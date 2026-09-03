@@ -88,13 +88,6 @@ Run every quality gate — format, lint, tests, and the 80% coverage floor:
 make check
 ```
 
-## Relationship to openspec-tui
-
-`openspec-tui` is a standalone OpenSpec terminal UI with its own embedded AI chat
-and PTY handling. This plugin is its read half, specialised for running inside
-Herdr: it drops the PTY layer because Herdr owns agent panes natively, and gains
-agent awareness that a standalone TUI cannot have. The two are independent.
-
 ## Licence
 
 MIT

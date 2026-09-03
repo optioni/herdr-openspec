@@ -40,7 +40,7 @@ context: |
 rules:
   proposal:
     - State the user-visible problem before implementation detail, and bound the scope with an explicit Non-Goals section.
-    - 'Check the change against the PRD non-goals: no editing of OpenSpec files, no orchestration across changes, no change authoring, no Windows support, and no replacement of openspec-tui.'
+    - 'Check the change against the PRD non-goals: no editing of OpenSpec files, no orchestration across changes, no change authoring, and no Windows support.'
     - Name which row of the IMPLEMENTATION-ORDER roadmap this change is, or say explicitly that it is unplanned work and why the roadmap did not anticipate it.
     - Mark as **BREAKING** any change to the plugin manifest, the plugin config format, or a keybinding.
   specs:

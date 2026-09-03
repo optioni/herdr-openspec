@@ -45,9 +45,6 @@ baked into the code; those are read from configuration or the OpenSpec CLI.
 
 - **Editing.** The pane does not write to OpenSpec files. Toggling a task checkbox
   would race the agent editing `tasks.md` in another pane.
-- **Replacing `openspec-tui`.** That project remains a standalone TUI with its own
-  embedded AI chat and PTY handling. This plugin is its read half, specialised for
-  running inside Herdr, and the two evolve independently.
 - **Orchestration.** Deciding what to implement next, in what order, across a
   phase, stays with the OpenSpec orchestrator agents. This plugin launches single
   changes on request; it does not drive a batch.
@@ -124,7 +121,6 @@ Enforced gates, failing the build when unmet:
 | OpenSpec CLI startup cost (200–400ms per call) makes the pane feel slow | Render from files immediately; treat CLI results as an asynchronous correction |
 | Agent-status event hooks may not be valid plugin event targets | Poll `herdr agent list` over the socket instead; adopt hooks later only as an optimisation |
 | Requiring a Rust toolchain suppresses adoption when published | Ship prebuilt binaries with a source fallback before listing in the registry |
-| Duplicating `openspec-tui`'s parsing logic | Accepted: parsing is the cheap half, and the two tools have diverging runtime environments |
 
 ## Future
 
