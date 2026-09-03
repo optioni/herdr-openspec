@@ -47,6 +47,16 @@ was the misjudgement that caused this pause.
 
 Check with `~/.claude/skills/checking-usage/fetch-usage.sh` before each change.
 
+**Where that 25% actually went:** the ff-change agent fanned out reviewer subagents,
+and two rounds died on `529 Overloaded`, losing their reports entirely. Findings only
+came back reliably once the reviewers were made to **write to scratchpad files** as
+they went. If you fan out reviewers again, have each write its findings to disk rather
+than returning them only in its final message — otherwise one `529` costs a whole
+round.
+
+Related: a teammate agent cannot pass `name` when spawning (`Teammates cannot spawn
+other teammates`), so a phase orchestrator's own subagents are unnamed.
+
 ## Environment
 
 - `openspec` is nvm-installed and **not on the default PATH**:
