@@ -1,75 +1,51 @@
-# Handoff
+# Handoff — Phase 1, paused after `repo-foundation` planning
 
-**Written:** 2026-09-04 ~00:35 EEST · **Branch:** `main` · **Remote:** `optioni/herdr-openspec`
+Paused 2026-09-04 ~00:35 EEST because the 5-hour session limit was exhausted
+(96% used, resetting 2026-09-03T22:30Z / 01:30 EEST). Working tree clean.
 
-## Where things stand
+## State
 
-Design is complete and approved. Implementation has started: `repo-foundation`'s
-planning artifacts are written, validated, and committed. **No Rust exists yet.**
-
-| Change | Phase | State |
-|---|---|---|
-| `repo-foundation` | 1 | Artifacts committed (`eb24038`). **Not implemented.** |
-| `ci-pipeline` | 1 | Untouched |
-| `plugin-config` | 1 | Untouched |
-| everything else | 2–6 | Untouched |
+| Change | State |
+|---|---|
+| `repo-foundation` | Artifacts complete, `--strict` valid, committed. **Not implemented.** |
+| `ci-pipeline` | Untouched — no artifacts |
+| `plugin-config` | Untouched — no artifacts |
 
 ## Next action
 
-Run the **apply** orchestrator on `repo-foundation`. Artifacts already exist —
-start at the apply step, do **not** re-run `ff-change`.
+Run the apply phase for `repo-foundation`. Artifacts already exist at
+`openspec/changes/repo-foundation/`, so **skip `ff-change`** and start at apply.
+`tasks.md` is the live checklist: 8 groups, all unchecked.
 
-The live checklist is `openspec/changes/repo-foundation/tasks.md`: 8 groups, all
-unchecked. Group 6 (Documentation) had an ordering fix applied during review —
-CHECK must precede CHANGE.
-
-## Budget shape — read this before starting
-
-`ff-change` alone cost **~25 percentage points** of a 5-hour session for a single
-Phase 1 change, partly because two rounds of reviewer subagents died on
-`529 Overloaded` and their reports were lost.
-
-**A full ff → apply → archive loop plausibly needs 40–50% of a session. Do not
-start a change below roughly half remaining.** Starting `repo-foundation` at 29%
-was the misjudgement that caused this pause.
-
-Check with `~/.claude/skills/checking-usage/fetch-usage.sh` before each change.
+Then `ci-pipeline` and `plugin-config` (both depend only on `repo-foundation`,
+so either order) need the full ff → apply → archive loop.
 
 ## Environment
 
-- `openspec` is nvm-installed and **not on the default PATH**:
-  `export PATH="$HOME/.nvm/versions/node/v24.20.0/bin:$PATH"`
-- `clippy` and `cargo-llvm-cov` are **not installed**. `repo-foundation` task 4.1
-  installs them: `rustup component add clippy`, `cargo install cargo-llvm-cov`.
-- Rust 1.91.1 is installed. `make` is present; `just` is not.
-- `openspec/schemas/tdd/` and `.claude/agents/` are graft-vendored — never edit in
-  place; edit `optioni/openspec-schemas` and re-sync.
+The `openspec` CLI is under nvm and not on the default PATH. Every shell needs:
 
-## Known-deferred doc fixes
+```bash
+export PATH="$HOME/.nvm/versions/node/v24.20.0/bin:$PATH"
+```
 
-Scheduled as tasks inside `repo-foundation/tasks.md`, not yet done:
+One-time setup `repo-foundation`'s apply phase requires, neither yet installed:
+`rustup component add clippy` and `cargo install cargo-llvm-cov`.
 
-1. `AGENTS.md` → "Current repo state" still claims no `Cargo.toml` exists.
-2. `README.md` → Install advertises action-menu entries that only arrive with
-   Phase 6's `plugin-actions`.
-3. `IMPLEMENTATION-ORDER.md` → Phase 6 credits `plugin-actions` with
-   `min_herdr_version`/`platforms` that `repo-foundation` actually ships. Deferred
-   to archive time per `openspec/config.yaml` → `operations.archive`.
+## Budget note
 
-## Decisions taken while the user was away
+`ff-change` alone for this Phase 1 change cost ~25% of a 5-hour session — it
+spent three rounds of reviewer subagents, two of which died on `529 Overloaded`
+and lost their reports. Assume a full ff → apply → archive loop needs 40–50%,
+and do not start a change below roughly half a session remaining.
 
-- Removed every `openspec-tui` reference from README, PRD, and config.yaml, on the
-  user's instruction (`9a4d371`). A planning-review agent then flagged the missing
-  `openspec-tui` non-goal as a defect; that finding was **stale** and was overruled.
-- Pointed the README install command at `optioni/herdr-openspec` and dropped a dead
-  GitHub link to `openspec-tui`, which has no remote (`85d9f2f`).
-- Fixed `IMPLEMENTATION-ORDER.md` prose referring to a `test-plan` artifact the
-  `tdd` schema does not have.
-- Stopped the phase orchestrator before its apply step rather than letting its
-  between-changes guard allow it to start work it could not finish.
+## Deferred, already scheduled as tasks in `repo-foundation/tasks.md`
 
-## Constraints that still hold
+- `AGENTS.md` → "Current repo state" claims no `Cargo.toml` exists.
+- `README.md` → Install advertises action-menu entries that only arrive with
+  Phase 6's `plugin-actions`.
 
-- Do not push branches other than `main`; do not open PRs.
-- Nothing published outward — no registry submission, no release.
-- The 80% coverage floor is never lowered to get green.
+Deferred to archive time per `openspec/config.yaml` → `operations.archive`:
+`IMPLEMENTATION-ORDER.md` Phase 6 credits `plugin-actions` with
+`min_herdr_version` and `platforms`, which `repo-foundation` actually ships.
+Its prose also still names a `test-plan` artifact the `tdd` schema does not
+have — the artifacts are `proposal → specs → design → tasks → planning-review`.
