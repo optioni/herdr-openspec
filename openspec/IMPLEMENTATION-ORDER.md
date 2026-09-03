@@ -38,7 +38,7 @@ that happens rather than letting it drift.
 
 | Change | Scope | Spec refs | Depends on |
 |---|---|---|---|
-| `repo-foundation` | Cargo scaffold (binary `herdr-openspec`); `rustfmt.toml`; `Makefile` with a `check` target running format, lint, test, and coverage; `scripts/build.sh` sourcing `~/.cargo/env` before building; a minimal `herdr-plugin.toml` with the `dashboard` pane so `herdr plugin link .` works from day one. | Build and distribution | — |
+| `repo-foundation` | Cargo scaffold (binary `herdr-openspec`); `rustfmt.toml`; `Makefile` with a `check` target running format, lint, test, and coverage; `scripts/build.sh` sourcing `~/.cargo/env` before building; a minimal `herdr-plugin.toml` (`id`, `name`, `version`, `min_herdr_version`, `platforms`, `[[build]]`, the `dashboard` pane) so `herdr plugin link .` works from day one. | Build and distribution | — |
 | `ci-pipeline` | GitHub Actions on `ubuntu-latest` and `macos-latest` with `Swatinem/rust-cache`. Required jobs: `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`. Coverage via `cargo llvm-cov --fail-under-lines 80`, Linux only. | Testing and quality gates | `repo-foundation` |
 | `plugin-config` | Read `config.toml` from the directory reported by `herdr plugin config-dir`: `openspec_bin`, `agent_kind`, `archived_count`. Absent file and absent keys fall back to defaults. Also the plugin-local state file that records truncated agent-name mappings. | Data layer → Resolution chain | `repo-foundation` |
 
@@ -83,7 +83,7 @@ Pure transformations. No terminal, no subprocess, no writes.
 
 | Change | Scope | Spec refs | Depends on |
 |---|---|---|---|
-| `plugin-actions` | The `open` and `open-tab` binary subcommands that open or focus the dashboard pane via `herdr plugin pane`, and the full manifest: both actions, both panes, `min_herdr_version`, and `platforms`. | Herdr integration → Manifest | `agent-launch` |
+| `plugin-actions` | The `open` and `open-tab` binary subcommands that open or focus the dashboard pane via `herdr plugin pane`, and the manifest entries that go with them: both `[[actions]]` and the `dashboard-tab` pane. (`min_herdr_version` and `platforms` ship in `repo-foundation`, not here.) | Herdr integration → Manifest | `agent-launch` |
 | `degraded-states` | Close the degraded-states table end to end: audit every row against the running plugin, add the `file mode` header badge, and cover each state with a view test. Nothing here should be new behaviour — this change exists to prove the table is true. | Degraded states | `plugin-actions`, `live-refresh` |
 
 ## Dependencies
