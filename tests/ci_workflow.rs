@@ -329,7 +329,9 @@ fn coverage_threshold_is_not_restated_in_ci() {
 fn parser_preconditions_hold() {
     let makefile = read_makefile();
     assert!(
-        makefile.lines().any(|l| l.trim_start().starts_with(".PHONY")),
+        makefile
+            .lines()
+            .any(|l| l.trim_start().starts_with(".PHONY")),
         ".PHONY line missing from Makefile"
     );
 
