@@ -23,6 +23,18 @@ The live checklist is `openspec/changes/repo-foundation/tasks.md`: 8 groups, all
 unchecked. Group 6 (Documentation) had an ordering fix applied during review —
 CHECK must precede CHANGE.
 
+## Resume prompt
+
+The 5-hour window resets at **01:30 EEST (22:30 UTC)**. A scheduled cloud resume was
+attempted and failed (the routine API rejected the request four times), so this is a
+manual restart. Paste this:
+
+> Read HANDOFF.md, then AGENTS.md and openspec/config.yaml. Implement the OpenSpec
+> change `repo-foundation` using the apply orchestrator. Its planning artifacts are
+> already committed at `openspec/changes/repo-foundation/` — do not regenerate them
+> and do not run ff-change. Work `tasks.md` there as the live checklist. Check usage
+> first and do not start if below ~50% remaining.
+
 ## Budget shape — read this before starting
 
 `ff-change` alone cost **~25 percentage points** of a 5-hour session for a single
