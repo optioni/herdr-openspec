@@ -29,17 +29,20 @@ this session, in the artifact that owns it.
   repo-foundation --strict` reports valid.
 
 **Refreshed during apply**, at commit `142eff7` (`build(make): add the four quality
-gates behind make check`): implementation reached the manifest group with Herdr 0.7.0+
-(0.8.2, installed) genuinely available, and `herdr plugin link .` rejected the manifest
-this review had approved — see the repair-log row below. `SPEC.md`, `design.md`,
-`specs/plugin-manifest/spec.md`, `tasks.md`, and `proposal.md` were corrected in place
-per the drift protocol before task 5.2 was marked done. No other planned contract moved
+gates behind make check`) and again while still inside group 5: implementation reached
+the manifest group with Herdr 0.7.0+ (0.8.2, installed) genuinely available, and found
+two live discrepancies neither this review nor any of its three reviewers could have
+caught without a real `herdr plugin link .` run — see the two repair-log rows below.
+`SPEC.md`, `design.md`, `specs/plugin-manifest/spec.md`, `tasks.md`, and `proposal.md`
+were corrected in place per the drift protocol before task 5.2 (first finding) and
+before task 5.5 (second finding) were marked done. No other planned contract moved
 during implementation; groups 1 through 4 landed exactly as reviewed.
 
 ## Gaps Found and Fixed
 
 | Severity | Source Artifact | Problem | Repair | Updated Location |
 |---|---|---|---|---|
+| CRITICAL | SPEC.md, discovered during apply (group 5) | `SPEC.md` → Build and distribution claimed `herdr plugin link .` "builds from the working tree for local development," and `specs/plugin-manifest/spec.md`'s "Herdr links the working tree" scenario asserted link "runs the `[[build]]` step." Herdr's own docs (plugins.mdx → Build commands) state build commands run only during a GitHub-managed `plugin install`, and that `plugin link` explicitly does not run them; confirmed empirically — `target/` stayed absent after `herdr plugin link .` with `target/` removed beforehand, and `herdr plugin log list` showed no build entry for the plugin. | Corrected `SPEC.md` → Build and distribution to state `plugin link` does not run build commands and the local author builds the tree themselves; corrected the "Herdr links the working tree" scenario to assert only `exit 0` plus the prerequisite that the tree is already built; updated task 5.5 to build before linking. | SPEC.md → Build and distribution; design.md → Persistence and Rollout; specs/plugin-manifest/spec.md; tasks.md 5.5 |
 | CRITICAL | SPEC.md, discovered during apply (group 5) | `SPEC.md` → Herdr integration → Manifest documented `id`, `name`, `min_herdr_version`, and `platforms` as the manifest's identifying keys, omitting `version`, which Herdr 0.7.0+ requires at the top level (`herdr plugin link .` on the installed 0.8.2 rejected the manifest with `missing field 'version'`). None of the three independent planning reviewers caught this because it required a live `herdr plugin link .` run against the real binary, which happens only in task 5.5/5.1, after the manifest is written — the planning review had no manifest to link against. | Added `version = "0.1.0"` (kept equal to `Cargo.toml`'s version by convention, not by an enforced link) to `SPEC.md`'s manifest example, this change's `herdr-plugin.toml`, and updated the required-key count from six to seven everywhere it was cited. `herdr plugin link .` then succeeded. | SPEC.md → Herdr integration → Manifest; design.md → Test Strategy matrix; specs/plugin-manifest/spec.md; tasks.md 5.2, 5.4; proposal.md → What Changes |
 | CRITICAL | design.md | The `~/.cargo/env` fallback check used `paste -sd:` with no file operand. BSD `paste` prints usage and yields an empty string, so the script would run with an empty `PATH`, source `~/.cargo/env`, and exit 0 — a false pass on a different scenario. | Replaced with `tr '\n' ':'`, and the command copied into the task so the implementer does not reach for the broken one. | design.md → Test Strategy matrix; tasks.md 3.6 |
 | CRITICAL | design.md, specs/plugin-build | Even with `paste` fixed, the check asserted only "exit 0" and could pass without the fallback branch ever running, if a Homebrew, asdf, or mise cargo satisfied the first probe. | The script now announces on stderr when it sources `~/.cargo/env`; the check first asserts `command -v cargo` fails on the stripped `PATH`, then greps for that notice. | specs/plugin-build → requirement text and two scenarios; design.md matrix; tasks.md 3.2, 3.5, 3.6 |

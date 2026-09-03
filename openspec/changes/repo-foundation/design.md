@@ -95,9 +95,12 @@ task.
 - **Index rebuild:** none.
 - **Authorization:** none. The binary reads no credentials and opens no socket.
 - **Observability:** none beyond the process exit status and the two output streams.
-- **Deployment:** Herdr clones the repository and runs the `[[build]]` step in place;
-  `herdr plugin link .` does the same from the working tree. There is no release
-  artifact and no publish step in this change.
+- **Deployment:** Herdr clones the repository and runs the `[[build]]` step in place
+  for a GitHub-managed `plugin install`. `herdr plugin link .` — the path this change
+  actually exercises — does not run build commands; the working tree is built with
+  `scripts/build.sh` (or `make build`) before or after linking. Discovered live
+  against Herdr 0.8.2 during apply; see planning-review.md's repair log. There is no
+  release artifact and no publish step in this change.
 - **Documentation:** `AGENTS.md` → "Current repo state" is rewritten in the same change,
   because it currently instructs agents not to assume build, lint, or test commands
   exist. `README.md` → Install gains a caveat: it already advertises action-menu entries

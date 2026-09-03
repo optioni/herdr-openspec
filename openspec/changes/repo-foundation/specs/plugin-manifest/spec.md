@@ -16,7 +16,9 @@ manifest format documented in `SPEC.md` → Herdr integration → Manifest.
 #### Scenario: Herdr links the working tree
 
 - **WHEN** `herdr plugin link .` is run from the repository root with Herdr 0.7.0 or later
-- **THEN** the command exits 0 and runs the `[[build]]` step
+- **THEN** the command exits 0 — `plugin link` does not run `[[build]]` steps; those
+  run only during a GitHub-managed `plugin install`, so the working tree must already
+  be built (`scripts/build.sh` or `make build`) for the pane to have a binary to run
 - **AND** `herdr plugin list` includes `herdr-openspec`
 
 #### Scenario: The dashboard pane launches the binary and stays open

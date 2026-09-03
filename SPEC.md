@@ -306,10 +306,13 @@ Two one-time setup steps are required: `rustup component add clippy` and
 
 ## Build and distribution
 
-Herdr installs a plugin by cloning the repository at a resolved commit and running
-the `[[build]]` step in place. There is no release process to satisfy:
-`herdr plugin install <owner>/<repo>` is sufficient, and `herdr plugin link .`
-builds from the working tree for local development.
+Herdr installs a GitHub-managed plugin by cloning the repository at a resolved
+commit and running the `[[build]]` step in place, after install confirmation and
+before registering the plugin. There is no release process to satisfy:
+`herdr plugin install <owner>/<repo>` is sufficient. `herdr plugin link .` — used
+for local development — does **not** run build commands; the local author builds
+the working tree themselves (`make build` or `scripts/build.sh`) before or after
+linking.
 
 The build step is `scripts/build.sh` rather than a bare `cargo build --release`,
 because Herdr may be launched without `~/.cargo/bin` on `PATH` — a GUI or
