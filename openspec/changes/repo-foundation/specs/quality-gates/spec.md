@@ -103,9 +103,13 @@ subcommand is not.
 
 #### Scenario: A bare `rustfmt` uses the configured edition
 
-- **WHEN** `rustfmt --check src/lib.rs` is run at HEAD with no `--edition` flag
+- **WHEN** `rustfmt --check src/main.rs` is run at HEAD with no `--edition` flag
 - **THEN** it exits 0 with no diff, because `rustfmt.toml` supplied the edition
-- **AND** the same command would fail if `rustfmt.toml` were absent
+- **AND** the same command fails with `rustfmt.toml` absent — `src/lib.rs` was
+  ruled out for this scenario because it formats identically under edition 2015
+  and 2024, so a check against it would pass regardless of `rustfmt.toml`;
+  `src/main.rs`'s multi-item `use` statement is edition-sensitive and genuinely
+  discriminates
 
 ### Requirement: The gates do not depend on Herdr
 

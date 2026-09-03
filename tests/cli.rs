@@ -73,12 +73,24 @@ fn unknown_subcommand() {
 
 #[test]
 fn extra_arguments_after_ui() {
-    let output = bin()
+    // Leave stdin's write end open (not Stdio::null()) so a wrongly-blocking
+    // implementation would hang here instead of trivially reaching EOF.
+    let mut child = bin()
         .arg("ui")
         .arg("--tab")
-        .stdin(Stdio::null())
-        .output()
-        .expect("failed to run binary");
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn binary");
+
+    thread::sleep(Duration::from_millis(200));
+    assert!(
+        child.try_wait().expect("try_wait failed").is_some(),
+        "process blocked on stdin instead of exiting immediately"
+    );
+
+    let output = child.wait_with_output().expect("failed to wait on child");
 
     assert_eq!(output.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&output.stderr);

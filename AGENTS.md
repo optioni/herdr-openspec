@@ -123,8 +123,9 @@ summary, not a change id. Unattributable agents are reported as a count, not gue
 ## Development
 
 ```sh
-herdr plugin link .    # build and load the working tree as a plugin
-make check             # every gate
+herdr plugin link .    # load the working tree as a plugin (does not build)
+make build              # build the release binary the pane runs
+make check              # every gate
 ```
 
 ## Conventions

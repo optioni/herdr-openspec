@@ -109,3 +109,30 @@ unresolved decision requires user input.
 - **An MSRV job.** `rust-version = "1.85"` is asserted but never built against. If that
   floor is to mean anything it needs a job on that toolchain, which is `ci-pipeline`'s
   decision to take or decline.
+
+## Change Review (group 7)
+
+An independent reviewer — not a fork of the implementing session — reviewed the
+completed diff against all planning artifacts. Findings: 0 CRITICAL, 3 WARNING,
+5 SUGGESTION. All three WARNINGs were fixed (no WARNING was accepted unfixed):
+
+| Severity | Problem | Repair | Updated Location |
+|---|---|---|---|
+| WARNING | `AGENTS.md` → Development still said `herdr plugin link .` "build[s] and load[s] the working tree," which group 5's live discovery (`plugin link` does not build) had already falsified in every other document except this one. | Comment corrected to "does not build"; a `make build` step inserted between `link` and `make check`, mirroring the `README.md` repair. | AGENTS.md → Development |
+| WARNING | The "A bare `rustfmt` uses the configured edition" check ran against `src/lib.rs`, which formats identically under edition 2015 and 2024 — the check passed whether or not `rustfmt.toml` existed and proved nothing. `src/main.rs`'s multi-item `use` statement is edition-sensitive and genuinely discriminates (confirmed: exits 1 with `rustfmt.toml` moved aside, 0 with it restored). | Scenario and task retargeted to `src/main.rs`, with the reasoning recorded in both. | specs/quality-gates/spec.md; tasks.md 4.8 |
+| WARNING | `tests/cli.rs::extra_arguments_after_ui` asserted "does not block waiting on stdin" while running with `Stdio::null()`, which reaches EOF instantly regardless of whether the implementation would have blocked — the clause was unverified. | Test rewritten to leave stdin's write end open (`Stdio::piped()`) and assert `try_wait()` returns `Some` after a short interval, so a wrongly-blocking implementation would now fail the test. | tests/cli.rs |
+
+All affected checks re-run after the fixes: `cargo test --all-features` green (11
+tests), `cargo fmt --all -- --check` clean, `make check` exits 0 with coverage
+unchanged at 100.00%, and `openspec validate repo-foundation --strict` valid.
+
+SUGGESTIONs noted, not implemented (schema calls for noting, not fixing):
+tightening `ui_prints_placeholder_banner` to also assert the "not implemented"
+line at the binary-integration tier (already covered at the unit tier); probing
+`command -v cargo` before the tool-specific `Makefile` guards for a more precise
+message when `cargo` itself is absent; a `.NOTPARALLEL:` guard against `make -j
+check` running gates out of order; listing `SPEC.md` under `proposal.md` →
+Impact → Modified, alongside `AGENTS.md` and `README.md`; and a pre-apply
+"six required keys" reference at planning-review.md line 62 that the apply-time
+repair row did not retroactively edit (left as an accurate record of what the
+original review saw).
