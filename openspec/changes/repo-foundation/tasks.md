@@ -81,11 +81,11 @@
 ## 8. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 8.1 CHECK: Inspect the intended verification commands and the tiers they cover — unit and binary-integration tests under `cargo test`, the four gates under `make check`, and the command checks already run in groups 3, 4, and 5
-- [ ] 8.2 VERIFY: `cargo fmt --all -- --check` — clean
-- [ ] 8.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors
-- [ ] 8.4 VERIFY: `cargo check --all-targets --all-features` — 0 errors
-- [ ] 8.5 VERIFY: `cargo test --all-features` — green
-- [ ] 8.6 VERIFY: `cargo llvm-cov --fail-under-lines 80` — at or above the floor
-- [ ] 8.7 VERIFY: `make check` — the single gate, exit 0. If it fails, name the failing sub-command rather than reporting a summary
-- [ ] 8.8 VERIFY: `openspec validate repo-foundation --strict` — valid. The `openspec` binary is installed under nvm here and is not on a default `PATH`; put `~/.nvm/versions/node/<version>/bin` ahead on `PATH` first, or a Homebrew node will fail for an unrelated reason
+- [x] 8.1 CHECK: Inspect the intended verification commands and the tiers they cover — unit and binary-integration tests under `cargo test`, the four gates under `make check`, and the command checks already run in groups 3, 4, and 5
+- [x] 8.2 VERIFY: `cargo fmt --all -- --check` — clean
+- [x] 8.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors
+- [x] 8.4 VERIFY: `cargo check --all-targets --all-features` — 0 errors
+- [x] 8.5 VERIFY: `cargo test --all-features` — green (11 tests: 6 unit, 5 binary-integration)
+- [x] 8.6 VERIFY: `cargo llvm-cov --fail-under-lines 80` — at or above the floor. Actual: 100.00% lines (54/54)
+- [x] 8.7 VERIFY: `make check` — the single gate, exit 0. If it fails, name the failing sub-command rather than reporting a summary. Exit 0
+- [x] 8.8 VERIFY: `openspec validate repo-foundation --strict` — valid. The `openspec` binary is installed under nvm here and is not on a default `PATH`; put `~/.nvm/versions/node/<version>/bin` ahead on `PATH` first, or a Homebrew node will fail for an unrelated reason. Valid
