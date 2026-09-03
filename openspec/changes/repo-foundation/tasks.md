@@ -8,13 +8,13 @@
 ## 1. Crate scaffold
 <!-- kind: operational -->
 
-- [ ] 1.1 CHECK: Confirm no crate exists yet — `cargo metadata --no-deps --format-version 1` fails and `ls Cargo.toml` reports no such file
-- [ ] 1.2 CHANGE: Add `Cargo.toml` — package `herdr-openspec`, `version = "0.1.0"`, `edition = "2024"`, `rust-version = "1.85"` (the edition floor, see design.md → Decisions), empty `[dependencies]` and `[dev-dependencies]`, and no `license` key; rely on the default `src/lib.rs` + `src/main.rs` layout so the single bin target is named `herdr-openspec`
-- [ ] 1.3 CHANGE: Add `rustfmt.toml` declaring `edition = "2024"`, matching `Cargo.toml` so a bare `rustfmt` and `cargo fmt` agree
-- [ ] 1.4 CHANGE: Add minimal `src/lib.rs` and `src/main.rs` — just enough to compile, with none of cargo's generated `Hello, world!` left behind; group 2 replaces both bodies wholesale. Confirm `/target` is already covered by `.gitignore`, and commit `Cargo.lock`
-- [ ] 1.5 VERIFY: `cargo build --release` exits 0 and `target/release/herdr-openspec` exists and is executable
-- [ ] 1.6 VERIFY: Filter `cargo metadata --no-deps --format-version 1` for targets whose `kind` contains `bin`; exactly one exists and it is named `herdr-openspec` — spec scenario "Exactly one binary target is produced at the release path". A bare `grep -c` over the one-line JSON cannot fail and must not be used
-- [ ] 1.7 VERIFY: `Cargo.lock` contains exactly one `[[package]]` entry, `cargo metadata` reports an empty dependency list, and `cargo build --release --offline` succeeds — spec scenario "No third-party dependencies are pulled in". The offline build alone is not evidence: a warm registry lets a dependent build succeed offline
+- [x] 1.1 CHECK: Confirm no crate exists yet — `cargo metadata --no-deps --format-version 1` fails and `ls Cargo.toml` reports no such file
+- [x] 1.2 CHANGE: Add `Cargo.toml` — package `herdr-openspec`, `version = "0.1.0"`, `edition = "2024"`, `rust-version = "1.85"` (the edition floor, see design.md → Decisions), empty `[dependencies]` and `[dev-dependencies]`, and no `license` key; rely on the default `src/lib.rs` + `src/main.rs` layout so the single bin target is named `herdr-openspec`
+- [x] 1.3 CHANGE: Add `rustfmt.toml` declaring `edition = "2024"`, matching `Cargo.toml` so a bare `rustfmt` and `cargo fmt` agree
+- [x] 1.4 CHANGE: Add minimal `src/lib.rs` and `src/main.rs` — just enough to compile, with none of cargo's generated `Hello, world!` left behind; group 2 replaces both bodies wholesale. Confirm `/target` is already covered by `.gitignore`, and commit `Cargo.lock`
+- [x] 1.5 VERIFY: `cargo build --release` exits 0 and `target/release/herdr-openspec` exists and is executable
+- [x] 1.6 VERIFY: Filter `cargo metadata --no-deps --format-version 1` for targets whose `kind` contains `bin`; exactly one exists and it is named `herdr-openspec` — spec scenario "Exactly one binary target is produced at the release path". A bare `grep -c` over the one-line JSON cannot fail and must not be used
+- [x] 1.7 VERIFY: `Cargo.lock` contains exactly one `[[package]]` entry, `cargo metadata` reports an empty dependency list, and `cargo build --release --offline` succeeds — spec scenario "No third-party dependencies are pulled in". The offline build alone is not evidence: a warm registry lets a dependent build succeed offline
 
 ## 2. Invocation parsing and the `ui` banner
 <!-- kind: behavior -->
