@@ -19,8 +19,7 @@ this session, in the artifact that owns it.
 - This repository HEAD: `5c2b6a0aadb6ca199f9a271272ea796a9c627d9a`
   (`docs(openspec): fill in project context, artifact rules, and operation guidance`)
 - Sibling repository HEAD: Not applicable. `herdr` and `openspec` are consumed as
-  installed binaries, not as source siblings, and `openspec-tui` is explicitly
-  independent per `PRD.md` → Non-goals.
+  installed binaries, not as source siblings.
 - Working tree: clean apart from this change's own untracked planning directory,
   `openspec/changes/repo-foundation/`. No source file exists to be dirty — the
   repository has no `Cargo.toml` at review time.

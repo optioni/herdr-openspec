@@ -1,7 +1,7 @@
 # Implementation Order
 
 The roadmap from an empty scaffold to an installable Herdr plugin. Each row is one
-OpenSpec change with its own proposal, specs, test-plan, design, and tasks under the
+OpenSpec change with its own proposal, specs, design, tasks, and planning-review under the
 repository's `tdd` schema.
 
 Read [SPEC.md](../SPEC.md) first — it is the contract every change below implements.
