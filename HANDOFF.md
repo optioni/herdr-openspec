@@ -4,46 +4,33 @@
 
 ## Where things stand
 
-Design is complete and approved. Implementation has started: `repo-foundation`'s
-planning artifacts are written, validated, and committed. **No Rust exists yet.**
+Design complete. **`repo-foundation` is implemented, merged, archived and pushed** —
+the crate exists, `make check` passes at 100% line coverage (54/54) against an 80%
+floor, and 11 requirements are live under `openspec/specs/`.
 
 | Change | Phase | State |
 |---|---|---|
-| `repo-foundation` | 1 | Artifacts committed (`eb24038`). **Not implemented.** |
-| `ci-pipeline` | 1 | Untouched |
-| `plugin-config` | 1 | Untouched |
+| `repo-foundation` | 1 | **Done, archived** (`2026-09-04-repo-foundation`) |
+| `ci-pipeline` | 1 | In progress — `phase1-rest` orchestrator |
+| `plugin-config` | 1 | Queued behind it |
 | everything else | 2–6 | Untouched |
 
-## Next action
+## What exists now
 
-Run the **apply** orchestrator on `repo-foundation`. Artifacts already exist —
-start at the apply step, do **not** re-run `ff-change`.
+`Cargo.toml`, `src/lib.rs`, `src/main.rs`, `tests/cli.rs`, `Makefile`, `rustfmt.toml`,
+`scripts/build.sh`, `herdr-plugin.toml`. `make check` runs format, lint, test and
+coverage. The binary answers `ui` (prints a placeholder banner, holds the pane open
+until stdin closes), exits 2 on an unknown or missing subcommand.
 
-The live checklist is `openspec/changes/repo-foundation/tasks.md`: 8 groups, all
-unchecked. Group 6 (Documentation) had an ordering fix applied during review —
-CHECK must precede CHANGE.
+## Contract corrections found by running against real Herdr 0.8.2
 
-## Resume prompt
+Both were wrong in SPEC.md and could not have been caught by static review:
 
-The 5-hour window resets at **01:30 EEST (22:30 UTC)**.
-
-**A local one-shot resume is armed for 01:38 EEST** (job `3068e79f`). It checks usage
-first and only starts if roughly 50%+ of the session remains; otherwise it reports and
-stops. It runs the apply orchestrator on `repo-foundation`, then continues to
-`ci-pipeline` and `plugin-config` if headroom allows.
-
-Caveat: that job is **session-only** — it lives in the Claude session that scheduled it
-and dies if that session exits. A cloud routine was attempted first and failed (the
-routine API rejected it four times), and a cloud run would not have had `herdr`, the
-nvm `openspec` CLI, or this working tree anyway.
-
-If the job did not fire, restart manually with:
-
-> Read HANDOFF.md, then AGENTS.md and openspec/config.yaml. Implement the OpenSpec
-> change `repo-foundation` using the apply orchestrator. Its planning artifacts are
-> already committed at `openspec/changes/repo-foundation/` — do not regenerate them
-> and do not run ff-change. Work `tasks.md` there as the live checklist. Check usage
-> first and do not start if below ~50% remaining.
+1. The plugin manifest **requires a `version` key**. `herdr plugin link .` rejected the
+   manifest without it. Added everywhere.
+2. **`herdr plugin link .` does NOT run the `[[build]]` step** — only a GitHub-managed
+   `herdr plugin install` does. SPEC.md claimed otherwise. Verified empirically. README
+   → Development now tells you to run `make build` yourself.
 
 ## Budget shape — read this before starting
 
