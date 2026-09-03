@@ -25,9 +25,19 @@ CHECK must precede CHANGE.
 
 ## Resume prompt
 
-The 5-hour window resets at **01:30 EEST (22:30 UTC)**. A scheduled cloud resume was
-attempted and failed (the routine API rejected the request four times), so this is a
-manual restart. Paste this:
+The 5-hour window resets at **01:30 EEST (22:30 UTC)**.
+
+**A local one-shot resume is armed for 01:38 EEST** (job `3068e79f`). It checks usage
+first and only starts if roughly 50%+ of the session remains; otherwise it reports and
+stops. It runs the apply orchestrator on `repo-foundation`, then continues to
+`ci-pipeline` and `plugin-config` if headroom allows.
+
+Caveat: that job is **session-only** — it lives in the Claude session that scheduled it
+and dies if that session exits. A cloud routine was attempted first and failed (the
+routine API rejected it four times), and a cloud run would not have had `herdr`, the
+nvm `openspec` CLI, or this working tree anyway.
+
+If the job did not fire, restart manually with:
 
 > Read HANDOFF.md, then AGENTS.md and openspec/config.yaml. Implement the OpenSpec
 > change `repo-foundation` using the apply orchestrator. Its planning artifacts are
