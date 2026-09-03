@@ -19,9 +19,9 @@ spec is wrong, update the spec as part of that change rather than letting the tw
 
 ## Current repo state
 
-Early. There is no `Cargo.toml` yet — the design documents and the OpenSpec
-scaffolding are the whole repository. Do not assume build, lint, or test commands
-exist until `repo-foundation` has landed.
+`repo-foundation` has landed: the crate builds, and `make check` runs all four
+quality gates. The dashboard itself is not implemented yet — `herdr-openspec ui`
+prints a placeholder banner and blocks until the pane closes.
 
 Important files:
 
@@ -32,6 +32,10 @@ Important files:
 - `openspec/schemas/tdd/schema.yaml` — the active schema (vendored by graft).
 - `.claude/agents/` — OpenSpec orchestration agents (vendored by graft).
 - `graft.toml` / `graft.lock` — what is vendored, and at which commit.
+- `Cargo.toml` — crate manifest.
+- `Makefile` — the four quality gates behind `make check`.
+- `scripts/build.sh` — the Herdr `[[build]]` step.
+- `herdr-plugin.toml` — the Herdr plugin manifest.
 
 ## Environment
 

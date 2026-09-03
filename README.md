@@ -28,7 +28,10 @@ Herdr clones the repository and compiles it in place, so a Rust toolchain is
 required for now. Prebuilt release binaries are planned.
 
 Then open the dashboard from Herdr's action menu: **OpenSpec: dashboard** (split
-pane) or **OpenSpec: dashboard (tab)**.
+pane) or **OpenSpec: dashboard (tab)** — these action-menu entries arrive with a
+later change; today the manifest declares the `dashboard` split pane only,
+reachable directly with
+`herdr plugin pane open --plugin herdr-openspec --entrypoint dashboard`.
 
 ## Keys
 
@@ -80,6 +83,14 @@ Link the working tree into Herdr instead of installing from GitHub:
 
 ```sh
 herdr plugin link .
+```
+
+`plugin link` does not build the crate — only a GitHub-managed
+`plugin install` does that. Build the release binary yourself before opening
+the pane:
+
+```sh
+make build
 ```
 
 Run every quality gate — format, lint, tests, and the 80% coverage floor:
