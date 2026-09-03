@@ -1,0 +1,91 @@
+<!-- No outer-loop acceptance group: design.md → Test Strategy records why. The change's
+     outermost surfaces are a shell script, a Makefile, and a TOML file, whose real
+     invocation is the evidence; those runs are scheduled as command checks below.
+     None of the command checks in this file may be committed as a Rust test — they are
+     one-off evidence, and a test asserting a manifest or Makefile key back at itself is
+     the shape the schema forbids. -->
+
+## 1. Crate scaffold
+<!-- kind: operational -->
+
+- [ ] 1.1 CHECK: Confirm no crate exists yet — `cargo metadata --no-deps --format-version 1` fails and `ls Cargo.toml` reports no such file
+- [ ] 1.2 CHANGE: Add `Cargo.toml` — package `herdr-openspec`, `version = "0.1.0"`, `edition = "2024"`, `rust-version = "1.85"` (the edition floor, see design.md → Decisions), empty `[dependencies]` and `[dev-dependencies]`, and no `license` key; rely on the default `src/lib.rs` + `src/main.rs` layout so the single bin target is named `herdr-openspec`
+- [ ] 1.3 CHANGE: Add `rustfmt.toml` declaring `edition = "2024"`, matching `Cargo.toml` so a bare `rustfmt` and `cargo fmt` agree
+- [ ] 1.4 CHANGE: Add minimal `src/lib.rs` and `src/main.rs` — just enough to compile, with none of cargo's generated `Hello, world!` left behind; group 2 replaces both bodies wholesale. Confirm `/target` is already covered by `.gitignore`, and commit `Cargo.lock`
+- [ ] 1.5 VERIFY: `cargo build --release` exits 0 and `target/release/herdr-openspec` exists and is executable
+- [ ] 1.6 VERIFY: Filter `cargo metadata --no-deps --format-version 1` for targets whose `kind` contains `bin`; exactly one exists and it is named `herdr-openspec` — spec scenario "Exactly one binary target is produced at the release path". A bare `grep -c` over the one-line JSON cannot fail and must not be used
+- [ ] 1.7 VERIFY: `Cargo.lock` contains exactly one `[[package]]` entry, `cargo metadata` reports an empty dependency list, and `cargo build --release --offline` succeeds — spec scenario "No third-party dependencies are pulled in". The offline build alone is not evidence: a warm registry lets a dependent build succeed offline
+
+## 2. Invocation parsing and the `ui` banner
+<!-- kind: behavior -->
+
+- [ ] 2.1 RED: Write failing unit tests in `src/lib.rs` for the pure classifier: `ui` alone classifies as the UI invocation; an unrecognised first argument classifies as a rejection carrying the offending token; no arguments classify as a rejection; `ui` followed by any argument classifies as a rejection carrying that argument; the banner contains `herdr-openspec`, `CARGO_PKG_VERSION`, and the not-implemented line; the usage text lists `ui`
+- [ ] 2.2 RED: Write failing integration tests in `tests/cli.rs` spawning `env!("CARGO_BIN_EXE_herdr-openspec")` for the five spec scenarios: `ui_prints_placeholder_banner` (`Stdio::null()` stdin → exit 0, banner on stdout, stderr empty), `ui_holds_open_until_stdin_closes` (`Stdio::piped()` stdin left open → `try_wait()` is `None` after a short interval, then dropping the handle yields exit 0), `unknown_subcommand` (`wat` → exit 2, usage plus `wat` on stderr, stdout empty), `extra_arguments_after_ui` (`ui --tab` with null stdin → exit 2, `--tab` on stderr, no blocking), `no_subcommand` (no args → exit 2, usage on stderr, stdout empty). Use `Stdio::null()` everywhere except the blocking test — a piped stdin left open with `child.wait()` hangs with no timeout
+- [ ] 2.3 Confirm the failures come from the missing behaviour, not from a broken harness — `cargo test --all-features` reports compile or assertion failures naming those tests, and none fails on `CARGO_BIN_EXE_` resolution
+- [ ] 2.4 GREEN: Implement in `src/lib.rs` the pure invocation type and its parse function, `usage()`, and `banner()` — no I/O, no `std::process::exit`
+- [ ] 2.5 GREEN: Implement `src/main.rs` — read `std::env::args`, call the library, and for the UI invocation print the banner then block until stdin reaches EOF and exit 0; otherwise print usage to stderr and exit 2 via `std::process::exit`, never `process::abort` (an abort discards the coverage profile). Keep it to argument reading, stream writing, blocking, and the exit status
+- [ ] 2.6 REFACTOR: Remove duplication between the banner, the usage text, and their tests while the tests stay green; if nothing warrants changing, state that in 2.7
+- [ ] 2.7 Run the group tests — `cargo test --all-features` green, no regressions, and nothing from task 1.4's placeholders survives
+
+## 3. Build script
+<!-- kind: operational -->
+
+- [ ] 3.1 CHECK: Confirm `/bin/sh scripts/build.sh` fails today because the script does not exist
+- [ ] 3.2 CHANGE: Add `scripts/build.sh` — POSIX `sh` with `set -eu`; when `command -v cargo` fails, load `~/.cargo/env` with `.` if it is readable, write a short notice to stderr saying it did so, and re-probe; when `cargo` is still unresolvable, write a message to stderr naming `cargo` and `https://rustup.rs` and exit non-zero without building; otherwise `cargo build --release`. Use no bash-only construct — no `[[`, no `function` keyword, no `source`, no array assignment — anywhere, indented or not
+- [ ] 3.3 CHANGE: Mark the script executable (`chmod +x scripts/build.sh`) even though the manifest invokes it through `/bin/sh`
+- [ ] 3.4 VERIFY: `sh -n scripts/build.sh` exits 0; `dash -n scripts/build.sh` also exits 0 where `dash` is available (on macOS `/bin/sh` is bash in POSIX mode and accepts bashisms, so `sh -n` alone proves little there); and an unanchored search finds no bashism — `! grep -nE '\[\[|\bfunction[[:space:]]|\bsource[[:space:]]|^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*=\(' scripts/build.sh` — spec scenario "Script is POSIX shell, not bash"
+- [ ] 3.5 VERIFY: `/bin/sh scripts/build.sh` with a normal `PATH` exits 0, leaves an executable `target/release/herdr-openspec`, and writes no `~/.cargo/env` notice to stderr — spec scenario "Build succeeds with cargo already on PATH"
+- [ ] 3.6 VERIFY: Build a stripped `PATH` with `STRIPPED=$(printf '%s' "$PATH" | tr ':' '\n' | grep -v '\.cargo' | tr '\n' ':')`, first assert `env PATH="$STRIPPED" command -v cargo` **fails** (otherwise a Homebrew, asdf, or mise cargo is satisfying the first probe and the fallback never runs), then run `env PATH="$STRIPPED" /bin/sh scripts/build.sh` — exits 0 and stderr carries the sourced-notice — spec scenario "Build succeeds when cargo is reachable only through `~/.cargo/env`". Note `paste -sd:` is not portable: BSD `paste` needs a file operand and silently yields an empty string, which would run the script with an empty `PATH` and pass for the wrong reason
+- [ ] 3.7 VERIFY: Capture the artifact mtime with a portable helper (`stat -f %m` on BSD, `stat -c %Y` on GNU), re-run under `env -i HOME=$(mktemp -d) PATH=/usr/bin:/bin` — exits non-zero, stderr names `cargo` and `https://rustup.rs`, and the mtime is unchanged — spec scenario "Cargo cannot be found at all"
+
+## 4. Makefile and the four gates
+<!-- kind: operational -->
+
+- [ ] 4.1 CHECK: Confirm the one-time tooling is present — `cargo clippy --version` and `cargo llvm-cov --version`; install with `rustup component add clippy` and `cargo install cargo-llvm-cov` if either is missing, and record that this was needed
+- [ ] 4.2 CHECK: Confirm `make check` fails today because no `Makefile` exists
+- [ ] 4.3 CHANGE: Add the `Makefile` — `.PHONY` targets `build` (`/bin/sh scripts/build.sh`), `fmt` (`cargo fmt --all`), `fmt-check` (`cargo fmt --all -- --check`), `lint` (`cargo clippy --all-targets --all-features -- -D warnings`), `test` (`cargo test --all-features`), `coverage` (`cargo llvm-cov --fail-under-lines 80`), and `check` composed from `fmt-check lint test coverage` in that order, stopping at the first failure. No exclusion flags on the coverage command, no `herdr` invocation anywhere, and `coverage` stays verbatim from SPEC.md without `--all-features`
+- [ ] 4.4 CHANGE: Guard `lint` and `coverage` with a probe of their own tool — `lint` fails naming `rustup component add clippy` when `cargo-clippy` is unresolvable, `coverage` fails naming `cargo install cargo-llvm-cov` when `cargo-llvm-cov` is unresolvable
+- [ ] 4.5 VERIFY: `make check` at HEAD runs the four commands in order and exits 0, and `make build` and `make fmt` each exit 0 leaving `git diff --quiet` clean — spec scenarios "All gates pass on a clean tree" and "The repository is formatted at HEAD"
+- [ ] 4.6 VERIFY: `make coverage` reports line coverage at or above 80% and exits 0 — spec scenario "Coverage passes at HEAD with the scaffold's only logic". If it falls short, add library tests; do not change the threshold
+- [ ] 4.7 VERIFY: `cargo llvm-cov --fail-under-lines 100` exits non-zero at HEAD, proving `--fail-under-lines` gates rather than reports — spec scenario "The floor actually fails a build below it". Also confirm by inspection that the `coverage` recipe carries no `--ignore-filename-regex` or other narrowing flag; that inspection is a contract gate, not a test
+- [ ] 4.8 VERIFY: `rustfmt --check src/lib.rs` with no `--edition` flag exits 0, which it only can because `rustfmt.toml` supplies the edition — spec scenario "A bare `rustfmt` uses the configured edition"
+- [ ] 4.9 VERIFY: Copy `src/lib.rs` aside to a temporary path, misformat the original, run `make check`, confirm it exits non-zero at `cargo fmt --all -- --check` and that lint, test, and coverage did not run, then restore from the copy — spec scenario "Format gate fails and stops the run". Restore from the copy, never `git checkout --`: groups 2 and 3 may not be committed yet, and a revert would destroy the implementation along with the injected damage
+- [ ] 4.10 VERIFY: The same copy-aside technique with a clippy-triggering line; `make lint` exits non-zero with clippy reporting the denied warning, then restore from the copy — spec scenario "Lint gate fails on a clippy warning"
+- [ ] 4.11 VERIFY: Build a scratch `PATH` on which `cargo` resolves but its subcommands do not — `T=$(mktemp -d); mkdir -p "$T/bin"; ln -s "$(command -v cargo)" "$T/bin/cargo"; NOTOOL="$T/bin:/usr/bin:/bin"` — then `env PATH="$NOTOOL" make lint` and `env PATH="$NOTOOL" make coverage` each exit non-zero naming `rustup component add clippy` and `cargo install cargo-llvm-cov` respectively, with no coverage figure printed — spec scenarios "The `clippy` component is not installed" and "`cargo-llvm-cov` is not installed". Do not simply set `PATH=/usr/bin:/bin`: that hides `cargo` too, so the check could not tell the two failures apart
+- [ ] 4.12 VERIFY: `! grep -nE '(^|[^-])herdr[[:space:]]' Makefile scripts/build.sh` finds no `herdr` invocation, and both `make check` and `/bin/sh scripts/build.sh` exit 0 with `herdr` unavailable (or on a machine without it) — spec scenario "Herdr is not installed"
+
+## 5. Plugin manifest
+<!-- kind: operational -->
+
+- [ ] 5.1 CHECK: Confirm `herdr plugin link .` fails today because no `herdr-plugin.toml` exists; if Herdr is not installed on this machine, record that and use TOML parsing as the substitute check throughout this group
+- [ ] 5.2 CHANGE: Add `herdr-plugin.toml` — `id = "herdr-openspec"`, `name = "OpenSpec"`, `min_herdr_version = "0.7.0"`, `platforms = ["macos", "linux"]`, one `[[build]]` with `command = ["/bin/sh", "scripts/build.sh"]`, and one `[[panes]]` with `id = "dashboard"`, `title = "OpenSpec"`, `placement = "split"`, `command = ["./target/release/herdr-openspec", "ui"]`. No `[[actions]]`, no `dashboard-tab`
+- [ ] 5.3 CHECK: Contract gate — re-read `SPEC.md` → Herdr integration → Manifest and confirm every key written here matches the documented format and spelling, that the omitted `[[actions]]` and `dashboard-tab` entries are the ones `plugin-actions` owns, and that the binary name agrees across all three agreement sites: `Cargo.toml` package name, the `herdr-plugin.toml` pane command path, and the artifact `scripts/build.sh` produces
+- [ ] 5.4 VERIFY: Parse `herdr-plugin.toml` with `python3` + `tomllib` (3.11+; where only an older Python is available, fall back to `herdr plugin link .` plus a line-oriented read and record which was used). Parsing succeeds and the six required keys carry exactly the specified values; `scripts/build.sh` and `target/release/herdr-openspec` both exist and are executable relative to the repository root; the pane command basename equals the single `bin` target name from `cargo metadata`; and there is no `actions` table and no pane with `id = "dashboard-tab"` — spec scenarios "The manifest parses and its declared paths resolve", "The manifest path and the Cargo binary name agree", and the automated half of "No action or tab-pane entry is declared". Keep this as a one-off command check; it must not be committed as a Rust test
+- [ ] 5.5 VERIFY (manual, needs Herdr 0.7.0+): `herdr plugin link .` exits 0 and runs the build step, `herdr plugin list` includes `herdr-openspec`, opening the `dashboard` pane shows the placeholder banner in a split pane titled `OpenSpec` that stays open, and Herdr's action menu offers no `OpenSpec:` entry — spec scenarios "Herdr links the working tree", "The dashboard pane launches the binary and stays open", and the manual half of "No action or tab-pane entry is declared". If Herdr is unavailable, record that these were not run rather than marking them passed
+
+## 6. Documentation
+<!-- kind: operational -->
+
+- [ ] 6.1 CHECK: Re-read `AGENTS.md` → "Current repo state" and `README.md` → Install and Development, and confirm exactly which sentences this change falsifies — the "there is no `Cargo.toml` yet" claim and the "do not assume build, lint, or test commands exist" caveat in `AGENTS.md`, and the action-menu instruction in `README.md` → Install. Record `README.md` → Development as already correct
+- [ ] 6.2 CHANGE: Rewrite in `AGENTS.md`: "Current repo state" (audience: agents starting a session) — replace the no-`Cargo.toml` claim and the "do not assume commands exist" caveat with the state after this change, and keep the important-files list correct by adding `Cargo.toml`, `Makefile`, `scripts/build.sh`, and `herdr-plugin.toml`. Net change should be roughly neutral in size: this rewrites and removes, it does not append
+- [ ] 6.3 CHANGE: In `README.md` → Install (audience: someone installing the plugin), qualify the action-menu instruction — the `OpenSpec: dashboard` entries arrive with `plugin-actions`; today the manifest ships the `dashboard` pane only. One clause, not a new section
+- [ ] 6.4 VERIFY: Confirm no other maintained document is now stale — `SPEC.md` and `PRD.md` describe the target state this change implements rather than the current state. Record "no change needed" rather than editing to note that work happened
+
+## 7. Change Review
+<!-- kind: operational -->
+
+- [ ] 7.1 CHECK: Dispatch an independent reviewer — not a fork of the implementing session — with only `proposal.md`, the three spec files, `design.md`, `tasks.md`, and the diff. Concentration points for this change: the binary name agreeing across `Cargo.toml`, `herdr-plugin.toml`, and the build artifact; whether any command check was committed as a Rust test asserting a manifest or `Makefile` key back at itself; whether `src/main.rs` grew logic that belongs in the library; whether the coverage figure was reached by testing behaviour rather than by narrowing what is measured; whether any command check stops short of the step it vouches for — in particular whether the `~/.cargo/env` check proved the fallback branch ran, and whether the missing-tool checks kept `cargo` resolvable; and whether anything in this change spawns a process outside `cli` in production code or writes inside `openspec/`
+- [ ] 7.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a one-line reason, note SUGGESTIONs, and re-run the affected checks
+- [ ] 7.3 VERIFY: Confirm no blocking or unowned finding remains
+
+## 8. Lint & Verify
+<!-- kind: operational -->
+
+- [ ] 8.1 CHECK: Inspect the intended verification commands and the tiers they cover — unit and binary-integration tests under `cargo test`, the four gates under `make check`, and the command checks already run in groups 3, 4, and 5
+- [ ] 8.2 VERIFY: `cargo fmt --all -- --check` — clean
+- [ ] 8.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors
+- [ ] 8.4 VERIFY: `cargo check --all-targets --all-features` — 0 errors
+- [ ] 8.5 VERIFY: `cargo test --all-features` — green
+- [ ] 8.6 VERIFY: `cargo llvm-cov --fail-under-lines 80` — at or above the floor
+- [ ] 8.7 VERIFY: `make check` — the single gate, exit 0. If it fails, name the failing sub-command rather than reporting a summary
+- [ ] 8.8 VERIFY: `openspec validate repo-foundation --strict` — valid. The `openspec` binary is installed under nvm here and is not on a default `PATH`; put `~/.nvm/versions/node/<version>/bin` ahead on `PATH` first, or a Homebrew node will fail for an unrelated reason
