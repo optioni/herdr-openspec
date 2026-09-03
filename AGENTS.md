@@ -59,7 +59,7 @@ Repository-specific guidance belongs in `openspec/config.yaml` under `context` a
 The active schema is `tdd`:
 
 ```text
-proposal -> specs -> test-plan -> design -> tasks
+proposal -> specs -> design -> tasks -> planning-review
 ```
 
 Non-trivial work goes through a change proposal before implementation. Bug fixes,

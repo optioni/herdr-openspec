@@ -1,32 +1,83 @@
 schema: tdd
 
-# Project context (optional)
-# This is shown to AI when creating artifacts.
-# Add your tech stack, conventions, style guides, domain knowledge, etc.
-# Example:
-#   context: |
-#     Tech stack: TypeScript, React, Node.js
-#     We use conventional commits
-#     Domain: e-commerce platform
+context: |
+  Project: herdr-openspec, a Herdr plugin rendering a read-only OpenSpec dashboard in
+  a terminal pane beside the coding agents. See PRD.md for requirements and non-goals,
+  SPEC.md for the design contract, AGENTS.md for conventions.
 
-# Per-artifact rules (optional)
-# Add custom rules for specific artifacts.
-# Example:
-#   rules:
-#     proposal:
-#       - Keep proposals under 500 words
-#       - Always include a "Non-goals" section
-#     tasks:
-#       - Break tasks into chunks of max 2 hours
+  Tech stack: Rust (stable), ratatui + crossterm for the TUI, notify for filesystem
+  watching, serde_json and serde_yaml for parsing, pulldown-cmark for markdown. Read
+  Cargo.toml for the current dependency set rather than assuming one; adding a
+  dependency is a decision to argue in the proposal. Built and checked through `make`.
 
-# Per-operation guidance (optional)
-# Add advisory guidance for how apply and archive work should be conducted.
-# This is separate from artifact rules above.
-# Example:
-#   operations:
-#     apply:
-#       guidance:
-#         - Keep test summaries concise
-#     archive:
-#       guidance:
-#         - Summarize the archive outcome before finishing
+  Domain concepts: a *change* is an OpenSpec unit of work living in
+  `openspec/changes/<name>/`, carrying *artifacts* named by the repository's *schema*
+  — the artifact with `role: tasks` holds the task checklist. An *archived* change
+  lives under `openspec/changes/archive/` prefixed `YYYY-MM-DD-`. In Herdr, a *pane*
+  hosts a process and an *agent* is a recognised coding agent occupying one, carrying
+  a status of working, idle, blocked, done, or unknown. *Attribution* is the mapping
+  from a live agent to the change it is working on.
+
+  Architecture: two seams carry the design. `cli` is the only module permitted to
+  spawn a process — `OpenspecCli` and `HerdrCli` are traits whose real implementations
+  spawn and return stdout and do nothing else. `ui` views are pure functions from
+  state to a ratatui frame and perform no I/O. Everything interesting — `resolve`,
+  `schema`, `changes`, `tasks`, `agents`, `launch` — sits between them as pure
+  transformations.
+
+  Semantics: the plugin never writes to OpenSpec files, because an agent may be
+  editing them in another pane. Files and the OpenSpec CLI are not primary and
+  fallback but fast and authoritative: files paint the pane immediately, CLI results
+  arrive asynchronously and correct them. Both paths produce the same `Change` type.
+
+  Verification tiers: unit tests over the pure modules; view tests rendering into a
+  ratatui `TestBackend` at 60 and 120 columns; fixture repositories under
+  `tests/fixtures/`. Coverage is enforced at 80% of lines. Commands: `make check`, or
+  individually `cargo fmt --all -- --check`, `cargo clippy --all-targets
+  --all-features -- -D warnings`, `cargo test --all-features`, and `cargo llvm-cov
+  --fail-under-lines 80`.
+
+rules:
+  proposal:
+    - State the user-visible problem before implementation detail, and bound the scope with an explicit Non-Goals section.
+    - 'Check the change against the PRD non-goals: no editing of OpenSpec files, no orchestration across changes, no change authoring, no Windows support, and no replacement of openspec-tui.'
+    - Name which row of the IMPLEMENTATION-ORDER roadmap this change is, or say explicitly that it is unplanned work and why the roadmap did not anticipate it.
+    - Mark as **BREAKING** any change to the plugin manifest, the plugin config format, or a keybinding.
+  specs:
+    - Use concrete SHALL requirements with observable behavior — what renders, which key does what, which process is spawned with which arguments.
+    - Every requirement needs at least one `#### Scenario:` in WHEN/THEN form naming the starting state of the repository or Herdr session and the resulting rendered state.
+    - Specify the degraded path whenever the change touches an external dependency; SPEC.md's degraded-states table is the contract.
+    - 'Cover empty and boundary state: no openspec directory, no active changes, a missing artifact file, a schema the CLI rejects, an unreachable Herdr socket, and a pane narrower than 100 columns.'
+  design:
+    - Name which modules the change touches, and confirm no process spawn was added outside `cli`.
+    - 'Any new view belongs in `ui` and must be a pure function of state: state explicitly if the change adds I/O to a view, and why it cannot live behind the seam.'
+    - Include a Test Boundaries table naming every real and replaced collaborator — the filesystem, the `openspec` binary, the Herdr socket, and the terminal each get a row.
+    - Include the verification matrix with one row per spec scenario, naming its tier, collaborators, and command.
+    - State whether the change alters the `Change` type, and if so how both `from_files` and `from_cli` are kept in agreement.
+  tasks:
+    - 'Concentration point: nothing spawns a process outside `cli`. A test that needs a real `openspec` binary or a live Herdr socket is a signal the seam moved.'
+    - 'Concentration point: views perform no I/O. A view test that needs a real directory is the same signal in the other direction.'
+    - 'Concentration point: the plugin never writes inside `openspec/`. Any change touching a path under it needs a test proving the tree is unmodified.'
+    - 'Concentration point: every external dependency has an absent case — no CLI, unknown schema, no socket, missing file. Adding a dependency without a test for its absence breaks the never-fail-closed guarantee.'
+    - 'Concentration point: agent attribution must not guess. A test must prove that an agent in the repository with no matching name is reported as unattributed rather than assigned to a change.'
+    - 'Concentration point: `from_files` and `from_cli` produce the same `Change` type. A field added to one without the other is a divergence the type system will not catch if it is optional.'
+    - 'Concentration point: view tests run at 60 and 120 columns. A single-width test does not cover the responsive breakpoint.'
+    - 'Concentration point: coverage counts the whole crate. Logic added to the spawn implementations or to `main` is effectively untestable — that is the reason to keep it out of there.'
+    - 'Concentration point: Herdr agent names are capped at 32 characters and match `[a-z][a-z0-9_-]{0,31}`. Any change naming an agent needs a test for a change name that exceeds it.'
+    - Add a contract gate to any group changing the plugin manifest or the config format — re-read SPEC.md and confirm the documented format still matches.
+    - 'End with the required validation sequence: `make check` as the single gate, with the failing sub-command named if it fails.'
+  planning-review:
+    - Delegate the finding pass to subagents that did not write the plan; never fork the planning session.
+    - Confirm every spec scenario appears in the design verification matrix and has a corresponding task.
+    - Confirm no task invents a boundary the design Test Boundaries table does not name.
+    - Confirm the change does not quietly cross a PRD non-goal, and that no code path writes inside `openspec/`.
+
+operations:
+  apply:
+    guidance:
+      - Commit after each task group, using Conventional Commits, so an interrupted session resumes cleanly.
+      - Run `make check` before claiming a group is complete; report the failing sub-command rather than a summary if it fails.
+      - When implementation reveals SPEC.md is wrong, update SPEC.md as part of the change rather than leaving the two to drift.
+  archive:
+    guidance:
+      - Confirm the roadmap row in `openspec/IMPLEMENTATION-ORDER.md` still describes what was built; correct it if the change split, merged, or moved.
