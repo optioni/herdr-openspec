@@ -1,0 +1,14 @@
+id = "herdr-openspec"
+name = "OpenSpec"
+version = "0.1.0"
+min_herdr_version = "0.7.0"
+platforms = ["macos", "linux"]
+
+[[build]]
+command = ["/bin/sh", "scripts/build.sh"]
+
+[[panes]]
+id = "dashboard"
+title = "OpenSpec"
+placement = "split"
+command = ["./target/release/herdr-openspec", "ui"]
