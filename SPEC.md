@@ -213,6 +213,7 @@ more than twenty agent kinds. `g` focuses an existing agent via `herdr agent foc
 ```toml
 id = "herdr-openspec"
 name = "OpenSpec"
+version = "0.1.0"
 min_herdr_version = "0.7.0"
 platforms = ["macos", "linux"]
 

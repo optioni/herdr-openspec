@@ -23,10 +23,10 @@ working tree. This is the first row of Phase 1 and every other change depends on
 - **`scripts/build.sh`.** POSIX `sh`, sources `~/.cargo/env` when `cargo` is not
   already resolvable, fails with a clear message when it still is not, then builds
   release. Herdr may launch without `~/.cargo/bin` on `PATH`.
-- **`herdr-plugin.toml`.** Minimal: id, name, `min_herdr_version`, `platforms`, the
-  `[[build]]` step, and the single `dashboard` pane, so `herdr plugin link .` works
-  from day one. Not **BREAKING** — the manifest is introduced here; `plugin-actions`
-  completes it.
+- **`herdr-plugin.toml`.** Minimal: id, name, version, `min_herdr_version`,
+  `platforms`, the `[[build]]` step, and the single `dashboard` pane, so
+  `herdr plugin link .` works from day one. Not **BREAKING** — the manifest is
+  introduced here; `plugin-actions` completes it.
 
 ## Non-Goals
 
