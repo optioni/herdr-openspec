@@ -1,0 +1,120 @@
+## Reviewed Artifacts
+
+- `proposal.md`
+- `specs/ci-workflow/spec.md`
+- `specs/quality-gates/spec.md` (added during this review — see the first repair row)
+- `design.md`
+- `tasks.md`
+
+The finding pass was delegated to three independent reviewers, none of which wrote the
+planning package and none of which was a fork of the planning session. Each received the
+change directory and one slice of the review list: capability coverage and scenario
+quality; design completeness, test boundaries, test strategy, and the technical soundness
+of the workflow itself; task alignment, contradictions, and this repository's own
+invariants. Each was required to append findings to its own scratchpad file as it went
+rather than only in a final message, because two review rounds during `repo-foundation`
+were lost to `529 Overloaded` and cost roughly 25% of a session. All three returned
+complete.
+
+The reviewers edited nothing. Every repair below was made in this session, in the
+artifact that owns it. Result: **0 CRITICAL, 12 WARNING, 12 SUGGESTION.**
+
+## Reviewed Against
+
+- This repository HEAD: `fc3edeb2fb6d11d3cbaf7fd811b1e01a00b02a33`
+  (`docs(handoff): repo-foundation done, Phase 1 remainder in progress`)
+- Sibling repository HEAD: Not applicable. `herdr` and `openspec` are consumed as
+  installed binaries, not as source siblings.
+- Working tree: clean apart from this change's own untracked planning directory,
+  `openspec/changes/ci-pipeline/`. `make check` passes at HEAD.
+- Environment facts confirmed during review, not assumed:
+  - `cargo llvm-cov` at HEAD reports exactly two files, `lib.rs` and `main.rs`, at
+    100.00% (54/54). Test targets under `tests/` do not enter the report, so the new
+    guard cannot move the coverage figure. Measured before design.md → D4 was written.
+  - All four marketplace action refs resolve, checked with `git ls-remote`:
+    `actions/checkout` `refs/tags/v7`, `Swatinem/rust-cache` `refs/tags/v2`,
+    `taiki-e/install-action` `refs/tags/cargo-llvm-cov`, `dtolnay/rust-toolchain`
+    `refs/heads/stable`. Reviewer 2 re-confirmed all four independently and additionally
+    fetched `action.yml` for rust-cache and rust-toolchain to confirm `prefix-key`,
+    `save-if`, and `components` are real inputs.
+  - Tier B tooling present: `actionlint` 1.7.12, `yamllint` 1.38.0, Ruby 3.3.10, Docker
+    29.4.0. `act` is not installed. Python has no PyYAML, which is why the Tier B YAML
+    load is Ruby's stdlib Psych.
+  - `git remote -v` is `git@github.com:optioni/herdr-openspec.git`, matching the badge
+    slug in tasks.md 3.4.
+
+## Gaps Found and Fixed
+
+| Severity | Source Artifact | Problem | Repair | Updated Location |
+|---|---|---|---|---|
+| WARNING | proposal.md, and the live `openspec/specs/quality-gates/spec.md` | The proposal declared no Modified Capabilities, arguing that `quality-gates` "makes the CI half of that sentence exist without changing what it requires". Narrowly true — no SHALL and no scenario becomes false — but that requirement's rationale clause is the byte-identical sentence SPEC.md is being corrected for: "so that no gate is defined twice and local runs and CI invoke identical commands". After this change CI never invokes `make check`, and never invokes `make coverage` on macOS. Correcting SPEC.md's prose while leaving the same claim standing in a live capability spec is the drift the protocol exists to prevent. Worse, tasks.md deferred the decision to implementation ("If it turns out not to be true, stop and add the delta spec"), making the capability list knowingly provisional. | Added a `quality-gates` MODIFIED delta reproducing the requirement in full — heading, every SHALL, the command table, all three scenarios — and rewriting only the rationale: `check` is the single *local* entry point, CI invokes the same targets individually, no command is written twice. Proposal's Modified Capabilities updated; the deferred decision in tasks became a CHECK that the delta and the corrected SPEC.md agree. | `specs/quality-gates/spec.md` (new); proposal.md → Capabilities, What Changes; design.md → D1; tasks.md 2.4 |
+| WARNING | specs/ci-workflow, design.md | An `env:` mapping neuters a gate without touching any `run:` body. `env: RUSTFLAGS: "-A warnings"` makes `make lint` lint nothing; every guard stays green, the step still prints, the job still goes green. The invariant was stated purely over `run:` steps, so the second definition D1 forbids had an unwatched door. | Requirement text extended from "no `run:` step" to a blanket ban on `env:` at any level — nothing in the workflow needs one — with a new scenario and a guard assertion. This also settles the reviewer suggestion to add `CARGO_TERM_COLOR: always`: rejected, because it would be the first `env:` and the ban is worth more than coloured logs. | specs/ci-workflow → "CI invokes every gate through `make`" + scenario "No environment mapping redefines what a gate does"; design.md → class (a) table, matrix; tasks.md 1.3, 1.7 |
+| WARNING | specs/ci-workflow, design.md | A `paths` / `paths-ignore` filter is not a trigger, so it satisfied every clause of the trigger scenario while stopping CI running at all. In this repository, where most commits touch only `*.md` and `openspec/**`, "don't burn macOS minutes on doc changes" is a tempting one-line edit that would disable most of CI with no red check and no cancelled check. | Requirement text and scenario now forbid both keys anywhere in the file; the trigger guard asserts their absence. Row added to the class (a) table with its failure mode. | specs/ci-workflow → R1 and scenario "The workflow declares its three triggers and filters no paths"; design.md → class (a) table, matrix; tasks.md 1.3, 1.7 |
+| WARNING | specs/ci-workflow, design.md, tasks.md | "The repository SHALL provide exactly one GitHub Actions workflow file" had a Tier B `ls` as its only verification. Every guard in this change is scoped to `ci.yml` by name, so a later `nightly.yml` running `cargo test` directly would restate a gate, sit outside the aggregate check, and turn nothing red. | Added an eleventh guard, `ci_yml_is_the_only_workflow_file`, doing a `read_dir` on `.github/workflows`. Std-only, no dependency. The scenario's row moved from Tier B to Tier A. | specs/ci-workflow → scenario "`ci.yml` is the repository's only workflow"; design.md → class (a) table, Test Boundaries, matrix; tasks.md 1.3 |
+| WARNING | design.md, tasks.md | The guard `no_gate_step_can_be_skipped_or_ignored` was specified as "every `if:` line falls inside the `ci` job section", while the workflow deliberately carries `save-if:` in both compiling jobs — the spec *requires* it. A substring match reddens against the correct workflow, and the obvious "fix" deletes the cache policy. The same shape recurs with `pull_request` as a prefix of `pull_request_target`. | Anchoring rule written into the design and into its own task: match `if:` only as a YAML key (trimmed line starting `if:` or `- if:`), never as a substring, naming `save-if:` and `cancel-in-progress:` as the reason. Task 1.9 gained a break that proves the anchored guard still fires. | design.md → D3, Test Strategy note, matrix; specs/ci-workflow scenario "A failing gate fails the run rather than being skipped"; tasks.md 1.4, 1.9 |
+| WARNING | design.md, tasks.md | The job-section splitter was specified as `^  [a-z][a-z0-9-]*:$`. GitHub job ids allow `_` and uppercase, so a future `integration_test` job would be invisible to it and `every_job_is_behind_the_aggregate_status_check` would stay green while a job sat outside the required status check — green by construction for exactly the case D8 exists to prevent. The precondition "at least two job sections" would not catch it either, since the workflow has three. | Pattern widened to `^  [A-Za-z_][A-Za-z0-9_-]*:$`; a section now also ends at the next column-0 line; the precondition raised from "≥2" to exactly three sections, plus a new precondition that `jobs:` is the last column-0 key so a relocated top-level key cannot fold into the last job. | design.md → D3, class (b) table, matrix; tasks.md 1.3, 1.5 |
+| WARNING | tasks.md, design.md | Tier B's `ruby -ryaml` check asserted "the parsed `on` map's key set". Psych implements YAML 1.1, where the bare key `on` is boolean `true`: verified on this machine, the document's keys are `["name", true, "jobs"]` and `doc["on"]` is `nil`. Written naively the check either raises `NoMethodError` or passes vacuously — and a vacuous pass would leave the triggers scenario's Tier B row vouching for nothing. | The trap and its workaround are now written into both the task and the matrix row: read `d[true] \|\| d["on"]`, and assert exactly one of the two is non-nil first so the check cannot pass on a `nil`. | design.md → D3, matrix; tasks.md 1.11 |
+| WARNING | specs/ci-workflow, design.md | The spec asserted that a failed install of *either* `cargo-llvm-cov` or `llvm-tools-preview` would surface the `Makefile` guard's `cargo install cargo-llvm-cov` message. False for the component: `cargo llvm-cov --version` still exits 0 without `llvm-tools-preview`, so the guard passes and the failure comes from `cargo-llvm-cov` itself. The design also over-cited `repo-foundation` task 4.11, which proved the `clippy` and `cargo-llvm-cov` guards and exercised nothing about `llvm-tools-preview`. The conclusion (loud, therefore untested) survived; the reasoning did not, and it would have been archived as the standing contract. | Scenario replaced with "A failed install fails the job rather than skipping the gate", distinguishing all three paths accurately: a component the toolchain action cannot add fails that step before any gate runs; a missing `cargo-llvm-cov` fires the guard; a missing `llvm-tools-preview` passes the guard and fails inside `cargo-llvm-cov`. The 4.11 citation is now scoped to the two paths it actually covers. | specs/ci-workflow → R5; design.md → "Not tested" table, matrix |
+| WARNING | specs/ci-workflow, design.md | "The aggregate job succeeds only when every needed job succeeded" was closed at Tier A by job-key set equality — a static property that is not a consequence of the scenario's WHEN and would hold identically if every job failed. Inverting the aggregate's failing step would have left it green, with only the deferred Tier C row to catch it. The design's claim that no scenario rests on Tier C alone was technically satisfied and substantively false for this one. | Split into two scenarios. "No job sits outside the aggregate check" now owns the set-equality property, which is a genuine and genuinely silent failure D8 already argued for. The success-path scenario is re-anchored on a claim Tier A can actually make — the failing step's `if:` names only `failure`, `cancelled`, and `skipped`, so a success result cannot match it — and keeps its Tier C row. | specs/ci-workflow → R7; design.md → matrix |
+| WARNING | specs/ci-workflow, design.md | "A missing component is reported by the Makefile guard, not by a crash" duplicated a live `quality-gates` scenario, added nothing but the words "on a runner", and was closed by a test written for two other scenarios — nothing changed colour if the behaviour were deleted. It also described a path this design makes unreachable: with `components:` on the toolchain action, a failed install fails that step and `make lint` is never reached. | Replaced by the accurate scenario described two rows above. The reason the component lists go untested now lives where it belongs, in design.md → "What earns a test, and what does not". | specs/ci-workflow → R5; design.md → matrix |
+| WARNING | design.md, tasks.md | Four assertions the verification matrix promised had no owning task: `name: CI` (a SHALL verified nowhere), `jobs.check["runs-on"]` being the matrix expression, the `concurrency` `group`, and the presence and ordering of `taiki-e/install-action@cargo-llvm-cov` before `make coverage`. The last is the one the whole coverage gate depends on. | All four written into the Tier B `ruby` task as explicit assertions, including the step-index comparison for the install ordering. | tasks.md 1.11; design.md → matrix |
+| WARNING | design.md | The substitute-tier ladder mitigated only the macOS leg — "this machine is macOS 27, so the macOS leg's commands are genuinely exercised" — leaving Linux, the only platform where `make coverage` runs in CI, never exercised on Linux at all. Docker is installed here, and the design's rejection of `act` (a different runner image) was being used to rule out a different and cheaper rung it never named. | Added a Tier B task running the three non-coverage gates in a `rust:1` container, stated honestly as proving the commands work on Linux and nothing about the runner image. `make coverage` in a container is explicitly rejected, with its cost given, and stays a Tier C item. Docker gained a Test Boundaries row. | design.md → Test Strategy, Test Boundaries, Risks, matrix; tasks.md 1.2, 1.17 |
+| WARNING | tasks.md | Task 1.8 (now 1.9) proved only 4 of the guards could fail, and the two omitted were the pure-*absence* assertions — `coverage_threshold_is_not_restated_in_ci` and `workflow_grants_no_write_and_reads_no_secret` — which are green against almost any file until shown to go red. The group's single RED (a file-not-found covering all guards at once) proves nothing about an individual assertion. | Extended from four breaks to seven, adding `--fail-under-lines 90` on the coverage line, `permissions: contents: write` on the `check` job, and `if: success()` on the lint step (which also proves the key-anchored `if:` match fires while `save-if` does not). "At least" kept, with a note that all eleven is better. | tasks.md 1.9; design.md → Risks |
+| WARNING | tasks.md | The Documentation group inverted the operational lifecycle: three unlabelled change tasks, the only CHECK last, and no VERIFY. That mattered concretely — 3.1 asserted what `AGENTS.md` currently says, and without a leading CHECK the rewrite would be done from memory, the exact trap task 2.1 guards against for `SPEC.md`. | Reordered to CHECK → CHANGE → CHANGE → CHANGE → VERIFY, with the leading CHECK quoting the sentence to be verified verbatim before rewriting. | tasks.md group 3 |
+| WARNING | tasks.md | Group 1's `operational` marker was defended on the schema's "when no executable test can express the behavior" clause, which is not the clause that applies — an executable test can express it, and one is written. The tell was a task labelled `REFACTOR ... while the tests stay green`, which is phase 3 of the *behavior* lifecycle sitting inside an operational group. The marker was right; the argument for it was the wrong half of the rule. | Preamble now rests on the schema's "CI and build config are operational work", says plainly that an executable test *is* expressible here, and points at D2 as the reason one is written anyway. The `REFACTOR` task relabelled `CHANGE`. The group is deliberately not split: splitting would put the failing check in one group and the file that satisfies it in another. | tasks.md group 1 preamble, 1.15 |
+| SUGGESTION | design.md | D2's stated criterion — a config value earns a test only when it is load-bearing *and* fails silently — did not actually cover four of the assertions being made. `make check` absent, `fail-fast: false`, `windows` absent, and the trigger key set are all *visible* if wrong: a `make check` in CI runs more gates and goes red on macOS; a `fail-fast` default loses detail on an already-red run; a Windows leg adds a job; a `schedule` adds runs. Stretching one criterion over them is the crack through which a later change widens the guard into the anti-pattern D2 itself rejects. | Criterion split into two honestly-named classes: (a) silent gate absence, and (b) decision locks. Class (b) is deliberately closed — an assertion joins it only by locking a numbered Decision — which is what stops it becoming "assert the whole file". No assertion was removed. | design.md → D2, Test Strategy tables |
+| SUGGESTION | design.md | D6 rejected floating branch refs "outright" and then used one: `dtolnay/rust-toolchain@stable` is `refs/heads/stable`, and a tag alternative (`@v1` with `toolchain: stable`) exists. | Exception stated explicitly, with the reason (on that action the branch *is* the version selector and is the documented entry point) and the tag alternative recorded as considered-and-not-taken. | design.md → D6 |
+| SUGGESTION | design.md, specs/ci-workflow | The `prefix-key` rationale claimed it prevents instrumented and ordinary artifacts colliding. `Swatinem/rust-cache@v2`'s `add-job-id-key` defaults to true, so the two jobs already have distinct keys; the collision cannot occur either way. The setting is harmless and worth keeping, but the stated reason was wrong. | Reworded in both places to the accurate reason: the job-id key already separates them, and the explicit prefix makes the separation legible and survives a later `shared-key`. | design.md → Persistence and Rollout; specs/ci-workflow → R6 |
+| SUGGESTION | tasks.md | No `timeout-minutes` anywhere, so every job inherited GitHub's 360-minute default — a hung `macos-latest` job bills six hours at the private-repo multiplier the Risks section is already worried about, and never releases the concurrency group. | `timeout-minutes` added to both compiling jobs in the workflow spec and to the requirement text, asserted once at Tier B, and named in Risks. Not tested at Tier A: a wrong bound fails loudly or costs minutes, never hides a gate. | specs/ci-workflow → R2, R4; design.md → "Not tested" table, Risks, matrix; tasks.md 1.7, 1.11 |
+| SUGGESTION | design.md | Test Boundaries claimed "every collaborator this change touches has a row" while omitting `git` — which three tasks rule on, including the "restore from a copy, never `git checkout --`" rule — and filed `actionlint` under a row headed "YAML parser", which it is not. | `git` and Docker rows added; `actionlint` split into its own row naming what it validates that no YAML load can; the Rust toolchain row widened to cover group 5's direct `cargo` invocations, which are not `Makefile` targets. | design.md → Test Boundaries |
+| SUGGESTION | design.md | Two matrix rows credited Tier A with evidence Tier A does not hold: the fork-PR row said "Same two tests" while naming one, and folded in a `save-if` claim that only the Tier B `ruby` check asserts. | Both tests named; the `save-if` clause moved to its own Tier B row. | design.md → matrix |
+| SUGGESTION | design.md | The "concurrency fails loudly" argument covered over-cancelling only. Under-cancelling produces no failure signal at all — superseded runs simply finish, burning the `macos-latest` minutes the design elsewhere worries about. | Both directions now stated, with the cost of the untested one named as runner minutes rather than a missing gate, and the Tier B assertion identified as what closes it. | design.md → "Not tested" table, Risks, matrix |
+| SUGGESTION | specs/ci-workflow | Three scenario clauses read as unfalsifiable or duplicative on their face: the cold-cache THEN said the result is "unchanged" without naming what it is unchanged *from*; the threshold scenario restated a live `quality-gates` requirement without saying why the pairing is load-bearing; and the single-line `run:` rule asserted something no SHALL required, leaving a future reader of the archived spec unable to see that it exists to serve a std-only parser. | Cold-cache THEN now names its comparison ("identically to a run with a warm cache"). The threshold clause carries its justification ("so the absence in the workflow is a relocation and not a deletion"). The single-line rule folded into the parent requirement's SHALL text with its real reason — the crate may take no dependency, so the guard is std-only string matching. | specs/ci-workflow → R3, R6 |
+| SUGGESTION | proposal.md | The proposal placed the two contradicting SPEC.md sentences "five lines" apart; measured, they are eleven apart, and design.md said eleven. A number that would not survive the first edit to that section. | Distance dropped from the proposal; the quotes carry the claim. | proposal.md → What Changes |
+| SUGGESTION | tasks.md | `proposal.md` and `design.md` both promise the SPEC.md correction is "logged in `planning-review.md`", and no task owned that log — the shape of commitment an interrupted session drops. | Added task 2.7 to write the repair-log entry with the quoted before and after. | tasks.md 2.7 |
+| SUGGESTION | tasks.md | Three commands fell below the precision bar `repo-foundation` set, stopping at a description: `yamllint` with no invocation, "structural assertions with `ruby -ryaml`" as eight prose bullets with no script, and a badge image URL with no link target. | `yamllint .github/workflows/ci.yml` spelled out; the ruby task given a starting invocation and an itemised assertion list carrying the YAML 1.1 trap; the badge task given both URLs. | tasks.md 1.10, 1.11, 3.4 |
+
+## No Remaining Implementation-Blocking Gaps
+
+None remain. No reviewer raised a CRITICAL. Every WARNING is repaired in the artifact
+that owns it, and every SUGGESTION is either implemented or explicitly resolved above —
+none was noted and dropped. One reviewer suggestion was **rejected with a reason rather
+than implemented**: adding `CARGO_TERM_COLOR: always` would require the workflow's first
+`env:` mapping, and the blanket `env:` ban is worth more than coloured logs; that
+rejection is recorded in the second repair row rather than left silent.
+
+Two things a planning review structurally cannot settle, both already handled in the
+artifacts rather than left implicit:
+
+- **No live CI run can be observed.** This session may not push or open a pull request,
+  so five scenario clauses have a Tier C row: that GitHub accepts and schedules the
+  workflow, that the `coverage` job's installs resolve, that a failure on one matrix leg
+  leaves the other running, that the aggregate reports success when every job succeeds,
+  and that a fork pull request behaves as specified. Each also carries a Tier A or Tier B
+  row verifying the same claim statically, and `tasks.md` 1.18 requires them to be
+  recorded as outstanding rather than marked passed.
+- **The SPEC.md edit itself is scheduled, not done.** The contradiction is confirmed
+  (`SPEC.md:290` against `SPEC.md:302`, with `Makefile:30` composing coverage into
+  `check`), independently verified by reviewer 2, and its resolution argued in
+  design.md → D1 and carried by the `quality-gates` delta. The document edit is
+  tasks 2.1–2.3, and task 2.7 appends the before/after to this log when it lands.
+
+## Deferred Non-Blocking Notes
+
+- **Branch protection is not configured, and configuring it is a Non-Goal.** It is a
+  repository setting rather than a file. The `ci` aggregate job exists so that one stable
+  status name is available to require; a human turns it on, and only after the workflow
+  has run once, or the rule blocks every pull request waiting on a check that has never
+  reported. Recorded at the end of `tasks.md`.
+- **SHA-pinning the actions plus a dependency-update bot** is the stricter supply-chain
+  posture, rejected in design.md → D6 on the blast radius of a read-only, secret-free
+  workflow. The resolution point is named: revisit if this repository ever gains a
+  publish job or a secret, at which point the trade-off inverts.
+- **`make coverage` is never exercised on Linux before landing.** The container rung
+  (tasks.md 1.17) runs the three non-coverage gates; installing `cargo-llvm-cov` in a
+  throwaway container costs minutes and proves only that the tool installs. Resolution
+  point is the first live run, recorded as Tier C in design.md → Test Strategy.
+- **An MSRV job** would give `Cargo.toml`'s `rust-version = "1.85"` its first
+  verification. Out of scope here and named as such in `proposal.md` → Non-Goals;
+  `repo-foundation`'s design already recorded that the number is unverified until CI adds
+  one.
