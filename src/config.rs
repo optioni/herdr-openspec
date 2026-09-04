@@ -35,8 +35,9 @@ impl Default for Config {
 }
 
 /// Treat an environment value as unset when it is empty or contains only
-/// whitespace, mirroring what `state::state_dir` needs for its own variables.
-fn non_blank(value: Option<String>) -> Option<String> {
+/// whitespace. Shared with `state`, whose own directory resolution needs the
+/// identical "first non-blank variable wins" rule.
+pub(crate) fn non_blank(value: Option<String>) -> Option<String> {
     value.filter(|v| !v.trim().is_empty())
 }
 
@@ -248,7 +249,8 @@ mod tests {
     #[test]
     fn xdg_config_home_is_deliberately_ignored() {
         let lookup = env(&[
-            ("XDG_CONFIG_HOME", "/xdg"),
+            ("XDG_CONFIG_HOME", "/xdg-config"),
+            ("XDG_STATE_HOME", "/xdg-state"),
             ("HOME", "/home/someone"),
         ]);
         assert_eq!(
@@ -257,9 +259,14 @@ mod tests {
                 "/home/someone/.config/herdr/plugins/config/herdr-openspec"
             ))
         );
-        // The state-directory side of this scenario — that state_dir on the same
-        // lookup *does* honour XDG_STATE_HOME — is asserted in state.rs once
-        // state_dir exists (group 4), so the asymmetry is pinned end to end.
+        // The asymmetry is a recorded decision, not an oversight: state_dir on
+        // the identical lookup *does* honour XDG_STATE_HOME.
+        assert_eq!(
+            crate::state::state_dir(&lookup),
+            Some(std::path::PathBuf::from(
+                "/xdg-state/herdr/plugins/herdr-openspec"
+            ))
+        );
     }
 
     #[test]
