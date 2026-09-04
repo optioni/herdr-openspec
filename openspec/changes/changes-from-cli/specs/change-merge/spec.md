@@ -39,11 +39,15 @@ permanently file-sourced, and `openspec list --json` filters `archive` out of it
 #### Scenario: The CLI's schema, progress, and artifacts replace the file's
 
 - **WHEN** the file `ChangeSet` holds one active change `alpha` with `schema`
-  `outside-in-tdd`, an empty `artifacts` list, `progress { completed: 2, total: 3 }`, and
+  `stale-name`, an empty `artifacts` list, `progress { completed: 2, total: 3 }`, and
   `dir` `<repo>/openspec/changes/alpha`; and `CliChanges::active` holds `alpha` with
-  `schema` `outside-in-tdd`, two `ArtifactRef`s, and `progress { completed: 4, total: 9 }`
-- **THEN** the merged active change carries the two `ArtifactRef`s and
-  `progress { completed: 4, total: 9 }`
+  `schema` `tdd`, two `ArtifactRef`s, and `progress { completed: 4, total: 9 }`
+- **THEN** the merged active change has `schema` `tdd`, carries the two `ArtifactRef`s, and
+  has `progress { completed: 4, total: 9 }`
+- **AND** the string `stale-name` appears nowhere in the merged change's `schema`, so an
+  implementation keeping the file's schema fails this scenario — the two producers are
+  deliberately given **different** schema names, since equal ones would leave the change's
+  headline claim unverified
 - **AND** its `dir` is `<repo>/openspec/changes/alpha`, the file change's, unchanged
 
 #### Scenario: A change only the CLI reported is inserted in name order
@@ -203,50 +207,20 @@ repository does not vendor it — and losing an unrelated message is the worse f
   join records a length disagreement
 - **THEN** the merged `problems` holds three entries in that order, with the join's last
 
-### Requirement: The merge produces the same `Change` type, enforced at compile time
+### Requirement: The merge is a third construction site, bound by the same gate
 
-`merge` SHALL construct every merged `Change` by naming all seven fields explicitly. It
-SHALL NOT introduce a `Default` implementation on `Change`, `ChangeSet`, `ArtifactRef`, or
-`Origin`, and SHALL NOT use a functional-update `..` expression or a `..` rest pattern in
-any `Change` literal or pattern anywhere in `src/changes.rs`.
+`merge` SHALL construct every merged `Change` by naming all seven fields explicitly, and
+SHALL be bound by `change-model`'s two-producer gate exactly as the two producers are —
+that requirement, modified by this change, is where the gate's mechanisms, their scope, and
+their checks are specified, and this capability adds no second, differently-worded copy of
+them.
 
-Both halves of `change-model`'s gate SHALL remain in force and SHALL both be checked, and
-neither SHALL be relaxed to make CLI-side construction easier:
+Nothing in the merge SHALL be a reason to relax either mechanism. Every field of a merged
+`Change` is supplied from one of the two inputs, so there is no field the merge cannot
+name.
 
-- **No `Default` and no `..`** — so a new field is `E0063` at every construction site,
-  which now includes `from_cli`'s and `merge`'s. A `..other` functional update compiles
-  with no `Default` anywhere, which is exactly why the `..` half is checked separately from
-  the `Default` half rather than implied by it.
-- **`conformance::assert_invariants`'s exhaustive `let Change { … }` with no rest
-  pattern** — so a new field is `E0027` in the one function both producers' tests call.
-
-Every `Change` this change's tests build, from either producer and from the merge, SHALL be
-passed through `assert_invariants`.
-
-#### Scenario: Adding a field breaks both halves independently
-
-- **WHEN** a field is added to `Change` in a throwaway copy of the crate and nothing else
-  is changed
-- **THEN** the build fails reporting `E0063` at each construction site — `from_files`',
-  `from_cli`'s, and `merge`'s — **and** `E0027` in `conformance::assert_invariants`
-- **AND** when the same copy additionally derives `Default` on `Change` and fills the new
-  field with `..Default::default()` at every construction site, the build still fails with
-  `E0027`, proving the conformance half catches what the `Default` half misses
-- **AND** when instead a `..` rest pattern is added to `assert_invariants`' pattern and no
-  `Default` is added, the build still fails with `E0063`, proving the `Default`/`..` half
-  catches what the conformance half misses
-
-#### Scenario: A source check rejects a reintroduced `Default` or rest pattern
-
-- **WHEN** the guarded source checks are run against a copy of `src/changes.rs` carrying,
-  in turn, `#[derive(..., Default)]` on `Change`, `impl Default for Origin`, a
-  `Change { name, ..other }` literal, and a `Change { name, .. }` pattern
-- **THEN** each run exits non-zero
-- **AND** both checks exit non-zero when `src/changes.rs` does not exist, and the
-  rest-pattern check exits non-zero when it finds no `Change {` construction at all, so
-  neither can pass vacuously
-- **AND** both exit zero against the real file, which contains a `segment[..star]` slice
-  index, so the rest-pattern check discriminates a slice index from a rest pattern
+Every `Change` this change's tests build — from either producer and from the merge — SHALL
+be passed through `changes::conformance::assert_invariants`.
 
 #### Scenario: Every merged value satisfies the shared invariants
 

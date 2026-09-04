@@ -37,8 +37,10 @@ change.
 
 ## Non-Goals
 
-- No writing anywhere under `openspec/` — PRD non-goal, and a task proves the tree is
-  byte-identical.
+- No **runtime** write anywhere under `openspec/` — PRD non-goal, and a task proves the
+  tree is byte-identical. (This change does edit two planning documents by hand,
+  `openspec/IMPLEMENTATION-ORDER.md` and its own artifacts; those are not code paths and
+  the check excludes exactly them, by name.)
 - No worker thread, no debounce, no caching across calls — `live-refresh` owns those.
 - No change to `subprocess-seam`'s `CliError` (its `Failed` carries stderr only; the CLI
   writes its error JSON to stdout, so the reason is unavailable — accepted, argued in
@@ -59,11 +61,16 @@ change.
 ### Modified Capabilities
 - `plugin-build`: the argued dependency set gains `serde_json`; the enumerated normal
   build graph gains `serde_json`, `itoa`, `memchr`, and `zmij`.
+- `change-model`: the two-producer gate's scope widens — `merge` becomes a third
+  construction site, `ChangeSet` and `Origin` join `Change` and `ArtifactRef` under the
+  no-`Default` rule, and the no-`..` rule is stated for the whole of `src/changes.rs`
+  rather than only for a producer's own literals.
 
 ## Impact
 
 `src/changes.rs` (new public functions and their parsers), `Cargo.toml`, `Cargo.lock`.
 `src/cli.rs`, `src/schema.rs`, `src/resolve.rs`, `src/tasks.rs` are consumed unchanged.
-`SPEC.md` gains eight corrections found against the CLI's own source (listed in
+`SPEC.md` gains corrections found against the CLI's own source (listed in
 planning-review.md); `openspec/IMPLEMENTATION-ORDER.md`'s Phase 3 row loses the third
-command. No manifest, no config format, no keys, no external service.
+command; `AGENTS.md`'s repo-state and architecture-rules sections are rewritten in place.
+No manifest, no config format, no keys, no external service.

@@ -7,11 +7,15 @@ reach the `openspec` program **only** through that trait object. It SHALL name n
 process-spawn API: `cli` remains the crate's one spawning module, and `from_cli` is its
 first real consumer.
 
-It SHALL run exactly two kinds of invocation, with these exact argument vectors:
+It SHALL run exactly two kinds of invocation **of its own**, with these exact argument
+vectors:
 
 1. `["list", "--json"]` — once per call.
 2. `["instructions", "apply", "--change", <name>, "--json"]` — once per change the first
    call reported, in the order the result is emitted in.
+
+The only other invocation it may make is `["schema", "which", <name>, "--json"]`, which
+`schema-cli-fallback` specifies and bounds. No other vector SHALL be run.
 
 It SHALL NOT run `openspec status --change <name> --json`. That command carries
 `schemaName`, `changeRoot`, and per-artifact existing paths computed by the *same*
@@ -38,7 +42,8 @@ functional-update `..` — and every value a test builds SHALL be passed through
 
 - **WHEN** a fake `OpenspecCli` answers `["list", "--json"]` with a payload naming changes
   `zulu` and `alpha` (in that order, most-recently-modified first) and answers each
-  `["instructions", "apply", "--change", <n>, "--json"]` with a well-formed payload
+  `["instructions", "apply", "--change", <n>, "--json"]` with a well-formed payload naming
+  a schema the scratch repository **does** vendor, so no `schema which` invocation is due
 - **THEN** the fake records exactly three invocations, all on the `OpenspecCli` side, in
   the order `["list","--json"]`, then the two apply vectors
 - **AND** no vector beginning `status` is recorded, and no vector carries any argument
@@ -67,6 +72,16 @@ functional-update `..` — and every value a test builds SHALL be passed through
 array. Each element of `changes` carries `name` (string), `completedTasks` (number),
 `totalTasks` (number), `lastModified` (string), and `status` (string), all five always
 present (`dist/core/list.js:119-125`).
+
+`name` SHALL be required to be a **non-empty** string and `completedTasks` / `totalTasks`
+non-negative integers; an entry failing any of those is skipped with one problem. An empty
+`name` is rejected rather than carried, because `conformance::assert_invariants` requires a
+non-empty `name` and would panic on the value instead of degrading.
+
+A `name` appearing more than once in `changes` SHALL keep the **first** occurrence and
+record one problem naming the duplicate. The real CLI enumerates directory entries and
+cannot emit a duplicate, but `merge` pairs by name and a second entry would silently
+overwrite the first.
 
 A change's `progress` SHALL be `Progress { completed: completedTasks, total: totalTasks }`
 from this payload, and SHALL NOT be taken from the apply payload's
@@ -115,6 +130,22 @@ both fields on `Change`.
 - **WHEN** `list --json` answers `{"changes": [], "root": {"path": <repo>, "source":
   "nearest"}}`
 - **THEN** `active` is empty, `problems` is empty, and no apply invocation is recorded
+
+#### Scenario: An entry whose name is the empty string is skipped
+
+- **WHEN** `list --json` reports two entries, one with `"name": ""` and one well-formed
+- **THEN** only the well-formed entry produces a `Change`, and exactly one problem names
+  the empty name at its position
+- **AND** nothing panics, which an implementation that carried the empty name into
+  `conformance::assert_invariants` would not manage
+
+#### Scenario: A repeated name keeps the first entry and names the duplicate
+
+- **WHEN** `list --json` reports `alpha` with `1/2`, then `mike`, then `alpha` again with
+  `9/9`
+- **THEN** `active` holds one `alpha`, carrying `progress { completed: 1, total: 2 }` from
+  the first occurrence, and one `mike`
+- **AND** exactly one problem names `alpha` as reported twice
 
 ### Requirement: The CLI's active list is re-sorted by name in byte order
 
@@ -212,6 +243,46 @@ SHALL NOT be re-resolved, re-sorted, or made relative.
 - **AND** positions 0 and 2 carry that entry's paths and position 1 carries none, so the
   list is neither de-duplicated nor truncated
 
+### Requirement: Every one of `Change`'s seven fields comes from CLI data
+
+`from_cli` SHALL supply all seven fields of `Change` without a default and without a
+functional update, from these sources:
+
+| Field | Source |
+|---|---|
+| `name` | the list payload's `name` |
+| `dir` | the apply payload's `changeDir` |
+| `origin` | `Origin::Active` by construction — `openspec list --json` filters `archive` out of its walk, so nothing it reports is archived |
+| `schema` | the apply payload's `schemaName` |
+| `artifacts` | the resolved schema's declared order plus `contextFiles`, per the requirement above |
+| `progress` | the list payload's `completedTasks` / `totalTasks` |
+| `problems` | accumulated while producing the value |
+
+There is therefore no field this producer cannot supply, and no argument for relaxing
+`change-model`'s gate on its account.
+
+`changeDir` SHALL be required to have a final path component **equal to the change's
+name**; a payload whose `changeDir` does not is a per-change failure recording one problem
+naming both, not a `Change`. The real CLI joins the change directory from the name and
+always satisfies this, but `conformance::assert_invariants` requires it of every `Active`
+value and would panic rather than degrade — so the check belongs at the boundary, where a
+malformed payload is still data rather than a bug.
+
+#### Scenario: A `changeDir` whose final component is not the change name is rejected
+
+- **WHEN** the apply payload for `alpha` reports
+  `changeDir: "<repo>/openspec/changes/beta"`
+- **THEN** `alpha` is absent from `active` and exactly one problem names both `alpha` and
+  that directory
+- **AND** nothing panics, and the other changes are unaffected
+
+#### Scenario: Every produced change is `Active` and satisfies the shared invariants
+
+- **WHEN** `from_cli` runs against a payload holding three well-formed changes
+- **THEN** every produced `Change` has `origin == Origin::Active`
+- **AND** every one passes `changes::conformance::assert_invariants`, the same function
+  `from_files`' tests call, with no second copy of the invariants written for this producer
+
 ### Requirement: Every CLI failure degrades to the file result and names itself
 
 `from_cli` SHALL never fail closed. Each failure below SHALL leave the affected changes out
@@ -270,6 +341,17 @@ A per-change failure SHALL NOT abort the remaining changes.
 - **AND** no `Change` is produced with an empty artifact list in its place, because an
   empty list would be indistinguishable from a change whose artifacts are genuinely
   unwritten
+
+#### Scenario: A non-zero exit from `list --json` yields an empty result and one problem
+
+- **WHEN** the fake answers `["list", "--json"]` with
+  `Err(CliError::Failed { code: Some(1), stderr: "" })` — the shape the CLI produces when
+  the working directory holds no `openspec/` at all, or when the repository root cannot be
+  resolved, since it writes its diagnostic to stdout and exits 1
+- **THEN** `active` is empty and `problems` holds exactly one entry naming the
+  `list --json` vector and exit code `1`
+- **AND** no apply invocation is recorded, and the entry claims no reason for the failure,
+  because stderr was empty
 
 #### Scenario: Empty stdout from `list --json` is a parse failure, not an empty repository
 

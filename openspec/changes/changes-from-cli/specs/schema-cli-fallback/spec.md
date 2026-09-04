@@ -27,6 +27,28 @@ The payload's `source` and `shadows` keys SHALL be ignored. `source` names which
 answered, which changes nothing about how the directory is read, and `shadows` lists the
 lower-priority locations, which this plugin does not consult.
 
+`schema::load` and `schema::load_dir` return a `ParsedSchema` carrying both the schema and
+a `problems` list — one entry per artifact entry the parser skipped, plus a
+directory-name-versus-declared-`name:` mismatch. Those problems SHALL be recorded on every
+`Change` whose schema resolved through them, exactly as `from_files` records them through
+`CachedSchemaLoad`. They SHALL NOT be discarded: on a schema the repository does not vendor,
+the file producer never read the file at all, so this producer is the **only** one that can
+report them and `change-merge`'s duplicate collapsing has nothing to collapse against.
+
+Because the schema is resolved at most once per name per call, a per-name problem list
+SHALL be attached to **each** change using that name, not only the first — otherwise a
+message appears on whichever change happened to be enumerated first.
+
+#### Scenario: A parser problem from the CLI-named schema reaches every change using it
+
+- **WHEN** two changes report `schemaName: "spec-driven"`, the repository vendors no
+  `spec-driven`, and the `schema which` payload names a scratch directory whose
+  `schema.yaml` declares three artifacts of which one entry has no usable `id`, so
+  `schema::load_dir` returns `Ok` carrying two artifacts and one problem
+- **THEN** both changes carry two `ArtifactRef`s
+- **AND** both changes' `problems` hold that one parser message, so it is not attached to
+  only the first change to use the cached entry
+
 #### Scenario: A schema absent from the repository is loaded from the directory the CLI names
 
 - **WHEN** a change's apply payload reports `schemaName: "spec-driven"`, the repository
@@ -114,6 +136,23 @@ note to stdout, hiding a real change in the contract instead of degrading visibl
   joined `schema.yaml` path as not present
 - **AND** exactly one `schema which` invocation is recorded for that name, so the tier did
   not retry
+
+#### Scenario: An unstartable `openspec` during the fallback degrades that change
+
+- **WHEN** a change's schema is not vendored and
+  `["schema", "which", <name>, "--json"]` answers `Err(CliError::NotStarted)`
+- **THEN** that change carries an empty `artifacts` list and exactly one problem naming the
+  schema and the program that could not be started
+- **AND** nothing panics and the remaining changes are unaffected
+
+#### Scenario: An unusable `schema.yaml` at the CLI-named path degrades that change
+
+- **WHEN** `schema which` answers a well-formed object whose `path` names a scratch
+  directory in which `schema.yaml` exists but holds bytes that are not a usable schema, and
+  again one in which `schema.yaml` exists as a **directory**
+- **THEN** each yields an empty `artifacts` list and exactly one problem naming the joined
+  `schema.yaml` path and the reason — invalid in the first case, unreadable in the second
+- **AND** exactly one `schema which` invocation is recorded in each case
 
 #### Scenario: A malformed `schema which` payload is a problem, not a panic
 

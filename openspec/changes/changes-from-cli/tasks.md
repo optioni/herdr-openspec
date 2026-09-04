@@ -12,6 +12,28 @@ the suite fail on a machine without the CLI — a state `SPEC.md` requires suppo
 **No parallel groups.** Every behaviour group edits `src/changes.rs`, so no two are
 independent in the sense the schema requires.
 
+## Test-module convention — read before writing any test
+
+`src/changes.rs`'s `mod tests` is flat today (86 functions, no submodules), and libtest
+matches a filter against the **full path** of a test. Each behaviour group below therefore
+nests its tests in a named submodule of `mod tests`, and every `testcount` gate and every
+`Command` cell in design.md's verification matrix addresses tests through that path:
+
+| Group | Module | Filter |
+|---|---|---|
+| 2 | `mod list_json` | `list_json::` |
+| 3 | `mod apply_json` | `apply_json::` |
+| 4 | `mod which_json` | `which_json::` |
+| 5 | `mod cli_artifacts` | `cli_artifacts::` |
+| 6 | `mod join_artifacts` | `join_artifacts::` |
+| 7 | `mod schema_fallback` | `schema_fallback::` |
+| 8 | `mod from_cli` | `from_cli::` |
+| 9 | `mod merge` | `merge::` |
+
+Without this, a filter such as `parse_list` matches **zero** of the test names its own
+group prescribes, and `cargo test` exits 0 on a filter that matches nothing — which is the
+"verification that cannot fail" defect in its purest form.
+
 ---
 
 ## Command-level checks, written out once
@@ -20,12 +42,12 @@ These are referenced by label from the tasks below. They are written here rather
 inside a table cell because a `|` cannot appear unescaped in a Markdown table and an
 escaped `\|` inside an ERE means a **literal** pipe — `grep -E 'a\|b'` matches the string
 `a|b` and finds nothing, so the check would pass against the very code it is meant to
-catch. Every one is judged on **output emptiness or a counted minimum**, never on a
-pipeline's exit status: `grep` exits 1 for no-match and 2 for a bad file, and `!` turns
-both into a pass.
+catch. Every one is judged on **output emptiness, a counted minimum, or a specific error
+code**, never on a bare pipeline exit status: `grep` exits 1 for no-match and 2 for a bad
+file, and `!` turns both into a pass.
 
-Extract each block to `$CHECKS/<LABEL>.sh` in task 1.1 and run the extracted, byte-identical
-file thereafter, so the run and the record cannot drift.
+Extract each block to `$CHECKS/<LABEL>.<ext>` in task 1.1 and run the extracted,
+byte-identical file thereafter, so the run and the record cannot drift.
 
 ```sh
 # NOSPAWN-GREP — `cli` is the only module in the crate that spawns a process.
@@ -79,90 +101,319 @@ m=$(grep -nE 'std::process|Command|Stdio' src/resolve.rs src/config.rs src/state
 [ -z "$m" ] || { echo "MODULE-SCOPED FAIL:" >&2; echo "$m" >&2; exit 1; }
 ```
 
-```sh
-# GATE-DEFAULT — no `Default` reachable for Change, ChangeSet, ArtifactRef, or Origin.
-# Half 1 of change-model's two-producer gate, carried forward from changes-from-files
-# with a vacuity guard added. $F points it at a copy for the negative-control runs.
-F="${F:-src/changes.rs}"
-fail() { echo "GATE-DEFAULT FAIL: $1" >&2; exit 1; }
+`GATE-MECH1.py` — mechanism 1 of `change-model`'s two-producer gate. Written in Python
+rather than shell because a shell version was **defeated at planning time** by three real,
+compiling, formatter-clean forms: a `// comment` between the comma and the `..`, a
+`/* block comment */` in the same position, and `impl std::default::Default for Change`.
+It strips comments properly (leaving string and character literals intact, and preserving
+byte offsets so line numbers stay exact) and searches every file under `src/`, because an
+`impl Default for Change` is legal in any file of the crate.
 
-# Guard A — the file exists. grep exits 2 on a missing file and `!` would pass that.
-[ -f "$F" ] || fail "$F missing - nothing to check"
+```python
+#!/usr/bin/env python3
+"""GATE-MECH1 - mechanism 1 of change-model's two-producer gate.
 
-# Guard B — vacuity. All four types must be declared in this file, or a search that found
-# no Default found nothing because it looked in the wrong place.
-grep -q '^pub struct Change {'      "$F" || fail "$F does not declare 'pub struct Change'"
-grep -q '^pub struct ChangeSet {'   "$F" || fail "$F does not declare 'pub struct ChangeSet'"
-grep -q '^pub struct ArtifactRef {' "$F" || fail "$F does not declare 'pub struct ArtifactRef'"
-grep -q '^pub enum Origin {'        "$F" || fail "$F does not declare 'pub enum Origin'"
+Half A: no `Default` is reachable for Change, ChangeSet, ArtifactRef, or Origin,
+        anywhere under the source tree - not just in changes.rs, since
+        `impl Default for Change` is legal in any file of the crate.
+Half B: no `..` functional update and no `..` rest pattern in changes.rs.
 
-hits=$(grep -nE 'derive\([^)]*Default|impl +Default +for +(Change|ChangeSet|ArtifactRef|Origin)' "$F" || true)
-[ -z "$hits" ] || { echo "GATE-DEFAULT FAIL: Default reachable in $F:" >&2
-                    echo "$hits" >&2; exit 1; }
-echo "GATE-DEFAULT OK: no Default on Change, ChangeSet, ArtifactRef, or Origin in $F"
+    usage: python3 GATE-MECH1.py [SRC_DIR]      (default: src)
+    exit 0 only when BOTH halves pass.
+"""
+import re
+import sys
+from pathlib import Path
+
+TYPES = ("Change", "ChangeSet", "ArtifactRef", "Origin")
+
+
+def strip_comments(text: str) -> str:
+    """Replace every comment with an equal number of spaces/newlines, so byte
+    offsets - and therefore reported line numbers - stay exact. String and char
+    literals are left intact; a comment marker inside one is not a comment."""
+    out = []
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if c == '"':                                   # string literal
+            out.append(c); i += 1
+            while i < n:
+                if text[i] == "\\" and i + 1 < n:
+                    out.append(text[i:i + 2]); i += 2; continue
+                out.append(text[i])
+                if text[i] == '"':
+                    i += 1; break
+                i += 1
+            continue
+        if c == "'" and i + 1 < n:                     # char literal or lifetime
+            m = re.match(r"'(?:\\.|[^\\'])'", text[i:])
+            if m:
+                out.append(m.group(0)); i += len(m.group(0)); continue
+            out.append(c); i += 1; continue
+        if text.startswith("//", i):                   # line comment
+            j = text.find("\n", i)
+            j = n if j == -1 else j
+            out.append(" " * (j - i)); i = j; continue
+        if text.startswith("/*", i):                   # block comment, nesting
+            depth, j = 1, i + 2
+            while j < n and depth:
+                if text.startswith("/*", j):
+                    depth += 1; j += 2
+                elif text.startswith("*/", j):
+                    depth -= 1; j += 2
+                else:
+                    j += 1
+            out.append("".join(ch if ch == "\n" else " " for ch in text[i:j]))
+            i = j; continue
+        out.append(c); i += 1
+    return "".join(out)
+
+
+def lineno(text: str, pos: int) -> int:
+    return text.count("\n", 0, pos) + 1
+
+
+def fail(msg: str) -> None:
+    print(f"GATE-MECH1 FAIL: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+src = Path(sys.argv[1] if len(sys.argv) > 1 else "src")
+if not src.is_dir():
+    fail(f"no such directory: {src}")
+files = sorted(src.rglob("*.rs"))
+# Vacuity guard A - the searched set is the crate's real module set, not an
+# empty list. 8 is today's count; a module deliberately removed is a deliberate
+# edit here.
+if len(files) < 8:
+    fail(f"searched only {len(files)} .rs files under {src} (expected >= 8)")
+
+changes = src / "changes.rs"
+if not changes.is_file():
+    fail(f"{changes} missing - nothing to check")
+changes_body = strip_comments(changes.read_text())
+
+# Vacuity guard B - all four types must be declared where we expect them, or a
+# search that found no Default found nothing because it looked in the wrong place.
+for decl in ("pub struct Change {", "pub struct ChangeSet {",
+             "pub struct ArtifactRef {", "pub enum Origin {"):
+    if decl not in changes_body:
+        fail(f"{changes} does not declare '{decl}'")
+
+# --- Half A: no Default for the four types, anywhere under src/ --------------
+impl_re = re.compile(
+    r"impl\b[^;{]*?\b(?:std::default::|core::default::)?Default\s+for\s+"
+    r"(?:crate::)?(?:changes::)?(" + "|".join(TYPES) + r")\b")
+decl_re = re.compile(r"(?:pub\s+)?(?:struct|enum)\s+(" + "|".join(TYPES) + r")\b")
+
+hits_a = []
+for f in files:
+    body = strip_comments(f.read_text())
+    for m in impl_re.finditer(body):
+        hits_a.append(f"{f}:{lineno(body, m.start())}: {m.group(0).strip()}")
+    for m in decl_re.finditer(body):
+        # Walk back over the attribute block immediately above the declaration,
+        # so a multi-line `#[derive(\n ... Default,\n)]` is caught too.
+        head = body[:m.start()]
+        block = head[head.rfind("\n\n") + 1:] if "\n\n" in head else head
+        for d in re.finditer(r"#\[derive\(([^)]*)\)\]", block, re.S):
+            if re.search(r"\bDefault\b", d.group(1)):
+                hits_a.append(
+                    f"{f}:{lineno(body, m.start())}: derive(Default) on {m.group(1)}")
+if hits_a:
+    print("GATE-MECH1 FAIL (half A): Default reachable for a Change type:",
+          file=sys.stderr)
+    for h in hits_a:
+        print("  " + h, file=sys.stderr)
+    sys.exit(1)
+
+# --- Half B: no `..` functional update and no `..` rest pattern in changes.rs -
+# A `..` whose nearest preceding non-whitespace character is `,` or `{` is a
+# functional update or a rest pattern; those are the only two positions either
+# can occupy. `segment[..star]` is preceded by `[` and is therefore not a hit -
+# that slice index is this half's own discriminating positive control.
+ctor_re = re.compile(r"(?:Change|ChangeSet|ArtifactRef|Origin::Archived)\s*\{")
+n_ctor = len(ctor_re.findall(changes_body))
+if n_ctor < 3:
+    fail(f"found only {n_ctor} struct constructions in {changes} (expected >= 3)")
+
+hits_b = [f"{changes}:{lineno(changes_body, m.start())}: "
+          f"{changes_body[m.start():m.start() + 40].strip()!r}"
+          for m in re.finditer(r"[,{]\s*\.\.", changes_body)]
+if hits_b:
+    print("GATE-MECH1 FAIL (half B): rest pattern or functional update:",
+          file=sys.stderr)
+    for h in hits_b:
+        print("  " + h, file=sys.stderr)
+    sys.exit(1)
+
+print(f"GATE-MECH1 OK (half A): no Default for {', '.join(TYPES)} "
+      f"in {len(files)} files under {src}")
+print(f"GATE-MECH1 OK (half B): {n_ctor} constructions in {changes}, "
+      f"no rest pattern and no functional update")
+```
+
+`defeat_mech1.py` — the mutator `GATE-MECH2`'s variant (b) uses to defeat mechanism 1 in a
+throwaway copy. It finds construction sites by asking the **compiler** for them (`E0063`
+spans) rather than by pattern-matching, so it cannot miss a literal a regex would not
+reach — and, importantly, does not touch `-> Change {`, which is a function body.
+
+```python
+#!/usr/bin/env python3
+"""Defeat mechanism 1 of the two-producer gate in a THROWAWAY copy of the crate:
+give `Change` a `Default` and fill every `Change` literal from it, so no `E0063`
+remains. Run from the copy's root, after a field has been added to `Change`."""
+import json
+import re
+import subprocess
+import sys
+
+for path, old, new in [
+    ("src/changes.rs",
+     "#[derive(Debug, Clone, PartialEq, Eq)]\npub struct Change {",
+     "#[derive(Debug, Clone, PartialEq, Eq, Default)]\npub struct Change {"),
+    ("src/changes.rs",
+     "#[derive(Debug, Clone, PartialEq, Eq)]\npub enum Origin {",
+     "#[derive(Debug, Clone, PartialEq, Eq, Default)]\npub enum Origin {\n    #[default]"),
+]:
+    s = open(path).read()
+    if s.count(old) != 1:
+        sys.exit(f"defeat_mech1: anchor not unique in {path}: {old!r}")
+    open(path, "w").write(s.replace(old, new, 1))
+
+# `Change` derives Default, so every field type must too. `Progress` does not - that
+# is an accident of a sibling type, not part of the gate, so the mutator supplies it
+# rather than letting an E0277 mask the E0027 under test.
+s = open("src/tasks.rs").read()
+s2 = re.sub(r"(#\[derive\()([^)]*?)(\)\]\npub struct Progress \{)", r"\1\2, Default\3",
+            s, count=1)
+if s2 == s:
+    sys.exit("defeat_mech1: could not add Default to tasks::Progress")
+open("src/tasks.rs", "w").write(s2)
+
+
+def e0063_sites():
+    """(file, byte_start) for every E0063 the compiler reports."""
+    out = subprocess.run(["cargo", "build", "--tests", "--message-format=json"],
+                         capture_output=True, text=True).stdout
+    sites = set()
+    for line in out.splitlines():
+        try:
+            m = json.loads(line)
+        except ValueError:
+            continue
+        d = m.get("message")
+        if not d or not d.get("code") or d["code"]["code"] != "E0063":
+            continue
+        for sp in d["spans"]:
+            sites.add((sp["file_name"], sp["byte_start"]))
+    return sites
+
+
+for _ in range(10):
+    sites = e0063_sites()
+    if not sites:
+        print("defeat_mech1: no E0063 remains - mechanism 1 is defeated")
+        sys.exit(0)
+    by_file = {}
+    for f, b in sites:
+        by_file.setdefault(f, []).append(b)
+    for f, offsets in by_file.items():
+        raw = open(f, "rb").read()
+        # Insert into the LAST site first, so earlier byte offsets stay valid.
+        for b in sorted(offsets, reverse=True):
+            open_brace = raw.index(b"{", b)
+            depth, i = 1, open_brace + 1
+            while depth:
+                if raw[i:i + 1] == b"{":
+                    depth += 1
+                elif raw[i:i + 1] == b"}":
+                    depth -= 1
+                i += 1
+            raw = raw[:i - 1] + b"..Default::default()\n" + raw[i - 1:]
+        open(f, "wb").write(raw)
+sys.exit("defeat_mech1: E0063 sites did not converge after 10 passes")
 ```
 
 ```sh
-# GATE-REST — no `..` functional update and no `..` rest pattern in src/changes.rs.
-# The OTHER half of gate mechanism 1, and it is not implied by GATE-DEFAULT:
-# `Change { name, ..other }` compiles with no `Default` anywhere in the crate.
-F="${F:-src/changes.rs}"
-fail() { echo "GATE-REST FAIL: $1" >&2; exit 1; }
+# GATE-MECH2 — mechanism 2 of change-model's two-producer gate, and the proof that
+# neither mechanism alone is sufficient. Four throwaway copies of the crate: a green
+# control that must BUILD, then three mutants that must each fail with the SPECIFIC
+# codes named and NOT with the code the other mechanism would have produced.
+# Asserting on the codes, not on "it failed", is what stops a copy broken for an
+# unrelated reason from being read as evidence — an earlier draft of this block was
+# defeated exactly that way, by an E0277 that masked the E0027 under test.
+#   env: WORK   a scratch directory (required, guarded — an unset WORK would rm -rf /)
+#        MUT    the directory holding defeat_mech1.py (default: .)
+set -u
+: "${WORK:?GATE-MECH2 FAIL: WORK (a scratch directory) must be set}"
+[ -d "$WORK" ] || { echo "GATE-MECH2 FAIL: WORK=$WORK is not a directory" >&2; exit 1; }
+MUT="${MUT:-.}"
+[ -f "$MUT/defeat_mech1.py" ] || { echo "GATE-MECH2 FAIL: $MUT/defeat_mech1.py missing" >&2; exit 1; }
+[ -f Cargo.toml ] && [ -d src ] || { echo "GATE-MECH2 FAIL: run from the crate root" >&2; exit 1; }
 
-# Guard A — the file exists (grep's exit code 2 again).
-[ -f "$F" ] || fail "$F missing - nothing to check"
+ADD_FIELD='
+p="src/changes.rs"; s=open(p).read()
+old="    pub problems: Vec<String>,\n}\n\n/// Every change this plugin found"
+assert s.count(old)==1, "anchor for the added field not found"
+open(p,"w").write(s.replace(old,"    pub problems: Vec<String>,\n    pub planted: u8,\n}\n\n/// Every change this plugin found",1))
+'
+ADD_REST='
+p="src/changes.rs"; s=open(p).read()
+old="            progress: _,\n            problems,\n        } = change;"
+assert s.count(old)==1, "anchor for the rest pattern not found"
+open(p,"w").write(s.replace(old,"            progress: _,\n            problems,\n            ..\n        } = change;",1))
+'
 
-# Strip whole-line `//` comments: every comment in this file is whole-line, and the doc
-# comments discuss `..` in prose. Then look for a `..` whose nearest preceding
-# non-whitespace character is `,` or `{` — the only two positions a functional update or
-# a rest pattern can occupy. A slice index such as `segment[..star]` is preceded by `[`
-# and is therefore not a hit, which is this check's own discriminating positive control.
-body=$(sed 's|^[[:space:]]*//.*$||' "$F")
-
-# Guard B — vacuity. Both producers plus the merge build the type here; a check that
-# found no construction at all searched the wrong file.
-n=$(printf '%s\n' "$body" | grep -cE '(Change|ChangeSet|ArtifactRef|Origin::Archived)[[:space:]]*\{')
-[ "$n" -ge 3 ] || fail "found only $n struct constructions in $F (expected >= 3)"
-
-hits=$(printf '%s\n' "$body" | grep -nE '[,{][[:space:]]*\.\.' || true)
-# The newline-separated form too: a line whose first non-space token is `..`, where the
-# previous non-blank line ended in `,` or `{`.
-multi=$(printf '%s\n' "$body" | awk '
-  { line=$0; sub(/^[[:space:]]+/,"",line); sub(/[[:space:]]+$/,"",line)
-    if (line ~ /^\.\./ && prev ~ /[,{]$/) printf "%d:%s\n", NR, $0
-    if (line != "") prev=line }')
-all=$(printf '%s\n%s\n' "$hits" "$multi" | grep -v '^$' || true)
-[ -z "$all" ] || { echo "GATE-REST FAIL: rest pattern or functional update in $F:" >&2
-                   echo "$all" >&2; exit 1; }
-echo "GATE-REST OK: $n constructions in $F, no rest pattern and no functional update"
-```
-
-```sh
-# GATE-COMPILE — mechanism 2 of the two-producer gate, and the proof that neither half
-# alone suffices. Three throwaway copies of the crate; each must FAIL TO COMPILE, and
-# each must fail with the SPECIFIC error code named, not merely "fail".
-#   $WORK is a scratch directory. Nothing is written inside the repository.
-gate_compile() { # $1 = variant label, $2 = required error code, $3 = python mutator
-  d="$WORK/gate-$1"; rm -rf "$d"; mkdir -p "$d"
-  cp -R Cargo.toml Cargo.lock src tests rustfmt.toml "$d/"
-  ( cd "$d" && python3 -c "$3" ) || { echo "GATE-COMPILE FAIL: mutator $1 did not apply" >&2; return 1; }
-  out=$( cd "$d" && cargo test --all-features --no-run 2>&1 )
-  if printf '%s\n' "$out" | grep -q "^error\[$2\]"; then
-    echo "GATE-COMPILE OK: variant $1 fails with $2"
-  else
-    echo "GATE-COMPILE FAIL: variant $1 did not produce $2" >&2
-    printf '%s\n' "$out" | grep -oE 'error\[E[0-9]+\][^\n]*' | sort -u >&2
-    return 1
-  fi
+copy() {
+  d="$WORK/mech2-$1"; rm -rf "$d"; mkdir -p "$d" || return 1
+  cp -R Cargo.toml Cargo.lock src tests rustfmt.toml "$d/" || return 1
+  printf '%s' "$d"
 }
-# A green control FIRST: an unmutated copy must BUILD. Without it, a variant that fails
-# because the copy is broken is indistinguishable from one that fails for the right
-# reason, which is verification stopping short of the step it vouches for.
-d="$WORK/gate-baseline"; rm -rf "$d"; mkdir -p "$d"
-cp -R Cargo.toml Cargo.lock src tests rustfmt.toml "$d/"
+
+# Green control FIRST. Without it, a mutant that fails because the copy is broken is
+# indistinguishable from one that fails for the right reason — which is verification
+# stopping short of the step it vouches for.
+d=$(copy baseline) || { echo "GATE-MECH2 FAIL: could not copy the crate" >&2; exit 1; }
 ( cd "$d" && cargo test --all-features --no-run >/dev/null 2>&1 ) \
-  || { echo "GATE-COMPILE FAIL: the unmutated copy does not build" >&2; exit 1; }
-echo "GATE-COMPILE OK: unmutated copy builds"
+  || { echo "GATE-MECH2 FAIL: the unmutated copy does not build" >&2; exit 1; }
+echo "GATE-MECH2 OK (control): the unmutated copy builds"
+
+codes() { printf '%s\n' "$1" | grep -oE '^error\[E[0-9]+\]' | sort -u | tr '\n' ' '; }
+
+# $1 label, $2 codes that MUST appear, $3 codes that must NOT, $4.. mutator commands
+variant() {
+  label=$1; want=$2; forbid=$3; shift 3
+  d=$(copy "$label") || { echo "GATE-MECH2 FAIL: could not copy for $label" >&2; exit 1; }
+  for mut in "$@"; do
+    ( cd "$d" && eval "$mut" ) >/dev/null 2>&1 \
+      || { echo "GATE-MECH2 FAIL: mutator for variant $label did not apply" >&2; exit 1; }
+  done
+  out=$( cd "$d" && cargo test --all-features --no-run 2>&1 )
+  got=$(codes "$out")
+  for c in $want; do
+    case " $got " in *" error[$c] "*) ;; *)
+      echo "GATE-MECH2 FAIL: variant $label must produce $c; produced: $got" >&2; exit 1;; esac
+  done
+  for c in $forbid; do
+    case " $got " in *" error[$c] "*)
+      echo "GATE-MECH2 FAIL: variant $label must NOT produce $c; produced: $got" >&2; exit 1;; esac
+  done
+  echo "GATE-MECH2 OK (variant $label): produced [$got], required [$want], forbade [${forbid:-none}]"
+}
+
+# (a) a field added and nothing else: BOTH mechanisms must fire.
+variant a "E0027 E0063" "" "python3 -c '$ADD_FIELD'"
+# (b) mechanism 1 fully defeated — Default derived and every Change literal filled
+#     from it, driven by the compiler's own E0063 spans so no literal is missed —
+#     and E0063 must be GONE. Mechanism 2 must still fire. This is the proof that
+#     "no Default" alone would not hold the gate.
+variant b "E0027" "E0063" "python3 -c '$ADD_FIELD'" "python3 '$MUT/defeat_mech1.py'"
+# (c) mechanism 2 defeated by the rest pattern change-model forbids in
+#     assert_invariants, and E0027 must be GONE. Mechanism 1 must still fire.
+variant c "E0063" "E0027" "python3 -c '$ADD_FIELD'" "python3 -c '$ADD_REST'"
+echo "GATE-MECH2 OK: both mechanisms fire independently; neither alone is sufficient"
 ```
 
 ```sh
@@ -204,10 +455,10 @@ env PATH="$NOTOOLS" cargo test --all-features
 ```
 
 ```sh
-# OPENSPEC-UNTOUCHED — nothing under openspec/ changed except this change's own artifacts.
-# Diffed against the BASE SHA captured in task 1.1, never against the index: this project
-# commits per task group, so `git diff --exit-code` between working tree and index passes
-# over the very change it exists to catch.
+# OPENSPEC-UNTOUCHED — no code path writes inside openspec/. Diffed against the BASE SHA
+# captured in task 1.1, never against the index: this project commits per task group, so
+# `git diff --exit-code` between working tree and index passes over the very change it
+# exists to catch.
 #
 # `git diff` alone is NOT enough: it lists tracked paths only, and a file the plugin
 # WRITES at runtime is untracked, so the one violation this check exists to catch would
@@ -215,13 +466,19 @@ env PATH="$NOTOOLS" cargo test --all-features
 #
 # `:(top)` anchors both pathspecs to the repository root and `git -C "$ROOT"` anchors the
 # reported paths there too, so the check gives the same answer from any working directory.
+#
+# Exactly TWO exclusions, both hand-edited planning documents rather than code-path
+# writes: this change's own artifact directory, and the roadmap row group 12 corrects.
+# They are excluded BY NAME, never by a broad prefix, so a stray file anywhere else under
+# openspec/ still fails.
 [ -n "$BASE" ] || { echo "FAIL: BASE sha not set" >&2; exit 1; }
 ROOT=$(git rev-parse --show-toplevel) || { echo "FAIL: not a git repo" >&2; exit 1; }
 git -C "$ROOT" rev-parse --verify "$BASE^{commit}" >/dev/null \
   || { echo "FAIL: bad BASE" >&2; exit 1; }
 stray=$( { git -C "$ROOT" diff --name-only "$BASE" -- ':(top)openspec/'
            git -C "$ROOT" ls-files --others --exclude-standard -- ':(top)openspec/'; } \
-         | grep -v '^openspec/changes/changes-from-cli/' | sort -u || true)
+         | grep -v '^openspec/changes/changes-from-cli/' \
+         | grep -vx 'openspec/IMPLEMENTATION-ORDER.md' | sort -u || true)
 [ -z "$stray" ] || { echo "FAIL: wrote inside openspec/ outside this change:" >&2
                      echo "$stray" >&2; exit 1; }
 echo "OPENSPEC-UNTOUCHED OK"
@@ -233,28 +490,171 @@ echo "OPENSPEC-UNTOUCHED OK"
 # "0 passed; ... filtered out" and returns 0. Every VERIFY that is a filtered run
 # therefore passes if the module is renamed, if the tests are never written, or if a typo
 # is made in the filter. The gate is a counted minimum, taken from the group's own RED.
-#   usage: testcount <filter> <minimum>
+#
+# The SCOPE parameter is load-bearing and was added after review: without it the helper
+# summed every test binary, so the whole-suite gate (316 today: 300 lib + 11 ci_workflow
+# + 5 binary-integration) passed against a lib baseline of 300 with zero new lib tests,
+# and stayed green even if the lib count FELL.
+#   usage: testcount <scope> <filter> <minimum>      scope: --lib | --all-targets
 testcount() {
-  out=$(cargo test --all-features "$1" 2>&1) || { printf '%s\n' "$out" >&2; return 1; }
+  scope=$1; filter=$2; min=$3
+  case "$scope" in --lib) sel="--lib";; --all-targets) sel="";; *)
+    echo "TESTCOUNT FAIL: scope must be --lib or --all-targets, got '$scope'" >&2; return 1;; esac
+  out=$(cargo test --all-features $sel "$filter" 2>&1) \
+    || { printf '%s\n' "$out" >&2; return 1; }
   n=$(printf '%s\n' "$out" | sed -n 's/^test result: ok\. \([0-9][0-9]*\) passed.*/\1/p' \
       | awk '{t+=$1} END{print t+0}')
-  [ "$n" -ge "$2" ] || { echo "TESTCOUNT FAIL: filter '$1' ran $n tests, expected >= $2" >&2
-                         return 1; }
-  echo "TESTCOUNT OK: filter '$1' ran $n tests (>= $2)"
+  [ "$n" -ge "$min" ] || {
+    echo "TESTCOUNT FAIL: $scope filter '$filter' ran $n tests, expected >= $min" >&2
+    return 1; }
+  echo "TESTCOUNT OK: $scope filter '$filter' ran $n tests (>= $min)"
 }
 ```
 
 ```sh
-# DEPS — the argued dependency set, the resolved graph, the MSRV floor, and the
-# genuinely-needed experiment. Reads `cargo metadata` JSON through python3 rather than
-# adding a crate to do it, exactly as subprocess-seam's DEPS does.
-#   $WORK is a scratch directory; every removal experiment runs in a COPY, because
-#   `cargo build` rewrites Cargo.lock during resolution before it reaches the compile
-#   error the check waits for.
-#
-# Leg 5's guard: removing a crate the manifest does not carry must be reported as a
-# FAILURE of the check, never counted as a pass — otherwise the leg silently succeeds
-# against a manifest that never declared it.
+# DEPS — the argued dependency set, the one binary target, the resolved graph, the MSRV
+# floor, and the genuinely-needed experiment. Reads `cargo metadata` JSON through
+# python3 rather than adding a crate to do it, as subprocess-seam's DEPS does.
+#   env: WORK  scratch directory (required, guarded); leg 5 copies the crate into it,
+#              because `cargo build` REWRITES Cargo.lock during resolution before it
+#              reaches the compile error the leg waits for, so an edit-and-restore in
+#              place would silently discard the resolution this change verified.
+#        DEPS_SKIP_LEG5=1 skips the three full builds.
+set -u
+: "${WORK:?DEPS FAIL: WORK (a scratch directory) must be set}"
+[ -d "$WORK" ] || { echo "DEPS FAIL: WORK=$WORK is not a directory" >&2; exit 1; }
+[ -f Cargo.toml ] && [ -d src ] || { echo "DEPS FAIL: run from the crate root" >&2; exit 1; }
+EXPECTED_GRAPH='arraydeque foldhash hashbrown hashlink itoa memchr serde_core serde_json serde_spanned toml toml_datetime toml_parser toml_writer winnow yaml-rust2 zmij'
+TRIPLES='aarch64-apple-darwin x86_64-apple-darwin aarch64-unknown-linux-gnu x86_64-unknown-linux-gnu'
+
+# --- leg 1: exactly one bin target, and build.sh actually produces it ---------
+cargo metadata --no-deps --format-version 1 | python3 -c '
+import json,sys
+m=json.load(sys.stdin); p=m["packages"][0]
+bins=[t for t in p["targets"] if "bin" in t["kind"]]
+assert p["name"]=="herdr-openspec", p["name"]
+assert len(bins)==1 and bins[0]["name"]=="herdr-openspec", bins
+assert p["edition"]=="2024", p["edition"]
+print("DEPS OK (leg 1a): exactly one bin target, herdr-openspec, edition 2024")
+' || { echo "DEPS FAIL: leg 1a" >&2; exit 1; }
+# The deletion and the EXIT STATUS are both load-bearing: build.sh has a real failure
+# path (`error: cargo not found`, exit 1) and a leftover binary from any earlier build
+# satisfies an existence check regardless of what the script did.
+rm -f target/release/herdr-openspec
+/bin/sh scripts/build.sh >/dev/null 2>&1 \
+  || { echo "DEPS FAIL: leg 1b scripts/build.sh exited non-zero" >&2; exit 1; }
+[ -x target/release/herdr-openspec ] \
+  || { echo "DEPS FAIL: leg 1b no executable at target/release/herdr-openspec" >&2; exit 1; }
+echo "DEPS OK (leg 1b): scripts/build.sh exited 0 and produced an executable binary"
+
+# --- leg 2: the declared set, read from RESOLVED metadata, not manifest text --
+cargo metadata --no-deps --format-version 1 | python3 -c '
+import json,sys
+want={"serde_json":["std"],
+      "toml":["display","parse","serde","std"],
+      "yaml-rust2":[]}
+deps=[d for d in json.load(sys.stdin)["packages"][0]["dependencies"] if d["kind"] is None]
+got={d["name"]:d for d in deps}
+assert sorted(got)==sorted(want), f"normal deps are {sorted(got)}, expected {sorted(want)}"
+for n,f in want.items():
+    assert got[n]["uses_default_features"] is False, f"{n} uses default features"
+    assert sorted(got[n]["features"])==sorted(f), "%s features %s != %s" % (n, got[n]["features"], f)
+print("DEPS OK (leg 2a): exactly", len(deps), "normal deps, defaults off, features exact")
+' || { echo "DEPS FAIL: leg 2a" >&2; exit 1; }
+# `cargo metadata` reports [] for both `features = []` and an omitted key and cannot
+# tell them apart; the requirement is about what the manifest says on its face, so
+# this clause is read from the TEXT.
+grep -q 'yaml-rust2 = .*features = \[\]' Cargo.toml \
+  || { echo "DEPS FAIL: leg 2b yaml-rust2 does not spell out features = [] in Cargo.toml" >&2; exit 1; }
+echo "DEPS OK (leg 2b): yaml-rust2's empty feature list is written out in Cargo.toml"
+cargo build --locked >/dev/null 2>&1 \
+  || { echo "DEPS FAIL: leg 2c cargo build --locked" >&2; exit 1; }
+echo "DEPS OK (leg 2c): cargo build --locked"
+
+# --- leg 3: the resolved normal graph, identical on all four supported triples -
+prev=""
+for t in $TRIPLES; do
+  set=$(cargo tree -e normal --target "$t" 2>/dev/null \
+        | grep -oE '[A-Za-z0-9_-]+ v[0-9]' | sed 's/ v[0-9]//' \
+        | grep -v '^herdr-openspec$' | sort -u | tr '\n' ' ')
+  [ -n "$set" ] || { echo "DEPS FAIL: leg 3 empty graph for $t" >&2; exit 1; }
+  [ "$set" = "$(printf '%s ' $EXPECTED_GRAPH)" ] \
+    || { echo "DEPS FAIL: leg 3 graph for $t is:" >&2; echo "  $set" >&2
+         echo "  expected: $(printf '%s ' $EXPECTED_GRAPH)" >&2; exit 1; }
+  [ -z "$prev" ] || [ "$set" = "$prev" ] \
+    || { echo "DEPS FAIL: leg 3 triples disagree" >&2; exit 1; }
+  prev="$set"
+  for bad in syn quote proc-macro2 serde_derive encoding_rs ryu; do
+    case " $set " in *" $bad "*)
+      echo "DEPS FAIL: leg 3 $bad is in the normal graph for $t" >&2; exit 1;; esac
+  done
+done
+echo "DEPS OK (leg 3): all four triples resolve the same 16 packages; no proc macro, no encoding_rs, no ryu"
+
+# --- leg 4: MSRV, compared against Cargo.toml's OWN rust-version -------------
+# A check carrying its own literal floor keeps enforcing the old value when the
+# crate's rust-version moves, and the requirement is a claim about the relationship.
+{ for t in $TRIPLES; do cargo tree -e normal --target "$t" 2>/dev/null; done; } \
+  | grep -oE '[A-Za-z0-9_-]+ v[0-9][^ ]*' | sed 's/ v/\t/' | sort -u > "$WORK/graph-pairs.tsv"
+cargo metadata --format-version 1 | WORK="$WORK" python3 -c '
+import json,sys,re,os
+pairs=set()
+for line in open(os.environ["WORK"]+"/graph-pairs.tsv"):
+    n,v=line.rstrip("\n").split("\t"); pairs.add((n,v.split()[0]))
+m=json.load(sys.stdin)
+floor=None
+for p in m["packages"]:
+    if p["name"]=="herdr-openspec": floor=p["rust_version"]
+assert floor, "the crate declares no rust-version"
+def key(v):
+    # Zero-pad to three components: "1.85" and "1.85.0" are the same floor, and a
+    # bare tuple comparison would rank (1,85,0) above (1,85) and report a false
+    # violation for every package declaring the patch digit.
+    n=[int(x) for x in re.findall(r"\d+", v)[:3]]
+    return tuple(n+[0]*(3-len(n)))
+over=[]; at=[]
+for p in m["packages"]:
+    if (p["name"], p["version"]) not in pairs: continue
+    rv=p.get("rust_version")
+    if not rv: continue
+    if key(rv)>key(floor): over.append((p["name"],p["version"],rv))
+    elif key(rv)==key(floor): at.append(p["name"])
+assert not over, f"packages above the {floor} floor: {over}"
+assert at, "no package sits at the floor - the intersection matched nothing"
+print(f"DEPS OK (leg 4): floor {floor} from Cargo.toml; at the floor: {sorted(set(at))}")
+' || { echo "DEPS FAIL: leg 4" >&2; exit 1; }
+
+# --- leg 5: each dependency is genuinely needed, tested in a COPY ------------
+[ "${DEPS_SKIP_LEG5:-0}" = "1" ] && { echo "DEPS SKIPPED (leg 5) by DEPS_SKIP_LEG5=1"; exit 0; }
+before=$(git status --porcelain -- Cargo.toml Cargo.lock)
+needed() { # $1 crate name, $2 the module whose failure is expected
+  d="$WORK/deps-$1"; rm -rf "$d"; mkdir -p "$d"
+  cp -R Cargo.toml Cargo.lock src tests rustfmt.toml "$d/"
+  # The guard: removing a crate the manifest does not carry must be a FAILURE OF THE
+  # CHECK, never counted as a pass — otherwise the leg silently succeeds against a
+  # manifest that never declared it.
+  grep -q "^$1 = " "$d/Cargo.toml" \
+    || { echo "DEPS FAIL: leg 5 '$1' is not declared in Cargo.toml - nothing to remove" >&2; exit 1; }
+  grep -v "^$1 = " "$d/Cargo.toml" > "$d/Cargo.toml.new" && mv "$d/Cargo.toml.new" "$d/Cargo.toml"
+  if ( cd "$d" && cargo build >/dev/null 2>&1 ); then
+    echo "DEPS FAIL: leg 5 the crate still builds without $1 - it is not genuinely needed" >&2
+    exit 1
+  fi
+  echo "DEPS OK (leg 5/$1): removing it breaks the build ($2 depends on it)"
+}
+needed toml "config and state"
+needed yaml-rust2 "schema"
+needed serde_json "changes::from_cli"
+# The guard itself, exercised: a crate the manifest does not carry must be reported as
+# a failure of the check. Run in a subshell so its `exit 1` does not end this script.
+if ( needed notacrate "nothing" ) >/dev/null 2>&1; then
+  echo "DEPS FAIL: leg 5's not-declared guard did not fire" >&2; exit 1
+fi
+echo "DEPS OK (leg 5 guard): removing an undeclared crate is reported as a failure"
+after=$(git status --porcelain -- Cargo.toml Cargo.lock)
+[ "$before" = "$after" ] \
+  || { echo "DEPS FAIL: leg 5 changed Cargo.toml or Cargo.lock in the working tree" >&2; exit 1; }
+echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
 ```
 
 ---
@@ -265,115 +665,117 @@ testcount() {
 - [ ] 1.1 CHECK: Capture the baseline that every later check measures against, and write
       each value into this file in place of the placeholder beside it.
       - `git rev-parse HEAD` → record as `BASE`. This is the commit the planning
-        artifacts land on; at planning time it was `c4f88df` plus the planning commit.
-        Every `OPENSPEC-UNTOUCHED` run uses this value.
+        artifacts land on. Every `OPENSPEC-UNTOUCHED` run uses this value.
       - `cargo test --all-features --lib 2>&1 | sed -n 's/^test result: ok\. \([0-9]*\)
-        passed.*/\1/p'` → record as the lib-test baseline. On `main` at planning time:
-        **300**. `TESTCOUNT` at the end requires **strictly more**.
-      - `export CHECKS=<scratchpad>/changes-from-cli-checks` and extract each fenced block
-        above to `$CHECKS/<LABEL>.sh`, byte-identically. Run the extracted files from here
-        on, never a retyped copy.
+        passed.*/\1/p'` → record as the **lib** baseline. On `main` at planning time:
+        **300** (the whole suite is 316: 300 lib + 11 `ci_workflow` + 5 binary-integration,
+        which is why the final gate is scoped `--lib`).
+      - `export CHECKS=<scratchpad>/changes-from-cli-checks` and extract every fenced block
+        above to `$CHECKS/<LABEL>.sh` (and `GATE-MECH1.py`, `defeat_mech1.py`),
+        byte-identically. Run the extracted files from here on, never a retyped copy.
+      - `export WORK=<scratchpad>/changes-from-cli-work` and `mkdir -p "$WORK"`.
+        `GATE-MECH2` and `DEPS` both refuse to run with `WORK` unset — an unset `WORK`
+        would make their `rm -rf "$WORK/..."` catastrophic.
       **Red when:** `BASE` is empty or not a commit (`OPENSPEC-UNTOUCHED` aborts on both);
-      the baseline count is recorded higher than reality, which would make `TESTCOUNT`
+      the lib baseline is recorded higher than reality, which makes `TESTCOUNT`
       unsatisfiable rather than falsely green.
 
-- [ ] 1.2 CHECK: Run `NOSPAWN-GREP`, `GATE-DEFAULT`, and `GATE-REST` against the tree as
-      it stands, before any edit. All three must **pass**, establishing that this change
-      starts from a clean gate rather than inheriting a broken one.
-      Expected, and observed at planning time:
+- [ ] 1.2 CHECK: Run `NOSPAWN-GREP` and `GATE-MECH1` against the tree as it stands, before
+      any edit. Both must **pass**, establishing that this change starts from a clean gate
+      rather than inheriting a broken one. Expected, and observed at planning time:
       `NOSPAWN OK: 8 files checked under src, only src/cli.rs may spawn`;
-      `GATE-DEFAULT OK: no Default on Change, ChangeSet, ArtifactRef, or Origin in src/changes.rs`;
-      `GATE-REST OK: 34 constructions in src/changes.rs, no rest pattern and no functional update`.
+      `GATE-MECH1 OK (half A): no Default for Change, ChangeSet, ArtifactRef, Origin in 9 files under src`;
+      `GATE-MECH1 OK (half B): 34 constructions in src/changes.rs, no rest pattern and no functional update`.
       **Red when:** the tree already carries a `Default`, a rest pattern, or a spawn API
       outside `src/cli.rs` — in which case this change is not the place to fix it and the
       finding is reported before any code is written.
 
-- [ ] 1.3 CHECK: Run `NOJSON-SEAM` now. It must **fail** with
-      `src/changes.rs does not name serde_json - the check would pass vacuously`, proving
-      the positive control is load-bearing rather than decorative. Record the message.
-      **Red when:** it passes today, which would mean the positive control is not wired.
+- [ ] 1.3 CHECK: Run the three checks that must **fail** today, and record each message.
+      They are the proof that the corresponding green runs later in the change are earned
+      rather than structural.
+      - `NOJSON-SEAM` → `src/changes.rs does not name serde_json - the check would pass
+        vacuously` (the positive control is load-bearing, not decorative).
+      - `DEPS` leg 2a → `normal deps are ['toml', 'yaml-rust2'], expected ['serde_json',
+        'toml', 'yaml-rust2']`.
+      - `DEPS` leg 5 for `serde_json` → `the crate still builds without serde_json - it is
+        not genuinely needed` (true today, because nothing parses JSON yet).
+      All three were demonstrated red at planning time.
+      **Red when:** any of the three passes today, which would mean it cannot discriminate.
 
 - [ ] 1.4 CHANGE: Add to `Cargo.toml`:
       `serde_json = { version = "1.0.151", default-features = false, features = ["std"] }`
-      — written with an explicit `features` list, `default-features = false`, and the
-      version checked against the registry rather than remembered (`cargo info serde_json`
-      reported `1.0.151` at planning time). Commit `Cargo.lock`.
+      — an explicit `features` list, `default-features = false`, and the version checked
+      against the registry rather than remembered (`cargo info serde_json` reported
+      `1.0.151` at planning time). Commit `Cargo.lock`.
 
-- [ ] 1.5 VERIFY: Run `DEPS` legs 1–4 and record the output verbatim.
-      - `cargo metadata --no-deps --format-version 1` → exactly **three** normal
-        dependencies, `serde_json`, `toml`, `yaml-rust2`, all with
-        `uses_default_features == false`; features exactly `["std"]`, `["display",
-        "parse", "serde", "std"]`, and `[]` respectively.
-      - `grep -n 'features = \[\]' Cargo.toml` finds the `yaml-rust2` line, so the
-        explicit-empty spelling is read from the manifest text (`cargo metadata` reports
-        `[]` for both spellings and cannot tell them apart).
-      - `cargo build --locked` exits 0.
-      - `cargo tree -e normal --target <triple>` for `aarch64-apple-darwin`,
-        `x86_64-apple-darwin`, `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu`
-        → all four identical, and the set besides `herdr-openspec` is exactly the sixteen
-        packages `plugin-build`'s delta enumerates. No `syn`, `quote`, `proc-macro2`,
-        `serde_derive`, `encoding_rs`, or `ryu`.
-      - MSRV: the maximum `rust_version` over the `(name, version)` pairs
-        `cargo tree -e normal` reports, intersected with `cargo metadata --format-version 1`,
-        is `1.85`, compared against `Cargo.toml`'s own `rust-version` read at run time
-        rather than a literal in the check.
-      **Red when:** a fourth dependency appears; a default is re-enabled; a proc-macro
-      crate enters the graph; `serde_json` resolves a version whose MSRV exceeds the
-      crate's floor. Verified at planning time in a scratch copy: the graph gains exactly
-      `serde_json`, `itoa`, `memchr`, `zmij`, identical on all four triples.
+- [ ] 1.5 VERIFY: Run `DEPS` with `DEPS_SKIP_LEG5=1` — legs 1 through 4 must all pass, and
+      the output recorded verbatim. Verified in a scratch copy at planning time:
+      `leg 1a` one bin target, edition 2024; `leg 1b` `scripts/build.sh` exits 0 after the
+      binary is deleted; `leg 2a` exactly three normal deps with defaults off and exact
+      features; `leg 2b` the `features = []` spelling read from the manifest text;
+      `leg 2c` `cargo build --locked`; `leg 3` all four triples resolve the same sixteen
+      packages with no `syn`/`quote`/`proc-macro2`/`serde_derive`/`encoding_rs`/`ryu`;
+      `leg 4` floor `1.85` read from `Cargo.toml`, with nine packages at it.
+      Leg 5 is deferred to task 10.8, because `serde_json` is not used yet and it would
+      correctly fail here.
 
-- [ ] 1.6 VERIFY: Run `make check` — must still be green with the dependency added and no
-      code using it yet. Commit.
+- [ ] 1.6 VERIFY: `make check` — must still be green with the dependency added and no code
+      using it yet. Commit.
 
 ---
 
-## 2. `parse_list` — the list envelope
+## 2. `parse_list` — the list envelope (`mod list_json`)
 <!-- kind: behavior -->
 
-- [ ] 2.1 RED: Write failing unit tests in `src/changes.rs`'s `mod tests` for:
+- [ ] 2.1 RED: Write failing unit tests in a new `mod list_json` inside `src/changes.rs`'s
+      `mod tests`:
       `a_bare_array_is_rejected_rather_than_parsed`;
-      `an_empty_change_list_is_a_supported_empty_state` (parser half: zero entries, zero
-      problems, a root); `a_change_entry_missing_a_required_field_is_skipped_not_fatal`
-      (three entries; the middle has no `totalTasks`, another has a numeric `name`; one
-      `ListEntry` survives and two problems name positions `1` and `2`);
-      `empty_stdout_from_list_is_a_parse_failure` (`""` → `Err`);
+      `an_empty_change_list_is_a_supported_empty_state`;
+      `a_change_entry_missing_a_required_field_is_skipped_not_fatal` (three entries; the
+      middle has no `totalTasks`, another has a numeric `name`; one entry survives and two
+      problems name positions `1` and `2`);
+      `an_entry_whose_name_is_the_empty_string_is_skipped`;
+      `a_repeated_name_keeps_the_first_entry_and_names_the_duplicate` (`alpha` `1/2`,
+      `mike`, `alpha` `9/9` → one `alpha` carrying `1/2`, one problem);
+      `empty_stdout_is_a_parse_failure`;
       `a_list_envelope_carries_the_root_path`;
       `an_envelope_with_no_root_yields_no_root`;
       `a_root_whose_path_is_not_a_string_yields_no_root`;
       `list_entries_keep_the_payload_order` (the sort is not this function's job).
       Confirm each fails because `parse_list` does not exist, not because of a typo:
-      `cargo test --all-features --lib parse_list` must report a **compile** error naming
-      `parse_list`, and the count of failing tests must equal the count written.
+      `cargo test --all-features --lib list_json::` must report a **compile** error naming
+      `parse_list`, and the number of failing tests must equal the number written.
 
 - [ ] 2.2 GREEN: Implement `pub(crate) struct ListEntry { name: String, progress:
       tasks::Progress }`, `pub(crate) struct ListPayload { root: Option<PathBuf>, changes:
       Vec<ListEntry>, problems: Vec<String> }`, and
       `pub(crate) fn parse_list(text: &str) -> Result<ListPayload, String>`.
       `Err` for: not JSON, not an object, no `changes` key, `changes` not an array.
-      Per-entry: `name` must be a string, `completedTasks` and `totalTasks` must be
-      numbers representable as `usize`; anything else records one problem naming the
-      entry's zero-based position and skips it. `lastModified` and `status` are read and
-      discarded — `change-model` forbids storing either.
+      Per entry: `name` a **non-empty** string, `completedTasks` and `totalTasks`
+      non-negative integers representable as `usize`, and the name not already seen;
+      anything else records one problem naming the entry's zero-based position and skips
+      it. `lastModified` and `status` are read and discarded — `change-model` forbids
+      storing either.
 
 - [ ] 2.3 REFACTOR: Extract the "non-negative integer from a `Value`" helper if it is used
-      more than twice; otherwise state that no refactor was needed.
+      more than twice; otherwise state explicitly that no refactor was needed.
 
-- [ ] 2.4 VERIFY: `testcount 'parse_list' <count written in 2.1>` — a counted minimum, not
-      a bare filtered run, because a filter matching nothing exits 0. Commit.
+- [ ] 2.4 VERIFY: `testcount --lib 'list_json::' <count written in 2.1>` — a counted
+      minimum, not a bare filtered run, because a filter matching nothing exits 0. Commit.
 
 ---
 
-## 3. `parse_apply` — the apply payload
+## 3. `parse_apply` — the apply payload (`mod apply_json`)
 <!-- kind: behavior -->
 
-- [ ] 3.1 RED: Write failing unit tests for:
+- [ ] 3.1 RED: Write failing unit tests in `mod apply_json` for:
       `an_apply_payload_yields_schema_name_change_dir_and_context_files`;
       `an_apply_payload_missing_context_files_is_an_error`;
       `an_apply_payload_missing_schema_name_is_an_error`;
       `an_apply_payload_missing_change_dir_is_an_error`;
       `an_error_envelope_is_an_error` (the CLI's `{"status":[{severity,code,message}]}`
-      shape, which arrives on stdout with exit 1 — this test proves the parser rejects it
-      rather than silently producing an empty payload should a future release exit 0);
+      shape, which arrives on stdout with exit 1 — this proves the parser rejects it rather
+      than silently producing an empty payload should a future release exit 0);
       `context_files_values_that_are_not_string_arrays_are_rejected`;
       `an_empty_context_files_object_is_valid_and_yields_no_paths`;
       `malformed_apply_json_is_an_error`.
@@ -382,51 +784,50 @@ testcount() {
 - [ ] 3.2 GREEN: Implement `pub(crate) struct ApplyPayload { schema_name: String,
       change_dir: PathBuf, context_files: BTreeMap<String, Vec<PathBuf>> }` and
       `pub(crate) fn parse_apply(text: &str) -> Result<ApplyPayload, String>`.
-      `schemaName` must be a non-empty string, `changeDir` a non-empty string,
-      `contextFiles` an object whose every value is an array of strings. A `BTreeMap` is
-      used rather than a `HashMap` so a rendered problem naming several keys is
-      deterministic across runs.
+      `schemaName` a non-empty string, `changeDir` a non-empty string, `contextFiles` an
+      object whose every value is an array of strings. A `BTreeMap` rather than a
+      `HashMap`, so a rendered problem naming several keys is deterministic across runs.
 
-- [ ] 3.3 REFACTOR: Share the "required non-empty string field" helper with `parse_list`
-      if it fits, or state that none was needed.
+- [ ] 3.3 REFACTOR: Share the "required non-empty string field" helper with `parse_list` if
+      it fits; otherwise state explicitly that none was needed.
 
-- [ ] 3.4 VERIFY: `testcount 'parse_apply' <count>`. Commit.
+- [ ] 3.4 VERIFY: `testcount --lib 'apply_json::' <count>`. Commit.
 
 ---
 
-## 4. `parse_schema_which` — the schema-directory payload
+## 4. `parse_schema_which` — the schema-directory payload (`mod which_json`)
 <!-- kind: behavior -->
 
-- [ ] 4.1 RED: Write failing unit tests for:
+- [ ] 4.1 RED: Write failing unit tests in `mod which_json` for:
       `a_schema_which_payload_yields_the_directory_path`;
       `a_leading_non_json_line_is_not_tolerated` (the exact string
       `"Note: Schema commands are experimental and may change.\n{\"path\":\"/x\"}"` → `Err`);
       `a_schema_which_error_body_is_an_error` (`{"error": "...", "available": [...]}`,
-      which is what the CLI writes to **stdout** on exit 1);
-      `malformed_schema_which_payloads_are_errors` — the four payloads `""`, `"null"`,
-      `"{\"path\": 7}"`, `"{\"name\":\"x\"}"`, each asserted individually so a single
-      failure names which one;
+      what the CLI writes to **stdout** on exit 1);
+      `an_empty_payload_is_an_error`, `a_null_payload_is_an_error`,
+      `a_non_string_path_is_an_error`, `a_payload_with_no_path_is_an_error` — the four
+      malformed cases asserted individually so a failure names which one;
       `an_empty_path_is_an_error`;
       `source_and_shadows_are_ignored` (a payload carrying `source: "package"` and a
       non-empty `shadows` array still yields just the path).
 
 - [ ] 4.2 GREEN: Implement `pub(crate) fn parse_schema_which(text: &str) ->
       Result<PathBuf, String>`. Parse the **whole** of `text` as one JSON document with
-      `serde_json::from_str` — no line skipping, no prefix trimming. Require an object
-      with a non-empty string `path`. Ignore every other key.
+      `serde_json::from_str` — no line skipping, no prefix trimming. Require an object with
+      a non-empty string `path`. Ignore every other key.
 
 - [ ] 4.3 REFACTOR: None expected; state so explicitly if none was made.
 
-- [ ] 4.4 VERIFY: `testcount 'schema_which' <count>`. Commit.
+- [ ] 4.4 VERIFY: `testcount --lib 'which_json::' <count>`. Commit.
 
 ---
 
-## 5. `cli_artifacts` — placing paths at schema positions
+## 5. `cli_artifacts` — placing paths at schema positions (`mod cli_artifacts`)
 <!-- kind: behavior -->
 
-- [ ] 5.1 RED: Write failing unit tests for:
-      `an_omitted_context_files_key_becomes_an_empty_path_list_at_its_position` (a `tdd`-
-      shaped five-artifact schema with keys for three);
+- [ ] 5.1 RED: Write failing unit tests in `mod cli_artifacts` for:
+      `an_omitted_context_files_key_becomes_an_empty_path_list_at_its_position` (a
+      five-artifact `tdd`-shaped schema with keys for three);
       `a_multi_file_artifact_keeps_the_cli_list_in_the_cli_order` (two absolute paths,
       asserted in order, asserted absolute, asserted not joined onto any change dir);
       `a_context_files_key_naming_no_schema_artifact_is_ignored` (extra key `legacy` →
@@ -446,17 +847,17 @@ testcount() {
       `context_files.get(&artifact.id).cloned().unwrap_or_default()`. After the walk,
       record one problem per `context_files` key no schema artifact declares.
 
-- [ ] 5.3 REFACTOR: State whether any was needed.
+- [ ] 5.3 REFACTOR: State explicitly whether any was needed.
 
-- [ ] 5.4 VERIFY: `testcount 'cli_artifacts' <count>`. Commit.
+- [ ] 5.4 VERIFY: `testcount --lib 'cli_artifacts::' <count>`. Commit.
 
 ---
 
-## 6. `join_artifacts` — the positional cross-producer join
+## 6. `join_artifacts` — the positional cross-producer join (`mod join_artifacts`)
 <!-- kind: behavior -->
 
-- [ ] 6.1 RED: Write failing unit tests, one per rule, all against hand-built vectors so
-      no CLI and no filesystem is involved:
+- [ ] 6.1 RED: Write failing unit tests in `mod join_artifacts`, one per rule, all against
+      hand-built vectors so no CLI and no filesystem is involved:
       `equal_length_lists_with_equal_ids_take_the_cli_paths_positionally`;
       `a_duplicate_id_is_joined_by_index_rather_than_collapsed` — ids `zeta`, `alpha`,
       `zeta` in both lists, with the CLI's index 2 carrying a path index 0 does not, and
@@ -466,93 +867,117 @@ testcount() {
       `an_empty_file_list_takes_the_cli_list`;
       `an_empty_cli_list_keeps_the_file_list`;
       `two_empty_lists_join_to_an_empty_list`;
-      `differing_lengths_keep_the_file_list_and_name_both_counts` (problem contains `5`
+      `differing_lengths_keep_the_file_list_and_name_both_counts` (the problem contains `5`
       and `3`);
-      `a_differing_id_at_one_index_keeps_the_file_list_and_names_the_index` — four
-      entries differing at indices 2 **and** 3, asserting the problem names index `2`,
-      `design`, and `plan`, and does **not** name index `3`. Without the second
-      difference the "first differing index" clause is untested;
+      `a_differing_id_at_one_index_keeps_the_file_list_and_names_the_index` — four entries
+      differing at indices 2 **and** 3, asserting the problem names index `2`, `design`,
+      and `plan`, and does **not** name index `3`. Without the second difference the "first
+      differing index" clause is untested;
       `the_join_never_reads_a_path_as_a_key` — file and CLI lists whose ids agree at every
-      position but whose paths share no string at all; the result is the CLI's, proving
-      no path comparison gates the join.
+      position but whose paths share no string at all; the result is the CLI's, proving no
+      path comparison gates the join.
 
 - [ ] 6.2 GREEN: Implement `pub(crate) fn join_artifacts(file: &[ArtifactRef], cli:
-      &[ArtifactRef]) -> (Vec<ArtifactRef>, Option<String>)` applying the six rules in
-      `change-merge`'s spec, in order.
+      &[ArtifactRef]) -> (Vec<ArtifactRef>, Option<String>)` applying `change-merge`'s six
+      rules, in order.
 
-- [ ] 6.3 REFACTOR: State whether any was needed.
+- [ ] 6.3 REFACTOR: State explicitly whether any was needed.
 
-- [ ] 6.4 VERIFY: `testcount 'join_artifacts' <count>`. Commit.
+- [ ] 6.4 VERIFY: `testcount --lib 'join_artifacts::' <count>`. Commit.
 
 ---
 
-## 7. Schema resolution through the CLI fallback tier
+## 7. Schema resolution through the CLI fallback tier (`mod schema_fallback`)
 <!-- kind: behavior -->
 
-- [ ] 7.1 RED: Write failing unit tests. Every one uses `cli::FakeCli` plus a real
-      `testutil::ScratchDir` holding real `schema.yaml` files — **no process is spawned**,
-      because the fake answers `["schema","which",…]` with a payload whose `path` names a
-      scratch directory that genuinely holds the file `schema::load_dir` then reads:
+- [ ] 7.1 RED: Write failing unit tests in `mod schema_fallback`. Every one uses
+      `cli::FakeCli` plus a real `testutil::ScratchDir` holding real `schema.yaml` files —
+      **no process is spawned**, because the fake answers `["schema","which",…]` with a
+      payload whose `path` names a scratch directory that genuinely holds the file
+      `schema::load_dir` then reads:
       `a_schema_absent_from_the_repository_is_loaded_from_the_directory_the_cli_names`;
       `a_vendored_schema_never_reaches_the_cli` — register **no** `schema which` response;
-      the fake panics on an unregistered pair, so a test that passes proves the call was
-      never made;
-      `an_unreadable_vendored_schema_is_not_repaired_by_the_cli` — `schema.yaml` created
-      as a **directory**, no `schema which` registration;
+      the fake panics on an unregistered pair, so a passing test proves the call was never
+      made;
+      `an_unreadable_vendored_schema_is_not_repaired_by_the_cli` — `schema.yaml` created as
+      a **directory**, no `schema which` registration;
       `an_invalid_vendored_schema_is_not_repaired_by_the_cli`;
-      `a_which_path_naming_a_directory_with_no_schema_yaml_stops_the_tier` — assert
-      exactly one recorded `schema which` call;
-      `a_which_failure_is_a_problem_naming_the_vector_and_the_exit_code`;
-      `three_changes_sharing_one_unvendored_schema_ask_the_cli_once`;
+      `an_unknown_schema_name_degrades_that_change_alone` (three changes; the middle one's
+      `schema which` answers `Err(CliError::Failed { code: Some(1), stderr: "" })`);
+      `a_which_path_naming_a_directory_with_no_schema_yaml_stops_the_tier` — assert exactly
+      one recorded `schema which` call;
+      `an_unstartable_openspec_during_the_fallback_degrades_that_change`;
+      `an_unusable_schema_yaml_at_the_cli_named_path_degrades_that_change` — both the
+      invalid-bytes and the `schema.yaml`-is-a-directory cases;
+      `a_malformed_which_payload_is_a_problem_not_a_panic` — the four payloads asserted
+      individually;
+      `a_parser_problem_from_the_cli_named_schema_reaches_every_change_using_it` — two
+      changes sharing one cached, CLI-named schema whose `schema.yaml` has one unusable
+      artifact entry; **both** changes must carry the parser's problem, which an
+      implementation attaching it only on the cache miss would fail;
+      `three_changes_sharing_one_unvendored_schema_ask_the_cli_once` — assert five
+      recorded calls in total;
       `a_failed_lookup_is_cached_rather_than_retried_per_change`;
       `two_different_schema_names_are_asked_for_separately`.
 
-- [ ] 7.2 GREEN: Implement the per-call schema resolver: a `HashMap<String, CachedCliSchema>`
-      owned by the `from_cli` call (never a `static` — `resolve::BinCache`'s reason: the
-      suite runs this crate's tests in parallel threads of one process). On a miss, call
-      `schema::load(repo, name)`; on `Ok` cache it; on `Err(NotVendored)` run
+- [ ] 7.2 GREEN: Implement the per-call schema resolver: a `HashMap<String,
+      CachedCliSchema>` owned by the `from_cli` call (never a `static` —
+      `resolve::BinCache`'s reason: the suite runs this crate's tests in parallel threads
+      of one process). On a miss, call `schema::load(repo, name)`; on `Ok` cache the schema
+      **and its `ParsedSchema::problems`**; on `Err(NotVendored)` run
       `["schema", "which", name, "--json"]`, `parse_schema_which`, then
-      `schema::load_dir(dir, name)`; on `Err(Unreadable)` or `Err(Invalid)` cache the
-      failure without calling the CLI. Cache failures as well as successes.
+      `schema::load_dir(dir, name)`, caching the same pair; on `Err(Unreadable)` or
+      `Err(Invalid)` cache the failure without calling the CLI. Every change using a cached
+      entry receives a clone of its problems, not only the change that populated it.
 
-- [ ] 7.3 CHECK: Confirm no process API name entered `src/changes.rs` while wiring the
-      fallback — run `NOSPAWN-GREP`. **Red when:** the tier was implemented by reaching for
+- [ ] 7.3 REFACTOR: Fold the fallback's five failure paths into one problem-rendering
+      helper if that removes duplication; otherwise state explicitly that no refactor was
+      needed.
+
+- [ ] 7.4 CHECK: Run `NOSPAWN-GREP` — confirm no process API name entered `src/changes.rs`
+      while wiring the fallback. **Red when:** the tier was implemented by reaching for
       `Command` rather than the trait object.
 
-- [ ] 7.4 VERIFY: `testcount 'schema_fallback' <count>`. Commit.
+- [ ] 7.5 VERIFY: `testcount --lib 'schema_fallback::' <count>`. Commit.
 
 ---
 
-## 8. `from_cli` — the composition
+## 8. `from_cli` — the composition (`mod from_cli`)
 <!-- kind: behavior -->
 
-- [ ] 8.1 RED: Write failing unit tests for:
+- [ ] 8.1 RED: Write failing unit tests in `mod from_cli` for:
       `a_two_change_repository_drives_exactly_three_invocations` — assert
       `FakeCli::calls()` **equals** the exact three-element vector, not merely contains
       them, so an extra `status` call fails;
       `no_status_invocation_is_made_even_when_an_apply_call_fails` — no `status`
       registration at all;
-      `the_argument_vector_carries_no_sort_flag` — assert the recorded list vector equals
+      `the_argument_vector_carries_no_sort_flag` — the recorded list vector equals
       `["list", "--json"]` exactly;
       `progress_is_read_from_the_list_payload_pair` — the apply payload deliberately
       carries a conflicting `progress`, and `0/0` must appear nowhere in the result;
       `the_most_recently_modified_default_order_is_replaced_by_byte_order`;
       `case_and_digits_order_by_byte_not_by_locale` — `Beta` before `alpha`, which a
       `localeCompare` sort reverses;
+      `a_change_dir_whose_final_component_is_not_the_change_name_is_rejected`;
+      `every_produced_change_is_active_and_satisfies_the_shared_invariants` — every value
+      through `conformance::assert_invariants`;
       `an_absent_openspec_binary_yields_an_empty_result_and_one_problem`;
+      `a_non_zero_exit_from_list_yields_an_empty_result_and_one_problem`;
       `a_schema_the_cli_rejects_removes_one_change_and_keeps_the_others` — the problem
-      names the change, the vector, and exit code `1`, and asserts the problem does **not**
-      contain any CLI message text, because stderr was empty;
+      names the change, the vector, and exit code `1`, and the test asserts the problem
+      does **not** contain any CLI message text, because stderr was empty;
       `malformed_json_from_a_single_apply_call_is_contained_to_that_change`;
       `an_apply_payload_missing_context_files_is_a_per_change_failure`;
       `empty_stdout_from_list_is_a_parse_failure_not_an_empty_repository` — asserts one
       problem, and asserts the empty-list case records none, so the two are distinguished;
-      `a_mismatched_root_discards_the_whole_cli_result` — asserts exactly one recorded
-      call, so the guard runs before the per-change calls;
+      `a_bare_array_is_rejected_at_the_composition`;
+      `a_mismatched_root_discards_the_whole_cli_result` — exactly one recorded call, so the
+      guard runs before the per-change calls;
       `a_symlinked_repository_root_is_not_a_disagreement` — a real scratch symlink;
       `an_envelope_with_no_root_is_treated_as_a_disagreement`;
-      `every_change_from_cli_satisfies_the_shared_invariants` — every produced `Change`
-      through `conformance::assert_invariants`.
+      `an_omitted_context_files_key_is_an_empty_path_list_end_to_end`;
+      `a_multi_file_artifact_survives_the_composition`;
+      `a_context_files_key_naming_no_schema_artifact_is_ignored_end_to_end`.
 
 - [ ] 8.2 GREEN: Implement `pub struct CliChanges` and
       `pub fn from_cli(cli: &dyn cli::OpenspecCli, repo: &Path) -> CliChanges`, plus
@@ -564,31 +989,35 @@ testcount() {
 
 - [ ] 8.3 REFACTOR: Clean up while green; state explicitly if none was needed.
 
-- [ ] 8.4 VERIFY: RED then GREEN for
-      `a_full_from_cli_run_leaves_the_tree_byte_identical` — `testutil::snapshot` over a
-      scratch tree and `testutil::shallow_snapshot` over the process's own working
-      directory, taken around one call covering a successful change, a change whose apply
-      call failed, a schema resolved through the CLI fallback tier, and a malformed
-      payload. The cwd snapshot is shallow for the reason `cli.rs`'s equivalent test
-      records: under `cargo test` the real cwd is this repository, whose `target/` holds
-      tens of thousands of files.
+- [ ] 8.4 RED then GREEN: `a_full_from_cli_run_leaves_the_tree_byte_identical` —
+      `testutil::snapshot` over a scratch tree and `testutil::shallow_snapshot` over the
+      process's own working directory, taken around one call covering a successful change,
+      a change whose apply call failed, a schema resolved through the CLI fallback tier,
+      and a malformed payload. The cwd snapshot is shallow for the reason `cli.rs`'s
+      equivalent test records: under `cargo test` the real cwd is this repository, whose
+      `target/` holds tens of thousands of files.
 
-- [ ] 8.5 VERIFY: `testcount 'from_cli' <count>` and run `NOSPAWN-GREP`. Commit.
+- [ ] 8.5 VERIFY: `testcount --lib 'from_cli::' <count>`, then run `NOSPAWN-GREP` and
+      `GATE-MECH1` — the latter must now report **more** than 34 constructions, since
+      `from_cli` builds the type. Commit.
 
 ---
 
-## 9. `merge` — layering CLI over files
+## 9. `merge` — layering CLI over files (`mod merge`)
 <!-- kind: behavior -->
 
-- [ ] 9.1 RED: Write failing unit tests, all pure (hand-built `ChangeSet` and
-      `CliChanges`, no CLI, no filesystem):
-      `the_cli_schema_progress_and_artifacts_replace_the_files`;
+- [ ] 9.1 RED: Write failing unit tests in `mod merge`, all pure (hand-built `ChangeSet`
+      and `CliChanges`, no CLI, no filesystem):
+      `the_cli_schema_progress_and_artifacts_replace_the_files` — the two producers are
+      given **different** schema names (`stale-name` and `tdd`) and the test asserts the
+      merged schema is `tdd` and that `stale-name` appears nowhere; equal names would leave
+      the change's headline claim unverified;
       `the_merged_dir_comes_from_the_file_change`;
       `a_change_only_the_cli_reported_is_inserted_in_name_order`;
       `a_change_only_the_file_producer_saw_survives_the_merge` (and records no problem);
       `an_empty_cli_result_leaves_the_file_result_intact` — assert the merged set `==` the
-      input set except for the appended problems, which a weaker per-field assertion
-      would not catch;
+      input set except for the appended problems, which a weaker per-field assertion would
+      not catch;
       `archived_changes_pass_through_untouched` — including the case where the CLI reports
       an active change of the same name;
       `a_file_side_message_survives_beside_a_corrected_artifact_list`;
@@ -602,26 +1031,33 @@ testcount() {
 - [ ] 9.2 GREEN: Implement `pub fn merge(files: ChangeSet, cli: CliChanges) -> ChangeSet`
       per `change-merge`'s field table: pair by name, `dir` from the file change, `schema`
       and `progress` from the CLI change, `artifacts` from `join_artifacts`, `problems`
-      concatenated file-first then CLI then join, exactly-equal strings collapsed to the
-      first occurrence. Union the two name sets, re-sort by name in byte order, pass
+      concatenated file-first then CLI then join with exactly-equal strings collapsed to
+      the first occurrence. Union the two name sets, re-sort by name in byte order, pass
       `archived` through unchanged, and concatenate the two problem lists onto
       `ChangeSet::problems`.
 
-- [ ] 9.3 CHECK: Contract gate — re-read `openspec/specs/change-model/spec.md` and confirm
-      the merged `Change` still carries exactly seven fields, no `status`, no ratio, no
-      formatted string, no `lastModified`, and no producer discriminant, and that
-      `archived` is still a separate vector rather than a filter over one list.
+- [ ] 9.3 REFACTOR: Share the byte-order sort with `from_cli`'s if both ended up with a
+      copy; otherwise state explicitly that no refactor was needed.
 
-- [ ] 9.4 VERIFY: `testcount 'merge' <count>`. Commit.
+- [ ] 9.4 CHECK: Contract gate — re-read `openspec/specs/change-model/spec.md` and this
+      change's delta on it, and confirm the merged `Change` still carries exactly seven
+      fields, no `status`, no ratio, no formatted string, no `lastModified`, and no
+      producer discriminant, and that `archived` is still a separate vector rather than a
+      filter over one list.
+
+- [ ] 9.5 VERIFY: `testcount --lib 'merge::' <count>`. Commit.
 
 ---
 
 ## 10. Architectural checks and their negative controls
 <!-- kind: operational -->
 
-- [ ] 10.1 VERIFY: `NOSPAWN-GREP` against `src` — must pass, reporting at least eight
-      files. Then run it four more times against scratch copies of `src/` to prove it is
-      not decoration, recording each message:
+- [ ] 10.1 CHECK: Before running the controls, confirm each check is green on the tree as
+      it now stands, so a red control below is attributable to the plant rather than to the
+      tree: `NOSPAWN-GREP`, `GATE-MECH1`, `NOJSON-SEAM`, `OPENSPEC-UNTOUCHED`.
+
+- [ ] 10.2 VERIFY: `NOSPAWN-GREP` negative controls — four scratch copies of `src/`, each
+      message recorded:
       (a) `Command::new("openspec")` planted in `src/changes.rs` → `NOSPAWN FAIL: spawn API
       outside .../cli.rs:` naming that line;
       (b) `cli.rs` deleted → `NOSPAWN FAIL: .../cli.rs missing - the exclusion has nothing
@@ -632,44 +1068,45 @@ testcount() {
       the exclusion is by path and not by base name.
       **Red when:** any of (a)–(d) passes.
 
-- [ ] 10.2 VERIFY: `GATE-DEFAULT` against `src/changes.rs` — must pass. Then four negative
-      controls, each recorded: `#[derive(..., Default)]` on `Change` → exit 1;
-      `impl Default for Origin` appended → exit 1; a missing file → exit 1 naming the
-      missing file; a file that declares none of the four types → exit 1 naming the
-      vacuity. All four were demonstrated red at planning time against the pre-change tree.
+- [ ] 10.3 VERIFY: `GATE-MECH1` negative controls — ten scratch copies of `src/`, each
+      message recorded. All ten were demonstrated red at planning time; the last two of the
+      first five are the forms that defeated an earlier shell version of this check and are
+      the reason it is written in Python:
+      (a) `Change { name: …, ..other }` on one line;
+      (b) the same functional update spread across lines;
+      (c) `let Change { name, .. }`;
+      (d) a functional update with a `// line comment` between the comma and the `..`;
+      (e) the same with a `/* block comment */` between them;
+      (f) `impl std::default::Default for Change` — the path-qualified form;
+      (g) `impl Default for crate::changes::Origin` planted in `src/state.rs`, proving the
+      search covers every file rather than only `changes.rs`;
+      (h) a multi-line `#[derive(\n …, Default,\n)]` on `Change`;
+      (i) `src/changes.rs` deleted;
+      (j) a copy holding fewer than eight `.rs` files.
+      **Red when:** any of (a)–(j) passes. The green run on the real tree is itself
+      discriminating: `src/changes.rs` contains a `segment[..star]` slice index the check
+      must not fire on.
 
-- [ ] 10.3 VERIFY: `GATE-REST` against `src/changes.rs` — must pass, and its message must
-      now report **more** constructions than the 34 recorded at planning time, since
-      `from_cli` and `merge` both build the type. Then five negative controls, each
-      recorded: an inline `Change { name: …, ..other }` → exit 1; the same spread over
-      lines → exit 1; a `let Change { name, .. }` pattern → exit 1; a missing file → exit 1;
-      a file with no constructions → exit 1 naming the vacuity. All five were demonstrated
-      red at planning time; the green run on the real file is itself discriminating,
-      because that file contains a `segment[..star]` slice index the check must not fire on.
+- [ ] 10.4 VERIFY: `GATE-MECH2` — the green control first (an unmutated copy builds), then
+      the three variants, each asserting the error codes that must be **present** and the
+      one that must be **absent**:
+      (a) a field added to `Change` and nothing else → `E0027` **and** `E0063`;
+      (b) mechanism 1 fully defeated by `defeat_mech1.py` → `E0027` present, `E0063`
+      **absent**, proving mechanism 2 catches what mechanism 1 misses;
+      (c) mechanism 2 defeated by a `..` in `assert_invariants` → `E0063` present, `E0027`
+      **absent**, proving mechanism 1 catches what mechanism 2 misses.
+      Verified end to end against the pre-change tree at planning time; variant (a)
+      reported five `E0063` initializer sites, which after this change must be more.
+      **Red when:** any variant compiles, or produces the code it must not, or the
+      unmutated control fails to build. Asserting on codes rather than on "it failed" is
+      load-bearing: an earlier draft was defeated by an `E0277` from `tasks::Progress`
+      lacking `Default`, which masked the `E0027` under test — which is also why
+      `defeat_mech1.py` supplies that `Default` rather than relying on the accident.
 
-- [ ] 10.4 VERIFY: `GATE-COMPILE` — the green control first (an unmutated copy builds),
-      then three mutated copies, each required to produce a **specific** error code:
-      (a) a field added to `Change`, nothing else → must produce `E0027` (the pattern in
-      `conformance::assert_invariants` does not mention it) **and** `E0063` at every
-      construction site, which after this change includes `from_cli`'s and `merge`'s;
-      (b) the same field plus `#[derive(Default)]` on `Change` and `..Default::default()`
-      at every construction site → must **still** produce `E0027`, proving mechanism 2
-      catches what mechanism 1 misses;
-      (c) the same field, no `Default`, but a `..` rest pattern added to
-      `assert_invariants` → must **still** produce `E0063`, proving mechanism 1 catches
-      what mechanism 2 misses.
-      **Red when:** any variant compiles, or fails with some other error code — the
-      assertion is on the code, not on "it failed". Verified against the pre-change tree at
-      planning time: (a) gave `E0027` plus `E0063` at five sites; (b) gave `E0027`; (c)
-      gave `E0063` at five sites.
-      Note deliberately **not** relied on: `tasks::Progress` implements no `Default`, so
-      variant (b) also raises `E0277`. That is an accident of a sibling type and could
-      vanish; the assertion is on `E0027` alone.
-
-- [ ] 10.5 VERIFY: `NOJSON-SEAM` — must now **pass**, reporting `serde_json used in
-      src/changes.rs, absent from src/cli.rs`, having failed in task 1.3 before the crate
-      used it. Then one negative control: a scratch copy of `src/cli.rs` with a
-      `use serde_json::Value;` line → the check exits 1.
+- [ ] 10.5 VERIFY: `NOJSON-SEAM` — must now **pass** (`serde_json used in src/changes.rs,
+      absent from src/cli.rs`), having failed in task 1.3 before the crate used it. Then
+      one negative control: a scratch copy of `src/cli.rs` carrying `use serde_json::Value;`
+      → the check exits 1.
 
 - [ ] 10.6 VERIFY: `NOSPAWN-RUN` — the whole suite on a `PATH` from which every directory
       holding `npm`, `node`, or `openspec` has been removed, with the five preconditions
@@ -681,13 +1118,16 @@ testcount() {
       `OPENSPEC-UNTOUCHED OK`. Then one negative control: create
       `openspec/specs/planted-probe.md`, re-run, confirm it **fails** naming that path,
       then delete it and confirm the check passes again. **Red when:** the untracked sweep
-      is missing, which the planted file is exactly what detects.
+      is missing, which the planted file is exactly what detects. Note the check excludes
+      exactly two paths by name — this change's artifact directory and
+      `openspec/IMPLEMENTATION-ORDER.md`, both hand-edited planning documents rather than
+      code-path writes — so it stays meaningful after group 12 and is re-run there.
 
-- [ ] 10.8 VERIFY: `DEPS` leg 5 — the genuinely-needed experiment, run three times in
-      **copies**: remove `toml` → `cargo build` fails; restore, remove `yaml-rust2` →
-      fails; restore, remove `serde_json` → fails, and the failure names `changes`.
-      Confirm the guard fires when asked to remove a crate the manifest does not carry
-      (try removing `notacrate` → the check reports a failure of itself, not a pass).
+- [ ] 10.8 VERIFY: `DEPS` in full, leg 5 included — the genuinely-needed experiment run
+      three times in **copies**: remove `toml` → `cargo build` fails; remove `yaml-rust2` →
+      fails; remove `serde_json` → fails, which is the leg that was correctly **red** in
+      task 1.3 and must now be green. Then the guard itself: asking it to remove a crate
+      the manifest does not carry must be reported as a failure of the check, not a pass.
       Confirm the working tree is byte-identical afterwards, `Cargo.lock` included.
 
 ---
@@ -697,96 +1137,108 @@ testcount() {
 
 - [ ] 11.1 CHECK: Dispatch an independent reviewer — an agent that did **not** write the
       implementation and is **not** a fork of the implementing session — against
-      `proposal.md`, all four spec files, `design.md`, `tasks.md`, and the diff. Give it
+      `proposal.md`, all five spec files, `design.md`, `tasks.md`, and the diff. Give it
       the concentration points from `openspec/config.yaml` → `rules.tasks`, and these two
       first: (1) for every spec scenario, name the test that would go red if the behaviour
-      were deleted; (2) both halves of the two-producer gate, and whether any check would
-      still pass if one half were removed.
+      were deleted; (2) both mechanisms of the two-producer gate, and whether any check
+      would still pass if one mechanism were removed.
 
 - [ ] 11.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a
       one-line reason, note each SUGGESTION, and re-run the affected tests.
 
-- [ ] 11.3 VERIFY: Confirm no blocking or unowned finding remains, and record the
-      finding counts by severity in this file.
+- [ ] 11.3 VERIFY: Confirm no blocking or unowned finding remains, and record the finding
+      counts by severity in this file.
 
 ---
 
 ## 12. Documentation
 <!-- kind: operational -->
 
-- [ ] 12.1 Rewrite in `SPEC.md` → Data layer → Resolution chain → **Changes** (audience:
+- [ ] 12.1 CHECK: Re-read the sections named below before editing them, and confirm each
+      still says what this change believes it says. **Red when:** a section was already
+      corrected by another change and this group would reintroduce a stale claim.
+
+- [ ] 12.2 Rewrite in `SPEC.md` → Data layer → Resolution chain → **Changes** (audience:
       every later change): replace the sentence describing `openspec list --json`'s output
       with the real envelope `{"changes": [...], "root": {"path", "source"}}`, and add that
       the CLI's own `--sort name` is `localeCompare` and therefore cannot be used to obtain
       the byte order both producers must share. Durable because two later changes read this
       paragraph as the contract and the current text would send them to a bare array.
 
-- [ ] 12.2 Rewrite in `SPEC.md` → Data layer → Dual-source model (audience: every later
+- [ ] 12.3 Rewrite in `SPEC.md` → Data layer → Dual-source model (audience: every later
       change): state that the CLI-side task counts come from `list --json`'s
       `completedTasks`/`totalTasks` and **not** from `instructions apply --json`'s
       `progress`, which resolves `apply.tracks` without globbing and therefore disagrees
       whenever `tracks` is a glob. Durable because the whole model rests on the two
       producers reporting one number.
 
-- [ ] 12.3 Add to `SPEC.md` → Data layer → Resolution chain → **Artifact files**
-      (audience: `live-refresh` and any later CLI consumer): the plugin runs
-      `instructions apply` and **not** `status --change`, and why — same
-      `resolveArtifactOutputs`, and `status`'s `artifacts` array is in topological build
-      order rather than the schema's declared order, so it is not a source for a
-      positional join.
+- [ ] 12.4 Add to `SPEC.md` → Data layer → Resolution chain → **Artifact files**
+      (audience: `live-refresh` and any later CLI consumer): the plugin runs `instructions
+      apply` and **not** `status --change`, and why — the same `resolveArtifactOutputs`, and
+      `status`'s `artifacts` array is in topological build order rather than the schema's
+      declared order, so it is not a source for a positional join.
 
-- [ ] 12.4 Add three rows to `SPEC.md` → Degraded states (audience: `degraded-states`,
+- [ ] 12.5 Add three rows to `SPEC.md` → Degraded states (audience: `degraded-states`,
       which audits that table end to end): a schema declaring the same artifact id twice
       (the CLI rejects the schema outright, so the change is permanently file-mode); a CLI
       reporting a repository root other than the resolved one (the whole CLI result is
       discarded); and a CLI command failing (the reason is unavailable, because the CLI
       writes its diagnostic to stdout and the seam's `Failed` carries stderr only).
 
-- [ ] 12.5 Rewrite in `openspec/IMPLEMENTATION-ORDER.md` → Phase 3 → the
+- [ ] 12.6 Rewrite in `openspec/IMPLEMENTATION-ORDER.md` → Phase 3 → the
       `changes-from-cli` row (audience: whoever reads the roadmap next): drop
       `openspec status --change <n> --json` from the list of parsed commands and record in
       one clause why. Rewrite rather than append — leaving the old list beside a correction
       is what makes a roadmap stop being read.
 
-- [ ] 12.6 Rewrite in `AGENTS.md` → **Current repo state** (audience: every future
+- [ ] 12.7 Rewrite in `AGENTS.md` → **Current repo state** (audience: every future
       session): fold `changes-from-cli` into the landed list and state in one clause what
       it added, replacing the "the CLI path is not built yet" implication rather than
       appending a paragraph beside it. Net addition must stay under ten lines.
 
-- [ ] 12.7 Rewrite in `AGENTS.md` → **Architecture rules** (audience: every future
+- [ ] 12.8 Rewrite in `AGENTS.md` → **Architecture rules** (audience: every future
       session): the existing "Nothing spawns a process outside `cli`" bullet gains one
       clause naming that the seam also parses nothing — `serde_json` must not appear in
       `src/cli.rs` — and the "Checkbox counting follows the OpenSpec CLI's rule exactly"
       bullet gains the `list --json`-not-apply-`progress` clause. Edit both in place; add
       no new bullet.
 
+- [ ] 12.9 VERIFY: Re-run `OPENSPEC-UNTOUCHED` after the roadmap edit — it must still
+      report OK, because `openspec/IMPLEMENTATION-ORDER.md` is one of its two named
+      exclusions. **Red when:** the documentation group touched any other path under
+      `openspec/`.
+
 ---
 
 ## 13. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 13.1 CHECK: Inspect the intended verification commands and affected tiers. The
-      gated code is all of `src/changes.rs`; the affected tier is the unit tier plus the
-      command-level checks in group 10. Confirm `make check` is the composite and that
-      each sub-command is also run individually below, so a failure names itself.
+- [ ] 13.1 CHECK: Inspect the intended verification commands and affected tiers. The gated
+      code is all of `src/changes.rs`; the affected tier is the unit tier plus the
+      command-level checks in group 10. Confirm `make check` is the composite and that each
+      sub-command is also run individually below, so a failure names itself.
 
 - [ ] 13.2 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
 
 - [ ] 13.3 VERIFY: `cargo fmt --all -- --check` — clean.
 
 - [ ] 13.4 VERIFY: `cargo test --all-features` — green. (Rust's type checker runs as part
-      of `cargo test` and `cargo clippy`; there is no separate type-check command in this
-      repository.)
+      of `cargo test` and `cargo clippy`; this repository has no separate type-check
+      command.)
 
 - [ ] 13.5 VERIFY: `cargo llvm-cov --fail-under-lines 80` — the floor is 80% and is never
-      lowered, waived, or excluded. `main` stands at 98.67% over 5499 lines; record the
-      new figure. **Red when:** the new code is added without tests, which is what the
-      floor exists to catch.
+      lowered, waived, or given an exclusion. `main` stands at 98.67% over 5499 lines;
+      record the new figure. **Red when:** the new code is added without tests, which is
+      what the floor exists to catch.
 
-- [ ] 13.6 VERIFY: `TESTCOUNT` over the whole `--lib` run — strictly more than the 300
-      recorded in task 1.1.
+- [ ] 13.6 VERIFY: `testcount --lib '' <lib baseline from 1.1 + 1>` — the **lib** test
+      count must be strictly greater than the 300 recorded in task 1.1. The `--lib` scope
+      is load-bearing: an unscoped run sums 316 tests across three binaries and would pass
+      with zero new lib tests, and would stay green even if the lib count fell.
 
 - [ ] 13.7 VERIFY: `make check` — the single composite gate, exit 0. If it fails, name the
       failing sub-command rather than summarising.
 
-- [ ] 13.8 VERIFY: `openspec validate changes-from-cli --strict` — valid.
+- [ ] 13.8 VERIFY: `openspec validate changes-from-cli --strict` — valid. This is the one
+      command in the change that runs the real `openspec` binary; design.md → Test
+      Boundaries names it, and no test depends on it.
