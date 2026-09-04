@@ -1253,7 +1253,7 @@ block is re-run, not further modified — and `GRAPH-SNAP` likewise.
 ## 8. Acceptance Test — Outer Loop GREEN
 <!-- kind: behavior -->
 
-- [ ] 8.1 VERIFY: Confirm group 0's acceptance test now passes end to end.
+- [x] 8.1 VERIFY: Confirm group 0's acceptance test now passes end to end.
       `cargo test --all-features --lib
       ui::tests::load::a_scratch_repository_renders_its_change_rows` — green, with exactly
       one test run under the filter.
@@ -1263,12 +1263,12 @@ block is re-run, not further modified — and `GRAPH-SNAP` likewise.
       Record the diff verbatim; a mismatch here is a row-grammar bug, not a fixture bug,
       until 8.2 proves otherwise.
 
-- [ ] 8.2 VERIFY: The literal, unqualified `make check` — the first time in this change it
+- [x] 8.2 VERIFY: The literal, unqualified `make check` — the first time in this change it
       is runnable. All four gates green at the unchanged 80% floor.
       **Red when:** any sub-command fails; name the failing one rather than reporting a
       summary.
 
-- [ ] 8.3 REFACTOR: Clean up the acceptance test's fixture setup if it duplicates the
+- [x] 8.3 REFACTOR: Clean up the acceptance test's fixture setup if it duplicates the
       `ScratchDir` helpers the other `load` tests already use; otherwise state that none was
       needed.
       Commit: `test(list-view): close the outer loop — a real repository renders real rows`.
