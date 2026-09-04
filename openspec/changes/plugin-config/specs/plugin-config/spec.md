@@ -4,13 +4,16 @@
 
 The plugin SHALL determine its configuration directory by reading the process
 environment, and SHALL NOT spawn any process to obtain it. `HERDR_PLUGIN_CONFIG_DIR`,
-which Herdr sets on every plugin pane and action process, is authoritative when it is
-set to a non-empty value. When it is unset or empty — the binary was run outside a
-Herdr-managed pane — the directory SHALL fall back to
+which Herdr sets on the plugin processes it starts — pane processes and action
+processes alike — is authoritative when it is set to a value that is neither empty nor
+whitespace-only. When it is unset, empty, or whitespace-only — the binary was run
+outside a Herdr-managed process — the directory SHALL fall back to
 `$HOME/.config/herdr/plugins/config/herdr-openspec`, the same path
-`herdr plugin config-dir herdr-openspec` prints. When neither `HERDR_PLUGIN_CONFIG_DIR`
-nor `HOME` is available there SHALL be no configuration directory, and every value
-SHALL take its default.
+`herdr plugin config-dir herdr-openspec` prints. `XDG_CONFIG_HOME` SHALL NOT be
+consulted, because the fallback's job is to agree with Herdr, and Herdr's own
+configuration root is `$HOME/.config/herdr`. When neither `HERDR_PLUGIN_CONFIG_DIR` nor
+`HOME` is available there SHALL be no configuration directory, and every value SHALL
+take its default.
 
 The resolution SHALL be a function of an environment lookup passed in by the caller, so
 that it is exercised without mutating the real process environment; exactly one thin
@@ -31,13 +34,25 @@ wrapper SHALL bind it to `std::env::var`.
 - **THEN** the resolved directory is
   `/home/someone/.config/herdr/plugins/config/herdr-openspec`
 
-#### Scenario: An empty environment variable is not a directory
+#### Scenario: An empty or blank environment variable is not a directory
 
 - **WHEN** the directory is resolved with `HERDR_PLUGIN_CONFIG_DIR` set to the empty
   string and `HOME` set to `/home/someone`
 - **THEN** the resolved directory is
   `/home/someone/.config/herdr/plugins/config/herdr-openspec`, not the empty path or
   the current directory
+- **AND** the same holds for the value `"   "`, so a blank variable falls through rather
+  than naming a directory of three spaces
+
+#### Scenario: `XDG_CONFIG_HOME` is deliberately ignored
+
+- **WHEN** the directory is resolved with `HERDR_PLUGIN_CONFIG_DIR` absent,
+  `XDG_CONFIG_HOME` set to `/xdg`, and `HOME` set to `/home/someone`
+- **THEN** the resolved directory is
+  `/home/someone/.config/herdr/plugins/config/herdr-openspec`, not `/xdg/...`, because
+  the fallback exists to agree with the path `herdr plugin config-dir` prints
+- **AND** the state directory resolved from the same lookup *does* honour
+  `XDG_STATE_HOME`, so the asymmetry is a recorded decision rather than an oversight
 
 #### Scenario: Neither variable is available
 
@@ -50,12 +65,14 @@ wrapper SHALL bind it to `std::env::var`.
 
 #### Scenario: Resolution spawns nothing
 
-- **WHEN** the crate's own tests are run on a `PATH` from which the `herdr` binary
-  cannot be resolved
+- **WHEN** the crate's own tests are run on a `PATH` on which `cargo` resolves and the
+  `herdr` binary does not
 - **THEN** every directory-resolution and configuration-loading test still passes
-- **AND** a search of `src/` finds no `std::process::Command`, no `Stdio`, and no
-  `herdr` invocation, because the module that is permitted to spawn (`cli`) does not
-  exist yet and this change does not create one
+- **AND** neither `src/config.rs` nor `src/state.rs` names a process API — no
+  `std::process`, no `Command`, no `Stdio` — and neither passes `"herdr"` or
+  `"openspec"` as a program name, because this capability's code sits on the pure side
+  of the spawn seam that `cli` will own. Prose naming `herdr plugin config-dir` is
+  documentation and is not an invocation
 
 ### Requirement: `config.toml` yields three values, each with a documented default
 
@@ -206,8 +223,9 @@ decides.
 
 Loading configuration SHALL be read-only. It SHALL NOT create the configuration
 directory, create or truncate `config.toml`, or modify any file's contents or
-modification time. It SHALL write nothing anywhere under the repository's `openspec/`
-directory, which this capability never reads or names.
+modification time. It names no repository path at all, so it cannot reach a repository's
+`openspec/` tree; `plugin-state` carries the requirement and the fixture proving that a
+repository is untouched by the one code path in this change that does write.
 
 #### Scenario: A configuration read leaves the tree byte-identical
 

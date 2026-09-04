@@ -30,8 +30,13 @@ row of Phase 1 in `openspec/IMPLEMENTATION-ORDER.md`.
   reader would silently ignore valid configuration a user wrote, which is the opposite
   of degrading honestly.
 - **`SPEC.md` is corrected** where it says the config directory comes from `herdr
-  plugin config-dir`, where its stack list omits a TOML parser, and where its module
-  map has no row for the module this change adds.
+  plugin config-dir`, where its stack list omits a TOML parser, where its module map has
+  no row for the modules this change adds, where its degraded-states table lacks a row
+  for either new degraded read, and where agent-name derivation is described as
+  truncation alone. `AGENTS.md`'s two architecture rules — nothing spawns outside `cli`,
+  and nothing writes to OpenSpec files — are rewritten in place to carry the corollaries
+  this change establishes, and `openspec/IMPLEMENTATION-ORDER.md`'s own `plugin-config`
+  row is corrected for the same reason `SPEC.md` is.
 - Not **BREAKING**: the config format is introduced here, not altered. No manifest key
   and no keybinding moves.
 
@@ -64,16 +69,27 @@ row of Phase 1 in `openspec/IMPLEMENTATION-ORDER.md`.
 - `plugin-build`: the requirement "The crate produces one binary, with no third-party
   dependencies" asserts `Cargo.lock` holds exactly one package. That was true of the
   scaffold and is now false. The requirement narrows to naming the dependency set
-  explicitly and forbidding a proc-macro dependency, so each future addition is argued
-  rather than assumed.
+  explicitly, asserting it against the resolved build graph rather than against the text
+  of `Cargo.toml`, and forbidding a proc-macro crate in that graph — so each future
+  addition is argued rather than assumed.
+- `ci-workflow`: the requirement "CI invokes every gate through `make`" justifies its
+  single-line `run:` rule with "the crate may take no dependency, so the guard is
+  std-only string matching". This change makes that premise false. The rule is right and
+  stays; only its stated reason is rewritten, to the one that survives — a YAML parser
+  as a dev-dependency to read four lines is not a trade worth making. No scenario
+  changes.
 
 ## Impact
 
 - **Code:** new `src/config.rs` and `src/state.rs`, both pure transformations plus a
-  thin filesystem edge; `src/lib.rs` gains the module declarations. No change to
-  `src/main.rs` — nothing reads configuration until `repo-resolution`.
+  thin filesystem edge; `src/lib.rs` gains the module declarations and a test-only
+  scratch-directory helper. No change to `src/main.rs` — nothing reads configuration
+  until `repo-resolution`.
 - **Build:** `Cargo.toml` gains `toml`; `Cargo.lock` is regenerated and committed.
-- **Docs:** `SPEC.md` → Overview (stack), Architecture (module map), and Data layer →
-  Resolution chain; `README.md` → Configuration gains the outside-Herdr fallback note.
+- **Docs:** `SPEC.md` → Overview (stack), Architecture (module map), Data layer →
+  Resolution chain, Degraded states, and Herdr integration → Attributing an agent;
+  `README.md` → Configuration; `AGENTS.md` → Architecture rules (both the spawn bullet
+  and the never-write bullet, rewritten in place), Conventions, and Current repo state;
+  `openspec/IMPLEMENTATION-ORDER.md` → the Phase 1 `plugin-config` row.
 - **External:** none. No network, no registry submission, no sibling repository. The
   files written live under `HERDR_PLUGIN_STATE_DIR`, never inside `openspec/`.
