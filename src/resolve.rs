@@ -346,6 +346,7 @@ pub fn openspec_bin_from_env(config: &crate::config::Config) -> BinResolution {
 mod tests {
     use crate::testutil::{ScratchDir, canonical, symlink, write_with_mode};
     use std::collections::BTreeMap;
+    use std::os::unix::fs::PermissionsExt;
     use std::path::Path;
 
     /// Build an environment lookup closure over a fixture map — never
@@ -511,6 +512,21 @@ mod tests {
         let nope = s.join("nope");
         assert!(!nope.exists());
 
+        // Precondition: no ancestor of `s`, up to and including `/`, holds an
+        // `openspec` directory — a stray one on some machine would otherwise
+        // fail this test confusingly, by finding a repository nobody meant.
+        let canonical_s = canonical(s);
+        let mut ancestor = Some(canonical_s.as_path());
+        while let Some(a) = ancestor {
+            assert!(
+                !a.join("openspec").is_dir(),
+                "ancestor {} unexpectedly holds an openspec directory; \
+                 the fixture assumption for this test is violated on this machine",
+                a.display()
+            );
+            ancestor = a.parent();
+        }
+
         let result = super::find_repo(&nope);
         assert_eq!(
             result,
@@ -519,6 +535,33 @@ mod tests {
             }
         );
         assert!(!nope.exists());
+    }
+
+    #[test]
+    fn an_unresolvable_path_whose_given_form_has_a_repository_ancestor_is_still_found() {
+        // The Err(_) branch of find_repo walks the path *as given* when it
+        // cannot be canonicalized (most commonly: the leaf does not exist).
+        // No other test exercises the `Found` arm of that branch — every
+        // existing "cannot be resolved" scenario ends in `NotFound`, leaving
+        // this arm's uncanonicalized-root return unpinned. Flagged in Change
+        // Review; added here rather than left implicit.
+        let scratch = ScratchDir::new();
+        let r = scratch.path();
+        mkdir(&r.join("openspec"));
+        let start = r.join("does-not-exist-child");
+        assert!(!start.exists());
+
+        let result = super::find_repo(&start);
+        // The root is `r` exactly as given — not canonicalized, since
+        // canonicalization failed on the whole starting path — which is why
+        // this assertion is an equality on the raw scratch path rather than
+        // on `canonical(r)`.
+        assert_eq!(
+            result,
+            super::RepoSearch::Found {
+                root: r.to_path_buf()
+            }
+        );
     }
 
     #[test]
@@ -643,6 +686,18 @@ mod tests {
         let b = scratch.path().join("b");
         write_with_mode(&a.join("openspec"), b"not executable", 0o644);
         write_with_mode(&b.join("openspec"), b"#!/bin/sh\n", 0o755);
+
+        // Confirm the fixture builder actually set the mode the test relies
+        // on, before the call under test.
+        let a_mode = std::fs::metadata(a.join("openspec"))
+            .expect("read fixture metadata")
+            .permissions()
+            .mode();
+        assert_eq!(
+            a_mode & 0o111,
+            0,
+            "fixture should have no execute bit, got mode {a_mode:o}"
+        );
 
         let path_value = format!("{}:{}", a.display(), b.display());
         let result = super::openspec_bin(None, &env(&[("PATH", &path_value)]), &no_prefix);
@@ -837,6 +892,15 @@ mod tests {
         let home = scratch.path().join("home");
         let bin = nvm_bin(&home, "v24.20.0");
         write_with_mode(&bin, b"#!/bin/sh\n", 0o755);
+
+        // Confirm the fixture binary exists and is executable before the
+        // call under test, so a later failure is attributable to the step
+        // rather than to a mis-built tree.
+        let bin_mode = std::fs::metadata(&bin)
+            .expect("fixture binary should exist")
+            .permissions()
+            .mode();
+        assert_ne!(bin_mode & 0o111, 0, "fixture binary should be executable");
 
         let result = super::openspec_bin(
             None,
@@ -1256,5 +1320,41 @@ mod tests {
                 source: super::BinSource::Configured,
             })
         );
+    }
+
+    #[test]
+    fn a_full_probe_leaves_the_filesystem_byte_identical() {
+        use crate::testutil::snapshot;
+
+        let scratch = ScratchDir::new();
+        let root = scratch.path();
+
+        let d = root.join("d");
+        write_with_mode(&d.join("openspec"), b"#!/bin/sh\n", 0o755);
+
+        let home = root.join("home");
+        write_with_mode(&nvm_bin(&home, "v20.0.0"), b"#!/bin/sh\n", 0o755);
+
+        let n = root.join("n");
+        write_with_mode(&n.join("bin").join("openspec"), b"#!/bin/sh\n", 0o755);
+
+        // An empty directory too, since it is the entry a listing-only
+        // comparison could miss but the extended (1.4) snapshot cannot.
+        let empty = root.join("empty");
+        mkdir(&empty);
+
+        let d_str = d.display().to_string();
+        let home_str = home.display().to_string();
+        let pairs = [("PATH", d_str.as_str()), ("HOME", home_str.as_str())];
+        let lookup = env(&pairs);
+        let hook = || Some(n.clone());
+
+        let before = snapshot(root);
+        let first = super::openspec_bin(None, &lookup, &hook);
+        let second = super::openspec_bin(None, &lookup, &hook);
+        let after = snapshot(root);
+
+        assert_eq!(before, after);
+        assert_eq!(first, second);
     }
 }
