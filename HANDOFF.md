@@ -46,9 +46,31 @@ existing one, so expect Phase 4 (the render seam) to run high too.
 
 **Weekly is the binding constraint.** Eleven changes remain across Phases 4–6, needing
 roughly 37 weekly points against **30% remaining** with ~48h to the weekly reset.
-Phase 4's six changes (~20 points) should fit this window; **Phases 5–6 will need the
-next one.** When weekly runs low, schedule the resume for after the weekly reset rather
-than the 5-hour one — do not grind forward on fumes.
+
+Phase 4's six changes need about **27 of those 30 points** — tight enough that the last
+one or two will probably slip past the weekly reset. Phases 5–6 certainly will. When
+weekly runs low, schedule the resume for after the weekly reset rather than the 5-hour
+one; do not grind forward on fumes.
+
+**Keep session and weekly units separate when reasoning about this.** A per-change cost
+in session points says nothing about whether something fits the weekly window. Session
+cost ran 38–44 points per change in Phase 3 (about 2.4 full 5-hour windows for six
+changes, so ~15h of wall time); weekly cost ran 4.5 points per change. Both matter, and
+they are not interchangeable.
+
+## The ~50% floor governs starting a change, not resuming one
+
+Refined after a phase orchestrator raised it, and confirmed:
+
+- **ff-change must not start below ~50% session remaining.** A halt mid-ff strands
+  uncommitted planning work, which is exactly what the floor exists to prevent. The ff
+  is also the expensive half — 21 and 27 points against 17 each for apply+archive.
+- **apply may start lower**, because it commits after every task group, so a budget
+  halt lands on a committed boundary and the next session resumes cleanly. Pair it with
+  an explicit instruction to stop at a group boundary above a named utilization.
+
+Dispatching `changes-from-cli`'s apply at 32% remaining was correct under this rule. It
+finished at 84%.
 
 **The dominant defect class across both phases is verification commands that cannot
 fail.** `task-parsing`'s planning review alone caught three CRITICALs of this kind: an
