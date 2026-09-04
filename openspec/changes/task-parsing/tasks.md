@@ -86,14 +86,16 @@ names is whitespace to it. Group 2 discovers that the CLI's alphabet differs at 
 points and corrects it. That is an ordinary incremental step, not a deliberate defect
 planted to manufacture a red — see 2.1 for what to do if the two turn out to agree.
 
-- [ ] 1.1 CHECK: Before the first commit of this change, capture the two baselines group 6
+- [x] 1.1 CHECK: Before the first commit of this change, capture the two baselines group 6
       compares against, because both of its checks are green by construction without them —
       this project commits after every task group, so by group 6 any `Cargo.toml` edit is
       already in `HEAD` and `git diff` against the working tree sees nothing. Record
       `git rev-parse HEAD` as the base SHA and save `cargo tree --edges normal > <baseline>`
       to a path outside the repository. Write both values into this task when you run it,
-      so group 6 does not have to guess them
-- [ ] 1.2 Create `src/tasks.rs` with a module doc comment naming the module's job in one
+      so group 6 does not have to guess them.
+      **Recorded:** base SHA `90fdcf4e97003dd66c157d8ded198fa8f09a8bb7`; tree baseline saved
+      to `/private/tmp/claude-501/-Users-juusopiikkila-Code-herdr-openspec/d5be0e1c-512c-496f-bdf6-1ea630cd0644/scratchpad/task-parsing/TREE_BASELINE.txt`
+- [x] 1.2 Create `src/tasks.rs` with a module doc comment naming the module's job in one
       sentence and pointing at `openspec/changes/task-parsing/design.md`, matching the
       opening of `src/schema.rs` and `src/resolve.rs`; register it with one
       `pub mod tasks;` line in `src/lib.rs` beside the existing four. Add nothing else to
@@ -101,13 +103,13 @@ planted to manufacture a red — see 2.1 for what to do if the two turn out to a
       spot, which is the reason the crate keeps them thin. Confirm `cargo build` succeeds
       with an empty module before writing a test, so a later failure is never "the module is
       not registered"
-- [ ] 1.3 RED: Write failing unit tests in `src/tasks.rs` for `count`, one per spec
+- [x] 1.3 RED: Write failing unit tests in `src/tasks.rs` for `count`, one per spec
       scenario listed above and named after it. Build every input as a Rust string
       literal in the test — no fixture file, no filesystem, no `include_str!` (group 4
       owns the corpus). Where a scenario names a specific code point, write it as an
       explicit escape (`\u{a0}`, `\u{feff}`, `\u{85}`) rather than pasting the character,
       so an editor normalising the file cannot silently disarm the test
-- [ ] 1.4 RED: Make the negative tests discriminating rather than merely green-able, each
+- [x] 1.4 RED: Make the negative tests discriminating rather than merely green-able, each
       against the specific wrong implementation it exists to reject. "A `+` bullet and an
       ordered marker are not task lines" rejects a bullet set widened to CommonMark's
       `[-+*]` and to ordered items — the CLI's pattern is `[-*]` and a wider one reports a
@@ -119,7 +121,7 @@ planted to manufacture a red — see 2.1 for what to do if the two turn out to a
       characters accepts. Each of these three tests must place a genuine task line in the
       same document and assert the exact total, so an implementation that matches nothing at
       all cannot pass them by returning zero
-- [ ] 1.5 RED: Write the fence, comment, and block-quote tests in this same pass, and be
+- [x] 1.5 RED: Write the fence, comment, and block-quote tests in this same pass, and be
       honest in a comment about what they are — **guards pinning a deliberate non-feature**,
       not drivers of new behaviour. They are red now because `count` does not exist; once it
       does, the only implementation they go red against is one that grows fence, comment, or
@@ -128,23 +130,23 @@ planted to manufacture a red — see 2.1 for what to do if the two turn out to a
       CLI. The block-quote test needs no rule of its own: `>` is not in the bullet alphabet,
       so a `> - [x] quoted` line already fails to match, and the test asserts that the
       agreement holds without a block-quote rule existing
-- [ ] 1.6 RED: Write the boundary tests — an empty string, a document of blank lines and
+- [x] 1.6 RED: Write the boundary tests — an empty string, a document of blank lines and
       prose with no checkbox, a single task line with no trailing newline, and a document
       whose only checkbox is on the last line after a trailing newline. Assert
       `Progress { completed: 0, total: 0 }` for the first two and the exact non-zero pair
       for the others. These are the absent-input cases; a `split('\n')` that drops the final
       element passes the first two and fails the third
-- [ ] 1.7 RED: Write the `Progress` tests — `is_complete` true at 3/3 and **false at 0/0**
+- [x] 1.7 RED: Write the `Progress` tests — `is_complete` true at 3/3 and **false at 0/0**
       (the CLI distinguishes "No tasks" from "✓ Complete" and an implementation testing only
       `completed == total` reports every taskless change as done), `+` and `+=` summing
       `(1,3)` and `(2,2)` to `(3,5)`, and equality between a `count` result and a `Progress`
       built directly from the pair a CLI response would supply. That last one is the
       agreement site's test: it is what makes `Progress` a shape `changes-from-cli` can
       construct without conversion
-- [ ] 1.8 Confirm every failure is the missing function or type rather than a broken test —
+- [x] 1.8 Confirm every failure is the missing function or type rather than a broken test —
       run `cargo test --all-features tasks::` and check that the new test names appear and
       fail for the stated reason, not that the file failed to compile for an unrelated one
-- [ ] 1.9 GREEN: Implement `Progress` (`Debug, Clone, Copy, PartialEq, Eq`, plus `Add` and
+- [x] 1.9 GREEN: Implement `Progress` (`Debug, Clone, Copy, PartialEq, Eq`, plus `Add` and
       `AddAssign`), `is_complete`, and `count(text: &str) -> Progress`. Split `text` on
       `'\n'`, strip **one** trailing `'\r'` from each line, and apply the line rule as a
       single left-to-right scan: skip leading whitespace, require exactly one `-` or `*`,
@@ -155,18 +157,18 @@ planted to manufacture a red — see 2.1 for what to do if the two turn out to a
       alphabet — not in order to manufacture a failure there, but because a rule adopted
       before its own scenario exists is a rule nothing in the suite constrains. No fence
       state, no comment state, no block-quote state, no allocation per line
-- [ ] 1.10 CHECK: Contract gate for `Progress`. Re-read design.md → Contracts and
+- [x] 1.10 CHECK: Contract gate for `Progress`. Re-read design.md → Contracts and
       `SPEC.md` → Data layer → Dual-source model as they stand at implementation time, and
       confirm that the value this group froze is the one `changes-from-cli` can build from
       `completedTasks` and `totalTasks` with no conversion and no third state: two `usize`
       counts, no ratio, no formatted string, no "unknown" variant. If a sentinel value looks
       tempting for "this change has no tasks artifact", record here that it is
       `changes-from-files`' `Option<Progress>`, not a `Progress` variant
-- [ ] 1.11 REFACTOR: If the scan has grown a duplicated "skip whitespace from index i"
+- [x] 1.11 REFACTOR: If the scan has grown a duplicated "skip whitespace from index i"
       fragment, extract it into one named helper — group 2 rewrites exactly that predicate
       and a single call site is what makes group 2 a two-line change rather than a
       four-site edit. Otherwise state that no refactor was needed
-- [ ] 1.12 Run the group tests — `cargo test --all-features` green, with no regressions to
+- [x] 1.12 Run the group tests — `cargo test --all-features` green, with no regressions to
       the existing `config`, `resolve`, `schema`, `state`, or invocation tests
 
 ## 2. The whitespace alphabet

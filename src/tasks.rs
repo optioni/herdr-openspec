@@ -3,6 +3,116 @@
 //!
 //! See `openspec/changes/task-parsing/design.md` for the full contract.
 
+/// A checkbox count: how many task lines a document holds and how many are
+/// checked. The shape both sources of a change's task progress must produce
+/// — `changes-from-files` obtains it by counting checkboxes, `changes-from-cli`
+/// by reading `completedTasks`/`totalTasks` out of `openspec list --json` — so
+/// the two can be compared with `==` and summed with no conversion and no
+/// third state. See `openspec/changes/task-parsing/design.md` -> Contracts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Progress {
+    pub completed: usize,
+    pub total: usize,
+}
+
+impl Progress {
+    /// True only when there is at least one task and every task is checked.
+    /// A change with no tasks is deliberately not "complete" — matching the
+    /// CLI's own three-way "No tasks" / "n/m tasks" / "✓ Complete" split.
+    pub fn is_complete(&self) -> bool {
+        self.total > 0 && self.completed == self.total
+    }
+}
+
+impl std::ops::Add for Progress {
+    type Output = Progress;
+
+    fn add(self, rhs: Progress) -> Progress {
+        Progress {
+            completed: self.completed + rhs.completed,
+            total: self.total + rhs.total,
+        }
+    }
+}
+
+impl std::ops::AddAssign for Progress {
+    fn add_assign(&mut self, rhs: Progress) {
+        self.completed += rhs.completed;
+        self.total += rhs.total;
+    }
+}
+
+/// The flat checkbox count for `text`. Deliberately identical to the
+/// OpenSpec CLI's own `countTasksFromContent` (`dist/utils/task-progress.js`,
+/// `@fission-ai/openspec` 1.11.0): a `-` or `*` bullet at any indent carrying
+/// a one-character `[ ]` / `[x]` / `[X]` box, with no code-fence, comment, or
+/// block-quote exemption. See design.md -> Decisions 1 for why the rule is
+/// copied rather than invented.
+pub fn count(text: &str) -> Progress {
+    let mut progress = Progress {
+        completed: 0,
+        total: 0,
+    };
+    for raw_line in text.split('\n') {
+        let line = raw_line.strip_suffix('\r').unwrap_or(raw_line);
+        if let Some(checked) = task_line_checked(line) {
+            progress.total += 1;
+            if checked {
+                progress.completed += 1;
+            }
+        }
+    }
+    progress
+}
+
+/// If `line` is a task line, whether it is checked. `None` when the line is
+/// not a task line at all. A single left-to-right scan: skip leading
+/// whitespace, require exactly one `-` or `*`, skip whitespace, require `[`,
+/// take exactly one character, require `]`. No fence, comment, or
+/// block-quote state — see design.md -> Decisions 6.
+///
+/// Whitespace here is `char::is_whitespace`, the standard-library predicate;
+/// it satisfies every scenario this group owns. Group 2 narrows it to the
+/// CLI's own alphabet.
+fn task_line_checked(line: &str) -> Option<bool> {
+    let mut chars = line.chars();
+    skip_whitespace(&mut chars);
+
+    match chars.next() {
+        Some('-') | Some('*') => {}
+        _ => return None,
+    }
+
+    skip_whitespace(&mut chars);
+
+    if chars.next() != Some('[') {
+        return None;
+    }
+
+    let box_char = chars.next()?;
+    if !(box_char.is_whitespace() || box_char == 'x' || box_char == 'X') {
+        return None;
+    }
+
+    if chars.next() != Some(']') {
+        return None;
+    }
+
+    Some(box_char == 'x' || box_char == 'X')
+}
+
+/// Advance `chars` past any run of whitespace characters at its front.
+fn skip_whitespace(chars: &mut std::str::Chars<'_>) {
+    let mut lookahead = chars.clone();
+    while let Some(c) = lookahead.next() {
+        if c.is_whitespace() {
+            *chars = lookahead.clone();
+        } else {
+            break;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     // Group 1: `Progress` and the flat line rule. Every test here drives
