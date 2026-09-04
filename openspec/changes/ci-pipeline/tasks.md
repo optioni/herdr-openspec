@@ -313,7 +313,7 @@ delta spec written during planning.
 ## 4. Change Review
 <!-- kind: operational -->
 
-- [ ] 4.1 CHECK: Dispatch an independent reviewer — not a fork of the implementing
+- [x] 4.1 CHECK: Dispatch an independent reviewer — not a fork of the implementing
       session — given only `proposal.md`, `specs/ci-workflow/spec.md`,
       `specs/quality-gates/spec.md`, `design.md`, `tasks.md`, and the diff. **The
       reviewer must write its findings incrementally to a scratchpad file as it goes, not
@@ -333,9 +333,9 @@ delta spec written during planning.
       requirement in full rather than partially; whether the SPEC.md correction removed
       the contradiction rather than adding a third statement beside the two; and whether
       anything in this change writes inside `openspec/` outside the change directory
-- [ ] 4.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a
+- [x] 4.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a
       one-line reason, note SUGGESTIONs, and re-run the affected checks
-- [ ] 4.3 VERIFY: Confirm no blocking or unowned finding remains
+- [x] 4.3 VERIFY: Confirm no blocking or unowned finding remains
 
 ## 5. Lint & Verify
 <!-- kind: operational -->
