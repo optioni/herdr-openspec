@@ -1,0 +1,579 @@
+<!-- No outer-loop acceptance group. design.md → Test Strategy records why: the outermost
+     surface this change ships is a library API with no caller — `src/main.rs` is
+     untouched and nothing consumes `OpenspecCli` or `HerdrCli` until `changes-from-cli` —
+     so an acceptance test would drive an entry point that ships to nobody. The
+     end-to-end obligation the roadmap puts on this change is discharged instead by
+     group 7, which drives a REAL process spawn through `resolve::openspec_bin`'s whole
+     chain to `<prefix>/bin/openspec` — the outermost composition that actually exists.
+
+     No group carries a `parallel-after` marker. Groups 2 through 7 all edit
+     `src/cli.rs`, and one file is shared mutable state; the tasks instruction permits
+     parallel dispatch only for groups touching different file trees.
+
+     All nine concentration points from `openspec/config.yaml` are accounted for.
+     Scheduled: nothing spawns outside `cli` (8.2, 8.3, 8.4 — and the whole shape of
+     groups 2-7, which put every spawn in one module behind one helper); the plugin
+     never writes inside `openspec/` (7.4's two snapshots prove nothing is written in the
+     scratch tree or in the process's own working directory — the two places this change
+     could plausibly write — and 8.5 proves nothing under `openspec/` changed outside this
+     change's own artifacts, tracked and untracked alike, against evidence rather than
+     inspection); every external dependency has an
+     absent case (2.1's `NotStarted` for both traits, 5.1's unstartable and non-zero
+     `npm`, 6.4's tolerance of an absent `npm`, and 8.6's proof that no dependency was
+     added at all); coverage counts the whole crate (4.2 keeps the fake under
+     `cfg(test)` so it is outside the denominator, 3.x covers the real wrappers rather
+     than writing them off, and 11.5 holds the 80% floor without waiver or exclusion).
+     Not applicable, deliberately: no view is added, so "views perform no I/O" and "view
+     tests at 60 and 120 columns" have nothing to bind to; the `Change` type is not
+     touched, so `from_files`/`from_cli` agreement is not at stake here — this change's
+     contribution to it is the fake `changes-from-cli` will use; no attribution path
+     exists yet, so "attribution must not guess" has nothing to bind to; and no agent
+     name is derived here, so the 32-character cap belongs to `state`, already landed.
+
+     The manifest/config contract gate does not apply: `herdr-plugin.toml`, `config.toml`'s
+     format, and every keybinding are untouched. The persistence gate is recorded as
+     not-applicable in 8.7 rather than omitted.
+
+     Every VERIFY and CHECK task below states what would make it go RED. A command whose
+     red condition cannot be stated concretely is decoration, and Phase 1-2 review
+     caught five of them: an ERE with escaped pipes matching a literal `a|b`; a missing
+     `test -f` guard letting grep's exit code 2 pass as success; a `git diff --exit-code`
+     comparing working tree to index on a commit-per-group project; a `PATH=/usr/bin:/bin`
+     that hid `cargo` rather than the tool under test; and `cargo build --offline` not
+     proving no dependency was added. -->
+
+## 1. Baselines and module scaffold
+<!-- kind: operational -->
+
+- [ ] 1.1 CHECK: Record the starting state, so any later failure belongs to this change.
+      Capture and write into this task's notes: (a) `BASE=$(git rev-parse HEAD)` — the
+      base SHA every later diff check compares against, because this project commits per
+      task group and a `git diff --exit-code` between working tree and index would pass
+      over the very change it exists to catch; (b) `make check` green, with the line
+      coverage number `cargo llvm-cov` reports (98.66% over 4924 lines at planning time)
+      and the test count (266 unit + 11 ci_workflow + 5 cli); (c) `git status --short`
+      empty, so no unrelated work is in flight; (d) the dependency set — define `$DEPS`
+      from design.md → Test Strategy in the shell first (it is a shorthand, not an
+      exported variable), then `cargo metadata --no-deps --format-version 1 | python3 -c "$DEPS"`.
+      Use the `sys.exit`-on-mismatch form the design carries, never a bare `assert`:
+      `python3 -O` or an inherited `PYTHONOPTIMIZE` strips `assert` and the check exits 0
+      for any dependency list. **Red when:** `make check` fails, the tree is dirty, or the
+      normal dependency set is anything but `["toml", "yaml-rust2"]`
+- [ ] 1.2 CHECK: Confirm the hand-over signal is where `repo-resolution` left it —
+      `src/resolve.rs` contains `pub fn npm_prefix_deferred() -> Option<PathBuf> { None }`
+      and the test `the_shipped_hook_yields_no_prefix` asserting it returns `None`, and
+      `cargo test --all-features resolve::tests::the_shipped_hook_yields_no_prefix` is
+      currently **green**. **Red when:** either is missing, or the test already fails —
+      in which case stop and investigate before touching anything, because the signal
+      this change is supposed to trip has already been tripped by something else
+- [ ] 1.3 CHECK: Confirm `NOSPAWN-GREP` (design.md → Test Strategy) fails on the tree as
+      it stands, with guard A naming the missing `src/cli.rs`. This is the check's first
+      demonstrated red and it is demonstrated **before** the check is relied on.
+      **Red when:** it exits 0 today, which would mean the guard is not guarding
+- [ ] 1.4 CHANGE: Add an empty `src/cli.rs` and declare `pub mod cli;` in `src/lib.rs`,
+      leaving every other module untouched. Give `src/cli.rs` a module doc comment naming
+      the seam, naming `SPEC.md` → Architecture as its source, and naming `tests/cli.rs`
+      as the unrelated file with the colliding name (that one is the binary's
+      command-line interface; this one is the subprocess seam)
+- [ ] 1.5 VERIFY: `cargo test --all-features` green and `cargo clippy --all-targets
+      --all-features -- -D warnings` clean with the empty module in place. **Red when:**
+      the new module does not compile or trips a lint
+
+## 2. The error type, the one spawn helper, and the trait contract
+<!-- kind: behavior -->
+
+- [ ] 2.1 RED: Write failing tests in `src/cli.rs` for the trait contract, named from the
+      spec scenarios: `stdout_is_returned_verbatim_on_success`,
+      `stderr_never_reaches_the_success_value`,
+      `a_non_zero_exit_is_a_failure_carrying_the_code_and_stderr`,
+      `a_program_that_cannot_be_started_is_a_failure_not_a_panic`,
+      `invalid_utf8_on_stdout_is_decoded_lossily_rather_than_failing`,
+      `empty_stdout_with_a_zero_exit_is_success_not_a_failure`,
+      `arguments_reach_the_program_in_order_and_unaltered`, and
+      `a_trait_object_crosses_a_thread_boundary`. Build the scratch programs with the
+      existing `testutil::{ScratchDir, write_with_mode}` at mode `0o755` — `#!/bin/sh`
+      scripts, never a copied real executable. The verbatim assertion must include the
+      trailing newline, so a `.trim()` inside the seam fails it; the stderr assertion must
+      check both that the `Ok` string equals the stdout payload **and** that it contains
+      no stderr token; the non-zero assertion must check that the stdout payload appears
+      nowhere in the error, that the error carries the caller's argument vector, and that
+      its stderr is `"boom\n"` **verbatim** — trailing newline included, since neither
+      stream is trimmed. Emit the invalid UTF-8 with `printf '\141\377\142'`, whose
+      octal escapes `/bin/sh` handles portably
+- [ ] 2.2 GREEN: Add `CliError` — a `#[derive(Debug, Clone, PartialEq, Eq)]` enum with
+      `NotStarted { program, args, reason }` and `Failed { program, args, code, stderr }`.
+      The argument vector is on both variants deliberately: `changes-from-cli` drives four
+      distinct invocations through one `RealOpenspecCli` and `agent-launch` four more
+      through one `RealHerdrCli`, and without it all eight failures render identically.
+      Follows
+      `schema::LoadError`'s struct-variant shape so callers branch on a variant rather
+      than matching message substrings. Document why there is deliberately no UTF-8
+      variant: `SPEC.md` → Degraded states records that the OpenSpec CLI itself decodes
+      lossily, and matching it keeps the two sources agreeing
+- [ ] 2.3 GREEN: Add the crate's single spawn site — a private helper taking the program
+      path and the argument slice, attaching an empty stdin, and returning the completed
+      run's success flag, exit code, stdout bytes, and stderr bytes, or the operating
+      system's error text when the program could not be started. Nothing else in the
+      crate may call `Command::new` after this
+- [ ] 2.4 GREEN: Add `pub trait OpenspecCli: Send + Sync` and `pub trait HerdrCli: Send + Sync`,
+      each with `fn run(&self, args: &[&str]) -> Result<String, CliError>`, and the shared
+      private mapping from a completed run to that `Result`: success → `Ok` of stdout
+      decoded lossily and **returned verbatim**; non-zero → `Failed` carrying the argument
+      vector, the code, and stderr decoded lossily and **also verbatim** — trimming stderr
+      would be a decision, and this module makes none; unstartable → `NotStarted` carrying
+      the argument vector and the operating system's error text
+- [ ] 2.5 REFACTOR: Keep the two traits' implementations sharing one mapping function
+      rather than duplicating it, and confirm no parsing, trimming, retrying, caching, or
+      timeout logic crept into the helper. If nothing needed cleaning, say so here
+- [ ] 2.6 CHECK — contract gate: Re-read the published surface against design.md →
+      Contracts and confirm the shipped signatures match it exactly, including the
+      `Send + Sync` supertraits and the two `CliError` variants. Every named consumer
+      (`changes-from-cli`, `agent-polling`, `agent-launch`, `live-refresh`) is future
+      work, so there is no existing caller to break — record that explicitly rather than
+      leaving the gate unanswered
+- [ ] 2.7 VERIFY: `testcount 'cli::' 8` using the shell function from design.md → Test
+      Strategy, then `cargo test --all-features` for the full suite. The counted form is
+      the point: a bare `cargo test --all-features cli::` **exits 0 when the filter matches
+      nothing** (verified at planning time — it prints "0 passed" and returns 0), so a
+      renamed module, a mistyped filter, or tests that were never written would pass
+      silently. **Red when:** fewer than 8 tests match, stdout is trimmed, stderr leaks
+      into `Ok`, a non-zero exit returns `Ok`, or an absent program panics
+
+## 3. The real implementations
+<!-- kind: behavior -->
+
+- [ ] 3.1 RED: Write failing tests named `the_constructed_path_is_the_program_that_runs`,
+      `no_argument_is_added_and_the_working_directory_is_inherited`,
+      `the_default_herdr_program_name_is_herdr`, and
+      `a_program_that_reads_stdin_returns_rather_than_blocking`. The first must assert
+      **both** directions — constructing with `B/prog` yields `Ok("B")` *and* constructing
+      with `A/prog` yields `Ok("A")` — so an implementation ignoring its constructor
+      argument cannot pass. The third asserts on the value the implementation holds, never
+      by spawning, so it passes on a machine with no Herdr installed. The fourth runs the
+      call on a thread reporting through an `mpsc` channel and polls `recv_timeout` in a
+      loop to a generous deadline (30s); it must **not** sleep a fixed interval and then
+      assert, because the failure being caught is an indefinite block, not slowness
+- [ ] 3.2 GREEN: Add `RealOpenspecCli` and `RealHerdrCli`, each holding the program path
+      it runs, each with `new(program: impl Into<PathBuf>)` and a `program()` accessor,
+      and `impl Default for RealHerdrCli` using the bare name `herdr`. Each `run` does
+      nothing but call the group-2 helper: no added argument, no `current_dir`, no
+      environment mutation, no retry, no timeout, no caching, no inspection of the output
+- [ ] 3.3 GREEN: Document on `RealOpenspecCli` that its program path comes from
+      `resolve::openspec_bin`'s result — the path the chain constructed, never its
+      canonicalized target — and on `RealHerdrCli` that this crate builds no resolution
+      chain for `herdr` because failing to start it is already the documented
+      "Herdr socket unreachable" degraded state
+- [ ] 3.4 REFACTOR: Confirm the two implementations are genuinely thin — each `run` is one
+      delegating call — and that nothing that could live outside the seam has been placed
+      inside it. If nothing needed cleaning, say so here
+- [ ] 3.5 VERIFY: `testcount 'cli::' 12`, then the full suite. **Red when:** fewer than 12
+      tests match the filter, the constructor's path is ignored, an argument is added, the
+      working directory is changed, or a program reading stdin never returns.
+      **Negative control for the stdin scenario, run once and recorded:** its red is
+      environment-dependent — with the invoker's own stdin already at EOF the test passes
+      even without the null-stdin attachment. Temporarily remove the null stdin, run the
+      test from a shell whose stdin is an open terminal or a fifo, confirm it hangs to the
+      deadline, then restore it. Without that observation the scenario is green by
+      construction on a CI runner
+
+## 4. The recording fake
+<!-- kind: behavior -->
+
+- [ ] 4.1 RED: Write failing tests named `invocations_are_recorded_in_call_order`,
+      `a_response_is_matched_by_the_exact_argument_vector`,
+      `an_openspec_call_is_not_answered_from_a_herdr_registration`,
+      `an_unregistered_invocation_panics_naming_the_program_and_the_vector`,
+      `queued_responses_are_returned_in_order_and_the_last_one_repeats`,
+      `a_failure_can_be_registered`, `the_fake_is_usable_from_another_thread`, and
+      `two_fakes_are_independent`. The panic test uses
+      `#[should_panic(expected = "lst")]` — the misspelled command, not a generic word, so
+      an unrelated panic during setup cannot satisfy it — and additionally asserts the
+      message names the program addressed. A fake that silently returned `Ok("")` fails it.
+      The cross-program test registers a vector on the `OpenspecCli` side only and calls it
+      through the `HerdrCli` handle inside `#[should_panic]`, then registers both sides
+      with different responses and asserts each handle gets its own. The exact-match test registers responses for both `["list", "--json"]`
+      and `["list"]` and calls the longer, so a prefix match cannot pass. The repeat test
+      calls four times against two registrations and asserts
+      `["first", "second", "second", "second"]`
+- [ ] 4.2 GREEN: Add the fake under `#[cfg(test)] pub(crate)`, following `testutil`'s
+      existing placement in `src/lib.rs`: one type implementing **both** traits, interior
+      state behind a `std::sync::Mutex` (never a `RefCell`, which is not `Sync` and so
+      could not satisfy the traits' supertraits), a registration method keyed on the pair
+      **(program addressed, exact argument vector)**, a `calls()` accessor returning the
+      recorded pairs in order, and a panic naming both the program and the unmatched vector
+      when no response is registered. Keying on the vector alone would answer a caller that
+      reached for the wrong handle out of the other program's registration, and the panic
+      could not fire because the vector *is* registered. Expect `E0034` on a bare
+      `fake.run(..)` with both traits in scope; disambiguate with
+      `OpenspecCli::run(&fake, ..)` and `HerdrCli::run(&fake, ..)`. Being `cfg(test)`
+      keeps it out of the release binary and out of the coverage denominator
+- [ ] 4.3 GREEN: Document on the fake why it panics rather than returning `Ok("")` — every
+      consumer of this seam is required to degrade rather than fail, so a silent empty
+      answer would let a caller's test pass while the caller spawned the wrong command —
+      and why responses are keyed rather than held in one global FIFO
+- [ ] 4.4 REFACTOR: Confirm every public method of the fake is exercised by a test in this
+      group, so `-D warnings` has no dead code to complain about and no method ships
+      unproven. If nothing needed cleaning, say so here
+- [ ] 4.5 VERIFY: `testcount 'cli::' 20`, then `cargo clippy --all-targets --all-features
+      -- -D warnings` clean. **Red when:** fewer than 20 tests match, an unregistered pair
+      returns instead of panicking, a `herdr` call is answered from an `openspec`
+      registration, a prefix match answers, the last response does not repeat, or the fake
+      cannot cross a thread boundary
+
+## 5. The npm-prefix decision and the spawning probe
+<!-- kind: behavior -->
+
+- [ ] 5.1 RED: Write failing tests named `a_trailing_newline_is_trimmed_off_the_prefix`,
+      `surrounding_whitespace_is_trimmed`,
+      `empty_or_whitespace_only_output_is_no_prefix`,
+      `a_non_zero_exit_is_no_prefix_even_with_output`,
+      `invalid_utf8_on_stdout_is_decoded_lossily_and_then_trimmed`,
+      `stderr_noise_does_not_reach_the_prefix`, and
+      `a_program_that_cannot_be_started_is_no_prefix`. The first five drive the pure
+      decision function with no process at all; the sixth and seventh drive the spawning
+      probe against scratch programs. The invalid-UTF-8 case must assert
+      `Some("/a\u{FFFD}")` rather than `None`, pinning that only trimming and emptiness
+      produce nothing. The stderr test's scratch program writes a **different, plausible**
+      path to stderr, so a probe reading the wrong stream resolves the wrong path rather
+      than merely failing
+- [ ] 5.2 GREEN: Add the pure decision function taking the run's success flag and the
+      stdout bytes and returning the prefix: decode lossily, trim the whole output (never
+      split into lines — splitting is parsing), and return nothing on failure, on empty
+      output, or on whitespace-only output. Taking only those two parameters is the
+      structural proof that stderr cannot influence the result; document that
+- [ ] 5.3 GREEN: Add the spawning probe taking the npm program path explicitly, running it
+      with exactly the arguments `prefix` and `-g` through the group-2 helper and doing
+      nothing but handing the success flag and stdout bytes to the decision function.
+      Parameterizing the program is what lets the end-to-end scenario in group 7 drive a
+      real spawn on a machine with no `npm`, without touching `PATH` —
+      `std::env::set_var` is `unsafe` in edition 2024 and races parallel tests, which
+      `AGENTS.md` forbids outright
+- [ ] 5.4 GREEN: Add `pub fn npm_prefix() -> Option<PathBuf>`, the one-line binding naming
+      the real `npm` program, following `config::env_lookup`'s shape
+- [ ] 5.5 REFACTOR: Confirm the probe is a delegation and the decision function holds every
+      rule, so each rule is provable without a process. If nothing needed cleaning, say so
+- [ ] 5.6 VERIFY: `testcount 'cli::' 27`, then the full suite. **Red when:** fewer than 27
+      tests match, the prefix is untrimmed, whitespace-only output yields a path, a failing
+      run's output is kept, stderr reaches the result, or an unstartable program panics
+
+## 6. The hand-over: repoint, observe the red, then replace
+<!-- kind: behavior -->
+
+- [ ] 6.1 RED: Change `resolve::npm_prefix_deferred`'s **body** to call
+      `crate::cli::npm_prefix()`, keeping its name and signature for this one step. Do not
+      delete it yet — deleting it outright turns the hand-over into a compile error, which
+      is a red of a sort but not the observation `repo-resolution` asked for
+- [ ] 6.2 RED — the hand-over observation, and the reason this group exists: run the
+      `NPM-PATH` block from design.md → Test Strategy and record its **verbatim** output in
+      this task's notes. Its precondition is **measured, not assumed**: it runs
+      `$NPMBIN/npm prefix -g` itself and aborts unless that exits 0 and prints an absolute
+      path. Only under that measured condition can the pinning test go red at all, and
+      review corrected an earlier draft here — the first version asserted "npm is not on
+      the PATH a plain shell inherits", which is **false** on this machine
+      (`/bin/sh -c 'command -v npm'` prints `/opt/homebrew/bin/npm`). **The expected result
+      is a FAILURE** of
+      `cargo test --all-features resolve::tests::the_shipped_hook_yields_no_prefix` run
+      with `$NPMBIN` on `PATH`, because that `npm prefix -g` exits 0 and prints the nvm
+      version directory, so the hook now returns `Some(...)` where the test pins `None`.
+      Then run the same test **without** `$NPMBIN` on `PATH` and record that output too —
+      **informational only**, never a prediction: it currently stays green because the
+      Homebrew node on this machine is broken (`dyld: Library not loaded:
+      libllhttp.9.3.dylib`, exit 134, empty stdout), and a `brew reinstall node` would flip
+      it. **If the run WITH the measured precondition satisfied is GREEN, stop: the binding
+      was not actually repointed, or the hook is not reaching `cli`. Investigate. Do not
+      adjust, relax, or delete the test to make it pass** — a pinning test that will not go
+      red at its own hand-over is not doing its job, and that is the finding, not the
+      inconvenience
+- [ ] 6.3 GREEN: Delete `resolve::npm_prefix_deferred` entirely and change
+      `resolve::openspec_bin_from_env` to pass `&crate::cli::npm_prefix` as its
+      fourth-step hook. Delete the now-satisfied pinning test
+      `the_shipped_hook_yields_no_prefix` — it was written to die here, and its epitaph
+      belongs in `planning-review.md`, not in a weakened assertion
+- [ ] 6.4 GREEN: Add two successors in `src/cli.rs`.
+      `the_binding_delegates_to_the_probe_rather_than_answering_for_itself` asserts
+      `cli::npm_prefix()` equals `cli::npm_prefix_via(Path::new("npm"))` — machine-
+      independent, and, unlike an assertion on the value alone, **red for a hardcoded
+      `None` body wherever a working `npm` exists**, which is the one wrong implementation
+      every other check in this change would let through.
+      `the_binding_yields_either_nothing_or_an_absolute_path` asserts the result is `None`
+      or a path for which `is_absolute()` holds. Neither names a machine-specific value, so
+      both pass where `npm` works, where it is broken, and on the no-tools `PATH` that 8.4
+      runs the suite on
+- [ ] 6.5 CHECK: Confirm `src/resolve.rs` still names **no** process API at all — no
+      `std::process`, no `Command`, no `Stdio` — including in its comments, which is a
+      normative requirement of the `openspec-binary` capability. Run the module-scoped
+      half of `NOSPAWN-GREP`. **Red when:** the rebinding pulled a process API name into
+      `resolve.rs`, in code or in a doc comment
+- [ ] 6.6 CHECK: Run the `BINDING` block from design.md → Test Strategy. Its three guards
+      are the only check in this change that can tell a completed hand-over from
+      `pub fn npm_prefix() -> Option<PathBuf> { None }`: (a) `src/resolve.rs` names
+      `cli::npm_prefix` where the composition passes its fourth-step hook; (b) no
+      `npm_prefix_deferred` survives anywhere under `src/`; (c) `npm_prefix()`'s own body
+      delegates to the probe rather than returning a literal. The `[ -f ]` / `[ -d ]`
+      guards are load-bearing, because `grep` exits 2 on a missing path and a bare `!`
+      would turn that into a pass. **Red when:** any of the three guards fails — and each
+      is demonstrated red against a scratch copy in 8.3a, so none of them is taken on
+      trust
+- [ ] 6.7 CHECK — contract gate: `resolve::npm_prefix_deferred` is a **removal** from the
+      crate's published surface. Confirm its only caller, `openspec_bin_from_env`, was
+      updated, that no test injects it, and that the injection point itself — the
+      `&dyn Fn() -> Option<PathBuf>` parameter — did not move, so every existing chain
+      test is unaffected
+- [ ] 6.8 VERIFY: `cargo test --all-features` green in full — `resolve`'s chain tests,
+      including the closure-driven fourth-step tests, must all still pass. **Red when:**
+      removing the placeholder broke a caller, or the chain's fourth step stopped being
+      injectable
+
+## 7. The end-to-end join, and proof that nothing is written
+<!-- kind: behavior -->
+
+- [ ] 7.1 RED: Write the failing test `a_real_spawn_resolves_the_npm_prefix_binary`: call
+      `resolve::openspec_bin` with nothing configured, a `PATH` naming one scratch
+      directory that holds no `openspec`, **no** `NVM_DIR` and **no** `HOME` in the
+      lookup, and a fourth-step hook that is the real spawning probe pointed at a scratch
+      `#!/bin/sh` program printing a scratch prefix `N` to stdout and unrelated noise to
+      stderr, with `N/bin/openspec` written at mode `0o755`. Assert the resolved binary is
+      `N/bin/openspec` **and** that its source is the npm-prefix step, so a chain that
+      reached it by another route fails. This is the roadmap's end-to-end obligation:
+      until now that join was exercised only by fixture closures returning a literal path
+- [ ] 7.2 RED: Write `a_failing_real_spawn_resolves_nothing` — the same call with a scratch
+      program that prints the same prefix to stdout but exits `1`; assert no binary is
+      resolved and no problem is recorded, because an absent CLI is a supported state
+      rather than a fault
+- [ ] 7.3 GREEN: Make both pass. If groups 5 and 6 were built correctly this requires no
+      production change; record that explicitly rather than leaving it ambiguous, since
+      "the test passed without a code change" is only acceptable when it was predicted
+- [ ] 7.4 RED then GREEN: Write `a_run_and_a_probe_leave_the_scratch_tree_byte_identical`
+      — snapshot a scratch tree holding the scratch programs, a prefix directory with
+      `bin/openspec`, and an **empty** directory using `testutil::snapshot`, then perform a
+      successful run, a failing run, an unstartable run, and a full npm probe against it,
+      then snapshot again and assert equality. The snapshot records directory entries and
+      modification times, not just file listings, so a helper that created a missing
+      directory while looking for one is caught. Take a **second** snapshot pair around the
+      same four operations over `std::env::current_dir()`, so the requirement's "not in the
+      working directory" clause is covered by evidence rather than implied by the scratch
+      tree's result — review caught that overclaim
+- [ ] 7.5 REFACTOR: Extract the scratch-program builders this group and groups 2, 3, and 5
+      share into one local helper in `src/cli.rs`'s test module, rather than repeating the
+      shebang and the mode in a dozen tests. If nothing needed cleaning, say so here
+- [ ] 7.6 VERIFY: `testcount 'cli::' 31`, then `cargo test --all-features` in full. **Red
+      when:** fewer than 31 tests match, the real probe's output cannot be consumed by the
+      chain, the npm-prefix source is misreported, a failing probe still resolves a binary,
+      or anything in the seam writes to the filesystem or to the working directory
+
+## 8. Architectural checks that can actually fail
+<!-- kind: operational -->
+
+- [ ] 8.1 CHECK: Copy each command block out of design.md → Test Strategy into a scratch
+      shell file **verbatim** and run the blocks from that file, rather than retyping a
+      shortened form. Record the scratch file's path in this task's notes so the review in
+      group 9 can diff it against the design. Every one of the defects Phase 1-2 review
+      caught was a check shortened at the moment of running it, and "run it as written" is
+      not a mechanism unless the thing that was run is recoverable afterwards
+- [ ] 8.2 VERIFY: Run `NOSPAWN-GREP` against `src` — it must now **pass**, reporting at
+      least 8 files checked. **Red when:** any `*.rs` file under `src/` other than
+      `src/cli.rs` names `process::Command`, `Command::new`, or `Stdio`; when `src/cli.rs`
+      is missing (guard A); when `src/cli.rs` names no spawn API, making the exclusion
+      vacuous (guard B); or when fewer than 8 non-`cli` files are found, which is how an
+      empty or wrong-directory run fails instead of passing (guard C)
+- [ ] 8.3 VERIFY — the negative controls, which are what make 8.2 evidence rather than
+      decoration. Run `NOSPAWN-GREP` four more times with `SRC` pointed at scratch copies
+      of `src/`: (a) a copy with `Command::new("openspec")` planted in a non-`cli` file —
+      must fail, naming the file and line; (b) a copy with `cli.rs` deleted — must fail on
+      guard A; (c) a copy with `cli.rs` emptied of its spawn API — must fail on guard B;
+      (d) a copy with the spawn planted at `ui/cli.rs` — must fail, proving the exclusion
+      is by **path** and not by base name. Control (d) exists because review demonstrated
+      that a base-name exclusion silently exempts a future `src/ui/cli.rs` while the file
+      count still reads 8. Record all four exit codes and messages. Also confirm that run
+      (a)'s planted line is what fired and not one of the three legitimate `.join("herdr")`
+      sites in `src/config.rs` and `src/state.rs`, which is exactly what `plugin-config`'s
+      `grep -rn '"herdr"' src/` could not distinguish and why that check was recorded as
+      not-run and is not inherited here. **Red when:** any of the four passes
+- [ ] 8.3a VERIFY — the `BINDING` negative controls, for the same reason. Run `BINDING`
+      against three scratch copies: one whose `resolve.rs` has the `cli::npm_prefix`
+      reference stripped (guard a must fire), one still holding `npm_prefix_deferred`
+      somewhere (guard b), and one whose `npm_prefix()` body is `None` (guard c). Record
+      each exit code and which guard named itself. **Red when:** any of the three passes —
+      which would mean the one check standing between this change and a hand-over that
+      never happened is decoration
+- [ ] 8.4 VERIFY: Run `NOSPAWN-RUN` — the whole suite on a `PATH` from which every
+      directory holding `npm`, `node`, or `openspec` has been removed, with the five
+      preconditions running **first** and aborting. **Red when:** any of `npm`, `node`, or
+      `openspec` is still resolvable on that `PATH` (precondition), when `cargo` or
+      `rustc` is not (precondition), or when any test fails there — including this
+      change's own, since every spawning test must name an absolute scratch path and
+      `npm_prefix()`'s smoke test must tolerate an absent `npm`
+- [ ] 8.5 VERIFY: Run `OPENSPEC-UNTOUCHED` with `BASE` set to the SHA captured in 1.1, and
+      demonstrate its red once by planting an untracked file under `openspec/specs/` and
+      confirming the check names it — then remove it. Both halves matter: `git diff` lists
+      **tracked** paths only, and a file written at runtime is untracked, so the diff alone
+      was blind to the one violation this check exists to catch (review demonstrated the
+      earlier draft reporting success over a planted file). **Red when:** `BASE` is unset,
+      names no commit, or the repository root cannot be found (all abort), or when any path
+      under `openspec/` outside `openspec/changes/subprocess-seam/` differs from the base
+      commit or exists as an untracked file
+- [ ] 8.6 VERIFY: Run `DEPS`. **Red when:** the normal dependency set is anything but
+      `["toml", "yaml-rust2"]`, or the dev or build sets are non-empty, or the input is not
+      JSON. Dev and build are pinned empty because they are empty today and a test-support
+      crate such as `assert_cmd` is the likeliest accidental addition for a change that
+      starts spawning things — review demonstrated that a normal-deps-only form let a
+      planted dev-dependency through. Checked with `cargo metadata` rather than
+      `cargo build --offline`, which proves only that the cache is warm
+- [ ] 8.7 CHECK — persistence gate: record that none of migration, backfill, cache
+      invalidation, or index rebuild applies. `resolve::BinCache` is unchanged and still
+      caches at most one probe per owned value; no file format, no stored data, and no
+      index exists in this change. Recorded rather than omitted, so the gate is answered
+
+## 9. Change Review
+<!-- kind: operational -->
+
+- [ ] 9.1 CHECK: Dispatch an independent reviewer — an agent that did **not** write the
+      implementation and is **not** a fork of the implementing session, per
+      `openspec/config.yaml`'s planning-review rule — given only `proposal.md`, both spec
+      files, `design.md`, `tasks.md`, and the diff against the SHA from 1.1. Ask it to
+      spend its attention first on: every verification command in this file and whether
+      each can concretely go red; whether each spec scenario's test would fail if the
+      behavior were deleted; whether anything that parses, decides, or merges leaked into
+      `src/cli.rs`; and whether the fake could let a caller's test pass while the caller
+      spawned the wrong command. Require it to write findings to a scratchpad file
+      incrementally as it goes rather than only in a final message
+- [ ] 9.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a
+      one-line reason, note each SUGGESTION, and re-run the affected tests
+- [ ] 9.3 VERIFY: Confirm no blocking or unowned finding remains, and that any artifact a
+      finding invalidated — `design.md`, a spec file, or this list — was updated rather
+      than left to drift
+
+## 10. Documentation
+<!-- kind: operational -->
+
+- [ ] 10.0 CHECK: Capture, verbatim and with line numbers, the stale phrases the tasks
+      below must make cease to exist, so 10.8 can prove they are gone rather than that
+      something was merely added beside them. Each phrase below was chosen because it lies
+      **within a single line** of the wrapped source — a phrase spanning a line break
+      cannot be matched by a line-oriented search, and a check that can never match is the
+      defect this project keeps finding. Confirmed present at planning time:
+      `-> Result<String>;` (`SPEC.md`:28 and :29, two occurrences — both trait sketches);
+      `thin wrappers, the` (`SPEC.md`:42); `unwired until` (`SPEC.md`:201);
+      `Each is a pure transformation, tested without a TUI or a subprocess`
+      (`SPEC.md`:396); `always returns nothing until` (`AGENTS.md`:29); and
+      `test ever spawns a real process` (`openspec/IMPLEMENTATION-ORDER.md`:21).
+      **Red when:** any is absent, or its occurrence count differs from the one recorded
+      here — either means the document moved under the plan and the rewrite targets need
+      re-reading before anything is edited
+- [ ] 10.1 Rewrite in `SPEC.md`: Architecture → The subprocess seam, the trait snippet
+      (audience: every future change that implements or consumes the seam) — it shows
+      `fn run(&self, args: &[&str]) -> Result<String>;` with no error type and no thread
+      bound. Replace with the shipped signature including `Send + Sync` and `CliError`,
+      and one line on why the bound is there: `live-refresh` runs CLI calls on a worker
+      thread and `agent-polling` polls on another, so a trait that cannot cross a thread
+      would have to be redesigned by its first consumer. Record the before/after in
+      `planning-review.md`
+- [ ] 10.2 Rewrite in `SPEC.md`: Architecture → The subprocess seam, the residue sentence
+      (audience: every future change reasoning about the coverage target) — "the
+      untestable residue is two thin wrappers, the `npm prefix -g` binding, and `main`" is
+      now wrong: the wrappers and the probe are covered by tests against scratch
+      `#!/bin/sh` programs, and the residue is the one-line `npm_prefix()` program binding
+      plus `main`. Rewrite in place; do not append a correction beside the stale claim
+- [ ] 10.3 Rewrite in `SPEC.md`: Data layer → Resolution chain, the paragraph beginning
+      "Step 4 is unwired until `subprocess-seam` lands" (audience: every future change
+      reading the binary probe chain) — entirely superseded. Replace with the landed
+      state: the hook stays injected, which is what keeps `resolve` pure; its production
+      binding is `cli`'s probe; and the stdout-only, trimmed rule with a non-zero exit or
+      empty output meaning no prefix is now that binding's contract rather than an
+      instruction to a future change. Removes more text than it adds
+- [ ] 10.4 Add in `SPEC.md`: Testing and quality gates → Unit-tested modules (audience:
+      every future change adding a test to `cli`) — one entry for `cli`: the traits'
+      contract and the `npm prefix -g` probe, tested against scratch `#!/bin/sh` programs
+      built under `std::env::temp_dir()` rather than against the real `openspec`, `herdr`,
+      or `npm`, so the suite passes with all three unresolvable. Three lines; it is the
+      only place that records why spawning in a test here is not a breach of the rule
+- [ ] 10.4a Rewrite in `SPEC.md`: Testing and quality gates → Unit-tested modules, the
+      **lead-in sentence** (audience: the same) — it reads "Each is a pure transformation,
+      tested without a TUI or a subprocess:", which 10.4's new entry contradicts one line
+      below it. Review caught this. Narrow it: these modules are pure transformations
+      tested without a TUI, and `cli` is the one exception, tested against scratch programs
+      because performing a spawn is what it exists to do. Rewrite in place — adding 10.4's
+      entry without this leaves a self-contradicting paragraph
+- [ ] 10.4b Rewrite in `openspec/IMPLEMENTATION-ORDER.md`: Ordering principles, the
+      subprocess-seam bullet (audience: every future change reading the roadmap) — it says
+      the seam lands before the first change that shells out "so no test ever spawns a real
+      process", which this change falsifies with roughly twenty scratch `#!/bin/sh` spawns
+      in its own tests. The principle's intent is sound and `tests/cli.rs` is an existing
+      precedent for the narrower reading, but as written the sentence is now false. Narrow
+      it to say what it means: no test spawns the `openspec` or `herdr` binaries. The
+      `subprocess-seam` **row** itself needs no correction — 10.7 re-confirms that
+- [ ] 10.5 Rewrite in `AGENTS.md`: Current repo state (audience: every future session) —
+      the sentence "the binary chain's fourth probe step ships as an injected hook that
+      always returns nothing until `subprocess-seam` wires it" is false once this lands.
+      Rewrite that clause in place and add `subprocess-seam` to the list of landed
+      changes; do not append a second paragraph beside the stale one. Net roughly neutral
+- [ ] 10.6 Rewrite in `AGENTS.md`: Architecture rules, the spawn bullet (audience: every
+      future session) — it describes the seam in the future tense. Rewrite it to say the
+      seam exists, that `src/cli.rs` is the one module permitted to name a process-spawn
+      API, and that the check guarding it excludes exactly that file and fails when the
+      exclusion is vacuous. Keep it to the rule plus the non-obvious reason; the
+      verification block itself lives in this change's `design.md`, not in `AGENTS.md`
+- [ ] 10.7 CHECK: `openspec/IMPLEMENTATION-ORDER.md`'s `subprocess-seam` row was re-read
+      at planning time and describes exactly what was built, including the end-to-end
+      obligation. Re-read it once more against the landed change and correct it only if
+      the work split, merged, or moved. **Red when:** the row no longer describes the
+      change — in which case correct the row, and record the correction in
+      `planning-review.md`
+- [ ] 10.8 VERIFY: Every phrase captured in 10.0 is gone. Run from the repository root, and
+      judge on output rather than on an exit code, because `grep` exits 1 for no-match and
+      2 for a missing file and both would satisfy a bare `!`:
+
+      ```sh
+      for f in SPEC.md AGENTS.md openspec/IMPLEMENTATION-ORDER.md; do
+        [ -f "$f" ] || { echo "STALEDOC FAIL: $f missing" >&2; exit 1; }
+      done
+      hits=$( { grep -nF -e '-> Result<String>;' -e 'thin wrappers, the' \
+                        -e 'unwired until' \
+                        -e 'Each is a pure transformation, tested without a TUI or a subprocess' \
+                        SPEC.md
+                grep -nF -e 'always returns nothing until' AGENTS.md
+                grep -nF -e 'test ever spawns a real process' \
+                        openspec/IMPLEMENTATION-ORDER.md; } || true)
+      [ -z "$hits" ] || { echo "STALEDOC FAIL:" >&2; echo "$hits" >&2; exit 1; }
+      echo "STALEDOC OK"
+      ```
+
+      `-F` rather than `-E` on purpose: these are literal phrases, and an escaped `|`
+      inside an ERE matches a literal pipe — the exact defect Phase 1 review found.
+      Demonstrate the red once before the rewrites land, by running the block against the
+      tree as it stands and confirming it names all six phrases. **Red when:** any stale
+      phrase survives — which is exactly what a task that appended a correction beside the
+      old text, instead of rewriting it in place, would leave behind
+
+## 11. Lint & Verify
+<!-- kind: operational -->
+
+- [ ] 11.1 CHECK: Inspect the intended verification commands and the tiers they touch —
+      the unit tier (`cargo test --all-features`, covering `cli::` and `resolve::`), the
+      binary-integration tier (`tests/cli.rs`, untouched by this change but re-run), and
+      the command-level checks from group 8. There is no view tier here, because no view
+      was added
+- [ ] 11.2 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
+      **Red when:** any lint fires, including dead code in the `cfg(test)` fake
+- [ ] 11.3 VERIFY: `cargo fmt --all -- --check` — clean. **Red when:** any file is
+      unformatted
+- [ ] 11.4 VERIFY: `cargo test --all-features` — green, and record the total test count.
+      Rust's type checker runs as part of every build here, so there is no separate
+      type-check command; the compile that backs 11.2 and 11.4 is it. **Red when:** any
+      test fails, or the total is not greater than the baseline recorded in 1.1 (266 unit +
+      11 ci_workflow + 5 cli) — a suite that grew by fewer tests than the groups above
+      wrote means tests were dropped or a filter silently matched nothing
+- [ ] 11.5 VERIFY: `cargo llvm-cov --fail-under-lines 80` — the coverage gate, which this
+      change's code is squarely inside. Record the reported percentage and total lines
+      beside the baseline from 1.1 (98.66% over 4924 lines). **Red when:** line coverage
+      falls below 80% — the enforced floor — **or** when it falls more than one percentage
+      point below the baseline, which is the softer condition that catches a seam whose
+      real implementations ended up unreachable while the hard floor still passes. Neither
+      threshold is ever lowered, waived, or given an exclusion: if a line is genuinely
+      unreachable the answer is to shrink the residue to one line, not to exempt it
+- [ ] 11.6 VERIFY: `make check` as the single composite gate, and name the failing
+      sub-command rather than a summary if it fails
+- [ ] 11.7 VERIFY: `openspec validate subprocess-seam --strict`. **Red when:** the change's
+      artifacts drift from the schema. Run it with the nvm directory on `PATH` — the
+      `openspec` binary is nvm-installed here and is not on the `PATH` a plain shell
+      inherits, the same fact that makes probe steps 3 and 4 exist
