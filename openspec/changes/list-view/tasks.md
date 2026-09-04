@@ -934,7 +934,7 @@ block is re-run, not further modified — and `GRAPH-SNAP` likewise.
 ## 4. `ui::list` — the row grammar
 <!-- kind: behavior -->
 
-- [ ] 4.1 RED: Write failing tests in a new `#[cfg(test)] pub(crate) mod fixture` →
+- [x] 4.1 RED: Write failing tests in a new `#[cfg(test)] pub(crate) mod fixture` →
       `mod tests` inside `src/changes.rs`, naming builders that do not exist yet:
       - `every_builder_satisfies_the_change_invariants` — `fixture::active(...)` and
         `fixture::archived(...)` outputs pass `conformance::assert_invariants`, so an
@@ -945,13 +945,13 @@ block is re-run, not further modified — and `GRAPH-SNAP` likewise.
       and `fixture::set` are undefined. This is deliberately the *first* task of the group:
       every later RED in it needs the fixture.
 
-- [ ] 4.2 GREEN: Implement the three builders in that module, naming **every** field of
+- [x] 4.2 GREEN: Implement the three builders in that module, naming **every** field of
       `Change` and `ChangeSet` explicitly — no `..`, no `Default` — so `GATE-MECH1` and
       `NOLIT-CHANGE` both keep covering them. `active(name, completed, total)` builds an
       `Origin::Active` change whose `dir` ends in `name`; `archived(date, name, completed,
       total)` builds an `Origin::Archived { date }` change whose `dir` ends with `name`.
 
-- [ ] 4.3 RED: Write failing tests in `src/ui/list.rs`'s `mod tests`. **Every one calls
+- [x] 4.3 RED: Write failing tests in `src/ui/list.rs`'s `mod tests`. **Every one calls
       `rows` at both 38 and 58**, which `LISTWIDTHS` enforces mechanically:
       - `active_row_grammar_at_38_and_58` — the three-change fixture at 38 gives
         `> add-token-refresh              [4/9]`,
@@ -1018,18 +1018,18 @@ block is re-run, not further modified — and `GRAPH-SNAP` likewise.
       Covers change-rows' first three requirements at the unit tier.
       **Red when:** `src/ui/list.rs` does not exist.
 
-- [ ] 4.4 GREEN: Create `src/ui/list.rs` with `RowKind`, `Row`, and
+- [x] 4.4 GREEN: Create `src/ui/list.rs` with `RowKind`, `Row`, and
       `pub fn rows(dashboard: &Dashboard, width: u16) -> Vec<Row>`, and register it in
       `src/ui/mod.rs`. Write the width arithmetic as an explicit **sequence of
       subtractions** from `width` — marker, date field (archived only), separator space,
       progress cell — so `agent-attribution` adds one more subtraction rather than rewriting
       it. Names truncate from the right, the no-repository path from the left.
 
-- [ ] 4.5 REFACTOR: Extract the pad-or-truncate-to-a-field helper used by the name field,
+- [x] 4.5 REFACTOR: Extract the pad-or-truncate-to-a-field helper used by the name field,
       the problem row, and the message rows, so there is exactly one implementation of
       right-truncation in the file.
 
-- [ ] 4.6 VERIFY: `testcount --lib 'ui::list::tests::' 17` and
+- [x] 4.6 VERIFY: `testcount --lib 'ui::list::tests::' 17` and
       `testcount --lib 'changes::fixture::tests::' 2`. Then run `LISTWIDTHS` (default
       `LIST_MIN=17`) — it must now **pass**, having failed at 1.2 for the stated reason —
       and `NOIO-VIEW`, which must now pass with `5 pure files`. Then `NOLIT-CHANGE` and

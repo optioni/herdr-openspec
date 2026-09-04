@@ -1,0 +1,834 @@
+//! The row grammar: every function here is a pure total transformation,
+//! parameterised by an interior width, with no ratatui styling. See
+//! `openspec/changes/list-view/specs/change-rows/spec.md` and design.md ->
+//! Decisions ("The row grammar is fixed-field and right-aligned").
+
+use crate::ui::app::{Dashboard, matches};
+
+/// What kind of thing a `Row` represents, so a caller can tell a change row
+/// from a separator, a message, or a repository-level problem without
+/// parsing its text. `Item`'s `index` is into the *visible* list `rows`
+/// emits — active then archived, filtered — never into `ChangeSet` itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RowKind {
+    Problem,
+    Item { index: usize },
+    Separator,
+    Message,
+}
+
+/// One drawn row: its text, exactly `width` characters; its kind; and
+/// whether it carries the selection marker. `list.rs` never styles a row —
+/// `ui::view` applies `Modifier::BOLD` to the selected one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Row {
+    pub text: String,
+    pub kind: RowKind,
+    pub selected: bool,
+}
+
+/// The progress cell: `[<completed>/<total>]`, or the three characters
+/// `[-]` when `total` is zero, so a change with no tasks still ends its row
+/// in the same column as one that has them.
+fn progress_cell(progress: &crate::tasks::Progress) -> String {
+    if progress.total == 0 {
+        "[-]".to_string()
+    } else {
+        format!("[{}/{}]", progress.completed, progress.total)
+    }
+}
+
+/// Pad `text` with trailing spaces to `width` when it fits; otherwise
+/// truncate to `width - 1` characters and append `…` — the crate's one
+/// right-truncation implementation, shared by the name field, the problem
+/// row, and the message rows. `width == 0` truncates to the empty string:
+/// there is no room even for the ellipsis.
+fn pad_or_truncate_right(text: &str, width: usize) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= width {
+        let mut s: String = chars.into_iter().collect();
+        s.push_str(&" ".repeat(width - s.chars().count()));
+        return s;
+    }
+    if width == 0 {
+        return String::new();
+    }
+    let mut s: String = chars[..width - 1].iter().collect();
+    s.push('…');
+    s
+}
+
+/// The keep-the-tail truncation `change-rows`' no-repository block and
+/// `responsive-layout`'s header share: whole when `text` fits in `width`
+/// characters, else `…` followed by its last `width - 1` characters, empty
+/// at `width == 0`. Does **not** pad — callers that need a full-width row
+/// pad the result themselves, since the header uses this un-padded (it
+/// right-aligns within its own remaining space).
+pub(crate) fn shorten_left(text: &str, width: usize) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= width {
+        return chars.into_iter().collect();
+    }
+    if width == 0 {
+        return String::new();
+    }
+    let tail: String = chars[chars.len() - (width - 1)..].iter().collect();
+    format!("…{tail}")
+}
+
+/// `shorten_left`, then padded with trailing spaces to `width` — the
+/// no-repository block's third row needs a full-width row like every other
+/// kind, unlike the header's un-padded, right-aligned use of the same rule.
+fn shorten_left_row(text: &str, width: usize) -> String {
+    let shortened = shorten_left(text, width);
+    let len = shortened.chars().count();
+    if len >= width {
+        shortened
+    } else {
+        format!("{shortened}{}", " ".repeat(width - len))
+    }
+}
+
+/// The active-change grammar: `[marker][space][name field][space][progress]`,
+/// with the progress cell dropped whole (reclaiming its own separating
+/// space) as soon as the name field would fall below one column, and the row
+/// degenerating to the first `width` characters of `"{marker} "` below two
+/// columns. Shared, unparameterised by date, by both the active row and the
+/// final degenerate branch of the archived row.
+fn active_style_row(marker: char, name: &str, progress: Option<&str>, width: u16) -> String {
+    let w = i64::from(width);
+    if w < 2 {
+        let head = format!("{marker} ");
+        return head.chars().take(w.max(0) as usize).collect();
+    }
+    if let Some(progress) = progress {
+        let progress_len = progress.chars().count() as i64;
+        let name_field_w = w - 2 - 1 - progress_len;
+        if name_field_w >= 1 {
+            let name_field = pad_or_truncate_right(name, name_field_w as usize);
+            return format!("{marker} {name_field} {progress}");
+        }
+    }
+    let name_field_w = (w - 2) as usize;
+    let name_field = pad_or_truncate_right(name, name_field_w);
+    format!("{marker} {name_field}")
+}
+
+/// The archived-change grammar: `[marker][space][date field: 10][space]`
+/// then the active grammar's `[name field][space][progress]`, with the date
+/// field ten spaces when `date` is `None`. Dropped whole, in order — the
+/// progress cell (and its separating space) first, then the date field (and
+/// its separating space), then degenerating to `active_style_row` — exactly
+/// as `change-rows`' "Archived changes sit below a separator" requirement
+/// states.
+fn archived_row_text(
+    marker: char,
+    date: Option<&str>,
+    name: &str,
+    progress: &str,
+    width: u16,
+) -> String {
+    let w = i64::from(width);
+    let date_field = date.map_or_else(|| " ".repeat(10), str::to_string);
+    let progress_len = progress.chars().count() as i64;
+
+    // Full form: marker + space + date(10) + space + name + space + progress.
+    let name_field_full = w - 14 - progress_len;
+    if name_field_full >= 1 {
+        let name_field = pad_or_truncate_right(name, name_field_full as usize);
+        return format!("{marker} {date_field} {name_field} {progress}");
+    }
+
+    // Drop the progress cell and its separating space: marker + space +
+    // date(10) + space + name.
+    let name_field_no_progress = w - 13;
+    if name_field_no_progress >= 1 {
+        let name_field = pad_or_truncate_right(name, name_field_no_progress as usize);
+        return format!("{marker} {date_field} {name_field}");
+    }
+
+    // Drop the date field too: degenerate to the active grammar, with no
+    // progress cell ever offered.
+    active_style_row(marker, name, None, width)
+}
+
+/// A `Problem` row: `! `, then the text, truncated with `…` when the width
+/// falls below three columns to the first `width` characters of `"! "`
+/// itself, exactly as `change-rows`' empty-state requirement states.
+fn problem_row_text(text: &str, width: u16) -> String {
+    let w = width as usize;
+    if w < 3 {
+        return "! ".chars().take(w).collect();
+    }
+    format!("! {}", pad_or_truncate_right(text, w - 2))
+}
+
+/// A `Message` row: the whole width, no prefix, padded or truncated by the
+/// shared right-truncation rule.
+fn message_row_text(text: &str, width: u16) -> String {
+    pad_or_truncate_right(text, width as usize)
+}
+
+fn separator_row_text(width: u16) -> String {
+    const PREFIX: &str = "  -- archived ";
+    let w = width as usize;
+    let prefix_len = PREFIX.chars().count();
+    if w <= prefix_len {
+        return PREFIX.chars().take(w).collect();
+    }
+    format!("{PREFIX}{}", "-".repeat(w - prefix_len))
+}
+
+fn no_repo_rows(searched_from: &std::path::Path, width: u16) -> Vec<Row> {
+    let path_text = searched_from.display().to_string();
+    vec![
+        Row {
+            text: message_row_text("No OpenSpec repository found", width),
+            kind: RowKind::Message,
+            selected: false,
+        },
+        Row {
+            text: message_row_text("searched from:", width),
+            kind: RowKind::Message,
+            selected: false,
+        },
+        Row {
+            text: shorten_left_row(&path_text, width as usize),
+            kind: RowKind::Message,
+            selected: false,
+        },
+    ]
+}
+
+/// The list region's content: every row, in the order `change-rows` states
+/// — problem rows, then the visible active changes (or the empty-state
+/// message for the state the dashboard is in), then the separator when at
+/// least one visible archived change follows, then the visible archived
+/// changes. Pure and total over every `Dashboard` value and every `u16`
+/// width, including `0`: never panics, performs no I/O, reads no clock and
+/// no global state. See `specs/change-rows/spec.md`.
+pub fn rows(dashboard: &Dashboard, width: u16) -> Vec<Row> {
+    if dashboard.repo.is_none() {
+        return no_repo_rows(&dashboard.searched_from, width);
+    }
+
+    let query = dashboard.filter.query.as_str();
+    let active: Vec<&crate::changes::Change> = dashboard
+        .changes
+        .active
+        .iter()
+        .filter(|c| matches(&c.name, query))
+        .collect();
+    let archived: Vec<&crate::changes::Change> = dashboard
+        .changes
+        .archived
+        .iter()
+        .filter(|c| matches(&c.name, query))
+        .collect();
+
+    let mut out = Vec::new();
+    for problem in &dashboard.changes.problems {
+        out.push(Row {
+            text: problem_row_text(problem, width),
+            kind: RowKind::Problem,
+            selected: false,
+        });
+    }
+
+    if active.is_empty() && archived.is_empty() {
+        if query.is_empty() {
+            out.push(Row {
+                text: message_row_text("No changes yet", width),
+                kind: RowKind::Message,
+                selected: false,
+            });
+        } else {
+            out.push(Row {
+                text: message_row_text("No changes match", width),
+                kind: RowKind::Message,
+                selected: false,
+            });
+            out.push(Row {
+                text: message_row_text(&format!("/{query}"), width),
+                kind: RowKind::Message,
+                selected: false,
+            });
+        }
+        return out;
+    }
+
+    let mut index = 0usize;
+    if active.is_empty() {
+        out.push(Row {
+            text: message_row_text("No active changes", width),
+            kind: RowKind::Message,
+            selected: false,
+        });
+    } else {
+        for change in &active {
+            let selected = index == dashboard.selected;
+            let marker = if selected { '>' } else { ' ' };
+            out.push(Row {
+                text: active_style_row(
+                    marker,
+                    &change.name,
+                    Some(&progress_cell(&change.progress)),
+                    width,
+                ),
+                kind: RowKind::Item { index },
+                selected,
+            });
+            index += 1;
+        }
+    }
+
+    if !archived.is_empty() {
+        out.push(Row {
+            text: separator_row_text(width),
+            kind: RowKind::Separator,
+            selected: false,
+        });
+        for change in &archived {
+            let selected = index == dashboard.selected;
+            let marker = if selected { '>' } else { ' ' };
+            let date = match &change.origin {
+                crate::changes::Origin::Archived { date } => date.as_deref(),
+                crate::changes::Origin::Active => None,
+            };
+            out.push(Row {
+                text: archived_row_text(
+                    marker,
+                    date,
+                    &change.name,
+                    &progress_cell(&change.progress),
+                    width,
+                ),
+                kind: RowKind::Item { index },
+                selected,
+            });
+            index += 1;
+        }
+    }
+
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::changes::fixture;
+    use crate::ui::app::{Dashboard, Filter, Route};
+    use crate::ui::list::{Row, RowKind, rows};
+
+    fn empty_filter() -> Filter {
+        Filter {
+            query: String::new(),
+            active: false,
+        }
+    }
+
+    fn dashboard_with(
+        active: Vec<crate::changes::Change>,
+        archived: Vec<crate::changes::Change>,
+        problems: Vec<String>,
+        selected: usize,
+    ) -> Dashboard {
+        Dashboard {
+            repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
+            searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
+            changes: fixture::set(active, archived, problems),
+            route: Route::List,
+            quit: false,
+            selected,
+            filter: empty_filter(),
+        }
+    }
+
+    fn three_active() -> Dashboard {
+        dashboard_with(
+            vec![
+                fixture::active("add-token-refresh", 4, 9),
+                fixture::active("fix-empty-basket", 7, 7),
+                fixture::active("migrate-ai-sdk-v7", 0, 0),
+            ],
+            Vec::new(),
+            Vec::new(),
+            0,
+        )
+    }
+
+    /// Every dashboard fixture this module's tests build, for
+    /// `rows_never_panic_at_any_width` and `every_row_is_exactly_the_requested_width`.
+    fn every_fixture() -> Vec<Dashboard> {
+        vec![
+            three_active(),
+            dashboard_with(
+                vec![fixture::active("alpha", 4, 9)],
+                Vec::new(),
+                Vec::new(),
+                0,
+            ),
+            dashboard_with(
+                Vec::new(),
+                vec![fixture::archived(Some("2026-08-14"), "add-auth", 7, 7)],
+                Vec::new(),
+                0,
+            ),
+            dashboard_with(
+                vec![fixture::active("fix-empty-basket", 7, 7)],
+                vec![
+                    fixture::archived(Some("2026-08-14"), "add-auth", 7, 7),
+                    fixture::archived(None, "legacy-cleanup", 3, 3),
+                ],
+                Vec::new(),
+                0,
+            ),
+            dashboard_with(Vec::new(), Vec::new(), Vec::new(), 0),
+            {
+                let mut d = dashboard_with(Vec::new(), Vec::new(), Vec::new(), 0);
+                d.filter.query = "zzz".to_string();
+                d
+            },
+            dashboard_with(
+                Vec::new(),
+                vec![fixture::archived(Some("2026-08-14"), "add-auth", 7, 7)],
+                Vec::new(),
+                0,
+            ),
+            dashboard_with(
+                vec![fixture::active("fix-empty-basket", 7, 7)],
+                Vec::new(),
+                vec!["openspec/changes: Permission denied (os error 13)".to_string()],
+                0,
+            ),
+            Dashboard {
+                repo: None,
+                searched_from: std::path::PathBuf::from(
+                    "/home/dev/workspaces/openspec-demos/a-rather-long-repository-name-here",
+                ),
+                changes: fixture::set(Vec::new(), Vec::new(), Vec::new()),
+                route: Route::List,
+                quit: false,
+                selected: 0,
+                filter: empty_filter(),
+            },
+        ]
+    }
+
+    #[test]
+    fn active_row_grammar_at_38_and_58() {
+        let d = three_active();
+        for (width, expected) in [
+            (
+                38,
+                [
+                    "> add-token-refresh              [4/9]",
+                    "  fix-empty-basket               [7/7]",
+                    "  migrate-ai-sdk-v7                [-]",
+                ],
+            ),
+            (
+                58,
+                [
+                    "> add-token-refresh                                  [4/9]",
+                    "  fix-empty-basket                                   [7/7]",
+                    "  migrate-ai-sdk-v7                                    [-]",
+                ],
+            ),
+        ] {
+            let rows = rows(&d, width);
+            assert_eq!(rows.len(), 3);
+            for (row, expect) in rows.iter().zip(expected.iter()) {
+                assert_eq!(&row.text, expect, "width {width}");
+            }
+        }
+    }
+
+    #[test]
+    fn progress_cell_is_dash_when_total_is_zero() {
+        let d = three_active();
+        for width in [38, 58] {
+            let rows = rows(&d, width);
+            assert!(rows[0].text.ends_with(']'));
+            assert!(rows[2].text.ends_with(']'));
+            assert_eq!(
+                rows[0].text.chars().last(),
+                rows[2].text.chars().last(),
+                "width {width}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_row_is_exactly_the_requested_width() {
+        for d in every_fixture() {
+            for width in [38, 58] {
+                for row in rows(&d, width) {
+                    assert_eq!(row.text.chars().count(), width as usize);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_long_name_is_truncated_with_an_ellipsis() {
+        let d = dashboard_with(
+            vec![fixture::active(
+                "a-very-long-change-name-that-will-not-fit-here",
+                2,
+                5,
+            )],
+            Vec::new(),
+            Vec::new(),
+            usize::MAX,
+        );
+        let rows38 = rows(&d, 38);
+        assert_eq!(rows38[0].text, "  a-very-long-change-name-that-… [2/5]");
+        let rows58 = rows(&d, 58);
+        assert_eq!(
+            rows58[0].text,
+            "  a-very-long-change-name-that-will-not-fit-here     [2/5]"
+        );
+        assert!(!rows58[0].text.contains('…'));
+    }
+
+    #[test]
+    fn a_narrow_width_drops_the_progress_cell_whole() {
+        let d = dashboard_with(
+            vec![fixture::active("alpha", 4, 9)],
+            Vec::new(),
+            Vec::new(),
+            0,
+        );
+        assert_eq!(rows(&d, 10)[0].text, "> a… [4/9]");
+        assert_eq!(rows(&d, 9)[0].text, "> … [4/9]");
+        assert_eq!(rows(&d, 8)[0].text, "> alpha ");
+        assert_eq!(rows(&d, 3)[0].text, "> …");
+        assert_eq!(rows(&d, 2)[0].text, "> ");
+        assert_eq!(rows(&d, 1)[0].text, ">");
+        assert_eq!(rows(&d, 0)[0].text, "");
+        assert!(rows(&d, 38)[0].text.contains("[4/9]"));
+        assert!(rows(&d, 58)[0].text.contains("[4/9]"));
+    }
+
+    #[test]
+    fn archived_narrow_widths_drop_progress_then_date() {
+        let d = dashboard_with(
+            vec![fixture::active("fix-empty-basket", 7, 7)],
+            vec![fixture::archived(Some("2026-08-14"), "add-auth", 7, 7)],
+            Vec::new(),
+            1,
+        );
+        let cases: [(u16, &str); 7] = [
+            (20, "> 2026-08-14 … [7/7]"),
+            (19, "> 2026-08-14 add-a…"),
+            (14, "> 2026-08-14 …"),
+            (13, "> add-auth   "),
+            (3, "> …"),
+            (1, ">"),
+            (0, ""),
+        ];
+        for (width, expected) in cases {
+            let row = &rows(&d, width)[2];
+            assert_eq!(row.text, expected, "width {width}");
+            assert_eq!(row.text.chars().count(), width as usize);
+        }
+        assert!(rows(&d, 38)[2].text.contains("2026-08-14"));
+        assert!(rows(&d, 38)[2].text.contains("[7/7]"));
+        assert!(rows(&d, 58)[2].text.contains("2026-08-14"));
+        assert!(rows(&d, 58)[2].text.contains("[7/7]"));
+    }
+
+    #[test]
+    fn archived_rows_carry_a_ten_column_date_field() {
+        let d = dashboard_with(
+            vec![fixture::active("fix-empty-basket", 7, 7)],
+            vec![fixture::archived(Some("2026-08-14"), "add-auth", 7, 7)],
+            Vec::new(),
+            usize::MAX,
+        );
+        assert_eq!(
+            rows(&d, 38)[2].text,
+            "  2026-08-14 add-auth            [7/7]"
+        );
+        assert_eq!(
+            rows(&d, 58)[2].text,
+            "  2026-08-14 add-auth                                [7/7]"
+        );
+    }
+
+    #[test]
+    fn an_undated_archived_row_uses_ten_spaces() {
+        let d = dashboard_with(
+            vec![fixture::active("fix-empty-basket", 7, 7)],
+            vec![fixture::archived(None, "legacy-cleanup", 3, 3)],
+            Vec::new(),
+            usize::MAX,
+        );
+        assert_eq!(
+            rows(&d, 38)[2].text,
+            "             legacy-cleanup      [3/3]"
+        );
+        assert_eq!(
+            rows(&d, 58)[2].text,
+            "             legacy-cleanup                          [3/3]"
+        );
+
+        let dated = dashboard_with(
+            vec![fixture::active("fix-empty-basket", 7, 7)],
+            vec![fixture::archived(
+                Some("2026-08-14"),
+                "legacy-cleanup",
+                3,
+                3,
+            )],
+            Vec::new(),
+            usize::MAX,
+        );
+        for width in [38, 58] {
+            let undated_start = rows(&d, width)[2].text.find('l');
+            let dated_start = rows(&dated, width)[2].text.find('l');
+            assert_eq!(undated_start, dated_start, "width {width}");
+        }
+    }
+
+    #[test]
+    fn the_separator_fills_the_width() {
+        assert_eq!(
+            separator_for_test(38),
+            "  -- archived ------------------------"
+        );
+        assert_eq!(
+            separator_for_test(58),
+            "  -- archived --------------------------------------------"
+        );
+        assert_eq!(separator_for_test(6), "  -- a");
+    }
+
+    fn separator_for_test(width: u16) -> String {
+        let d = dashboard_with(
+            vec![fixture::active("fix-empty-basket", 7, 7)],
+            vec![fixture::archived(Some("2026-08-14"), "add-auth", 7, 7)],
+            Vec::new(),
+            0,
+        );
+        rows(&d, width)
+            .into_iter()
+            .find(|r| r.kind == RowKind::Separator)
+            .expect("a separator row")
+            .text
+    }
+
+    #[test]
+    fn the_separator_is_emitted_only_when_archived_rows_follow() {
+        let no_archived = three_active();
+        for width in [38, 58] {
+            assert!(
+                !rows(&no_archived, width)
+                    .iter()
+                    .any(|r| r.kind == RowKind::Separator)
+            );
+        }
+        let with_archived = dashboard_with(
+            vec![fixture::active("fix-empty-basket", 7, 7)],
+            vec![fixture::archived(Some("2026-08-14"), "add-auth", 7, 7)],
+            Vec::new(),
+            0,
+        );
+        for width in [38, 58] {
+            let count = rows(&with_archived, width)
+                .iter()
+                .filter(|r| r.kind == RowKind::Separator)
+                .count();
+            assert_eq!(count, 1);
+        }
+    }
+
+    #[test]
+    fn row_order_is_problems_then_active_then_separator_then_archived() {
+        let d = dashboard_with(
+            vec![
+                fixture::active("add-token-refresh", 4, 9),
+                fixture::active("fix-empty-basket", 7, 7),
+            ],
+            vec![
+                fixture::archived(Some("2026-08-14"), "add-auth", 7, 7),
+                fixture::archived(None, "legacy-cleanup", 3, 3),
+            ],
+            vec!["openspec/changes: broken".to_string()],
+            0,
+        );
+        for width in [38, 58] {
+            let kinds: Vec<RowKind> = rows(&d, width).into_iter().map(|r| r.kind).collect();
+            assert_eq!(
+                kinds,
+                vec![
+                    RowKind::Problem,
+                    RowKind::Item { index: 0 },
+                    RowKind::Item { index: 1 },
+                    RowKind::Separator,
+                    RowKind::Item { index: 2 },
+                    RowKind::Item { index: 3 },
+                ],
+                "width {width}"
+            );
+        }
+    }
+
+    #[test]
+    fn rows_preserve_the_change_set_order() {
+        let d = dashboard_with(
+            vec![
+                fixture::active("zeta", 1, 2),
+                fixture::active("alpha", 1, 2),
+                fixture::active("mid", 1, 2),
+            ],
+            Vec::new(),
+            Vec::new(),
+            usize::MAX,
+        );
+        for width in [38, 58] {
+            let rows = rows(&d, width);
+            assert!(rows[0].text.contains("zeta"));
+            assert!(rows[1].text.contains("alpha"));
+            assert!(rows[2].text.contains("mid"));
+        }
+    }
+
+    #[test]
+    fn the_selected_flag_marks_exactly_the_selected_change() {
+        let d = dashboard_with(
+            vec![
+                fixture::active("add-token-refresh", 4, 9),
+                fixture::active("fix-empty-basket", 7, 7),
+                fixture::active("migrate-ai-sdk-v7", 0, 0),
+            ],
+            vec![
+                fixture::archived(Some("2026-08-14"), "add-auth", 7, 7),
+                fixture::archived(None, "legacy-cleanup", 3, 3),
+            ],
+            Vec::new(),
+            3,
+        );
+        for width in [38, 58] {
+            let rows = rows(&d, width);
+            let selected: Vec<&Row> = rows.iter().filter(|r| r.selected).collect();
+            assert_eq!(selected.len(), 1, "width {width}");
+            assert_eq!(selected[0].kind, RowKind::Item { index: 3 });
+            for r in &rows {
+                if r.kind == RowKind::Separator {
+                    assert!(!r.selected);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_no_repository_block_is_three_rows() {
+        let d = Dashboard {
+            repo: None,
+            searched_from: std::path::PathBuf::from(
+                "/home/dev/workspaces/openspec-demos/a-rather-long-repository-name-here",
+            ),
+            changes: fixture::set(Vec::new(), Vec::new(), Vec::new()),
+            route: Route::List,
+            quit: false,
+            selected: 0,
+            filter: empty_filter(),
+        };
+        let rows38 = rows(&d, 38);
+        assert_eq!(rows38.len(), 3);
+        assert!(rows38[0].text.starts_with("No OpenSpec repository found"));
+        assert!(rows38[1].text.starts_with("searched from:"));
+        assert!(
+            rows38[2]
+                .text
+                .starts_with("…os/a-rather-long-repository-name-here")
+        );
+        assert!(
+            !rows38
+                .iter()
+                .any(|r| matches!(r.kind, RowKind::Item { .. }))
+        );
+
+        let rows58 = rows(&d, 58);
+        assert!(
+            rows58[2]
+                .text
+                .starts_with("…kspaces/openspec-demos/a-rather-long-repository-name-here")
+        );
+        assert!(
+            !rows58
+                .iter()
+                .any(|r| matches!(r.kind, RowKind::Item { .. }))
+        );
+    }
+
+    #[test]
+    fn the_four_message_states_are_distinct() {
+        for width in [38, 58] {
+            let empty = dashboard_with(Vec::new(), Vec::new(), Vec::new(), 0);
+            let rows_empty = rows(&empty, width);
+            assert!(rows_empty[0].text.starts_with("No changes yet"));
+
+            let archived_only = dashboard_with(
+                Vec::new(),
+                vec![fixture::archived(Some("2026-08-14"), "add-auth", 7, 7)],
+                Vec::new(),
+                0,
+            );
+            let rows_archived_only = rows(&archived_only, width);
+            assert!(rows_archived_only[0].text.starts_with("No active changes"));
+            assert_eq!(rows_archived_only[1].kind, RowKind::Separator);
+            assert_eq!(rows_archived_only[2].kind, RowKind::Item { index: 0 });
+
+            let mut no_match = dashboard_with(
+                vec![fixture::active("fix-empty-basket", 7, 7)],
+                Vec::new(),
+                Vec::new(),
+                0,
+            );
+            no_match.filter.query = "zzz".to_string();
+            let rows_no_match = rows(&no_match, width);
+            assert!(rows_no_match[0].text.starts_with("No changes match"));
+            assert!(rows_no_match[1].text.starts_with("/zzz"));
+
+            let mut matched = dashboard_with(
+                vec![fixture::active("fix-empty-basket", 7, 7)],
+                Vec::new(),
+                Vec::new(),
+                0,
+            );
+            matched.filter.query = "fix".to_string();
+            let rows_matched = rows(&matched, width);
+            assert!(!rows_matched.iter().any(|r| r.kind == RowKind::Message));
+        }
+    }
+
+    #[test]
+    fn problem_rows_are_truncated_to_the_width() {
+        let d = dashboard_with(
+            Vec::new(),
+            Vec::new(),
+            vec!["openspec/changes: Permission denied (os error 13)".to_string()],
+            0,
+        );
+        let row38 = &rows(&d, 38)[0];
+        assert_eq!(row38.text, "! openspec/changes: Permission denied…");
+        let row58 = &rows(&d, 58)[0];
+        assert_eq!(
+            row58.text,
+            "! openspec/changes: Permission denied (os error 13)       "
+        );
+    }
+
+    #[test]
+    fn rows_never_panic_at_any_width() {
+        for d in every_fixture() {
+            for width in [0u16, 1, 2, 8, 9, 10, 13, 14, 38, 58, 120, u16::MAX] {
+                for row in rows(&d, width) {
+                    assert_eq!(row.text.chars().count(), width as usize, "width {width}");
+                }
+            }
+        }
+    }
+}
