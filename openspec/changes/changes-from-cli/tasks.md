@@ -1027,7 +1027,7 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
 ## 9. `merge` — layering CLI over files (`mod merge`)
 <!-- kind: behavior -->
 
-- [ ] 9.1 RED: Write failing unit tests in `mod merge`, all pure (hand-built `ChangeSet`
+- [x] 9.1 RED: Write failing unit tests in `mod merge`, all pure (hand-built `ChangeSet`
       and `CliChanges`, no CLI, no filesystem):
       `the_cli_schema_progress_and_artifacts_replace_the_files` — the two producers are
       given **different** schema names (`stale-name` and `tdd`) and the test asserts the
@@ -1049,7 +1049,7 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
       `every_merged_value_satisfies_the_shared_invariants` — all seven values through
       `conformance::assert_invariants`.
 
-- [ ] 9.2 GREEN: Implement `pub fn merge(files: ChangeSet, cli: CliChanges) -> ChangeSet`
+- [x] 9.2 GREEN: Implement `pub fn merge(files: ChangeSet, cli: CliChanges) -> ChangeSet`
       per `change-merge`'s field table: pair by name, `dir` from the file change, `schema`
       and `progress` from the CLI change, `artifacts` from `join_artifacts`, `problems`
       concatenated file-first then CLI then join with exactly-equal strings collapsed to
@@ -1057,16 +1057,16 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
       `archived` through unchanged, and concatenate the two problem lists onto
       `ChangeSet::problems`.
 
-- [ ] 9.3 REFACTOR: Share the byte-order sort with `from_cli`'s if both ended up with a
+- [x] 9.3 REFACTOR: Share the byte-order sort with `from_cli`'s if both ended up with a
       copy; otherwise state explicitly that no refactor was needed.
 
-- [ ] 9.4 CHECK: Contract gate — re-read `openspec/specs/change-model/spec.md` and this
+- [x] 9.4 CHECK: Contract gate — re-read `openspec/specs/change-model/spec.md` and this
       change's delta on it, and confirm the merged `Change` still carries exactly seven
       fields, no `status`, no ratio, no formatted string, no `lastModified`, and no
       producer discriminant, and that `archived` is still a separate vector rather than a
       filter over one list.
 
-- [ ] 9.5 VERIFY: `testcount --lib 'merge::' <count>`. Commit.
+- [x] 9.5 VERIFY: `testcount --lib 'merge::' <count>`. Commit.
 
 ---
 

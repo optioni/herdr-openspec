@@ -1069,6 +1069,13 @@ fn resolve_cli_schema(
     (cached.schema.clone(), cached.problems.clone())
 }
 
+/// Sort `changes` by `name` ascending, comparing bytes — the order both
+/// producers must share (`change-enumeration`). Shared by [`from_cli`] and
+/// [`merge`] so the byte-order rule is stated once.
+fn sort_by_name_byte_order(changes: &mut [Change]) {
+    changes.sort_by(|a, b| a.name.as_bytes().cmp(b.name.as_bytes()));
+}
+
 /// Every change the OpenSpec CLI reported, and every problem producing them.
 /// Carries no `archived` list: `openspec list --json` filters `archive` out
 /// of its own walk, so archived changes stay permanently file-sourced.
@@ -1211,9 +1218,80 @@ pub fn from_cli(cli: &dyn crate::cli::OpenspecCli, repo: &std::path::Path) -> Cl
         });
     }
 
-    active.sort_by(|a, b| a.name.as_bytes().cmp(b.name.as_bytes()));
+    sort_by_name_byte_order(&mut active);
 
     CliChanges { active, problems }
+}
+
+/// Concatenate `items`, collapsing exactly-equal strings to their first
+/// occurrence and preserving the remaining order. Shared by [`merge`]'s
+/// per-change problem list.
+fn dedup_preserve_order(items: Vec<String>) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    items
+        .into_iter()
+        .filter(|s| seen.insert(s.clone()))
+        .collect()
+}
+
+/// Layer `cli` over `files`: `change-merge`'s field table, applied per
+/// change paired by name. Pure — no filesystem, no CLI — and total: never a
+/// `Result`, never panics. See `change-merge` for the full contract.
+pub fn merge(files: ChangeSet, cli: CliChanges) -> ChangeSet {
+    let ChangeSet {
+        active: file_active,
+        archived,
+        problems: file_problems,
+    } = files;
+    let CliChanges {
+        active: cli_active,
+        problems: cli_problems,
+    } = cli;
+
+    let mut cli_by_name: std::collections::HashMap<String, Change> = cli_active
+        .into_iter()
+        .map(|change| (change.name.clone(), change))
+        .collect();
+
+    let mut merged: Vec<Change> = Vec::new();
+
+    for file_change in file_active {
+        match cli_by_name.remove(&file_change.name) {
+            Some(cli_change) => {
+                let (artifacts, join_problem) =
+                    join_artifacts(&file_change.artifacts, &cli_change.artifacts);
+                let mut combined = file_change.problems;
+                combined.extend(cli_change.problems);
+                if let Some(problem) = join_problem {
+                    combined.push(problem);
+                }
+                merged.push(Change {
+                    name: file_change.name,
+                    dir: file_change.dir,
+                    origin: Origin::Active,
+                    schema: cli_change.schema,
+                    artifacts,
+                    progress: cli_change.progress,
+                    problems: dedup_preserve_order(combined),
+                });
+            }
+            None => merged.push(file_change),
+        }
+    }
+
+    // Whatever remains in `cli_by_name` is CLI-only: insert unchanged.
+    merged.extend(cli_by_name.into_values());
+
+    sort_by_name_byte_order(&mut merged);
+
+    let mut problems = file_problems;
+    problems.extend(cli_problems);
+
+    ChangeSet {
+        active: merged,
+        archived,
+        problems,
+    }
 }
 
 /// Paint the pane from disk: every active change under
@@ -4530,6 +4608,347 @@ mod tests {
             let after_cwd = crate::testutil::shallow_snapshot(&cwd);
             assert_eq!(before, after);
             assert_eq!(before_cwd, after_cwd);
+        }
+    }
+
+    // --- group 9: `merge` — layering CLI over files (`mod merge`) ----------
+
+    mod merge {
+        // The module and the function under test share a name; see `mod
+        // cli_artifacts` above for why the explicit import comes first.
+        use super::super::merge;
+        use super::*;
+
+        fn active(
+            name: &str,
+            schema: &str,
+            artifacts: Vec<ArtifactRef>,
+            progress: (usize, usize),
+        ) -> Change {
+            Change {
+                name: name.to_string(),
+                dir: PathBuf::from(format!("/repo/openspec/changes/{name}")),
+                origin: Origin::Active,
+                schema: schema.to_string(),
+                artifacts,
+                progress: crate::tasks::Progress {
+                    completed: progress.0,
+                    total: progress.1,
+                },
+                problems: vec![],
+            }
+        }
+
+        fn archived(name: &str, date: &str) -> Change {
+            Change {
+                name: name.to_string(),
+                dir: PathBuf::from(format!("/repo/openspec/changes/archive/{date}-{name}")),
+                origin: Origin::Archived {
+                    date: Some(date.to_string()),
+                },
+                schema: "tdd".to_string(),
+                artifacts: vec![],
+                progress: crate::tasks::Progress {
+                    completed: 0,
+                    total: 0,
+                },
+                problems: vec![],
+            }
+        }
+
+        fn empty_set() -> ChangeSet {
+            ChangeSet {
+                active: vec![],
+                archived: vec![],
+                problems: vec![],
+            }
+        }
+
+        fn empty_cli() -> CliChanges {
+            CliChanges {
+                active: vec![],
+                problems: vec![],
+            }
+        }
+
+        #[test]
+        fn the_cli_schema_progress_and_artifacts_replace_the_files() {
+            let mut files = empty_set();
+            let mut file_alpha = active("alpha", "stale-name", vec![], (2, 3));
+            file_alpha.dir = PathBuf::from("/repo/openspec/changes/alpha");
+            files.active.push(file_alpha);
+
+            let mut cli = empty_cli();
+            let mut cli_alpha = active(
+                "alpha",
+                "tdd",
+                vec![
+                    ArtifactRef {
+                        id: "proposal".to_string(),
+                        paths: vec![],
+                    },
+                    ArtifactRef {
+                        id: "tasks".to_string(),
+                        paths: vec![],
+                    },
+                ],
+                (4, 9),
+            );
+            cli_alpha.dir = PathBuf::from("/repo/openspec/changes/alpha");
+            cli.active.push(cli_alpha);
+
+            let merged = merge(files, cli);
+            let alpha = &merged.active[0];
+            assert_eq!(alpha.schema, "tdd");
+            let rendered = format!("{alpha:?}");
+            assert!(!rendered.contains("stale-name"));
+            assert_eq!(alpha.artifacts.len(), 2);
+            assert_eq!(
+                alpha.progress,
+                crate::tasks::Progress {
+                    completed: 4,
+                    total: 9
+                }
+            );
+        }
+
+        #[test]
+        fn the_merged_dir_comes_from_the_file_change() {
+            let mut files = empty_set();
+            files.active.push(active("alpha", "tdd", vec![], (0, 0)));
+
+            let mut cli = empty_cli();
+            let mut cli_alpha = active("alpha", "tdd", vec![], (0, 0));
+            cli_alpha.dir = PathBuf::from("/some/other/canonicalized/path/alpha");
+            cli.active.push(cli_alpha);
+
+            let merged = merge(files, cli);
+            assert_eq!(
+                merged.active[0].dir,
+                PathBuf::from("/repo/openspec/changes/alpha")
+            );
+        }
+
+        #[test]
+        fn a_change_only_the_cli_reported_is_inserted_in_name_order() {
+            let mut files = empty_set();
+            files.active.push(active("alpha", "tdd", vec![], (0, 0)));
+            files.active.push(active("zulu", "tdd", vec![], (0, 0)));
+
+            let mut cli = empty_cli();
+            cli.active.push(active("alpha", "tdd", vec![], (0, 0)));
+            cli.active.push(active("mike", "tdd", vec![], (0, 0)));
+            cli.active.push(active("zulu", "tdd", vec![], (0, 0)));
+
+            let merged = merge(files, cli);
+            let names: Vec<&str> = merged.active.iter().map(|c| c.name.as_str()).collect();
+            assert_eq!(names, vec!["alpha", "mike", "zulu"]);
+            let mike = merged.active.iter().find(|c| c.name == "mike").unwrap();
+            assert!(mike.problems.is_empty());
+        }
+
+        #[test]
+        fn a_change_only_the_file_producer_saw_survives_the_merge() {
+            let mut files = empty_set();
+            files.active.push(active("alpha", "tdd", vec![], (0, 0)));
+            let newly_created = active("newly-created", "tdd", vec![], (0, 0));
+            files.active.push(newly_created.clone());
+
+            let mut cli = empty_cli();
+            cli.active.push(active("alpha", "tdd", vec![], (0, 0)));
+
+            let merged = merge(files, cli);
+            let found = merged
+                .active
+                .iter()
+                .find(|c| c.name == "newly-created")
+                .unwrap();
+            assert_eq!(found, &newly_created);
+        }
+
+        #[test]
+        fn an_empty_cli_result_leaves_the_file_result_intact() {
+            let mut files = empty_set();
+            files.active.push(active("alpha", "tdd", vec![], (0, 0)));
+            files.active.push(active("mike", "tdd", vec![], (0, 0)));
+            files.archived.push(archived("old-one", "2026-01-01"));
+            files.archived.push(archived("old-two", "2026-01-02"));
+            files.archived.push(archived("old-three", "2026-01-03"));
+
+            let mut cli = empty_cli();
+            cli.problems
+                .push("could not start openspec: list --json".to_string());
+
+            let merged = merge(files.clone(), cli.clone());
+            assert_eq!(merged.active, files.active);
+            assert_eq!(merged.archived, files.archived);
+            let mut expected_problems = files.problems.clone();
+            expected_problems.extend(cli.problems.clone());
+            assert_eq!(merged.problems, expected_problems);
+        }
+
+        #[test]
+        fn archived_changes_pass_through_untouched() {
+            let mut files = empty_set();
+            files.archived.push(archived("add-auth", "2026-08-14"));
+
+            let mut cli = empty_cli();
+            cli.active.push(active("add-auth", "tdd", vec![], (0, 0)));
+
+            let merged = merge(files.clone(), cli);
+            assert_eq!(merged.archived, files.archived);
+            assert!(
+                merged
+                    .active
+                    .iter()
+                    .any(|c| c.name == "add-auth" && c.origin == Origin::Active)
+            );
+        }
+
+        #[test]
+        fn a_file_side_message_survives_beside_a_corrected_artifact_list() {
+            let mut files = empty_set();
+            let mut file_alpha = active("alpha", "tdd", vec![], (0, 0));
+            file_alpha.problems = vec!["x is not vendored: no schema.yaml there".to_string()];
+            files.active.push(file_alpha);
+
+            let mut cli = empty_cli();
+            let cli_alpha = active(
+                "alpha",
+                "tdd",
+                vec![
+                    ArtifactRef {
+                        id: "a".to_string(),
+                        paths: vec![],
+                    },
+                    ArtifactRef {
+                        id: "b".to_string(),
+                        paths: vec![],
+                    },
+                    ArtifactRef {
+                        id: "c".to_string(),
+                        paths: vec![],
+                    },
+                    ArtifactRef {
+                        id: "d".to_string(),
+                        paths: vec![],
+                    },
+                    ArtifactRef {
+                        id: "e".to_string(),
+                        paths: vec![],
+                    },
+                ],
+                (0, 0),
+            );
+            cli.active.push(cli_alpha);
+
+            let merged = merge(files, cli);
+            let alpha = &merged.active[0];
+            assert_eq!(alpha.artifacts.len(), 5);
+            assert_eq!(
+                alpha.problems,
+                vec!["x is not vendored: no schema.yaml there".to_string()]
+            );
+        }
+
+        #[test]
+        fn duplicate_messages_from_both_producers_are_collapsed() {
+            let mut files = empty_set();
+            let mut file_alpha = active("alpha", "tdd", vec![], (0, 0));
+            file_alpha.problems = vec![
+                "a different message".to_string(),
+                "shared duplicate message".to_string(),
+            ];
+            files.active.push(file_alpha);
+
+            let mut cli = empty_cli();
+            let mut cli_alpha = active("alpha", "tdd", vec![], (0, 0));
+            cli_alpha.problems = vec!["shared duplicate message".to_string()];
+            cli.active.push(cli_alpha);
+
+            let merged = merge(files, cli);
+            assert_eq!(
+                merged.active[0].problems,
+                vec![
+                    "a different message".to_string(),
+                    "shared duplicate message".to_string(),
+                ]
+            );
+        }
+
+        #[test]
+        fn a_join_problem_is_appended_after_both_producers_problems() {
+            let mut files = empty_set();
+            let mut file_alpha = active(
+                "alpha",
+                "tdd",
+                vec![
+                    ArtifactRef {
+                        id: "a".to_string(),
+                        paths: vec![],
+                    },
+                    ArtifactRef {
+                        id: "b".to_string(),
+                        paths: vec![],
+                    },
+                ],
+                (0, 0),
+            );
+            file_alpha.problems = vec!["file problem".to_string()];
+            files.active.push(file_alpha);
+
+            let mut cli = empty_cli();
+            let mut cli_alpha = active(
+                "alpha",
+                "tdd",
+                vec![
+                    ArtifactRef {
+                        id: "a".to_string(),
+                        paths: vec![],
+                    },
+                    ArtifactRef {
+                        id: "b".to_string(),
+                        paths: vec![],
+                    },
+                    ArtifactRef {
+                        id: "c".to_string(),
+                        paths: vec![],
+                    },
+                ],
+                (0, 0),
+            );
+            cli_alpha.problems = vec!["cli problem".to_string()];
+            cli.active.push(cli_alpha);
+
+            let merged = merge(files, cli);
+            let problems = &merged.active[0].problems;
+            assert_eq!(problems.len(), 3);
+            assert_eq!(problems[0], "file problem");
+            assert_eq!(problems[1], "cli problem");
+            assert!(problems[2].contains('2'));
+            assert!(problems[2].contains('3'));
+        }
+
+        #[test]
+        fn every_merged_value_satisfies_the_shared_invariants() {
+            let mut files = empty_set();
+            files.active.push(active("alpha", "tdd", vec![], (1, 2)));
+            files.active.push(active("beta", "tdd", vec![], (0, 0)));
+            files.archived.push(archived("old-one", "2026-01-01"));
+            files.archived.push(archived("old-two", "2026-01-02"));
+            files.archived.push(archived("old-three", "2026-01-03"));
+
+            let mut cli = empty_cli();
+            cli.active.push(active("alpha", "tdd", vec![], (3, 4)));
+            cli.active.push(active("beta", "tdd", vec![], (0, 0)));
+            cli.active.push(active("gamma", "tdd", vec![], (0, 0)));
+
+            let merged = merge(files, cli);
+            // 3 merged active names (alpha, beta, gamma) + 3 archived.
+            assert_eq!(merged.active.len() + merged.archived.len(), 6);
+            for change in merged.active.iter().chain(merged.archived.iter()) {
+                assert_invariants(change);
+            }
         }
     }
 }
