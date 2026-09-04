@@ -922,6 +922,47 @@ pub(crate) fn cli_artifacts(
     (artifacts, problems)
 }
 
+/// Join the two producers' artifact lists by **index**, never by path and
+/// never by id. See `change-merge` -> "Artifact lists are joined by
+/// position, never by path and never by id" for the six rules, applied in
+/// order.
+pub(crate) fn join_artifacts(
+    file: &[ArtifactRef],
+    cli: &[ArtifactRef],
+) -> (Vec<ArtifactRef>, Option<String>) {
+    if file.is_empty() && cli.is_empty() {
+        return (Vec::new(), None);
+    }
+    if cli.is_empty() {
+        return (file.to_vec(), None);
+    }
+    if file.is_empty() {
+        return (cli.to_vec(), None);
+    }
+    if file.len() != cli.len() {
+        return (
+            file.to_vec(),
+            Some(format!(
+                "the file artifact list has {} entries and the CLI's has {}; keeping the file list",
+                file.len(),
+                cli.len()
+            )),
+        );
+    }
+    for (index, (f, c)) in file.iter().zip(cli.iter()).enumerate() {
+        if f.id != c.id {
+            return (
+                file.to_vec(),
+                Some(format!(
+                    "the file and CLI artifact lists disagree at index {index}: {:?} vs {:?}; keeping the file list",
+                    f.id, c.id
+                )),
+            );
+        }
+    }
+    (cli.to_vec(), None)
+}
+
 /// Paint the pane from disk: every active change under
 /// `<repo>/openspec/changes/`, the `archived_count` most recent archived
 /// changes under its `archive/`, and every problem recorded along the way.
@@ -2951,6 +2992,168 @@ mod tests {
                 ids,
                 vec!["proposal", "specs", "design", "tasks", "planning-review"]
             );
+        }
+    }
+
+    // --- group 6: `join_artifacts` — the positional cross-producer join ----
+    // (`mod join_artifacts`)
+
+    mod join_artifacts {
+        // See `mod cli_artifacts` above for why the function is imported
+        // explicitly ahead of the glob: the module and the function share a
+        // name.
+        use super::super::join_artifacts;
+        use super::*;
+
+        fn r(id: &str, paths: Vec<&str>) -> ArtifactRef {
+            ArtifactRef {
+                id: id.to_string(),
+                paths: paths.into_iter().map(PathBuf::from).collect(),
+            }
+        }
+
+        #[test]
+        fn equal_length_lists_with_equal_ids_take_the_cli_paths_positionally() {
+            let file = vec![
+                r("proposal", vec!["/repo/a/proposal.md"]),
+                r("specs", vec![]),
+                r("design", vec![]),
+            ];
+            let cli = vec![
+                r("proposal", vec!["/private/var/.../a/proposal.md"]),
+                r(
+                    "specs",
+                    vec![
+                        "/private/var/.../a/specs/one.md",
+                        "/private/var/.../a/specs/two.md",
+                    ],
+                ),
+                r("design", vec![]),
+            ];
+            let (joined, problem) = join_artifacts(&file, &cli);
+            assert_eq!(problem, None);
+            let ids: Vec<&str> = joined.iter().map(|a| a.id.as_str()).collect();
+            assert_eq!(ids, vec!["proposal", "specs", "design"]);
+            assert_eq!(joined[0].paths, cli[0].paths);
+            assert_eq!(joined[1].paths, cli[1].paths);
+            assert_eq!(joined[1].paths.len(), 2);
+        }
+
+        #[test]
+        fn a_duplicate_id_is_joined_by_index_rather_than_collapsed() {
+            let file = vec![
+                r("zeta", vec!["/f/zeta-0"]),
+                r("alpha", vec![]),
+                r("zeta", vec!["/f/zeta-2"]),
+            ];
+            let cli = vec![
+                r("zeta", vec![]),
+                r("alpha", vec![]),
+                r("zeta", vec!["/c/zeta-2"]),
+            ];
+            let (joined, problem) = join_artifacts(&file, &cli);
+            assert_eq!(problem, None);
+            assert_eq!(joined.len(), 3);
+            assert_eq!(joined[0].id, "zeta");
+            assert_eq!(joined[2].id, "zeta");
+            // Index 2 keeps its own CLI path, not index 0's — an id-keyed
+            // join would give both positions the same (first-matching)
+            // entry and fail this assertion.
+            assert_eq!(joined[2].paths, vec![PathBuf::from("/c/zeta-2")]);
+            assert!(joined[0].paths.is_empty());
+        }
+
+        #[test]
+        fn an_empty_file_list_takes_the_cli_list() {
+            let cli = vec![
+                r("a", vec![]),
+                r("b", vec![]),
+                r("c", vec![]),
+                r("d", vec![]),
+                r("e", vec![]),
+            ];
+            let (joined, problem) = join_artifacts(&[], &cli);
+            assert_eq!(joined, cli);
+            assert_eq!(problem, None);
+        }
+
+        #[test]
+        fn an_empty_cli_list_keeps_the_file_list() {
+            let file = vec![
+                r("a", vec![]),
+                r("b", vec![]),
+                r("c", vec![]),
+                r("d", vec![]),
+                r("e", vec![]),
+            ];
+            let (joined, problem) = join_artifacts(&file, &[]);
+            assert_eq!(joined, file);
+            assert_eq!(problem, None);
+        }
+
+        #[test]
+        fn two_empty_lists_join_to_an_empty_list() {
+            let (joined, problem) = join_artifacts(&[], &[]);
+            assert!(joined.is_empty());
+            assert_eq!(problem, None);
+        }
+
+        #[test]
+        fn differing_lengths_keep_the_file_list_and_name_both_counts() {
+            let file = vec![
+                r("a", vec![]),
+                r("b", vec![]),
+                r("c", vec![]),
+                r("d", vec![]),
+                r("e", vec![]),
+            ];
+            let cli = vec![r("a", vec![]), r("b", vec![]), r("c", vec![])];
+            let (joined, problem) = join_artifacts(&file, &cli);
+            assert_eq!(joined, file);
+            let problem = problem.expect("should record a problem");
+            assert!(problem.contains('5'), "{problem}");
+            assert!(problem.contains('3'), "{problem}");
+        }
+
+        #[test]
+        fn a_differing_id_at_one_index_keeps_the_file_list_and_names_the_index() {
+            let file = vec![
+                r("proposal", vec![]),
+                r("specs", vec![]),
+                r("design", vec![]),
+                r("tasks", vec![]),
+            ];
+            let cli = vec![
+                r("proposal", vec![]),
+                r("specs", vec![]),
+                r("plan", vec![]),
+                r("other", vec![]),
+            ];
+            let (joined, problem) = join_artifacts(&file, &cli);
+            assert_eq!(joined, file);
+            let problem = problem.expect("should record a problem");
+            assert!(problem.contains('2'), "{problem}");
+            assert!(problem.contains("design"), "{problem}");
+            assert!(problem.contains("plan"), "{problem}");
+            // Only the FIRST differing index is named, even though index 3
+            // also differs.
+            assert!(!problem.contains("tasks"), "{problem}");
+            assert!(!problem.contains("other"), "{problem}");
+        }
+
+        #[test]
+        fn the_join_never_reads_a_path_as_a_key() {
+            let file = vec![
+                r("proposal", vec!["/f/proposal.md"]),
+                r("specs", vec!["/f/specs.md"]),
+            ];
+            let cli = vec![
+                r("proposal", vec!["/c/totally-different.md"]),
+                r("specs", vec!["/c/also-different.md"]),
+            ];
+            let (joined, problem) = join_artifacts(&file, &cli);
+            assert_eq!(problem, None);
+            assert_eq!(joined, cli);
         }
     }
 }

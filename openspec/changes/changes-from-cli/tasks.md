@@ -856,7 +856,7 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
 ## 6. `join_artifacts` — the positional cross-producer join (`mod join_artifacts`)
 <!-- kind: behavior -->
 
-- [ ] 6.1 RED: Write failing unit tests in `mod join_artifacts`, one per rule, all against
+- [x] 6.1 RED: Write failing unit tests in `mod join_artifacts`, one per rule, all against
       hand-built vectors so no CLI and no filesystem is involved:
       `equal_length_lists_with_equal_ids_take_the_cli_paths_positionally`;
       `a_duplicate_id_is_joined_by_index_rather_than_collapsed` — ids `zeta`, `alpha`,
@@ -877,13 +877,13 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
       position but whose paths share no string at all; the result is the CLI's, proving no
       path comparison gates the join.
 
-- [ ] 6.2 GREEN: Implement `pub(crate) fn join_artifacts(file: &[ArtifactRef], cli:
+- [x] 6.2 GREEN: Implement `pub(crate) fn join_artifacts(file: &[ArtifactRef], cli:
       &[ArtifactRef]) -> (Vec<ArtifactRef>, Option<String>)` applying `change-merge`'s six
       rules, in order.
 
-- [ ] 6.3 REFACTOR: State explicitly whether any was needed.
+- [x] 6.3 REFACTOR: State explicitly whether any was needed.
 
-- [ ] 6.4 VERIFY: `testcount --lib 'join_artifacts::' <count>`. Commit.
+- [x] 6.4 VERIFY: `testcount --lib 'join_artifacts::' <count>`. Commit.
 
 ---
 
