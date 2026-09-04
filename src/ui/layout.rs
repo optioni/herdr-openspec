@@ -72,11 +72,55 @@ pub fn split_body(area: Rect, route: Route) -> (Option<Rect>, Option<Rect>) {
     }
 }
 
+/// The index of the first row to draw, so the selected row (`cursor`, an
+/// index into the emitted row vector — not `Dashboard::selected`, since
+/// problem, separator, and message rows shift it) stays inside a `height`-row
+/// slice of `rows` total rows. Pure and total over its three arguments,
+/// derived on every draw rather than stored on `Dashboard`: the interior
+/// height is a property of the current frame, exactly like `LayoutMode`, and
+/// a stored offset would be stale after a resize. See
+/// `specs/list-selection/spec.md` -> "The visible slice follows the
+/// selection".
+pub fn viewport(rows: usize, cursor: usize, height: u16) -> usize {
+    let height = height as usize;
+    if height == 0 || rows <= height {
+        return 0;
+    }
+    cursor.saturating_sub(height / 2).min(rows - height)
+}
+
 #[cfg(test)]
 mod tests {
     use crate::ui::app::Route;
-    use crate::ui::layout::{LayoutMode, WIDE_MIN_WIDTH, mode, split_body, split_frame};
+    use crate::ui::layout::{LayoutMode, WIDE_MIN_WIDTH, mode, split_body, split_frame, viewport};
     use ratatui::layout::Rect;
+
+    #[test]
+    fn viewport_is_zero_when_everything_fits() {
+        assert_eq!(viewport(0, 0, 16), 0);
+        assert_eq!(viewport(16, 15, 16), 0);
+        assert_eq!(viewport(17, 0, 16), 0);
+        assert_eq!(viewport(30, 20, 0), 0);
+    }
+
+    #[test]
+    fn viewport_centres_and_clamps() {
+        assert_eq!(viewport(30, 20, 16), 12);
+        assert_eq!(viewport(30, 29, 16), 14);
+        assert_eq!(viewport(30, 20, 8), 16);
+        assert_eq!(viewport(30, 0, 16), 0);
+    }
+
+    #[test]
+    fn viewport_boundaries_are_exact() {
+        assert_eq!(viewport(0, 0, 16), 0);
+        assert_eq!(viewport(16, 15, 16), 0);
+        assert_eq!(viewport(17, 0, 16), 0);
+        assert_eq!(viewport(17, 8, 16), 0);
+        assert_eq!(viewport(17, 9, 16), 1);
+        assert_eq!(viewport(17, 16, 16), 1);
+        assert_eq!(viewport(30, 20, 0), 0);
+    }
 
     #[test]
     fn mode_is_narrow_below_100() {

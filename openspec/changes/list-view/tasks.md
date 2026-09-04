@@ -906,7 +906,7 @@ block is re-run, not further modified — and `GRAPH-SNAP` likewise.
 <!-- kind: behavior -->
 <!-- parallel-after: 1 -->
 
-- [ ] 3.1 RED: Write failing tests in `src/ui/layout.rs`'s `mod tests` for:
+- [x] 3.1 RED: Write failing tests in `src/ui/layout.rs`'s `mod tests` for:
       - `viewport_is_zero_when_everything_fits` — `(0, 0, 16)`, `(16, 15, 16)`,
         `(17, 0, 16)`, and `(30, 20, 0)` all return `0`.
       - `viewport_centres_and_clamps` — `(30, 20, 16)` → 12; `(30, 29, 16)` → 14;
@@ -917,14 +917,14 @@ block is re-run, not further modified — and `GRAPH-SNAP` likewise.
       Covers list-selection → "The viewport is exact at its boundaries" at the unit tier.
       **Red when:** `ui::layout::viewport` does not exist and the module fails to compile.
 
-- [ ] 3.2 GREEN: Implement `pub fn viewport(rows: usize, cursor: usize, height: u16) -> usize`
+- [x] 3.2 GREEN: Implement `pub fn viewport(rows: usize, cursor: usize, height: u16) -> usize`
       exactly as list-selection states: `0` when `height == 0` or `rows <= height as usize`,
       else `min(cursor.saturating_sub(height as usize / 2), rows - height as usize)`.
 
-- [ ] 3.3 REFACTOR: None expected — the function is four lines with no duplication. State
+- [x] 3.3 REFACTOR: None expected — the function is four lines with no duplication. State
       that rather than inventing a change.
 
-- [ ] 3.4 VERIFY: `testcount --lib 'ui::layout::tests::' 9`, then the four intermediate-gate
+- [x] 3.4 VERIFY: `testcount --lib 'ui::layout::tests::' 9`, then the four intermediate-gate
       commands. `cargo test --all-features` must still fail on exactly group 0's test.
       **Red when:** the count is below 9, which is 6 measured at `main` plus this group's 3.
       Commit: `feat(list-view): add layout::viewport, the derived scroll offset`.
