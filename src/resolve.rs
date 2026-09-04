@@ -865,4 +865,176 @@ mod tests {
         let result = super::openspec_bin(None, &with_neither);
         assert_eq!(result.found, None);
     }
+
+    // --- group 5: the npm-prefix step, the deferred hook, and the chain ----
+
+    fn no_prefix() -> Option<std::path::PathBuf> {
+        None
+    }
+
+    #[test]
+    fn the_configured_path_wins_over_every_other_source() {
+        let scratch = ScratchDir::new();
+        let c = scratch.path().join("c");
+        let configured = c.join("openspec");
+        write_with_mode(&configured, b"#!/bin/sh\n", 0o755);
+
+        let d = scratch.path().join("d");
+        write_with_mode(&d.join("openspec"), b"#!/bin/sh\n", 0o755);
+
+        let home = scratch.path().join("home");
+        write_with_mode(&nvm_bin(&home, "v20.0.0"), b"#!/bin/sh\n", 0o755);
+
+        let lookup = env(&[
+            ("PATH", &d.display().to_string()),
+            ("HOME", &home.display().to_string()),
+        ]);
+
+        let result = super::openspec_bin(Some(&configured), &lookup, &no_prefix);
+        assert_eq!(
+            result.found,
+            Some(super::FoundBin {
+                path: configured.clone(),
+                source: super::BinSource::Configured,
+            })
+        );
+        assert!(result.problems.is_empty());
+
+        // Dropping the configured argument yields the PATH answer, so the
+        // ordering itself is what is under test.
+        let dropped = super::openspec_bin(None, &lookup, &no_prefix);
+        assert_eq!(
+            dropped.found,
+            Some(super::FoundBin {
+                path: d.join("openspec"),
+                source: super::BinSource::Path,
+            })
+        );
+    }
+
+    #[test]
+    fn path_wins_when_nothing_is_configured() {
+        let scratch = ScratchDir::new();
+        let d = scratch.path().join("d");
+        write_with_mode(&d.join("openspec"), b"#!/bin/sh\n", 0o755);
+        let home = scratch.path().join("home");
+        write_with_mode(&nvm_bin(&home, "v20.0.0"), b"#!/bin/sh\n", 0o755);
+
+        let lookup = env(&[
+            ("PATH", &d.display().to_string()),
+            ("HOME", &home.display().to_string()),
+        ]);
+        let result = super::openspec_bin(None, &lookup, &no_prefix);
+        assert_eq!(
+            result.found,
+            Some(super::FoundBin {
+                path: d.join("openspec"),
+                source: super::BinSource::Path,
+            })
+        );
+    }
+
+    #[test]
+    fn an_absent_or_blank_path_contributes_nothing() {
+        let scratch = ScratchDir::new();
+        let n = scratch.path().join("n");
+        write_with_mode(&n.join("bin").join("openspec"), b"#!/bin/sh\n", 0o755);
+        let hook = || Some(n.clone());
+
+        for path_value in [None, Some(""), Some("   ")] {
+            let pairs: Vec<(&str, &str)> = match path_value {
+                Some(v) => vec![("PATH", v)],
+                None => vec![],
+            };
+            let lookup = env(&pairs);
+            let result = super::openspec_bin(None, &lookup, &hook);
+            assert_eq!(
+                result.found,
+                Some(super::FoundBin {
+                    path: n.join("bin").join("openspec"),
+                    source: super::BinSource::NpmPrefix,
+                }),
+                "PATH value {path_value:?} should have fallen through to the npm prefix"
+            );
+        }
+    }
+
+    #[test]
+    fn the_nvm_tree_outranks_the_npm_prefix() {
+        let scratch = ScratchDir::new();
+        let path_only = scratch.path().join("path-only");
+        mkdir(&path_only);
+        let home = scratch.path().join("home");
+        write_with_mode(&nvm_bin(&home, "v20.0.0"), b"#!/bin/sh\n", 0o755);
+        let n = scratch.path().join("n");
+        write_with_mode(&n.join("bin").join("openspec"), b"#!/bin/sh\n", 0o755);
+        let hook = || Some(n.clone());
+
+        let lookup = env(&[
+            ("PATH", &path_only.display().to_string()),
+            ("HOME", &home.display().to_string()),
+        ]);
+        let result = super::openspec_bin(None, &lookup, &hook);
+        assert_eq!(
+            result.found,
+            Some(super::FoundBin {
+                path: nvm_bin(&home, "v20.0.0"),
+                source: super::BinSource::Nvm,
+            })
+        );
+    }
+
+    #[test]
+    fn the_npm_prefix_is_the_last_resort() {
+        let scratch = ScratchDir::new();
+        let path_only = scratch.path().join("path-only");
+        mkdir(&path_only);
+        let n = scratch.path().join("n");
+        write_with_mode(&n.join("bin").join("openspec"), b"#!/bin/sh\n", 0o755);
+        let hook = || Some(n.clone());
+
+        // No configured, no PATH match, and — deliberately — no HOME/NVM_DIR
+        // at all, so the nvm step contributes nothing.
+        let lookup = env(&[("PATH", &path_only.display().to_string())]);
+        let result = super::openspec_bin(None, &lookup, &hook);
+        assert_eq!(
+            result.found,
+            Some(super::FoundBin {
+                path: n.join("bin").join("openspec"),
+                source: super::BinSource::NpmPrefix,
+            })
+        );
+    }
+
+    #[test]
+    fn an_npm_prefix_without_a_usable_binary_yields_nothing() {
+        let scratch = ScratchDir::new();
+        let n = scratch.path().join("n");
+        mkdir(&n); // no bin/openspec inside
+        let hook = || Some(n.clone());
+
+        let lookup = env(&[]);
+        let result = super::openspec_bin(None, &lookup, &hook);
+        assert_eq!(result.found, None);
+        assert!(result.problems.is_empty());
+    }
+
+    #[test]
+    fn nothing_anywhere_is_a_supported_state_not_a_fault() {
+        let lookup = env(&[]);
+        let result = super::openspec_bin(None, &lookup, &no_prefix);
+        assert_eq!(result.found, None);
+        assert!(result.problems.is_empty());
+    }
+
+    #[test]
+    fn the_shipped_hook_yields_no_prefix() {
+        assert_eq!(
+            super::npm_prefix_deferred(),
+            None,
+            "this is expected to go RED the day subprocess-seam wires npm prefix -g \
+             through this hook — that failure is the intended hand-over signal, not \
+             a regression"
+        );
+    }
 }
