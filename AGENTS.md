@@ -20,22 +20,26 @@ spec is wrong, update the spec as part of that change rather than letting the tw
 ## Current repo state
 
 `repo-foundation`, `ci-pipeline`, `plugin-config`, `repo-resolution`,
-`schema-model`, `task-parsing`, `changes-from-files`, and `subprocess-seam` have
-landed: the crate builds with two third-party dependencies (`toml`, `yaml-rust2`),
-`make check` runs all four quality gates locally and in CI, the crate reads
-`config.toml` and derives and records agent-name mappings under
-`HERDR_PLUGIN_STATE_DIR`, it can locate the OpenSpec repository root and the
-`openspec` binary — the binary chain's fourth probe step is an injected hook whose
-production binding, `cli::npm_prefix`, runs the real `npm prefix -g` probe behind
-the subprocess seam — it reads the repository's schema and produces the ordered artifact list
-including the tasks artifact, it parses a task file into groups, items, and
-completion counts that agree with the CLI's own, and it enumerates
-`openspec/changes/` into the `Change`/`ChangeSet` values the dashboard
-renders — active and archived, with every artifact resolved and every
-change's task progress counted by the CLI's own fallback rule, with no
-`openspec` binary present at all. The dashboard itself is not implemented
-yet — `herdr-openspec ui` prints a placeholder banner and blocks until the
-pane closes.
+`schema-model`, `task-parsing`, `changes-from-files`, `subprocess-seam`, and
+`changes-from-cli` have landed: the crate builds with three third-party
+dependencies (`toml`, `yaml-rust2`, `serde_json`), `make check` runs all four
+quality gates locally and in CI, the crate reads `config.toml` and derives and
+records agent-name mappings under `HERDR_PLUGIN_STATE_DIR`, it can locate the
+OpenSpec repository root and the `openspec` binary — the binary chain's fourth
+probe step is an injected hook whose production binding, `cli::npm_prefix`,
+runs the real `npm prefix -g` probe behind the subprocess seam — it reads the
+repository's schema and produces the ordered artifact list including the
+tasks artifact, it parses a task file into groups, items, and completion
+counts that agree with the CLI's own, and it enumerates `openspec/changes/`
+into the `Change`/`ChangeSet` values the dashboard renders — active and
+archived, with every artifact resolved and every change's task progress
+counted by the CLI's own fallback rule, file-sourced when no `openspec`
+binary is present at all, and corrected by `changes::from_cli`/
+`changes::merge` when it is: the CLI's schema, progress, and artifacts
+replace the file's for every change it reports, joined by position, archived
+changes staying permanently file-sourced. The dashboard itself is not
+implemented yet — `herdr-openspec ui` prints a placeholder banner and blocks
+until the pane closes.
 
 Important files:
 
@@ -132,7 +136,9 @@ unreachable and the tests become integration tests by accident.
   workspace, tab, and pane ids — arrives in the environment of every process Herdr
   starts for a plugin (`HERDR_PLUGIN_CONFIG_DIR`, `HERDR_PLUGIN_STATE_DIR`,
   `HERDR_PLUGIN_ROOT`, and friends), so reading it is never a reason to spawn
-  `herdr` from anywhere in the crate.
+  `herdr` from anywhere in the crate. The seam also parses nothing: it returns
+  stdout verbatim, and every JSON parse lives on the testable side of it —
+  `serde_json` must never appear in `src/cli.rs`, checked the same way.
 - **Views do no I/O.** They are pure functions from state to a ratatui frame, tested
   by rendering into a `TestBackend` buffer at 60 and 120 columns.
 
@@ -147,7 +153,10 @@ Further invariants from `SPEC.md`:
   into the configuration directory the user hand-edits.
 - **Checkbox counting follows the OpenSpec CLI's rule exactly**, fenced and commented
   checkboxes included, because the file path and the CLI path must report the same
-  progress for the same change (`SPEC.md` → Dual-source model).
+  progress for the same change (`SPEC.md` → Dual-source model). On the CLI side that
+  count comes from `openspec list --json`'s `completedTasks`/`totalTasks` pair, never
+  from `instructions apply`'s own `progress` field, which disagrees whenever a
+  schema's `apply.tracks` is a glob.
 
 Do not attribute an agent to a change on weak evidence. A terminal title is a
 summary, not a change id. Unattributable agents are reported as a count, not guessed at.

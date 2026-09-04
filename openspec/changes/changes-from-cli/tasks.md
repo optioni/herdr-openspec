@@ -1302,56 +1302,56 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
 ## 12. Documentation
 <!-- kind: operational -->
 
-- [ ] 12.1 CHECK: Re-read the sections named below before editing them, and confirm each
+- [x] 12.1 CHECK: Re-read the sections named below before editing them, and confirm each
       still says what this change believes it says. **Red when:** a section was already
       corrected by another change and this group would reintroduce a stale claim.
 
-- [ ] 12.2 Rewrite in `SPEC.md` → Data layer → Resolution chain → **Changes** (audience:
+- [x] 12.2 Rewrite in `SPEC.md` → Data layer → Resolution chain → **Changes** (audience:
       every later change): replace the sentence describing `openspec list --json`'s output
       with the real envelope `{"changes": [...], "root": {"path", "source"}}`, and add that
       the CLI's own `--sort name` is `localeCompare` and therefore cannot be used to obtain
       the byte order both producers must share. Durable because two later changes read this
       paragraph as the contract and the current text would send them to a bare array.
 
-- [ ] 12.3 Rewrite in `SPEC.md` → Data layer → Dual-source model (audience: every later
+- [x] 12.3 Rewrite in `SPEC.md` → Data layer → Dual-source model (audience: every later
       change): state that the CLI-side task counts come from `list --json`'s
       `completedTasks`/`totalTasks` and **not** from `instructions apply --json`'s
       `progress`, which resolves `apply.tracks` without globbing and therefore disagrees
       whenever `tracks` is a glob. Durable because the whole model rests on the two
       producers reporting one number.
 
-- [ ] 12.4 Add to `SPEC.md` → Data layer → Resolution chain → **Artifact files**
+- [x] 12.4 Add to `SPEC.md` → Data layer → Resolution chain → **Artifact files**
       (audience: `live-refresh` and any later CLI consumer): the plugin runs `instructions
       apply` and **not** `status --change`, and why — the same `resolveArtifactOutputs`, and
       `status`'s `artifacts` array is in topological build order rather than the schema's
       declared order, so it is not a source for a positional join.
 
-- [ ] 12.5 Add three rows to `SPEC.md` → Degraded states (audience: `degraded-states`,
+- [x] 12.5 Add three rows to `SPEC.md` → Degraded states (audience: `degraded-states`,
       which audits that table end to end): a schema declaring the same artifact id twice
       (the CLI rejects the schema outright, so the change is permanently file-mode); a CLI
       reporting a repository root other than the resolved one (the whole CLI result is
       discarded); and a CLI command failing (the reason is unavailable, because the CLI
       writes its diagnostic to stdout and the seam's `Failed` carries stderr only).
 
-- [ ] 12.6 Rewrite in `openspec/IMPLEMENTATION-ORDER.md` → Phase 3 → the
+- [x] 12.6 Rewrite in `openspec/IMPLEMENTATION-ORDER.md` → Phase 3 → the
       `changes-from-cli` row (audience: whoever reads the roadmap next): drop
       `openspec status --change <n> --json` from the list of parsed commands and record in
       one clause why. Rewrite rather than append — leaving the old list beside a correction
       is what makes a roadmap stop being read.
 
-- [ ] 12.7 Rewrite in `AGENTS.md` → **Current repo state** (audience: every future
+- [x] 12.7 Rewrite in `AGENTS.md` → **Current repo state** (audience: every future
       session): fold `changes-from-cli` into the landed list and state in one clause what
       it added, replacing the "the CLI path is not built yet" implication rather than
       appending a paragraph beside it. Net addition must stay under ten lines.
 
-- [ ] 12.8 Rewrite in `AGENTS.md` → **Architecture rules** (audience: every future
+- [x] 12.8 Rewrite in `AGENTS.md` → **Architecture rules** (audience: every future
       session): the existing "Nothing spawns a process outside `cli`" bullet gains one
       clause naming that the seam also parses nothing — `serde_json` must not appear in
       `src/cli.rs` — and the "Checkbox counting follows the OpenSpec CLI's rule exactly"
       bullet gains the `list --json`-not-apply-`progress` clause. Edit both in place; add
       no new bullet.
 
-- [ ] 12.9 VERIFY: Re-run `OPENSPEC-UNTOUCHED` after the roadmap edit — it must still
+- [x] 12.9 VERIFY: Re-run `OPENSPEC-UNTOUCHED` after the roadmap edit — it must still
       report OK, because `openspec/IMPLEMENTATION-ORDER.md` is one of its two named
       exclusions. **Red when:** the documentation group touched any other path under
       `openspec/`.

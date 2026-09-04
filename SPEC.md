@@ -96,6 +96,16 @@ hand-designed one. Re-verify it against `dist/utils/task-progress.js`'s
 if the two sources are ever suspected of disagreeing. `Progress::is_complete`
 mirrors the CLI's three-way split too: `total > 0 && completed == total`.
 
+On the CLI side, the count comes from `openspec list --json`'s
+`completedTasks`/`totalTasks` pair — **never** from
+`openspec instructions apply --change <n> --json`'s own `progress` field. The
+two are different computations: `list` resolves the tracked-tasks artifact's
+`generates` through the same glob expansion the file path uses and sums every
+matched file, falling back to `<changeDir>/tasks.md`; apply resolves
+`apply.tracks` as a single path with no globbing. They agree only when
+`apply.tracks` names a plain filename, so `changes::from_cli` reads
+`list --json`'s pair and discards apply's `progress` entirely.
+
 ### Resolution chain
 
 **Repository.** Start from the invocation context's workspace working directory
@@ -126,16 +136,19 @@ rather than falling back, because that is what the OpenSpec CLI does and the
 dual-source model depends on the two agreeing. There is no `role` key anywhere in
 the schema format.
 
-**Changes.** `openspec list --json` yields
-`{name, completedTasks, totalTasks, lastModified, status}` per change. The file
-path enumerates subdirectories of `openspec/changes/` excluding `archive/`.
-Active changes are ordered name-ascending in byte order — a contract, not a
-preference, because both producers of `Change` must agree on it: the CLI's
-own default order is most-recently-modified first, so the CLI path re-sorts
-its own result by name to match. `Change` carries no `status` and no
-`lastModified` field; the CLI derives the first from the completed/total pair
-(`Progress::is_complete` mirrors the same split) and no view renders the
-second.
+**Changes.** `openspec list --json` yields the envelope
+`{"changes": [ … ], "root": {"path", "source"}}` — **not** a bare array. Each
+element of `changes` carries `{name, completedTasks, totalTasks, lastModified,
+status}`. The file path enumerates subdirectories of `openspec/changes/`
+excluding `archive/`. Active changes are ordered name-ascending in byte order —
+a contract, not a preference, because both producers of `Change` must agree on
+it: the CLI's own default order is most-recently-modified first, and its own
+`--sort name` flag sorts with `localeCompare` — a locale collation, not byte
+order — so it cannot be used to obtain the shared order; the CLI path instead
+re-sorts its own result by name, in byte order, after the fact. `Change`
+carries no `status` and no `lastModified` field; the CLI derives the first
+from the completed/total pair (`Progress::is_complete` mirrors the same split)
+and no view renders the second.
 
 **Archived changes.** Directories under `openspec/changes/archive/` named
 `YYYY-MM-DD-<name>`. Strip the date prefix; entries are ordered dated-newest-
@@ -166,6 +179,15 @@ guessing filenames once the CLI path is available. An artifact matching
 nothing is **omitted** from `contextFiles` entirely, rather than present with
 an empty array (`dist/commands/workflow/instructions.js:270-277`,
 `dist/commands/workflow/shared.d.ts:24`, `@fission-ai/openspec@1.11.0`).
+
+The plugin runs `instructions apply` and deliberately **not**
+`openspec status --change <n> --json`, even though `status` also reports
+per-artifact paths: both compute them through the same
+`resolveArtifactOutputs` function, so `status` supplies nothing `apply`
+doesn't, at the cost of a second Node start per change. `status`'s own
+`artifacts` array is additionally sorted in **topological build order**
+rather than the schema's declared order, so it would not even be a correct
+source for the positional join above.
 
 **The `openspec` binary.** Probed in order, and cached for the session, taking
 the first usable candidate and probing no further:
@@ -392,6 +414,9 @@ Every condition renders usable content rather than an error screen:
 | `config.toml` malformed, unreadable, or a key of the wrong type | The affected key falls back to its documented default while every other key that parsed correctly is still honoured; `Config::problems` names each fallback |
 | `agent-names.toml` unusable (malformed, unreadable, or an entry Herdr would reject) | Empty or partial mapping; attribution falls back to the name-equality tier, and nothing already on disk is lost |
 | A configured `openspec_bin` that does not name a usable binary | Falls through to the remaining probe steps rather than winning or ending the chain; the fallback is named in `BinResolution::problems` rather than being silent |
+| A schema declares the same artifact id at two positions | The CLI rejects such a schema outright (`Duplicate artifact ID`), so a change using it is permanently file-mode — this crate's own parser accepts the duplicate, as `schema-artifacts` requires, so the plugin's "usable" is strictly wider than the CLI's |
+| `openspec list --json` reports a repository root other than the one this plugin resolved | The whole CLI result is discarded, not merged: the CLI resolves its root from the **process** working directory while this plugin resolves from the invocation context's workspace working directory, and the subprocess seam forbids setting `current_dir`, so the two can legitimately disagree |
+| A CLI command exits non-zero | The reason is unavailable to the plugin: the CLI writes its diagnostic to **stdout**, not stderr, and the subprocess seam's `CliError::Failed` carries stderr only — the recorded problem names the command and its exit code, never the CLI's own message |
 
 ## Testing and quality gates
 
