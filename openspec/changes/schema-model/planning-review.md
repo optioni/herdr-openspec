@@ -35,6 +35,8 @@ answered rather than adopted, both recorded at the end.
   `optioni/openspec-schemas` is vendored, read-only, and unmodified.
 - Working tree: clean apart from this change's own planning directory. No source file is
   touched by this change yet; `src/schema.rs` does not exist.
+- Repairs were committed as `87a300e` (`docs(schema-model): repair planning-review
+  findings`), which touches only this change's five planning artifacts.
 
 Environment facts confirmed during planning and re-confirmed independently during review,
 on this machine (macOS 27.0.0, Rust 1.91.1, Herdr 0.8.2):
