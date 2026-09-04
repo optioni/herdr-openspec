@@ -34,6 +34,8 @@ Important files:
 - `graft.toml` / `graft.lock` — what is vendored, and at which commit.
 - `Cargo.toml` — crate manifest.
 - `Makefile` — the four quality gates behind `make check`.
+- `.github/workflows/ci.yml` — runs the same gates on `ubuntu-latest` and
+  `macos-latest`, coverage on Linux only.
 - `scripts/build.sh` — the Herdr `[[build]]` step.
 - `herdr-plugin.toml` — the Herdr plugin manifest.
 
@@ -82,8 +84,8 @@ stay in sync.
 
 ## Quality gates
 
-All four are enforced in CI and available locally behind one target, so the two
-cannot diverge:
+All four are enforced in CI, invoking the same `make` targets individually — with
+coverage on Linux only — and are available locally behind one composite target:
 
 ```sh
 make check

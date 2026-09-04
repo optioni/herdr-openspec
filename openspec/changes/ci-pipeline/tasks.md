@@ -284,29 +284,29 @@ delta spec written during planning.
 ## 3. Documentation
 <!-- kind: operational -->
 
-- [ ] 3.1 CHECK: Re-read `AGENTS.md` → "Quality gates" and → "Current repo state", and
+- [x] 3.1 CHECK: Re-read `AGENTS.md` → "Quality gates" and → "Current repo state", and
       `README.md` → the header block, and record the exact sentences this change
       falsifies or makes imprecise. At planning time the "Quality gates" section read
       "All four are enforced in CI and available locally behind one target, so the two
       cannot diverge:" — verify that verbatim before rewriting it, the way task 2.1
       guards the `SPEC.md` edit
-- [ ] 3.2 CHANGE: Rewrite in `AGENTS.md`: "Quality gates" (audience: agents starting a
+- [x] 3.2 CHANGE: Rewrite in `AGENTS.md`: "Quality gates" (audience: agents starting a
       session) — the sentence above was aspirational and is now true, but it is also now
       imprecise in the same way SPEC.md was: say that CI invokes the same `make` targets,
       with coverage on Linux only. Rewrite the sentence in place; do not append a second
       one beside it
-- [ ] 3.3 CHANGE: Add in `AGENTS.md`: "Current repo state" → important files (audience:
+- [x] 3.3 CHANGE: Add in `AGENTS.md`: "Current repo state" → important files (audience:
       agents) — one line for `.github/workflows/ci.yml`, matching the existing
       one-line-per-file form. The list is the map agents use to orient; a workflow absent
       from it gets edited without being found
-- [ ] 3.4 CHANGE: Add in `README.md`: the status badge under the title (audience: anyone
+- [x] 3.4 CHANGE: Add in `README.md`: the status badge under the title (audience: anyone
       landing on the repository) — image
       `https://github.com/optioni/herdr-openspec/actions/workflows/ci.yml/badge.svg`
       linking to
       `https://github.com/optioni/herdr-openspec/actions/workflows/ci.yml`. Two lines
       including the blank one. It will show "no status" until the first run, which is
       correct and expected
-- [ ] 3.5 VERIFY: Confirm no rule was added to `AGENTS.md` that the code already states,
+- [x] 3.5 VERIFY: Confirm no rule was added to `AGENTS.md` that the code already states,
       and that the net effect on `AGENTS.md` is roughly one rewritten sentence plus one
       file-list line. If it is more, something is being narrated rather than documented
 

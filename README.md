@@ -1,5 +1,7 @@
 # herdr-openspec
 
+[![CI](https://github.com/optioni/herdr-openspec/actions/workflows/ci.yml/badge.svg)](https://github.com/optioni/herdr-openspec/actions/workflows/ci.yml)
+
 A [Herdr](https://herdr.dev) plugin that puts a read-only OpenSpec dashboard in a
 pane next to your agents.
 
