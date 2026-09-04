@@ -359,11 +359,11 @@
 ## 6. The hand-over: repoint, observe the red, then replace
 <!-- kind: behavior -->
 
-- [ ] 6.1 RED: Change `resolve::npm_prefix_deferred`'s **body** to call
+- [x] 6.1 RED: Change `resolve::npm_prefix_deferred`'s **body** to call
       `crate::cli::npm_prefix()`, keeping its name and signature for this one step. Do not
       delete it yet — deleting it outright turns the hand-over into a compile error, which
       is a red of a sort but not the observation `repo-resolution` asked for
-- [ ] 6.2 RED — the hand-over observation, and the reason this group exists: run the
+- [x] 6.2 RED — the hand-over observation, and the reason this group exists: run the
       `NPM-PATH` block from design.md → Test Strategy and record its **verbatim** output in
       this task's notes. Its precondition is **measured, not assumed**: it runs
       `$NPMBIN/npm prefix -g` itself and aborts unless that exits 0 and prints an absolute
@@ -384,12 +384,36 @@
       adjust, relax, or delete the test to make it pass** — a pinning test that will not go
       red at its own hand-over is not doing its job, and that is the finding, not the
       inconvenience
-- [ ] 6.3 GREEN: Delete `resolve::npm_prefix_deferred` entirely and change
+
+      RECORDED — precondition measured: `PRECONDITION OK: npm prefix -g -> /Users/
+      juusopiikkila/.nvm/versions/node/v24.20.0`.
+
+      RECORDED — WITH `$NPMBIN` on `PATH` (expected FAILURE, verbatim):
+      ```
+      test resolve::tests::the_shipped_hook_yields_no_prefix ... FAILED
+      thread 'resolve::tests::the_shipped_hook_yields_no_prefix' panicked at
+      src/resolve.rs:1209:9:
+      assertion `left == right` failed: this is expected to go RED the day
+      subprocess-seam wires npm prefix -g through this hook — that failure is the
+      intended hand-over signal, not a regression
+        left: Some("/Users/juusopiikkila/.nvm/versions/node/v24.20.0")
+       right: None
+      test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 294 filtered out
+      ```
+      This is the hand-over signal: CONFIRMED RED, for the right reason (the hook now
+      resolves a real prefix where the test still pinned `None`), not a harness error.
+
+      RECORDED — WITHOUT `$NPMBIN` on `PATH` (informational only, verbatim):
+      `test result: ok. 1 passed; 0 failed`. Matches the design's documented reason:
+      Homebrew's `npm`/`node` on this machine are on the plain `PATH` but broken (dyld
+      error), so `npm prefix -g` there still yields nothing and the test stayed green —
+      consistent with, not contradicting, the measured-precondition red above.
+- [x] 6.3 GREEN: Delete `resolve::npm_prefix_deferred` entirely and change
       `resolve::openspec_bin_from_env` to pass `&crate::cli::npm_prefix` as its
       fourth-step hook. Delete the now-satisfied pinning test
       `the_shipped_hook_yields_no_prefix` — it was written to die here, and its epitaph
       belongs in `planning-review.md`, not in a weakened assertion
-- [ ] 6.4 GREEN: Add two successors in `src/cli.rs`.
+- [x] 6.4 GREEN: Add two successors in `src/cli.rs`.
       `the_binding_delegates_to_the_probe_rather_than_answering_for_itself` asserts
       `cli::npm_prefix()` equals `cli::npm_prefix_via(Path::new("npm"))` — machine-
       independent, and, unlike an assertion on the value alone, **red for a hardcoded
@@ -399,12 +423,14 @@
       or a path for which `is_absolute()` holds. Neither names a machine-specific value, so
       both pass where `npm` works, where it is broken, and on the no-tools `PATH` that 8.4
       runs the suite on
-- [ ] 6.5 CHECK: Confirm `src/resolve.rs` still names **no** process API at all — no
+- [x] 6.5 CHECK: Confirm `src/resolve.rs` still names **no** process API at all — no
       `std::process`, no `Command`, no `Stdio` — including in its comments, which is a
       normative requirement of the `openspec-binary` capability. Run the module-scoped
       half of `NOSPAWN-GREP`. **Red when:** the rebinding pulled a process API name into
       `resolve.rs`, in code or in a doc comment
-- [ ] 6.6 CHECK: Run the `BINDING` block from design.md → Test Strategy. Its three guards
+
+      RECORDED: `MODULE-SCOPED OK: resolve.rs names no process API`.
+- [x] 6.6 CHECK: Run the `BINDING` block from design.md → Test Strategy. Its three guards
       are the only check in this change that can tell a completed hand-over from
       `pub fn npm_prefix() -> Option<PathBuf> { None }`: (a) `src/resolve.rs` names
       `cli::npm_prefix` where the composition passes its fourth-step hook; (b) no
@@ -414,15 +440,39 @@
       would turn that into a pass. **Red when:** any of the three guards fails — and each
       is demonstrated red against a scratch copy in 8.3a, so none of them is taken on
       trust
-- [ ] 6.7 CHECK — contract gate: `resolve::npm_prefix_deferred` is a **removal** from the
+
+      RECORDED: `BINDING OK` — but not on the first attempt, and the miss is worth
+      recording. The deleted test's epitaph comment I wrote in `src/resolve.rs` quoted
+      the literal identifier `npm_prefix_deferred()` in prose, which guard (b) — "no
+      `npm_prefix_deferred` survives anywhere under `src/`" — correctly flagged:
+      `BINDING FAIL: placeholder survives: src/resolve.rs:1200`. The guard is
+      text-blind to intent, exactly as designed ("including in its comments"). Reworded
+      the comment to describe the deleted function without spelling its identifier,
+      re-ran, and got `BINDING OK`. This is the guard doing its job, not a false
+      positive — recorded rather than silently fixed.
+- [x] 6.7 CHECK — contract gate: `resolve::npm_prefix_deferred` is a **removal** from the
       crate's published surface. Confirm its only caller, `openspec_bin_from_env`, was
       updated, that no test injects it, and that the injection point itself — the
       `&dyn Fn() -> Option<PathBuf>` parameter — did not move, so every existing chain
       test is unaffected
-- [ ] 6.8 VERIFY: `cargo test --all-features` green in full — `resolve`'s chain tests,
+
+      RECORDED: only caller (`openspec_bin_from_env`) updated to pass
+      `&crate::cli::npm_prefix`; no test injects `npm_prefix_deferred` (it never existed
+      as an injectable — every chain test injects its own closure); the parameter
+      remains `npm_prefix: &dyn Fn() -> Option<PathBuf>` on both `openspec_bin` and
+      `step4_npm_prefix`, unmoved. `resolve::` suite: 41 passed, 0 failed (255 filtered
+      out of 296), confirming every existing chain test — closure-injected fourth step
+      included — is unaffected.
+- [x] 6.8 VERIFY: `cargo test --all-features` green in full — `resolve`'s chain tests,
       including the closure-driven fourth-step tests, must all still pass. **Red when:**
       removing the placeholder broke a caller, or the chain's fourth step stopped being
       injectable
+
+      RECORDED: full suite 296 passed, 0 failed (265 non-cli unit + 31 cli + 11
+      ci_workflow + 5 cli.rs binary-integration — one fewer non-cli unit test than the
+      266 baseline, since the pinning test was deleted and replaced by two cli::
+      successors already counted in the 31). `cargo clippy --all-targets --all-features
+      -- -D warnings` clean.
 
 ## 7. The end-to-end join, and proof that nothing is written
 <!-- kind: behavior -->

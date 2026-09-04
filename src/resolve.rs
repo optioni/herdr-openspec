@@ -304,19 +304,6 @@ pub fn openspec_bin(
     }
 }
 
-/// Step 4's collaborator. Needs the output of `npm prefix -g`, which requires
-/// spawning a process; no module in this crate may spawn one outside `cli`,
-/// and `cli` does not exist until `subprocess-seam`. This binding therefore
-/// returns no prefix, so step 4 contributes nothing in production and no
-/// code path here spawns anything. `subprocess-seam` replaces this binding
-/// with one that runs `npm prefix -g` behind the seam — and must read its
-/// **stdout only**, trimmed: on the reference machine `npm` writes unrelated
-/// zsh-plugin noise to stderr, and a non-zero exit or empty output means no
-/// prefix.
-pub fn npm_prefix_deferred() -> Option<PathBuf> {
-    None
-}
-
 /// A session-lifetime cache of a single `BinResolution`, owned by the
 /// caller rather than process-global: `cargo test` runs the suite in
 /// parallel threads of one process, so a `static` cache would be shared by
@@ -334,12 +321,18 @@ impl BinCache {
 }
 
 /// The single composition against the real process environment: the
-/// configured value, `config::env_lookup`, and the deferred npm hook, and
-/// nothing else — the crate's untestable residue does not grow past this
-/// one line. See `openspec/changes/repo-resolution/design.md` -> Contracts.
+/// configured value, `config::env_lookup`, and `cli`'s real npm-prefix
+/// binding, and nothing else — the crate's untestable residue does not grow
+/// past this one line. See `openspec/changes/repo-resolution/design.md` ->
+/// Contracts and `openspec/changes/subprocess-seam/design.md` for the
+/// binding itself.
 pub fn openspec_bin_from_env(config: &crate::config::Config) -> BinResolution {
     let env = crate::config::env_lookup();
-    openspec_bin(config.openspec_bin.as_deref(), &env, &npm_prefix_deferred)
+    openspec_bin(
+        config.openspec_bin.as_deref(),
+        &env,
+        &crate::cli::npm_prefix,
+    )
 }
 
 #[cfg(test)]
@@ -1206,16 +1199,14 @@ mod tests {
         assert!(result.problems.is_empty());
     }
 
-    #[test]
-    fn the_shipped_hook_yields_no_prefix() {
-        assert_eq!(
-            super::npm_prefix_deferred(),
-            None,
-            "this is expected to go RED the day subprocess-seam wires npm prefix -g \
-             through this hook — that failure is the intended hand-over signal, not \
-             a regression"
-        );
-    }
+    // `the_shipped_hook_yields_no_prefix` — `repo-resolution`'s hand-over
+    // pinning test for the placeholder step-4 hook this file used to ship
+    // — is deleted here, not weakened. Its whole purpose was to go red the
+    // day `subprocess-seam` wired that hook to a real probe. Recorded in
+    // `openspec/changes/subprocess-seam/tasks.md` task 6.2 and
+    // `planning-review.md`: with `$NPMBIN` (the nvm `npm`) on `PATH`, the
+    // test failed with `left: Some(".../nvm/versions/node/v24.20.0"),
+    // right: None` — the intended signal, observed before this deletion.
 
     // --- group 6: session cache and the one real-environment composition ---
 

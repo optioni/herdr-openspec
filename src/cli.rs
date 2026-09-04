@@ -57,7 +57,9 @@ enum RunOutcome {
         stdout: Vec<u8>,
         stderr: Vec<u8>,
     },
-    NotStarted { reason: String },
+    NotStarted {
+        reason: String,
+    },
 }
 
 /// The crate's single spawn site. Nothing else in the crate may call
@@ -335,7 +337,11 @@ impl FakeCli {
 
     /// The pairs recorded so far, in call order.
     pub(crate) fn calls(&self) -> Vec<(Program, Vec<String>)> {
-        self.state.lock().expect("fake cli mutex poisoned").calls.clone()
+        self.state
+            .lock()
+            .expect("fake cli mutex poisoned")
+            .calls
+            .clone()
     }
 
     fn respond(&self, program: Program, args: &[&str]) -> Result<String, CliError> {
@@ -420,10 +426,7 @@ mod tests {
         let result = super::OpenspecCli::run(&cli, &["list", "--json"]);
         match result {
             Err(super::CliError::Failed {
-                code,
-                stderr,
-                args,
-                ..
+                code, stderr, args, ..
             }) => {
                 assert_eq!(code, Some(3));
                 assert_eq!(stderr, "boom\n");
@@ -472,7 +475,11 @@ mod tests {
     #[test]
     fn arguments_reach_the_program_in_order_and_unaltered() {
         let scratch = ScratchDir::new();
-        let prog = script(&scratch, "prog", "for a in \"$@\"; do printf '%s\\n' \"$a\"; done\n");
+        let prog = script(
+            &scratch,
+            "prog",
+            "for a in \"$@\"; do printf '%s\\n' \"$a\"; done\n",
+        );
         let cli = super::RealOpenspecCli::new(prog);
         let result = super::OpenspecCli::run(&cli, &["list", "--json", "a b", "--", "-x"])
             .expect("should succeed");
@@ -510,16 +517,10 @@ mod tests {
         let b = script(&scratch, "b", "printf 'B'\n");
 
         let cli_a = super::RealOpenspecCli::new(a);
-        assert_eq!(
-            super::OpenspecCli::run(&cli_a, &[]),
-            Ok("A".to_string())
-        );
+        assert_eq!(super::OpenspecCli::run(&cli_a, &[]), Ok("A".to_string()));
 
         let cli_b = super::RealOpenspecCli::new(b);
-        assert_eq!(
-            super::OpenspecCli::run(&cli_b, &[]),
-            Ok("B".to_string())
-        );
+        assert_eq!(super::OpenspecCli::run(&cli_b, &[]), Ok("B".to_string()));
     }
 
     #[test]
@@ -586,9 +587,18 @@ mod tests {
         assert_eq!(
             fake.calls(),
             vec![
-                (super::Program::Openspec, vec!["status".to_string(), "--json".to_string()]),
-                (super::Program::Openspec, vec!["list".to_string(), "--json".to_string()]),
-                (super::Program::Openspec, vec!["status".to_string(), "--json".to_string()]),
+                (
+                    super::Program::Openspec,
+                    vec!["status".to_string(), "--json".to_string()]
+                ),
+                (
+                    super::Program::Openspec,
+                    vec!["list".to_string(), "--json".to_string()]
+                ),
+                (
+                    super::Program::Openspec,
+                    vec!["status".to_string(), "--json".to_string()]
+                ),
             ]
         );
     }
@@ -621,7 +631,9 @@ mod tests {
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             super::HerdrCli::run(&fake, &["list", "--json"])
         }));
-        let err = result.expect_err("should have panicked rather than answering from the openspec registration");
+        let err = result.expect_err(
+            "should have panicked rather than answering from the openspec registration",
+        );
         let message = panic_message(err.as_ref());
         assert!(message.contains("list"), "message: {message}");
         assert!(
@@ -801,5 +813,34 @@ mod tests {
         assert!(!missing.exists());
         let result = super::npm_prefix_via(&missing);
         assert_eq!(result, None);
+    }
+
+    // --- group 6: the hand-over's two successor tests -----------------------
+
+    #[test]
+    fn the_binding_delegates_to_the_probe_rather_than_answering_for_itself() {
+        // Machine-independent, and — unlike an assertion on the value
+        // alone — red for a hardcoded `None` body wherever a working `npm`
+        // exists: `npm_prefix()`'s own body is exactly `npm_prefix_via(Path::new("npm"))`,
+        // so the two calls must agree regardless of what `npm` (if any) is
+        // actually on this machine's `PATH`.
+        assert_eq!(
+            super::npm_prefix(),
+            super::npm_prefix_via(std::path::Path::new("npm"))
+        );
+    }
+
+    #[test]
+    fn the_binding_yields_either_nothing_or_an_absolute_path() {
+        // Names no machine-specific value, so it passes with npm installed,
+        // with npm broken, and on the no-tools PATH task 8.4 runs the suite
+        // on.
+        match super::npm_prefix() {
+            None => {}
+            Some(path) => assert!(
+                path.is_absolute(),
+                "expected an absolute path or nothing, got {path:?}"
+            ),
+        }
     }
 }
