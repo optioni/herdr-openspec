@@ -286,7 +286,12 @@ fn gate_commands_are_defined_only_in_the_makefile() {
     let phony = phony_targets(&makefile);
 
     for line in content.lines() {
+        // A `run:` or `env:` key can open either a mapping entry (`  run: ...`) or a
+        // YAML sequence item (`  - run: ...`, `- uses: ...` already occurs in this
+        // workflow) — strip a leading `- ` before matching either key so the guard
+        // cannot be defeated by writing the second, equally legal form.
         let trimmed = line.trim_start();
+        let trimmed = trimmed.strip_prefix("- ").unwrap_or(trimmed);
         if let Some(rest) = trimmed.strip_prefix("run: ") {
             let rest = rest.trim();
             assert!(
@@ -304,8 +309,11 @@ fn gate_commands_are_defined_only_in_the_makefile() {
                 "run: step invokes undeclared Makefile target `{target}`"
             );
         }
-        assert_ne!(
-            trimmed, "env:",
+        // Matches both the block form (`env:` alone) and a flow-style mapping on the
+        // same line (`env: {RUSTFLAGS: "-A warnings"}`) — either neuters a gate
+        // without touching any `run:` body.
+        assert!(
+            !trimmed.starts_with("env:"),
             "workflow must declare no `env:` mapping: line `{line}`"
         );
     }
@@ -364,6 +372,7 @@ fn parser_preconditions_hold() {
 
     for line in &lines {
         let trimmed = line.trim_start();
+        let trimmed = trimmed.strip_prefix("- ").unwrap_or(trimmed);
         assert!(
             !trimmed.starts_with("run: |") && !trimmed.starts_with("run: >"),
             "block-scalar `run:` found: {line}"
