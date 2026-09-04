@@ -513,26 +513,26 @@ not vendored leaves the artifact list empty", "A wildcard inside a directory seg
 unsupported" (the recorded-problem half), and "A `**` that is not the last directory segment is
 unsupported" (the sibling-artifacts half).
 
-- [ ] 8.1 RED: Write failing unit tests for `from_files(repo, archived_count) -> ChangeSet`,
+- [x] 8.1 RED: Write failing unit tests for `from_files(repo, archived_count) -> ChangeSet`,
       one per scenario above, each building a complete scratch repository — `openspec/`,
       `openspec/config.yaml`, `openspec/schemas/tdd/schema.yaml`, `openspec/changes/`, and an
       `archive/` — with a small helper that writes a minimal vendored schema so each test
       states only what it varies. Pass `testutil::canonical(scratch.path())` in as the root
-- [ ] 8.2 RED: Write the headline test as a whole-value `assert_eq!` against a constructed
+- [x] 8.2 RED: Write the headline test as a whole-value `assert_eq!` against a constructed
       `Change`, not a field-by-field walk, so a field the composition forgets to fill is
       caught by the same assertion that checks the ones it fills
-- [ ] 8.3 RED: Write the two-schema test with **both** schemas vendored and with artifact
+- [x] 8.3 RED: Write the two-schema test with **both** schemas vendored and with artifact
       lists that differ, asserting each change's `schema` **and** that their `artifacts` ids
       differ. A `schema`-name-only assertion passes for an implementation that resolves the
       name per change and then loads one schema for the whole repository
-- [ ] 8.4 RED: Write the remaining composition tests: the "same name active and archived" pair
+- [x] 8.4 RED: Write the remaining composition tests: the "same name active and archived" pair
       (two distinct values in two lists with different `dir` values, neither list filtering the
       other); the "read twice, even after a touch" test, which advances an unrelated file's
       modification time between the two reads and still asserts `==`, so a `lastModified` field
       would fail it where a plain double read of an untouched tree would not; and the
       conformance sweep, passing every `Change` from a five-change repository through
       `conformance::assert_invariants`
-- [ ] 8.5 RED: Write the two degraded-composition tests. All-three-failures: an unreadable
+- [x] 8.5 RED: Write the two degraded-composition tests. All-three-failures: an unreadable
       `archive/`, one change declaring an unvendored schema, and another whose `tasks.md` is a
       directory — asserting both active changes are present and each problem appears **exactly
       once** at the right level; a test asserting only "some problem exists" passes for an
@@ -540,13 +540,13 @@ unsupported" (the sibling-artifacts half).
       vendored probe schema whose `specs` artifact generates `specs/*/spec.md`, asserting the
       change records one problem naming that artifact while its other artifacts still resolve
       normally
-- [ ] 8.6 RED: Write the whole-repository containment test. Take a `testutil::snapshot` of a
+- [x] 8.6 RED: Write the whole-repository containment test. Take a `testutil::snapshot` of a
       complete scratch repository, run `from_files` three times, snapshot again, and assert
       equality. Additionally assert that `openspec/changes/archive/` still does not exist for
       a repository that had none, and that no `tasks.md` was created in any change directory
       that lacked one. Labelled `RED` for the reason 6.5 gives: "this code writes nothing" is a
       behaviour, and this test fails both before `from_files` exists and after it starts writing
-- [ ] 8.7 GREEN: Implement `from_files`: read `<repo>/openspec/config.yaml` **once** with
+- [x] 8.7 GREEN: Implement `from_files`: read `<repo>/openspec/config.yaml` **once** with
       `schema::read_file`; list active and archived directories with group 7's functions; for
       each change read its `.openspec.yaml`, call `schema::declared_name`, look the resolved
       name up in a call-local `HashMap` cache and `schema::load` it on a miss; build the
@@ -555,22 +555,39 @@ unsupported" (the sibling-artifacts half).
       update. Order the selection problems before the load problems before the artifact
       problems before the task problems, matching `schema::resolve`'s existing rule that a
       composition never rebuilds a problem list from its last step alone
-- [ ] 8.8 CHECK: Persistence gate. Confirm the two caches introduced here — the project config
+- [x] 8.8 CHECK: Persistence gate. Confirm the two caches introduced here — the project config
       text and the schema map — are both local to the `from_files` call and that no `static`,
       `OnceLock`, or `lazy` value was added anywhere in `src/changes.rs`. Record that no
       migration, backfill, index rebuild, or cross-call cache invalidation applies, as
       design.md → Persistence and Rollout states per item. Run this **after** 8.7's GREEN, so
       a cache introduced by the very code it inspects is something it can see
-- [ ] 8.9 CHECK: Contract gate. Re-read design.md → Contracts and confirm the complete public
+
+      `grep -n 'static\|OnceLock\|lazy' src/changes.rs` — no match. `project_config_text`
+      is a local `crate::schema::FileText` and `schema_cache` is a local
+      `HashMap<String, CachedSchemaLoad>`, both owned by `from_files`'s stack frame and
+      passed down by reference; neither survives the call. No migration, backfill, index
+      rebuild, or cross-call invalidation applies — confirmed per design.md → Persistence
+      and Rollout.
+- [x] 8.9 CHECK: Contract gate. Re-read design.md → Contracts and confirm the complete public
       surface matches: `from_files`'s signature, the four public types, and the two
       obligations recorded for `changes-from-cli` — that it joins the artifact lists by
       **position** rather than by path or by id, and that it re-sorts the active list by name.
       Confirm no `pub fn` was added that no scenario reaches, since an uncovered public
       function is a coverage cost with no caller
-- [ ] 8.10 REFACTOR: Collapse any duplication between the active and archived per-change paths
+
+      `grep -n '^pub fn\|^pub struct\|^pub enum' src/changes.rs` shows exactly `Origin`,
+      `ArtifactRef`, `Change`, `ChangeSet`, and `from_files(repo: &Path, archived_count: usize) -> ChangeSet`
+      — nothing else public. The two `changes-from-cli` obligations (position-based join,
+      re-sort by name) are recorded in this module's doc comments and in design.md →
+      Contracts, not yet exercised since `from_cli` does not exist until Phase 3.
+- [x] 8.10 REFACTOR: Collapse any duplication between the active and archived per-change paths
       into one function taking the origin, so an artifact rule cannot come to differ between an
       active change and an archived one, keeping tests green
-- [ ] 8.11 Run the whole suite — `cargo test --all-features` — and confirm no regressions in
+
+      Already collapsed in 8.7's GREEN: `build_change` takes `origin: Origin` and is the one
+      function `from_files` calls for every active and every archived directory; no
+      refactor step introduced further duplication to remove.
+- [x] 8.11 Run the whole suite — `cargo test --all-features` — and confirm no regressions in
       `config`, `state`, `resolve`, `schema`, or `tasks`
 
 ## 9. Invariants that are commands, not tests

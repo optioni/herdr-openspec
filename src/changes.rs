@@ -584,6 +584,165 @@ pub(crate) fn list_changes(
     (active, archived, problems)
 }
 
+/// The human-readable problem a `schema::LoadError` renders as. Mirrors
+/// `schema::load_error_problem`'s wording — private to that module, so this
+/// change reproduces the shape rather than exporting it, since `schema` is
+/// consumed unchanged (design.md -> Boundaries).
+fn schema_load_problem(err: &crate::schema::LoadError) -> String {
+    match err {
+        crate::schema::LoadError::NotVendored { path } => {
+            format!("{} is not vendored: no schema.yaml there", path.display())
+        }
+        crate::schema::LoadError::Unreadable { path, reason } => {
+            format!("{} could not be read: {reason}", path.display())
+        }
+        crate::schema::LoadError::Invalid { path, reason } => {
+            format!("{} is not a usable schema: {reason}", path.display())
+        }
+    }
+}
+
+/// One schema, loaded at most once per name per `from_files` call: the
+/// schema itself (`None` when it did not load) and every problem loading it
+/// produced — a `parse`-level per-entry problem on success, or the one
+/// rendered `LoadError` message on failure.
+struct CachedSchemaLoad {
+    schema: Option<crate::schema::Schema>,
+    problems: Vec<String>,
+}
+
+/// Look `name` up in `cache`, loading it from `repo` on a miss. The cache is
+/// a plain `HashMap` owned by one `from_files` call, never a `static` —
+/// `resolve::BinCache`'s reason: the suite runs the crate's tests in
+/// parallel threads of one process, and a process-global cache would let
+/// the first test decide the answer for every other.
+fn load_schema_cached<'a>(
+    repo: &std::path::Path,
+    name: &str,
+    cache: &'a mut std::collections::HashMap<String, CachedSchemaLoad>,
+) -> &'a CachedSchemaLoad {
+    cache
+        .entry(name.to_string())
+        .or_insert_with(|| match crate::schema::load(repo, name) {
+            Ok(parsed) => CachedSchemaLoad {
+                schema: Some(parsed.schema),
+                problems: parsed.problems,
+            },
+            Err(err) => CachedSchemaLoad {
+                schema: None,
+                problems: vec![schema_load_problem(&err)],
+            },
+        })
+}
+
+/// Build one `Change` from a directory already known to be active or
+/// archived: select and load its schema (through the per-call cache),
+/// resolve its artifacts, and count its tasks — applying the CLI's fallback
+/// through `change_progress` even when the schema failed to load, so a
+/// change with an unvendored schema still reports a real progress pair
+/// rather than `0/0`. Problems accumulate in the order `schema::resolve`
+/// already establishes: selection, then load, then artifacts, then tasks.
+#[allow(clippy::too_many_arguments)]
+fn build_change(
+    repo: &std::path::Path,
+    dir: &std::path::Path,
+    name: &str,
+    origin: Origin,
+    project_config_path: &std::path::Path,
+    project_config_text: &crate::schema::FileText,
+    schema_cache: &mut std::collections::HashMap<String, CachedSchemaLoad>,
+) -> Change {
+    let change_config_path = dir.join(".openspec.yaml");
+    let change_config_text = crate::schema::read_file(&change_config_path);
+
+    let selection = crate::schema::declared_name(
+        Some((change_config_path.as_path(), &change_config_text)),
+        (project_config_path, project_config_text),
+    );
+
+    let mut problems = selection.problems;
+
+    let cached = load_schema_cached(repo, &selection.name, schema_cache);
+    problems.extend(cached.problems.iter().cloned());
+
+    let (artifacts, artifact_problems) = match &cached.schema {
+        Some(schema) => change_artifacts(dir, schema),
+        None => (Vec::new(), Vec::new()),
+    };
+    problems.extend(artifact_problems);
+
+    let tasks_artifact = cached
+        .schema
+        .as_ref()
+        .and_then(|schema| schema.tasks.as_ref());
+    let (progress, task_problems) = change_progress(dir, tasks_artifact);
+    problems.extend(task_problems);
+
+    Change {
+        name: name.to_string(),
+        dir: dir.to_path_buf(),
+        origin,
+        schema: selection.name,
+        artifacts,
+        progress,
+        problems,
+    }
+}
+
+/// Paint the pane from disk: every active change under
+/// `<repo>/openspec/changes/`, the `archived_count` most recent archived
+/// changes under its `archive/`, and every problem recorded along the way.
+/// Total — never a `Result`, never panics, never `unwrap`s. `openspec/config.yaml`
+/// is read once and reused for every change; schemas are cached by name for
+/// the duration of this one call. See
+/// `openspec/changes/changes-from-files/design.md` for the full contract.
+pub fn from_files(repo: &std::path::Path, archived_count: usize) -> ChangeSet {
+    let project_config_path = repo.join("openspec").join("config.yaml");
+    let project_config_text = crate::schema::read_file(&project_config_path);
+
+    let (active_names, archived_list, problems) = list_changes(repo, archived_count);
+
+    let mut schema_cache: std::collections::HashMap<String, CachedSchemaLoad> =
+        std::collections::HashMap::new();
+
+    let active = active_names
+        .into_iter()
+        .map(|name| {
+            let dir = repo.join("openspec").join("changes").join(&name);
+            build_change(
+                repo,
+                &dir,
+                &name,
+                Origin::Active,
+                &project_config_path,
+                &project_config_text,
+                &mut schema_cache,
+            )
+        })
+        .collect();
+
+    let archived = archived_list
+        .into_iter()
+        .map(|entry| {
+            build_change(
+                repo,
+                &entry.dir,
+                &entry.name,
+                Origin::Archived { date: entry.date },
+                &project_config_path,
+                &project_config_text,
+                &mut schema_cache,
+            )
+        })
+        .collect();
+
+    ChangeSet {
+        active,
+        archived,
+        problems,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::conformance::assert_invariants;
@@ -1712,5 +1871,406 @@ mod tests {
                 .join("openspec/changes/archive-was-never-here")
                 .exists()
         );
+    }
+
+    // --- group 8: `from_files`, the composition and its degraded states ---
+
+    /// A minimal vendored schema at `<repo>/openspec/schemas/<name>/schema.yaml`.
+    fn vendor_schema(repo: &std::path::Path, name: &str, artifacts: &[(&str, &str)]) {
+        let mut yaml = format!("name: {name}\nartifacts:\n");
+        for (id, generates) in artifacts {
+            yaml.push_str(&format!("  - id: {id}\n    generates: {generates}\n"));
+        }
+        write(
+            &repo.join("openspec/schemas").join(name).join("schema.yaml"),
+            &yaml,
+        );
+    }
+
+    fn write_project_config(repo: &std::path::Path, schema: &str) {
+        write(
+            &repo.join("openspec/config.yaml"),
+            &format!("schema: {schema}\n"),
+        );
+    }
+
+    const TDD_ARTIFACTS: &[(&str, &str)] = &[
+        ("proposal", "proposal.md"),
+        ("specs", "specs/**/*.md"),
+        ("design", "design.md"),
+        ("tasks", "tasks.md"),
+        ("planning-review", "planning-review.md"),
+    ];
+
+    #[test]
+    fn a_fully_written_active_change_becomes_one_value() {
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+        write_project_config(&repo, "tdd");
+        write(
+            &repo.join("openspec/changes/add-auth/.openspec.yaml"),
+            "schema: tdd\n",
+        );
+        write(&repo.join("openspec/changes/add-auth/proposal.md"), "# P\n");
+        write(&repo.join("openspec/changes/add-auth/design.md"), "# D\n");
+        write(
+            &repo.join("openspec/changes/add-auth/tasks.md"),
+            "- [x] a\n- [x] b\n- [x] c\n- [x] d\n- [ ] e\n- [ ] f\n- [ ] g\n- [ ] h\n- [ ] i\n",
+        );
+
+        let set = from_files(&repo, 5);
+        assert_eq!(set.active.len(), 1);
+        let change = &set.active[0];
+        assert_eq!(
+            change,
+            &Change {
+                name: "add-auth".to_string(),
+                dir: repo.join("openspec/changes/add-auth"),
+                origin: Origin::Active,
+                schema: "tdd".to_string(),
+                artifacts: vec![
+                    ArtifactRef {
+                        id: "proposal".to_string(),
+                        paths: vec![repo.join("openspec/changes/add-auth/proposal.md")],
+                    },
+                    ArtifactRef {
+                        id: "specs".to_string(),
+                        paths: vec![],
+                    },
+                    ArtifactRef {
+                        id: "design".to_string(),
+                        paths: vec![repo.join("openspec/changes/add-auth/design.md")],
+                    },
+                    ArtifactRef {
+                        id: "tasks".to_string(),
+                        paths: vec![repo.join("openspec/changes/add-auth/tasks.md")],
+                    },
+                    ArtifactRef {
+                        id: "planning-review".to_string(),
+                        paths: vec![],
+                    },
+                ],
+                progress: crate::tasks::Progress {
+                    completed: 4,
+                    total: 9,
+                },
+                problems: vec![],
+            }
+        );
+        assert!(set.archived.is_empty());
+        assert!(set.problems.is_empty());
+        assert_invariants(change);
+    }
+
+    #[test]
+    fn an_archived_change_carries_the_date_split_off_its_directory_name() {
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+        write_project_config(&repo, "tdd");
+        write(
+            &repo.join("openspec/changes/archive/2026-08-14-add-auth/tasks.md"),
+            "- [x] a\n- [x] b\n- [x] c\n",
+        );
+
+        let set = from_files(&repo, 5);
+        assert!(set.active.is_empty());
+        assert_eq!(set.archived.len(), 1);
+        let change = &set.archived[0];
+        assert_eq!(change.name, "add-auth");
+        assert_eq!(
+            change.origin,
+            Origin::Archived {
+                date: Some("2026-08-14".to_string())
+            }
+        );
+        assert_eq!(
+            change.dir,
+            repo.join("openspec/changes/archive/2026-08-14-add-auth")
+        );
+        assert_eq!(
+            change.progress,
+            crate::tasks::Progress {
+                completed: 3,
+                total: 3
+            }
+        );
+        assert!(change.progress.is_complete());
+        assert_invariants(change);
+    }
+
+    #[test]
+    fn a_change_whose_schema_did_not_load_is_still_a_complete_value() {
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        // No `openspec/schemas/outside-in-tdd/` vendored at all.
+        write(
+            &repo.join("openspec/changes/learning-tool/.openspec.yaml"),
+            "schema: outside-in-tdd\n",
+        );
+        write(
+            &repo.join("openspec/changes/learning-tool/tasks.md"),
+            "- [x] a\n- [x] b\n- [ ] c\n",
+        );
+
+        let set = from_files(&repo, 5);
+        assert_eq!(set.active.len(), 1);
+        let change = &set.active[0];
+        assert_eq!(change.schema, "outside-in-tdd");
+        assert!(change.artifacts.is_empty());
+        assert_eq!(
+            change.progress,
+            crate::tasks::Progress {
+                completed: 2,
+                total: 3
+            }
+        );
+        assert_eq!(change.problems.len(), 1);
+        assert!(change.problems[0].contains("outside-in-tdd"));
+        assert_invariants(change);
+    }
+
+    #[test]
+    fn the_same_repository_read_twice_produces_equal_values_even_after_a_touch() {
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+        write_project_config(&repo, "tdd");
+        write(
+            &repo.join("openspec/changes/add-auth/tasks.md"),
+            "- [ ] a\n",
+        );
+        write(&repo.join("README.md"), "# unrelated\n");
+
+        let first = from_files(&repo, 5);
+
+        // Advance an unrelated file's modification time between the two
+        // reads, deterministically rather than by sleeping past filesystem
+        // mtime granularity. A `Change` carrying a `lastModified` field
+        // could not survive this; a plain double read of an untouched tree
+        // would pass either way, so the touch is what makes the assertion
+        // mean something.
+        let readme = repo.join("README.md");
+        let current = std::fs::metadata(&readme)
+            .expect("read fixture metadata")
+            .modified()
+            .expect("modified time");
+        let advanced = current + std::time::Duration::from_secs(120);
+        let file = std::fs::File::options()
+            .write(true)
+            .open(&readme)
+            .expect("open fixture for touching");
+        file.set_modified(advanced).expect("advance mtime");
+
+        let second = from_files(&repo, 5);
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn every_value_a_producer_builds_satisfies_the_shared_invariants() {
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+        write_project_config(&repo, "tdd");
+        write(&repo.join("openspec/changes/one/tasks.md"), "- [ ] a\n");
+        write(&repo.join("openspec/changes/two/tasks.md"), "- [x] a\n");
+        write(
+            &repo.join("openspec/changes/archive/2026-01-01-three/tasks.md"),
+            "- [x] a\n",
+        );
+        write(
+            &repo.join("openspec/changes/archive/2026-01-02-four/tasks.md"),
+            "- [ ] a\n",
+        );
+        write(
+            &repo.join("openspec/changes/archive/2026-01-03-five/tasks.md"),
+            "- [x] a\n",
+        );
+
+        let set = from_files(&repo, 5);
+        assert_eq!(set.active.len(), 2);
+        assert_eq!(set.archived.len(), 3);
+        for change in set.active.iter().chain(set.archived.iter()) {
+            assert_invariants(change);
+        }
+    }
+
+    #[test]
+    fn an_archived_change_keeps_its_file_derived_values_when_the_cli_arrives() {
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+        write_project_config(&repo, "tdd");
+        write(
+            &repo.join("openspec/changes/add-auth/tasks.md"),
+            "- [ ] a\n",
+        );
+        write(
+            &repo.join("openspec/changes/archive/2026-08-14-add-auth/tasks.md"),
+            "- [x] a\n",
+        );
+
+        let set = from_files(&repo, 5);
+        assert_eq!(set.active.len(), 1);
+        assert_eq!(set.archived.len(), 1);
+        assert_eq!(set.active[0].name, "add-auth");
+        assert_eq!(set.archived[0].name, "add-auth");
+        assert_ne!(set.active[0].dir, set.archived[0].dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_repository_level_failure_is_recorded_on_the_set_not_on_a_change() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+
+        let (paths, problem) = resolve_artifact(&repo, "notes.md");
+        assert!(paths.is_empty());
+        assert_eq!(problem, None);
+
+        let archive_dir = repo.join("openspec/changes/archive");
+        mkdir(&archive_dir);
+
+        std::fs::set_permissions(&archive_dir, std::fs::Permissions::from_mode(0o000))
+            .expect("set archive/ unreadable");
+        let set = from_files(&repo, 5);
+        std::fs::set_permissions(&archive_dir, std::fs::Permissions::from_mode(0o755))
+            .expect("restore archive/ permissions");
+
+        assert!(set.active.is_empty());
+        assert!(set.archived.is_empty());
+        assert_eq!(set.problems.len(), 1);
+        assert!(set.problems[0].contains(&archive_dir.display().to_string()));
+    }
+
+    #[test]
+    fn every_degradation_lands_on_a_problems_list_rather_than_in_a_return_type() {
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+        write_project_config(&repo, "tdd");
+        write(
+            &repo.join("openspec/changes/unvendored/.openspec.yaml"),
+            "schema: not-vendored\n",
+        );
+        mkdir(&repo.join("openspec/changes/directory-tasks/tasks.md"));
+
+        let set = from_files(&repo, 5);
+        assert_eq!(set.active.len(), 2);
+
+        let unvendored = set
+            .active
+            .iter()
+            .find(|c| c.name == "unvendored")
+            .expect("unvendored change present");
+        assert_eq!(unvendored.problems.len(), 1);
+        assert!(unvendored.problems[0].contains("not-vendored"));
+
+        let directory_tasks = set
+            .active
+            .iter()
+            .find(|c| c.name == "directory-tasks")
+            .expect("directory-tasks change present");
+        assert_eq!(directory_tasks.problems.len(), 1);
+        assert!(
+            directory_tasks.problems[0].contains(
+                &repo
+                    .join("openspec/changes/directory-tasks/tasks.md")
+                    .display()
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn the_whole_repository_is_byte_identical_after_from_files() {
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+        write_project_config(&repo, "tdd");
+        write(&repo.join("openspec/changes/one/proposal.md"), "# P\n");
+
+        let before = snapshot(&repo);
+        let _ = from_files(&repo, 5);
+        let _ = from_files(&repo, 5);
+        let _ = from_files(&repo, 5);
+        let after = snapshot(&repo);
+        assert_eq!(before, after);
+        assert!(!repo.join("openspec/changes/archive").exists());
+        assert!(!repo.join("openspec/changes/one/tasks.md").exists());
+    }
+
+    #[test]
+    fn a_changes_own_declaration_wins_over_the_projects_in_from_files() {
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+        vendor_schema(
+            &repo,
+            "probe",
+            &[("notes", "notes.md"), ("plan", "plan.md")],
+        );
+        write_project_config(&repo, "tdd");
+        write(&repo.join("openspec/changes/a/tasks.md"), "- [ ] a\n");
+        write(
+            &repo.join("openspec/changes/b/.openspec.yaml"),
+            "schema: probe\n",
+        );
+        write(&repo.join("openspec/changes/b/tasks.md"), "- [ ] a\n");
+
+        let set = from_files(&repo, 5);
+        let a = set.active.iter().find(|c| c.name == "a").unwrap();
+        let b = set.active.iter().find(|c| c.name == "b").unwrap();
+        assert_eq!(a.schema, "tdd");
+        assert_eq!(b.schema, "probe");
+        let a_ids: Vec<&str> = a.artifacts.iter().map(|r| r.id.as_str()).collect();
+        let b_ids: Vec<&str> = b.artifacts.iter().map(|r| r.id.as_str()).collect();
+        assert_ne!(a_ids, b_ids);
+    }
+
+    #[test]
+    fn a_repository_declaring_no_schema_falls_back_to_the_default() {
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+        write(&repo.join("openspec/changes/a/tasks.md"), "- [ ] a\n");
+
+        let set = from_files(&repo, 5);
+        let change = &set.active[0];
+        assert_eq!(change.schema, crate::schema::DEFAULT_SCHEMA);
+        assert!(change.artifacts.is_empty());
+        assert_eq!(change.problems.len(), 1);
+    }
+
+    #[test]
+    fn an_unsupported_glob_shape_records_one_problem_while_siblings_still_resolve() {
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        vendor_schema(
+            &repo,
+            "probe",
+            &[
+                ("specs", "specs/*/spec.md"),
+                ("proposal", "proposal.md"),
+                ("tasks", "tasks.md"),
+            ],
+        );
+        write_project_config(&repo, "probe");
+        write(&repo.join("openspec/changes/a/proposal.md"), "# P\n");
+        write(&repo.join("openspec/changes/a/specs/zeta/spec.md"), "# Z\n");
+
+        let set = from_files(&repo, 5);
+        let change = &set.active[0];
+        assert_eq!(change.problems.len(), 1);
+        assert!(change.problems[0].contains("specs"));
+        let proposal = change
+            .artifacts
+            .iter()
+            .find(|r| r.id == "proposal")
+            .unwrap();
+        assert_eq!(proposal.paths.len(), 1);
     }
 }
