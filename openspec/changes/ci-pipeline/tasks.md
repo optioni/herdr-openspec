@@ -33,18 +33,18 @@ workflow on disk — is this group's deterministic failing check. Splitting them
 the failing check in one group and the file that satisfies it in another, or else mean
 writing the workflow first and then a guard that passes on arrival, which proves nothing.
 
-- [ ] 1.1 CHECK: Confirm the starting state — `ls .github` reports no such directory,
+- [x] 1.1 CHECK: Confirm the starting state — `ls .github` reports no such directory,
       `cargo test --all-features` is green with 11 tests and says nothing about CI, and
       `make check` exits 0 at HEAD. Record the pre-change test count; group 5 compares
       against it
-- [ ] 1.2 CHECK: Confirm the one-off Tier B tooling is present — `actionlint --version`,
+- [x] 1.2 CHECK: Confirm the one-off Tier B tooling is present — `actionlint --version`,
       `yamllint --version`, `ruby -ryaml -e 'puts Psych::VERSION'`, and `docker info`.
       The first three were present when this change was planned (actionlint 1.7.12,
       yamllint 1.38.0, Ruby 3.3.10); Docker was installed but its daemon state was not
       checked. If one is missing or the daemon is down, record that and say which Tier B
       checks were not run rather than marking them passed. None of the four is a gate and
       none may become one — see design.md → D9
-- [ ] 1.3 CHANGE: Add `tests/ci_workflow.rs` — a std-only integration test reading
+- [x] 1.3 CHANGE: Add `tests/ci_workflow.rs` — a std-only integration test reading
       `.github/workflows/ci.yml`, the `.github/workflows/` directory, and `Makefile`
       through `env!("CARGO_MANIFEST_DIR")`, so it is independent of the working
       directory. Give it a section splitter: locate the column-0 `jobs:` line, then treat
@@ -65,7 +65,7 @@ writing the workflow first and then a guard that passes on arrival, which proves
       `parser_preconditions_hold`,
       `ci_yml_is_the_only_workflow_file`. Their assertions are specified row by row in
       design.md → Test Strategy → Verification matrix; implement those and nothing more
-- [ ] 1.4 CHANGE: Match `if:` as a YAML key inside
+- [x] 1.4 CHANGE: Match `if:` as a YAML key inside
       `no_gate_step_can_be_skipped_or_ignored` — a line whose trimmed form starts with
       `if:` or `- if:` — never as a substring. `save-if:` (both compiling jobs) and
       `cancel-in-progress:` (top level) must not match, or the guard reddens against the
@@ -73,7 +73,7 @@ writing the workflow first and then a guard that passes on arrival, which proves
       Apply the same discipline to trigger keys in
       `pull_requests_and_main_pushes_both_trigger_the_workflow`: match `pull_request` as
       a key, since it is a prefix of `pull_request_target`
-- [ ] 1.5 CHANGE: Make `parser_preconditions_hold` genuinely load-bearing — it asserts
+- [x] 1.5 CHANGE: Make `parser_preconditions_hold` genuinely load-bearing — it asserts
       that `Makefile` contains a `.PHONY` line, that the workflow contains a column-0
       `jobs:` line, that `jobs:` is the **last** column-0 key in the file (otherwise a
       later `permissions:` or `concurrency:` moved below it folds silently into the last
@@ -81,14 +81,14 @@ writing the workflow first and then a guard that passes on arrival, which proves
       block-scalar `run:` (`run: |` or `run: >`) exists. Without it the other ten can
       pass vacuously against a reformatted file, which is the standing risk of a
       line-oriented parser (design.md → D3)
-- [ ] 1.6 CHECK: Confirm the guard fails for the right reason — `cargo test
+- [x] 1.6 CHECK: Confirm the guard fails for the right reason — `cargo test
       --all-features` reports the eleven new tests failing because
       `.github/workflows/ci.yml` does not exist, not because of a compile error or a
       panic inside the splitter. A file-not-found failure with a message naming the path
       is the expected shape; make the read report the path it tried. Note that this one
       cause covers all eleven and proves nothing about any individual assertion — task
       1.9 is what does that
-- [ ] 1.7 CHANGE: Add `.github/workflows/ci.yml`. `name: CI`. Triggers: `push` with
+- [x] 1.7 CHANGE: Add `.github/workflows/ci.yml`. `name: CI`. Triggers: `push` with
       `branches: [main]`, `pull_request`, `workflow_dispatch`, and nothing else — no
       `paths:` and no `paths-ignore:` on any of them. Top-level
       `permissions: contents: read`. `concurrency` with
@@ -117,7 +117,7 @@ writing the workflow first and then a guard that passes on arrival, which proves
       anywhere. No `make check`. No `continue-on-error`. All four action refs were
       confirmed to resolve with `git ls-remote` while planning (design.md → D6); do not
       substitute a different major version without re-confirming
-- [ ] 1.8 VERIFY: `cargo test --all-features` — the eleven guard tests now pass and the
+- [x] 1.8 VERIFY: `cargo test --all-features` — the eleven guard tests now pass and the
       11 pre-existing tests still pass. This closes the Tier A rows for nineteen of the
       spec's twenty-three scenarios: "`ci.yml` is the repository's only workflow", "The
       workflow declares its three triggers and filters no paths", "The matrix names both
@@ -137,7 +137,7 @@ writing the workflow first and then a guard that passes on arrival, which proves
       "Each compiling job caches, and coverage caches under its own key" — are closed by
       1.11, and three of them are untested by design because their wrong values fail
       loudly
-- [ ] 1.9 VERIFY: Prove each guard can actually fail. For at least these seven, copy the
+- [x] 1.9 VERIFY: Prove each guard can actually fail. For at least these seven, copy the
       workflow aside, break it, re-run the single test, confirm red, restore from the
       copy: change `make test` to `cargo test --all-features`
       (`gate_commands_are_defined_only_in_the_makefile`); add `continue-on-error: true`
@@ -155,11 +155,11 @@ writing the workflow first and then a guard that passes on arrival, which proves
       `git checkout --` — group 1 may not be committed yet and a revert would destroy the
       workflow along with the injected damage. A guard that stays green under its own
       break is green by construction and must be fixed, not accepted
-- [ ] 1.10 VERIFY: `actionlint .github/workflows/ci.yml` — 0 findings; and
+- [x] 1.10 VERIFY: `actionlint .github/workflows/ci.yml` — 0 findings; and
       `yamllint .github/workflows/ci.yml` — no errors (a line-length or document-start
       warning under yamllint's default profile is acceptable and should be recorded, not
       silenced by adding config). Tier B rows for "*(whole file)*"
-- [ ] 1.11 VERIFY: Structural assertions with `ruby -ryaml` (stdlib Psych — do not add a
+- [x] 1.11 VERIFY: Structural assertions with `ruby -ryaml` (stdlib Psych — do not add a
       crate dependency for this, see design.md → D3). Start from
       `ruby -ryaml -e 'd = YAML.load_file(".github/workflows/ci.yml"); ...'` and assert:
       - `d["name"] == "CI"` — the requirement's one SHALL that no committed guard covers
@@ -195,37 +195,37 @@ writing the workflow first and then a guard that passes on arrival, which proves
       per job", "Each compiling job caches, and coverage caches under its own key",
       "Permissions are read-only and no secret is referenced", and the `save-if` half of
       "A pull request from a fork runs the same gates"
-- [ ] 1.12 VERIFY: Inspection — the three gate steps in `check` are separate steps each
+- [x] 1.12 VERIFY: Inspection — the three gate steps in `check` are separate steps each
       carrying a `name:`, in the order `make check` composes them. Inspection row for
       "All three gates run on each runner"
-- [ ] 1.13 CHECK: Contract gate — the workflow is a second consumer of the `Makefile`'s
+- [x] 1.13 CHECK: Contract gate — the workflow is a second consumer of the `Makefile`'s
       target interface. Re-read `openspec/specs/quality-gates/spec.md` and confirm every
       target the workflow invokes (`fmt-check`, `lint`, `test`, `coverage`) is one that
       requirement declares, spelled identically, and that this change has not added,
       renamed, or removed a target. Confirm `git diff` shows the `Makefile` unmodified
-- [ ] 1.14 CHECK: Persistence gate — record that none of migration, backfill, seeding,
+- [x] 1.14 CHECK: Persistence gate — record that none of migration, backfill, seeding,
       index rebuild, or cached-read invalidation applies. The only cache is
       `Swatinem/rust-cache`'s build cache, created empty by this change and separated per
       job by the action's own `add-job-id-key` default; the `coverage` job's explicit
       `prefix-key` makes that separation legible rather than creating it. Nothing needs
       invalidating on rollout
-- [ ] 1.15 CHANGE: Remove duplication between the guard's eleven tests — section
+- [x] 1.15 CHANGE: Remove duplication between the guard's eleven tests — section
       splitting, file loading, the `.PHONY` scan and the key-anchored line match want to
       be shared helpers — while the guard tests stay green. If nothing warrants changing,
       say so here
-- [ ] 1.16 VERIFY: Run the group's gates locally on macOS, which is this machine and
+- [x] 1.16 VERIFY: Run the group's gates locally on macOS, which is this machine and
       therefore a genuine exercise of the macOS leg's commands — `make fmt-check`,
       `make lint`, `make test`, `make coverage`, each as a separate command.
       `--all-targets` means clippy lints the new test too, and `cargo fmt --all` formats
       it; expect to fix lint and format findings in the test file, not just in `src/`
-- [ ] 1.17 VERIFY: Exercise the Linux leg's commands on Linux —
+- [x] 1.17 VERIFY: Exercise the Linux leg's commands on Linux —
       `docker run --rm -v "$PWD":/w -w /w rust:1 make fmt-check lint test`. This proves
       the commands work on Linux; it proves nothing about the GitHub runner image, and
       must not be reported as if it did. `make coverage` is deliberately not run here:
       the image ships no `cargo-llvm-cov` and installing it would cost minutes to prove
       only that the tool installs. If Docker is unavailable (1.2), record that this rung
       was skipped rather than marking it passed
-- [ ] 1.18 DEFERRED (do not mark passed): The Tier C rows — that GitHub accepts and
+- [x] 1.18 DEFERRED (do not mark passed): The Tier C rows — that GitHub accepts and
       schedules the workflow, that the `coverage` job goes green with its installs
       working, that a failure on one matrix leg leaves the other running, that the
       aggregate job reports success when every job succeeds, and that a fork pull request
