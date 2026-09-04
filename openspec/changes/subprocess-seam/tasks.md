@@ -312,7 +312,7 @@
 ## 5. The npm-prefix decision and the spawning probe
 <!-- kind: behavior -->
 
-- [ ] 5.1 RED: Write failing tests named `a_trailing_newline_is_trimmed_off_the_prefix`,
+- [x] 5.1 RED: Write failing tests named `a_trailing_newline_is_trimmed_off_the_prefix`,
       `surrounding_whitespace_is_trimmed`,
       `empty_or_whitespace_only_output_is_no_prefix`,
       `a_non_zero_exit_is_no_prefix_even_with_output`,
@@ -325,25 +325,36 @@
       produce nothing. The stderr test's scratch program writes a **different, plausible**
       path to stderr, so a probe reading the wrong stream resolves the wrong path rather
       than merely failing
-- [ ] 5.2 GREEN: Add the pure decision function taking the run's success flag and the
+
+      RECORDED: RED confirmed by compile failure — `E0425: cannot find function
+      npm_prefix_from`/`npm_prefix_via` in module `super`, the right reason.
+- [x] 5.2 GREEN: Add the pure decision function taking the run's success flag and the
       stdout bytes and returning the prefix: decode lossily, trim the whole output (never
       split into lines — splitting is parsing), and return nothing on failure, on empty
       output, or on whitespace-only output. Taking only those two parameters is the
       structural proof that stderr cannot influence the result; document that
-- [ ] 5.3 GREEN: Add the spawning probe taking the npm program path explicitly, running it
+- [x] 5.3 GREEN: Add the spawning probe taking the npm program path explicitly, running it
       with exactly the arguments `prefix` and `-g` through the group-2 helper and doing
       nothing but handing the success flag and stdout bytes to the decision function.
       Parameterizing the program is what lets the end-to-end scenario in group 7 drive a
       real spawn on a machine with no `npm`, without touching `PATH` —
       `std::env::set_var` is `unsafe` in edition 2024 and races parallel tests, which
       `AGENTS.md` forbids outright
-- [ ] 5.4 GREEN: Add `pub fn npm_prefix() -> Option<PathBuf>`, the one-line binding naming
+- [x] 5.4 GREEN: Add `pub fn npm_prefix() -> Option<PathBuf>`, the one-line binding naming
       the real `npm` program, following `config::env_lookup`'s shape
-- [ ] 5.5 REFACTOR: Confirm the probe is a delegation and the decision function holds every
+- [x] 5.5 REFACTOR: Confirm the probe is a delegation and the decision function holds every
       rule, so each rule is provable without a process. If nothing needed cleaning, say so
-- [ ] 5.6 VERIFY: `testcount 'cli::' 27`, then the full suite. **Red when:** fewer than 27
+
+      RECORDED: `npm_prefix_via` is a single `match` on `spawn`'s outcome delegating
+      straight to `npm_prefix_from`; every trimming/emptiness/failure rule lives in
+      `npm_prefix_from` alone, provable with no process. Nothing needed cleaning.
+- [x] 5.6 VERIFY: `testcount 'cli::' 27`, then the full suite. **Red when:** fewer than 27
       tests match, the prefix is untrimmed, whitespace-only output yields a path, a failing
       run's output is kept, stderr reaches the result, or an unstartable program panics
+
+      RECORDED: `testcount 'cli::' 27` -> OK (29 >= 27). Full suite: 295 passed (266
+      baseline + 29 cli), 0 failed. `cargo clippy --all-targets --all-features -- -D
+      warnings` clean.
 
 ## 6. The hand-over: repoint, observe the red, then replace
 <!-- kind: behavior -->

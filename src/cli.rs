@@ -202,6 +202,50 @@ impl HerdrCli for RealHerdrCli {
     }
 }
 
+/// The pure decision behind the `npm prefix -g` probe: given the run's exit
+/// success and its stdout bytes, decide the prefix. Taking only these two
+/// parameters is the *structural* proof that stderr cannot influence the
+/// result — there is no parameter to read it from. Decodes lossily (as
+/// [`run_and_map`] does), then trims the **whole** output rather than
+/// splitting into lines — splitting would be parsing, which this module
+/// does none of. Returns nothing on failure, on empty output, or on
+/// whitespace-only output; a non-zero exit beats even plausible-looking
+/// output, so a failing run's stdout is never trusted.
+fn npm_prefix_from(success: bool, stdout: &[u8]) -> Option<PathBuf> {
+    if !success {
+        return None;
+    }
+    let decoded = String::from_utf8_lossy(stdout);
+    let trimmed = decoded.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(PathBuf::from(trimmed))
+}
+
+/// The spawning probe: start `program` with exactly the arguments `prefix`
+/// and `-g`, and hand the outcome to [`npm_prefix_from`]. Parameterizing the
+/// program (rather than hardcoding `npm`) is what lets the end-to-end
+/// scenario in group 7 drive a real spawn on a machine with no `npm`,
+/// without touching `PATH` — `std::env::set_var` is `unsafe` in edition
+/// 2024 and races parallel tests, which `AGENTS.md` forbids outright.
+pub fn npm_prefix_via(program: &Path) -> Option<PathBuf> {
+    match spawn(program, &["prefix", "-g"]) {
+        RunOutcome::Completed {
+            success, stdout, ..
+        } => npm_prefix_from(success, &stdout),
+        RunOutcome::NotStarted { .. } => None,
+    }
+}
+
+/// The one binding to the real `npm` program, following
+/// `config::env_lookup`'s shape: a one-line binding to the real world, with
+/// nothing left to assert beyond delegation. This is the production
+/// binding `resolve::openspec_bin_from_env` passes as its fourth-step hook.
+pub fn npm_prefix() -> Option<PathBuf> {
+    npm_prefix_via(Path::new("npm"))
+}
+
 /// Which program a fake invocation addressed. Recorded and keyed alongside
 /// the argument vector: one type implements both traits below, so a vector
 /// alone would let a caller that reached for the wrong handle be answered
@@ -693,5 +737,69 @@ mod tests {
         );
         assert_eq!(fake_a.calls().len(), 1);
         assert_eq!(fake_b.calls().len(), 1);
+    }
+
+    // --- group 5: the npm-prefix decision and the spawning probe -----------
+
+    #[test]
+    fn a_trailing_newline_is_trimmed_off_the_prefix() {
+        assert_eq!(
+            super::npm_prefix_from(true, b"/opt/homebrew\n"),
+            Some(std::path::PathBuf::from("/opt/homebrew"))
+        );
+    }
+
+    #[test]
+    fn surrounding_whitespace_is_trimmed() {
+        assert_eq!(
+            super::npm_prefix_from(true, b"  /usr/local  \n"),
+            Some(std::path::PathBuf::from("/usr/local"))
+        );
+    }
+
+    #[test]
+    fn empty_or_whitespace_only_output_is_no_prefix() {
+        for stdout in [b"".as_slice(), b"\n".as_slice(), b"   \t \n".as_slice()] {
+            assert_eq!(
+                super::npm_prefix_from(true, stdout),
+                None,
+                "stdout {stdout:?} should yield no prefix"
+            );
+        }
+    }
+
+    #[test]
+    fn a_non_zero_exit_is_no_prefix_even_with_output() {
+        assert_eq!(super::npm_prefix_from(false, b"/opt/homebrew\n"), None);
+    }
+
+    #[test]
+    fn invalid_utf8_on_stdout_is_decoded_lossily_and_then_trimmed() {
+        assert_eq!(
+            super::npm_prefix_from(true, &[0x2F, 0x61, 0xFF, 0x0A]),
+            Some(std::path::PathBuf::from("/a\u{FFFD}"))
+        );
+    }
+
+    #[test]
+    fn stderr_noise_does_not_reach_the_prefix() {
+        let scratch = ScratchDir::new();
+        let prog = script(
+            &scratch,
+            "npm",
+            "printf '/scratch/prefix\\n'; printf 'zsh: plugin warning\\n/wrong/prefix\\n' >&2\n",
+        );
+        let result = super::npm_prefix_via(&prog);
+        assert_eq!(result, Some(std::path::PathBuf::from("/scratch/prefix")));
+        assert!(!result.unwrap().to_string_lossy().contains("wrong"));
+    }
+
+    #[test]
+    fn a_program_that_cannot_be_started_is_no_prefix() {
+        let scratch = ScratchDir::new();
+        let missing = scratch.path().join("does-not-exist");
+        assert!(!missing.exists());
+        let result = super::npm_prefix_via(&missing);
+        assert_eq!(result, None);
     }
 }
