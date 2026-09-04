@@ -5,8 +5,13 @@
 ## Where things stand
 
 **Phases 1–3 complete; Phase 4 is two changes in.** Eleven changes implemented and
-archived. `main` is green: `make check` exits 0 at **98.14% line coverage over 18,087
-lines**, 532 tests. **28 commits ahead of `origin/main` — unpushed, by instruction.**
+archived. `main` is green: `make check` exits 0 at **98.26% line coverage over 10,493
+lines**, 532 tests. Pushed through `bf74944`.
+
+**Read coverage from the line columns, not the region columns.** `cargo llvm-cov`'s
+TOTAL row leads with regions (18,087 here) and reports lines further right (10,493).
+Two reports have quoted the region count as a line count; the numbers are not
+interchangeable and the line figure is the one the 80% floor gates on.
 
 | Phase | Changes | State |
 |---|---|---|
