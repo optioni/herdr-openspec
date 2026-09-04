@@ -952,7 +952,7 @@ needs, in the extracted copy rather than in the archive.
 ## 6. `ui::event` and `ui::driver` — the event loop
 <!-- kind: behavior -->
 
-- [ ] 6.1 RED: Create `src/ui/event.rs` (trait, `EventError`, `CrosstermEvents`) and
+- [x] 6.1 RED: Create `src/ui/event.rs` (trait, `EventError`, `CrosstermEvents`) and
       `src/ui/driver.rs` with `mod tests`, including a `Script` double that returns queued
       `Result<Option<Event>, EventError>` values, records the `timeout` of every call, and
       returns `Err(EventError("script exhausted".into()))` once empty — never `Ok(None)`
@@ -978,17 +978,38 @@ needs, in the extracted copy rather than in the archive.
         script recorded **zero** calls.
       **Red when:** `run_loop`, `LoopSummary`, `LoopError`, `EventSource`, and `EventError`
       do not exist.
+      **Recorded:** `pub mod event; pub mod driver;` added first. `src/ui/event.rs` created
+      with only a module doc comment (no types yet), and `src/ui/driver.rs` with only the
+      test module — the `Script` and `FailingBackend` doubles reference `EventSource`,
+      `EventError` (from the still-empty `event.rs`) and `run_loop`, `LoopSummary`,
+      `LoopError` (from `driver.rs` itself), none of which exist yet. Confirmed:
+      `error[E0432]: unresolved imports … no run_loop in ui::driver` and a second `no
+      EventSource in ui::event` — both production sides missing, exactly as predicted.
 
-- [ ] 6.2 GREEN: Implement `EventSource`, `EventError`, `CrosstermEvents` (poll then read,
+- [x] 6.2 GREEN: Implement `EventSource`, `EventError`, `CrosstermEvents` (poll then read,
       two lines, no branch of its own beyond the poll result), `TICK`, `LoopSummary`,
       `LoopError`, and `run_loop`: draw, count the frame, poll, count the poll, apply the
       action, break on `quit`.
+      **Recorded:** 5 of 6 tests green immediately; `route_change_shows_in_the_next_frame`
+      failed on a byte-index panic — `&row_text(buf, 1)[1..7]` sliced mid-character, since
+      column 0 is the (3-byte) `┌` border. Same hazard already worked around in group 4's
+      view tests via a char-based `cols()` helper; fixed here the same way
+      (`row_text(buf,1).chars().skip(1).take(6).collect()`). All 6 green after the fix.
 
-- [ ] 6.3 REFACTOR: If the frame/poll counters and the break condition read awkwardly,
+- [x] 6.3 REFACTOR: If the frame/poll counters and the break condition read awkwardly,
       restructure the loop body while keeping the six tests green; otherwise record that no
       refactor was needed.
+      **Recorded:** `cargo clippy --all-targets --all-features -- -D warnings` reported
+      nothing on the loop body — no restructure needed. All 6 tests stayed green.
 
-- [ ] 6.4 VERIFY: `testcount --lib 'ui::driver::tests::' 6`, then `make check`. Commit.
+- [x] 6.4 VERIFY: `testcount --lib 'ui::driver::tests::' 6`, then `make check`. Commit.
+      **Recorded:** `TESTCOUNT OK: --lib filter 'ui::driver::tests::' ran 6 tests (>= 6)`.
+      Per the 1.1 correction: `fmt-check` clean; `clippy -D warnings` clean; full suite —
+      437 lib (431 + 6) + 11 `ci_workflow` + 5-of-6 `cli` (the one known RED, unchanged);
+      `cargo llvm-cov --ignore-run-fail --fail-under-lines 80` → **98.15%** over 8,637
+      lines, 160 uncovered (`src/ui/event.rs` at 0.00% — `CrosstermEvents` is named,
+      argued-uncoverable residue, same reasoning as `CrosstermOps`), floor holds well
+      clear of 80.
 
 ---
 
