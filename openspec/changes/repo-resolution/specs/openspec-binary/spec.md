@@ -60,13 +60,19 @@ usable candidate and probing no further:
 The result SHALL report **which** step produced the binary, so that the chain's order is
 observable rather than inferred from a path that two steps could both have produced.
 
-An empty `PATH` entry SHALL be skipped rather than interpreted as the current directory:
-a plugin pane starts in a directory the user chose for other reasons, and resolving an
-executable from it is not a behaviour this plugin offers. An absent, empty, or
-whitespace-only `PATH` SHALL contribute no candidates rather than being an error.
+A `PATH` entry that is empty or whitespace-only SHALL be skipped rather than interpreted
+as the current directory: a plugin pane starts in a directory the user chose for other
+reasons, and resolving an executable from it is not a behaviour this plugin offers. An
+absent `PATH` SHALL contribute no candidates rather than being an error. Because that
+rule is invisible in the resolved path — the current directory is frequently a
+repository, whose `openspec` child is a *directory* and would be rejected for an
+unrelated reason — step 2's candidate list SHALL be observable in its own right, as a
+pure function of the `PATH` string, so the skipping is asserted rather than inferred.
 
-Within step 3, version directories SHALL be tried newest first, ordered **numerically**
-by the `MAJOR.MINOR.PATCH` triple in a leading-`v` name, so that `v10.0.0` precedes
+Within step 3, the nvm root SHALL be `NVM_DIR` when non-blank and `$HOME/.nvm`
+otherwise; when neither is available the step SHALL contribute no candidates rather than
+panicking. Version directories SHALL be tried newest first, ordered **numerically** by
+the `MAJOR.MINOR.PATCH` triple in a leading-`v` name, so that `v10.0.0` precedes
 `v9.99.99`; a directory whose name does not parse as such a version SHALL still be
 eligible, ordered after every parsed version and among its own kind by name descending.
 A version directory with no usable `bin/openspec` SHALL be skipped rather than ending
@@ -83,6 +89,8 @@ mode, not a fault.
 - **THEN** the resolved binary is `C/openspec` and its source is the configured step
 - **AND** the result would be `D/openspec` if step 1 were skipped, which is what makes
   the assertion on the reported source load-bearing
+- **AND** the reported problems are empty, because a configured path that *works* is not
+  a fallback and must not produce a message the header would render
 
 #### Scenario: `PATH` wins when nothing is configured
 
@@ -96,13 +104,18 @@ mode, not a fault.
   files
 - **THEN** the resolved binary is `A/openspec`
 
-#### Scenario: An empty `PATH` entry is not the current directory
+#### Scenario: An empty or blank `PATH` entry is not the current directory
 
-- **WHEN** `PATH` is `:D:` — a leading and a trailing empty entry around a directory `D`
-  holding an executable `openspec`
-- **THEN** the resolved binary is the absolute `D/openspec`
-- **AND** it is not the relative path `openspec`, and no candidate was constructed from
-  an empty string
+- **WHEN** the candidate list is built from the `PATH` string `:D:   :` — a leading empty
+  entry, a directory `D`, a trailing empty entry, and a whitespace-only entry
+- **THEN** the candidate list is exactly `[D/openspec]`: one entry, absolute, with no
+  bare relative `openspec` and no candidate under a directory of spaces
+- **AND** resolving with that same `PATH`, where `D/openspec` is an executable regular
+  file, yields the absolute `D/openspec`
+- **AND** the candidate-list assertion is the load-bearing half: an implementation
+  honouring the POSIX "empty entry means the current directory" rule produces the same
+  *resolved* path here, because the working directory during a test run is the crate
+  root, whose `openspec` child is a directory and is rejected for an unrelated reason
 
 #### Scenario: An absent or blank `PATH` contributes nothing
 
@@ -133,11 +146,17 @@ mode, not a fault.
 - **THEN** the resolved binary is the one under `v20.0.0`, so neither earlier version
   ended the step
 
-#### Scenario: A version directory whose name is not a version is still eligible
+#### Scenario: A version directory whose name is not a version is still eligible, and sorts last
 
 - **WHEN** the only entry in the nvm tree is `system/bin/openspec`, an executable regular
   file
-- **THEN** it is resolved with the nvm step as its source
+- **THEN** it is resolved with the nvm step as its source, so an unparseable name is kept
+  rather than dropped
+- **AND** re-running against a tree holding **both** `vnightly/bin/openspec` and
+  `v20.0.0/bin/openspec`, each executable, resolves the `v20.0.0` one, because a parsed
+  version outranks an unparseable name. `vnightly` is the fixture rather than `system`
+  because plain name-descending sorting puts `vnightly` **above** `v20.0.0` and `system`
+  **below** it — only the first of those two discriminates against the wrong ordering
 
 #### Scenario: `NVM_DIR` overrides the default nvm root
 
@@ -147,6 +166,18 @@ mode, not a fault.
 - **THEN** the binary under `NVM_DIR` is resolved
 - **AND** re-running with `NVM_DIR` set to `"   "` resolves the one under `HOME`, so a
   blank value falls through to the default rather than naming a directory of spaces
+- **AND** re-running with **both** `NVM_DIR` and `HOME` absent from the lookup yields no
+  binary and no panic, rather than unwrapping an absent `HOME`
+
+#### Scenario: The nvm tree outranks the npm prefix
+
+- **WHEN** nothing is configured, `PATH` holds no `openspec`, the nvm tree holds an
+  executable `H/.nvm/versions/node/v20.0.0/bin/openspec`, and the injected hook returns a
+  **different** directory `N` holding an executable `N/bin/openspec`
+- **THEN** the resolved binary is the nvm one, with the nvm step as its source
+- **AND** this is the one adjacent pair in the chain that no other scenario separates:
+  on the reference machine `npm prefix -g` prints the nvm version directory, so the two
+  steps resolve to the same path there and a swapped chain would be invisible
 
 #### Scenario: The npm prefix is the last resort
 
@@ -163,8 +194,8 @@ mode, not a fault.
 
 #### Scenario: Nothing anywhere is a supported state, not a fault
 
-- **WHEN** nothing is configured, `PATH` is absent, no nvm tree exists, and the hook
-  returns nothing
+- **WHEN** nothing is configured, `PATH`, `NVM_DIR`, and `HOME` are all absent from the
+  lookup, and the hook returns nothing
 - **THEN** no binary is resolved
 - **AND** the reported problems are empty, which is what distinguishes this from a
   configured path that could not be used
@@ -229,12 +260,15 @@ empty result, so that hand-over turns a test red rather than passing silently.
   containing `npm`, `node`, or `openspec` has been removed, having first asserted that
   all three are unresolvable on it and that `cargo` and `rustc` still are
 - **THEN** every resolution test still passes
-- **AND** no file under `src/` names `process::Command`, `Command::new`, or `Stdio`, and
-  `src/resolve.rs` names no process API at all — no `std::process`, no `Command`, no
-  `Stdio`
-- **AND** the check does **not** search for the program-name literal `"openspec"`, which
-  this change necessarily writes as a path component and which already appears in
-  `src/state.rs`, so such a search would report a spawn that is not there
+- **AND** `src/resolve.rs` names no process API at all — no `std::process`, no `Command`,
+  no `Stdio` — including in its comments, because the check reads source text and cannot
+  tell a comment from a call
+
+The normative clause is scoped to `src/resolve.rs` deliberately. A tree-wide "no file
+under `src/` names `Command`" claim would be a live requirement that `subprocess-seam`'s
+`src/cli.rs` is *required* to falsify — the defect `plugin-config`'s review repaired in
+its own version of this scenario. The tree-wide grep is still run, as a task-level check
+that `subprocess-seam` will rescope; it is not frozen here as a requirement.
 
 ### Requirement: A resolved binary is cached for the session in a value the caller owns
 
@@ -279,9 +313,12 @@ its own assertions.
 - **WHEN** the composition is called with a `Config` whose `openspec_bin` is a scratch
   executable `C/openspec`
 - **THEN** it resolves `C/openspec` with the configured step as its source, on the real
-  process environment and without reading `PATH`
+  process environment
 - **AND** the assertion is on a path no other step could have produced, so a composition
   that ignored its argument and returned nothing would fail
+- **AND** the result is deterministic on any machine, because step 1 wins before `PATH`,
+  `NVM_DIR`, or `HOME` are consulted — a property the chain-ordering requirement above
+  already pins with its own tests
 
 ### Requirement: Binary resolution reads and never writes
 
@@ -290,8 +327,11 @@ Probing SHALL create no file and no directory anywhere — not the configured pa
 
 #### Scenario: A full probe leaves the filesystem byte-identical
 
-- **WHEN** a scratch tree holding a `PATH` directory, an nvm tree, and an npm prefix is
-  snapshotted — every path, every file's bytes, and every file's modification time — and
-  a full four-step probe is then run twice against it
+- **WHEN** a scratch tree holding a `PATH` directory, an nvm tree, an npm prefix, and an
+  **empty** directory is snapshotted — every path, **including every directory**, every
+  file's bytes, and every entry's modification time — and a full four-step probe is then
+  run twice against it
 - **THEN** a second snapshot equals the first exactly, with no entry added, removed, or
   modified
+- **AND** the snapshot records directories, not only files, so a probe that created a
+  missing `bin/` while looking for one is caught

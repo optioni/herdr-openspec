@@ -72,7 +72,8 @@ writing this design**, because every one of them changes a decision:
 | The npm-prefix hook | `&dyn Fn() -> Option<PathBuf>` | The same injection shape, one step further out: the collaborator that does not exist yet is a closure rather than a trait, because a trait with one method and one implementation is the closure with extra ceremony |
 | `openspec_bin_from_env` | `src/resolve.rs` | `config::load_from_env`: one composition, nothing left to assert inside it |
 | `pub mod resolve;` | `src/lib.rs` | Alongside `config` and `state` |
-| An executable-file builder and a symlink helper for fixtures | `src/lib.rs` → `testutil` | Beside the existing `ScratchDir` and `snapshot`, both of which this change reuses unchanged |
+| An executable-file builder and a symlink helper for fixtures | `src/lib.rs` → `testutil` | Beside the existing `ScratchDir`, reused unchanged |
+| One extension to `testutil::snapshot` | `src/lib.rs` → `testutil` | `snapshot` today records only non-directory entries (`src/lib.rs`, `collect`), so a `create_dir_all` — the likeliest accidental write, and the one both containment guards name — is invisible to it. It gains directory entries. `config` and `state`'s existing snapshot assertions are equality comparisons, so adding entries to both sides leaves them green; task 1.3 re-runs them to prove it |
 
 **No process spawn is added.** `src/resolve.rs` names no process API at all. The `cli`
 module still does not exist; `subprocess-seam` creates it. The `npm prefix -g` invocation
@@ -90,8 +91,14 @@ concentration point does not apply. `changes-from-files` introduces it.
 Every consumer is a future change in this repository. Nothing outside it depends on any
 of this.
 
+Every type below derives `Debug, Clone, PartialEq, Eq`, matching `config::Config`
+(`src/config.rs:11`): the scenarios compare whole values with `assert_eq!` and print them
+on failure, so the derives are part of what a consumer may rely on rather than an
+implementation detail.
+
 ```rust
 // resolve — repository discovery
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RepoSearch {
     Found { root: PathBuf },
     NotFound { searched_from: PathBuf },
@@ -102,8 +109,16 @@ pub fn find_repo(start: &Path) -> RepoSearch;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinSource { Configured, Path, Nvm, NpmPrefix }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FoundBin { pub path: PathBuf, pub source: BinSource }
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BinResolution { pub found: Option<FoundBin>, pub problems: Vec<String> }
+
+/// Step 2's candidate list as a pure function of the `PATH` string — no filesystem
+/// access. Exists so that "an empty entry is not the current directory" is assertable:
+/// the rule is invisible in the resolved path, because the working directory is
+/// usually a repository whose `openspec` child is a directory and is rejected anyway.
+pub(crate) fn path_candidates(path_value: &str) -> Vec<PathBuf>;
 
 pub fn openspec_bin(
     configured: Option<&Path>,
@@ -186,14 +201,14 @@ for one.
 |---|---|---|
 | Process environment | real — the no-spawn run manipulates the real `PATH` of the `cargo test` process | **replaced**: every function takes an environment lookup closure over a fixture map. `std::env::set_var` is never called |
 | `std::env::var` | real — reached only through `config::env_lookup`, which `plugin-config` already pins with its own assertions | called only inside `env_lookup`. `openspec_bin_from_env` reaches it; its one test configures a scratch executable so step 1 short-circuits before `PATH`, `HOME`, or `NVM_DIR` are read, which is what makes that test deterministic |
-| `std::env::temp_dir()` | not used | real, and read-only — it reads `TMPDIR`. It is where `ScratchDir` puts every fixture |
+| `std::env::temp_dir()` | **real, read-only** — task 7.5 scans it for leaked `herdr-openspec-test-` directories | real, and read-only — it reads `TMPDIR`. It is where `ScratchDir` puts every fixture |
 | Filesystem — `PATH` directories | not used | real, but always fresh scratch directories. Never a directory on the machine's real `PATH` |
 | Filesystem — nvm tree | not used | real scratch. `NVM_DIR` and `HOME` in the fixture lookup point at scratch trees; the user's real `~/.nvm` is never read by a unit test |
 | Filesystem — npm prefix | not used | real scratch. Reached only through the injected hook, which in tests is a closure returning a scratch path |
 | Filesystem — repository tree | read-only. `openspec validate --strict` is the final gate and reads it | real scratch. One fixture holds `openspec/changes/x/tasks.md` purely to assert it is **not** modified |
 | Symbolic links | not used | real, via `std::os::unix::fs::symlink`. Four scenarios depend on link behaviour, and the real install is a symlink |
 | Unix permission bits | not used | real, via `std::os::unix::fs::PermissionsExt`. Modes `0755` and `0644` are set explicitly by the fixture builder; no test relies on a default umask |
-| `openspec` binary | **not invoked.** The chain stats a path and returns it; nothing executes it, reads its version, or opens it | not touched. Every fixture "binary" is a 20-byte text file with the execute bit set |
+| `openspec` binary | **never invoked by this crate.** The chain stats a path and returns it; nothing executes it, reads its version, or opens it. It *is* invoked by the workflow, once, as the read-only `openspec validate --strict` gate (task 10.7) — which is why 7.3 and 10.7 must run on different `PATH`s: `NOTOOLS` deliberately makes `openspec` unresolvable | not touched. Every fixture "binary" is a 20-byte text file with the execute bit set |
 | `npm` binary | **not invoked.** Step 4's collaborator is a closure | not touched |
 | `node` binary | not used | not touched |
 | `herdr` binary and socket | not used. No production code path invokes `herdr`, and this change adds no Herdr surface | not touched |
@@ -201,10 +216,10 @@ for one.
 | Clock and randomness | not used. The cache test counts probe invocations with an `AtomicUsize`; no test sleeps, polls, or reads the clock | not touched. `ScratchDir` names come from pid plus an atomic counter |
 | Threads | none. Nothing in this change spawns one, and no test does | not touched |
 | Terminal, `ratatui`, `crossterm` | not used — this change adds no view | not touched |
-| `cargo`, `cargo metadata`, `cargo tree`, `cargo llvm-cov` | real — the no-spawn run, the unchanged-dependency check, and the coverage gate | real, as the test runner only |
+| `cargo`, `cargo metadata`, `cargo llvm-cov`, `make` | real — the no-spawn run, the unchanged-dependency check, the coverage gate, and `make check`. `cargo tree` is deliberately absent: `plugin-config` needed it to pin a new build graph, and this change adds no dependency, so `cargo metadata` alone is the check | real, as the test runner only |
 | `python3` | real — parses `cargo metadata` JSON for the unchanged-dependency check. No `tomllib`, so no 3.11 floor | not touched |
-| POSIX shell userland (`sh`, `grep`, `tr`, `dirname`, `mktemp`) | real. macOS/BSD is the reference platform: no `stat -c`, no `sed -i` without an argument, no `grep -P`, and no `paste -sd:`, which is a usage error on BSD and silently yields an empty string | not touched; modification times are compared in Rust through `std::fs::Metadata`, never through `stat` |
-| `git` working tree | not used as a restore mechanism. No check in this change modifies a tracked file | not touched |
+| POSIX shell userland (`sh`, `grep`, `tr`, `sed`) | real. macOS/BSD is the reference platform: no `stat -c`, no `sed -i` without an argument, no `grep -P`, and no `paste -sd:`, which is a usage error on BSD and silently yields an empty string | not touched; modification times are compared in Rust through `std::fs::Metadata`, never through `stat` |
+| `git` | **real, read-only** — `git status --short` (1.1) and `git show HEAD:Cargo.lock` compared with `cmp` against the working copy (1.5, 7.4) — written without a literal pipe character here, which cannot appear unescaped in a Markdown table cell. Never `checkout`, `restore`, or `reset`: no check here modifies a tracked file, so nothing needs restoring | not touched |
 | The user's real `~/.nvm`, `~/.config/herdr`, `~/.local/state/herdr` | **not touched, and not read.** Unlike `plugin-config`, this change has no destructive check and links no probe plugin | not touched |
 
 ## Test Strategy
@@ -213,7 +228,7 @@ Tiers, fastest first:
 
 - **unit** — `cargo test --all-features resolve::`, functions in `src/resolve.rs`.
   Pure ordering logic takes fixture closures; everything filesystem-shaped takes a
-  scratch tree. **39 of the 40 scenarios live here.**
+  scratch tree. **41 of the 42 scenarios live here.**
 - **command check** — a shell command run once, its exit status inspected, recorded as a
   task. **One scenario:** "Resolution spawns no process", which is a fact about the
   compiled tree and about the process environment, not about running code.
@@ -239,27 +254,31 @@ proving nothing spawns.
 Shorthand used below. Every command is written for BSD userland.
 
 ```sh
-# A scratch directory per check; removed at the end of the task.
-T=$(mktemp -d)
-
 # NOTOOLS — a PATH with every directory holding npm, node, or openspec removed, and the
 # Rust toolchain intact. Do NOT build this from `dirname "$(command -v npm)"`: in this
 # user's zsh, `npm` is a shell function, so that yields `.` and the recipe silently
 # removes nothing (verified). Do NOT use `env PATH=/usr/bin:/bin cargo ...` either: env
 # execs through the NEW PATH and cargo lives in ~/.cargo/bin, so the check fails for the
 # wrong reason. Test each directory directly instead.
-NOTOOLS=$(printf '%s' "$PATH" | tr ':' '\n' | while IFS= read -r d; do
+#
+# Two details the review proved matter. `printf '%s'` leaves the final line
+# unterminated, so `while read` silently drops the LAST PATH entry — harmless only until
+# ~/.cargo/bin happens to be last, which is where rustup's `.cargo/env` append puts it.
+# And a trailing ':' from `tr` is an empty PATH entry meaning the current directory,
+# which contradicts this change's own requirement, so it is stripped.
+NOTOOLS=$(printf '%s\n' "$PATH" | tr ':' '\n' | while IFS= read -r d; do
   [ -n "$d" ] || continue
   if [ -x "$d/npm" ] || [ -x "$d/node" ] || [ -x "$d/openspec" ]; then continue; fi
   printf '%s\n' "$d"
-done | tr '\n' ':')
+done | tr '\n' ':' | sed 's/:$//')
 
-# Direct, normal-kind dependencies of the package, asserted — never printed.
-# Unchanged from `plugin-config`: this change must not move it.
+# Direct, normal-kind dependencies of the package — checked with an explicit exit, not a
+# bare `assert`, which `python3 -O` or an inherited PYTHONOPTIMIZE strips (verified: the
+# assert form exits 0 under PYTHONOPTIMIZE=1 against a crate with a second dependency).
 DEPS='import json,sys
 p = json.load(sys.stdin)["packages"][0]
-normal = [d for d in p["dependencies"] if d.get("kind") is None]
-assert sorted(d["name"] for d in normal) == ["toml"], normal'
+normal = sorted(d["name"] for d in p["dependencies"] if d.get("kind") is None)
+if normal != ["toml"]: sys.exit("unexpected normal deps: %r" % (normal,))'
 ```
 
 The two checks that contain a pipe or a regex alternation are written here rather than
@@ -274,7 +293,13 @@ catch. The matrix row below names these by label.
 # std::process::exit, which is not a spawn. Verified on this tree: the tree-wide form is
 # clean today and fires on a planted `use std::process::Command;` in a copy of src/.
 ! grep -rnE 'process::Command|Command::new|Stdio' src/
-! grep -nE 'std::process|Command|Stdio' src/resolve.rs
+[ -f src/resolve.rs ] && ! grep -nE 'std::process|Command|Stdio' src/resolve.rs
+# The `[ -f ... ]` guard is load-bearing: grep exits 2 for a missing file, and `!` turns
+# that into a pass, so a renamed or split module would silently stop being checked.
+#
+# The tree-wide half is a TASK-level check, not a frozen requirement. `subprocess-seam`
+# creates `src/cli.rs` containing exactly these APIs and must rescope it; only the
+# module-scoped half is normative in specs/openspec-binary/spec.md.
 #
 # There is deliberately NO `! grep -rn '"openspec"' src/` here. That check, which
 # `plugin-config` used, is already false at HEAD — src/state.rs:653 joins the literal
@@ -282,10 +307,19 @@ catch. The matrix row below names these by label.
 # A program-name-literal search cannot distinguish a path component from an argv[0].
 
 # NOSPAWN-RUN — the suite passes with npm, node, and openspec all unresolvable and the
-# toolchain intact. The three assertions come FIRST: without them the run proves nothing,
-# because a PATH that still resolves npm would pass whether or not anything spawns it.
-for t in npm node openspec; do ! env PATH="$NOTOOLS" sh -c "command -v $t"; done
-env PATH="$NOTOOLS" sh -c 'command -v cargo'
+# toolchain intact. The five preconditions come FIRST and must ABORT: a bare
+# `! command -v ...` sequence without `set -e` exits 0 even when npm and node are still
+# resolvable (verified — it printed both paths and still returned 0), which is the
+# "verification that stops short of the step it vouches for" failure in its purest form.
+for t in npm node openspec; do
+  if env PATH="$NOTOOLS" sh -c "command -v $t" >/dev/null 2>&1; then
+    echo "PRECONDITION FAILED: $t still resolvable on NOTOOLS" >&2; exit 1
+  fi
+done
+for t in cargo rustc; do
+  env PATH="$NOTOOLS" sh -c "command -v $t" >/dev/null 2>&1 || {
+    echo "PRECONDITION FAILED: $t not resolvable on NOTOOLS" >&2; exit 1; }
+done
 env PATH="$NOTOOLS" cargo test --all-features
 ```
 
@@ -308,24 +342,26 @@ no later change inherits a stronger claim than was made.
 | A starting path containing `..` is resolved before the walk | Start at `R/a/../a`; assert the root is exactly `canonicalize(R)` **and** that its string contains no `..`. A lexical walk yields `R/a/..` | unit | real scratch filesystem | `cargo test --all-features resolve::` |
 | A starting path naming a regular file is walked from its parent | Start at `R/a/notes.md` with `R/openspec/`; assert `canonicalize(R)` | unit | real scratch filesystem | `cargo test --all-features resolve::` |
 | A starting directory that does not exist is not an error | Start at `S/nope`, never created; assert `NotFound { searched_from }` equals `S/nope` verbatim — not empty, not `.`, not canonicalized — and that `S/nope` still does not exist afterwards | unit | real scratch filesystem | `cargo test --all-features resolve::` |
+| A relative starting path that cannot be resolved does not reach the process working directory | `find_repo(Path::new("nope/deeper"))` — a relative path that does not exist — while `cargo test` runs with the crate root (a repository) as its working directory; assert `NotFound` naming `nope/deeper`. An implementation walking `Path::ancestors` to its final empty element joins a bare `openspec`, finds the crate's own, and returns `Found` with an empty root | unit | real process working directory, read-only | `cargo test --all-features resolve::` |
 | No repository anywhere up to the filesystem root | Assert first, with an explanatory message, that no ancestor of the scratch directory holds an `openspec` directory; then assert `NotFound` naming `canonicalize(S)`, and that the call returned at all — a walk that failed to stop at `/` hangs the suite rather than passing | unit | real scratch filesystem | `cargo test --all-features resolve::` |
-| A repository tree is byte-identical after discovery | Snapshot paths, bytes, and mtimes of `R` holding `openspec/changes/x/tasks.md`, `openspec/specs/`, and `README.md` through `std::fs::Metadata`; run discovery twice from `R/openspec/changes/x`; assert snapshot equality. Reuses `testutil::snapshot` unchanged | unit | real scratch filesystem | `cargo test --all-features resolve::` |
+| A repository tree is byte-identical after discovery | Snapshot paths **including directories**, bytes, and mtimes of `R` holding `openspec/changes/x/tasks.md`, an empty `openspec/specs/`, and `README.md` through `std::fs::Metadata`; run discovery twice from `R/openspec/changes/x`; assert snapshot equality. Requires the `testutil::snapshot` extension in task 1.3 — the current file-only form cannot see a created empty directory | unit | real scratch filesystem | `cargo test --all-features resolve::` |
 | A missing starting directory is not created | Discovery from an uncreated scratch path; assert neither it nor any intermediate directory exists afterwards, and the scratch root's listing is unchanged | unit | real scratch filesystem | `cargo test --all-features resolve::` |
 | An executable regular file is usable | One `PATH` entry `D`, `D/openspec` mode `0755`, nothing else present; assert the path and `BinSource::Path` | unit | real scratch filesystem, environment replaced | `cargo test --all-features resolve::` |
 | A file without an execute bit is skipped | `PATH=A:B`, `A/openspec` mode `0644`, `B/openspec` mode `0755`; assert `B/openspec`. An `is_file()`-only check returns `A` | unit | real scratch filesystem, environment replaced | `cargo test --all-features resolve::` |
 | A directory named `openspec` is skipped | `PATH=A:B`, `A/openspec` a directory, `B/openspec` executable; assert `B/openspec`. A mode-bits-only check returns `A`, since a directory has the execute bit | unit | real scratch filesystem, environment replaced | `cargo test --all-features resolve::` |
 | A symbolic link to an executable file is usable and is returned unresolved | `A/openspec` symlinked to `T/openspec.js` mode `0755`; assert the result is `A/openspec` **and not** `T/openspec.js`, so the canonicalize-the-result implementation fails | unit | real scratch filesystem, symlink | `cargo test --all-features resolve::` |
 | A dangling symbolic link is skipped | `A/openspec` symlinked to a non-existent path, `B/openspec` executable; assert `B/openspec` | unit | real scratch filesystem, symlink | `cargo test --all-features resolve::` |
-| The configured path wins over every other source | Three distinct executables — configured `C/openspec`, `PATH` `D/openspec`, nvm `H/.nvm/versions/node/v20.0.0/bin/openspec`; assert `C/openspec` and `BinSource::Configured`, and assert in the same test that dropping the configured argument yields `D/openspec`, so the ordering claim is what is under test | unit | real scratch filesystem, environment replaced | `cargo test --all-features resolve::` |
+| The configured path wins over every other source | Three distinct executables — configured `C/openspec`, `PATH` `D/openspec`, nvm `H/.nvm/versions/node/v20.0.0/bin/openspec`; assert `C/openspec`, `BinSource::Configured`, and `problems.is_empty()`; then assert in the same test that dropping the configured argument yields `D/openspec`, so the ordering claim is what is under test and a configured path that *works* provably records nothing | unit | real scratch filesystem, environment replaced | `cargo test --all-features resolve::` |
 | `PATH` wins when nothing is configured | Nothing configured, `PATH` and nvm both populated with different executables; assert the `PATH` one and `BinSource::Path` | unit | real scratch filesystem, environment replaced | `cargo test --all-features resolve::` |
 | `PATH` entries are searched left to right | `PATH=A:B`, both executable; assert `A/openspec`; then re-run with `PATH=B:A` and assert `B/openspec`, so the test cannot pass by accident of directory-creation order | unit | real scratch filesystem, environment replaced | `cargo test --all-features resolve::` |
-| An empty `PATH` entry is not the current directory | `PATH=":D:"`; assert the absolute `D/openspec`, and assert the result is not the relative path `openspec` | unit | real scratch filesystem, environment replaced | `cargo test --all-features resolve::` |
+| An empty or blank `PATH` entry is not the current directory | Assert `path_candidates(":D:   :")` is exactly `[D/openspec]` — one entry, absolute, no bare `openspec`, no space-named directory — then resolve with that `PATH` and assert `D/openspec`. The candidate-list half is the load-bearing one: a cwd-honouring implementation returns the same *resolved* path, because the test process's working directory is the crate root whose `openspec` child is a directory | unit | pure for the candidate list; real scratch filesystem and environment replaced for the resolution | `cargo test --all-features resolve::` |
 | An absent or blank `PATH` contributes nothing | Three runs — `PATH` absent, `""`, `"   "` — each with an npm prefix holding an executable; assert all three give the npm-prefix path and `BinSource::NpmPrefix` | unit | real scratch filesystem, environment replaced | `cargo test --all-features resolve::` |
 | The nvm tree is searched when `PATH` has nothing | `PATH` a directory with no `openspec`; `HOME` a scratch home holding `.nvm/versions/node/v24.20.0/bin/openspec` executable; assert that path and `BinSource::Nvm` | unit | real scratch filesystem, environment replaced | `cargo test --all-features resolve::` |
 | Node versions are ordered numerically, not lexically | `v9.99.99` and `v10.0.0` both executable; assert the `v10.0.0` path. Lexical ordering returns `v9.99.99` | unit | real scratch filesystem, environment replaced | `cargo test --all-features resolve::` |
 | A version directory without a usable binary is skipped | `v22.0.0/` empty, `v21.0.0/bin/openspec` mode `0644`, `v20.0.0/bin/openspec` mode `0755`; assert the `v20.0.0` path, so neither higher version ended the step | unit | real scratch filesystem, environment replaced | `cargo test --all-features resolve::` |
-| A version directory whose name is not a version is still eligible | Only `system/bin/openspec`, executable; assert that path and `BinSource::Nvm` | unit | real scratch filesystem, environment replaced | `cargo test --all-features resolve::` |
-| `NVM_DIR` overrides the default nvm root | Two scratch trees, one under `NVM_DIR` and one under `HOME/.nvm`, holding different executables; assert the `NVM_DIR` one, then re-run with `NVM_DIR="   "` and assert the `HOME` one | unit | real scratch filesystem, environment replaced | `cargo test --all-features resolve::` |
+| A version directory whose name is not a version is still eligible, and sorts last | Only `system/bin/openspec`, executable; assert that path and `BinSource::Nvm`. Then a second tree holding **both** `vnightly/bin/openspec` and `v20.0.0/bin/openspec`; assert the `v20.0.0` one. `vnightly` rather than `system` because plain name-descending puts `vnightly` above `v20.0.0` and `system` below it, so only `vnightly` discriminates | unit | real scratch filesystem, environment replaced | `cargo test --all-features resolve::` |
+| `NVM_DIR` overrides the default nvm root | Two scratch trees, one under `NVM_DIR` and one under `HOME/.nvm`, holding different executables; assert the `NVM_DIR` one, then re-run with `NVM_DIR="   "` and assert the `HOME` one, then re-run with both absent and assert no binary and no panic | unit | real scratch filesystem, environment replaced | `cargo test --all-features resolve::` |
+| The nvm tree outranks the npm prefix | Nothing configured, `PATH` barren, an executable under `H/.nvm/versions/node/v20.0.0/bin/openspec`, and a hook returning a **different** directory `N` holding `N/bin/openspec`; assert the nvm path and `BinSource::Nvm`. This is the only pair of adjacent steps no other scenario separates, and the pair the reference machine cannot distinguish — `npm prefix -g` prints the nvm version directory there | unit | real scratch filesystem, environment replaced, hook replaced | `cargo test --all-features resolve::` |
 | The npm prefix is the last resort | Nothing configured, `PATH` barren, no nvm tree, hook returns `N` holding `N/bin/openspec` executable; assert that path and `BinSource::NpmPrefix` | unit | real scratch filesystem, hook replaced by a closure | `cargo test --all-features resolve::` |
 | An npm prefix without a usable binary yields nothing | Hook returns a directory with no `bin/openspec`; assert no binary and empty `problems` | unit | real scratch filesystem, hook replaced | `cargo test --all-features resolve::` |
 | Nothing anywhere is a supported state, not a fault | Nothing configured, `PATH` absent, no nvm tree, hook returns `None`; assert no binary **and** `problems.is_empty()` — the second half is what separates this from the configured-wrong case | unit | environment replaced, hook replaced | `cargo test --all-features resolve::` |
@@ -333,14 +369,20 @@ no later change inherits a stronger claim than was made.
 | A configured path that is not executable falls through | Configured file mode `0644`, `PATH` holds an executable; assert the `PATH` path and exactly one problem naming the configured path | unit | real scratch filesystem, environment replaced | `cargo test --all-features resolve::` |
 | A configured path fails and nothing else is found | Configured path absent from disk, every other source empty; assert no binary **and** exactly one problem naming it. Paired with "Nothing anywhere", this is the assertion that makes `problems` load-bearing | unit | real scratch filesystem, environment replaced | `cargo test --all-features resolve::` |
 | The shipped hook yields no prefix | Assert `npm_prefix_deferred()` is `None`, with the assertion message naming `subprocess-seam` as the change that will make it fail | unit | none — the deferred binding | `cargo test --all-features resolve::` |
-| Resolution spawns no process | Assert `npm`, `node`, and `openspec` are each unresolvable on `NOTOOLS` and that `cargo` is resolvable, then run the suite on it; then the two source-text patterns. What each half does *not* prove is stated above the matrix | command check | real cargo, real `PATH`, npm/node/openspec deliberately unresolvable | the `NOSPAWN-RUN` and `SPAWN` blocks above |
+| Resolution spawns no process | Assert `npm`, `node`, and `openspec` are each unresolvable on `NOTOOLS` and that `cargo` and `rustc` are, aborting if any precondition fails, then run the suite on it; then the two source-text patterns. What each half does *not* prove is stated above the matrix | command check | real cargo, real `PATH`, npm/node/openspec deliberately unresolvable | the `NOSPAWN-RUN` and `SPAWN` blocks above |
 | A second lookup does not re-probe | A probe closure incrementing an `AtomicUsize`; call `get_or_probe` twice; assert the counter is exactly 1 and both results are equal. No sleeping, no clock — the counter is read after both calls have returned | unit | none — pure, single-threaded | `cargo test --all-features resolve::` |
 | A negative result is cached too | Same shape, probe returns `found: None`; assert counter 1 and no binary on both calls | unit | none — pure | `cargo test --all-features resolve::` |
 | Two caches are independent | Two `BinCache` values, different probe results; assert each returns its own. A `static` cache fails this | unit | none — pure | `cargo test --all-features resolve::` |
 | The composition honours a configured binary | Call `openspec_bin_from_env` with a `Config` whose `openspec_bin` is a scratch executable; assert that exact path and `BinSource::Configured`. Deterministic because step 1 short-circuits before the real `PATH` is read; discriminating because no other step could produce a scratch path | unit | **real** process environment via `config::env_lookup`, real scratch filesystem | `cargo test --all-features resolve::` |
-| A full probe leaves the filesystem byte-identical | Snapshot paths, bytes, and mtimes of a scratch tree holding a `PATH` directory, an nvm tree, and an npm prefix; run a full four-step probe twice; assert snapshot equality and that no entry appeared | unit | real scratch filesystem, environment replaced, hook replaced | `cargo test --all-features resolve::` |
+| A full probe leaves the filesystem byte-identical | Snapshot paths **including directories**, bytes, and mtimes of a scratch tree holding a `PATH` directory, an nvm tree, an npm prefix, and an empty directory; run a full four-step probe twice; assert snapshot equality and that no entry appeared | unit | real scratch filesystem, environment replaced, hook replaced | `cargo test --all-features resolve::` |
 
-Forty scenarios, forty matrix rows, matched one-to-one by name.
+Forty-two scenarios, forty-two matrix rows, matched one-to-one by name.
+
+A caution about the Command column: `cargo test --all-features resolve::` exits 0 when
+the filter matches nothing (verified — a nonsense filter reports "0 passed … 5 filtered
+out" and returns 0). The filtered form is a convenience for running one group; the gate
+is the unfiltered `cargo test --all-features` in task 10.4, and task 2.5 requires
+checking that the filter actually names the new tests.
 
 ## Decisions
 
@@ -399,6 +441,16 @@ the symlink is the stable, upgrade-surviving name — canonicalizing it would pi
 specific `node_modules` path that an `npm update` invalidates. The repository root will
 be *joined onto* and *printed*, where a `..` component or an unresolved symlink produces
 a path the user cannot act on.
+
+**Step 2's candidate list is a separate, pure function.** The rule "an empty `PATH`
+entry is not the current directory" is not observable in the resolved path: the working
+directory during a test run is the crate root, whose `openspec` child is a *directory*
+and is therefore rejected by the usability predicate for an entirely unrelated reason.
+A resolution-level test is green against the implementation it exists to reject. Exposing
+`path_candidates(&str) -> Vec<PathBuf>` — no filesystem access, crate-internal — moves
+the assertion to where the behaviour actually lives. This is the general remedy for a
+rule whose effect is masked downstream, and it is worth the extra function precisely
+because the alternative is a test that cannot fail.
 
 **Node version ordering is numeric, with unparseable names last.** Lexical ordering puts
 `v9.99.99` above `v10.0.0`, and nvm users routinely hold both majors. Unparseable names
@@ -460,6 +512,19 @@ used to hand `agent-launch` the derived-agent-name correction.
   → Mitigated by the third leg: the dependency set is asserted unchanged (7.4), and step
   4's collaborator is a closure with exactly one production binding that returns `None`.
   The limitation is stated above the matrix rather than left for a reader to discover.
+- **Step 4's production join is dead code until `subprocess-seam`.** With
+  `npm_prefix_deferred()` hard-wired to `None`, `<prefix>/bin/openspec` plus its
+  usability check is exercised only by fixture closures; its first production execution
+  is the day the seam lands. → The residue is small and the same shape as steps 2 and 3,
+  and it is unit-tested. The mitigation is to say so, so `subprocess-seam` does not
+  inherit "step 4 is already proven" and ship only a stdout parser: task 9.7 requires its
+  roadmap row to carry an end-to-end obligation, not just the binding swap.
+- **The one hard-won empirical fact about step 4 — read `npm prefix -g`'s stdout only,
+  trimmed — would otherwise live in an archived design.md and a doc comment.** On the
+  reference machine `npm` writes zsh-plugin noise to stderr, and a naive implementation
+  that captured both would resolve a prefix of garbage. → Tasks 9.3 and 9.7 carry it into
+  `SPEC.md` and `IMPLEMENTATION-ORDER.md`, the two documents a `subprocess-seam`
+  implementer actually reads.
 - **`grep`-based checks are pattern matching, and this change adds path components that
   spell `openspec`.** → The program-name-literal check is deliberately *not* inherited
   from `plugin-config`; it is already false at HEAD and the design says so, so nobody

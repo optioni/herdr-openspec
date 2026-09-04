@@ -13,12 +13,19 @@ that first renders a pane.
 The starting path SHALL be canonicalized before the walk when the filesystem can resolve
 it, so that a path containing `..` or a symbolic link yields a repository root a human
 can act on; when it cannot be resolved — most commonly because it does not exist — the
-walk SHALL proceed over the path as given rather than failing.
+walk SHALL proceed over the path as given rather than failing. In that unresolved case
+the walk SHALL stop at the last non-empty ancestor: `Path::ancestors` ends a relative
+path with the empty path, and joining `openspec` to it produces a bare relative
+`openspec` that would be resolved against the process's own working directory — which,
+when the plugin runs inside a repository, is a repository. A path the caller supplied
+SHALL never be answered with a repository the caller did not name.
 
 When no ancestor qualifies, the result SHALL name the directory the search began from,
 because `SPEC.md` → Degraded states requires the empty state to print it. A starting
-path that does not exist, or that names a regular file rather than a directory, SHALL
-produce that same not-found result rather than an error or a panic.
+path that does not exist SHALL produce that not-found result rather than an error or a
+panic. A starting path naming a **regular file** is walked from that path, so its parent
+is the first ancestor examined — a file has no `openspec` child, so the walk simply moves
+up, and no special case is needed.
 
 #### Scenario: The starting directory is itself the repository
 
@@ -79,6 +86,15 @@ produce that same not-found result rather than an error or a panic.
   canonicalized — rather than an empty path, the current directory, or a panic
 - **AND** `S/nope` still does not exist afterwards
 
+#### Scenario: A relative starting path that cannot be resolved does not reach the process working directory
+
+- **WHEN** discovery runs from the relative path `nope/deeper`, which does not exist
+  relative to the current directory, while the process's own working directory *is* a
+  repository (the crate root, which contains `openspec/`, is where `cargo test` runs)
+- **THEN** no repository is found and the result names `nope/deeper`
+- **AND** it is not `Found` with an empty or relative root, which is what an
+  implementation that walked `Path::ancestors` to its final empty element would produce
+
 #### Scenario: No repository anywhere up to the filesystem root
 
 - **WHEN** discovery runs from a scratch directory none of whose ancestors, up to and
@@ -97,12 +113,15 @@ an agent may be editing `tasks.md` in another pane, nor on the path it walked.
 
 #### Scenario: A repository tree is byte-identical after discovery
 
-- **WHEN** a scratch fixture holding `R/openspec/changes/x/tasks.md`, `R/openspec/specs/`
-  and an unrelated `R/README.md` is snapshotted — every path, every file's bytes, and
-  every file's modification time, read through `std::fs::Metadata` — and discovery is
-  then run twice from `R/openspec/changes/x`
+- **WHEN** a scratch fixture holding `R/openspec/changes/x/tasks.md`, an **empty**
+  `R/openspec/specs/`, and an unrelated `R/README.md` is snapshotted — every path,
+  **including every directory**, every file's bytes, and every entry's modification time,
+  read through `std::fs::Metadata` — and discovery is then run twice from
+  `R/openspec/changes/x`
 - **THEN** a second snapshot equals the first exactly, with no entry added, removed, or
   modified
+- **AND** the snapshot records directories, not only files, because creating an empty
+  directory is the likeliest accidental write and a file-only snapshot cannot see it
 
 #### Scenario: A missing starting directory is not created
 

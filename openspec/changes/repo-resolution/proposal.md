@@ -72,14 +72,17 @@ adds no dependency — it is re-verified rather than amended.
 
 ## Impact
 
-- **Code:** new `src/resolve.rs`; `src/lib.rs` gains `pub mod resolve;` and the test-only
-  scratch helpers grow an executable-file builder. `src/main.rs` is untouched — nothing
+- **Code:** new `src/resolve.rs`; `src/lib.rs` gains `pub mod resolve;`, an
+  executable-file builder and a symlink helper for fixtures, and one correction to the
+  existing `testutil::snapshot`, which records only non-directory entries today and so
+  cannot see a created empty directory — the write both containment guards exist to catch. `src/main.rs` is untouched — nothing
   consumes resolution until `changes-from-files`.
 - **Build:** none. No dependency is added; `Cargo.toml` and `Cargo.lock` are unchanged,
   and that is itself checked.
 - **Docs:** `SPEC.md` → Architecture (the subprocess seam), Data layer → Resolution chain
   (Repository and *The `openspec` binary*), Degraded states, and Testing → Unit-tested
-  modules; `openspec/IMPLEMENTATION-ORDER.md` → the Phase 3 `subprocess-seam` row;
-  `AGENTS.md` → Current repo state.
+  modules; `openspec/IMPLEMENTATION-ORDER.md` → the Phase 3 `subprocess-seam` row and
+  the dependency graph, which gains the `repo-resolution --> subprocess-seam` edge that
+  handing over the hook creates; `AGENTS.md` → Current repo state.
 - **External:** none. No network, no sibling repository, no registry. Nothing is written
   anywhere — this change's production code never creates a file or a directory.
