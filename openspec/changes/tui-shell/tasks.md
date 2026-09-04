@@ -1016,7 +1016,7 @@ needs, in the extracted copy rather than in the archive.
 ## 7. `ui::load` and `changes::empty_set` — startup state from files
 <!-- kind: behavior -->
 
-- [ ] 7.1 RED: Add `mod tests { mod load { … } }` to `src/ui/mod.rs` and write four failing
+- [x] 7.1 RED: Add `mod tests { mod load { … } }` to `src/ui/mod.rs` and write four failing
       tests for dashboard-loop's startup scenarios, each building a `ScratchDir` tree:
       - `load::a_scratch_repository_is_loaded_from_files` — a tree with
         `openspec/changes/alpha/proposal.md` and `openspec/changes/alpha/tasks.md`
@@ -1038,21 +1038,46 @@ needs, in the extracted copy rather than in the archive.
         before and after `ui::load`; assert equality. Full recursive snapshot, not shallow:
         the tree is small and every byte and mtime matters here.
       **Red when:** `ui::load` and `changes::empty_set` do not exist.
+      **Recorded:** `error[E0425]: cannot find function 'load' in module 'super::super'`
+      (three call sites) — missing behaviour, not a harness issue.
 
-- [ ] 7.2 GREEN: Implement `changes::empty_set()` in `src/changes.rs`, naming all three
+- [x] 7.2 GREEN: Implement `changes::empty_set()` in `src/changes.rs`, naming all three
       `ChangeSet` fields explicitly with no `Default` and no `..`, and `ui::load` in
       `src/ui/mod.rs`, branching on `resolve::find_repo`'s two variants.
+      **Recorded:** all 4 tests green on first implementation. For the `Found` branch,
+      `Dashboard::searched_from` is the canonicalized `start` (`RepoSearch::Found` carries
+      only `root`, not the original start point, so `ui::load` canonicalizes `start`
+      itself — no test pins this field's value in the found case, only in the not-found
+      one, where it is `find_repo`'s own reported `searched_from`).
 
-- [ ] 7.3 CHECK: Run `GATE-MECH1` — `empty_set` is a new construction site inside the file
+- [x] 7.3 CHECK: Run `GATE-MECH1` — `empty_set` is a new construction site inside the file
       that gate searches, so it must still report no `Default` for `Change`, `ChangeSet`,
       `ArtifactRef`, or `Origin`, and no rest pattern or functional update in
       `src/changes.rs`. Record the new construction count, which is one higher than the
       value `changes-from-cli` recorded.
+      **Recorded:** `GATE-MECH1 OK (half A)` unchanged (16 files now, `ui/*` added).
+      `GATE-MECH1 OK (half B): 63 constructions` — **two** higher than the task-1.2 baseline
+      of 61, not one. Reproduced and understood: the counting regex matches `ChangeSet\s*\{`
+      textually, which fires on a function's `-> ChangeSet {` return-type-and-brace shape as
+      well as on an actual struct literal — `pub fn empty_set() -> ChangeSet {` contributes
+      one hit for the signature and one for the literal body, both genuinely new. The
+      predicted "+1" assumed only the literal counts; the check's own regex does not
+      distinguish the two shapes (a property already true of the baseline — `from_files`'s
+      and `merge`'s own `-> ChangeSet {` signatures already contribute this way, unremarked
+      at task 1.2). Not a defect: `hits_b` (the rest-pattern/functional-update half) is
+      unaffected, and half A's `Default` search is orthogonal to this count.
 
-- [ ] 7.4 REFACTOR: None expected — `load` is a two-arm match. State explicitly that no
+- [x] 7.4 REFACTOR: None expected — `load` is a two-arm match. State explicitly that no
       refactor was needed, or make one and say what.
+      **Recorded:** `cargo clippy --all-targets --all-features -- -D warnings` reported
+      nothing — no refactor needed. All 4 tests stayed green.
 
-- [ ] 7.5 VERIFY: `testcount --lib 'ui::tests::load::' 4`, then `make check`. Commit.
+- [x] 7.5 VERIFY: `testcount --lib 'ui::tests::load::' 4`, then `make check`. Commit.
+      **Recorded:** `TESTCOUNT OK: --lib filter 'ui::tests::load::' ran 4 tests (>= 4)`.
+      Per the 1.1 correction: `fmt-check` clean; `clippy -D warnings` clean; full suite —
+      441 lib (437 + 4) + 11 `ci_workflow` + 5-of-6 `cli` (the one known RED, unchanged);
+      `cargo llvm-cov --ignore-run-fail --fail-under-lines 80` → **98.11%** over 8,748
+      lines, 165 uncovered, floor holds well clear of 80.
 
 ---
 

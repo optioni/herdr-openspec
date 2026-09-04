@@ -1294,6 +1294,19 @@ pub fn merge(files: ChangeSet, cli: CliChanges) -> ChangeSet {
     }
 }
 
+/// The `ChangeSet` for the "no repository found" case: `ui::load` needs one
+/// and constructs it here, naming every field explicitly, rather than in
+/// `src/ui/mod.rs` — a construction site outside this file would sit
+/// outside `change-model`'s no-`Default`/no-`..` gate, which searches this
+/// file. See `openspec/changes/tui-shell/design.md` -> Decisions.
+pub fn empty_set() -> ChangeSet {
+    ChangeSet {
+        active: Vec::new(),
+        archived: Vec::new(),
+        problems: Vec::new(),
+    }
+}
+
 /// Paint the pane from disk: every active change under
 /// `<repo>/openspec/changes/`, the `archived_count` most recent archived
 /// changes under its `archive/`, and every problem recorded along the way.
