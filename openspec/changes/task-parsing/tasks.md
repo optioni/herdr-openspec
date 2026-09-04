@@ -532,14 +532,14 @@ change the `quality-gates` capability and is deliberately not this change's work
 ## 8. Documentation
 <!-- kind: operational -->
 
-- [ ] 8.1 CHECK: Re-read, at implementation time rather than from memory of this plan, the
+- [x] 8.1 CHECK: Re-read, at implementation time rather than from memory of this plan, the
       exact current wording of every passage rewritten below: `SPEC.md` → Data layer →
       Dual-source model, → Degraded states (the table), → Testing and quality gates →
       Unit-tested modules (the `tasks::parse` entry); `openspec/IMPLEMENTATION-ORDER.md` →
       the Phase 2 `task-parsing` row; and `AGENTS.md` → Current repo state. Record what each
       says now, so a correction another change already made is neither duplicated nor
       reverted
-- [ ] 8.2 CHANGE — add to `SPEC.md`: Data layer → Dual-source model, three or four lines
+- [x] 8.2 CHANGE — add to `SPEC.md`: Data layer → Dual-source model, three or four lines
       (audience: `changes-from-files`, `changes-from-cli`, and `tasks-tab`, all planned
       from this section). The section says files and the CLI both produce progress and says
       nothing about the two producing the *same* number, which is the property the whole
@@ -549,13 +549,13 @@ change the `quality-gates` capability and is deliberately not this change's work
       is counted deliberately so the two agree, and where the rule can be re-verified
       (`dist/utils/task-progress.js` in the installed package). Name the package version
       observed in 6.4, so a future reader can tell whether the agreement is still current
-- [ ] 8.3 CHANGE — rewrite in `SPEC.md`: Testing and quality gates → Unit-tested modules,
+- [x] 8.3 CHANGE — rewrite in `SPEC.md`: Testing and quality gates → Unit-tested modules,
       the `tasks::parse` entry (audience: future changes choosing a tier). It reads
       "`tasks::parse` — markdown checkboxes to grouped items and counts", which names one
       of the three entry points this change ships. Widen it in place to name `count` and
       `read` beside `parse` and to say the counting rule is the CLI's — this is a rewrite
       of the existing line, not a second bullet beside it
-- [ ] 8.4 CHANGE — add to `SPEC.md`: Degraded states, one table row (audience:
+- [x] 8.4 CHANGE — add to `SPEC.md`: Degraded states, one table row (audience:
       `degraded-states`, which is planned from this table and is told to confirm the table
       rather than to discover behaviour). The table's nearest row covers a *missing*
       artifact file, which this change deliberately treats as zero tasks and not a problem.
@@ -573,7 +573,7 @@ change the `quality-gates` capability and is deliberately not this change's work
       problem rather than decode lossily.
       `plugin-config` and `repo-resolution` each added their own row for the same reason:
       Phase 6 must be able to confirm the table, not extend it
-- [ ] 8.5 CHANGE — rewrite in `openspec/IMPLEMENTATION-ORDER.md`: the Phase 2
+- [x] 8.5 CHANGE — rewrite in `openspec/IMPLEMENTATION-ORDER.md`: the Phase 2
       `task-parsing` row (audience: whoever reads the roadmap next, and the archive step,
       which is told to confirm the row still describes what was built). Two corrections.
       Its **Spec refs** cell reads "User interface → Detail view", which is where the parsed
@@ -586,7 +586,7 @@ change the `quality-gates` capability and is deliberately not this change's work
       `repo-resolution` extended to record directories. Both have landed, so this is a note
       in the row rather than a new edge in the Mermaid graph — and record the decision not
       to add the edge, so a later reader does not read its absence as an oversight
-- [ ] 8.6 CHANGE — rewrite in `AGENTS.md`: Current repo state (audience: a fresh session's
+- [x] 8.6 CHANGE — rewrite in `AGENTS.md`: Current repo state (audience: a fresh session's
       first paragraph). Two clauses become false: the list of landed changes omits
       `task-parsing`, and "`task-parsing` is next; `changes-from-files` still needs it" is
       now wrong in both halves. Replace with what is true after this change — the crate
@@ -596,7 +596,7 @@ change the `quality-gates` capability and is deliberately not this change's work
       dependency order. In the same pass, decide whether the Important-files list should
       name `src/tasks.rs`; it names no other source file individually, so the answer is
       probably no — record which way you went
-- [ ] 8.7 CHANGE: Make, or record the decision not to make, one `AGENTS.md` → Architecture
+- [x] 8.7 CHANGE: Make, or record the decision not to make, one `AGENTS.md` → Architecture
       rules edit. The candidate durable rule is the one a future change would otherwise get
       wrong: *checkbox counting follows the OpenSpec CLI's rule exactly, fenced and
       commented checkboxes included, because the file path and the CLI path must report the
@@ -604,7 +604,7 @@ change the `quality-gates` capability and is deliberately not this change's work
       that `changes-from-cli` and `tasks-tab` both sit on. If it goes in, it goes in as at
       most two lines under the existing invariants — `AGENTS.md` is a fixed attention
       budget, not an archive. Prefer editing a neighbouring rule over adding a third bullet
-- [ ] 8.8 VERIFY: Net size — this group adds roughly fourteen lines across three documents
+- [x] 8.8 VERIFY: Net size — this group adds roughly fourteen lines across three documents
       (`SPEC.md`, `openspec/IMPLEMENTATION-ORDER.md`, `AGENTS.md`) and rewrites three
       entries in place. Because that is more than ten lines in `SPEC.md` alone, say what it
       replaces there: the Dual-source model section gains the counting rule it never stated,

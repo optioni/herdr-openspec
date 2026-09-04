@@ -83,6 +83,16 @@ The consequence is that an absent CLI degrades correctness slightly rather than
 breaking the pane, and the file path is exercised on every launch rather than
 being untested fallback code.
 
+The two sources must also agree on the *same* number, or the pane would
+flicker between two counts for a change nobody touched. `tasks::count` and
+`tasks::parse` therefore reproduce the OpenSpec CLI's own checkbox rule
+verbatim — a `-`/`*` bullet carrying a one-character `[ ]`/`[x]`/`[X]` box,
+counted even inside a fence or an HTML comment, on purpose — rather than a
+hand-designed one. Re-verify it against `dist/utils/task-progress.js`'s
+`TASK_LINE_PATTERN` (`@fission-ai/openspec` 1.11.0 on the reference machine)
+if the two sources are ever suspected of disagreeing. `Progress::is_complete`
+mirrors the CLI's three-way split too: `total > 0 && completed == total`.
+
 ### Resolution chain
 
 **Repository.** Start from the invocation context's workspace working directory
@@ -342,6 +352,7 @@ Every condition renders usable content rather than an error screen:
 | Schema loads with no tasks artifact (`apply.tracks` matches nothing, and no artifact has id `tasks`) | Every other tab renders; the tasks tab is absent (its rendering, and how progress falls back, are `tasks-tab`'s decision) |
 | No active changes | Empty state; archived changes remain browsable |
 | Artifact file missing | Tab is still shown and renders "No content yet" |
+| A tasks file exists but cannot be read (a directory where a file was expected, a permission error, an I/O error, or invalid UTF-8) | Reported as zero tasks, named in `Tasks::problems`; the CLI's count corrects the pane when it arrives. Invalid UTF-8 is the one case where the file path knowingly disagrees with `openspec list --json`, which decodes lossily and still reports a count — every other read failure already agrees with the CLI, which records the same failure as zero tasks too |
 | Herdr socket unreachable | Runs as a standalone TUI; agent column and action keys hidden |
 | Pane narrower than 100 columns | Single-column list and detail |
 | `config.toml` malformed, unreadable, or a key of the wrong type | The affected key falls back to its documented default while every other key that parsed correctly is still honoured; `Config::problems` names each fallback |
@@ -359,7 +370,10 @@ Each is a pure transformation, tested without a TUI or a subprocess:
 - `schema::select` and `schema::parse` — which schema name applies (a change's
   own override, the project's, or the default), and `schema.yaml` to ordered
   tabs plus the `apply.tracks`-then-id-`tasks` rule for the tasks artifact
-- `tasks::parse` — markdown checkboxes to grouped items and counts
+- `tasks::count`, `tasks::parse`, and `tasks::read` — markdown checkboxes to
+  flat counts and to grouped items, both by the OpenSpec CLI's own counting
+  rule; `read` is the filesystem edge, tested against a scratch directory
+  tree, not a faked filesystem layer
 - `agents::attribute` — agent-list JSON plus change list to per-change badges,
   covering all three tiers including the deliberate non-attribution case
 - `resolve::find_repo` and `resolve::openspec_bin` — the upward walk for

@@ -19,18 +19,20 @@ spec is wrong, update the spec as part of that change rather than letting the tw
 
 ## Current repo state
 
-`repo-foundation`, `ci-pipeline`, `plugin-config`, `repo-resolution`, and
-`schema-model` have landed: the crate builds with two third-party dependencies
-(`toml`, `yaml-rust2`), `make check` runs all four quality gates locally and in
-CI, the crate reads `config.toml` and derives and records agent-name mappings
-under `HERDR_PLUGIN_STATE_DIR`, it can locate the OpenSpec repository root and
-the `openspec` binary — the binary chain's fourth probe step ships as an
-injected hook that always returns nothing until `subprocess-seam` wires it —
-and it reads the repository's schema and produces the ordered artifact list,
-including the tasks artifact. `task-parsing` is next; `changes-from-files`
-still needs it, `schema-model` having already landed. The dashboard itself is
-not implemented yet — `herdr-openspec ui` prints a placeholder banner and
-blocks until the pane closes.
+`repo-foundation`, `ci-pipeline`, `plugin-config`, `repo-resolution`,
+`schema-model`, and `task-parsing` have landed: the crate builds with two
+third-party dependencies (`toml`, `yaml-rust2`), `make check` runs all four
+quality gates locally and in CI, the crate reads `config.toml` and derives
+and records agent-name mappings under `HERDR_PLUGIN_STATE_DIR`, it can locate
+the OpenSpec repository root and the `openspec` binary — the binary chain's
+fourth probe step ships as an injected hook that always returns nothing
+until `subprocess-seam` wires it — it reads the repository's schema and
+produces the ordered artifact list including the tasks artifact, and it
+parses a task file into groups, items, and completion counts that agree with
+the CLI's own. `changes-from-files` is next, with all three of its
+dependencies now landed. The dashboard itself is not implemented yet —
+`herdr-openspec ui` prints a placeholder banner and blocks until the pane
+closes.
 
 Important files:
 
@@ -126,7 +128,7 @@ unreachable and the tests become integration tests by accident.
 - **Views do no I/O.** They are pure functions from state to a ratatui frame, tested
   by rendering into a `TestBackend` buffer at 60 and 120 columns.
 
-Two further invariants from `SPEC.md`:
+Further invariants from `SPEC.md`:
 
 - **Never fail closed.** A missing OpenSpec CLI, an unknown schema, or an
   unreachable Herdr socket degrades the view. It never replaces it with an error screen.
@@ -135,6 +137,9 @@ Two further invariants from `SPEC.md`:
   pane. The one thing the plugin itself writes, the agent-name mapping, goes under
   `HERDR_PLUGIN_STATE_DIR` and nowhere else — never into the repository, and never
   into the configuration directory the user hand-edits.
+- **Checkbox counting follows the OpenSpec CLI's rule exactly**, fenced and commented
+  checkboxes included, because the file path and the CLI path must report the same
+  progress for the same change (`SPEC.md` → Dual-source model).
 
 Do not attribute an agent to a change on weak evidence. A terminal title is a
 summary, not a change id. Unattributable agents are reported as a count, not guessed at.
