@@ -1,10 +1,10 @@
 //! Pure invocation classification for the `herdr-openspec` binary.
 //!
 //! Nothing here performs I/O: `parse` turns argument strings into an
-//! [`Invocation`], and `usage`, `banner`, and `rejection_text` produce the
-//! strings `src/main.rs` writes to stdout or stderr. Keeping this logic here
-//! rather than in `main` is what makes it unit-testable — see design.md ->
-//! Decisions ("Library plus thin `main`").
+//! [`Invocation`], and `usage` and `rejection_text` produce the strings
+//! `src/main.rs` writes to stderr. Keeping this logic here rather than in
+//! `main` is what makes it unit-testable — see design.md -> Decisions
+//! ("Library plus thin `main`").
 
 pub mod changes;
 pub mod cli;
@@ -277,7 +277,7 @@ pub(crate) mod testutil {
 /// The classified shape of an invocation of the binary.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Invocation {
-    /// `ui` alone: render the placeholder dashboard pane.
+    /// `ui` alone: run the dashboard.
     Ui,
     /// Anything else. Carries the offending token, when there is one — the
     /// unrecognised first argument, or the trailing argument after `ui`.
@@ -298,14 +298,6 @@ pub fn parse(args: &[&str]) -> Invocation {
 /// Usage text printed to stderr for any rejected invocation.
 pub fn usage() -> &'static str {
     "usage: herdr-openspec <ui>\n\nCommands:\n  ui    Run the OpenSpec dashboard pane\n"
-}
-
-/// The placeholder banner printed to stdout on `ui`.
-pub fn banner() -> String {
-    format!(
-        "herdr-openspec {}\nThe OpenSpec dashboard is not implemented yet.\n",
-        env!("CARGO_PKG_VERSION")
-    )
 }
 
 /// The full stderr text for a rejected invocation: an optional line naming
@@ -342,14 +334,6 @@ mod tests {
             parse(&["ui", "--tab"]),
             Invocation::Reject(Some("--tab".to_string()))
         );
-    }
-
-    #[test]
-    fn banner_names_the_plugin_id_version_and_not_implemented_line() {
-        let banner = banner();
-        assert!(banner.contains("herdr-openspec"));
-        assert!(banner.contains(env!("CARGO_PKG_VERSION")));
-        assert!(banner.to_lowercase().contains("not implemented"));
     }
 
     #[test]

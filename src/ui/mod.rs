@@ -8,10 +8,80 @@ pub mod layout;
 pub mod terminal;
 pub mod view;
 
+use std::io::IsTerminal;
 use std::path::Path;
 
 use crate::config::Config;
 use crate::ui::app::{Dashboard, Route};
+use crate::ui::driver::{LoopError, TICK};
+use crate::ui::event::CrosstermEvents;
+use crate::ui::terminal::{CrosstermOps, TerminalError, TerminalGuard, TerminalOps};
+
+/// Why the dashboard failed to start.
+#[derive(Debug)]
+pub enum StartError {
+    /// `stdout` is not a terminal — refused before any configuration read
+    /// or filesystem walk. `plugin-build` owns the exit status and message
+    /// this becomes; this type owns only the decision.
+    NotATerminal,
+    /// A `TerminalOps` operation failed while entering the guard.
+    Terminal(TerminalError),
+    /// Anything else — reading the working directory, constructing the
+    /// real terminal, or the event loop itself.
+    Io(String),
+}
+
+impl std::fmt::Display for StartError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StartError::NotATerminal => write!(f, "not a terminal"),
+            StartError::Terminal(e) => write!(f, "{e}"),
+            StartError::Io(s) => write!(f, "{s}"),
+        }
+    }
+}
+
+impl From<std::io::Error> for StartError {
+    fn from(err: std::io::Error) -> Self {
+        StartError::Io(err.to_string())
+    }
+}
+
+impl From<LoopError> for StartError {
+    fn from(err: LoopError) -> Self {
+        match err {
+            LoopError::Draw(detail) => StartError::Io(format!("draw failed: {detail}")),
+            LoopError::Events(e) => StartError::Io(format!("event source failed: {}", e.0)),
+        }
+    }
+}
+
+/// The one pure decision: refuse without touching any `TerminalOps`
+/// operation when `is_terminal` is false, otherwise enter the guard.
+pub fn enter_if_terminal(
+    is_terminal: bool,
+    ops: &dyn TerminalOps,
+) -> Result<TerminalGuard<'_>, StartError> {
+    if !is_terminal {
+        return Err(StartError::NotATerminal);
+    }
+    TerminalGuard::enter(ops).map_err(StartError::Terminal)
+}
+
+/// Start the dashboard: refuse without a terminal, install the panic hook,
+/// load configuration and startup state, and run the event loop to
+/// completion. Straight-line wiring with no branch of its own beyond `?`.
+pub fn run() -> Result<(), StartError> {
+    let _guard = enter_if_terminal(std::io::stdout().is_terminal(), &CrosstermOps)?;
+    terminal::install_panic_hook();
+    let config = crate::config::load_from_env();
+    let cwd = std::env::current_dir()?;
+    let mut dashboard = load(&cwd, &config);
+    let mut term =
+        ratatui::Terminal::new(ratatui::backend::CrosstermBackend::new(std::io::stdout()))?;
+    driver::run_loop(&mut term, &mut dashboard, &mut CrosstermEvents, TICK)?;
+    Ok(())
+}
 
 /// Startup state, read from files only: `resolve::find_repo` then, when a
 /// root was found, `changes::from_files`. Makes no CLI call, spawns no
@@ -160,6 +230,81 @@ mod tests {
             let _ = super::super::load(root, &config_with_archived_count(5));
             let after = snapshot(root);
             assert_eq!(before, after, "ui::load wrote inside the repository");
+        }
+    }
+
+    mod start {
+        use std::cell::RefCell;
+
+        use crate::ui::terminal::{TerminalError, TerminalOps};
+
+        #[derive(Default)]
+        struct Recorder {
+            calls: RefCell<Vec<&'static str>>,
+            fail_enable_raw: bool,
+        }
+
+        impl Recorder {
+            fn calls(&self) -> Vec<&'static str> {
+                self.calls.borrow().clone()
+            }
+        }
+
+        impl TerminalOps for Recorder {
+            fn enable_raw(&self) -> Result<(), TerminalError> {
+                self.calls.borrow_mut().push("enable_raw");
+                if self.fail_enable_raw {
+                    return Err(TerminalError {
+                        op: "enable_raw",
+                        detail: "device busy".to_string(),
+                    });
+                }
+                Ok(())
+            }
+            fn enter_alternate(&self) -> Result<(), TerminalError> {
+                self.calls.borrow_mut().push("enter_alternate");
+                Ok(())
+            }
+            fn leave_alternate(&self) -> Result<(), TerminalError> {
+                self.calls.borrow_mut().push("leave_alternate");
+                Ok(())
+            }
+            fn disable_raw(&self) -> Result<(), TerminalError> {
+                self.calls.borrow_mut().push("disable_raw");
+                Ok(())
+            }
+        }
+
+        #[test]
+        fn not_a_terminal_records_no_call() {
+            let rec = Recorder::default();
+            let result = super::super::enter_if_terminal(false, &rec);
+            assert!(matches!(
+                result,
+                Err(super::super::StartError::NotATerminal)
+            ));
+            assert!(rec.calls().is_empty());
+        }
+
+        #[test]
+        fn a_terminal_enters_the_guard() {
+            let rec = Recorder::default();
+            let result = super::super::enter_if_terminal(true, &rec);
+            assert!(result.is_ok());
+            assert_eq!(rec.calls(), vec!["enable_raw", "enter_alternate"]);
+        }
+
+        #[test]
+        fn a_failing_enable_raw_becomes_start_error_terminal() {
+            let rec = Recorder {
+                fail_enable_raw: true,
+                ..Recorder::default()
+            };
+            let result = super::super::enter_if_terminal(true, &rec);
+            match result {
+                Err(super::super::StartError::Terminal(e)) => assert_eq!(e.op, "enable_raw"),
+                other => panic!("expected StartError::Terminal, got {other:?}"),
+            }
         }
     }
 }

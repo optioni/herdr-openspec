@@ -1084,7 +1084,7 @@ needs, in the extracted copy rather than in the archive.
 ## 8. `ui::run` and `main` — the wiring, and outer-loop GREEN
 <!-- kind: behavior -->
 
-- [ ] 8.1 RED: Add `mod tests { mod start { … } }` to `src/ui/mod.rs` and write three
+- [x] 8.1 RED: Add `mod tests { mod start { … } }` to `src/ui/mod.rs` and write three
       failing tests for terminal-lifecycle's refusal scenario:
       - `start::not_a_terminal_records_no_call` — `enter_if_terminal(false, &recorder)`
         returns `Err(StartError::NotATerminal)` and the recorder's list is **empty**. The
@@ -1097,30 +1097,47 @@ needs, in the extracted copy rather than in the archive.
         `enter_if_terminal(true, &failing)` returns `Err(StartError::Terminal(e))` whose
         `op` is `"enable_raw"`.
       **Red when:** `enter_if_terminal` and `StartError` do not exist.
+      **Recorded:** `error[E0433]: failed to resolve: could not find 'StartError' in
+      'super'` and `error[E0425]: cannot find function 'enter_if_terminal' in module
+      'super::super'` — missing behaviour, not a harness issue.
 
-- [ ] 8.2 GREEN: Implement `StartError`, `enter_if_terminal`, and `ui::run`. `run`'s body,
+- [x] 8.2 GREEN: Implement `StartError`, `enter_if_terminal`, and `ui::run`. `run`'s body,
       in order: `enter_if_terminal(std::io::stdout().is_terminal(), &CrosstermOps)?`;
       `install_panic_hook()`; `config::load_from_env()`; `std::env::current_dir()`;
       `load(&cwd, &config)`; `Terminal::new(CrosstermBackend::new(std::io::stdout()))`;
       `run_loop(&mut terminal, &mut dashboard, &mut CrosstermEvents, TICK)`; drop the guard.
       Keep it to wiring with no branch of its own beyond `?`, which is what design.md →
       Risks accepts as uncovered.
+      **Recorded:** all 3 tests green on first implementation. `From<std::io::Error>` and
+      `From<LoopError>` for `StartError` let `current_dir()?`, `Terminal::new(...)?`, and
+      `run_loop(...)?` each convert with a bare `?`, keeping `run`'s body to the named
+      straight-line sequence plus the guard drop at the end of scope.
 
-- [ ] 8.3 CHANGE: Update `src/main.rs` — `Invocation::Ui` calls `ui::run()` and maps
+- [x] 8.3 CHANGE: Update `src/main.rs` — `Invocation::Ui` calls `ui::run()` and maps
       `Ok(())` to exit 0, `Err(StartError::NotATerminal)` to a stderr message naming
       `herdr-openspec` and `not a terminal` plus exit 3, and any other `Err` to its
       `Display` text plus exit 1. Delete `lib::banner` and its unit test; leave
       `lib::parse`, `lib::usage`, and `lib::rejection_text` untouched, so the status-2 path
       is unchanged.
+      **Recorded:** done as specified. `StartError::NotATerminal`'s own `Display` reads just
+      `"not a terminal"` — `main.rs` prepends `"herdr-openspec: "` itself for the exit-3
+      message, so the process name lives in the one place `plugin-build` owns the exit
+      surface, not duplicated into the library type. `lib::banner` and its test deleted;
+      `parse`, `usage`, `rejection_text` untouched, confirmed by `unknown_subcommand`,
+      `extra_arguments_after_ui`, and `no_subcommand` staying green unmodified.
 
-- [ ] 8.4 CHANGE: Replace `tests/cli.rs::ui_prints_placeholder_banner` and
+- [x] 8.4 CHANGE: Replace `tests/cli.rs::ui_prints_placeholder_banner` and
       `ui_holds_open_until_stdin_closes` — both now assert removed behaviour — with
       `failing_statuses_are_distinct`: run the binary four ways with stdout piped and stdin
       at EOF (`ui`, `wat`, `ui --tab`, no arguments), assert statuses 3, 2, 2, 2, assert the
       three status-2 runs print usage listing `ui` and name their rejected token, and assert
       every run's stdout is empty. `ui_without_a_terminal_exits_three` from group 0 stays.
+      **Recorded:** done as specified. `unknown_subcommand`, `extra_arguments_after_ui`, and
+      `no_subcommand` are left in place, unmentioned by this task and covering the same
+      shapes individually — the net count (6 tests before this task: 5 baseline + group 0's
+      addition, minus the 2 replaced, plus 1 new) lands back at 5, matching 8.5's target.
 
-- [ ] 8.5 VERIFY (outer loop closes): Run
+- [x] 8.5 VERIFY (outer loop closes): Run
       `cargo test --all-features --test cli ui_without_a_terminal_exits_three` — it must now
       **pass**, having failed at task 0.3 with the recorded message. That is a filtered run,
       so read its `filtered out` arithmetic and confirm exactly one test ran; a filter that
@@ -1130,12 +1147,31 @@ needs, in the extracted copy rather than in the archive.
       is that 8.3 deletes `lib::banner`, which leaves the surviving
       `ui_prints_placeholder_banner` failing the run outright.
       **Red when:** the binary still blocks on stdin, or exits 0 or 2 instead of 3.
+      **Recorded — the outer loop closes:** `test ui_without_a_terminal_exits_three ... ok`;
+      `test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 4 filtered out` — exactly
+      one test ran under the filter, and it passed, having failed since task 0.3.
+      `TESTCOUNT OK: --test-cli filter '' ran 5 tests (>= 5)`;
+      `TESTCOUNT OK: --lib filter 'ui::tests::start::' ran 3 tests (>= 3)`.
 
-- [ ] 8.6 REFACTOR + VERIFY: No refactor is expected — `run` is straight-line wiring and
+- [x] 8.6 REFACTOR + VERIFY: No refactor is expected — `run` is straight-line wiring and
       `main`'s dispatch is a three-arm match. State explicitly that none was needed, or make
       one and say what. Then `make check`, then `cargo llvm-cov --summary-only` and record
       the TOTAL against the 98.93% baseline from task 1.1. The floor is 80 and is not moving; this is
       recorded so a large unexplained drop is visible rather than discovered later. Commit.
+      **Recorded:** `cargo clippy --all-targets --all-features -- -D warnings` reported
+      nothing on `ui::run` or `main` — no refactor needed. **`make check` — the literal,
+      unqualified command, no longer needing the 1.1 substitution now that the acceptance
+      test is green — exits 0**: `fmt-check` clean, `lint` clean, `test` 443 lib + 11
+      `ci_workflow` + 5 `cli`, all passing, `coverage` passes the 80% floor.
+      `cargo llvm-cov --summary-only` → **TOTAL 97.82%** over 8,822 lines, 192 uncovered —
+      down from the 98.93%/7,635-line/82-uncovered baseline, as design.md → Risks predicted
+      ("the recorded total will move a little more than the residue list alone suggests"):
+      the newly-uncoverable residue is `ui::terminal::CrosstermOps` and
+      `install_panic_hook`, `ui::event::CrosstermEvents`, `ui::run`'s body after its
+      terminal check, `main.rs`'s exit-1 arm (unreachable without a real terminal), and the
+      test-only `FailingBackend`'s seven `Backend` methods `Terminal` never calls — every
+      one named in that section in advance. The floor (80) is unmoved and cleared by 17.82
+      points.
 
 ---
 

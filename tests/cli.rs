@@ -51,46 +51,63 @@ fn ui_without_a_terminal_exits_three() {
 }
 
 #[test]
-fn ui_prints_placeholder_banner() {
-    let output = bin()
-        .arg("ui")
-        .stdin(Stdio::null())
-        .output()
-        .expect("failed to run binary");
+fn failing_statuses_are_distinct() {
+    // Every run pipes stdout and starts stdin at EOF (Stdio::null()), so
+    // none of the four can block: `ui` refuses immediately for lack of a
+    // terminal, and the other three are argument-classification rejections
+    // that never reach `ui::run` at all.
+    let run = |args: &[&str]| {
+        bin()
+            .args(args)
+            .stdin(Stdio::null())
+            .output()
+            .expect("failed to run binary")
+    };
 
-    assert!(output.status.success(), "status: {:?}", output.status);
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("herdr-openspec"), "stdout: {stdout}");
-    assert!(
-        stdout.contains(env!("CARGO_PKG_VERSION")),
-        "stdout: {stdout}"
+    let ui = run(&["ui"]);
+    let wat = run(&["wat"]);
+    let ui_tab = run(&["ui", "--tab"]);
+    let none = run(&[]);
+
+    assert_eq!(ui.status.code(), Some(3), "ui status: {:?}", ui.status);
+    assert_eq!(wat.status.code(), Some(2), "wat status: {:?}", wat.status);
+    assert_eq!(
+        ui_tab.status.code(),
+        Some(2),
+        "ui --tab status: {:?}",
+        ui_tab.status
     );
-    assert!(output.stderr.is_empty(), "stderr: {:?}", output.stderr);
-}
-
-#[test]
-fn ui_holds_open_until_stdin_closes() {
-    let mut child = bin()
-        .arg("ui")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("failed to spawn binary");
-
-    // Give the process time to print the banner and start blocking on stdin.
-    thread::sleep(Duration::from_millis(200));
-    assert!(
-        child.try_wait().expect("try_wait failed").is_none(),
-        "process exited before stdin closed"
+    assert_eq!(
+        none.status.code(),
+        Some(2),
+        "no-args status: {:?}",
+        none.status
     );
 
-    // Dropping the stdin handle closes the write end, so the child's stdin
-    // reaches EOF and it should exit.
-    drop(child.stdin.take());
+    for (name, output) in [("wat", &wat), ("ui --tab", &ui_tab), ("no-args", &none)] {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains("ui"), "{name} stderr: {stderr}");
+    }
+    let wat_stderr = String::from_utf8_lossy(&wat.stderr);
+    assert!(wat_stderr.contains("wat"), "wat stderr: {wat_stderr}");
+    let ui_tab_stderr = String::from_utf8_lossy(&ui_tab.stderr);
+    assert!(
+        ui_tab_stderr.contains("--tab"),
+        "ui --tab stderr: {ui_tab_stderr}"
+    );
 
-    let status = child.wait().expect("failed to wait on child");
-    assert!(status.success(), "status: {status:?}");
+    for (name, output) in [
+        ("ui", &ui),
+        ("wat", &wat),
+        ("ui --tab", &ui_tab),
+        ("no-args", &none),
+    ] {
+        assert!(
+            output.stdout.is_empty(),
+            "{name} stdout: {:?}",
+            output.stdout
+        );
+    }
 }
 
 #[test]
