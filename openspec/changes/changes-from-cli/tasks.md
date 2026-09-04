@@ -1361,32 +1361,32 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
 ## 13. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 13.1 CHECK: Inspect the intended verification commands and affected tiers. The gated
+- [x] 13.1 CHECK: Inspect the intended verification commands and affected tiers. The gated
       code is all of `src/changes.rs`; the affected tier is the unit tier plus the
       command-level checks in group 10. Confirm `make check` is the composite and that each
       sub-command is also run individually below, so a failure names itself.
 
-- [ ] 13.2 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
+- [x] 13.2 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
 
-- [ ] 13.3 VERIFY: `cargo fmt --all -- --check` — clean.
+- [x] 13.3 VERIFY: `cargo fmt --all -- --check` — clean.
 
-- [ ] 13.4 VERIFY: `cargo test --all-features` — green. (Rust's type checker runs as part
+- [x] 13.4 VERIFY: `cargo test --all-features` — green. (Rust's type checker runs as part
       of `cargo test` and `cargo clippy`; this repository has no separate type-check
       command.)
 
-- [ ] 13.5 VERIFY: `cargo llvm-cov --fail-under-lines 80` — the floor is 80% and is never
+- [x] 13.5 VERIFY: `cargo llvm-cov --fail-under-lines 80` — the floor is 80% and is never
       lowered, waived, or given an exclusion. `main` stands at 98.67% over 5499 lines;
       record the new figure. **Red when:** the new code is added without tests, which is
       what the floor exists to catch.
 
-- [ ] 13.6 VERIFY: `testcount --lib '' <lib baseline from 1.1 + 1>` — the **lib** test
+- [x] 13.6 VERIFY: `testcount --lib '' <lib baseline from 1.1 + 1>` — the **lib** test
       count must be strictly greater than the 300 recorded in task 1.1. The `--lib` scope
       is load-bearing: an unscoped run sums 316 tests across three binaries and would pass
       with zero new lib tests, and would stay green even if the lib count fell.
 
-- [ ] 13.7 VERIFY: `make check` — the single composite gate, exit 0. If it fails, name the
+- [x] 13.7 VERIFY: `make check` — the single composite gate, exit 0. If it fails, name the
       failing sub-command rather than summarising.
 
-- [ ] 13.8 VERIFY: `openspec validate changes-from-cli --strict` — valid. This is the one
+- [x] 13.8 VERIFY: `openspec validate changes-from-cli --strict` — valid. This is the one
       command in the change that runs the real `openspec` binary; design.md → Test
       Boundaries names it, and no test depends on it.
