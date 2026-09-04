@@ -843,13 +843,13 @@ Three documents and six edits, with a CHECK before them and a VERIFY after. Ever
 rewrites or replaces existing wording rather than appending beside something now false, and
 states its net effect.
 
-- [ ] 11.1 CHECK: Before editing, re-read each passage this group claims to correct and
+- [x] 11.1 CHECK: Before editing, re-read each passage this group claims to correct and
       confirm it still says what the task assumes — `SPEC.md` → Data layer → Resolution chain
       (Artifact files, Changes, Archived changes), → Degraded states, → Testing and quality
       gates → Fixtures; `openspec/IMPLEMENTATION-ORDER.md`'s two rows; and `AGENTS.md` →
       Current repo state. Record any that has already moved, so the edit is a correction and
       not a collision
-- [ ] 11.2 CHANGE: `SPEC.md` → Data layer → Resolution chain → **Artifact files**. Rewrite
+- [x] 11.2 CHANGE: `SPEC.md` → Data layer → Resolution chain → **Artifact files**. Rewrite
       "The file path falls back to `<id>.md` for file artifacts and `<id>/` for directory
       artifacts" to say that the file path resolves the schema artifact's `generates` value, of
       which `<id>.md` / `<id>/` is the reduction for the vendored `tdd` schema and not the
@@ -860,7 +860,7 @@ states its net effect.
       `dist/commands/workflow/shared.d.ts:24`) the way the other CLI claims in that document
       are cited. Audience: whoever writes `changes-from-cli`. Net: rewrites two sentences,
       adds one
-- [ ] 11.3 CHANGE: `SPEC.md` → Data layer → **Changes** and **Archived changes**. Add the two
+- [x] 11.3 CHANGE: `SPEC.md` → Data layer → **Changes** and **Archived changes**. Add the two
       orderings this change fixes and the reason they are contracts rather than preferences:
       active changes name-ascending in byte order (so `changes-from-cli` must re-sort
       `openspec list --json`'s mtime-descending default), and archived changes dated-descending
@@ -869,7 +869,7 @@ states its net effect.
       the merge joins artifact lists by position because `schema-artifacts` forbids
       de-duplicating ids. Audience: whoever writes `changes-from-cli` or `list-view`. Net:
       rewrites the Archived changes paragraph, adds five lines to Changes
-- [ ] 11.4 CHANGE: `SPEC.md` → **Degraded states**. Add two rows for states this change
+- [x] 11.4 CHANGE: `SPEC.md` → **Degraded states**. Add two rows for states this change
       introduces and Phase 6 must not rediscover: an `openspec/changes/` (or `archive/`) that
       exists and cannot be read, and an artifact whose `generates` pattern the file path does
       not support. In the same table, correct the "Schema loads with no tasks artifact" row:
@@ -879,7 +879,7 @@ states its net effect.
       stays `tasks-tab`'s. `IMPLEMENTATION-ORDER.md` forbids `degraded-states` from discovering
       new behaviour, which is why `plugin-config`, `repo-resolution`, and `task-parsing` each
       added their own rows. Net: two rows added, one row's parenthetical rewritten
-- [ ] 11.5 CHANGE: `SPEC.md` → Testing and quality gates → **Fixtures**. Rewrite the section to
+- [x] 11.5 CHANGE: `SPEC.md` → Testing and quality gates → **Fixtures**. Rewrite the section to
       describe the two mechanisms the crate actually uses — run-time `ScratchDir` trees for
       every filesystem edge, and `include_str!` corpora such as the existing
       `tests/fixtures/tasks/` for pure parsers whose input is bytes — and delete the promise of
@@ -890,7 +890,7 @@ states its net effect.
       no change will ever build, and it also discharges `task-parsing`'s deferred note that
       `tests/fixtures/tasks/` is a shape the section does not describe. Net: rewrites the
       section, no growth
-- [ ] 11.6 CHANGE: `openspec/IMPLEMENTATION-ORDER.md` → the Phase 2 `changes-from-files` row
+- [x] 11.6 CHANGE: `openspec/IMPLEMENTATION-ORDER.md` → the Phase 2 `changes-from-files` row
       and the Phase 3 `changes-from-cli` row. Correct the first row's "resolve artifact paths
       as `<id>.md` or `<id>/`" to name `generates`, and add to the second row the two
       obligations this change hands it: join the artifact lists by position rather than by path
@@ -898,14 +898,14 @@ states its net effect.
       `Config::archived_count` from `plugin-config`, which reaches it transitively through
       `repo-resolution` and so adds no Mermaid edge — recorded so the absence is not read as an
       oversight. Net: two rows edited
-- [ ] 11.7 CHANGE: `AGENTS.md` → Current repo state. Replace the "`changes-from-files` is next"
+- [x] 11.7 CHANGE: `AGENTS.md` → Current repo state. Replace the "`changes-from-files` is next"
       clause with one sentence saying what landed, rather than appending beside it. Do **not**
       add a new rule to the Architecture rules section: the one durable constraint this change
       produces — that both producers of `Change` are kept in agreement by the absence of
       `Default`, the absence of any `..`, and a shared conformance function — belongs in the
       change's own design.md and in `change-model`, which is where a future change will look
       for it. Net: one sentence rewritten, nothing added
-- [ ] 11.8 VERIFY: Re-read each edited passage end to end and confirm it now reads as one
+- [x] 11.8 VERIFY: Re-read each edited passage end to end and confirm it now reads as one
       coherent statement rather than a correction bolted onto an older one, and that no
       document grew a second entry saying what an existing entry already said
 

@@ -20,19 +20,22 @@ spec is wrong, update the spec as part of that change rather than letting the tw
 ## Current repo state
 
 `repo-foundation`, `ci-pipeline`, `plugin-config`, `repo-resolution`,
-`schema-model`, and `task-parsing` have landed: the crate builds with two
-third-party dependencies (`toml`, `yaml-rust2`), `make check` runs all four
-quality gates locally and in CI, the crate reads `config.toml` and derives
-and records agent-name mappings under `HERDR_PLUGIN_STATE_DIR`, it can locate
-the OpenSpec repository root and the `openspec` binary — the binary chain's
-fourth probe step ships as an injected hook that always returns nothing
-until `subprocess-seam` wires it — it reads the repository's schema and
-produces the ordered artifact list including the tasks artifact, and it
-parses a task file into groups, items, and completion counts that agree with
-the CLI's own. `changes-from-files` is next, with all three of its
-dependencies now landed. The dashboard itself is not implemented yet —
-`herdr-openspec ui` prints a placeholder banner and blocks until the pane
-closes.
+`schema-model`, `task-parsing`, and `changes-from-files` have landed: the
+crate builds with two third-party dependencies (`toml`, `yaml-rust2`),
+`make check` runs all four quality gates locally and in CI, the crate reads
+`config.toml` and derives and records agent-name mappings under
+`HERDR_PLUGIN_STATE_DIR`, it can locate the OpenSpec repository root and the
+`openspec` binary — the binary chain's fourth probe step ships as an
+injected hook that always returns nothing until `subprocess-seam` wires it —
+it reads the repository's schema and produces the ordered artifact list
+including the tasks artifact, it parses a task file into groups, items, and
+completion counts that agree with the CLI's own, and it enumerates
+`openspec/changes/` into the `Change`/`ChangeSet` values the dashboard
+renders — active and archived, with every artifact resolved and every
+change's task progress counted by the CLI's own fallback rule, with no
+`openspec` binary present at all. The dashboard itself is not implemented
+yet — `herdr-openspec ui` prints a placeholder banner and blocks until the
+pane closes.
 
 Important files:
 

@@ -126,15 +126,43 @@ the schema format.
 **Changes.** `openspec list --json` yields
 `{name, completedTasks, totalTasks, lastModified, status}` per change. The file
 path enumerates subdirectories of `openspec/changes/` excluding `archive/`.
+Active changes are ordered name-ascending in byte order — a contract, not a
+preference, because both producers of `Change` must agree on it: the CLI's
+own default order is most-recently-modified first, so the CLI path re-sorts
+its own result by name to match. `Change` carries no `status` and no
+`lastModified` field; the CLI derives the first from the completed/total pair
+(`Progress::is_complete` mirrors the same split) and no view renders the
+second.
 
 **Archived changes.** Directories under `openspec/changes/archive/` named
-`YYYY-MM-DD-<name>`. Strip the date prefix, sort descending, show the five most
-recent (`archived_count` in plugin configuration).
+`YYYY-MM-DD-<name>`. Strip the date prefix; entries are ordered dated-newest-
+first, with same-date entries broken by name descending, and every undated
+entry ordered after all dated ones, among itself by name descending; show the
+five most recent (`archived_count` in plugin configuration). Archived changes
+are permanently file-sourced — the CLI has no way to address one — so this
+ordering is the plugin's own rather than copied from a CLI default.
 
-**Artifact files.** `openspec instructions apply --change <name> --json` returns
-`contextFiles`, mapping artifact id to concrete paths — preferable to guessing
-filenames. The file path falls back to `<id>.md` for file artifacts and `<id>/`
-for directory artifacts.
+A change's `artifacts` are joined between the file and CLI producers by
+**position** in the schema's declared order, never by path or by id:
+`schema-artifacts` requires a schema's artifact list to be kept verbatim and
+never de-duplicated, so an id is not a key, and the file producer does not
+canonicalize its paths while the CLI's `contextFiles` does, so the path
+strings legitimately differ.
+
+**Artifact files.** The file path resolves each schema artifact's `generates`
+value against the change directory — never a path constructed from the
+artifact's `id`. `<id>.md` for a file artifact and `<id>/` for a directory
+artifact is what `generates` happens to reduce to for the vendored `tdd`
+schema, where every artifact's filename is its id; it is not the rule, and a
+schema declaring `id: plan` with `generates: implementation-plan.md` resolves
+to `implementation-plan.md`, not `plan.md`.
+
+`openspec instructions apply --change <name> --json` returns `contextFiles`,
+mapping an artifact id to an **array** of absolute paths — preferable to
+guessing filenames once the CLI path is available. An artifact matching
+nothing is **omitted** from `contextFiles` entirely, rather than present with
+an empty array (`dist/commands/workflow/instructions.js:270-277`,
+`dist/commands/workflow/shared.d.ts:24`, `@fission-ai/openspec@1.11.0`).
 
 **The `openspec` binary.** Probed in order, and cached for the session, taking
 the first usable candidate and probing no further:
@@ -349,9 +377,11 @@ Every condition renders usable content rather than an error screen:
 | Schema unknown to the CLI | Per-change fall back to file mode. This is real: `learning-tool` declares schema `outside-in-tdd`, which the installed CLI rejects |
 | Schema not vendored (no `openspec/schemas/<name>/schema.yaml` locally) | Artifact list empty until the CLI tier supplies it; distinct from the row above, which is the CLI rejecting a schema the plugin already read — both can be true at once for a schema like `outside-in-tdd` |
 | Schema unreadable or invalid (I/O error, or bytes that are not a usable schema) | Artifact list empty, and the reason is named |
-| Schema loads with no tasks artifact (`apply.tracks` matches nothing, and no artifact has id `tasks`) | Every other tab renders; the tasks tab is absent (its rendering, and how progress falls back, are `tasks-tab`'s decision) |
+| Schema loads with no tasks artifact (`apply.tracks` matches nothing, and no artifact has id `tasks`) | Every other tab renders; the tasks tab is absent, which is `tasks-tab`'s rendering decision. The task **count** is not deferred: it falls back to counting `<change dir>/tasks.md` directly, matching `openspec list --json`'s own behaviour for such a change, so the pane never shows a pair the CLI would immediately correct |
 | No active changes | Empty state; archived changes remain browsable |
 | Artifact file missing | Tab is still shown and renders "No content yet" |
+| `openspec/changes/` or its `archive/` exists and cannot be read | Empty list for the affected tier, with the reason named on `ChangeSet::problems`; the archive walk is not attempted when the parent read already failed, so a permission error is never reported twice for the same fault |
+| An artifact's `generates` pattern falls outside the file path's supported glob subset | That artifact's list is empty and the reason is named; every other artifact on the change still resolves normally, and the CLI tier supplies the correct list when it arrives |
 | A tasks file exists but cannot be read (a directory where a file was expected, a permission error, an I/O error, or invalid UTF-8) | Reported as zero tasks, named in `Tasks::problems`; the CLI's count corrects the pane when it arrives. Invalid UTF-8 is the one case where the file path knowingly disagrees with `openspec list --json`, which decodes lossily and still reports a count — every other read failure already agrees with the CLI, which records the same failure as zero tasks too |
 | Herdr socket unreachable | Runs as a standalone TUI; agent column and action keys hidden |
 | Pane narrower than 100 columns | Single-column list and detail |
@@ -388,9 +418,22 @@ both 60 and 120 columns so the responsive breakpoint is genuinely covered.
 
 ### Fixtures
 
-Under `tests/fixtures/`: a `tdd`-schema repository with active and archived
-changes; a repository with no `openspec/` directory; a repository declaring a
-schema the CLI does not recognise.
+Two mechanisms, not checked-in fixture repositories: no change in the roadmap
+has a use for one. `changes::from_files` needs an empty directory, a
+symbolic link (dangling and not), and a directory at mode `0o000`, none of
+which git can store faithfully; and every view change performs no I/O at
+all, building a `ChangeSet` or `Config` value directly rather than opening a
+repository — the render seam above requires views to be pure functions from
+state to a frame.
+
+- **Run-time `crate::testutil::ScratchDir` trees**, built fresh under
+  `std::env::temp_dir()` for every test that needs a real filesystem edge —
+  `config`, `state`, `resolve`, `schema`, `tasks`, and `changes` all use this,
+  and it is how `changes::from_files`' unreadable-directory and symbolic-link
+  scenarios are reached at all.
+- **`include_str!` corpora** for pure parsers whose input is bytes, not a
+  directory tree — `tests/fixtures/tasks/` holds the markdown fixtures
+  `tasks::count` and `tasks::parse` are proven to agree on.
 
 ### Gates
 
