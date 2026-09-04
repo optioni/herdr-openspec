@@ -208,6 +208,123 @@ pub fn select(repo: &Path, change_dir: Option<&Path>) -> Selection {
     }
 }
 
+/// One artifact declared by a schema: its id and the (verbatim, unresolved)
+/// `generates` value that names the file or glob it produces.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Artifact {
+    pub id: String,
+    pub generates: String,
+}
+
+/// A loaded schema: the name that located it, the ordered artifact list —
+/// the tab order — and the artifact holding the task checklist, when the
+/// schema has one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Schema {
+    pub name: String,
+    pub artifacts: Vec<Artifact>,
+    pub tasks: Option<Artifact>,
+}
+
+/// A schema that parsed, plus one problem per skipped entry or other
+/// non-fatal defect.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedSchema {
+    pub schema: Schema,
+    pub problems: Vec<String>,
+}
+
+/// Parse one `schema.yaml` document. `Err` is the reason it is not a usable
+/// schema at all; `Ok` carries the schema plus one problem per skipped
+/// entry. Group 4's GREEN reads no key but the top-level `artifacts:` and
+/// `name:`; group 5 adds the `apply:`-driven `Schema::tasks` rule.
+pub fn parse(name: &str, text: &str) -> Result<ParsedSchema, String> {
+    let doc = first_document(text)?.ok_or_else(|| "the document is empty".to_string())?;
+    if !doc.is_hash() {
+        return Err("the document is not a mapping".to_string());
+    }
+
+    let sequence = doc["artifacts"]
+        .as_vec()
+        .ok_or_else(|| "artifacts is absent or not a sequence".to_string())?;
+    if sequence.is_empty() {
+        return Err("artifacts is an empty sequence".to_string());
+    }
+
+    let mut artifacts = Vec::new();
+    let mut problems = Vec::new();
+    for (position, entry) in sequence.iter().enumerate() {
+        match artifact_from(entry, position) {
+            Ok(artifact) => artifacts.push(artifact),
+            Err(reason) => problems.push(reason),
+        }
+    }
+    if artifacts.is_empty() {
+        return Err("every artifact entry is unusable".to_string());
+    }
+
+    if let Some(declared) = non_blank_str(&doc["name"]) {
+        if declared != name {
+            problems.push(format!(
+                "the schema directory {name:?} does not match its file's declared name {declared:?}"
+            ));
+        }
+    }
+
+    Ok(ParsedSchema {
+        schema: Schema {
+            name: name.to_string(),
+            artifacts,
+            // Group 5 fills this in from the schema's `apply:` block.
+            tasks: None,
+        },
+        problems,
+    })
+}
+
+/// A non-blank string read from a YAML node, applying `config::non_blank`'s
+/// rule. `None` for a missing key (`Yaml::BadValue`), a non-string value, or
+/// a string that is empty or whitespace-only.
+fn non_blank_str(node: &Yaml) -> Option<String> {
+    node.as_str()
+        .and_then(|s| crate::config::non_blank(Some(s.to_string())))
+}
+
+/// A relative path with no `..` segment and no NUL byte — the constraint the
+/// OpenSpec CLI applies to `generates`, applied here because
+/// `changes-from-files` joins the value onto a change directory.
+fn is_safe_relative_path(value: &str) -> bool {
+    if value.contains('\0') {
+        return false;
+    }
+    let path = Path::new(value);
+    if path.is_absolute() {
+        return false;
+    }
+    !path
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+}
+
+/// One `artifacts:` sequence entry, or the reason it is unusable, naming its
+/// zero-based `position` in the message — kept out of `Artifact` itself,
+/// which exists only for the problem text.
+fn artifact_from(node: &Yaml, position: usize) -> Result<Artifact, String> {
+    if !node.is_hash() {
+        return Err(format!("artifact at position {position} is not a mapping"));
+    }
+    let id = non_blank_str(&node["id"])
+        .ok_or_else(|| format!("artifact at position {position} has no usable id"))?;
+    let generates = non_blank_str(&node["generates"])
+        .ok_or_else(|| format!("artifact at position {position} has no usable generates"))?;
+    if !is_safe_relative_path(&generates) {
+        return Err(format!(
+            "artifact at position {position} has a generates value that escapes the change directory: {generates:?}"
+        ));
+    }
+    Ok(Artifact { id, generates })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -555,5 +672,251 @@ mod tests {
         assert_eq!(bare_selection.source, NameSource::Default);
         assert!(bare_selection.problems.is_empty());
         assert!(!bare.join("openspec").exists());
+    }
+
+    // --- group 4: parsing a schema document into artifacts ------------
+    //
+    // Every test here asserts `schema.name`, `schema.artifacts`, and
+    // `problems` only — `Schema::tasks` is group 5's, because 4.9's GREEN
+    // deliberately reads no key but `artifacts:` and `name:`.
+
+    fn art(id: &str, generates: &str) -> Artifact {
+        Artifact {
+            id: id.to_string(),
+            generates: generates.to_string(),
+        }
+    }
+
+    #[test]
+    fn artifact_order_is_the_files_order_not_alphabetical() {
+        let text = "\
+name: test
+artifacts:
+  - id: zeta
+    generates: zeta.md
+    requires: [middle]
+  - id: alpha
+    generates: alpha.md
+    requires: [zeta]
+  - id: middle
+    generates: middle.md
+  - id: zeta
+    generates: zeta2.md
+";
+        let parsed = parse("test", text).expect("schema should parse");
+        assert_eq!(
+            parsed.schema.artifacts,
+            vec![
+                art("zeta", "zeta.md"),
+                art("alpha", "alpha.md"),
+                art("middle", "middle.md"),
+                art("zeta", "zeta2.md"),
+            ]
+        );
+    }
+
+    #[test]
+    fn only_the_first_yaml_document_of_the_schema_file_is_used() {
+        let text = "\
+name: test
+artifacts:
+  - id: first
+    generates: first.md
+---
+name: test
+artifacts:
+  - id: second
+    generates: second.md
+";
+        let parsed = parse("test", text).expect("schema should parse");
+        assert_eq!(parsed.schema.artifacts, vec![art("first", "first.md")]);
+    }
+
+    #[test]
+    fn entries_missing_id_or_generates_are_skipped_and_the_rest_survive() {
+        let text = "\
+name: test
+artifacts:
+  - id: proposal
+    generates: proposal.md
+  - generates: orphan.md
+  - id: noname
+  - id: tasks
+    generates: tasks.md
+";
+        let parsed = parse("test", text).expect("schema should parse");
+        assert_eq!(
+            parsed.schema.artifacts,
+            vec![art("proposal", "proposal.md"), art("tasks", "tasks.md")]
+        );
+        assert_eq!(parsed.problems.len(), 2);
+        assert!(parsed.problems[0].contains('1'));
+        assert!(parsed.problems[1].contains('2'));
+    }
+
+    #[test]
+    fn a_blank_id_or_generates_is_skipped_like_an_absent_one() {
+        let text = "\
+name: test
+artifacts:
+  - id: \"  \"
+    generates: valid.md
+  - id: valid
+    generates: \"\"
+  - id: ok
+    generates: ok.md
+";
+        let parsed = parse("test", text).expect("schema should parse");
+        assert_eq!(parsed.schema.artifacts, vec![art("ok", "ok.md")]);
+        assert_eq!(parsed.problems.len(), 2);
+    }
+
+    #[test]
+    fn an_entry_that_is_not_a_mapping_is_skipped() {
+        let text = "\
+name: test
+artifacts:
+  - \"proposal\"
+  - [nested, sequence]
+  - id: ok
+    generates: ok.md
+";
+        let parsed = parse("test", text).expect("schema should parse");
+        assert_eq!(parsed.schema.artifacts, vec![art("ok", "ok.md")]);
+        assert_eq!(parsed.problems.len(), 2);
+    }
+
+    #[test]
+    fn a_generates_that_escapes_the_change_directory_is_skipped() {
+        let text = "\
+name: test
+artifacts:
+  - id: a
+    generates: ../outside.md
+  - id: b
+    generates: /etc/passwd
+  - id: c
+    generates: a/../../b.md
+  - id: d
+    generates: specs/**/*.md
+  - id: e
+    generates: sub/dir/file.md
+";
+        let parsed = parse("test", text).expect("schema should parse");
+        assert_eq!(
+            parsed.schema.artifacts,
+            vec![art("d", "specs/**/*.md"), art("e", "sub/dir/file.md")]
+        );
+        assert_eq!(parsed.problems.len(), 3);
+    }
+
+    #[test]
+    fn unused_keys_being_absent_or_malformed_does_not_make_an_entry_unusable() {
+        let text = "\
+name: test
+artifacts:
+  - id: a
+    generates: a.md
+  - id: b
+    generates: b.md
+    requires: not-a-sequence
+";
+        let parsed = parse("test", text).expect("schema should parse");
+        assert_eq!(
+            parsed.schema.artifacts,
+            vec![art("a", "a.md"), art("b", "b.md")]
+        );
+        assert!(parsed.problems.is_empty());
+    }
+
+    #[test]
+    fn a_schema_whose_every_entry_is_unusable_is_invalid_rather_than_empty() {
+        let text = "\
+name: test
+artifacts:
+  - generates: a.md
+  - generates: b.md
+";
+        assert!(parse("test", text).is_err());
+    }
+
+    #[test]
+    fn an_empty_comment_only_or_non_mapping_document_is_invalid() {
+        for text in ["", "# nothing\n", "just text\n", "- a\n- b\n"] {
+            assert!(parse("test", text).is_err(), "text {text:?}");
+        }
+    }
+
+    #[test]
+    fn an_absent_non_sequence_or_empty_artifacts_key_is_invalid() {
+        for text in [
+            "name: test\nversion: 1\n",
+            "name: test\nversion: 1\nartifacts: nope\n",
+            "name: test\nversion: 1\nartifacts: []\n",
+        ] {
+            assert!(parse("test", text).is_err(), "text {text:?}");
+        }
+    }
+
+    #[test]
+    fn flow_style_anchors_and_crlf_all_parse() {
+        // Flow style.
+        let flow = "name: test\nartifacts: [{id: a, generates: a.md}, {id: tasks, generates: tasks.md}]\n";
+        let parsed = parse("test", flow).expect("flow-style schema should parse");
+        assert_eq!(
+            parsed.schema.artifacts,
+            vec![art("a", "a.md"), art("tasks", "tasks.md")]
+        );
+
+        // Anchors and aliases.
+        let anchored = "\
+name: test
+template: &tpl
+  id: shared
+  generates: shared.md
+artifacts:
+  - *tpl
+";
+        let parsed = parse("test", anchored).expect("anchored schema should parse");
+        assert_eq!(parsed.schema.artifacts, vec![art("shared", "shared.md")]);
+
+        // CRLF versus LF.
+        let lf = "name: test\nartifacts:\n  - id: a\n    generates: a.md\n";
+        let crlf = lf.replace('\n', "\r\n");
+        let parsed_lf = parse("test", lf).expect("LF schema should parse");
+        let parsed_crlf = parse("test", &crlf).expect("CRLF schema should parse");
+        assert_eq!(parsed_lf.schema, parsed_crlf.schema);
+
+        // These three are what distinguish a YAML parser from a line
+        // scanner: each is legal YAML that an indentation-and-colon scanner
+        // reads wrongly or not at all. Kept even though each sub-case is
+        // individually simple, so the dependency choice stays load-bearing.
+    }
+
+    #[test]
+    fn a_schema_file_whose_block_scalars_mimic_structure_still_parses_correctly() {
+        // Modelled on the vendored `tdd` schema, whose `apply.instruction`
+        // content genuinely sits at four spaces — the same column as
+        // `generates:` under an artifact.
+        let text = "\
+name: test
+artifacts:
+  - id: real1
+    generates: real1.md
+  - id: real2
+    generates: real2.md
+apply:
+  tracks: real1.md
+  instruction: |
+    Do the thing.
+    - id: fake
+      generates: fake.md
+      tracks: fake.md
+";
+        let parsed = parse("test", text).expect("schema should parse");
+        assert_eq!(
+            parsed.schema.artifacts,
+            vec![art("real1", "real1.md"), art("real2", "real2.md")]
+        );
     }
 }
