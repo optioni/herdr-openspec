@@ -68,8 +68,18 @@ pub fn find_repo(start: &Path) -> RepoSearch {
 
 #[cfg(test)]
 mod tests {
-    use crate::testutil::{ScratchDir, canonical, symlink};
+    use crate::testutil::{ScratchDir, canonical, symlink, write_with_mode};
+    use std::collections::BTreeMap;
     use std::path::Path;
+
+    /// Build an environment lookup closure over a fixture map — never
+    /// `std::env::set_var`, which is `unsafe` in edition 2024 and races
+    /// parallel tests. `pairs` maps variable name to value; a name absent
+    /// from `pairs` is `None`.
+    fn env<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+        let map: BTreeMap<&str, &str> = pairs.iter().copied().collect();
+        move |name| map.get(name).map(|s| s.to_string())
+    }
 
     fn mkdir(path: &Path) {
         std::fs::create_dir_all(path).expect("create fixture directory");
@@ -326,5 +336,196 @@ mod tests {
             .map(|e| e.expect("entry").file_name())
             .collect();
         assert_eq!(listing_before, listing_after);
+    }
+
+    // --- group 3: candidate usability, result types, and the PATH step -----
+
+    #[test]
+    fn an_executable_regular_file_is_usable() {
+        let scratch = ScratchDir::new();
+        let d = scratch.path().join("d");
+        write_with_mode(&d.join("openspec"), b"#!/bin/sh\n", 0o755);
+
+        let result = super::openspec_bin(None, &env(&[("PATH", &d.display().to_string())]));
+        assert_eq!(
+            result.found,
+            Some(super::FoundBin {
+                path: d.join("openspec"),
+                source: super::BinSource::Path,
+            })
+        );
+    }
+
+    #[test]
+    fn a_file_without_an_execute_bit_is_skipped() {
+        let scratch = ScratchDir::new();
+        let a = scratch.path().join("a");
+        let b = scratch.path().join("b");
+        write_with_mode(&a.join("openspec"), b"not executable", 0o644);
+        write_with_mode(&b.join("openspec"), b"#!/bin/sh\n", 0o755);
+
+        let path_value = format!("{}:{}", a.display(), b.display());
+        let result = super::openspec_bin(None, &env(&[("PATH", &path_value)]));
+        assert_eq!(
+            result.found,
+            Some(super::FoundBin {
+                path: b.join("openspec"),
+                source: super::BinSource::Path,
+            })
+        );
+    }
+
+    #[test]
+    fn a_directory_named_openspec_is_skipped() {
+        let scratch = ScratchDir::new();
+        let a = scratch.path().join("a");
+        let b = scratch.path().join("b");
+        mkdir(&a.join("openspec")); // a directory, which carries the execute bit
+        write_with_mode(&b.join("openspec"), b"#!/bin/sh\n", 0o755);
+
+        let path_value = format!("{}:{}", a.display(), b.display());
+        let result = super::openspec_bin(None, &env(&[("PATH", &path_value)]));
+        assert_eq!(
+            result.found,
+            Some(super::FoundBin {
+                path: b.join("openspec"),
+                source: super::BinSource::Path,
+            })
+        );
+    }
+
+    #[test]
+    fn a_symbolic_link_to_an_executable_file_is_usable_and_is_returned_unresolved() {
+        let scratch = ScratchDir::new();
+        let a = scratch.path().join("a");
+        let t = scratch.path().join("t");
+        write_with_mode(&t.join("openspec.js"), b"#!/usr/bin/env node\n", 0o755);
+        symlink(&t.join("openspec.js"), &a.join("openspec"));
+
+        let result = super::openspec_bin(None, &env(&[("PATH", &a.display().to_string())]));
+        let found = result.found.expect("a binary should be found");
+        assert_eq!(found.path, a.join("openspec"));
+        assert_ne!(found.path, t.join("openspec.js"));
+        assert_eq!(found.source, super::BinSource::Path);
+    }
+
+    #[test]
+    fn a_dangling_symbolic_link_is_skipped() {
+        let scratch = ScratchDir::new();
+        let a = scratch.path().join("a");
+        let b = scratch.path().join("b");
+        symlink(&scratch.path().join("does-not-exist"), &a.join("openspec"));
+        write_with_mode(&b.join("openspec"), b"#!/bin/sh\n", 0o755);
+
+        let path_value = format!("{}:{}", a.display(), b.display());
+        let result = super::openspec_bin(None, &env(&[("PATH", &path_value)]));
+        assert_eq!(
+            result.found,
+            Some(super::FoundBin {
+                path: b.join("openspec"),
+                source: super::BinSource::Path,
+            })
+        );
+    }
+
+    #[test]
+    fn path_entries_are_searched_left_to_right() {
+        let scratch = ScratchDir::new();
+        let a = scratch.path().join("a");
+        let b = scratch.path().join("b");
+        write_with_mode(&a.join("openspec"), b"#!/bin/sh\n", 0o755);
+        write_with_mode(&b.join("openspec"), b"#!/bin/sh\n", 0o755);
+
+        let ab = format!("{}:{}", a.display(), b.display());
+        let result_ab = super::openspec_bin(None, &env(&[("PATH", &ab)]));
+        assert_eq!(result_ab.found.map(|f| f.path), Some(a.join("openspec")));
+
+        // Re-run with the two directories swapped, so the test cannot pass by
+        // accident of directory-creation order.
+        let ba = format!("{}:{}", b.display(), a.display());
+        let result_ba = super::openspec_bin(None, &env(&[("PATH", &ba)]));
+        assert_eq!(result_ba.found.map(|f| f.path), Some(b.join("openspec")));
+    }
+
+    #[test]
+    fn an_empty_or_blank_path_entry_is_not_the_current_directory() {
+        let scratch = ScratchDir::new();
+        let d = scratch.path().join("d");
+        write_with_mode(&d.join("openspec"), b"#!/bin/sh\n", 0o755);
+
+        let path_value = format!(":{}:   :", d.display());
+
+        // The candidate-list half is the load-bearing assertion: exactly one
+        // entry, absolute, with no bare relative `openspec` and no candidate
+        // under a directory of spaces.
+        let candidates = super::path_candidates(&path_value);
+        assert_eq!(candidates, vec![d.join("openspec")]);
+
+        let result = super::openspec_bin(None, &env(&[("PATH", &path_value)]));
+        assert_eq!(
+            result.found,
+            Some(super::FoundBin {
+                path: d.join("openspec"),
+                source: super::BinSource::Path,
+            })
+        );
+    }
+
+    #[test]
+    fn a_configured_path_that_does_not_exist_falls_through_to_path() {
+        let scratch = ScratchDir::new();
+        let g = scratch.path().join("g").join("openspec");
+        let d = scratch.path().join("d");
+        write_with_mode(&d.join("openspec"), b"#!/bin/sh\n", 0o755);
+        assert!(
+            !g.exists(),
+            "the configured path must not exist for this fixture"
+        );
+
+        let result = super::openspec_bin(Some(&g), &env(&[("PATH", &d.display().to_string())]));
+        assert_eq!(
+            result.found,
+            Some(super::FoundBin {
+                path: d.join("openspec"),
+                source: super::BinSource::Path,
+            })
+        );
+        assert_eq!(result.problems.len(), 1);
+        assert!(result.problems[0].contains(&g.display().to_string()));
+        assert!(!g.exists());
+    }
+
+    #[test]
+    fn a_configured_path_that_is_not_executable_falls_through() {
+        let scratch = ScratchDir::new();
+        let configured = scratch.path().join("configured-openspec");
+        write_with_mode(&configured, b"not executable", 0o644);
+        let d = scratch.path().join("d");
+        write_with_mode(&d.join("openspec"), b"#!/bin/sh\n", 0o755);
+
+        let result = super::openspec_bin(
+            Some(&configured),
+            &env(&[("PATH", &d.display().to_string())]),
+        );
+        assert_eq!(
+            result.found,
+            Some(super::FoundBin {
+                path: d.join("openspec"),
+                source: super::BinSource::Path,
+            })
+        );
+        assert_eq!(result.problems.len(), 1);
+        assert!(result.problems[0].contains(&configured.display().to_string()));
+    }
+
+    #[test]
+    fn a_configured_path_fails_and_nothing_else_is_found() {
+        let scratch = ScratchDir::new();
+        let configured = scratch.path().join("nowhere").join("openspec");
+
+        let result = super::openspec_bin(Some(&configured), &env(&[]));
+        assert_eq!(result.found, None);
+        assert_eq!(result.problems.len(), 1);
+        assert!(result.problems[0].contains(&configured.display().to_string()));
     }
 }
