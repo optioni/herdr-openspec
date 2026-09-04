@@ -721,7 +721,7 @@ needs, in the extracted copy rather than in the archive.
 ## 4. The `TestBackend` harness and `ui::view`
 <!-- kind: behavior -->
 
-- [ ] 4.1 RED: Extend `crate::testutil` in `src/lib.rs` with the harness, and write three
+- [x] 4.1 RED: Extend `crate::testutil` in `src/lib.rs` with the harness, and write three
       failing tests in `testutil::tests` for quality-gates' harness scenarios:
       - `render_at_touches_no_directory` — create a `testutil::ScratchDir` the test owns,
         take `testutil::snapshot` of **that directory alone** before and after
@@ -738,13 +738,27 @@ needs, in the extracted copy rather than in the archive.
       - `cell_reads_symbol_and_style` — `cell(&buffer, 0, 0)` returns the symbol and style
         of the top-left cell at both widths.
       **Red when:** `render_at`, `row_text`, and `cell` do not exist.
+      **Design gap found and fixed here:** `render_at`'s own tests require `ui::view::render`
+      to already produce real header and footer text ("row 0 spells `OpenSpec`", "last row
+      begins `q quit`") — but `ui::view::render` is task 4.4's GREEN, two steps later. The
+      same forward-reference shape as group 2/3's `Route` issue. Fix: `src/ui/view.rs` and
+      `pub mod view;` are created now, with `render` implementing the header and footer
+      *only* (both fully spec-correct, not stubs) — enough for these 3 tests to be honestly
+      green. The body region (task 4.3/4.4's real subject — borders, titles, emphasis,
+      interiors) is deliberately left undrawn until 4.3/4.4, so those 16 tests still get a
+      genuine RED→GREEN cycle. Confirmed: `error[E0583]: file not found for module 'view'`
+      — missing behaviour, not a harness issue.
 
-- [ ] 4.2 GREEN: Implement `testutil::render_at(width, height, &Dashboard) -> Buffer`
+- [x] 4.2 GREEN: Implement `testutil::render_at(width, height, &Dashboard) -> Buffer`
       building a `Terminal<TestBackend>`, drawing once through `ui::view::render`, and
       cloning the backend buffer; plus `row_text` and `cell`. All `#[cfg(test)]`, so nothing
       reaches the shipped binary.
+      **Recorded:** all 3 tests green on first implementation (`render_at` via
+      `TestBackend::new` + `Terminal::new` + `terminal.draw(...)` +
+      `terminal.backend().buffer().clone()`; `row_text` concatenates `buffer[(x,y)].symbol()`
+      per column; `cell` indexes `&buffer[(x,y)]`).
 
-- [ ] 4.3 RED: Create `src/ui/view.rs` with `mod tests` and write sixteen failing tests, one
+- [x] 4.3 RED: Create `src/ui/view.rs` with `mod tests` and write sixteen failing tests, one
       per responsive-layout scenario. Each names the exact cells it asserts, at each width:
       - `frame_rows_at_60_and_120` — at 60x20 and 120x20: `row_text(buf,0)[0..8] ==
         "OpenSpec"`; `cell(buf,0,0).style` has `Modifier::BOLD`; `row_text(buf,19)` starts
@@ -813,22 +827,50 @@ needs, in the extracted copy rather than in the archive.
         `searched_from` path, because that empty state is `list-view`'s.
       **Red when:** `ui::view::render` does not exist. Confirm each failure names a missing
       function or a wrong cell, never a panic inside `TestBackend` construction.
+      **Recorded:** 9 of 16 passed immediately (the header/footer-only scenarios, already
+      implemented at 4.2) and 7 failed on a body-region assertion — `assertion left == right
+      / left: " " / right: "┌"` and similar — confirming the missing behaviour is the body,
+      not a harness or compile problem. Failing: `narrow_draws_only_the_list_region`,
+      `narrow_detail_route_replaces_the_list_region`, `frame_rows_at_60_and_120`,
+      `breakpoint_is_exact_at_the_boundary`, `routed_region_border_is_bold`,
+      `wide_draws_two_regions_divided_at_40`, `resizing_the_backend_changes_the_next_frame`.
 
-- [ ] 4.4 GREEN: Implement `ui::view::render`, composing `layout::split_frame` and
+- [x] 4.4 GREEN: Implement `ui::view::render`, composing `layout::split_frame` and
       `layout::split_body`, the header (label, then the shortening rule from
       responsive-layout's requirement, counting **characters** not bytes), the footer's
       whole-hint drop rule, and the bordered regions with their titles and focus style.
       Region interiors are left untouched.
+      **Recorded:** added `render_body`/`render_region` (the missing piece from 4.3),
+      composing `layout::split_body` with `Block::bordered().title(..).border_style(..)` —
+      `border_style`, not `style`, is what the planning review's finding 11 warns a naive
+      implementation would use instead. All 16 tests green on first implementation.
 
-- [ ] 4.5 REFACTOR: Extract the header-shortening rule into a private pure function taking
+- [x] 4.5 REFACTOR: Extract the header-shortening rule into a private pure function taking
       `(&str, u16) -> Option<String>` so it is readable independently of the frame, keeping
       tests green.
+      **Recorded:** already factored this way from 4.2's implementation (`shorten_for_header(text:
+      &str, header_width: u16) -> Option<String>`) — no further extraction needed; all tests
+      stayed green.
 
-- [ ] 4.6 VERIFY: `testcount --lib 'ui::view::tests::' 16` and
+- [x] 4.6 VERIFY: `testcount --lib 'ui::view::tests::' 16` and
       `testcount --lib 'testutil::tests::' 3`, then run `WIDTHS` — it must now **pass**,
       reporting all 16 view tests naming both 60 and 120, having failed at task 1.3. Every
       one of the sixteen names both widths after the repairs above; there is **no exemption
       list**, and the check has no mechanism for one. `make check`. Commit.
+      **Recorded:** `TESTCOUNT OK: --lib filter 'ui::view::tests::' ran 16 tests (>= 16)`;
+      `TESTCOUNT OK: --lib filter 'testutil::tests::' ran 3 tests (>= 3)`. `WIDTHS` first
+      **failed**: `these view tests do not name both 60 and 120: frame_rows_at_60_and_120,
+      one_row_frame_draws_header_only, two_row_frame_draws_no_body,
+      one_column_frame_does_not_panic, breakpoint_is_exact_at_the_boundary` — those five used
+      `60u16`/`120u16`/`100u16` literals, and `\b\d+\b` does not match a digit run fused to a
+      type suffix (no word boundary between a digit and a following letter). Fixed by
+      dropping the `u16` suffixes (Rust infers the element type from `render_at`'s parameter
+      regardless); all 16 tests stayed green. Re-run: `WIDTHS OK: all 16 view tests name both
+      60 and 120`. Per the 1.1 correction: `fmt-check` clean (two nits auto-fixed); `clippy -D
+      warnings` clean; full suite — 423 lib (404 + 3 + 16) + 11 `ci_workflow` + 5-of-6 `cli`
+      (the one known RED, unchanged); `cargo llvm-cov --ignore-run-fail --fail-under-lines 80`
+      → **98.92%** over 8,259 lines, 89 uncovered (`src/ui/view.rs` at 99.02%, `src/ui/app.rs`
+      97.60%, `src/ui/layout.rs` 100.00%), floor holds.
 
 ---
 

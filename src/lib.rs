@@ -176,6 +176,102 @@ pub(crate) mod testutil {
     pub(crate) fn canonical(path: &Path) -> PathBuf {
         std::fs::canonicalize(path).expect("canonicalize expected path")
     }
+
+    /// Render `dashboard` at `width`x`height` through `ui::view::render` into
+    /// a `ratatui::backend::TestBackend`, and return the resulting buffer.
+    /// Every view scenario in this change and in every later view change
+    /// uses this, `row_text`, and `cell` — never a real terminal.
+    pub(crate) fn render_at(
+        width: u16,
+        height: u16,
+        dashboard: &crate::ui::app::Dashboard,
+    ) -> ratatui::buffer::Buffer {
+        let backend = ratatui::backend::TestBackend::new(width, height);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct TestBackend terminal");
+        terminal
+            .draw(|frame| crate::ui::view::render(frame, dashboard))
+            .expect("draw a frame into the TestBackend");
+        terminal.backend().buffer().clone()
+    }
+
+    /// Read row `y` of `buffer` as a `String`, one character per column.
+    pub(crate) fn row_text(buffer: &ratatui::buffer::Buffer, y: u16) -> String {
+        (0..buffer.area.width)
+            .map(|x| buffer[(x, y)].symbol().to_string())
+            .collect()
+    }
+
+    /// The cell at `(x, y)`, for reading its symbol and `Style`.
+    pub(crate) fn cell(buffer: &ratatui::buffer::Buffer, x: u16, y: u16) -> &ratatui::buffer::Cell {
+        &buffer[(x, y)]
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::{ScratchDir, cell, render_at, row_text, snapshot};
+        use crate::changes::ChangeSet;
+        use crate::ui::app::{Dashboard, Route};
+
+        fn empty_dashboard() -> Dashboard {
+            Dashboard {
+                repo: None,
+                searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
+                changes: ChangeSet {
+                    active: Vec::new(),
+                    archived: Vec::new(),
+                    problems: Vec::new(),
+                },
+                route: Route::List,
+                quit: false,
+            }
+        }
+
+        #[test]
+        fn render_at_touches_no_directory() {
+            let scratch = ScratchDir::new();
+            let before = snapshot(scratch.path());
+            let dashboard = empty_dashboard();
+
+            let buf60 = render_at(60, 20, &dashboard);
+            let buf120 = render_at(120, 20, &dashboard);
+
+            let after = snapshot(scratch.path());
+            assert_eq!(
+                before, after,
+                "render_at wrote inside the owned scratch dir"
+            );
+
+            for buf in [&buf60, &buf120] {
+                assert_eq!(&row_text(buf, 0)[0..8], "OpenSpec");
+                assert!(row_text(buf, buf.area.height - 1).starts_with("q quit"));
+            }
+        }
+
+        #[test]
+        fn row_text_reads_a_whole_row() {
+            let dashboard = empty_dashboard();
+            for width in [60u16, 120u16] {
+                let buf = render_at(width, 20, &dashboard);
+                assert_eq!(row_text(&buf, 0).chars().count(), width as usize);
+            }
+        }
+
+        #[test]
+        fn cell_reads_symbol_and_style() {
+            let dashboard = empty_dashboard();
+            for width in [60u16, 120u16] {
+                let buf = render_at(width, 20, &dashboard);
+                let top_left = cell(&buf, 0, 0);
+                assert_eq!(top_left.symbol(), "O");
+                assert!(
+                    top_left
+                        .style()
+                        .add_modifier
+                        .contains(ratatui::style::Modifier::BOLD)
+                );
+            }
+        }
+    }
 }
 
 /// The classified shape of an invocation of the binary.
