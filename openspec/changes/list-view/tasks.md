@@ -770,7 +770,7 @@ block is re-run, not further modified — and `GRAPH-SNAP` likewise.
 ## 2. `ui::app` — state, the visible list, and the key map
 <!-- kind: behavior -->
 
-- [ ] 2.1 RED: Write failing tests in `src/ui/app.rs`'s `mod tests` → `mod keys` for:
+- [x] 2.1 RED: Write failing tests in `src/ui/app.rs`'s `mod tests` → `mod keys` for:
       - `matches_is_case_insensitive_substring_on_the_name` — `matches("add-token-refresh",
         "add")`, `("ADD-TOKEN-REFRESH", "add")`, `("add-token-refresh", "ADD")`,
         `("add-token-refresh", "")` all true; `("fix-empty-basket", "add")` false. Covers
@@ -827,12 +827,12 @@ block is re-run, not further modified — and `GRAPH-SNAP` likewise.
       honest RED for a typed language; confirm the compiler names those items and not a
       typo in the test module.
 
-- [ ] 2.2 GREEN: Add `pub struct Filter { pub query: String, pub active: bool }` to
+- [x] 2.2 GREEN: Add `pub struct Filter { pub query: String, pub active: bool }` to
       `src/ui/app.rs`, deriving `Debug, Clone, PartialEq, Eq` and **not** `Default`. Add
       `selected: usize` and `filter: Filter` to `Dashboard`. Extend `Action` to the nine
       variants in design.md → Contracts, renaming `BackToList` to `Back`.
 
-- [ ] 2.2b GREEN: Update **every** `Dashboard` literal in the crate in this same commit.
+- [x] 2.2b GREEN: Update **every** `Dashboard` literal in the crate in this same commit.
       `..` is forbidden by `NODEFAULT-UI`, so each must name the two new fields or the
       crate does not compile and roughly thirty landed tests go with it. Find them first —
       `grep -rn 'Dashboard[[:space:]]*{' src/` — which returns **14 lines** on `main`, of
@@ -856,27 +856,27 @@ block is re-run, not further modified — and `GRAPH-SNAP` likewise.
       form alone and `app.rs:260`'s pattern is missed; it fails to compile, so the error is
       loud, but the fix belongs here rather than as a surprise in 2.8.
 
-- [ ] 2.3 GREEN: Implement `pub fn matches(name: &str, query: &str) -> bool` —
+- [x] 2.3 GREEN: Implement `pub fn matches(name: &str, query: &str) -> bool` —
       `name.to_ascii_lowercase().contains(&query.to_ascii_lowercase())`, true for an empty
       query — and `Dashboard::visible(&self) -> Vec<&Change>` /
       `Dashboard::visible_len(&self) -> usize`, active-then-archived with `matches` applied
       to `Change::name` and nothing else.
 
-- [ ] 2.4 GREEN: Implement `action_for(event, filtering)` as the two tables in
+- [x] 2.4 GREEN: Implement `action_for(event, filtering)` as the two tables in
       dashboard-loop and list-filtering, `KeyEventKind::Press` only, total over every event
       under both modes.
 
-- [ ] 2.5 GREEN: Implement `Dashboard::apply` as the state machine in dashboard-loop →
+- [x] 2.5 GREEN: Implement `Dashboard::apply` as the state machine in dashboard-loop →
       "Key handling is a pure, total function over events", with a single private
       `clamp_selection` helper called after every action that can change the visible list or
       the index — `SelectNext`, `SelectPrev`, `FilterPush`, `FilterPop`, and the two `Back`
       layers that clear a query.
 
-- [ ] 2.6 REFACTOR: Fold the two `Back` query-clearing layers and `clamp_selection` so the
+- [x] 2.6 REFACTOR: Fold the two `Back` query-clearing layers and `clamp_selection` so the
       clamp is written once; if no duplication remains after 2.5, state that here rather
       than inventing a change.
 
-- [ ] 2.7 CHECK (contract gate): three interfaces move in this group — `action_for`'s
+- [x] 2.7 CHECK (contract gate): three interfaces move in this group — `action_for`'s
       signature, `Action`'s variants, and `Dashboard`'s field list. Grep the tree for
       **all three**: `action_for(`, `Action::`, and `Dashboard[[:space:]]*{`. The third is
       load-bearing and easy to forget: neither `src/ui/view.rs` nor `src/lib.rs` names
@@ -887,7 +887,7 @@ block is re-run, not further modified — and `GRAPH-SNAP` likewise.
       **Red when:** a site outside those files appears, meaning a consumer this change did
       not plan for.
 
-- [ ] 2.8 VERIFY: `. $CHECKS/TESTCOUNT.sh` then `testcount --lib 'ui::app::tests::' 22`.
+- [x] 2.8 VERIFY: `. $CHECKS/TESTCOUNT.sh` then `testcount --lib 'ui::app::tests::' 22`.
       Then run `NODEFAULT-UI` (default `TYPES="Dashboard Filter"`) — it must **pass**, and
       its `Filter` positive control must now find `struct Filter`. Then the four
       intermediate-gate commands from the top of this file; `cargo test --all-features` must

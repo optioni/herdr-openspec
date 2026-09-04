@@ -148,6 +148,11 @@ mod tests {
             changes: empty_set(),
             route,
             quit: false,
+            selected: 0,
+            filter: crate::ui::app::Filter {
+                query: String::new(),
+                active: false,
+            },
         }
     }
 

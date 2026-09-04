@@ -100,6 +100,11 @@ pub fn load(start: &Path, config: &Config) -> Dashboard {
                 changes,
                 route: Route::List,
                 quit: false,
+                selected: 0,
+                filter: crate::ui::app::Filter {
+                    query: String::new(),
+                    active: false,
+                },
             }
         }
         crate::resolve::RepoSearch::NotFound { searched_from } => Dashboard {
@@ -108,6 +113,11 @@ pub fn load(start: &Path, config: &Config) -> Dashboard {
             changes: crate::changes::empty_set(),
             route: Route::List,
             quit: false,
+            selected: 0,
+            filter: crate::ui::app::Filter {
+                query: String::new(),
+                active: false,
+            },
         },
     }
 }
@@ -116,7 +126,9 @@ pub fn load(start: &Path, config: &Config) -> Dashboard {
 mod tests {
     mod load {
         use crate::config::Config;
-        use crate::testutil::{ScratchDir, canonical, snapshot, write_with_mode};
+        use crate::testutil::{
+            ScratchDir, canonical, render_at, row_text, snapshot, write_with_mode,
+        };
         use crate::ui::app::Route;
 
         fn write(path: &std::path::Path, contents: &str) {
@@ -206,6 +218,85 @@ mod tests {
 
             let seven = super::super::load(root, &config_with_archived_count(7));
             assert_eq!(seven.changes.archived.len(), 7);
+        }
+
+        /// The outer-loop acceptance test: `ui::load` -> `changes::from_files` ->
+        /// `ui::list::rows` -> `ui::view::render` is a path no unit test crosses.
+        /// A real scratch repository, rendered through a `TestBackend`, must show
+        /// real rows. See design.md -> Test Strategy.
+        #[test]
+        fn a_scratch_repository_renders_its_change_rows() {
+            let scratch = ScratchDir::new();
+            let root = scratch.path();
+            write(
+                &root.join("openspec/changes/add-token-refresh/tasks.md"),
+                "- [x] a\n- [x] b\n- [x] c\n- [x] d\n- [ ] e\n- [ ] f\n- [ ] g\n- [ ] h\n- [ ] i\n",
+            );
+            write(
+                &root.join("openspec/changes/fix-empty-basket/tasks.md"),
+                "- [x] a\n- [x] b\n- [x] c\n- [x] d\n- [x] e\n- [x] f\n- [x] g\n",
+            );
+            write(
+                &root.join("openspec/changes/migrate-ai-sdk-v7/proposal.md"),
+                "# P\n",
+            );
+            write(
+                &root.join("openspec/changes/archive/2026-08-14-add-auth/tasks.md"),
+                "- [x] a\n- [x] b\n- [x] c\n- [x] d\n- [x] e\n- [x] f\n- [x] g\n",
+            );
+
+            let dashboard = super::super::load(root, &config_with_archived_count(5));
+
+            fn cols(text: &str, from: usize, to_inclusive: usize) -> String {
+                text.chars()
+                    .skip(from)
+                    .take(to_inclusive - from + 1)
+                    .collect()
+            }
+
+            let buf120 = render_at(120, 20, &dashboard);
+            assert_eq!(
+                cols(&row_text(&buf120, 2), 1, 38),
+                "> add-token-refresh              [4/9]"
+            );
+            assert_eq!(
+                cols(&row_text(&buf120, 3), 1, 38),
+                "  fix-empty-basket               [7/7]"
+            );
+            assert_eq!(
+                cols(&row_text(&buf120, 4), 1, 38),
+                "  migrate-ai-sdk-v7                [-]"
+            );
+            assert_eq!(
+                cols(&row_text(&buf120, 5), 1, 38),
+                "  -- archived ------------------------"
+            );
+            assert_eq!(
+                cols(&row_text(&buf120, 6), 1, 38),
+                "  2026-08-14 add-auth            [7/7]"
+            );
+
+            let buf60 = render_at(60, 20, &dashboard);
+            assert_eq!(
+                cols(&row_text(&buf60, 2), 1, 58),
+                "> add-token-refresh                                  [4/9]"
+            );
+            assert_eq!(
+                cols(&row_text(&buf60, 3), 1, 58),
+                "  fix-empty-basket                                   [7/7]"
+            );
+            assert_eq!(
+                cols(&row_text(&buf60, 4), 1, 58),
+                "  migrate-ai-sdk-v7                                    [-]"
+            );
+            assert_eq!(
+                cols(&row_text(&buf60, 5), 1, 58),
+                "  -- archived --------------------------------------------"
+            );
+            assert_eq!(
+                cols(&row_text(&buf60, 6), 1, 58),
+                "  2026-08-14 add-auth                                [7/7]"
+            );
         }
 
         #[test]

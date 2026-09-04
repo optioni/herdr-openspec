@@ -56,7 +56,7 @@ pub fn run_loop<B: Backend, E: EventSource>(
         polls += 1;
 
         if let Some(event) = event {
-            let action = action_for(&event);
+            let action = action_for(&event, dashboard.filter.active);
             dashboard.apply(action);
             if dashboard.quit {
                 break;
@@ -89,6 +89,11 @@ mod tests {
             changes: empty_set(),
             route: Route::List,
             quit: false,
+            selected: 0,
+            filter: crate::ui::app::Filter {
+                query: String::new(),
+                active: false,
+            },
         }
     }
 

@@ -131,6 +131,102 @@ pub(crate) mod conformance {
     }
 }
 
+/// Test-only `Change`/`ChangeSet` builders shared by `ui::app`, `ui::list`, and
+/// `ui::view`'s tests. Naming every field explicitly, with no `..` and no
+/// `Default`, keeps every construction site inside this file — the one
+/// `change-model`'s `GATE-MECH1` searches — so `NOLIT-CHANGE` has nothing to
+/// catch. See `openspec/changes/list-view/design.md` -> Boundaries and
+/// Decisions ("`Change` fixtures live in `src/changes.rs`, behind
+/// `#[cfg(test)]`").
+#[cfg(test)]
+pub(crate) mod fixture {
+    use std::path::PathBuf;
+
+    use super::{Change, ChangeSet, Origin};
+
+    /// An active change named `name`, at `completed` of `total` tasks, whose
+    /// `dir` ends in exactly `name` — `conformance::assert_invariants`'s
+    /// requirement for `Origin::Active`.
+    pub(crate) fn active(name: &str, completed: usize, total: usize) -> Change {
+        Change {
+            name: name.to_string(),
+            dir: PathBuf::from(format!("/repo/openspec/changes/{name}")),
+            origin: Origin::Active,
+            schema: "tdd".to_string(),
+            artifacts: Vec::new(),
+            progress: crate::tasks::Progress { completed, total },
+            problems: Vec::new(),
+        }
+    }
+
+    /// An archived change named `name`, at `completed` of `total` tasks,
+    /// dated `date` (or undated when `None`), whose `dir` ends *with* `name`
+    /// — `conformance::assert_invariants`'s (weaker) requirement for
+    /// `Origin::Archived`, since the directory carries the date prefix too.
+    pub(crate) fn archived(
+        date: Option<&str>,
+        name: &str,
+        completed: usize,
+        total: usize,
+    ) -> Change {
+        let dir_name = match date {
+            Some(d) => format!("{d}-{name}"),
+            None => name.to_string(),
+        };
+        Change {
+            name: name.to_string(),
+            dir: PathBuf::from(format!("/repo/openspec/changes/archive/{dir_name}")),
+            origin: Origin::Archived {
+                date: date.map(str::to_string),
+            },
+            schema: "tdd".to_string(),
+            artifacts: Vec::new(),
+            progress: crate::tasks::Progress { completed, total },
+            problems: Vec::new(),
+        }
+    }
+
+    /// A `ChangeSet` from already-built `active` and `archived` vectors and
+    /// `problems`, preserving each vector's order untouched — `rows` and
+    /// `Dashboard::visible` are what sort or filter, never the fixture.
+    pub(crate) fn set(
+        active: Vec<Change>,
+        archived: Vec<Change>,
+        problems: Vec<String>,
+    ) -> ChangeSet {
+        ChangeSet {
+            active,
+            archived,
+            problems,
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::{active, archived, set};
+        use crate::changes::conformance::assert_invariants;
+
+        #[test]
+        fn every_builder_satisfies_the_change_invariants() {
+            assert_invariants(&active("add-token-refresh", 4, 9));
+            assert_invariants(&archived(Some("2026-08-14"), "add-auth", 7, 7));
+            assert_invariants(&archived(None, "legacy-cleanup", 3, 3));
+        }
+
+        #[test]
+        fn the_five_change_fixture_is_ordered_active_then_archived() {
+            let s = set(
+                vec![active("a", 1, 2), active("b", 1, 2)],
+                vec![archived(Some("2026-01-01"), "c", 1, 1)],
+                Vec::new(),
+            );
+            assert_eq!(s.active[0].name, "a");
+            assert_eq!(s.active[1].name, "b");
+            assert_eq!(s.archived[0].name, "c");
+        }
+    }
+}
+
 /// Split a leading `YYYY-MM-DD-` prefix off `dir_name`, using exactly the
 /// OpenSpec CLI's own pattern: four ASCII digits, `-`, two, `-`, two, `-` —
 /// with no calendar validation, because the CLI writes with that pattern and

@@ -219,6 +219,11 @@ pub(crate) mod testutil {
                 changes: empty_set(),
                 route: Route::List,
                 quit: false,
+                selected: 0,
+                filter: crate::ui::app::Filter {
+                    query: String::new(),
+                    active: false,
+                },
             }
         }
 
