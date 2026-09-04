@@ -3,6 +3,7 @@
 //!
 //! See `openspec/changes/changes-from-files/design.md` for the full contract.
 
+use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 
 /// Whether a change is active or archived, and — for an archived one — the
@@ -109,7 +110,12 @@ pub(crate) mod conformance {
                 name.as_str(),
                 "an Active Change's dir must end in exactly its name"
             ),
-            Origin::Archived { .. } => assert!(
+            // `date: _` rather than a `..` rest pattern: `Origin` is part of
+            // the two-producer surface too, and `..` here would let a field
+            // added to `Archived` escape the same silent-absorption risk
+            // mechanism 2 exists to close on `Change` itself. Found in
+            // Change Review.
+            Origin::Archived { date: _ } => assert!(
                 dir_final.ends_with(name.as_str()),
                 "an Archived Change's dir must end with its name"
             ),
@@ -353,7 +359,14 @@ pub(crate) fn resolve_artifact(
             }
             let mut matches = Vec::new();
             collect_glob_matches(&base, recursive, &file, &mut matches);
-            matches.sort();
+            // `PathBuf`'s `Ord` compares path *components*, not the raw
+            // path string: `"specs/api"` sorts before `"specs/api.md"`
+            // because `"api"` is a strict prefix of `"api.md"`, but full
+            // *byte-string* order (what the spec requires) puts
+            // `"specs/api.md"` first, since `.` (0x2E) sorts before `/`
+            // (0x2F). Sort on the raw OS-string bytes instead — found in
+            // Change Review, before any test exercised the divergence.
+            matches.sort_by(|a, b| a.as_os_str().as_bytes().cmp(b.as_os_str().as_bytes()));
             (matches, None)
         }
         Err(pattern) => (
@@ -1199,6 +1212,26 @@ mod tests {
             ]
         );
         assert_eq!(problem, None);
+    }
+
+    #[test]
+    fn ordering_is_byte_order_on_the_full_path_not_pathbuf_component_order() {
+        // `PathBuf`'s `Ord` compares components, not raw bytes: `"api"` is a
+        // strict prefix of `"api.md"`, so `PathBuf` sorts `specs/api/deep.md`
+        // *before* `specs/api.md` — the opposite of what byte-string order on
+        // the full path gives, since `.` (0x2E) precedes `/` (0x2F). Found in
+        // Change Review: the existing ordering test's fixture never exercised
+        // this divergence, so `Vec<PathBuf>::sort()` passed it undetected.
+        let scratch = ScratchDir::new();
+        let dir = canonical(scratch.path());
+        write(&dir.join("specs/api.md"), "# api.md\n");
+        write(&dir.join("specs/api/deep.md"), "# nested\n");
+
+        let (paths, _) = resolve_artifact(&dir, "specs/**/*.md");
+        assert_eq!(
+            paths,
+            vec![dir.join("specs/api.md"), dir.join("specs/api/deep.md")]
+        );
     }
 
     #[test]
