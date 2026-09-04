@@ -48,54 +48,52 @@ retry, because Herdr may launch the build without `~/.cargo/bin` on `PATH`. When
   indented or not — no `[[`, no `function` keyword, no `source` builtin, and no array
   assignment; `.` is used to load `~/.cargo/env`
 
-### Requirement: The `ui` invocation prints a placeholder and holds the pane open
+### Requirement: The `ui` invocation runs the dashboard and needs a terminal
 
-The binary SHALL accept `ui` as its only argument. On `ui` it SHALL write a banner to
-stdout naming the plugin id `herdr-openspec`, the crate version, and a line stating the
-dashboard is not implemented yet; it SHALL then block until stdin reaches EOF and exit
-0, so a Herdr pane running it stays visible instead of closing immediately. Any other
-argument list — an unrecognised first argument, no arguments, or `ui` followed by
-anything — SHALL print usage on stderr and exit 2, so that the `open` subcommand added
-by `plugin-actions` is distinguishable from today's behaviour. Argument classification
-SHALL live in the library as a pure function, with `src/main.rs` restricted to reading
-arguments, writing streams, blocking on stdin, and setting the exit status.
+The binary SHALL accept `ui` as its only argument. On `ui` it SHALL run the dashboard
+through `ui::run`, which reads no arguments of its own. Argument classification SHALL
+remain a pure function in the library, with `src/main.rs` restricted to reading arguments,
+dispatching, writing stderr, and setting the exit status.
 
-#### Scenario: `ui` prints the placeholder banner
+Exit statuses SHALL be distinct and stable:
 
-- **WHEN** the built binary is run as `herdr-openspec ui` with stdin already at EOF
-- **THEN** it exits 0
-- **AND** stdout contains `herdr-openspec`, the value of `CARGO_PKG_VERSION`, and a line
-  stating the dashboard is not implemented yet
-- **AND** stderr is empty
+| Outcome | Status | Streams |
+|---|---|---|
+| The dashboard ran and the user quit | 0 | whatever the alternate screen held, which is discarded on leaving it |
+| An unrecognised argument, no argument, or an argument after `ui` | 2 | usage on stderr, stdout empty |
+| `ui` with stdout not a terminal | 3 | a message on stderr naming `herdr-openspec` and the words `not a terminal`, stdout empty |
+| `ui` failed to start for any other reason | 1 | the error's `Display` text on stderr, stdout empty |
 
-#### Scenario: `ui` holds the process open until stdin closes
+On status 3 the process SHALL exit without waiting on stdin. The previous behaviour blocked
+until stdin reached EOF, so a test or script that piped the binary's output would hang
+rather than fail; this change makes that case terminate.
 
-- **WHEN** the built binary is run as `herdr-openspec ui` with stdin attached to a pipe
-  that is left open
-- **THEN** the banner is emitted and the process is still running when polled after a
-  short interval, rather than having exited
-- **AND** when the write end of the pipe is dropped, the process exits 0
+#### Scenario: `ui` with stdout piped exits 3 without blocking
 
-#### Scenario: Unknown subcommand
-
-- **WHEN** the built binary is run as `herdr-openspec wat`
-- **THEN** it exits with status 2
-- **AND** stderr contains usage text listing `ui` and the rejected argument `wat`
+- **WHEN** the built binary is run as `herdr-openspec ui` with stdout and stderr captured
+  through pipes and with stdin attached to a pipe whose write end is deliberately left
+  **open**, so a wrongly blocking implementation would hang
+- **THEN** it exits with status 3, polled to a ten-second deadline that fails the test if
+  the process is still alive when it expires
 - **AND** stdout is empty
+- **AND** stderr contains `herdr-openspec` and the words `not a terminal`
 
-#### Scenario: Extra arguments after `ui`
+#### Scenario: The three failing statuses are distinct
 
-- **WHEN** the built binary is run as `herdr-openspec ui --tab`
-- **THEN** it exits with status 2
-- **AND** stderr contains the usage text and the rejected argument `--tab`
-- **AND** stdout is empty, and the process does not block waiting on stdin
+- **WHEN** the built binary is run four ways with stdout piped and stdin at EOF: `ui`,
+  `wat`, `ui --tab`, and with no arguments
+- **THEN** the exit statuses are 3, 2, 2, and 2 respectively
+- **AND** the three status-2 runs still print the usage text listing `ui`, and the `wat`
+  and `ui --tab` runs still name the rejected token, unchanged by this change
+- **AND** no run prints anything to stdout
 
-#### Scenario: No subcommand
+#### Scenario: Every binary-integration run pipes stdout
 
-- **WHEN** the built binary is run with no arguments
-- **THEN** it exits with status 2
-- **AND** stderr contains the same usage text listing `ui`
-- **AND** stdout is empty
+- **WHEN** `tests/cli.rs` is inspected for every place it spawns the crate's own binary
+- **THEN** each one sets stdout to a pipe or to null, never inheriting the test process's
+  own terminal, so the status-3 branch is the branch the suite reaches
+- **AND** the tree-wide containment of the crossterm terminal-mode functions is
+  `terminal-lifecycle`'s requirement, not restated here — one check, one owner
 
 ### Requirement: The crate produces one binary from an argued dependency set
 
@@ -113,14 +111,38 @@ diff rather than a silent addition to what is built. After this change that set 
 | `toml` | at least `1.1.5` | `std`, `parse`, `display`, `serde`; defaults off |
 | `yaml-rust2` | at least `0.12.0` | `features = []`, written explicitly; defaults off — the default `encoding` feature exists only for `load_from_bytes` BOM and UTF-16 detection, and this crate reads YAML through `std::fs::read_to_string` |
 | `serde_json` | at least `1.0.151` | `std`; defaults off — the default set is exactly `std`, so turning defaults off and naming it changes nothing that is built and everything about whether a future default is adopted silently. The crate is used through `serde_json::Value` only, with no `serde::Deserialize` derive, so no proc-macro crate enters the graph |
+| `ratatui` | at least `0.30.2` | `crossterm`; defaults off — the default set additionally carries `all-widgets`, `macros`, and `layout-cache`, none of which this plugin uses, and `all-widgets` alone would pull `time` into the build for the calendar widget. `underline-color` is nominally dropped too but arrives anyway, because `ratatui` declares `ratatui-crossterm` with **its** defaults on and those include it — so a rendered `Cell`'s `Style` still carries an `underline_color` field, which is why an untouched cell's style is `fg(Reset).bg(Reset).underline_color(Reset)` rather than `Style::default()`. The `crossterm` feature also re-enables `std` transitively, so `default-features = false` is narrower on its face than in effect |
+
+`crossterm` SHALL NOT be declared as a direct dependency. It is reached through
+`ratatui::crossterm`, the re-export of the exact `crossterm` version `ratatui-crossterm`
+resolved, so a backend type and an event type from two different `crossterm` releases can
+never coexist in this crate.
 
 Each declared version's own `rust-version` SHALL be no higher than this crate's
-`rust-version`, so the declared MSRV stays true. No dependency, direct or transitive,
-SHALL introduce a proc-macro crate into the normal build graph: the resolved graph is
-what determines build time and audit surface, and it is the property that changes when a
-feature is added or a default is re-enabled. `Cargo.lock` SHALL be committed, and the
-change that introduces or alters a dependency SHALL verify `cargo build --locked`
-succeeds at the commit that lands it.
+`rust-version`, so the declared MSRV stays true. This crate's `rust-version` SHALL be
+`1.88`, raised from `1.85` by `ratatui` 0.30.2 and its three sibling crates, which are the
+tightest packages in the graph.
+
+The normal build graph SHALL contain no proc-macro crate other than those on this
+enumerated allowlist: `darling_macro`, `derive_more-impl`, `document-features`, `indoc`,
+`instability`, `rustversion`, `strum_macros`, and `thiserror-impl`. Every one arrives
+through `ratatui`, which cannot be built without them. The rule is an allowlist rather than
+the previous absolute prohibition because that prohibition is unsatisfiable with any
+terminal-UI crate in this ecosystem; an allowlist keeps the property mechanical, so a
+proc-macro crate arriving from a *new* direct dependency still fails the check and still
+has to be argued.
+
+The resolved normal build graph SHALL be pinned by a committed snapshot,
+`tests/fixtures/build-graph.txt`, holding one `<name> <version>` line per package, sorted,
+for each of the four supported triples, with the per-triple sets recorded separately —
+they are no longer identical, because `rustix`, reached through `crossterm`, pulls
+`linux-raw-sys` on Linux and not on macOS. Enumerating the graph in prose was workable at
+sixteen packages and is not at roughly eighty; a committed snapshot is exactly as brittle
+as the committed `Cargo.lock` that determines it, and every graph change becomes a
+reviewable diff.
+
+`Cargo.lock` SHALL be committed, and the change that introduces or alters a dependency
+SHALL verify `cargo build --locked` succeeds at the commit that lands it.
 
 #### Scenario: Exactly one binary target is produced at the release path
 
@@ -137,16 +159,20 @@ succeeds at the commit that lands it.
 
 - **WHEN** `cargo metadata --no-deps --format-version 1` is inspected for the package's
   dependencies of kind `null` (normal, not dev or build)
-- **THEN** there are exactly three, named `serde_json`, `toml`, and `yaml-rust2`
-- **AND** all three report `uses_default_features` as `false` — read from the resolved
+- **THEN** there are exactly four, named `ratatui`, `serde_json`, `toml`, and `yaml-rust2`
+- **AND** all four report `uses_default_features` as `false` — read from the resolved
   metadata, not from the text of `Cargo.toml`
 - **AND** `toml`'s features are exactly `display`, `parse`, `serde`, and `std`,
-  `serde_json`'s are exactly `std`, and `yaml-rust2`'s feature list is empty
+  `serde_json`'s are exactly `std`, `ratatui`'s are exactly `crossterm`, and
+  `yaml-rust2`'s feature list is empty
 - **AND** the `features` key is written out as `features = []` in the manifest rather than
   omitted. `cargo metadata` reports `[]` for both spellings and so cannot tell them apart;
   the requirement's own rationale — a reviewable diff rather than a silent addition — is
   about what the manifest says on its face, so the check for this clause is reading
   `Cargo.toml`
+- **AND** `crossterm` is **not** among the declared dependencies, while `crossterm` **is**
+  present in the resolved graph, so the re-export rule is observably in effect rather than
+  merely written down
 - **AND** `cargo build --locked` succeeds with `Cargo.lock` committed, so the resolved
   versions in a fresh checkout are the ones this change verified
 
@@ -162,48 +188,46 @@ succeeds at the commit that lands it.
   floor keeps enforcing the old value when the crate's `rust-version` moves, and the
   requirement is a claim about the relationship between the two
 - **AND** the packages sitting exactly at the floor are reported rather than assumed: on
-  the resolution this change lands, `yaml-rust2`, `hashbrown`, `hashlink`, `toml`,
-  `toml_datetime`, `toml_parser`, `toml_writer`, and `serde_spanned` all declare `1.85`,
-  so no single crate is uniquely the tightest. The four packages this change adds are not
-  among them — `serde_json` and `zmij` declare `1.71`, `itoa` `1.68`, and `memchr` `1.61` —
-  so the floor is unchanged by this change, which is itself the assertion rather than an
-  aside
+  the resolution this change lands they are `ratatui`, `ratatui-core`,
+  `ratatui-crossterm`, and `ratatui-widgets`, all at `1.88.0`, which is why the crate's own
+  floor moves from `1.85` to `1.88` in this change rather than staying put
 - **AND** the intersection with `cargo tree -e normal` is load-bearing: `cargo metadata`
-  alone also reports optional and dev-only resolutions cargo never builds — `syn`,
-  `serde_derive`, and `indexmap` among them — so a check over every metadata package
-  would report on crates that are not in the build
+  alone also reports optional and dev-only resolutions cargo never builds, so a check over
+  every metadata package would report on crates that are not in the build
 - **AND** the check reads resolved metadata rather than a crates.io listing, so a future
   version bump that raises an MSRV fails here rather than in a contributor's build
 
 #### Scenario: The resolved build graph is small and proc-macro-free
 
-- **WHEN** `cargo tree -e normal --target <triple>` is inspected once for each of the four
+The title is kept verbatim from the requirement this block replaces, because a MODIFIED
+requirement must carry every scenario name the live spec has. Its content is what changed:
+"small" now means *pinned by a committed snapshot* rather than *sixteen packages listed in
+prose*, and "proc-macro-free" now means *bounded by an enumerated allowlist*, for the
+reasons the requirement above gives.
+
+- **WHEN** `cargo tree -e normal --target <triple>` is run once for each of the four
   supported triples — `aarch64-apple-darwin`, `x86_64-apple-darwin`,
   `aarch64-unknown-linux-gnu`, `x86_64-unknown-linux-gnu` — rather than once for the host,
   because `cargo tree` resolves only the host target by default and a transitive dependency
   scoped to the other supported platform would be invisible on either runner alone. Not
-  `--target all`, which reports optional resolutions cargo never builds: on this graph it
-  lists `syn`, `quote`, `proc-macro2`, `serde_derive`, and `unicode-ident` through
-  `serde_core`'s optional `derive` feature
-- **THEN** each of the four produces the same set, and the packages it names, besides
-  `herdr-openspec` itself, are exactly `toml`,
-  `serde_core`, `serde_spanned`, `toml_datetime`, `toml_parser`, `toml_writer`, `winnow`,
-  `yaml-rust2`, `arraydeque`, `hashlink`, `hashbrown`, `foldhash`, `serde_json`, `itoa`,
-  `memchr`, and `zmij` — sixteen, the twelve this crate already built plus the four
-  `serde_json` brings
-- **AND** it names no `syn`, `quote`, `proc-macro2`, or `serde_derive`, so nothing in
-  the build graph runs a proc macro. `serde_json` reaches `serde_core` without
-  `serde_core`'s optional `derive` feature, which is what keeps that true after this
-  change. A dependency scoped to a platform the manifest does
-  not declare — Windows — is out of scope by construction and is not searched for
+  `--target all`, which reports optional resolutions cargo never builds
+- **THEN** each triple's sorted `<name> <version>` set equals the set recorded for it in
+  `tests/fixtures/build-graph.txt`, and the check fails when the fixture is missing or
+  names a triple the run did not produce
+- **AND** the two macOS sets are equal to each other and the two Linux sets are equal to
+  each other, while macOS and Linux differ by exactly one package, `linux-raw-sys`, which
+  `rustix` pulls in only on Linux — asserted as a named difference rather than the sets
+  being asserted identical, which they no longer are
+- **AND** the proc-macro crates present are exactly the eight on the allowlist:
+  `darling_macro`, `derive_more-impl`, `document-features`, `indoc`, `instability`,
+  `rustversion`, `strum_macros`, and `thiserror-impl` — a set equality, so a ninth arriving
+  from a future dependency fails and an eighth disappearing does too
 - **AND** it names no `encoding_rs`, which `yaml-rust2`'s default features would have
   pulled in, so `default-features = false` is observably in effect rather than merely
   written down
-- **AND** it names no `ryu`, which older `serde_json` releases used for float formatting
-  and which `zmij` replaces, so the enumerated set is the resolution actually verified
-  rather than one carried over from memory
-- **AND** `Cargo.lock` holds more entries than that — optional resolutions cargo never
-  builds — which is why no check counts lock entries
+- **AND** it names no `time`, which `ratatui`'s default `all-widgets` feature would have
+  pulled in for the calendar widget, so `ratatui`'s trimmed feature list is observably in
+  effect too
 
 #### Scenario: Each dependency is genuinely needed rather than incidental
 
@@ -217,6 +241,9 @@ succeeds at the commit that lands it.
 - **AND** with the manifest restored again and `serde_json` removed instead, `cargo build`
   fails a third time, because `changes::from_cli` parses `openspec list --json`,
   `openspec instructions apply --json`, and `openspec schema which --json` through it
+- **AND** with the manifest restored again and `ratatui` removed instead, `cargo build`
+  fails a fourth time, because `ui` renders every frame and reads every key through it and
+  through its `crossterm` re-export
 - **AND** removing a dependency that is not declared is reported as a failure of the check
   rather than counted as a pass, so no leg can silently succeed against a
   manifest that never carried the crate
