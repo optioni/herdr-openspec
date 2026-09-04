@@ -1127,4 +1127,109 @@ mod tests {
              a regression"
         );
     }
+
+    // --- group 6: session cache and the one real-environment composition ---
+
+    #[test]
+    fn a_second_lookup_does_not_re_probe() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let counter = AtomicUsize::new(0);
+        let scratch = ScratchDir::new();
+        let bin = scratch.path().join("openspec");
+        write_with_mode(&bin, b"#!/bin/sh\n", 0o755);
+        let bin_for_probe = bin.clone();
+
+        let probe = || {
+            counter.fetch_add(1, Ordering::Relaxed);
+            super::BinResolution {
+                found: Some(super::FoundBin {
+                    path: bin_for_probe.clone(),
+                    source: super::BinSource::Path,
+                }),
+                problems: Vec::new(),
+            }
+        };
+
+        let cache = super::BinCache::default();
+        let first = cache.get_or_probe(probe).clone();
+        let second = cache.get_or_probe(probe).clone();
+
+        assert_eq!(counter.load(Ordering::Relaxed), 1);
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn a_negative_result_is_cached_too() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let counter = AtomicUsize::new(0);
+        let probe = || {
+            counter.fetch_add(1, Ordering::Relaxed);
+            super::BinResolution {
+                found: None,
+                problems: Vec::new(),
+            }
+        };
+
+        let cache = super::BinCache::default();
+        let first = cache.get_or_probe(probe);
+        assert_eq!(first.found, None);
+        let second = cache.get_or_probe(probe);
+        assert_eq!(second.found, None);
+
+        assert_eq!(counter.load(Ordering::Relaxed), 1);
+    }
+
+    #[test]
+    fn two_caches_are_independent() {
+        // A `static` cache would fail this: both values would share one
+        // underlying `OnceLock`, and the first probe would decide the answer
+        // for both. This is the reason the cache is a value, not global.
+        let a = super::BinCache::default();
+        let b = super::BinCache::default();
+
+        let resolution_a = super::BinResolution {
+            found: Some(super::FoundBin {
+                path: std::path::PathBuf::from("/a/openspec"),
+                source: super::BinSource::Path,
+            }),
+            problems: Vec::new(),
+        };
+        let resolution_b = super::BinResolution {
+            found: Some(super::FoundBin {
+                path: std::path::PathBuf::from("/b/openspec"),
+                source: super::BinSource::Path,
+            }),
+            problems: Vec::new(),
+        };
+
+        let got_a = a.get_or_probe(|| resolution_a.clone());
+        let got_b = b.get_or_probe(|| resolution_b.clone());
+
+        assert_eq!(got_a, &resolution_a);
+        assert_eq!(got_b, &resolution_b);
+        assert_ne!(got_a, got_b);
+    }
+
+    #[test]
+    fn the_composition_honours_a_configured_binary() {
+        let scratch = ScratchDir::new();
+        let configured = scratch.path().join("openspec");
+        write_with_mode(&configured, b"#!/bin/sh\n", 0o755);
+
+        let config = crate::config::Config {
+            openspec_bin: Some(configured.clone()),
+            ..crate::config::Config::default()
+        };
+
+        let result = super::openspec_bin_from_env(&config);
+        assert_eq!(
+            result.found,
+            Some(super::FoundBin {
+                path: configured,
+                source: super::BinSource::Configured,
+            })
+        );
+    }
 }
