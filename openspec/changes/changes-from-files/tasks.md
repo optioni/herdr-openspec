@@ -68,21 +68,25 @@
 ## 1. Baselines and module scaffold
 <!-- kind: operational -->
 
-- [ ] 1.1 CHECK: Before the first commit of this change, capture the two baselines group 9
+- [x] 1.1 CHECK: Before the first commit of this change, capture the two baselines group 9
       compares against, because both of its checks are green by construction without them —
       this project commits after every task group, so by group 9 any `Cargo.toml` edit is
       already in `HEAD` and a `git diff` against the working tree sees nothing. Record
       `git rev-parse HEAD` as the base SHA and save `cargo tree --edges normal > <baseline>`
       to a path **outside** the repository. Write both values into this task when you run it,
       so group 9 does not have to guess them
-- [ ] 1.2 CHANGE: Create `src/changes.rs` with a module doc comment naming the module's job
+
+      **Base SHA:** `bf71421d1234264b34bfb6e3e11b474781ad0140`
+      **Baseline `cargo tree`:** saved to
+      `/private/tmp/claude-501/-Users-juusopiikkila-Code-herdr-openspec/d5be0e1c-512c-496f-bdf6-1ea630cd0644/scratchpad/cargo-tree-baseline.txt`
+- [x] 1.2 CHANGE: Create `src/changes.rs` with a module doc comment naming the module's job
       in one sentence and pointing at
       `openspec/changes/changes-from-files/design.md`, matching the opening of
       `src/schema.rs` and `src/tasks.rs`; register it with one `pub mod changes;` line in
       `src/lib.rs` beside the existing five. Add **nothing else** to `src/lib.rs` and nothing
       at all to `src/main.rs` — logic in either is coverage's blind spot, which is the reason
       the crate keeps them thin
-- [ ] 1.3 VERIFY: `cargo build` succeeds with the empty module registered, so a failure in
+- [x] 1.3 VERIFY: `cargo build` succeeds with the empty module registered, so a failure in
       group 2 is never "the module is not registered"
 
 ## 2. The `Change` model and the two-producer gate
