@@ -340,27 +340,27 @@ delta spec written during planning.
 ## 5. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 5.1 CHECK: Inspect the intended verification commands and the tiers they cover —
+- [x] 5.1 CHECK: Inspect the intended verification commands and the tiers they cover —
       the eleven guard tests and the 11 pre-existing tests under `cargo test`, the four
       gates under `make check`, and the one-off Tier B checks already run in group 1
-- [ ] 5.2 VERIFY: `cargo fmt --all -- --check` — clean
-- [ ] 5.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
+- [x] 5.2 VERIFY: `cargo fmt --all -- --check` — clean
+- [x] 5.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
       `--all-targets` includes `tests/ci_workflow.rs`
-- [ ] 5.4 VERIFY: `cargo check --all-targets --all-features` — 0 errors. This repository
+- [x] 5.4 VERIFY: `cargo check --all-targets --all-features` — 0 errors. This repository
       has no separate type checker; `cargo check` is the equivalent
-- [ ] 5.5 VERIFY: `cargo test --all-features` — green, and the test count is the 11
+- [x] 5.5 VERIFY: `cargo test --all-features` — green, and the test count is the 11
       recorded in 1.1 plus the eleven guards
-- [ ] 5.6 VERIFY: `cargo llvm-cov --fail-under-lines 80` — at or above the floor, and the
+- [x] 5.6 VERIFY: `cargo llvm-cov --fail-under-lines 80` — at or above the floor, and the
       figure is unchanged from the 100.00% (54/54) at HEAD before this change. The report
       lists only `lib.rs` and `main.rs`; a test target under `tests/` does not enter it
       (design.md → D4). A changed figure means `src/` was touched, which this change says
       it does not do
-- [ ] 5.7 VERIFY: `make check` — the single gate, exit 0. If it fails, name the failing
+- [x] 5.7 VERIFY: `make check` — the single gate, exit 0. If it fails, name the failing
       sub-command rather than reporting a summary
-- [ ] 5.8 VERIFY: `git status --short` shows only the files `proposal.md` → Impact names —
+- [x] 5.8 VERIFY: `git status --short` shows only the files `proposal.md` → Impact names —
       `.github/workflows/ci.yml`, `tests/ci_workflow.rs`, `SPEC.md`, `README.md`,
       `AGENTS.md`, and this change's own artifacts. Anything else is a leftover
-- [ ] 5.9 VERIFY: `openspec validate ci-pipeline --strict` — valid. Put
+- [x] 5.9 VERIFY: `openspec validate ci-pipeline --strict` — valid. Put
       `~/.nvm/versions/node/v24.20.0/bin` ahead on `PATH` first
 
 ## Follow-up, outside this change
