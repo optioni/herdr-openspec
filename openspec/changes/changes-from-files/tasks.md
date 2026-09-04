@@ -639,6 +639,30 @@ non-login shell inherits here; prefix the commands in 9.5, 9.6, and 12.8 with
       `Change { name: "x".to_string(), ..other }` in a probe constructor — exit 1; red against
       `let Change { name, .. } = change;` replacing the conformance pattern — exit 1; green
       (real file) — exit 0.
+
+      **Correction found in Change Review (10.1) and repaired here.** The mechanism-2 command
+      above is line-oriented: `grep -E`'s `[^}]*` does not cross a newline, so a *multi-line*
+      `Change { name: "x".to_string(), ..other }` — the exact shape `rustfmt` produces for any
+      seven-field literal that does not fit one line — passed the guarded scan at exit 0
+      (clean) even though the defect was present. Verified directly: a doctored copy with the
+      multi-line form above scanned clean under the original command. The command is corrected
+      to a whole-file (`-0777`), brace-depth-aware Perl scan that also covers `Origin`, whose
+      `Archived { .. }` pattern arm the original alternation omitted entirely (fixed in the
+      same commit by binding `date: _` instead of `..`):
+
+      ```
+      test -f src/changes.rs && ! perl -0777 -e 'my $t = do { local $/; <> }; \
+        exit(($t =~ /(Change|ChangeSet|ArtifactRef|Origin)(::[A-Za-z_]+)?\s*\{[^{}]*\.\./) ? 0 : 1)' \
+        src/changes.rs
+      ```
+
+      Re-observed, using `cp`-based backup/restore rather than `git checkout` so no committed
+      fix could be discarded by the probe: red against the multi-line constructor above — exit
+      1; red against the single-line conformance rest pattern — exit 1; red against
+      `Origin::Archived { .. }` (pre-fix) — exit 1; green against the real, fixed file — exit
+      0, confirmed both immediately after the fix and again after restoring from a backup
+      copy. This corrected command is the one that should be reproduced in any future
+      re-verification (10.3, and this change's own repeat of 9.1-9.3).
 - [x] 9.3 CHECK: `Change` carries no derived and no source-specific state. Run
       `test -f src/changes.rs && ! grep -nE 'pub +(status|percent|percentage|ratio|last_modified|lastModified|modified|source|producer|provenance|origin_kind) *:' src/changes.rs`
       and confirm zero. Observe the red first against scratch copies carrying
@@ -721,7 +745,7 @@ non-login shell inherits here; prefix the commands in 9.5, 9.6, and 12.8 with
 ## 10. Change Review
 <!-- kind: operational -->
 
-- [ ] 10.1 CHECK: Delegate the finding pass to a reviewer that did **not** write the
+- [x] 10.1 CHECK: Delegate the finding pass to a reviewer that did **not** write the
       implementation, given only the change artifacts and the diff — never a fork of the
       implementing session, which inherits the reasoning being reviewed. Brief it on the six
       places this change is most likely to be wrong:
@@ -739,12 +763,78 @@ non-login shell inherits here; prefix the commands in 9.5, 9.6, and 12.8 with
       for each?
       (f) 6.2's absolute pair — does the comment record the oracle, and is the expected value
       from outside this crate?
-- [ ] 10.2 CHANGE: Fix every CRITICAL. Resolve or consciously accept each WARNING with a
+
+      Dispatched to the `outside-in-tdd-reviewer` agent, briefed with all six areas plus the
+      three spec files, design.md, tasks.md, planning-review.md, and the full diff of
+      `src/changes.rs`/`src/lib.rs` against the base SHA. Instructed to write findings
+      incrementally to a scratchpad file as it went. Verdict: **no CRITICAL findings**; all
+      six briefed areas confirmed correct except (d) and (e), each of which had one narrow
+      gap (below). ~55 spec scenarios spot-checked against named tests — all present.
+
+      **CRITICAL:** none.
+
+      **WARNING, fixed:**
+      - The mechanism-2 scan in 9.2 is line-oriented and misses a *multi-line* `..` —
+        exactly the shape `rustfmt` produces for a seven-field literal. Verified directly
+        (doctored multi-line copy scanned clean). Fixed: corrected command recorded in 9.2
+        above, re-observed red (three ways) and green, and 9.2 re-run against the repaired
+        file in 10.3.
+      - `resolve_artifact`'s glob branch sorted matches with `Vec<PathBuf>::sort()`, which
+        compares path *components*, not the byte-string order design.md's spec requires
+        (`"specs/api"` sorts before `"specs/api.md"` under component order; the reverse
+        under byte order). Fixed in `src/changes.rs`: sort on `as_os_str().as_bytes()`
+        instead, with a new discriminating test
+        (`ordering_is_byte_order_on_the_full_path_not_pathbuf_component_order`) verified to
+        fail against the old `.sort()` before the fix landed.
+      - `conformance::assert_invariants` matched `Origin::Archived { .. }` with a rest
+        pattern the mechanism-2 scan's alternation didn't even cover (it named only
+        `Change|ChangeSet|ArtifactRef`). Fixed: bound `date: _` instead, and added `Origin`
+        to the corrected scan's alternation.
+
+      **WARNING, accepted as-is (one-line reason each):**
+      - `a_repository_level_failure_is_recorded_on_the_set_not_on_a_change` sets `archive/`
+        (not `openspec/changes/`) unreadable and carries a stray unrelated assertion —
+        accepted because the scenario it's discriminating against (no second, redundant
+        problem beneath an unreadable *parent*) is already covered precisely by
+        `an_unreadable_changes_directory_is_one_named_problem` in group 7; renaming/tightening
+        this test is cosmetic, not a correctness gap.
+      - `every_degradation_lands_on_a_problems_list_rather_than_in_a_return_type` doesn't
+        build all three of the scenario's named failures in one tree or assert on
+        `set.problems` — accepted because each of the three failure kinds (unreadable
+        archive, unvendored schema, directory-shaped tasks file) already has its own
+        dedicated, more discriminating test elsewhere in the suite; the combined scenario
+        was this test's aspiration, not a gap in actual coverage.
+      - `an_unsupported_glob_shape_records_one_problem_while_siblings_still_resolve` asserts
+        `contains("specs")` rather than the exact artifact id and pattern — accepted as a
+        minor weakening; `each_unsupported_glob_shape_is_an_err_naming_the_pattern_verbatim`
+        (group 4) already asserts the pattern verbatim at the `shape` level, and
+        `change_artifacts`' `format!("artifact {:?}: {reason}", …)` construction is read
+        directly in `src/changes.rs:370` by anyone auditing the message format.
+
+      **SUGGESTION:** noted, not actioned (each is a minor test-precision nit —
+      `a_schema_that_failed_to_load_still_counts_tasks_md` duplicating the "no tasks
+      artifact" input, a couple of `problems.len() == 1` assertions not also checking the
+      message content, an absence assertion naming a path the walk never looks for,
+      `schema_load_problem` duplicating `schema::load_error_problem`'s text with nothing
+      pinning them equal, and one `#[allow(clippy::too_many_arguments)]` that turned out to
+      be unnecessary since clippy stayed clean without it). None affect correctness or the
+      floor this change has to clear.
+- [x] 10.2 CHANGE: Fix every CRITICAL. Resolve or consciously accept each WARNING with a
       one-line reason recorded in the artifact it concerns. Note SUGGESTIONs
-- [ ] 10.3 VERIFY: Re-run every test affected by a fix, then `cargo test --all-features`, then
+
+      No CRITICALs to fix. Three WARNINGs fixed (recorded in 10.1 above, committed as
+      `fix(changes): sort glob matches by full-path byte order, not PathBuf order`); three
+      WARNINGs consciously accepted with reasons recorded in 10.1; all SUGGESTIONs noted,
+      none actioned.
+- [x] 10.3 VERIFY: Re-run every test affected by a fix, then `cargo test --all-features`, then
       **re-run 9.1, 9.2, and 9.3** against the repaired `src/changes.rs`. Those three scans ran
       before this group edited the file they scan, and a fix that reintroduced a `Default`, a
       `..`, or a `pub status:` would otherwise be caught by nothing
+
+      `cargo test --all-features` — 266/266 in the lib suite (77 under `changes::`, +1 for
+      the new ordering test), no regressions. Re-ran 9.1 — exit 0; 9.2 mechanism 1 — exit 0;
+      9.2 mechanism 2 (corrected command) — exit 0; 9.3 — exit 0. All clean against the
+      repaired file.
 
 ## 11. Documentation
 <!-- kind: operational -->
