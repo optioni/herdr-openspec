@@ -768,7 +768,7 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
 ## 3. `parse_apply` — the apply payload (`mod apply_json`)
 <!-- kind: behavior -->
 
-- [ ] 3.1 RED: Write failing unit tests in `mod apply_json` for:
+- [x] 3.1 RED: Write failing unit tests in `mod apply_json` for:
       `an_apply_payload_yields_schema_name_change_dir_and_context_files`;
       `an_apply_payload_missing_context_files_is_an_error`;
       `an_apply_payload_missing_schema_name_is_an_error`;
@@ -781,17 +781,17 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
       `malformed_apply_json_is_an_error`.
       Confirm the failures are missing-function failures.
 
-- [ ] 3.2 GREEN: Implement `pub(crate) struct ApplyPayload { schema_name: String,
+- [x] 3.2 GREEN: Implement `pub(crate) struct ApplyPayload { schema_name: String,
       change_dir: PathBuf, context_files: BTreeMap<String, Vec<PathBuf>> }` and
       `pub(crate) fn parse_apply(text: &str) -> Result<ApplyPayload, String>`.
       `schemaName` a non-empty string, `changeDir` a non-empty string, `contextFiles` an
       object whose every value is an array of strings. A `BTreeMap` rather than a
       `HashMap`, so a rendered problem naming several keys is deterministic across runs.
 
-- [ ] 3.3 REFACTOR: Share the "required non-empty string field" helper with `parse_list` if
+- [x] 3.3 REFACTOR: Share the "required non-empty string field" helper with `parse_list` if
       it fits; otherwise state explicitly that none was needed.
 
-- [ ] 3.4 VERIFY: `testcount --lib 'apply_json::' <count>`. Commit.
+- [x] 3.4 VERIFY: `testcount --lib 'apply_json::' <count>`. Commit.
 
 ---
 

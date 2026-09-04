@@ -758,9 +758,8 @@ pub(crate) fn parse_list(text: &str) -> Result<ListPayload, String> {
 
     for (position, entry) in entries.iter().enumerate() {
         let Some(name) = entry
-            .get("name")
-            .and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
+            .as_object()
+            .and_then(|o| required_non_empty_str(o, "name"))
         else {
             problems.push(format!(
                 "openspec list --json entry at position {position} has no usable \"name\""
@@ -795,6 +794,82 @@ pub(crate) fn parse_list(text: &str) -> Result<ListPayload, String> {
         root,
         changes,
         problems,
+    })
+}
+
+/// One `openspec instructions apply --change <name> --json` payload, parsed:
+/// the schema name, the change directory, and each schema artifact id's
+/// context files, verbatim and in the CLI's own order per key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ApplyPayload {
+    pub(crate) schema_name: String,
+    pub(crate) change_dir: PathBuf,
+    pub(crate) context_files: std::collections::BTreeMap<String, Vec<PathBuf>>,
+}
+
+/// A required non-empty string field, read from a JSON object. Shared by
+/// `parse_list`'s `name` and `parse_apply`'s `schemaName`/`changeDir`.
+fn required_non_empty_str<'a>(
+    obj: &'a serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Option<&'a str> {
+    obj.get(key)
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+}
+
+/// Parse `openspec instructions apply --change <name> --json`'s stdout: a
+/// non-empty `schemaName`, a non-empty `changeDir`, and a `contextFiles`
+/// object whose every value is an array of strings — including an empty
+/// object, the valid "nothing written yet" state. See `cli-changes` ->
+/// "A change's artifacts are placed by schema position from `contextFiles`".
+pub(crate) fn parse_apply(text: &str) -> Result<ApplyPayload, String> {
+    let value: serde_json::Value = serde_json::from_str(text).map_err(|e| {
+        format!("openspec instructions apply --json payload is not valid JSON: {e}")
+    })?;
+    let obj = value.as_object().ok_or_else(|| {
+        "openspec instructions apply --json payload is not a JSON object".to_string()
+    })?;
+
+    let schema_name = required_non_empty_str(obj, "schemaName")
+        .ok_or_else(|| {
+            "openspec instructions apply --json payload has no usable \"schemaName\"".to_string()
+        })?
+        .to_string();
+
+    let change_dir = required_non_empty_str(obj, "changeDir").ok_or_else(|| {
+        "openspec instructions apply --json payload has no usable \"changeDir\"".to_string()
+    })?;
+    let change_dir = PathBuf::from(change_dir);
+
+    let context_files_obj = obj
+        .get("contextFiles")
+        .and_then(|v| v.as_object())
+        .ok_or_else(|| {
+            "openspec instructions apply --json payload has no usable \"contextFiles\"".to_string()
+        })?;
+
+    let mut context_files = std::collections::BTreeMap::new();
+    for (key, value) in context_files_obj {
+        let array = value.as_array().ok_or_else(|| {
+            format!("openspec instructions apply --json payload's \"contextFiles.{key}\" is not an array")
+        })?;
+        let mut paths = Vec::with_capacity(array.len());
+        for entry in array {
+            let s = entry.as_str().ok_or_else(|| {
+                format!(
+                    "openspec instructions apply --json payload's \"contextFiles.{key}\" holds a non-string entry"
+                )
+            })?;
+            paths.push(PathBuf::from(s));
+        }
+        context_files.insert(key.clone(), paths);
+    }
+
+    Ok(ApplyPayload {
+        schema_name,
+        change_dir,
+        context_files,
     })
 }
 
@@ -2513,6 +2588,89 @@ mod tests {
             let payload = parse_list(text).expect("should parse");
             let names: Vec<&str> = payload.changes.iter().map(|c| c.name.as_str()).collect();
             assert_eq!(names, vec!["zulu", "mike", "alpha"]);
+        }
+    }
+
+    // --- group 3: `parse_apply` — the apply payload (`mod apply_json`) -----
+
+    mod apply_json {
+        use super::*;
+
+        #[test]
+        fn an_apply_payload_yields_schema_name_change_dir_and_context_files() {
+            let text = r#"{
+                "schemaName":"tdd",
+                "changeDir":"/repo/openspec/changes/x",
+                "contextFiles":{"proposal":["/repo/openspec/changes/x/proposal.md"],"specs":[]}
+            }"#;
+            let payload = parse_apply(text).expect("should parse");
+            assert_eq!(payload.schema_name, "tdd");
+            assert_eq!(
+                payload.change_dir,
+                PathBuf::from("/repo/openspec/changes/x")
+            );
+            assert_eq!(
+                payload.context_files.get("proposal"),
+                Some(&vec![PathBuf::from("/repo/openspec/changes/x/proposal.md")])
+            );
+            assert_eq!(payload.context_files.get("specs"), Some(&vec![]));
+        }
+
+        #[test]
+        fn an_apply_payload_missing_context_files_is_an_error() {
+            let text = r#"{"schemaName":"tdd","changeDir":"/repo/openspec/changes/x"}"#;
+            assert!(parse_apply(text).is_err());
+        }
+
+        #[test]
+        fn an_apply_payload_missing_schema_name_is_an_error() {
+            let text = r#"{"changeDir":"/repo/openspec/changes/x","contextFiles":{}}"#;
+            assert!(parse_apply(text).is_err());
+        }
+
+        #[test]
+        fn an_apply_payload_missing_change_dir_is_an_error() {
+            let text = r#"{"schemaName":"tdd","contextFiles":{}}"#;
+            assert!(parse_apply(text).is_err());
+        }
+
+        #[test]
+        fn an_error_envelope_is_an_error() {
+            let text = r#"{"status":[{"severity":"error","code":"unknown_schema","message":"Unknown schema \"outside-in-tdd\""}]}"#;
+            assert!(parse_apply(text).is_err());
+        }
+
+        #[test]
+        fn context_files_values_that_are_not_string_arrays_are_rejected() {
+            let text = r#"{
+                "schemaName":"tdd",
+                "changeDir":"/repo/openspec/changes/x",
+                "contextFiles":{"proposal":[1,2]}
+            }"#;
+            assert!(parse_apply(text).is_err());
+
+            let text = r#"{
+                "schemaName":"tdd",
+                "changeDir":"/repo/openspec/changes/x",
+                "contextFiles":{"proposal":"not-an-array"}
+            }"#;
+            assert!(parse_apply(text).is_err());
+        }
+
+        #[test]
+        fn an_empty_context_files_object_is_valid_and_yields_no_paths() {
+            let text = r#"{
+                "schemaName":"tdd",
+                "changeDir":"/repo/openspec/changes/x",
+                "contextFiles":{}
+            }"#;
+            let payload = parse_apply(text).expect("should parse");
+            assert!(payload.context_files.is_empty());
+        }
+
+        #[test]
+        fn malformed_apply_json_is_an_error() {
+            assert!(parse_apply("{ this is not json").is_err());
         }
     }
 }
