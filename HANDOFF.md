@@ -79,6 +79,20 @@ cost ran 38–44 points per change in Phase 3 (about 2.4 full 5-hour windows for
 changes, so ~15h of wall time); weekly cost ran 4.5 points per change. Both matter, and
 they are not interchangeable.
 
+## Measured per-step cost (Phase 4)
+
+Finer-grained than the per-change figures above, and the basis for planning windows:
+
+| Step | Session points |
+|---|---|
+| ff-change | 23–31 |
+| apply | 16–19 |
+| archive | 2–3 |
+
+So **45–50 session points per change — about two changes per 5-hour window.** Weekly is
+no longer a factor: the rolling 7-day window turned over mid-phase (71% → 8% used), so
+the session window is the only limit, and it interrupts a phase without ending it.
+
 ## The ~50% floor governs starting a change, not resuming one
 
 Refined after a phase orchestrator raised it, and confirmed:
