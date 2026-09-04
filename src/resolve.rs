@@ -2,6 +2,70 @@
 //!
 //! See `openspec/changes/repo-resolution/design.md` for the full contract.
 
+use std::path::{Path, PathBuf};
+
+/// The outcome of walking up from a starting path for an `openspec` directory.
+/// See `openspec/changes/repo-resolution/design.md` -> Contracts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RepoSearch {
+    /// The nearest ancestor (including the starting path itself) holding an
+    /// `openspec` directory child.
+    Found { root: PathBuf },
+    /// No ancestor up to the filesystem root holds one. Names the directory
+    /// the search began from, so the empty state can print it.
+    NotFound { searched_from: PathBuf },
+}
+
+/// Is `path` a directory, following symbolic links? Every `Err` from the
+/// filesystem — an unreadable or non-existent path — means "no", never a
+/// panic.
+fn is_dir_through_symlinks(path: &Path) -> bool {
+    std::fs::metadata(path).map(|m| m.is_dir()).unwrap_or(false)
+}
+
+/// Locate the OpenSpec repository by walking `start` and its ancestors,
+/// stopping at the first one whose `openspec` child is a directory (through
+/// symbolic links), and at the filesystem root. See
+/// `openspec/changes/repo-resolution/design.md` -> Contracts and
+/// `openspec/changes/repo-resolution/specs/repo-discovery/spec.md`.
+pub fn find_repo(start: &Path) -> RepoSearch {
+    match std::fs::canonicalize(start) {
+        Ok(canonical_start) => {
+            for ancestor in canonical_start.ancestors() {
+                if is_dir_through_symlinks(&ancestor.join("openspec")) {
+                    return RepoSearch::Found {
+                        root: ancestor.to_path_buf(),
+                    };
+                }
+            }
+            RepoSearch::NotFound {
+                searched_from: canonical_start,
+            }
+        }
+        Err(_) => {
+            // `start` cannot be resolved — most commonly because it does not
+            // exist. Walk the path as given, but skip the *empty* path that
+            // `Path::ancestors` yields at the end of a relative chain: joining
+            // `openspec` to it would produce a bare relative `openspec`,
+            // resolved against the process's own working directory rather
+            // than against anything the caller named.
+            for ancestor in start.ancestors() {
+                if ancestor.as_os_str().is_empty() {
+                    continue;
+                }
+                if is_dir_through_symlinks(&ancestor.join("openspec")) {
+                    return RepoSearch::Found {
+                        root: ancestor.to_path_buf(),
+                    };
+                }
+            }
+            RepoSearch::NotFound {
+                searched_from: start.to_path_buf(),
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::testutil::{ScratchDir, canonical, symlink};
