@@ -301,33 +301,33 @@ directory and compare against plain joins onto that same canonical root. Do **no
 a `canonicalize` inside the implementation to make an assertion pass — design.md → Decisions 6
 forbids it, and doing so would silently reverse a decision.
 
-- [ ] 5.1 RED: Write failing unit tests for `resolve_artifact(change_dir, generates) ->
+- [x] 5.1 RED: Write failing unit tests for `resolve_artifact(change_dir, generates) ->
       (Vec<PathBuf>, Option<String>)` — the resolved paths and the one problem an unsupported
       shape records — one test per `change-artifacts` scenario above, named after it
-- [ ] 5.2 RED: Make "An artifact whose filename differs from its id" discriminating: vendor a
+- [x] 5.2 RED: Make "An artifact whose filename differs from its id" discriminating: vendor a
       probe schema declaring `id: plan` with `generates: implementation-plan.md`, write both
       `implementation-plan.md` and a decoy `plan.md`, and assert the resolved vector holds the
       first and **not** the second. Without the decoy, an implementation that builds paths
       from the id passes
-- [ ] 5.3 RED: Make the ordering test assert the whole ordered vector, not membership, and
+- [x] 5.3 RED: Make the ordering test assert the whole ordered vector, not membership, and
       choose names that separate byte order from locale order — `specs/Beta/spec.md` must
       precede `specs/alpha/spec.md`, which is the opposite of what a locale-aware comparison
       produces
-- [ ] 5.4 RED: Write the absent cases as their own tests, each asserting an empty vector and
+- [x] 5.4 RED: Write the absent cases as their own tests, each asserting an empty vector and
       **no** problem: an artifact file that does not exist, a `specs/` directory that does not
       exist, and a `specs/` directory that exists and is empty. An unwritten artifact is the
       normal state of a change in flight, and recording a problem for it would fill
       `degraded-states` with noise
-- [ ] 5.5 RED: Write the symlink pair — a `proposal.md` that is a link to a real file
+- [x] 5.5 RED: Write the symlink pair — a `proposal.md` that is a link to a real file
       (resolves, and the path returned is the link's own, not its target) and one that
       dangles (resolves to nothing, records nothing) — and the directory-link test, whose
       `specs/loop` points back at `specs/`. The last one must assert both that the call
       terminates and that the result is exactly the one real file; a test that only asserts
       termination passes for an implementation that returns everything
-- [ ] 5.6 RED: Write the brace test as a *resolution* test, not only an `is_glob` test: build
+- [x] 5.6 RED: Write the brace test as a *resolution* test, not only an `is_glob` test: build
       `specs/alpha/spec.md` and `specs/zeta/spec.md`, ask for `specs/{alpha,zeta}/spec.md`,
       and assert an empty vector — the same answer the real CLI gives for the same tree
-- [ ] 5.7 RED: Write failing unit tests for `change_artifacts(change_dir, &Schema) ->
+- [x] 5.7 RED: Write failing unit tests for `change_artifacts(change_dir, &Schema) ->
       (Vec<ArtifactRef>, Vec<String>)` covering the two `change-model` scenarios this group
       claims: over a `tdd`-shaped schema and a change directory holding only `tasks.md` and
       `proposal.md`, assert five `ArtifactRef`s with ids `proposal`, `specs`, `design`,
@@ -335,24 +335,24 @@ forbids it, and doing so would silently reverse a decision.
       three carrying none, and no problem recorded for the three. Assert the whole ordered
       vector; a per-id lookup would pass for an implementation that emits the artifacts in
       filesystem order
-- [ ] 5.8 GREEN: Implement the non-glob branch: join, then accept only a regular file reached
+- [x] 5.8 GREEN: Implement the non-glob branch: join, then accept only a regular file reached
       **through** symbolic links (`std::fs::metadata`, never `symlink_metadata`), matching the
       CLI's `statSync().isFile()`
-- [ ] 5.9 GREEN: Implement the glob branch over `shape`'s output: walk the literal prefix
+- [x] 5.9 GREEN: Implement the glob branch over `shape`'s output: walk the literal prefix
       directory, recursing only when the shape is recursive, never descending into a directory
       reached through a symbolic link, skipping every entry whose name begins with `.`,
       accepting only regular files through links, and sorting the result by full path
       ascending in byte order
-- [ ] 5.10 GREEN: Implement `change_artifacts`, producing one `ArtifactRef` per schema
+- [x] 5.10 GREEN: Implement `change_artifacts`, producing one `ArtifactRef` per schema
       artifact **in schema order** and collecting each unsupported-shape problem. Emit one ref
       per artifact entry even when two entries share an id — `schema-artifacts` requires the
       list to be kept verbatim and never de-duplicated. This is the function group 8 composes;
       it does not read tasks and does not know what a change is
-- [ ] 5.11 REFACTOR: Extract the "is this a regular file through links" test into one helper
+- [x] 5.11 REFACTOR: Extract the "is this a regular file through links" test into one helper
       used by both branches, matching `resolve::is_usable_binary`'s shape, and keep the walk
       free of `unwrap` — every `read_dir` error inside the walk means "nothing there", as in
       `resolve::nvm_candidates`
-- [ ] 5.12 Run the group tests — `cargo test --all-features changes::` — no regressions
+- [x] 5.12 Run the group tests — `cargo test --all-features changes::` — no regressions
 
 ## 6. Task progress and the CLI's fallback
 <!-- kind: behavior -->

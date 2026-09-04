@@ -258,6 +258,137 @@ pub(crate) fn shape(generates: &str) -> Result<Shape, String> {
     })
 }
 
+/// Is `path` a regular file, reached through symbolic links? `fs::metadata`
+/// follows links — `symlink_metadata` does not — matching the CLI's own
+/// `statSync().isFile()` and `resolve::is_usable_binary`'s shape. Every
+/// filesystem `Err` (absent, dangling link, permission denied) means "not
+/// usable", never a panic.
+fn is_regular_file_through_links(path: &std::path::Path) -> bool {
+    std::fs::metadata(path).is_ok_and(|m| m.is_file())
+}
+
+/// Does `name` match `file`? A [`FilePattern::Literal`] requires an exact
+/// name; a [`FilePattern::Prefixed`] requires the name to start with the
+/// prefix and end with the suffix (and be long enough to hold both without
+/// overlap, so `"md"` does not "match" a one-character name under a
+/// `prefix: "m", suffix: "d"` pattern).
+fn matches_file_pattern(name: &str, file: &FilePattern) -> bool {
+    match file {
+        FilePattern::Literal(literal) => name == literal,
+        FilePattern::Prefixed { prefix, suffix } => {
+            name.len() >= prefix.len() + suffix.len()
+                && name.starts_with(prefix.as_str())
+                && name.ends_with(suffix.as_str())
+        }
+    }
+}
+
+/// Walk `dir`, collecting every regular file (reached through links) whose
+/// name matches `file` into `out`. Skips every entry whose name begins with
+/// `.`. Recurses into a real subdirectory only when `recursive` holds, and
+/// **never** into a directory reached through a symbolic link — `file_type`
+/// is `DirEntry::file_type`, which does not follow links, so a symlinked
+/// directory takes the non-recursing branch below regardless of
+/// `recursive`, which is what makes a `specs/loop` pointing back at `specs/`
+/// terminate rather than cycle. An unreadable `dir` contributes nothing,
+/// matching every other directory walk in this crate.
+fn collect_glob_matches(
+    dir: &std::path::Path,
+    recursive: bool,
+    file: &FilePattern,
+    out: &mut Vec<PathBuf>,
+) {
+    let Ok(read_dir) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in read_dir.flatten() {
+        let Ok(name) = entry.file_name().into_string() else {
+            continue;
+        };
+        if name.starts_with('.') {
+            continue;
+        }
+        let path = entry.path();
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if file_type.is_dir() {
+            if recursive {
+                collect_glob_matches(&path, recursive, file, out);
+            }
+            continue;
+        }
+        if matches_file_pattern(&name, file) && is_regular_file_through_links(&path) {
+            out.push(path);
+        }
+    }
+}
+
+/// Resolve one schema artifact's `generates` value against `change_dir`:
+/// the paths it names on disk, and the one problem an unsupported glob
+/// shape records. Never fails and never records a problem for an absent
+/// file or an empty match — an unwritten artifact is the normal state of a
+/// change in flight.
+pub(crate) fn resolve_artifact(
+    change_dir: &std::path::Path,
+    generates: &str,
+) -> (Vec<PathBuf>, Option<String>) {
+    match shape(generates) {
+        Ok(Shape::Literal(relative)) => {
+            let path = change_dir.join(relative);
+            if is_regular_file_through_links(&path) {
+                (vec![path], None)
+            } else {
+                (Vec::new(), None)
+            }
+        }
+        Ok(Shape::Glob {
+            dirs,
+            recursive,
+            file,
+        }) => {
+            let mut base = change_dir.to_path_buf();
+            for segment in &dirs {
+                base.push(segment);
+            }
+            let mut matches = Vec::new();
+            collect_glob_matches(&base, recursive, &file, &mut matches);
+            matches.sort();
+            (matches, None)
+        }
+        Err(pattern) => (
+            Vec::new(),
+            Some(format!("unsupported glob pattern: {pattern:?}")),
+        ),
+    }
+}
+
+/// Resolve every artifact `schema` declares, in the schema's declared
+/// order, against `change_dir`. One [`ArtifactRef`] per schema artifact
+/// entry — including a repeated id, which `schema-artifacts` requires kept
+/// verbatim and never de-duplicated — plus every unsupported-shape problem,
+/// named with the artifact's id so a reader can tell which tab is affected.
+pub(crate) fn change_artifacts(
+    change_dir: &std::path::Path,
+    schema: &crate::schema::Schema,
+) -> (Vec<ArtifactRef>, Vec<String>) {
+    let mut artifacts = Vec::with_capacity(schema.artifacts.len());
+    let mut problems = Vec::new();
+
+    for artifact in &schema.artifacts {
+        let (paths, problem) = resolve_artifact(change_dir, &artifact.generates);
+        if let Some(reason) = problem {
+            problems.push(format!("artifact {:?}: {reason}", artifact.id));
+        }
+        artifacts.push(ArtifactRef {
+            id: artifact.id.clone(),
+            paths,
+        });
+    }
+
+    (artifacts, problems)
+}
+
 #[cfg(test)]
 mod tests {
     use super::conformance::assert_invariants;
@@ -598,5 +729,257 @@ mod tests {
         // `**` alone is `Err`, because the subset's final segment must be a
         // filename pattern and `**` is a directory segment.
         assert!(shape("**").is_err());
+    }
+
+    // --- group 5: resolving one artifact to paths -------------------------
+
+    use crate::testutil::{ScratchDir, canonical, symlink};
+
+    fn mkdir(path: &std::path::Path) {
+        std::fs::create_dir_all(path).expect("create fixture directory");
+    }
+
+    fn write(path: &std::path::Path, contents: &str) {
+        if let Some(parent) = path.parent() {
+            mkdir(parent);
+        }
+        std::fs::write(path, contents).expect("write fixture file");
+    }
+
+    #[test]
+    fn a_non_glob_generates_naming_an_existing_file_resolves_to_it() {
+        let scratch = ScratchDir::new();
+        let dir = canonical(scratch.path());
+        write(&dir.join("proposal.md"), "# Proposal\n");
+
+        let (paths, problem) = resolve_artifact(&dir, "proposal.md");
+        assert_eq!(paths, vec![dir.join("proposal.md")]);
+        assert_eq!(problem, None);
+    }
+
+    #[test]
+    fn an_artifact_whose_filename_differs_from_its_id_resolves_by_generates_not_id() {
+        // Discriminating against an implementation that builds paths from
+        // the artifact's id rather than its `generates` value: a decoy
+        // `plan.md` sits beside the real file and must not appear.
+        let scratch = ScratchDir::new();
+        let dir = canonical(scratch.path());
+        write(&dir.join("implementation-plan.md"), "# Plan\n");
+        write(&dir.join("plan.md"), "# Decoy\n");
+
+        let (paths, problem) = resolve_artifact(&dir, "implementation-plan.md");
+        assert_eq!(paths, vec![dir.join("implementation-plan.md")]);
+        assert!(!paths.contains(&dir.join("plan.md")));
+        assert_eq!(problem, None);
+    }
+
+    #[test]
+    fn a_non_glob_generates_naming_something_that_is_not_a_regular_file_resolves_to_nothing() {
+        let scratch = ScratchDir::new();
+        let dir = canonical(scratch.path());
+        mkdir(&dir.join("notes"));
+
+        let (paths, problem) = resolve_artifact(&dir, "notes");
+        assert!(paths.is_empty());
+        assert_eq!(problem, None);
+    }
+
+    #[test]
+    fn an_absent_non_glob_artifact_file_resolves_to_nothing_with_no_problem() {
+        let scratch = ScratchDir::new();
+        let dir = canonical(scratch.path());
+
+        let (paths, problem) = resolve_artifact(&dir, "design.md");
+        assert!(paths.is_empty());
+        assert_eq!(problem, None);
+    }
+
+    #[test]
+    fn a_symbolic_link_to_a_regular_file_is_a_resolved_artifact() {
+        let scratch = ScratchDir::new();
+        let dir = canonical(scratch.path());
+        write(&dir.join("real-proposal.md"), "# Real\n");
+        symlink(&dir.join("real-proposal.md"), &dir.join("proposal.md"));
+
+        let (paths, problem) = resolve_artifact(&dir, "proposal.md");
+        assert_eq!(paths, vec![dir.join("proposal.md")]);
+        assert!(!paths.contains(&dir.join("real-proposal.md")));
+        assert_eq!(problem, None);
+
+        // A dangling link resolves to nothing and records nothing.
+        symlink(&dir.join("does-not-exist.md"), &dir.join("dangling.md"));
+        let (paths, problem) = resolve_artifact(&dir, "dangling.md");
+        assert!(paths.is_empty());
+        assert_eq!(problem, None);
+    }
+
+    #[test]
+    fn a_brace_expression_resolves_to_nothing_like_the_cli() {
+        let scratch = ScratchDir::new();
+        let dir = canonical(scratch.path());
+        write(&dir.join("specs/alpha/spec.md"), "# Alpha\n");
+        write(&dir.join("specs/zeta/spec.md"), "# Zeta\n");
+
+        let (paths, problem) = resolve_artifact(&dir, "specs/{alpha,zeta}/spec.md");
+        assert!(paths.is_empty());
+        assert_eq!(problem, None);
+    }
+
+    #[test]
+    fn a_nested_spec_tree_resolves_in_byte_order_not_locale_order() {
+        let scratch = ScratchDir::new();
+        let dir = canonical(scratch.path());
+        write(&dir.join("specs/Beta/spec.md"), "# Beta\n");
+        write(&dir.join("specs/alpha/spec.md"), "# Alpha\n");
+        write(&dir.join("specs/alpha/nested/deep.md"), "# Deep\n");
+        write(&dir.join("specs/top.md"), "# Top\n");
+
+        let (paths, problem) = resolve_artifact(&dir, "specs/**/*.md");
+        assert_eq!(
+            paths,
+            vec![
+                dir.join("specs/Beta/spec.md"),
+                dir.join("specs/alpha/nested/deep.md"),
+                dir.join("specs/alpha/spec.md"),
+                dir.join("specs/top.md"),
+            ]
+        );
+        assert_eq!(problem, None);
+    }
+
+    #[test]
+    fn a_glob_matching_nothing_is_an_empty_path_list_not_a_problem() {
+        let scratch = ScratchDir::new();
+        let dir = canonical(scratch.path());
+
+        // No `specs/` directory at all.
+        let (paths, problem) = resolve_artifact(&dir, "specs/**/*.md");
+        assert!(paths.is_empty());
+        assert_eq!(problem, None);
+
+        // `specs/` exists and is empty.
+        mkdir(&dir.join("specs"));
+        let (paths, problem) = resolve_artifact(&dir, "specs/**/*.md");
+        assert!(paths.is_empty());
+        assert_eq!(problem, None);
+    }
+
+    #[test]
+    fn dot_entries_and_non_files_are_skipped() {
+        let scratch = ScratchDir::new();
+        let dir = canonical(scratch.path());
+        write(&dir.join("specs/.hidden.md"), "# Hidden\n");
+        write(&dir.join("specs/.hidden-cap/spec.md"), "# Hidden cap\n");
+        mkdir(&dir.join("specs/looks-like.md"));
+        write(&dir.join("specs/alpha/spec.md"), "# Alpha\n");
+
+        let (paths, problem) = resolve_artifact(&dir, "specs/**/*.md");
+        assert_eq!(paths, vec![dir.join("specs/alpha/spec.md")]);
+        assert_eq!(problem, None);
+    }
+
+    #[test]
+    fn a_directory_symbolic_link_is_not_descended_into() {
+        let scratch = ScratchDir::new();
+        let dir = canonical(scratch.path());
+        write(&dir.join("specs/alpha/spec.md"), "# Alpha\n");
+        symlink(&dir.join("specs"), &dir.join("specs/loop"));
+
+        let (paths, problem) = resolve_artifact(&dir, "specs/**/*.md");
+        assert_eq!(paths, vec![dir.join("specs/alpha/spec.md")]);
+        assert_eq!(problem, None);
+    }
+
+    #[test]
+    fn a_prefix_and_suffix_file_pattern_is_supported() {
+        let scratch = ScratchDir::new();
+        let dir = canonical(scratch.path());
+        write(&dir.join("specs/spec-a.md"), "# A\n");
+        write(&dir.join("specs/spec-b.md"), "# B\n");
+        write(&dir.join("specs/other.md"), "# Other\n");
+
+        let (paths, problem) = resolve_artifact(&dir, "specs/spec-*.md");
+        assert_eq!(
+            paths,
+            vec![dir.join("specs/spec-a.md"), dir.join("specs/spec-b.md")]
+        );
+        assert_eq!(problem, None);
+    }
+
+    #[test]
+    fn an_unsupported_glob_shape_records_one_problem_naming_the_pattern() {
+        let scratch = ScratchDir::new();
+        let dir = canonical(scratch.path());
+        write(&dir.join("specs/zeta/spec.md"), "# Zeta\n");
+
+        let (paths, problem) = resolve_artifact(&dir, "specs/*/spec.md");
+        assert!(paths.is_empty());
+        let problem = problem.expect("unsupported shape should record a problem");
+        assert!(problem.contains("specs/*/spec.md"));
+    }
+
+    fn probe_schema() -> crate::schema::Schema {
+        crate::schema::Schema {
+            name: "tdd".to_string(),
+            artifacts: vec![
+                crate::schema::Artifact {
+                    id: "proposal".to_string(),
+                    generates: "proposal.md".to_string(),
+                },
+                crate::schema::Artifact {
+                    id: "specs".to_string(),
+                    generates: "specs/**/*.md".to_string(),
+                },
+                crate::schema::Artifact {
+                    id: "design".to_string(),
+                    generates: "design.md".to_string(),
+                },
+                crate::schema::Artifact {
+                    id: "tasks".to_string(),
+                    generates: "tasks.md".to_string(),
+                },
+                crate::schema::Artifact {
+                    id: "planning-review".to_string(),
+                    generates: "planning-review.md".to_string(),
+                },
+            ],
+            tasks: None,
+        }
+    }
+
+    #[test]
+    fn tab_order_follows_the_schema_not_the_filesystem() {
+        let scratch = ScratchDir::new();
+        let dir = canonical(scratch.path());
+        write(&dir.join("tasks.md"), "- [ ] a\n");
+        write(&dir.join("proposal.md"), "# Proposal\n");
+
+        let (artifacts, problems) = change_artifacts(&dir, &probe_schema());
+        assert_eq!(
+            artifacts,
+            vec![
+                ArtifactRef {
+                    id: "proposal".to_string(),
+                    paths: vec![dir.join("proposal.md")],
+                },
+                ArtifactRef {
+                    id: "specs".to_string(),
+                    paths: vec![],
+                },
+                ArtifactRef {
+                    id: "design".to_string(),
+                    paths: vec![],
+                },
+                ArtifactRef {
+                    id: "tasks".to_string(),
+                    paths: vec![dir.join("tasks.md")],
+                },
+                ArtifactRef {
+                    id: "planning-review".to_string(),
+                    paths: vec![],
+                },
+            ]
+        );
+        assert!(problems.is_empty());
     }
 }
