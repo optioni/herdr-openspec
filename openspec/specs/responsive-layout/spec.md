@@ -19,11 +19,19 @@ The header SHALL render the literal `OpenSpec` at column 0 with
 `Esc back` in that order, separated by two spaces, starting at column 0, dropping hints
 from the **end** when the remaining width cannot hold the next one whole.
 
-Every scenario in this capability renders a `Dashboard` whose `changes` is
-`changes::empty_set()`, unless it says otherwise. Nothing in this change reads that field,
-but naming it makes the fixture explicit for `list-view`, which will change these
-assertions and needs to know whether an interior was blank because the set was empty or
-because nothing rendered it.
+The footer has two further forms, specified by `list-filtering` and restated here because
+this requirement owns the row: while `dashboard.filter.active` is set the hints are
+**replaced** by the prompt `/`, the query, and `_`, keeping its tail when it overflows;
+while the filter is inactive with a non-empty query, `/` and the query become a fourth
+hint placed **first** in the list above, dropped last rather than first. Every scenario
+below renders a `Dashboard` with an empty, inactive filter, so the three-hint form is what
+they assert.
+
+Scenarios in this capability render a `Dashboard` whose `changes` is
+`changes::empty_set()` unless they say otherwise. That state is no longer inert: with a
+repository root present, `change-rows` renders a `No changes yet` message row into the list
+region's interior, and the scenarios below are written so that none of them depends on that
+interior being blank.
 
 Degenerate heights SHALL be decided explicitly rather than delegated to the constraint
 solver — measured, not assumed: `Layout::vertical([Length(1), Min(0), Length(1)])` at
@@ -31,7 +39,9 @@ height 1 gives the single row to the **footer**, so a naive split renders `q qui
 `OpenSpec` belongs. The explicit branch is: at height 0 `render` SHALL draw nothing; at
 height 1 it SHALL draw the header only; at height 2 it SHALL draw the header on row 0 and
 the footer on row 1 and no body; at height 3 or more it SHALL use the three-way split
-above. `render` SHALL NOT panic at any frame size of at least one column by one row.
+above. `render` SHALL NOT panic at any frame size of at least one column by one row, and
+SHALL NOT panic at an interior of zero columns or zero rows, which a one- or two-column
+frame produces.
 
 #### Scenario: Header, body, and footer occupy their rows at both widths
 
@@ -64,9 +74,10 @@ above. `render` SHALL NOT panic at any frame size of at least one column by one 
 
 #### Scenario: A one-column frame renders without panicking
 
-- **WHEN** the same `Dashboard` is rendered at 1x1, at 1x20, and — as the contrasting
-  controls at the two mandated widths — at 60x20 and 120x20
-- **THEN** none of the four panics
+- **WHEN** the same `Dashboard` is rendered at 1x1, at 1x20, at 2x20, and — as the
+  contrasting controls at the two mandated widths — at 60x20 and 120x20
+- **THEN** none of the five panics, including the two whose list region has an interior of
+  zero columns
 - **AND** the 1x20 buffer's row 0 is the single character `O`, the first character of the
   truncated `OpenSpec` label, so a one-column frame still draws rather than silently
   skipping the header
@@ -167,15 +178,20 @@ breakpoint changes layout on its next frame with no extra state.
 The region the dashboard's route names SHALL have its border drawn with
 `Modifier::BOLD` set; the other region, when drawn, SHALL have its border drawn without it.
 
-Region interiors SHALL be left blank by this change. `list-view`, `markdown-viewer`, and
-`detail-view` fill them; until they land, every interior cell SHALL be a space whose
-`Style` equals `ratatui::buffer::Cell::default().style()`, so a later change adding content
-is a visible diff rather than an overwrite of something already there. The comparison is
-against `Cell::default().style()` and **not** against `Style::default()`: `ratatui-crossterm`
+The **list** region's interior is no longer left blank: `change-rows` owns every cell of it
+and `list-selection` owns which slice is drawn. The **detail** region's interior SHALL
+still be left blank by this capability — `markdown-viewer` and `detail-view` fill it; until
+they land, every cell of it SHALL be a space whose `Style` equals
+`ratatui::buffer::Cell::default().style()`, so a later change adding content is a visible
+diff rather than an overwrite of something already there. The comparison is against
+`Cell::default().style()` and **not** against `Style::default()`: `ratatui-crossterm`
 re-enables the `underline-color` feature through its own defaults, so an untouched cell's
 style is `fg(Reset).bg(Reset).underline_color(Reset)`, which equals neither
 `Style::default()` nor `Style::reset()`. Comparing against the constructible value is what
 catches a `Block::style` being set where `Block::border_style` was meant.
+
+Row content SHALL NOT bleed across a border: no cell of a region's border column or border
+row SHALL be overwritten by a row, at either mandated width.
 
 #### Scenario: The routed region's border is bold and the other's is not
 
@@ -190,12 +206,29 @@ catches a `Block::style` being set where `Block::border_style` was meant.
 
 #### Scenario: Interiors are blank at both widths
 
-- **WHEN** a `Dashboard` with `route: Route::List` is rendered at 60x20 and at 120x20
-- **THEN** in the 120-column buffer every cell in rows 2 through 17 and columns 1 through
-  38 is a space whose `Style` equals `Cell::default().style()`, and so is every cell in rows
-  2 through 17 and columns 41 through 118
-- **AND** in the 60-column buffer every cell in rows 2 through 17 and columns 1 through 58
-  satisfies the same two assertions
+The scenario's name is kept verbatim from `tui-shell` because a delta's scenario headers
+are its merge key; only the **detail** interior is blank now.
+
+- **WHEN** a `Dashboard` with `route: Route::List`, a repository root of `/tmp/demo-repo`,
+  and `changes::empty_set()` is rendered at 60x20 and at 120x20
+- **THEN** in the 120-column buffer every cell in rows 2 through 17 and columns 41 through
+  118 is a space whose `Style` equals `Cell::default().style()` — the detail region is
+  still untouched
+- **AND** in the 120-column buffer row 2, columns 1 through 38, begins `No changes yet`, so
+  the list interior is written by `change-rows` rather than left blank
+- **AND** in the 60-column buffer row 2, columns 1 through 58, begins `No changes yet`, and
+  rows 3 through 17 of columns 1 through 58 are entirely spaces whose `Style` equals
+  `Cell::default().style()`, so exactly one message row was drawn
+
+#### Scenario: Rows do not overwrite the borders at either width
+
+- **WHEN** a `Dashboard` holding thirty active changes with names long enough to be
+  truncated is rendered at 60x20 and at 120x20
+- **THEN** in the 60-column buffer every cell of column 0 and column 59 in rows 1 through
+  18 is a box-drawing character
+- **AND** in the 120-column buffer every cell of columns 0, 39, 40, and 119 in rows 1
+  through 18 is a box-drawing character, so a 38-column row neither ran into the divider
+  nor into the detail region
 
 ### Requirement: The header names the repository root, shortened from the left when narrow
 
@@ -213,6 +246,10 @@ SHALL be drawn; when the width is below 8 the label itself SHALL be truncated to
 columns available. Shortening SHALL count characters, not bytes, and SHALL keep the tail —
 the repository's own directory name is what identifies it, and the leading path components
 are what a reader can spare.
+
+The shortening rule SHALL be one shared implementation with `change-rows`' no-repository
+block, which shortens `searched_from` by the same keep-the-tail rule against the list
+region's interior width rather than the header's.
 
 #### Scenario: A path that fits is right-aligned whole at both widths
 
@@ -232,7 +269,10 @@ are what a reader can spare.
   first character of the shortened text is the ellipsis and the last is the final `e` of
   the directory name
 - **AND** the 120-column header row spells the whole seventy-character path in columns 50
-  through 119, with no ellipsis anywhere in the buffer
+  through 119, with no ellipsis anywhere in the buffer — which stays true only because
+  that `Dashboard`'s `changes` is `changes::empty_set()` with a repository root present,
+  so the list interior holds the fourteen-character `No changes yet` and needs no
+  ellipsis of its own
 
 #### Scenario: A header too narrow for any path shows only the label
 
@@ -243,12 +283,19 @@ are what a reader can spare.
 - **AND** the 60-column header row carries the shortened, ellipsis-prefixed path in columns
   9 through 59, and the 120-column header row carries the full path in columns 50 through
   119 — so the 16-column omission is a width branch and not the feature being absent
+- **AND** no ellipsis appears anywhere in the 16-column buffer: its list interior is
+  fourteen columns wide and `No changes yet` is exactly fourteen characters, so the body
+  neither truncates nor overflows
 
 #### Scenario: No repository found is named in the header at both widths
 
 - **WHEN** a `Dashboard` built with no repository root — the value `ui::load` produces when
-  `resolve::find_repo` reports `NotFound` — is rendered at 60x20 and at 120x20
+  `resolve::find_repo` reports `NotFound`, with `searched_from` `/tmp/searched-from` — is
+  rendered at 60x20 and at 120x20
 - **THEN** the 60-column header row spells `no repository` in columns 47 through 59
 - **AND** the 120-column header row spells `no repository` in columns 107 through 119
-- **AND** neither buffer names the directory the search started from: the empty state that
-  reports it is `list-view`'s body content, not the shell's header
+- **AND** neither **header row** names the directory the search started from: row 0 of
+  each buffer does not contain `/tmp/searched-from`. The **body** now does, and that is
+  `change-rows`' no-repository block — the landed form of this scenario asserted the
+  string was absent from the whole buffer, which `list-view` makes false; the assertion
+  is narrowed to row 0, which is what the requirement was ever about

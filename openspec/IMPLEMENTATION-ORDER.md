@@ -68,7 +68,7 @@ Pure transformations. No terminal, no subprocess, no writes.
 | Change | Scope | Spec refs | Depends on |
 |---|---|---|---|
 | `tui-shell` | crossterm terminal setup and teardown, the ratatui event loop, quit handling, the 100-column responsive breakpoint, and the `TestBackend` harness that later view changes assert against. | User interface → Responsive layout | `changes-from-files` |
-| `list-view` | The change list: one row per active change with progress, the archived separator and rows below it, selection and navigation, and `/` filtering. Empty states for no repository and no changes. | User interface → List view | `tui-shell` |
+| `list-view` | The change list: one row per active change with progress, the archived separator and rows below it, selection and navigation, and `/` filtering. Empty states for no repository and no changes. Also renders repository-level `ChangeSet::problems` (e.g. an unreadable `openspec/changes/`) above the list, since no other change owns its leading rows. | User interface → List view; Degraded states | `tui-shell` |
 | `markdown-viewer` | `pulldown-cmark` to ratatui text — headings, lists, code blocks, emphasis, links — with scrolling. | User interface → Detail view | `tui-shell` |
 | `detail-view` | Change header (name, schema, progress), the artifact tab bar built from the schema's ordered artifacts, `1`–`9` / `[` / `]` tab switching, and the "No content yet" state for a missing artifact. | User interface → Detail view | `list-view`, `markdown-viewer` |
 | `tasks-tab` | The tasks artifact rendered as grouped checkbox items with a progress bar, replacing the plain markdown view for that one tab. Read-only. | User interface → Detail view | `detail-view`, `task-parsing` |
