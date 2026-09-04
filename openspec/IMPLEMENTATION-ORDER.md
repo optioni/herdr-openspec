@@ -40,7 +40,7 @@ that happens rather than letting it drift.
 |---|---|---|---|
 | `repo-foundation` | Cargo scaffold (binary `herdr-openspec`); `rustfmt.toml`; `Makefile` with a `check` target running format, lint, test, and coverage; `scripts/build.sh` sourcing `~/.cargo/env` before building; a minimal `herdr-plugin.toml` (`id`, `name`, `version`, `min_herdr_version`, `platforms`, `[[build]]`, the `dashboard` pane) so `herdr plugin link .` works from day one. | Build and distribution | — |
 | `ci-pipeline` | GitHub Actions on `ubuntu-latest` and `macos-latest` with `Swatinem/rust-cache`. Required jobs: `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test`. Coverage via `cargo llvm-cov --fail-under-lines 80`, Linux only. | Testing and quality gates | `repo-foundation` |
-| `plugin-config` | Read `config.toml` from the directory reported by `herdr plugin config-dir`: `openspec_bin`, `agent_kind`, `archived_count`. Absent file and absent keys fall back to defaults. Also the plugin-local state file that records truncated agent-name mappings. | Data layer → Resolution chain | `repo-foundation` |
+| `plugin-config` | Read `config.toml` from the directory Herdr injects as `HERDR_PLUGIN_CONFIG_DIR` (no subprocess; falls back to the same path `herdr plugin config-dir` reports when run outside a Herdr-started process): `openspec_bin`, `agent_kind`, `archived_count`. Absent file and absent keys fall back to defaults. Also the plugin-local state file — under `HERDR_PLUGIN_STATE_DIR`, separate from `config.toml` — that records the agent-name mapping whenever the derived name differs from the change name, not only when truncated. | Data layer → Resolution chain | `repo-foundation` |
 
 ## Phase 2 — Reading OpenSpec from disk
 

@@ -12,8 +12,9 @@ binary invoked two ways by the manifest: as a pane process rendering the TUI, an
 as an action process that opens or focuses that pane.
 
 **Stack:** Rust, `ratatui` + `crossterm` (TUI), `notify` (filesystem watching),
-`serde_json`, `serde_yaml`, `pulldown-cmark` (markdown). Exact versions are pinned
-to current stable releases at implementation time, not from memory.
+`serde_json`, `serde_yaml`, `pulldown-cmark` (markdown), `toml` (plugin configuration
+and state, both TOML). Exact versions are pinned to current stable releases at
+implementation time, not from memory.
 
 ## Architecture
 
@@ -29,7 +30,11 @@ trait HerdrCli    { fn run(&self, args: &[&str]) -> Result<String>; }
 Each has exactly one real implementation that spawns a process and returns stdout,
 and a fake used by tests. No parsing, merging, or decision-making happens inside
 either. This is what makes the coverage target reachable: the untestable residue
-is two thin wrappers and `main`.
+is two thin wrappers and `main`. (`config::env_lookup` is a third one-line binding
+to the real world — the crate's single call to `std::env::var` — but it is not
+untestable residue: it carries its own assertions, comparing its result against
+`std::env::var` directly for a variable known to be present and for one nothing
+sets, rather than being covered only by the composition that calls it.)
 
 **The render seam.** Views are pure functions from a `Dashboard` state value to a
 ratatui frame. They perform no I/O, so they are tested by rendering into a
@@ -39,6 +44,8 @@ ratatui frame. They perform no I/O, so they are tested by rendering into a
 
 | Module | Responsibility |
 |---|---|
+| `config` | Resolve the plugin's configuration directory from the process environment (no process spawn) and read `config.toml` into `openspec_bin`, `agent_kind`, `archived_count` |
+| `state` | Resolve the plugin's state directory from the process environment; derive a Herdr-legal agent name from a change name; record and read back the mapping |
 | `resolve` | Locate the repository root and the `openspec` binary |
 | `schema` | Parse `schema.yaml` into an ordered artifact list; identify the tasks artifact |
 | `changes` | Build `Change` values from files and from CLI JSON |
@@ -94,8 +101,15 @@ for directory artifacts.
 **The `openspec` binary.** Probed in order, and cached for the session:
 
 1. `openspec_bin` from plugin configuration — `config.toml` in the directory
-   reported by `herdr plugin config-dir herdr-openspec`, which also holds
-   `agent_kind`, `archived_count`, and the truncated-name mapping
+   Herdr injects as `HERDR_PLUGIN_CONFIG_DIR` into every plugin process it
+   starts, pane or action alike, no subprocess required. That directory is
+   the same one `herdr plugin config-dir herdr-openspec` reports for a human,
+   and is also the fallback path the plugin computes for itself when run
+   outside a Herdr-started process. `config.toml` also holds `agent_kind` and
+   `archived_count`. The agent-name mapping lives separately, under
+   `HERDR_PLUGIN_STATE_DIR` — see Herdr integration → Attributing an agent —
+   because the plugin writes it and must not write into the directory the
+   user hand-edits
 2. `openspec` on `PATH`
 3. `~/.nvm/versions/node/*/bin/openspec`
 4. `$(npm prefix -g)/bin/openspec`
@@ -186,11 +200,29 @@ as a pure optimisation.
 
 Three tiers, and the design refuses to guess beyond them:
 
-1. **Launched by the plugin.** `herdr agent start` takes a name positionally, and
-   change names are already kebab-case, so the agent is named after the change and
-   `agent list` yields the association directly. Names are capped at 32 characters
-   (`[a-z][a-z0-9_-]{0,31}`); longer change names are truncated and the mapping is
-   recorded in plugin-local state.
+1. **Launched by the plugin.** `herdr agent start` takes a name positionally, but a
+   change name is not always a legal Herdr agent name
+   (`[a-z][a-z0-9_-]{0,31}`) — it may start with a digit, carry illegal
+   characters, or simply run past 32 characters. The plugin derives an agent
+   name from the change name by a pure, total function: ASCII-lowercase;
+   replace every character outside `[a-z0-9_-]` with `-`; collapse runs of
+   `-` and trim leading/trailing `-`/`_`; fall back to `change` if nothing is
+   left; prefix `c-` if the result cannot legally start an agent name; and,
+   past 32 characters, keep the first 27 characters (trimmed of any trailing
+   separator) plus `-` and a four-digit lowercase base-36 suffix derived from
+   an FNV-1a hash of the whole original change name, so the same change
+   always derives the same agent name on every machine. A mapping from the
+   derived agent name back to the change name is recorded in plugin-local
+   state (under `HERDR_PLUGIN_STATE_DIR`, never beside `config.toml`)
+   whenever the derived name **differs from the change name at all** — not
+   only when it was truncated. `2fa-support` is only 13 characters but still
+   becomes `c-2fa-support` and still needs the mapping to be attributable. A
+   derived name already bound to a different change is rebound rather than
+   rejected: the most recent launch is the live one. Launch flow's
+   `herdr agent start <change>` and `herdr agent prompt <change>` below refer
+   to this *derived* name, not the raw change name; correcting those two
+   lines to say so explicitly is `agent-launch`'s work, planned from this
+   paragraph.
 2. **Named manually.** Any live agent whose name equals a change name is
    attributed, making `herdr agent rename` a deliberate way to opt in.
 3. **Everything else.** Agents whose `cwd` is inside the repository but which carry
@@ -258,6 +290,8 @@ Every condition renders usable content rather than an error screen:
 | Artifact file missing | Tab is still shown and renders "No content yet" |
 | Herdr socket unreachable | Runs as a standalone TUI; agent column and action keys hidden |
 | Pane narrower than 100 columns | Single-column list and detail |
+| `config.toml` malformed, unreadable, or a key of the wrong type | The affected key falls back to its documented default while every other key that parsed correctly is still honoured; `Config::problems` names each fallback |
+| `agent-names.toml` unusable (malformed, unreadable, or an entry Herdr would reject) | Empty or partial mapping; attribution falls back to the name-equality tier, and nothing already on disk is lost |
 
 ## Testing and quality gates
 

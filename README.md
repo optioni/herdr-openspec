@@ -61,6 +61,11 @@ Optional, in `config.toml` inside the directory reported by:
 herdr plugin config-dir herdr-openspec
 ```
 
+Herdr supplies that same directory to the plugin itself as
+`HERDR_PLUGIN_CONFIG_DIR`, so no subprocess is needed to find it while running.
+Outside a Herdr-started process — for local testing, say — the plugin falls
+back to `$HOME/.config/herdr/plugins/config/herdr-openspec`.
+
 | Key | Default | Meaning |
 |---|---|---|
 | `openspec_bin` | auto-detected | Path to the `openspec` binary |

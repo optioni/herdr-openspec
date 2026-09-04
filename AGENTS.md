@@ -19,9 +19,13 @@ spec is wrong, update the spec as part of that change rather than letting the tw
 
 ## Current repo state
 
-`repo-foundation` has landed: the crate builds, and `make check` runs all four
-quality gates. The dashboard itself is not implemented yet — `herdr-openspec ui`
-prints a placeholder banner and blocks until the pane closes.
+`repo-foundation`, `ci-pipeline`, and `plugin-config` have landed: the crate builds
+with its first third-party dependency (`toml`), `make check` runs all four quality
+gates locally and in CI, and the crate reads `config.toml` and derives and records
+agent-name mappings under `HERDR_PLUGIN_STATE_DIR`. Nothing consumes that
+configuration yet — `repo-resolution` is next. The dashboard itself is not
+implemented yet — `herdr-openspec ui` prints a placeholder banner and blocks until
+the pane closes.
 
 Important files:
 
@@ -108,7 +112,12 @@ unreachable and the tests become integration tests by accident.
 
 - **Nothing spawns a process outside `cli`.** `OpenspecCli` and `HerdrCli` are
   traits whose real implementations do nothing but spawn and return stdout. Parsing,
-  merging, and decisions live on the testable side of that seam.
+  merging, and decisions live on the testable side of that seam. Plugin context —
+  the configuration directory, the state directory, the plugin root, and the
+  workspace, tab, and pane ids — arrives in the environment of every process Herdr
+  starts for a plugin (`HERDR_PLUGIN_CONFIG_DIR`, `HERDR_PLUGIN_STATE_DIR`,
+  `HERDR_PLUGIN_ROOT`, and friends), so reading it is never a reason to spawn
+  `herdr` from anywhere in the crate.
 - **Views do no I/O.** They are pure functions from state to a ratatui frame, tested
   by rendering into a `TestBackend` buffer at 60 and 120 columns.
 
@@ -116,8 +125,11 @@ Two further invariants from `SPEC.md`:
 
 - **Never fail closed.** A missing OpenSpec CLI, an unknown schema, or an
   unreachable Herdr socket degrades the view. It never replaces it with an error screen.
-- **Never write to OpenSpec files.** An agent may be editing `tasks.md` in another
-  pane. The dashboard reads.
+- **The plugin's own writes are scoped to its state directory.** The dashboard reads
+  `openspec/` and never writes there — an agent may be editing `tasks.md` in another
+  pane. The one thing the plugin itself writes, the agent-name mapping, goes under
+  `HERDR_PLUGIN_STATE_DIR` and nowhere else — never into the repository, and never
+  into the configuration directory the user hand-edits.
 
 Do not attribute an agent to a change on weak evidence. A terminal title is a
 summary, not a change id. Unattributable agents are reported as a count, not guessed at.
@@ -139,3 +151,9 @@ make check              # every gate
 - **Language:** English for code, comments, commits, and documentation.
 - **Dependencies:** check the current stable version before adding one; do not rely
   on remembered version numbers.
+- **Environment-dependent code takes an injected lookup.** A function that needs the
+  process environment takes a `&dyn Fn(&str) -> Option<String>` rather than calling
+  `std::env::var` directly, and the crate confines that one real call to a single
+  binding. `std::env::set_var` is `unsafe` in edition 2024 and `cargo test` runs
+  tests in parallel threads of one process, so a test that sets a real environment
+  variable corrupts its neighbours.
