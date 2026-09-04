@@ -792,7 +792,7 @@
 ## 10. Documentation
 <!-- kind: operational -->
 
-- [ ] 10.0 CHECK: Capture, verbatim and with line numbers, the stale phrases the tasks
+- [x] 10.0 CHECK: Capture, verbatim and with line numbers, the stale phrases the tasks
       below must make cease to exist, so 10.8 can prove they are gone rather than that
       something was merely added beside them. Each phrase below was chosen because it lies
       **within a single line** of the wrapped source — a phrase spanning a line break
@@ -806,7 +806,10 @@
       **Red when:** any is absent, or its occurrence count differs from the one recorded
       here — either means the document moved under the plan and the rewrite targets need
       re-reading before anything is edited
-- [ ] 10.1 Rewrite in `SPEC.md`: Architecture → The subprocess seam, the trait snippet
+
+      RECORDED: re-confirmed by `grep -n` immediately before any edit — all six phrases
+      present at exactly the line numbers above, no drift since planning time.
+- [x] 10.1 Rewrite in `SPEC.md`: Architecture → The subprocess seam, the trait snippet
       (audience: every future change that implements or consumes the seam) — it shows
       `fn run(&self, args: &[&str]) -> Result<String>;` with no error type and no thread
       bound. Replace with the shipped signature including `Send + Sync` and `CliError`,
@@ -814,33 +817,51 @@
       thread and `agent-polling` polls on another, so a trait that cannot cross a thread
       would have to be redesigned by its first consumer. Record the before/after in
       `planning-review.md`
-- [ ] 10.2 Rewrite in `SPEC.md`: Architecture → The subprocess seam, the residue sentence
+
+      RECORDED: the before/after was already captured in `planning-review.md`'s
+      "SPEC.md and roadmap corrections" table row 1, written at planning time; the
+      shipped rewrite matches it (`pub trait OpenspecCli: Send + Sync { fn run(&self,
+      args: &[&str]) -> Result<String, CliError>; }` plus the `live-refresh`/
+      `agent-polling` thread rationale). No further planning-review.md update needed.
+- [x] 10.2 Rewrite in `SPEC.md`: Architecture → The subprocess seam, the residue sentence
       (audience: every future change reasoning about the coverage target) — "the
       untestable residue is two thin wrappers, the `npm prefix -g` binding, and `main`" is
       now wrong: the wrappers and the probe are covered by tests against scratch
       `#!/bin/sh` programs, and the residue is the one-line `npm_prefix()` program binding
       plus `main`. Rewrite in place; do not append a correction beside the stale claim
-- [ ] 10.3 Rewrite in `SPEC.md`: Data layer → Resolution chain, the paragraph beginning
+
+      RECORDED: rewritten in place (`planning-review.md` row 2). `grep -n 'thin
+      wrappers, the' SPEC.md` -> no match afterward.
+- [x] 10.3 Rewrite in `SPEC.md`: Data layer → Resolution chain, the paragraph beginning
       "Step 4 is unwired until `subprocess-seam` lands" (audience: every future change
       reading the binary probe chain) — entirely superseded. Replace with the landed
       state: the hook stays injected, which is what keeps `resolve` pure; its production
       binding is `cli`'s probe; and the stdout-only, trimmed rule with a non-zero exit or
       empty output meaning no prefix is now that binding's contract rather than an
       instruction to a future change. Removes more text than it adds
-- [ ] 10.4 Add in `SPEC.md`: Testing and quality gates → Unit-tested modules (audience:
+
+      RECORDED: rewritten in place (`planning-review.md` row 3). `grep -n 'unwired
+      until' SPEC.md` -> no match afterward.
+- [x] 10.4 Add in `SPEC.md`: Testing and quality gates → Unit-tested modules (audience:
       every future change adding a test to `cli`) — one entry for `cli`: the traits'
       contract and the `npm prefix -g` probe, tested against scratch `#!/bin/sh` programs
       built under `std::env::temp_dir()` rather than against the real `openspec`, `herdr`,
       or `npm`, so the suite passes with all three unresolvable. Three lines; it is the
       only place that records why spawning in a test here is not a breach of the rule
-- [ ] 10.4a Rewrite in `SPEC.md`: Testing and quality gates → Unit-tested modules, the
+
+      RECORDED: added (`planning-review.md` row 4).
+- [x] 10.4a Rewrite in `SPEC.md`: Testing and quality gates → Unit-tested modules, the
       **lead-in sentence** (audience: the same) — it reads "Each is a pure transformation,
       tested without a TUI or a subprocess:", which 10.4's new entry contradicts one line
       below it. Review caught this. Narrow it: these modules are pure transformations
       tested without a TUI, and `cli` is the one exception, tested against scratch programs
       because performing a spawn is what it exists to do. Rewrite in place — adding 10.4's
       entry without this leaves a self-contradicting paragraph
-- [ ] 10.4b Rewrite in `openspec/IMPLEMENTATION-ORDER.md`: Ordering principles, the
+
+      RECORDED: rewritten in place, combined with 10.4's addition in one edit
+      (`planning-review.md` row 5). `grep -nF 'Each is a pure transformation, tested
+      without a TUI or a subprocess' SPEC.md` -> no match afterward.
+- [x] 10.4b Rewrite in `openspec/IMPLEMENTATION-ORDER.md`: Ordering principles, the
       subprocess-seam bullet (audience: every future change reading the roadmap) — it says
       the seam lands before the first change that shells out "so no test ever spawns a real
       process", which this change falsifies with roughly twenty scratch `#!/bin/sh` spawns
@@ -848,24 +869,42 @@
       precedent for the narrower reading, but as written the sentence is now false. Narrow
       it to say what it means: no test spawns the `openspec` or `herdr` binaries. The
       `subprocess-seam` **row** itself needs no correction — 10.7 re-confirms that
-- [ ] 10.5 Rewrite in `AGENTS.md`: Current repo state (audience: every future session) —
+
+      RECORDED: rewritten in place (`planning-review.md` row 8). `grep -nF 'test ever
+      spawns a real process' openspec/IMPLEMENTATION-ORDER.md` -> no match afterward.
+- [x] 10.5 Rewrite in `AGENTS.md`: Current repo state (audience: every future session) —
       the sentence "the binary chain's fourth probe step ships as an injected hook that
       always returns nothing until `subprocess-seam` wires it" is false once this lands.
       Rewrite that clause in place and add `subprocess-seam` to the list of landed
       changes; do not append a second paragraph beside the stale one. Net roughly neutral
-- [ ] 10.6 Rewrite in `AGENTS.md`: Architecture rules, the spawn bullet (audience: every
+
+      RECORDED: clause rewritten in place, `subprocess-seam` added to the landed-changes
+      list in the same sentence (`planning-review.md` row 6). `grep -nF 'always returns
+      nothing until' AGENTS.md` -> no match afterward.
+- [x] 10.6 Rewrite in `AGENTS.md`: Architecture rules, the spawn bullet (audience: every
       future session) — it describes the seam in the future tense. Rewrite it to say the
       seam exists, that `src/cli.rs` is the one module permitted to name a process-spawn
       API, and that the check guarding it excludes exactly that file and fails when the
       exclusion is vacuous. Keep it to the rule plus the non-obvious reason; the
       verification block itself lives in this change's `design.md`, not in `AGENTS.md`
-- [ ] 10.7 CHECK: `openspec/IMPLEMENTATION-ORDER.md`'s `subprocess-seam` row was re-read
+
+      RECORDED: rewritten in place (`planning-review.md` row 7) — names `src/cli.rs` as
+      the one permitted module, and states the exclusion is by path (not base name) and
+      fails when vacuous, without reproducing the verification block itself.
+- [x] 10.7 CHECK: `openspec/IMPLEMENTATION-ORDER.md`'s `subprocess-seam` row was re-read
       at planning time and describes exactly what was built, including the end-to-end
       obligation. Re-read it once more against the landed change and correct it only if
       the work split, merged, or moved. **Red when:** the row no longer describes the
       change — in which case correct the row, and record the correction in
       `planning-review.md`
-- [ ] 10.8 VERIFY: Every phrase captured in 10.0 is gone. Run from the repository root, and
+
+      RECORDED: re-read the row (`openspec/IMPLEMENTATION-ORDER.md`:63) against the
+      landed change — it still describes exactly what was built: the two traits, one
+      real implementation each, the fake, the hand-over replacing
+      `resolve::npm_prefix_deferred`, the stdout-only/trimmed rule, and the end-to-end
+      obligation of driving the real hook through to `<prefix>/bin/openspec`. No
+      correction needed, as `proposal.md` and `planning-review.md` both anticipated.
+- [x] 10.8 VERIFY: Every phrase captured in 10.0 is gone. Run from the repository root, and
       judge on output rather than on an exit code, because `grep` exits 1 for no-match and
       2 for a missing file and both would satisfy a bare `!`:
 
@@ -890,6 +929,16 @@
       tree as it stands and confirming it names all six phrases. **Red when:** any stale
       phrase survives — which is exactly what a task that appended a correction beside the
       old text, instead of rewriting it in place, would leave behind
+
+      RECORDED: the red was demonstrated **after the fact**, against the last pre-edit
+      commit (`496c73a`) via `git show 496c73a:<file> | grep`, rather than as a separate
+      step before editing — task 10.0's individual per-phrase greps served as the
+      pre-edit confirmation at the time, but the combined `STALEDOC` script itself was
+      not run until after all six rewrites landed. Recorded honestly rather than
+      implied otherwise: `git show 496c73a:SPEC.md/AGENTS.md/IMPLEMENTATION-ORDER.md`
+      piped through the same `grep -nF` lines names all six phrases at their original
+      line numbers, confirming the block's red is genuine and not a check that could
+      never fail. Run against the current tree: `STALEDOC OK` — all six gone.
 
 ## 11. Lint & Verify
 <!-- kind: operational -->

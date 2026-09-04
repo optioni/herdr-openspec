@@ -18,7 +18,10 @@ that happens rather than letting it drift.
   and fully tested before anything renders (SPEC → Architecture).
 - **The subprocess seam exists before anything crosses it.** `OpenspecCli` and
   `HerdrCli` land as traits with fakes before the first change that shells out, so no
-  test ever spawns a real process (SPEC → Architecture).
+  test spawns the `openspec` or `herdr` binaries — `subprocess-seam`'s own tests spawn
+  scratch `#!/bin/sh` programs at absolute paths to prove the seam itself, and
+  `tests/cli.rs` spawns this crate's own binary; neither is what this principle
+  guards against (SPEC → Architecture).
 - **Files before the CLI.** The file-reading path is built first and stays the path
   that paints the pane. CLI enrichment is layered on top as an asynchronous
   correction, which keeps the fallback exercised on every launch rather than untested

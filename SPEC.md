@@ -25,26 +25,29 @@ Two boundaries define the design. Everything interesting lives between them.
 spawn a process. Two traits carry the two programs it wraps directly:
 
 ```rust
-trait OpenspecCli { fn run(&self, args: &[&str]) -> Result<String>; }
-trait HerdrCli    { fn run(&self, args: &[&str]) -> Result<String>; }
+pub trait OpenspecCli: Send + Sync { fn run(&self, args: &[&str]) -> Result<String, CliError>; }
+pub trait HerdrCli:    Send + Sync { fn run(&self, args: &[&str]) -> Result<String, CliError>; }
 ```
 
-Each has exactly one real implementation that spawns a process and returns stdout,
-and a fake used by tests. No parsing, merging, or decision-making happens inside
-either. A third spawn lives behind the same seam: the one-shot `npm prefix -g`
-probe that `resolve::openspec_bin`'s fourth step needs. It is neither `openspec`
-nor `herdr`, so it is not one of the two traits above — but it is still a process
-spawn, and `cli` is still where it lives. `resolve` itself never spawns it: the
-probe arrives as an injected `&dyn Fn() -> Option<PathBuf>`, the same shape by
-which `resolve` and `config` take the process environment as a lookup closure,
-so `resolve` stays pure and the seam still exists before anything crosses it.
-This is what makes the coverage target reachable: the untestable residue is two
-thin wrappers, the `npm prefix -g` binding, and `main`. (`config::env_lookup` is
-a fourth one-line binding to the real world — the crate's single call to
-`std::env::var` — but it is not untestable residue: it carries its own
-assertions, comparing its result against `std::env::var` directly for a
-variable known to be present and for one nothing sets, rather than being
-covered only by the composition that calls it.)
+Both require `Send + Sync`: `live-refresh` runs CLI calls on a worker thread and
+`agent-polling` polls on another, so a trait that could not cross a thread boundary
+would have to be redesigned by the first change that used one. Each has exactly one
+real implementation that spawns a process and returns stdout, and a fake used by
+tests. No parsing, merging, or decision-making happens inside either. A third spawn
+lives behind the same seam: the one-shot `npm prefix -g` probe that
+`resolve::openspec_bin`'s fourth step needs. It is neither `openspec` nor `herdr`, so
+it is not one of the two traits above — but it is still a process spawn, and `cli` is
+still where it lives. `resolve` itself never spawns it: the probe arrives as an
+injected `&dyn Fn() -> Option<PathBuf>`, the same shape by which `resolve` and
+`config` take the process environment as a lookup closure, so `resolve` stays pure and
+the seam still exists before anything crosses it. This is what makes the coverage
+target reachable: the wrappers and the probe are covered by tests run against
+scratch `#!/bin/sh` programs, and the untestable residue is the one-line `npm_prefix()`
+program binding plus `main`. (`config::env_lookup` is a second one-line binding to the
+real world — the crate's single call to `std::env::var` — but it is not untestable
+residue: it carries its own assertions, comparing its result against `std::env::var`
+directly for a variable known to be present and for one nothing sets, rather than
+being covered only by the composition that calls it.)
 
 **The render seam.** Views are pure functions from a `Dashboard` state value to a
 ratatui frame. They perform no I/O, so they are tested by rendering into a
@@ -197,14 +200,15 @@ visibly rather than either silently substituting a different binary or
 failing closed.
 
 Steps 3 and 4 exist because the binary is commonly installed under a Node version
-manager, and a plugin pane command does not run through a login shell. Step 4 is
-unwired until `subprocess-seam` lands: `resolve::openspec_bin` takes the npm
-prefix as an injected hook, and the binding `repo-resolution` ships always
-returns nothing, so a system-node install with no nvm tree and no `PATH` entry
-resolves nothing today and the dashboard runs in file mode until that change
-replaces the binding. Whoever wires it must read `npm prefix -g`'s **stdout
-only**, trimmed — on the reference machine `npm` writes unrelated shell-plugin
-noise to stderr — and treat a non-zero exit or empty output as no prefix.
+manager, and a plugin pane command does not run through a login shell.
+`resolve::openspec_bin` takes the npm prefix as an injected `&dyn Fn() -> Option<PathBuf>`
+hook, the same shape by which it and `config` take the process environment as a
+lookup closure — that injection is what keeps `resolve` pure, and it survives the
+subprocess seam landing rather than being replaced by it. The hook's production
+binding is `cli::npm_prefix`: it starts the npm program with the arguments `prefix`
+and `-g`, reads its **stdout only**, trimmed — on the reference machine `npm` writes
+unrelated shell-plugin noise to stderr — and reports no prefix when the program could
+not be started, exited non-zero, or produced empty output.
 
 ### Refresh
 
@@ -393,8 +397,16 @@ Every condition renders usable content rather than an error screen:
 
 ### Unit-tested modules
 
-Each is a pure transformation, tested without a TUI or a subprocess:
+Each is a pure transformation, tested without a TUI. `cli` is the one exception: it
+is tested against scratch `#!/bin/sh` programs rather than the real `openspec`,
+`herdr`, or `npm`, because performing a spawn is the one thing it exists to do.
 
+- `cli::OpenspecCli`, `cli::HerdrCli`, and the `npm prefix -g` probe — the traits'
+  contract (stdout returned verbatim, stderr excluded, a non-zero exit or an
+  absent program becomes an error rather than a panic) and the probe's
+  trim/decode rules, proved against scratch `#!/bin/sh` programs built under
+  `std::env::temp_dir()` so the suite passes with `openspec`, `herdr`, and `npm`
+  all unresolvable
 - `changes::from_files` and `changes::from_cli` — both produce the same `Change`
   type, from fixture trees and fixture JSON respectively
 - `schema::select` and `schema::parse` — which schema name applies (a change's

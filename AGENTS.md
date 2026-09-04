@@ -20,14 +20,14 @@ spec is wrong, update the spec as part of that change rather than letting the tw
 ## Current repo state
 
 `repo-foundation`, `ci-pipeline`, `plugin-config`, `repo-resolution`,
-`schema-model`, `task-parsing`, and `changes-from-files` have landed: the
-crate builds with two third-party dependencies (`toml`, `yaml-rust2`),
+`schema-model`, `task-parsing`, `changes-from-files`, and `subprocess-seam` have
+landed: the crate builds with two third-party dependencies (`toml`, `yaml-rust2`),
 `make check` runs all four quality gates locally and in CI, the crate reads
 `config.toml` and derives and records agent-name mappings under
 `HERDR_PLUGIN_STATE_DIR`, it can locate the OpenSpec repository root and the
-`openspec` binary — the binary chain's fourth probe step ships as an
-injected hook that always returns nothing until `subprocess-seam` wires it —
-it reads the repository's schema and produces the ordered artifact list
+`openspec` binary — the binary chain's fourth probe step is an injected hook whose
+production binding, `cli::npm_prefix`, runs the real `npm prefix -g` probe behind
+the subprocess seam — it reads the repository's schema and produces the ordered artifact list
 including the tasks artifact, it parses a task file into groups, items, and
 completion counts that agree with the CLI's own, and it enumerates
 `openspec/changes/` into the `Change`/`ChangeSet` values the dashboard
@@ -120,10 +120,15 @@ Coverage is a floor that catches drift, not the mechanism that produces tests �
 Two boundaries carry the design. Respect them, or the coverage target becomes
 unreachable and the tests become integration tests by accident.
 
-- **Nothing spawns a process outside `cli`.** `OpenspecCli` and `HerdrCli` are
-  traits whose real implementations do nothing but spawn and return stdout. Parsing,
-  merging, and decisions live on the testable side of that seam. Plugin context —
-  the configuration directory, the state directory, the plugin root, and the
+- **Nothing spawns a process outside `cli`.** `src/cli.rs` is the one module in the
+  crate permitted to name a process-spawn API (`process::Command`, `Command::new`,
+  `Stdio`) — `OpenspecCli` and `HerdrCli` are traits whose real implementations do
+  nothing but spawn and return stdout. Parsing, merging, and decisions live on the
+  testable side of that seam. This is checked, not aspirational: a tree-wide grep
+  excludes exactly `src/cli.rs` by path (never by base name, so a future
+  `src/ui/cli.rs` is still caught) and fails if that exclusion is vacuous — if
+  `src/cli.rs` is missing, or itself names no spawn API. Plugin context — the
+  configuration directory, the state directory, the plugin root, and the
   workspace, tab, and pane ids — arrives in the environment of every process Herdr
   starts for a plugin (`HERDR_PLUGIN_CONFIG_DIR`, `HERDR_PLUGIN_STATE_DIR`,
   `HERDR_PLUGIN_ROOT`, and friends), so reading it is never a reason to spawn
