@@ -19,8 +19,9 @@ pub trait EventSource {
 }
 
 /// The real event stream: poll then read. Two lines, no branch of its own
-/// beyond the poll result. Not unit tested — see design.md -> Test Strategy
-/// ("`CrosstermOps` and `CrosstermEvents` are not tested").
+/// beyond the poll result. Not unit tested — see design.md -> Test Strategy,
+/// which names this type and the terminal seam's real implementation as
+/// the two deliberately-uncovered one-line bindings in the crate.
 pub struct CrosstermEvents;
 
 impl EventSource for CrosstermEvents {

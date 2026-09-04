@@ -1178,21 +1178,40 @@ needs, in the extracted copy rather than in the archive.
 ## 9. Architectural and dependency checks
 <!-- kind: operational -->
 
-- [ ] 9.1 CHECK: Re-read design.md → Test Boundaries and confirm no test written in groups
+- [x] 9.1 CHECK: Re-read design.md → Test Boundaries and confirm no test written in groups
       2–8 introduced a collaborator it does not name — in particular that no view test
       opened a directory and no test constructed `CrosstermOps`.
+      **Recorded:** confirmed by grep — `CrosstermOps` is named only in `src/ui/terminal.rs`
+      (definition and `install_panic_hook`'s body) and `src/ui/mod.rs` (`ui::run`'s wiring),
+      never under `tests/` or in any `#[cfg(test)]` module. No `std::fs::`/`ScratchDir`
+      reference exists in `src/ui/view.rs`, `layout.rs`, `app.rs`, or `driver.rs`. Both
+      checked directly, ahead of running the mechanical checks below.
 
-- [ ] 9.2 VERIFY: `NOSPAWN-GREP` with `MIN=14` — must **pass**, having failed at task 1.3
+- [x] 9.2 VERIFY: `NOSPAWN-GREP` with `MIN=14` — must **pass**, having failed at task 1.3
       with `searched only 8 files`. Record the file count it reports.
+      **Recorded:** `NOSPAWN OK: 15 files checked under src (>= 14), only src/cli.rs may
+      spawn`.
 
-- [ ] 9.3 VERIFY: `NOIO-VIEW`, `NOCLI-SHELL`, and `NODEFAULT-UI` — all three must **pass**,
+- [x] 9.3 VERIFY: `NOIO-VIEW`, `NOCLI-SHELL`, and `NODEFAULT-UI` — all three must **pass**,
       having failed at task 1.3 with `src/ui/app.rs missing`, `src/ui missing`, and
       `src/ui/app.rs missing` respectively. Record the positive-control line from each.
+      **Recorded:** `NOIO-VIEW OK: 4 pure files carry no I/O API; positive control matched`;
+      `NOCLI-SHELL OK: 7 files under src/ui name no CLI seam; positive control matched`;
+      `NODEFAULT-UI OK: no Default for Dashboard, no elided field; positive control
+      matched`.
 
-- [ ] 9.4 VERIFY: `NORAW-GREP` in full — must now **pass** both legs, including the
+- [x] 9.4 VERIFY: `NORAW-GREP` in full — must now **pass** both legs, including the
       `CrosstermOps` site count of at least 2, which task 5.4 recorded as still failing.
+      **Recorded — real finding, fixed here:** first run **failed** its second leg:
+      `NORAW FAIL: CrosstermOps named outside terminal.rs and mod.rs:
+      src/ui/event.rs:23`. `src/ui/event.rs`'s doc comment on `CrosstermEvents` named
+      `CrosstermOps` in prose (cross-referencing design.md's Test Strategy), which the grep
+      cannot distinguish from a real construction site. Fixed by rewording the comment to
+      describe the same fact without the identifier. Re-run: `NORAW OK: 17 files searched,
+      mode functions only in src/ui/terminal.rs, CrosstermOps at 6 sites` — the file count
+      (17) matches the group-5.4 prediction for this point in the plan.
 
-- [ ] 9.5 VERIFY: `NOSPAWN-GREP`, `NOIO-VIEW`, `NOCLI-SHELL`, `NORAW-GREP`, and
+- [x] 9.5 VERIFY: `NOSPAWN-GREP`, `NOIO-VIEW`, `NOCLI-SHELL`, `NORAW-GREP`, and
       `NODEFAULT-UI` negative controls. Copy `src/` and `tests/` to `$WORK/neg-N/` and plant
       one violation per copy, confirming each check goes **red**:
       1. `let _ = std::process::Command::new("ls");` in `src/ui/driver.rs` → `NOSPAWN-GREP`
@@ -1219,16 +1238,38 @@ needs, in the extracted copy rather than in the archive.
       they run against whatever directory is the working directory, or against `$SRC` where
       they take one — so the protection is that `cp -R src tests "$WORK/neg-N/"` fails
       loudly when `$WORK` is unset, which is why task 1.1 exports it.
+      **Recorded:** all nine planted violations, each run from inside its own
+      `$WORK/neg-N/` copy (real tree never edited), discriminated exactly as specified —
+      `NOSPAWN FAIL: spawn API outside src/cli.rs` and (same copy) `NOIO-VIEW FAIL: I/O API
+      in a pure view file` for #1; `NOIO-VIEW FAIL` for #2; `NOCLI-SHELL FAIL: the shell
+      names the CLI seam` for #3; `NORAW FAIL: terminal-mode function outside
+      src/ui/terminal.rs` for #4; `NOIO-VIEW FAIL: src/ui/terminal.rs missing` and (same
+      copy) `NORAW FAIL: src/ui/terminal.rs missing` for #5; `NOCLI-SHELL FAIL: positive
+      control - src/changes.rs does not name OpenspecCli` for #6; `NODEFAULT-UI FAIL:
+      Dashboard has a Default` (the plain-`impl` leg) for #7; `NODEFAULT-UI FAIL: Dashboard
+      literal or pattern elides a field` for #8; `NODEFAULT-UI FAIL: Dashboard has a
+      Default` (the derive leg, confirmed by the reported hit being the `#[derive(...,
+      Default, ...)]` line rather than an `impl` line) for #9.
 
-- [ ] 9.6 VERIFY: `DEPS` in full, including leg 5 for all four crates — removing `ratatui`
+- [x] 9.6 VERIFY: `DEPS` in full, including leg 5 for all four crates — removing `ratatui`
       from a throwaway copy's manifest must now fail the build, which it could not before
       group 4. Then `GRAPH-SNAP` and `NOJSON-SEAM` and `NOWAIVER`.
+      **Recorded:** `DEPS OK` legs 1a/1b/2a/2a-bis/2b/2c/4/5 (toml, yaml-rust2, serde_json,
+      **ratatui**, and the not-declared guard) — all pass, working tree unchanged including
+      `Cargo.lock`. `GRAPH-SNAP OK: 4 triples match tests/fixtures/build-graph.txt; 8
+      proc-macro crates; no encoding_rs, no time`. `NOJSON-SEAM OK`. `NOWAIVER OK: floor is
+      80, no exclusion, no coverage attribute`.
 
-- [ ] 9.7 VERIFY: `OPENSPEC-UNTOUCHED` against `$BASE`. The only permitted paths under
+- [x] 9.7 VERIFY: `OPENSPEC-UNTOUCHED` against `$BASE`. The only permitted paths under
       `openspec/` are this change's own artifact directory. Any other path, tracked or
       untracked, fails — the untracked sweep is what would catch a runtime write.
+      **Recorded:** `OPENSPEC-UNTOUCHED OK` against
+      `BASE=e25017546cea99e4b606fcd74a404131e1ca582e`.
 
-- [ ] 9.8 VERIFY: `make check`. Commit.
+- [x] 9.8 VERIFY: `make check`. Commit.
+      **Recorded:** `make check` exits 0 — `fmt-check`, `lint`, `test` (443 lib + 11
+      `ci_workflow` + 5 `cli`), and `coverage` (**97.74%**/**97.82%** lines over 8,822
+      lines, 192 uncovered) all pass; floor (80) cleared.
 
 ---
 
