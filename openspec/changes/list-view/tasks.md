@@ -621,7 +621,7 @@ block is re-run, not further modified — and `GRAPH-SNAP` likewise.
 ## 0. Acceptance Test — Outer Loop RED
 <!-- kind: behavior -->
 
-- [ ] 0.1 Set up the harness: no new harness is needed. `crate::testutil::ScratchDir`,
+- [x] 0.1 Set up the harness: no new harness is needed. `crate::testutil::ScratchDir`,
       `write_with_mode`, `render_at`, `row_text`, and `cell` all exist and are exactly what
       design.md → Test Boundaries names — the filesystem **real** through `ScratchDir`, the
       rendering surface **replaced** by `TestBackend`, the terminal **never reached**, the
@@ -630,7 +630,7 @@ block is re-run, not further modified — and `GRAPH-SNAP` likewise.
       composition test over `ui::load` + `ui::view::render`, and `NOIO-VIEW` must keep
       proving that `view.rs` and `list.rs` name no filesystem API.
 
-- [ ] 0.2 RED: Add `ui::tests::load::a_scratch_repository_renders_its_change_rows` for
+- [x] 0.2 RED: Add `ui::tests::load::a_scratch_repository_renders_its_change_rows` for
       change-rows → "Active rows render at both mandated widths", composed with
       dashboard-loop → "A scratch repository is loaded from disk with no binary present".
       Build a `ScratchDir` repository holding
@@ -654,7 +654,7 @@ block is re-run, not further modified — and `GRAPH-SNAP` likewise.
       Read columns by **character index**, never byte offset — `…` and the box-drawing
       borders are multi-byte. Use only API that exists today, so the test **compiles**.
 
-- [ ] 0.3 Confirm it fails because the behaviour is missing, not because the harness is
+- [x] 0.3 Confirm it fails because the behaviour is missing, not because the harness is
       misconfigured. Run `cargo test --all-features --lib
       ui::tests::load::a_scratch_repository_renders_its_change_rows` and record the message
       verbatim. **Expected today:** the assertion on the 120-column row 2 fails, comparing
@@ -671,7 +671,7 @@ block is re-run, not further modified — and `GRAPH-SNAP` likewise.
 ## 1. Baseline, checks, and the scratchpad
 <!-- kind: operational -->
 
-- [ ] 1.1 CHECK: Record the starting state before any edit, by **measuring**, never by
+- [x] 1.1 CHECK: Record the starting state before any edit, by **measuring**, never by
       copying a number from this file.
       - `git rev-parse HEAD` → `export BASE=<sha>`. Every `OPENSPEC-UNTOUCHED` run uses it.
         A diff against the index would pass over this change's own per-group commits.
@@ -704,7 +704,7 @@ block is re-run, not further modified — and `GRAPH-SNAP` likewise.
       which case the tree is not the one this plan was written against and the discrepancy
       is resolved before any edit.
 
-- [ ] 1.2 CHECK: Run the checks that must **pass** on the tree as it stands, so this change
+- [x] 1.2 CHECK: Run the checks that must **pass** on the tree as it stands, so this change
       starts from clean gates rather than inheriting broken ones: `NOSPAWN-GREP` (default
       `MIN=8`), `NOCLI-SHELL` (default `UI_MIN=7`), `NORAW-GREP`, `NODEFAULT-UI` with
       `TYPES=Dashboard` (its edited form must still pass on the pre-change tree),
@@ -720,7 +720,7 @@ block is re-run, not further modified — and `GRAPH-SNAP` likewise.
       fix it.
       **Wrongly green when:** an extraction typo made a block a no-op — guarded by 1.3.
 
-- [ ] 1.3 CHECK: Prove the **existence guards** and **positive controls** of every extracted
+- [x] 1.3 CHECK: Prove the **existence guards** and **positive controls** of every extracted
       check can fail, before trusting any of them. Against a throwaway copy under `$WORK`:
       - `NOSPAWN-GREP` with `SRC=$WORK/empty` → `no such directory`.
       - `NOSPAWN-GREP` with `MIN=16` on the current tree → `searched only 15 files under src
@@ -755,14 +755,14 @@ block is re-run, not further modified — and `GRAPH-SNAP` likewise.
       **Red when:** any guard reports success. A guard that cannot fail is worth nothing,
       and this repository has shipped three of them.
 
-- [ ] 1.4 CHECK: Confirm the intermediate-gate substitution stated at the top of this file
+- [x] 1.4 CHECK: Confirm the intermediate-gate substitution stated at the top of this file
       is real: run `cargo llvm-cov --ignore-run-fail --fail-under-lines 80` on the tree with
       group 0's acceptance test red, and confirm it **reports a TOTAL** rather than
       producing no report. Record the percentage.
       **Red when:** it produces no report, in which case every intermediate gate in groups
       2–7 must drop its coverage step and say so here instead of silently skipping it.
 
-- [ ] 1.5 Commit the plan-time baseline record (this file's checkbox state only; no source
+- [x] 1.5 Commit the plan-time baseline record (this file's checkbox state only; no source
       change yet). Conventional Commits: `docs(list-view): record measured check baselines`.
 
 ---
