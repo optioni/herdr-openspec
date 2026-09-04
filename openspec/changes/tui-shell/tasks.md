@@ -651,7 +651,7 @@ needs, in the extracted copy rather than in the archive.
 ## 3. `ui::app` — `Dashboard`, `Route`, and key handling
 <!-- kind: behavior -->
 
-- [ ] 3.1 RED: Create `src/ui/app.rs` with `mod tests { mod keys { … } }` and write eight
+- [x] 3.1 RED: Create `src/ui/app.rs` with `mod tests { mod keys { … } }` and write eight
       failing tests, for dashboard-loop's key-handling scenarios:
       - `keys::quit_keys_and_their_near_misses` — Press `Char('q')` NONE → `Quit`; Press
         `Char('c')` CONTROL → `Quit`; Press `Char('Q')` SHIFT → `Ignore`; Press `Char('q')`
@@ -682,19 +682,39 @@ needs, in the extracted copy rather than in the archive.
         &d;` with **no** `..`, then one assertion per binding. A sixth field added later
         fails to compile here, which is the half `NODEFAULT-UI`'s grep cannot do.
       **Red when:** `action_for`, `Action`, `Route`, and `Dashboard::apply` do not exist.
+      **Recorded:** the bullet list names nine tests (the prose "eight failing tests" is a
+      planning miscount, corrected here — the `Route` re-export note above already moved
+      `Route` itself out of this RED step, so nine *new* app.rs tests remained to write, one
+      of which is the compile-time `dashboard_destructures…` companion). Confirmed:
+      `error[E0432]: unresolved imports … no action_for in ui::app` (and `Action`,
+      `Dashboard`) — missing behaviour, not a harness issue.
 
-- [ ] 3.2 GREEN: Implement `Route`, `Action`, `Dashboard` (five fields, every one named at
+- [x] 3.2 GREEN: Implement `Route`, `Action`, `Dashboard` (five fields, every one named at
       every construction site, **no** `Default` derive or impl), `action_for`, and
       `Dashboard::apply`. `action_for` matches on `Event::Key(k)` with
       `k.kind == KeyEventKind::Press` and falls through to `Ignore` for everything else.
+      **Recorded:** all 9 tests green on first implementation. `action_for` uses a `let …
+      else` guard for the non-`Key` case, a `kind != Press` early return, then one `match
+      (key.code, key.modifiers)` over the four mapped combinations.
 
-- [ ] 3.3 REFACTOR: Extract the key-event match into a single `match` over
+- [x] 3.3 REFACTOR: Extract the key-event match into a single `match` over
       `(code, modifiers)` if the first implementation nested conditionals, keeping tests
       green; otherwise record that no refactor was needed.
+      **Recorded:** the first implementation already used a single `match (code,
+      modifiers)` — no nested conditionals to extract. No refactor needed; all 9 tests
+      stayed green.
 
-- [ ] 3.4 VERIFY: `testcount --lib 'ui::app::tests::' 9`. Then run `NODEFAULT-UI` — it must
+- [x] 3.4 VERIFY: `testcount --lib 'ui::app::tests::' 9`. Then run `NODEFAULT-UI` — it must
       now **pass**, having failed at task 1.3 with `src/ui/app.rs missing`; record the
       positive-control line. Then `make check`. Commit.
+      **Recorded:** `TESTCOUNT OK: --lib filter 'ui::app::tests::' ran 9 tests (>= 9)`.
+      `NODEFAULT-UI OK: no Default for Dashboard, no elided field; positive control
+      matched` — now passes, having failed at 1.3 with `src/ui/app.rs missing`. Per the 1.1
+      correction: `fmt-check` clean (one nit auto-fixed by `cargo fmt`); `clippy -D
+      warnings` clean; full suite — 404 lib (395 + 9) + 11 `ci_workflow` + 5-of-6 `cli` (the
+      one known RED, unchanged); `cargo llvm-cov --ignore-run-fail --fail-under-lines 80` →
+      **98.92%** over 7,887 lines, 85 uncovered (`src/ui/app.rs` at 97.60%, `src/ui/layout.rs`
+      still 100.00%), floor holds.
 
 ---
 
