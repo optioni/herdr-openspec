@@ -6,6 +6,49 @@
 //! rather than in `main` is what makes it unit-testable — see design.md ->
 //! Decisions ("Library plus thin `main`").
 
+pub mod config;
+pub mod state;
+
+/// Test-only helpers shared by `config` and `state`'s unit tests.
+#[cfg(test)]
+pub(crate) mod testutil {
+    use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// A uniquely named directory under `std::env::temp_dir()`, created on
+    /// construction and removed (recursively) on drop. Named
+    /// `herdr-openspec-test-<pid>-<counter>` — predictable, so a test can assert a
+    /// path's absence up front and a leak-check can search for the prefix if a
+    /// panicking test ever leaves one behind. No `tempfile` dependency: see
+    /// `openspec/changes/plugin-config/design.md` -> Decisions.
+    pub(crate) struct ScratchDir {
+        path: PathBuf,
+    }
+
+    impl ScratchDir {
+        pub(crate) fn new() -> Self {
+            static COUNTER: AtomicUsize = AtomicUsize::new(0);
+            let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "herdr-openspec-test-{}-{counter}",
+                std::process::id()
+            ));
+            std::fs::create_dir_all(&path).expect("create scratch dir");
+            Self { path }
+        }
+
+        pub(crate) fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for ScratchDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+}
+
 /// The classified shape of an invocation of the binary.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Invocation {
