@@ -133,8 +133,75 @@ pub(crate) fn path_candidates(path_value: &str) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Probe for the `openspec` binary: step 1, the configured path, then step
-/// 2, each `PATH` entry in order. (Steps 3 and 4 arrive in later groups.) A
+/// The root nvm's version trees live under: `NVM_DIR` when it is set to a
+/// value that is neither empty nor whitespace-only, and `$HOME/.nvm`
+/// otherwise. `None` when neither is available, so the step contributes no
+/// candidates rather than panicking on an absent `HOME`.
+fn nvm_root(env: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
+    if let Some(dir) = crate::config::non_blank(env("NVM_DIR")) {
+        return Some(PathBuf::from(dir));
+    }
+    let home = crate::config::non_blank(env("HOME"))?;
+    Some(PathBuf::from(home).join(".nvm"))
+}
+
+/// Parse a directory name as a `vMAJOR.MINOR.PATCH` node version, for
+/// ordering purposes only. Anything else — `system`, `iojs-v3.3.1`,
+/// `vnightly` — does not parse and is still eligible as a candidate; see
+/// `nvm_candidates`.
+fn parse_node_version(name: &str) -> Option<(u64, u64, u64)> {
+    let rest = name.strip_prefix('v')?;
+    let mut parts = rest.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let patch = parts.next()?.parse().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some((major, minor, patch))
+}
+
+/// Step 3's candidate list: `<nvm root>/versions/node/<version>/bin/openspec`
+/// for every version directory found, newest first. Parsed versions sort
+/// numerically descending (`v10.0.0` before `v9.99.99`, unlike a lexical
+/// sort); every unparseable name sorts after every parsed version, and among
+/// themselves by name descending — an `nvm alias`-heavy setup should still
+/// resolve something rather than nothing. An `Err` reading the versions
+/// directory (root cannot be resolved, or does not exist) yields no
+/// candidates rather than a panic.
+fn nvm_candidates(env: &dyn Fn(&str) -> Option<String>) -> Vec<PathBuf> {
+    let Some(root) = nvm_root(env) else {
+        return Vec::new();
+    };
+    let versions_dir = root.join("versions").join("node");
+    let Ok(read_dir) = std::fs::read_dir(&versions_dir) else {
+        return Vec::new();
+    };
+
+    let mut names: Vec<String> = read_dir
+        .flatten()
+        .filter(|entry| entry.path().is_dir())
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .collect();
+
+    names.sort_by(
+        |a, b| match (parse_node_version(a), parse_node_version(b)) {
+            (Some(va), Some(vb)) => vb.cmp(&va),
+            (Some(_), None) => std::cmp::Ordering::Less,
+            (None, Some(_)) => std::cmp::Ordering::Greater,
+            (None, None) => b.cmp(a),
+        },
+    );
+
+    names
+        .into_iter()
+        .map(|name| versions_dir.join(name).join("bin").join("openspec"))
+        .collect()
+}
+
+/// Probe for the `openspec` binary: step 1, the configured path; step 2,
+/// each `PATH` entry in order; step 3, the nvm version trees, newest first.
+/// (Step 4 arrives in a later group.) A
 /// mis-configured `configured` path falls through to the remaining steps
 /// rather than winning or ending the chain, and records exactly one
 /// problem naming it — silently substituting a different binary would hide
@@ -174,6 +241,18 @@ pub fn openspec_bin(
                     problems,
                 };
             }
+        }
+    }
+
+    for candidate in nvm_candidates(env) {
+        if is_usable_binary(&candidate) {
+            return BinResolution {
+                found: Some(FoundBin {
+                    path: candidate,
+                    source: BinSource::Nvm,
+                }),
+                problems,
+            };
         }
     }
 
