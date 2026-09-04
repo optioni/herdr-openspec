@@ -44,11 +44,13 @@ raw mode and the alternate screen entered and left in a fixed, mirrored
 order (restored on normal return, error return, and panic alike), a
 draw-then-wait event loop with `q`/`Ctrl-C` to quit and `Enter`/`Esc` to
 move between the list and detail routes, and a 100-column breakpoint
-deciding a one- or two-region body. The body regions themselves are still
-empty bordered frames — `list-view`, `markdown-viewer`, and `detail-view`
-fill them next — and `ui` refuses to start with exit status 3 when stdout is
-not a terminal, which is also what keeps `cargo test` (which spawns this
-binary) from ever putting a real terminal into raw mode.
+deciding a one- or two-region body. The list region now fills with real
+rows — active changes, a separator, then archived ones, with selection,
+scrolling, and a `/` filter — and the detail region is still an empty
+bordered frame; `markdown-viewer` and `detail-view` fill it next. `ui`
+refuses to start with exit status 3 when stdout is not a terminal, which is
+also what keeps `cargo test` (which spawns this binary) from ever putting a
+real terminal into raw mode.
 
 Important files:
 
@@ -156,6 +158,9 @@ unreachable and the tests become integration tests by accident.
   way as the subprocess seam above, `tests/` included. A test that reaches the real
   terminal implementation corrupts the developer's own session, because `cargo test`
   spawns this binary.
+- **The list region's two mandated interior widths are 38 and 58 columns** — the
+  wide layout's `Length(40)` list column and the narrow layout's 60-column frame,
+  each less two border columns. Every row-grammar test in `ui::list` asserts both.
 
 Further invariants from `SPEC.md`:
 

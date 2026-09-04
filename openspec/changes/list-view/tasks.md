@@ -1348,7 +1348,7 @@ block is re-run, not further modified — and `GRAPH-SNAP` likewise.
 ## 10. Documentation
 <!-- kind: operational -->
 
-- [ ] 10.1 Rewrite in `SPEC.md`: **User interface → List view** (audience: every future
+- [x] 10.1 Rewrite in `SPEC.md`: **User interface → List view** (audience: every future
       change that renders a row). Replace the 48-character mock with the real 38-column
       rendering and state the row grammar in prose — marker, name field, right-aligned
       progress cell, and the archived row's ten-column date field — because the landed mock
@@ -1360,7 +1360,7 @@ block is re-run, not further modified — and `GRAPH-SNAP` likewise.
       This **replaces** the existing mock and its two-sentence caveat; net growth roughly
       ten lines, all of it the grammar that was previously undecided.
 
-- [ ] 10.2 Rewrite in `SPEC.md`: **User interface → Keys** (audience: the same). Correct
+- [x] 10.2 Rewrite in `SPEC.md`: **User interface → Keys** (audience: the same). Correct
       **five rows** and one sentence, in place. A reader consults this table one row at a
       time, so a qualification written only on the `/` row does not reach someone looking up
       `q`; each affected row carries its own:
@@ -1382,7 +1382,7 @@ block is re-run, not further modified — and `GRAPH-SNAP` likewise.
       - and the sentence "`Esc` at the list root … is inert rather than a quit" is rewritten
         as the layered dismissal, which keeps it true while naming the layers.
 
-- [ ] 10.2b Rewrite in `SPEC.md`: three sentences elsewhere that this change falsifies
+- [x] 10.2b Rewrite in `SPEC.md`: three sentences elsewhere that this change falsifies
       (audience: every future change; each is a one-line edit, no net growth):
       - **User interface → List view:** "Progress comes from the CLI when available and from
         checkbox counts otherwise" — false of what the pane renders, because `NOCLI-SHELL`
@@ -1406,13 +1406,13 @@ block is re-run, not further modified — and `GRAPH-SNAP` likewise.
         the seam's claim true: `render` takes a value, never a path, and `NOIO-VIEW` proves
         it.
 
-- [ ] 10.3 Add to `SPEC.md`: **Degraded states** (audience: `degraded-states`, which audits
+- [x] 10.3 Add to `SPEC.md`: **Degraded states** (audience: `degraded-states`, which audits
       this table row by row). One new row for a filter matching no change, and one clause
       added to the existing `openspec/changes/`-unreadable row naming *where* the reason on
       `ChangeSet::problems` is rendered — previously unassigned to any change, which would
       have made `degraded-states`' "confirm, do not add" principle false.
 
-- [ ] 10.4 Rewrite in `AGENTS.md`: **Current repo state** (audience: every session).
+- [x] 10.4 Rewrite in `AGENTS.md`: **Current repo state** (audience: every session).
       Replace the sentence "The body regions themselves are still empty bordered frames —
       `list-view`, `markdown-viewer`, and `detail-view` fill them next" with what the list
       now shows, and add one line to **Architecture rules** naming the two interior widths
@@ -1420,7 +1420,7 @@ block is re-run, not further modified — and `GRAPH-SNAP` likewise.
       change would otherwise rediscover by breaking it. Net: one sentence rewritten, one
       line added; nothing appended beside a rule it supersedes.
 
-- [ ] 10.4b Record, in this file and in `planning-review.md`, the one edit that must be made
+- [x] 10.4b Record, in this file and in `planning-review.md`, the one edit that must be made
       at **archive** time rather than now: `openspec/IMPLEMENTATION-ORDER.md`'s `list-view`
       row does not mention repository-level `ChangeSet::problems`, which this change
       deliberately renders (design.md → Decisions says why). It cannot be edited here —
@@ -1430,14 +1430,14 @@ block is re-run, not further modified — and `GRAPH-SNAP` likewise.
       archive step catch it. The same row's **Spec refs** cell reads "User interface → List
       view" and needs "Degraded states" alongside it, for the same reason.
 
-- [ ] 10.5 CHECK (contract gate): Re-read `SPEC.md` → Manifest and the `config.toml` format
+- [x] 10.5 CHECK (contract gate): Re-read `SPEC.md` → Manifest and the `config.toml` format
       and confirm neither changed. This change touches no manifest key and no configuration
       key, so the documented formats must still match `herdr-plugin.toml` and
       `src/config.rs` byte for byte.
       **Red when:** either drifted, which would mean this change altered a format it claims
       not to.
 
-- [ ] 10.6 VERIFY: `OPENSPEC-UNTOUCHED` again — 10.1–10.4 edit files outside `openspec/`,
+- [x] 10.6 VERIFY: `OPENSPEC-UNTOUCHED` again — 10.1–10.4 edit files outside `openspec/`,
       so the result must be identical to 9.4's.
       **Red when:** a documentation edit landed under `openspec/` outside this change's own
       directory.

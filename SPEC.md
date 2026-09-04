@@ -69,7 +69,7 @@ ratatui frame. They perform no I/O, so they are tested by rendering into a
 | `agents` | Attribute live Herdr agents to changes |
 | `launch` | Split a pane, start an agent, send the `/opsx:*` prompt |
 | `watch` | Filesystem watching and debounce |
-| `ui` | Views, layout, key handling, terminal lifecycle, and the event loop |
+| `ui` | Views (the change-row grammar included), layout, the dashboard's own state (selection and the `/` filter), key handling, terminal lifecycle, and the event loop |
 | `cli` | The two subprocess traits and their real implementations |
 
 ## Data layer
@@ -256,31 +256,55 @@ unusable.
   opens detail and `Esc` returns. At this width the route selects which region is
   visible, not merely emphasised.
 
-`Enter` and `Esc` move the route at **every** width — the difference is only what
-moving it does to the frame. Both the `Length(40)`/`Min(0)` constraints and the
-every-width route rule are frozen here for `list-view`, `detail-view`, and
-`agent-attribution` to inherit.
+`Enter` and `Esc` move the route at **every** width when neither the filter mode
+nor a filter query is active — the difference is only what moving it does to the
+frame. While filtering, `Enter` accepts the query and `Esc` cancels it without
+touching the route, and `/` itself moves the route to the list at every width;
+`list-view` → Keys states the full layering. Both the `Length(40)`/`Min(0)`
+constraints and the underlying every-width route rule are frozen here for
+`list-view`, `detail-view`, and `agent-attribution` to inherit.
 
 ### List view
 
-One row per active change, then a separator, then the five most recent archived
-changes:
+One row per active change, then a separator, then the archived changes
+(`archived_count` in plugin configuration, five by default) — the real
+rendering against the wide layout's 38-column list-region interior
+(`Length(40)` less two border columns; the narrow layout's 60-column frame
+leaves 58):
 
 ```
-> add-token-refresh    [4/9]  > claude - working
-  fix-empty-basket     [7/7]  done
-  migrate-ai-sdk-v7    [-]    schema unknown
-  -- archived --------------------------------
-  2026-08-14 add-auth
+> add-token-refresh              [4/9]
+  fix-empty-basket               [7/7]
+  migrate-ai-sdk-v7                [-]
+  -- archived ------------------------
+  2026-08-14 add-auth            [7/7]
 ```
 
-The mock above illustrates *content*, not width: its widest row is 48 characters,
-and the wide-layout list column (`Length(40)`, above) leaves a 38-column interior.
-How a row is shortened to fit 38 columns is `list-view`'s decision, made with the
-constraint already known.
+Each row is a selection marker (`>` for the selected change, a space
+otherwise), a space, a name field, a space, and a progress cell right-aligned
+so its final character occupies the interior's last column:
+`[<completed>/<total>]`, or the three characters `[-]` when the change has no
+tasks — its cell still ends in the same column as one that has them. An
+archived row additionally carries a ten-column date field (`YYYY-MM-DD`, or
+ten spaces when the entry is undated) between the marker and the name field.
 
-Progress comes from the CLI when available and from checkbox counts otherwise. A
-footer reports agents in the repository that could not be attributed to a change.
+A cell too narrow for the interior is dropped **whole**, never cut short, in
+a fixed order: the progress cell first (reclaiming its separating space too),
+then an archived row's date field (reclaiming its separating space), and
+then the row degenerates to the marker-plus-name grammar an active row
+always has. A name too long for its field is truncated with a trailing `…`.
+
+The mock's **third column**, reserved here for an agent badge and (on an
+archived row) a per-change problem indicator, belongs to `agent-attribution`
+and `degraded-states` respectively; `list-view` reserves no width for it. The
+footer reporting agents that could not be attributed to a change is
+`agent-attribution`'s addition too — its absence here is not an omission.
+
+Progress comes from the CLI when available and from checkbox counts
+otherwise; the rendered list is **file-sourced at every width** until
+`live-refresh` wires the CLI correction in, since `list-view` depends only on
+`changes-from-files`. The dual-source model above is still the design — this
+is what the pane can reach before that later change lands.
 
 ### Detail view
 
@@ -298,21 +322,23 @@ agent editing `tasks.md` in another pane.
 
 | Key | Action |
 |---|---|
-| `j` / `k`, arrows | Navigate |
-| `Enter` | Open change detail |
-| `Esc` | Back to list |
+| `j` / `k`, arrows | Move the list selection, clamped at both ends rather than wrapping; the list scrolls to keep it visible. While filtering, the arrows still navigate, but `j` and `k` type themselves into the query instead |
+| `Enter` | Open change detail, or — while filtering — accept the query without opening detail |
+| `Esc` | Dismiss one layer: filter mode with its query when active, else a non-empty query alone, else back to list, else nothing |
 | `1`–`9`, `[`, `]` | Switch artifact tab |
-| `/` | Filter changes |
+| `/` | Start filter mode from either route, moving to the list: printable keys type into the query, `Backspace` deletes, `Enter` accepts, `Esc` cancels, and `Ctrl-C` still quits |
 | `r` | Force refresh |
 | `a` | Launch an agent with `/opsx:apply` |
 | `c` | Launch an agent with `/opsx:continue` |
 | `s` | Launch an agent with `/opsx:archive` |
 | `g` | Focus the running agent for this change |
-| `q` | Quit |
+| `q` | Quit — except while filtering, where it types a `q` instead |
 | `Ctrl-C` | Quit |
 
-`Esc` at the list root — no detail open to return from — is inert rather than a
-quit; only `q` and `Ctrl-C` close the pane.
+`Esc` at the list root, with no detail open, no filter active, and no query set,
+is inert rather than a quit — the layered dismissal above is what determines
+whether there is a layer left to dismiss. Only `q` (outside filter mode) and
+`Ctrl-C` close the pane.
 
 Action keys are hidden when the Herdr socket is unreachable.
 
@@ -426,8 +452,9 @@ Every condition renders usable content rather than an error screen:
 | Schema unreadable or invalid (I/O error, or bytes that are not a usable schema) | Artifact list empty, and the reason is named |
 | Schema loads with no tasks artifact (`apply.tracks` matches nothing, and no artifact has id `tasks`) | Every other tab renders; the tasks tab is absent, which is `tasks-tab`'s rendering decision. The task **count** is not deferred: it falls back to counting `<change dir>/tasks.md` directly, matching `openspec list --json`'s own behaviour for such a change, so the pane never shows a pair the CLI would immediately correct |
 | No active changes | Empty state; archived changes remain browsable |
+| A `/` filter matches no change | Two rows: `No changes match`, then `/` and the query, so the filter that produced the empty state stays visible |
 | Artifact file missing | Tab is still shown and renders "No content yet" |
-| `openspec/changes/` or its `archive/` exists and cannot be read | Empty list for the affected tier, with the reason named on `ChangeSet::problems`; the archive walk is not attempted when the parent read already failed, so a permission error is never reported twice for the same fault |
+| `openspec/changes/` or its `archive/` exists and cannot be read | Empty list for the affected tier, with the reason named on `ChangeSet::problems` and rendered as a leading `!`-marked row of the list, above the change rows; the archive walk is not attempted when the parent read already failed, so a permission error is never reported twice for the same fault |
 | An artifact's `generates` pattern falls outside the file path's supported glob subset | That artifact's list is empty and the reason is named; every other artifact on the change still resolves normally, and the CLI tier supplies the correct list when it arrives |
 | A tasks file exists but cannot be read (a directory where a file was expected, a permission error, an I/O error, or invalid UTF-8) | Reported as zero tasks, named in `Tasks::problems`; the CLI's count corrects the pane when it arrives. Invalid UTF-8 is the one case where the file path knowingly disagrees with `openspec list --json`, which decodes lossily and still reports a count — every other read failure already agrees with the CLI, which records the same failure as zero tasks too |
 | Herdr socket unreachable | Runs as a standalone TUI; agent column and action keys hidden |
@@ -478,12 +505,12 @@ is tested against scratch `#!/bin/sh` programs rather than the real `openspec`,
   `openspec/` and the four-step binary probe chain, both tested against a
   purpose-built scratch directory tree under `std::env::temp_dir()`, not a
   faked filesystem layer
-- `ui::layout`, `ui::app`, `ui::view`, `ui::driver`, `ui::terminal`, and `ui::load`
-  — the breakpoint and frame split, `Dashboard` and key handling, the render seam
-  proper, the draw-then-wait event loop, and startup state from files.
-  `ratatui::backend::TestBackend` stands in for the rendering surface and a
-  recording `TerminalOps` double stands in for the terminal; no test constructs
-  the real terminal implementation
+- `ui::layout`, `ui::app`, `ui::list`, `ui::view`, `ui::driver`, `ui::terminal`,
+  and `ui::load` — the breakpoint and frame split, `Dashboard` and key handling,
+  the change-row grammar, the render seam proper, the draw-then-wait event loop,
+  and startup state from files. `ratatui::backend::TestBackend` stands in for
+  the rendering surface and a recording `TerminalOps` double stands in for the
+  terminal; no test constructs the real terminal implementation
 
 ### View tests
 
@@ -495,10 +522,13 @@ both 60 and 120 columns so the responsive breakpoint is genuinely covered.
 Three mechanisms, not checked-in fixture repositories: no change in the roadmap
 has a use for one. `changes::from_files` needs an empty directory, a
 symbolic link (dangling and not), and a directory at mode `0o000`, none of
-which git can store faithfully; and every view change performs no I/O at
+which git can store faithfully; and every view **test** performs no I/O at
 all, building a `ChangeSet` or `Config` value directly rather than opening a
-repository — the render seam above requires views to be pure functions from
-state to a frame.
+repository — `render` itself still takes a value, never a path, so the render
+seam stays pure. The one exception, by design rather than by drift: an
+outer-loop composition test per change may open a real directory through
+`ui::load`, because that is the one path no unit test crosses; `list-view`'s
+own such test lives in `ui::tests::load::`, never in a view module.
 
 - **Run-time `crate::testutil::ScratchDir` trees**, built fresh under
   `std::env::temp_dir()` for every test that needs a real filesystem edge —
