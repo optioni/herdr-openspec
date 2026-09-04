@@ -1036,4 +1036,92 @@ mod tests {
         assert_eq!(tasks.groups.len(), 1);
         assert_eq!(tasks.groups[0].heading, None);
     }
+
+    // Group 5: the filesystem edge, and what it must not touch. Every
+    // fixture is built under a `ScratchDir`, never a path in the real
+    // repository.
+
+    use crate::testutil::{ScratchDir, snapshot, write_with_mode};
+
+    #[test]
+    fn an_absent_file_is_zero_tasks_and_no_problem() {
+        let scratch = ScratchDir::new();
+        let path = scratch.path().join("tasks.md");
+        assert!(!path.exists());
+
+        let tasks = super::read(&path);
+        assert_eq!(
+            tasks,
+            super::Tasks {
+                groups: vec![],
+                problems: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn a_directory_where_a_file_was_expected_is_one_named_problem() {
+        let scratch = ScratchDir::new();
+
+        let tasks = super::read(scratch.path());
+        assert!(tasks.groups.is_empty());
+        assert_eq!(tasks.problems.len(), 1);
+        assert!(tasks.problems[0].contains(&scratch.path().display().to_string()));
+    }
+
+    #[test]
+    fn a_file_of_invalid_utf8_is_one_named_problem_not_a_parse_result() {
+        let scratch = ScratchDir::new();
+        let path = scratch.path().join("tasks.md");
+        write_with_mode(&path, &[0xFF, 0xFE], 0o644);
+
+        let tasks = super::read(&path);
+        assert!(tasks.groups.is_empty());
+        assert_eq!(tasks.problems.len(), 1);
+        assert!(tasks.problems[0].contains(&path.display().to_string()));
+    }
+
+    #[test]
+    fn a_readable_file_is_parsed_exactly_as_its_text_would_be() {
+        let scratch = ScratchDir::new();
+        let path = scratch.path().join("tasks.md");
+        let text = "## G\n- [x] a\n- [ ] b\n";
+        write_with_mode(&path, text.as_bytes(), 0o644);
+        assert_eq!(
+            std::fs::read(&path).expect("fixture file readable"),
+            text.as_bytes()
+        );
+
+        assert_eq!(super::read(&path), super::parse(text));
+    }
+
+    #[test]
+    fn a_task_tree_is_byte_identical_after_reading() {
+        let scratch = ScratchDir::new();
+        let root = scratch.path();
+
+        let tasks_md = root
+            .join("openspec")
+            .join("changes")
+            .join("x")
+            .join("tasks.md");
+        write_with_mode(&tasks_md, b"## G\n- [x] a\n", 0o644);
+        let specs_dir = root.join("openspec").join("specs");
+        std::fs::create_dir_all(&specs_dir).expect("create empty specs dir");
+        let readme = root.join("README.md");
+        write_with_mode(&readme, b"# Readme\n", 0o644);
+
+        let nonexistent = root.join("nonexistent").join("nested").join("path.md");
+
+        let before = snapshot(root);
+        let _ = super::read(&tasks_md);
+        let _ = super::read(&specs_dir);
+        let _ = super::read(&nonexistent);
+        let after = snapshot(root);
+
+        assert_eq!(before, after);
+        assert!(!nonexistent.exists());
+        assert!(!nonexistent.parent().unwrap().exists());
+        assert!(!root.join("nonexistent").exists());
+    }
 }
