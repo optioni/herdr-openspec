@@ -1,134 +1,52 @@
 # Handoff
 
-**Written:** 2026-09-04 ~09:10 EEST · **Branch:** `main` · **Remote:** `optioni/herdr-openspec`
+**Written:** 2026-09-04 ~13:15 EEST · **Branch:** `main` · **Remote:** `optioni/herdr-openspec`
 
 ## Where things stand
 
-**Phase 1 complete. Phase 2 is one-of-four archived, with the second change's
-artifacts written and its apply not yet started.** `main` is green and clean:
-`make check` exits 0 at **97.51% line coverage (1806 lines)** against the 80% floor,
-112 tests. Nothing is pushed — every Phase 2 commit is local.
+**Phases 1 and 2 are complete.** Seven changes implemented, archived, and pushed.
+`main` is green: `make check` exits 0 at **98.66% line coverage over 4924 lines**.
 
 | Phase | Changes | State |
 |---|---|---|
-| 1 — Foundation | `repo-foundation`, `ci-pipeline`, `plugin-config` | **Done, archived** |
-| 2 — Reading from disk | `repo-resolution` | **Done, archived** |
-| | `schema-model` | **Artifacts written & committed; apply NOT started** |
-| | `task-parsing`, `changes-from-files` | Not started |
-| 3–6 | — | Untouched |
+| 1 — Foundation | `repo-foundation`, `ci-pipeline`, `plugin-config` | **Done** |
+| 2 — Reading from disk | `repo-resolution`, `schema-model`, `task-parsing`, `changes-from-files` | **Done** |
+| 3 — Subprocess seam | `subprocess-seam`, `changes-from-cli` | Next |
+| 4–6 | — | Untouched |
 
-Eight capabilities are live under `openspec/specs/`: the six from Phase 1 plus
-`repo-discovery` and `openspec-binary` from `repo-resolution`.
+`openspec/changes/` holds only `archive/`. Fifteen capabilities are live under
+`openspec/specs/`.
+
+Modules: `lib.rs`, `main.rs`, `config.rs`, `state.rs`, `resolve.rs`, `schema.rs`,
+`tasks.rs`, `changes.rs`. Dependencies: `toml` 1.1.5, `yaml-rust2` 0.12.0.
 
 ## Next action
 
-**Resume with the apply step for `schema-model`** — its artifacts already exist under
-`openspec/changes/schema-model/` (10 groups, 92 tasks, 50 scenarios), so do **not**
-re-run `ff-change` on it. Then archive it, then run the full ff → apply → archive loop
-for `task-parsing` and `changes-from-files`.
+Dispatch the phase orchestrator on **Phase 3 — The subprocess seam**:
+`subprocess-seam`, then `changes-from-cli`. Both need the full ff → apply → archive
+loop.
 
-Paused at 75% of the 5-hour session used, at a clean committed boundary, per the
-"don't start work below ~50% remaining" rule. Session resets **08:30 UTC**.
+Phase 3 is the first phase that spawns a process, so two things carry over:
 
-## What exists now
+1. **`resolve.rs` step 4 of the openspec-binary probe chain (`npm prefix -g`) is a
+   stub** — an injected `&dyn Fn() -> Option<PathBuf>` whose shipped binding returns
+   `None`, with a test pinning the empty result specifically so wiring it up in Phase 3
+   goes red rather than silently passing. Wire it through `OpenspecCli`.
+2. **`plugin-config`'s no-spawn check cannot be trusted.** Its design carried a
+   `grep -rn '"herdr"'` check that false-positives on legitimate `.join("herdr")` path
+   code, so it was recorded as not-run. `subprocess-seam` introduces the crate's first
+   real `Command::new` and needs a genuine check, not that one.
 
-`src/lib.rs`, `src/main.rs`, `src/config.rs`, `src/state.rs`, **`src/resolve.rs`**,
-`tests/cli.rs`, `tests/ci_workflow.rs`, `Cargo.toml` (one dependency: `toml` 1.1.5;
-`schema-model` will add `yaml-rust2` 0.12.0), `Makefile`, `rustfmt.toml`,
-`scripts/build.sh`, `herdr-plugin.toml`, and `.github/workflows/` — `check` matrixed
-over ubuntu/macos, Linux-only `coverage`, and an aggregate `ci` job for branch
-protection.
+`changes-from-cli` must produce the same `Change` type `changes-from-files` already
+produces. A field added to one and not the other is the divergence the type system will
+not catch if it is optional.
 
-## Phase 2 findings so far
+## Weekly budget is now the binding constraint
 
-**`repo-resolution` (archived).** The Phase 2 no-subprocess rule was kept: step 4 of
-the binary probe chain (`npm prefix -g`) is an injected `&dyn Fn() -> Option<PathBuf>`
-whose shipped binding returns `None`, so production spawns nothing. A test pins the
-empty result so the Phase 3 hand-over to `subprocess-seam` goes red rather than
-silent. `IMPLEMENTATION-ORDER.md` gained the `repo-resolution --> subprocess-seam`
-edge that this creates.
-
-**`schema-model` planning found two SPEC.md errors** (correction is scheduled inside
-the change, group 9 — do not skip that group):
-
-1. **`role: tasks` does not exist.** Not in `openspec/schemas/tdd/schema.yaml`, not in
-   the CLI's `spec-driven` schema, not in the CLI's Zod `ArtifactSchema`. The real
-   rule is `findTrackedTasksArtifact`: the artifact whose `generates` equals
-   `apply.tracks`, falling back to id `tasks` only when no `apply` block declares one
-   — and a `tracks` **miss does not fall back**. `IMPLEMENTATION-ORDER.md`'s Phase 2
-   row states the wrong rule too.
-2. **`openspec schema` has no dump subcommand.** Only `which`, `validate`, `fork`,
-   `init`. The Phase 3 fallback is `openspec schema which <name> --json`, which
-   returns the schema *directory*.
-
-`openspec/config.yaml` → `context` carries **both** falsehoods and is injected into
-every future change's planning prompt. That edit is task 9.7a and is the
-highest-leverage line in the change.
-
-**YAML dependency decision: `yaml-rust2` 0.12.0**, measured rather than remembered.
-`serde_yaml` is published as `0.9.34+deprecated`; `serde_yml` is a deprecated shim;
-`serde_yaml_ng`/`serde_norway` pull 8 transitive crates each including
-`unsafe-libyaml`; `saphyr` is disqualified because `thiserror-impl` puts `syn`/`quote`
-in the *normal* graph, which the live `plugin-build` requirement forbids. `yaml-rust2`
-is 4 transitive crates, pure Rust, no proc macro, MSRV 1.85. Hand-parsing was rejected
-on evidence: the vendored schema's `apply.instruction` block scalar sits at 4 spaces —
-the same column as `generates:` — and contains markdown headings and `key: value`
-prose, so a line scanner produces a silently wrong tab order.
-
-## Known debt found during Phase 2
-
-**`openspec validate --all --strict` fails on the six Phase 1 specs.** All six carry
-`TBD - created by archiving change <x>. Update Purpose after archive.` — the
-placeholder `openspec archive` writes. `repo-discovery` and `openspec-binary` pass
-because real Purpose sections were written for them. Fixing the six is unscoped work;
-it wants its own small change, or an `operations.archive` task that writes a real
-Purpose at archive time.
-
-**A `MODIFIED` requirement cannot rename a scenario** — `openspec validate --strict`
-refuses any MODIFIED block that omits a scenario name the live spec carries. That is
-why `schema-model`'s `plugin-build` delta is written REMOVED + ADDED; at archive time
-that requirement lands last in the rewritten capability file rather than second.
-
-**Three OpenSpec CLI versions are installed** under nvm (1.11.0 on the workflow PATH,
-1.12.0, 1.9.0). Every `schema-model` fact was confirmed against both 1.11.0 and 1.12.0.
-
-**An apply subagent created a git worktree unprompted.** `repo-resolution` was
-implemented on a `repo-resolution` branch in
-`/Users/juusopiikkila/Code/herdr-openspec-repo-resolution`, fast-forwarded into `main`
-by hand, and the worktree and branch removed. Tell apply agents explicitly to work in
-the main checkout on `main`.
-
-## Contract corrections found by running against real Herdr 0.8.2
-
-Three, none catchable by static review:
-
-1. The plugin manifest **requires a `version` key** — `herdr plugin link .` rejects it
-
-## Contract corrections found by running against real Herdr 0.8.2
-
-Three, none catchable by static review:
-
-1. The plugin manifest **requires a `version` key** — `herdr plugin link .` rejects it
-   otherwise.
-2. **`herdr plugin link .` does NOT run `[[build]]`** — only a GitHub-managed
-   `herdr plugin install` does. Run `make build` yourself.
-3. **`herdr plugin config-dir` is not how a plugin finds its own directories.** Herdr
-   injects `HERDR_PLUGIN_CONFIG_DIR` and `HERDR_PLUGIN_STATE_DIR`, verified
-   character-identical for both pane and action entrypoints. This is why
-   `plugin-config` needs no subprocess and does not depend on `subprocess-seam` —
-   nothing spawns `herdr`.
-
-## Two open issues for later phases
-
-1. **`subprocess-seam` (Phase 3) introduces the crate's first real `Command::new`.**
-   `plugin-config`'s design carried a `grep -rn '"herdr"'` no-spawn check that
-   false-positives on legitimate `.join("herdr")` path code, so it was recorded as
-   not-run. Do not inherit a false sense of coverage from it — that change needs a
-   genuine check.
-2. **CI has never run on GitHub.** Five `ci-pipeline` scenario clauses need a real
-   run to observe (scheduling, runner installs, matrix-leg independence, aggregate
-   status, fork-PR behavior). Each has a static verification row, but the live
-   behaviour is unconfirmed until something is pushed to a PR.
+Weekly sat at 60% used with 53h to reset when Phase 2 finished, running roughly 4
+points per change. Thirteen changes remain across Phases 3–6, which is more than one
+weekly window holds. **The roadmap will span more than one week.** That is a pacing
+fact, not a fault — but do not plan on finishing in a single run.
 
 ## Budget shape — read this before starting
 
