@@ -149,6 +149,30 @@ two `grep` patterns (against the real `src/` and against a simulated doc comment
 repository today and passing against a probe crate. `openspec validate plugin-config
 --strict` reports the change valid. No unresolved decision requires user input.
 
+## Apply-Time Live Verification (task 6.1)
+
+Re-confirmed empirically during implementation, independent of the planning-time probe
+recorded above, against `herdr 0.8.2` (`/opt/homebrew/bin/herdr`), with a running Herdr
+server:
+
+Two throwaway plugins, ids `envprobe-pc` and `envprobe-pc2` — never `herdr-openspec` —
+linked from a scratch directory outside this repository:
+
+| Probe | Entrypoint | `HERDR_PLUGIN_CONFIG_DIR` | `HERDR_PLUGIN_STATE_DIR` |
+|---|---|---|---|
+| `envprobe-pc` | `[[panes]]`, opened with `herdr plugin pane open --plugin envprobe-pc --entrypoint dump --placement split --direction down --no-focus` | `/Users/juusopiikkila/.config/herdr/plugins/config/envprobe-pc` | `/Users/juusopiikkila/.local/state/herdr/plugins/envprobe-pc` |
+| `envprobe-pc2` | `[[actions]]`, invoked with `herdr plugin action invoke dump --plugin envprobe-pc2` | `/Users/juusopiikkila/.config/herdr/plugins/config/envprobe-pc2` | `/Users/juusopiikkila/.local/state/herdr/plugins/envprobe-pc2` |
+
+Both `HERDR_PLUGIN_CONFIG_DIR` values are character-identical to
+`herdr plugin config-dir <id>`'s own output, confirmed separately for both ids. The pane
+process additionally carried `HERDR_PLUGIN_ENTRYPOINT_ID=dump`; the action process
+carried `HERDR_PLUGIN_ACTION_ID=dump` instead. Both processes also carried `HERDR_ENV=1`
+and `HERDR_PLUGIN_ROOT`. Both plugins were unlinked with `herdr plugin unlink`, and the
+configuration and state directories Herdr created for them were removed by the exact
+paths above — never by a glob, and never for `herdr-openspec`. This re-confirms the
+planning-time probe rather than replacing it: the design's central premise held at
+implementation time on the same Herdr version.
+
 ## Deferred Non-Blocking Notes
 
 - **`cargo build --locked` is not a recurring gate.** The `quality-gates` capability

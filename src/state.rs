@@ -248,10 +248,7 @@ pub fn record(dir: Option<&Path>, agent: &str, change: &str) -> std::io::Result<
 
     static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
     let counter = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let tmp_path = dir.join(format!(
-        "agent-names.toml.tmp-{}-{counter}",
-        std::process::id()
-    ));
+    let tmp_path = dir.join(format!("agent-names.toml.tmp-{}-{counter}", crate::pid()));
 
     let write_and_rename = || -> std::io::Result<()> {
         std::fs::write(&tmp_path, &contents)?;

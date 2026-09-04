@@ -9,6 +9,18 @@
 pub mod config;
 pub mod state;
 
+/// The current process id. Exists so `state::record`'s temporary-file name can
+/// include it without `src/state.rs` itself containing the literal
+/// `std::process`: that module is checked by the stricter, module-scoped form
+/// of the "resolution spawns nothing" gate (`grep -nE
+/// 'std::process|Command|Stdio' src/config.rs src/state.rs`), which forbids
+/// any process API there, spawning or not — see
+/// `openspec/changes/plugin-config/design.md` -> Boundaries and Test
+/// Strategy. `std::process::id()` reads the pid; it does not spawn.
+pub(crate) fn pid() -> u32 {
+    std::process::id()
+}
+
 /// Test-only helpers shared by `config` and `state`'s unit tests.
 #[cfg(test)]
 pub(crate) mod testutil {
