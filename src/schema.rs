@@ -80,7 +80,11 @@ pub(crate) fn schema_key(text: &str) -> Result<Option<String>, String> {
     }
     match value.as_str() {
         Some(s) => match crate::config::non_blank(Some(s.to_string())) {
-            Some(s) => Ok(Some(s)),
+            // Trimmed, per tasks.md 2.8 — `is_legal_name` also trims before
+            // validating, so accept and use must agree on the trimmed form,
+            // never a padded one that would join into a schema path with
+            // leading or trailing whitespace in a path segment.
+            Some(s) => Ok(Some(s.trim().to_string())),
             None => Err("schema is blank".to_string()),
         },
         None => Err("schema is not a string".to_string()),
@@ -324,7 +328,9 @@ fn id_fallback(artifacts: &[Artifact], extra: Option<&str>) -> (Option<Artifact>
         Some(artifact) => (Some(artifact.clone()), extra.map(str::to_string)),
         None => {
             let reason = match extra {
-                Some(extra) => format!("no tasks artifact: {extra}, and no artifact has id \"tasks\""),
+                Some(extra) => {
+                    format!("no tasks artifact: {extra}, and no artifact has id \"tasks\"")
+                }
                 None => "no tasks artifact: no apply.tracks value and no artifact has id \"tasks\""
                     .to_string(),
             };
@@ -586,6 +592,24 @@ mod tests {
     }
 
     #[test]
+    fn a_padded_declaration_is_trimmed_before_use() {
+        // Found in Change Review: `is_legal_name` trims before validating,
+        // so a padded name was accepted as legal and then used un-trimmed —
+        // `schema: " tdd "` joined into `openspec/schemas/ tdd /schema.yaml`,
+        // a path `tdd` never occupies. Accept and use must agree.
+        assert_eq!(
+            schema_key("schema: \" tdd \"\n"),
+            Ok(Some("tdd".to_string()))
+        );
+
+        let project_path = Path::new("openspec/config.yaml");
+        let project = read("schema: \" tdd \"\n");
+        let selection = declared_name(None, (project_path, &project));
+        assert_eq!(selection.name, "tdd");
+        assert!(selection.problems.is_empty());
+    }
+
+    #[test]
     fn a_declaration_of_the_wrong_type_is_not_a_declaration() {
         for text in [
             "schema:\n  nested: mapping\n",
@@ -748,13 +772,15 @@ mod tests {
         assert_eq!(selection.name, DEFAULT_SCHEMA);
         assert_eq!(selection.source, NameSource::Default);
         assert_eq!(selection.problems.len(), 1);
-        assert!(selection.problems[0].contains(
-            &repo
-                .join("openspec")
-                .join("config.yaml")
-                .display()
-                .to_string()
-        ));
+        assert!(
+            selection.problems[0].contains(
+                &repo
+                    .join("openspec")
+                    .join("config.yaml")
+                    .display()
+                    .to_string()
+            )
+        );
     }
 
     #[test]
@@ -891,6 +917,10 @@ artifacts:
         assert_eq!(parsed.problems.len(), 2);
         assert!(parsed.problems[0].contains('1'));
         assert!(parsed.problems[1].contains('2'));
+        // The spec's own AND clause: one bad neighbour does not cost the
+        // tasks tab. Asserted directly rather than only through the problem
+        // count, which would be 3 (not 2) if the tasks rule had failed here.
+        assert_eq!(parsed.schema.tasks, Some(art("tasks", "tasks.md")));
     }
 
     #[test]
@@ -1003,7 +1033,8 @@ artifacts:
     #[test]
     fn flow_style_anchors_and_crlf_all_parse() {
         // Flow style.
-        let flow = "name: test\nartifacts: [{id: a, generates: a.md}, {id: tasks, generates: tasks.md}]\n";
+        let flow =
+            "name: test\nartifacts: [{id: a, generates: a.md}, {id: tasks, generates: tasks.md}]\n";
         let parsed = parse("test", flow).expect("flow-style schema should parse");
         assert_eq!(
             parsed.schema.artifacts,
@@ -1226,8 +1257,7 @@ apply:
 
     fn write_config(repo: &Path, text: &str) {
         mkdir(&repo.join("openspec"));
-        std::fs::write(repo.join("openspec").join("config.yaml"), text)
-            .expect("write config.yaml");
+        std::fs::write(repo.join("openspec").join("config.yaml"), text).expect("write config.yaml");
     }
 
     #[test]
@@ -1311,11 +1341,13 @@ apply:
         let repo = scratch.path();
         // `schema.yaml` as a directory: `read_to_string` fails with an I/O
         // error rather than `NotFound`.
-        mkdir(&repo
-            .join("openspec")
-            .join("schemas")
-            .join("odd")
-            .join("schema.yaml"));
+        mkdir(
+            &repo
+                .join("openspec")
+                .join("schemas")
+                .join("odd")
+                .join("schema.yaml"),
+        );
 
         let expected_path = repo
             .join("openspec")
@@ -1354,7 +1386,10 @@ apply:
         let resolution = resolve(repo, Some(&change_dir));
         assert_eq!(resolution.name, "absent");
         assert_eq!(resolution.source, NameSource::Project);
-        assert!(matches!(resolution.schema, Err(LoadError::NotVendored { .. })));
+        assert!(matches!(
+            resolution.schema,
+            Err(LoadError::NotVendored { .. })
+        ));
         assert_eq!(resolution.problems.len(), 2);
     }
 
@@ -1381,7 +1416,10 @@ apply:
         // each loaded with the directory's name and no problem — an absent
         // or unusable `name` is not a disagreement.
         for (dir, text) in [
-            ("no-name", "artifacts:\n  - id: tasks\n    generates: a.md\n"),
+            (
+                "no-name",
+                "artifacts:\n  - id: tasks\n    generates: a.md\n",
+            ),
             (
                 "blank-name",
                 "name: \"  \"\nartifacts:\n  - id: tasks\n    generates: a.md\n",

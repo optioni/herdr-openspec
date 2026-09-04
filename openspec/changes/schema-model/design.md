@@ -837,17 +837,15 @@ class of bug, and a whole-value `assert_eq!` is what the scenarios want anyway.
   files so a future bug report is diagnosable rather than mysterious.
 - **One unit scenario reads this repository's own graft-vendored `openspec/schemas/tdd/`.**
   A `graft sync` that changes that file could break a test that has nothing to do with the
-  change being made. → The scenario asserts only stable properties — parses, non-empty, first
-  artifact `proposal`, an artifact `tasks`/`tasks.md`, the `specs` glob verbatim — never the
-  exact list, so adding an artifact upstream does not break it. It is read through
-  `env!("CARGO_MANIFEST_DIR")`, never the process working directory. The scenario is worth
-  the coupling: it is the only test that proves the model matches the file the plugin will
-  actually meet, and it is the test that would have caught `role: tasks` before a line was
-  written. Its artifact-list assertion is nonetheless **exact**, not a containment check —
-  a parser that silently drops `design` or `planning-review`, the two longest block scalars
-  and precisely what a block-scalar defect would eat, satisfies any "contains" clause. So a
-  graft update that adds or renames an artifact *will* turn this test red, on purpose. That
-  is a one-line fixture update with a real question behind it, not a flake.
+  change being made. → Accepted: the artifact-list assertion is **exact**, not a containment
+  check — a parser that silently drops `design` or `planning-review`, the two longest block
+  scalars and precisely what a block-scalar defect would eat, satisfies any "contains" clause,
+  so the exact form is what makes the scenario worth having. It is read through
+  `env!("CARGO_MANIFEST_DIR")`, never the process working directory. The scenario is worth the
+  coupling: it is the only test that proves the model matches the file the plugin will actually
+  meet, and it is the test that would have caught `role: tasks` before a line was written. A
+  graft update that adds or renames an artifact *will* turn this test red, on purpose — that is
+  a one-line fixture update with a real question behind it, not a flake.
 - **Reading `openspec/config.yaml` per change is O(changes) file reads.** → Bounded and
   small; `select`/`load` are split so a caller can avoid the expensive half, and the
   expensive half is the 663-line parse, not the 83-line one. If it ever matters,
