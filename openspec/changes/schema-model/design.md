@@ -8,8 +8,11 @@ something reads the schema. This is the second row of Phase 2 in
 `openspec/IMPLEMENTATION-ORDER.md`, and like every Phase 2 row it is a pure transformation:
 no terminal, no subprocess, no writes.
 
-**Facts read off the real OpenSpec CLI (1.11.0) and the real vendored schema before writing
-this design.** Every one of them changed a decision, and two of them make `SPEC.md` wrong.
+**Facts read off the real OpenSpec CLI and the real vendored schema before writing this
+design.** Every one of them changed a decision, and two of them make `SPEC.md` wrong. The
+CLI on the workflow's `PATH` here is **1.11.0** (nvm `v24.20.0`); the machine also carries
+1.12.0 under `v24.18.0` and 1.9.0 under `v24.19.0`, and every fact below was re-confirmed
+against 1.12.0 during review with no drift — so none of these is a quirk of one release.
 
 | Fact | Observed | Consequence |
 |---|---|---|
@@ -52,7 +55,9 @@ this design.** Every one of them changed a decision, and two of them make `SPEC.
 - No injected hook for that fallback. `repo-resolution` injected one for `npm prefix -g`
   because step 4 sat *inside* an ordered chain whose position had to be pinned today; here
   there is no chain — the disk load either produces a schema or names why it did not, and
-  the CLI tier comes after all of it. See Decisions.
+  the CLI tier comes after all of it. What this change ships instead is `load_dir`, which
+  takes the *directory* rather than a repository root, so Phase 3 is one call rather than a
+  re-derivation. See Decisions.
 - No change enumeration, no artifact **file path** resolution, no task parsing, no
   rendering. Those are `changes-from-files`, `task-parsing`, and `detail-view`.
 - No caching. `SPEC.md` specifies session caching for the binary probe and nothing else.
@@ -74,7 +79,7 @@ this design.** Every one of them changed a decision, and two of them make `SPEC.
 | Blank-value rule | `config::non_blank` | Already shared by `config`, `state`, and `resolve`. A `schema:` of `"  "` is not a declaration, exactly as a blank `PATH` entry is not a candidate |
 | `problems: Vec<String>` | `SchemaResolution` | `Config::problems` and `BinResolution::problems`, unchanged in shape. `degraded-states` renders one thing, not three |
 | `pub mod schema;` | `src/lib.rs` | Alongside `config`, `resolve`, `state` |
-| A fixture-repository builder | `src/lib.rs` → `testutil` | Beside `ScratchDir`, `write_with_mode`, `symlink`, `canonical`, `snapshot` — all reused unchanged, none extended |
+| Test fixtures | `src/lib.rs` → `testutil`, **reused unchanged** | `ScratchDir` plus `std::fs::write` covers every fixture these scenarios need; `write_with_mode`, `symlink`, `canonical`, and `snapshot` already exist and none is extended. `snapshot` already records directory entries — `repo-resolution` added that — so the two containment guards see a `create_dir_all`. If a fixture turns out to want a builder it is added here rather than inside a test module (tasks.md 1.5) |
 | `yaml-rust2` | `Cargo.toml` | The `toml` dependency's shape: `default-features = false` plus an explicit feature list |
 
 **No process spawn is added.** `src/schema.rs` names no process API at all; the `cli` module
@@ -164,9 +169,21 @@ pub(crate) enum FileText {
 }
 
 /// `Ok(Some(name))` when the first document declares a non-blank string
-/// `schema:`; `Ok(None)` when the text holds no document; `Err(reason)` when it
-/// is not valid YAML, its first document is not a mapping, or `schema:` is
-/// present with a non-string value.
+/// `schema:`.
+///
+/// `Ok(None)` — the normal, silent case — when the text holds no document at
+/// all, **or** when its first document is a mapping carrying no `schema:` key.
+/// That second branch is the ordinary shape of a repository that pins nothing
+/// and of a `.openspec.yaml` carrying only `created:`, and it is the one an
+/// implementation gets wrong by accident: `yaml-rust2` yields `Yaml::BadValue`
+/// for a missing key, whose `as_str()` is `None` — indistinguishable from
+/// `schema: [a]` or `schema: 42` through a string accessor. The wrong-type
+/// branch must therefore be keyed on *the node exists and is not a
+/// `Yaml::String`* (`!is_badvalue()`), never on `as_str().is_none()`.
+///
+/// `Err(reason)` when the text is not valid YAML, when its first document is
+/// not a mapping, or when `schema:` is present with a non-string value —
+/// including an explicit `null`.
 pub(crate) fn schema_key(text: &str) -> Result<Option<String>, String>;
 
 /// A single, non-escaping path segment: non-blank, no separator, not `.` or
@@ -186,13 +203,29 @@ pub fn parse(name: &str, text: &str) -> Result<ParsedSchema, String>;
 
 // --- filesystem edge ---
 
-/// Read a path into a `FileText`, mapping `NotFound` to `Absent`.
-fn read_file(path: &Path) -> FileText;
+/// Read a path into a `FileText`, mapping `NotFound` to `Absent` and every
+/// other failure — including a UTF-8 decode failure — to `Unreadable`.
+///
+/// `pub(crate)`, like `FileText` and `declared_name`, and deliberately so:
+/// `changes-from-files` lives in `src/changes.rs`, the same crate, and the
+/// per-change loop is exactly the caller that wants to read
+/// `openspec/config.yaml` once and hand the same `FileText` to `declared_name`
+/// for every change. A private `read_file` would leave that caller with only
+/// `select`, which re-reads both files on every call — the cost the Risks
+/// section names — and the escape hatch this design credits would not exist.
+pub(crate) fn read_file(path: &Path) -> FileText;
 
 /// Which schema applies to `repo`, or to `change_dir` inside it.
 pub fn select(repo: &Path, change_dir: Option<&Path>) -> Selection;
 
-/// Read and parse `<repo>/openspec/schemas/<name>/schema.yaml`.
+/// Read and parse `<dir>/schema.yaml`. `dir` is *any* schema directory: the
+/// repository's own, `$XDG_DATA_HOME/openspec/schemas/<name>`, or the absolute
+/// path `openspec schema which <name> --json` reports for a schema the CLI
+/// package ships. `name` is only what the result is labelled with and what the
+/// file's `name:` key is compared against.
+pub fn load_dir(dir: &Path, name: &str) -> Result<ParsedSchema, LoadError>;
+
+/// The repository tier: `load_dir(&repo.join("openspec").join("schemas").join(name), name)`.
 pub fn load(repo: &Path, name: &str) -> Result<ParsedSchema, LoadError>;
 
 /// The composition, for the common case.
@@ -209,16 +242,31 @@ pub fn resolve(repo: &Path, change_dir: Option<&Path>) -> SchemaResolution;
 - **`NameSource` is part of the contract, not a debugging aid.** Two sources routinely
   declare the same name, so a name alone cannot prove the ordering. This is the same
   argument `resolve::BinSource` makes, for the same reason.
+- **`parse`'s `Err(String)` is a display string, never a value to match on.** It exists
+  only to become `LoadError::Invalid { reason }` and to be shown to a user. The
+  three-variant argument below is about the *category* of failure, which is what a consumer
+  branches on; the sentence inside a category is prose. A consumer matching substrings in
+  it is making the mistake `LoadError` exists to prevent.
 - **`LoadError` has three variants rather than one string** because `changes-from-cli` must
   branch on `NotVendored` specifically, and a consumer matching substrings in a message is
   a consumer that breaks when the message is reworded.
 - **`Schema::name` is the directory segment**, because that is what `openspec schema which`
   keys on and what the user configured. A disagreement with the file's `name:` is a problem,
-  not a failure.
-- **`Schema::tasks` is a clone, not an index.** An index into `artifacts` desyncs the moment
-  a consumer filters or reorders the list, and two small `String`s are cheaper than that
-  class of bug. It also makes the scenarios `assert_eq!`-comparable against a whole
-  `Artifact` value.
+  not a failure — and only a **present, non-blank string** `name:` can disagree. An absent
+  `name:` (`Yaml::BadValue`) or one that is blank or not a string records nothing. This is
+  not a detail: almost every fixture in this change omits `name:`, and a dozen of them assert
+  `problems.is_empty()`, so an implementation comparing
+  `dir != doc["name"].as_str().unwrap_or("")` turns half the suite red. Only the mismatch
+  fixture carries a `name:` key at all.
+- **`Schema::tasks` is a clone, not an index, and it carries an invariant.** When `Some`, it
+  is always equal to one element of `artifacts`; `parse` is the only producer and it never
+  builds one that is not. A consumer that filters `artifacts` — `list-view`'s `/` filter and
+  `detail-view`'s tab numbering are both in scope later — must re-derive or clear it rather
+  than assume the two stay consistent, because the struct as declared permits a `tasks` that
+  is no longer in the list. An index would desync the same way and more silently; a
+  `tasks_id: Option<String>` key would not desync at all, and is rejected only because every
+  scenario here asserts a whole `Artifact` with `assert_eq!` and a bare id would push a
+  lookup into each of them. The invariant is stated because it is the price of that choice.
 - **`problems` has three producers:** selection fallbacks, per-entry skips, and a
   `LoadError`. An empty `problems` with a loaded schema means "everything read cleanly".
 - **Compatibility.** Purely additive. No existing signature changes; `src/main.rs`,
@@ -260,7 +308,7 @@ one.
 | Dependency | In acceptance test (deterministic command checks) | In unit tests |
 |---|---|---|
 | Filesystem — scratch trees | not used | **real**, always a fresh `testutil::ScratchDir` under `std::env::temp_dir()`. Never a directory on the machine's real `PATH` or in `$HOME` |
-| Filesystem — this repository's own tree | **real, read-only** — the dependency, graph, MSRV and spawn checks read `Cargo.toml`, `Cargo.lock`, and `src/` | **real, read-only, exactly one scenario**: "The repository's own vendored `tdd` schema loads" reads `openspec/schemas/tdd/schema.yaml` through `env!("CARGO_MANIFEST_DIR")` — never through the process working directory, which a test runner may change |
+| Filesystem — this repository's own tree | **real, read-only.** `DEPS`, `GRAPH`, `MSRV` and `SPAWN` read `Cargo.toml`, `Cargo.lock` and `src/`. `NEEDED` — the only check that edits a manifest — runs against a **copy** of the crate under `std::env::temp_dir()` and never touches the working tree, because `cargo build` rewrites `Cargo.lock` during resolution. `BUILD` writes only to the gitignored `target/`. Group 1 does of course edit `Cargo.toml` and `Cargo.lock`; that is the change, not a check | **real, read-only, exactly one scenario**: "The repository's own vendored `tdd` schema loads" reads `openspec/schemas/tdd/schema.yaml` through `env!("CARGO_MANIFEST_DIR")` — never through the process working directory, which a test runner may change |
 | Process environment | not manipulated. No check strips `PATH`; unlike `repo-resolution`, nothing here reads an environment variable | **not used at all.** No function in this change takes an environment lookup, because none needs one — the repository root arrives as an argument from `resolve::find_repo` |
 | `std::env::var` | not reached | not reached. `config::env_lookup` is untouched |
 | `std::env::temp_dir()` | **real, read-only** — the leak check scans it for `herdr-openspec-test-` directories | real, and read-only. It is where `ScratchDir` puts every fixture |
@@ -284,14 +332,14 @@ one.
 
 Tiers, fastest first:
 
-- **unit** — `cargo test --all-features schema::`, functions in `src/schema.rs`. **41 of the
-  47 scenarios live here**, and 30 of those reach no filesystem at all: `schema_key`,
+- **unit** — `cargo test --all-features schema::`, functions in `src/schema.rs`. **44 of the
+  50 scenarios live here**, and 32 of those reach no filesystem at all: `schema_key`,
   `is_legal_name`, `declared_name`, and `parse` are pure functions over `&str` and
   `FileText` values.
 - **command check** — a shell command run once, its exit status inspected, recorded as a
   task. **Six scenarios:** `plugin-build`'s five, which are facts about the build graph
-  rather than about running code, and "The schema module names no process API", which is a
-  fact about the source text.
+  and the build script rather than about running code, and "The schema module names no
+  process API", which is a fact about the source text.
 
 **This change does not take the outer-loop acceptance test.** Its outermost surface is a
 library API. `src/main.rs` is untouched, the binary's observable behaviour is still the `ui`
@@ -300,8 +348,10 @@ would have to drive an entry point that ships to nobody — the same argument `p
 and `repo-resolution` made, for the same reason. The unit tier reaches every collaborator
 these functions have: a real filesystem for three files, and a real YAML parser.
 
-Shorthand used below. Every command is written for BSD userland and every one has been run,
-with a negative control, before being written here.
+Shorthand used below. Every command is written for BSD userland, and **every one was run on
+this machine with a negative control** before being written here — the control is named under
+each block. Nothing is described in prose that a task is expected to spell out itself: the
+one check in `repo-resolution` that went wrong did so in its spelling, not its intent.
 
 ```sh
 # DEPS — the declared normal dependency set and each crate's resolved features.
@@ -323,65 +373,179 @@ for name, d in normal.items():
 # Verified: exit 0 against a probe crate declaring both; exit 1 with
 # "unexpected normal deps: ['toml']" against this crate at HEAD, and still exit 1 under
 # PYTHONOPTIMIZE=1.
-
-# GRAPH — the resolved normal build graph, package for package.
-GRAPH_WANT='arraydeque foldhash hashbrown hashlink serde_core serde_spanned toml toml_datetime toml_parser toml_writer winnow yaml-rust2'
-got=$(cargo tree -e normal --prefix none | awk 'NF {print $1}' | grep -vx 'herdr-openspec' | sort -u | tr '\n' ' ' | sed 's/ $//')
-[ "$got" = "$GRAPH_WANT" ] || { echo "graph mismatch: [$got]" >&2; exit 1; }
-# `awk 'NF {print $1}'` rather than `cut`, because cargo indents nothing under --prefix none
-# but does emit a trailing blank line. `grep -vx` on the root name so a rename fails the
-# check rather than silently passing. Verified: matches against a probe crate declaring both
-# dependencies, and mismatches with [serde_core serde_spanned toml ...] against this crate
-# at HEAD.
-
-# MSRV — every package in the NORMAL graph, not every package cargo metadata resolves.
-# The intersection is load-bearing: `cargo metadata` also reports syn, serde_derive and
-# indexmap, which cargo never builds here.
-MSRV='import json, subprocess, sys
-FLOOR = (1, 85, 0)
-def v(s):
-    parts = [int(x) for x in s.split(".")]
-    while len(parts) < 3: parts.append(0)
-    return tuple(parts[:3])
-tree = subprocess.run(["cargo", "tree", "-e", "normal", "--prefix", "none"],
-                      capture_output=True, text=True)
-if tree.returncode != 0:
-    sys.exit("cargo tree failed: " + tree.stderr.strip())
-names = {l.split()[0] for l in tree.stdout.splitlines() if l.strip()}
-if len(names) < 2:
-    sys.exit("cargo tree produced no dependencies; refusing to pass vacuously")
-meta = json.loads(subprocess.run(["cargo", "metadata", "--format-version", "1"],
-                                 capture_output=True, text=True, check=True).stdout)
-checked = 0
-for p in meta["packages"]:
-    if p["name"] not in names or p.get("rust_version") is None: continue
-    checked += 1
-    if v(p["rust_version"]) > FLOOR:
-        sys.exit("%s %s declares rust-version %s > 1.85" % (p["name"], p["version"], p["rust_version"]))
-if checked == 0:
-    sys.exit("no package in the normal graph declared a rust-version; check is vacuous")
-print("msrv ok: %d normal-graph packages declare an MSRV, none above 1.85" % checked)'
-# Run: python3 -c "$MSRV"
-# Verified: prints "msrv ok: 12 ..." and exits 0 against the probe crate; with FLOOR lowered
-# to (1,60,0) it exits 1 naming "hashbrown 0.17.1 declares rust-version 1.85.0 > 1.85". The
-# two vacuity guards exist because both inputs can legitimately come back empty.
+#
+# `cargo metadata` cannot distinguish `features = []` from an omitted `features` key — both
+# report `[]` — so the delta spec's "written out on the face of the manifest" clause is
+# checked by reading Cargo.toml, not by this filter. Stated so nobody believes DEPS covers it.
 ```
 
-The spawn check is written outside a table cell because `|` cannot appear unescaped in a
-Markdown table and an escaped `\|` inside an ERE matches a *literal* pipe, so the check
-would pass against the very code it is meant to catch.
+```sh
+# GRAPH — the resolved normal build graph, package for package, on each supported triple.
+#
+# NOT `cargo tree --target all`: verified that on this graph it additionally lists syn,
+# quote, proc-macro2, serde_derive and unicode-ident, reached through serde_core's optional
+# `derive` feature, none of which is ever built. An exact-list check against that output
+# would be unsatisfiable. `--target <triple>` needs no installed std; it is a resolution.
+#
+# `if grep ...; then exit 1; fi` rather than `! grep ...` throughout: POSIX says `set -e`
+# ignores a command prefixed with `!`, so a sequence of bare `! grep` lines lets an early
+# violation be masked by a later line succeeding (verified: exit 0 with a planted spawn).
+GRAPH_WANT='arraydeque foldhash hashbrown hashlink serde_core serde_spanned toml toml_datetime toml_parser toml_writer winnow yaml-rust2'
+for t in aarch64-apple-darwin x86_64-apple-darwin \
+         aarch64-unknown-linux-gnu x86_64-unknown-linux-gnu; do
+  out=$(cargo tree -e normal --target "$t" --prefix none) \
+    || { echo "FAIL: cargo tree failed for $t" >&2; exit 1; }
+  got=$(printf '%s\n' "$out" | awk 'NF {print $1}' | grep -vx 'herdr-openspec' \
+        | sort -u | tr '\n' ' ' | sed 's/ $//')
+  [ -n "$got" ] || { echo "FAIL: empty graph for $t; refusing to pass vacuously" >&2; exit 1; }
+  [ "$got" = "$GRAPH_WANT" ] || { echo "FAIL: $t graph mismatch: [$got]" >&2; exit 1; }
+  if printf '%s\n' "$out" | awk 'NF {print $1}' \
+     | grep -qxE 'syn|quote|proc-macro2|serde_derive|encoding_rs'; then
+    echo "FAIL: $t graph contains a proc macro or encoding_rs" >&2; exit 1
+  fi
+done
+echo "graph ok: identical on all four supported triples, no proc macro, no encoding_rs"
+# `grep -qxE` matches the whole field, so a future package whose name merely *contains* one
+# of these strings is not a false failure. `grep -vx 'herdr-openspec'` on the root name means
+# a package rename fails the check rather than silently passing.
+# Verified: exit 0 against a probe crate carrying both dependencies, identical on all four
+# triples; exit 1 naming the mismatch against this crate at HEAD. A probe carrying a
+# `[target."cfg(windows)".dependencies] thiserror` entry still passes — correctly, because
+# the manifest declares `platforms = ["macos", "linux"]` and that dependency is in no
+# supported build. That is the exact edge of this check and it is stated rather than implied.
+```
+
+```sh
+# MSRV — every package in the NORMAL graph on the supported triples, against the floor read
+# from Cargo.toml rather than from a second literal copy of it. The scenario is a claim about
+# the relationship between two values; a hardcoded floor only ever reads one of them.
+MSRV='import json, subprocess, sys
+TARGETS = ["aarch64-apple-darwin", "x86_64-apple-darwin",
+           "aarch64-unknown-linux-gnu", "x86_64-unknown-linux-gnu"]
+def v(s):
+    p = [int(x) for x in s.split(".")]
+    while len(p) < 3: p.append(0)
+    return tuple(p[:3])
+meta = json.loads(subprocess.run(["cargo", "metadata", "--format-version", "1"],
+                                 capture_output=True, text=True, check=True).stdout)
+root = json.loads(subprocess.run(["cargo", "metadata", "--no-deps", "--format-version", "1"],
+                                 capture_output=True, text=True, check=True).stdout)["packages"][0]
+if not root.get("rust_version"):
+    sys.exit("root package declares no rust-version; the floor is undefined")
+FLOOR = v(root["rust_version"])
+keys = set()
+for t in TARGETS:
+    r = subprocess.run(["cargo", "tree", "-e", "normal", "--target", t, "--prefix", "none"],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        sys.exit("cargo tree failed for %s: %s" % (t, r.stderr.strip()))
+    for line in r.stdout.splitlines():
+        f = line.split()
+        if len(f) >= 2: keys.add((f[0], f[1].lstrip("v")))
+if len(keys) < 2:
+    sys.exit("cargo tree produced no dependencies; refusing to pass vacuously")
+checked, at_floor = 0, []
+for p in meta["packages"]:
+    if (p["name"], p["version"]) not in keys or p.get("rust_version") is None: continue
+    checked += 1
+    if v(p["rust_version"]) > FLOOR:
+        sys.exit("%s %s declares rust-version %s > %s"
+                 % (p["name"], p["version"], p["rust_version"], root["rust_version"]))
+    if v(p["rust_version"]) == FLOOR: at_floor.append(p["name"])
+if checked == 0:
+    sys.exit("no package in the normal graph declared a rust-version; check is vacuous")
+print("msrv ok: floor %s from Cargo.toml; %d normal-graph packages declare an MSRV; "
+      "at the floor: %s" % (root["rust_version"], checked, sorted(at_floor)))'
+# Run: python3 -c "$MSRV"
+# Matching on (name, version) rather than on name alone: a dev- or build-dependency can
+# resolve a second version of a normal-graph package, whose MSRV would otherwise be checked
+# as though it were in the build. The two vacuity guards exist because both inputs can come
+# back empty. The failure message formats the floor rather than hardcoding it, so a negative
+# control reads correctly.
+# Verified: prints "msrv ok: floor 1.85 from Cargo.toml; 12 normal-graph packages declare an
+# MSRV; at the floor: ['hashbrown', 'hashlink', 'serde_spanned', 'toml', 'toml_datetime',
+# 'toml_parser', 'toml_writer', 'yaml-rust2', 'herdr-openspec']" against the probe crate; with
+# the floor forced to 1.60 it exits 1 naming "hashbrown 0.17.1 declares rust-version 1.85.0
+# > 1.60". Note nine packages tie at 1.85 — yaml-rust2 is not uniquely the tightest, which
+# is why the spec scenario reports the set rather than naming one crate.
+```
+
+```sh
+# BUILD — one bin target, and a build script that actually ran.
+cargo metadata --no-deps --format-version 1 | python3 -c 'import json, sys
+p = json.load(sys.stdin)["packages"][0]
+bins = sorted(t["name"] for t in p["targets"] if "bin" in t["kind"])
+if bins != ["herdr-openspec"]: sys.exit("bin targets: %r" % (bins,))'
+rm -f target/release/herdr-openspec
+/bin/sh scripts/build.sh || { echo "FAIL: scripts/build.sh exited non-zero" >&2; exit 1; }
+[ -x target/release/herdr-openspec ] \
+  || { echo "FAIL: binary missing or not executable after build" >&2; exit 1; }
+# The `rm -f` is what turns this from an observation into a check: the binary survives from
+# any earlier build or `make build`, so without it the existence assertion is satisfied by a
+# leftover regardless of what the script did — and scripts/build.sh has a real failure path
+# ("error: cargo not found", exit 1) that an existence-only check sails past.
+```
+
+```sh
+# NEEDED — each dependency is load-bearing. Runs entirely in a throwaway copy.
+#
+# `cargo build` REWRITES Cargo.lock during resolution, BEFORE it reaches the compile error
+# this check waits for: verified that removing `toml` deletes fourteen package blocks from
+# the lock. An in-tree edit-and-restore of Cargo.toml alone therefore leaves the tree
+# unbuildable under `--locked` and silently discards the resolution this change verified, and
+# an interrupt between the edit and the restore leaves it broken with no recovery step.
+R=$(pwd)
+P=$(mktemp -d)/needed; mkdir -p "$P"
+cp -R "$R/src" "$R/tests" "$P/"
+cp "$R/Cargo.toml" "$R/Cargo.lock" "$R/rustfmt.toml" "$P/"
+cd "$P"; fail=0
+for dep in toml yaml-rust2; do
+  cp "$R/Cargo.toml" Cargo.toml
+  grep -q "^$dep = " Cargo.toml \
+    || { echo "FAIL: $dep is not declared; nothing to remove" >&2; fail=1; continue; }
+  grep -v "^$dep = " Cargo.toml > Cargo.toml.tmp && mv Cargo.toml.tmp Cargo.toml
+  if cargo build >/dev/null 2>&1; then
+    echo "FAIL: the crate still builds without $dep" >&2; fail=1
+  else
+    echo "ok: removing $dep breaks the build"
+  fi
+done
+cd "$R"; rm -rf "$(dirname "$P")"
+[ "$fail" = 0 ] || exit 1
+# The `grep -q "^$dep = "` precondition is what stops the second leg passing for the wrong
+# reason: without it, a manifest that never carried yaml-rust2 makes the removal a no-op and
+# the build fails anyway, and the check records a pass for a step it never performed.
+# Verified against this crate at HEAD: "ok: removing toml breaks the build", then
+# "FAIL: yaml-rust2 is not declared; nothing to remove", exit 1, with `git status --short`
+# still empty afterwards.
+```
 
 ```sh
 # SPAWN — no spawn API anywhere in the tree, and no process API at all in the new module.
 # `std::process` alone is NOT usable tree-wide: src/lib.rs legitimately calls
 # std::process::id and src/main.rs calls std::process::exit, neither of which is a spawn.
-! grep -rnE 'process::Command|Command::new|Stdio' src/
-[ -f src/schema.rs ] && ! grep -nE 'std::process|Command|Stdio' src/schema.rs
-# The `[ -f ... ]` guard is load-bearing: grep exits 2 for a missing file and `!` turns that
-# into a pass, so a renamed or split module would silently stop being checked. Verified
-# three ways on this tree: the tree-wide form is clean at HEAD; both forms fire on a planted
-# `use std::process::Command;` in a copy of src/; and the module-scoped form correctly FAILS
-# today, because src/schema.rs does not exist yet.
+#
+# Positive controls come FIRST, because a grep that cannot see the tree exits 0 under `!`
+# and reports clean forever. Verified with the real BSD grep: from a directory with no src/,
+# `! grep -rnE ... src/` prints "No such file or directory" and exits 0.
+[ -d src ] || { echo "FAIL: src/ missing; the tree-wide grep would pass vacuously" >&2; exit 1; }
+grep -q 'pub mod schema' src/lib.rs \
+  || { echo "FAIL: positive control - grep cannot see src/lib.rs" >&2; exit 1; }
+[ -f src/schema.rs ] \
+  || { echo "FAIL: src/schema.rs missing; module check would pass vacuously" >&2; exit 1; }
+if grep -rnE 'process::Command|Command::new|Stdio' src/; then
+  echo "FAIL: a spawn API appears somewhere under src/" >&2; exit 1
+fi
+if grep -nE 'std::process|Command|Stdio' src/schema.rs; then
+  echo "FAIL: a process API appears in src/schema.rs" >&2; exit 1
+fi
+echo "spawn ok: no spawn API under src/, no process API in src/schema.rs"
+# Written as `if grep ...; then exit 1; fi`, never `! grep ...`: `set -e` is defined to ignore
+# a `!`-prefixed command, so two bare `! grep` lines let a tree-wide violation be masked by a
+# clean module (verified: exit 0 with a planted spawn in src/state.rs and a clean schema.rs).
+# Verified five ways: fails at HEAD (no src/schema.rs); passes on a simulated post-change
+# tree; fails on a plant in src/schema.rs; fails on a plant in src/state.rs with schema.rs
+# clean; fails when run from a directory with no src/.
 #
 # The tree-wide half is a TASK-level check, not a frozen requirement — `subprocess-seam`
 # creates `src/cli.rs` containing exactly these APIs and must rescope it. Only the
@@ -402,6 +566,16 @@ the *source text* — it would not catch a spawn reached through a dependency, w
 plus a module that takes no environment lookup and no injected collaborator are the
 argument. Stated here so no later change inherits a stronger claim than was made.
 
+**And none of the six is a standing gate.** `make check` is `fmt-check lint test coverage`,
+and CI runs exactly those four; `DEPS`, `GRAPH`, `MSRV`, `BUILD`, `NEEDED`, and `SPAWN` run
+once each, as tasks, at the commit that lands this change. What pins the resolution
+afterwards is the committed `Cargo.lock`, not a check. So a later `cargo update` that raises
+an MSRV or drags in a proc macro fails **nothing** until someone re-runs these blocks — which
+is why the Risks section says the resolution point is "the next change that alters the
+dependency set", and does not claim a gate fires on its own. Wiring them into `make check`
+would make that claim true and is deliberately out of scope here: it changes the
+`quality-gates` capability, which this change otherwise leaves alone.
+
 There is deliberately **no `NOTOOLS`/`NOSPAWN-RUN` PATH-stripping run** in this change.
 `repo-resolution` needed one because its subject was `PATH` itself; nothing here reads an
 environment variable, so stripping the environment would prove nothing that the two checks
@@ -412,34 +586,36 @@ colon, `env PATH=… cargo` hiding cargo itself — are cost with no matching ev
 |---|---|---|---|---|
 | A change's own declaration wins over the project's | `declared_name` over two `FileText::Read` values; assert `Selection { name: "tdd", source: Change, problems: [] }`, then re-run with `change: None` and assert `Project`/`spec-driven`, so precedence is what is under test | unit | pure — no filesystem | `cargo test --all-features schema::` |
 | The project declaration answers when the change declares nothing | `declared_name(Some((path, &Absent)), (path, &Read(...)))`; assert `Project` | unit | pure | `cargo test --all-features schema::` |
-| Nothing declared anywhere yields the default | Both `Absent`; assert `spec-driven`, `Default`, and `problems.is_empty()` — the empty-problems clause is what rejects an implementation that records a fallback for a file that never existed | unit | pure | `cargo test --all-features schema::` |
-| No change directory is supplied at all | `select` against a scratch repository, `change_dir: None`, with a `.openspec.yaml` planted **beside the repository root**; assert `Project` and that the planted file was not consulted | unit | real scratch filesystem | `cargo test --all-features schema::` |
+| Nothing declared anywhere yields the default | Both `Absent`; assert `spec-driven`, `Default`, and `problems.is_empty()` — the empty-problems clause is what rejects an implementation that records a fallback for a file that never existed. A second run in the same test drives `select` against a scratch directory holding no `openspec/` at all | unit | pure, plus one real scratch directory for the no-`openspec/` half | `cargo test --all-features schema::` |
+| A file that declares other keys but no `schema:` records no problem | `schema_key` over a mapping carrying `context:` and `rules:` and no `schema:`, and over a `.openspec.yaml` carrying only `created:`; assert `Ok(None)` for both, then `declared_name` over the pair and assert `Default` with `problems.is_empty()`. **The load-bearing case:** an absent key is `Yaml::BadValue`, whose `as_str()` is `None` — the same observable as `schema: [a]`, which must record a problem. An implementation keyed on `as_str().is_none()` rather than on `is_badvalue()` fails here and nowhere else | unit | pure | `cargo test --all-features schema::` |
+| A fallback at both sources records both problems, in order | `.openspec.yaml` blank and `openspec/config.yaml` carrying a mapping-valued `schema:`; assert `Default`, `problems.len() == 2`, the first naming `.openspec.yaml` and the second naming `config.yaml`. The only scenario where both sources fail at once, and the only one that rejects a first-wins, last-wins, or `Option<String>` implementation | unit | pure | `cargo test --all-features schema::` |
+| No change directory is supplied at all | `select(repo, None)` against `<scratch>/repo` whose `openspec/config.yaml` says `schema: tdd`, with `schema: planted` written to **both** `<scratch>/repo/.openspec.yaml` (what a `change_dir = repo` bug reads) and `<scratch>/.openspec.yaml` (what a `change_dir = repo.parent()` bug reads); assert the name is `tdd` and never `planted`. Both the distinct third name and the in-repo plant are load-bearing: a planted file agreeing with the project's, or planted only outside the scratch tree, is green against every implementation. Both plants sit inside the `ScratchDir`, so drop still removes them | unit | real scratch filesystem | `cargo test --all-features schema::` |
 | A blank declaration is not a declaration | `schema: "   "` and, in the same test, `schema: ""`; assert `Project`/`tdd` and exactly one problem naming `.openspec.yaml` for each | unit | pure | `cargo test --all-features schema::` |
 | A declaration of the wrong type is not a declaration | Four values in one test — a nested mapping, a sequence, `null`, and a top-level scalar document; each asserts `Default` and exactly one problem. An implementation that string-formats any YAML node returns `{...}` as a name and fails | unit | pure | `cargo test --all-features schema::` |
 | A file that is not valid YAML falls through and is named | `.openspec.yaml` indented with a tab; assert `Project`/`tdd`, one problem naming the file, and that the problem text contains the parser's own message rather than a generic string | unit | pure | `cargo test --all-features schema::` |
 | An unreadable file falls through and is named | `select` against a scratch repository whose `openspec/config.yaml` is a **directory**; assert `Default`, one problem naming the path, and no panic | unit | real scratch filesystem | `cargo test --all-features schema::` |
 | An empty or comment-only document declares nothing without complaint | `""` and `"# nothing\n"` in one test; assert `Default` and `problems.is_empty()` for both. `yaml-rust2` returns **zero documents** for each, so an implementation indexing `[0]` panics here | unit | pure | `cargo test --all-features schema::` |
 | Only the first YAML document is consulted | Two `---`-separated documents declaring `tdd` then `other`; assert `tdd` and no problem | unit | pure | `cargo test --all-features schema::` |
-| A name containing a path separator is rejected and falls through | `schema: ../../etc` in the change file, `schema: tdd` in the project file; assert `Project`/`tdd` and one problem containing `../../etc` | unit | pure | `cargo test --all-features schema::` |
-| Every rejected shape is rejected, and a legal name with a dot is not | Six values in one test — `..`, `.`, `a/b`, `/abs`, one containing `\0`, and `v1.2-tdd`; assert `Default` plus one problem for the first five and acceptance for the sixth. Without the sixth, `is_legal_name` returning `false` unconditionally passes | unit | pure | `cargo test --all-features schema::` |
+| A name containing a path separator is rejected and falls through | `schema: ../../etc` in the change file, `schema: tdd` in the project file; assert `Project`/`tdd` and one problem containing `../../etc`. No clause asserts "nothing outside the repository was read": the API cannot observe it, and a clause that restates the previous THEN is the shape `repo-resolution`'s review removed three of | unit | pure | `cargo test --all-features schema::` |
+| Every rejected shape is rejected, and a legal name with a dot is not | Six values in one test — `..`, `.`, `a/b`, `a\b`, `/abs`, one containing NUL, and `v1.2-tdd`; assert `Default` plus one problem for the first six and acceptance for the seventh. The NUL fixture's YAML source must be `schema: "a\0b"` — the double-quoted escape, i.e. the Rust literal `"schema: \"a\\0b\"\n"` — because a literal NUL in a plain scalar is silently truncated to the legal name `a` (verified) and the test then goes red for a reason unrelated to `is_legal_name`. Without the seventh value, `is_legal_name` returning `false` unconditionally passes | unit | pure | `cargo test --all-features schema::` |
 | An illegal project name still falls through to the default | `schema: ../escape` in the project file only; assert `Default` and one problem | unit | pure | `cargo test --all-features schema::` |
 | A repository tree is byte-identical after selection | Snapshot paths **including directories**, bytes, and mtimes of a scratch repository through `testutil::snapshot`; run `select` twice; assert snapshot equality | unit | real scratch filesystem | `cargo test --all-features schema::` |
 | A missing configuration file is not created | `select` against a repository with `openspec/` but no `config.yaml`, and a change directory that does not exist; assert neither exists afterwards and the result is `Default` | unit | real scratch filesystem | `cargo test --all-features schema::` |
-| The repository's own vendored `tdd` schema loads | `load(Path::new(env!("CARGO_MANIFEST_DIR")), "tdd")`; assert name `tdd`, first artifact id `proposal`, an artifact `tasks`/`tasks.md`, an artifact `specs` whose `generates` is the glob verbatim, and no problem. Asserts stable properties only, never the exact list, because the file is graft-vendored and may gain an artifact | unit | **real repository tree, read-only** | `cargo test --all-features schema::` |
-| Artifact order is the file's order, not alphabetical | `parse` a fixture listing `zeta`, `alpha`, `middle`; assert exactly that order. A sorted implementation returns `alpha` first and a reversed one returns `middle` first — a two-artifact fixture distinguishes neither | unit | pure | `cargo test --all-features schema::` |
-| A schema that is not vendored is reported as such and not as broken | `load` a scratch repository holding only `openspec/schemas/tdd/`, asking for `spec-driven`; assert `Err(LoadError::NotVendored { path })` by **variant**, and that the path names `openspec/schemas/spec-driven/schema.yaml` | unit | real scratch filesystem | `cargo test --all-features schema::` |
+| The repository's own vendored `tdd` schema loads | `load(Path::new(env!("CARGO_MANIFEST_DIR")), "tdd")`; assert the artifact ids are **exactly** `[proposal, specs, design, tasks, planning-review]` in order, the name is `tdd`, `tasks` is selected via the file's real `apply.tracks`, `specs`'s `generates` is the glob verbatim, and `problems.is_empty()`. The exact list rather than a containment check: a parser that loses `design` or `planning-review` — the two longest `instruction:` block scalars, and exactly what a block-scalar defect would eat — satisfies every "contains" clause. `CARGO_MANIFEST_DIR`, never the process working directory | unit | **real repository tree, read-only** | `cargo test --all-features schema::` |
+| Artifact order is the file's order, not alphabetical | `parse` a fixture listing `zeta` (`requires: [middle]`), `alpha` (`requires: [zeta]`), `middle`, and a fourth entry repeating the id `zeta`; assert exactly those four in file order. The edges and the repeat are load-bearing: the requirement forbids sorting, de-duplicating, **and** re-ordering by `requires`, and a fixture with no edges and no repeat is green against a topological sort and against an insertion-ordered de-duplicating map | unit | pure | `cargo test --all-features schema::` |
+| A schema that is not vendored is reported as such and not as broken | `load` a scratch repository holding only `openspec/schemas/tdd/`, asking for `spec-driven`; assert `Err(LoadError::NotVendored { path })` by **variant**, and that the path names `openspec/schemas/spec-driven/schema.yaml`; then, in the same test, `resolve(...)` and assert `problems.len() == 1` naming that path, since `LoadError` carries no `problems` and only the composition renders one. A third run against a repository with no `openspec/schemas/` directory at all asserts the same variant | unit | real scratch filesystem | `cargo test --all-features schema::` |
 | A schema directory with no `schema.yaml` is not vendored | `openspec/schemas/half/` created empty; assert `NotVendored`, not `Unreadable` | unit | real scratch filesystem | `cargo test --all-features schema::` |
-| A `schema.yaml` that cannot be read is reported as unreadable | `openspec/schemas/odd/schema.yaml` created as a **directory**; assert `Unreadable` carrying the I/O message, and no panic. This is the scenario that separates `NotVendored` from `Unreadable`, which a `Path::exists()`-based implementation conflates | unit | real scratch filesystem | `cargo test --all-features schema::` |
-| The directory name and the file's `name:` key disagreeing is recorded | `openspec/schemas/renamed/schema.yaml` declaring `name: original`; assert `Schema::name == "renamed"` and exactly one problem containing both words | unit | real scratch filesystem | `cargo test --all-features schema::` |
+| A `schema.yaml` that cannot be read is reported as unreadable | `openspec/schemas/odd/schema.yaml` created as a **directory**; assert `Unreadable` carrying the I/O message, then `resolve(...).problems.len() == 1` naming the path, and no panic. This is the scenario that separates `NotVendored` from `Unreadable`, which a `Path::exists()`-based implementation conflates | unit | real scratch filesystem | `cargo test --all-features schema::` |
+| The directory name and the file's `name:` key disagreeing is recorded | `openspec/schemas/renamed/schema.yaml` declaring `name: original`; assert `Schema::name == "renamed"` and exactly one problem containing both words; then, in the same test, three more fixtures — no `name:` key, a blank `name:`, and a mapping-valued `name:` — each loading with the directory's name and **no** problem. Without those three, an implementation comparing `dir != doc["name"].as_str().unwrap_or("")` passes here and turns every other fixture in the change red, since almost all of them omit `name:` | unit | real scratch filesystem | `cargo test --all-features schema::` |
 | Only the first YAML document of the schema file is used | Two `---`-separated schema documents; assert the artifact list is exactly the first document's | unit | pure | `cargo test --all-features schema::` |
 | `apply.tracks` selects an artifact whose id is not `tasks` | Fixture with `checklist`/`tasks.md` and `tasks`/`notes.md`, `apply.tracks: tasks.md`; assert `tasks == Some(checklist)` **and** `!= Some(tasks)`. This is the headline scenario: an id-first implementation — which is what `SPEC.md` as written would have produced — fails it | unit | pure | `cargo test --all-features schema::` |
 | An absent `apply` block falls back to the artifact with id `tasks` | Fixture with `proposal`/`proposal.md` and `tasks`/`checklist.md`, no `apply:`; assert `tasks` is selected and its `generates` is `checklist.md`, so the assertion is on the whole artifact and not on a name that both rules would produce | unit | pure | `cargo test --all-features schema::` |
-| An `apply` block without `tracks`, and an explicit `tracks: null`, both fall back to the id | Two fixtures asserted in one test. They differ in the parse tree — `BadValue` versus `Null` — and an implementation branching on key presence rather than on `is_null()` behaves differently for them | unit | pure | `cargo test --all-features schema::` |
+| An `apply` block without `tracks`, and an explicit `tracks: null`, both fall back to the id | Two fixtures asserted in one test. They differ in the parse tree — `BadValue` versus `Null` — and an implementation branching on key presence rather than on "absent or null" behaves differently for them. A third fixture in the same test makes `apply:` itself a bare scalar and asserts the id fallback with no panic, which is the indexing-a-non-mapping failure reached from the other direction | unit | pure | `cargo test --all-features schema::` |
 | A `tracks` value matching nothing yields no tasks artifact even when an id `tasks` exists | Fixture with `tasks`/`tasks.md` and `design`/`design.md`, `apply.tracks: nowhere.md`; assert `tasks.is_none()` and one problem naming `nowhere.md`. An implementation that falls back to the id on a miss returns `Some(tasks)` — and that fallback is exactly what the CLI's `find` does not do | unit | pure | `cargo test --all-features schema::` |
 | A schema with neither a `tracks` match nor an id `tasks` loads without one | Fixture with only `proposal` and `design`; assert the schema loads with both artifacts, `tasks.is_none()`, and one problem. An implementation returning `Err` here fails closed | unit | pure | `cargo test --all-features schema::` |
 | `tracks` matches on `generates`, not on a filename suffix | Fixture with `a`/`sub/tasks.md` and `b`/`tasks.md`, `apply.tracks: tasks.md`; assert `b`. An implementation comparing `Path::file_name` returns `a`, which is first in the list | unit | pure | `cargo test --all-features schema::` |
 | A `tracks` value of the wrong type falls back to the id | `apply.tracks` as a sequence, with an id `tasks` present; assert `tasks` selected and one problem naming the key | unit | pure | `cargo test --all-features schema::` |
-| Entries missing `id` or `generates` are skipped and the rest survive | Four-entry fixture; assert the list is exactly `proposal`, `tasks`, exactly two problems naming positions 1 and 2, and that the tasks artifact is still found | unit | pure | `cargo test --all-features schema::` |
+| Entries missing `id` or `generates` are skipped and the rest survive | Four-entry fixture; assert the list is exactly `proposal`, `tasks` and exactly two problems naming positions 1 and 2. Deliberately **no** `Schema::tasks` clause: the tasks rule is group 5's, and this scenario lands in group 4 | unit | pure | `cargo test --all-features schema::` |
 | A blank `id` or `generates` is skipped like an absent one | `id: "  "` and `generates: ""` alongside one valid artifact; assert one artifact and two problems | unit | pure | `cargo test --all-features schema::` |
 | An entry that is not a mapping is skipped | A bare string and a nested sequence in `artifacts:`; assert one artifact, two problems, no panic | unit | pure | `cargo test --all-features schema::` |
 | A `generates` that escapes the change directory is skipped | `../outside.md`, `/etc/passwd`, `a/../../b.md` rejected; `specs/**/*.md` and `sub/dir/file.md` accepted, all in one test. Without the accepted pair, a predicate rejecting every value containing `/` or `.` passes | unit | pure | `cargo test --all-features schema::` |
@@ -448,15 +624,16 @@ colon, `env PATH=… cargo` hiding cargo itself — are cost with no matching ev
 | Invalid YAML is reported with the parser's own message | Tab-indented schema file; assert `Invalid` naming the path, the problem carrying the parser message, and no panic | unit | pure for `parse`; real scratch filesystem for the `LoadError` mapping | `cargo test --all-features schema::` |
 | An empty, comment-only, or non-mapping document is invalid | Four inputs in one test — empty, comment-only, `just text`, and a top-level sequence; assert `Err` for each and no panic. The first two return **zero documents** from `yaml-rust2`, so an implementation indexing `[0]` panics | unit | pure | `cargo test --all-features schema::` |
 | An absent, non-sequence, or empty `artifacts:` key is invalid | Three inputs in one test — no key, `artifacts: nope`, `artifacts: []`; assert `Err` for each, with the empty-sequence case asserted explicitly | unit | pure | `cargo test --all-features schema::` |
-| Flow style, anchors, and CRLF all parse | Three inputs in one test; assert two ordered artifacts and `tasks` for the flow-style one, the aliased artifact for the anchor one, and byte-for-byte equal results for the `\r\n` and `\n` forms. **This is the scenario that distinguishes a YAML parser from a line scanner**, and it is the test that fails if the dependency is ever replaced with a hand-rolled subset | unit | pure | `cargo test --all-features schema::` |
-| A schema file whose block scalars mimic structure still parses correctly | Fixture whose `apply.instruction: \|` block contains `- id: fake`, `generates: fake.md`, and `tracks: fake.md` at the same column an artifact's keys use; assert exactly the two real artifacts and the real tracks target. Modelled on the vendored `tdd` schema, whose `apply.instruction` content genuinely sits at that column | unit | pure | `cargo test --all-features schema::` |
+| Flow style, anchors, and CRLF all parse | Three inputs in one test; assert two ordered artifacts for the flow-style one, the aliased artifact for the anchor one, and equal `Schema` values for the `\r\n` and `\n` forms; group 5 extends this test with the `Schema::tasks` assertion once the rule exists. **This is the scenario that distinguishes a YAML parser from a line scanner**, and it is the test that fails if the dependency is ever replaced with a hand-rolled subset | unit | pure | `cargo test --all-features schema::` |
+| A schema file whose block scalars mimic structure still parses correctly | Fixture whose `apply.instruction: \|` block contains `- id: fake`, `generates: fake.md`, and `tracks: fake.md` at the same column an artifact's keys use; assert exactly the two real artifacts with no `fake` entry. Modelled on the vendored `tdd` schema, whose `apply.instruction` content genuinely sits at that column. The other half of this scenario — that the *tracks target* comes from the real `apply.tracks` and not from the one inside the block scalar — is asserted in group 5, where the rule exists; group 4 can only assert the artifact list | unit | pure | `cargo test --all-features schema::` |
+| A composed resolution carries the selection's problems as well as the load's | `resolve` against a scratch repository whose change `.openspec.yaml` is invalid YAML and whose `openspec/config.yaml` declares `schema: absent`; assert name `absent`, source `Project`, `Err(NotVendored)`, and `problems.len() == 2` with the selection's first. The only scenario where both halves contribute, and the one that rejects a composition rebuilding `problems` from the load step alone | unit | real scratch filesystem | `cargo test --all-features schema::` |
 | A repository tree is byte-identical after loading | Snapshot including directories, bytes, and mtimes; `resolve` twice, then once more naming a schema that is not vendored; assert equality after all three | unit | real scratch filesystem | `cargo test --all-features schema::` |
-| The schema module names no process API | The `SPAWN` block above, both halves | command check | real `grep` over `src/` | see `SPAWN` |
-| Exactly one binary target is produced at the release path | `cargo metadata --no-deps` for `bin` targets, then `/bin/sh scripts/build.sh` and a check that `target/release/herdr-openspec` exists and is executable. Carried unchanged from the live requirement and re-verified because the dependency set moved | command check | real `cargo`, real `sh` | `cargo metadata --no-deps --format-version 1`; `/bin/sh scripts/build.sh` |
-| The declared dependency set is exactly the argued crates | The `DEPS` filter | command check | real `cargo metadata`, real `python3` | `cargo metadata --no-deps --format-version 1 \| python3 -c "$DEPS"` |
-| Every package in the normal build graph declares an MSRV no higher than the crate's | The `MSRV` filter | command check | real `cargo tree`, `cargo metadata`, `python3` | `python3 -c "$MSRV"` |
-| The resolved build graph is small and proc-macro-free | The `GRAPH` block, plus an explicit `grep` for `syn`, `quote`, `proc-macro2`, `serde_derive`, and `encoding_rs` — kept even though the exact-list equality implies it, so a later relaxation of the list to a subset still catches a proc macro | command check | real `cargo tree` | see `GRAPH` |
-| Each dependency is genuinely needed rather than incidental | Remove `toml` from `Cargo.toml`, confirm `cargo build` fails; restore; remove `yaml-rust2`, confirm `cargo build` fails; restore both and confirm `cargo build --locked` and `cargo test --all-features` are green. Edits are made and reverted in the working tree with the file's content restored from `git show HEAD:Cargo.toml`, never with `git checkout` on a tree holding other uncommitted work | command check | real `cargo`, real `git` (read-only) | `cargo build` |
+| The schema module names no process API | The `SPAWN` block above, run as one script whose single exit status is inspected — positive controls first, `if grep` rather than `! grep` | command check | real `grep` over `src/` | see `SPAWN` |
+| Exactly one binary target is produced at the release path | The `BUILD` block above: the `bin`-target filter, then `rm -f` the binary, then `scripts/build.sh` asserted to **exit 0**, then the executable check. Carried from the live requirement and strengthened, because an existence-only check is satisfied by a leftover from any earlier build | command check | real `cargo`, real `sh`, writes only to the gitignored `target/` | see `BUILD` |
+| The declared dependency set is exactly the argued crates | The `DEPS` filter, plus a direct read of `Cargo.toml` for the `features = []` clause, which `cargo metadata` cannot distinguish from an omitted key | command check | real `cargo metadata`, real `python3`, `Cargo.toml` read as text | `cargo metadata --no-deps --format-version 1 \| python3 -c "$DEPS"` |
+| Every package in the normal build graph declares an MSRV no higher than the crate's | The `MSRV` block above: floor read from the root package's `rust-version`, `(name, version)` matching, four triples, two vacuity guards, and the set at the floor printed rather than a single crate named | command check | real `cargo tree`, `cargo metadata`, `python3` | `python3 -c "$MSRV"` |
+| The resolved build graph is small and proc-macro-free | The `GRAPH` block above, over all four supported triples, with the proc-macro/`encoding_rs` `grep -qxE` written into it — kept even though the exact-list equality implies it, so a later relaxation of the list to a subset still catches a proc macro | command check | real `cargo tree` | see `GRAPH` |
+| Each dependency is genuinely needed rather than incidental | The `NEEDED` block above, run entirely in a throwaway copy under `mktemp -d`. The working tree is never edited: `cargo build` rewrites `Cargo.lock` during resolution before it reaches the compile error, so an in-tree edit-and-restore of `Cargo.toml` alone leaves the tree unbuildable under `--locked`. The `grep -q` precondition on each leg stops a removal that is a no-op from being recorded as a pass | command check | real `cargo`; a copied crate under `std::env::temp_dir()`; the working tree read-only | see `NEEDED` |
 
 A caution about the Command column: `cargo test --all-features schema::` exits 0 when the
 filter matches nothing — a nonsense filter reports "0 passed … N filtered out" and returns
@@ -524,16 +701,48 @@ CLI error. A consumer distinguishing those by matching substrings in a problem s
 the first time the message is reworded. This is the same argument `resolve::BinSource` makes:
 the *reason* is part of the contract, not a debugging aid.
 
+**Does the plugin need to read `schema.yaml` at all?** The one alternative that removes the
+dependency entirely deserves a paragraph rather than a row in the Context table.
+`openspec status --change <n> --json` already returns `artifacts[]` with `id`, `outputPath`,
+`status` and `requires`, **in schema order** — the whole content of `Schema::artifacts` plus
+the tab order, per change, from a command `changes-from-cli` already plans to run. A plugin
+that only ever asked the CLI would need no YAML crate and no parser.
+
+Rejected, on `SPEC.md`'s dual-source model: "files paint the pane immediately, CLI results
+arrive asynchronously and correct them". The CLI is a Node binary costing 200–400ms per
+invocation and it does not exist as a collaborator until Phase 3, so a CLI-only schema means
+the pane opens with no tabs and no tasks tab until the first call returns — and shows nothing
+at all when `openspec` is not installed, which `SPEC.md` names as a supported state. The file
+tier is the one that must exist. What this does change is the *scope* of the CLI tier: it is
+not merely a fallback for a schema that is not vendored, it is also the corrector for one
+that is, and `changes-from-cli` gets both from the same call.
+
 **No injected hook for the CLI fallback, unlike `repo-resolution`'s step 4.** The asymmetry
 is deliberate and is worth stating so nobody reads it as an oversight. `repo-resolution`
 injected a `&dyn Fn() -> Option<PathBuf>` because `npm prefix -g` was **step 4 of an ordered
 chain**: without it, steps 1–3's ordering was the only thing ever exercised, and
 `subprocess-seam` would have had to re-derive where step 4 belonged. Here there is no chain.
 The disk tier either produces a schema or names one of three reasons, and the CLI tier is a
-strictly later consumer that will call `load` again against the directory
-`openspec schema which` reports. A hook would be a parameter with one production binding,
-one test binding, and no ordering to protect — ceremony rather than a seam. The obligation
-is instead handed over on the roadmap, where a `changes-from-cli` implementer will read it.
+strictly later consumer. A hook would be a parameter with one production binding, one test
+binding, and no ordering to protect — ceremony rather than a seam.
+
+But the fallback position that argument retreats to has to actually work, and the obvious
+version of it does not. `openspec schema which spec-driven --json` reports
+`/…/node_modules/@fission-ai/openspec/schemas/spec-driven` — an absolute directory **outside
+the repository**, with no `openspec/` segment — so a `load(repo, name)` that builds
+`<repo>/openspec/schemas/<name>/schema.yaml` cannot be pointed at it. Worse than a flat no:
+the `$XDG_DATA_HOME` tier *would* fit that signature and the package tier would not, so a
+Phase 3 implementer would get a function that silently covers one of the two CLI tiers.
+
+**So `load_dir(dir, name)` is the primitive and `load(repo, name)` is the convenience.**
+`load_dir` reads `<dir>/schema.yaml` for any schema directory — the repository's,
+`$XDG_DATA_HOME`'s, or the one the CLI reports — and `load` is one `join`. It costs no new
+scenario (every existing `load` scenario exercises it) and it means Phase 3 is a call rather
+than a re-derivation of the `NotFound → NotVendored` / `IsADirectory → Unreadable` /
+`parse-Err → Invalid` mapping, which is the natural property of this change. That is what
+makes the no-hook argument sound rather than merely cheap: the seam is the *signature*, not
+a closure. The obligation is also written onto the roadmap, where a `changes-from-cli`
+implementer will read it.
 
 **`select` and `load` are separate entry points, with `resolve` as the convenience.**
 `changes-from-files` iterates changes, and each change may declare its own schema. A single
@@ -598,22 +807,34 @@ class of bug, and a whole-value `assert_eq!` is what the scenarios want anyway.
   omits a scenario name the live spec still carries. Recorded in proposal.md so the shape is
   not mistaken for a retired capability; `plugin-build` keeps its two other requirements.
 - **`yaml-rust2`'s `rust-version` is `1.85.0` — exactly this crate's floor, and the tightest
-  in the graph.** A future `yaml-rust2` release that raises it breaks the crate's declared
-  MSRV silently, because cargo will happily resolve it. → The MSRV clause had prose and no
-  scenario; this change adds one, so the next bump fails a gate rather than a contributor's
-  build.
+  in the graph** — it ties with `hashbrown`, `hashlink`, `toml`, `toml_datetime`,
+  `toml_parser`, `toml_writer` and `serde_spanned`, all at `1.85`. A future release that
+  raises it breaks the crate's declared MSRV silently, because cargo will happily resolve it.
+  → Partially mitigated, and the limit is stated rather than overclaimed: the MSRV clause had
+  prose and no scenario and now has one, but **the check is not a standing gate**.
+  `make check` is `fmt-check lint test coverage` and CI runs exactly those; `MSRV` runs once,
+  in this change's task list. What pins the resolution afterwards is the committed
+  `Cargo.lock`. Resolution point: the next change that alters the dependency set re-runs the
+  blocks — and if that proves too weak in practice, the honest fix is a `deps-check` target
+  inside `make check`, which is a `quality-gates` change and not this one's.
 - **`yaml-rust2` is the stable-numbered sibling of `saphyr`, which the same maintainer
   positions as its successor.** → Both were released on the same day (2026-08-18), and
   `yaml-rust2` carries 14.6M recent downloads against `saphyr`'s 757k, so it is being
   released in lockstep rather than abandoned. `saphyr` is unusable here today regardless, on
   the proc-macro constraint. The migration cost if that changes is bounded by the decision
   above: no YAML type appears in any signature, so it is one module's body. Resolution point:
-  whenever `plugin-build`'s graph check fails after a `cargo update`.
+  the next change that alters the dependency set and re-runs `GRAPH` — not a `cargo update`,
+  which fires nothing, for the reason the bullet above states.
 - **`yaml-rust2` rejects duplicate mapping keys; the JavaScript `yaml` parser the CLI uses
   accepts them, last-wins.** A schema with a duplicated key therefore loads for the CLI and
   is `Invalid` for the plugin. → Accepted, and it is the safe direction: the plugin degrades
   visibly with the parser's message rather than silently picking a different value than the
-  CLI did. Recorded here so a future bug report is diagnosable rather than mysterious.
+  CLI did. The same `Err` fires on the two files a **user actually hand-edits** —
+  `openspec/config.yaml` (this repository's own is eighty-plus lines with nested block
+  scalars, which is exactly where a duplicated `rules:` or `context:` key happens) and a
+  change's `.openspec.yaml` — where the effect is not a visible `Invalid` schema but a
+  *silent fall-through to the next source* carrying one problem string. Recorded for both
+  files so a future bug report is diagnosable rather than mysterious.
 - **One unit scenario reads this repository's own graft-vendored `openspec/schemas/tdd/`.**
   A `graft sync` that changes that file could break a test that has nothing to do with the
   change being made. → The scenario asserts only stable properties — parses, non-empty, first
@@ -622,7 +843,11 @@ class of bug, and a whole-value `assert_eq!` is what the scenarios want anyway.
   `env!("CARGO_MANIFEST_DIR")`, never the process working directory. The scenario is worth
   the coupling: it is the only test that proves the model matches the file the plugin will
   actually meet, and it is the test that would have caught `role: tasks` before a line was
-  written.
+  written. Its artifact-list assertion is nonetheless **exact**, not a containment check —
+  a parser that silently drops `design` or `planning-review`, the two longest block scalars
+  and precisely what a block-scalar defect would eat, satisfies any "contains" clause. So a
+  graft update that adds or renames an artifact *will* turn this test red, on purpose. That
+  is a one-line fixture update with a real question behind it, not a flake.
 - **Reading `openspec/config.yaml` per change is O(changes) file reads.** → Bounded and
   small; `select`/`load` are split so a caller can avoid the expensive half, and the
   expensive half is the 663-line parse, not the 83-line one. If it ever matters,
@@ -651,12 +876,14 @@ more crates, which `scripts/build.sh` handles with no edit.
 None blocking. Three settled here rather than left open:
 
 - *Should the module ask the CLI when a schema is not vendored?* No, not in this change —
-  that needs `subprocess-seam`. But the **command it will use** is settled and recorded,
-  because `SPEC.md`'s `openspec schema` does not exist: `openspec schema which <name> --json`
-  returns `{"name","source","path","shadows"}`, and `path` is the schema *directory* whose
-  `schema.yaml` this same `parse` then reads. Its stdout is clean JSON; the "experimental"
-  note goes to stderr. `openspec status --change <n> --json` separately returns the ordered
-  `artifacts[]` per change, which `changes-from-cli` already plans to call.
+  that needs `subprocess-seam`. But the **command it will use, and the function that consumes
+  it**, are both settled and recorded, because `SPEC.md`'s `openspec schema` does not exist:
+  `openspec schema which <name> --json` returns `{"name","source","path","shadows"}`, where
+  `path` is an **absolute schema directory** — for a CLI-shipped schema, one outside the
+  repository entirely, with no `openspec/` segment — which is handed to
+  `load_dir(path, name)`. Its stdout is clean JSON; the "experimental" note goes to stderr.
+  `openspec status --change <n> --json` separately returns the ordered `artifacts[]` per
+  change, which `changes-from-cli` already plans to call.
 - *Should `Schema` carry `requires` so the tab bar could show dependency order?* No.
   `SPEC.md` says the `artifacts` list *is* the tab order; a second ordering with no
   requirement behind it is a field nothing reads.

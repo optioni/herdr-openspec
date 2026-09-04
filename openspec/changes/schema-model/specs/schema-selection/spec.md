@@ -1,3 +1,14 @@
+## Purpose
+Deciding which OpenSpec schema a repository, or one change inside it, is written under:
+a change's own `.openspec.yaml`, then the repository's `openspec/config.yaml`, then the
+CLI's default `spec-driven` — reporting which of the three answered, because two sources
+routinely name the same schema and a name alone cannot prove the ordering. Selection is
+read-only and total: a file that cannot be read, a document that is not YAML, a value of
+the wrong type, and a name that would escape `openspec/schemas/` each fall through to the
+next source with a named problem rather than winning, stopping the search, or failing. An
+absent file, and a file that simply declares no `schema:` key, are the normal case and are
+silent.
+
 ## ADDED Requirements
 
 ### Requirement: The schema name comes from the change, then the project, then the default
@@ -18,11 +29,14 @@ Only the **first YAML document** of each file is consulted. A value SHALL count 
 declaration only when it is a YAML string that is neither empty nor whitespace-only,
 applying the same blank rule `config::non_blank` establishes across this crate.
 
-Every fallback SHALL be recorded as a human-readable problem string, in the shape
-`Config::problems` and `BinResolution::problems` already use — with one exception: a file
-that simply does not exist, or that exists and declares no `schema:` key, is the normal
-case and SHALL record nothing. A problem means *something was there and could not be
-used*, never *nothing was there*.
+Every fallback SHALL be recorded as a human-readable problem string, appended in source
+order to a list in the shape `Config::problems` and `BinResolution::problems` already use —
+with one exception: a file that simply does not exist, or that parses to a mapping carrying
+no `schema:` key at all, is the normal case and SHALL record nothing. A problem means
+*something was there and could not be used*, never *nothing was there*. An absent key and a
+present key of the wrong type SHALL therefore be distinguished, which is possible but not
+automatic: the parser reports both as "no string here", and only the absent one is a
+missing node.
 
 Selection SHALL never fail, return an error, or panic. A file that cannot be read, a
 document that is not valid YAML, a document that is not a mapping, and a `schema:` value of
@@ -50,14 +64,42 @@ the wrong type each fall through to the next source.
 - **WHEN** neither `.openspec.yaml` nor `openspec/config.yaml` exists
 - **THEN** the resolved name is `spec-driven` and the source is the default
 - **AND** no problem is recorded, because absence is the normal case and not a fallback
+- **AND** the same holds for a repository root with no `openspec/` directory at all, so a
+  path that is not a repository degrades rather than failing
+
+#### Scenario: A file that declares other keys but no `schema:` records no problem
+
+- **WHEN** `openspec/config.yaml` is a valid YAML mapping carrying `context:` and `rules:`
+  but no `schema:` key — the ordinary shape of a repository that pins nothing — and no
+  change declares one
+- **THEN** the resolved name is `spec-driven` from the default
+- **AND** **no** problem is recorded
+- **AND** the same holds for a `.openspec.yaml` carrying only `created:`
+- **AND** this is the case an implementation keyed on "the value is not a string" gets
+  wrong: an absent key and a `schema:` of the wrong type look identical through a
+  string accessor, and only the second is a fallback worth telling a user about
 
 #### Scenario: No change directory is supplied at all
 
-- **WHEN** selection is asked for a repository with no change directory argument, and
-  `openspec/config.yaml` contains `schema: tdd`
-- **THEN** the resolved name is `tdd` from the project
-- **AND** no path under any change directory is read — a `.openspec.yaml` planted beside
-  the repository root is not consulted
+- **WHEN** selection is asked for a repository at `<scratch>/repo` with no change directory
+  argument, `openspec/config.yaml` contains `schema: tdd`, and a `.openspec.yaml` containing
+  `schema: planted` — a name appearing nowhere else in the fixture — is written to **both**
+  `<scratch>/repo/.openspec.yaml` and `<scratch>/.openspec.yaml`
+- **THEN** the resolved name is `tdd` from the project, and never `planted`
+- **AND** the two planted files are what make the assertion bite: an implementation that
+  answers a `None` change directory by reading the repository root reads the first, and one
+  that reads the root's parent reads the second
+
+#### Scenario: A fallback at both sources records both problems, in order
+
+- **WHEN** `.openspec.yaml` contains `schema: "   "` and `openspec/config.yaml` contains a
+  `schema:` whose value is a nested mapping
+- **THEN** the resolved name is `spec-driven` from the default
+- **AND** **two** problems are recorded, the first naming `.openspec.yaml` and the second
+  naming `openspec/config.yaml`
+- **AND** this is the only scenario in which both sources fail at once, and it is what
+  rejects an implementation that returns on the first problem, keeps only the last, or
+  stores a single `Option<String>` rather than the list the requirement invokes
 
 #### Scenario: A blank declaration is not a declaration
 
@@ -117,7 +159,11 @@ the wrong type each fall through to the next source.
 The resolved name is joined into `<repository>/openspec/schemas/<name>/schema.yaml`, so it
 SHALL be a single path segment. A name that is empty after trimming, that contains a path
 separator, that is exactly `.` or `..` or contains a `..` segment, that is absolute, or that
-contains a NUL byte SHALL NOT be accepted from any source.
+contains a NUL byte SHALL NOT be accepted from any source. The separator set is `/` **and**
+`\`: a backslash is a legal filename character on both supported platforms, so rejecting it
+is a choice rather than a necessity, and it is made to mirror the CLI, which splits a schema
+name on `[\\/]+`. The CLI's further rejection of a `C:`-style drive prefix is deliberately
+not mirrored — Windows is a PRD non-goal.
 
 A rejected name SHALL fall through to the next source in the ordering — never win, and
 never end the search — and the rejection SHALL be recorded as a problem naming the offending
@@ -131,16 +177,19 @@ effect or failing closed.
   contains `schema: tdd`
 - **THEN** the resolved name is `tdd` from the project
 - **AND** exactly one problem is recorded, containing the text `../../etc`
-- **AND** no path outside the repository is read or stat-ed — asserted by the fact that
-  the run resolves the project schema rather than any file the traversal would have reached
 
 #### Scenario: Every rejected shape is rejected, and a legal name with a dot is not
 
-- **WHEN** each of `..`, `.`, `a/b`, `/abs`, and a value containing a NUL byte is placed in
-  turn as the only declaration, with no project declaration
+- **WHEN** each of `..`, `.`, `a/b`, `a\b`, `/abs`, and a value containing a NUL byte is
+  placed in turn as the only declaration, with no project declaration
 - **THEN** each yields `spec-driven` from the default with exactly one problem
 - **AND** in the same test the name `v1.2-tdd` is accepted and wins, so the rule rejects
-  traversal rather than rejecting every name containing a dot or a digit
+  traversal rather than rejecting every name containing a dot or a digit. Without this
+  positive case an `is_legal_name` that returns `false` unconditionally passes every other
+  clause here, because they all expect the fall-through
+- **AND** the NUL fixture is written as the YAML double-quoted escape — the document text
+  `schema: "a\0b"` — not as a literal NUL byte in a plain scalar, which the parser
+  silently truncates to the perfectly legal name `a`
 
 #### Scenario: An illegal project name still falls through to the default
 
