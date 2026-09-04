@@ -1483,17 +1483,17 @@ block is re-run, not further modified — and `GRAPH-SNAP` likewise.
 ## 12. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 12.1 CHECK: Inspect the intended verification commands and affected tiers. The gate is
+- [x] 12.1 CHECK: Inspect the intended verification commands and affected tiers. The gate is
       `make check`; the tiers are `--lib` unit and view tests only — this change adds no
       `tests/cli.rs` case and the binary's behaviour is unchanged.
 
-- [ ] 12.2 VERIFY: `cargo fmt --all -- --check` — clean.
+- [x] 12.2 VERIFY: `cargo fmt --all -- --check` — clean.
 
-- [ ] 12.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings.
+- [x] 12.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings.
       (This repository has no separate type checker: `cargo clippy` builds the crate, so a
       type error fails here.)
 
-- [ ] 12.4 VERIFY: `cargo test --all-features` — green. Then the counted floors, so a
+- [x] 12.4 VERIFY: `cargo test --all-features` — green. Then the counted floors, so a
       renamed module cannot pass as a green run: `testcount --lib 'ui::app::tests::' 22`,
       `testcount --lib 'ui::layout::tests::' 9`, `testcount --lib 'ui::list::tests::' 17`,
       `testcount --lib 'ui::view::tests::' 47`, `testcount --lib 'ui::driver::tests::' 8`,
@@ -1501,21 +1501,21 @@ block is re-run, not further modified — and `GRAPH-SNAP` likewise.
       `testcount --lib 'changes::fixture::tests::' 2`, and
       `testcount --lib '' <measured baseline + 67>`. Record the final lib total.
 
-- [ ] 12.5 VERIFY: `make coverage` — `cargo llvm-cov --fail-under-lines 80` at the unchanged
+- [x] 12.5 VERIFY: `make coverage` — `cargo llvm-cov --fail-under-lines 80` at the unchanged
       floor. Record the TOTAL percentage and the uncovered-line count, and compare against
       1.1's 98.01% over 8,836 lines: a fall of more than about one point is a finding, not a
       pass.
 
-- [ ] 12.6 VERIFY: `make check` as the single gate — all four in order. If it fails, name
+- [x] 12.6 VERIFY: `make check` as the single gate — all four in order. If it fails, name
       the failing sub-command rather than reporting a summary.
 
-- [ ] 12.7 VERIFY: Re-run the whole architectural suite one last time against the final
+- [x] 12.7 VERIFY: Re-run the whole architectural suite one last time against the final
       tree: `NOSPAWN-GREP` with `MIN=16`, `NOIO-VIEW`, `NOCLI-SHELL` with `UI_MIN=8`,
       `NORAW-GREP`, `NODEFAULT-UI`, `NOLIT-CHANGE` with `MIN=16`, `WIDTHS` with
       `WIDTHS_MIN=47`, `LISTWIDTHS` with `LIST_MIN=17`, `NOWAIVER`, `GATE-MECH1`,
       `NOJSON-SEAM`, `DEPS` (with `DEPS_SKIP_LEG5=1`; 9.1 ran it in full), `GRAPH-SNAP`,
       and `OPENSPEC-UNTOUCHED` against `$BASE`.
 
-- [ ] 12.8 VERIFY: `openspec validate list-view --strict` — valid. The `openspec` binary is
+- [x] 12.8 VERIFY: `openspec validate list-view --strict` — valid. The `openspec` binary is
       nvm-installed: `export PATH="$HOME/.nvm/versions/node/v24.20.0/bin:$PATH"` first.
       Commit: `docs(list-view): record group 12 lint & verify evidence — apply complete`.
