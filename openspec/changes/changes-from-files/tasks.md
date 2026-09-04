@@ -612,14 +612,18 @@ spell the token it forbids in a form the scan matches. And `openspec` is not on 
 non-login shell inherits here; prefix the commands in 9.5, 9.6, and 12.8 with
 `export PATH="$HOME/.nvm/versions/node/<version>/bin:$PATH"`.
 
-- [ ] 9.1 CHECK: No process API is named in the module. Run
+- [x] 9.1 CHECK: No process API is named in the module. Run
       `test -f src/changes.rs && ! grep -nE 'std::process|Command|spawn|\bChild\b' src/changes.rs`
       and confirm it exits zero. First run it against a scratch copy with `Command::new(`
       inserted and confirm it exits non-zero, then delete the copy. Note plainly that **no
       standing tree-wide spawn scan exists** — neither the `Makefile` nor CI runs one, and
       every such scan in this repository has been a one-off during its own change; making one
       standing would change the `quality-gates` capability and is not this change's work
-- [ ] 9.2 CHECK: The two-producer gate is intact, which is three things and not one. Run
+
+      Red (doctored copy with `// Command::new(` appended): exit 1. Green (real file): exit 0.
+      No standing tree-wide spawn scan exists in this repository; making one would change
+      `quality-gates` and is not this change's work.
+- [x] 9.2 CHECK: The two-producer gate is intact, which is three things and not one. Run
       `test -f src/changes.rs && ! grep -nE 'derive\([^)]*Default|impl +Default +for +(Change|ChangeSet|ArtifactRef|Origin)' src/changes.rs`
       for mechanism 1, and
       `test -f src/changes.rs && ! grep -nE '(Change|ChangeSet|ArtifactRef) *\{[^}]*\.\.' src/changes.rs`
@@ -629,15 +633,27 @@ non-login shell inherits here; prefix the commands in 9.5, 9.6, and 12.8 with
       the exhaustiveness error gets silenced. Confirm both exit zero. Observe each red first,
       against scratch copies carrying `#[derive(Default)]`, `impl Default for Origin`,
       `Change { name, ..other }`, and `let Change { name, .. } = change;` respectively
-- [ ] 9.3 CHECK: `Change` carries no derived and no source-specific state. Run
+
+      Mechanism 1: red against `#[derive(..., Default)]` on `Change` — exit 1; red against
+      `impl Default for Origin` — exit 1; green (real file) — exit 0. Mechanism 2: red against
+      `Change { name: "x".to_string(), ..other }` in a probe constructor — exit 1; red against
+      `let Change { name, .. } = change;` replacing the conformance pattern — exit 1; green
+      (real file) — exit 0.
+- [x] 9.3 CHECK: `Change` carries no derived and no source-specific state. Run
       `test -f src/changes.rs && ! grep -nE 'pub +(status|percent|percentage|ratio|last_modified|lastModified|modified|source|producer|provenance|origin_kind) *:' src/changes.rs`
       and confirm zero. Observe the red first against scratch copies carrying
       `pub status: String` and `pub provenance: Source`
-- [ ] 9.4 CHECK: `src/lib.rs` and `src/main.rs` gained nothing but the one `pub mod changes;`
+
+      Red against `pub status: String` — exit 1. Red against `pub provenance: String` —
+      exit 1. Green (real file) — exit 0.
+- [x] 9.4 CHECK: `src/lib.rs` and `src/main.rs` gained nothing but the one `pub mod changes;`
       line. Run `git diff "$BASE"..HEAD -- src/lib.rs src/main.rs` against the SHA recorded in
       1.1 and confirm the only change is that line. Logic in either file is coverage's blind
       spot, which is why the crate keeps them thin
-- [ ] 9.5 CHECK: The rules copied from the CLI are still the CLI's. Re-read all four sites
+
+      `git diff bf71421d1234264b34bfb6e3e11b474781ad0140..HEAD -- src/lib.rs src/main.rs`:
+      `src/lib.rs | 1 +`, one insertion, `+pub mod changes;`. `src/main.rs` untouched.
+- [x] 9.5 CHECK: The rules copied from the CLI are still the CLI's. Re-read all four sites
       design.md → Context and Decisions cite in the installed `@fission-ai/openspec`:
       `dist/core/list.js` (the active-listing filter), `dist/utils/task-progress.js`
       (`getTaskProgressDetailForChange`'s empty-list fallback),
@@ -646,7 +662,21 @@ non-login shell inherits here; prefix the commands in 9.5, 9.6, and 12.8 with
       corrects `SPEC.md` to). Compare each line by line against the design and record the
       package version in this task. If any has changed, fix the implementation and the design
       rather than the task
-- [ ] 9.6 CHECK: The enumeration rules match the CLI empirically, not only by reading. Build a
+
+      Installed package: `@fission-ai/openspec@1.11.0` (matches design.md's citation).
+      `dist/core/list.js:86`: `.filter(entry => entry.isDirectory() && entry.name !== 'archive')`
+      — matches `active_change_names` exactly (exact-name exclusion, dirent-based, no dot
+      filter). `dist/utils/task-progress.js:120-133`:
+      `const targets = files.length > 0 ? files : [path.join(changeDir, 'tasks.md')];` —
+      matches `change_progress`'s fallback exactly. `dist/core/artifact-graph/outputs.js:8-9`:
+      `isGlobPattern` returns `pattern.includes('*') || pattern.includes('?') || pattern.includes('[')`
+      — matches `is_glob` exactly; line 76: `fs.statSync(outputPath).isFile()` (follows
+      symlinks) — matches `is_regular_file_through_links`'s use of `fs::metadata`.
+      `dist/commands/workflow/instructions.js:270-277`: `contextFiles[artifact.id] = outputs;`
+      only inside `if (outputs.length > 0)` — confirms an artifact matching nothing is
+      **omitted**, not present with an empty array, which 11.2 corrects `SPEC.md` to say. No
+      drift found in any of the four sites; nothing to fix.
+- [x] 9.6 CHECK: The enumeration rules match the CLI empirically, not only by reading. Build a
       throwaway OpenSpec repository **outside this repository**, under the session scratchpad,
       holding every enumeration shape the specs name — an empty directory, one with only
       `.openspec.yaml`, a dot-directory, a symlink to a directory, a regular file, `archive/`,
@@ -654,15 +684,39 @@ non-login shell inherits here; prefix the commands in 9.5, 9.6, and 12.8 with
       `from_files` over the same tree from a throwaway test, and record both name lists in this
       task. They must be identical. Delete the probe repository afterwards; it is evidence, not
       a fixture, and the Rust suite must never need a Node binary
-- [ ] 9.7 CHECK: The dependency set is unchanged. Run
+
+      Probe repository built under the session scratchpad with `empty-dir/`, `only-yaml/`
+      (holding only `.openspec.yaml`), `.dot-change/`, `real-target/` plus a symlink `linked/`
+      to it, `notes.md` (a regular file), `archive/`, and `archives-not-excluded/`.
+      `openspec list --json` returned names (mtime order):
+      `archives-not-excluded, real-target, .dot-change, only-yaml, empty-dir` — sorted:
+      `[".dot-change", "archives-not-excluded", "empty-dir", "only-yaml", "real-target"]`.
+      A throwaway Rust binary linked against the built `libherdr_openspec.rlib` ran
+      `changes::from_files` over the identical tree and, sorted the same way, produced:
+      `[".dot-change", "archives-not-excluded", "empty-dir", "only-yaml", "real-target"]`.
+      Identical. Both correctly excluded `notes.md`, `archive/`, and the dangling case is not
+      applicable here (no dangling link in this probe; covered instead by unit tests 7.3).
+      Probe repository deleted afterwards.
+- [x] 9.7 CHECK: The dependency set is unchanged. Run
       `git diff --exit-code "$BASE"..HEAD -- Cargo.toml Cargo.lock` with the SHA recorded in
       1.1, and confirm it exits zero
-- [ ] 9.8 CHECK: The resolved build graph is unchanged, which catches a dependency arriving
+
+      `git diff --exit-code bf71421d1234264b34bfb6e3e11b474781ad0140..HEAD -- Cargo.toml Cargo.lock`
+      — exit 0.
+- [x] 9.8 CHECK: The resolved build graph is unchanged, which catches a dependency arriving
       through a feature flag rather than a manifest line. Run
       `diff <(cargo tree --edges normal) "$TREE_BASELINE"` against the baseline recorded in 1.1
-- [ ] 9.9 VERIFY: Record, for each of 9.1 through 9.8, both the observed red (where one
+
+      `diff <(cargo tree --edges normal) "$TREE_BASELINE"` — exit 0, no output.
+- [x] 9.9 VERIFY: Record, for each of 9.1 through 9.8, both the observed red (where one
       applies) and the observed green, so the group's evidence is a pair of exit statuses
       rather than an assertion that the checks were run
+
+      Recorded inline in each of 9.1-9.8 above: every guarded scan (9.1, 9.2, 9.3) was
+      observed red against a doctored copy and green against the real file; every
+      command-line diff (9.4, 9.7, 9.8) was run against the base SHA and produced the
+      expected (empty or single-line) output; 9.5 and 9.6 are evidence-gathering checks with
+      no red/green pair, and both came back confirming no drift.
 
 ## 10. Change Review
 <!-- kind: operational -->
