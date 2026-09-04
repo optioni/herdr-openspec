@@ -422,6 +422,168 @@ pub(crate) fn change_progress(
     (progress, problems)
 }
 
+/// Decode one directory entry's raw OS name to UTF-8, or record one problem
+/// naming it (lossily, for the message only) and skip it. Kept as its own
+/// pure step — rather than folded into the walk below — because APFS
+/// refuses to create a directory whose name is not valid UTF-8 (`EILSEQ`),
+/// so a filesystem test cannot reach this branch on the reference machine
+/// even though the behaviour matters on Linux; this function is what a unit
+/// test drives directly with a hand-built `OsString`.
+fn decode_entry_name(raw: std::ffi::OsString, problems: &mut Vec<String>) -> Option<String> {
+    match raw.into_string() {
+        Ok(name) => Some(name),
+        Err(raw) => {
+            problems.push(format!(
+                "a directory entry name is not valid UTF-8: {}",
+                raw.to_string_lossy()
+            ));
+            None
+        }
+    }
+}
+
+/// Directory entries within an already-open `read_dir` iterator that are
+/// themselves directories, decoded to `String` — the rule both listings
+/// below share and must not drift on: `DirEntry::file_type`, never
+/// `Path::is_dir`, so a directory reached only through a symbolic link is
+/// excluded from both. Deliberately does **not** apply the active listing's
+/// `archive`-name exclusion or the archived listing's dot-prefix exclusion:
+/// those differ between the two listings on purpose, and folding them in
+/// here is exactly how a later "simplification" would collapse that
+/// difference. Every inner directory-entry read is `.flatten()`-based, per
+/// design.md -> Boundaries: an unreadable *entry* within an otherwise good
+/// listing just means "skip it", the way `resolve::nvm_candidates` treats
+/// every inner `Err`.
+fn directory_names(read_dir: std::fs::ReadDir, problems: &mut Vec<String>) -> Vec<String> {
+    let mut names = Vec::new();
+    for entry in read_dir.flatten() {
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        if !file_type.is_dir() {
+            continue;
+        }
+        if let Some(name) = decode_entry_name(entry.file_name(), problems) {
+            names.push(name);
+        }
+    }
+    names
+}
+
+/// Active change names directly under `<repo>/openspec/changes/`: every
+/// directory entry other than one named exactly `archive`, sorted ascending
+/// by byte order. `(names, problems, unreadable)`, where `unreadable` is
+/// true only when the directory exists but could not itself be read — the
+/// signal `archived_entries` needs to short-circuit rather than report the
+/// same permission failure a second time. An absent `openspec/changes/` is
+/// a supported empty state, matching `openspec list --json`'s own
+/// treatment (`dist/core/list.js`).
+pub(crate) fn active_change_names(repo: &std::path::Path) -> (Vec<String>, Vec<String>, bool) {
+    let dir = repo.join("openspec").join("changes");
+    let mut problems = Vec::new();
+
+    let mut names = match std::fs::read_dir(&dir) {
+        Ok(read_dir) => directory_names(read_dir, &mut problems),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (Vec::new(), problems, false),
+        Err(e) => {
+            problems.push(format!("{} could not be read: {e}", dir.display()));
+            return (Vec::new(), problems, true);
+        }
+    };
+
+    names.retain(|name| name != "archive");
+    names.sort();
+    (names, problems, false)
+}
+
+/// One archived change: its date and stripped name — see
+/// [`split_archive_name`] — and the archived directory it was found in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ArchivedEntry {
+    pub(crate) date: Option<String>,
+    pub(crate) name: String,
+    pub(crate) dir: PathBuf,
+}
+
+/// Archived entries directly under `<repo>/openspec/changes/archive/`,
+/// excluding dot-prefixed names (unlike the active listing — the two are
+/// deliberately opposite, see `change-enumeration`'s spec), ordered dated
+/// entries newest first with same-date ties broken by name descending, then
+/// every undated entry ordered among itself by name descending, then
+/// truncated to `archived_count`.
+///
+/// `active_unreadable` short-circuits the read entirely when the caller
+/// already found `openspec/changes/` itself unreadable: `read_dir` on the
+/// archive directory beneath an unreadable parent fails with a permission
+/// error of its own (`EACCES`, not `NotFound`), which would otherwise
+/// record a second, redundant problem describing the same fault.
+pub(crate) fn archived_entries(
+    repo: &std::path::Path,
+    archived_count: usize,
+    active_unreadable: bool,
+) -> (Vec<ArchivedEntry>, Vec<String>) {
+    if active_unreadable {
+        return (Vec::new(), Vec::new());
+    }
+
+    let dir = repo.join("openspec").join("changes").join("archive");
+    let mut problems = Vec::new();
+
+    let raw_names = match std::fs::read_dir(&dir) {
+        Ok(read_dir) => directory_names(read_dir, &mut problems),
+        // Absent, or present as a regular file rather than a directory — an
+        // `archive` that is a plain file is simply not an archive, not a
+        // fault, matching `openspec/changes/archive/`'s absence.
+        Err(e)
+            if e.kind() == std::io::ErrorKind::NotFound
+                || e.kind() == std::io::ErrorKind::NotADirectory =>
+        {
+            return (Vec::new(), problems);
+        }
+        Err(e) => {
+            problems.push(format!("{} could not be read: {e}", dir.display()));
+            return (Vec::new(), problems);
+        }
+    };
+
+    let mut entries: Vec<ArchivedEntry> = raw_names
+        .into_iter()
+        .filter(|name| !name.starts_with('.'))
+        .map(|raw| {
+            let (date, name) = split_archive_name(&raw);
+            ArchivedEntry {
+                date,
+                name,
+                dir: dir.join(&raw),
+            }
+        })
+        .collect();
+
+    entries.sort_by(|a, b| match (&a.date, &b.date) {
+        (Some(date_a), Some(date_b)) => date_b.cmp(date_a).then_with(|| b.name.cmp(&a.name)),
+        (Some(_), None) => std::cmp::Ordering::Less,
+        (None, Some(_)) => std::cmp::Ordering::Greater,
+        (None, None) => b.name.cmp(&a.name),
+    });
+    entries.truncate(archived_count);
+
+    (entries, problems)
+}
+
+/// The composition group 8's `from_files` calls: active names, ordered and
+/// truncated archived entries, and every problem from either listing —
+/// `active_change_names`' plus `archived_entries`', with the short-circuit
+/// above already applied.
+pub(crate) fn list_changes(
+    repo: &std::path::Path,
+    archived_count: usize,
+) -> (Vec<String>, Vec<ArchivedEntry>, Vec<String>) {
+    let (active, mut problems, active_unreadable) = active_change_names(repo);
+    let (archived, archived_problems) = archived_entries(repo, archived_count, active_unreadable);
+    problems.extend(archived_problems);
+    (active, archived, problems)
+}
+
 #[cfg(test)]
 mod tests {
     use super::conformance::assert_invariants;
@@ -1192,5 +1354,363 @@ mod tests {
         let after_empty = snapshot(&empty_dir);
         assert_eq!(before_empty, after_empty);
         assert!(!empty_dir.join("tasks.md").exists());
+    }
+
+    // --- group 7: enumerating active and archived changes -----------------
+
+    fn archived_names(entries: &[ArchivedEntry]) -> Vec<&str> {
+        entries.iter().map(|e| e.name.as_str()).collect()
+    }
+
+    #[test]
+    fn a_directory_with_no_marker_file_is_a_change() {
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        mkdir(&repo.join("openspec/changes/empty-dir"));
+        write(&repo.join("openspec/changes/only-yaml/.openspec.yaml"), "");
+        write(&repo.join("openspec/changes/only-proposal/proposal.md"), "");
+
+        let (active, problems, unreadable) = active_change_names(&repo);
+        assert_eq!(active, vec!["empty-dir", "only-proposal", "only-yaml"]);
+        assert!(problems.is_empty());
+        assert!(!unreadable);
+    }
+
+    #[test]
+    fn a_regular_file_is_not_a_change() {
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        write(&repo.join("openspec/changes/notes.md"), "notes");
+        mkdir(&repo.join("openspec/changes/real-change"));
+
+        let (active, problems, _) = active_change_names(&repo);
+        assert_eq!(active, vec!["real-change"]);
+        assert!(problems.is_empty());
+    }
+
+    #[test]
+    fn a_symbolic_link_to_a_directory_is_not_a_change() {
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        mkdir(&repo.join("openspec/changes/real-target"));
+        symlink(
+            &repo.join("openspec/changes/real-target"),
+            &repo.join("openspec/changes/linked"),
+        );
+        symlink(
+            &repo.join("openspec/changes/does-not-exist"),
+            &repo.join("openspec/changes/dangling"),
+        );
+
+        let (active, problems, _) = active_change_names(&repo);
+        assert_eq!(active, vec!["real-target"]);
+        assert!(problems.is_empty());
+    }
+
+    #[test]
+    fn the_archive_exclusion_is_by_exact_name() {
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        mkdir(&repo.join("openspec/changes/archive"));
+        mkdir(&repo.join("openspec/changes/archives-not-excluded"));
+        mkdir(&repo.join("openspec/changes/archive-notes"));
+
+        let (active, _, _) = active_change_names(&repo);
+        assert_eq!(active, vec!["archive-notes", "archives-not-excluded"]);
+    }
+
+    #[test]
+    fn a_dot_directory_is_a_change() {
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        mkdir(&repo.join("openspec/changes/.dot-change"));
+        mkdir(&repo.join("openspec/changes/plain"));
+
+        let (active, _, _) = active_change_names(&repo);
+        assert_eq!(active, vec![".dot-change", "plain"]);
+    }
+
+    #[test]
+    fn case_and_digits_order_by_byte_not_by_locale() {
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        for name in ["Beta", "alpha", "10-late", "2-early"] {
+            mkdir(&repo.join("openspec/changes").join(name));
+        }
+
+        let (active, _, _) = active_change_names(&repo);
+        assert_eq!(active, vec!["10-late", "2-early", "Beta", "alpha"]);
+    }
+
+    #[test]
+    fn a_normal_archived_directory_splits_into_a_date_and_a_name_via_archived_entries() {
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        mkdir(&repo.join("openspec/changes/archive/2026-08-14-add-token-refresh"));
+
+        let (archived, problems) = archived_entries(&repo, 5, false);
+        assert_eq!(archived.len(), 1);
+        assert_eq!(archived[0].name, "add-token-refresh");
+        assert_eq!(archived[0].date, Some("2026-08-14".to_string()));
+        assert!(archived[0].dir.ends_with("2026-08-14-add-token-refresh"));
+        assert!(problems.is_empty());
+    }
+
+    #[test]
+    fn a_dot_prefixed_archive_directory_is_not_an_archived_change() {
+        // Both halves in one test, since the two rules are deliberately
+        // opposite: `.dot-change/` is listed under `changes/` while
+        // `.hidden-archived/` is not listed under `archive/`.
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        mkdir(&repo.join("openspec/changes/.dot-change"));
+        mkdir(&repo.join("openspec/changes/archive/.hidden-archived"));
+        mkdir(&repo.join("openspec/changes/archive/2026-08-14-real"));
+
+        let (active, _, _) = active_change_names(&repo);
+        assert!(active.contains(&".dot-change".to_string()));
+
+        let (archived, _) = archived_entries(&repo, 5, false);
+        assert_eq!(archived_names(&archived), vec!["real"]);
+    }
+
+    #[test]
+    fn two_archived_directories_can_strip_to_the_same_name() {
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        mkdir(&repo.join("openspec/changes/archive/2026-01-05-retry-policy"));
+        mkdir(&repo.join("openspec/changes/archive/2026-07-22-retry-policy"));
+
+        let (archived, _) = archived_entries(&repo, 5, false);
+        assert_eq!(archived.len(), 2);
+        assert!(archived.iter().all(|e| e.name == "retry-policy"));
+        let dates: Vec<&str> = archived
+            .iter()
+            .map(|e| e.date.as_deref().unwrap())
+            .collect();
+        assert_eq!(dates, vec!["2026-07-22", "2026-01-05"]);
+    }
+
+    #[test]
+    fn dated_entries_come_newest_first() {
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        mkdir(&repo.join("openspec/changes/archive/2026-01-05-a"));
+        mkdir(&repo.join("openspec/changes/archive/2026-09-01-c"));
+        mkdir(&repo.join("openspec/changes/archive/2026-07-22-b"));
+
+        let (archived, _) = archived_entries(&repo, 5, false);
+        assert_eq!(archived_names(&archived), vec!["c", "b", "a"]);
+    }
+
+    #[test]
+    fn two_entries_sharing_a_date_order_by_name_descending() {
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        mkdir(&repo.join("openspec/changes/archive/2026-05-01-alpha"));
+        mkdir(&repo.join("openspec/changes/archive/2026-05-01-zeta"));
+
+        let (archived, _) = archived_entries(&repo, 5, false);
+        assert_eq!(archived_names(&archived), vec!["zeta", "alpha"]);
+    }
+
+    #[test]
+    fn an_undated_entry_sorts_after_every_dated_one() {
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        mkdir(&repo.join("openspec/changes/archive/zeta-undated"));
+        mkdir(&repo.join("openspec/changes/archive/2026-01-05-a"));
+        mkdir(&repo.join("openspec/changes/archive/alpha-undated"));
+
+        let (archived, _) = archived_entries(&repo, 5, false);
+        assert_eq!(
+            archived_names(&archived),
+            vec!["a", "zeta-undated", "alpha-undated"]
+        );
+    }
+
+    #[test]
+    fn the_limit_keeps_the_most_recent_entries() {
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        for day in 1..=7 {
+            mkdir(
+                &repo
+                    .join("openspec/changes/archive")
+                    .join(format!("2026-01-{day:02}-entry")),
+            );
+        }
+
+        let (archived, _) = archived_entries(&repo, 5, false);
+        assert_eq!(
+            archived_names(&archived),
+            vec!["entry", "entry", "entry", "entry", "entry"]
+        );
+        let dates: Vec<&str> = archived
+            .iter()
+            .map(|e| e.date.as_deref().unwrap())
+            .collect();
+        assert_eq!(
+            dates,
+            vec![
+                "2026-01-07",
+                "2026-01-06",
+                "2026-01-05",
+                "2026-01-04",
+                "2026-01-03"
+            ]
+        );
+    }
+
+    #[test]
+    fn a_limit_larger_than_the_archive_keeps_everything() {
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        mkdir(&repo.join("openspec/changes/archive/2026-01-01-a"));
+        mkdir(&repo.join("openspec/changes/archive/2026-01-02-b"));
+
+        let (archived, problems) = archived_entries(&repo, 50, false);
+        assert_eq!(archived.len(), 2);
+        assert!(problems.is_empty());
+
+        let (archived_zero, problems_zero) = archived_entries(&repo, 0, false);
+        assert!(archived_zero.is_empty());
+        assert!(problems_zero.is_empty());
+
+        let (active, active_problems, _) = active_change_names(&repo);
+        assert!(active.is_empty());
+        assert!(active_problems.is_empty());
+    }
+
+    #[test]
+    fn a_repository_with_no_openspec_directory_yields_an_empty_set() {
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+
+        let (active, archived, problems) = list_changes(&repo, 5);
+        assert!(active.is_empty());
+        assert!(archived.is_empty());
+        assert!(problems.is_empty());
+        assert!(!repo.join("openspec").exists());
+    }
+
+    #[test]
+    fn no_openspec_changes_directory_yields_an_empty_set() {
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        mkdir(&repo.join("openspec"));
+
+        let (active, archived, problems) = list_changes(&repo, 5);
+        assert!(active.is_empty());
+        assert!(archived.is_empty());
+        assert!(problems.is_empty());
+    }
+
+    #[test]
+    fn no_active_changes_still_lists_the_archive() {
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        mkdir(&repo.join("openspec/changes/archive/2026-01-01-a"));
+        mkdir(&repo.join("openspec/changes/archive/2026-01-02-b"));
+
+        let (active, archived, problems) = list_changes(&repo, 5);
+        assert!(active.is_empty());
+        assert_eq!(archived.len(), 2);
+        assert!(problems.is_empty());
+    }
+
+    #[test]
+    fn an_archive_that_is_a_regular_file_is_not_an_archive() {
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        write(&repo.join("openspec/changes/archive"), "not a directory");
+        mkdir(&repo.join("openspec/changes/real-change"));
+
+        let (active, archived, problems) = list_changes(&repo, 5);
+        assert_eq!(active, vec!["real-change"]);
+        assert!(archived.is_empty());
+        assert!(problems.is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_changes_directory_is_one_named_problem() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        let changes_dir = repo.join("openspec/changes");
+        mkdir(&changes_dir.join("archive"));
+
+        std::fs::set_permissions(&changes_dir, std::fs::Permissions::from_mode(0o000))
+            .expect("set changes/ unreadable");
+        let (active, archived, problems) = list_changes(&repo, 5);
+        std::fs::set_permissions(&changes_dir, std::fs::Permissions::from_mode(0o755))
+            .expect("restore changes/ permissions");
+
+        assert!(active.is_empty());
+        assert!(archived.is_empty());
+        // Exactly one problem: the discriminating assertion. An
+        // implementation that also walks the archive beneath the
+        // unreadable parent records a second, redundant EACCES problem.
+        assert_eq!(problems.len(), 1);
+        assert!(problems[0].contains(&changes_dir.display().to_string()));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_archive_leaves_the_active_list_intact() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        mkdir(&repo.join("openspec/changes/one"));
+        mkdir(&repo.join("openspec/changes/two"));
+        let archive_dir = repo.join("openspec/changes/archive");
+        mkdir(&archive_dir);
+
+        std::fs::set_permissions(&archive_dir, std::fs::Permissions::from_mode(0o000))
+            .expect("set archive/ unreadable");
+        let (active, archived, problems) = list_changes(&repo, 5);
+        std::fs::set_permissions(&archive_dir, std::fs::Permissions::from_mode(0o755))
+            .expect("restore archive/ permissions");
+
+        assert_eq!(active, vec!["one", "two"]);
+        assert!(archived.is_empty());
+        assert_eq!(problems.len(), 1);
+        assert!(problems[0].contains(&archive_dir.display().to_string()));
+    }
+
+    #[test]
+    fn a_directory_entry_whose_name_is_not_valid_utf_8_is_skipped_not_fatal() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let mut problems = Vec::new();
+        let normal = decode_entry_name(std::ffi::OsString::from("plain"), &mut problems);
+        assert_eq!(normal, Some("plain".to_string()));
+        assert!(problems.is_empty());
+
+        let invalid = std::ffi::OsString::from_vec(vec![0x66, 0x6f, 0x80, 0x6f]);
+        let decoded = decode_entry_name(invalid, &mut problems);
+        assert_eq!(decoded, None);
+        assert_eq!(problems.len(), 1);
+    }
+
+    #[test]
+    fn the_repository_tree_is_byte_identical_after_enumeration() {
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        mkdir(&repo.join("openspec/changes/one"));
+        mkdir(&repo.join("openspec/changes/archive/2026-01-01-a"));
+
+        let before = snapshot(&repo);
+        let _ = list_changes(&repo, 5);
+        let after = snapshot(&repo);
+        assert_eq!(before, after);
+        assert!(
+            !repo
+                .join("openspec/changes/archive-was-never-here")
+                .exists()
+        );
     }
 }

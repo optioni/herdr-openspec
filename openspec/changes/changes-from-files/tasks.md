@@ -427,26 +427,26 @@ leaves the active list intact", and "An `archive` that is a regular file is not 
 and the `change-model` scenario "A directory entry whose name is not valid UTF-8 is skipped,
 not fatal".
 
-- [ ] 7.1 RED: Write failing unit tests for the two listing functions — active names from
+- [x] 7.1 RED: Write failing unit tests for the two listing functions — active names from
       `<repo>/openspec/changes/` and archived entries from `<repo>/openspec/changes/archive/`
       — one per scenario above, each building its tree under `ScratchDir` and passing
       `testutil::canonical(scratch.path())` in as the root
-- [ ] 7.2 RED: Make the marker-file test discriminating: include an entirely empty directory,
+- [x] 7.2 RED: Make the marker-file test discriminating: include an entirely empty directory,
       one holding only `.openspec.yaml`, and one holding only `proposal.md`, and assert all
       three are listed. An implementation that requires any marker fails on at least one, and
       the CLI removed exactly that requirement because it hid freshly scaffolded changes
-- [ ] 7.3 RED: Make the symlink test use `DirEntry::file_type`, not `Path::is_dir`, the
+- [x] 7.3 RED: Make the symlink test use `DirEntry::file_type`, not `Path::is_dir`, the
       distinguishing case. Build a real directory, a symbolic link pointing at it, and a
       dangling link, and assert exactly one change is listed. `Path::is_dir` follows links and
       would list two — a divergence from the CLI that no other test in this group catches
-- [ ] 7.4 RED: Make the exclusion test prove it is exact rather than a prefix: `archive`,
+- [x] 7.4 RED: Make the exclusion test prove it is exact rather than a prefix: `archive`,
       `archives-not-excluded`, and `archive-notes` in one tree, asserting the last two are
       listed and the first is not
-- [ ] 7.5 RED: Write the dot-rule test as **one** test asserting both halves at once, because
+- [x] 7.5 RED: Write the dot-rule test as **one** test asserting both halves at once, because
       the two listings are deliberately opposite and a test of either alone reads like an
       inconsistency: `.dot-change/` under `openspec/changes/` is listed, and
       `.hidden-archived/` under `archive/` is not, in the same repository
-- [ ] 7.6 RED: Make the ordering tests assert whole ordered vectors. For active changes use
+- [x] 7.6 RED: Make the ordering tests assert whole ordered vectors. For active changes use
       `Beta`, `alpha`, `10-late`, `2-early` so byte order and locale order differ visibly. For
       archived changes assert three things separately: the dated-descending order; the
       same-date pair ordering by name descending, which a sort that leaves ties to the
@@ -454,9 +454,9 @@ not fatal".
       undated entries must come out dated-first with the undated pair descending by name — a
       plain descending sort of raw names puts a letter-initial name above every date and fails
       this last one
-- [ ] 7.7 RED: Write the `archived_count` tests: seven dated entries at 5, two entries at 50,
+- [x] 7.7 RED: Write the `archived_count` tests: seven dated entries at 5, two entries at 50,
       and the same two at 0, each asserting the exact resulting list
-- [ ] 7.8 RED: Write the degraded-directory tests: no `openspec/` at all, no
+- [x] 7.8 RED: Write the degraded-directory tests: no `openspec/` at all, no
       `openspec/changes/`, no `archive/`, an `archive` that is a regular file — all four
       empty and problem-free — then `openspec/changes/` at mode `0o000` and `archive/` at mode
       `0o000`, each asserting exactly **one** problem at the right level and the correct
@@ -469,33 +469,33 @@ not fatal".
       `ScratchDir::drop` is unable to remove. The crate has no precedent for this: every
       existing "unreadable" test puts a directory where a file was expected, which needs no
       permission manipulation at all
-- [ ] 7.9 RED: Write the invalid-UTF-8 test as a **pure unit test over the name-decoding
+- [x] 7.9 RED: Write the invalid-UTF-8 test as a **pure unit test over the name-decoding
       step**, given an `OsString` built with `std::os::unix::ffi::OsStringExt::from_vec` over
       bytes that are not valid UTF-8, beside one built from a normal name. Do **not** create
       such a directory: APFS rejects the name with `EILSEQ` (errno 92) at `mkdir`, so a
       filesystem test fails on the reference machine for a reason unrelated to the plugin,
       while the behaviour still matters on Linux. Assert the normal name is returned, the
       undecodable one is not, exactly one problem names it, and nothing panics
-- [ ] 7.10 GREEN: Implement the active listing: `read_dir`, keep entries whose
+- [x] 7.10 GREEN: Implement the active listing: `read_dir`, keep entries whose
       `file_type()?.is_dir()` holds and whose name is not exactly `archive`, decode names to
       `String` and record a problem on the set for each that will not decode, sort ascending
       by byte order. Cite `dist/core/list.js`'s filter in a comment
-- [ ] 7.11 GREEN: Implement the archived listing: the same directory test, excluding names
+- [x] 7.11 GREEN: Implement the archived listing: the same directory test, excluding names
       beginning with `.`, splitting each with `split_archive_name`, ordering dated entries by
       date descending then name descending, placing undated entries after all dated ones
       ordered by name descending, and truncating to `archived_count`
-- [ ] 7.12 GREEN: Handle the two top-level `read_dir` results by **matching on the `Result`**,
+- [x] 7.12 GREEN: Handle the two top-level `read_dir` results by **matching on the `Result`**,
       not by `flatten()`: `NotFound` is no problem at all, and any other error is exactly one
       problem at the set level. `flatten()` is right for the inner walks and wrong here — it
       discards the distinction the degraded-state scenarios rest on. Short-circuit the archive
       walk when the `openspec/changes/` read itself failed, so the parent's permission error
       is not reported twice
-- [ ] 7.13 REFACTOR: Extract the shared "directory entries that are directories, decoded"
+- [x] 7.13 REFACTOR: Extract the shared "directory entries that are directories, decoded"
       helper used by both listings so the two cannot drift on the symlink rule. Do **not**
       extend it to cover the dot rule: the active listing keeps dot entries and the archived
       listing drops them, deliberately, and a shared filter is exactly how that difference
       would be collapsed by a later "simplification". Keep tests green
-- [ ] 7.14 Run the group tests — `cargo test --all-features changes::` — no regressions
+- [x] 7.14 Run the group tests — `cargo test --all-features changes::` — no regressions
 
 ## 8. `from_files`: the composition and its degraded states
 <!-- kind: behavior -->
