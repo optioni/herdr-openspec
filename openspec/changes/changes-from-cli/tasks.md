@@ -825,7 +825,7 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
 ## 5. `cli_artifacts` — placing paths at schema positions (`mod cli_artifacts`)
 <!-- kind: behavior -->
 
-- [ ] 5.1 RED: Write failing unit tests in `mod cli_artifacts` for:
+- [x] 5.1 RED: Write failing unit tests in `mod cli_artifacts` for:
       `an_omitted_context_files_key_becomes_an_empty_path_list_at_its_position` (a
       five-artifact `tdd`-shaped schema with keys for three);
       `a_multi_file_artifact_keeps_the_cli_list_in_the_cli_order` (two absolute paths,
@@ -841,15 +841,15 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
       schema's declared order, and assert the schema's. Without this the test would pass
       for an implementation that iterated the map.
 
-- [ ] 5.2 GREEN: Implement `pub(crate) fn cli_artifacts(schema: &schema::Schema,
+- [x] 5.2 GREEN: Implement `pub(crate) fn cli_artifacts(schema: &schema::Schema,
       context_files: &BTreeMap<String, Vec<PathBuf>>) -> (Vec<ArtifactRef>, Vec<String>)`.
       Walk `schema.artifacts` in declared order; each position's `paths` is
       `context_files.get(&artifact.id).cloned().unwrap_or_default()`. After the walk,
       record one problem per `context_files` key no schema artifact declares.
 
-- [ ] 5.3 REFACTOR: State explicitly whether any was needed.
+- [x] 5.3 REFACTOR: State explicitly whether any was needed.
 
-- [ ] 5.4 VERIFY: `testcount --lib 'cli_artifacts::' <count>`. Commit.
+- [x] 5.4 VERIFY: `testcount --lib 'cli_artifacts::' <count>`. Commit.
 
 ---
 

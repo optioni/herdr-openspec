@@ -891,6 +891,37 @@ pub(crate) fn parse_schema_which(text: &str) -> Result<PathBuf, String> {
     Ok(PathBuf::from(path))
 }
 
+/// Place each schema artifact's `contextFiles` paths at its schema position:
+/// one [`ArtifactRef`] per `schema.artifacts` entry, in the schema's
+/// declared order, whose `paths` are `context_files[id]` verbatim when the
+/// key is present and empty otherwise — a missing key is the normal
+/// "No content yet" state, not a problem. One problem is recorded per
+/// `context_files` key no schema artifact declares. See `cli-changes` ->
+/// "A change's artifacts are placed by schema position from `contextFiles`".
+pub(crate) fn cli_artifacts(
+    schema: &crate::schema::Schema,
+    context_files: &std::collections::BTreeMap<String, Vec<PathBuf>>,
+) -> (Vec<ArtifactRef>, Vec<String>) {
+    let artifacts: Vec<ArtifactRef> = schema
+        .artifacts
+        .iter()
+        .map(|artifact| ArtifactRef {
+            id: artifact.id.clone(),
+            paths: context_files.get(&artifact.id).cloned().unwrap_or_default(),
+        })
+        .collect();
+
+    let schema_ids: std::collections::HashSet<&str> =
+        schema.artifacts.iter().map(|a| a.id.as_str()).collect();
+    let problems = context_files
+        .keys()
+        .filter(|key| !schema_ids.contains(key.as_str()))
+        .map(|key| format!("contextFiles reported {key:?}, which the schema does not declare"))
+        .collect();
+
+    (artifacts, problems)
+}
+
 /// Paint the pane from disk: every active change under
 /// `<repo>/openspec/changes/`, the `archived_count` most recent archived
 /// changes under its `archive/`, and every problem recorded along the way.
@@ -2750,6 +2781,175 @@ mod tests {
             assert_eq!(
                 parse_schema_which(text),
                 Ok(PathBuf::from("/pkg/spec-driven"))
+            );
+        }
+    }
+
+    // --- group 5: `cli_artifacts` — placing paths at schema positions ------
+    // (`mod cli_artifacts`)
+
+    mod cli_artifacts {
+        // Explicit import first: the module and the function under test
+        // share a name, and an explicit `use` shadows the same name a glob
+        // import would otherwise bind to the enclosing `mod cli_artifacts`
+        // declaration itself.
+        use super::super::cli_artifacts;
+        use super::*;
+        use std::collections::BTreeMap;
+
+        fn tdd_schema() -> crate::schema::Schema {
+            crate::schema::Schema {
+                name: "tdd".to_string(),
+                artifacts: vec![
+                    crate::schema::Artifact {
+                        id: "proposal".to_string(),
+                        generates: "proposal.md".to_string(),
+                    },
+                    crate::schema::Artifact {
+                        id: "specs".to_string(),
+                        generates: "specs/**/*.md".to_string(),
+                    },
+                    crate::schema::Artifact {
+                        id: "design".to_string(),
+                        generates: "design.md".to_string(),
+                    },
+                    crate::schema::Artifact {
+                        id: "tasks".to_string(),
+                        generates: "tasks.md".to_string(),
+                    },
+                    crate::schema::Artifact {
+                        id: "planning-review".to_string(),
+                        generates: "planning-review.md".to_string(),
+                    },
+                ],
+                tasks: None,
+            }
+        }
+
+        #[test]
+        fn an_omitted_context_files_key_becomes_an_empty_path_list_at_its_position() {
+            let mut context_files = BTreeMap::new();
+            context_files.insert(
+                "proposal".to_string(),
+                vec![PathBuf::from("/repo/x/proposal.md")],
+            );
+            context_files.insert(
+                "specs".to_string(),
+                vec![PathBuf::from("/repo/x/specs/a.md")],
+            );
+            context_files.insert("tasks".to_string(), vec![PathBuf::from("/repo/x/tasks.md")]);
+
+            let (artifacts, problems) = cli_artifacts(&tdd_schema(), &context_files);
+            let ids: Vec<&str> = artifacts.iter().map(|a| a.id.as_str()).collect();
+            assert_eq!(
+                ids,
+                vec!["proposal", "specs", "design", "tasks", "planning-review"]
+            );
+            let design = artifacts.iter().find(|a| a.id == "design").unwrap();
+            assert!(design.paths.is_empty());
+            let planning_review = artifacts
+                .iter()
+                .find(|a| a.id == "planning-review")
+                .unwrap();
+            assert!(planning_review.paths.is_empty());
+            assert!(problems.is_empty());
+        }
+
+        #[test]
+        fn a_multi_file_artifact_keeps_the_cli_list_in_the_cli_order() {
+            let mut context_files = BTreeMap::new();
+            context_files.insert(
+                "specs".to_string(),
+                vec![
+                    PathBuf::from("/repo/x/specs/cap-one/spec.md"),
+                    PathBuf::from("/repo/x/specs/cap-two/spec.md"),
+                ],
+            );
+            let (artifacts, _problems) = cli_artifacts(&tdd_schema(), &context_files);
+            let specs = artifacts.iter().find(|a| a.id == "specs").unwrap();
+            assert_eq!(
+                specs.paths,
+                vec![
+                    PathBuf::from("/repo/x/specs/cap-one/spec.md"),
+                    PathBuf::from("/repo/x/specs/cap-two/spec.md"),
+                ]
+            );
+        }
+
+        #[test]
+        fn a_context_files_key_naming_no_schema_artifact_is_ignored() {
+            let mut context_files = BTreeMap::new();
+            context_files.insert(
+                "legacy".to_string(),
+                vec![PathBuf::from("/repo/x/legacy.md")],
+            );
+            let (artifacts, problems) = cli_artifacts(&tdd_schema(), &context_files);
+            assert!(!artifacts.iter().any(|a| a.id == "legacy"));
+            let ids: Vec<&str> = artifacts.iter().map(|a| a.id.as_str()).collect();
+            assert_eq!(
+                ids,
+                vec!["proposal", "specs", "design", "tasks", "planning-review"]
+            );
+            assert_eq!(problems.len(), 1);
+            assert!(problems[0].contains("legacy"));
+        }
+
+        #[test]
+        fn a_duplicate_schema_id_gives_both_positions_the_same_paths() {
+            let schema = crate::schema::Schema {
+                name: "dup".to_string(),
+                artifacts: vec![
+                    crate::schema::Artifact {
+                        id: "zeta".to_string(),
+                        generates: "zeta.md".to_string(),
+                    },
+                    crate::schema::Artifact {
+                        id: "alpha".to_string(),
+                        generates: "alpha.md".to_string(),
+                    },
+                    crate::schema::Artifact {
+                        id: "zeta".to_string(),
+                        generates: "zeta2.md".to_string(),
+                    },
+                ],
+                tasks: None,
+            };
+            let mut context_files = BTreeMap::new();
+            context_files.insert("zeta".to_string(), vec![PathBuf::from("/repo/x/zeta.md")]);
+
+            let (artifacts, _problems) = cli_artifacts(&schema, &context_files);
+            assert_eq!(artifacts.len(), 3);
+            assert_eq!(artifacts[0].id, "zeta");
+            assert_eq!(artifacts[0].paths, vec![PathBuf::from("/repo/x/zeta.md")]);
+            assert_eq!(artifacts[1].id, "alpha");
+            assert!(artifacts[1].paths.is_empty());
+            assert_eq!(artifacts[2].id, "zeta");
+            assert_eq!(artifacts[2].paths, vec![PathBuf::from("/repo/x/zeta.md")]);
+        }
+
+        #[test]
+        fn an_empty_context_files_map_yields_every_artifact_with_no_paths() {
+            let context_files = BTreeMap::new();
+            let (artifacts, problems) = cli_artifacts(&tdd_schema(), &context_files);
+            assert_eq!(artifacts.len(), 5);
+            assert!(artifacts.iter().all(|a| a.paths.is_empty()));
+            assert!(problems.is_empty());
+        }
+
+        #[test]
+        fn artifact_order_is_the_schemas_declared_order_not_the_map_order() {
+            // The map's own key order (alpha < design < proposal, ...) differs
+            // from the schema's declared order, so an implementation that
+            // iterated the map would produce the wrong order here.
+            let mut context_files = BTreeMap::new();
+            context_files.insert("alpha".to_string(), vec![]);
+            context_files.insert("design".to_string(), vec![]);
+            context_files.insert("proposal".to_string(), vec![]);
+            let (artifacts, _problems) = cli_artifacts(&tdd_schema(), &context_files);
+            let ids: Vec<&str> = artifacts.iter().map(|a| a.id.as_str()).collect();
+            assert_eq!(
+                ids,
+                vec!["proposal", "specs", "design", "tasks", "planning-review"]
             );
         }
     }
