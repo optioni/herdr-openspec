@@ -141,7 +141,7 @@ malformed one, and those are the assertions.
       error (`E0027: pattern does not mention field`) and produces no warning
 - [ ] 2.5 REFACTOR: Keep the invariant assertions one per statement with a distinct message
       each, so a failure names which invariant broke rather than which function it broke in
-- [ ] 2.6 CHECK: Prove the compile-time gate is real rather than asserting it. Add a
+- [x] 2.6 CHECK: Prove the compile-time gate is real rather than asserting it. Add a
       throwaway field to `Change`, update **only** `from_files`' future construction site (or,
       at this point in the change, only the test builders), run
       `cargo test --all-features`, and record the compiler errors verbatim in this task.
@@ -152,14 +152,46 @@ malformed one, and those are the assertions.
       the gate being offered back to you. Then revert. This cannot be a committed test,
       because a test that fails to compile fails the suite permanently; the recorded error is
       the evidence, and design.md → Test Strategy says so
-- [ ] 2.7 CHECK: Contract gate. Re-read design.md → Contracts and confirm the frozen surface
+
+      **Evidence.** Added `pub throwaway_probe_field: bool` to `Change`, updated only
+      `well_formed_active`'s literal (leaving `well_formed_archived`'s unpatched), ran
+      `cargo test --all-features`:
+
+      ```
+      error[E0027]: pattern does not mention field `throwaway_probe_field`
+        --> src/changes.rs:74:13
+      error[E0063]: missing field `throwaway_probe_field` in initializer of `changes::Change`
+         --> src/changes.rs:149:9
+          |
+      149 |         Change {
+          |         ^^^^^^ missing `throwaway_probe_field`
+      ```
+
+      Both name the field and the source line, not the enclosing function, exactly as
+      predicted. `rustc` additionally suggested "include the missing field in the pattern"
+      and "if you don't care about this missing field, you can explicitly ignore it" (via a
+      rest pattern) at the `E0027` site — the gate being offered back, not taken. Reverted
+      immediately after capturing this output; `cargo test --all-features changes::` passed
+      11/11 both before and after the probe.
+- [x] 2.7 CHECK: Contract gate. Re-read design.md → Contracts and confirm the frozen surface
       matches it field for field: seven fields on `Change`, three on `ChangeSet`, two on
       `ArtifactRef`, `Origin`'s two variants, no `Default`, no `#[non_exhaustive]`, no
       `status`, no ratio, no formatted string, no `lastModified`, and no producer
       discriminant. Confirm `progress` is a `Progress` and not an `Option<Progress>`, and
       that design.md → Decisions 9 records why that differs from `task-parsing`'s prediction
-- [ ] 2.8 Run the group tests — `cargo test --all-features changes::` — and confirm no
+
+      Confirmed field-for-field against `src/changes.rs`: `Change` has exactly `name`,
+      `dir`, `origin`, `schema`, `artifacts`, `progress`, `problems` (seven); `ChangeSet`
+      has `active`, `archived`, `problems` (three); `ArtifactRef` has `id`, `paths` (two);
+      `Origin` has `Active` and `Archived { date: Option<String> }` (two variants). No
+      `Default`, no `#[non_exhaustive]`, no `status`/ratio/formatted-string/`lastModified`/
+      discriminant field anywhere. `progress: crate::tasks::Progress`, not wrapped in
+      `Option`, matching Decisions 9's correction of `task-parsing`'s prediction.
+- [x] 2.8 Run the group tests — `cargo test --all-features changes::` — and confirm no
       regressions in the rest of the suite
+
+      `cargo test --all-features` — full suite green (11/11 in `changes::`, no regressions
+      in `config`, `state`, `resolve`, `schema`, `tasks`, or `tests/cli.rs`).
 
 ## 3. Splitting the archive date prefix
 <!-- kind: behavior -->
