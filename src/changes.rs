@@ -873,6 +873,24 @@ pub(crate) fn parse_apply(text: &str) -> Result<ApplyPayload, String> {
     })
 }
 
+/// Parse `openspec schema which <name> --json`'s stdout: the whole of
+/// `text` as one JSON document — no line skipping, no prefix trimming, so a
+/// future release moving its "experimental" note from stderr to stdout
+/// degrades visibly rather than being silently absorbed. Requires an object
+/// with a non-empty string `path`; `source` and `shadows` are ignored. See
+/// `schema-cli-fallback` -> "A not-vendored schema is repaired through
+/// `openspec schema which`".
+pub(crate) fn parse_schema_which(text: &str) -> Result<PathBuf, String> {
+    let value: serde_json::Value = serde_json::from_str(text)
+        .map_err(|e| format!("openspec schema which --json payload is not valid JSON: {e}"))?;
+    let obj = value
+        .as_object()
+        .ok_or_else(|| "openspec schema which --json payload is not a JSON object".to_string())?;
+    let path = required_non_empty_str(obj, "path")
+        .ok_or_else(|| "openspec schema which --json payload has no usable \"path\"".to_string())?;
+    Ok(PathBuf::from(path))
+}
+
 /// Paint the pane from disk: every active change under
 /// `<repo>/openspec/changes/`, the `archived_count` most recent archived
 /// changes under its `archive/`, and every problem recorded along the way.
@@ -2671,6 +2689,68 @@ mod tests {
         #[test]
         fn malformed_apply_json_is_an_error() {
             assert!(parse_apply("{ this is not json").is_err());
+        }
+    }
+
+    // --- group 4: `parse_schema_which` — the schema-directory payload ------
+    // (`mod which_json`)
+
+    mod which_json {
+        use super::*;
+
+        #[test]
+        fn a_schema_which_payload_yields_the_directory_path() {
+            let text = r#"{"name":"spec-driven","source":"package","path":"/pkg/spec-driven","shadows":[]}"#;
+            assert_eq!(
+                parse_schema_which(text),
+                Ok(PathBuf::from("/pkg/spec-driven"))
+            );
+        }
+
+        #[test]
+        fn a_leading_non_json_line_is_not_tolerated() {
+            let text = "Note: Schema commands are experimental and may change.\n{\"path\":\"/x\"}";
+            assert!(parse_schema_which(text).is_err());
+        }
+
+        #[test]
+        fn a_schema_which_error_body_is_an_error() {
+            let text = r#"{"error":"Unknown schema \"outside-in-tdd\"","available":["tdd","spec-driven"]}"#;
+            assert!(parse_schema_which(text).is_err());
+        }
+
+        #[test]
+        fn an_empty_payload_is_an_error() {
+            assert!(parse_schema_which("").is_err());
+        }
+
+        #[test]
+        fn a_null_payload_is_an_error() {
+            assert!(parse_schema_which("null").is_err());
+        }
+
+        #[test]
+        fn a_non_string_path_is_an_error() {
+            assert!(parse_schema_which(r#"{"path": 7}"#).is_err());
+        }
+
+        #[test]
+        fn a_payload_with_no_path_is_an_error() {
+            assert!(parse_schema_which(r#"{"name":"x"}"#).is_err());
+        }
+
+        #[test]
+        fn an_empty_path_is_an_error() {
+            assert!(parse_schema_which(r#"{"path":""}"#).is_err());
+        }
+
+        #[test]
+        fn source_and_shadows_are_ignored() {
+            let text = r#"{"name":"spec-driven","source":"package","path":"/pkg/spec-driven","shadows":["/user/spec-driven"]}"#;
+            assert_eq!(
+                parse_schema_which(text),
+                Ok(PathBuf::from("/pkg/spec-driven"))
+            );
         }
     }
 }

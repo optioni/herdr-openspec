@@ -798,7 +798,7 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
 ## 4. `parse_schema_which` — the schema-directory payload (`mod which_json`)
 <!-- kind: behavior -->
 
-- [ ] 4.1 RED: Write failing unit tests in `mod which_json` for:
+- [x] 4.1 RED: Write failing unit tests in `mod which_json` for:
       `a_schema_which_payload_yields_the_directory_path`;
       `a_leading_non_json_line_is_not_tolerated` (the exact string
       `"Note: Schema commands are experimental and may change.\n{\"path\":\"/x\"}"` → `Err`);
@@ -811,14 +811,14 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
       `source_and_shadows_are_ignored` (a payload carrying `source: "package"` and a
       non-empty `shadows` array still yields just the path).
 
-- [ ] 4.2 GREEN: Implement `pub(crate) fn parse_schema_which(text: &str) ->
+- [x] 4.2 GREEN: Implement `pub(crate) fn parse_schema_which(text: &str) ->
       Result<PathBuf, String>`. Parse the **whole** of `text` as one JSON document with
       `serde_json::from_str` — no line skipping, no prefix trimming. Require an object with
       a non-empty string `path`. Ignore every other key.
 
-- [ ] 4.3 REFACTOR: None expected; state so explicitly if none was made.
+- [x] 4.3 REFACTOR: None expected; state so explicitly if none was made.
 
-- [ ] 4.4 VERIFY: `testcount --lib 'which_json::' <count>`. Commit.
+- [x] 4.4 VERIFY: `testcount --lib 'which_json::' <count>`. Commit.
 
 ---
 
