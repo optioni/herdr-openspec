@@ -99,7 +99,7 @@
 ## 2. The error type, the one spawn helper, and the trait contract
 <!-- kind: behavior -->
 
-- [ ] 2.1 RED: Write failing tests in `src/cli.rs` for the trait contract, named from the
+- [x] 2.1 RED: Write failing tests in `src/cli.rs` for the trait contract, named from the
       spec scenarios: `stdout_is_returned_verbatim_on_success`,
       `stderr_never_reaches_the_success_value`,
       `a_non_zero_exit_is_a_failure_carrying_the_code_and_stderr`,
@@ -117,7 +117,7 @@
       its stderr is `"boom\n"` **verbatim** — trailing newline included, since neither
       stream is trimmed. Emit the invalid UTF-8 with `printf '\141\377\142'`, whose
       octal escapes `/bin/sh` handles portably
-- [ ] 2.2 GREEN: Add `CliError` — a `#[derive(Debug, Clone, PartialEq, Eq)]` enum with
+- [x] 2.2 GREEN: Add `CliError` — a `#[derive(Debug, Clone, PartialEq, Eq)]` enum with
       `NotStarted { program, args, reason }` and `Failed { program, args, code, stderr }`.
       The argument vector is on both variants deliberately: `changes-from-cli` drives four
       distinct invocations through one `RealOpenspecCli` and `agent-launch` four more
@@ -127,32 +127,46 @@
       than matching message substrings. Document why there is deliberately no UTF-8
       variant: `SPEC.md` → Degraded states records that the OpenSpec CLI itself decodes
       lossily, and matching it keeps the two sources agreeing
-- [ ] 2.3 GREEN: Add the crate's single spawn site — a private helper taking the program
+- [x] 2.3 GREEN: Add the crate's single spawn site — a private helper taking the program
       path and the argument slice, attaching an empty stdin, and returning the completed
       run's success flag, exit code, stdout bytes, and stderr bytes, or the operating
       system's error text when the program could not be started. Nothing else in the
       crate may call `Command::new` after this
-- [ ] 2.4 GREEN: Add `pub trait OpenspecCli: Send + Sync` and `pub trait HerdrCli: Send + Sync`,
+- [x] 2.4 GREEN: Add `pub trait OpenspecCli: Send + Sync` and `pub trait HerdrCli: Send + Sync`,
       each with `fn run(&self, args: &[&str]) -> Result<String, CliError>`, and the shared
       private mapping from a completed run to that `Result`: success → `Ok` of stdout
       decoded lossily and **returned verbatim**; non-zero → `Failed` carrying the argument
       vector, the code, and stderr decoded lossily and **also verbatim** — trimming stderr
       would be a decision, and this module makes none; unstartable → `NotStarted` carrying
       the argument vector and the operating system's error text
-- [ ] 2.5 REFACTOR: Keep the two traits' implementations sharing one mapping function
+- [x] 2.5 REFACTOR: Keep the two traits' implementations sharing one mapping function
       rather than duplicating it, and confirm no parsing, trimming, retrying, caching, or
       timeout logic crept into the helper. If nothing needed cleaning, say so here
-- [ ] 2.6 CHECK — contract gate: Re-read the published surface against design.md →
+
+      RECORDED: `run_and_map` is the single shared mapping function `RealOpenspecCli` and
+      (once added in group 3) `RealHerdrCli` both call; nothing needed cleaning.
+- [x] 2.6 CHECK — contract gate: Re-read the published surface against design.md →
       Contracts and confirm the shipped signatures match it exactly, including the
       `Send + Sync` supertraits and the two `CliError` variants. Every named consumer
       (`changes-from-cli`, `agent-polling`, `agent-launch`, `live-refresh`) is future
       work, so there is no existing caller to break — record that explicitly rather than
       leaving the gate unanswered
-- [ ] 2.7 VERIFY: `testcount 'cli::' 8` using the shell function from design.md → Test
+
+      RECORDED: signatures match design.md → Contracts exactly — both traits carry
+      `Send + Sync`, `run(&self, args: &[&str]) -> Result<String, CliError>`, and
+      `CliError` has exactly the two struct variants shown, each carrying `args`. No
+      existing caller in the crate; the four named future consumers are all unbuilt.
+- [x] 2.7 VERIFY: `testcount 'cli::' 8` using the shell function from design.md → Test
       Strategy, then `cargo test --all-features` for the full suite. The counted form is
       the point: a bare `cargo test --all-features cli::` **exits 0 when the filter matches
       nothing** (verified at planning time — it prints "0 passed" and returns 0), so a
       renamed module, a mistyped filter, or tests that were never written would pass
+
+      RECORDED: `testcount 'cli::' 8` -> "TESTCOUNT OK: filter 'cli::' ran 8 tests (>= 8)".
+      Full suite: 274 passed (266 baseline + 8 new), 0 failed. `cargo clippy --all-targets
+      --all-features -- -D warnings` clean. Sanity-checked the counting mechanism itself:
+      `testcount 'this_name_does_not_exist' 999` correctly FAILs (0 < 999), confirming the
+      counted form catches what a bare filtered `cargo test` would not.
       silently. **Red when:** fewer than 8 tests match, stdout is trimmed, stderr leaks
       into `Ok`, a non-zero exit returns `Ok`, or an absent program panics
 
