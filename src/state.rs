@@ -134,33 +134,141 @@ pub fn agent_name(change: &str) -> String {
     result
 }
 
+/// Whether `name` matches Herdr's agent-name pattern `[a-z][a-z0-9_-]{0,31}`.
+fn is_legal_agent_name(name: &str) -> bool {
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_lowercase() => {}
+        _ => return false,
+    }
+    name.len() <= 32
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+}
+
 /// Read the mapping from `agent-names.toml` inside `dir`. Never fails,
-/// panics, or returns an error: an absent directory, an absent file, and an
-/// empty file all yield an empty mapping with no problem. Full file-reading
-/// behaviour — parsing, per-entry validation — lands with the mapping-file
-/// requirement; see `openspec/changes/plugin-config/design.md` -> Contracts.
+/// panics, or returns an error to the caller. An absent directory, an absent
+/// file, and an empty file all yield an empty mapping with no problem. A file
+/// that is not valid TOML, or whose `[names]` table is missing or is not a
+/// table, yields an empty mapping and one problem. Per entry, a non-string
+/// value or an agent name that fails `^[a-z][a-z0-9_-]{0,31}$` is skipped with
+/// one problem, while every well-formed entry in the same file still comes
+/// back. See `openspec/changes/plugin-config/design.md` -> Contracts.
 pub fn read(dir: Option<&Path>) -> Mapping {
-    let _ = dir;
-    Mapping::default()
+    let Some(dir) = dir else {
+        return Mapping::default();
+    };
+
+    let path = dir.join("agent-names.toml");
+    let contents = match std::fs::read_to_string(&path) {
+        Ok(contents) => contents,
+        Err(_) => return Mapping::default(),
+    };
+
+    if contents.trim().is_empty() {
+        return Mapping::default();
+    }
+
+    let table: toml::Table = match contents.parse() {
+        Ok(table) => table,
+        Err(_) => {
+            return Mapping {
+                names: BTreeMap::new(),
+                problems: vec!["agent-names.toml is not valid TOML".to_string()],
+            };
+        }
+    };
+
+    let names_value = match table.get("names") {
+        Some(value) => value,
+        None => {
+            return Mapping {
+                names: BTreeMap::new(),
+                problems: vec!["agent-names.toml has no [names] table".to_string()],
+            };
+        }
+    };
+
+    let Some(names_table) = names_value.as_table() else {
+        return Mapping {
+            names: BTreeMap::new(),
+            problems: vec!["agent-names.toml's names key is not a table".to_string()],
+        };
+    };
+
+    let mut mapping = Mapping::default();
+    for (key, value) in names_table {
+        match value.as_str() {
+            None => mapping
+                .problems
+                .push(format!("agent-names.toml: {key} is not a string")),
+            Some(change) if is_legal_agent_name(key) => {
+                mapping.names.insert(key.clone(), change.to_string());
+            }
+            Some(_) => mapping
+                .problems
+                .push(format!("agent-names.toml: {key} is not a legal agent name")),
+        }
+    }
+
+    mapping
 }
 
 /// Record that `agent` is the derived name for `change` inside `dir`. The
 /// `agent == change` short-circuit runs before the directory is consulted, so
 /// an unchanged name succeeds even when no state directory can be resolved —
-/// this order is part of the contract. Full atomic-write behaviour lands with
-/// the mapping-file requirement; see
-/// `openspec/changes/plugin-config/design.md` -> Contracts.
+/// this order is part of the contract. Creates the state directory when
+/// missing, writes the complete new contents to a temporary file inside that
+/// same directory, and renames it over `agent-names.toml`, so a concurrent
+/// reader observes either the previous file or the new one and never a
+/// partial one. See `openspec/changes/plugin-config/design.md` -> Contracts.
 pub fn record(dir: Option<&Path>, agent: &str, change: &str) -> std::io::Result<()> {
     if agent == change {
         return Ok(());
     }
-    let Some(_dir) = dir else {
+    let Some(dir) = dir else {
         return Err(std::io::Error::new(
             std::io::ErrorKind::NotFound,
             "no state directory could be resolved",
         ));
     };
-    Ok(())
+
+    std::fs::create_dir_all(dir)
+        .map_err(|e| std::io::Error::new(e.kind(), format!("{}: {e}", dir.display())))?;
+
+    let mut mapping = read(Some(dir));
+    mapping.names.insert(agent.to_string(), change.to_string());
+
+    let mut names_table = toml::Table::new();
+    for (k, v) in &mapping.names {
+        names_table.insert(k.clone(), toml::Value::String(v.clone()));
+    }
+    let mut table = toml::Table::new();
+    table.insert("names".to_string(), toml::Value::Table(names_table));
+    let contents = table.to_string();
+
+    static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let counter = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp_path = dir.join(format!(
+        "agent-names.toml.tmp-{}-{counter}",
+        std::process::id()
+    ));
+
+    let write_and_rename = || -> std::io::Result<()> {
+        std::fs::write(&tmp_path, &contents)?;
+        std::fs::rename(&tmp_path, dir.join("agent-names.toml"))?;
+        Ok(())
+    };
+
+    match write_and_rename() {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp_path);
+            Err(std::io::Error::new(
+                e.kind(),
+                format!("{}: {e}", dir.display()),
+            ))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -308,5 +416,245 @@ mod tests {
         }
         s.len() <= 32
             && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+    }
+
+    // --- reading and recording the mapping file (group 5) -------------------
+
+    use crate::testutil::{snapshot, ScratchDir};
+    use std::fs;
+
+    fn write_mapping(dir: &std::path::Path, contents: &str) {
+        fs::write(dir.join("agent-names.toml"), contents).expect("write agent-names.toml");
+    }
+
+    #[test]
+    fn absent_file_and_absent_directory_are_both_empty_not_faults() {
+        let scratch = ScratchDir::new();
+
+        // Uncreated directory.
+        let uncreated = scratch.path().join("nonexistent");
+        let mapping = super::read(Some(&uncreated));
+        assert!(mapping.names.is_empty());
+        assert!(mapping.problems.is_empty());
+
+        // Directory exists but holds no agent-names.toml.
+        let empty_dir = ScratchDir::new();
+        let mapping = super::read(Some(empty_dir.path()));
+        assert!(mapping.names.is_empty());
+        assert!(mapping.problems.is_empty());
+
+        // agent-names.toml exists and is zero bytes.
+        let zero_byte = ScratchDir::new();
+        write_mapping(zero_byte.path(), "");
+        let mapping = super::read(Some(zero_byte.path()));
+        assert!(mapping.names.is_empty());
+        assert!(mapping.problems.is_empty());
+    }
+
+    #[test]
+    fn a_malformed_file_is_empty_and_reports_one_problem() {
+        let scratch = ScratchDir::new();
+        write_mapping(scratch.path(), "[names");
+        let mapping = super::read(Some(scratch.path()));
+        assert!(mapping.names.is_empty());
+        assert_eq!(mapping.problems.len(), 1);
+        assert!(mapping.problems[0].contains("agent-names.toml"));
+    }
+
+    #[test]
+    fn a_bad_entry_is_skipped_and_its_neighbours_survive() {
+        let scratch = ScratchDir::new();
+        write_mapping(
+            scratch.path(),
+            "[names]\ngood-agent = \"a-real-change\"\nbad-agent = 7\nBad_Name = \"another-change\"\n\"has spaces!\" = \"third-change\"\n",
+        );
+        let mapping = super::read(Some(scratch.path()));
+        assert_eq!(mapping.names.len(), 1);
+        assert_eq!(
+            mapping.names.get("good-agent"),
+            Some(&"a-real-change".to_string())
+        );
+        assert_eq!(mapping.problems.len(), 3);
+        assert!(mapping.problems.iter().any(|p| p.contains("bad-agent")));
+        assert!(mapping.problems.iter().any(|p| p.contains("Bad_Name")));
+        assert!(mapping.problems.iter().any(|p| p.contains("has spaces!")));
+    }
+
+    #[test]
+    fn names_is_present_but_is_not_a_table() {
+        let scratch = ScratchDir::new();
+        write_mapping(scratch.path(), "names = \"nope\"\n");
+        let mapping = super::read(Some(scratch.path()));
+        assert!(mapping.names.is_empty());
+        assert_eq!(mapping.problems.len(), 1);
+        assert!(mapping.problems[0].contains("names"));
+    }
+
+    #[test]
+    fn a_truncated_name_is_recorded() {
+        let scratch = ScratchDir::new();
+        let change = "a".repeat(48);
+        let agent = super::agent_name(&change);
+        super::record(Some(scratch.path()), &agent, &change).expect("record");
+
+        assert!(scratch.path().join("agent-names.toml").exists());
+        let mapping = super::read(Some(scratch.path()));
+        assert_eq!(mapping.names.len(), 1);
+        assert_eq!(mapping.names.get(&agent), Some(&change));
+    }
+
+    #[test]
+    fn an_unchanged_name_is_not_recorded() {
+        let scratch = ScratchDir::new();
+        let uncreated = scratch.path().join("nonexistent");
+        super::record(Some(&uncreated), "add-token-refresh", "add-token-refresh")
+            .expect("record");
+        assert!(!uncreated.exists());
+    }
+
+    #[test]
+    fn recording_the_same_pair_twice_changes_nothing() {
+        let scratch = ScratchDir::new();
+        super::record(Some(scratch.path()), "c-2fa-support", "2fa-support").expect("record 1");
+        let first = fs::read(scratch.path().join("agent-names.toml")).expect("read after first");
+        super::record(Some(scratch.path()), "c-2fa-support", "2fa-support").expect("record 2");
+        let second = fs::read(scratch.path().join("agent-names.toml")).expect("read after second");
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn a_second_mapping_is_added_beside_the_first() {
+        let scratch = ScratchDir::new();
+        super::record(Some(scratch.path()), "c-2fa-support", "2fa-support").expect("record 1");
+        super::record(Some(scratch.path()), "c-another", "another!!!").expect("record 2");
+        let mapping = super::read(Some(scratch.path()));
+        assert_eq!(mapping.names.len(), 2);
+        assert_eq!(
+            mapping.names.get("c-2fa-support"),
+            Some(&"2fa-support".to_string())
+        );
+        assert_eq!(
+            mapping.names.get("c-another"),
+            Some(&"another!!!".to_string())
+        );
+    }
+
+    #[test]
+    fn the_same_agent_name_recorded_for_a_different_change_replaces_it() {
+        let scratch = ScratchDir::new();
+        super::record(Some(scratch.path()), "change", "!!!").expect("record 1");
+        super::record(Some(scratch.path()), "unrelated", "unrelated-change").expect("record 2");
+        super::record(Some(scratch.path()), "change", "---").expect("record 3");
+
+        let mapping = super::read(Some(scratch.path()));
+        assert_eq!(mapping.names.get("change"), Some(&"---".to_string()));
+        assert_eq!(
+            mapping.names.get("unrelated"),
+            Some(&"unrelated-change".to_string())
+        );
+        assert!(mapping.problems.is_empty());
+    }
+
+    #[test]
+    fn the_state_directory_is_created_on_first_record() {
+        let scratch = ScratchDir::new();
+        let state_dir = scratch.path().join("nested").join("state");
+        assert!(!state_dir.exists());
+        super::record(Some(&state_dir), "c-x", "x-change").expect("record");
+        assert!(state_dir.is_dir());
+        let entries: Vec<_> = fs::read_dir(&state_dir)
+            .expect("read state dir")
+            .map(|e| e.expect("entry").file_name())
+            .collect();
+        assert_eq!(entries, vec![std::ffi::OsString::from("agent-names.toml")]);
+    }
+
+    #[test]
+    fn the_file_is_replaced_by_rename_not_written_in_place() {
+        let scratch = ScratchDir::new();
+        super::record(Some(scratch.path()), "c-first", "first-change").expect("record 1");
+
+        let target = scratch.path().join("agent-names.toml");
+        let witness = scratch.path().join("witness.toml");
+        fs::hard_link(&target, &witness).expect("hard link witness");
+        let previous_bytes = fs::read(&witness).expect("read witness before");
+
+        super::record(Some(scratch.path()), "c-second", "second-change").expect("record 2");
+
+        let new_bytes = fs::read(&target).expect("read target after");
+        let witness_bytes = fs::read(&witness).expect("read witness after");
+        assert_eq!(witness_bytes, previous_bytes);
+        assert_ne!(new_bytes, witness_bytes);
+        assert!(new_bytes.windows(b"second-change".len()).any(|w| w == b"second-change"));
+
+        let mut names: Vec<_> = fs::read_dir(scratch.path())
+            .expect("read state dir")
+            .map(|e| e.expect("entry").file_name())
+            .collect();
+        names.sort();
+        assert_eq!(
+            names,
+            vec![
+                std::ffi::OsString::from("agent-names.toml"),
+                std::ffi::OsString::from("witness.toml"),
+            ]
+        );
+    }
+
+    #[test]
+    fn recording_fails_without_panicking() {
+        let scratch = ScratchDir::new();
+        let blocked = scratch.path().join("blocked");
+        fs::write(&blocked, b"not a directory").expect("write blocking file");
+        let before = fs::read(&blocked).expect("read before");
+
+        let result = super::record(Some(&blocked), "c-x", "x-change");
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains(&blocked.display().to_string()));
+
+        let after = fs::read(&blocked).expect("read after");
+        assert_eq!(before, after);
+        assert!(
+            fs::read_dir(scratch.path())
+                .expect("read scratch dir")
+                .filter_map(|e| e.ok())
+                .all(|e| !e.file_name().to_string_lossy().contains(".tmp-"))
+        );
+    }
+
+    #[test]
+    fn a_repository_tree_is_untouched_by_a_recording() {
+        let repo = ScratchDir::new();
+        let changes_dir = repo.path().join("openspec").join("changes").join("x");
+        fs::create_dir_all(&changes_dir).expect("create fixture tree");
+        fs::write(changes_dir.join("tasks.md"), b"- [ ] 1 do it\n").expect("write fixture file");
+
+        let before = snapshot(repo.path());
+
+        let state = ScratchDir::new();
+        super::record(Some(state.path()), "c-x", "x-change").expect("record");
+
+        let after = snapshot(repo.path());
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn the_configuration_directory_is_not_written_to() {
+        let config = ScratchDir::new();
+        write_mapping(config.path(), "openspec_bin = \"/opt/bin/openspec\"\n");
+        // (agent-names.toml is not a config file; reuse the writer to place a
+        // recognisable fixture file at a known name inside the config dir.)
+        fs::remove_file(config.path().join("agent-names.toml")).ok();
+        fs::write(config.path().join("config.toml"), b"agent_kind = \"codex\"\n")
+            .expect("write config.toml fixture");
+
+        let before = snapshot(config.path());
+
+        let state = ScratchDir::new();
+        super::record(Some(state.path()), "c-x", "x-change").expect("record");
+
+        let after = snapshot(config.path());
+        assert_eq!(before, after);
     }
 }
