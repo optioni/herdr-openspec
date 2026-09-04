@@ -368,7 +368,7 @@ expected is one named problem", "A file of invalid UTF-8 is one named problem, n
 result", "A readable file is parsed exactly as its text would be", and "A task tree is
 byte-identical after reading".
 
-- [ ] 5.1 RED: Write the four `read` tests, named after their scenarios, building every
+- [x] 5.1 RED: Write the four `read` tests, named after their scenarios, building every
       fixture under a `crate::testutil::ScratchDir` — never a path in the real repository.
       The absent-file test asserts no groups, `Progress { completed: 0, total: 0 }`, **and**
       `problems.is_empty()`; the directory and invalid-UTF-8 tests each assert no groups and
@@ -376,7 +376,7 @@ byte-identical after reading".
       are what make `problems` load-bearing: an implementation recording a problem for every
       failed read passes the second pair alone, and one that never records passes the first
       alone
-- [ ] 5.2 RED: Use a **directory** as the unreadable case, not a file with mode `0000`. A
+- [x] 5.2 RED: Use a **directory** as the unreadable case, not a file with mode `0000`. A
       read of a directory fails with `EISDIR` on both macOS and Linux and for the root user
       as well, while a mode-`0000` file is readable by root and would pass silently in a
       container that runs as one. It is also the realistic shape: a schema whose tasks
@@ -385,7 +385,7 @@ byte-identical after reading".
       `std::fs::write`, not as a string. Have "A readable file is parsed exactly as its text
       would be" assert `read(path) == parse(text)` on the whole value, problems included, so
       the edge cannot quietly differ from the pure path
-- [ ] 5.3 CHARACTERIZE: Write the containment test in the same pass as 5.1 and 5.2, before
+- [x] 5.3 CHARACTERIZE: Write the containment test in the same pass as 5.1 and 5.2, before
       any `read` exists — build a fixture tree holding `openspec/changes/x/tasks.md`, an
       **empty** `openspec/specs/` directory, and `README.md`; take a `testutil::snapshot`;
       call `read` on the `tasks.md` path, on the `openspec/specs` directory path, and on a
@@ -399,11 +399,11 @@ byte-identical after reading".
       correct implementation makes it green immediately. What it genuinely goes red against
       is an implementation that creates a parent directory, opens the target in a mode that
       updates its modification time, or writes a lock file beside it
-- [ ] 5.4 Confirm 5.1's failures are the missing `read` rather than a broken fixture —
+- [x] 5.4 Confirm 5.1's failures are the missing `read` rather than a broken fixture —
       assert inside at least one test that the fixture file exists and holds the expected
       bytes before the call under test, and check that `cargo test --all-features tasks::`
       names the new tests rather than failing to compile for an unrelated reason
-- [ ] 5.5 GREEN: Implement `read(path: &Path) -> Tasks`. Read the file as UTF-8 text; on
+- [x] 5.5 GREEN: Implement `read(path: &Path) -> Tasks`. Read the file as UTF-8 text; on
       success return `parse` of it. Map `ErrorKind::NotFound` to an empty `Tasks` with **no**
       problem — the CLI treats a missing tasks file as zero tasks, and a change whose tasks
       artifact is not written yet is an ordinary state. Map every other error, including an
@@ -412,7 +412,7 @@ byte-identical after reading".
       records that this is a knowing divergence, that the CLI reports a count for such a
       file and this module reports none plus a problem, and why that is the better failure.
       Never return a `Result`, never panic, never `unwrap`
-- [ ] 5.6 CHECK: Contract gate for the module's complete public surface. `read` closes it,
+- [x] 5.6 CHECK: Contract gate for the module's complete public surface. `read` closes it,
       and design.md → Contracts names five consumers — `changes-from-files`,
       `changes-from-cli`, `tasks-tab`, `live-refresh`, and `degraded-states`. Re-read that
       table against the code as it now stands and confirm each row is still satisfiable:
@@ -420,17 +420,17 @@ byte-identical after reading".
       `Result` the caller must handle, and `Tasks::problems` is the only channel by which a
       degradation is reported. Run `cargo doc --no-deps` and read the generated `tasks`
       page as a consumer would, to catch a type that is public but whose field is not
-- [ ] 5.7 CHECK: Persistence gate — confirm and record that none of migration, backfill,
+- [x] 5.7 CHECK: Persistence gate — confirm and record that none of migration, backfill,
       seeding, cache invalidation, index rebuild, authorization, observability, or
       deployment applies, matching design.md → Persistence and Rollout item by item. In
       particular confirm no memoisation was introduced: `read` recomputes on every call
       because `live-refresh` owns invalidation and a cache here would have to be invalidated
       by a watcher this change cannot see. If a `OnceLock` or a lazily-initialised static
       appeared during groups 1–5, this is where it is caught
-- [ ] 5.8 REFACTOR: If `read` has grown a nested match on `ErrorKind`, flatten it to the
+- [x] 5.8 REFACTOR: If `read` has grown a nested match on `ErrorKind`, flatten it to the
       one-line "NotFound is silent, everything else is one problem" shape the doc comment
       claims; otherwise state that no refactor was needed
-- [ ] 5.9 Run the group tests — `cargo test --all-features` green, no regressions
+- [x] 5.9 Run the group tests — `cargo test --all-features` green, no regressions
 
 ## 6. No-spawn and dependency confirmation
 <!-- kind: operational -->

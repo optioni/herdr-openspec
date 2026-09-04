@@ -168,6 +168,35 @@ pub fn parse(text: &str) -> Tasks {
     }
 }
 
+/// Read a task file at `path`, without writing anything. Never returns a
+/// `Result`, never panics, never `unwrap`s: a missing file — the CLI's own
+/// treatment of a change whose tasks artifact is not written yet — is an
+/// empty [`Tasks`] with **no** problem; every other read failure, including
+/// a directory where a file was expected, a permission error, or an
+/// invalid-UTF-8 decode failure, is an empty `Tasks` carrying exactly one
+/// problem naming `path`.
+///
+/// Invalid UTF-8 is deliberately **not** decoded lossily to preserve the
+/// CLI's count: the CLI reads with replacement characters and so reports a
+/// count for such a file, and this module reports none plus a named
+/// problem instead — a knowing divergence recorded in
+/// `openspec/changes/task-parsing/design.md` -> Decisions 8 and in
+/// `specs/task-groups`. The dual-source model is what resolves it: the
+/// CLI's count arrives and corrects the pane.
+pub fn read(path: &std::path::Path) -> Tasks {
+    match std::fs::read_to_string(path) {
+        Ok(text) => parse(&text),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Tasks {
+            groups: Vec::new(),
+            problems: Vec::new(),
+        },
+        Err(e) => Tasks {
+            groups: Vec::new(),
+            problems: vec![format!("{} could not be read: {e}", path.display())],
+        },
+    }
+}
+
 /// Push the group being closed, unless it is the leading (headingless)
 /// group and holds no items — the one case `parse`'s doc comment names as
 /// suppressed.
