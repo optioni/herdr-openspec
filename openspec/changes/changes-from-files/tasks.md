@@ -105,7 +105,7 @@ The conformance function's own behaviour is genuinely testable, which is why thi
 carry an honest RED without a filesystem: it accepts a well-formed value and rejects each
 malformed one, and those are the assertions.
 
-- [ ] 2.1 RED: Write failing unit tests in `src/changes.rs` for
+- [x] 2.1 RED: Write failing unit tests in `src/changes.rs` for
       `conformance::assert_invariants`, building `Change` values by hand with no filesystem:
       a well-formed active value passes; a value with an empty `name` panics; a value with
       an empty `schema` panics; a value holding an `ArtifactRef` with an empty `id` panics;
@@ -118,7 +118,7 @@ malformed one, and those are the assertions.
       `schema-artifacts` capability requires a schema's list to be kept verbatim and "never
       de-duplicated", and it ships a scenario producing `zeta, alpha, middle, zeta` — so a
       uniqueness invariant would panic on a value `from_files` legitimately produces
-- [ ] 2.2 RED: Add the test that pins the derived-state rule from the type's side: construct
+- [x] 2.2 RED: Add the test that pins the derived-state rule from the type's side: construct
       the three-way split (`no-tasks`, `complete`, `in-progress`) from `progress.total`,
       `progress.completed`, and `progress.is_complete()` for three `Change` values, and
       assert each. Be honest about what this catches: on its own it is close to a tautology
@@ -126,12 +126,12 @@ malformed one, and those are the assertions.
       is 9.3's source scan. Its value is that it is the *worked example* a future reader finds
       when they wonder where the split lives, and it has to be deleted to make room for a
       stored one
-- [ ] 2.3 GREEN: Define `Origin`, `ArtifactRef`, `Change`, and `ChangeSet` exactly as
+- [x] 2.3 GREEN: Define `Origin`, `ArtifactRef`, `Change`, and `ChangeSet` exactly as
       design.md → Contracts specifies, deriving `Debug, Clone, PartialEq, Eq` and
       **deliberately not** `Default`. Write the reason for the missing `Default` into a doc
       comment on `Change` — one or two lines, naming the compile error it buys, because a
       derive that looks accidentally omitted gets added back
-- [ ] 2.4 GREEN: Implement `#[cfg(test)] pub(crate) mod conformance` with
+- [x] 2.4 GREEN: Implement `#[cfg(test)] pub(crate) mod conformance` with
       `assert_invariants(&Change)`, opening with the exhaustive `let Change { name, dir,
       origin, schema, artifacts, progress: _, problems } = change;` pattern carrying **no**
       `..` rest pattern. Every field must be *mentioned*, but a field no invariant reads must
@@ -139,7 +139,7 @@ malformed one, and those are the assertions.
       `unused_variables`, which `-D warnings` turns into a clippy failure, and the obvious
       way out is the rest pattern that deletes the gate. `field: _` keeps the exhaustiveness
       error (`E0027: pattern does not mention field`) and produces no warning
-- [ ] 2.5 REFACTOR: Keep the invariant assertions one per statement with a distinct message
+- [x] 2.5 REFACTOR: Keep the invariant assertions one per statement with a distinct message
       each, so a failure names which invariant broke rather than which function it broke in
 - [x] 2.6 CHECK: Prove the compile-time gate is real rather than asserting it. Add a
       throwaway field to `Change`, update **only** `from_files`' future construction site (or,
@@ -243,17 +243,17 @@ segment is unsupported" (the `shape` half; 8.6 owns the recorded-problem half), 
 wildcard in the filename segment is unsupported", and "A `**` that is not the last directory
 segment is unsupported" (the `shape` half).
 
-- [ ] 4.1 RED: Write failing unit tests for `is_glob(&str)`, asserting `tasks.md`,
+- [x] 4.1 RED: Write failing unit tests for `is_glob(&str)`, asserting `tasks.md`,
       `specs/{alpha,zeta}/spec.md`, and `design.md` are not globs while `specs/**/*.md`,
       `notes/file?.md`, and `notes/[ab].md` are. The brace case is the one an implementation
       gets wrong by being reasonable: `{` is **not** in the CLI's metacharacter set, and a
       value containing one takes the literal-path branch in both tools
-- [ ] 4.2 RED: Write failing unit tests for `shape(&str) -> Result<Shape, String>` covering
+- [x] 4.2 RED: Write failing unit tests for `shape(&str) -> Result<Shape, String>` covering
       the supported subset — `specs/**/*.md`, `specs/spec-*.md`, `specs/*`, `a/b/c.md` — and
       each unsupported shape: `specs/*/spec.md`, `specs/?eta/spec.md`, `specs/[az]*/spec.md`,
       `specs/*-*.md`, `specs/**/nested/*.md`, and `specs/**/nested/**/*.md`. Assert the `Err`
       message names the pattern verbatim, so a caller can print it
-- [ ] 4.3 RED: Add the four boundary inputs the scenarios do not name, with the answer the
+- [x] 4.3 RED: Add the four boundary inputs the scenarios do not name, with the answer the
       subset rule already determines — do not leave the implementer to "assert whichever it
       does", which is green by construction. `.` is not a glob and is `Shape::Literal(".")`,
       which 5.7 then resolves to nothing because a directory is not a regular file. `specs/`
@@ -263,16 +263,16 @@ segment is unsupported" (the `shape` half).
       directory list, `recursive = true`, and a bare `*` file pattern — which is
       `Err`, because the subset's final segment must be a filename pattern and `**` is a
       directory segment. Assert exactly these
-- [ ] 4.4 GREEN: Implement `is_glob` as the CLI's `isGlobPattern` character for character —
+- [x] 4.4 GREEN: Implement `is_glob` as the CLI's `isGlobPattern` character for character —
       contains `*`, `?`, or `[` — with a comment naming the file and function it is copied
       from, not a paraphrase of the rule
-- [ ] 4.5 GREEN: Implement `shape`, splitting on `/` and applying design.md's five-line
+- [x] 4.5 GREEN: Implement `shape`, splitting on `/` and applying design.md's five-line
       subset: every directory segment a literal free of `*?[` except that the **last**
       directory segment may be exactly `**`; the final segment a literal, or a literal prefix
       plus exactly one `*` plus a literal suffix. Everything else is `Err` naming the pattern
-- [ ] 4.6 REFACTOR: Extract the "segment contains a metacharacter" test used by both halves
+- [x] 4.6 REFACTOR: Extract the "segment contains a metacharacter" test used by both halves
       so the two cannot drift apart, keeping tests green
-- [ ] 4.7 Run the group tests — `cargo test --all-features changes::` — no regressions
+- [x] 4.7 Run the group tests — `cargo test --all-features changes::` — no regressions
 
 ## 5. Resolving one artifact to paths
 <!-- kind: behavior -->

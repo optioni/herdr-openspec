@@ -155,6 +155,109 @@ pub(crate) fn split_archive_name(dir_name: &str) -> (Option<String>, String) {
     (None, dir_name.to_string())
 }
 
+/// The final segment of a glob: a literal filename, or a literal prefix and
+/// suffix around exactly one `*`. `Prefixed { prefix: "", suffix: "" }` is a
+/// bare `*`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum FilePattern {
+    Literal(String),
+    Prefixed { prefix: String, suffix: String },
+}
+
+/// The classified shape of a `generates` value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum Shape {
+    /// Not a glob: one relative path, joined and tested for being a regular
+    /// file.
+    Literal(String),
+    /// `dirs` are the literal directory segments; `recursive` is true when
+    /// the last directory segment was `**`.
+    Glob {
+        dirs: Vec<String>,
+        recursive: bool,
+        file: FilePattern,
+    },
+}
+
+/// Is `generates` a glob? Reproduces the OpenSpec CLI's own `isGlobPattern`
+/// (`dist/core/artifact-graph/outputs.js`) character for character: contains
+/// `*`, `?`, or `[`. `{` is deliberately **not** in that set — a value such
+/// as `specs/{alpha,zeta}/spec.md` takes the literal-path branch in both
+/// tools.
+pub(crate) fn is_glob(generates: &str) -> bool {
+    generates.contains(['*', '?', '['])
+}
+
+/// One directory segment or the final filename segment contains a
+/// metacharacter (`*`, `?`, or `[`). Shared by `shape`'s directory-segment
+/// loop and its file-pattern check so the two rules cannot drift apart.
+fn has_metacharacter(segment: &str) -> bool {
+    is_glob(segment)
+}
+
+/// Parse the final (filename) segment of a glob into a [`FilePattern`],
+/// or `None` when it falls outside the supported subset: any `?` or `[`,
+/// or a `*` count other than exactly one.
+fn file_pattern(segment: &str) -> Option<FilePattern> {
+    if !has_metacharacter(segment) {
+        return Some(FilePattern::Literal(segment.to_string()));
+    }
+    if segment.contains(['?', '[']) {
+        return None;
+    }
+    if segment.matches('*').count() != 1 {
+        return None;
+    }
+    let star = segment.find('*').expect("exactly one '*' was just counted");
+    Some(FilePattern::Prefixed {
+        prefix: segment[..star].to_string(),
+        suffix: segment[star + 1..].to_string(),
+    })
+}
+
+/// Classify `generates`: a literal relative path, or — when [`is_glob`]
+/// holds — a glob within design.md's deliberately small supported subset.
+/// `Err` names the pattern verbatim so the caller can record it as a
+/// problem: every directory segment must be a literal free of `*?[`,
+/// except that the **last** directory segment may be exactly `**`; the
+/// final segment must be a literal filename, or a literal prefix, exactly
+/// one `*`, and a literal suffix.
+pub(crate) fn shape(generates: &str) -> Result<Shape, String> {
+    if !is_glob(generates) {
+        return Ok(Shape::Literal(generates.to_string()));
+    }
+
+    let segments: Vec<&str> = generates.split('/').collect();
+    // `split_last` returns `(last_element, everything_before_it)` — the
+    // *file* segment first, then the directory segments.
+    let (file_segment, dir_segments) = segments
+        .split_last()
+        .expect("split('/') always yields at least one segment");
+
+    let mut dirs = Vec::new();
+    let mut recursive = false;
+    let last_dir_index = dir_segments.len().checked_sub(1);
+    for (index, segment) in dir_segments.iter().copied().enumerate() {
+        let is_last = Some(index) == last_dir_index;
+        if is_last && segment == "**" {
+            recursive = true;
+            continue;
+        }
+        if has_metacharacter(segment) {
+            return Err(generates.to_string());
+        }
+        dirs.push(segment.to_string());
+    }
+
+    let file = file_pattern(file_segment).ok_or_else(|| generates.to_string())?;
+
+    Ok(Shape::Glob {
+        dirs,
+        recursive,
+        file,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::conformance::assert_invariants;
@@ -389,5 +492,111 @@ mod tests {
             split_archive_name("2026-08-14-"),
             (None, "2026-08-14-".to_string())
         );
+    }
+
+    // --- group 4: classifying a `generates` value -------------------------
+
+    #[test]
+    fn a_plain_filename_is_not_a_glob() {
+        assert!(!is_glob("tasks.md"));
+        assert!(!is_glob("design.md"));
+    }
+
+    #[test]
+    fn a_brace_expression_is_not_a_glob() {
+        // The case an implementation gets wrong by being reasonable: `{` is
+        // not in the CLI's metacharacter set.
+        assert!(!is_glob("specs/{alpha,zeta}/spec.md"));
+    }
+
+    #[test]
+    fn each_of_the_three_metacharacters_makes_a_value_a_glob() {
+        assert!(is_glob("specs/**/*.md"));
+        assert!(is_glob("notes/file?.md"));
+        assert!(is_glob("notes/[ab].md"));
+    }
+
+    #[test]
+    fn the_supported_glob_subset_parses() {
+        assert_eq!(
+            shape("specs/**/*.md"),
+            Ok(Shape::Glob {
+                dirs: vec!["specs".to_string()],
+                recursive: true,
+                file: FilePattern::Prefixed {
+                    prefix: String::new(),
+                    suffix: ".md".to_string(),
+                },
+            })
+        );
+        assert_eq!(
+            shape("specs/spec-*.md"),
+            Ok(Shape::Glob {
+                dirs: vec!["specs".to_string()],
+                recursive: false,
+                file: FilePattern::Prefixed {
+                    prefix: "spec-".to_string(),
+                    suffix: ".md".to_string(),
+                },
+            })
+        );
+        assert_eq!(
+            shape("specs/*"),
+            Ok(Shape::Glob {
+                dirs: vec!["specs".to_string()],
+                recursive: false,
+                file: FilePattern::Prefixed {
+                    prefix: String::new(),
+                    suffix: String::new(),
+                },
+            })
+        );
+        assert_eq!(
+            shape("a/b/c.md"),
+            Ok(Shape::Literal("a/b/c.md".to_string()))
+        );
+    }
+
+    #[test]
+    fn each_unsupported_glob_shape_is_an_err_naming_the_pattern_verbatim() {
+        for pattern in [
+            "specs/*/spec.md",
+            "specs/?eta/spec.md",
+            "specs/[az]*/spec.md",
+            "specs/*-*.md",
+            "specs/**/nested/*.md",
+            "specs/**/nested/**/*.md",
+        ] {
+            match shape(pattern) {
+                Err(reason) => assert_eq!(reason, pattern, "pattern {pattern:?}"),
+                Ok(shape) => panic!("expected {pattern:?} to be unsupported, got {shape:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn four_boundary_inputs_have_the_answer_the_subset_rule_already_determines() {
+        // `.` is not a glob and is a literal, which 5.7 then resolves to
+        // nothing because a directory is not a regular file.
+        assert_eq!(shape("."), Ok(Shape::Literal(".".to_string())));
+        // `specs/` is not a glob and is a literal, likewise nothing.
+        assert_eq!(shape("specs/"), Ok(Shape::Literal("specs/".to_string())));
+        // `*` is a glob whose directory list is empty and whose file
+        // pattern is a bare `*`, matching every non-dot regular file
+        // directly in the change directory.
+        assert_eq!(
+            shape("*"),
+            Ok(Shape::Glob {
+                dirs: vec![],
+                recursive: false,
+                file: FilePattern::Prefixed {
+                    prefix: String::new(),
+                    suffix: String::new(),
+                },
+            })
+        );
+        // `**` alone is `Err`, because the subset's final segment must be a
+        // filename pattern and `**` is a directory segment.
+        assert!(shape("**").is_err());
     }
 }
