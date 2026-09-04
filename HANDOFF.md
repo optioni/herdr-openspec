@@ -37,16 +37,39 @@ Phase 3 is the first phase that spawns a process, so two things carry over:
    code, so it was recorded as not-run. `subprocess-seam` introduces the crate's first
    real `Command::new` and needs a genuine check, not that one.
 
+### The two-producer gate is structural — do not soften it
+
 `changes-from-cli` must produce the same `Change` type `changes-from-files` already
-produces. A field added to one and not the other is the divergence the type system will
-not catch if it is optional.
+produces. The guard against divergence is **not** advisory and not just "remove
+`Default`" — a reviewer disproved that empirically: `Change { name, ..other }` compiles
+with no `Default` anywhere. The gate is the **pair**:
 
-## Weekly budget is now the binding constraint
+- no `Default` impl **and** no `..` rest pattern in any producer, plus
+- a shared `conformance::assert_invariants(&Change)` whose exhaustive
+  `let Change { … }` with no rest pattern **fails to compile** when a field is added.
 
-Weekly sat at 60% used with 53h to reset when Phase 2 finished, running roughly 4
-points per change. Thirteen changes remain across Phases 3–6, which is more than one
-weekly window holds. **The roadmap will span more than one week.** That is a pacing
-fact, not a fault — but do not plan on finishing in a single run.
+`progress` is a `Progress`, not an `Option`. `changes-from-cli` must not relax any part
+of this to make its own construction easier.
+
+## Measured cost, and the dominant defect class
+
+**Measured, not estimated:** Phase 2's three changes cost **84 session points and 8
+weekly points** — about 28 session points and 2.7 weekly points per change. The
+`changes-from-files` ff alone was 29 session points.
+
+Thirteen changes remain across Phases 3–6: roughly 364 session points (about 3.6 full
+5-hour windows) and ~35 weekly points against 40% remaining. So the weekly window is
+**tight but not obviously insufficient** — an earlier estimate of 4 weekly points per
+change said the roadmap could not fit, and the measured figure says it might. Re-check
+against real readings rather than either estimate.
+
+**The dominant defect class across both phases is verification commands that cannot
+fail.** `task-parsing`'s planning review alone caught three CRITICALs of this kind: an
+ERE with escaped pipes matching a literal `a|b`; a missing `test -f` guard letting
+`grep`'s exit code 2 pass as success; and a `git diff --exit-code` comparing working
+tree to index, which on a project that commits after every task group passes over the
+very change it exists to catch (now fixed to diff against a base SHA captured in task
+1.1). Ask of every verification command: what would make this go red?
 
 ## Budget shape — read this before starting
 
