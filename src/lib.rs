@@ -47,6 +47,37 @@ pub(crate) mod testutil {
             let _ = std::fs::remove_dir_all(&self.path);
         }
     }
+
+    /// A snapshot of a directory's listing, every file's bytes, and every file's
+    /// modification time — read through [`std::fs::Metadata`], never by shelling
+    /// out to `stat`, whose flags differ between BSD and GNU. Two snapshots taken
+    /// around an operation and compared for equality is how "the tree is
+    /// untouched" is proven, rather than by checking the listing alone.
+    #[derive(Debug, PartialEq, Eq)]
+    pub(crate) struct Snapshot(Vec<(PathBuf, Vec<u8>, std::time::SystemTime)>);
+
+    pub(crate) fn snapshot(dir: &Path) -> Snapshot {
+        let mut entries = Vec::new();
+        collect(dir, &mut entries);
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        Snapshot(entries)
+    }
+
+    fn collect(dir: &Path, out: &mut Vec<(PathBuf, Vec<u8>, std::time::SystemTime)>) {
+        let Ok(read_dir) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in read_dir.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                collect(&path, out);
+            } else if let Ok(metadata) = entry.metadata() {
+                let bytes = std::fs::read(&path).unwrap_or_default();
+                let mtime = metadata.modified().expect("modified time");
+                out.push((path, bytes, mtime));
+            }
+        }
+    }
 }
 
 /// The classified shape of an invocation of the binary.

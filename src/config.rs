@@ -62,12 +62,108 @@ pub fn config_dir(env: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
     )
 }
 
-/// Load configuration from `dir`, or produce the default when no directory is
-/// resolved. `dir` and file-reading behaviour are implemented in full by the
-/// `config.toml`-reading requirement; see
+/// Expand a configured `openspec_bin` value using the same injected
+/// environment lookup that resolved the configuration directory. A leading
+/// `~/` or `$HOME/`, and a bare `~`, become `HOME`; a `~user` form and any
+/// value that cannot be expanded (`HOME` unavailable) are returned verbatim.
+/// A blank value is `None`. No filesystem access is made either way — see
 /// `openspec/changes/plugin-config/design.md` -> Contracts.
-pub fn load(_dir: Option<&std::path::Path>, _env: &dyn Fn(&str) -> Option<String>) -> Config {
-    Config::default()
+fn expand_openspec_bin(raw: &str, env: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let home = non_blank(env("HOME"));
+
+    if trimmed == "~" {
+        return Some(match home {
+            Some(h) => PathBuf::from(h),
+            None => PathBuf::from(trimmed),
+        });
+    }
+    if let Some(rest) = trimmed.strip_prefix("~/") {
+        return Some(match home {
+            Some(h) => PathBuf::from(h).join(rest),
+            None => PathBuf::from(trimmed),
+        });
+    }
+    if let Some(rest) = trimmed.strip_prefix("$HOME/") {
+        return Some(match home {
+            Some(h) => PathBuf::from(h).join(rest),
+            None => PathBuf::from(trimmed),
+        });
+    }
+    // A `~user` form, or anything else: returned verbatim. Resolving another
+    // user's home would require a lookup this plugin does not perform.
+    Some(PathBuf::from(trimmed))
+}
+
+/// Load configuration from `dir`, or produce the default when no directory is
+/// resolved, no `config.toml` exists, or the file is empty. Never fails,
+/// panics, or returns an error: every fallback is instead recorded as a
+/// human-readable string on `Config::problems`. See
+/// `openspec/changes/plugin-config/design.md` -> Contracts.
+pub fn load(dir: Option<&std::path::Path>, env: &dyn Fn(&str) -> Option<String>) -> Config {
+    let mut config = Config::default();
+
+    let Some(dir) = dir else {
+        return config;
+    };
+
+    let path = dir.join("config.toml");
+    let contents = match std::fs::read_to_string(&path) {
+        Ok(contents) => contents,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return config,
+        Err(e) => {
+            config
+                .problems
+                .push(format!("config.toml could not be read: {e}"));
+            return config;
+        }
+    };
+
+    if contents.trim().is_empty() {
+        return config;
+    }
+
+    let table: toml::Table = match contents.parse() {
+        Ok(table) => table,
+        Err(e) => {
+            config
+                .problems
+                .push(format!("config.toml is not valid TOML: {e}"));
+            return config;
+        }
+    };
+
+    if let Some(value) = table.get("openspec_bin") {
+        match value.as_str() {
+            Some(s) => config.openspec_bin = expand_openspec_bin(s, env),
+            None => config
+                .problems
+                .push("openspec_bin is not a string".to_string()),
+        }
+    }
+
+    if let Some(value) = table.get("agent_kind") {
+        match value.as_str() {
+            Some(s) => config.agent_kind = s.to_string(),
+            None => config
+                .problems
+                .push("agent_kind is not a string".to_string()),
+        }
+    }
+
+    if let Some(value) = table.get("archived_count") {
+        match value.as_integer() {
+            Some(n) if n >= 0 => config.archived_count = n as usize,
+            _ => config
+                .problems
+                .push("archived_count is not a non-negative integer".to_string()),
+        }
+    }
+
+    config
 }
 
 /// The single binding of a name to `std::env::var` in this crate. Treated as
@@ -186,5 +282,226 @@ mod tests {
             lookup("HERDR_OPENSPEC_DEFINITELY_UNSET_9f3a2b1c"),
             None
         );
+    }
+
+    // --- Reading config.toml (group 3) -------------------------------------
+
+    use crate::testutil::{snapshot, ScratchDir};
+    use std::fs;
+
+    fn write_config(dir: &std::path::Path, contents: &str) {
+        fs::write(dir.join("config.toml"), contents).expect("write config.toml");
+    }
+
+    #[test]
+    fn every_key_is_set() {
+        let scratch = ScratchDir::new();
+        write_config(
+            scratch.path(),
+            "openspec_bin = \"/opt/bin/openspec\"\nagent_kind = \"codex\"\narchived_count = 12\n",
+        );
+        let cfg = super::load(Some(scratch.path()), &env(&[]));
+        assert_eq!(
+            cfg.openspec_bin,
+            Some(std::path::PathBuf::from("/opt/bin/openspec"))
+        );
+        assert_eq!(cfg.agent_kind, "codex");
+        assert_eq!(cfg.archived_count, 12);
+        assert!(cfg.problems.is_empty());
+    }
+
+    #[test]
+    fn the_file_does_not_exist() {
+        let scratch = ScratchDir::new();
+        let cfg = super::load(Some(scratch.path()), &env(&[]));
+        assert_eq!(cfg, super::Config::default());
+    }
+
+    #[test]
+    fn the_directory_does_not_exist() {
+        let scratch = ScratchDir::new();
+        let missing = scratch.path().join("nonexistent");
+        let cfg = super::load(Some(&missing), &env(&[]));
+        assert_eq!(cfg, super::Config::default());
+        assert!(!missing.exists());
+    }
+
+    #[test]
+    fn an_empty_file_is_not_a_malformed_file() {
+        let scratch = ScratchDir::new();
+        write_config(scratch.path(), "");
+        let cfg = super::load(Some(scratch.path()), &env(&[]));
+        assert_eq!(cfg, super::Config::default());
+        assert!(cfg.problems.is_empty());
+    }
+
+    #[test]
+    fn only_one_key_is_set() {
+        let scratch = ScratchDir::new();
+        write_config(scratch.path(), "archived_count = 0\n");
+        let cfg = super::load(Some(scratch.path()), &env(&[]));
+        assert_eq!(cfg.archived_count, 0);
+        assert_eq!(cfg.agent_kind, "claude");
+        assert_eq!(cfg.openspec_bin, None);
+        assert!(cfg.problems.is_empty());
+    }
+
+    #[test]
+    fn unrecognised_keys_are_ignored() {
+        let scratch = ScratchDir::new();
+        write_config(
+            scratch.path(),
+            "agent_kind = \"codex\"\nfuture_setting = \"x\"\n[some_table]\nkey = 1\n",
+        );
+        let cfg = super::load(Some(scratch.path()), &env(&[]));
+        assert_eq!(cfg.agent_kind, "codex");
+        assert!(cfg.problems.is_empty());
+    }
+
+    #[test]
+    fn the_file_is_not_valid_toml() {
+        let scratch = ScratchDir::new();
+        write_config(scratch.path(), "agent_kind = = \"codex\"\n");
+        let cfg = super::load(Some(scratch.path()), &env(&[]));
+        assert_eq!(cfg.openspec_bin, None);
+        assert_eq!(cfg.agent_kind, "claude");
+        assert_eq!(cfg.archived_count, 5);
+        assert_eq!(cfg.problems.len(), 1);
+        assert!(cfg.problems[0].contains("config.toml"));
+    }
+
+    #[test]
+    fn one_key_has_the_wrong_type_the_rest_survive() {
+        let scratch = ScratchDir::new();
+        write_config(
+            scratch.path(),
+            "openspec_bin = true\nagent_kind = \"codex\"\narchived_count = \"many\"\n",
+        );
+        let cfg = super::load(Some(scratch.path()), &env(&[]));
+        assert_eq!(cfg.openspec_bin, None);
+        assert_eq!(cfg.archived_count, 5);
+        assert_eq!(cfg.agent_kind, "codex");
+        assert_eq!(cfg.problems.len(), 2);
+        assert!(cfg.problems.iter().any(|p| p.contains("openspec_bin")));
+        assert!(cfg.problems.iter().any(|p| p.contains("archived_count")));
+    }
+
+    #[test]
+    fn a_negative_count_is_not_a_count() {
+        let scratch = ScratchDir::new();
+        write_config(scratch.path(), "archived_count = -1\n");
+        let cfg = super::load(Some(scratch.path()), &env(&[]));
+        assert_eq!(cfg.archived_count, 5);
+        assert_eq!(cfg.problems.len(), 1);
+        assert!(cfg.problems[0].contains("archived_count"));
+    }
+
+    #[test]
+    fn the_file_cannot_be_read() {
+        let scratch = ScratchDir::new();
+        fs::create_dir(scratch.path().join("config.toml")).expect("create dir as config.toml");
+        let cfg = super::load(Some(scratch.path()), &env(&[]));
+        assert_eq!(cfg.openspec_bin, None);
+        assert_eq!(cfg.agent_kind, "claude");
+        assert_eq!(cfg.archived_count, 5);
+        assert_eq!(cfg.problems.len(), 1);
+        assert!(cfg.problems[0].contains("config.toml"));
+    }
+
+    #[test]
+    fn a_tilde_path_is_expanded() {
+        let scratch = ScratchDir::new();
+        write_config(
+            scratch.path(),
+            "openspec_bin = \"~/.nvm/versions/node/v24/bin/openspec\"\n",
+        );
+        let cfg = super::load(Some(scratch.path()), &env(&[("HOME", "/home/someone")]));
+        assert_eq!(
+            cfg.openspec_bin,
+            Some(std::path::PathBuf::from(
+                "/home/someone/.nvm/versions/node/v24/bin/openspec"
+            ))
+        );
+    }
+
+    #[test]
+    fn a_dollar_home_path_is_expanded_and_a_bare_tilde_is_the_home_directory() {
+        let scratch = ScratchDir::new();
+        write_config(scratch.path(), "openspec_bin = \"$HOME/bin/openspec\"\n");
+        let cfg = super::load(Some(scratch.path()), &env(&[("HOME", "/home/someone")]));
+        assert_eq!(
+            cfg.openspec_bin,
+            Some(std::path::PathBuf::from("/home/someone/bin/openspec"))
+        );
+
+        let scratch2 = ScratchDir::new();
+        write_config(scratch2.path(), "openspec_bin = \"~\"\n");
+        let cfg2 = super::load(Some(scratch2.path()), &env(&[("HOME", "/home/someone")]));
+        assert_eq!(
+            cfg2.openspec_bin,
+            Some(std::path::PathBuf::from("/home/someone"))
+        );
+    }
+
+    #[test]
+    fn an_unexpandable_value_is_returned_verbatim() {
+        let scratch = ScratchDir::new();
+        write_config(scratch.path(), "openspec_bin = \"~/bin/openspec\"\n");
+        let cfg = super::load(Some(scratch.path()), &env(&[]));
+        assert_eq!(
+            cfg.openspec_bin,
+            Some(std::path::PathBuf::from("~/bin/openspec"))
+        );
+
+        let scratch2 = ScratchDir::new();
+        write_config(scratch2.path(), "openspec_bin = \"~otheruser/bin/openspec\"\n");
+        let cfg2 = super::load(Some(scratch2.path()), &env(&[("HOME", "/home/someone")]));
+        assert_eq!(
+            cfg2.openspec_bin,
+            Some(std::path::PathBuf::from("~otheruser/bin/openspec"))
+        );
+    }
+
+    #[test]
+    fn an_empty_value_is_an_absent_value() {
+        let scratch = ScratchDir::new();
+        write_config(scratch.path(), "openspec_bin = \"   \"\n");
+        let cfg = super::load(Some(scratch.path()), &env(&[]));
+        assert_eq!(cfg.openspec_bin, None);
+        assert!(cfg.problems.is_empty());
+    }
+
+    #[test]
+    fn a_path_that_does_not_exist_is_still_returned() {
+        let scratch = ScratchDir::new();
+        write_config(scratch.path(), "openspec_bin = \"/nowhere/openspec\"\n");
+        let cfg = super::load(Some(scratch.path()), &env(&[]));
+        assert_eq!(
+            cfg.openspec_bin,
+            Some(std::path::PathBuf::from("/nowhere/openspec"))
+        );
+        assert!(!std::path::Path::new("/nowhere/openspec").exists());
+        assert!(cfg.problems.is_empty());
+    }
+
+    #[test]
+    fn a_configuration_read_leaves_the_tree_byte_identical() {
+        let scratch = ScratchDir::new();
+        write_config(scratch.path(), "agent_kind = \"codex\"\n");
+        fs::write(scratch.path().join("unrelated.txt"), b"hello").expect("write unrelated file");
+
+        let before = snapshot(scratch.path());
+        super::load(Some(scratch.path()), &env(&[]));
+        super::load(Some(scratch.path()), &env(&[]));
+        let after = snapshot(scratch.path());
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn a_missing_configuration_directory_stays_missing() {
+        let scratch = ScratchDir::new();
+        let missing = scratch.path().join("nonexistent");
+        super::load(Some(&missing), &env(&[]));
+        assert!(!missing.exists());
     }
 }
