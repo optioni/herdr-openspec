@@ -1,37 +1,108 @@
 # Handoff
 
-**Written:** 2026-09-04 ~04:55 EEST · **Branch:** `main` · **Remote:** `optioni/herdr-openspec`
+**Written:** 2026-09-04 ~09:10 EEST · **Branch:** `main` · **Remote:** `optioni/herdr-openspec`
 
 ## Where things stand
 
-**Phase 1 is complete.** All three changes implemented, archived, and pushed. `main`
-is green: `make check` exits 0 at **97.65% line coverage (895 lines)** against the 80%
-floor, 72 tests.
+**Phase 1 complete. Phase 2 is one-of-four archived, with the second change's
+artifacts written and its apply not yet started.** `main` is green and clean:
+`make check` exits 0 at **97.51% line coverage (1806 lines)** against the 80% floor,
+112 tests. Nothing is pushed — every Phase 2 commit is local.
 
 | Phase | Changes | State |
 |---|---|---|
 | 1 — Foundation | `repo-foundation`, `ci-pipeline`, `plugin-config` | **Done, archived** |
-| 2 — Reading from disk | `repo-resolution`, `schema-model`, `task-parsing`, `changes-from-files` | Next |
+| 2 — Reading from disk | `repo-resolution` | **Done, archived** |
+| | `schema-model` | **Artifacts written & committed; apply NOT started** |
+| | `task-parsing`, `changes-from-files` | Not started |
 | 3–6 | — | Untouched |
 
-`openspec/changes/` contains only `archive/`. Six capabilities are live under
-`openspec/specs/`: `plugin-build`, `plugin-manifest`, `quality-gates`, `ci-workflow`,
-`plugin-config`, `plugin-state`.
+Eight capabilities are live under `openspec/specs/`: the six from Phase 1 plus
+`repo-discovery` and `openspec-binary` from `repo-resolution`.
 
 ## Next action
 
-Phase 2 is unblocked — `repo-resolution` depends on `plugin-config` (done), and
-`schema-model` / `task-parsing` depend only on `repo-foundation` (done). Dispatch the
-phase orchestrator on **Phase 2 — Reading OpenSpec from disk**. All four changes need
-the full ff → apply → archive loop.
+**Resume with the apply step for `schema-model`** — its artifacts already exist under
+`openspec/changes/schema-model/` (10 groups, 92 tasks, 50 scenarios), so do **not**
+re-run `ff-change` on it. Then archive it, then run the full ff → apply → archive loop
+for `task-parsing` and `changes-from-files`.
+
+Paused at 75% of the 5-hour session used, at a clean committed boundary, per the
+"don't start work below ~50% remaining" rule. Session resets **08:30 UTC**.
 
 ## What exists now
 
-`src/lib.rs`, `src/main.rs`, `src/config.rs`, `src/state.rs`, `tests/cli.rs`,
-`tests/ci_workflow.rs`, `Cargo.toml` (one dependency: `toml` 1.1.5), `Makefile`,
-`rustfmt.toml`, `scripts/build.sh`, `herdr-plugin.toml`, and
-`.github/workflows/` — `check` matrixed over ubuntu/macos, Linux-only `coverage`, and
-an aggregate `ci` job for branch protection.
+`src/lib.rs`, `src/main.rs`, `src/config.rs`, `src/state.rs`, **`src/resolve.rs`**,
+`tests/cli.rs`, `tests/ci_workflow.rs`, `Cargo.toml` (one dependency: `toml` 1.1.5;
+`schema-model` will add `yaml-rust2` 0.12.0), `Makefile`, `rustfmt.toml`,
+`scripts/build.sh`, `herdr-plugin.toml`, and `.github/workflows/` — `check` matrixed
+over ubuntu/macos, Linux-only `coverage`, and an aggregate `ci` job for branch
+protection.
+
+## Phase 2 findings so far
+
+**`repo-resolution` (archived).** The Phase 2 no-subprocess rule was kept: step 4 of
+the binary probe chain (`npm prefix -g`) is an injected `&dyn Fn() -> Option<PathBuf>`
+whose shipped binding returns `None`, so production spawns nothing. A test pins the
+empty result so the Phase 3 hand-over to `subprocess-seam` goes red rather than
+silent. `IMPLEMENTATION-ORDER.md` gained the `repo-resolution --> subprocess-seam`
+edge that this creates.
+
+**`schema-model` planning found two SPEC.md errors** (correction is scheduled inside
+the change, group 9 — do not skip that group):
+
+1. **`role: tasks` does not exist.** Not in `openspec/schemas/tdd/schema.yaml`, not in
+   the CLI's `spec-driven` schema, not in the CLI's Zod `ArtifactSchema`. The real
+   rule is `findTrackedTasksArtifact`: the artifact whose `generates` equals
+   `apply.tracks`, falling back to id `tasks` only when no `apply` block declares one
+   — and a `tracks` **miss does not fall back**. `IMPLEMENTATION-ORDER.md`'s Phase 2
+   row states the wrong rule too.
+2. **`openspec schema` has no dump subcommand.** Only `which`, `validate`, `fork`,
+   `init`. The Phase 3 fallback is `openspec schema which <name> --json`, which
+   returns the schema *directory*.
+
+`openspec/config.yaml` → `context` carries **both** falsehoods and is injected into
+every future change's planning prompt. That edit is task 9.7a and is the
+highest-leverage line in the change.
+
+**YAML dependency decision: `yaml-rust2` 0.12.0**, measured rather than remembered.
+`serde_yaml` is published as `0.9.34+deprecated`; `serde_yml` is a deprecated shim;
+`serde_yaml_ng`/`serde_norway` pull 8 transitive crates each including
+`unsafe-libyaml`; `saphyr` is disqualified because `thiserror-impl` puts `syn`/`quote`
+in the *normal* graph, which the live `plugin-build` requirement forbids. `yaml-rust2`
+is 4 transitive crates, pure Rust, no proc macro, MSRV 1.85. Hand-parsing was rejected
+on evidence: the vendored schema's `apply.instruction` block scalar sits at 4 spaces —
+the same column as `generates:` — and contains markdown headings and `key: value`
+prose, so a line scanner produces a silently wrong tab order.
+
+## Known debt found during Phase 2
+
+**`openspec validate --all --strict` fails on the six Phase 1 specs.** All six carry
+`TBD - created by archiving change <x>. Update Purpose after archive.` — the
+placeholder `openspec archive` writes. `repo-discovery` and `openspec-binary` pass
+because real Purpose sections were written for them. Fixing the six is unscoped work;
+it wants its own small change, or an `operations.archive` task that writes a real
+Purpose at archive time.
+
+**A `MODIFIED` requirement cannot rename a scenario** — `openspec validate --strict`
+refuses any MODIFIED block that omits a scenario name the live spec carries. That is
+why `schema-model`'s `plugin-build` delta is written REMOVED + ADDED; at archive time
+that requirement lands last in the rewritten capability file rather than second.
+
+**Three OpenSpec CLI versions are installed** under nvm (1.11.0 on the workflow PATH,
+1.12.0, 1.9.0). Every `schema-model` fact was confirmed against both 1.11.0 and 1.12.0.
+
+**An apply subagent created a git worktree unprompted.** `repo-resolution` was
+implemented on a `repo-resolution` branch in
+`/Users/juusopiikkila/Code/herdr-openspec-repo-resolution`, fast-forwarded into `main`
+by hand, and the worktree and branch removed. Tell apply agents explicitly to work in
+the main checkout on `main`.
+
+## Contract corrections found by running against real Herdr 0.8.2
+
+Three, none catchable by static review:
+
+1. The plugin manifest **requires a `version` key** — `herdr plugin link .` rejects it
 
 ## Contract corrections found by running against real Herdr 0.8.2
 
@@ -70,6 +141,18 @@ start a change below roughly half remaining.** Starting `repo-foundation` at 29%
 was the misjudgement that caused this pause.
 
 Check with `~/.claude/skills/checking-usage/fetch-usage.sh` before each change.
+
+**Measured in Phase 2, and the variance is the point:**
+
+| Step | Cost (5h session points) |
+|---|---|
+| `repo-resolution` ff (opus) | 19 |
+| `repo-resolution` apply (sonnet, 80 tasks) + archive | 10 |
+| `schema-model` ff (opus, 92 tasks / 50 scenarios / 3 deltas) | **44** |
+
+A whole change came in at 29 points; the next change's ff alone cost 44. Budget for
+the bad case, not the average — the driver is artifact count and reviewer fan-out, and
+neither is knowable before the ff agent has read the Spec refs.
 
 **Where that 25% actually went:** the ff-change agent fanned out reviewer subagents,
 and two rounds died on `529 Overloaded`, losing their reports entirely. Findings only
