@@ -444,7 +444,7 @@ changes — no tree-wide scan is wired into `make check` or CI, and `repo-resolu
 equivalent scan was likewise a one-off run during that change. Making one standing would
 change the `quality-gates` capability and is deliberately not this change's work.
 
-- [ ] 6.1 CHECK: `git diff --exit-code "$BASE"..HEAD -- Cargo.toml Cargo.lock` — exits 0,
+- [x] 6.1 CHECK: `git diff --exit-code "$BASE"..HEAD -- Cargo.toml Cargo.lock` — exits 0,
       proving this change added no dependency, direct or transitive, where `$BASE` is the
       SHA task 1.1 captured. The base SHA is not optional: `git diff --exit-code` alone
       compares the working tree to the index, and this project commits after every task
@@ -455,7 +455,7 @@ change the `quality-gates` capability and is deliberately not this change's work
       a good reason, and stays green when the value is wrong. If it fails, the design
       decision to add no dependency has been broken and design.md → Decisions 2 must be
       reopened rather than amended after the fact
-- [ ] 6.2 CHECK: Scan the new module for any process API —
+- [x] 6.2 CHECK: Scan the new module for any process API —
       `test -f src/tasks.rs && ! grep -nE 'std::process|Command|spawn|\boutput\(|\bstatus\(' src/tasks.rs`
       Run it as a check whose exit status decides the outcome, not as a report you read, and
       keep both halves: the `test -f` guard, because `grep` exits 2 on a missing file and a
@@ -464,13 +464,13 @@ change the `quality-gates` capability and is deliberately not this change's work
       source file, and yields a check that can never fail. Confirm afterwards that the
       crate's only process reference is still `crate::pid`'s single documented call in
       `src/lib.rs`
-- [ ] 6.3 CHECK: `diff <(cargo tree --edges normal) "$TREE_BASELINE"` — exits 0 against the
+- [x] 6.3 CHECK: `diff <(cargo tree --edges normal) "$TREE_BASELINE"` — exits 0 against the
       baseline task 1.1 captured, confirming the normal build graph still contains only
       `toml`, `yaml-rust2`, and their existing transitive dependencies. A `cargo tree` run
       with nothing to compare against is a printed report, not a check. This is the half a
       manifest diff cannot see: a dependency arriving through a feature flag adds no line to
       `Cargo.toml`
-- [ ] 6.4 CHECK: Re-read `dist/utils/task-progress.js` in the installed
+- [x] 6.4 CHECK: Re-read `dist/utils/task-progress.js` in the installed
       `@fission-ai/openspec` package **at implementation time**, not from this plan, and
       compare `TASK_LINE_PATTERN` character by character against the rule groups 1 and 2
       implemented. Record the package version observed. If the pattern has changed since
@@ -479,9 +479,21 @@ change the `quality-gates` capability and is deliberately not this change's work
       copy is agreement with the program that is actually installed. Locate the package
       without hardcoding an nvm version, for example
       `dirname "$(readlink -f "$(command -v openspec)")"`
-- [ ] 6.5 VERIFY: Confirm each of 6.1 through 6.4 was run as a command with a pass/fail
+- [x] 6.5 VERIFY: Confirm each of 6.1 through 6.4 was run as a command with a pass/fail
       outcome and record what each returned. A check reported as "looks fine" is a check
-      that cannot fail
+      that cannot fail.
+      **Recorded:** 6.1 `git diff --exit-code 90fdcf4e97003dd66c157d8ded198fa8f09a8bb7..HEAD
+      -- Cargo.toml Cargo.lock` exited 0. 6.2 `test -f src/tasks.rs && ! grep -nE
+      'std::process|Command|spawn|\boutput\(|\bstatus\(' src/tasks.rs` exited 0; probed by
+      appending a `std::process::Command::new(...)` line to a scratch copy (exited 1, as it
+      must) and by pointing the same command at a nonexistent file (also exited 1, via the
+      `test -f` guard) — confirming the check can fail both ways. The crate's only process
+      references remain `crate::pid`'s `std::process::id()` in `src/lib.rs` and
+      `src/main.rs`'s pre-existing `std::process::exit`. 6.3 `diff <(cargo tree --edges
+      normal) "$TREE_BASELINE"` exited 0. 6.4 re-read `dist/utils/task-progress.js` in the
+      installed `@fission-ai/openspec` (still 1.11.0) at implementation time (after group 5,
+      not only at the start): `TASK_LINE_PATTERN = /^\s*[-*]\s*\[([\sxX])\]\s*(.*)/`,
+      unchanged and character-for-character the rule `task_line` implements
 
 ## 7. Change Review
 <!-- kind: operational -->
