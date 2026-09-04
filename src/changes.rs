@@ -977,7 +977,7 @@ fn cli_error_problem(subject: &str, args: &[&str], err: &crate::cli::CliError) -
             args: _,
             reason: _,
         } => {
-            format!("{subject}: openspec {vector} could not start {program}")
+            format!("{subject}: could not start {program} for openspec {vector}")
         }
         crate::cli::CliError::Failed {
             program: _,
@@ -3710,16 +3710,25 @@ mod tests {
                 which_response(&unreadable_dir, "unreadable-one"),
             );
 
+            let schema_which_call_count = |fake: &FakeCli| {
+                fake.calls()
+                    .iter()
+                    .filter(|(_, args)| args.first().map(String::as_str) == Some("schema"))
+                    .count()
+            };
+
             let mut cache = HashMap::new();
             let (invalid_schema, invalid_problems) =
                 resolve_cli_schema(&fake, &repo, "invalid-one", &mut cache);
             assert!(invalid_schema.is_none());
             assert_eq!(invalid_problems.len(), 1);
+            assert_eq!(schema_which_call_count(&fake), 1);
 
             let (unreadable_schema, unreadable_problems) =
                 resolve_cli_schema(&fake, &repo, "unreadable-one", &mut cache);
             assert!(unreadable_schema.is_none());
             assert_eq!(unreadable_problems.len(), 1);
+            assert_eq!(schema_which_call_count(&fake), 2);
         }
 
         #[test]
@@ -4288,13 +4297,24 @@ mod tests {
             );
             fake.register_openspec(
                 &["instructions", "apply", "--change", "zulu", "--json"],
-                Err(failed(&[
-                    "instructions",
-                    "apply",
-                    "--change",
-                    "zulu",
-                    "--json",
-                ])),
+                // A non-empty stderr, deliberately unlike the real CLI's
+                // (which is always empty on this path): this is what makes
+                // "the problem does not leak the CLI's own message" a
+                // discriminating assertion rather than one that could never
+                // fail, since `failed`'s bare `stderr: String::new()` would
+                // leave nothing to leak either way.
+                Err(CliError::Failed {
+                    program: "openspec".to_string(),
+                    args: vec![
+                        "instructions".to_string(),
+                        "apply".to_string(),
+                        "--change".to_string(),
+                        "zulu".to_string(),
+                        "--json".to_string(),
+                    ],
+                    code: Some(1),
+                    stderr: "Unknown schema \"outside-in-tdd\"".to_string(),
+                }),
             );
             let result = from_cli(&fake, &repo);
             let names: Vec<&str> = result.active.iter().map(|c| c.name.as_str()).collect();
@@ -4302,6 +4322,7 @@ mod tests {
             assert_eq!(result.problems.len(), 1);
             assert!(result.problems[0].contains("zulu"));
             assert!(result.problems[0].contains('1'));
+            assert!(!result.problems[0].contains("Unknown schema"));
         }
 
         #[test]
@@ -4428,9 +4449,25 @@ mod tests {
             symlink(&real_repo, &link);
 
             let fake = FakeCli::new();
-            fake.register_openspec(&["list", "--json"], Ok(list_json(&real_repo, &[])));
+            // A non-empty payload, so "the changes are produced normally" is
+            // actually exercised — an empty payload can only show that no
+            // problem was recorded, not that a change survives this path.
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(list_json(&real_repo, &[("alpha", 1, 2)])),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "alpha", "--json"],
+                Ok(apply_json(
+                    "tdd",
+                    &real_repo.join("openspec/changes/alpha"),
+                    &[],
+                )),
+            );
             let result = from_cli(&fake, &link);
             assert!(result.problems.is_empty());
+            assert_eq!(result.active.len(), 1);
+            assert_eq!(result.active[0].name, "alpha");
         }
 
         #[test]
@@ -4608,6 +4645,135 @@ mod tests {
             let after_cwd = crate::testutil::shallow_snapshot(&cwd);
             assert_eq!(before, after);
             assert_eq!(before_cwd, after_cwd);
+        }
+
+        // --- Change Review (task 11.2): closes two CRITICAL coverage gaps --
+        // `schema_fallback`'s scenarios state their THEN as a property of a
+        // produced `Change`, but every one of its tests calls
+        // `resolve_cli_schema` directly and never builds one through
+        // `from_cli`. This is the composition-level binding: a schema that
+        // fails to resolve must still leave the change in `active`, with an
+        // empty artifact list and one problem on *that change's own*
+        // `problems` — never dropped, and never a top-level `CliChanges`
+        // problem. Demonstrated in review to be unbound: `continue`-ing
+        // (dropping the change) on `schema.is_none()` left the whole suite
+        // green before this test existed.
+        #[test]
+        fn a_change_whose_schema_fails_to_resolve_still_appears_in_active() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(list_json(
+                    &repo,
+                    &[("alpha", 0, 0), ("mike", 0, 0), ("zulu", 0, 0)],
+                )),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "alpha", "--json"],
+                Ok(apply_json("tdd", &repo.join("openspec/changes/alpha"), &[])),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "mike", "--json"],
+                Ok(apply_json(
+                    "outside-in-tdd",
+                    &repo.join("openspec/changes/mike"),
+                    &[],
+                )),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "zulu", "--json"],
+                Ok(apply_json("tdd", &repo.join("openspec/changes/zulu"), &[])),
+            );
+            fake.register_openspec(
+                &["schema", "which", "outside-in-tdd", "--json"],
+                Err(failed(&["schema", "which", "outside-in-tdd", "--json"])),
+            );
+
+            let result = from_cli(&fake, &repo);
+            let names: Vec<&str> = result.active.iter().map(|c| c.name.as_str()).collect();
+            assert_eq!(names, vec!["alpha", "mike", "zulu"]);
+            assert!(result.problems.is_empty());
+
+            let mike = result.active.iter().find(|c| c.name == "mike").unwrap();
+            assert!(mike.artifacts.is_empty());
+            assert_eq!(mike.problems.len(), 1);
+            assert!(mike.problems[0].contains("outside-in-tdd"));
+            assert!(mike.problems[0].contains('1'));
+
+            for name in ["alpha", "zulu"] {
+                let change = result.active.iter().find(|c| c.name == name).unwrap();
+                assert_eq!(change.artifacts.len(), TDD_ARTIFACTS.len());
+                assert!(change.problems.is_empty());
+            }
+        }
+
+        // Binds `schema-cli-fallback`'s "at most once per name per call" to
+        // the actual composition. `schema_fallback`'s tests of the same
+        // shape hand-drive `run`/`parse_list`/`parse_apply`/
+        // `resolve_cli_schema` with a cache *they* allocate, ahead of
+        // `from_cli` existing; that cache was never lifted into `from_cli`
+        // once group 8 landed, so it proved nothing about the real cache's
+        // lifetime. Demonstrated in review: moving `from_cli`'s cache
+        // allocation inside the per-change loop — one `schema which` per
+        // change, the N+1 regression the requirement exists to prevent —
+        // left the suite green before this test existed.
+        #[test]
+        fn from_cli_asks_the_cli_once_for_a_schema_shared_by_three_changes() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            let pkg_dir = repo.join("pkg/spec-driven");
+            write(
+                &pkg_dir.join("schema.yaml"),
+                "name: spec-driven\nartifacts:\n  - id: proposal\n    generates: proposal.md\n  - id: tasks\n    generates: tasks.md\n",
+            );
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(list_json(
+                    &repo,
+                    &[("alpha", 0, 0), ("mike", 0, 0), ("zulu", 0, 0)],
+                )),
+            );
+            for name in ["alpha", "mike", "zulu"] {
+                fake.register_openspec(
+                    &["instructions", "apply", "--change", name, "--json"],
+                    Ok(apply_json(
+                        "spec-driven",
+                        &repo.join(format!("openspec/changes/{name}")),
+                        &[],
+                    )),
+                );
+            }
+            fake.register_openspec(
+                &["schema", "which", "spec-driven", "--json"],
+                Ok(format!(
+                    r#"{{"name":"spec-driven","source":"package","path":{:?},"shadows":[]}}"#,
+                    pkg_dir.display().to_string()
+                )),
+            );
+
+            let result = from_cli(&fake, &repo);
+            assert_eq!(result.active.len(), 3);
+            for change in &result.active {
+                let ids: Vec<&str> = change.artifacts.iter().map(|a| a.id.as_str()).collect();
+                assert_eq!(ids, vec!["proposal", "tasks"]);
+                assert!(change.problems.is_empty());
+            }
+
+            let calls = fake.calls();
+            assert_eq!(
+                calls.len(),
+                5,
+                "list + 3 applies + exactly one schema which"
+            );
+            let schema_which_calls = calls
+                .iter()
+                .filter(|(_, args)| args.first().map(String::as_str) == Some("schema"))
+                .count();
+            assert_eq!(schema_which_calls, 1);
         }
     }
 

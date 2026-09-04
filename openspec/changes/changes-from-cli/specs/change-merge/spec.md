@@ -226,6 +226,6 @@ be passed through `changes::conformance::assert_invariants`.
 
 - **WHEN** a merge is performed over a file set holding two active and three archived
   changes and a CLI result holding three active changes, one of which is CLI-only
-- **THEN** `assert_invariants` passes for all seven resulting values
+- **THEN** `assert_invariants` passes for all six resulting values
 - **AND** it is the same function `from_files`' tests call, with no second copy of the
   invariants written for this producer

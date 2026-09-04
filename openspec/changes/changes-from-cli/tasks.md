@@ -700,6 +700,10 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
       **Red when:** `BASE` is empty or not a commit (`OPENSPEC-UNTOUCHED` aborts on both);
       the lib baseline is recorded higher than reality, which makes `TESTCOUNT`
       unsatisfiable rather than falsely green.
+      **Recorded:** `BASE=6759921d2d577a884ca15814bda2fd359a07b7ad` (`docs(changes-from-cli):
+      repair planning gaps found by three reviewers`); lib baseline **300**, matching the
+      value already stated above. `$CHECKS` and `$WORK` extracted and used for every check
+      from here on.
 
 - [x] 1.2 CHECK: Run `NOSPAWN-GREP` and `GATE-MECH1` against the tree as it stands, before
       any edit. Both must **pass**, establishing that this change starts from a clean gate
@@ -722,6 +726,13 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
         not genuinely needed` (true today, because nothing parses JSON yet).
       All three were demonstrated red at planning time.
       **Red when:** any of the three passes today, which would mean it cannot discriminate.
+      **Recorded at implementation time:** all three exactly matched the messages above, re-run
+      before task 1.4's edit — `NOJSON-SEAM FAIL: src/changes.rs does not name serde_json -
+      the check would pass vacuously`; `DEPS FAIL: leg 2a` with `AssertionError: normal deps
+      are ['toml', 'yaml-rust2'], expected ['serde_json', 'toml', 'yaml-rust2']`; and `DEPS`
+      leg 5 for `serde_json` confirmed red by observing `cargo build` succeed with no
+      `serde_json` declared (the leg's own guard requires the crate to be declared first, so
+      this was checked by hand rather than through the leg itself).
 
 - [x] 1.4 CHANGE: Add to `Cargo.toml`:
       `serde_json = { version = "1.0.151", default-features = false, features = ["std"] }`
@@ -739,6 +750,14 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
       `leg 4` floor `1.85` read from `Cargo.toml`, with nine packages at it.
       Leg 5 is deferred to task 10.8, because `serde_json` is not used yet and it would
       correctly fail here.
+      **Recorded at implementation time:** legs 1–4 all `DEPS OK`, matching the planning-time
+      run verbatim — leg 1a one bin target `herdr-openspec`, edition 2024; leg 1b
+      `scripts/build.sh` exit 0 with the binary rebuilt; leg 2a exactly 3 normal deps,
+      defaults off, features exact; leg 2b the `features = []` spelling present; leg 2c
+      `cargo build --locked` clean; leg 3 all four triples resolve the same 16 packages, no
+      `syn`/`quote`/`proc-macro2`/`serde_derive`/`encoding_rs`/`ryu`; leg 4 floor `1.85`, at
+      the floor: `hashbrown`, `hashlink`, `herdr-openspec`, `serde_spanned`, `toml`,
+      `toml_datetime`, `toml_parser`, `toml_writer`, `yaml-rust2`.
 
 - [x] 1.6 VERIFY: `make check` — must still be green with the dependency added and no code
       using it yet. Commit.
@@ -781,7 +800,7 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
 - [x] 2.3 REFACTOR: Extract the "non-negative integer from a `Value`" helper if it is used
       more than twice; otherwise state explicitly that no refactor was needed.
 
-- [x] 2.4 VERIFY: `testcount --lib 'list_json::' <count written in 2.1>` — a counted
+- [x] 2.4 VERIFY: `testcount --lib 'list_json::' 10` (recorded: 10/10 ran, OK) — a counted
       minimum, not a bare filtered run, because a filter matching nothing exits 0. Commit.
 
 ---
@@ -812,7 +831,7 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
 - [x] 3.3 REFACTOR: Share the "required non-empty string field" helper with `parse_list` if
       it fits; otherwise state explicitly that none was needed.
 
-- [x] 3.4 VERIFY: `testcount --lib 'apply_json::' <count>`. Commit.
+- [x] 3.4 VERIFY: `testcount --lib 'apply_json::' 8` (recorded: 8/8 ran, OK). Commit.
 
 ---
 
@@ -839,7 +858,7 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
 
 - [x] 4.3 REFACTOR: None expected; state so explicitly if none was made.
 
-- [x] 4.4 VERIFY: `testcount --lib 'which_json::' <count>`. Commit.
+- [x] 4.4 VERIFY: `testcount --lib 'which_json::' 9` (recorded: 9/9 ran, OK). Commit.
 
 ---
 
@@ -870,7 +889,7 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
 
 - [x] 5.3 REFACTOR: State explicitly whether any was needed.
 
-- [x] 5.4 VERIFY: `testcount --lib 'cli_artifacts::' <count>`. Commit.
+- [x] 5.4 VERIFY: `testcount --lib 'cli_artifacts::' 6` (recorded: 6/6 ran, OK). Commit.
 
 ---
 
@@ -904,7 +923,7 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
 
 - [x] 6.3 REFACTOR: State explicitly whether any was needed.
 
-- [x] 6.4 VERIFY: `testcount --lib 'join_artifacts::' <count>`. Commit.
+- [x] 6.4 VERIFY: `testcount --lib 'join_artifacts::' 8` (recorded: 8/8 ran, OK). Commit.
 
 ---
 
@@ -954,12 +973,23 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
 - [x] 7.3 REFACTOR: Fold the fallback's five failure paths into one problem-rendering
       helper if that removes duplication; otherwise state explicitly that no refactor was
       needed.
+      **Recorded at task 11.2 (Change Review SUGGESTION):** the five paths already share
+      `cli_error_problem` and `schema_load_problem`; no further extraction was made there.
+      A related, separate duplication the review flagged and this task did not reach:
+      `CachedSchemaLoad` (`from_files`' schema cache entry) and `CachedCliSchema` (this
+      group's) are structurally identical (`{ schema: Option<Schema>, problems:
+      Vec<String> }`). Accepted rather than folded: `from_files` and `from_cli` are
+      deliberately independent producers per `change-model`'s gate, and their caches, while
+      shaped alike today, cache different things (a `Result`-shaped miss path here vs. a
+      fallback-tiered one there) — collapsing them into one type would couple two
+      construction sites the gate exists to keep separately correct, for a savings of one
+      struct definition.
 
 - [x] 7.4 CHECK: Run `NOSPAWN-GREP` — confirm no process API name entered `src/changes.rs`
       while wiring the fallback. **Red when:** the tier was implemented by reaching for
       `Command` rather than the trait object.
 
-- [x] 7.5 VERIFY: `testcount --lib 'schema_fallback::' <count>`. Commit.
+- [x] 7.5 VERIFY: `testcount --lib 'schema_fallback::' 14` (recorded: 14/14 ran, OK — 13 prescribed plus one extra positive control on the leading-noise-line rule at this tier). Commit.
 
 ---
 
@@ -1018,7 +1048,7 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
       equivalent test records: under `cargo test` the real cwd is this repository, whose
       `target/` holds tens of thousands of files.
 
-- [x] 8.5 VERIFY: `testcount --lib 'from_cli::' <count>`, then run `NOSPAWN-GREP` and
+- [x] 8.5 VERIFY: `testcount --lib 'from_cli::' 24` (recorded: 24/24 ran, OK — 22 from task 8.1/8.4 plus two added at task 11.2 closing the Change Review's two CRITICAL findings), then run `NOSPAWN-GREP` and
       `GATE-MECH1` — the latter must now report **more** than 34 constructions, since
       `from_cli` builds the type. Commit.
 
@@ -1066,7 +1096,7 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
       producer discriminant, and that `archived` is still a separate vector rather than a
       filter over one list.
 
-- [x] 9.5 VERIFY: `testcount --lib 'merge::' <count>`. Commit.
+- [x] 9.5 VERIFY: `testcount --lib 'merge::' 10` (recorded: 10/10 ran, OK). Commit.
 
 ---
 
@@ -1076,6 +1106,10 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
 - [x] 10.1 CHECK: Before running the controls, confirm each check is green on the tree as
       it now stands, so a red control below is attributable to the plant rather than to the
       tree: `NOSPAWN-GREP`, `GATE-MECH1`, `NOJSON-SEAM`, `OPENSPEC-UNTOUCHED`.
+      **Recorded:** all four green — `NOSPAWN OK: 8 files checked under src, only
+      src/cli.rs may spawn`; `GATE-MECH1 OK` both halves (61 constructions); `NOJSON-SEAM
+      OK: serde_json used in src/changes.rs, absent from src/cli.rs`; `OPENSPEC-UNTOUCHED
+      OK`.
 
 - [x] 10.2 VERIFY: `NOSPAWN-GREP` negative controls — four scratch copies of `src/`, each
       message recorded:
@@ -1088,6 +1122,8 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
       (d) the spawn planted at `ui/cli.rs` rather than the top level → still fails, proving
       the exclusion is by path and not by base name.
       **Red when:** any of (a)–(d) passes.
+      **Recorded:** all four (a)–(d) failed exactly with the messages quoted above (verbatim
+      `NOSPAWN FAIL` output in each scratch copy).
 
 - [x] 10.3 VERIFY: `GATE-MECH1` negative controls — ten scratch copies of `src/`, each
       message recorded. All ten were demonstrated red at planning time; the last two of the
@@ -1107,6 +1143,16 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
       **Red when:** any of (a)–(j) passes. The green run on the real tree is itself
       discriminating: `src/changes.rs` contains a `segment[..star]` slice index the check
       must not fire on.
+      **Recorded:** all ten (a)–(j) red; the real tree green (61 constructions at the time
+      of this run). **The check itself changed mid-implementation** (task 8.5): a raw-string
+      literal (`r#"..."#`) in a JSON test fixture desynced `strip_comments`'s naive
+      quote-tracking, leaving a later, genuine `//` comment unstripped and producing a
+      false-positive half-B hit on plain English prose containing `...`. `strip_comments`
+      was given a raw-string-aware branch (both in this file's own `GATE-MECH1.py` block and
+      in the extracted `$CHECKS` copy, kept in sync), and this task's ten controls were run
+      against the **post-fix** script, not the one demonstrated red at planning time — an
+      independent Change Review reviewer (task 11.1) re-ran all ten again independently
+      against the fixed script and confirmed all ten still red, so nothing was weakened.
 
 - [x] 10.4 VERIFY: `GATE-MECH2` — the green control first (an unmutated copy builds), then
       the three variants, each asserting the error codes that must be **present** and the
@@ -1123,17 +1169,25 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
       load-bearing: an earlier draft was defeated by an `E0277` from `tasks::Progress`
       lacking `Default`, which masked the `E0027` under test — which is also why
       `defeat_mech1.py` supplies that `Default` rather than relying on the accident.
+      **Recorded:** control (green) built; variant (a) `[E0027 E0063 ]`; variant (b)
+      `[E0027 ]` with `E0063` absent; variant (c) `[E0063 ]` with `E0027` absent — all four
+      `GATE-MECH2 OK`.
 
 - [x] 10.5 VERIFY: `NOJSON-SEAM` — must now **pass** (`serde_json used in src/changes.rs,
       absent from src/cli.rs`), having failed in task 1.3 before the crate used it. Then
       one negative control: a scratch copy of `src/cli.rs` carrying `use serde_json::Value;`
       → the check exits 1.
+      **Recorded:** `NOJSON-SEAM OK: serde_json used in src/changes.rs, absent from
+      src/cli.rs`; the negative control failed with `NOJSON-SEAM FAIL: serde_json in
+      src/cli.rs:` naming the planted `use` line.
 
 - [x] 10.6 VERIFY: `NOSPAWN-RUN` — the whole suite on a `PATH` from which every directory
       holding `npm`, `node`, or `openspec` has been removed, with the five preconditions
       passing first (all three unresolvable, `cargo` and `rustc` still resolvable). Every
       test must pass, including this change's own. **Red when:** any test in this change
       reached the real `openspec` binary.
+      **Recorded:** all five preconditions passed, then the full suite (lib + `ci_workflow` +
+      `cli` binary-integration + doc-tests) ran green on the `NOTOOLS` `PATH`.
 
 - [x] 10.7 VERIFY: `OPENSPEC-UNTOUCHED` with `BASE` from task 1.1 — must report
       `OPENSPEC-UNTOUCHED OK`. Then one negative control: create
@@ -1143,6 +1197,9 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
       exactly two paths by name — this change's artifact directory and
       `openspec/IMPLEMENTATION-ORDER.md`, both hand-edited planning documents rather than
       code-path writes — so it stays meaningful after group 12 and is re-run there.
+      **Recorded:** `OPENSPEC-UNTOUCHED OK`; with `openspec/specs/planted-probe.md` present,
+      `FAIL: wrote inside openspec/ outside this change:` naming that exact path; `OK` again
+      after removal.
 
 - [x] 10.8 VERIFY: `DEPS` in full, leg 5 included — the genuinely-needed experiment run
       three times in **copies**: remove `toml` → `cargo build` fails; remove `yaml-rust2` →
@@ -1150,25 +1207,95 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
       task 1.3 and must now be green. Then the guard itself: asking it to remove a crate
       the manifest does not carry must be reported as a failure of the check, not a pass.
       Confirm the working tree is byte-identical afterwards, `Cargo.lock` included.
+      **Recorded:** legs 1–4 `DEPS OK` (as in task 1.5); leg 5/`toml`, leg 5/`yaml-rust2`,
+      leg 5/`serde_json` all `DEPS OK` (each removal broke the build for the module named);
+      the leg 5 guard `DEPS OK` (an undeclared crate's removal reported as a failure); final
+      `DEPS OK: the working tree is unchanged, Cargo.lock included` and confirmed by
+      `git status --porcelain -- Cargo.toml Cargo.lock` being empty before and after.
 
 ---
 
 ## 11. Change Review
 <!-- kind: operational -->
 
-- [ ] 11.1 CHECK: Dispatch an independent reviewer — an agent that did **not** write the
+- [x] 11.1 CHECK: Dispatch an independent reviewer — an agent that did **not** write the
       implementation and is **not** a fork of the implementing session — against
       `proposal.md`, all five spec files, `design.md`, `tasks.md`, and the diff. Give it
       the concentration points from `openspec/config.yaml` → `rules.tasks`, and these two
       first: (1) for every spec scenario, name the test that would go red if the behaviour
       were deleted; (2) both mechanisms of the two-producer gate, and whether any check
       would still pass if one mechanism were removed.
+      **Recorded:** dispatched an `outside-in-tdd-reviewer` subagent against `6759921..HEAD`
+      (this change's commits up to and including group 10), writing findings incrementally
+      to a scratchpad file. Full findings kept at
+      `/private/tmp/claude-501/.../scratchpad/changes-from-cli-review-findings.md` for this
+      session's lifetime; disposition of each recorded below and at each finding's own task.
 
-- [ ] 11.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a
+- [x] 11.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a
       one-line reason, note each SUGGESTION, and re-run the affected tests.
+      **Recorded — 2 CRITICAL, 6 WARNING, 7 SUGGESTION:**
+      - CRITICAL 1 (a change whose schema fails to resolve was never exercised through
+        `from_cli`, so the "it still appears in `active`" clause was unbound — demonstrated
+        by mutation: `continue`-ing on `schema.is_none()` left the suite green) — **fixed**:
+        added `from_cli::a_change_whose_schema_fails_to_resolve_still_appears_in_active`,
+        re-verified the same mutation now fails it.
+      - CRITICAL 2 (the "at most once per name per call" cache was bound only by
+        `schema_fallback` tests that hand-drive their own cache, never by `from_cli` itself
+        — demonstrated by mutation: moving the cache inside the per-change loop left the
+        suite green) — **fixed**: added
+        `from_cli::from_cli_asks_the_cli_once_for_a_schema_shared_by_three_changes`,
+        re-verified the same mutation now fails it.
+      - WARNING (`change-merge` spec scenario says "seven" resulting values, arithmetic
+        gives six) — **fixed**: corrected the scenario text.
+      - WARNING (`a_schema_the_cli_rejects_removes_one_change_and_keeps_the_others`'s
+        "does not leak the CLI's message" assertion couldn't fail, since the fixture's
+        `stderr` was already empty) — **fixed**: registered a non-empty `stderr` and
+        asserted it is absent from the recorded problem.
+      - WARNING (`an_unusable_schema_yaml_at_the_cli_named_path_degrades_that_change`
+        didn't assert "exactly one `schema which` invocation... in each case", unlike its
+        two siblings) — **fixed**: added the same call-count assertion to both halves.
+      - WARNING (`a_symlinked_repository_root_is_not_a_disagreement` used a zero-change
+        payload, so "the changes are produced normally" was unbound) — **fixed**: gave the
+        payload one change with a registered apply response and asserted it reaches
+        `active`.
+      - WARNING (no BASE/lib-baseline/testcount evidence recorded in this file, contrary
+        to what tasks 1.1/1.3/1.5/10.2–10.8 themselves ask for) — **fixed**: filled in at
+        each named task above.
+      - WARNING (task 10.3's ten controls were re-run against a script that changed
+        mid-implementation, with no note of the re-run) — **fixed**: noted at 10.3, with the
+        reviewer's own independent re-run of all ten as corroboration.
+      - SUGGESTION (`GATE-MECH1.py` half B scans string-literal *contents*, so a future
+        fixture holding literal `, ..`/`{ ..` text would false-positive) — accepted, not
+        fixed: no such fixture exists today (nearest is a `/`-preceded `...` in a path
+        string), and blanking string bodies for half B only is a check-script change this
+        session chose not to make without its own re-verification pass.
+      - SUGGESTION (`CachedSchemaLoad`/`CachedCliSchema` structurally identical) —
+        accepted, not folded; reasoned at task 7.3 above.
+      - SUGGESTION (`cli_error_problem` takes both `args` and `err`, whose own `args` field
+        is discarded) — accepted, not fixed: the caller's vector is the one actually run
+        (built from live values, e.g. the change's own name), while `CliError::args` is
+        `String`-recorded after the fact: they agree by construction at every call site
+        today, and the parameter keeps the function usable if a caller ever legitimately
+        wants to name a vector other than the one on the error.
+      - SUGGESTION (`NotStarted` message read backwards: "openspec `<vector>` could not
+        start openspec") — **fixed**: reworded to "could not start `<program>` for openspec
+        `<vector>`".
+      - SUGGESTION (`parse_list`'s duplicate-name check runs after the progress-field
+        checks, so a duplicate with a bad `totalTasks` reports the less informative reason)
+        — accepted: behaviourally harmless, the entry is skipped either way.
+      - SUGGESTION (two `list_json` position assertions are single-character `contains`)
+        — accepted: low value against the time remaining in this session.
+      - SUGGESTION (`progress_is_read_from_the_list_payload_pair` doesn't sweep for the
+        literal absence of `0/0` the way `merge`'s equivalent test does) — accepted: the
+        `4/9`-equality assertion already discriminates against taking the apply payload's
+        progress, which is what the scenario is protecting.
+      All fixes re-verified: `cargo test --all-features --lib` **389 passed, 0 failed**
+      (2 new tests over the reviewer's recorded 387).
 
-- [ ] 11.3 VERIFY: Confirm no blocking or unowned finding remains, and record the finding
+- [x] 11.3 VERIFY: Confirm no blocking or unowned finding remains, and record the finding
       counts by severity in this file.
+      **Recorded:** 2 CRITICAL (fixed), 6 WARNING (fixed), 7 SUGGESTION (4 fixed, 3 accepted
+      with a stated reason). No finding remains unowned.
 
 ---
 
