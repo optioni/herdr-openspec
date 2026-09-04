@@ -209,18 +209,14 @@ pub(crate) mod testutil {
     #[cfg(test)]
     mod tests {
         use super::{ScratchDir, cell, render_at, row_text, snapshot};
-        use crate::changes::ChangeSet;
+        use crate::changes::empty_set;
         use crate::ui::app::{Dashboard, Route};
 
         fn empty_dashboard() -> Dashboard {
             Dashboard {
                 repo: None,
                 searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
-                changes: ChangeSet {
-                    active: Vec::new(),
-                    archived: Vec::new(),
-                    problems: Vec::new(),
-                },
+                changes: empty_set(),
                 route: Route::List,
                 quit: false,
             }

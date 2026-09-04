@@ -59,7 +59,7 @@ Constraints that shape everything below:
 |---|---|---|
 | `src/ui/mod.rs` (new) | `load`, `enter_if_terminal`, `run`, `StartError`; re-exports | Composition root, like `config::load_from_env` |
 | `src/ui/app.rs` (new) | `Dashboard`, `Route`, `Action`, `action_for`, `Dashboard::apply` | Pure total transformation, like `tasks::parse` |
-| `src/ui/layout.rs` (new) | `WIDE_MIN_WIDTH`, `LayoutMode`, `mode`, `split_frame` | Pure total transformation |
+| `src/ui/layout.rs` (new) | `WIDE_MIN_WIDTH`, `LayoutMode`, `mode`, `split_frame`, `split_body` | Pure total transformation |
 | `src/ui/view.rs` (new) | `render(&mut Frame, &Dashboard)` | The render seam's pure side |
 | `src/ui/driver.rs` (new) | `run_loop`, `LoopSummary`, `LoopError`, `TICK` | Generic over `Backend` and `EventSource`, like `changes::from_cli` being generic over `&dyn OpenspecCli` |
 | `src/ui/terminal.rs` (new) | `TerminalOps`, `CrosstermOps`, `TerminalGuard`, `TerminalError`, `restore_then`, `install_panic_hook` | The `cli` seam's shape: a trait, one real spawn-nothing-else implementation, fakes in tests |
@@ -127,6 +127,8 @@ impl Dashboard { pub fn apply(&mut self, action: Action); }
 pub const WIDE_MIN_WIDTH: u16 = 100;
 pub enum LayoutMode { Narrow, Wide }
 pub fn mode(width: u16) -> LayoutMode;
+pub fn split_frame(area: Rect) -> (Rect, Rect, Rect); // header, body, footer
+pub fn split_body(area: Rect, route: Route) -> (Option<Rect>, Option<Rect>); // list, detail
 
 // src/ui/view.rs
 pub fn render(frame: &mut Frame, dashboard: &Dashboard);
@@ -304,7 +306,7 @@ status.
 | dashboard-loop: `Dashboard` has no `Default` and no site elides a field | `NODEFAULT-UI` with its `struct Dashboard` positive control and its two planted-violation controls, plus `app::tests::keys::dashboard_destructures_into_exactly_five_fields` as the compile-time companion | command + unit | `grep` real | `sh $CHECKS/NODEFAULT-UI.sh`; `testcount --lib 'ui::app::tests::' 9` |
 | dashboard-loop: The pure view files name no I/O API | `NOIO-VIEW` with its four-file existence guard and `terminal.rs` positive control | command | `grep` real | `sh $CHECKS/NOIO-VIEW.sh` |
 | dashboard-loop: The shell never names the CLI seam | `NOCLI-SHELL` with its `src/changes.rs` positive control | command | `find`, `grep` real | `sh $CHECKS/NOCLI-SHELL.sh` |
-| dashboard-loop: Both quit keys quit and neither near-miss does | `keys::quit_keys_and_their_near_misses` | unit | none | `testcount --lib 'ui::app::tests::' 8` |
+| dashboard-loop: Both quit keys quit and neither near-miss does | `keys::quit_keys_and_their_near_misses` | unit | none | `testcount --lib 'ui::app::tests::' 9` |
 | dashboard-loop: A released quit key does not quit | `keys::only_press_kind_acts` | unit | none | same filter |
 | dashboard-loop: Enter and Esc move between the two routes | `keys::enter_and_esc_move_between_routes` | unit | none | same filter |
 | dashboard-loop: Non-key events are ignored without panicking | `keys::non_key_events_are_ignored` | unit | none | same filter |
@@ -327,7 +329,7 @@ status.
 | plugin-build: The resolved build graph is small and proc-macro-free (title kept verbatim; content is now the committed-snapshot comparison) | `GRAPH-SNAP` — four `cargo tree` runs compared to `tests/fixtures/build-graph.txt`, plus the proc-macro allowlist equality and the `linux-raw-sys`-only difference | command | `cargo`, `python3` real | `sh $CHECKS/GRAPH-SNAP.sh` |
 | plugin-build: Each dependency is genuinely needed rather than incidental | `DEPS` leg 5, four legs, run in a throwaway copy | command | `cargo` real | `sh $CHECKS/DEPS.sh` |
 | plugin-build: No JSON parsing reaches the subprocess seam | `NOJSON-SEAM`, carried forward from `changes-from-cli` | command | `grep` real | `sh $CHECKS/NOJSON-SEAM.sh` |
-| quality-gates: The harness renders a state value with no repository on disk | `testutil::tests::render_at_touches_no_directory` — a `testutil::snapshot` of `std::env::temp_dir()`'s direct entries before and after a render | unit | real filesystem, shallow | `testcount --lib 'testutil::tests::' 3` |
+| quality-gates: The harness renders a state value with no repository on disk | `testutil::tests::render_at_touches_no_directory` — a `testutil::snapshot` of a `ScratchDir` the test owns, **not** `std::env::temp_dir()` (this crate creates and destroys hundreds of `ScratchDir`s directly under it across parallel `cargo test` threads, which made an early draft of this test red on roughly six runs in ten for reasons unrelated to rendering — finding 2 of the planning review) | unit | real filesystem, one owned directory | `testcount --lib 'testutil::tests::' 3` |
 | quality-gates: Both widths are exercised for every view scenario | `WIDTHS` — every `#[test]` in `src/ui/view.rs` names both `60` and `120`, with a floor of 16 tests found. No exemption list: every boundary-width scenario also renders at 60 and 120 as its contrasting control | command | `python3` real | `sh $CHECKS/WIDTHS.sh`, paired with `testcount --lib 'ui::view::tests::' 16` |
 | quality-gates: The coverage floor is unchanged by the new module | `make coverage` at the unchanged 80% floor, plus a grep proving no `#[coverage` attribute and no `llvm-cov` exclusion flag entered the tree | gate + command | `cargo-llvm-cov` real | `make coverage`; `sh $CHECKS/NOWAIVER.sh` |
 

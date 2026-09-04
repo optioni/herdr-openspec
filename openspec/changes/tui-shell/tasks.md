@@ -1377,12 +1377,17 @@ needs, in the extracted copy rather than in the archive.
 ## 11. Change Review
 <!-- kind: operational -->
 
-- [ ] 11.1 Dispatch the finding pass to a reviewer that did not write this implementation,
+- [x] 11.1 Dispatch the finding pass to a reviewer that did not write this implementation,
       giving it only the change artifacts and the diff — never this session's reasoning.
       Do not fork the implementing session. Ask it to assign CRITICAL / WARNING / SUGGESTION
       and to change nothing.
+      **Recorded:** dispatched to a fresh `outside-in-tdd-reviewer` subagent (not a fork),
+      given the base SHA, the planning artifact paths, and the concentration-point brief
+      below; it read the diff and planning docs itself and independently re-ran every
+      architectural check, `make check`, and `cargo llvm-cov` rather than trusting the
+      recorded numbers in this file.
 
-- [ ] 11.2 Concentration points to put in the reviewer's brief, this repository's first:
+- [x] 11.2 Concentration points to put in the reviewer's brief, this repository's first:
       - **A view test that opens a directory**, or a `Dashboard` built by reading disk in a
         `view.rs` test. That is logic leaking across the render seam.
       - **A view scenario asserted at one width only**, or asserted with the same assertion
@@ -1398,10 +1403,91 @@ needs, in the extracted copy rather than in the archive.
       - **A `Dashboard` construction that does not name all five fields.**
       - **Leftovers**: placeholder text in a region interior, debug printing inside a
         render, a `dbg!`, commented-out layout experiments.
+      **Recorded:** none of the eight concentration points produced a hit — the reviewer
+      confirmed each mechanically (re-ran NOIO-VIEW/NOCLI-SHELL/NORAW-GREP/NODEFAULT-UI/
+      WIDTHS, grepped for `dbg!`/`println!`/`todo!`/`TODO`/`FIXME`, checked every view test
+      builds its `Dashboard` in memory). It also independently verified the five
+      self-reported deviations recorded in groups 2, 4, 1, 7, and 9 above, and confirmed
+      each sound by re-deriving it rather than trusting the note.
 
-- [ ] 11.3 Fix every CRITICAL. Resolve or consciously accept each WARNING with a one-line
+- [x] 11.3 Fix every CRITICAL. Resolve or consciously accept each WARNING with a one-line
       reason. Note SUGGESTIONs. Re-run every affected test and every affected check, and
       record the findings and their disposition in this file beneath this task.
+
+      **Findings: 0 CRITICAL, 5 WARNING, 6 SUGGESTION.**
+
+      **WARNING — all fixed:**
+      1. `ui::driver::tests::a_draw_failure_stops_before_polling` asserted only
+         `matches!(result, Err(LoopError::Draw(_)))`, never inspecting the payload the spec
+         requires ("carrying the backend error's text"). **Fixed:** now asserts the payload
+         contains `"FailingBackend always fails to draw"`.
+      2. `ui::driver::TICK`'s value (spec: "SHALL be 250 milliseconds") was never asserted,
+         only its use-site. **Fixed:** added `tick_is_250_milliseconds`, mirroring how
+         `ui::layout::tests` pins `WIDE_MIN_WIDTH`.
+      3. `StartError`'s `Display` impl and both `From` impls were entirely uncovered, which
+         falsified `quality-gates`' coverage scenario's claim that the uncoverable residue
+         is confined to a named, smaller set (`TerminalError`'s own `Display` *was* already
+         tested, making the gap inconsistent within the change too). **Fixed:** three new
+         tests in `ui::tests::start` cover `Display` for all three `StartError` variants and
+         both `From` conversions; also added a `Debug`-format test for `TerminalGuard`
+         (`ui::terminal::tests::guard::a_guard_formats_for_debug`), the other pure-but-untested
+         surface the reviewer found. Corrected `specs/quality-gates/spec.md`'s coverage
+         scenario to name what genuinely remains uncoverable: `main.rs`'s exit-0 arm
+         (alongside the already-named exit-1 — neither reachable without a real terminal)
+         and `ui::load`'s `canonicalize` fallback (a race no deterministic test constructs).
+      4. `render`'s height-0 branch (`responsive-layout`: "at height 0 render SHALL draw
+         nothing") had no view-tier test — only `split_frame`'s own height-0 case was
+         covered, at the layout tier. **Fixed:** added
+         `ui::view::tests::zero_height_frame_draws_nothing` (17th view test, still naming
+         both 60 and 120 for `WIDTHS`); a 0-height `TestBackend` has no cells to read, so the
+         assertion is "did not panic", the strongest claim a zero-cell buffer admits.
+      5. Five sites hand-constructed `ChangeSet { active: vec![], archived: vec![], problems:
+         vec![] }` outside `src/changes.rs` (`ui/app.rs`, `ui/view.rs`, `ui/driver.rs`,
+         `lib.rs`'s `testutil::tests`, `ui/mod.rs`'s `ui::tests::load`) even though
+         `changes::empty_set()` existed from group 7 onward — the exact construction site the
+         design decision (`src/changes.rs` → `empty_set`'s doc comment; design.md → Decisions)
+         exists to keep inside `GATE-MECH1`'s no-`Default`/no-`..` gate. None elided a field,
+         so this was a WARNING, not CRITICAL — the invariant just wasn't mechanically
+         enforced at those five sites. **Fixed:** all five now call `crate::changes::empty_set()`.
+
+      **SUGGESTION — disposition:**
+      1. A private, identically-shaped `fn empty_set() -> ChangeSet` in `src/changes.rs`'s
+         own `mod merge` test module shadowed the new public one. **Fixed:** deleted; its ten
+         call sites resolve to the public `empty_set()` through the existing `use super::*;`
+         chain (`mod tests` → `mod merge`), confirmed by re-running `changes::tests::merge::*`.
+      2. design.md's verification-matrix row for `render_at_touches_no_directory` prescribed
+         snapshotting `std::env::temp_dir()`, which the actual (spec-correct) implementation
+         does not do. **Fixed:** row corrected to describe the owned-`ScratchDir` approach and
+         why, cross-referencing planning-review finding 2.
+      3. Same file, the `quit_keys_and_their_near_misses` matrix row said `testcount --lib
+         'ui::app::tests::' 8`; the count is 9 everywhere else. **Fixed:** typo corrected.
+      4. `ui::view::tests::header_path_right_aligned_whole` used `.trim()` (accepts any
+         Unicode whitespace) where the spec says "columns 8 through 45 are spaces". **Fixed:**
+         matched the stricter form the sibling assertion at `region_interiors_are_blank`
+         already uses (`.chars().all(|c| c == ' ')`).
+      5. `split_frame`/`split_body` are `pub` (required — `ui::view` is a sibling module) but
+         `split_body` was absent from design.md's Contracts code block and Boundaries table
+         row. **Fixed:** both added to both places.
+      6. The seven command-level checks (`NOIO-VIEW`, `NOCLI-SHELL`, `NORAW-GREP`,
+         `NODEFAULT-UI`, `WIDTHS`, `GRAPH-SNAP`, `NOWAIVER`) exist only as fenced blocks in
+         `tasks.md`, extracted to a scratchpad at implementation time — nothing in `Makefile`,
+         CI, or `tests/` runs them, so a later change could violate any of them with every
+         committed gate still green. **Accepted, not fixed:** this is this repository's
+         established convention (`NOSPAWN-GREP` has been carried the same way across three
+         prior changes) and is explicitly out of this change's scope — wiring seven checks
+         into CI is a decision for a change that owns that surface, not a side effect of this
+         one. Recorded here so the decision is deliberate rather than silent drift.
+
+      **Re-verification after fixes:** full lib suite 443 → 449 tests (6 new: 1 driver
+      `tick_is_250_milliseconds`, 1 view `zero_height_frame_draws_nothing`, 3 `StartError`
+      `Display`/`From` tests, 1 `TerminalGuard` `Debug`-format test); `cargo fmt --all --
+      --check` clean; `cargo clippy --all-targets --all-features -- -D warnings` clean;
+      `openspec validate tui-shell
+      --strict` → `Change 'tui-shell' is valid` (confirms the `specs/quality-gates/spec.md`
+      edit didn't break the delta spec); `make check` exits 0; `cargo llvm-cov
+      --fail-under-lines 80` → **98.01%** over 8,836 lines, 176 uncovered — up from 97.82%
+      before this group (`ui/mod.rs` 78.78% → 93.36%, `ui/terminal.rs` 80.66% → 83.66%), floor
+      cleared by 18.01 points.
 
 ---
 

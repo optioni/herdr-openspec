@@ -115,7 +115,6 @@ pub fn load(start: &Path, config: &Config) -> Dashboard {
 #[cfg(test)]
 mod tests {
     mod load {
-        use crate::changes::ChangeSet;
         use crate::config::Config;
         use crate::testutil::{ScratchDir, canonical, snapshot, write_with_mode};
         use crate::ui::app::Route;
@@ -184,14 +183,7 @@ mod tests {
 
             assert_eq!(dashboard.repo, None);
             assert_eq!(dashboard.searched_from, expected_searched_from);
-            assert_eq!(
-                dashboard.changes,
-                ChangeSet {
-                    active: Vec::new(),
-                    archived: Vec::new(),
-                    problems: Vec::new(),
-                }
-            );
+            assert_eq!(dashboard.changes, crate::changes::empty_set());
         }
 
         #[test]
@@ -305,6 +297,53 @@ mod tests {
                 Err(super::super::StartError::Terminal(e)) => assert_eq!(e.op, "enable_raw"),
                 other => panic!("expected StartError::Terminal, got {other:?}"),
             }
+        }
+
+        // Closes a Change Review finding: StartError's Display and From impls
+        // are pure, need no terminal, and were entirely uncovered even though
+        // quality-gates' coverage scenario claims the uncoverable residue is
+        // confined to a named, smaller set. TerminalError's own Display is
+        // already tested in ui::terminal — this brings StartError's up to the
+        // same standard.
+        #[test]
+        fn display_names_the_right_text_per_variant() {
+            assert_eq!(
+                super::super::StartError::NotATerminal.to_string(),
+                "not a terminal"
+            );
+            let terminal_err = super::super::StartError::Terminal(TerminalError {
+                op: "enable_raw",
+                detail: "device busy".to_string(),
+            });
+            let text = terminal_err.to_string();
+            assert!(text.contains("enable_raw"));
+            assert!(text.contains("device busy"));
+            assert_eq!(
+                super::super::StartError::Io("boom".to_string()).to_string(),
+                "boom"
+            );
+        }
+
+        #[test]
+        fn io_error_converts_to_start_error_io() {
+            let io_err = std::io::Error::other("disk full");
+            let start_err: super::super::StartError = io_err.into();
+            assert!(start_err.to_string().contains("disk full"));
+        }
+
+        #[test]
+        fn loop_error_converts_to_start_error_io() {
+            let draw: super::super::StartError =
+                crate::ui::driver::LoopError::Draw("panel broke".to_string()).into();
+            assert!(draw.to_string().contains("draw failed"));
+            assert!(draw.to_string().contains("panel broke"));
+
+            let events: super::super::StartError = crate::ui::driver::LoopError::Events(
+                crate::ui::event::EventError("script exhausted".to_string()),
+            )
+            .into();
+            assert!(events.to_string().contains("event source failed"));
+            assert!(events.to_string().contains("script exhausted"));
         }
     }
 }

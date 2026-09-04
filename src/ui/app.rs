@@ -90,22 +90,14 @@ mod tests {
             Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind,
         };
 
-        use crate::changes::ChangeSet;
+        use crate::changes::empty_set;
         use crate::ui::app::{Action, Dashboard, Route, action_for};
-
-        fn empty_changes() -> ChangeSet {
-            ChangeSet {
-                active: Vec::new(),
-                archived: Vec::new(),
-                problems: Vec::new(),
-            }
-        }
 
         fn dashboard_at(route: Route) -> Dashboard {
             Dashboard {
                 repo: None,
                 searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
-                changes: empty_changes(),
+                changes: empty_set(),
                 route,
                 quit: false,
             }

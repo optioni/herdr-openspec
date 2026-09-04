@@ -76,25 +76,17 @@ mod tests {
     use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
     use ratatui::layout::{Position, Size};
 
-    use crate::changes::ChangeSet;
+    use crate::changes::empty_set;
     use crate::testutil::{cell, row_text};
     use crate::ui::app::{Dashboard, Route};
-    use crate::ui::driver::{LoopError, LoopSummary, run_loop};
+    use crate::ui::driver::{LoopError, LoopSummary, TICK, run_loop};
     use crate::ui::event::{EventError, EventSource};
-
-    fn empty_changes() -> ChangeSet {
-        ChangeSet {
-            active: Vec::new(),
-            archived: Vec::new(),
-            problems: Vec::new(),
-        }
-    }
 
     fn dashboard() -> Dashboard {
         Dashboard {
             repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
             searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
-            changes: empty_changes(),
+            changes: empty_set(),
             route: Route::List,
             quit: false,
         }
@@ -206,6 +198,15 @@ mod tests {
         fn flush(&mut self) -> Result<(), Self::Error> {
             Ok(())
         }
+    }
+
+    #[test]
+    fn tick_is_250_milliseconds() {
+        // dashboard-loop: "ui::driver::TICK SHALL be 250 milliseconds and SHALL
+        // be what ui::run passes" — the second half is structurally visible at
+        // src/ui/mod.rs's run_loop call site; this pins the value itself, the
+        // same way ui::layout pins WIDE_MIN_WIDTH.
+        assert_eq!(TICK, Duration::from_millis(250));
     }
 
     #[test]
@@ -356,7 +357,12 @@ mod tests {
             &mut events,
             Duration::from_millis(1),
         );
-        assert!(matches!(result, Err(LoopError::Draw(_))));
+        match result {
+            Err(LoopError::Draw(detail)) => {
+                assert!(detail.contains("FailingBackend always fails to draw"));
+            }
+            other => panic!("expected Err(LoopError::Draw(_)), got {other:?}"),
+        }
         assert_eq!(events.calls(), 0);
     }
 }

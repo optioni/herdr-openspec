@@ -135,27 +135,17 @@ mod tests {
     use ratatui::buffer::{Buffer, Cell};
     use ratatui::style::Modifier;
 
-    use crate::changes::ChangeSet;
+    use crate::changes::empty_set;
     use crate::testutil::{cell, render_at, row_text};
     use crate::ui::app::{Dashboard, Route};
 
-    // `Dashboard::changes` is `changes::empty_set()` in spirit — every scenario in
-    // this capability renders an empty `ChangeSet`, per responsive-layout's preamble.
-    // The literal helper `changes::empty_set()` does not exist until group 7, so this
-    // constructs the same value directly, exactly as group 3's app.rs tests already do.
-    fn empty_changes() -> ChangeSet {
-        ChangeSet {
-            active: Vec::new(),
-            archived: Vec::new(),
-            problems: Vec::new(),
-        }
-    }
-
+    // `Dashboard::changes` is `changes::empty_set()`, per responsive-layout's
+    // preamble — every scenario in this capability renders an empty `ChangeSet`.
     fn dashboard(repo: Option<&str>, route: Route) -> Dashboard {
         Dashboard {
             repo: repo.map(std::path::PathBuf::from),
             searched_from: std::path::PathBuf::from("/tmp/searched-from"),
-            changes: empty_changes(),
+            changes: empty_set(),
             route,
             quit: false,
         }
@@ -196,6 +186,22 @@ mod tests {
             );
             assert_eq!(cell(&buf, 0, 1).symbol(), "┌");
             assert_eq!(cell(&buf, 0, 18).symbol(), "└");
+        }
+    }
+
+    #[test]
+    fn zero_height_frame_draws_nothing() {
+        // responsive-layout: "at height 0 render SHALL draw nothing." Closes a
+        // Change Review finding — split_frame's own height-0 case was tested at
+        // the layout tier (ui::layout::tests::split_frame_degenerate_heights)
+        // but render's two early returns (render_header, render_footer) were
+        // not exercised at the view tier at all. A 0-height buffer has no rows
+        // to read, so the assertion is "did not panic" — the strongest claim a
+        // zero-cell buffer admits.
+        let d = dashboard(Some("/tmp/demo-repo"), Route::List);
+        for width in [60, 120] {
+            let buf = render_at(width, 0, &d);
+            assert_eq!(buf.area.height, 0);
         }
     }
 
@@ -383,7 +389,10 @@ mod tests {
         let d = dashboard(Some("/tmp/demo-repo"), Route::List);
         let buf = render_at(60, 20, &d);
         assert_eq!(cols(&row_text(&buf, 0), 46..60), "/tmp/demo-repo");
-        assert_eq!(cols(&row_text(&buf, 0), 8..46).trim(), "");
+        assert!(
+            cols(&row_text(&buf, 0), 8..46).chars().all(|c| c == ' '),
+            "columns 8..46 must be exactly spaces"
+        );
 
         let buf = render_at(120, 20, &d);
         assert_eq!(cols(&row_text(&buf, 0), 106..120), "/tmp/demo-repo");

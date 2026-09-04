@@ -66,8 +66,11 @@ the pure side of the render seam and into the view.
   `ui::terminal::CrosstermOps`, `ui::terminal::install_panic_hook`, `ui::event::CrosstermEvents`,
   and the body of `ui::run` after its terminal check — each of them a wiring binding with
   no branch of its own, which is the reason for keeping them separate from the logic
-- **AND** two further uncovered regions are expected and named rather than discovered:
-  `src/main.rs`'s exit-1 arm, which no test can reach because `StartError::Terminal` and
-  `StartError::Io` arise only from a real terminal, and the `Backend` methods a test double
-  implements but `Terminal` never calls, since `cargo llvm-cov` instruments `#[cfg(test)]`
-  code too
+- **AND** further uncovered regions are expected and named rather than discovered:
+  `src/main.rs`'s exit-0 and exit-1 arms, neither reachable without a real terminal attached
+  to the spawned binary (`Ok(())` requires `ui::run` to complete a loop iteration and quit;
+  `StartError::Terminal` and `StartError::Io` arise only from a real terminal too); the
+  `Backend` methods a test double implements but `Terminal` never calls, since
+  `cargo llvm-cov` instruments `#[cfg(test)]` code too; and `ui::load`'s `canonicalize`
+  fallback for a start path that stops existing between `resolve::find_repo` succeeding and
+  the canonicalize call — a race no deterministic test constructs

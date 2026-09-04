@@ -294,5 +294,16 @@ mod tests {
             assert!(text.contains("enable_raw"));
             assert!(text.contains("device busy"));
         }
+
+        #[test]
+        fn a_guard_formats_for_debug() {
+            // Closes a Change Review finding: the hand-written Debug impl
+            // (derive doesn't reach through the `&dyn TerminalOps` field) was
+            // never actually exercised.
+            let rec = Recorder::default();
+            let guard = TerminalGuard::enter(&rec).expect("enter succeeds");
+            let text = format!("{guard:?}");
+            assert!(text.contains("TerminalGuard"));
+        }
     }
 }

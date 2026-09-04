@@ -4835,14 +4835,6 @@ mod tests {
             }
         }
 
-        fn empty_set() -> ChangeSet {
-            ChangeSet {
-                active: vec![],
-                archived: vec![],
-                problems: vec![],
-            }
-        }
-
         fn empty_cli() -> CliChanges {
             CliChanges {
                 active: vec![],
