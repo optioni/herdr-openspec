@@ -423,7 +423,7 @@ needs, in the extracted copy rather than in the archive.
 ## 1. Baseline, checks, and the `ratatui` dependency
 <!-- kind: operational -->
 
-- [ ] 1.1 CHECK: Record the starting state before any edit.
+- [x] 1.1 CHECK: Record the starting state before any edit.
       - `git rev-parse HEAD` → `export BASE=<sha>`. Every `OPENSPEC-UNTOUCHED` run uses it.
         A diff against the index would pass over this change's own per-group commits.
       - `cargo test --all-features --lib 2>&1 | sed -n 's/^test result: ok\. \([0-9]*\)
@@ -442,15 +442,40 @@ needs, in the extracted copy rather than in the archive.
       **Red when:** `BASE` is empty or not a commit (`OPENSPEC-UNTOUCHED` aborts on both), or
       the lib baseline is recorded higher than reality, which makes every later `TESTCOUNT`
       unsatisfiable rather than falsely green.
+      **Recorded:** `BASE=e25017546cea99e4b606fcd74a404131e1ca582e`
+      (`docs(tui-shell): plan the ratatui shell, event loop, and 100-column breakpoint`).
+      Lib baseline **389**. `--test cli` count **5**. Coverage **98.93%** over 7,635 lines,
+      82 uncovered — exact match to the planning-time figures. Checks pre-extracted in the
+      scratchpad from planning review were **stale** (predated the review repairs to
+      `NOCLI-SHELL`, `NOIO-VIEW`, `WIDTHS`, and `TESTCOUNT`); re-extracted byte-identically
+      from the current `tasks.md` and archive instead.
+      **Correction recorded here, load-bearing for every later "then `make check`" in
+      groups 1–7:** `make check`'s `test` and `coverage` steps run the whole suite
+      unfiltered, and group 0's outer-loop acceptance test (`ui_without_a_terminal_exits_three`)
+      is deliberately RED until group 8 closes it — `cargo llvm-cov` also hard-fails on any
+      test failure and produces no report at all, `--no-fail-fast` included. Neither tasks.md
+      nor design.md reconciles this with "then `make check`" appearing at 1.7, 2.4, 3.4, 4.6,
+      5.4, 6.4, and 7.5. Resolution: for those intermediate boundaries, `make check` is run
+      as `cargo fmt --all -- --check`, `cargo clippy --all-targets --all-features -- -D
+      warnings`, `cargo test --all-features` (confirmed to fail on **exactly** the one known
+      acceptance test, with the identical panic message each time — a second failure would be
+      a real regression), and `cargo llvm-cov --ignore-run-fail --fail-under-lines 80` (which
+      still reports a TOTAL despite the known test failure). The literal, unqualified
+      `make check` is run at 8.6 onward, once the acceptance test is GREEN.
 
-- [ ] 1.2 CHECK: Run the checks that must **pass** on the tree as it stands, so this change
+- [x] 1.2 CHECK: Run the checks that must **pass** on the tree as it stands, so this change
       starts from clean gates rather than inheriting broken ones: `NOSPAWN-GREP` (with the
       default `MIN=8`), `GATE-MECH1`, `NOJSON-SEAM`, and `OPENSPEC-UNTOUCHED`. Record each
       output verbatim. Expected: `NOSPAWN OK: 8 files checked under src (>= 8)`.
       **Red when:** any already fails, in which case this change is not the place to fix it
       and the finding is reported before any code is written.
+      **Recorded:** `NOSPAWN OK: 8 files checked under src (>= 8), only src/cli.rs may
+      spawn`; `GATE-MECH1 OK (half A): no Default for Change, ChangeSet, ArtifactRef, Origin
+      in 9 files under src` and `(half B): 61 constructions in src/changes.rs, no rest
+      pattern and no functional update`; `NOJSON-SEAM OK: serde_json used in src/changes.rs,
+      absent from src/cli.rs`; `OPENSPEC-UNTOUCHED OK`.
 
-- [ ] 1.3 CHECK: Run the checks that must **fail** today, and record each message. They are
+- [x] 1.3 CHECK: Run the checks that must **fail** today, and record each message. They are
       the proof that the corresponding green runs later are earned rather than structural.
       - `NOIO-VIEW` → `src/ui/app.rs missing`.
       - `NOCLI-SHELL` → `src/ui missing`.
@@ -463,16 +488,36 @@ needs, in the extracted copy rather than in the archive.
         the assertion it would have reached.
       - `NOSPAWN-GREP` with `MIN=14` → `searched only 8 files under src (expected >= 14)`.
       **Red when:** any of the seven **passes** today, which would mean it cannot discriminate.
+      **Recorded:** all seven failed with exactly the predicted messages —
+      `NOIO-VIEW FAIL: src/ui/app.rs missing`; `NOCLI-SHELL FAIL: src/ui missing`;
+      `NORAW FAIL: src/ui/terminal.rs missing`; `WIDTHS FAIL: src/ui/view.rs missing`;
+      `NODEFAULT-UI FAIL: src/ui/app.rs missing`;
+      `GRAPH-SNAP FAIL: aarch64-apple-darwin resolved only 16 packages`;
+      `NOSPAWN FAIL: searched only 8 files under src (expected >= 14)`.
 
-- [ ] 1.4 CHANGE: Add to `Cargo.toml`
+- [x] 1.4 CHANGE: Add to `Cargo.toml`
       `ratatui = { version = "0.30.2", default-features = false, features = ["crossterm"] }`
       — version read from `cargo info ratatui` rather than remembered (it reported `0.30.2`
       as latest at planning time), defaults off, feature list explicit. Do **not** declare
       `crossterm`: design.md → Decisions argues why the re-export is used instead. Raise
       `rust-version` from `1.85` to `1.88`, which `ratatui` 0.30.2 and its three sibling
       crates require. Commit `Cargo.lock`.
+      **Recorded:** `cargo info ratatui` reports latest **0.30.2**, `rust-version 1.85.0`
+      for the crate itself (the beta shown as "version" carries the same floor); the four
+      packages that actually sit at the raised floor are `ratatui`, `ratatui-core`,
+      `ratatui-crossterm`, and `ratatui-widgets`, all `1.88.0`, confirmed via `cargo
+      metadata`. `cargo build` succeeds; `Cargo.lock` updated and staged.
+      **Incidental fix, unplanned but forced by this task:** raising `rust-version` to
+      `1.88` changes clippy's MSRV-gated suggestions — `1.88` is the floor at which
+      `if`-let-chains became suggestable — and `cargo clippy -- -D warnings` newly failed
+      on two pre-existing nested-`if` sites in `src/schema.rs` (lines ~151 and ~275,
+      `clippy::collapsible_if`) that were clean before this edit. Fixed by applying
+      clippy's own suggested collapse into a `let … && let …` chain at both sites — a
+      behaviour-preserving mechanical rewrite, verified by the full suite staying green.
+      Confirmed pre-existing-clean by running `cargo clippy` against the unstaged tree
+      (`git stash`) before this edit: 0 warnings.
 
-- [ ] 1.5 CHANGE: Make four edits to the extracted `DEPS` copy, and record the diff:
+- [x] 1.5 CHANGE: Make four edits to the extracted `DEPS` copy, and record the diff:
       1. A fourth expected normal dependency: `ratatui`, defaults off, features exactly
          `crossterm`.
       2. An assertion that `crossterm` is **absent** from the declared set while **present**
@@ -488,20 +533,46 @@ needs, in the extracted copy rather than in the archive.
          unsatisfiable. Keep the `TRIPLES` variable: leg 4 still uses it.
       Leg 5 for `ratatui` will correctly fail until group 8 — defer it with
       `DEPS_SKIP_LEG5=1` here and run it at task 9.6.
+      **Recorded:** all four edits made in `$CHECKS/DEPS.sh` exactly as specified — leg 2's
+      `want` dict gained `"ratatui":["crossterm"]` plus a positive assertion that
+      `"crossterm" not in got`, and a new leg-2a-bis asserting `crossterm` present in
+      `cargo tree -e normal`; leg 5 gained `needed ratatui "ui"`; leg 3 (the
+      `EXPECTED_GRAPH` block and its per-triple equality loop) deleted outright, replaced
+      with a one-line pointer to `GRAPH-SNAP.sh`, `TRIPLES` retained for leg 4.
 
-- [ ] 1.6 CHANGE: Generate the graph snapshot: `GRAPH_WRITE=1 sh $CHECKS/GRAPH-SNAP.sh`,
+- [x] 1.6 CHANGE: Generate the graph snapshot: `GRAPH_WRITE=1 sh $CHECKS/GRAPH-SNAP.sh`,
       producing `tests/fixtures/build-graph.txt`. Then run it **without** `GRAPH_WRITE` and
       confirm it passes. Record the per-triple package counts. At planning time, with only
       `ratatui` resolved in isolation, the four triples produced 62/62/63/63 packages and
       differed by exactly `linux-raw-sys`; the real numbers here are higher because this
       crate's existing three dependencies are in the same graph — record what the run
       reports, do not carry the planning-time numbers over.
+      **Recorded:** `GRAPH-SNAP WROTE tests/fixtures/build-graph.txt`; re-run without
+      `GRAPH_WRITE` → `GRAPH-SNAP OK: 4 triples match tests/fixtures/build-graph.txt; 8
+      proc-macro crates; no encoding_rs, no time`. Per-triple counts: aarch64-apple-darwin
+      **74**, x86_64-apple-darwin **74**, aarch64-unknown-linux-gnu **75**,
+      x86_64-unknown-linux-gnu **75** — the two Linux triples each carry one more package
+      than the two macOS triples, matching the design's named `linux-raw-sys` difference.
 
-- [ ] 1.7 VERIFY: Run `DEPS` with `DEPS_SKIP_LEG5=1` — legs 1, 2 and 4 must pass (leg 3 was
+- [x] 1.7 VERIFY: Run `DEPS` with `DEPS_SKIP_LEG5=1` — legs 1, 2 and 4 must pass (leg 3 was
       deleted at task 1.5), output recorded verbatim, with leg 4 reporting `ratatui`, `ratatui-core`,
       `ratatui-crossterm`, and `ratatui-widgets` at the `1.88.0` floor. Then `make check`
       must still be green with the dependency added and no code using it yet — clippy
       included, since an unused dependency is not a clippy error. Commit.
+      **Recorded:** `DEPS OK (leg 1a)` one bin target, edition 2024; `DEPS OK (leg 1b)`
+      `scripts/build.sh` produces an executable; `DEPS OK (leg 2a)` exactly 4 normal deps,
+      defaults off, features exact, crossterm not declared; `DEPS OK (leg 2a-bis)` crossterm
+      present in the resolved graph; `DEPS OK (leg 2b)` `yaml-rust2`'s `features = []`
+      spelled out; `DEPS OK (leg 2c)` `cargo build --locked`; `DEPS OK (leg 4)` floor `1.88`
+      from `Cargo.toml`, at the floor: `darling, darling_core, darling_macro,
+      herdr-openspec, instability, ratatui, ratatui-core, ratatui-crossterm,
+      ratatui-widgets` — a superset of the four named in this task, which is expected and
+      not a violation. `DEPS SKIPPED (leg 5)`. Then, per the 1.1 correction: `fmt-check`
+      clean; `clippy -D warnings` clean; `cargo test --all-features` fails on exactly
+      `ui_without_a_terminal_exits_three` (389 lib + 11 ci_workflow + 5-of-6 cli, the one
+      known RED); `cargo llvm-cov --ignore-run-fail --fail-under-lines 80` reports **98.93%**
+      over 7,634 lines, 82 uncovered — unchanged from the 1.1 baseline (one line count moved
+      by the clippy let-chain rewrite, coverage percentage identical), floor holds.
       **Red when:** the MSRV floor read from `Cargo.toml` is still `1.85` while a package
       declares `1.88`, which is exactly what leg 4 exists to catch.
 

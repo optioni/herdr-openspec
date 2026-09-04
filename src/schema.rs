@@ -149,14 +149,14 @@ pub(crate) fn declared_name(
 ) -> Selection {
     let mut problems = Vec::new();
 
-    if let Some((path, text)) = change {
-        if let Some(name) = source_contribution(path, text, &mut problems) {
-            return Selection {
-                name,
-                source: NameSource::Change,
-                problems,
-            };
-        }
+    if let Some((path, text)) = change
+        && let Some(name) = source_contribution(path, text, &mut problems)
+    {
+        return Selection {
+            name,
+            source: NameSource::Change,
+            problems,
+        };
     }
 
     let (path, text) = project;
@@ -272,12 +272,12 @@ pub fn parse(name: &str, text: &str) -> Result<ParsedSchema, String> {
         problems.push(problem);
     }
 
-    if let Some(declared) = non_blank_str(&doc["name"]) {
-        if declared != name {
-            problems.push(format!(
-                "the schema directory {name:?} does not match its file's declared name {declared:?}"
-            ));
-        }
+    if let Some(declared) = non_blank_str(&doc["name"])
+        && declared != name
+    {
+        problems.push(format!(
+            "the schema directory {name:?} does not match its file's declared name {declared:?}"
+        ));
     }
 
     Ok(ParsedSchema {
