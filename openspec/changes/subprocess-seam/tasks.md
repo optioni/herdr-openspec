@@ -247,7 +247,7 @@
 ## 4. The recording fake
 <!-- kind: behavior -->
 
-- [ ] 4.1 RED: Write failing tests named `invocations_are_recorded_in_call_order`,
+- [x] 4.1 RED: Write failing tests named `invocations_are_recorded_in_call_order`,
       `a_response_is_matched_by_the_exact_argument_vector`,
       `an_openspec_call_is_not_answered_from_a_herdr_registration`,
       `an_unregistered_invocation_panics_naming_the_program_and_the_vector`,
@@ -263,7 +263,18 @@
       and `["list"]` and calls the longer, so a prefix match cannot pass. The repeat test
       calls four times against two registrations and asserts
       `["first", "second", "second", "second"]`
-- [ ] 4.2 GREEN: Add the fake under `#[cfg(test)] pub(crate)`, following `testutil`'s
+
+      RECORDED: written as 10 test functions rather than 8, splitting two of the named
+      scenarios in two: `#[should_panic]` cannot be followed by further assertions in the
+      same function body (the panic unwinds the test), so "assert the panic AND assert
+      the message names the program" and "assert the panic AND then register both sides
+      and assert each gets its own" each needed a second function. Added
+      `an_unregistered_invocation_panic_message_names_the_program` and
+      `each_handle_gets_its_own_registration`, both using `std::panic::catch_unwind` to
+      inspect the message where the attribute form cannot. Confirmed RED first: compiling
+      against no `FakeCli` type failed with `E0433` (`cannot find type FakeCli`) — the
+      right reason.
+- [x] 4.2 GREEN: Add the fake under `#[cfg(test)] pub(crate)`, following `testutil`'s
       existing placement in `src/lib.rs`: one type implementing **both** traits, interior
       state behind a `std::sync::Mutex` (never a `RefCell`, which is not `Sync` and so
       could not satisfy the traits' supertraits), a registration method keyed on the pair
@@ -275,18 +286,28 @@
       `fake.run(..)` with both traits in scope; disambiguate with
       `OpenspecCli::run(&fake, ..)` and `HerdrCli::run(&fake, ..)`. Being `cfg(test)`
       keeps it out of the release binary and out of the coverage denominator
-- [ ] 4.3 GREEN: Document on the fake why it panics rather than returning `Ok("")` — every
+- [x] 4.3 GREEN: Document on the fake why it panics rather than returning `Ok("")` — every
       consumer of this seam is required to degrade rather than fail, so a silent empty
       answer would let a caller's test pass while the caller spawned the wrong command —
       and why responses are keyed rather than held in one global FIFO
-- [ ] 4.4 REFACTOR: Confirm every public method of the fake is exercised by a test in this
+- [x] 4.4 REFACTOR: Confirm every public method of the fake is exercised by a test in this
       group, so `-D warnings` has no dead code to complain about and no method ships
       unproven. If nothing needed cleaning, say so here
-- [ ] 4.5 VERIFY: `testcount 'cli::' 20`, then `cargo clippy --all-targets --all-features
+
+      RECORDED: `clippy::type_complexity` fired on the raw nested
+      `HashMap<(Program, Vec<String>), VecDeque<...>>` field type — factored into
+      `FakeCliKey`/`FakeCliResponses` type aliases, which cleared it. Every public method
+      (`new`, `register_openspec`, `register_herdr`, `calls`) is exercised by at least one
+      test in this group; `-D warnings` clean afterward.
+- [x] 4.5 VERIFY: `testcount 'cli::' 20`, then `cargo clippy --all-targets --all-features
       -- -D warnings` clean. **Red when:** fewer than 20 tests match, an unregistered pair
       returns instead of panicking, a `herdr` call is answered from an `openspec`
       registration, a prefix match answers, the last response does not repeat, or the fake
       cannot cross a thread boundary
+
+      RECORDED: `testcount 'cli::' 20` -> OK (22 >= 20, ten new fake tests over the
+      12-test baseline). Full suite: 288 passed (266 baseline + 22 cli), 0 failed.
+      `cargo clippy --all-targets --all-features -- -D warnings` clean.
 
 ## 5. The npm-prefix decision and the spawning probe
 <!-- kind: behavior -->

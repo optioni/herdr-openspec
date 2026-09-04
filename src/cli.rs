@@ -202,6 +202,134 @@ impl HerdrCli for RealHerdrCli {
     }
 }
 
+/// Which program a fake invocation addressed. Recorded and keyed alongside
+/// the argument vector: one type implements both traits below, so a vector
+/// alone would let a caller that reached for the wrong handle be answered
+/// out of the other program's registration — precisely the "a caller's test
+/// passes while the caller spawned the wrong command" failure this seam
+/// exists to prevent.
+#[cfg(test)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum Program {
+    Openspec,
+    Herdr,
+}
+
+#[cfg(test)]
+impl Program {
+    fn label(self) -> &'static str {
+        match self {
+            Program::Openspec => "openspec",
+            Program::Herdr => "herdr",
+        }
+    }
+}
+
+/// The recording fake every later change's tests use instead of a real
+/// `openspec` or `herdr` binary. `#[cfg(test)] pub(crate)`, following
+/// `testutil`'s existing placement in `src/lib.rs`: it contributes nothing
+/// to the release binary and nothing to the coverage denominator.
+///
+/// Every registration and every recorded call is keyed on the **pair** of
+/// which program was addressed and the exact argument vector — not the
+/// vector alone, for the reason on [`Program`]. An invocation with no
+/// registered response panics naming both, rather than returning an empty
+/// `Ok`: every consumer of this seam is required to degrade rather than
+/// fail on a real error, so a silent empty answer would let a caller's test
+/// pass while the caller spawned the wrong command. Registering a pair more
+/// than once queues the responses in registration order, and the last
+/// registered response for a pair repeats for every further invocation of
+/// it, so a poll calling the same command many times needs one
+/// registration and a refresh returning changed data needs two.
+///
+/// Interior state sits behind a `std::sync::Mutex`, never a `RefCell` —
+/// `RefCell` is not `Sync`, so it could not satisfy `OpenspecCli: Send +
+/// Sync` / `HerdrCli: Send + Sync`, and `live-refresh`/`agent-polling` both
+/// need a fake usable from a worker thread.
+#[cfg(test)]
+pub(crate) struct FakeCli {
+    state: std::sync::Mutex<FakeCliState>,
+}
+
+#[cfg(test)]
+type FakeCliKey = (Program, Vec<String>);
+
+#[cfg(test)]
+type FakeCliResponses =
+    std::collections::HashMap<FakeCliKey, std::collections::VecDeque<Result<String, CliError>>>;
+
+#[cfg(test)]
+#[derive(Default)]
+struct FakeCliState {
+    responses: FakeCliResponses,
+    calls: Vec<FakeCliKey>,
+}
+
+#[cfg(test)]
+impl FakeCli {
+    pub(crate) fn new() -> Self {
+        Self {
+            state: std::sync::Mutex::new(FakeCliState::default()),
+        }
+    }
+
+    fn register(&self, program: Program, args: &[&str], response: Result<String, CliError>) {
+        let key = (program, args.iter().map(|a| a.to_string()).collect());
+        let mut state = self.state.lock().expect("fake cli mutex poisoned");
+        state.responses.entry(key).or_default().push_back(response);
+    }
+
+    /// Register a response for `args` on the `OpenspecCli` side.
+    pub(crate) fn register_openspec(&self, args: &[&str], response: Result<String, CliError>) {
+        self.register(Program::Openspec, args, response);
+    }
+
+    /// Register a response for `args` on the `HerdrCli` side.
+    pub(crate) fn register_herdr(&self, args: &[&str], response: Result<String, CliError>) {
+        self.register(Program::Herdr, args, response);
+    }
+
+    /// The pairs recorded so far, in call order.
+    pub(crate) fn calls(&self) -> Vec<(Program, Vec<String>)> {
+        self.state.lock().expect("fake cli mutex poisoned").calls.clone()
+    }
+
+    fn respond(&self, program: Program, args: &[&str]) -> Result<String, CliError> {
+        let key: (Program, Vec<String>) = (program, args.iter().map(|a| a.to_string()).collect());
+        let mut state = self.state.lock().expect("fake cli mutex poisoned");
+        state.calls.push(key.clone());
+        let Some(queue) = state.responses.get_mut(&key) else {
+            drop(state);
+            panic!(
+                "FakeCli: no response registered for {} call with arguments {:?}",
+                program.label(),
+                key.1
+            );
+        };
+        // The last registered response repeats: pop while more than one
+        // remains queued, otherwise clone the sole remaining one in place.
+        if queue.len() > 1 {
+            queue.pop_front().expect("checked non-empty above")
+        } else {
+            queue.front().expect("checked non-empty above").clone()
+        }
+    }
+}
+
+#[cfg(test)]
+impl OpenspecCli for FakeCli {
+    fn run(&self, args: &[&str]) -> Result<String, CliError> {
+        self.respond(Program::Openspec, args)
+    }
+}
+
+#[cfg(test)]
+impl HerdrCli for FakeCli {
+    fn run(&self, args: &[&str]) -> Result<String, CliError> {
+        self.respond(Program::Herdr, args)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::testutil::{ScratchDir, write_with_mode};
@@ -397,5 +525,173 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
         assert_eq!(received, Some(Ok(String::new())));
+    }
+
+    // --- group 4: the recording fake -----------------------------------------
+
+    #[test]
+    fn invocations_are_recorded_in_call_order() {
+        let fake = super::FakeCli::new();
+        fake.register_openspec(&["list", "--json"], Ok("a".to_string()));
+        fake.register_openspec(&["status", "--json"], Ok("b".to_string()));
+
+        let _ = super::OpenspecCli::run(&fake, &["status", "--json"]);
+        let _ = super::OpenspecCli::run(&fake, &["list", "--json"]);
+        let _ = super::OpenspecCli::run(&fake, &["status", "--json"]);
+
+        assert_eq!(
+            fake.calls(),
+            vec![
+                (super::Program::Openspec, vec!["status".to_string(), "--json".to_string()]),
+                (super::Program::Openspec, vec!["list".to_string(), "--json".to_string()]),
+                (super::Program::Openspec, vec!["status".to_string(), "--json".to_string()]),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_response_is_matched_by_the_exact_argument_vector() {
+        let fake = super::FakeCli::new();
+        fake.register_openspec(&["list", "--json"], Ok("A".to_string()));
+        fake.register_openspec(&["list"], Ok("B".to_string()));
+
+        let result = super::OpenspecCli::run(&fake, &["list", "--json"]);
+        assert_eq!(result, Ok("A".to_string()));
+    }
+
+    /// Extract a panic's `String` or `&str` payload as an owned `String`.
+    /// Shared by both panic-inspecting tests below, so the naming assertion
+    /// need not be duplicated verbatim.
+    fn panic_message(err: &(dyn std::any::Any + Send)) -> String {
+        err.downcast_ref::<String>()
+            .cloned()
+            .or_else(|| err.downcast_ref::<&str>().map(|s| s.to_string()))
+            .expect("panic payload should be a string")
+    }
+
+    #[test]
+    fn an_openspec_call_is_not_answered_from_a_herdr_registration() {
+        let fake = super::FakeCli::new();
+        fake.register_openspec(&["list", "--json"], Ok("openspec answer".to_string()));
+
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            super::HerdrCli::run(&fake, &["list", "--json"])
+        }));
+        let err = result.expect_err("should have panicked rather than answering from the openspec registration");
+        let message = panic_message(err.as_ref());
+        assert!(message.contains("list"), "message: {message}");
+        assert!(
+            message.to_lowercase().contains("herdr"),
+            "message should name the HerdrCli program: {message}"
+        );
+    }
+
+    #[test]
+    fn each_handle_gets_its_own_registration() {
+        let fake = super::FakeCli::new();
+        fake.register_openspec(&["same"], Ok("openspec side".to_string()));
+        fake.register_herdr(&["same"], Ok("herdr side".to_string()));
+
+        assert_eq!(
+            super::OpenspecCli::run(&fake, &["same"]),
+            Ok("openspec side".to_string())
+        );
+        assert_eq!(
+            super::HerdrCli::run(&fake, &["same"]),
+            Ok("herdr side".to_string())
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "lst")]
+    fn an_unregistered_invocation_panics_naming_the_program_and_the_vector() {
+        let fake = super::FakeCli::new();
+        fake.register_openspec(&["list", "--json"], Ok("a".to_string()));
+        let _ = super::OpenspecCli::run(&fake, &["lst", "--json"]);
+    }
+
+    #[test]
+    fn an_unregistered_invocation_panic_message_names_the_program() {
+        let fake = super::FakeCli::new();
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            super::OpenspecCli::run(&fake, &["lst"])
+        }));
+        let err = result.expect_err("should have panicked");
+        let message = panic_message(err.as_ref());
+        assert!(message.contains("lst"), "message: {message}");
+        assert!(
+            message.to_lowercase().contains("openspec"),
+            "message should name the program addressed: {message}"
+        );
+    }
+
+    #[test]
+    fn queued_responses_are_returned_in_order_and_the_last_one_repeats() {
+        let fake = super::FakeCli::new();
+        fake.register_openspec(&["poll"], Ok("first".to_string()));
+        fake.register_openspec(&["poll"], Ok("second".to_string()));
+
+        let results: Vec<_> = (0..4)
+            .map(|_| super::OpenspecCli::run(&fake, &["poll"]))
+            .collect();
+        assert_eq!(
+            results,
+            vec![
+                Ok("first".to_string()),
+                Ok("second".to_string()),
+                Ok("second".to_string()),
+                Ok("second".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_failure_can_be_registered() {
+        let fake = super::FakeCli::new();
+        let err = super::CliError::Failed {
+            program: "openspec".to_string(),
+            args: vec!["list".to_string()],
+            code: Some(1),
+            stderr: "boom".to_string(),
+        };
+        fake.register_openspec(&["list"], Err(err.clone()));
+
+        let result = super::OpenspecCli::run(&fake, &["list"]);
+        assert_eq!(result, Err(err));
+    }
+
+    #[test]
+    fn the_fake_is_usable_from_another_thread() {
+        let fake = std::sync::Arc::new(super::FakeCli::new());
+        fake.register_openspec(&["a"], Ok("A".to_string()));
+        fake.register_openspec(&["b"], Ok("B".to_string()));
+
+        let inline = super::OpenspecCli::run(fake.as_ref(), &["a"]);
+        let f = fake.clone();
+        let handle = std::thread::spawn(move || super::OpenspecCli::run(f.as_ref(), &["b"]));
+        let threaded = handle.join().expect("thread panicked");
+
+        assert_eq!(inline, Ok("A".to_string()));
+        assert_eq!(threaded, Ok("B".to_string()));
+        assert_eq!(fake.calls().len(), 2);
+    }
+
+    #[test]
+    fn two_fakes_are_independent() {
+        let fake_a = super::FakeCli::new();
+        let fake_b = super::FakeCli::new();
+        fake_a.register_openspec(&["list"], Ok("A".to_string()));
+        fake_b.register_openspec(&["list"], Ok("B".to_string()));
+
+        assert_eq!(
+            super::OpenspecCli::run(&fake_a, &["list"]),
+            Ok("A".to_string())
+        );
+        assert_eq!(
+            super::OpenspecCli::run(&fake_b, &["list"]),
+            Ok("B".to_string())
+        );
+        assert_eq!(fake_a.calls().len(), 1);
+        assert_eq!(fake_b.calls().len(), 1);
     }
 }
