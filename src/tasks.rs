@@ -421,4 +421,384 @@ mod tests {
             }
         );
     }
+
+    // Group 3: headings, groups, and items. `assert_eq!` compares whole
+    // `Tasks` values wherever the expected value is small enough to write
+    // out, per tasks.md 3.1, so an extra fabricated group cannot slip
+    // through unnoticed.
+
+    fn item(checked: bool, text: &str, indent: usize) -> super::Item {
+        super::Item {
+            checked,
+            text: text.to_string(),
+            indent,
+        }
+    }
+
+    fn heading(level: u8, text: &str) -> super::Heading {
+        super::Heading {
+            level,
+            text: text.to_string(),
+        }
+    }
+
+    #[test]
+    fn two_headings_yield_two_groups_holding_their_own_items() {
+        let text = "## 1. First\n- [x] a\n- [ ] b\n## 2. Second\n- [ ] c";
+        let tasks = super::parse(text);
+        assert_eq!(
+            tasks,
+            super::Tasks {
+                groups: vec![
+                    super::Group {
+                        heading: Some(heading(2, "1. First")),
+                        items: vec![item(true, "a", 0), item(false, "b", 0)],
+                    },
+                    super::Group {
+                        heading: Some(heading(2, "2. Second")),
+                        items: vec![item(false, "c", 0)],
+                    },
+                ],
+                problems: vec![],
+            }
+        );
+        assert_eq!(
+            tasks.groups[0].progress(),
+            super::Progress {
+                completed: 1,
+                total: 2
+            }
+        );
+        assert_eq!(
+            tasks.groups[1].progress(),
+            super::Progress {
+                completed: 0,
+                total: 1
+            }
+        );
+    }
+
+    #[test]
+    fn items_before_the_first_heading_form_an_unnamed_leading_group() {
+        let text = "- [x] loose\n## Group\n- [ ] inside";
+        let tasks = super::parse(text);
+        assert_eq!(
+            tasks,
+            super::Tasks {
+                groups: vec![
+                    super::Group {
+                        heading: None,
+                        items: vec![item(true, "loose", 0)],
+                    },
+                    super::Group {
+                        heading: Some(heading(2, "Group")),
+                        items: vec![item(false, "inside", 0)],
+                    },
+                ],
+                problems: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn a_file_opening_with_a_heading_has_no_empty_leading_group() {
+        let text = "# Implementation Tasks\n\n## 1. Group\n- [ ] a";
+        let tasks = super::parse(text);
+        assert_eq!(tasks.groups.len(), 2);
+        assert!(tasks.groups.iter().all(|g| g.heading.is_some()));
+        assert_eq!(
+            tasks,
+            super::Tasks {
+                groups: vec![
+                    super::Group {
+                        heading: Some(heading(1, "Implementation Tasks")),
+                        items: vec![],
+                    },
+                    super::Group {
+                        heading: Some(heading(2, "1. Group")),
+                        items: vec![item(false, "a", 0)],
+                    },
+                ],
+                problems: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn a_closing_hash_sequence_is_kept_not_stripped() {
+        let text = "## Group ##\n- [ ] a";
+        let tasks = super::parse(text);
+        assert_eq!(tasks.groups.len(), 1);
+        assert_eq!(tasks.groups[0].heading, Some(heading(2, "Group ##")));
+    }
+
+    #[test]
+    fn indented_over_long_and_unspaced_hashes_are_not_headings() {
+        let text = "   ## Indented\n- [ ] a\n####### Seven\n- [ ] a\n#NoSpace\n- [ ] a";
+        let tasks = super::parse(text);
+        assert_eq!(tasks.groups.len(), 1);
+        assert_eq!(tasks.groups[0].heading, None);
+        assert_eq!(tasks.groups[0].items.len(), 3);
+        assert_eq!(
+            tasks.progress(),
+            super::Progress {
+                completed: 0,
+                total: 3
+            }
+        );
+    }
+
+    #[test]
+    fn a_deeper_heading_closes_the_group_above_rather_than_nesting() {
+        let text = "## Outer\n- [ ] a\n### Inner\n- [ ] b";
+        let tasks = super::parse(text);
+        assert_eq!(
+            tasks,
+            super::Tasks {
+                groups: vec![
+                    super::Group {
+                        heading: Some(heading(2, "Outer")),
+                        items: vec![item(false, "a", 0)],
+                    },
+                    super::Group {
+                        heading: Some(heading(3, "Inner")),
+                        items: vec![item(false, "b", 0)],
+                    },
+                ],
+                problems: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn repeated_and_empty_headings_are_all_kept() {
+        let text = "## Same\n- [ ] a\n## Same\n- [ ] b\n##\n## Last";
+        let tasks = super::parse(text);
+        assert_eq!(tasks.groups.len(), 4);
+        let heading_texts: Vec<&str> = tasks
+            .groups
+            .iter()
+            .map(|g| g.heading.as_ref().unwrap().text.as_str())
+            .collect();
+        assert_eq!(heading_texts, vec!["Same", "Same", "", "Last"]);
+        assert!(tasks.groups[2].items.is_empty());
+        assert!(tasks.groups[3].items.is_empty());
+    }
+
+    #[test]
+    fn prose_between_items_is_dropped_and_does_not_split_a_group() {
+        let text = "## G\n- [ ] a\n\nSome explanatory prose.\n- [ ] b";
+        let tasks = super::parse(text);
+        assert_eq!(
+            tasks,
+            super::Tasks {
+                groups: vec![super::Group {
+                    heading: Some(heading(2, "G")),
+                    items: vec![item(false, "a", 0), item(false, "b", 0)],
+                }],
+                problems: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn a_nested_sub_task_is_a_sibling_item_carrying_its_indent() {
+        let text = "## G\n- [x] parent\n  - [ ] child\n\t- [ ] tabbed";
+        let tasks = super::parse(text);
+        assert_eq!(
+            tasks,
+            super::Tasks {
+                groups: vec![super::Group {
+                    heading: Some(heading(2, "G")),
+                    items: vec![
+                        item(true, "parent", 0),
+                        item(false, "child", 2),
+                        item(false, "tabbed", 1),
+                    ],
+                }],
+                problems: vec![],
+            }
+        );
+        assert_eq!(
+            tasks.groups[0].progress(),
+            super::Progress {
+                completed: 1,
+                total: 3
+            }
+        );
+    }
+
+    #[test]
+    fn indent_does_not_affect_membership_of_the_preceding_group() {
+        let text = "## G\n        - [ ] deeply indented\n## H";
+        let tasks = super::parse(text);
+        assert_eq!(
+            tasks,
+            super::Tasks {
+                groups: vec![
+                    super::Group {
+                        heading: Some(heading(2, "G")),
+                        items: vec![item(false, "deeply indented", 8)],
+                    },
+                    super::Group {
+                        heading: Some(heading(2, "H")),
+                        items: vec![],
+                    },
+                ],
+                problems: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn a_checked_items_state_survives_grouping() {
+        let text = "## Group\n- [X] done\n- [ ] todo";
+        let tasks = super::parse(text);
+        assert_eq!(
+            tasks,
+            super::Tasks {
+                groups: vec![super::Group {
+                    heading: Some(heading(2, "Group")),
+                    items: vec![item(true, "done", 0), item(false, "todo", 0)],
+                }],
+                problems: vec![],
+            }
+        );
+        assert_eq!(
+            tasks.groups[0].progress(),
+            super::Progress {
+                completed: 1,
+                total: 2
+            }
+        );
+    }
+
+    #[test]
+    fn a_crlf_document_parses_the_same_as_its_lf_twin() {
+        let crlf = "## G\r\n- [x] a\r\n- [ ] b\r\n";
+        let lf = "## G\n- [x] a\n- [ ] b\n";
+        let from_crlf = super::parse(crlf);
+        let from_lf = super::parse(lf);
+        assert_eq!(from_crlf, from_lf);
+        assert_eq!(
+            from_lf,
+            super::Tasks {
+                groups: vec![super::Group {
+                    heading: Some(heading(2, "G")),
+                    items: vec![item(true, "a", 0), item(false, "b", 0)],
+                }],
+                problems: vec![],
+            }
+        );
+        assert_eq!(
+            from_crlf.progress(),
+            super::Progress {
+                completed: 1,
+                total: 2
+            }
+        );
+        assert!(
+            !from_crlf.groups[0]
+                .heading
+                .as_ref()
+                .unwrap()
+                .text
+                .contains('\r')
+        );
+        for group in &from_crlf.groups {
+            for item in &group.items {
+                assert!(!item.text.contains('\r'));
+            }
+        }
+    }
+
+    #[test]
+    fn an_empty_document_parses_to_no_tasks_and_no_problems() {
+        let tasks = super::parse("");
+        assert_eq!(
+            tasks,
+            super::Tasks {
+                groups: vec![],
+                problems: vec![],
+            }
+        );
+
+        let prose_only =
+            super::parse("\n\n   \nSome prose that mentions nothing checkbox-shaped.\n\n");
+        assert_eq!(
+            prose_only,
+            super::Tasks {
+                groups: vec![],
+                problems: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn the_four_canonical_shapes_are_task_lines_parse_half() {
+        let text = "- [ ] a\n- [x] b\n* [ ] c\n* [x] d";
+        let tasks = super::parse(text);
+        assert_eq!(
+            tasks,
+            super::Tasks {
+                groups: vec![super::Group {
+                    heading: None,
+                    items: vec![
+                        item(false, "a", 0),
+                        item(true, "b", 0),
+                        item(false, "c", 0),
+                        item(true, "d", 0),
+                    ],
+                }],
+                problems: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn whitespace_around_the_bullet_and_the_box_is_optional_parse_half() {
+        let text = "-[x]done\n   *   [ ]   todo   ";
+        let tasks = super::parse(text);
+        assert_eq!(
+            tasks,
+            super::Tasks {
+                groups: vec![super::Group {
+                    heading: None,
+                    items: vec![item(true, "done", 0), item(false, "todo", 3)],
+                }],
+                problems: vec![],
+            }
+        );
+    }
+
+    #[test]
+    fn a_space_a_tab_and_a_non_breaking_space_are_all_empty_boxes_parse_half() {
+        let text = "- [\u{20}] space\n- [\u{9}] tab\n- [\u{a0}] nbsp";
+        let tasks = super::parse(text);
+        assert_eq!(tasks.groups.len(), 1);
+        assert_eq!(tasks.groups[0].items.len(), 3);
+        for parsed_item in &tasks.groups[0].items {
+            assert!(!parsed_item.checked);
+        }
+    }
+
+    #[test]
+    fn a_numbering_prefix_and_inline_markup_are_kept_verbatim_in_the_text() {
+        let text = "- [x] 3.11 Run the group tests — `cargo test` green\n\
+                     - [ ] 10.5a **VERIFY:** coverage";
+        let tasks = super::parse(text);
+        assert_eq!(
+            tasks,
+            super::Tasks {
+                groups: vec![super::Group {
+                    heading: None,
+                    items: vec![
+                        item(true, "3.11 Run the group tests — `cargo test` green", 0),
+                        item(false, "10.5a **VERIFY:** coverage", 0),
+                    ],
+                }],
+                problems: vec![],
+            }
+        );
+    }
 }
