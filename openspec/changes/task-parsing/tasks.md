@@ -619,7 +619,7 @@ change the `quality-gates` capability and is deliberately not this change's work
 ## 9. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 9.1 CHECK: Inspect the intended verification commands and affected tiers — the unit
+- [x] 9.1 CHECK: Inspect the intended verification commands and affected tiers — the unit
       tier (`cargo test --all-features tasks::` for one group at a time, plus the whole
       suite for regressions; a cargo test-name filter matching nothing exits 0, so the
       filtered form is a convenience and 9.4 is the gate), the four command checks in group
@@ -630,21 +630,24 @@ change the `quality-gates` capability and is deliberately not this change's work
       residue: `git diff "$BASE"..HEAD -- src/lib.rs src/main.rs` shows one `pub mod tasks;`
       line and nothing else. Logic in either file is what coverage cannot reach, which is
       the reason the crate keeps them thin
-- [ ] 9.2 VERIFY: `cargo fmt --all -- --check` — clean
-- [ ] 9.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
+- [x] 9.2 VERIFY: `cargo fmt --all -- --check` — clean
+- [x] 9.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
       Probe with `cargo clippy --version`, not `command -v cargo-clippy`: rustup installs
       that shim unconditionally, so the shim resolves even when the component is absent
-- [ ] 9.4 VERIFY: `cargo test --all-features` — green, including the unchanged `config`,
+- [x] 9.4 VERIFY: `cargo test --all-features` — green, including the unchanged `config`,
       `resolve`, `schema`, and `state` unit tests and the `tests/cli.rs` and
       `tests/ci_workflow.rs` integration tests, none of which this change touches. Rust has
       no separate type-check step; `cargo test` and `cargo clippy` cover it
-- [ ] 9.5 VERIFY: `cargo llvm-cov --fail-under-lines 80` — at or above the floor, and record
+- [x] 9.5 VERIFY: `cargo llvm-cov --fail-under-lines 80` — at or above the floor, and record
       the resulting percentage against the pre-change baseline. If it falls short, add
       tests; never lower the threshold, never add an exclusion flag, and never mark a
-      function `#[cfg(not(test))]` to hide it from the count
-- [ ] 9.6 VERIFY: `make check` — the single composite gate, exit 0. If it fails, name the
+      function `#[cfg(not(test))]` to hide it from the count.
+      **Recorded:** 98.37% total line coverage (3433 lines, 56 missed), up from the
+      pre-change baseline of 98.03% over 2793 lines. `tasks.rs` itself is 99.84% (640
+      lines, 1 missed)
+- [x] 9.6 VERIFY: `make check` — the single composite gate, exit 0. If it fails, name the
       failing sub-command rather than reporting a summary
-- [ ] 9.7 VERIFY: `openspec validate task-parsing --strict` reports the change valid, with
+- [x] 9.7 VERIFY: `openspec validate task-parsing --strict` reports the change valid, with
       nvm ahead on `PATH`, since `openspec` is not on the `PATH` a non-login shell inherits
       here. Resolve the version rather than hardcoding it, so an nvm upgrade does not
       silently make this task unrunnable — for example
