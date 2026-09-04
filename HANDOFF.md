@@ -1,18 +1,19 @@
 # Handoff
 
-**Written:** 2026-09-04 ~13:15 EEST · **Branch:** `main` · **Remote:** `optioni/herdr-openspec`
+**Written:** 2026-09-05 ~02:20 EEST · **Branch:** `main` · **Remote:** `optioni/herdr-openspec`
 
 ## Where things stand
 
-**Phases 1–3 are complete.** Nine changes implemented, archived, and pushed. `main` is
-green: `make check` exits 0 at **98.93% line coverage over 7635 lines**.
+**Phases 1–3 complete; Phase 4 is two changes in.** Eleven changes implemented and
+archived. `main` is green: `make check` exits 0 at **98.14% line coverage over 18,087
+lines**, 532 tests. **28 commits ahead of `origin/main` — unpushed, by instruction.**
 
 | Phase | Changes | State |
 |---|---|---|
 | 1 — Foundation | `repo-foundation`, `ci-pipeline`, `plugin-config` | **Done** |
 | 2 — Reading from disk | `repo-resolution`, `schema-model`, `task-parsing`, `changes-from-files` | **Done** |
 | 3 — Subprocess seam | `subprocess-seam`, `changes-from-cli` | **Done** |
-| 4 — The dashboard | `tui-shell`, `list-view`, `markdown-viewer`, `detail-view`, `tasks-tab`, `live-refresh` | Next |
+| 4 — The dashboard | `tui-shell` ✓, `list-view` ✓, `markdown-viewer`, `detail-view`, `tasks-tab`, `live-refresh` | **In progress** |
 | 5–6 | — | Untouched |
 
 Nineteen capabilities live under `openspec/specs/`. Modules: `lib.rs`, `main.rs`,
@@ -25,9 +26,24 @@ CLI consumer was added. The `Change` conformance gate survived a second producer
 
 ## Next action
 
-Dispatch the phase orchestrator on **Phase 4 — The dashboard**: `tui-shell`,
-`list-view` and `markdown-viewer` (siblings, nothing connects them until
-`detail-view`), `detail-view`, `tasks-tab`, `live-refresh`.
+Continue Phase 4 at **`markdown-viewer`**, then `detail-view`, `tasks-tab`,
+`live-refresh` — full ff → apply → archive loop each. `markdown-viewer` and
+`list-view` were siblings; `list-view` went first, so nothing blocks `markdown-viewer`.
+
+**Paused here only because the 5-hour session window was at 76%**, below the ~50%-
+remaining floor for starting an ff. Nothing is uncommitted and nothing is half-done —
+both completed changes are archived.
+
+### The weekly budget is no longer the constraint
+
+The 7-day rolling window turned over mid-phase: weekly went **71% → 2% used** between
+`tui-shell`'s ff and its apply, and stands at **8%** now. The prediction in the section
+below — that Phase 4's last one or two changes would slip past the weekly reset — is
+**stale and should not be planned against**. The binding constraint is now just the
+recurring 5-hour session window.
+
+Measured this phase: `tui-shell` ff 31 session points, `list-view` ff ~23, each apply
+~16–19, archive ~2–3. Weekly cost is running ~3 points per change.
 
 Phase 4 introduces the render seam. Views must be **pure functions from state to a
 ratatui frame with no I/O**, tested by rendering into a `TestBackend` buffer at **both
