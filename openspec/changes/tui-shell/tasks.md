@@ -877,7 +877,7 @@ needs, in the extracted copy rather than in the archive.
 ## 5. `ui::terminal` — the terminal seam
 <!-- kind: behavior -->
 
-- [ ] 5.1 RED: Create `src/ui/terminal.rs` with `mod tests { mod guard { … } }`, including a
+- [x] 5.1 RED: Create `src/ui/terminal.rs` with `mod tests { mod guard { … } }`, including a
       `Recorder` double that appends each call's name to a `RefCell<Vec<&'static str>>` and
       can be configured to fail any subset of the four operations. Write eight failing tests
       for terminal-lifecycle's scenarios:
@@ -904,18 +904,32 @@ needs, in the extracted copy rather than in the archive.
       **Red when:** `TerminalOps`, `TerminalGuard`, `TerminalError`, and `restore_then` do
       not exist. The `Recorder` must be written first and must compile against the trait,
       so confirm the failure is the missing production types and not the double.
+      **Recorded:** `error[E0432]: unresolved imports … no restore_then in ui::terminal`
+      (and `TerminalError`, `TerminalGuard`, `TerminalOps`) — the `Recorder` double itself
+      compiled cleanly against the trait signatures named in its `impl TerminalOps for
+      Recorder` block; only the production types were missing.
 
-- [ ] 5.2 GREEN: Implement `TerminalError`, `TerminalOps`, `TerminalGuard` (with `Drop`),
+- [x] 5.2 GREEN: Implement `TerminalError`, `TerminalOps`, `TerminalGuard` (with `Drop`),
       `restore_then`, `install_panic_hook`, and `CrosstermOps`. `CrosstermOps`'s four
       methods each call exactly one `ratatui::crossterm` function and map its error; no
       branch, no ordering, no state. `install_panic_hook` captures
       `std::panic::take_hook()` and installs a hook whose body is
       `restore_then(&CrosstermOps, &mut || previous(info))`.
+      **Recorded:** all 8 tests green after also adding a minimal `Debug` impl for
+      `TerminalGuard` (needed by `Result::expect_err` in two tests; `#[derive(Debug)]`
+      does not apply since the struct holds a `&dyn TerminalOps` trait object).
+      `CrosstermOps::enter_alternate`/`leave_alternate` use
+      `ratatui::crossterm::execute!(stdout(), EnterAlternateScreen)` /
+      `LeaveAlternateScreen`; `enable_raw`/`disable_raw` call the corresponding bare
+      functions. All four map their error into `TerminalError` with the operation's name.
 
-- [ ] 5.3 REFACTOR: If `Drop` and `restore_then` duplicate the leave-then-disable sequence,
+- [x] 5.3 REFACTOR: If `Drop` and `restore_then` duplicate the leave-then-disable sequence,
       have `Drop` call `restore_then` with a no-op continuation, keeping tests green.
+      **Recorded:** implemented this way from the start of 5.2 rather than as a later
+      extraction (`Drop::drop` is `restore_then(self.ops, &mut || {})`) — no separate
+      refactor step was needed. All 8 tests green throughout.
 
-- [ ] 5.4 VERIFY: `testcount --lib 'ui::terminal::tests::' 8`. Then run `NORAW-GREP`. It
+- [x] 5.4 VERIFY: `testcount --lib 'ui::terminal::tests::' 8`. Then run `NORAW-GREP`. It
       **still fails at this point**, and on its *file-count* guard rather than on anything
       about raw mode: at the end of this group `src/` holds 14 `.rs` files and `tests/` holds
       2, so the searched set is 15 and the guard reads
@@ -923,6 +937,15 @@ needs, in the extracted copy rather than in the archive.
       `ui/event.rs` do not exist until group 6. Record that exact message and re-run the
       check in full at task 9.4, where the count is 17 and the `CrosstermOps` leg reports 2
       sites. **Do not weaken the threshold**: the guard is doing its job. `make check`. Commit.
+      **Recorded:** `TESTCOUNT OK: --lib filter 'ui::terminal::tests::' ran 8 tests (>= 8)`.
+      `NORAW-GREP` → `NORAW FAIL: searched only 15 files (expected >= 16)` — exactly the
+      predicted message; threshold left unweakened. Per the 1.1 correction: `fmt-check`
+      clean; `clippy -D warnings` clean; full suite — 431 lib (423 + 8) + 11 `ci_workflow` +
+      5-of-6 `cli` (the one known RED, unchanged); `cargo llvm-cov --ignore-run-fail
+      --fail-under-lines 80` → **98.53%** over 8,424 lines, 124 uncovered
+      (`src/ui/terminal.rs` at 78.79% — `CrosstermOps` and `install_panic_hook` are the
+      named, argued-uncoverable residue from design.md → Test Strategy), floor holds well
+      clear of 80.
 
 ---
 
