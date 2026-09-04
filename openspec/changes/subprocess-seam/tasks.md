@@ -45,7 +45,7 @@
 ## 1. Baselines and module scaffold
 <!-- kind: operational -->
 
-- [ ] 1.1 CHECK: Record the starting state, so any later failure belongs to this change.
+- [x] 1.1 CHECK: Record the starting state, so any later failure belongs to this change.
       Capture and write into this task's notes: (a) `BASE=$(git rev-parse HEAD)` — the
       base SHA every later diff check compares against, because this project commits per
       task group and a `git diff --exit-code` between working tree and index would pass
@@ -59,25 +59,42 @@
       `python3 -O` or an inherited `PYTHONOPTIMIZE` strips `assert` and the check exits 0
       for any dependency list. **Red when:** `make check` fails, the tree is dirty, or the
       normal dependency set is anything but `["toml", "yaml-rust2"]`
-- [ ] 1.2 CHECK: Confirm the hand-over signal is where `repo-resolution` left it —
+
+      RECORDED: `BASE=b2e85f179b13f7b43ad2165882d2bab29375e119`. `make check` green:
+      98.66% line coverage over 4924 lines (matches planning-time baseline exactly),
+      266 unit + 11 ci_workflow + 5 cli tests. `git status --short` empty before this
+      change's first edit. `DEPS` check: `DEPS OK` (normal = `["toml", "yaml-rust2"]`,
+      dev = `[]`, build = `[]`).
+- [x] 1.2 CHECK: Confirm the hand-over signal is where `repo-resolution` left it —
       `src/resolve.rs` contains `pub fn npm_prefix_deferred() -> Option<PathBuf> { None }`
       and the test `the_shipped_hook_yields_no_prefix` asserting it returns `None`, and
       `cargo test --all-features resolve::tests::the_shipped_hook_yields_no_prefix` is
       currently **green**. **Red when:** either is missing, or the test already fails —
       in which case stop and investigate before touching anything, because the signal
       this change is supposed to trip has already been tripped by something else
-- [ ] 1.3 CHECK: Confirm `NOSPAWN-GREP` (design.md → Test Strategy) fails on the tree as
+
+      RECORDED: both present (`src/resolve.rs:316-318`, `src/resolve.rs:1210`), and
+      `cargo test --all-features resolve::tests::the_shipped_hook_yields_no_prefix` ->
+      "1 passed, 281 filtered out". Signal untripped, as expected.
+- [x] 1.3 CHECK: Confirm `NOSPAWN-GREP` (design.md → Test Strategy) fails on the tree as
       it stands, with guard A naming the missing `src/cli.rs`. This is the check's first
       demonstrated red and it is demonstrated **before** the check is relied on.
       **Red when:** it exits 0 today, which would mean the guard is not guarding
-- [ ] 1.4 CHANGE: Add an empty `src/cli.rs` and declare `pub mod cli;` in `src/lib.rs`,
+
+      RECORDED: ran guard A alone against the tree before `src/cli.rs` existed ->
+      "NOSPAWN FAIL: src/cli.rs missing - the exclusion has nothing to exclude", exit 1.
+      Guard is guarding.
+- [x] 1.4 CHANGE: Add an empty `src/cli.rs` and declare `pub mod cli;` in `src/lib.rs`,
       leaving every other module untouched. Give `src/cli.rs` a module doc comment naming
       the seam, naming `SPEC.md` → Architecture as its source, and naming `tests/cli.rs`
       as the unrelated file with the colliding name (that one is the binary's
       command-line interface; this one is the subprocess seam)
-- [ ] 1.5 VERIFY: `cargo test --all-features` green and `cargo clippy --all-targets
+- [x] 1.5 VERIFY: `cargo test --all-features` green and `cargo clippy --all-targets
       --all-features -- -D warnings` clean with the empty module in place. **Red when:**
       the new module does not compile or trips a lint
+
+      RECORDED: both green with the empty module in place — no new test count change
+      expected here (module has no tests yet).
 
 ## 2. The error type, the one spawn helper, and the trait contract
 <!-- kind: behavior -->

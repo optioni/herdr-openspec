@@ -7,6 +7,7 @@
 //! Decisions ("Library plus thin `main`").
 
 pub mod changes;
+pub mod cli;
 pub mod config;
 pub mod resolve;
 pub mod schema;
