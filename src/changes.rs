@@ -972,10 +972,19 @@ pub(crate) fn join_artifacts(
 fn cli_error_problem(subject: &str, args: &[&str], err: &crate::cli::CliError) -> String {
     let vector = args.join(" ");
     match err {
-        crate::cli::CliError::NotStarted { program, .. } => {
+        crate::cli::CliError::NotStarted {
+            program,
+            args: _,
+            reason: _,
+        } => {
             format!("{subject}: openspec {vector} could not start {program}")
         }
-        crate::cli::CliError::Failed { code, .. } => {
+        crate::cli::CliError::Failed {
+            program: _,
+            args: _,
+            code,
+            stderr: _,
+        } => {
             let code = code
                 .map(|c| c.to_string())
                 .unwrap_or_else(|| "unknown".to_string());
@@ -1006,7 +1015,7 @@ fn resolve_cli_schema_uncached(
             schema: Some(parsed.schema),
             problems: parsed.problems,
         },
-        Err(crate::schema::LoadError::NotVendored { .. }) => {
+        Err(crate::schema::LoadError::NotVendored { path: _ }) => {
             let args = ["schema", "which", name, "--json"];
             match cli.run(&args) {
                 Ok(text) => match parse_schema_which(&text) {
@@ -1058,6 +1067,153 @@ fn resolve_cli_schema(
         .entry(name.to_string())
         .or_insert_with(|| resolve_cli_schema_uncached(cli, repo, name));
     (cached.schema.clone(), cached.problems.clone())
+}
+
+/// Every change the OpenSpec CLI reported, and every problem producing them.
+/// Carries no `archived` list: `openspec list --json` filters `archive` out
+/// of its own walk, so archived changes stay permanently file-sourced.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CliChanges {
+    pub active: Vec<Change>,
+    pub problems: Vec<String>,
+}
+
+/// Do `a` and `b` name the same directory? Canonicalizes both and compares
+/// the canonical forms when the filesystem can resolve both, falling back
+/// to comparing the paths as given otherwise — so a symbolic link in either
+/// path is not read as a disagreement. Used by the repository-root guard:
+/// `resolve::find_repo` walks up from the invocation context's workspace
+/// working directory, while the CLI resolves its own root by walking up
+/// from the **process** working directory, and `subprocess-seam` forbids
+/// the real implementation from setting `current_dir`.
+pub(crate) fn same_directory(a: &std::path::Path, b: &std::path::Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(ca), Ok(cb)) => ca == cb,
+        _ => a == b,
+    }
+}
+
+/// Build the CLI's view of the active changes: `openspec list --json`, the
+/// repository-root guard, then one `openspec instructions apply` call per
+/// change, schema resolution through [`resolve_cli_schema`], and artifact
+/// placement through [`cli_artifacts`]. Total — never a `Result`, never
+/// panics, never `unwrap`s on any input. See `cli-changes` for the full
+/// contract this function implements.
+pub fn from_cli(cli: &dyn crate::cli::OpenspecCli, repo: &std::path::Path) -> CliChanges {
+    let list_args = ["list", "--json"];
+    let list_text = match cli.run(&list_args) {
+        Ok(text) => text,
+        Err(err) => {
+            return CliChanges {
+                active: Vec::new(),
+                problems: vec![cli_error_problem("openspec list --json", &list_args, &err)],
+            };
+        }
+    };
+
+    let list_payload = match parse_list(&list_text) {
+        Ok(payload) => payload,
+        Err(reason) => {
+            return CliChanges {
+                active: Vec::new(),
+                problems: vec![format!(
+                    "openspec list --json payload is unusable: {reason}"
+                )],
+            };
+        }
+    };
+
+    let root_agrees = list_payload
+        .root
+        .as_ref()
+        .is_some_and(|root| same_directory(root, repo));
+    if !root_agrees {
+        let reported = list_payload
+            .root
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "<no root reported>".to_string());
+        return CliChanges {
+            active: Vec::new(),
+            problems: vec![format!(
+                "openspec list --json reported repository root {reported:?}, which disagrees with the resolved root {:?}",
+                repo.display().to_string()
+            )],
+        };
+    }
+
+    let mut problems = list_payload.problems;
+    let mut active = Vec::with_capacity(list_payload.changes.len());
+    let mut schema_cache: std::collections::HashMap<String, CachedCliSchema> =
+        std::collections::HashMap::new();
+
+    for entry in &list_payload.changes {
+        let apply_args = [
+            "instructions",
+            "apply",
+            "--change",
+            entry.name.as_str(),
+            "--json",
+        ];
+        let apply_text = match cli.run(&apply_args) {
+            Ok(text) => text,
+            Err(err) => {
+                problems.push(cli_error_problem(
+                    &format!("change {:?}", entry.name),
+                    &apply_args,
+                    &err,
+                ));
+                continue;
+            }
+        };
+
+        let apply = match parse_apply(&apply_text) {
+            Ok(payload) => payload,
+            Err(reason) => {
+                problems.push(format!(
+                    "the apply payload for change {:?} is unusable: {reason}",
+                    entry.name
+                ));
+                continue;
+            }
+        };
+
+        let dir_final = apply
+            .change_dir
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or_default();
+        if dir_final != entry.name {
+            problems.push(format!(
+                "the apply payload for change {:?} reports changeDir {:?}, whose final component is not the change's name",
+                entry.name, apply.change_dir
+            ));
+            continue;
+        }
+
+        let (schema, mut change_problems) =
+            resolve_cli_schema(cli, repo, &apply.schema_name, &mut schema_cache);
+
+        let (artifacts, artifact_problems) = match &schema {
+            Some(schema) => cli_artifacts(schema, &apply.context_files),
+            None => (Vec::new(), Vec::new()),
+        };
+        change_problems.extend(artifact_problems);
+
+        active.push(Change {
+            name: entry.name.clone(),
+            dir: apply.change_dir,
+            origin: Origin::Active,
+            schema: apply.schema_name,
+            artifacts,
+            progress: entry.progress,
+            problems: change_problems,
+        });
+    }
+
+    active.sort_by(|a, b| a.name.as_bytes().cmp(b.name.as_bytes()));
+
+    CliChanges { active, problems }
 }
 
 /// Paint the pane from disk: every active change under
@@ -3705,6 +3861,675 @@ mod tests {
                 .filter(|(_, args)| args.first().map(String::as_str) == Some("schema"))
                 .count();
             assert_eq!(schema_which_calls, 2);
+        }
+    }
+
+    // --- group 8: `from_cli` — the composition (`mod from_cli`) ------------
+
+    mod from_cli {
+        // The module and the function under test share a name; see `mod
+        // cli_artifacts` above for why the explicit import comes first.
+        use super::super::from_cli;
+        use super::*;
+        use crate::cli::{CliError, FakeCli};
+
+        fn list_json(root: &std::path::Path, entries: &[(&str, usize, usize)]) -> String {
+            let changes: Vec<String> = entries
+                .iter()
+                .copied()
+                .map(|(name, completed, total)| {
+                    format!(
+                        r#"{{"name":{name:?},"completedTasks":{completed},"totalTasks":{total},"lastModified":"x","status":"y"}}"#
+                    )
+                })
+                .collect();
+            format!(
+                r#"{{"changes":[{}],"root":{{"path":{:?},"source":"nearest"}}}}"#,
+                changes.join(","),
+                root.display().to_string()
+            )
+        }
+
+        fn apply_json(
+            schema_name: &str,
+            change_dir: &std::path::Path,
+            context_files: &[(&str, &[&str])],
+        ) -> String {
+            let entries: Vec<String> = context_files
+                .iter()
+                .copied()
+                .map(|(id, paths)| {
+                    let paths: Vec<String> = paths.iter().map(|p| format!("{p:?}")).collect();
+                    format!("{id:?}:[{}]", paths.join(","))
+                })
+                .collect();
+            format!(
+                r#"{{"schemaName":{schema_name:?},"changeDir":{:?},"contextFiles":{{{}}}}}"#,
+                change_dir.display().to_string(),
+                entries.join(",")
+            )
+        }
+
+        fn failed(args: &[&str]) -> CliError {
+            CliError::Failed {
+                program: "openspec".to_string(),
+                args: args.iter().map(|a| a.to_string()).collect(),
+                code: Some(1),
+                stderr: String::new(),
+            }
+        }
+
+        #[test]
+        fn a_two_change_repository_drives_exactly_three_invocations() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(list_json(&repo, &[("zulu", 0, 0), ("alpha", 1, 2)])),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "zulu", "--json"],
+                Ok(apply_json("tdd", &repo.join("openspec/changes/zulu"), &[])),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "alpha", "--json"],
+                Ok(apply_json("tdd", &repo.join("openspec/changes/alpha"), &[])),
+            );
+
+            let result = from_cli(&fake, &repo);
+            assert_eq!(result.active.len(), 2);
+            assert!(result.problems.is_empty());
+
+            assert_eq!(
+                fake.calls(),
+                vec![
+                    (
+                        crate::cli::Program::Openspec,
+                        vec!["list".to_string(), "--json".to_string()]
+                    ),
+                    (
+                        crate::cli::Program::Openspec,
+                        vec![
+                            "instructions".to_string(),
+                            "apply".to_string(),
+                            "--change".to_string(),
+                            "zulu".to_string(),
+                            "--json".to_string(),
+                        ]
+                    ),
+                    (
+                        crate::cli::Program::Openspec,
+                        vec![
+                            "instructions".to_string(),
+                            "apply".to_string(),
+                            "--change".to_string(),
+                            "alpha".to_string(),
+                            "--json".to_string(),
+                        ]
+                    ),
+                ]
+            );
+        }
+
+        #[test]
+        fn no_status_invocation_is_made_even_when_an_apply_call_fails() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            let fake = FakeCli::new();
+            fake.register_openspec(&["list", "--json"], Ok(list_json(&repo, &[("zulu", 0, 0)])));
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "zulu", "--json"],
+                Err(failed(&[
+                    "instructions",
+                    "apply",
+                    "--change",
+                    "zulu",
+                    "--json",
+                ])),
+            );
+            // No "status" registration at all — the fake would panic if
+            // `from_cli` reached for it.
+            let result = from_cli(&fake, &repo);
+            assert!(result.active.is_empty());
+            assert_eq!(result.problems.len(), 1);
+        }
+
+        #[test]
+        fn the_argument_vector_carries_no_sort_flag() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            let fake = FakeCli::new();
+            fake.register_openspec(&["list", "--json"], Ok(list_json(&repo, &[])));
+            let _ = from_cli(&fake, &repo);
+            let calls = fake.calls();
+            assert_eq!(calls[0].1, vec!["list".to_string(), "--json".to_string()]);
+        }
+
+        #[test]
+        fn progress_is_read_from_the_list_payload_pair() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(list_json(&repo, &[("alpha", 4, 9)])),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "alpha", "--json"],
+                Ok(format!(
+                    r#"{{"schemaName":"tdd","changeDir":{:?},"contextFiles":{{}},"progress":{{"total":0,"complete":0,"remaining":0}}}}"#,
+                    repo.join("openspec/changes/alpha").display().to_string()
+                )),
+            );
+            let result = from_cli(&fake, &repo);
+            let alpha = &result.active[0];
+            assert_eq!(
+                alpha.progress,
+                crate::tasks::Progress {
+                    completed: 4,
+                    total: 9
+                }
+            );
+        }
+
+        #[test]
+        fn the_most_recently_modified_default_order_is_replaced_by_byte_order() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(list_json(
+                    &repo,
+                    &[("zulu", 0, 0), ("mike", 0, 0), ("alpha", 0, 0)],
+                )),
+            );
+            for name in ["zulu", "mike", "alpha"] {
+                fake.register_openspec(
+                    &["instructions", "apply", "--change", name, "--json"],
+                    Ok(apply_json(
+                        "tdd",
+                        &repo.join(format!("openspec/changes/{name}")),
+                        &[],
+                    )),
+                );
+            }
+            let result = from_cli(&fake, &repo);
+            let names: Vec<&str> = result.active.iter().map(|c| c.name.as_str()).collect();
+            assert_eq!(names, vec!["alpha", "mike", "zulu"]);
+
+            let calls = fake.calls();
+            let apply_order: Vec<&str> = calls[1..]
+                .iter()
+                .map(|(_, args)| args[3].as_str())
+                .collect();
+            assert_eq!(apply_order, vec!["zulu", "mike", "alpha"]);
+        }
+
+        #[test]
+        fn case_and_digits_order_by_byte_not_by_locale() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(list_json(
+                    &repo,
+                    &[
+                        ("Beta", 0, 0),
+                        ("alpha", 0, 0),
+                        ("10-late", 0, 0),
+                        ("2-early", 0, 0),
+                    ],
+                )),
+            );
+            for name in ["Beta", "alpha", "10-late", "2-early"] {
+                fake.register_openspec(
+                    &["instructions", "apply", "--change", name, "--json"],
+                    Ok(apply_json(
+                        "tdd",
+                        &repo.join(format!("openspec/changes/{name}")),
+                        &[],
+                    )),
+                );
+            }
+            let result = from_cli(&fake, &repo);
+            let names: Vec<&str> = result.active.iter().map(|c| c.name.as_str()).collect();
+            assert_eq!(names, vec!["10-late", "2-early", "Beta", "alpha"]);
+        }
+
+        #[test]
+        fn a_change_dir_whose_final_component_is_not_the_change_name_is_rejected() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(list_json(&repo, &[("alpha", 0, 0)])),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "alpha", "--json"],
+                Ok(apply_json("tdd", &repo.join("openspec/changes/beta"), &[])),
+            );
+            let result = from_cli(&fake, &repo);
+            assert!(result.active.is_empty());
+            assert_eq!(result.problems.len(), 1);
+            assert!(result.problems[0].contains("alpha"));
+            assert!(result.problems[0].contains("beta"));
+        }
+
+        #[test]
+        fn every_produced_change_is_active_and_satisfies_the_shared_invariants() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(list_json(
+                    &repo,
+                    &[("alpha", 1, 2), ("mike", 0, 0), ("zulu", 3, 3)],
+                )),
+            );
+            for name in ["alpha", "mike", "zulu"] {
+                fake.register_openspec(
+                    &["instructions", "apply", "--change", name, "--json"],
+                    Ok(apply_json(
+                        "tdd",
+                        &repo.join(format!("openspec/changes/{name}")),
+                        &[],
+                    )),
+                );
+            }
+            let result = from_cli(&fake, &repo);
+            assert_eq!(result.active.len(), 3);
+            for change in &result.active {
+                assert_eq!(change.origin, Origin::Active);
+                assert_invariants(change);
+            }
+        }
+
+        #[test]
+        fn an_absent_openspec_binary_yields_an_empty_result_and_one_problem() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["list", "--json"],
+                Err(CliError::NotStarted {
+                    program: "openspec".to_string(),
+                    args: vec!["list".to_string(), "--json".to_string()],
+                    reason: "No such file or directory".to_string(),
+                }),
+            );
+            let result = from_cli(&fake, &repo);
+            assert!(result.active.is_empty());
+            assert_eq!(result.problems.len(), 1);
+            assert!(result.problems[0].contains("openspec"));
+            assert!(result.problems[0].contains("list"));
+        }
+
+        #[test]
+        fn a_non_zero_exit_from_list_yields_an_empty_result_and_one_problem() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            let fake = FakeCli::new();
+            fake.register_openspec(&["list", "--json"], Err(failed(&["list", "--json"])));
+            let result = from_cli(&fake, &repo);
+            assert!(result.active.is_empty());
+            assert_eq!(result.problems.len(), 1);
+            assert!(result.problems[0].contains('1'));
+        }
+
+        #[test]
+        fn a_schema_the_cli_rejects_removes_one_change_and_keeps_the_others() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(list_json(
+                    &repo,
+                    &[("alpha", 0, 0), ("mike", 0, 0), ("zulu", 0, 0)],
+                )),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "alpha", "--json"],
+                Ok(apply_json("tdd", &repo.join("openspec/changes/alpha"), &[])),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "mike", "--json"],
+                Ok(apply_json("tdd", &repo.join("openspec/changes/mike"), &[])),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "zulu", "--json"],
+                Err(failed(&[
+                    "instructions",
+                    "apply",
+                    "--change",
+                    "zulu",
+                    "--json",
+                ])),
+            );
+            let result = from_cli(&fake, &repo);
+            let names: Vec<&str> = result.active.iter().map(|c| c.name.as_str()).collect();
+            assert_eq!(names, vec!["alpha", "mike"]);
+            assert_eq!(result.problems.len(), 1);
+            assert!(result.problems[0].contains("zulu"));
+            assert!(result.problems[0].contains('1'));
+        }
+
+        #[test]
+        fn malformed_json_from_a_single_apply_call_is_contained_to_that_change() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(list_json(
+                    &repo,
+                    &[("alpha", 0, 0), ("mike", 0, 0), ("zulu", 0, 0)],
+                )),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "alpha", "--json"],
+                Ok(apply_json(
+                    "tdd",
+                    &repo.join("openspec/changes/alpha"),
+                    &[("proposal", &["/x/proposal.md"])],
+                )),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "mike", "--json"],
+                Ok("{ this is not json".to_string()),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "zulu", "--json"],
+                Ok(apply_json(
+                    "tdd",
+                    &repo.join("openspec/changes/zulu"),
+                    &[("proposal", &["/z/proposal.md"])],
+                )),
+            );
+            let result = from_cli(&fake, &repo);
+            let names: Vec<&str> = result.active.iter().map(|c| c.name.as_str()).collect();
+            assert_eq!(names, vec!["alpha", "zulu"]);
+            assert_eq!(result.problems.len(), 1);
+            assert!(result.problems[0].contains("mike"));
+            for change in &result.active {
+                assert_eq!(change.artifacts.len(), TDD_ARTIFACTS.len());
+            }
+        }
+
+        #[test]
+        fn an_apply_payload_missing_context_files_is_a_per_change_failure() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(list_json(&repo, &[("alpha", 0, 0)])),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "alpha", "--json"],
+                Ok(format!(
+                    r#"{{"schemaName":"tdd","changeDir":{:?}}}"#,
+                    repo.join("openspec/changes/alpha").display().to_string()
+                )),
+            );
+            let result = from_cli(&fake, &repo);
+            assert!(result.active.is_empty());
+            assert_eq!(result.problems.len(), 1);
+            assert!(result.problems[0].contains("alpha"));
+        }
+
+        #[test]
+        fn empty_stdout_from_list_is_a_parse_failure_not_an_empty_repository() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            let fake = FakeCli::new();
+            fake.register_openspec(&["list", "--json"], Ok(String::new()));
+            let result = from_cli(&fake, &repo);
+            assert!(result.active.is_empty());
+            assert_eq!(result.problems.len(), 1);
+
+            let fake2 = FakeCli::new();
+            fake2.register_openspec(&["list", "--json"], Ok(list_json(&repo, &[])));
+            let result2 = from_cli(&fake2, &repo);
+            assert!(result2.active.is_empty());
+            assert!(result2.problems.is_empty());
+        }
+
+        #[test]
+        fn a_bare_array_is_rejected_at_the_composition() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            let fake = FakeCli::new();
+            fake.register_openspec(&["list", "--json"], Ok("[]".to_string()));
+            let result = from_cli(&fake, &repo);
+            assert!(result.active.is_empty());
+            assert_eq!(result.problems.len(), 1);
+        }
+
+        #[test]
+        fn a_mismatched_root_discards_the_whole_cli_result() {
+            let scratch = ScratchDir::new();
+            let repo_a = canonical(scratch.path()).join("repo-a");
+            mkdir(&repo_a);
+            let repo_b = canonical(scratch.path()).join("repo-b");
+            mkdir(&repo_b);
+
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(list_json(&repo_b, &[("alpha", 0, 0), ("mike", 0, 0)])),
+            );
+            let result = from_cli(&fake, &repo_a);
+            assert!(result.active.is_empty());
+            assert_eq!(result.problems.len(), 1);
+            assert!(result.problems[0].contains(&repo_a.display().to_string()));
+            assert!(result.problems[0].contains(&repo_b.display().to_string()));
+            assert_eq!(fake.calls().len(), 1);
+        }
+
+        #[test]
+        fn a_symlinked_repository_root_is_not_a_disagreement() {
+            let scratch = ScratchDir::new();
+            let real_repo = canonical(scratch.path()).join("real");
+            mkdir(&real_repo);
+            vendor_schema(&real_repo, "tdd", TDD_ARTIFACTS);
+            let link = scratch.path().join("link");
+            symlink(&real_repo, &link);
+
+            let fake = FakeCli::new();
+            fake.register_openspec(&["list", "--json"], Ok(list_json(&real_repo, &[])));
+            let result = from_cli(&fake, &link);
+            assert!(result.problems.is_empty());
+        }
+
+        #[test]
+        fn an_envelope_with_no_root_is_treated_as_a_disagreement() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(r#"{"changes":[{"name":"alpha","completedTasks":0,"totalTasks":0,"lastModified":"x","status":"y"}]}"#.to_string()),
+            );
+            let result = from_cli(&fake, &repo);
+            assert!(result.active.is_empty());
+            assert_eq!(result.problems.len(), 1);
+            assert_eq!(fake.calls().len(), 1);
+        }
+
+        #[test]
+        fn an_omitted_context_files_key_is_an_empty_path_list_end_to_end() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(list_json(&repo, &[("alpha", 0, 0)])),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "alpha", "--json"],
+                Ok(apply_json(
+                    "tdd",
+                    &repo.join("openspec/changes/alpha"),
+                    &[
+                        ("proposal", &["/x/proposal.md"]),
+                        ("specs", &["/x/specs/a.md"]),
+                        ("tasks", &["/x/tasks.md"]),
+                    ],
+                )),
+            );
+            let result = from_cli(&fake, &repo);
+            let alpha = &result.active[0];
+            let ids: Vec<&str> = alpha.artifacts.iter().map(|a| a.id.as_str()).collect();
+            assert_eq!(
+                ids,
+                vec!["proposal", "specs", "design", "tasks", "planning-review"]
+            );
+            let design = alpha.artifacts.iter().find(|a| a.id == "design").unwrap();
+            assert!(design.paths.is_empty());
+        }
+
+        #[test]
+        fn a_multi_file_artifact_survives_the_composition() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(list_json(&repo, &[("alpha", 0, 0)])),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "alpha", "--json"],
+                Ok(apply_json(
+                    "tdd",
+                    &repo.join("openspec/changes/alpha"),
+                    &[(
+                        "specs",
+                        &["/x/specs/cap-one/spec.md", "/x/specs/cap-two/spec.md"],
+                    )],
+                )),
+            );
+            let result = from_cli(&fake, &repo);
+            let alpha = &result.active[0];
+            let specs = alpha.artifacts.iter().find(|a| a.id == "specs").unwrap();
+            assert_eq!(
+                specs.paths,
+                vec![
+                    PathBuf::from("/x/specs/cap-one/spec.md"),
+                    PathBuf::from("/x/specs/cap-two/spec.md"),
+                ]
+            );
+        }
+
+        #[test]
+        fn a_context_files_key_naming_no_schema_artifact_is_ignored_end_to_end() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(list_json(&repo, &[("alpha", 0, 0)])),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "alpha", "--json"],
+                Ok(apply_json(
+                    "tdd",
+                    &repo.join("openspec/changes/alpha"),
+                    &[("legacy", &["/x/legacy.md"])],
+                )),
+            );
+            let result = from_cli(&fake, &repo);
+            let alpha = &result.active[0];
+            assert!(!alpha.artifacts.iter().any(|a| a.id == "legacy"));
+            assert_eq!(alpha.problems.len(), 1);
+            assert!(alpha.problems[0].contains("legacy"));
+        }
+
+        #[test]
+        fn a_full_from_cli_run_leaves_the_tree_byte_identical() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+            let pkg_dir = repo.join("pkg/spec-driven");
+            write(
+                &pkg_dir.join("schema.yaml"),
+                "name: spec-driven\nartifacts:\n  - id: proposal\n    generates: proposal.md\n  - id: tasks\n    generates: tasks.md\n",
+            );
+
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(list_json(
+                    &repo,
+                    &[
+                        ("alpha", 1, 2),
+                        ("mike", 0, 0),
+                        ("zulu", 0, 0),
+                        ("nina", 0, 0),
+                    ],
+                )),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "alpha", "--json"],
+                Ok(apply_json("tdd", &repo.join("openspec/changes/alpha"), &[])),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "mike", "--json"],
+                Err(failed(&[
+                    "instructions",
+                    "apply",
+                    "--change",
+                    "mike",
+                    "--json",
+                ])),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "zulu", "--json"],
+                Ok(apply_json(
+                    "spec-driven",
+                    &repo.join("openspec/changes/zulu"),
+                    &[],
+                )),
+            );
+            fake.register_openspec(
+                &["schema", "which", "spec-driven", "--json"],
+                Ok(format!(
+                    r#"{{"name":"spec-driven","source":"package","path":{:?},"shadows":[]}}"#,
+                    pkg_dir.display().to_string()
+                )),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "nina", "--json"],
+                Ok("{ not json".to_string()),
+            );
+
+            let before = snapshot(&repo);
+            let cwd = std::env::current_dir().expect("current dir");
+            let before_cwd = crate::testutil::shallow_snapshot(&cwd);
+
+            let _ = from_cli(&fake, &repo);
+            let _ = from_cli(&fake, &repo);
+
+            let after = snapshot(&repo);
+            let after_cwd = crate::testutil::shallow_snapshot(&cwd);
+            assert_eq!(before, after);
+            assert_eq!(before_cwd, after_cwd);
         }
     }
 }

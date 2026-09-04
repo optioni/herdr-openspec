@@ -131,11 +131,32 @@ TYPES = ("Change", "ChangeSet", "ArtifactRef", "Origin")
 def strip_comments(text: str) -> str:
     """Replace every comment with an equal number of spaces/newlines, so byte
     offsets - and therefore reported line numbers - stay exact. String and char
-    literals are left intact; a comment marker inside one is not a comment."""
+    literals are left intact; a comment marker inside one is not a comment.
+
+    Handles Rust raw string literals (`r"..."`, `r#"..."#`, `r##"..."##`, ...)
+    as a distinct case from a plain `"..."` string: a naive scan for the next
+    unescaped `"` desyncs on a raw string's own embedded quotes (this crate's
+    tests hold several `r#"{"schemaName":...}"#` JSON fixtures), and once
+    desynced treats every following genuine `//` comment as "inside a string"
+    and leaves it unstripped — found via task 8.5's GATE-MECH1 run, which
+    reported a `..` inside an English-prose comment ("(alpha < design <
+    proposal, ...)") because the raw-string fixtures earlier in the same file
+    had thrown the scan off; the group's own `..` **usages** (`CliError`/
+    `LoadError` variants, unrelated to the four gated types but still forbidden
+    by the file-wide half B rule) were separately named-out, not exempted."""
     out = []
     i, n = 0, len(text)
     while i < n:
         c = text[i]
+        if c == "r":                                    # raw string literal
+            m = re.match(r'r(#*)"', text[i:])
+            if m:
+                hashes = m.group(1)
+                terminator = '"' + hashes
+                start = i + m.end()
+                end = text.find(terminator, start)
+                end = n if end == -1 else end + len(terminator)
+                out.append(text[i:end]); i = end; continue
         if c == '"':                                   # string literal
             out.append(c); i += 1
             while i < n:
@@ -945,7 +966,7 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
 ## 8. `from_cli` — the composition (`mod from_cli`)
 <!-- kind: behavior -->
 
-- [ ] 8.1 RED: Write failing unit tests in `mod from_cli` for:
+- [x] 8.1 RED: Write failing unit tests in `mod from_cli` for:
       `a_two_change_repository_drives_exactly_three_invocations` — assert
       `FakeCli::calls()` **equals** the exact three-element vector, not merely contains
       them, so an extra `status` call fails;
@@ -979,7 +1000,7 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
       `a_multi_file_artifact_survives_the_composition`;
       `a_context_files_key_naming_no_schema_artifact_is_ignored_end_to_end`.
 
-- [ ] 8.2 GREEN: Implement `pub struct CliChanges` and
+- [x] 8.2 GREEN: Implement `pub struct CliChanges` and
       `pub fn from_cli(cli: &dyn cli::OpenspecCli, repo: &Path) -> CliChanges`, plus
       `pub(crate) fn same_directory(a: &Path, b: &Path) -> bool` (canonicalize both;
       compare the canonical forms when both succeed, otherwise compare as given).
@@ -987,9 +1008,9 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
       resolution → `cli_artifacts` → `Change` → sort by name in byte order.
       Build each `Change` naming all seven fields; no `Default`, no `..`.
 
-- [ ] 8.3 REFACTOR: Clean up while green; state explicitly if none was needed.
+- [x] 8.3 REFACTOR: Clean up while green; state explicitly if none was needed.
 
-- [ ] 8.4 RED then GREEN: `a_full_from_cli_run_leaves_the_tree_byte_identical` —
+- [x] 8.4 RED then GREEN: `a_full_from_cli_run_leaves_the_tree_byte_identical` —
       `testutil::snapshot` over a scratch tree and `testutil::shallow_snapshot` over the
       process's own working directory, taken around one call covering a successful change,
       a change whose apply call failed, a schema resolved through the CLI fallback tier,
@@ -997,7 +1018,7 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
       equivalent test records: under `cargo test` the real cwd is this repository, whose
       `target/` holds tens of thousands of files.
 
-- [ ] 8.5 VERIFY: `testcount --lib 'from_cli::' <count>`, then run `NOSPAWN-GREP` and
+- [x] 8.5 VERIFY: `testcount --lib 'from_cli::' <count>`, then run `NOSPAWN-GREP` and
       `GATE-MECH1` — the latter must now report **more** than 34 constructions, since
       `from_cli` builds the type. Commit.
 
