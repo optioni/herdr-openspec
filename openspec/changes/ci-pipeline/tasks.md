@@ -242,13 +242,13 @@ sentence appears in two places here — SPEC.md's prose and the live `quality-ga
 requirement's rationale — so both are corrected, one as a document edit and one as a
 delta spec written during planning.
 
-- [ ] 2.1 CHECK: Quote the contradiction exactly as it stands in `SPEC.md` → Testing and
+- [x] 2.1 CHECK: Quote the contradiction exactly as it stands in `SPEC.md` → Testing and
       quality gates → Gates — the opening "Enforced identically locally and in CI, behind
       a single `make check` target so the two cannot diverge" against the later "coverage
       runs once, on Linux" — and confirm both sentences are still present at HEAD before
       editing. If the text has moved since planning, re-locate it rather than editing
       from memory
-- [ ] 2.2 CHANGE: Rewrite that lead sentence so it says what is achievable and what the
+- [x] 2.2 CHANGE: Rewrite that lead sentence so it says what is achievable and what the
       change actually does: every gate command is written once, in the `Makefile`;
       locally `make check` runs all four in order and stops at the first failure; CI
       invokes the same targets rather than the composite — `make fmt-check`, `make lint`,
@@ -257,25 +257,25 @@ delta spec written during planning.
       fold the existing "CI runs on ... coverage runs once, on Linux" sentence into the
       rewrite rather than leaving it beside the new text. This rewrites and replaces; it
       must not grow the section by more than a couple of lines
-- [ ] 2.3 CHANGE: In the same section, qualify "Two one-time setup steps are required" as
+- [x] 2.3 CHANGE: In the same section, qualify "Two one-time setup steps are required" as
       local-developer setup, noting that CI obtains `clippy` from the toolchain action and
       `cargo-llvm-cov` from `taiki-e/install-action`. One clause, not a new paragraph
-- [ ] 2.4 CHECK: Confirm the `quality-gates` delta at
+- [x] 2.4 CHECK: Confirm the `quality-gates` delta at
       `openspec/changes/ci-pipeline/specs/quality-gates/spec.md` still says what the
       corrected SPEC.md says. The delta reproduces the live requirement in full — heading,
       every SHALL, the command table, and all three scenarios — and changes only the
       rationale clause. Diff it against
       `openspec/specs/quality-gates/spec.md` and confirm the rationale sentence is the
       only difference; a MODIFIED delta with partial content loses detail at archive time
-- [ ] 2.5 VERIFY: Re-read the whole SPEC.md section and confirm no sentence now
+- [x] 2.5 VERIFY: Re-read the whole SPEC.md section and confirm no sentence now
       contradicts another; in particular that nothing still claims CI runs `make check`.
       Grep `SPEC.md` for `make check` and confirm every remaining occurrence is about
       local use
-- [ ] 2.6 VERIFY: Confirm no other maintained document repeats the corrected claim —
+- [x] 2.6 VERIFY: Confirm no other maintained document repeats the corrected claim —
       grep `PRD.md`, `README.md`, and `openspec/IMPLEMENTATION-ORDER.md` for `make check`
       and `CI`. Record "no change needed" where that is the answer rather than editing to
       note that work happened
-- [ ] 2.7 CHANGE: Log the correction in `planning-review.md`'s repair log — the quoted
+- [x] 2.7 CHANGE: Log the correction in `planning-review.md`'s repair log — the quoted
       before and after, why the original could not hold, and that it was found in
       planning rather than during apply. Both `proposal.md` and `design.md` → D1 promise
       this log exists; without a task it is the kind of commitment an interrupted session

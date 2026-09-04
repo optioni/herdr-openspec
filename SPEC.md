@@ -287,8 +287,8 @@ schema the CLI does not recognise.
 
 ### Gates
 
-Enforced identically locally and in CI, behind a single `make check` target so the
-two cannot diverge:
+Every gate command is written once, in the `Makefile`. Locally, `make check` runs all
+four in order and stops at the first failure:
 
 | Gate | Command |
 |---|---|
@@ -298,11 +298,13 @@ two cannot diverge:
 | Coverage | `cargo llvm-cov --fail-under-lines 80` |
 
 `cargo-llvm-cov` is chosen over `tarpaulin`, which is Linux-first and unreliable on
-Apple Silicon. CI runs on `ubuntu-latest` and `macos-latest` with `Swatinem/rust-cache`;
-coverage runs once, on Linux.
+Apple Silicon. CI invokes the same targets individually rather than the composite —
+`make fmt-check`, `make lint`, and `make test` on both `ubuntu-latest` and
+`macos-latest` with `Swatinem/rust-cache`, and `make coverage` once, on Linux.
 
-Two one-time setup steps are required: `rustup component add clippy` and
-`cargo install cargo-llvm-cov`.
+Two one-time setup steps are required for local development — `rustup component add
+clippy` and `cargo install cargo-llvm-cov` — since CI obtains `clippy` from the
+toolchain action and `cargo-llvm-cov` from `taiki-e/install-action`.
 
 ## Build and distribution
 

@@ -118,3 +118,64 @@ artifacts rather than left implicit:
   verification. Out of scope here and named as such in `proposal.md` → Non-Goals;
   `repo-foundation`'s design already recorded that the number is unverified until CI adds
   one.
+
+## Apply-time Repair Log
+
+### SPEC.md → Testing and quality gates → Gates: the `make check` / coverage contradiction
+
+Confirmed present at HEAD before editing (task 2.1), quoted exactly as design.md → D1
+described it:
+
+**Before:**
+
+> Enforced identically locally and in CI, behind a single `make check` target so the
+> two cannot diverge:
+>
+> [gate table, unchanged]
+>
+> `cargo-llvm-cov` is chosen over `tarpaulin`, which is Linux-first and unreliable on
+> Apple Silicon. CI runs on `ubuntu-latest` and `macos-latest` with
+> `Swatinem/rust-cache`; coverage runs once, on Linux.
+>
+> Two one-time setup steps are required: `rustup component add clippy` and
+> `cargo install cargo-llvm-cov`.
+
+**After:**
+
+> Every gate command is written once, in the `Makefile`. Locally, `make check` runs all
+> four in order and stops at the first failure:
+>
+> [gate table, unchanged]
+>
+> `cargo-llvm-cov` is chosen over `tarpaulin`, which is Linux-first and unreliable on
+> Apple Silicon. CI invokes the same targets individually rather than the composite —
+> `make fmt-check`, `make lint`, and `make test` on both `ubuntu-latest` and
+> `macos-latest` with `Swatinem/rust-cache`, and `make coverage` once, on Linux.
+>
+> Two one-time setup steps are required for local development — `rustup component add
+> clippy` and `cargo install cargo-llvm-cov` — since CI obtains `clippy` from the
+> toolchain action and `cargo-llvm-cov` from `taiki-e/install-action`.
+
+**Why the original could not hold:** `make check` composes `fmt-check`, `lint`, `test`,
+and `coverage` (`Makefile:30`). A CI that ran `make check` on both `ubuntu-latest` and
+`macos-latest` would measure coverage twice — once on a platform SPEC.md itself calls
+unreliable for `cargo-llvm-cov` — and a CI that ran it on Linux only would skip
+formatting, linting, and testing on macOS entirely. "Behind a single `make check`
+target" and "coverage runs once, on Linux" cannot both be true; this change makes the
+second one true and rewrites the first to describe what is actually achievable, per
+design.md → D1.
+
+**Found in planning, not during apply.** The contradiction was identified while writing
+`design.md`, confirmed independently by a second reviewer during the planning review
+(see `## Reviewed Against` above), and the fix — CI invokes the four `Makefile` targets
+individually rather than the composite — was argued and settled in design.md → D1 before
+any implementation task ran. The same sentence's rationale clause, reproduced word for
+word in the live `openspec/specs/quality-gates/spec.md`, was corrected in the same
+review pass by adding a `quality-gates` MODIFIED delta (see the first row of `## Gaps
+Found and Fixed` above) rather than being left to contradict the corrected SPEC.md.
+
+The document edit itself — the two `SPEC.md` sentences quoted above — landed during
+apply, in group 2 (tasks 2.1–2.3), verified against no remaining occurrence of
+`make check` describing CI (task 2.5) and against `PRD.md`, `README.md`, and
+`openspec/IMPLEMENTATION-ORDER.md` for the same claim (task 2.6: none of the three
+repeats it, so no change was needed in any of them).
