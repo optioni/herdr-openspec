@@ -102,8 +102,9 @@ The workflow SHALL declare no `env:` mapping at any level — workflow, job, or 
 because an environment variable such as `RUSTFLAGS` changes what a gate does without
 appearing in any `run:` body, which is the same second definition reached through a door
 no `run:`-level rule watches. Every `run:` step SHALL be written as a single line rather
-than a block scalar, so the parity guard can read the workflow without a YAML parser —
-the crate may take no dependency, so the guard is std-only string matching. The workflow
+than a block scalar, so the parity guard can read the workflow without a YAML parser.
+The guard is deliberately std-only string matching: adding a YAML parser as a
+dev-dependency to read four lines is not a trade this repository makes. The workflow
 SHALL NOT invoke the composite `make check` target, because coverage runs on only one of
 the two runners.
 

@@ -48,12 +48,29 @@ retry, because Herdr may launch the build without `~/.cargo/bin` on `PATH`. When
   indented or not — no `[[`, no `function` keyword, no `source` builtin, and no array
   assignment; `.` is used to load `~/.cargo/env`
 
-### Requirement: The crate produces one binary, with no third-party dependencies
+### Requirement: The crate produces one binary from a declared dependency set
 
 The Cargo package SHALL be named `herdr-openspec` and SHALL produce exactly one target
 of kind `bin`, also named `herdr-openspec`, so a release build lands at
-`target/release/herdr-openspec`. The crate SHALL declare edition 2024 and SHALL add no
-third-party dependency: `Cargo.lock` therefore contains exactly one package.
+`target/release/herdr-openspec`. The crate SHALL declare edition 2024.
+
+The crate's direct third-party dependencies SHALL be exactly those a change has argued
+in its `design.md`, and SHALL be declared with `default-features = false` and an
+explicit feature list, so that a future change to a crate's defaults is a reviewable
+diff rather than a silent addition to what is built. After this change that set is
+exactly one crate:
+
+| Crate | Version | Features |
+|---|---|---|
+| `toml` | at least `1.1.5` | `std`, `parse`, `display`, `serde`; defaults off |
+
+The declared version's own `rust-version` SHALL be no higher than this crate's
+`rust-version`, so the declared MSRV stays true. No dependency, direct or transitive,
+SHALL introduce a proc-macro crate into the normal build graph: the resolved graph is
+what determines build time and audit surface, and it is the property that changes when a
+feature is added or a default is re-enabled. `Cargo.lock` SHALL be committed, and the
+change that introduces or alters a dependency SHALL verify `cargo build --locked`
+succeeds at the commit that lands it.
 
 #### Scenario: Exactly one binary target is produced at the release path
 
@@ -63,13 +80,35 @@ third-party dependency: `Cargo.lock` therefore contains exactly one package.
 - **AND** after `/bin/sh scripts/build.sh` has run, `target/release/herdr-openspec`
   exists and is executable
 
-#### Scenario: No third-party dependencies are pulled in
+#### Scenario: The declared dependency set is exactly one crate
 
-- **WHEN** `Cargo.lock` is inspected after a successful build
-- **THEN** it contains exactly one `[[package]]` entry, the crate itself
-- **AND** `cargo metadata --no-deps --format-version 1` reports an empty dependency
-  list for the package
-- **AND** `cargo build --release --offline` succeeds, as a secondary signal
+- **WHEN** `cargo metadata --no-deps --format-version 1` is inspected for the package's
+  dependencies of kind `null` (normal, not dev or build)
+- **THEN** there is exactly one, named `toml`
+- **AND** that dependency's `uses_default_features` is `false` and its `features` are
+  exactly `display`, `parse`, `serde`, and `std` — read from the resolved metadata, not
+  from the text of `Cargo.toml`
+- **AND** `cargo build --locked` succeeds with `Cargo.lock` committed, so the resolved
+  versions in a fresh checkout are the ones this change verified
+
+#### Scenario: The resolved build graph is small and proc-macro-free
+
+- **WHEN** `cargo tree -e normal` is inspected
+- **THEN** the packages it names, besides `herdr-openspec` itself, are exactly `toml`,
+  `serde_core`, `serde_spanned`, `toml_datetime`, `toml_parser`, `toml_writer`, and
+  `winnow`
+- **AND** it names no `syn`, `quote`, `proc-macro2`, or `serde_derive`, so nothing in
+  the build graph runs a proc macro
+- **AND** `Cargo.lock` holds more entries than that — optional resolutions cargo never
+  builds — which is why no check counts lock entries
+
+#### Scenario: The dependency is genuinely needed rather than incidental
+
+- **WHEN** the `toml` dependency is removed from `Cargo.toml`
+- **THEN** `cargo build` fails, because `config` and `state` parse and emit TOML through
+  it
+- **AND** with the dependency and the committed lock restored, `cargo build --locked`
+  and `cargo test --all-features` are green again
 
 ### Requirement: The `ui` invocation prints a placeholder and holds the pane open
 
