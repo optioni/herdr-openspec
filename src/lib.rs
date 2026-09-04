@@ -109,6 +109,39 @@ pub(crate) mod testutil {
         }
     }
 
+    /// A *shallow* (non-recursive) snapshot of a directory's direct entries:
+    /// each child's path, whether it is a directory, and its modification
+    /// time — never its bytes, and never anything below it. Reserved for a
+    /// directory whose full recursive [`snapshot`] would be prohibitively
+    /// expensive or unstable to take, such as the test process's own
+    /// working directory under `cargo test`, which is this crate's own
+    /// repository root — including a `target/` directory that can hold tens
+    /// of thousands of build-artifact files and hundreds of megabytes,
+    /// changing across unrelated builds. See
+    /// `openspec/changes/subprocess-seam/design.md` -> Test Strategy and
+    /// -> Decisions for why the "not in the working directory" clause of
+    /// "running a program writes nothing" is proven with this shallow form
+    /// rather than [`snapshot`]: nothing in `cli` computes any path
+    /// relative to the current directory, so a stray write this seam
+    /// caused would surface as a new, removed, or modified **top-level**
+    /// entry — the one thing this snapshot would catch.
+    #[derive(Debug, PartialEq, Eq)]
+    pub(crate) struct ShallowSnapshot(Vec<(PathBuf, bool, std::time::SystemTime)>);
+
+    pub(crate) fn shallow_snapshot(dir: &Path) -> ShallowSnapshot {
+        let mut entries = Vec::new();
+        if let Ok(read_dir) = std::fs::read_dir(dir) {
+            for entry in read_dir.flatten() {
+                if let Ok(metadata) = entry.metadata() {
+                    let mtime = metadata.modified().expect("modified time");
+                    entries.push((entry.path(), metadata.is_dir(), mtime));
+                }
+            }
+        }
+        entries.sort_by(|a, b| a.0.cmp(&b.0));
+        ShallowSnapshot(entries)
+    }
+
     /// Write `contents` to `path`, creating parent directories as needed, and
     /// set its permission bits explicitly to `mode`. Never relies on the
     /// process umask, which differs between an interactive shell and a CI

@@ -446,7 +446,7 @@ echo "OPENSPEC-UNTOUCHED OK"
 | A vacuous exclusion fails the check | `NOSPAWN-GREP` on a copy with `cli.rs` deleted (guard A), on a copy with `cli.rs` emptied of its spawn (guard B), on a copy holding only `cli.rs` (guard C), and on a copy with the spawn planted at `ui/cli.rs` — all four must exit non-zero, the last proving the exclusion is by path and not by base name | command check | real `find`, `grep`, scratch copies of `src/` | the `NOSPAWN-GREP` block, run four times with `SRC` |
 | The suite passes with npm, node, and openspec unresolvable | `NOSPAWN-RUN`, preconditions first and aborting | command check | real cargo, real `PATH`, npm/node/openspec deliberately unresolvable | the `NOSPAWN-RUN` block |
 | A run and a probe leave the scratch tree byte-identical | `testutil::snapshot` before and after a successful run, a failing run, an unstartable run, and a full npm probe; assert equality. The snapshot records directories and mtimes, not just files | unit | real scratch filesystem, real `/bin/sh` | `cargo test --all-features cli::` |
-| A run and a probe leave the scratch tree byte-identical | Second row for the second piece of evidence: the same four operations snapshotted around the test process's own working directory, so the requirement's "not in the working directory" clause is covered rather than implied by the scratch tree | unit | real cwd (read-only), real `/bin/sh` | `cargo test --all-features cli::` |
+| A run and a probe leave the scratch tree byte-identical | Second row for the second piece of evidence: the same four operations, snapshotted around the test process's own working directory with `testutil::shallow_snapshot` (a non-recursive listing of cwd's direct entries — path, is-dir, mtime; never bytes, never descends), so the requirement's "not in the working directory" clause is covered rather than implied by the scratch tree. **Not** the full recursive `snapshot` used for the scratch-tree row above: under `cargo test`, cwd is this crate's own repository root, whose `target/` directory alone holds tens of thousands of build-artifact files; a recursive byte-comparing walk of it was measured during implementation at 7.59s per test run for no more discriminating evidence than the shallow form, since nothing in `cli` computes a path relative to the current directory — any stray write this seam caused would land as a new, removed, or modified top-level entry, which the shallow snapshot catches directly. Verified during implementation to retain genuine discriminating power: a planted stray top-level file was caught and named in the failure | unit | real cwd (read-only), real `/bin/sh` | `cargo test --all-features cli::` |
 | The hook is still injected, so the chain stays pure | The existing `resolve` chain tests, unchanged: a closure hook returning a scratch directory resolves `N/bin/openspec` with the npm-prefix source | unit | real scratch filesystem, closure hook | `cargo test --all-features resolve::` |
 | The production binding is the real probe | The `BINDING` block's three guards, run with their negative controls. `openspec_bin_from_env`'s existing configured-binary test is **not** evidence for this scenario and is not counted as such: step 1 returns before step 4 is reached, so it passes with any hook at all — including a closure that returns no prefix | command check | real `grep`, `sed`, scratch copies | the `BINDING` block |
 | Resolution spawns no process | `NOSPAWN-RUN` for the runtime half; the module-scoped block for the source-text half (`src/resolve.rs` names no `std::process`, `Command`, or `Stdio` at all, comments included) | command check | real cargo, real `PATH`, real `grep` | the `NOSPAWN-RUN` and `NOSPAWN-GREP` blocks |
@@ -600,6 +600,24 @@ exact body being deleted, would keep every other check in this change green with
 still dead. `BINDING` is the one thing that fails on it, and its guard (c) is structural
 because no assertion on the *value* `npm_prefix()` returns can be both machine-independent
 and red for that body. The behavioural half is group 6's delegation test.
+
+**The working-directory half of "running a program writes nothing" is proven with a
+shallow, non-recursive snapshot, not the full recursive one used for the scratch
+tree.** Found during implementation, not at planning time: a full recursive
+`testutil::snapshot` around `std::env::current_dir()` is correct but, under `cargo
+test`, cwd is this crate's own repository root — `target/` alone holds tens of
+thousands of build-artifact files, and a byte-comparing recursive walk of it measured
+at 7.59s for this one test, on every future run. `testutil::shallow_snapshot` — added
+alongside it — lists only cwd's direct entries (path, is-dir, mtime; never bytes,
+never descends), which is exactly as discriminating for this seam: nothing in `cli`
+computes a path relative to the current directory, so a stray write would surface as a
+new, removed, or modified top-level entry, which the shallow form catches directly.
+Verified by planting a stray top-level file and confirming the test named it, then
+removing the plant and confirming green. *Alternative:* changing the test process's
+own cwd to a scratch directory for the test's duration, rejected — `cargo test` runs
+tests in parallel threads of one process, and `std::env::set_current_dir` is
+process-global, so it would race every other concurrently running test exactly the way
+`AGENTS.md` forbids `std::env::set_var` from doing.
 
 ### SPEC.md corrections this change carries
 

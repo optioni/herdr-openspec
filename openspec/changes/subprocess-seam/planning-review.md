@@ -96,6 +96,16 @@ deferred: whether the real implementations are tested by spawning (yes — scrat
 the hand-over red is made observable (a measured `npm prefix -g` precondition, not an
 assumption about `PATH`).
 
+## Implementation-Time Corrections
+
+Found during apply, not at planning time, and repaired under the same discipline as
+the table above (owning artifact updated, before/after recorded here) rather than
+patched silently.
+
+| Severity | Source Artifact | Problem | Repair | Updated Location |
+|---|---|---|---|---|
+| WARNING | design.md → Test Strategy (verification matrix, "A run and a probe leave the scratch tree byte-identical", second row), tasks.md 7.4 | The cwd half of the writes-nothing scenario, as designed, snapshotted `std::env::current_dir()` with the full recursive `testutil::snapshot`. Under `cargo test`, cwd is this crate's own repository root — `target/` alone holds ~42,400 build-artifact files (~468MB) — and a recursive byte-comparing walk of it measured at 7.59s for this one test, on every future run of it. Not a correctness bug, but a real reliability/performance defect in the test-boundary choice: unbounded cost tied to unrelated repository state is the same class of hazard as a flaky timing-based check | Added `testutil::shallow_snapshot` (`src/lib.rs`) — a non-recursive listing of a directory's direct entries (path, is-dir, mtime; never bytes, never descends) — and used it for the cwd half only; the scratch-tree half keeps the full recursive `snapshot`. Verified it retains genuine discriminating power: planted a stray top-level file after the operations under test, confirmed the test failed and named it, removed the plant, confirmed green again. 7.59s → 0.10s for the same test. Rationale it is still faithful evidence: nothing in `cli` computes a path relative to the current directory, so a stray write this seam caused would necessarily be a top-level entry | design.md → Test Strategy (verification matrix), → Decisions (new entry); `src/lib.rs` (`shallow_snapshot`); tasks.md 7.4 |
+
 ## Deferred Non-Blocking Notes
 
 - **Whether Herdr injects a variable naming its own binary path** is `agent-polling`'s

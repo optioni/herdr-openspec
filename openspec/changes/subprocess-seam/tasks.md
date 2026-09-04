@@ -477,7 +477,7 @@
 ## 7. The end-to-end join, and proof that nothing is written
 <!-- kind: behavior -->
 
-- [ ] 7.1 RED: Write the failing test `a_real_spawn_resolves_the_npm_prefix_binary`: call
+- [x] 7.1 RED: Write the failing test `a_real_spawn_resolves_the_npm_prefix_binary`: call
       `resolve::openspec_bin` with nothing configured, a `PATH` naming one scratch
       directory that holds no `openspec`, **no** `NVM_DIR` and **no** `HOME` in the
       lookup, and a fourth-step hook that is the real spawning probe pointed at a scratch
@@ -486,14 +486,20 @@
       `N/bin/openspec` **and** that its source is the npm-prefix step, so a chain that
       reached it by another route fails. This is the roadmap's end-to-end obligation:
       until now that join was exercised only by fixture closures returning a literal path
-- [ ] 7.2 RED: Write `a_failing_real_spawn_resolves_nothing` — the same call with a scratch
+- [x] 7.2 RED: Write `a_failing_real_spawn_resolves_nothing` — the same call with a scratch
       program that prints the same prefix to stdout but exits `1`; assert no binary is
       resolved and no problem is recorded, because an absent CLI is a supported state
       rather than a fault
-- [ ] 7.3 GREEN: Make both pass. If groups 5 and 6 were built correctly this requires no
+- [x] 7.3 GREEN: Make both pass. If groups 5 and 6 were built correctly this requires no
       production change; record that explicitly rather than leaving it ambiguous, since
       "the test passed without a code change" is only acceptable when it was predicted
-- [ ] 7.4 RED then GREEN: Write `a_run_and_a_probe_leave_the_scratch_tree_byte_identical`
+
+      RECORDED: predicted and confirmed — both tests passed with no production change,
+      since groups 5 (the probe) and 6 (the binding/injection point) were already
+      correct. The only fix needed was in the *test* code itself (an `E0716` borrow
+      error from an inline temporary `&[("PATH", ...)]` — fixed with a `let` binding),
+      not in `src/cli.rs` or `src/resolve.rs` production code.
+- [x] 7.4 RED then GREEN: Write `a_run_and_a_probe_leave_the_scratch_tree_byte_identical`
       — snapshot a scratch tree holding the scratch programs, a prefix directory with
       `bin/openspec`, and an **empty** directory using `testutil::snapshot`, then perform a
       successful run, a failing run, an unstartable run, and a full npm probe against it,
@@ -503,13 +509,58 @@
       same four operations over `std::env::current_dir()`, so the requirement's "not in the
       working directory" clause is covered by evidence rather than implied by the scratch
       tree's result — review caught that overclaim
-- [ ] 7.5 REFACTOR: Extract the scratch-program builders this group and groups 2, 3, and 5
+
+      DRIFT FOUND AND CORRECTED: written exactly as specified first — a second full
+      recursive `testutil::snapshot` around `std::env::current_dir()`. It passed, but
+      took **7.59s** for this one test alone: under `cargo test`, the real cwd is this
+      crate's own repository root, whose `target/` directory holds ~42,400 files and
+      ~468MB, all read byte-for-byte by `snapshot`'s recursive walk, on every test run,
+      forever (`make check`, CI, every future `cargo test`). This is a genuine
+      reliability/performance defect in the design's test-boundary choice, not a
+      cosmetic one — caught here per the standing instruction to distrust a check that
+      passes suspiciously easily, and per the operating hard rule "no timing-based test"
+      cousin: a test whose cost scales with unrelated repository state is exactly the
+      kind of check that becomes flaky or prohibitively slow without ever having been
+      wrong.
+
+      Fix: added `testutil::shallow_snapshot` (`src/lib.rs`) — a *non-recursive* listing
+      of a directory's direct children (path, is-dir, mtime; never bytes, never
+      descends) — and used it for the cwd half only; the scratch-tree half keeps the
+      full recursive `snapshot`, since that tree is small and under this change's
+      control. Verified the replacement (a) is fast: 0.10s vs 7.59s for the same test,
+      and (b) still has genuine discriminating power: planted
+      `std::fs::write(cwd.join("stray-test-artifact.txt"), b"oops")` after the
+      operations under test, reran, and got a genuine `FAILED` with the exact stray file
+      named in the diff; removed the plant and confirmed green again. Rationale this is
+      still faithful evidence: nothing in `cli`'s implementation computes any path
+      relative to the current directory (every path is either an absolute scratch path
+      or the bare literal `"npm"`/`"herdr"`), so a stray write this seam caused would
+      necessarily land as a new, removed, or modified **top-level** entry — exactly what
+      `shallow_snapshot` catches.
+
+      This is a material change to a test-boundary mechanism (design.md → Test
+      Boundaries and → Decisions), so treated as drift: design.md's verification-matrix
+      row for "A run and a probe leave the scratch tree byte-identical" (the
+      cwd-snapshot half) is updated to name `shallow_snapshot` and the reason, and
+      `planning-review.md` gets a repair-log row recording this before/after. See both
+      files for the corrected text; `openspec validate subprocess-seam --strict` re-run
+      clean after the edit (task 11.7 re-confirms at the end of the change).
+- [x] 7.5 REFACTOR: Extract the scratch-program builders this group and groups 2, 3, and 5
       share into one local helper in `src/cli.rs`'s test module, rather than repeating the
       shebang and the mode in a dozen tests. If nothing needed cleaning, say so here
-- [ ] 7.6 VERIFY: `testcount 'cli::' 31`, then `cargo test --all-features` in full. **Red
+
+      RECORDED: already a single shared `script()` helper (added in group 2, task 2.1),
+      used by every scratch-program test in groups 2, 3, 5, 6, and 7. Nothing needed
+      extracting.
+- [x] 7.6 VERIFY: `testcount 'cli::' 31`, then `cargo test --all-features` in full. **Red
       when:** fewer than 31 tests match, the real probe's output cannot be consumed by the
       chain, the npm-prefix source is misreported, a failing probe still resolves a binary,
       or anything in the seam writes to the filesystem or to the working directory
+
+      RECORDED: `testcount 'cli::' 31` -> OK (34 >= 31). Full suite: 299 passed (265 +
+      34), 0 failed, in 0.35s (versus what would have been ~7s+ with the unfixed
+      cwd-snapshot). `cargo fmt --all -- --check` and `cargo clippy --all-targets
+      --all-features -- -D warnings` both clean.
 
 ## 8. Architectural checks that can actually fail
 <!-- kind: operational -->

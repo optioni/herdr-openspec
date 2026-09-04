@@ -843,4 +843,142 @@ mod tests {
             ),
         }
     }
+
+    // --- group 7: the end-to-end join, and proof that nothing is written ---
+
+    /// Build an environment lookup closure over a fixture map — mirrors
+    /// `resolve::tests::env`, kept local rather than shared across modules
+    /// since it is a two-line test helper, not part of either module's
+    /// public contract.
+    fn env<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+        let map: std::collections::BTreeMap<&str, &str> = pairs.iter().copied().collect();
+        move |name| map.get(name).map(|s| s.to_string())
+    }
+
+    #[test]
+    fn a_real_spawn_resolves_the_npm_prefix_binary() {
+        let scratch = ScratchDir::new();
+        let path_only = scratch.path().join("path-only");
+        std::fs::create_dir_all(&path_only).expect("create path-only dir");
+
+        let prefix_dir = scratch.path().join("N");
+        let openspec_bin = prefix_dir.join("bin").join("openspec");
+        write_with_mode(&openspec_bin, b"#!/bin/sh\n", 0o755);
+
+        let npm = script(
+            &scratch,
+            "npm",
+            &format!(
+                "printf '%s\\n' '{}'; printf 'unrelated noise\\n' >&2\n",
+                prefix_dir.display()
+            ),
+        );
+
+        let path_only_str = path_only.display().to_string();
+        let pairs = [("PATH", path_only_str.as_str())];
+        let lookup = env(&pairs);
+        let hook = || super::npm_prefix_via(&npm);
+
+        let result = crate::resolve::openspec_bin(None, &lookup, &hook);
+        assert_eq!(
+            result.found,
+            Some(crate::resolve::FoundBin {
+                path: openspec_bin.clone(),
+                source: crate::resolve::BinSource::NpmPrefix,
+            })
+        );
+    }
+
+    #[test]
+    fn a_failing_real_spawn_resolves_nothing() {
+        let scratch = ScratchDir::new();
+        let path_only = scratch.path().join("path-only");
+        std::fs::create_dir_all(&path_only).expect("create path-only dir");
+
+        let prefix_dir = scratch.path().join("N");
+        let openspec_bin = prefix_dir.join("bin").join("openspec");
+        write_with_mode(&openspec_bin, b"#!/bin/sh\n", 0o755);
+
+        let npm = script(
+            &scratch,
+            "npm",
+            &format!("printf '%s\\n' '{}'; exit 1\n", prefix_dir.display()),
+        );
+
+        let path_only_str = path_only.display().to_string();
+        let pairs = [("PATH", path_only_str.as_str())];
+        let lookup = env(&pairs);
+        let hook = || super::npm_prefix_via(&npm);
+
+        let result = crate::resolve::openspec_bin(None, &lookup, &hook);
+        assert_eq!(result.found, None);
+        assert!(result.problems.is_empty());
+    }
+
+    #[test]
+    fn a_run_and_a_probe_leave_the_scratch_tree_byte_identical() {
+        use crate::testutil::{shallow_snapshot, snapshot};
+
+        let scratch = ScratchDir::new();
+        let root = scratch.path();
+
+        let ok_prog = script(&scratch, "ok_prog", "printf 'ok'\n");
+        let fail_prog = script(
+            &scratch,
+            "fail_prog",
+            "printf 'partial'; printf 'boom' >&2; exit 3\n",
+        );
+        let missing = root.join("does-not-exist");
+        assert!(!missing.exists());
+
+        let prefix_dir = root.join("prefix");
+        write_with_mode(
+            &prefix_dir.join("bin").join("openspec"),
+            b"#!/bin/sh\n",
+            0o755,
+        );
+
+        let npm = script(&scratch, "npm", "printf '/scratch/prefix\\n'\n");
+
+        // An empty directory too, since it is the entry a listing-only
+        // comparison could miss but the extended snapshot cannot.
+        let empty = root.join("empty");
+        std::fs::create_dir_all(&empty).expect("create empty dir");
+
+        // Snapshots taken around the scratch tree AND around the test
+        // process's own working directory — the requirement's "not in the
+        // working directory" clause is covered by evidence, not implied by
+        // the scratch tree's result alone. The scratch tree is snapshotted
+        // in full (`snapshot`, recursive, byte-comparing); the cwd is
+        // snapshotted only at its top level (`shallow_snapshot`) — under
+        // `cargo test`, the real cwd is this crate's own repository root,
+        // whose `target/` directory alone holds tens of thousands of
+        // build-artifact files, so a recursive byte-comparing snapshot of
+        // it was measured to cost multiple seconds and hundreds of
+        // megabytes of reads per test run, for evidence no more meaningful
+        // than the shallow form: nothing in this seam computes a path
+        // relative to the current directory, so a stray write would land
+        // at the top level, which the shallow snapshot catches directly.
+        let cwd = std::env::current_dir().expect("current dir");
+
+        let before_scratch = snapshot(root);
+        let before_cwd = shallow_snapshot(&cwd);
+
+        let ok_cli = super::RealOpenspecCli::new(ok_prog);
+        let _ = super::OpenspecCli::run(&ok_cli, &[]);
+
+        let fail_cli = super::RealOpenspecCli::new(fail_prog);
+        let _ = super::OpenspecCli::run(&fail_cli, &[]);
+
+        let missing_cli = super::RealOpenspecCli::new(missing);
+        let _ = super::OpenspecCli::run(&missing_cli, &[]);
+
+        let _ = super::npm_prefix_via(&npm);
+
+        let after_scratch = snapshot(root);
+        let after_cwd = shallow_snapshot(&cwd);
+
+        assert_eq!(before_scratch, after_scratch);
+        assert_eq!(before_cwd, after_cwd);
+    }
 }
