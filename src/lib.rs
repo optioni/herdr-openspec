@@ -8,6 +8,7 @@
 
 pub mod config;
 pub mod resolve;
+pub mod schema;
 pub mod state;
 
 /// The current process id. Exists so `state::record`'s temporary-file name
