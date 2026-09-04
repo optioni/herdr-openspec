@@ -6,6 +6,14 @@
 use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 
+/// A non-negative integer read from a JSON value, representable as `usize`.
+/// Shared by `parse_list`'s `completedTasks`/`totalTasks` fields — a `Value`
+/// that is missing, negative, fractional, a string, or too large for
+/// `usize` all yield `None` uniformly, through `serde_json::Value::as_u64`.
+fn non_negative_usize(value: Option<&serde_json::Value>) -> Option<usize> {
+    usize::try_from(value?.as_u64()?).ok()
+}
+
 /// Whether a change is active or archived, and — for an archived one — the
 /// date its directory name was prefixed with, when it parsed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -700,6 +708,94 @@ fn build_change(
         progress,
         problems,
     }
+}
+
+/// One `openspec list --json` entry, reduced to what `from_cli` needs: the
+/// name and the task-progress pair. `lastModified` and `status` are read and
+/// discarded by `parse_list` — `change-model` forbids storing either.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ListEntry {
+    pub(crate) name: String,
+    pub(crate) progress: crate::tasks::Progress,
+}
+
+/// `openspec list --json`'s envelope, parsed: the repository root it
+/// answered for (when the envelope carries a usable one), the well-formed
+/// entries in payload order, and one problem per entry `parse_list` could
+/// not use.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ListPayload {
+    pub(crate) root: Option<PathBuf>,
+    pub(crate) changes: Vec<ListEntry>,
+    pub(crate) problems: Vec<String>,
+}
+
+/// Parse `openspec list --json`'s stdout: the envelope
+/// `{"changes": [...], "root": {"path", "source"}}`, never a bare array. See
+/// `cli-changes` -> "The list payload is an envelope, and progress comes
+/// from it".
+pub(crate) fn parse_list(text: &str) -> Result<ListPayload, String> {
+    let value: serde_json::Value = serde_json::from_str(text)
+        .map_err(|e| format!("openspec list --json payload is not valid JSON: {e}"))?;
+    let obj = value
+        .as_object()
+        .ok_or_else(|| "openspec list --json payload is not a JSON object".to_string())?;
+    let entries = obj
+        .get("changes")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| "openspec list --json payload has no \"changes\" array".to_string())?;
+
+    let root = obj
+        .get("root")
+        .and_then(|v| v.as_object())
+        .and_then(|r| r.get("path"))
+        .and_then(|p| p.as_str())
+        .map(PathBuf::from);
+
+    let mut changes = Vec::new();
+    let mut problems = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+
+    for (position, entry) in entries.iter().enumerate() {
+        let Some(name) = entry
+            .get("name")
+            .and_then(|v| v.as_str())
+            .filter(|s| !s.is_empty())
+        else {
+            problems.push(format!(
+                "openspec list --json entry at position {position} has no usable \"name\""
+            ));
+            continue;
+        };
+        let Some(completed) = non_negative_usize(entry.get("completedTasks")) else {
+            problems.push(format!(
+                "openspec list --json entry at position {position} ({name:?}) has no usable \"completedTasks\""
+            ));
+            continue;
+        };
+        let Some(total) = non_negative_usize(entry.get("totalTasks")) else {
+            problems.push(format!(
+                "openspec list --json entry at position {position} ({name:?}) has no usable \"totalTasks\""
+            ));
+            continue;
+        };
+        if !seen.insert(name.to_string()) {
+            problems.push(format!(
+                "openspec list --json reported {name:?} more than once; keeping the first"
+            ));
+            continue;
+        }
+        changes.push(ListEntry {
+            name: name.to_string(),
+            progress: crate::tasks::Progress { completed, total },
+        });
+    }
+
+    Ok(ListPayload {
+        root,
+        changes,
+        problems,
+    })
 }
 
 /// Paint the pane from disk: every active change under
@@ -2305,5 +2401,118 @@ mod tests {
             .find(|r| r.id == "proposal")
             .unwrap();
         assert_eq!(proposal.paths.len(), 1);
+    }
+
+    // --- group 2: `parse_list` — the list envelope (`mod list_json`) -------
+
+    mod list_json {
+        use super::*;
+
+        #[test]
+        fn a_bare_array_is_rejected_rather_than_parsed() {
+            let text = r#"[{"name":"alpha","completedTasks":1,"totalTasks":2,"lastModified":"x","status":"y"}]"#;
+            assert!(parse_list(text).is_err());
+        }
+
+        #[test]
+        fn an_empty_change_list_is_a_supported_empty_state() {
+            let text = r#"{"changes":[],"root":{"path":"/repo","source":"nearest"}}"#;
+            let payload = parse_list(text).expect("should parse");
+            assert!(payload.changes.is_empty());
+            assert!(payload.problems.is_empty());
+            assert_eq!(payload.root, Some(PathBuf::from("/repo")));
+        }
+
+        #[test]
+        fn a_change_entry_missing_a_required_field_is_skipped_not_fatal() {
+            let text = r#"{"changes":[
+                {"name":"alpha","completedTasks":1,"totalTasks":2,"lastModified":"x","status":"y"},
+                {"name":"mike","totalTasks":3,"lastModified":"x","status":"y"},
+                {"name":42,"completedTasks":0,"totalTasks":0,"lastModified":"x","status":"y"}
+            ]}"#;
+            let payload = parse_list(text).expect("should parse");
+            assert_eq!(payload.changes.len(), 1);
+            assert_eq!(payload.changes[0].name, "alpha");
+            assert_eq!(payload.problems.len(), 2);
+            assert!(payload.problems[0].contains('1'), "{}", payload.problems[0]);
+            assert!(payload.problems[1].contains('2'), "{}", payload.problems[1]);
+        }
+
+        #[test]
+        fn an_entry_whose_name_is_the_empty_string_is_skipped() {
+            let text = r#"{"changes":[
+                {"name":"","completedTasks":0,"totalTasks":0,"lastModified":"x","status":"y"},
+                {"name":"alpha","completedTasks":1,"totalTasks":2,"lastModified":"x","status":"y"}
+            ]}"#;
+            let payload = parse_list(text).expect("should parse");
+            assert_eq!(payload.changes.len(), 1);
+            assert_eq!(payload.changes[0].name, "alpha");
+            assert_eq!(payload.problems.len(), 1);
+            assert!(payload.problems[0].contains('0'), "{}", payload.problems[0]);
+        }
+
+        #[test]
+        fn a_repeated_name_keeps_the_first_entry_and_names_the_duplicate() {
+            let text = r#"{"changes":[
+                {"name":"alpha","completedTasks":1,"totalTasks":2,"lastModified":"x","status":"y"},
+                {"name":"mike","completedTasks":0,"totalTasks":0,"lastModified":"x","status":"y"},
+                {"name":"alpha","completedTasks":9,"totalTasks":9,"lastModified":"x","status":"y"}
+            ]}"#;
+            let payload = parse_list(text).expect("should parse");
+            assert_eq!(payload.changes.len(), 2);
+            let alpha = payload.changes.iter().find(|c| c.name == "alpha").unwrap();
+            assert_eq!(
+                alpha.progress,
+                crate::tasks::Progress {
+                    completed: 1,
+                    total: 2
+                }
+            );
+            assert!(payload.changes.iter().any(|c| c.name == "mike"));
+            assert_eq!(payload.problems.len(), 1);
+            assert!(
+                payload.problems[0].contains("alpha"),
+                "{}",
+                payload.problems[0]
+            );
+        }
+
+        #[test]
+        fn empty_stdout_is_a_parse_failure() {
+            assert!(parse_list("").is_err());
+        }
+
+        #[test]
+        fn a_list_envelope_carries_the_root_path() {
+            let text = r#"{"changes":[],"root":{"path":"/repo/root","source":"nearest"}}"#;
+            let payload = parse_list(text).expect("should parse");
+            assert_eq!(payload.root, Some(PathBuf::from("/repo/root")));
+        }
+
+        #[test]
+        fn an_envelope_with_no_root_yields_no_root() {
+            let text = r#"{"changes":[]}"#;
+            let payload = parse_list(text).expect("should parse");
+            assert_eq!(payload.root, None);
+        }
+
+        #[test]
+        fn a_root_whose_path_is_not_a_string_yields_no_root() {
+            let text = r#"{"changes":[],"root":{"path":7,"source":"nearest"}}"#;
+            let payload = parse_list(text).expect("should parse");
+            assert_eq!(payload.root, None);
+        }
+
+        #[test]
+        fn list_entries_keep_the_payload_order() {
+            let text = r#"{"changes":[
+                {"name":"zulu","completedTasks":0,"totalTasks":0,"lastModified":"x","status":"y"},
+                {"name":"mike","completedTasks":0,"totalTasks":0,"lastModified":"x","status":"y"},
+                {"name":"alpha","completedTasks":0,"totalTasks":0,"lastModified":"x","status":"y"}
+            ]}"#;
+            let payload = parse_list(text).expect("should parse");
+            let names: Vec<&str> = payload.changes.iter().map(|c| c.name.as_str()).collect();
+            assert_eq!(names, vec!["zulu", "mike", "alpha"]);
+        }
     }
 }

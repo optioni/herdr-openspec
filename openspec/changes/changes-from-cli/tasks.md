@@ -727,7 +727,7 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
 ## 2. `parse_list` — the list envelope (`mod list_json`)
 <!-- kind: behavior -->
 
-- [ ] 2.1 RED: Write failing unit tests in a new `mod list_json` inside `src/changes.rs`'s
+- [x] 2.1 RED: Write failing unit tests in a new `mod list_json` inside `src/changes.rs`'s
       `mod tests`:
       `a_bare_array_is_rejected_rather_than_parsed`;
       `an_empty_change_list_is_a_supported_empty_state`;
@@ -746,7 +746,7 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
       `cargo test --all-features --lib list_json::` must report a **compile** error naming
       `parse_list`, and the number of failing tests must equal the number written.
 
-- [ ] 2.2 GREEN: Implement `pub(crate) struct ListEntry { name: String, progress:
+- [x] 2.2 GREEN: Implement `pub(crate) struct ListEntry { name: String, progress:
       tasks::Progress }`, `pub(crate) struct ListPayload { root: Option<PathBuf>, changes:
       Vec<ListEntry>, problems: Vec<String> }`, and
       `pub(crate) fn parse_list(text: &str) -> Result<ListPayload, String>`.
@@ -757,10 +757,10 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
       it. `lastModified` and `status` are read and discarded — `change-model` forbids
       storing either.
 
-- [ ] 2.3 REFACTOR: Extract the "non-negative integer from a `Value`" helper if it is used
+- [x] 2.3 REFACTOR: Extract the "non-negative integer from a `Value`" helper if it is used
       more than twice; otherwise state explicitly that no refactor was needed.
 
-- [ ] 2.4 VERIFY: `testcount --lib 'list_json::' <count written in 2.1>` — a counted
+- [x] 2.4 VERIFY: `testcount --lib 'list_json::' <count written in 2.1>` — a counted
       minimum, not a bare filtered run, because a filter matching nothing exits 0. Commit.
 
 ---
