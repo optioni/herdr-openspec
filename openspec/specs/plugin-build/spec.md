@@ -112,6 +112,7 @@ diff rather than a silent addition to what is built. After this change that set 
 |---|---|---|
 | `toml` | at least `1.1.5` | `std`, `parse`, `display`, `serde`; defaults off |
 | `yaml-rust2` | at least `0.12.0` | `features = []`, written explicitly; defaults off — the default `encoding` feature exists only for `load_from_bytes` BOM and UTF-16 detection, and this crate reads YAML through `std::fs::read_to_string` |
+| `serde_json` | at least `1.0.151` | `std`; defaults off — the default set is exactly `std`, so turning defaults off and naming it changes nothing that is built and everything about whether a future default is adopted silently. The crate is used through `serde_json::Value` only, with no `serde::Deserialize` derive, so no proc-macro crate enters the graph |
 
 Each declared version's own `rust-version` SHALL be no higher than this crate's
 `rust-version`, so the declared MSRV stays true. No dependency, direct or transitive,
@@ -136,11 +137,11 @@ succeeds at the commit that lands it.
 
 - **WHEN** `cargo metadata --no-deps --format-version 1` is inspected for the package's
   dependencies of kind `null` (normal, not dev or build)
-- **THEN** there are exactly two, named `toml` and `yaml-rust2`
-- **AND** both report `uses_default_features` as `false` — read from the resolved
+- **THEN** there are exactly three, named `serde_json`, `toml`, and `yaml-rust2`
+- **AND** all three report `uses_default_features` as `false` — read from the resolved
   metadata, not from the text of `Cargo.toml`
-- **AND** `toml`'s features are exactly `display`, `parse`, `serde`, and `std`, and
-  `yaml-rust2`'s feature list is empty
+- **AND** `toml`'s features are exactly `display`, `parse`, `serde`, and `std`,
+  `serde_json`'s are exactly `std`, and `yaml-rust2`'s feature list is empty
 - **AND** the `features` key is written out as `features = []` in the manifest rather than
   omitted. `cargo metadata` reports `[]` for both spellings and so cannot tell them apart;
   the requirement's own rationale — a reviewable diff rather than a silent addition — is
@@ -163,7 +164,10 @@ succeeds at the commit that lands it.
 - **AND** the packages sitting exactly at the floor are reported rather than assumed: on
   the resolution this change lands, `yaml-rust2`, `hashbrown`, `hashlink`, `toml`,
   `toml_datetime`, `toml_parser`, `toml_writer`, and `serde_spanned` all declare `1.85`,
-  so no single crate is uniquely the tightest
+  so no single crate is uniquely the tightest. The four packages this change adds are not
+  among them — `serde_json` and `zmij` declare `1.71`, `itoa` `1.68`, and `memchr` `1.61` —
+  so the floor is unchanged by this change, which is itself the assertion rather than an
+  aside
 - **AND** the intersection with `cargo tree -e normal` is load-bearing: `cargo metadata`
   alone also reports optional and dev-only resolutions cargo never builds — `syn`,
   `serde_derive`, and `indexmap` among them — so a check over every metadata package
@@ -184,13 +188,20 @@ succeeds at the commit that lands it.
 - **THEN** each of the four produces the same set, and the packages it names, besides
   `herdr-openspec` itself, are exactly `toml`,
   `serde_core`, `serde_spanned`, `toml_datetime`, `toml_parser`, `toml_writer`, `winnow`,
-  `yaml-rust2`, `arraydeque`, `hashlink`, `hashbrown`, and `foldhash`
+  `yaml-rust2`, `arraydeque`, `hashlink`, `hashbrown`, `foldhash`, `serde_json`, `itoa`,
+  `memchr`, and `zmij` — sixteen, the twelve this crate already built plus the four
+  `serde_json` brings
 - **AND** it names no `syn`, `quote`, `proc-macro2`, or `serde_derive`, so nothing in
-  the build graph runs a proc macro. A dependency scoped to a platform the manifest does
+  the build graph runs a proc macro. `serde_json` reaches `serde_core` without
+  `serde_core`'s optional `derive` feature, which is what keeps that true after this
+  change. A dependency scoped to a platform the manifest does
   not declare — Windows — is out of scope by construction and is not searched for
 - **AND** it names no `encoding_rs`, which `yaml-rust2`'s default features would have
   pulled in, so `default-features = false` is observably in effect rather than merely
   written down
+- **AND** it names no `ryu`, which older `serde_json` releases used for float formatting
+  and which `zmij` replaces, so the enumerated set is the resolution actually verified
+  rather than one carried over from memory
 - **AND** `Cargo.lock` holds more entries than that — optional resolutions cargo never
   builds — which is why no check counts lock entries
 
@@ -203,8 +214,11 @@ succeeds at the commit that lands it.
 - **AND** with the manifest restored in the copy and `yaml-rust2` removed instead,
   `cargo build` fails again, because `schema` parses `config.yaml`, `.openspec.yaml`, and
   `schema.yaml` through it
+- **AND** with the manifest restored again and `serde_json` removed instead, `cargo build`
+  fails a third time, because `changes::from_cli` parses `openspec list --json`,
+  `openspec instructions apply --json`, and `openspec schema which --json` through it
 - **AND** removing a dependency that is not declared is reported as a failure of the check
-  rather than counted as a pass, so the second leg cannot silently succeed against a
+  rather than counted as a pass, so no leg can silently succeed against a
   manifest that never carried the crate
 - **AND** the working tree is byte-identical afterwards, `Cargo.lock` included. The
   experiment is run in a copy rather than in place because `cargo build` **rewrites
@@ -214,3 +228,12 @@ succeeds at the commit that lands it.
   resolution this change verified
 - **AND** in the working tree itself, `cargo build --locked` and `cargo test --all-features`
   are green, which is where the "committed lock still resolves" half of the claim is made
+
+#### Scenario: No JSON parsing reaches the subprocess seam
+
+- **WHEN** `src/cli.rs` is searched for `serde_json`
+- **THEN** there is no match, so the seam still returns stdout verbatim and every parse
+  lives on the testable side of it
+- **AND** the check fails when `src/cli.rs` is absent, and it is paired with a positive
+  control asserting that `src/changes.rs` **does** name `serde_json`, so a search that
+  found nothing because it searched nothing fails instead of passing
