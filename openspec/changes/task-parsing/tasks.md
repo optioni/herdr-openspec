@@ -178,7 +178,7 @@ Covers "A byte-order mark before the first bullet does not hide the task", "A ne
 character before a bullet is not indentation", and "A next-line character inside the box
 is not an empty box".
 
-- [ ] 2.1 RED: Write the three failing tests named after those scenarios, then confirm
+- [x] 2.1 RED: Write the three failing tests named after those scenarios, then confirm
       each is red **against group 1's shipped implementation** rather than against a
       missing function — this group's whole content is that `char::is_whitespace` is the
       wrong predicate. The BOM test fails because `char::is_whitespace` rejects U+FEFF, so
@@ -189,23 +189,23 @@ is not an empty box".
       planning note rather than as a reason to regress working code into a failure. A test
       that passes because the behaviour is already right is a fact to record, not a defect
       to create
-- [ ] 2.2 RED: Give the BOM test a second task line after the BOM-prefixed one and assert
+- [x] 2.2 RED: Give the BOM test a second task line after the BOM-prefixed one and assert
       the exact pair `(completed: 1, total: 2)`. A test asserting only "the total is not
       zero" passes against an implementation that counts the second line and drops the
       first, which is precisely the bug
-- [ ] 2.3 GREEN: Replace the whitespace predicate with one named helper carrying a doc
+- [x] 2.3 GREEN: Replace the whitespace predicate with one named helper carrying a doc
       comment stating the rule and its provenance in two lines: the set is the CLI's `\s` —
       Unicode `White_Space` plus U+FEFF, minus U+0085 — and both differences from
       `char::is_whitespace` are resolved in the CLI's favour because the counts must agree.
       Apply it at every whitespace test in the scan: leading indent, between bullet and
       box, inside the box, and after the box
-- [ ] 2.4 REFACTOR: Confirm there is exactly one place in the module that decides what
+- [x] 2.4 REFACTOR: Confirm there is exactly one place in the module that decides what
       whitespace is, and that `trim` on the item text is either the same rule or explicitly
       documented as `str::trim`'s. `str::trim` uses `char::is_whitespace`, so a text ending
       in U+FEFF keeps it while a text ending in U+0085 loses it — record which way you went
       and why it cannot change a count, since trimming happens after the line has already
       been counted
-- [ ] 2.5 Run the group tests — `cargo test --all-features` green, no regressions
+- [x] 2.5 Run the group tests — `cargo test --all-features` green, no regressions
 
 ## 3. Headings, groups, and items
 <!-- kind: behavior -->

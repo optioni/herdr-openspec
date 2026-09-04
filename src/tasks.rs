@@ -70,10 +70,6 @@ pub fn count(text: &str) -> Progress {
 /// whitespace, require exactly one `-` or `*`, skip whitespace, require `[`,
 /// take exactly one character, require `]`. No fence, comment, or
 /// block-quote state — see design.md -> Decisions 6.
-///
-/// Whitespace here is `char::is_whitespace`, the standard-library predicate;
-/// it satisfies every scenario this group owns. Group 2 narrows it to the
-/// CLI's own alphabet.
 fn task_line_checked(line: &str) -> Option<bool> {
     let mut chars = line.chars();
     skip_whitespace(&mut chars);
@@ -90,7 +86,7 @@ fn task_line_checked(line: &str) -> Option<bool> {
     }
 
     let box_char = chars.next()?;
-    if !(box_char.is_whitespace() || box_char == 'x' || box_char == 'X') {
+    if !(is_task_whitespace(box_char) || box_char == 'x' || box_char == 'X') {
         return None;
     }
 
@@ -101,16 +97,31 @@ fn task_line_checked(line: &str) -> Option<bool> {
     Some(box_char == 'x' || box_char == 'X')
 }
 
-/// Advance `chars` past any run of whitespace characters at its front.
+/// Advance `chars` past any run of whitespace characters at its front, using
+/// [`is_task_whitespace`].
 fn skip_whitespace(chars: &mut std::str::Chars<'_>) {
     let mut lookahead = chars.clone();
     while let Some(c) = lookahead.next() {
-        if c.is_whitespace() {
+        if is_task_whitespace(c) {
             *chars = lookahead.clone();
         } else {
             break;
         }
     }
+}
+
+/// The whitespace alphabet the OpenSpec CLI's `\s` matches: Unicode
+/// `White_Space` plus U+FEFF (byte-order mark), minus U+0085 (next line).
+/// Both differences from `char::is_whitespace` are resolved in the CLI's
+/// favour, because the counts must agree: a UTF-8 BOM sits immediately
+/// before a file's first character, so without U+FEFF here the first task
+/// line of a BOM-prefixed file would be invisible to this module and
+/// visible to the CLI; U+0085 is whitespace to `char::is_whitespace` and
+/// not to the CLI, so it is admitted by neither rule here. Used at every
+/// whitespace test in the scan: leading indent, between bullet and box,
+/// inside the box, and after the box.
+fn is_task_whitespace(c: char) -> bool {
+    (c.is_whitespace() || c == '\u{feff}') && c != '\u{85}'
 }
 
 #[cfg(test)]
@@ -366,5 +377,48 @@ mod tests {
             total: 4,
         };
         assert_eq!(from_file, from_cli);
+    }
+
+    // Group 2: the whitespace alphabet. `char::is_whitespace` differs from
+    // the CLI's `\s` at exactly two code points — these three tests are red
+    // against group 1's shipped `count` because it uses that predicate.
+
+    #[test]
+    fn a_byte_order_mark_before_the_first_bullet_does_not_hide_the_task() {
+        let text = "\u{feff}- [x] first\n- [ ] second";
+        let progress = super::count(text);
+        assert_eq!(
+            progress,
+            super::Progress {
+                completed: 1,
+                total: 2
+            }
+        );
+    }
+
+    #[test]
+    fn a_next_line_character_before_a_bullet_is_not_indentation() {
+        let text = "\u{85}- [x] task";
+        let progress = super::count(text);
+        assert_eq!(
+            progress,
+            super::Progress {
+                completed: 0,
+                total: 0
+            }
+        );
+    }
+
+    #[test]
+    fn a_next_line_character_inside_the_box_is_not_an_empty_box() {
+        let text = "- [\u{85}] x";
+        let progress = super::count(text);
+        assert_eq!(
+            progress,
+            super::Progress {
+                completed: 0,
+                total: 0
+            }
+        );
     }
 }
