@@ -171,9 +171,47 @@ pub(crate) fn declared_name(
     }
 }
 
+/// Read a path into a `FileText`, mapping `NotFound` to `Absent` and every
+/// other failure — including a permission error or a directory where a file
+/// was expected — to `Unreadable`.
+///
+/// `pub(crate)`, like `FileText` and `declared_name`: `changes-from-files`
+/// lives in this crate and is the caller that wants to read
+/// `openspec/config.yaml` once and hand the same `FileText` to
+/// `declared_name` for every change, rather than re-reading it once per
+/// change through `select`.
+pub(crate) fn read_file(path: &Path) -> FileText {
+    match std::fs::read_to_string(path) {
+        Ok(text) => FileText::Read(text),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => FileText::Absent,
+        Err(e) => FileText::Unreadable(e.to_string()),
+    }
+}
+
+/// Which schema applies to `repo`, or to `change_dir` inside it. Reads
+/// `<change_dir>/.openspec.yaml` only when `change_dir` is `Some`, and
+/// `<repo>/openspec/config.yaml` always, and hands both to `declared_name`.
+pub fn select(repo: &Path, change_dir: Option<&Path>) -> Selection {
+    let project_path = repo.join("openspec").join("config.yaml");
+    let project_text = read_file(&project_path);
+
+    match change_dir {
+        Some(dir) => {
+            let change_path = dir.join(".openspec.yaml");
+            let change_text = read_file(&change_path);
+            declared_name(
+                Some((change_path.as_path(), &change_text)),
+                (project_path.as_path(), &project_text),
+            )
+        }
+        None => declared_name(None, (project_path.as_path(), &project_text)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::testutil::{ScratchDir, snapshot};
 
     fn read(text: &str) -> FileText {
         FileText::Read(text.to_string())
@@ -406,5 +444,116 @@ mod tests {
         assert_eq!(selection.name, DEFAULT_SCHEMA);
         assert_eq!(selection.source, NameSource::Default);
         assert_eq!(selection.problems.len(), 1);
+    }
+
+    // --- group 3: the selection filesystem edge -----------------------
+
+    fn mkdir(path: &Path) {
+        std::fs::create_dir_all(path).expect("create fixture directory");
+    }
+
+    #[test]
+    fn no_change_directory_is_supplied_at_all() {
+        let scratch = ScratchDir::new();
+        let root = scratch.path();
+        let repo = root.join("repo");
+        mkdir(&repo.join("openspec"));
+        std::fs::write(repo.join("openspec").join("config.yaml"), b"schema: tdd\n")
+            .expect("write project config");
+        // A third name appearing nowhere else in the fixture, planted at
+        // both the path a `change_dir = repo` bug would read and the path a
+        // `change_dir = repo.parent()` bug would read.
+        std::fs::write(repo.join(".openspec.yaml"), b"schema: planted\n")
+            .expect("write repo-root plant");
+        std::fs::write(root.join(".openspec.yaml"), b"schema: planted\n")
+            .expect("write scratch-root plant");
+
+        let selection = select(&repo, None);
+        assert_eq!(
+            selection,
+            Selection {
+                name: "tdd".to_string(),
+                source: NameSource::Project,
+                problems: Vec::new(),
+            }
+        );
+    }
+
+    #[test]
+    fn an_unreadable_file_falls_through_and_is_named() {
+        let scratch = ScratchDir::new();
+        let repo = scratch.path();
+        // `openspec/config.yaml` as a directory: `read_to_string` returns an
+        // I/O error rather than `NotFound`, which is what separates
+        // `Unreadable` from `Absent`.
+        mkdir(&repo.join("openspec").join("config.yaml"));
+
+        let selection = select(repo, None);
+        assert_eq!(selection.name, DEFAULT_SCHEMA);
+        assert_eq!(selection.source, NameSource::Default);
+        assert_eq!(selection.problems.len(), 1);
+        assert!(selection.problems[0].contains(
+            &repo
+                .join("openspec")
+                .join("config.yaml")
+                .display()
+                .to_string()
+        ));
+    }
+
+    #[test]
+    fn a_repository_tree_is_byte_identical_after_selection() {
+        let scratch = ScratchDir::new();
+        let repo = scratch.path();
+        mkdir(&repo.join("openspec").join("changes").join("x"));
+        std::fs::write(
+            repo.join("openspec")
+                .join("changes")
+                .join("x")
+                .join("tasks.md"),
+            b"- [ ] 1 do it\n",
+        )
+        .expect("write tasks.md");
+        mkdir(&repo.join("openspec").join("specs"));
+        std::fs::write(repo.join("openspec").join("config.yaml"), b"schema: tdd\n")
+            .expect("write config.yaml");
+        std::fs::write(repo.join("README.md"), b"# Fixture\n").expect("write README.md");
+
+        assert!(
+            repo.join("openspec").join("config.yaml").exists(),
+            "fixture must exist before the call under test"
+        );
+
+        let before = snapshot(repo);
+        let _ = select(repo, None);
+        let _ = select(repo, None);
+        let after = snapshot(repo);
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn a_missing_configuration_file_is_not_created() {
+        let scratch = ScratchDir::new();
+        let repo = scratch.path();
+        mkdir(&repo.join("openspec"));
+        let change_dir = repo.join("nonexistent-change");
+
+        let selection = select(repo, Some(&change_dir));
+        assert!(!repo.join("openspec").join("config.yaml").exists());
+        assert!(!change_dir.exists());
+        assert_eq!(selection.name, DEFAULT_SCHEMA);
+        assert_eq!(selection.source, NameSource::Default);
+
+        // The other half of "Nothing declared anywhere yields the default":
+        // a repository root with no `openspec/` directory at all degrades
+        // rather than failing. Asserted here, through `select`, rather than
+        // in group 2, which is pure and creates no file.
+        let bare = scratch.path().join("bare-root");
+        mkdir(&bare);
+        let bare_selection = select(&bare, None);
+        assert_eq!(bare_selection.name, DEFAULT_SCHEMA);
+        assert_eq!(bare_selection.source, NameSource::Default);
+        assert!(bare_selection.problems.is_empty());
+        assert!(!bare.join("openspec").exists());
     }
 }
