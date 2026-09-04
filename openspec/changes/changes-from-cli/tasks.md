@@ -662,7 +662,7 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
 ## 1. Foundation: baseline, the dependency, and the extracted checks
 <!-- kind: operational -->
 
-- [ ] 1.1 CHECK: Capture the baseline that every later check measures against, and write
+- [x] 1.1 CHECK: Capture the baseline that every later check measures against, and write
       each value into this file in place of the placeholder beside it.
       - `git rev-parse HEAD` → record as `BASE`. This is the commit the planning
         artifacts land on. Every `OPENSPEC-UNTOUCHED` run uses this value.
@@ -680,7 +680,7 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
       the lib baseline is recorded higher than reality, which makes `TESTCOUNT`
       unsatisfiable rather than falsely green.
 
-- [ ] 1.2 CHECK: Run `NOSPAWN-GREP` and `GATE-MECH1` against the tree as it stands, before
+- [x] 1.2 CHECK: Run `NOSPAWN-GREP` and `GATE-MECH1` against the tree as it stands, before
       any edit. Both must **pass**, establishing that this change starts from a clean gate
       rather than inheriting a broken one. Expected, and observed at planning time:
       `NOSPAWN OK: 8 files checked under src, only src/cli.rs may spawn`;
@@ -690,7 +690,7 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
       outside `src/cli.rs` — in which case this change is not the place to fix it and the
       finding is reported before any code is written.
 
-- [ ] 1.3 CHECK: Run the three checks that must **fail** today, and record each message.
+- [x] 1.3 CHECK: Run the three checks that must **fail** today, and record each message.
       They are the proof that the corresponding green runs later in the change are earned
       rather than structural.
       - `NOJSON-SEAM` → `src/changes.rs does not name serde_json - the check would pass
@@ -702,13 +702,13 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
       All three were demonstrated red at planning time.
       **Red when:** any of the three passes today, which would mean it cannot discriminate.
 
-- [ ] 1.4 CHANGE: Add to `Cargo.toml`:
+- [x] 1.4 CHANGE: Add to `Cargo.toml`:
       `serde_json = { version = "1.0.151", default-features = false, features = ["std"] }`
       — an explicit `features` list, `default-features = false`, and the version checked
       against the registry rather than remembered (`cargo info serde_json` reported
       `1.0.151` at planning time). Commit `Cargo.lock`.
 
-- [ ] 1.5 VERIFY: Run `DEPS` with `DEPS_SKIP_LEG5=1` — legs 1 through 4 must all pass, and
+- [x] 1.5 VERIFY: Run `DEPS` with `DEPS_SKIP_LEG5=1` — legs 1 through 4 must all pass, and
       the output recorded verbatim. Verified in a scratch copy at planning time:
       `leg 1a` one bin target, edition 2024; `leg 1b` `scripts/build.sh` exits 0 after the
       binary is deleted; `leg 2a` exactly three normal deps with defaults off and exact
@@ -719,7 +719,7 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
       Leg 5 is deferred to task 10.8, because `serde_json` is not used yet and it would
       correctly fail here.
 
-- [ ] 1.6 VERIFY: `make check` — must still be green with the dependency added and no code
+- [x] 1.6 VERIFY: `make check` — must still be green with the dependency added and no code
       using it yet. Commit.
 
 ---
