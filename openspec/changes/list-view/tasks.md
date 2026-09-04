@@ -1045,7 +1045,7 @@ block is re-run, not further modified — and `GRAPH-SNAP` likewise.
 ## 5. `ui::view` — drawing the rows, the slice, and the selection
 <!-- kind: behavior -->
 
-- [ ] 5.1 RED: Write failing tests in `src/ui/view.rs`'s `mod tests`, **every one rendering
+- [x] 5.1 RED: Write failing tests in `src/ui/view.rs`'s `mod tests`, **every one rendering
       at both 60 and 120** (`WIDTHS` enforces it):
       - `list_rows_render_at_60_and_120` — the exact 38- and 58-column strings from 4.3 as
         buffer rows 2, 3, 4 at columns 1..=38 and 1..=58, plus interior rows 5..=17 all
@@ -1098,21 +1098,21 @@ block is re-run, not further modified — and `GRAPH-SNAP` likewise.
       Covers change-rows' four requirements and list-selection's two at the view tier.
       **Red when:** the interiors are blank, so every row assertion fails against spaces.
 
-- [ ] 5.2 GREEN: Implement `render_list(frame, interior, dashboard)` in `src/ui/view.rs`:
+- [x] 5.2 GREEN: Implement `render_list(frame, interior, dashboard)` in `src/ui/view.rs`:
       call `list::rows(dashboard, interior.width)`, find the index of the selected row,
       call `layout::viewport(rows.len(), cursor, interior.height)`, and `set_string` each
       row of the slice at the interior's first column, applying `Modifier::BOLD` to the
       selected row and `Style::default()` to the rest. Draw nothing when the interior has
       zero width or zero height.
 
-- [ ] 5.3 GREEN: Call `render_list` from `render_body` for the list region only, using
+- [x] 5.3 GREEN: Call `render_list` from `render_body` for the list region only, using
       `Block::inner` on the region's area so the borders are never overwritten.
 
-- [ ] 5.4 REFACTOR: Extract the tests' two interior geometries into one helper
+- [x] 5.4 REFACTOR: Extract the tests' two interior geometries into one helper
       (`interior_cols(buf, y)` returning the 38 or 58 characters for the buffer's width) so
       the *expectations* are written out per test but the geometry is derived once.
 
-- [ ] 5.5 VERIFY: `testcount --lib 'ui::view::tests::' 38` — the 17 measured at `main` plus
+- [x] 5.5 VERIFY: `testcount --lib 'ui::view::tests::' 38` — the 17 measured at `main` plus
       this group's 21 — then `WIDTHS` with `WIDTHS_MIN=38`, which must pass. Then the four
       intermediate-gate commands.
       **Red when:** `WIDTHS` names a new test that omits 60 or 120, or the count is below 38.
