@@ -142,9 +142,9 @@ keeps every step's tests genuinely red before its code exists.
 ## 8. Change Review
 <!-- kind: operational -->
 
-- [ ] 8.1 CHECK: Dispatch an independent reviewer — not a fork of the implementing session — against proposal.md, both spec files, design.md, and tasks.md plus the diff. Point it first at the concentration points that bite here: every ordering assertion checking `BinSource` and not only a path; the three usability tests actually failing against the three wrong predicates named in 3.2; the symlink test rejecting a canonicalizing implementation; the two `problems` tests distinguishing "nothing installed" from "configured wrong" by count; the cache tests failing against no cache and against a `static`; `openspec_bin_from_env`'s test not being the tautological form; the containment tests asserting bytes and mtimes rather than listings; and every discovery assertion comparing against `canonicalize(expected)` so macOS and Linux agree
-- [ ] 8.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a one-line reason, note SUGGESTIONs, and re-run every affected check
-- [ ] 8.3 VERIFY: Confirm no blocking or unowned finding remains, and that every artifact a repair touched was updated in place rather than annotated afterwards
+- [x] 8.1 CHECK: Dispatch an independent reviewer — not a fork of the implementing session — against proposal.md, both spec files, design.md, and tasks.md plus the diff. Point it first at the concentration points that bite here: every ordering assertion checking `BinSource` and not only a path; the three usability tests actually failing against the three wrong predicates named in 3.2; the symlink test rejecting a canonicalizing implementation; the two `problems` tests distinguishing "nothing installed" from "configured wrong" by count; the cache tests failing against no cache and against a `static`; `openspec_bin_from_env`'s test not being the tautological form; the containment tests asserting bytes and mtimes rather than listings; and every discovery assertion comparing against `canonicalize(expected)` so macOS and Linux agree
+- [x] 8.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a one-line reason, note SUGGESTIONs, and re-run every affected check
+- [x] 8.3 VERIFY: Confirm no blocking or unowned finding remains, and that every artifact a repair touched was updated in place rather than annotated afterwards
 
 ## 9. Documentation
 <!-- kind: operational -->
