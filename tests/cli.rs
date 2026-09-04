@@ -14,6 +14,43 @@ fn bin() -> Command {
 }
 
 #[test]
+fn ui_without_a_terminal_exits_three() {
+    // stdin's write end is deliberately left open (not Stdio::null()) so a
+    // wrongly-blocking implementation hangs rather than reaching EOF and
+    // exiting for an unrelated reason.
+    let mut child = bin()
+        .arg("ui")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn binary");
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let exited = loop {
+        if child.try_wait().expect("try_wait failed").is_some() {
+            break true;
+        }
+        if Instant::now() >= deadline {
+            break false;
+        }
+        thread::sleep(Duration::from_millis(10));
+    };
+    assert!(
+        exited,
+        "process blocked on stdin instead of exiting immediately"
+    );
+
+    let output = child.wait_with_output().expect("failed to wait on child");
+
+    assert_eq!(output.status.code(), Some(3), "status: {:?}", output.status);
+    assert!(output.stdout.is_empty(), "stdout: {:?}", output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("herdr-openspec"), "stderr: {stderr}");
+    assert!(stderr.contains("not a terminal"), "stderr: {stderr}");
+}
+
+#[test]
 fn ui_prints_placeholder_banner() {
     let output = bin()
         .arg("ui")

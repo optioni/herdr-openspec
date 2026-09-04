@@ -392,20 +392,20 @@ needs, in the extracted copy rather than in the archive.
 ## 0. Acceptance Test — Outer Loop RED
 <!-- kind: behavior -->
 
-- [ ] 0.1 Set up the harness: no new harness is needed. `tests/cli.rs` already spawns the
+- [x] 0.1 Set up the harness: no new harness is needed. `tests/cli.rs` already spawns the
       crate's own binary through `env!("CARGO_BIN_EXE_herdr-openspec")` and already polls to
       a deadline rather than sleeping. design.md → Test Boundaries names the crate's own
       binary as **real** in this tier and the terminal as **never reached**, because the
       spawn pipes stdout.
 
-- [ ] 0.2 RED: Add `tests/cli.rs::ui_without_a_terminal_exits_three` for
+- [x] 0.2 RED: Add `tests/cli.rs::ui_without_a_terminal_exits_three` for
       plugin-build → "`ui` with stdout piped exits 3 without blocking". Spawn `ui` with
       stdout and stderr piped and **stdin attached to a pipe whose write end is left open**,
       so a wrongly blocking implementation hangs rather than reaching EOF. Poll `try_wait`
       to a ten-second deadline. Assert: exited before the deadline; `status.code() ==
       Some(3)`; stdout empty; stderr contains `herdr-openspec` and `not a terminal`.
 
-- [ ] 0.3 Confirm it fails because the behaviour is missing, not because the harness is
+- [x] 0.3 Confirm it fails because the behaviour is missing, not because the harness is
       misconfigured. Run `cargo test --all-features --test cli ui_without_a_terminal_exits_three`
       and record the message verbatim. **Expected today:** the process blocks on stdin, so
       the deadline expires and the run fails on `exited` — not on a status mismatch. Both
@@ -413,6 +413,10 @@ needs, in the extracted copy rather than in the archive.
       **Red when:** the assertion fails for the absent behaviour. **Wrongly green when:** the
       filter matched nothing — guarded by naming the test explicitly and confirming the run
       reports `1 filtered out`-style arithmetic consistent with one test having run.
+      **Recorded:** `thread 'ui_without_a_terminal_exits_three' panicked at tests/cli.rs:39:5:
+      process blocked on stdin instead of exiting immediately` — the deadline expired, as
+      predicted. `test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 5 filtered
+      out` confirms exactly one test ran under the filter.
 
 ---
 
