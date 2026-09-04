@@ -244,25 +244,50 @@ configured" and "configured wrong" are distinguishable by the caller.
 - **AND** exactly one problem still names the configured path, so the caller can tell
   this apart from the case where nothing was configured at all
 
-### Requirement: The `npm prefix -g` step is an injected hook, deferred until the subprocess seam exists
+### Requirement: The `npm prefix -g` step is an injected hook bound to a real probe in `cli`
 
 Step 4 needs the output of `npm prefix -g`, which requires spawning a process. No module
-in this crate may spawn one outside `cli`, and `cli` does not exist until
-`subprocess-seam`. The chain SHALL therefore take the npm prefix as an injected
-`&dyn Fn() -> Option<PathBuf>`, following the same pattern by which configuration takes
-the process environment as an injected lookup.
+in this crate may spawn one outside `cli`. The chain SHALL therefore continue to take the
+npm prefix as an injected `&dyn Fn() -> Option<PathBuf>`, following the same pattern by
+which configuration takes the process environment as an injected lookup — that injection
+is what keeps `resolve` pure and unit-testable, and it survives the seam landing rather
+than being replaced by it.
 
-The binding this change ships SHALL return no prefix, so step 4 contributes nothing in
-production and no code path spawns anything. `subprocess-seam` SHALL replace that
-binding with one that runs `npm prefix -g` behind the seam. A test SHALL pin today's
-empty result, so that hand-over turns a test red rather than passing silently.
+What changes is the binding. The production binding SHALL be the real probe published by
+the `subprocess-seam` capability, which starts the npm program with the arguments `prefix`
+and `-g`, reads its **stdout only**, trimmed, and reports no prefix when the program could
+not be started, exited non-zero, or produced empty output. `resolve::openspec_bin_from_env`
+SHALL pass that binding and no other.
 
-#### Scenario: The shipped hook yields no prefix
+`resolve` SHALL expose no npm binding of its own. The placeholder that always returned
+nothing SHALL be removed rather than left beside the real one.
 
-- **WHEN** the binding this change provides is called
-- **THEN** it returns no prefix
-- **AND** the test asserting this names `subprocess-seam` as the change that will make it
-  fail, because going red is the intended signal rather than a regression
+`src/resolve.rs` SHALL name no process API at all — no `std::process`, no `Command`, no
+`Stdio` — including in its comments, because the check reads source text and cannot tell a
+comment from a call. This clause is scoped to `src/resolve.rs` deliberately; the tree-wide
+form of the rule, with `src/cli.rs` excluded as the one module permitted to spawn, is a
+requirement of the `subprocess-seam` capability rather than of this one.
+
+#### Scenario: The hook is still injected, so the chain stays pure
+
+- **WHEN** `openspec_bin` is called with nothing configured, a `PATH` holding no
+  `openspec`, no nvm tree, and a fourth-step hook that is an ordinary closure returning a
+  scratch directory `N` holding an executable `N/bin/openspec`
+- **THEN** `N/bin/openspec` is resolved with the npm-prefix step as its source
+- **AND** the call spawns nothing, because the collaborator is a closure and `resolve` has
+  no other way to reach a process
+
+#### Scenario: The production binding is the real probe
+
+- **WHEN** `src/resolve.rs` is searched for the identifier the composition passes as its
+  fourth-step hook
+- **THEN** it names `cli::npm_prefix`, and searching all of `src/` for
+  `npm_prefix_deferred` yields no match
+- **AND** both halves are needed: the absence check alone passes for a hand-over in which
+  the placeholder was renamed and still returns nothing, and every other check in this
+  change — the chain tests, the no-spawn greps, the no-tools suite run, and the binding's
+  own smoke test — stays green for that implementation, because no prefix is a legitimate
+  answer
 
 #### Scenario: Resolution spawns no process
 
@@ -273,12 +298,8 @@ empty result, so that hand-over turns a test red rather than passing silently.
 - **AND** `src/resolve.rs` names no process API at all — no `std::process`, no `Command`,
   no `Stdio` — including in its comments, because the check reads source text and cannot
   tell a comment from a call
-
-The normative clause is scoped to `src/resolve.rs` deliberately. A tree-wide "no file
-under `src/` names `Command`" claim would be a live requirement that `subprocess-seam`'s
-`src/cli.rs` is *required* to falsify — the defect `plugin-config`'s review repaired in
-its own version of this scenario. The tree-wide grep is still run, as a task-level check
-that `subprocess-seam` will rescope; it is not frozen here as a requirement.
+- **AND** the whole suite passes on that `PATH` too, including `cli`'s own tests, because
+  every spawning test names an absolute scratch program path
 
 ### Requirement: A resolved binary is cached for the session in a value the caller owns
 
