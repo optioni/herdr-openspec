@@ -1,0 +1,154 @@
+//! The 100-column breakpoint and the frame split. Pure `Rect` arithmetic —
+//! no filesystem, process, environment, network, or standard-I/O API. See
+//! `openspec/changes/tui-shell/specs/responsive-layout/spec.md`.
+
+use ratatui::layout::{Constraint, Layout, Rect};
+
+use crate::ui::app::Route;
+
+/// The narrow/wide breakpoint, in columns. `SPEC.md` -> Responsive layout.
+pub const WIDE_MIN_WIDTH: u16 = 100;
+
+/// Whether the body shows one region (below the breakpoint) or two (at or
+/// above it). Derived from the current frame area on every draw — never
+/// stored on `Dashboard` — so a resize across the breakpoint changes layout
+/// on the very next frame.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LayoutMode {
+    Narrow,
+    Wide,
+}
+
+/// A total function of `width` alone.
+pub fn mode(width: u16) -> LayoutMode {
+    if width >= WIDE_MIN_WIDTH {
+        LayoutMode::Wide
+    } else {
+        LayoutMode::Narrow
+    }
+}
+
+/// Split `area` into a header row, a body, and a footer row.
+///
+/// Heights 0, 1, and 2 are branched on explicitly rather than handed to the
+/// constraint solver: measured against ratatui 0.30.2,
+/// `Layout::vertical([Length(1), Min(0), Length(1)])` at height 1 gives the
+/// single row to the footer, not the header, which is not the contract
+/// `responsive-layout` wants. See design.md -> Decisions.
+pub fn split_frame(area: Rect) -> (Rect, Rect, Rect) {
+    let row = |y: u16, height: u16| Rect {
+        x: area.x,
+        y,
+        width: area.width,
+        height,
+    };
+    match area.height {
+        0 => (row(area.y, 0), row(area.y, 0), row(area.y, 0)),
+        1 => (row(area.y, 1), row(area.y + 1, 0), row(area.y + 1, 0)),
+        2 => (row(area.y, 1), row(area.y + 1, 0), row(area.y + 1, 1)),
+        h => (
+            row(area.y, 1),
+            row(area.y + 1, h - 2),
+            row(area.y + h - 1, 1),
+        ),
+    }
+}
+
+/// Split the body into the change-list region and the artifact-detail
+/// region. At [`LayoutMode::Wide`] both are drawn, divided at column 40;
+/// below the breakpoint only the routed region is drawn and the other is
+/// `None`.
+pub fn split_body(area: Rect, route: Route) -> (Option<Rect>, Option<Rect>) {
+    match mode(area.width) {
+        LayoutMode::Wide => {
+            let [list, detail] =
+                Layout::horizontal([Constraint::Length(40), Constraint::Min(0)]).areas(area);
+            (Some(list), Some(detail))
+        }
+        LayoutMode::Narrow => match route {
+            Route::List => (Some(area), None),
+            Route::Detail => (None, Some(area)),
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::ui::app::Route;
+    use crate::ui::layout::{LayoutMode, WIDE_MIN_WIDTH, mode, split_body, split_frame};
+    use ratatui::layout::Rect;
+
+    #[test]
+    fn mode_is_narrow_below_100() {
+        assert_eq!(mode(0), LayoutMode::Narrow);
+        assert_eq!(mode(1), LayoutMode::Narrow);
+        assert_eq!(mode(40), LayoutMode::Narrow);
+        assert_eq!(mode(60), LayoutMode::Narrow);
+        assert_eq!(mode(99), LayoutMode::Narrow);
+    }
+
+    #[test]
+    fn mode_is_wide_at_100_and_above() {
+        assert_eq!(WIDE_MIN_WIDTH, 100);
+        assert_eq!(mode(100), LayoutMode::Wide);
+        assert_eq!(mode(101), LayoutMode::Wide);
+        assert_eq!(mode(120), LayoutMode::Wide);
+        assert_eq!(mode(u16::MAX), LayoutMode::Wide);
+    }
+
+    #[test]
+    fn split_frame_gives_header_body_footer_at_normal_height() {
+        for width in [60u16, 120u16] {
+            let area = Rect::new(0, 0, width, 20);
+            let (header, body, footer) = split_frame(area);
+            assert_eq!(header, Rect::new(0, 0, width, 1));
+            assert_eq!(body, Rect::new(0, 1, width, 18));
+            assert_eq!(footer, Rect::new(0, 19, width, 1));
+        }
+    }
+
+    #[test]
+    fn split_frame_degenerate_heights() {
+        for width in [60u16, 120u16] {
+            let (header, body, footer) = split_frame(Rect::new(0, 0, width, 0));
+            assert_eq!(header.height, 0);
+            assert_eq!(body.height, 0);
+            assert_eq!(footer.height, 0);
+
+            let (header, body, footer) = split_frame(Rect::new(0, 0, width, 1));
+            assert_eq!(header, Rect::new(0, 0, width, 1));
+            assert_eq!(body.height, 0);
+            assert_eq!(footer.height, 0);
+
+            let (header, body, footer) = split_frame(Rect::new(0, 0, width, 2));
+            assert_eq!(header.y, 0);
+            assert_eq!(footer.y, 1);
+            assert_eq!(body.height, 0);
+        }
+    }
+
+    #[test]
+    fn split_body_wide_puts_the_divider_at_40() {
+        let body = Rect::new(0, 1, 120, 18);
+        let (list, detail) = split_body(body, Route::List);
+        assert_eq!(list, Some(Rect::new(0, 1, 40, 18)));
+        assert_eq!(detail, Some(Rect::new(40, 1, 80, 18)));
+
+        let body = Rect::new(0, 1, 100, 18);
+        let (list, detail) = split_body(body, Route::List);
+        assert_eq!(list, Some(Rect::new(0, 1, 40, 18)));
+        assert_eq!(detail, Some(Rect::new(40, 1, 60, 18)));
+    }
+
+    #[test]
+    fn split_body_narrow_yields_one_region_for_the_route() {
+        let body = Rect::new(0, 1, 60, 18);
+        let (list, detail) = split_body(body, Route::List);
+        assert_eq!(list, Some(body));
+        assert_eq!(detail, None);
+
+        let (list, detail) = split_body(body, Route::Detail);
+        assert_eq!(list, None);
+        assert_eq!(detail, Some(body));
+    }
+}

@@ -13,6 +13,7 @@ pub mod resolve;
 pub mod schema;
 pub mod state;
 pub mod tasks;
+pub mod ui;
 
 /// The current process id. Exists so `state::record`'s temporary-file name
 /// can include it without `src/state.rs` itself naming the standard-library

@@ -581,7 +581,7 @@ needs, in the extracted copy rather than in the archive.
 ## 2. `ui::layout` — the breakpoint and the frame split
 <!-- kind: behavior -->
 
-- [ ] 2.1 RED: Create `src/ui/layout.rs` with an empty `mod tests` and write six failing
+- [x] 2.1 RED: Create `src/ui/layout.rs` with an empty `mod tests` and write six failing
       tests in it, for responsive-layout's frame and breakpoint scenarios:
       - `mode_is_narrow_below_100` — `mode(0)`, `mode(1)`, `mode(40)`, `mode(60)`,
         `mode(99)` all `LayoutMode::Narrow`.
@@ -604,17 +604,47 @@ needs, in the extracted copy rather than in the archive.
       `split_frame`, and `split_body` do not exist. Confirm the failure is the missing
       behaviour, not a missing `pub mod ui;` — add the module declaration first so the
       compile error names the functions.
+      **Design gap found and fixed here:** `split_body`'s narrow-mode scenario needs
+      `Route`, which design.md → Boundaries assigns to `src/ui/app.rs` — group 3, which
+      tasks.md sequences *after* this group, and the preamble states "view needs layout and
+      app" (implying layout needs neither). This is a genuine forward reference the plan
+      does not resolve. Fix: `Route`'s one-line definition (`pub enum Route { List, Detail
+      }`, with `Debug, Clone, Copy, PartialEq, Eq`) is pulled forward into `src/ui/app.rs`
+      now, minimally — nothing else from group 3 (`Dashboard`, `Action`, `action_for`,
+      `apply`, or app.rs's own test module) is added yet. `Route` still lives exactly where
+      design.md says; only its arrival commit moved earlier. `src/ui/mod.rs` created with
+      `pub mod app;` and `pub mod layout;`; `pub mod ui;` added to `src/lib.rs`.
+      **Recorded:** `error[E0432]: unresolved imports … no split_frame in ui::layout` (and
+      the other three names) — confirmed missing-behaviour, not a missing `pub mod ui;`
+      (that declaration was added first, as instructed).
 
-- [ ] 2.2 GREEN: Implement `WIDE_MIN_WIDTH: u16 = 100`, `LayoutMode`, `mode`,
+- [x] 2.2 GREEN: Implement `WIDE_MIN_WIDTH: u16 = 100`, `LayoutMode`, `mode`,
       `split_frame`, and `split_body`. Handle heights 0, 1, and 2 with explicit branches
       rather than handing them to the constraint solver — design.md → Decisions and
       responsive-layout's requirement both say why: the solver's behaviour when constraints
       cannot all be satisfied is not part of its contract.
+      **Recorded:** `split_frame` branches explicitly on height 0/1/2/else, each arm a
+      `Rect` row helper; `split_body` calls `mode(area.width)` and, at `Wide`, uses
+      `Layout::horizontal([Constraint::Length(40), Constraint::Min(0)])` (the solver is
+      fine for the two-way horizontal split — only the three-way vertical split is
+      excluded from it, per design.md). All 6 tests green on first implementation.
 
-- [ ] 2.3 REFACTOR: Fold any duplicated `Rect` arithmetic between the two split functions
+- [x] 2.3 REFACTOR: Fold any duplicated `Rect` arithmetic between the two split functions
       into one helper while the tests stay green, or record that none was duplicated.
+      **Recorded:** folded the repeated `Rect { x: area.x, y, width: area.width, height }`
+      construction inside `split_frame` into a local `row(y, height)` closure (four
+      call-sites collapse to one-liners). No duplication existed *between* `split_frame`
+      and `split_body` — the two use different constraint strategies by design (explicit
+      branching vs. the solver) — so nothing was folded across them. All 6 tests stayed
+      green.
 
-- [ ] 2.4 VERIFY: `testcount --lib 'ui::layout::tests::' 6`, then `make check`. Commit.
+- [x] 2.4 VERIFY: `testcount --lib 'ui::layout::tests::' 6`, then `make check`. Commit.
+      **Recorded:** `TESTCOUNT OK: --lib filter 'ui::layout::tests::' ran 6 tests (>= 6)`.
+      Per the 1.1 correction: `fmt-check` clean; `clippy -D warnings` clean; full suite —
+      395 lib (389 + 6 new) + 11 `ci_workflow` + 5-of-6 `cli` (the one known RED,
+      `ui_without_a_terminal_exits_three`, unchanged); `cargo llvm-cov --ignore-run-fail
+      --fail-under-lines 80` → **98.94%** over 7,721 lines, 82 uncovered (`src/ui/layout.rs`
+      itself at 100.00%), floor holds.
 
 ---
 
