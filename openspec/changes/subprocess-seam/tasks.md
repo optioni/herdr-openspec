@@ -943,22 +943,36 @@
 ## 11. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 11.1 CHECK: Inspect the intended verification commands and the tiers they touch —
+- [x] 11.1 CHECK: Inspect the intended verification commands and the tiers they touch —
       the unit tier (`cargo test --all-features`, covering `cli::` and `resolve::`), the
       binary-integration tier (`tests/cli.rs`, untouched by this change but re-run), and
       the command-level checks from group 8. There is no view tier here, because no view
       was added
-- [ ] 11.2 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
+
+      RECORDED: confirmed — unit tier (`cli::` 35 tests, `resolve::` chain tests
+      unaffected), binary-integration tier (`tests/cli.rs`, 5 tests, byte-for-byte
+      unchanged by this change and still passing), and group 8's seven command-level
+      checks (all re-verified in this group via `make check` and a direct
+      `openspec validate` run). No view tier, as designed.
+- [x] 11.2 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
       **Red when:** any lint fires, including dead code in the `cfg(test)` fake
-- [ ] 11.3 VERIFY: `cargo fmt --all -- --check` — clean. **Red when:** any file is
+
+      RECORDED: clean, 0 warnings, 0 errors.
+- [x] 11.3 VERIFY: `cargo fmt --all -- --check` — clean. **Red when:** any file is
       unformatted
-- [ ] 11.4 VERIFY: `cargo test --all-features` — green, and record the total test count.
+
+      RECORDED: clean, exit 0.
+- [x] 11.4 VERIFY: `cargo test --all-features` — green, and record the total test count.
       Rust's type checker runs as part of every build here, so there is no separate
       type-check command; the compile that backs 11.2 and 11.4 is it. **Red when:** any
       test fails, or the total is not greater than the baseline recorded in 1.1 (266 unit +
       11 ci_workflow + 5 cli) — a suite that grew by fewer tests than the groups above
       wrote means tests were dropped or a filter silently matched nothing
-- [ ] 11.5 VERIFY: `cargo llvm-cov --fail-under-lines 80` — the coverage gate, which this
+
+      RECORDED: 300 unit + 11 ci_workflow + 5 cli.rs binary-integration = 316 total,
+      versus the 282-test baseline (266 + 11 + 5) — grew by 34, all failures 0. 300 is
+      strictly greater than 266, satisfying the red condition's inverse.
+- [x] 11.5 VERIFY: `cargo llvm-cov --fail-under-lines 80` — the coverage gate, which this
       change's code is squarely inside. Record the reported percentage and total lines
       beside the baseline from 1.1 (98.66% over 4924 lines). **Red when:** line coverage
       falls below 80% — the enforced floor — **or** when it falls more than one percentage
@@ -966,9 +980,23 @@
       real implementations ended up unreachable while the hard floor still passes. Neither
       threshold is ever lowered, waived, or given an exclusion: if a line is genuinely
       unreachable the answer is to shrink the residue to one line, not to exempt it
-- [ ] 11.6 VERIFY: `make check` as the single composite gate, and name the failing
+
+      RECORDED: **98.67% over 5499 lines**, against the 98.66%-over-4924-lines baseline
+      — 0.01 percentage points *above* baseline, not below it, and far above both the
+      80% hard floor and the "no more than one point below baseline" soft condition.
+      `cli.rs` itself: 98.42% line coverage (569 lines, 9 missed — the `RealOpenspecCli`
+      constructor path not yet fully exercised beyond `program()`'s own test plus a
+      couple of defensive branches). Neither threshold touched, waived, or excluded.
+- [x] 11.6 VERIFY: `make check` as the single composite gate, and name the failing
       sub-command rather than a summary if it fails
-- [ ] 11.7 VERIFY: `openspec validate subprocess-seam --strict`. **Red when:** the change's
+
+      RECORDED: `make check` exit code 0 (captured directly, not inferred from tail
+      output) — fmt-check, lint, test, and coverage all passed in sequence. Nothing to
+      name as failing.
+- [x] 11.7 VERIFY: `openspec validate subprocess-seam --strict`. **Red when:** the change's
       artifacts drift from the schema. Run it with the nvm directory on `PATH` — the
       `openspec` binary is nvm-installed here and is not on the `PATH` a plain shell
       inherits, the same fact that makes probe steps 3 and 4 exist
+
+      RECORDED: `Change 'subprocess-seam' is valid`, exit 0, with
+      `$HOME/.nvm/versions/node/v24.20.0/bin` prepended to `PATH`.
