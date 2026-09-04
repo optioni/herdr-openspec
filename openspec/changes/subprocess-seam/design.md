@@ -562,10 +562,17 @@ E0034-ambiguous, so the tests disambiguate with
 *Alternative:* two separate fake types, rejected — the recording and queueing logic is
 identical and would be duplicated, and a test needing both would still hold two values.
 
-**The fake is `#[cfg(test)] pub(crate)`.** It follows `testutil`'s existing placement,
-contributes nothing to the release binary, and — the reason that matters — contributes
-nothing to the coverage denominator, so the 80% floor is not gamed by counting test
-scaffolding.
+**The fake is `#[cfg(test)] pub(crate)`.** It follows `testutil`'s existing placement and
+contributes nothing to the release binary. **Correction, found in Change Review:** an
+earlier draft of this entry also claimed it "contributes nothing to the coverage
+denominator" — that is false. `cargo llvm-cov` measures the test binary, which compiles
+in every `#[cfg(test)]` item including `mod tests` itself, and `cli.rs`'s reported line
+count (567 per `cargo llvm-cov`, against roughly 380 lines outside `mod tests`) confirms
+test code is counted, not excluded. `#[cfg(test)]` placement keeps the fake out of the
+**release binary** only; it is not a coverage-denominator mechanism, and this change does
+not rely on it being one — every trait, error variant, and probe function this change adds
+is exercised directly, so the 80% floor holds regardless of how test scaffolding is
+counted.
 
 **`RealHerdrCli` takes a program path and defaults to the bare name `herdr`.** `openspec`
 has a four-step resolution chain because `plugin-config` and `repo-resolution` built one;

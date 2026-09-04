@@ -422,16 +422,33 @@ mod tests {
             "prog",
             "printf 'partial'; printf 'boom\\n' >&2; exit 3\n",
         );
-        let cli = super::RealOpenspecCli::new(prog);
+        let cli = super::RealOpenspecCli::new(prog.clone());
         let result = super::OpenspecCli::run(&cli, &["list", "--json"]);
         match result {
             Err(super::CliError::Failed {
-                code, stderr, args, ..
+                program,
+                code,
+                stderr,
+                args,
             }) => {
+                assert_eq!(program, prog.display().to_string());
                 assert_eq!(code, Some(3));
                 assert_eq!(stderr, "boom\n");
                 assert_eq!(args, vec!["list".to_string(), "--json".to_string()]);
-                assert!(!stderr.contains("partial"));
+                // The stdout payload ("partial") must be nowhere in the
+                // error at all — checked against the whole error's Debug
+                // rendering, not just the already-asserted-equal `stderr`
+                // field, which cannot discriminate this on its own.
+                let rendered = format!(
+                    "{:?}",
+                    super::CliError::Failed {
+                        program: program.clone(),
+                        code,
+                        stderr: stderr.clone(),
+                        args: args.clone(),
+                    }
+                );
+                assert!(!rendered.contains("partial"), "rendered: {rendered}");
             }
             other => panic!("expected Failed, got {other:?}"),
         }
@@ -506,6 +523,7 @@ mod tests {
         let handle = std::thread::spawn(move || h.run(&[]));
         let threaded = handle.join().expect("thread panicked");
         assert_eq!(inline, threaded);
+        assert_eq!(inline, Ok("ok".to_string()));
     }
 
     // --- group 3: the real implementations ----------------------------------
@@ -543,6 +561,12 @@ mod tests {
     fn the_default_herdr_program_name_is_herdr() {
         let cli = super::RealHerdrCli::default();
         assert_eq!(cli.program(), std::path::Path::new("herdr"));
+    }
+
+    #[test]
+    fn openspec_clis_program_accessor_reports_the_constructed_path() {
+        let cli = super::RealOpenspecCli::new("/some/openspec/path");
+        assert_eq!(cli.program(), std::path::Path::new("/some/openspec/path"));
     }
 
     #[test]
@@ -648,13 +672,27 @@ mod tests {
         fake.register_openspec(&["same"], Ok("openspec side".to_string()));
         fake.register_herdr(&["same"], Ok("herdr side".to_string()));
 
+        // Call the HerdrCli handle FIRST, deliberately out of registration
+        // order: a fake keyed on the argument vector alone (rather than the
+        // pair of program-addressed and vector) would queue both
+        // registrations under one shared key and hand back "openspec side"
+        // here regardless — the queue's registration order, not the
+        // program actually addressed — so this ordering is what makes the
+        // assertion discriminate rather than pass by queue-order accident.
+        assert_eq!(
+            super::HerdrCli::run(&fake, &["same"]),
+            Ok("herdr side".to_string())
+        );
         assert_eq!(
             super::OpenspecCli::run(&fake, &["same"]),
             Ok("openspec side".to_string())
         );
         assert_eq!(
-            super::HerdrCli::run(&fake, &["same"]),
-            Ok("herdr side".to_string())
+            fake.calls(),
+            vec![
+                (super::Program::Herdr, vec!["same".to_string()]),
+                (super::Program::Openspec, vec!["same".to_string()]),
+            ]
         );
     }
 

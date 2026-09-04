@@ -286,6 +286,15 @@
       `fake.run(..)` with both traits in scope; disambiguate with
       `OpenspecCli::run(&fake, ..)` and `HerdrCli::run(&fake, ..)`. Being `cfg(test)`
       keeps it out of the release binary and out of the coverage denominator
+
+      RECORDED, corrected during Change Review: the task text's last clause is wrong —
+      `cargo llvm-cov` measures the test binary, which compiles in every `#[cfg(test)]`
+      item including `mod tests` itself, so `cfg(test)` code is **not** excluded from the
+      coverage denominator (`cli.rs`'s reported 567 lines, against ~380 outside `mod
+      tests`, confirms this). `cfg(test)` placement keeps the fake out of the **release
+      binary** only. See design.md → Decisions for the corrected rationale; this change
+      does not rely on the (false) denominator-exclusion claim for its own 80% floor,
+      since every trait, error variant, and probe function is exercised directly.
 - [x] 4.3 GREEN: Document on the fake why it panics rather than returning `Ok("")` — every
       consumer of this seam is required to degrade rather than fail, so a silent empty
       answer would let a caller's test pass while the caller spawned the wrong command —
@@ -429,7 +438,17 @@
       half of `NOSPAWN-GREP`. **Red when:** the rebinding pulled a process API name into
       `resolve.rs`, in code or in a doc comment
 
-      RECORDED: `MODULE-SCOPED OK: resolve.rs names no process API`.
+      RECORDED, corrected during Change Review: the original note here quoted
+      `MODULE-SCOPED OK: resolve.rs names no process API` as if it were the check's own
+      output — it was not. Design.md's `MODULE-SCOPED` block prints nothing on success
+      (it only echoes on `FAIL`); that line was an ad-hoc echo from a simplified command
+      run against `resolve.rs` alone rather than the verbatim block's actual behavior.
+      Re-run properly (task 8.1's extracted, byte-identical `NOSPAWN-GREP.sh`, which
+      contains both halves): `SRC=src sh NOSPAWN-GREP.sh` -> `NOSPAWN OK: 8 files checked
+      under src, only src/cli.rs may spawn`, exit 0 — the tree-wide half's own success
+      line, with the silent module-scoped half passing (confirmed by the exit code and
+      by a direct `grep -nE 'std::process|Command|Stdio' src/resolve.rs` returning
+      empty).
 - [x] 6.6 CHECK: Run the `BINDING` block from design.md → Test Strategy. Its three guards
       are the only check in this change that can tell a completed hand-over from
       `pub fn npm_prefix() -> Option<PathBuf> { None }`: (a) `src/resolve.rs` names
@@ -681,7 +700,7 @@
 ## 9. Change Review
 <!-- kind: operational -->
 
-- [ ] 9.1 CHECK: Dispatch an independent reviewer — an agent that did **not** write the
+- [x] 9.1 CHECK: Dispatch an independent reviewer — an agent that did **not** write the
       implementation and is **not** a fork of the implementing session, per
       `openspec/config.yaml`'s planning-review rule — given only `proposal.md`, both spec
       files, `design.md`, `tasks.md`, and the diff against the SHA from 1.1. Ask it to
@@ -691,11 +710,84 @@
       `src/cli.rs`; and whether the fake could let a caller's test pass while the caller
       spawned the wrong command. Require it to write findings to a scratchpad file
       incrementally as it goes rather than only in a final message
-- [ ] 9.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a
+
+      RECORDED: dispatched the `outside-in-tdd-reviewer` agent (not a fork; fresh
+      context) with the planning docs, tasks.md's full text (whose RECORDED notes it
+      was told to treat as evidence, not decoration), and the diff against
+      `b2e85f179b13f7b43ad2165882d2bab29375e119`. It wrote findings incrementally to
+      `/private/tmp/claude-501/.../scratchpad/subprocess-seam-review-findings.md` and
+      independently re-ran (not merely re-read) every check block, all four
+      `NOSPAWN-GREP` negative controls, all three `BINDING` guards, `NOSPAWN-RUN`,
+      `DEPS`, `OPENSPEC-UNTOUCHED`, and the `shallow_snapshot` claim — via its own
+      mutation testing in each case, not by trusting the recorded text. Result: **0
+      CRITICAL, 2 WARNING, 6 SUGGESTION.**
+- [x] 9.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a
       one-line reason, note each SUGGESTION, and re-run the affected tests
-- [ ] 9.3 VERIFY: Confirm no blocking or unowned finding remains, and that any artifact a
+
+      RECORDED — 0 CRITICAL: none to fix.
+
+      WARNING 1 — `a_non_zero_exit_is_a_failure_carrying_the_code_and_stderr` never
+      asserted `CliError::Failed.program`; reviewer proved it by mutating `run_and_map`
+      to hardcode `program: "MUTANT"` and the suite stayed green. **Fixed**: the test now
+      clones the program path before construction and asserts `program` equals it, and
+      the "stdout payload is nowhere in the error" clause is now checked against the
+      whole error's `Debug` rendering (the old `!stderr.contains("partial")` assertion
+      could never fail, since `stderr` was already asserted `== "boom\n"` two lines
+      above — a second finding folded into the same fix).
+
+      WARNING 2 — groups 10 (Documentation) and 11 (Lint & Verify) are not yet done,
+      confirmed by the reviewer independently running task 10.8's `STALEDOC` block
+      against the tree as it stood (correctly red, naming all six stale phrases).
+      **Accepted, not a defect**: this is simply "the orchestrator had not reached those
+      groups yet" at review time, per this schema's own group ordering — resolved by
+      doing groups 10 and 11 next, in order, as planned.
+
+      SUGGESTION 1 — `each_handle_gets_its_own_registration` wasn't independently
+      discriminating: the reviewer collapsed the fake's key to the argument vector alone
+      and the test stayed green by queue-order coincidence. **Fixed**: now calls the
+      `HerdrCli` handle first (out of registration order) and additionally asserts
+      `fake.calls()` names the two distinct `Program` values.
+
+      SUGGESTION 2 — `RealOpenspecCli::program()` had no test (the only uncovered
+      non-test code in the seam). **Fixed**: added
+      `openspec_clis_program_accessor_reports_the_constructed_path`.
+
+      SUGGESTION 3 — the thread-boundary test's `HerdrCli` half asserted only
+      `inline == threaded`, which two `Err(NotStarted)` values would satisfy. **Fixed**:
+      added `assert_eq!(inline, Ok("ok".to_string()))`.
+
+      SUGGESTION 4 — task 6.5's RECORDED note quoted `MODULE-SCOPED OK: ...` as if it
+      were the design block's own output; design.md's module-scoped block actually
+      prints nothing on success. **Fixed**: reworded to say so and re-ran the real,
+      byte-identical `NOSPAWN-GREP.sh` (which contains both halves) for accurate
+      evidence.
+
+      SUGGESTION 5 — design.md → Decisions claimed the fake's `#[cfg(test)]` placement
+      "contributes nothing to the coverage denominator" — false: `cargo llvm-cov`
+      instruments the test binary, which compiles in every `#[cfg(test)]` item including
+      `mod tests` itself (`cli.rs` measures 567-569 lines against ~380 outside `mod
+      tests`). **Fixed**: corrected design.md's Decisions entry and added a matching
+      correction note to tasks.md 4.2, both stating the true, narrower claim
+      (`cfg(test)` excludes the fake from the release binary only) and that this
+      change's own 80% floor does not rely on the false claim.
+
+      Re-ran after all fixes: `cargo test --all-features` -> 300 passed, 0 failed (265 +
+      35 cli + 11 ci_workflow + 5 cli.rs, one more than group 8's 299 for the new
+      `program()` test). `cargo clippy --all-targets --all-features -- -D warnings` and
+      `cargo fmt --all -- --check` both clean. `cargo llvm-cov --fail-under-lines 80`:
+      98.67% over 5499 lines (up from 98.61%/5477 at the reviewer's snapshot, and above
+      the 98.66%/4924 baseline). `openspec validate subprocess-seam --strict`: valid.
+- [x] 9.3 VERIFY: Confirm no blocking or unowned finding remains, and that any artifact a
       finding invalidated — `design.md`, a spec file, or this list — was updated rather
       than left to drift
+
+      RECORDED: no CRITICAL and no unowned WARNING remains — WARNING 1 is fixed in
+      code, WARNING 2 is owned by groups 10-11 (next). Both SUGGESTIONs touching
+      design.md (the `shallow_snapshot` rationale had already been recorded correctly by
+      this orchestrator, and the `cfg(test)`/coverage-denominator claim) are corrected in
+      `design.md` itself, not left to drift; no spec file required a change from this
+      review. This tasks.md file was updated throughout 9.1-9.2 rather than only
+      afterward.
 
 ## 10. Documentation
 <!-- kind: operational -->
