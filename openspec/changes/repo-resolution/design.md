@@ -220,7 +220,7 @@ Tiers, fastest first:
 
 There is no "existing test" tier row in this change: it declares no modified capability,
 so no live spec's scenarios are carried. The live `plugin-build` requirement that the
-normal-kind dependency list is exactly `["toml"]` is *re-verified* as task 6.4 rather
+normal-kind dependency list is exactly `["toml"]` is *re-verified* as task 7.4 rather
 than as a matrix row, because it is not one of this change's scenarios — but a
 resolution written with a `glob` or `which` crate would break it, so it is checked
 rather than assumed.
@@ -291,7 +291,7 @@ env PATH="$NOTOOLS" cargo test --all-features
 
 **Where each check stops.** `SPAWN` is evidence about the *source text* — it would not
 catch a spawn reached through a dependency, which is why the dependency set is checked
-separately (6.4). `NOSPAWN-RUN` is evidence that the *test suite* needs none of the three
+separately (7.4). `NOSPAWN-RUN` is evidence that the *test suite* needs none of the three
 binaries; it is not proof that production code never spawns, because a spawn whose error
 is swallowed would still pass. The two together, plus the closure-shaped step-4
 collaborator that has no other implementation to call, are the argument. Stated here so
@@ -457,7 +457,7 @@ used to hand `agent-launch` the derived-agent-name correction.
   spec test on the empty hook is what stops the deferral from being forgotten.
 - **The no-spawn evidence is source-text and environment, not instrumentation.** A spawn
   reached through a dependency, or one whose error is swallowed, would pass both halves.
-  → Mitigated by the third leg: the dependency set is asserted unchanged (6.4), and step
+  → Mitigated by the third leg: the dependency set is asserted unchanged (7.4), and step
   4's collaborator is a closure with exactly one production binding that returns `None`.
   The limitation is stated above the matrix rather than left for a reader to discover.
 - **`grep`-based checks are pattern matching, and this change adds path components that
