@@ -310,7 +310,9 @@ mod tests {
         let lookup = env(&[("XDG_STATE_HOME", "/xdg"), ("HOME", "/home/someone")]);
         assert_eq!(
             super::state_dir(&lookup),
-            Some(std::path::PathBuf::from("/xdg/herdr/plugins/herdr-openspec"))
+            Some(std::path::PathBuf::from(
+                "/xdg/herdr/plugins/herdr-openspec"
+            ))
         );
     }
 
@@ -423,7 +425,7 @@ mod tests {
 
     // --- reading and recording the mapping file (group 5) -------------------
 
-    use crate::testutil::{snapshot, ScratchDir};
+    use crate::testutil::{ScratchDir, snapshot};
     use std::fs;
 
     fn write_mapping(dir: &std::path::Path, contents: &str) {
@@ -526,8 +528,7 @@ mod tests {
     fn an_unchanged_name_is_not_recorded() {
         let scratch = ScratchDir::new();
         let uncreated = scratch.path().join("nonexistent");
-        super::record(Some(&uncreated), "add-token-refresh", "add-token-refresh")
-            .expect("record");
+        super::record(Some(&uncreated), "add-token-refresh", "add-token-refresh").expect("record");
         assert!(!uncreated.exists());
     }
 
@@ -604,7 +605,11 @@ mod tests {
         let witness_bytes = fs::read(&witness).expect("read witness after");
         assert_eq!(witness_bytes, previous_bytes);
         assert_ne!(new_bytes, witness_bytes);
-        assert!(new_bytes.windows(b"second-change".len()).any(|w| w == b"second-change"));
+        assert!(
+            new_bytes
+                .windows(b"second-change".len())
+                .any(|w| w == b"second-change")
+        );
 
         let mut names: Vec<_> = fs::read_dir(scratch.path())
             .expect("read state dir")
@@ -661,8 +666,11 @@ mod tests {
     #[test]
     fn the_configuration_directory_is_not_written_to() {
         let config = ScratchDir::new();
-        fs::write(config.path().join("config.toml"), b"agent_kind = \"codex\"\n")
-            .expect("write config.toml fixture");
+        fs::write(
+            config.path().join("config.toml"),
+            b"agent_kind = \"codex\"\n",
+        )
+        .expect("write config.toml fixture");
 
         let before = snapshot(config.path());
 

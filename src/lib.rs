@@ -42,10 +42,8 @@ pub(crate) mod testutil {
         pub(crate) fn new() -> Self {
             static COUNTER: AtomicUsize = AtomicUsize::new(0);
             let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
-            let path = std::env::temp_dir().join(format!(
-                "herdr-openspec-test-{}-{counter}",
-                crate::pid()
-            ));
+            let path = std::env::temp_dir()
+                .join(format!("herdr-openspec-test-{}-{counter}", crate::pid()));
             std::fs::create_dir_all(&path).expect("create scratch dir");
             Self { path }
         }

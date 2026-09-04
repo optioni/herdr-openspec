@@ -233,10 +233,7 @@ mod tests {
             "/home/someone/.config/herdr/plugins/config/herdr-openspec",
         ));
 
-        let empty = env(&[
-            ("HERDR_PLUGIN_CONFIG_DIR", ""),
-            ("HOME", "/home/someone"),
-        ]);
+        let empty = env(&[("HERDR_PLUGIN_CONFIG_DIR", ""), ("HOME", "/home/someone")]);
         assert_eq!(super::config_dir(&empty), expected);
 
         let blank = env(&[
@@ -292,15 +289,12 @@ mod tests {
     #[test]
     fn env_lookup_is_none_for_a_name_nothing_sets() {
         let lookup = super::env_lookup();
-        assert_eq!(
-            lookup("HERDR_OPENSPEC_DEFINITELY_UNSET_9f3a2b1c"),
-            None
-        );
+        assert_eq!(lookup("HERDR_OPENSPEC_DEFINITELY_UNSET_9f3a2b1c"), None);
     }
 
     // --- Reading config.toml (group 3) -------------------------------------
 
-    use crate::testutil::{snapshot, ScratchDir};
+    use crate::testutil::{ScratchDir, snapshot};
     use std::fs;
 
     fn write_config(dir: &std::path::Path, contents: &str) {
@@ -468,7 +462,10 @@ mod tests {
         );
 
         let scratch2 = ScratchDir::new();
-        write_config(scratch2.path(), "openspec_bin = \"~otheruser/bin/openspec\"\n");
+        write_config(
+            scratch2.path(),
+            "openspec_bin = \"~otheruser/bin/openspec\"\n",
+        );
         let cfg2 = super::load(Some(scratch2.path()), &env(&[("HOME", "/home/someone")]));
         assert_eq!(
             cfg2.openspec_bin,

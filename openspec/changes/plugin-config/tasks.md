@@ -121,10 +121,10 @@
 ## 9. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 9.1 CHECK: Inspect the intended verification commands and affected tiers — the unit tier (`cargo test --all-features`, `src/config.rs` and `src/state.rs`), the command checks in groups 1 and 6, the existing `tests/ci_workflow.rs` guard the `ci-workflow` delta leaves untouched, and the live check in 6.1. Coverage is affected: this change roughly triples the crate's line count
-- [ ] 9.2 VERIFY: `cargo fmt --all -- --check` — clean
-- [ ] 9.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors. Probe with `cargo clippy --version`, not `command -v cargo-clippy`: rustup installs that shim unconditionally, so the shim resolves even when the component is absent
-- [ ] 9.4 VERIFY: `cargo test --all-features` — green, including the unchanged `ci_workflow` guard. Rust has no separate type-check step; `cargo test` and `cargo clippy` cover it
-- [ ] 9.5 VERIFY: `cargo llvm-cov --fail-under-lines 80` — at or above the floor. If it falls short, add tests; never lower the threshold and never add an exclusion flag
-- [ ] 9.6 VERIFY: `make check` — the single composite gate, exit 0. If it fails, name the failing sub-command rather than reporting a summary
-- [ ] 9.7 VERIFY: `openspec validate plugin-config --strict` reports the change valid, with nvm ahead on `PATH` — `export PATH="$HOME/.nvm/versions/node/v24.20.0/bin:$PATH"` — since `openspec` is not on the `PATH` a non-login shell inherits here
+- [x] 9.1 CHECK: Inspect the intended verification commands and affected tiers — the unit tier (`cargo test --all-features`, `src/config.rs` and `src/state.rs`), the command checks in groups 1 and 6, the existing `tests/ci_workflow.rs` guard the `ci-workflow` delta leaves untouched, and the live check in 6.1. Coverage is affected: this change roughly triples the crate's line count
+- [x] 9.2 VERIFY: `cargo fmt --all -- --check` — clean
+- [x] 9.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors. Probe with `cargo clippy --version`, not `command -v cargo-clippy`: rustup installs that shim unconditionally, so the shim resolves even when the component is absent
+- [x] 9.4 VERIFY: `cargo test --all-features` — green, including the unchanged `ci_workflow` guard. Rust has no separate type-check step; `cargo test` and `cargo clippy` cover it
+- [x] 9.5 VERIFY: `cargo llvm-cov --fail-under-lines 80` — at or above the floor. If it falls short, add tests; never lower the threshold and never add an exclusion flag
+- [x] 9.6 VERIFY: `make check` — the single composite gate, exit 0. If it fails, name the failing sub-command rather than reporting a summary
+- [x] 9.7 VERIFY: `openspec validate plugin-config --strict` reports the change valid, with nvm ahead on `PATH` — `export PATH="$HOME/.nvm/versions/node/v24.20.0/bin:$PATH"` — since `openspec` is not on the `PATH` a non-login shell inherits here
