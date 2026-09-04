@@ -8,7 +8,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::widgets::Block;
 
-use crate::ui::app::{Dashboard, Route};
+use crate::ui::app::{Dashboard, Filter, Route};
 use crate::ui::layout::{split_body, split_frame, viewport};
 use crate::ui::list;
 
@@ -19,7 +19,7 @@ const FOOTER_HINTS: [&str; 3] = ["q quit", "Enter detail", "Esc back"];
 pub fn render(frame: &mut Frame, dashboard: &Dashboard) {
     let (header, body, footer) = split_frame(frame.area());
     render_header(frame, header, dashboard);
-    render_footer(frame, footer);
+    render_footer(frame, footer, &dashboard.filter);
     render_body(frame, body, dashboard);
 }
 
@@ -112,53 +112,84 @@ fn render_header(frame: &mut Frame, header: Rect, dashboard: &Dashboard) {
 /// `A - 1` characters when `A >= 8`; otherwise nothing is shown at all, and
 /// only the (possibly itself truncated) `OpenSpec` label is drawn.
 fn shorten_for_header(text: &str, header_width: u16) -> Option<String> {
-    let a = header_width.saturating_sub(9);
-    let char_count = text.chars().count() as u16;
+    let a = header_width.saturating_sub(9) as usize;
+    let char_count = text.chars().count();
     if char_count <= a {
         Some(text.to_string())
     } else if a >= 8 {
-        let tail_len = (a - 1) as usize;
-        let tail: String = text
-            .chars()
-            .rev()
-            .take(tail_len)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect();
-        Some(format!("…{tail}"))
+        Some(list::shorten_left(text, a))
     } else {
         None
     }
 }
 
-/// The footer row: `q quit`, `Enter detail`, and `Esc back`, separated by
-/// two spaces, dropping whole hints from the end when the remaining width
-/// cannot hold the next one whole.
-fn render_footer(frame: &mut Frame, footer: Rect) {
+/// The footer row, in one of three forms — `list-filtering` -> "The footer
+/// shows the filter prompt while filtering and the query after":
+/// - filtering: the prompt `/` + query + `_`, replacing the hints entirely,
+///   keeping its **tail** when it overflows the footer;
+/// - not filtering, a non-empty query: `/` + query leads the hint list,
+///   dropped last rather than first;
+/// - otherwise: `q quit`, `Enter detail`, and `Esc back`, unchanged.
+fn render_footer(frame: &mut Frame, footer: Rect, filter: &Filter) {
     if footer.height == 0 {
         return;
     }
-    let mut shown: Vec<&str> = Vec::new();
-    let mut used = 0u16;
-    for (i, hint) in FOOTER_HINTS.iter().enumerate() {
-        let separator = if i == 0 { 0 } else { 2 };
-        let needed = hint.chars().count() as u16 + separator;
-        let Some(next_used) = used.checked_add(needed) else {
-            break;
-        };
-        if next_used > footer.width {
-            break;
-        }
-        used = next_used;
-        shown.push(hint);
-    }
-    let text = shown.join("  ");
+    let text = if filter.active {
+        footer_prompt(&filter.query, footer.width)
+    } else if filter.query.is_empty() {
+        fit_hints(
+            &FOOTER_HINTS
+                .iter()
+                .map(|s| (*s).to_string())
+                .collect::<Vec<_>>(),
+            footer.width,
+        )
+    } else {
+        let mut hints = vec![format!("/{}", filter.query)];
+        hints.extend(FOOTER_HINTS.iter().map(|s| (*s).to_string()));
+        fit_hints(&hints, footer.width)
+    };
     if !text.is_empty() {
         frame
             .buffer_mut()
             .set_string(footer.x, footer.y, &text, Style::default());
     }
+}
+
+/// The filter prompt: `/` + `query` + `_`, whole when it fits `width`,
+/// otherwise its **tail** — the last `width` characters — so the cursor
+/// (the trailing `_`) and the characters just typed stay visible.
+fn footer_prompt(query: &str, width: u16) -> String {
+    let text = format!("/{query}_");
+    let chars: Vec<char> = text.chars().collect();
+    let w = width as usize;
+    if chars.len() <= w {
+        text
+    } else {
+        chars[chars.len() - w..].iter().collect()
+    }
+}
+
+/// `hints`, joined by two spaces, dropping whole hints from the **end**
+/// when the remaining width cannot hold the next one whole — the rule
+/// `render_footer`'s three-hint form already used, generalised to any hint
+/// list so the accepted-query form can lead with a fourth hint.
+fn fit_hints(hints: &[String], width: u16) -> String {
+    let mut shown: Vec<&str> = Vec::new();
+    let mut used = 0u16;
+    for (i, hint) in hints.iter().enumerate() {
+        let separator = if i == 0 { 0 } else { 2 };
+        let needed = hint.chars().count() as u16 + separator;
+        let Some(next_used) = used.checked_add(needed) else {
+            break;
+        };
+        if next_used > width {
+            break;
+        }
+        used = next_used;
+        shown.push(hint.as_str());
+    }
+    shown.join("  ")
 }
 
 #[cfg(test)]
@@ -320,6 +351,11 @@ mod tests {
         let buf = render_at(1, 20, &d);
         assert_eq!(row_text(&buf, 0), "O");
         assert_eq!(row_text(&buf, 19), " ");
+        // Extended: a 2x20 render, so a zero-column list-region interior is
+        // exercised too (a 2-wide frame's list region has width 2, and
+        // Block::bordered().inner() of that is width 0).
+        let buf = render_at(2, 20, &d);
+        let _ = buf;
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
             assert_eq!(cols(&row_text(&buf, 0), 0..8), "OpenSpec");
@@ -447,20 +483,25 @@ mod tests {
 
     #[test]
     fn region_interiors_are_blank() {
+        // Rewritten for list-view: only the DETAIL interior is blank now —
+        // change-rows owns every cell of the list interior, and an empty
+        // ChangeSet with a repository root renders "No changes yet" there.
         let d = dashboard(Some("/tmp/demo-repo"), Route::List);
         let default_style = Cell::default().style();
 
         let buf = render_at(120, 20, &d);
         for y in 2..=17u16 {
-            for x in (1..=38u16).chain(41..=118u16) {
+            for x in 41..=118u16 {
                 let c = cell(&buf, x, y);
                 assert_eq!(c.symbol(), " ", "x={x} y={y}");
                 assert_eq!(c.style(), default_style, "x={x} y={y}");
             }
         }
+        assert!(interior_cols(&buf, 2).starts_with("No changes yet"));
 
         let buf = render_at(60, 20, &d);
-        for y in 2..=17u16 {
+        assert!(interior_cols(&buf, 2).starts_with("No changes yet"));
+        for y in 3..=17u16 {
             for x in 1..=58u16 {
                 let c = cell(&buf, x, y);
                 assert_eq!(c.symbol(), " ", "x={x} y={y}");
@@ -521,13 +562,21 @@ mod tests {
 
     #[test]
     fn header_says_no_repository() {
+        // Rewritten for list-view: the landed assertion checked the WHOLE
+        // buffer for the searched-from path's absence. change-rows' own
+        // no-repository block now names it on purpose (row 2 of the body),
+        // so the assertion narrows to row 0 — the header row — which is
+        // what this requirement was ever about.
         let d = dashboard(None, Route::List);
         let buf = render_at(60, 20, &d);
         assert_eq!(cols(&row_text(&buf, 0), 47..60), "no repository");
+        assert!(!row_text(&buf, 0).contains("/tmp/searched-from"));
+        assert!(row_text(&buf, 4).contains("/tmp/searched-from"));
 
         let buf = render_at(120, 20, &d);
         assert_eq!(cols(&row_text(&buf, 0), 107..120), "no repository");
-        assert!(!buffer_contains(&buf, "/tmp/searched-from"));
+        assert!(!row_text(&buf, 0).contains("/tmp/searched-from"));
+        assert!(row_text(&buf, 4).contains("/tmp/searched-from"));
     }
 
     fn three_active() -> Dashboard {
@@ -984,6 +1033,234 @@ mod tests {
                     "x={x} y={y} symbol={s:?}"
                 );
             }
+        }
+    }
+
+    fn five_change_dashboard(selected: usize) -> Dashboard {
+        dashboard_with(
+            vec![
+                fixture::active("add-token-refresh", 4, 9),
+                fixture::active("fix-empty-basket", 7, 7),
+                fixture::active("migrate-ai-sdk-v7", 0, 0),
+            ],
+            vec![
+                fixture::archived(Some("2026-08-14"), "add-auth", 7, 7),
+                fixture::archived(None, "legacy-cleanup", 3, 3),
+            ],
+            selected,
+            Route::List,
+        )
+    }
+
+    #[test]
+    fn the_prompt_replaces_the_hints_while_filtering() {
+        let mut d = five_change_dashboard(0);
+        d.filter = Filter {
+            query: "add".to_string(),
+            active: true,
+        };
+        let buf60 = render_at(60, 20, &d);
+        assert_eq!(row_text(&buf60, 19), format!("/add_{}", " ".repeat(55)));
+        let buf120 = render_at(120, 20, &d);
+        assert_eq!(row_text(&buf120, 19), format!("/add_{}", " ".repeat(115)));
+        for buf in [&buf60, &buf120] {
+            let footer = row_text(buf, 19);
+            assert!(!footer.contains("q quit"));
+            assert!(!footer.contains("Enter detail"));
+            assert!(!footer.contains("Esc back"));
+        }
+    }
+
+    #[test]
+    fn an_accepted_query_leads_the_hint_list() {
+        let mut d = five_change_dashboard(0);
+        d.filter = Filter {
+            query: "add".to_string(),
+            active: false,
+        };
+        let expected = "/add  q quit  Enter detail  Esc back";
+        assert_eq!(expected.chars().count(), 36);
+        let buf60 = render_at(60, 20, &d);
+        assert_eq!(
+            row_text(&buf60, 19),
+            format!("{expected}{}", " ".repeat(24))
+        );
+        let buf120 = render_at(120, 20, &d);
+        assert_eq!(
+            row_text(&buf120, 19),
+            format!("{expected}{}", " ".repeat(84))
+        );
+
+        d.filter.query = String::new();
+        let buf60 = render_at(60, 20, &d);
+        assert_eq!(
+            row_text(&buf60, 19),
+            format!("q quit  Enter detail  Esc back{}", " ".repeat(30))
+        );
+        let buf120 = render_at(120, 20, &d);
+        assert_eq!(
+            row_text(&buf120, 19),
+            format!("q quit  Enter detail  Esc back{}", " ".repeat(90))
+        );
+    }
+
+    #[test]
+    fn a_prompt_longer_than_the_footer_keeps_its_tail() {
+        let mut d = five_change_dashboard(0);
+        d.filter = Filter {
+            query: "aaaaaaaaaa".repeat(7),
+            active: true,
+        };
+        let buf60 = render_at(60, 20, &d);
+        let row60 = row_text(&buf60, 19);
+        assert_eq!(row60.chars().count(), 60);
+        assert!(row60.ends_with('_'));
+        assert_eq!(row60.chars().next(), Some('a'));
+
+        let buf120 = render_at(120, 20, &d);
+        let row120 = row_text(&buf120, 19);
+        let expected = format!("/{}_{}", "a".repeat(70), " ".repeat(48));
+        assert_eq!(row120, expected);
+    }
+
+    #[test]
+    fn a_query_narrows_both_tiers() {
+        let mut d = five_change_dashboard(0);
+        d.filter.query = "add".to_string();
+        let buf120 = render_at(120, 20, &d);
+        assert_eq!(
+            interior_cols(&buf120, 2),
+            "> add-token-refresh              [4/9]"
+        );
+        assert_eq!(
+            interior_cols(&buf120, 3),
+            "  -- archived ------------------------"
+        );
+        assert_eq!(
+            interior_cols(&buf120, 4),
+            "  2026-08-14 add-auth            [7/7]"
+        );
+        let buf60 = render_at(60, 20, &d);
+        assert_eq!(
+            interior_cols(&buf60, 2),
+            "> add-token-refresh                                  [4/9]"
+        );
+        assert_eq!(
+            interior_cols(&buf60, 3),
+            "  -- archived --------------------------------------------"
+        );
+        assert_eq!(
+            interior_cols(&buf60, 4),
+            "  2026-08-14 add-auth                                [7/7]"
+        );
+        for buf in [&buf120, &buf60] {
+            assert!(!buffer_contains(buf, "fix-empty-basket"));
+            assert!(!buffer_contains(buf, "migrate-ai-sdk-v7"));
+            assert!(!buffer_contains(buf, "legacy-cleanup"));
+        }
+    }
+
+    #[test]
+    fn matching_ignores_case() {
+        // Compares the drawn *rows*, not the whole buffer: the footer
+        // legitimately echoes the literal query text typed (`/ADD` vs.
+        // `/add`), which is a separate, un-normalised concern from which
+        // changes match.
+        let lower = {
+            let mut d = five_change_dashboard(0);
+            d.filter.query = "add".to_string();
+            d
+        };
+        for query in ["ADD", "Add"] {
+            let mut d = five_change_dashboard(0);
+            d.filter.query = query.to_string();
+            for width in [60, 120] {
+                let buf = render_at(width, 20, &d);
+                let buf_lower = render_at(width, 20, &lower);
+                for y in 2..=17u16 {
+                    assert_eq!(
+                        interior_cols(&buf, y),
+                        interior_cols(&buf_lower, y),
+                        "query {query:?} width {width} row {y}"
+                    );
+                }
+            }
+        }
+
+        // The lowercasing applies to both sides: an upper-case change name
+        // still matches a lower-case query.
+        let mut upper_name = dashboard_with(
+            vec![fixture::active("ADD-TOKEN-REFRESH", 4, 9)],
+            Vec::new(),
+            0,
+            Route::List,
+        );
+        upper_name.filter.query = "add".to_string();
+        let buf = render_at(120, 20, &upper_name);
+        assert!(buffer_contains(&buf, "ADD-TOKEN-REFRESH"));
+    }
+
+    #[test]
+    fn a_query_matching_only_an_archived_change() {
+        let mut d = five_change_dashboard(0);
+        d.filter.query = "auth".to_string();
+        for width in [60, 120] {
+            let buf = render_at(width, 20, &d);
+            assert!(interior_cols(&buf, 2).starts_with("No active changes"));
+            assert!(interior_cols(&buf, 3).contains("-- archived"));
+            assert!(interior_cols(&buf, 4).contains("add-auth"));
+            assert_eq!(cell(&buf, 1, 4).symbol(), ">");
+            assert!(!buffer_contains(&buf, "No changes match"));
+            assert!(!buffer_contains(&buf, "No changes yet"));
+        }
+    }
+
+    #[test]
+    fn a_query_matching_nothing_names_itself() {
+        let mut d = five_change_dashboard(0);
+        d.filter.query = "zzz".to_string();
+        for width in [60, 120] {
+            let buf = render_at(width, 20, &d);
+            assert!(interior_cols(&buf, 2).starts_with("No changes match"));
+            assert!(interior_cols(&buf, 3).starts_with("/zzz"));
+            assert!(!buffer_contains(&buf, "-- archived"));
+            for name in [
+                "add-token-refresh",
+                "fix-empty-basket",
+                "migrate-ai-sdk-v7",
+                "add-auth",
+                "legacy-cleanup",
+            ] {
+                assert!(!buffer_contains(&buf, name));
+            }
+            for y in 2..=17u16 {
+                assert_ne!(cell(&buf, 1, y).symbol(), ">");
+            }
+        }
+    }
+
+    #[test]
+    fn shrinking_the_visible_list_clamps_the_marker() {
+        let mut d = five_change_dashboard(4);
+        d.apply(Action::FilterStart);
+        for c in ['a', 'd', 'd'] {
+            d.apply(Action::FilterPush(c));
+        }
+        for width in [60, 120] {
+            let buf = render_at(width, 20, &d);
+            assert!(interior_cols(&buf, 4).contains("add-auth"));
+            assert_eq!(cell(&buf, 1, 4).symbol(), ">");
+        }
+    }
+
+    #[test]
+    fn slash_starts_filter_mode_and_the_list_is_shown() {
+        let mut d = five_change_dashboard(0);
+        d.route = Route::Detail;
+        d.apply(Action::FilterStart);
+        for width in [60, 120] {
+            let buf = render_at(width, 20, &d);
+            assert!(buffer_contains(&buf, "Changes"));
         }
     }
 }

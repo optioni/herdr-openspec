@@ -1123,7 +1123,7 @@ block is re-run, not further modified — and `GRAPH-SNAP` likewise.
 ## 6. `ui::view` — the footer's filter forms and the rewritten shell scenarios
 <!-- kind: behavior -->
 
-- [ ] 6.1 RED: Write failing tests in `src/ui/view.rs`'s `mod tests`, each at 60 and 120:
+- [x] 6.1 RED: Write failing tests in `src/ui/view.rs`'s `mod tests`, each at 60 and 120:
       - `the_prompt_replaces_the_hints_while_filtering` — row 19 at 60 is exactly `/add_`
         plus fifty-five spaces; at 120 `/add_` plus one hundred and fifteen; `q quit`,
         `Enter detail`, and `Esc back` absent from row 19 at both.
@@ -1168,18 +1168,18 @@ block is re-run, not further modified — and `GRAPH-SNAP` likewise.
       **Red when:** the footer still renders the three hints while filtering, and the
       rewritten interior test still finds a blank list interior.
 
-- [ ] 6.2 GREEN: Implement the footer's two extra forms in `render_footer`, taking the
+- [x] 6.2 GREEN: Implement the footer's two extra forms in `render_footer`, taking the
       `Filter` as an argument: the prompt form (hints replaced, tail kept) and the
       leading-hint form (`/` + query prepended to the hint list, same drop-from-the-end
       rule). The empty-inactive form is byte-for-byte what it is today.
 
-- [ ] 6.3 REFACTOR: Extract `shorten_left(text, width)` — whole when it fits, else `…` plus
+- [x] 6.3 REFACTOR: Extract `shorten_left(text, width)` — whole when it fits, else `…` plus
       the last `width - 1` characters, empty at width 0 — and refactor
       `shorten_for_header` onto it, so the crate holds exactly one left-truncation and one
       right-truncation implementation. The header's landed scenarios must stay green
       unchanged; if any moves, the refactor is wrong.
 
-- [ ] 6.4 VERIFY: The eight `responsive-layout` tests this change does **not** alter
+- [x] 6.4 VERIFY: The eight `responsive-layout` tests this change does **not** alter
       must still pass, unmodified, and their tests are the evidence for those seven matrix
       rows: run `cargo test --all-features --lib ui::view::tests::frame_rows_at_60_and_120
       ui::view::tests::one_row_frame_draws_header_only` and the rest by name —
@@ -1196,7 +1196,7 @@ block is re-run, not further modified — and `GRAPH-SNAP` likewise.
       **Wrongly green when:** a name is misspelled and the filter matches nothing — count
       the tests the run reports, do not read its exit status.
 
-- [ ] 6.5 VERIFY: `testcount --lib 'ui::view::tests::' 47`, then `WIDTHS` with
+- [x] 6.5 VERIFY: `testcount --lib 'ui::view::tests::' 47`, then `WIDTHS` with
       `WIDTHS_MIN=47` — this is the change's final view floor. Then the four
       intermediate-gate commands.
       **Red when:** the count is below 47, or `WIDTHS` names a test omitting a width.
