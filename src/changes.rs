@@ -389,6 +389,39 @@ pub(crate) fn change_artifacts(
     (artifacts, problems)
 }
 
+/// The change's task pair: resolve `tasks`' `generates` value through
+/// [`resolve_artifact`], substitute `[change_dir/tasks.md]` when that
+/// resolves to no files — because no tasks artifact is declared, because
+/// the schema failed to load so no artifact is available at all, or
+/// because the artifact's glob matched nothing — and sum every target with
+/// `tasks::read`. Reproduces the OpenSpec CLI's own
+/// `getTaskProgressDetailForChange` (`dist/utils/task-progress.js:120-133`),
+/// including the fallback: omitting it would report `0/0` for exactly the
+/// changes whose schema is unusual.
+pub(crate) fn change_progress(
+    change_dir: &std::path::Path,
+    tasks: Option<&crate::schema::Artifact>,
+) -> (crate::tasks::Progress, Vec<String>) {
+    let resolved = tasks.map(|artifact| resolve_artifact(change_dir, &artifact.generates).0);
+    let targets = match resolved {
+        Some(paths) if !paths.is_empty() => paths,
+        _ => vec![change_dir.join("tasks.md")],
+    };
+
+    let mut progress = crate::tasks::Progress {
+        completed: 0,
+        total: 0,
+    };
+    let mut problems = Vec::new();
+    for target in &targets {
+        let document = crate::tasks::read(target);
+        progress += document.progress();
+        problems.extend(document.problems);
+    }
+
+    (progress, problems)
+}
+
 #[cfg(test)]
 mod tests {
     use super::conformance::assert_invariants;
@@ -981,5 +1014,183 @@ mod tests {
             ]
         );
         assert!(problems.is_empty());
+    }
+
+    // --- group 6: task progress and the CLI's fallback --------------------
+
+    use crate::testutil::snapshot;
+
+    fn tasks_artifact(generates: &str) -> crate::schema::Artifact {
+        crate::schema::Artifact {
+            id: "tasks".to_string(),
+            generates: generates.to_string(),
+        }
+    }
+
+    #[test]
+    fn a_single_tasks_file_gives_the_changes_progress() {
+        let scratch = ScratchDir::new();
+        let dir = canonical(scratch.path());
+        write(&dir.join("tasks.md"), "- [x] a\n- [ ] b\n");
+
+        let artifact = tasks_artifact("tasks.md");
+        let (progress, problems) = change_progress(&dir, Some(&artifact));
+        assert_eq!(
+            progress,
+            crate::tasks::Progress {
+                completed: 1,
+                total: 2
+            }
+        );
+        assert!(problems.is_empty());
+    }
+
+    #[test]
+    fn a_glob_shaped_tasks_artifact_sums_across_its_files() {
+        let scratch = ScratchDir::new();
+        let dir = canonical(scratch.path());
+        write(&dir.join("tasks.md"), "- [x] a\n- [ ] b\n");
+        write(&dir.join("sub/tasks.md"), "- [x] a\n- [x] b\n- [ ] c\n");
+        write(&dir.join("sub/deeper/tasks.md"), "- [ ] a\n");
+
+        // Absolute pair, not self-consistent: the same tree, driven through
+        // the real `openspec list --json` at planning time, reported
+        // `completedTasks: 3, totalTasks: 6` for the identical shape (see
+        // design.md -> Test Strategy, "A glob-shaped tasks artifact sums
+        // across its files").
+        let artifact = tasks_artifact("**/tasks.md");
+        let (progress, problems) = change_progress(&dir, Some(&artifact));
+        assert_eq!(
+            progress,
+            crate::tasks::Progress {
+                completed: 3,
+                total: 6
+            }
+        );
+        assert!(problems.is_empty());
+    }
+
+    #[test]
+    fn a_schema_declaring_no_tasks_artifact_still_counts_tasks_md() {
+        let scratch = ScratchDir::new();
+        let dir = canonical(scratch.path());
+        write(&dir.join("tasks.md"), "- [x] a\n- [ ] b\n");
+
+        let (progress, problems) = change_progress(&dir, None);
+        assert_eq!(
+            progress,
+            crate::tasks::Progress {
+                completed: 1,
+                total: 2
+            }
+        );
+        assert!(problems.is_empty());
+    }
+
+    #[test]
+    fn a_schema_that_failed_to_load_still_counts_tasks_md() {
+        // From `change_progress`'s side this is the identical input as "no
+        // tasks artifact declared" — both mean "no artifact is available" —
+        // but the *caller* reaches `None` for two different reasons
+        // (`schema::LoadError` versus no `apply.tracks`/id-`tasks` match),
+        // and both must fall back identically.
+        let scratch = ScratchDir::new();
+        let dir = canonical(scratch.path());
+        write(&dir.join("tasks.md"), "- [x] a\n- [ ] b\n");
+
+        let (progress, problems) = change_progress(&dir, None);
+        assert_eq!(
+            progress,
+            crate::tasks::Progress {
+                completed: 1,
+                total: 2
+            }
+        );
+        assert!(problems.is_empty());
+    }
+
+    #[test]
+    fn a_tasks_artifact_whose_glob_matched_nothing_still_counts_tasks_md() {
+        let scratch = ScratchDir::new();
+        let dir = canonical(scratch.path());
+        write(&dir.join("tasks.md"), "- [x] a\n- [ ] b\n");
+        // A genuinely different tree from the two `None` variants above:
+        // `Some` is passed, but its glob matches nothing, so the fallback
+        // fires for a different reason.
+        let artifact = tasks_artifact("**/nonexistent-tasks-glob.md");
+
+        let (progress, problems) = change_progress(&dir, Some(&artifact));
+        assert_eq!(
+            progress,
+            crate::tasks::Progress {
+                completed: 1,
+                total: 2
+            }
+        );
+        assert!(problems.is_empty());
+    }
+
+    #[test]
+    fn an_unreadable_tasks_file_is_zero_plus_one_named_problem() {
+        let scratch = ScratchDir::new();
+        let dir = canonical(scratch.path());
+        mkdir(&dir.join("tasks.md")); // a directory where a file was expected
+
+        let (progress, problems) = change_progress(&dir, None);
+        assert_eq!(
+            progress,
+            crate::tasks::Progress {
+                completed: 0,
+                total: 0
+            }
+        );
+        assert_eq!(problems.len(), 1);
+        assert!(problems[0].contains(&dir.join("tasks.md").display().to_string()));
+    }
+
+    #[test]
+    fn a_change_with_no_tasks_file_at_all_is_zero_not_complete() {
+        let scratch = ScratchDir::new();
+        let dir = canonical(scratch.path());
+        mkdir(&dir);
+
+        let (progress, problems) = change_progress(&dir, None);
+        assert_eq!(
+            progress,
+            crate::tasks::Progress {
+                completed: 0,
+                total: 0
+            }
+        );
+        assert!(problems.is_empty());
+        assert!(!progress.is_complete());
+    }
+
+    #[test]
+    fn a_change_directory_is_byte_identical_after_resolution_and_counting() {
+        let scratch = ScratchDir::new();
+        let dir = canonical(scratch.path());
+        write(&dir.join("specs/alpha/spec.md"), "# Alpha\n");
+        write(&dir.join("tasks.md"), "- [x] a\n- [ ] b\n");
+
+        let artifact = tasks_artifact("tasks.md");
+        let before = snapshot(&dir);
+        let _ = change_progress(&dir, Some(&artifact));
+        let _ = change_progress(&dir, Some(&artifact));
+        let _ = change_progress(&dir, Some(&artifact));
+        let after = snapshot(&dir);
+        assert_eq!(before, after);
+
+        // A change directory with no `tasks.md` at all: the fallback names
+        // exactly this path for every change whose glob matched nothing,
+        // and it must never be created.
+        let empty_scratch = ScratchDir::new();
+        let empty_dir = canonical(empty_scratch.path());
+        mkdir(&empty_dir);
+        let before_empty = snapshot(&empty_dir);
+        let _ = change_progress(&empty_dir, None);
+        let after_empty = snapshot(&empty_dir);
+        assert_eq!(before_empty, after_empty);
+        assert!(!empty_dir.join("tasks.md").exists());
     }
 }

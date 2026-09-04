@@ -368,10 +368,10 @@ being reasonable: when the tasks artifact resolves to no files, the CLI substitu
 `<change dir>/tasks.md` and counts it anyway. Omitting it makes the file path report `0/0`
 for exactly the changes whose schema is unusual.
 
-- [ ] 6.1 RED: Write failing unit tests for `change_progress(change_dir, Option<&Artifact>)
+- [x] 6.1 RED: Write failing unit tests for `change_progress(change_dir, Option<&Artifact>)
       -> (Progress, Vec<String>)`, one per scenario above, each building its tree under
       `ScratchDir`
-- [ ] 6.2 RED: Write the summing test against an **absolute** expected pair rather than a
+- [x] 6.2 RED: Write the summing test against an **absolute** expected pair rather than a
       self-consistent one. Build `tasks.md` at 1/2, `sub/tasks.md` at 2/3, and
       `sub/deeper/tasks.md` at 0/1 under a tasks artifact generating `**/tasks.md`, and
       assert `Progress { completed: 3, total: 6 }`. Record in a comment beside the assertion
@@ -379,7 +379,7 @@ for exactly the changes whose schema is unusual.
       and reported `completedTasks: 3, totalTasks: 6`, so the expected value comes from an
       oracle outside this crate. `completed` is load-bearing as well as `total`: a file set
       that is entirely unchecked would let a hardcoded `checked = false` pass
-- [ ] 6.3 RED: Write the fallback as **three** separate tests, one per way the file list can
+- [x] 6.3 RED: Write the fallback as **three** separate tests, one per way the file list can
       come back empty — a schema declaring no tasks artifact, a schema that failed to load so
       no artifact is available at all, and a tasks artifact whose glob matched nothing — each
       with a real `tasks.md` at 1/2 in the change directory and each asserting 1/2. An
@@ -387,13 +387,13 @@ for exactly the changes whose schema is unusual.
       schema so that it genuinely produces the case it names, and confirm that by asserting a
       *different* progress in each variant if the trees allow it — three schemas that are all
       silently invalid would collapse all three tests into one
-- [ ] 6.4 RED: Write the two remaining edge tests. Unreadable: a *directory* named `tasks.md`,
+- [x] 6.4 RED: Write the two remaining edge tests. Unreadable: a *directory* named `tasks.md`,
       asserting 0/0 and exactly one problem naming the path — `tasks::read` already produces
       that problem, and this pins that it is propagated onto the change rather than dropped.
       Absent: no `tasks.md` and no tasks artifact, asserting 0/0, an empty problems list, and
       `is_complete() == false` — the last assertion is what separates "no tasks" from "all
       tasks done", the same three-way split the CLI makes
-- [ ] 6.5 RED: Write the containment test. Take a `testutil::snapshot` of a change directory
+- [x] 6.5 RED: Write the containment test. Take a `testutil::snapshot` of a change directory
       holding a nested `specs/` tree and a `tasks.md`, run resolution and counting three
       times, snapshot again, and assert equality. Then, on a change directory with **no**
       `tasks.md`, assert that the path the fallback names still does not exist afterwards —
@@ -401,14 +401,14 @@ for exactly the changes whose schema is unusual.
       nothing, and an `OpenOptions` written the wrong way round would create it. This is a
       `RED` and not a `CHARACTERIZE`: "this code writes nothing" is a behaviour, the test
       fails before `change_progress` exists, and it fails again if the function starts writing
-- [ ] 6.6 GREEN: Implement `change_progress`: resolve the tasks artifact's `generates` through
+- [x] 6.6 GREEN: Implement `change_progress`: resolve the tasks artifact's `generates` through
       group 5's resolver, substitute `[change_dir.join("tasks.md")]` when the result is empty,
       read each target with `tasks::read`, and accumulate with `Progress`'s `+=`. Cite the
       CLI's function and line range in a comment
-- [ ] 6.7 REFACTOR: Keep the fallback visible as one named expression rather than buried in an
+- [x] 6.7 REFACTOR: Keep the fallback visible as one named expression rather than buried in an
       `if`, since it is the behaviour a future reader is most likely to "simplify" away; state
       in the verification task if no other refactor was needed
-- [ ] 6.8 Run the group tests — `cargo test --all-features changes::` — no regressions
+- [x] 6.8 Run the group tests — `cargo test --all-features changes::` — no regressions
 
 ## 7. Enumerating active and archived changes
 <!-- kind: behavior -->
