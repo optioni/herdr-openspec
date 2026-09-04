@@ -317,6 +317,31 @@ pub fn npm_prefix_deferred() -> Option<PathBuf> {
     None
 }
 
+/// A session-lifetime cache of a single `BinResolution`, owned by the
+/// caller rather than process-global: `cargo test` runs the suite in
+/// parallel threads of one process, so a `static` cache would be shared by
+/// every test and the first probe would decide the answer for all of them.
+/// Caches the whole outcome, negative results included, so a re-render
+/// never re-walks `PATH`.
+#[derive(Default)]
+pub struct BinCache(std::sync::OnceLock<BinResolution>);
+
+impl BinCache {
+    /// Return the cached resolution, running `probe` only on the first call.
+    pub fn get_or_probe(&self, probe: impl FnOnce() -> BinResolution) -> &BinResolution {
+        self.0.get_or_init(probe)
+    }
+}
+
+/// The single composition against the real process environment: the
+/// configured value, `config::env_lookup`, and the deferred npm hook, and
+/// nothing else — the crate's untestable residue does not grow past this
+/// one line. See `openspec/changes/repo-resolution/design.md` -> Contracts.
+pub fn openspec_bin_from_env(config: &crate::config::Config) -> BinResolution {
+    let env = crate::config::env_lookup();
+    openspec_bin(config.openspec_bin.as_deref(), &env, &npm_prefix_deferred)
+}
+
 #[cfg(test)]
 mod tests {
     use crate::testutil::{ScratchDir, canonical, symlink, write_with_mode};
