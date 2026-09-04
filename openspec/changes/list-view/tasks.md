@@ -1278,7 +1278,7 @@ block is re-run, not further modified — and `GRAPH-SNAP` likewise.
 ## 9. Architectural and dependency checks
 <!-- kind: operational -->
 
-- [ ] 9.1 CHECK: Run every check against the finished tree and record each output verbatim:
+- [x] 9.1 CHECK: Run every check against the finished tree and record each output verbatim:
       `NOSPAWN-GREP` with `MIN=16`, `NOIO-VIEW`, `NOCLI-SHELL` with `UI_MIN=8`,
       `NORAW-GREP`, `NODEFAULT-UI`, `NOLIT-CHANGE` with `MIN=16`, `WIDTHS` with
       `WIDTHS_MIN=47`, `LISTWIDTHS` with `LIST_MIN=17`, `NOWAIVER`, `GATE-MECH1`,
@@ -1290,7 +1290,7 @@ block is re-run, not further modified — and `GRAPH-SNAP` likewise.
       **Wrongly green when:** `DEPS` or `GRAPH-SNAP` is skipped on the reasoning that no
       dependency changed — run them; the point is that nothing changed.
 
-- [ ] 9.2 CHECK: Prove each check can still go **red** against a planted violation, in a
+- [x] 9.2 CHECK: Prove each check can still go **red** against a planted violation, in a
       throwaway copy under `$WORK`, then remove it. Extract and run the same `$CHECKS`
       scripts, never a retyped variant:
       1. `let _ = std::process::Command::new("ls");` in `src/ui/list.rs` → `NOSPAWN-GREP`
@@ -1330,14 +1330,14 @@ block is re-run, not further modified — and `GRAPH-SNAP` likewise.
       **Red when:** any planted violation is **not** caught. A check that stays green
       against its own violation is the defect class this repository has shipped three times.
 
-- [ ] 9.3 CHECK: Confirm no test in the change reaches a collaborator the design's Test
+- [x] 9.3 CHECK: Confirm no test in the change reaches a collaborator the design's Test
       Boundaries table does not name. Grep `src/ui/list.rs` and `src/ui/view.rs` for
       `ScratchDir`, `temp_dir`, `std::fs`, and `Command` — expected: **no hits in either**.
       Grep `src/ui/mod.rs` for `render_at` — expected: exactly the acceptance test.
       **Red when:** a view test opens a directory, which is the signal that logic leaked
       into the view.
 
-- [ ] 9.4 VERIFY: `OPENSPEC-UNTOUCHED` against `$BASE`. The only permitted paths under
+- [x] 9.4 VERIFY: `OPENSPEC-UNTOUCHED` against `$BASE`. The only permitted paths under
       `openspec/` are `openspec/changes/list-view/`.
       **Red when:** any other path appears — including an untracked one, which is the half
       `git diff` alone would miss.
