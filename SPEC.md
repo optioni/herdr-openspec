@@ -20,7 +20,8 @@ implementation time, not from memory.
 
 Two boundaries define the design. Everything interesting lives between them.
 
-**The subprocess seam.** All process spawning sits behind two traits:
+**The subprocess seam.** `cli` is the only module in this crate permitted to
+spawn a process. Two traits carry the two programs it wraps directly:
 
 ```rust
 trait OpenspecCli { fn run(&self, args: &[&str]) -> Result<String>; }
@@ -29,12 +30,20 @@ trait HerdrCli    { fn run(&self, args: &[&str]) -> Result<String>; }
 
 Each has exactly one real implementation that spawns a process and returns stdout,
 and a fake used by tests. No parsing, merging, or decision-making happens inside
-either. This is what makes the coverage target reachable: the untestable residue
-is two thin wrappers and `main`. (`config::env_lookup` is a third one-line binding
-to the real world — the crate's single call to `std::env::var` — but it is not
-untestable residue: it carries its own assertions, comparing its result against
-`std::env::var` directly for a variable known to be present and for one nothing
-sets, rather than being covered only by the composition that calls it.)
+either. A third spawn lives behind the same seam: the one-shot `npm prefix -g`
+probe that `resolve::openspec_bin`'s fourth step needs. It is neither `openspec`
+nor `herdr`, so it is not one of the two traits above — but it is still a process
+spawn, and `cli` is still where it lives. `resolve` itself never spawns it: the
+probe arrives as an injected `&dyn Fn() -> Option<PathBuf>`, the same shape by
+which `resolve` and `config` take the process environment as a lookup closure,
+so `resolve` stays pure and the seam still exists before anything crosses it.
+This is what makes the coverage target reachable: the untestable residue is two
+thin wrappers, the `npm prefix -g` binding, and `main`. (`config::env_lookup` is
+a fourth one-line binding to the real world — the crate's single call to
+`std::env::var` — but it is not untestable residue: it carries its own
+assertions, comparing its result against `std::env::var` directly for a
+variable known to be present and for one nothing sets, rather than being
+covered only by the composition that calls it.)
 
 **The render seam.** Views are pure functions from a `Dashboard` state value to a
 ratatui frame. They perform no I/O, so they are tested by rendering into a
@@ -76,7 +85,13 @@ being untested fallback code.
 ### Resolution chain
 
 **Repository.** Start from the invocation context's workspace working directory
-and walk up looking for `openspec/`. If none is found, render an empty state
+and walk up looking for `openspec/`, stopping at the innermost ancestor that
+holds it — an `openspec/` several levels up is not preferred over one closer in.
+A regular file named `openspec` does not count; only a directory (including one
+reached through a symbolic link) does. The starting path is canonicalized
+before the walk when the filesystem can resolve it, so a `..` component or a
+symlinked working directory does not leak into the root the empty state
+prints or a later change joins onto. If none is found, render an empty state
 naming the directory searched.
 
 **Schema.** Read `openspec/config.yaml` for `schema:`. Load
@@ -98,7 +113,8 @@ recent (`archived_count` in plugin configuration).
 filenames. The file path falls back to `<id>.md` for file artifacts and `<id>/`
 for directory artifacts.
 
-**The `openspec` binary.** Probed in order, and cached for the session:
+**The `openspec` binary.** Probed in order, and cached for the session, taking
+the first usable candidate and probing no further:
 
 1. `openspec_bin` from plugin configuration — `config.toml` in the directory
    Herdr injects as `HERDR_PLUGIN_CONFIG_DIR` into every plugin process it
@@ -111,11 +127,33 @@ for directory artifacts.
    because the plugin writes it and must not write into the directory the
    user hand-edits
 2. `openspec` on `PATH`
-3. `~/.nvm/versions/node/*/bin/openspec`
+3. `<nvm root>/versions/node/<version>/bin/openspec`, where the nvm root is
+   `NVM_DIR` when it is set to a non-blank value and `$HOME/.nvm` otherwise,
+   and version directories are tried newest first, ordered numerically (so
+   `v10.0.0` precedes `v9.99.99`) with an unparseable name kept and sorted
+   after every parsed version
 4. `$(npm prefix -g)/bin/openspec`
 
+A step matches only a candidate that is, following symbolic links, an
+executable regular file — a directory named `openspec` does not qualify, and
+neither does a file with no execute bit. The winning path is returned exactly
+as the chain constructed it, never canonicalized, since it is the name a
+later change spawns and a symbolic link is the stable, upgrade-surviving
+form. A configured `openspec_bin` that is not usable does not win and does
+not end the chain: the remaining steps still run, and the fallback is
+recorded as a problem naming the configured path, so a user's typo degrades
+visibly rather than either silently substituting a different binary or
+failing closed.
+
 Steps 3 and 4 exist because the binary is commonly installed under a Node version
-manager, and a plugin pane command does not run through a login shell.
+manager, and a plugin pane command does not run through a login shell. Step 4 is
+unwired until `subprocess-seam` lands: `resolve::openspec_bin` takes the npm
+prefix as an injected hook, and the binding `repo-resolution` ships always
+returns nothing, so a system-node install with no nvm tree and no `PATH` entry
+resolves nothing today and the dashboard runs in file mode until that change
+replaces the binding. Whoever wires it must read `npm prefix -g`'s **stdout
+only**, trimmed — on the reference machine `npm` writes unrelated shell-plugin
+noise to stderr — and treat a non-zero exit or empty output as no prefix.
 
 ### Refresh
 
@@ -292,6 +330,7 @@ Every condition renders usable content rather than an error screen:
 | Pane narrower than 100 columns | Single-column list and detail |
 | `config.toml` malformed, unreadable, or a key of the wrong type | The affected key falls back to its documented default while every other key that parsed correctly is still honoured; `Config::problems` names each fallback |
 | `agent-names.toml` unusable (malformed, unreadable, or an entry Herdr would reject) | Empty or partial mapping; attribution falls back to the name-equality tier, and nothing already on disk is lost |
+| A configured `openspec_bin` that does not name a usable binary | Falls through to the remaining probe steps rather than winning or ending the chain; the fallback is named in `BinResolution::problems` rather than being silent |
 
 ## Testing and quality gates
 
@@ -306,7 +345,10 @@ Each is a pure transformation, tested without a TUI or a subprocess:
 - `tasks::parse` — markdown checkboxes to grouped items and counts
 - `agents::attribute` — agent-list JSON plus change list to per-change badges,
   covering all three tiers including the deliberate non-attribution case
-- `resolve::openspec_bin` — the four-step probe chain against a synthetic filesystem
+- `resolve::find_repo` and `resolve::openspec_bin` — the upward walk for
+  `openspec/` and the four-step binary probe chain, both tested against a
+  purpose-built scratch directory tree under `std::env::temp_dir()`, not a
+  faked filesystem layer
 
 ### View tests
 

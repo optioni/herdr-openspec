@@ -48,7 +48,7 @@ Pure transformations. No terminal, no subprocess, no writes.
 
 | Change | Scope | Spec refs | Depends on |
 |---|---|---|---|
-| `repo-resolution` | `resolve` — walk up from a starting directory for `openspec/`, and the four-step `openspec` binary probe chain (config, `PATH`, nvm glob, `npm prefix -g`) with session caching. Tested against a synthetic filesystem. | Data layer → Resolution chain | `plugin-config` |
+| `repo-resolution` | `resolve` — walk up from a starting directory for `openspec/`, and the four-step `openspec` binary probe chain (config, `PATH`, nvm tree, `npm prefix -g`) with session caching. Step 4's `npm prefix -g` collaborator ships as an injected hook that always returns nothing; `subprocess-seam` replaces it. Tested against a purpose-built scratch directory tree, not a faked filesystem layer. | Data layer → Resolution chain | `plugin-config` |
 | `schema-model` | `schema` — parse `openspec/config.yaml` for `schema:`, load `openspec/schemas/<name>/schema.yaml`, produce the ordered artifact list, and identify the tasks artifact by `role: tasks` rather than by the id `tasks`. | Data layer → Resolution chain | `repo-foundation` |
 | `task-parsing` | `tasks` — parse a markdown task file into groups under their headings, items with checked state, and completion counts. | User interface → Detail view | `repo-foundation` |
 | `changes-from-files` | `changes::from_files` — enumerate active changes from `openspec/changes/`, archived ones from `openspec/changes/archive/` (strip the `YYYY-MM-DD-` prefix, sort descending, take `archived_count`), and resolve artifact paths as `<id>.md` or `<id>/`. Produces the `Change` type the CLI path must also produce. | Data layer | `repo-resolution`, `schema-model`, `task-parsing` |
@@ -57,7 +57,7 @@ Pure transformations. No terminal, no subprocess, no writes.
 
 | Change | Scope | Spec refs | Depends on |
 |---|---|---|---|
-| `subprocess-seam` | `cli` — the `OpenspecCli` and `HerdrCli` traits, one real spawn-and-return-stdout implementation each, and the fakes used by every later test. No parsing lives here. | Architecture → The subprocess seam | `repo-foundation` |
+| `subprocess-seam` | `cli` — the `OpenspecCli` and `HerdrCli` traits, one real spawn-and-return-stdout implementation each, and the fakes used by every later test. No parsing lives here. Also replaces `resolve::npm_prefix_deferred` with a real binding that runs `npm prefix -g` behind the seam, reading its stdout only, trimmed — `npm` writes unrelated shell-plugin noise to stderr on the reference machine — and treating a non-zero exit or empty output as no prefix. This is an end-to-end obligation, not just a binding swap: a scenario must drive the real hook through to `<prefix>/bin/openspec`, since until this change lands that join is exercised only by fixture closures. | Architecture → The subprocess seam | `repo-foundation`, `repo-resolution` |
 | `changes-from-cli` | `changes::from_cli` — parse `openspec list --json`, `openspec status --change <n> --json`, and `openspec instructions apply --change <n> --json` (for `contextFiles`) into the same `Change` type, plus the merge policy that layers CLI results over file results. A schema the CLI rejects falls back to the file result for that change. | Data layer → Dual-source model | `changes-from-files`, `subprocess-seam` |
 
 ## Phase 4 — The dashboard
@@ -97,6 +97,7 @@ graph TD
   repo-foundation --> subprocess-seam
   plugin-config --> repo-resolution
   repo-resolution --> changes-from-files
+  repo-resolution --> subprocess-seam
   schema-model --> changes-from-files
   task-parsing --> changes-from-files
   changes-from-files --> changes-from-cli
