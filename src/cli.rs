@@ -328,4 +328,74 @@ mod tests {
         let threaded = handle.join().expect("thread panicked");
         assert_eq!(inline, threaded);
     }
+
+    // --- group 3: the real implementations ----------------------------------
+
+    #[test]
+    fn the_constructed_path_is_the_program_that_runs() {
+        let scratch = ScratchDir::new();
+        let a = script(&scratch, "a", "printf 'A'\n");
+        let b = script(&scratch, "b", "printf 'B'\n");
+
+        let cli_a = super::RealOpenspecCli::new(a);
+        assert_eq!(
+            super::OpenspecCli::run(&cli_a, &[]),
+            Ok("A".to_string())
+        );
+
+        let cli_b = super::RealOpenspecCli::new(b);
+        assert_eq!(
+            super::OpenspecCli::run(&cli_b, &[]),
+            Ok("B".to_string())
+        );
+    }
+
+    #[test]
+    fn no_argument_is_added_and_the_working_directory_is_inherited() {
+        let scratch = ScratchDir::new();
+        let prog = script(&scratch, "prog", "printf '%s\\n' \"$#\"; pwd\n");
+        let cli = super::RealOpenspecCli::new(prog);
+        let result = super::OpenspecCli::run(&cli, &[]).expect("should succeed");
+        let mut lines = result.lines();
+        assert_eq!(lines.next(), Some("0"));
+        let printed_cwd = lines.next().expect("second line");
+        let expected_cwd = std::env::current_dir().expect("current dir");
+        assert_eq!(
+            std::fs::canonicalize(printed_cwd).expect("canonicalize printed cwd"),
+            std::fs::canonicalize(&expected_cwd).expect("canonicalize expected cwd")
+        );
+    }
+
+    #[test]
+    fn the_default_herdr_program_name_is_herdr() {
+        let cli = super::RealHerdrCli::default();
+        assert_eq!(cli.program(), std::path::Path::new("herdr"));
+    }
+
+    #[test]
+    fn a_program_that_reads_stdin_returns_rather_than_blocking() {
+        use std::sync::mpsc;
+        use std::time::{Duration, Instant};
+
+        let scratch = ScratchDir::new();
+        let prog = script(&scratch, "prog", "cat\n");
+        let cli = super::RealOpenspecCli::new(prog);
+
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let result = super::OpenspecCli::run(&cli, &[]);
+            let _ = tx.send(result);
+        });
+
+        let deadline = Instant::now() + Duration::from_secs(30);
+        let mut received = None;
+        while Instant::now() < deadline {
+            if let Ok(result) = rx.try_recv() {
+                received = Some(result);
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert_eq!(received, Some(Ok(String::new())));
+    }
 }

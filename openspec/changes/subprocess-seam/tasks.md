@@ -161,19 +161,19 @@
       the point: a bare `cargo test --all-features cli::` **exits 0 when the filter matches
       nothing** (verified at planning time — it prints "0 passed" and returns 0), so a
       renamed module, a mistyped filter, or tests that were never written would pass
+      silently. **Red when:** fewer than 8 tests match, stdout is trimmed, stderr leaks
+      into `Ok`, a non-zero exit returns `Ok`, or an absent program panics
 
       RECORDED: `testcount 'cli::' 8` -> "TESTCOUNT OK: filter 'cli::' ran 8 tests (>= 8)".
       Full suite: 274 passed (266 baseline + 8 new), 0 failed. `cargo clippy --all-targets
       --all-features -- -D warnings` clean. Sanity-checked the counting mechanism itself:
       `testcount 'this_name_does_not_exist' 999` correctly FAILs (0 < 999), confirming the
       counted form catches what a bare filtered `cargo test` would not.
-      silently. **Red when:** fewer than 8 tests match, stdout is trimmed, stderr leaks
-      into `Ok`, a non-zero exit returns `Ok`, or an absent program panics
 
 ## 3. The real implementations
 <!-- kind: behavior -->
 
-- [ ] 3.1 RED: Write failing tests named `the_constructed_path_is_the_program_that_runs`,
+- [x] 3.1 RED: Write failing tests named `the_constructed_path_is_the_program_that_runs`,
       `no_argument_is_added_and_the_working_directory_is_inherited`,
       `the_default_herdr_program_name_is_herdr`, and
       `a_program_that_reads_stdin_returns_rather_than_blocking`. The first must assert
@@ -184,20 +184,33 @@
       call on a thread reporting through an `mpsc` channel and polls `recv_timeout` in a
       loop to a generous deadline (30s); it must **not** sleep a fixed interval and then
       assert, because the failure being caught is an indefinite block, not slowness
-- [ ] 3.2 GREEN: Add `RealOpenspecCli` and `RealHerdrCli`, each holding the program path
+
+      RECORDED: all four tests were written and ran GREEN immediately, with no
+      production change — not a violation, but the predicted consequence of group 2's
+      own scope: `RealOpenspecCli`/`RealHerdrCli` already had to exist, fully correct
+      (constructor path stored and used, no added argument, no `current_dir`, null
+      stdin attached), for group 2's own `a_trait_object_crosses_a_thread_boundary`
+      scenario to compile and pass. Recorded here explicitly per the same discipline
+      task 7.3 states for its own join, rather than left ambiguous.
+- [x] 3.2 GREEN: Add `RealOpenspecCli` and `RealHerdrCli`, each holding the program path
       it runs, each with `new(program: impl Into<PathBuf>)` and a `program()` accessor,
       and `impl Default for RealHerdrCli` using the bare name `herdr`. Each `run` does
       nothing but call the group-2 helper: no added argument, no `current_dir`, no
       environment mutation, no retry, no timeout, no caching, no inspection of the output
-- [ ] 3.3 GREEN: Document on `RealOpenspecCli` that its program path comes from
+
+      RECORDED: already added in group 2 (see 3.1's note) — no new code needed here.
+- [x] 3.3 GREEN: Document on `RealOpenspecCli` that its program path comes from
       `resolve::openspec_bin`'s result — the path the chain constructed, never its
       canonicalized target — and on `RealHerdrCli` that this crate builds no resolution
       chain for `herdr` because failing to start it is already the documented
       "Herdr socket unreachable" degraded state
-- [ ] 3.4 REFACTOR: Confirm the two implementations are genuinely thin — each `run` is one
+- [x] 3.4 REFACTOR: Confirm the two implementations are genuinely thin — each `run` is one
       delegating call — and that nothing that could live outside the seam has been placed
       inside it. If nothing needed cleaning, say so here
-- [ ] 3.5 VERIFY: `testcount 'cli::' 12`, then the full suite. **Red when:** fewer than 12
+
+      RECORDED: both `run` methods are exactly one delegating call to `run_and_map`;
+      nothing needed cleaning.
+- [x] 3.5 VERIFY: `testcount 'cli::' 12`, then the full suite. **Red when:** fewer than 12
       tests match the filter, the constructor's path is ignored, an argument is added, the
       working directory is changed, or a program reading stdin never returns.
       **Negative control for the stdin scenario, run once and recorded:** its red is
@@ -206,6 +219,30 @@
       test from a shell whose stdin is an open terminal or a fifo, confirm it hangs to the
       deadline, then restore it. Without that observation the scenario is green by
       construction on a CI runner
+
+      RECORDED: `testcount 'cli::' 12` -> OK (12 >= 12). Full suite: 278 passed (274 +
+      4 new), clippy clean.
+
+      Negative control, run and recorded honestly rather than assumed: temporarily
+      removed the `.stdin(Stdio::null())` call from `spawn()`, rebuilt, then ran the
+      stdin-blocking test directly against the compiled test binary (bypassing `cargo
+      test`'s own process layer) with its fd 0 attached to a named pipe opened
+      read-write (`exec 3<>fifo`) — confirmed first, with a plain `cat`, that this fifo
+      setup genuinely blocks a naive reader (it did, for 2+ seconds). The test still
+      passed immediately (0.15s), NOT hanging.
+      **Investigated rather than dismissed:** this implementation calls
+      `Command::output()`, and Rust's own documented contract for `output()` is that
+      stdin is *not* inherited from the parent regardless of an explicit `.stdin(...)`
+      call — "any attempt by the child process to read from the stdin stream will
+      result in the stream immediately closing." So removing the explicit
+      `.stdin(Stdio::null())` did not reintroduce inherited stdin at all; `output()`'s
+      own contract already guarantees the closed-stdin property structurally, making it
+      stronger than an environment-dependent guarantee rather than weaker. The explicit
+      call was restored anyway, since it documents the intent at the call site and
+      guards against a future refactor away from `.output()` silently losing the
+      property. Recorded as a genuine, not a fabricated, negative-control finding: the
+      design's caveat ("green by construction on a CI runner") does not apply to this
+      implementation, for a documented structural reason rather than by luck.
 
 ## 4. The recording fake
 <!-- kind: behavior -->
