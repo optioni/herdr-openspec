@@ -20,26 +20,35 @@ spec is wrong, update the spec as part of that change rather than letting the tw
 ## Current repo state
 
 `repo-foundation`, `ci-pipeline`, `plugin-config`, `repo-resolution`,
-`schema-model`, `task-parsing`, `changes-from-files`, `subprocess-seam`, and
-`changes-from-cli` have landed: the crate builds with three third-party
-dependencies (`toml`, `yaml-rust2`, `serde_json`), `make check` runs all four
-quality gates locally and in CI, the crate reads `config.toml` and derives and
-records agent-name mappings under `HERDR_PLUGIN_STATE_DIR`, it can locate the
-OpenSpec repository root and the `openspec` binary — the binary chain's fourth
-probe step is an injected hook whose production binding, `cli::npm_prefix`,
-runs the real `npm prefix -g` probe behind the subprocess seam — it reads the
-repository's schema and produces the ordered artifact list including the
-tasks artifact, it parses a task file into groups, items, and completion
-counts that agree with the CLI's own, and it enumerates `openspec/changes/`
-into the `Change`/`ChangeSet` values the dashboard renders — active and
-archived, with every artifact resolved and every change's task progress
-counted by the CLI's own fallback rule, file-sourced when no `openspec`
-binary is present at all, and corrected by `changes::from_cli`/
-`changes::merge` when it is: the CLI's schema, progress, and artifacts
-replace the file's for every change it reports, joined by position, archived
-changes staying permanently file-sourced. The dashboard itself is not
-implemented yet — `herdr-openspec ui` prints a placeholder banner and blocks
-until the pane closes.
+`schema-model`, `task-parsing`, `changes-from-files`, `subprocess-seam`,
+`changes-from-cli`, and `tui-shell` have landed: the crate builds with four
+third-party dependencies (`toml`, `yaml-rust2`, `serde_json`, `ratatui` — the
+last reached through `ratatui::crossterm`'s re-export, not a direct
+dependency), `make check` runs all four quality gates locally and in CI, the
+crate reads `config.toml` and derives and records agent-name mappings under
+`HERDR_PLUGIN_STATE_DIR`, it can locate the OpenSpec repository root and the
+`openspec` binary — the binary chain's fourth probe step is an injected hook
+whose production binding, `cli::npm_prefix`, runs the real `npm prefix -g`
+probe behind the subprocess seam — it reads the repository's schema and
+produces the ordered artifact list including the tasks artifact, it parses a
+task file into groups, items, and completion counts that agree with the
+CLI's own, and it enumerates `openspec/changes/` into the
+`Change`/`ChangeSet` values the dashboard renders — active and archived,
+with every artifact resolved and every change's task progress counted by
+the CLI's own fallback rule, file-sourced when no `openspec` binary is
+present at all, and corrected by `changes::from_cli`/`changes::merge` when
+it is: the CLI's schema, progress, and artifacts replace the file's for
+every change it reports, joined by position, archived changes staying
+permanently file-sourced. `herdr-openspec ui` now opens a real dashboard:
+raw mode and the alternate screen entered and left in a fixed, mirrored
+order (restored on normal return, error return, and panic alike), a
+draw-then-wait event loop with `q`/`Ctrl-C` to quit and `Enter`/`Esc` to
+move between the list and detail routes, and a 100-column breakpoint
+deciding a one- or two-region body. The body regions themselves are still
+empty bordered frames — `list-view`, `markdown-viewer`, and `detail-view`
+fill them next — and `ui` refuses to start with exit status 3 when stdout is
+not a terminal, which is also what keeps `cargo test` (which spawns this
+binary) from ever putting a real terminal into raw mode.
 
 Important files:
 
@@ -140,7 +149,13 @@ unreachable and the tests become integration tests by accident.
   stdout verbatim, and every JSON parse lives on the testable side of it —
   `serde_json` must never appear in `src/cli.rs`, checked the same way.
 - **Views do no I/O.** They are pure functions from state to a ratatui frame, tested
-  by rendering into a `TestBackend` buffer at 60 and 120 columns.
+  by rendering into a `TestBackend` buffer at 60 and 120 columns. `src/ui/terminal.rs`
+  is the only file in the crate permitted to name a crossterm terminal-mode function
+  (`enable_raw_mode`, `disable_raw_mode`, `EnterAlternateScreen`,
+  `LeaveAlternateScreen`) — checked the same tree-wide-grep-with-a-positive-control
+  way as the subprocess seam above, `tests/` included. A test that reaches the real
+  terminal implementation corrupts the developer's own session, because `cargo test`
+  spawns this binary.
 
 Further invariants from `SPEC.md`:
 

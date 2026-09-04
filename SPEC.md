@@ -11,11 +11,14 @@ state, plus the ability to launch an agent onto a change. It ships a single Rust
 binary invoked two ways by the manifest: as a pane process rendering the TUI, and
 as an action process that opens or focuses that pane.
 
-**Stack:** Rust, `ratatui` + `crossterm` (TUI), `notify` (filesystem watching),
-`serde_json`, `yaml-rust2` (YAML — the choice is argued in `schema-model`'s
-design.md; a later change needing YAML should not re-open it), `pulldown-cmark`
-(markdown), `toml` (plugin configuration and state, both TOML). Exact versions are
-pinned to current stable releases at implementation time, not from memory.
+**Stack:** Rust, `ratatui` (TUI) — `crossterm` is reached through `ratatui`'s own
+re-export and is not itself a declared dependency, so a backend type and an event
+type can never come from two different `crossterm` releases — `notify` (filesystem
+watching), `serde_json`, `yaml-rust2` (YAML — the choice is argued in
+`schema-model`'s design.md; a later change needing YAML should not re-open it),
+`pulldown-cmark` (markdown), `toml` (plugin configuration and state, both TOML).
+Exact versions are pinned to current stable releases at implementation time, not
+from memory.
 
 ## Architecture
 
@@ -66,7 +69,7 @@ ratatui frame. They perform no I/O, so they are tested by rendering into a
 | `agents` | Attribute live Herdr agents to changes |
 | `launch` | Split a pane, start an agent, send the `/opsx:*` prompt |
 | `watch` | Filesystem watching and debounce |
-| `ui` | Views, layout, key handling |
+| `ui` | Views, layout, key handling, terminal lifecycle, and the event loop |
 | `cli` | The two subprocess traits and their real implementations |
 
 ## Data layer
@@ -245,9 +248,18 @@ re-read including CLI calls.
 A Herdr split pane is frequently 40–60 columns, where a fixed two-column layout is
 unusable.
 
-- **100 columns or wider:** two columns — change list left, artifact detail right.
+- **100 columns or wider:** two columns — change list left (`Length(40)`), artifact
+  detail right (`Min(0)`), so every column gained beyond 100 goes to detail. At
+  this width `Enter` and `Esc` still move the route; they select which region is
+  emphasised (bold border) rather than which is visible.
 - **Narrower than 100 columns:** single column. The list is the root view; `Enter`
-  opens detail and `Esc` returns.
+  opens detail and `Esc` returns. At this width the route selects which region is
+  visible, not merely emphasised.
+
+`Enter` and `Esc` move the route at **every** width — the difference is only what
+moving it does to the frame. Both the `Length(40)`/`Min(0)` constraints and the
+every-width route rule are frozen here for `list-view`, `detail-view`, and
+`agent-attribution` to inherit.
 
 ### List view
 
@@ -261,6 +273,11 @@ changes:
   -- archived --------------------------------
   2026-08-14 add-auth
 ```
+
+The mock above illustrates *content*, not width: its widest row is 48 characters,
+and the wide-layout list column (`Length(40)`, above) leaves a 38-column interior.
+How a row is shortened to fit 38 columns is `list-view`'s decision, made with the
+constraint already known.
 
 Progress comes from the CLI when available and from checkbox counts otherwise. A
 footer reports agents in the repository that could not be attributed to a change.
@@ -292,6 +309,10 @@ agent editing `tasks.md` in another pane.
 | `s` | Launch an agent with `/opsx:archive` |
 | `g` | Focus the running agent for this change |
 | `q` | Quit |
+| `Ctrl-C` | Quit |
+
+`Esc` at the list root — no detail open to return from — is inert rather than a
+quit; only `q` and `Ctrl-C` close the pane.
 
 Action keys are hidden when the Herdr socket is unreachable.
 
@@ -418,6 +439,16 @@ Every condition renders usable content rather than an error screen:
 | `openspec list --json` reports a repository root other than the one this plugin resolved | The whole CLI result is discarded, not merged: the CLI resolves its root from the **process** working directory while this plugin resolves from the invocation context's workspace working directory, and the subprocess seam forbids setting `current_dir`, so the two can legitimately disagree |
 | A CLI command exits non-zero | The reason is unavailable to the plugin: the CLI writes its diagnostic to **stdout**, not stderr, and the subprocess seam's `CliError::Failed` carries stderr only — the recorded problem names the command and its exit code, never the CLI's own message |
 
+### No terminal is not a degraded state
+
+`ui` refuses to start at all when stdout is not a terminal, exiting status 3 with a
+message naming `herdr-openspec` and the words `not a terminal`. This is deliberately
+outside the table above: every row there is a precondition the pane still renders
+*something* for, but a TUI has nothing to render into a pipe — there is no content
+to degrade to. Treating it as a table row would make the section's opening sentence
+("every condition renders usable content rather than an error screen") false, and
+`PRD.md` → Success criteria, which repeats the same claim, false with it.
+
 ## Testing and quality gates
 
 ### Unit-tested modules
@@ -447,6 +478,12 @@ is tested against scratch `#!/bin/sh` programs rather than the real `openspec`,
   `openspec/` and the four-step binary probe chain, both tested against a
   purpose-built scratch directory tree under `std::env::temp_dir()`, not a
   faked filesystem layer
+- `ui::layout`, `ui::app`, `ui::view`, `ui::driver`, `ui::terminal`, and `ui::load`
+  — the breakpoint and frame split, `Dashboard` and key handling, the render seam
+  proper, the draw-then-wait event loop, and startup state from files.
+  `ratatui::backend::TestBackend` stands in for the rendering surface and a
+  recording `TerminalOps` double stands in for the terminal; no test constructs
+  the real terminal implementation
 
 ### View tests
 
@@ -455,7 +492,7 @@ both 60 and 120 columns so the responsive breakpoint is genuinely covered.
 
 ### Fixtures
 
-Two mechanisms, not checked-in fixture repositories: no change in the roadmap
+Three mechanisms, not checked-in fixture repositories: no change in the roadmap
 has a use for one. `changes::from_files` needs an empty directory, a
 symbolic link (dangling and not), and a directory at mode `0o000`, none of
 which git can store faithfully; and every view change performs no I/O at
@@ -471,6 +508,11 @@ state to a frame.
 - **`include_str!` corpora** for pure parsers whose input is bytes, not a
   directory tree — `tests/fixtures/tasks/` holds the markdown fixtures
   `tasks::count` and `tasks::parse` are proven to agree on.
+- **A committed tool-output snapshot**, `tests/fixtures/build-graph.txt` — the
+  resolved dependency graph, one `<name> <version>` line per package per
+  supported triple, compared against a live `cargo tree` run. Neither a
+  `ScratchDir` tree nor an `include_str!` corpus: it pins what `cargo`, not this
+  crate, produces.
 
 ### Gates
 

@@ -1276,7 +1276,7 @@ needs, in the extracted copy rather than in the archive.
 ## 10. Documentation
 <!-- kind: operational -->
 
-- [ ] 10.1 CHECK: Re-read `SPEC.md` and list every statement this change made false, before
+- [x] 10.1 CHECK: Re-read `SPEC.md` and list every statement this change made false, before
       editing. Expected set, each corrected in 10.2: the stack line implies a direct
       `crossterm` dependency; the Keys table omits `Ctrl-C`; the module map's `ui` row omits
       terminal lifecycle and the event loop; nothing anywhere covers "stdout is not a
@@ -1288,8 +1288,10 @@ needs, in the extracted copy rather than in the archive.
       **Red when:** a statement on this list turns out to be already true, or a false
       statement is found that is not on it — in either case the list is corrected here
       before 10.2 edits anything.
+      **Recorded:** re-read confirmed all nine statements false exactly as listed, and no
+      further false statement was found beyond them.
 
-- [ ] 10.2 CHANGE: Correct `SPEC.md` — audience: every future change reading the design
+- [x] 10.2 CHANGE: Correct `SPEC.md` — audience: every future change reading the design
       contract; durable reason: `AGENTS.md` requires the spec to be corrected by the change
       that disproves it, not left to drift. Nine edits, all **rewrites in place** except the
       two additions named below, adding roughly 30 lines net:
@@ -1325,8 +1327,16 @@ needs, in the extracted copy rather than in the archive.
         `tests/fixtures/build-graph.txt`, a committed snapshot of tool output compared
         against a live `cargo tree` run, which is neither a `ScratchDir` tree nor an
         `include_str!` corpus.
+      **Recorded:** all nine edits made (`git diff --stat SPEC.md`: +51/-9, 42 net — a bit
+      over the estimated "roughly 30" since the Responsive layout and Degraded states
+      additions grew somewhat in the writing, both still single, focused additions in the
+      places named). The "no terminal is not a degraded state" note is its own `###`
+      heading, matching every other subsection's heading level in the file (an `####` would
+      have been the literal single-level-deeper reading of "below the table", but breaks
+      the document's own heading convention with no compensating clarity). `PRD.md` left
+      untouched, confirmed by `git status`.
 
-- [ ] 10.3 CHANGE: Rewrite `AGENTS.md`'s "Current repo state" paragraph in place — it says
+- [x] 10.3 CHANGE: Rewrite `AGENTS.md`'s "Current repo state" paragraph in place — it says
       the dashboard is not implemented and `ui` prints a placeholder banner, which this
       change makes false. Replace, do not append. Also add one rule to "Architecture rules",
       rewriting rather than extending the existing "Views do no I/O" bullet: name
@@ -1334,17 +1344,33 @@ needs, in the extracted copy rather than in the archive.
       function, with the reason (a test that reaches a real terminal corrupts the
       developer's session, and `cargo test` spawns this binary). Net change: roughly neutral
       — the placeholder sentence goes, the raw-mode rule arrives.
+      **Recorded:** both edits made in place (replaced, not appended). `git diff --stat
+      AGENTS.md`: +36/-21, net +15 — more than "roughly neutral" predicted, because the
+      replacement paragraph names the concrete landed behaviour (raw mode/alternate-screen
+      lifecycle, the event loop's quit and route keys, the breakpoint, the still-empty body
+      regions, and the terminal refusal) rather than a one-line summary; judged worth the
+      extra length for a paragraph whose job is to tell the next reader what actually
+      exists.
 
-- [ ] 10.4 CHECK: Confirm `openspec/IMPLEMENTATION-ORDER.md`'s Phase 4 `tui-shell` row still
+- [x] 10.4 CHECK: Confirm `openspec/IMPLEMENTATION-ORDER.md`'s Phase 4 `tui-shell` row still
       describes what was built. It names crossterm setup and teardown, the event loop, quit
       handling, the breakpoint, and the `TestBackend` harness — all five landed. Correct it
       only if something moved; record explicitly that nothing did, if nothing did.
+      **Recorded:** re-read the row and its Mermaid dependency edges (`changes-from-files
+      --> tui-shell`, `tui-shell --> list-view`, `tui-shell --> markdown-viewer`,
+      `tui-shell --> agent-polling`) and the "`tui-shell` depends on `changes-from-files`,
+      not on the CLI" paragraph below the diagram. All five scope items and all four edges
+      match exactly what landed. **Nothing moved; no correction made.**
 
-- [ ] 10.5 VERIFY: `OPENSPEC-UNTOUCHED` again — 10.4 may have edited a file under
+- [x] 10.5 VERIFY: `OPENSPEC-UNTOUCHED` again — 10.4 may have edited a file under
       `openspec/`. If it did, the check will fail on it, and the exclusion must be extended
       **by name** for exactly that path with a recorded reason, matching how
       `changes-from-cli` handled the same situation. If 10.4 changed nothing, the check
       passes unchanged. Commit.
+      **Recorded:** 10.4 changed nothing, so no exclusion was needed. `OPENSPEC-UNTOUCHED
+      OK` against the unmodified exclusion list. `make check` re-run after the
+      documentation edits: exits 0, coverage unchanged at 97.82% (docs-only, no source
+      touched).
 
 ---
 
