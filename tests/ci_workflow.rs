@@ -413,17 +413,20 @@ fn every_job_is_behind_the_aggregate_status_check() {
         "`ci` job must declare `if: always()`"
     );
 
-    let has_failing_step = content.lines().any(|l| {
+    let has_step_if_key = ci.text.lines().any(|l| {
         let t = l.trim();
-        t.starts_with("if:")
-            && t.contains("needs.*.result")
-            && t.contains("failure")
-            && t.contains("cancelled")
-            && t.contains("skipped")
+        (t.starts_with("if:") || t.starts_with("- if:")) && t != "if: always()"
     });
     assert!(
-        has_failing_step,
-        "`ci` job must have a step whose `if:` checks failure, cancelled, and skipped across needs.*.result"
+        has_step_if_key,
+        "`ci` job must have a step-level `if:` distinct from the job-level `if: always()`"
+    );
+    assert!(
+        ci.text.contains("needs.*.result")
+            && ci.text.contains("failure")
+            && ci.text.contains("cancelled")
+            && ci.text.contains("skipped"),
+        "`ci` job's failing step must check failure, cancelled, and skipped across needs.*.result"
     );
     assert!(
         ci.text.contains("exit 1"),
