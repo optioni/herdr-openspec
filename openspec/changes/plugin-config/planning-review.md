@@ -173,6 +173,43 @@ paths above — never by a glob, and never for `herdr-openspec`. This re-confirm
 planning-time probe rather than replacing it: the design's central premise held at
 implementation time on the same Herdr version.
 
+## Change Review (task 7.1) Findings and Repairs
+
+An independent `outside-in-tdd-reviewer` (not a fork of the implementing session)
+reviewed the full diff (`git diff 8ccb37e..1073b87`) against all planning artifacts.
+Findings and their disposition:
+
+| Severity | Location | Problem | Repair |
+|---|---|---|---|
+| CRITICAL | `src/lib.rs`'s `pid()` doc comment | The doc comment explaining why `crate::pid()` exists quoted the module-scoped spawn-check regex verbatim, including the literal substring `Stdio` — which made design.md's **tree-wide** `grep -rnE 'process::Command\|Command::new\|Stdio' src/` gate fail against the very comment written to satisfy the module-scoped gate. | Reworded the comment to describe the check in prose without reproducing its literal patterns, so it cannot trip either half of the SPAWN check. Re-ran all four SPAWN lines: clean (module-scoped and tree-wide `Command`/`Stdio`/`process::Command` checks pass; the two `"herdr"`/`"openspec"` literal checks still show the known false positives below). |
+| WARNING | `src/config.rs`, `neither_variable_is_available` | Asserted only that `config_dir` returns `None`; the scenario's second THEN clause — `load(None, …)` equals `Config::default()` with empty `problems` — was unasserted, so `load`'s `dir: None` branch had no dedicated test. | Added the missing assertion. |
+| WARNING | `src/state.rs`, `read` | A non-`NotFound` I/O error (e.g. `agent-names.toml` existing as a directory) was silently treated the same as an absent file — zero problems — unlike `config::load`'s identical case, and unlike design.md → Contracts' general statement that `state::read` is "infallible by construction: every failure becomes a default plus a string in problems." No spec scenario named this case explicitly (unlike `plugin-config`'s "The file cannot be read" scenario, `plugin-state`'s spec has no analogous scenario for `agent-names.toml`), but the general contract text applies to both modules. | Mirrored `config::load`'s `NotFound`-vs-other-error split; a non-`NotFound` read failure now yields an empty mapping plus one problem naming `agent-names.toml`. Added test `the_mapping_file_cannot_be_read`. |
+| WARNING | `src/state.rs`, `record` | `record` reconstructs the file from `read`'s already-filtered `Mapping`, so any entry `read` would have skipped (bad type, illegal agent name) is silently dropped from the file on the next successful `record` call, with no problem surfaced (`record` returns `io::Result<()>`, not a `Mapping`). No scenario requires preserving invalid entries. | **Accepted as intentional**, one-line reason: an entry `read` already treats as unusable is one Herdr would reject if handed to it, so pruning it on the next rewrite is self-healing rather than data loss — nothing valid is lost, and no spec scenario asks for the alternative (preserving known-bad bytes verbatim across a write it did not need to touch). Not changed. |
+| WARNING | This file | The `crate::pid()` fix and the SPAWN-block imprecision below were recorded only in a commit message, not here, so the archive would not carry them. | This section and the one below. |
+
+## Design.md Imprecision Found During Implementation (non-blocking)
+
+design.md → Test Strategy's `SPAWN` block includes `! grep -rn '"herdr"' src/` and
+`! grep -rn '"openspec"' src/`, intended to catch a program-name literal passed to a
+spawn API. This change's own legitimate code trips both: `.join("herdr")` appears in
+`config::config_dir`'s and `state::state_dir`'s fallback-path construction
+(`src/config.rs:59`, `src/state.rs:34,44`), and a test fixture builds a path through
+`.join("openspec")` (`src/state.rs`, the repository-containment test) — both are quoted
+string literals used as **path segments**, not program names, so the literal grep
+false-positives against code the spec itself requires.
+
+The actual invariant — no `Command::new`/`Stdio`/`process::Command` anywhere in `src/`
+— is independently and correctly enforced by the SPAWN block's other two lines, which
+stay clean. The reviewer's assessment, confirmed here: a program-name literal can only
+reach a spawn through `Command::new` or `Stdio`, both of which the tree-wide line already
+forbids, so the `"herdr"`/`"openspec"` lines are strictly redundant with the first line
+for this codebase and are better read as documentation of intent than as an independently
+load-bearing check. Not fixed here — design.md is this change's own settled planning
+artifact, not something to relitigate to squeeze out a rewording; recorded so
+`subprocess-seam`, which introduces the crate's first real `Command::new`, does not
+inherit a check believed clean that is actually failing on false positives it never
+looked past.
+
 ## Deferred Non-Blocking Notes
 
 - **`cargo build --locked` is not a recurring gate.** The `quality-gates` capability

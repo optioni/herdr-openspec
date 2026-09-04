@@ -273,6 +273,13 @@ mod tests {
     fn neither_variable_is_available() {
         let lookup = env(&[]);
         assert_eq!(super::config_dir(&lookup), None);
+
+        // Loading configuration for that outcome yields exactly the default
+        // Config and reports no problem, because an absent directory is a
+        // supported state and not a fault.
+        let cfg = super::load(None, &lookup);
+        assert_eq!(cfg, super::Config::default());
+        assert!(cfg.problems.is_empty());
     }
 
     #[test]

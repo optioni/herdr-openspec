@@ -9,14 +9,15 @@
 pub mod config;
 pub mod state;
 
-/// The current process id. Exists so `state::record`'s temporary-file name can
-/// include it without `src/state.rs` itself containing the literal
-/// `std::process`: that module is checked by the stricter, module-scoped form
-/// of the "resolution spawns nothing" gate (`grep -nE
-/// 'std::process|Command|Stdio' src/config.rs src/state.rs`), which forbids
-/// any process API there, spawning or not — see
-/// `openspec/changes/plugin-config/design.md` -> Boundaries and Test
-/// Strategy. `std::process::id()` reads the pid; it does not spawn.
+/// The current process id. Exists so `state::record`'s temporary-file name
+/// can include it without `src/state.rs` itself naming the standard-library
+/// process module: that module is checked by the stricter, module-scoped
+/// form of the "resolution spawns nothing" gate that applies to
+/// `src/config.rs` and `src/state.rs` only, forbidding any process API there
+/// at all — spawning or not. See `openspec/changes/plugin-config/design.md`
+/// -> Boundaries and Test Strategy for the exact check (deliberately not
+/// reproduced here, so this comment cannot itself trip the tree-wide half of
+/// that same check). Reading the current process id is not a spawn.
 pub(crate) fn pid() -> u32 {
     std::process::id()
 }
@@ -43,7 +44,7 @@ pub(crate) mod testutil {
             let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
             let path = std::env::temp_dir().join(format!(
                 "herdr-openspec-test-{}-{counter}",
-                std::process::id()
+                crate::pid()
             ));
             std::fs::create_dir_all(&path).expect("create scratch dir");
             Self { path }

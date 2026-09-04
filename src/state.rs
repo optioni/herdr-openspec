@@ -161,7 +161,13 @@ pub fn read(dir: Option<&Path>) -> Mapping {
     let path = dir.join("agent-names.toml");
     let contents = match std::fs::read_to_string(&path) {
         Ok(contents) => contents,
-        Err(_) => return Mapping::default(),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Mapping::default(),
+        Err(_) => {
+            return Mapping {
+                names: BTreeMap::new(),
+                problems: vec!["agent-names.toml could not be read".to_string()],
+            };
+        }
     };
 
     if contents.trim().is_empty() {
@@ -487,6 +493,22 @@ mod tests {
         assert!(mapping.problems[0].contains("names"));
     }
 
+    /// Not a named spec scenario, but required by design.md -> Contracts'
+    /// general statement that `state::read` is "infallible by construction:
+    /// every failure becomes a default plus a string in problems" — mirrors
+    /// `config::load`'s identical "file cannot be read" case, found and fixed
+    /// during Change Review.
+    #[test]
+    fn the_mapping_file_cannot_be_read() {
+        let scratch = ScratchDir::new();
+        fs::create_dir(scratch.path().join("agent-names.toml"))
+            .expect("create dir as agent-names.toml");
+        let mapping = super::read(Some(scratch.path()));
+        assert!(mapping.names.is_empty());
+        assert_eq!(mapping.problems.len(), 1);
+        assert!(mapping.problems[0].contains("agent-names.toml"));
+    }
+
     #[test]
     fn a_truncated_name_is_recorded() {
         let scratch = ScratchDir::new();
@@ -639,10 +661,6 @@ mod tests {
     #[test]
     fn the_configuration_directory_is_not_written_to() {
         let config = ScratchDir::new();
-        write_mapping(config.path(), "openspec_bin = \"/opt/bin/openspec\"\n");
-        // (agent-names.toml is not a config file; reuse the writer to place a
-        // recognisable fixture file at a known name inside the config dir.)
-        fs::remove_file(config.path().join("agent-names.toml")).ok();
         fs::write(config.path().join("config.toml"), b"agent_kind = \"codex\"\n")
             .expect("write config.toml fixture");
 

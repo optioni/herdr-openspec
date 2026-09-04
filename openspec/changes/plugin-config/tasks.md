@@ -98,9 +98,9 @@
 ## 7. Change Review
 <!-- kind: operational -->
 
-- [ ] 7.1 CHECK: Dispatch an independent reviewer — not a fork of the implementing session — against proposal.md, all four spec files, design.md, and tasks.md plus the diff. Point it first at the concentration points that bite here: a test asserting a fixture back at itself rather than the behaviour; the empty-file and malformed-file cases being distinguishable only by `problems`; the rename test actually failing against an `fs::write` implementation; `env_lookup`'s tests distinguishing a real lookup from a stub; the containment tests asserting mtimes rather than existence; and the agent-name tests pinning the exact literals rather than only a length and a regex
-- [ ] 7.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a one-line reason, note SUGGESTIONs, and re-run every affected check
-- [ ] 7.3 VERIFY: Confirm no blocking or unowned finding remains, and that every artifact a repair touched was updated in place rather than annotated afterwards
+- [x] 7.1 CHECK: Dispatch an independent reviewer — not a fork of the implementing session — against proposal.md, all four spec files, design.md, and tasks.md plus the diff. Point it first at the concentration points that bite here: a test asserting a fixture back at itself rather than the behaviour; the empty-file and malformed-file cases being distinguishable only by `problems`; the rename test actually failing against an `fs::write` implementation; `env_lookup`'s tests distinguishing a real lookup from a stub; the containment tests asserting mtimes rather than existence; and the agent-name tests pinning the exact literals rather than only a length and a regex
+- [x] 7.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a one-line reason, note SUGGESTIONs, and re-run every affected check
+- [x] 7.3 VERIFY: Confirm no blocking or unowned finding remains, and that every artifact a repair touched was updated in place rather than annotated afterwards
 
 ## 8. Documentation
 <!-- kind: operational -->
