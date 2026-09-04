@@ -7,6 +7,7 @@
 //! Decisions ("Library plus thin `main`").
 
 pub mod config;
+pub mod resolve;
 pub mod state;
 
 /// The current process id. Exists so `state::record`'s temporary-file name
@@ -25,6 +26,7 @@ pub(crate) fn pid() -> u32 {
 /// Test-only helpers shared by `config` and `state`'s unit tests.
 #[cfg(test)]
 pub(crate) mod testutil {
+    use std::os::unix::fs::PermissionsExt;
     use std::path::{Path, PathBuf};
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -64,6 +66,15 @@ pub(crate) mod testutil {
     /// out to `stat`, whose flags differ between BSD and GNU. Two snapshots taken
     /// around an operation and compared for equality is how "the tree is
     /// untouched" is proven, rather than by checking the listing alone.
+    ///
+    /// Directory entries are recorded too (path, empty bytes, own modification
+    /// time), not only files: `collect` originally pushed an entry only for a
+    /// non-directory, so an empty directory contributed nothing and a
+    /// `create_dir_all` — the likeliest accidental write — was invisible to a
+    /// comparison of two snapshots. `config` and `state`'s existing snapshot
+    /// assertions are equality comparisons over two snapshots taken with the
+    /// same (extended) function, so they stay green with directory entries added
+    /// to both sides.
     #[derive(Debug, PartialEq, Eq)]
     pub(crate) struct Snapshot(Vec<(PathBuf, Vec<u8>, std::time::SystemTime)>);
 
@@ -81,6 +92,10 @@ pub(crate) mod testutil {
         for entry in read_dir.flatten() {
             let path = entry.path();
             if path.is_dir() {
+                if let Ok(metadata) = entry.metadata() {
+                    let mtime = metadata.modified().expect("modified time");
+                    out.push((path.clone(), Vec::new(), mtime));
+                }
                 collect(&path, out);
             } else if let Ok(metadata) = entry.metadata() {
                 let bytes = std::fs::read(&path).unwrap_or_default();
@@ -88,6 +103,40 @@ pub(crate) mod testutil {
                 out.push((path, bytes, mtime));
             }
         }
+    }
+
+    /// Write `contents` to `path`, creating parent directories as needed, and
+    /// set its permission bits explicitly to `mode`. Never relies on the
+    /// process umask, which differs between an interactive shell and a CI
+    /// runner and would make "mode 0644" mean something else depending on who
+    /// runs the suite. The fixture "binary" this repository's tests build is
+    /// always a short text file, never a copied real executable.
+    pub(crate) fn write_with_mode(path: &Path, contents: &[u8], mode: u32) {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("create fixture parent directory");
+        }
+        std::fs::write(path, contents).expect("write fixture file");
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+            .expect("set fixture file mode");
+    }
+
+    /// Create a symbolic link at `link` pointing to `original`, creating
+    /// `link`'s parent directories as needed. `original` need not exist —
+    /// several scenarios need a dangling link.
+    pub(crate) fn symlink(original: &Path, link: &Path) {
+        if let Some(parent) = link.parent() {
+            std::fs::create_dir_all(parent).expect("create fixture parent directory");
+        }
+        std::os::unix::fs::symlink(original, link).expect("create fixture symlink");
+    }
+
+    /// Canonicalize `path`, on the assumption that it exists. Every discovery
+    /// assertion compares against `canonicalize(expected)` rather than a raw
+    /// `ScratchDir` path: on macOS `std::env::temp_dir()` sits under
+    /// `/var/folders/...`, and `/var` is a symlink to `/private/var`, so an
+    /// assertion against the raw path passes on Linux and fails on macOS.
+    pub(crate) fn canonical(path: &Path) -> PathBuf {
+        std::fs::canonicalize(path).expect("canonicalize expected path")
     }
 }
 
