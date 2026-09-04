@@ -225,12 +225,12 @@ group 1 could only take the `count` half of — "The four canonical shapes are t
 non-breaking space are all empty boxes" — plus "A numbering prefix and inline markup are
 kept verbatim in the text", which is a `parse`-only scenario throughout.
 
-- [ ] 3.1 RED: Write failing unit tests for `parse`, one per scenario above, named after
+- [x] 3.1 RED: Write failing unit tests for `parse`, one per scenario above, named after
       it. Compare **whole values** with `assert_eq!` wherever the expected `Tasks` is small
       enough to write out — the types derive `PartialEq` for exactly this, as
       `resolve::BinResolution` and `schema::Schema` already do — rather than asserting a
       field at a time, which lets an extra fabricated group slip through unnoticed
-- [ ] 3.2 RED: Write the four text-fidelity tests this group inherits, which are the only
+- [x] 3.2 RED: Write the four text-fidelity tests this group inherits, which are the only
       place `Item::text` is asserted against hostile input. "Whitespace around the bullet
       and the box is optional" asserts the texts are exactly `done` and `todo` for
       `-[x]done` and `   *   [ ]   todo   `; "A numbering prefix and inline markup are kept
@@ -241,7 +241,7 @@ kept verbatim in the text", which is a `parse`-only scenario throughout.
       are task lines" asserts the four texts in order. Together with 2.4's decision about
       which trim applies, these are what stop the text field being whatever the
       implementation happened to produce
-- [ ] 3.3 RED: Make the heading tests discriminating. "Indented, over-long, and unspaced
+- [x] 3.3 RED: Make the heading tests discriminating. "Indented, over-long, and unspaced
       hashes are not headings" must assert the group count is **exactly one** and that its
       heading is `None`, so an implementation trimming the line before counting hashes
       fabricates three groups and fails. "A file opening with a heading has no empty
@@ -252,23 +252,23 @@ kept verbatim in the text", which is a `parse`-only scenario throughout.
       test alone constrains the rule. "A closing hash sequence is kept, not stripped"
       asserts the heading text is exactly `Group ##`, rejecting a CommonMark-faithful
       implementation that strips it — which would also mangle a heading like `## C# ##`
-- [ ] 3.4 RED: "Repeated and empty headings are all kept" uses two headings of identical
+- [x] 3.4 RED: "Repeated and empty headings are all kept" uses two headings of identical
       text, one bare `##` with no text at all, and one trailing heading with no items, and
       asserts four groups in document order with the exact heading texts. It rejects three
       separate wrong implementations at once: one that deduplicates by heading text, one
       that treats a heading with no following item as absent, and one that drops a heading
       whose text is empty
-- [ ] 3.5 RED: "A nested sub-task is a sibling item carrying its indent" asserts the
+- [x] 3.5 RED: "A nested sub-task is a sibling item carrying its indent" asserts the
       indents `[0, 2, 1]` for a document whose third line is tab-indented, so an
       implementation expanding a tab to a column width fails, and asserts the group
       progress is `(1, 3)`, so an implementation treating a nested item as a child of the
       one above it — and therefore not a task — fails. "Indent does not affect membership
       of the preceding group" places an eight-space item between two headings and asserts
       it belongs to the first
-- [ ] 3.6 Confirm the failures are the missing `parse` and its types rather than a broken
+- [x] 3.6 Confirm the failures are the missing `parse` and its types rather than a broken
       expectation — check that `cargo test --all-features tasks::` names the new tests and
       that the group-1 and group-2 `count` tests are still green and untouched
-- [ ] 3.7 GREEN: Implement `Heading`, `Item`, `Group`, and `Tasks`, each deriving
+- [x] 3.7 GREEN: Implement `Heading`, `Item`, `Group`, and `Tasks`, each deriving
       `Debug, Clone, PartialEq, Eq`; `Group::progress` and `Tasks::progress` — and **no**
       `Tasks::items` iterator: design.md → Contracts records that it has no consumer, no
       scenario, and no test, and an uncovered `pub fn` under an 80% line floor is a cost
@@ -279,7 +279,7 @@ kept verbatim in the text", which is a `parse`-only scenario throughout.
       text, and the count of whitespace characters before its bullet; every other line is
       discarded. Emit the leading group only when it holds at least one item. Never sort,
       merge, deduplicate, or nest
-- [ ] 3.8 REFACTOR: Extract the shared "is this line a task, and what are its parts"
+- [x] 3.8 REFACTOR: Extract the shared "is this line a task, and what are its parts"
       decision so `count` and `parse` call one function rather than carrying two copies of
       the rule. This is what design.md → Decisions 3 means by "two entry points, one rule":
       the split is in what each does with the result, not in the rule itself. Return the
@@ -287,7 +287,7 @@ kept verbatim in the text", which is a `parse`-only scenario throughout.
       without allocating a `String` per line and `parse` allocates only when it builds an
       `Item`. If that shape proves impossible, do not force it — say so here and let group
       4's equality test be what keeps the two in step
-- [ ] 3.9 CHECK: Contract gate for the document model. This group freezes `Tasks`, `Group`,
+- [x] 3.9 CHECK: Contract gate for the document model. This group freezes `Tasks`, `Group`,
       `Item`, and `Heading` — the whole surface `tasks-tab` consumes, per design.md →
       Contracts. Re-read that table and `SPEC.md` → User interface → Detail view as they
       stand now, and confirm the tab can be drawn from what this group emits: groups in
@@ -295,7 +295,7 @@ kept verbatim in the text", which is a `parse`-only scenario throughout.
       indent, and a per-group and whole-file progress for the bar. Name anything the view
       would need and cannot get, and fix it here rather than after 5.6 gates the module two
       groups later
-- [ ] 3.10 Run the group tests — `cargo test --all-features` green, no regressions
+- [x] 3.10 Run the group tests — `cargo test --all-features` green, no regressions
 
 ## 4. Count and parse agree, on a real corpus
 <!-- kind: refactor -->

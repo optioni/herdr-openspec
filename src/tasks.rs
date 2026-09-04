@@ -55,9 +55,9 @@ pub fn count(text: &str) -> Progress {
     };
     for raw_line in text.split('\n') {
         let line = raw_line.strip_suffix('\r').unwrap_or(raw_line);
-        if let Some(checked) = task_line_checked(line) {
+        if let Some(parts) = task_line(line) {
             progress.total += 1;
-            if checked {
+            if parts.checked {
                 progress.completed += 1;
             }
         }
@@ -65,49 +65,216 @@ pub fn count(text: &str) -> Progress {
     progress
 }
 
-/// If `line` is a task line, whether it is checked. `None` when the line is
-/// not a task line at all. A single left-to-right scan: skip leading
-/// whitespace, require exactly one `-` or `*`, skip whitespace, require `[`,
-/// take exactly one character, require `]`. No fence, comment, or
-/// block-quote state — see design.md -> Decisions 6.
-fn task_line_checked(line: &str) -> Option<bool> {
-    let mut chars = line.chars();
-    skip_whitespace(&mut chars);
+/// An ATX heading: `level` is the number of `#` characters (1 to 6) and
+/// `text` is the remainder of the line, trimmed, kept verbatim — no closing
+/// `#` sequence is stripped and no numbering prefix is interpreted.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Heading {
+    pub level: u8,
+    pub text: String,
+}
 
-    match chars.next() {
-        Some('-') | Some('*') => {}
+/// One task line: its checked state, its trimmed text, and its indent —
+/// the number of whitespace characters preceding its bullet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Item {
+    pub checked: bool,
+    pub text: String,
+    pub indent: usize,
+}
+
+/// The task lines under one heading (or, for the leading group, under no
+/// heading at all), in document order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Group {
+    pub heading: Option<Heading>,
+    pub items: Vec<Item>,
+}
+
+impl Group {
+    /// This group's checkbox count.
+    pub fn progress(&self) -> Progress {
+        let mut progress = Progress {
+            completed: 0,
+            total: 0,
+        };
+        for item in &self.items {
+            progress.total += 1;
+            if item.checked {
+                progress.completed += 1;
+            }
+        }
+        progress
+    }
+}
+
+/// A parsed task document: groups in document order, plus any problems
+/// encountered reading it (always empty for [`parse`]; [`read`] populates
+/// it for a filesystem edge).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tasks {
+    pub groups: Vec<Group>,
+    pub problems: Vec<String>,
+}
+
+impl Tasks {
+    /// The whole document's checkbox count: the sum of every group's.
+    /// Equal to `count` applied to the same text — see the group-4 corpus
+    /// test that pins this agreement.
+    pub fn progress(&self) -> Progress {
+        let mut progress = Progress {
+            completed: 0,
+            total: 0,
+        };
+        for group in &self.groups {
+            progress += group.progress();
+        }
+        progress
+    }
+}
+
+/// Arrange `text`'s task lines into groups under the ATX headings above
+/// them. One pass over the same split-and-strip-`\r` lines as [`count`]: a
+/// line starting at column zero with one to six `#` followed by a space or
+/// the end of the line closes the current group and opens a new one; a
+/// line matching the task rule appends an item; every other line — prose —
+/// is discarded. The leading (headingless) group is emitted only when it
+/// holds at least one item; every group with a heading is emitted
+/// regardless, including one with no items and one whose heading text is
+/// empty. Never sorts, merges, deduplicates, or nests.
+pub fn parse(text: &str) -> Tasks {
+    let mut groups = Vec::new();
+    let mut heading: Option<Heading> = None;
+    let mut items: Vec<Item> = Vec::new();
+
+    for raw_line in text.split('\n') {
+        let line = raw_line.strip_suffix('\r').unwrap_or(raw_line);
+        if let Some(new_heading) = heading_line(line) {
+            close_group(&mut groups, heading.take(), std::mem::take(&mut items));
+            heading = Some(new_heading);
+        } else if let Some(parts) = task_line(line) {
+            items.push(Item {
+                checked: parts.checked,
+                text: parts.text.trim().to_string(),
+                indent: parts.indent,
+            });
+        }
+    }
+    close_group(&mut groups, heading, items);
+
+    Tasks {
+        groups,
+        problems: Vec::new(),
+    }
+}
+
+/// Push the group being closed, unless it is the leading (headingless)
+/// group and holds no items — the one case `parse`'s doc comment names as
+/// suppressed.
+fn close_group(groups: &mut Vec<Group>, heading: Option<Heading>, items: Vec<Item>) {
+    if heading.is_some() || !items.is_empty() {
+        groups.push(Group { heading, items });
+    }
+}
+
+/// If `line` is an ATX heading — one to six `#` characters at column zero,
+/// followed by a space or the end of the line — the heading it opens.
+/// `None` for seven or more `#` characters, a `#` immediately followed by a
+/// non-space character, or any leading whitespace before the first `#`
+/// (deliberately stricter than CommonMark's three-space allowance — see
+/// design.md -> Decisions 5).
+fn heading_line(line: &str) -> Option<Heading> {
+    let hashes = line.chars().take_while(|&c| c == '#').count();
+    if hashes == 0 || hashes > 6 {
+        return None;
+    }
+    let rest = &line[hashes..];
+    match rest.chars().next() {
+        None => Some(Heading {
+            level: hashes as u8,
+            text: String::new(),
+        }),
+        Some(' ') => Some(Heading {
+            level: hashes as u8,
+            text: rest.trim().to_string(),
+        }),
+        Some(_) => None,
+    }
+}
+
+/// The parts of one task line, borrowed rather than owned: `count` uses
+/// this without allocating anything, and `parse` allocates only when it
+/// builds an [`Item`] from the result. Two entry points, one rule — see
+/// design.md -> Decisions 3.
+struct TaskLineParts<'a> {
+    checked: bool,
+    /// Everything after the closing `]`, not yet trimmed. `count` ignores
+    /// this; `parse` trims it with `str::trim` (`char::is_whitespace`-based,
+    /// not [`is_task_whitespace`] — trimming happens after the line has
+    /// already been counted, so which whitespace rule it uses cannot change
+    /// a count).
+    text: &'a str,
+    /// The number of [`is_task_whitespace`] characters preceding the
+    /// bullet, counted as characters rather than columns.
+    indent: usize,
+}
+
+/// If `line` is a task line, its parts. `None` when the line is not a task
+/// line at all. A single left-to-right scan: skip leading whitespace,
+/// require exactly one `-` or `*`, skip whitespace, require `[`, take
+/// exactly one character, require `]`. No fence, comment, or block-quote
+/// state — see design.md -> Decisions 6.
+fn task_line(line: &str) -> Option<TaskLineParts<'_>> {
+    let mut it = line.char_indices().peekable();
+    let indent = skip_task_whitespace(&mut it);
+
+    match it.next() {
+        Some((_, '-')) | Some((_, '*')) => {}
         _ => return None,
     }
 
-    skip_whitespace(&mut chars);
+    skip_task_whitespace(&mut it);
 
-    if chars.next() != Some('[') {
-        return None;
+    match it.next() {
+        Some((_, '[')) => {}
+        _ => return None,
     }
 
-    let box_char = chars.next()?;
+    let box_char = it.next().map(|(_, c)| c)?;
     if !(is_task_whitespace(box_char) || box_char == 'x' || box_char == 'X') {
         return None;
     }
 
-    if chars.next() != Some(']') {
-        return None;
+    match it.next() {
+        Some((_, ']')) => {}
+        _ => return None,
     }
 
-    Some(box_char == 'x' || box_char == 'X')
+    let text = match it.peek() {
+        Some(&(byte_idx, _)) => &line[byte_idx..],
+        None => "",
+    };
+
+    Some(TaskLineParts {
+        checked: box_char == 'x' || box_char == 'X',
+        text,
+        indent,
+    })
 }
 
-/// Advance `chars` past any run of whitespace characters at its front, using
-/// [`is_task_whitespace`].
-fn skip_whitespace(chars: &mut std::str::Chars<'_>) {
-    let mut lookahead = chars.clone();
-    while let Some(c) = lookahead.next() {
+/// Advance `it` past any run of [`is_task_whitespace`] characters at its
+/// front, returning how many were skipped.
+fn skip_task_whitespace(it: &mut std::iter::Peekable<std::str::CharIndices<'_>>) -> usize {
+    let mut skipped = 0;
+    while let Some(&(_, c)) = it.peek() {
         if is_task_whitespace(c) {
-            *chars = lookahead.clone();
+            skipped += 1;
+            it.next();
         } else {
             break;
         }
     }
+    skipped
 }
 
 /// The whitespace alphabet the OpenSpec CLI's `\s` matches: Unicode
