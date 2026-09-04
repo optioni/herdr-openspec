@@ -201,24 +201,37 @@ a name" (the pure half; 7.1 owns the `from_files` half), "An impossible date is 
 prefix", "A malformed or absent prefix keeps the whole name", and "A prefix with nothing
 after it keeps its whole name".
 
-- [ ] 3.1 RED: Write failing unit tests for `split_archive_name(&str) -> (Option<String>,
+- [x] 3.1 RED: Write failing unit tests for `split_archive_name(&str) -> (Option<String>,
       String)` from the four scenarios above, every input a Rust string literal and no
       filesystem involved
-- [ ] 3.2 RED: Make the negative tests discriminating rather than merely green-able. Include
+- [x] 3.2 RED: Make the negative tests discriminating rather than merely green-able. Include
       `2026-1-1-single-digits` (a rule using a loose digit run accepts it), `20260814-nohyphen`
       (a rule matching digits and hyphens anywhere accepts it), `2026-08-14` with no trailing
       hyphen (a rule testing only the ten leading characters accepts it), and
       `2026-08-14-` (a rule that strips eleven characters unconditionally yields an empty
       name). Put a genuinely dated entry in the same test and assert its split too, so an
       implementation that never splits anything cannot pass by returning the input
-- [ ] 3.3 GREEN: Implement `split_archive_name` as a hand-written character test for exactly
+
+      Verified RED: stubbed `split_archive_name` to always return `(None, dir_name)` and
+      confirmed 3 of 15 tests failed with the wrong-value assertion (not a compile error) —
+      `a_normal_archived_directory_splits_into_a_date_and_a_name`,
+      `an_impossible_date_is_still_a_date_prefix`, and
+      `a_malformed_or_absent_prefix_keeps_the_whole_name`'s dated case — before restoring
+      the real implementation.
+- [x] 3.3 GREEN: Implement `split_archive_name` as a hand-written character test for exactly
       the CLI's `^\d{4}-\d{2}-\d{2}-` — four ASCII digits, `-`, two, `-`, two, `-` — with no
       calendar validation, because the CLI writes with that pattern and validates no further.
       Return `(None, whole_name)` when the pattern does not match **or** when the remainder
       after it is empty
-- [ ] 3.4 REFACTOR: Confirm the function is total, allocation-light, and reads as the pattern
+- [x] 3.4 REFACTOR: Confirm the function is total, allocation-light, and reads as the pattern
       it implements; state in the verification task if no refactor was needed
-- [ ] 3.5 Run the group tests — `cargo test --all-features changes::` — no regressions
+
+      No refactor needed: the function is a single left-to-right byte scan with no
+      recursion or intermediate allocation until the two owned `String`s it must return,
+      and reads directly as "four digits, hyphen, two digits, hyphen, two digits, hyphen".
+- [x] 3.5 Run the group tests — `cargo test --all-features changes::` — no regressions
+
+      15/15 passing; no regressions elsewhere in the suite.
 
 ## 4. Classifying a `generates` value
 <!-- kind: behavior -->

@@ -102,10 +102,7 @@ pub(crate) mod conformance {
             );
         }
 
-        let dir_final = dir
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or_default();
+        let dir_final = dir.file_name().and_then(|s| s.to_str()).unwrap_or_default();
         match origin {
             Origin::Active => assert_eq!(
                 dir_final,
@@ -118,6 +115,44 @@ pub(crate) mod conformance {
             ),
         }
     }
+}
+
+/// Split a leading `YYYY-MM-DD-` prefix off `dir_name`, using exactly the
+/// OpenSpec CLI's own pattern: four ASCII digits, `-`, two, `-`, two, `-` —
+/// with no calendar validation, because the CLI writes with that pattern and
+/// validates no further. `(None, whole_name)` when the pattern does not
+/// match, or matches with nothing after it — an archived entry never gets
+/// an empty `name`.
+///
+/// Slicing is byte-index-safe here without a UTF-8 boundary check: every
+/// byte inspected up to and including the third hyphen is confirmed ASCII
+/// (a digit or `-`) before any slice is taken, so index 10 and index 11
+/// always fall on a character boundary regardless of what follows.
+pub(crate) fn split_archive_name(dir_name: &str) -> (Option<String>, String) {
+    let bytes = dir_name.as_bytes();
+    let digit = |i: usize| bytes.get(i).is_some_and(u8::is_ascii_digit);
+    let hyphen = |i: usize| bytes.get(i) == Some(&b'-');
+
+    let matches_prefix = digit(0)
+        && digit(1)
+        && digit(2)
+        && digit(3)
+        && hyphen(4)
+        && digit(5)
+        && digit(6)
+        && hyphen(7)
+        && digit(8)
+        && digit(9)
+        && hyphen(10);
+
+    if matches_prefix {
+        let remainder = &dir_name[11..];
+        if !remainder.is_empty() {
+            return (Some(dir_name[0..10].to_string()), remainder.to_string());
+        }
+    }
+
+    (None, dir_name.to_string())
 }
 
 #[cfg(test)]
@@ -289,5 +324,70 @@ mod tests {
 
         assert!(in_progress.total > 0);
         assert!(!in_progress.is_complete());
+    }
+
+    // --- group 3: splitting the archive date prefix ----------------------
+
+    #[test]
+    fn a_normal_archived_directory_splits_into_a_date_and_a_name() {
+        assert_eq!(
+            split_archive_name("2026-08-14-add-token-refresh"),
+            (
+                Some("2026-08-14".to_string()),
+                "add-token-refresh".to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn an_impossible_date_is_still_a_date_prefix() {
+        assert_eq!(
+            split_archive_name("9999-99-99-far-future"),
+            (Some("9999-99-99".to_string()), "far-future".to_string())
+        );
+    }
+
+    #[test]
+    fn a_malformed_or_absent_prefix_keeps_the_whole_name() {
+        // Each is discriminating against a specific loose rule: single
+        // digits (a loose digit-run pattern would accept it), no hyphens (a
+        // rule matching digits and hyphens anywhere would accept it), no
+        // trailing hyphen (a rule testing only the first ten characters
+        // would accept it), and a genuinely dated entry alongside them so an
+        // implementation that never splits anything cannot pass by
+        // returning every input verbatim.
+        assert_eq!(
+            split_archive_name("2026-1-1-single-digits"),
+            (None, "2026-1-1-single-digits".to_string())
+        );
+        assert_eq!(
+            split_archive_name("20260814-nohyphen"),
+            (None, "20260814-nohyphen".to_string())
+        );
+        assert_eq!(
+            split_archive_name("2026-08-14"),
+            (None, "2026-08-14".to_string())
+        );
+        assert_eq!(
+            split_archive_name("no-date-prefix"),
+            (None, "no-date-prefix".to_string())
+        );
+        assert_eq!(
+            split_archive_name("2026-08-14-genuinely-dated"),
+            (
+                Some("2026-08-14".to_string()),
+                "genuinely-dated".to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn a_prefix_with_nothing_after_it_keeps_its_whole_name() {
+        // A rule that strips eleven characters unconditionally would yield
+        // an empty name here.
+        assert_eq!(
+            split_archive_name("2026-08-14-"),
+            (None, "2026-08-14-".to_string())
+        );
     }
 }
