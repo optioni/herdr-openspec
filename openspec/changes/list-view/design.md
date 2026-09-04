@@ -490,9 +490,9 @@ Recorded here and executed in tasks.md group 10, with before/after logged in `pl
 15. **Testing and quality gates → Unit-tested modules** — the `ui` bullet lists
     `ui::layout`, `ui::app`, `ui::view`, `ui::driver`, `ui::terminal`, and `ui::load`.
     `ui::list` is added: it gains 17 tests and a check of its own.
-17. **Architecture → Module map, the `ui` row** — "Views, layout, key handling, terminal
+16. **Architecture → Module map, the `ui` row** — "Views, layout, key handling, terminal
     lifecycle, and the event loop" gains the row grammar and the dashboard's own state.
-16. **Fixtures, "every view change performs no I/O at all"** — narrowed to "every view
+17. **Fixtures, "every view change performs no I/O at all"** — narrowed to "every view
     *test*". The claim is already false of `tui-shell`, whose `ui::tests::load::` tests open
     a `ScratchDir`, and this change's acceptance test does the same on purpose. The render
     seam is unaffected and says so: `render` takes a value, never a path, and `NOIO-VIEW`
@@ -565,5 +565,5 @@ recorded:
 Not applicable. This change builds a terminal view and no design source — no HTML mockup,
 no design file — exists for it. The visual contract is `SPEC.md` → List view and
 → Responsive layout, transcribed into `change-rows`, `list-selection`, and `list-filtering`
-as exact cell positions and exact row strings, with the nine corrections listed above
+as exact cell positions and exact row strings, with the seventeen corrections listed above
 applied to `SPEC.md` as part of this change.

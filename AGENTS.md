@@ -42,8 +42,10 @@ every change it reports, joined by position, archived changes staying
 permanently file-sourced. `herdr-openspec ui` now opens a real dashboard:
 raw mode and the alternate screen entered and left in a fixed, mirrored
 order (restored on normal return, error return, and panic alike), a
-draw-then-wait event loop with `q`/`Ctrl-C` to quit and `Enter`/`Esc` to
-move between the list and detail routes, and a 100-column breakpoint
+draw-then-wait event loop — `q`/`Ctrl-C` to quit, `j`/`k`/arrows to move the
+list selection, `/` to filter (where printable keys type instead of
+commanding and only `Ctrl-C` still quits), `Enter`/`Esc` to move between the
+list and detail routes outside filter mode — and a 100-column breakpoint
 deciding a one- or two-region body. The list region now fills with real
 rows — active changes, a separator, then archived ones, with selection,
 scrolling, and a `/` filter — and the detail region is still an empty

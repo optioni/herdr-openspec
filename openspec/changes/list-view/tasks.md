@@ -1448,11 +1448,11 @@ block is re-run, not further modified — and `GRAPH-SNAP` likewise.
 ## 11. Change Review
 <!-- kind: operational -->
 
-- [ ] 11.1 CHECK: Dispatch an **independent** reviewer — a fresh subagent, never a fork of
+- [x] 11.1 CHECK: Dispatch an **independent** reviewer — a fresh subagent, never a fork of
       the implementing session — against `proposal.md`, all five spec files, `design.md`,
       `tasks.md`, and the diff. Give it the artifacts and the diff, not this session's
       reasoning. Concentration points, in order:
-      1. **Tests that cannot fail.** For each of the 56 spec scenarios, name the test that
+      1. **Tests that cannot fail.** For each of the 61 spec scenarios, name the test that
          would go red if the behaviour were deleted. Re-run 9.2's planted violations
          independently rather than trusting the recorded output.
       2. **Both widths, genuinely.** Every view test names 60 and 120 and every row test
@@ -1470,11 +1470,11 @@ block is re-run, not further modified — and `GRAPH-SNAP` likewise.
       7. **Leftovers.** `dbg!`, `println!`, `todo!`, `TODO`, `FIXME`, commented-out code,
          and hardcoded widths that should have come from the interior.
 
-- [ ] 11.2 CHANGE: Fix every CRITICAL. Resolve or consciously accept each WARNING with a
+- [x] 11.2 CHANGE: Fix every CRITICAL. Resolve or consciously accept each WARNING with a
       one-line reason recorded in `planning-review.md`. Note each SUGGESTION. Re-run the
       affected tests and any check whose input changed.
 
-- [ ] 11.3 VERIFY: Confirm no blocking or unowned finding remains, and that the finding
+- [x] 11.3 VERIFY: Confirm no blocking or unowned finding remains, and that the finding
       counts are recorded in `planning-review.md` alongside the planning-time findings.
       Commit: `review(list-view): address Change Review findings`.
 

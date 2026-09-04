@@ -450,6 +450,11 @@ mod tests {
             let rows = rows(&d, width);
             assert!(rows[0].text.ends_with(']'));
             assert!(rows[2].text.ends_with(']'));
+            // migrate-ai-sdk-v7 is the 0-of-0 fixture: its cell is the dash
+            // form, not a numeric one — found in Change Review, whose test
+            // only compared the two rows' last characters and would have
+            // passed a `[0/0]` cell too.
+            assert!(rows[2].text.contains("[-]"), "width {width}");
             assert_eq!(
                 rows[0].text.chars().last(),
                 rows[2].text.chars().last(),
@@ -760,6 +765,31 @@ mod tests {
             !rows58
                 .iter()
                 .any(|r| matches!(r.kind, RowKind::Item { .. }))
+        );
+
+        // The no-repository block replaces EVERY other row, problem rows
+        // included — `ui::load` cannot build this value (it only ever
+        // constructs `changes::empty_set()` alongside `repo: None`), but
+        // `rows` is a pure total function over every `Dashboard` a test can
+        // construct, and this precedence is stated for exactly that case.
+        // Found in Change Review: no scenario exercised it, so a guard
+        // narrowed to `repo.is_none() && problems.is_empty()` would have
+        // passed the whole suite.
+        let with_problems = Dashboard {
+            repo: None,
+            searched_from: d.searched_from.clone(),
+            changes: fixture::set(Vec::new(), Vec::new(), vec!["broken".to_string()]),
+            route: Route::List,
+            quit: false,
+            selected: 0,
+            filter: empty_filter(),
+        };
+        let rows_with_problems = rows(&with_problems, 38);
+        assert_eq!(rows_with_problems.len(), 3);
+        assert!(
+            !rows_with_problems
+                .iter()
+                .any(|r| r.kind == RowKind::Problem)
         );
     }
 

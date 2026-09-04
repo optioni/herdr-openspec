@@ -181,3 +181,42 @@ Each is recorded in design.md → Open Questions with the change that resolves i
   `live-refresh`, the first change that can replace the `ChangeSet` under the selection.
 - Whether the viewport becomes page-anchored rather than centred — recorded in design.md →
   Decisions as the alternative to try, with `live-refresh` named as its likely occasion.
+
+## Change Review (post-implementation, group 11)
+
+An independent `outside-in-tdd-reviewer` — a fresh subagent, not a fork of the
+implementing session — reviewed the finished diff (`68b66e9`..`HEAD`, the ten
+commits of this change) against the planning artifacts above. It ran `cargo
+fmt --check`, `cargo clippy --all-targets --all-features -D warnings`, and
+`cargo test --all-features --lib` itself (516 passed, 0 failed; 98.25% line
+coverage at review time) rather than trusting the implementer's commit
+messages, independently re-derived the row-grammar arithmetic at every
+narrow-width boundary the spec pins, re-planted nine of the eleven
+architectural-check violations in a throwaway copy (all nine caught), and ran
+34 of its own mutations against `src/ui/app.rs` and `src/ui/list.rs` to find
+tests that could not fail (31 of 34 were caught by the existing suite).
+
+**0 CRITICAL. 2 WARNING, both fixed. 6 SUGGESTION: 4 fixed, 2 accepted without repair.**
+
+### WARNING — fixed
+
+| Finding | Repair |
+|---|---|
+| `esc_dismisses_one_layer_at_a_time` never asserted the route after the *first* `Back`, so "dismiss exactly **one** layer" was untested — a mutation that reset the route unconditionally on every `Back` left the suite green | Added `assert_eq!(d.route, Route::Detail)` after the first `Back`. Reproduced: the planted mutation now fails at that line |
+| `action_for_is_total_over_a_keycode_sweep`'s filter-mode sweep explicitly skipped `Up`/`Down`, and nothing else asserted list-filtering's "`Up`/`Down` still navigate while filtering" mapping — deleting both arms from `action_for`'s filter-mode table left the suite green | Added the two assertions to `navigation_and_filter_keys_are_distinguished`. Reproduced: the planted deletion now fails |
+
+### SUGGESTION — fixed
+
+| Finding | Repair |
+|---|---|
+| `progress_cell_is_dash_when_total_is_zero` only compared the two rows' last characters; a `[0/0]` cell would have passed it | Added `assert!(rows[2].text.contains("[-]"))` |
+| `rows()`'s "no-repository block replaces every other row, problem rows included" had no scenario — a guard narrowed to `repo.is_none() && problems.is_empty()` stayed green | Added a case to `the_no_repository_block_is_three_rows` building a `Dashboard` with `repo: None` and a non-empty `problems`, asserting still exactly 3 rows and no `Problem` row |
+| `AGENTS.md`'s "Current repo state" still read the pre-change "`q`/`Ctrl-C` to quit and `Enter`/`Esc` to move between the list and detail routes" — the exact unqualified claim `SPEC.md`'s Keys corrections exist to kill, just in the other file; task 10.4 scoped only the "empty bordered frames" sentence, so nothing prompted this one | Rewrote the sentence to name the list-selection and filter-mode keys and note `Enter`/`Esc` route-moving is now qualified to outside filter mode |
+| `tasks.md` task 11.1 said "the 56 spec scenarios" (the five delta specs hold 61); `design.md` → Visual Design said "the nine corrections" (the list has seventeen, and was itself misnumbered 15/17/16) | Both corrected; the numbering fixed to 1–17 in order |
+
+### SUGGESTION — accepted without repair
+
+- **Extracted check scripts under the scratchpad are missing each block's leading `# LABEL — …` comment line** — the extractor consumed it as the label. Behaviourally inert (every check body is otherwise byte-identical, every check ran, every planted violation was caught), and the scratchpad is not part of the committed change — nothing to repair in the repository. Recorded so a future run of this change's checks from a fresh scratchpad extraction is not surprised by the same cosmetic gap.
+- **`src/ui/driver.rs`'s `filter_mode_is_passed_to_action_for` test renders the dashboard at 120x20 with no assertion**, present only to name the second mandated width per task 7.1's own instruction. `driver.rs` is not covered by the `WIDTHS` check, so nothing mechanically required it — noted as the one place a width literal is decorative rather than load-bearing, not a defect.
+
+No finding was unowned or left blocking. All fixes were re-verified by reproducing the mutation that had previously escaped and confirming it now fails.

@@ -509,6 +509,19 @@ mod tests {
                 action_for(&press(KeyCode::Char('/'), KeyModifiers::CONTROL), false),
                 Action::Ignore
             );
+
+            // While filtering, Up/Down still navigate (only Char keys type
+            // into the query) — found in Change Review, whose planted
+            // mutation (deleting both arms from the filter-mode table) left
+            // the suite green without this pair.
+            assert_eq!(
+                action_for(&press(KeyCode::Up, KeyModifiers::NONE), true),
+                Action::SelectPrev
+            );
+            assert_eq!(
+                action_for(&press(KeyCode::Down, KeyModifiers::NONE), true),
+                Action::SelectNext
+            );
         }
 
         #[test]
@@ -580,6 +593,11 @@ mod tests {
             d.apply(Action::Back);
             assert!(!d.filter.active);
             assert_eq!(d.filter.query, "");
+            // Exactly one layer was dismissed: the route is untouched by
+            // this first `Back` — found in Change Review, whose planted
+            // mutation (unconditionally resetting the route on every
+            // `Back`) left the suite green without this assertion.
+            assert_eq!(d.route, Route::Detail);
             assert!(!d.quit);
 
             d.apply(Action::Back);
