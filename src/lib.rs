@@ -6,6 +6,7 @@
 //! rather than in `main` is what makes it unit-testable — see design.md ->
 //! Decisions ("Library plus thin `main`").
 
+pub mod changes;
 pub mod config;
 pub mod resolve;
 pub mod schema;
