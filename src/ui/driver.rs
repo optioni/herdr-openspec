@@ -289,6 +289,42 @@ mod tests {
     }
 
     #[test]
+    fn filter_mode_is_passed_to_action_for() {
+        // dashboard-loop's one call site now passes dashboard.filter.active
+        // through: `/` starts filter mode, and a `q` typed while filtering
+        // does not quit the loop — only `Ctrl-C` does.
+        let backend = TestBackend::new(60, 20);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        let mut dashboard = dashboard();
+        let mut events = Script::new(vec![
+            Ok(Some(press(KeyCode::Char('/'), KeyModifiers::NONE))),
+            Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
+            Ok(Some(press(KeyCode::Char('c'), KeyModifiers::CONTROL))),
+        ]);
+
+        let summary = run_loop(
+            &mut terminal,
+            &mut dashboard,
+            &mut events,
+            Duration::from_millis(1),
+        )
+        .expect("loop ends");
+        assert_eq!(
+            summary,
+            LoopSummary {
+                frames: 3,
+                polls: 3
+            }
+        );
+        assert_eq!(dashboard.filter.query, "q");
+        assert!(dashboard.quit);
+
+        // Render the same dashboard at 120x20 too, so this test names both
+        // mandated widths.
+        let _ = crate::testutil::render_at(120, 20, &dashboard);
+    }
+
+    #[test]
     fn ignored_input_redraws_and_continues() {
         let backend = TestBackend::new(60, 20);
         let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");

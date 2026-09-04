@@ -1210,7 +1210,7 @@ block is re-run, not further modified — and `GRAPH-SNAP` likewise.
 ## 7. `ui::driver` and `ui::load` — the mode reaches the key map
 <!-- kind: behavior -->
 
-- [ ] 7.1 RED: Write failing tests for:
+- [x] 7.1 RED: Write failing tests for:
       - `ui::driver::tests::filter_mode_is_passed_to_action_for` — drive `run_loop` at 60x20
         with a script of Press `Char('/')`, Press `Char('q')`, Press `Char('c')`+CONTROL.
         Assert `Ok(LoopSummary { frames: 3, polls: 3 })`, `dashboard.filter.query == "q"`,
@@ -1228,14 +1228,14 @@ block is re-run, not further modified — and `GRAPH-SNAP` likewise.
       **Red when:** `run_loop` still calls the one-argument `action_for` and the crate does
       not compile, or `load` does not set the two fields.
 
-- [ ] 7.2 GREEN: Change `run_loop`'s single call site to
+- [x] 7.2 GREEN: Change `run_loop`'s single call site to
       `action_for(&event, dashboard.filter.active)`, and `ui::load`'s two `Dashboard`
       literals to name `selected: 0` and `filter: Filter { query: String::new(), active:
       false }`.
 
-- [ ] 7.3 REFACTOR: None expected. State that rather than inventing a change.
+- [x] 7.3 REFACTOR: None expected. State that rather than inventing a change.
 
-- [ ] 7.4 VERIFY: `testcount --lib 'ui::driver::tests::' 8`.
+- [x] 7.4 VERIFY: `testcount --lib 'ui::driver::tests::' 8`.
       **Do not** run `testcount --lib 'ui::tests::load::' 5` here: group 0's acceptance test
       lives under that filter and is still RED until 8.1, so `testcount` would fail on its
       exit guard (and, even past it, `test result: FAILED.` does not match the `sed` that

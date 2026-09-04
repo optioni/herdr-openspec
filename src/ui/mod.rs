@@ -130,7 +130,7 @@ mod tests {
         use crate::testutil::{
             ScratchDir, canonical, render_at, row_text, snapshot, write_with_mode,
         };
-        use crate::ui::app::Route;
+        use crate::ui::app::{Filter, Route};
 
         fn write(path: &std::path::Path, contents: &str) {
             write_with_mode(path, contents.as_bytes(), 0o644);
@@ -164,6 +164,14 @@ mod tests {
             assert_eq!(dashboard.changes.active[0].progress.total, 3);
             assert_eq!(dashboard.route, Route::List);
             assert!(!dashboard.quit);
+            assert_eq!(dashboard.selected, 0);
+            assert_eq!(
+                dashboard.filter,
+                Filter {
+                    query: String::new(),
+                    active: false
+                }
+            );
         }
 
         #[test]
@@ -197,6 +205,14 @@ mod tests {
             assert_eq!(dashboard.repo, None);
             assert_eq!(dashboard.searched_from, expected_searched_from);
             assert_eq!(dashboard.changes, crate::changes::empty_set());
+            assert_eq!(dashboard.selected, 0);
+            assert_eq!(
+                dashboard.filter,
+                Filter {
+                    query: String::new(),
+                    active: false
+                }
+            );
         }
 
         #[test]
