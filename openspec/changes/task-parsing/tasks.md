@@ -498,7 +498,7 @@ change the `quality-gates` capability and is deliberately not this change's work
 ## 7. Change Review
 <!-- kind: operational -->
 
-- [ ] 7.1 CHECK: Dispatch an independent reviewer — not a fork of the implementing session
+- [x] 7.1 CHECK: Dispatch an independent reviewer — not a fork of the implementing session
       — against proposal.md, both spec files, design.md, and tasks.md plus the diff. Point
       it first at the concentration points that bite here: that group 2's three tests were
       genuinely red against group 1's shipped implementation rather than green on arrival;
@@ -524,9 +524,9 @@ change the `quality-gates` capability and is deliberately not this change's work
       `repo-resolution`'s planning review caught. Give the reviewer a scratchpad path and
       require it to append findings as it goes rather than only in a final message —
       `HANDOFF.md` records two review rounds lost to `529 Overloaded`
-- [ ] 7.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a
+- [x] 7.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a
       one-line reason, note SUGGESTIONs, and re-run every affected check
-- [ ] 7.3 VERIFY: Confirm no blocking or unowned finding remains, and that every artifact a
+- [x] 7.3 VERIFY: Confirm no blocking or unowned finding remains, and that every artifact a
       repair touched was updated in place rather than annotated afterwards
 
 ## 8. Documentation
@@ -562,9 +562,15 @@ change the `quality-gates` capability and is deliberately not this change's work
       The state it has no row for is a tasks file that exists and cannot be read — a
       directory where a file was expected, a permission error, an I/O error, or bytes that
       are not valid UTF-8 — where the change reports zero tasks, names the file in
-      `Tasks::problems`, and lets the CLI's count correct the pane when it arrives. Say in
-      the same row that this is the one place the file path knowingly disagrees with
-      `openspec list --json`, which decodes lossily and still reports a count.
+      `Tasks::problems`, and lets the CLI's count correct the pane when it arrives.
+      **Group-7 review repair:** scope the "knowingly disagrees with `openspec list --json`"
+      clause to the invalid-UTF-8 case only, not the whole unreadable class — verified
+      against the installed CLI's `countTaskFile`, which catches every non-`ENOENT` error
+      (`EISDIR`, `EACCES`, I/O) exactly as this module does and returns `{total: 0,
+      completed: 0}` for all of them, so a directory or permission error already agrees
+      with the CLI. Only invalid UTF-8 diverges: the CLI decodes lossily (`fs.readFile(f,
+      'utf-8')`) and still reports a count, while this module reports zero tasks plus a
+      problem rather than decode lossily.
       `plugin-config` and `repo-resolution` each added their own row for the same reason:
       Phase 6 must be able to confirm the table, not extend it
 - [ ] 8.5 CHANGE — rewrite in `openspec/IMPLEMENTATION-ORDER.md`: the Phase 2

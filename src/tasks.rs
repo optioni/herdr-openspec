@@ -355,13 +355,16 @@ mod tests {
 
     #[test]
     fn a_plus_bullet_and_an_ordered_marker_are_not_task_lines() {
-        let text = "+ [x] plus\n1. [x] ordered\n1) [x] paren";
+        // A genuine task line alongside the three rejected shapes, so an
+        // implementation matching nothing at all cannot pass by returning
+        // zero (tasks.md 1.4).
+        let text = "+ [x] plus\n1. [x] ordered\n1) [x] paren\n- [x] real";
         let progress = super::count(text);
         assert_eq!(
             progress,
             super::Progress {
-                completed: 0,
-                total: 0
+                completed: 1,
+                total: 1
             }
         );
     }
@@ -492,6 +495,21 @@ mod tests {
                 total: 1
             }
         );
+    }
+
+    #[test]
+    fn a_crlf_document_counts_the_same_as_its_lf_twin() {
+        // The `count` half of "A CRLF document counts and reads the same as
+        // its LF twin" — group 3's a_crlf_document_parses_the_same_as_its_lf_twin
+        // test covers the `parse` half. Found untested by the group-7 review.
+        let crlf = "## G\r\n- [x] a\r\n- [ ] b\r\n";
+        let lf = "## G\n- [x] a\n- [ ] b\n";
+        let expected = super::Progress {
+            completed: 1,
+            total: 2,
+        };
+        assert_eq!(super::count(crlf), expected);
+        assert_eq!(super::count(lf), expected);
     }
 
     #[test]
