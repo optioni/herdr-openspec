@@ -1494,37 +1494,73 @@ needs, in the extracted copy rather than in the archive.
 ## 12. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 12.1 CHECK: Inspect the verification commands and the tiers they touch. `make check`
+- [x] 12.1 CHECK: Inspect the verification commands and the tiers they touch. `make check`
       runs format, lint, test, and coverage in order and stops at the first failure; the
       command-level checks are separate and are run explicitly below, because `make check`
       does not know about them.
+      **Recorded:** confirmed against `Makefile`'s `check: fmt-check lint test coverage`
+      target. Tasks 12.2–12.6 below reproduce those four tiers individually (so a failure
+      is attributable to a specific sub-command, per the group's own point); 12.7 covers
+      the eleven command-level checks `make check` does not run at all; 12.9 is the
+      composite gate itself, last.
 
-- [ ] 12.2 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
+- [x] 12.2 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
+      **Recorded:** `Finished` with no warnings — 0 errors.
 
-- [ ] 12.3 VERIFY: `cargo fmt --all -- --check` — clean.
+- [x] 12.3 VERIFY: `cargo fmt --all -- --check` — clean.
+      **Recorded:** exit 0, no diff.
 
-- [ ] 12.4 VERIFY: `cargo check --all-targets --all-features` — 0 errors. Rust has no
+- [x] 12.4 VERIFY: `cargo check --all-targets --all-features` — 0 errors. Rust has no
       separate type checker; this is the type-check step, run separately from clippy so a
       clippy lint failure is distinguishable from a type error.
+      **Recorded:** `Finished` — 0 errors.
 
-- [ ] 12.5 VERIFY: `cargo test --all-features` — green. Then `testcount --lib '' 443` for
+- [x] 12.5 VERIFY: `cargo test --all-features` — green. Then `testcount --lib '' 443` for
       the whole library: the task-1.1 baseline of 389, minus the deleted `banner` test,
       plus 55 new tests (6 layout + 9 app + 3 testutil + 16 view + 8 terminal + 6 driver +
       4 load + 3 start). And `testcount --test-cli '' 5`.
+      **Recorded:** all green — 449 lib + 11 `ci_workflow` + 5 `cli`, 0 failed.
+      `TESTCOUNT OK: --lib filter '' ran 449 tests (>= 443)` — 6 above the plan's own
+      prediction, because group 11's Change Review fixed 5 WARNING findings by adding 6
+      tests (1 driver, 1 view — bringing view to 17, not the planned 16 — 3 `StartError`,
+      1 `TerminalGuard`) that were not anticipated at planning time; every count-based gate
+      in this file (`testcount`, `WIDTHS`'s 17-test report) reflects the actual, larger
+      number, not the stale prediction. `TESTCOUNT OK: --test-cli filter '' ran 5 tests
+      (>= 5)`.
 
-- [ ] 12.6 VERIFY: `cargo llvm-cov --fail-under-lines 80` — the floor is unchanged, with no
+- [x] 12.6 VERIFY: `cargo llvm-cov --fail-under-lines 80` — the floor is unchanged, with no
       exclusion and no waiver; `NOWAIVER` proves the second half. Record the TOTAL.
+      **Recorded:** exit 0. **TOTAL 98.01%** over 8,836 lines, 176 uncovered — up from
+      97.82% before group 11's coverage fixes and from the 98.93%/7,635-line/82-uncovered
+      task-1.1 baseline, the gap between the two being the argued, now-accurately-named
+      residue in `specs/quality-gates/spec.md`. Floor (80) cleared by 18.01 points.
+      `NOWAIVER OK`.
 
-- [ ] 12.7 VERIFY: Re-run every command-level check one final time against the finished
+- [x] 12.7 VERIFY: Re-run every command-level check one final time against the finished
       tree: `NOSPAWN-GREP` with `MIN=14`, `NOIO-VIEW`, `NOCLI-SHELL`, `NORAW-GREP`,
       `NODEFAULT-UI`, `GATE-MECH1`, `NOJSON-SEAM`, `DEPS` (all legs), `GRAPH-SNAP`,
       `WIDTHS`, `NOWAIVER`, and `OPENSPEC-UNTOUCHED`.
+      **Recorded:** all twelve pass. `NOSPAWN OK: 15 files (>= 14)`; `NOIO-VIEW OK`;
+      `NOCLI-SHELL OK: 7 files`; `NORAW OK: 17 files searched … CrosstermOps at 6 sites`;
+      `NODEFAULT-UI OK`; `GATE-MECH1 OK` half A (16 files) and half B — **61 constructions**,
+      back down from group-9's 63: deleting the shadowing test-local `empty_set()` helper in
+      group 11 removed its own two matching sites (signature + body), landing exactly back
+      on the pre-`tui-shell` baseline even though the production `empty_set()` is a
+      genuinely new, additional construction site — a coincidence of the count, not a sign
+      anything reverted; `NOJSON-SEAM OK`; `DEPS OK` all legs including leg 5 for all four
+      crates; `GRAPH-SNAP OK`; `WIDTHS OK: all 17 view tests name both 60 and 120`;
+      `NOWAIVER OK`; `OPENSPEC-UNTOUCHED OK` against
+      `BASE=e25017546cea99e4b606fcd74a404131e1ca582e`.
 
-- [ ] 12.8 VERIFY: `openspec validate tui-shell --strict` — with
+- [x] 12.8 VERIFY: `openspec validate tui-shell --strict` — with
       `PATH="$HOME/.nvm/versions/node/v24.20.0/bin:$PATH"`, since the CLI is nvm-installed
       and is not on the default `PATH`.
+      **Recorded:** `Change 'tui-shell' is valid`.
 
-- [ ] 12.9 VERIFY: `make check` — the single composite gate, exit 0. It runs last, after
+- [x] 12.9 VERIFY: `make check` — the single composite gate, exit 0. It runs last, after
       group 10's documentation edits and group 11's review fixes, so the finished tree is
       the tree the gate sees. If it fails, name the failing sub-command rather than
       summarising.
+      **Recorded:** `make check` exits 0 — `fmt-check`, `lint`, `test` (465 tests total
+      across all three test binaries plus the lib), `coverage` (98.01%, floor 80 cleared)
+      all pass, in order, on the finished tree. Apply complete.
