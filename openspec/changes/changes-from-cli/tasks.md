@@ -1073,11 +1073,11 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
 ## 10. Architectural checks and their negative controls
 <!-- kind: operational -->
 
-- [ ] 10.1 CHECK: Before running the controls, confirm each check is green on the tree as
+- [x] 10.1 CHECK: Before running the controls, confirm each check is green on the tree as
       it now stands, so a red control below is attributable to the plant rather than to the
       tree: `NOSPAWN-GREP`, `GATE-MECH1`, `NOJSON-SEAM`, `OPENSPEC-UNTOUCHED`.
 
-- [ ] 10.2 VERIFY: `NOSPAWN-GREP` negative controls — four scratch copies of `src/`, each
+- [x] 10.2 VERIFY: `NOSPAWN-GREP` negative controls — four scratch copies of `src/`, each
       message recorded:
       (a) `Command::new("openspec")` planted in `src/changes.rs` → `NOSPAWN FAIL: spawn API
       outside .../cli.rs:` naming that line;
@@ -1089,7 +1089,7 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
       the exclusion is by path and not by base name.
       **Red when:** any of (a)–(d) passes.
 
-- [ ] 10.3 VERIFY: `GATE-MECH1` negative controls — ten scratch copies of `src/`, each
+- [x] 10.3 VERIFY: `GATE-MECH1` negative controls — ten scratch copies of `src/`, each
       message recorded. All ten were demonstrated red at planning time; the last two of the
       first five are the forms that defeated an earlier shell version of this check and are
       the reason it is written in Python:
@@ -1108,7 +1108,7 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
       discriminating: `src/changes.rs` contains a `segment[..star]` slice index the check
       must not fire on.
 
-- [ ] 10.4 VERIFY: `GATE-MECH2` — the green control first (an unmutated copy builds), then
+- [x] 10.4 VERIFY: `GATE-MECH2` — the green control first (an unmutated copy builds), then
       the three variants, each asserting the error codes that must be **present** and the
       one that must be **absent**:
       (a) a field added to `Change` and nothing else → `E0027` **and** `E0063`;
@@ -1124,18 +1124,18 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
       lacking `Default`, which masked the `E0027` under test — which is also why
       `defeat_mech1.py` supplies that `Default` rather than relying on the accident.
 
-- [ ] 10.5 VERIFY: `NOJSON-SEAM` — must now **pass** (`serde_json used in src/changes.rs,
+- [x] 10.5 VERIFY: `NOJSON-SEAM` — must now **pass** (`serde_json used in src/changes.rs,
       absent from src/cli.rs`), having failed in task 1.3 before the crate used it. Then
       one negative control: a scratch copy of `src/cli.rs` carrying `use serde_json::Value;`
       → the check exits 1.
 
-- [ ] 10.6 VERIFY: `NOSPAWN-RUN` — the whole suite on a `PATH` from which every directory
+- [x] 10.6 VERIFY: `NOSPAWN-RUN` — the whole suite on a `PATH` from which every directory
       holding `npm`, `node`, or `openspec` has been removed, with the five preconditions
       passing first (all three unresolvable, `cargo` and `rustc` still resolvable). Every
       test must pass, including this change's own. **Red when:** any test in this change
       reached the real `openspec` binary.
 
-- [ ] 10.7 VERIFY: `OPENSPEC-UNTOUCHED` with `BASE` from task 1.1 — must report
+- [x] 10.7 VERIFY: `OPENSPEC-UNTOUCHED` with `BASE` from task 1.1 — must report
       `OPENSPEC-UNTOUCHED OK`. Then one negative control: create
       `openspec/specs/planted-probe.md`, re-run, confirm it **fails** naming that path,
       then delete it and confirm the check passes again. **Red when:** the untracked sweep
@@ -1144,7 +1144,7 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
       `openspec/IMPLEMENTATION-ORDER.md`, both hand-edited planning documents rather than
       code-path writes — so it stays meaningful after group 12 and is re-run there.
 
-- [ ] 10.8 VERIFY: `DEPS` in full, leg 5 included — the genuinely-needed experiment run
+- [x] 10.8 VERIFY: `DEPS` in full, leg 5 included — the genuinely-needed experiment run
       three times in **copies**: remove `toml` → `cargo build` fails; remove `yaml-rust2` →
       fails; remove `serde_json` → fails, which is the leg that was correctly **red** in
       task 1.3 and must now be green. Then the guard itself: asking it to remove a crate
