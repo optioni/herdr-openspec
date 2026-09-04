@@ -1,0 +1,5 @@
+- [x] first task, already done
+- [ ] second task, still open
+- [x] third task, already done
+- [ ] fourth task, still open
+- [ ] fifth task, still open

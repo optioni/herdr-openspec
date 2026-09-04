@@ -968,4 +968,72 @@ mod tests {
             }
         );
     }
+
+    // Group 4: count and parse agree, on a real corpus. Every fixture is
+    // `include_str!`-embedded at compile time, never a run-time path, so no
+    // test resolves a location in the live repository — see design.md ->
+    // Decisions 11.
+
+    const ARCHIVED_CHANGE: &str = include_str!("../tests/fixtures/tasks/archived-change.md");
+    const CRLF: &str = include_str!("../tests/fixtures/tasks/crlf.md");
+    const FENCED_AND_COMMENTED: &str =
+        include_str!("../tests/fixtures/tasks/fenced-and-commented.md");
+    const NO_HEADING: &str = include_str!("../tests/fixtures/tasks/no-heading.md");
+    const EMPTY: &str = include_str!("../tests/fixtures/tasks/empty.md");
+
+    #[test]
+    fn a_real_changes_task_file_counts_the_same_both_ways() {
+        for text in [
+            ARCHIVED_CHANGE,
+            CRLF,
+            FENCED_AND_COMMENTED,
+            NO_HEADING,
+            EMPTY,
+        ] {
+            assert_eq!(super::parse(text).progress(), super::count(text));
+        }
+
+        // Oracle pair for `archived-change.md` (a frozen copy of
+        // openspec/changes/archive/2026-09-04-schema-model/tasks.md), obtained
+        // by running the CLI's own TASK_LINE_PATTERN over the same bytes in
+        // node (@fission-ai/openspec 1.11.0), independently of this crate:
+        //
+        //   node -e '
+        //     const fs = require("fs");
+        //     const TASK_LINE_PATTERN = /^\s*[-*]\s*\[([\sxX])\]\s*(.*)/;
+        //     const content = fs.readFileSync("tests/fixtures/tasks/archived-change.md", "utf-8");
+        //     let total = 0, completed = 0;
+        //     for (const line of content.split("\n")) {
+        //       const m = line.match(TASK_LINE_PATTERN);
+        //       if (m) { total++; if (m[1].toLowerCase() === "x") completed++; }
+        //     }
+        //     console.log({ total, completed });
+        //   '
+        //   => { total: 92, completed: 92 }
+        //
+        // Without this absolute-count assertion, an implementation that
+        // returns zero from both `count` and `parse` would still pass the
+        // equality loop above.
+        assert_eq!(
+            super::count(ARCHIVED_CHANGE),
+            super::Progress {
+                completed: 92,
+                total: 92
+            }
+        );
+    }
+
+    #[test]
+    fn text_with_no_heading_still_agrees() {
+        let expected = super::Progress {
+            completed: 2,
+            total: 5,
+        };
+        assert_eq!(super::count(NO_HEADING), expected);
+
+        let tasks = super::parse(NO_HEADING);
+        assert_eq!(tasks.progress(), expected);
+        assert_eq!(tasks.groups.len(), 1);
+        assert_eq!(tasks.groups[0].heading, None);
+    }
 }

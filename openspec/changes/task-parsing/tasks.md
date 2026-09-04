@@ -313,7 +313,7 @@ verify the characterization still holds. What these tests genuinely protect agai
 future drift between the two entry points, and — through 4.3's absolute counts — an
 implementation that agrees with itself by counting nothing.
 
-- [ ] 4.1 CHARACTERIZE: Copy one real, complete `tasks.md` from this repository's `openspec/changes/archive/`
+- [x] 4.1 CHARACTERIZE: Copy one real, complete `tasks.md` from this repository's `openspec/changes/archive/`
       into `tests/fixtures/tasks/archived-change.md`, **by copying the file**, not by
       hand-transcribing it. Add the four smaller documents beside it —
       `crlf.md` (CRLF endings throughout), `fenced-and-commented.md` (checkboxes inside a
@@ -324,31 +324,38 @@ implementation that agrees with itself by counting nothing.
       satisfies the entire corpus. Record in a one-line comment at the top of the copied
       file which change it came from and that it is a frozen copy, so a reader does not try
       to keep it in sync
-- [ ] 4.2 CHARACTERIZE: Obtain the copied document's expected `completed` and `total` from
+- [x] 4.2 CHARACTERIZE: Obtain the copied document's expected `completed` and `total` from
       an **oracle outside this crate**, not from the code under test: run the CLI's own
       `TASK_LINE_PATTERN` over the same bytes in `node`, or read the pair out of
       `openspec list --json` for the change it came from. Record the pair, the method, and
       the observed package version in this task. An expected value derived by running the
-      Rust implementation is not evidence of anything
-- [ ] 4.3 CHARACTERIZE: Write the corpus test: `include_str!` each of the five fixtures —
+      Rust implementation is not evidence of anything.
+      **Recorded:** `completed: 92, total: 92` for `archived-change.md` (a frozen copy of
+      `openspec/changes/archive/2026-09-04-schema-model/tasks.md`), obtained by running the
+      installed `@fission-ai/openspec` 1.11.0's exact `TASK_LINE_PATTERN` regex over the
+      fixture's bytes in `node` (see the comment beside the assertion in `src/tasks.rs`
+      for the runnable script). Also recorded for the smaller fixtures, oracle-derived the
+      same way: `crlf.md` 2/3, `fenced-and-commented.md` 3/5, `no-heading.md` 2/5,
+      `empty.md` 0/0
+- [x] 4.3 CHARACTERIZE: Write the corpus test: `include_str!` each of the five fixtures —
       never a run-time path, so no test resolves a location in the live repository — and
       assert `parse(text).progress() == count(text)` for every one. In the same test,
       assert the copied archived document's **absolute** `completed` and `total` against
       4.2's oracle pair. Without that second assertion the test passes against an
       implementation where both sides return zero, which is the one failure mode an
       equality-only property test cannot see
-- [ ] 4.4 CHARACTERIZE: Write "Text with no heading still agrees" against `no-heading.md`,
+- [x] 4.4 CHARACTERIZE: Write "Text with no heading still agrees" against `no-heading.md`,
       asserting `Progress { completed: 2, total: 5 }` from both entry points — the
       `completed` half as well as the `total` — and that `parse` returns exactly one group
       whose heading is `None`
-- [ ] 4.5 CHANGE (contingency, fires only if 4.3 or 4.4 is red): the two entry points
+- [x] 4.5 CHANGE (contingency, fires only if 4.3 or 4.4 is red): the two entry points
       already disagree, which is a real defect rather than a missing feature. Reconcile
       whichever one is wrong and add a scenario-shaped unit test for the specific line that
       differed, so the corpus test is not the only thing standing between the two rules. Do
       **not** commit a deliberately broken implementation in order to watch a test fail
-- [ ] 4.6 REFACTOR: If 4.5 fired and produced a third copy of the line rule, collapse it
+- [x] 4.6 REFACTOR: If 4.5 fired and produced a third copy of the line rule, collapse it
       into the one from 3.8; otherwise state that no refactor was needed
-- [ ] 4.7 VERIFY: Run the group tests — `cargo test --all-features` green, no regressions —
+- [x] 4.7 VERIFY: Run the group tests — `cargo test --all-features` green, no regressions —
       and state plainly which outcome 4.3 and 4.4 had. Green on arrival is the expected
       result for a correct implementation and is not a problem; a *silent* green is, so say
       it out loud either way
