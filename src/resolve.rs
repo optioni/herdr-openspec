@@ -645,4 +645,145 @@ mod tests {
         assert_eq!(result.problems.len(), 1);
         assert!(result.problems[0].contains(&configured.display().to_string()));
     }
+
+    // --- group 4: the nvm step ----------------------------------------------
+
+    fn nvm_bin(home: &Path, version: &str) -> std::path::PathBuf {
+        home.join(".nvm")
+            .join("versions")
+            .join("node")
+            .join(version)
+            .join("bin")
+            .join("openspec")
+    }
+
+    #[test]
+    fn the_nvm_tree_is_searched_when_path_has_nothing() {
+        let scratch = ScratchDir::new();
+        let path_only = scratch.path().join("path-only");
+        mkdir(&path_only); // no openspec in it
+        let home = scratch.path().join("home");
+        let bin = nvm_bin(&home, "v24.20.0");
+        write_with_mode(&bin, b"#!/bin/sh\n", 0o755);
+
+        let result = super::openspec_bin(
+            None,
+            &env(&[
+                ("PATH", &path_only.display().to_string()),
+                ("HOME", &home.display().to_string()),
+            ]),
+        );
+        assert_eq!(
+            result.found,
+            Some(super::FoundBin {
+                path: bin,
+                source: super::BinSource::Nvm,
+            })
+        );
+    }
+
+    #[test]
+    fn node_versions_are_ordered_numerically_not_lexically() {
+        let scratch = ScratchDir::new();
+        let home = scratch.path().join("home");
+        write_with_mode(&nvm_bin(&home, "v9.99.99"), b"#!/bin/sh\n", 0o755);
+        write_with_mode(&nvm_bin(&home, "v10.0.0"), b"#!/bin/sh\n", 0o755);
+
+        let result = super::openspec_bin(None, &env(&[("HOME", &home.display().to_string())]));
+        assert_eq!(
+            result.found.map(|f| f.path),
+            Some(nvm_bin(&home, "v10.0.0"))
+        );
+    }
+
+    #[test]
+    fn a_version_directory_without_a_usable_binary_is_skipped() {
+        let scratch = ScratchDir::new();
+        let home = scratch.path().join("home");
+        mkdir(
+            &home
+                .join(".nvm")
+                .join("versions")
+                .join("node")
+                .join("v22.0.0"),
+        ); // no bin/ at all
+        write_with_mode(&nvm_bin(&home, "v21.0.0"), b"not executable", 0o644);
+        write_with_mode(&nvm_bin(&home, "v20.0.0"), b"#!/bin/sh\n", 0o755);
+
+        let result = super::openspec_bin(None, &env(&[("HOME", &home.display().to_string())]));
+        assert_eq!(
+            result.found.map(|f| f.path),
+            Some(nvm_bin(&home, "v20.0.0"))
+        );
+    }
+
+    #[test]
+    fn a_version_directory_whose_name_is_not_a_version_is_still_eligible_and_sorts_last() {
+        let scratch1 = ScratchDir::new();
+        let home1 = scratch1.path().join("home");
+        write_with_mode(&nvm_bin(&home1, "system"), b"#!/bin/sh\n", 0o755);
+
+        let result1 = super::openspec_bin(None, &env(&[("HOME", &home1.display().to_string())]));
+        assert_eq!(
+            result1.found,
+            Some(super::FoundBin {
+                path: nvm_bin(&home1, "system"),
+                source: super::BinSource::Nvm,
+            })
+        );
+
+        // A parsed version outranks an unparseable name. `vnightly` is the
+        // fixture, not `system`: plain name-descending sorts `vnightly` above
+        // `v20.0.0` and `system` below it, so only `vnightly` discriminates
+        // against the wrong ordering.
+        let scratch2 = ScratchDir::new();
+        let home2 = scratch2.path().join("home");
+        write_with_mode(&nvm_bin(&home2, "vnightly"), b"#!/bin/sh\n", 0o755);
+        write_with_mode(&nvm_bin(&home2, "v20.0.0"), b"#!/bin/sh\n", 0o755);
+
+        let result2 = super::openspec_bin(None, &env(&[("HOME", &home2.display().to_string())]));
+        assert_eq!(
+            result2.found.map(|f| f.path),
+            Some(nvm_bin(&home2, "v20.0.0"))
+        );
+    }
+
+    #[test]
+    fn nvm_dir_overrides_the_default_nvm_root() {
+        let scratch = ScratchDir::new();
+        let nvm_dir = scratch.path().join("nvmdir");
+        let nvm_dir_bin = nvm_dir
+            .join("versions")
+            .join("node")
+            .join("v20.0.0")
+            .join("bin")
+            .join("openspec");
+        write_with_mode(&nvm_dir_bin, b"#!/bin/sh\n", 0o755);
+
+        let home = scratch.path().join("home");
+        let home_bin = nvm_bin(&home, "v20.0.0");
+        write_with_mode(&home_bin, b"#!/bin/sh\n", 0o755);
+
+        let nvm_dir_str = nvm_dir.display().to_string();
+        let home_str = home.display().to_string();
+
+        let both_pairs = [
+            ("NVM_DIR", nvm_dir_str.as_str()),
+            ("HOME", home_str.as_str()),
+        ];
+        let with_both = env(&both_pairs);
+        let result = super::openspec_bin(None, &with_both);
+        assert_eq!(result.found.map(|f| f.path), Some(nvm_dir_bin.clone()));
+
+        // A blank NVM_DIR falls through to the default HOME-based root.
+        let blank_pairs = [("NVM_DIR", "   "), ("HOME", home_str.as_str())];
+        let with_blank = env(&blank_pairs);
+        let result = super::openspec_bin(None, &with_blank);
+        assert_eq!(result.found.map(|f| f.path), Some(home_bin));
+
+        // Neither variable available: no binary and no panic.
+        let with_neither = env(&[]);
+        let result = super::openspec_bin(None, &with_neither);
+        assert_eq!(result.found, None);
+    }
 }
