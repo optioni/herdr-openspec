@@ -271,15 +271,74 @@ pub fn parse(name: &str, text: &str) -> Result<ParsedSchema, String> {
         }
     }
 
+    let (tasks, tasks_problem) = tasks_artifact(&doc["apply"], &artifacts);
+    if let Some(problem) = tasks_problem {
+        problems.push(problem);
+    }
+
+    if let Some(declared) = non_blank_str(&doc["name"]) {
+        if declared != name {
+            problems.push(format!(
+                "the schema directory {name:?} does not match its file's declared name {declared:?}"
+            ));
+        }
+    }
+
     Ok(ParsedSchema {
         schema: Schema {
             name: name.to_string(),
             artifacts,
-            // Group 5 fills this in from the schema's `apply:` block.
-            tasks: None,
+            tasks,
         },
         problems,
     })
+}
+
+/// The tasks-artifact rule the OpenSpec CLI's own `findTrackedTasksArtifact`
+/// applies: when `apply.tracks` is a non-null string, the artifact whose
+/// `generates` equals it exactly, with no id fallback on a miss; otherwise —
+/// `apply` absent, not a mapping, or `tracks` absent, null, or the wrong
+/// type — the artifact whose id is `tasks`. At most one problem: a `tracks`
+/// string that matched nothing, a `tracks` of the wrong type, or neither
+/// rule finding an artifact.
+fn tasks_artifact(apply: &Yaml, artifacts: &[Artifact]) -> (Option<Artifact>, Option<String>) {
+    if apply.is_hash() {
+        let tracks = &apply["tracks"];
+        if !tracks.is_badvalue() && !tracks.is_null() {
+            return match tracks.as_str() {
+                Some(value) => match artifacts.iter().find(|a| a.generates == value) {
+                    Some(artifact) => (Some(artifact.clone()), None),
+                    None => (
+                        None,
+                        Some(format!(
+                            "apply.tracks names {value:?}, which no artifact generates"
+                        )),
+                    ),
+                },
+                None => id_fallback(artifacts, Some("apply.tracks is not a string")),
+            };
+        }
+    }
+    id_fallback(artifacts, None)
+}
+
+/// The id-`tasks` fallback shared by every branch of `tasks_artifact` that
+/// does not have a matched `tracks` value. `extra` is the problem to record
+/// alongside a hit (a wrong-typed `tracks`, say); on a miss it is folded
+/// into the "no tasks artifact" message so at most one problem is ever
+/// produced.
+fn id_fallback(artifacts: &[Artifact], extra: Option<&str>) -> (Option<Artifact>, Option<String>) {
+    match artifacts.iter().find(|a| a.id == "tasks") {
+        Some(artifact) => (Some(artifact.clone()), extra.map(str::to_string)),
+        None => {
+            let reason = match extra {
+                Some(extra) => format!("no tasks artifact: {extra}, and no artifact has id \"tasks\""),
+                None => "no tasks artifact: no apply.tracks value and no artifact has id \"tasks\""
+                    .to_string(),
+            };
+            (None, Some(reason))
+        }
+    }
 }
 
 /// A non-blank string read from a YAML node, applying `config::non_blank`'s
@@ -763,11 +822,14 @@ artifacts:
     generates: valid.md
   - id: valid
     generates: \"\"
-  - id: ok
+  - id: tasks
     generates: ok.md
 ";
         let parsed = parse("test", text).expect("schema should parse");
-        assert_eq!(parsed.schema.artifacts, vec![art("ok", "ok.md")]);
+        // The surviving artifact's id is `tasks`, so it also satisfies the
+        // id fallback: this fixture stays free of group 5's separate
+        // "no tasks artifact" problem, per task 5.6.
+        assert_eq!(parsed.schema.artifacts, vec![art("tasks", "ok.md")]);
         assert_eq!(parsed.problems.len(), 2);
     }
 
@@ -778,11 +840,11 @@ name: test
 artifacts:
   - \"proposal\"
   - [nested, sequence]
-  - id: ok
+  - id: tasks
     generates: ok.md
 ";
         let parsed = parse("test", text).expect("schema should parse");
-        assert_eq!(parsed.schema.artifacts, vec![art("ok", "ok.md")]);
+        assert_eq!(parsed.schema.artifacts, vec![art("tasks", "ok.md")]);
         assert_eq!(parsed.problems.len(), 2);
     }
 
@@ -799,13 +861,13 @@ artifacts:
     generates: a/../../b.md
   - id: d
     generates: specs/**/*.md
-  - id: e
+  - id: tasks
     generates: sub/dir/file.md
 ";
         let parsed = parse("test", text).expect("schema should parse");
         assert_eq!(
             parsed.schema.artifacts,
-            vec![art("d", "specs/**/*.md"), art("e", "sub/dir/file.md")]
+            vec![art("d", "specs/**/*.md"), art("tasks", "sub/dir/file.md")]
         );
         assert_eq!(parsed.problems.len(), 3);
     }
@@ -817,14 +879,14 @@ name: test
 artifacts:
   - id: a
     generates: a.md
-  - id: b
+  - id: tasks
     generates: b.md
     requires: not-a-sequence
 ";
         let parsed = parse("test", text).expect("schema should parse");
         assert_eq!(
             parsed.schema.artifacts,
-            vec![art("a", "a.md"), art("b", "b.md")]
+            vec![art("a", "a.md"), art("tasks", "b.md")]
         );
         assert!(parsed.problems.is_empty());
     }
@@ -867,6 +929,8 @@ artifacts:
             parsed.schema.artifacts,
             vec![art("a", "a.md"), art("tasks", "tasks.md")]
         );
+        // Group 5: no `apply:` block, so the id fallback selects `tasks`.
+        assert_eq!(parsed.schema.tasks, Some(art("tasks", "tasks.md")));
 
         // Anchors and aliases.
         let anchored = "\
@@ -918,5 +982,157 @@ apply:
             parsed.schema.artifacts,
             vec![art("real1", "real1.md"), art("real2", "real2.md")]
         );
+        // Group 5: the tasks artifact comes from the real `apply.tracks:
+        // real1.md`, not from the `tracks: fake.md` line inside the block
+        // scalar — the half of this scenario group 4 could not express.
+        assert_eq!(parsed.schema.tasks, Some(art("real1", "real1.md")));
+    }
+
+    // --- group 5: the tasks artifact -----------------------------------
+
+    #[test]
+    fn apply_tracks_selects_an_artifact_whose_id_is_not_tasks() {
+        let text = "\
+name: test
+artifacts:
+  - id: checklist
+    generates: tasks.md
+  - id: tasks
+    generates: notes.md
+apply:
+  tracks: tasks.md
+";
+        let parsed = parse("test", text).expect("schema should parse");
+        assert_eq!(parsed.schema.tasks, Some(art("checklist", "tasks.md")));
+        assert_ne!(parsed.schema.tasks, Some(art("tasks", "notes.md")));
+        assert_eq!(
+            parsed.schema.artifacts,
+            vec![art("checklist", "tasks.md"), art("tasks", "notes.md")]
+        );
+    }
+
+    #[test]
+    fn an_absent_apply_block_falls_back_to_the_artifact_with_id_tasks() {
+        let text = "\
+name: test
+artifacts:
+  - id: proposal
+    generates: proposal.md
+  - id: tasks
+    generates: checklist.md
+";
+        let parsed = parse("test", text).expect("schema should parse");
+        assert_eq!(parsed.schema.tasks, Some(art("tasks", "checklist.md")));
+        assert!(parsed.problems.is_empty());
+    }
+
+    #[test]
+    fn an_apply_block_without_tracks_and_an_explicit_tracks_null_both_fall_back_to_the_id() {
+        let absent_key = "\
+name: test
+artifacts:
+  - id: tasks
+    generates: checklist.md
+apply:
+  requires: []
+";
+        let explicit_null = "\
+name: test
+artifacts:
+  - id: tasks
+    generates: checklist.md
+apply:
+  requires: []
+  tracks: null
+";
+        // `apply:` itself a bare scalar rather than a mapping, which must
+        // also fall back to the id without panicking — indexing a scalar
+        // node reached from the other direction.
+        let apply_not_a_mapping = "\
+name: test
+artifacts:
+  - id: tasks
+    generates: checklist.md
+apply: not-a-mapping
+";
+        for text in [absent_key, explicit_null, apply_not_a_mapping] {
+            let parsed = parse("test", text).expect("schema should parse");
+            assert_eq!(
+                parsed.schema.tasks,
+                Some(art("tasks", "checklist.md")),
+                "text {text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_tracks_value_matching_nothing_yields_no_tasks_artifact_even_when_an_id_tasks_exists() {
+        let text = "\
+name: test
+artifacts:
+  - id: tasks
+    generates: tasks.md
+  - id: design
+    generates: design.md
+apply:
+  tracks: nowhere.md
+";
+        let parsed = parse("test", text).expect("schema should parse");
+        assert!(parsed.schema.tasks.is_none());
+        assert_ne!(parsed.schema.tasks, Some(art("tasks", "tasks.md")));
+        assert_eq!(parsed.problems.len(), 1);
+        assert!(parsed.problems[0].contains("nowhere.md"));
+    }
+
+    #[test]
+    fn a_schema_with_neither_a_tracks_match_nor_an_id_tasks_loads_without_one() {
+        let text = "\
+name: test
+artifacts:
+  - id: proposal
+    generates: proposal.md
+  - id: design
+    generates: design.md
+";
+        let parsed = parse("test", text).expect("schema should still load");
+        assert_eq!(
+            parsed.schema.artifacts,
+            vec![art("proposal", "proposal.md"), art("design", "design.md")]
+        );
+        assert!(parsed.schema.tasks.is_none());
+        assert_eq!(parsed.problems.len(), 1);
+    }
+
+    #[test]
+    fn tracks_matches_on_generates_not_on_a_filename_suffix() {
+        let text = "\
+name: test
+artifacts:
+  - id: a
+    generates: sub/tasks.md
+  - id: b
+    generates: tasks.md
+apply:
+  tracks: tasks.md
+";
+        let parsed = parse("test", text).expect("schema should parse");
+        assert_eq!(parsed.schema.tasks, Some(art("b", "tasks.md")));
+        assert_ne!(parsed.schema.tasks, Some(art("a", "sub/tasks.md")));
+    }
+
+    #[test]
+    fn a_tracks_value_of_the_wrong_type_falls_back_to_the_id() {
+        let text = "\
+name: test
+artifacts:
+  - id: tasks
+    generates: checklist.md
+apply:
+  tracks: [a, b]
+";
+        let parsed = parse("test", text).expect("schema should parse");
+        assert_eq!(parsed.schema.tasks, Some(art("tasks", "checklist.md")));
+        assert_eq!(parsed.problems.len(), 1);
+        assert!(parsed.problems[0].contains("tracks"));
     }
 }
