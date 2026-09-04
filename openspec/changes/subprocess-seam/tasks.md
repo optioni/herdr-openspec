@@ -565,19 +565,27 @@
 ## 8. Architectural checks that can actually fail
 <!-- kind: operational -->
 
-- [ ] 8.1 CHECK: Copy each command block out of design.md → Test Strategy into a scratch
+- [x] 8.1 CHECK: Copy each command block out of design.md → Test Strategy into a scratch
       shell file **verbatim** and run the blocks from that file, rather than retyping a
       shortened form. Record the scratch file's path in this task's notes so the review in
       group 9 can diff it against the design. Every one of the defects Phase 1-2 review
       caught was a check shortened at the moment of running it, and "run it as written" is
       not a mechanism unless the thing that was run is recoverable afterwards
-- [ ] 8.2 VERIFY: Run `NOSPAWN-GREP` against `src` — it must now **pass**, reporting at
+
+      RECORDED: extracted verbatim (via `sed` line ranges against design.md, not
+      retyped) to
+      `/private/tmp/claude-501/-Users-juusopiikkila-Code-herdr-openspec/d5be0e1c-512c-496f-bdf6-1ea630cd0644/scratchpad/subprocess-seam-checks/{NOSPAWN-GREP,NOSPAWN-RUN,NPM-PATH,BINDING,DEPS,OPENSPEC-UNTOUCHED,TESTCOUNT}.sh`.
+      Only the Markdown code-fence lines (` ``` `) were stripped; every other character is
+      as design.md has it.
+- [x] 8.2 VERIFY: Run `NOSPAWN-GREP` against `src` — it must now **pass**, reporting at
       least 8 files checked. **Red when:** any `*.rs` file under `src/` other than
       `src/cli.rs` names `process::Command`, `Command::new`, or `Stdio`; when `src/cli.rs`
       is missing (guard A); when `src/cli.rs` names no spawn API, making the exclusion
       vacuous (guard B); or when fewer than 8 non-`cli` files are found, which is how an
       empty or wrong-directory run fails instead of passing (guard C)
-- [ ] 8.3 VERIFY — the negative controls, which are what make 8.2 evidence rather than
+
+      RECORDED: `NOSPAWN OK: 8 files checked under src, only src/cli.rs may spawn`.
+- [x] 8.3 VERIFY — the negative controls, which are what make 8.2 evidence rather than
       decoration. Run `NOSPAWN-GREP` four more times with `SRC` pointed at scratch copies
       of `src/`: (a) a copy with `Command::new("openspec")` planted in a non-`cli` file —
       must fail, naming the file and line; (b) a copy with `cli.rs` deleted — must fail on
@@ -590,21 +598,52 @@
       sites in `src/config.rs` and `src/state.rs`, which is exactly what `plugin-config`'s
       `grep -rn '"herdr"' src/` could not distinguish and why that check was recorded as
       not-run and is not inherited here. **Red when:** any of the four passes
-- [ ] 8.3a VERIFY — the `BINDING` negative controls, for the same reason. Run `BINDING`
+
+      RECORDED — all four exit 1, none passed:
+      (a) `Command::new("openspec")` planted in a copy's `schema.rs` (line 1500) ->
+      `NOSPAWN FAIL: spawn API outside .../cli.rs: .../schema.rs:1500:fn planted() { ... }`
+      — confirmed by separate `grep` that this fired line is distinct from the three real
+      `.join("herdr")`/`.join("openspec")` sites at `config.rs:59`, `state.rs:34`,
+      `state.rs:44`.
+      (b) `cli.rs` deleted -> `NOSPAWN FAIL: .../cli.rs missing - the exclusion has
+      nothing to exclude` (guard A).
+      (c) `cli.rs` emptied -> `NOSPAWN FAIL: .../cli.rs names no spawn API - exclusion is
+      vacuous` (guard B).
+      (d) spawn planted at `ui/cli.rs` -> `NOSPAWN FAIL: spawn API outside .../cli.rs:
+      .../ui/cli.rs:1:fn planted() { ... }` — proves the exclusion is by path, not base
+      name. All four scratch copies removed afterward.
+- [x] 8.3a VERIFY — the `BINDING` negative controls, for the same reason. Run `BINDING`
       against three scratch copies: one whose `resolve.rs` has the `cli::npm_prefix`
       reference stripped (guard a must fire), one still holding `npm_prefix_deferred`
       somewhere (guard b), and one whose `npm_prefix()` body is `None` (guard c). Record
       each exit code and which guard named itself. **Red when:** any of the three passes —
       which would mean the one check standing between this change and a hand-over that
       never happened is decoration
-- [ ] 8.4 VERIFY: Run `NOSPAWN-RUN` — the whole suite on a `PATH` from which every
+
+      RECORDED — baseline on the real tree: `BINDING OK`. All three negative controls
+      exit 1: (a) `cli::npm_prefix` reference replaced with a dummy identifier ->
+      `BINDING FAIL: src/resolve.rs does not name cli::npm_prefix` (guard a). (b) a
+      `npm_prefix_deferred` function appended to a copy's `resolve.rs` -> `BINDING FAIL:
+      placeholder survives: src/resolve.rs:1353:pub fn npm_prefix_deferred() -> ...`
+      (guard b). (c) `npm_prefix()`'s body replaced with `{ None }` -> `BINDING FAIL:
+      npm_prefix() does not delegate to the probe: pub fn npm_prefix() -> Option<PathBuf>
+      { None }` (guard c). All three scratch copies removed afterward.
+- [x] 8.4 VERIFY: Run `NOSPAWN-RUN` — the whole suite on a `PATH` from which every
       directory holding `npm`, `node`, or `openspec` has been removed, with the five
       preconditions running **first** and aborting. **Red when:** any of `npm`, `node`, or
       `openspec` is still resolvable on that `PATH` (precondition), when `cargo` or
       `rustc` is not (precondition), or when any test fails there — including this
       change's own, since every spawning test must name an absolute scratch path and
       `npm_prefix()`'s smoke test must tolerate an absent `npm`
-- [ ] 8.5 VERIFY: Run `OPENSPEC-UNTOUCHED` with `BASE` set to the SHA captured in 1.1, and
+
+      RECORDED: all five preconditions passed (npm/node/openspec confirmed unresolvable
+      on the stripped `PATH`; cargo/rustc confirmed still resolvable), then
+      `env PATH="$NOTOOLS" cargo test --all-features` ran the full suite: 299 passed, 0
+      failed (lib) + 11 (ci_workflow) + 5 (cli.rs binary-integration), matching the
+      normal-`PATH` run exactly. Confirms every spawning test in `cli::` names an
+      absolute scratch path and `npm_prefix()`'s smoke test tolerates a fully absent
+      `npm`.
+- [x] 8.5 VERIFY: Run `OPENSPEC-UNTOUCHED` with `BASE` set to the SHA captured in 1.1, and
       demonstrate its red once by planting an untracked file under `openspec/specs/` and
       confirming the check names it — then remove it. Both halves matter: `git diff` lists
       **tracked** paths only, and a file written at runtime is untracked, so the diff alone
@@ -613,17 +652,31 @@
       names no commit, or the repository root cannot be found (all abort), or when any path
       under `openspec/` outside `openspec/changes/subprocess-seam/` differs from the base
       commit or exists as an untracked file
-- [ ] 8.6 VERIFY: Run `DEPS`. **Red when:** the normal dependency set is anything but
+
+      RECORDED, all three phases: clean tree -> `OPENSPEC-UNTOUCHED OK`. Planted
+      untracked `openspec/specs/foo/cache.md` -> `FAIL: wrote inside openspec/ outside
+      this change: openspec/specs/foo/cache.md`, exit 1 — demonstrating the red the
+      untracked-files sweep exists to catch. Plant removed -> `OPENSPEC-UNTOUCHED OK`
+      again; `git status --short openspec/` confirmed clean afterward.
+- [x] 8.6 VERIFY: Run `DEPS`. **Red when:** the normal dependency set is anything but
       `["toml", "yaml-rust2"]`, or the dev or build sets are non-empty, or the input is not
       JSON. Dev and build are pinned empty because they are empty today and a test-support
       crate such as `assert_cmd` is the likeliest accidental addition for a change that
       starts spawning things — review demonstrated that a normal-deps-only form let a
       planted dev-dependency through. Checked with `cargo metadata` rather than
       `cargo build --offline`, which proves only that the cache is warm
-- [ ] 8.7 CHECK — persistence gate: record that none of migration, backfill, cache
+
+      RECORDED: `DEPS OK` — normal deps still exactly `["toml", "yaml-rust2"]`, dev and
+      build still empty; this change added no dependency of any kind.
+- [x] 8.7 CHECK — persistence gate: record that none of migration, backfill, cache
       invalidation, or index rebuild applies. `resolve::BinCache` is unchanged and still
       caches at most one probe per owned value; no file format, no stored data, and no
       index exists in this change. Recorded rather than omitted, so the gate is answered
+
+      RECORDED: confirmed — `resolve::BinCache` (a `std::sync::OnceLock<BinResolution>`
+      wrapper) is untouched by this change; nothing in `src/cli.rs` introduces a file
+      format, persisted state, migration, backfill, or index. Not applicable, answered
+      rather than omitted.
 
 ## 9. Change Review
 <!-- kind: operational -->
