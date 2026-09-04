@@ -6,13 +6,15 @@ context: |
   SPEC.md for the design contract, AGENTS.md for conventions.
 
   Tech stack: Rust (stable), ratatui + crossterm for the TUI, notify for filesystem
-  watching, serde_json and serde_yaml for parsing, pulldown-cmark for markdown. Read
+  watching, serde_json and yaml-rust2 for parsing, pulldown-cmark for markdown. Read
   Cargo.toml for the current dependency set rather than assuming one; adding a
   dependency is a decision to argue in the proposal. Built and checked through `make`.
 
   Domain concepts: a *change* is an OpenSpec unit of work living in
   `openspec/changes/<name>/`, carrying *artifacts* named by the repository's *schema*
-  — the artifact with `role: tasks` holds the task checklist. An *archived* change
+  — the tasks artifact is the one whose `generates` equals the schema's
+  `apply.tracks` value, falling back to the artifact with id `tasks` when no `apply`
+  block declares what it tracks. An *archived* change
   lives under `openspec/changes/archive/` prefixed `YYYY-MM-DD-`. In Herdr, a *pane*
   hosts a process and an *agent* is a recognised coding agent occupying one, carrying
   a status of working, idle, blocked, done, or unknown. *Attribution* is the mapping

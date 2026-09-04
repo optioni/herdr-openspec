@@ -12,9 +12,10 @@ binary invoked two ways by the manifest: as a pane process rendering the TUI, an
 as an action process that opens or focuses that pane.
 
 **Stack:** Rust, `ratatui` + `crossterm` (TUI), `notify` (filesystem watching),
-`serde_json`, `serde_yaml`, `pulldown-cmark` (markdown), `toml` (plugin configuration
-and state, both TOML). Exact versions are pinned to current stable releases at
-implementation time, not from memory.
+`serde_json`, `yaml-rust2` (YAML — the choice is argued in `schema-model`'s
+design.md; a later change needing YAML should not re-open it), `pulldown-cmark`
+(markdown), `toml` (plugin configuration and state, both TOML). Exact versions are
+pinned to current stable releases at implementation time, not from memory.
 
 ## Architecture
 
@@ -94,11 +95,23 @@ symlinked working directory does not leak into the root the empty state
 prints or a later change joins onto. If none is found, render an empty state
 naming the directory searched.
 
-**Schema.** Read `openspec/config.yaml` for `schema:`. Load
-`openspec/schemas/<name>/schema.yaml` when vendored — graft places it there — and
-otherwise ask the CLI via `openspec schema`. The `artifacts` list becomes the tab
-order. The tasks artifact is the one whose entry carries `role: tasks`; the id
-`tasks` is conventional and must not be assumed.
+**Schema.** Determine the schema name by consulting, in order: a change's own
+`.openspec.yaml` → `schema:`, then the repository's `openspec/config.yaml` →
+`schema:`, then the default `spec-driven` when neither declares one. Search for
+`openspec/schemas/<name>/schema.yaml` in three tiers: the project's own
+`openspec/schemas/` — graft places a vendored schema there — then
+`$XDG_DATA_HOME`, then the CLI package's own built-ins; the third tier is why a CLI
+fallback exists at all, since `spec-driven` is not vendored in any repository. When
+the first tier misses, ask `openspec schema which <name> --json`, which returns
+`{"name","source","path","shadows"}` where `path` is the schema's *directory*
+(stdout is clean JSON; an "experimental" note goes to stderr) — read the same
+`schema.yaml` from that directory. The `artifacts` list becomes the tab order. The
+tasks artifact is the one whose `generates` equals the schema's top-level
+`apply.tracks`, falling back to the artifact with id `tasks` when no `apply` block
+declares what it tracks; a `tracks` value matching nothing yields no tasks artifact
+rather than falling back, because that is what the OpenSpec CLI does and the
+dual-source model depends on the two agreeing. There is no `role` key anywhere in
+the schema format.
 
 **Changes.** `openspec list --json` yields
 `{name, completedTasks, totalTasks, lastModified, status}` per change. The file
@@ -324,6 +337,9 @@ Every condition renders usable content rather than an error screen:
 | No `openspec/` found while walking up | Empty state naming the directory searched |
 | `openspec` binary not found | File mode, with a dim `file mode` badge in the header |
 | Schema unknown to the CLI | Per-change fall back to file mode. This is real: `learning-tool` declares schema `outside-in-tdd`, which the installed CLI rejects |
+| Schema not vendored (no `openspec/schemas/<name>/schema.yaml` locally) | Artifact list empty until the CLI tier supplies it; distinct from the row above, which is the CLI rejecting a schema the plugin already read — both can be true at once for a schema like `outside-in-tdd` |
+| Schema unreadable or invalid (I/O error, or bytes that are not a usable schema) | Artifact list empty, and the reason is named |
+| Schema loads with no tasks artifact (`apply.tracks` matches nothing, and no artifact has id `tasks`) | Every other tab renders; the tasks tab is absent (its rendering, and how progress falls back, are `tasks-tab`'s decision) |
 | No active changes | Empty state; archived changes remain browsable |
 | Artifact file missing | Tab is still shown and renders "No content yet" |
 | Herdr socket unreachable | Runs as a standalone TUI; agent column and action keys hidden |
@@ -340,8 +356,9 @@ Each is a pure transformation, tested without a TUI or a subprocess:
 
 - `changes::from_files` and `changes::from_cli` — both produce the same `Change`
   type, from fixture trees and fixture JSON respectively
-- `schema::artifacts` — `schema.yaml` to ordered tabs, including `role: tasks`
-  detection
+- `schema::select` and `schema::parse` — which schema name applies (a change's
+  own override, the project's, or the default), and `schema.yaml` to ordered
+  tabs plus the `apply.tracks`-then-id-`tasks` rule for the tasks artifact
 - `tasks::parse` — markdown checkboxes to grouped items and counts
 - `agents::attribute` — agent-list JSON plus change list to per-change badges,
   covering all three tiers including the deliberate non-attribution case
