@@ -1,36 +1,63 @@
 # Handoff
 
-**Written:** 2026-09-04 ~00:35 EEST · **Branch:** `main` · **Remote:** `optioni/herdr-openspec`
+**Written:** 2026-09-04 ~04:55 EEST · **Branch:** `main` · **Remote:** `optioni/herdr-openspec`
 
 ## Where things stand
 
-Design complete. **`repo-foundation` is implemented, merged, archived and pushed** —
-the crate exists, `make check` passes at 100% line coverage (54/54) against an 80%
-floor, and 11 requirements are live under `openspec/specs/`.
+**Phase 1 is complete.** All three changes implemented, archived, and pushed. `main`
+is green: `make check` exits 0 at **97.65% line coverage (895 lines)** against the 80%
+floor, 72 tests.
 
-| Change | Phase | State |
+| Phase | Changes | State |
 |---|---|---|
-| `repo-foundation` | 1 | **Done, archived** (`2026-09-04-repo-foundation`) |
-| `ci-pipeline` | 1 | In progress — `phase1-rest` orchestrator |
-| `plugin-config` | 1 | Queued behind it |
-| everything else | 2–6 | Untouched |
+| 1 — Foundation | `repo-foundation`, `ci-pipeline`, `plugin-config` | **Done, archived** |
+| 2 — Reading from disk | `repo-resolution`, `schema-model`, `task-parsing`, `changes-from-files` | Next |
+| 3–6 | — | Untouched |
+
+`openspec/changes/` contains only `archive/`. Six capabilities are live under
+`openspec/specs/`: `plugin-build`, `plugin-manifest`, `quality-gates`, `ci-workflow`,
+`plugin-config`, `plugin-state`.
+
+## Next action
+
+Phase 2 is unblocked — `repo-resolution` depends on `plugin-config` (done), and
+`schema-model` / `task-parsing` depend only on `repo-foundation` (done). Dispatch the
+phase orchestrator on **Phase 2 — Reading OpenSpec from disk**. All four changes need
+the full ff → apply → archive loop.
 
 ## What exists now
 
-`Cargo.toml`, `src/lib.rs`, `src/main.rs`, `tests/cli.rs`, `Makefile`, `rustfmt.toml`,
-`scripts/build.sh`, `herdr-plugin.toml`. `make check` runs format, lint, test and
-coverage. The binary answers `ui` (prints a placeholder banner, holds the pane open
-until stdin closes), exits 2 on an unknown or missing subcommand.
+`src/lib.rs`, `src/main.rs`, `src/config.rs`, `src/state.rs`, `tests/cli.rs`,
+`tests/ci_workflow.rs`, `Cargo.toml` (one dependency: `toml` 1.1.5), `Makefile`,
+`rustfmt.toml`, `scripts/build.sh`, `herdr-plugin.toml`, and
+`.github/workflows/` — `check` matrixed over ubuntu/macos, Linux-only `coverage`, and
+an aggregate `ci` job for branch protection.
 
 ## Contract corrections found by running against real Herdr 0.8.2
 
-Both were wrong in SPEC.md and could not have been caught by static review:
+Three, none catchable by static review:
 
-1. The plugin manifest **requires a `version` key**. `herdr plugin link .` rejected the
-   manifest without it. Added everywhere.
-2. **`herdr plugin link .` does NOT run the `[[build]]` step** — only a GitHub-managed
-   `herdr plugin install` does. SPEC.md claimed otherwise. Verified empirically. README
-   → Development now tells you to run `make build` yourself.
+1. The plugin manifest **requires a `version` key** — `herdr plugin link .` rejects it
+   otherwise.
+2. **`herdr plugin link .` does NOT run `[[build]]`** — only a GitHub-managed
+   `herdr plugin install` does. Run `make build` yourself.
+3. **`herdr plugin config-dir` is not how a plugin finds its own directories.** Herdr
+   injects `HERDR_PLUGIN_CONFIG_DIR` and `HERDR_PLUGIN_STATE_DIR`, verified
+   character-identical for both pane and action entrypoints. This is why
+   `plugin-config` needs no subprocess and does not depend on `subprocess-seam` —
+   nothing spawns `herdr`.
+
+## Two open issues for later phases
+
+1. **`subprocess-seam` (Phase 3) introduces the crate's first real `Command::new`.**
+   `plugin-config`'s design carried a `grep -rn '"herdr"'` no-spawn check that
+   false-positives on legitimate `.join("herdr")` path code, so it was recorded as
+   not-run. Do not inherit a false sense of coverage from it — that change needs a
+   genuine check.
+2. **CI has never run on GitHub.** Five `ci-pipeline` scenario clauses need a real
+   run to observe (scheduling, runner installs, matrix-leg independence, aggregate
+   status, fork-PR behavior). Each has a static verification row, but the live
+   behaviour is unconfirmed until something is pushed to a PR.
 
 ## Budget shape — read this before starting
 
