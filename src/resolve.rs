@@ -2,6 +2,7 @@
 //!
 //! See `openspec/changes/repo-resolution/design.md` for the full contract.
 
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 /// The outcome of walking up from a starting path for an `openspec` directory.
@@ -63,6 +64,122 @@ pub fn find_repo(start: &Path) -> RepoSearch {
                 searched_from: start.to_path_buf(),
             }
         }
+    }
+}
+
+/// Which step of the probe chain produced a binary. Part of the contract,
+/// not a debugging aid: two steps can legitimately produce the same path (on
+/// the reference machine, the nvm step and the npm-prefix step do), so path
+/// equality alone cannot distinguish which one actually ran.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinSource {
+    Configured,
+    Path,
+    Nvm,
+    NpmPrefix,
+}
+
+/// A usable `openspec` binary and the step that found it. The path is
+/// returned exactly as the chain constructed it — never canonicalized — so a
+/// caller that later spawns it uses the same stable, upgrade-surviving name
+/// (a symbolic link, on the reference machine).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FoundBin {
+    pub path: PathBuf,
+    pub source: BinSource,
+}
+
+/// The outcome of probing for the `openspec` binary. `problems` has exactly
+/// one producer today — a configured `openspec_bin` that could not be used —
+/// so an empty `problems` with `found: None` means "no CLI installed" and a
+/// non-empty one means "the user configured something that does not work".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BinResolution {
+    pub found: Option<FoundBin>,
+    pub problems: Vec<String>,
+}
+
+/// Is `path` a usable `openspec` candidate: an executable regular file,
+/// reached through symbolic links? `fs::metadata` follows symlinks —
+/// `symlink_metadata` does not, and the real install on the reference
+/// machine is a symlink to a `.js` file. A directory carries the execute
+/// bit, so the regular-file clause is load-bearing on its own; "any execute
+/// bit" rather than "owner execute" because a binary installed by another
+/// user with mode `0711` is still runnable. Every filesystem `Err` means
+/// "not usable", never a panic.
+fn is_usable_binary(path: &Path) -> bool {
+    match std::fs::metadata(path) {
+        Ok(metadata) => metadata.is_file() && metadata.permissions().mode() & 0o111 != 0,
+        Err(_) => false,
+    }
+}
+
+/// Step 2's candidate list, as a pure function of the `PATH` string — no
+/// filesystem access. Split by hand on `':'` rather than
+/// `std::env::split_paths`, which takes an `OsStr` while the injected lookup
+/// is `String`-typed and, on Unix, yields empty entries that would still
+/// need filtering. An entry that is empty or whitespace-only is skipped
+/// rather than treated as the current directory: POSIX says an empty `PATH`
+/// entry means the current directory, but a plugin pane starts in whatever
+/// directory the user's workspace is rooted at, and resolving an executable
+/// from it is not a behaviour this plugin offers. Reuses `config::non_blank`
+/// for the identical "first non-blank value wins" rule the rest of the crate
+/// already applies to environment values.
+pub(crate) fn path_candidates(path_value: &str) -> Vec<PathBuf> {
+    path_value
+        .split(':')
+        .filter(|entry| crate::config::non_blank(Some((*entry).to_string())).is_some())
+        .map(|entry| Path::new(entry).join("openspec"))
+        .collect()
+}
+
+/// Probe for the `openspec` binary: step 1, the configured path, then step
+/// 2, each `PATH` entry in order. (Steps 3 and 4 arrive in later groups.) A
+/// mis-configured `configured` path falls through to the remaining steps
+/// rather than winning or ending the chain, and records exactly one
+/// problem naming it — silently substituting a different binary would hide
+/// a user's mistake, and refusing to look further would fail closed, which
+/// `SPEC.md` forbids. See
+/// `openspec/changes/repo-resolution/design.md` -> Contracts.
+pub fn openspec_bin(
+    configured: Option<&Path>,
+    env: &dyn Fn(&str) -> Option<String>,
+) -> BinResolution {
+    let mut problems = Vec::new();
+
+    if let Some(configured) = configured {
+        if is_usable_binary(configured) {
+            return BinResolution {
+                found: Some(FoundBin {
+                    path: configured.to_path_buf(),
+                    source: BinSource::Configured,
+                }),
+                problems,
+            };
+        }
+        problems.push(format!(
+            "configured openspec_bin is not usable: {}",
+            configured.display()
+        ));
+    }
+
+    if let Some(path_value) = env("PATH") {
+        for candidate in path_candidates(&path_value) {
+            if is_usable_binary(&candidate) {
+                return BinResolution {
+                    found: Some(FoundBin {
+                        path: candidate,
+                        source: BinSource::Path,
+                    }),
+                    problems,
+                };
+            }
+        }
+    }
+
+    BinResolution {
+        found: None,
+        problems,
     }
 }
 
