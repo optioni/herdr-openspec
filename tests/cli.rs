@@ -7,7 +7,7 @@
 
 use std::process::{Command, Stdio};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 fn bin() -> Command {
     Command::new(env!("CARGO_BIN_EXE_herdr-openspec"))
@@ -84,9 +84,22 @@ fn extra_arguments_after_ui() {
         .spawn()
         .expect("failed to spawn binary");
 
-    thread::sleep(Duration::from_millis(200));
+    // Poll to a deadline rather than sleeping a fixed interval. Process startup
+    // on a cold or loaded machine can exceed any single sleep, which made this
+    // test flaky; a wrongly-blocking implementation still fails, because the
+    // deadline expires with the child alive.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let exited = loop {
+        if child.try_wait().expect("try_wait failed").is_some() {
+            break true;
+        }
+        if Instant::now() >= deadline {
+            break false;
+        }
+        thread::sleep(Duration::from_millis(10));
+    };
     assert!(
-        child.try_wait().expect("try_wait failed").is_some(),
+        exited,
         "process blocked on stdin instead of exiting immediately"
     );
 
