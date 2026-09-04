@@ -890,7 +890,7 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
 ## 7. Schema resolution through the CLI fallback tier (`mod schema_fallback`)
 <!-- kind: behavior -->
 
-- [ ] 7.1 RED: Write failing unit tests in `mod schema_fallback`. Every one uses
+- [x] 7.1 RED: Write failing unit tests in `mod schema_fallback`. Every one uses
       `cli::FakeCli` plus a real `testutil::ScratchDir` holding real `schema.yaml` files —
       **no process is spawned**, because the fake answers `["schema","which",…]` with a
       payload whose `path` names a scratch directory that genuinely holds the file
@@ -920,7 +920,7 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
       `a_failed_lookup_is_cached_rather_than_retried_per_change`;
       `two_different_schema_names_are_asked_for_separately`.
 
-- [ ] 7.2 GREEN: Implement the per-call schema resolver: a `HashMap<String,
+- [x] 7.2 GREEN: Implement the per-call schema resolver: a `HashMap<String,
       CachedCliSchema>` owned by the `from_cli` call (never a `static` —
       `resolve::BinCache`'s reason: the suite runs this crate's tests in parallel threads
       of one process). On a miss, call `schema::load(repo, name)`; on `Ok` cache the schema
@@ -930,15 +930,15 @@ echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
       `Err(Invalid)` cache the failure without calling the CLI. Every change using a cached
       entry receives a clone of its problems, not only the change that populated it.
 
-- [ ] 7.3 REFACTOR: Fold the fallback's five failure paths into one problem-rendering
+- [x] 7.3 REFACTOR: Fold the fallback's five failure paths into one problem-rendering
       helper if that removes duplication; otherwise state explicitly that no refactor was
       needed.
 
-- [ ] 7.4 CHECK: Run `NOSPAWN-GREP` — confirm no process API name entered `src/changes.rs`
+- [x] 7.4 CHECK: Run `NOSPAWN-GREP` — confirm no process API name entered `src/changes.rs`
       while wiring the fallback. **Red when:** the tier was implemented by reaching for
       `Command` rather than the trait object.
 
-- [ ] 7.5 VERIFY: `testcount --lib 'schema_fallback::' <count>`. Commit.
+- [x] 7.5 VERIFY: `testcount --lib 'schema_fallback::' <count>`. Commit.
 
 ---
 

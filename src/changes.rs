@@ -963,6 +963,103 @@ pub(crate) fn join_artifacts(
     (cli.to_vec(), None)
 }
 
+/// Render a CLI invocation failure as one problem naming `subject` (what was
+/// being resolved), the argument vector, and — for a non-zero exit — the
+/// exit code. Never the CLI's own diagnostic text: it writes that to
+/// stdout, and `subprocess-seam`'s `CliError::Failed` carries stderr only.
+/// See `cli-changes` -> "Every CLI failure degrades to the file result and
+/// names itself".
+fn cli_error_problem(subject: &str, args: &[&str], err: &crate::cli::CliError) -> String {
+    let vector = args.join(" ");
+    match err {
+        crate::cli::CliError::NotStarted { program, .. } => {
+            format!("{subject}: openspec {vector} could not start {program}")
+        }
+        crate::cli::CliError::Failed { code, .. } => {
+            let code = code
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            format!("{subject}: openspec {vector} exited with code {code}")
+        }
+    }
+}
+
+/// One schema resolved through `from_cli`'s CLI-fallback tier: `None` when
+/// it did not resolve at all, plus every problem resolving it produced.
+struct CachedCliSchema {
+    schema: Option<crate::schema::Schema>,
+    problems: Vec<String>,
+}
+
+/// The uncached half of [`resolve_cli_schema`]: repository tier, then — on
+/// `LoadError::NotVendored` only — the `openspec schema which` tier. See
+/// `schema-cli-fallback` -> "A not-vendored schema is repaired through
+/// `openspec schema which`" and "Every failure of the fallback tier
+/// degrades and names itself".
+fn resolve_cli_schema_uncached(
+    cli: &dyn crate::cli::OpenspecCli,
+    repo: &std::path::Path,
+    name: &str,
+) -> CachedCliSchema {
+    match crate::schema::load(repo, name) {
+        Ok(parsed) => CachedCliSchema {
+            schema: Some(parsed.schema),
+            problems: parsed.problems,
+        },
+        Err(crate::schema::LoadError::NotVendored { .. }) => {
+            let args = ["schema", "which", name, "--json"];
+            match cli.run(&args) {
+                Ok(text) => match parse_schema_which(&text) {
+                    Ok(dir) => match crate::schema::load_dir(&dir, name) {
+                        Ok(parsed) => CachedCliSchema {
+                            schema: Some(parsed.schema),
+                            problems: parsed.problems,
+                        },
+                        Err(err) => CachedCliSchema {
+                            schema: None,
+                            problems: vec![schema_load_problem(&err)],
+                        },
+                    },
+                    Err(reason) => CachedCliSchema {
+                        schema: None,
+                        problems: vec![format!(
+                            "openspec schema which {name:?} --json payload is unusable: {reason}"
+                        )],
+                    },
+                },
+                Err(err) => CachedCliSchema {
+                    schema: None,
+                    problems: vec![cli_error_problem(&format!("schema {name:?}"), &args, &err)],
+                },
+            }
+        }
+        Err(err) => CachedCliSchema {
+            schema: None,
+            problems: vec![schema_load_problem(&err)],
+        },
+    }
+}
+
+/// Resolve `name`'s schema through the repository tier, then — on a miss —
+/// the CLI fallback tier, caching the result (success or failure) by name
+/// for the duration of one `from_cli` call, never a `static`
+/// (`resolve::BinCache`'s reason: the suite runs this crate's tests in
+/// parallel threads of one process). Every caller sharing `cache` for the
+/// same `name` receives a clone of the same problems, not only the first.
+/// See `schema-cli-fallback` -> "A schema is resolved at most once per name
+/// per call".
+fn resolve_cli_schema(
+    cli: &dyn crate::cli::OpenspecCli,
+    repo: &std::path::Path,
+    name: &str,
+    cache: &mut std::collections::HashMap<String, CachedCliSchema>,
+) -> (Option<crate::schema::Schema>, Vec<String>) {
+    let cached = cache
+        .entry(name.to_string())
+        .or_insert_with(|| resolve_cli_schema_uncached(cli, repo, name));
+    (cached.schema.clone(), cached.problems.clone())
+}
+
 /// Paint the pane from disk: every active change under
 /// `<repo>/openspec/changes/`, the `archived_count` most recent archived
 /// changes under its `archive/`, and every problem recorded along the way.
@@ -3154,6 +3251,460 @@ mod tests {
             let (joined, problem) = join_artifacts(&file, &cli);
             assert_eq!(problem, None);
             assert_eq!(joined, cli);
+        }
+    }
+
+    // --- group 7: schema resolution through the CLI fallback tier ----------
+    // (`mod schema_fallback`)
+
+    mod schema_fallback {
+        use super::*;
+        use crate::cli::{CliError, FakeCli, OpenspecCli};
+        use std::collections::HashMap;
+
+        /// A `schema.yaml` directly under `dir` — unlike `vendor_schema`,
+        /// which nests it under `<repo>/openspec/schemas/<name>/`, this is
+        /// the shape of the arbitrary directory `openspec schema which`
+        /// names: a CLI-package or `$XDG_DATA_HOME` tier the file producer
+        /// never reads.
+        fn write_schema_yaml(dir: &std::path::Path, name: &str, artifacts: &[(&str, &str)]) {
+            let mut yaml = format!("name: {name}\nartifacts:\n");
+            for (id, generates) in artifacts {
+                yaml.push_str(&format!("  - id: {id}\n    generates: {generates}\n"));
+            }
+            write(&dir.join("schema.yaml"), &yaml);
+        }
+
+        fn which_response(dir: &std::path::Path, name: &str) -> Result<String, CliError> {
+            Ok(format!(
+                r#"{{"name":{name:?},"source":"package","path":{:?},"shadows":[]}}"#,
+                dir.display()
+            ))
+        }
+
+        #[test]
+        fn a_schema_absent_from_the_repository_is_loaded_from_the_directory_the_cli_names() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            let pkg_dir = repo.join("pkg/spec-driven");
+            write_schema_yaml(
+                &pkg_dir,
+                "spec-driven",
+                &[("proposal", "proposal.md"), ("tasks", "tasks.md")],
+            );
+
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["schema", "which", "spec-driven", "--json"],
+                which_response(&pkg_dir, "spec-driven"),
+            );
+
+            let mut cache = HashMap::new();
+            let (schema, problems) = resolve_cli_schema(&fake, &repo, "spec-driven", &mut cache);
+            let schema = schema.expect("should resolve");
+            let ids: Vec<&str> = schema.artifacts.iter().map(|a| a.id.as_str()).collect();
+            assert_eq!(ids, vec!["proposal", "tasks"]);
+            assert!(problems.is_empty());
+        }
+
+        #[test]
+        fn a_vendored_schema_never_reaches_the_cli() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+
+            let fake = FakeCli::new();
+            // No "schema which" registration — the fake panics on an
+            // unregistered pair, so a passing test proves the call was
+            // never made.
+            let mut cache = HashMap::new();
+            let (schema, problems) = resolve_cli_schema(&fake, &repo, "tdd", &mut cache);
+            assert!(schema.is_some());
+            assert!(problems.is_empty());
+        }
+
+        #[test]
+        fn an_unreadable_vendored_schema_is_not_repaired_by_the_cli() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            mkdir(&repo.join("openspec/schemas/odd/schema.yaml"));
+
+            let fake = FakeCli::new();
+            let mut cache = HashMap::new();
+            let (schema, problems) = resolve_cli_schema(&fake, &repo, "odd", &mut cache);
+            assert!(schema.is_none());
+            assert_eq!(problems.len(), 1);
+            assert!(problems[0].contains("odd") || problems[0].contains("schema.yaml"));
+        }
+
+        #[test]
+        fn an_invalid_vendored_schema_is_not_repaired_by_the_cli() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            write(
+                &repo.join("openspec/schemas/bad/schema.yaml"),
+                "not: [valid",
+            );
+
+            let fake = FakeCli::new();
+            let mut cache = HashMap::new();
+            let (schema, problems) = resolve_cli_schema(&fake, &repo, "bad", &mut cache);
+            assert!(schema.is_none());
+            assert_eq!(problems.len(), 1);
+        }
+
+        #[test]
+        fn an_unknown_schema_name_degrades_that_change_alone() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+            let pkg_dir = repo.join("pkg/spec-driven");
+            write_schema_yaml(
+                &pkg_dir,
+                "spec-driven",
+                &[("proposal", "proposal.md"), ("tasks", "tasks.md")],
+            );
+
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["schema", "which", "outside-in-tdd", "--json"],
+                Err(CliError::Failed {
+                    program: "openspec".to_string(),
+                    args: vec![
+                        "schema".to_string(),
+                        "which".to_string(),
+                        "outside-in-tdd".to_string(),
+                        "--json".to_string(),
+                    ],
+                    code: Some(1),
+                    stderr: String::new(),
+                }),
+            );
+            fake.register_openspec(
+                &["schema", "which", "spec-driven", "--json"],
+                which_response(&pkg_dir, "spec-driven"),
+            );
+
+            let mut cache = HashMap::new();
+            let (tdd, tdd_problems) = resolve_cli_schema(&fake, &repo, "tdd", &mut cache);
+            let (unknown, unknown_problems) =
+                resolve_cli_schema(&fake, &repo, "outside-in-tdd", &mut cache);
+            let (spec_driven, spec_driven_problems) =
+                resolve_cli_schema(&fake, &repo, "spec-driven", &mut cache);
+
+            assert!(tdd.is_some());
+            assert!(tdd_problems.is_empty());
+            assert!(unknown.is_none());
+            assert_eq!(unknown_problems.len(), 1);
+            assert!(unknown_problems[0].contains("outside-in-tdd"));
+            assert!(unknown_problems[0].contains('1'));
+            assert!(spec_driven.is_some());
+            assert!(spec_driven_problems.is_empty());
+        }
+
+        #[test]
+        fn a_which_path_naming_a_directory_with_no_schema_yaml_stops_the_tier() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            let empty_dir = repo.join("empty");
+            mkdir(&empty_dir);
+
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["schema", "which", "ghost", "--json"],
+                which_response(&empty_dir, "ghost"),
+            );
+
+            let mut cache = HashMap::new();
+            let (schema, problems) = resolve_cli_schema(&fake, &repo, "ghost", &mut cache);
+            assert!(schema.is_none());
+            assert_eq!(problems.len(), 1);
+            assert!(problems[0].contains("schema.yaml"));
+            let schema_which_calls = fake
+                .calls()
+                .iter()
+                .filter(|(_, args)| args.first().map(String::as_str) == Some("schema"))
+                .count();
+            assert_eq!(schema_which_calls, 1);
+        }
+
+        #[test]
+        fn an_unstartable_openspec_during_the_fallback_degrades_that_change() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["schema", "which", "spec-driven", "--json"],
+                Err(CliError::NotStarted {
+                    program: "openspec".to_string(),
+                    args: vec![
+                        "schema".to_string(),
+                        "which".to_string(),
+                        "spec-driven".to_string(),
+                        "--json".to_string(),
+                    ],
+                    reason: "No such file or directory".to_string(),
+                }),
+            );
+
+            let mut cache = HashMap::new();
+            let (schema, problems) = resolve_cli_schema(&fake, &repo, "spec-driven", &mut cache);
+            assert!(schema.is_none());
+            assert_eq!(problems.len(), 1);
+            assert!(problems[0].contains("spec-driven"));
+            assert!(problems[0].contains("openspec"));
+        }
+
+        #[test]
+        fn an_unusable_schema_yaml_at_the_cli_named_path_degrades_that_change() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+
+            let invalid_dir = repo.join("invalid");
+            write(&invalid_dir.join("schema.yaml"), "not: [valid");
+            let unreadable_dir = repo.join("unreadable");
+            mkdir(&unreadable_dir.join("schema.yaml"));
+
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["schema", "which", "invalid-one", "--json"],
+                which_response(&invalid_dir, "invalid-one"),
+            );
+            fake.register_openspec(
+                &["schema", "which", "unreadable-one", "--json"],
+                which_response(&unreadable_dir, "unreadable-one"),
+            );
+
+            let mut cache = HashMap::new();
+            let (invalid_schema, invalid_problems) =
+                resolve_cli_schema(&fake, &repo, "invalid-one", &mut cache);
+            assert!(invalid_schema.is_none());
+            assert_eq!(invalid_problems.len(), 1);
+
+            let (unreadable_schema, unreadable_problems) =
+                resolve_cli_schema(&fake, &repo, "unreadable-one", &mut cache);
+            assert!(unreadable_schema.is_none());
+            assert_eq!(unreadable_problems.len(), 1);
+        }
+
+        #[test]
+        fn a_malformed_which_payload_is_a_problem_not_a_panic() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+
+            for (name, payload) in [
+                ("empty-body", ""),
+                ("null-body", "null"),
+                ("non-string-path", r#"{"path": 7}"#),
+                ("no-path", r#"{"name":"x"}"#),
+            ] {
+                let fake = FakeCli::new();
+                fake.register_openspec(
+                    &["schema", "which", name, "--json"],
+                    Ok(payload.to_string()),
+                );
+                let mut cache = HashMap::new();
+                let (schema, problems) = resolve_cli_schema(&fake, &repo, name, &mut cache);
+                assert!(schema.is_none(), "case {name}");
+                assert_eq!(problems.len(), 1, "case {name}");
+            }
+        }
+
+        #[test]
+        fn a_leading_non_json_line_is_not_tolerated_by_the_fallback() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["schema", "which", "noisy", "--json"],
+                Ok(
+                    "Note: Schema commands are experimental and may change.\n{\"path\":\"/x\"}"
+                        .to_string(),
+                ),
+            );
+            let mut cache = HashMap::new();
+            let (schema, problems) = resolve_cli_schema(&fake, &repo, "noisy", &mut cache);
+            assert!(schema.is_none());
+            assert_eq!(problems.len(), 1);
+        }
+
+        #[test]
+        fn a_parser_problem_from_the_cli_named_schema_reaches_every_change_using_it() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            let pkg_dir = repo.join("pkg/spec-driven");
+            // A schema.yaml with one unusable artifact entry (no `id`)
+            // alongside two usable ones, so `schema::load_dir` returns `Ok`
+            // carrying two artifacts and one problem.
+            write(
+                &pkg_dir.join("schema.yaml"),
+                "name: spec-driven\nartifacts:\n  - generates: no-id.md\n  - id: proposal\n    generates: proposal.md\n  - id: tasks\n    generates: tasks.md\n",
+            );
+
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["schema", "which", "spec-driven", "--json"],
+                which_response(&pkg_dir, "spec-driven"),
+            );
+
+            let mut cache = HashMap::new();
+            let (first_schema, first_problems) =
+                resolve_cli_schema(&fake, &repo, "spec-driven", &mut cache);
+            let (second_schema, second_problems) =
+                resolve_cli_schema(&fake, &repo, "spec-driven", &mut cache);
+
+            assert!(first_schema.is_some());
+            assert!(second_schema.is_some());
+            assert_eq!(first_problems.len(), 1);
+            assert_eq!(first_problems, second_problems);
+        }
+
+        #[test]
+        fn three_changes_sharing_one_unvendored_schema_ask_the_cli_once() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            let pkg_dir = repo.join("pkg/spec-driven");
+            write_schema_yaml(
+                &pkg_dir,
+                "spec-driven",
+                &[("proposal", "proposal.md"), ("tasks", "tasks.md")],
+            );
+
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(r#"{"changes":[
+                    {"name":"alpha","completedTasks":0,"totalTasks":0,"lastModified":"x","status":"y"},
+                    {"name":"mike","completedTasks":0,"totalTasks":0,"lastModified":"x","status":"y"},
+                    {"name":"zulu","completedTasks":0,"totalTasks":0,"lastModified":"x","status":"y"}
+                ],"root":{"path":"/repo","source":"nearest"}}"#
+                    .to_string()),
+            );
+            for name in ["alpha", "mike", "zulu"] {
+                fake.register_openspec(
+                    &["instructions", "apply", "--change", name, "--json"],
+                    Ok(format!(
+                        r#"{{"schemaName":"spec-driven","changeDir":"/repo/openspec/changes/{name}","contextFiles":{{}}}}"#
+                    )),
+                );
+            }
+            fake.register_openspec(
+                &["schema", "which", "spec-driven", "--json"],
+                which_response(&pkg_dir, "spec-driven"),
+            );
+
+            // Drive exactly the sequence `from_cli` will later automate,
+            // through the traits directly — this test is what proves the
+            // resolver's caching property end to end, ahead of `from_cli`
+            // existing.
+            let list_text = OpenspecCli::run(&fake, &["list", "--json"]).unwrap();
+            let list_payload = parse_list(&list_text).unwrap();
+            let mut cache = HashMap::new();
+            for entry in &list_payload.changes {
+                let apply_text = OpenspecCli::run(
+                    &fake,
+                    &["instructions", "apply", "--change", &entry.name, "--json"],
+                )
+                .unwrap();
+                let apply = parse_apply(&apply_text).unwrap();
+                let (schema, problems) =
+                    resolve_cli_schema(&fake, &repo, &apply.schema_name, &mut cache);
+                let schema = schema.expect("should resolve");
+                let ids: Vec<&str> = schema.artifacts.iter().map(|a| a.id.as_str()).collect();
+                assert_eq!(ids, vec!["proposal", "tasks"]);
+                assert!(problems.is_empty());
+            }
+
+            let calls = fake.calls();
+            assert_eq!(calls.len(), 5);
+            let schema_which_calls = calls
+                .iter()
+                .filter(|(_, args)| args.first().map(String::as_str) == Some("schema"))
+                .count();
+            assert_eq!(schema_which_calls, 1);
+        }
+
+        #[test]
+        fn a_failed_lookup_is_cached_rather_than_retried_per_change() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["schema", "which", "outside-in-tdd", "--json"],
+                Err(CliError::Failed {
+                    program: "openspec".to_string(),
+                    args: vec![
+                        "schema".to_string(),
+                        "which".to_string(),
+                        "outside-in-tdd".to_string(),
+                        "--json".to_string(),
+                    ],
+                    code: Some(1),
+                    stderr: String::new(),
+                }),
+            );
+
+            let mut cache = HashMap::new();
+            for _ in 0..3 {
+                let (schema, problems) =
+                    resolve_cli_schema(&fake, &repo, "outside-in-tdd", &mut cache);
+                assert!(schema.is_none());
+                assert_eq!(problems.len(), 1);
+            }
+            let schema_which_calls = fake
+                .calls()
+                .iter()
+                .filter(|(_, args)| args.first().map(String::as_str) == Some("schema"))
+                .count();
+            assert_eq!(schema_which_calls, 1);
+        }
+
+        #[test]
+        fn two_different_schema_names_are_asked_for_separately() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            let a_dir = repo.join("pkg/spec-driven");
+            write_schema_yaml(&a_dir, "spec-driven", &[("proposal", "proposal.md")]);
+            let b_dir = repo.join("pkg/other-schema");
+            write_schema_yaml(&b_dir, "other-schema", &[("notes", "notes.md")]);
+
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["schema", "which", "spec-driven", "--json"],
+                which_response(&a_dir, "spec-driven"),
+            );
+            fake.register_openspec(
+                &["schema", "which", "other-schema", "--json"],
+                which_response(&b_dir, "other-schema"),
+            );
+
+            let mut cache = HashMap::new();
+            let (a, _) = resolve_cli_schema(&fake, &repo, "spec-driven", &mut cache);
+            let (b, _) = resolve_cli_schema(&fake, &repo, "other-schema", &mut cache);
+            assert_eq!(
+                a.unwrap()
+                    .artifacts
+                    .iter()
+                    .map(|x| x.id.clone())
+                    .collect::<Vec<_>>(),
+                vec!["proposal"]
+            );
+            assert_eq!(
+                b.unwrap()
+                    .artifacts
+                    .iter()
+                    .map(|x| x.id.clone())
+                    .collect::<Vec<_>>(),
+                vec!["notes"]
+            );
+            let schema_which_calls = fake
+                .calls()
+                .iter()
+                .filter(|(_, args)| args.first().map(String::as_str) == Some("schema"))
+                .count();
+            assert_eq!(schema_which_calls, 2);
         }
     }
 }
