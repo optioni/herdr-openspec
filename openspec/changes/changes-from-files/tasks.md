@@ -912,20 +912,42 @@ states its net effect.
 ## 12. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 12.1 CHECK: Inspect the intended verification commands and affected tiers — the unit
+- [x] 12.1 CHECK: Inspect the intended verification commands and affected tiers — the unit
       tier over `src/changes.rs`, plus the whole suite, plus the coverage gate, since this
       change adds a module to a crate whose floor is enforced over all of it
-- [ ] 12.2 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors
-- [ ] 12.3 VERIFY: `cargo fmt --all -- --check` — clean
-- [ ] 12.4 VERIFY: `cargo build --all-features` — 0 errors. Rust's type checker has no separate
+
+      Tiers affected: unit tests in `changes::tests` (266 lib tests overall, of which the
+      module's own account for a large majority); the whole suite including `config`,
+      `state`, `resolve`, `schema`, `tasks`, `tests/ci_workflow.rs`, `tests/cli.rs`; and the
+      crate-wide coverage gate, since `cargo llvm-cov --fail-under-lines 80` is computed over
+      every file, not per-module.
+- [x] 12.2 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors
+
+      Clean. 0 warnings, 0 errors.
+- [x] 12.3 VERIFY: `cargo fmt --all -- --check` — clean
+
+      Clean, no output.
+- [x] 12.4 VERIFY: `cargo build --all-features` — 0 errors. Rust's type checker has no separate
       command; the build is it
-- [ ] 12.5 VERIFY: `cargo test --all-features` — green
-- [ ] 12.6 VERIFY: `cargo llvm-cov --fail-under-lines 80` — at or above the floor. The floor is
+
+      Clean, 0 errors.
+- [x] 12.5 VERIFY: `cargo test --all-features` — green
+
+      266 lib tests + 11 (`ci_workflow`) + 5 (`cli`) + 0 doc-tests, all green.
+- [x] 12.6 VERIFY: `cargo llvm-cov --fail-under-lines 80` — at or above the floor. The floor is
       never lowered, waived, or given an exclusion; if the module falls short, add the missing
       test rather than the exclusion
-- [ ] 12.7 VERIFY: `make check` — the project's single composite gate, run last so it confirms
+
+      Exit 0. Total line coverage **98.66%**, well above the 80% floor. `changes.rs` itself:
+      99.33% lines (1481/1491), 100% functions. No exclusion added; floor untouched.
+- [x] 12.7 VERIFY: `make check` — the project's single composite gate, run last so it confirms
       all four sub-commands in order on a tree nothing has touched since. If it fails, name the
       failing sub-command rather than reporting a summary
-- [ ] 12.8 VERIFY: `openspec validate changes-from-files --strict` — valid. `openspec` is not
+
+      `make check` exit 0: `fmt-check`, `lint`, `test`, `coverage` all passed in order.
+- [x] 12.8 VERIFY: `openspec validate changes-from-files --strict` — valid. `openspec` is not
       on the `PATH` a non-login shell inherits here; prefix with
       `export PATH="$HOME/.nvm/versions/node/<version>/bin:$PATH"`
+
+      `openspec validate changes-from-files --strict` → "Change 'changes-from-files' is
+      valid".
