@@ -10,7 +10,11 @@ TBD - created by archiving change repo-foundation. Update Purpose after archive.
 The repository SHALL provide a `Makefile` with phony targets `fmt`, `fmt-check`,
 `lint`, `test`, `coverage`, `build`, and `check`. `check` SHALL be composed from
 `fmt-check`, `lint`, `test`, and `coverage` in that order, so that no gate is defined
-twice and local runs and CI invoke identical commands. The commands SHALL be exactly:
+twice. `check` is the single local entry point; CI invokes the same targets
+individually rather than the composite — `fmt-check`, `lint`, and `test` on both
+supported runners and `coverage` once, on Linux — so every command below is still
+written in exactly one place, but the composite itself is a local convenience and not
+the thing CI runs. The commands SHALL be exactly:
 
 | Target | Command |
 |---|---|
