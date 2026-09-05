@@ -133,6 +133,96 @@ pub fn load(start: &Path, config: &Config) -> Dashboard {
 
 #[cfg(test)]
 mod tests {
+    /// The outer-loop acceptance test: `ui::app::action_for` ->
+    /// `Dashboard::apply` -> `ui::markdown::lines` -> `ui::view::render` ->
+    /// `Dashboard::normalise_scroll` is a path no unit test crosses. See
+    /// design.md -> Test Strategy.
+    mod detail {
+        use ratatui::layout::Rect;
+        use ratatui::widgets::Block;
+
+        use crate::testutil::{Script, press};
+        use crate::ui::app::{Dashboard, Detail, Filter, Route};
+        use crate::ui::driver::run_loop;
+        use crate::ui::layout::{split_body, split_frame};
+
+        fn dashboard() -> Dashboard {
+            let source: String = (0..20).map(|i| format!("- line-{i:02}\n")).collect();
+            Dashboard {
+                repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
+                searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
+                changes: crate::changes::empty_set(),
+                route: Route::Detail,
+                quit: false,
+                selected: 0,
+                filter: Filter {
+                    query: String::new(),
+                    active: false,
+                },
+                detail: Detail { source, scroll: 0 },
+            }
+        }
+
+        /// The detail interior, derived the same way the view seam derives
+        /// it, so this test fails loudly if the breakpoint or the frame
+        /// split ever moves rather than silently reading a stale rectangle.
+        fn detail_interior(width: u16, height: u16, route: Route) -> Rect {
+            let (_, body, _) = split_frame(Rect::new(0, 0, width, height));
+            let (_, detail) = split_body(body, route);
+            let detail = detail.expect("detail region must be drawn for this test's routes");
+            Block::bordered().inner(detail)
+        }
+
+        #[test]
+        fn a_markdown_document_renders_and_scrolls_through_the_loop() {
+            for width in [120u16, 60u16] {
+                let mut dashboard = dashboard();
+                let interior = detail_interior(width, 20, Route::Detail);
+
+                let backend = ratatui::backend::TestBackend::new(width, 20);
+                let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+                let mut events = Script::new(vec![
+                    Ok(Some(press(
+                        ratatui::crossterm::event::KeyCode::Char('j'),
+                        ratatui::crossterm::event::KeyModifiers::NONE,
+                    ))),
+                    Ok(Some(press(
+                        ratatui::crossterm::event::KeyCode::Char('j'),
+                        ratatui::crossterm::event::KeyModifiers::NONE,
+                    ))),
+                    Ok(Some(press(
+                        ratatui::crossterm::event::KeyCode::Char('q'),
+                        ratatui::crossterm::event::KeyModifiers::NONE,
+                    ))),
+                ]);
+
+                let summary = run_loop(
+                    &mut terminal,
+                    &mut dashboard,
+                    &mut events,
+                    std::time::Duration::from_millis(1),
+                )
+                .expect("loop ends");
+
+                let buf = terminal.backend().buffer();
+                let row_at = |y: u16| -> String {
+                    (interior.x..interior.x + 9)
+                        .map(|x| buf[(x, y)].symbol().to_string())
+                        .collect()
+                };
+                assert_eq!(row_at(interior.y), "- line-02", "width {width}");
+                assert_eq!(
+                    row_at(interior.y + interior.height - 1),
+                    "- line-17",
+                    "width {width}"
+                );
+
+                assert_eq!(dashboard.detail.scroll, 2, "width {width}");
+                assert_eq!(summary.frames, 3, "width {width}");
+            }
+        }
+    }
+
     mod load {
         use crate::config::Config;
         use crate::testutil::{

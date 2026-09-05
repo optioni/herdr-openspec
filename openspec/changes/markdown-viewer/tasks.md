@@ -1001,7 +1001,7 @@ carries is group 6's.
 ## 2. Acceptance Test — Outer Loop RED
 <!-- kind: behavior -->
 
-- [ ] 2.1 RED: Add
+- [x] 2.1 RED: Add
       `ui::tests::detail::a_markdown_document_renders_and_scrolls_through_the_loop` in
       `src/ui/mod.rs`'s `mod tests` → a new `mod detail`, for detail-scroll → "The document
       fills the detail interior at both mandated widths" composed with → "At the detail route
@@ -1033,7 +1033,7 @@ carries is group 6's.
       and at 60, in the detail route, `Rect::new(1, 2, 58, 16)`.
       Use only API that exists after group 1, so the test **compiles**.
 
-- [ ] 2.2 CHECK: Confirm it fails because the behaviour is missing, not because the harness is
+- [x] 2.2 CHECK: Confirm it fails because the behaviour is missing, not because the harness is
       misconfigured. Run `cargo test --all-features --lib
       ui::tests::detail::a_markdown_document_renders_and_scrolls_through_the_loop` and record
       the message verbatim. **Expected today:** the assertion on the 120-column row 2 fails,
@@ -1045,7 +1045,7 @@ carries is group 6's.
       **Also wrongly green when:** the fixture's source string is malformed, so re-read the
       recorded actual and confirm it is spaces rather than a *different* row.
 
-- [ ] 2.3 VERIFY: the four intermediate-gate commands. `cargo test --all-features` must fail
+- [x] 2.3 VERIFY: the four intermediate-gate commands. `cargo test --all-features` must fail
       on **exactly one** test — the new acceptance test — and `cargo clippy --all-targets`
       must be clean.
       Commit: `test(markdown-viewer): add the detail acceptance test, red`.
