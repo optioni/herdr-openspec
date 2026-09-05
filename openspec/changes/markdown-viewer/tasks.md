@@ -1536,7 +1536,7 @@ arithmetic and a green-on-arrival RED in group 7 — the defect class group 12 h
 ## 9. Acceptance Test — Outer Loop GREEN
 <!-- kind: behavior -->
 
-- [ ] 9.1 VERIFY: `. $CHECKS/TESTCOUNT.sh` then
+- [x] 9.1 VERIFY: `. $CHECKS/TESTCOUNT.sh` then
       `testcount --lib 'ui::tests::detail::' 1` — one test, green, at both widths, with no
       change to the test since 2.1. Record the run. The counted form is used rather than a
       bare filtered `cargo test`, which exits 0 when a filter matches nothing.
@@ -1544,11 +1544,11 @@ arithmetic and a green-on-arrival RED in group 7 — the defect class group 12 h
       implementation is not an acceptance test; if an expectation was genuinely wrong, record
       the correction and its reason here rather than changing it silently.
 
-- [ ] 9.2 VERIFY: `make check` — the literal, unqualified gate, for the first time since
+- [x] 9.2 VERIFY: `make check` — the literal, unqualified gate, for the first time since
       group 1. All four sub-commands in order. If it fails, name the failing sub-command
       rather than reporting a summary.
 
-- [ ] 9.3 VERIFY: `testcount --lib '' 564` — the measured 516 baseline plus this change's 48
+- [x] 9.3 VERIFY: `testcount --lib '' 564` — the measured 516 baseline plus this change's 48
       library tests. Record the final lib total and the whole-suite total.
       **Red when:** the total is below 564, which would mean a group's tests were never
       written or a module was renamed out from under a filter.
