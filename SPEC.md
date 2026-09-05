@@ -13,14 +13,20 @@ as an action process that opens or focuses that pane.
 
 **Stack:** Rust, `ratatui` (TUI) — `crossterm` is reached through `ratatui`'s own
 re-export and is not itself a declared dependency, so a backend type and an event
-type can never come from two different `crossterm` releases — `notify` (filesystem
-watching), `serde_json`, `yaml-rust2` (YAML — the choice is argued in
-`schema-model`'s design.md; a later change needing YAML should not re-open it),
-`pulldown-cmark` (markdown — the version and the `default-features = false`
-choice are argued in `markdown-viewer`'s design.md; a later change needing
-markdown should not re-open it), `toml` (plugin configuration and state, both
-TOML). Exact versions are pinned to current stable releases at implementation
-time, not from memory.
+type can never come from two different `crossterm` releases — `notify` 8.2.0
+(filesystem watching; `default-features = false, features = ["macos_fsevent"]` —
+`default-features = false` alone does not compile on macOS, since `notify`'s
+FSEvents backend is gated on the *absence* of `macos_kqueue`, not the presence of
+`macos_fsevent`, and FSEvents recurses in the kernel while the kqueue backend opens
+one file descriptor per watched entry; the argument, and why no
+`notify-debouncer-*` crate is used, is in `live-refresh`'s design.md — a later
+change needing a watcher should not re-open it), `serde_json`, `yaml-rust2` (YAML —
+the choice is argued in `schema-model`'s design.md; a later change needing YAML
+should not re-open it), `pulldown-cmark` (markdown — the version and the
+`default-features = false` choice are argued in `markdown-viewer`'s design.md; a
+later change needing markdown should not re-open it), `toml` (plugin configuration
+and state, both TOML). Exact versions are pinned to current stable releases at
+implementation time, not from memory.
 
 ## Architecture
 
@@ -61,7 +67,12 @@ one-line binding to the real world, alongside `resolve`'s `npm prefix -g`
 hook and `config::env_lookup`: the loop's injected `&dyn Fn(&Path) ->
 Result<String, String>` reader, whose one production binding lives in
 `src/ui/mod.rs` and is the only place under `src/ui/` naming
-`read_to_string` (`detail-view`).
+`read_to_string` (`detail-view`). The fourth is `watch::RealFsEvents::drain`'s
+one `Instant::now()` call (`live-refresh`): the debounce it drives takes `now`
+as a parameter rather than reading the clock itself, so this is the crate's
+only clock binding and no view test can reach it — `NOBLOCK`'s leg 2 makes
+that a checked fact, not merely a claim, by forbidding every file under
+`src/ui/` (tests included) from naming `Instant::now`.
 
 **Module map:**
 
@@ -75,8 +86,9 @@ Result<String, String>` reader, whose one production binding lives in
 | `tasks` | Parse markdown checkboxes into groups, items, and counts |
 | `agents` | Attribute live Herdr agents to changes |
 | `launch` | Split a pane, start an agent, send the `/opsx:*` prompt |
-| `watch` | Filesystem watching and debounce |
-| `ui` | Views (the change-row grammar, the detail region's header/tab-bar/content grammar, markdown rendering, and `ui::tasks`' checklist-and-progress-bar grammar for the tracked-tasks tab), layout, the dashboard's own state (selection, the `/` filter, the detail scroll offset, the selected artifact tab, and the injected artifact-read binding), key handling, terminal lifecycle, and the event loop |
+| `watch` | The recursive `notify` watch, the debounce, and classifying a touched path to a per-change `Selection` |
+| `refresh` | The worker thread and the non-blocking `Refresher` seam it answers through |
+| `ui` | Views (the change-row grammar, the detail region's header/tab-bar/content grammar, markdown rendering, and `ui::tasks`' checklist-and-progress-bar grammar for the tracked-tasks tab), layout, the dashboard's own state (selection, the `/` filter, the detail scroll offset, the selected artifact tab, the live tier's refresh flag and standing problems, and the injected artifact-read binding), key handling, terminal lifecycle, and the event loop |
 | `cli` | The two subprocess traits and their real implementations |
 
 ## Data layer
@@ -244,9 +256,37 @@ not be started, exited non-zero, or produced empty output.
 
 ### Refresh
 
-One `notify` watcher on `openspec/`, debounced at approximately 150ms, invalidating
-only the changes whose paths were touched. A manual refresh key forces a full
-re-read including CLI calls.
+One recursive `notify` watch on `openspec/`, opened once at startup and held for the
+pane's lifetime. Every touched path it reports is folded into a **debounce**: a pure
+state machine (`watch::Debounce`) that takes `now` as a parameter rather than reading
+the clock itself, so its window-boundary behaviour is asserted directly
+(`take_due(t0 + 149ms)` is `None`, `take_due(t0 + 150ms)` is `Some(_)`) instead of
+through a real sleep. The window is 150ms, capped at one second of total deferral
+(`DEBOUNCE_MAX`) so a writer saving more often than that — an agent editing
+`tasks.md`, then a spec, then a design doc — cannot defer a batch forever. The one
+real `Instant::now()` call in the whole crate lives in `watch::RealFsEvents::drain`,
+which captures it once per call and reuses it for both the debounce and the
+`pending_in` value the next frame's wait consults.
+
+A batch of touched paths is classified to a `changes::Selection`: a path under a
+specific `openspec/changes/<name>/` narrows the selection to that change alone; a
+touch to the `changes/` directory itself, to `archive/`, or to anything the
+classifier does not recognise widens it to every change (conservative by design — a
+wrong "every change" costs one extra CLI cycle that was already going to happen on
+the next `list --json`; a wrong "just this one" would silently stop the pane
+noticing a change elsewhere). A worker thread — the crate's only one, confined to
+`src/refresh.rs` — takes a `Selection` request and answers it twice: first the
+file-sourced `ChangeSet` (sub-millisecond, since it is a directory walk), then the
+CLI-merged one 200–400ms later. The loop applies whichever result is ready on every
+frame without ever waiting for either, which is what makes "files paint, the CLI
+corrects" a property of two successive frames rather than a synchronous read.
+
+Pressing `r` sets the same one-shot request the pane issues automatically at
+startup — `Selection::All`, so the CLI corrects every change's numbers once,
+whether or not anything was ever touched. The event loop's own wait shortens to
+whatever is left of the debounce window (`watch::poll_timeout`) rather than always
+sleeping the full 250ms tick, so a pending batch is noticed close to the moment it
+becomes due; the tick itself is unchanged.
 
 ## User interface
 
@@ -382,7 +422,7 @@ agent editing `tasks.md` in another pane.
 | `Esc` | Dismiss one layer: filter mode with its query when active, else a non-empty query alone, else back to list, else nothing |
 | `1`–`9`, `[`, `]` | Switch artifact tab, at **both** routes — the wide layout draws the detail region at the list route too, so a tab press there is immediately visible (`detail-view`). `0` is inert: tab addressing is 1-based. While filtering, all of them type themselves into the query like any other printable key |
 | `/` | Start filter mode from either route, moving to the list: printable keys type into the query, `Backspace` deletes, `Enter` accepts, `Esc` cancels, and `Ctrl-C` still quits |
-| `r` | Force refresh |
+| `r` | Force a full refresh: re-read every change from files, and re-ask the CLI about every one. While filtering, `r` types itself into the query instead, like every other printable key |
 | `a` | Launch an agent with `/opsx:apply` |
 | `c` | Launch an agent with `/opsx:continue` |
 | `s` | Launch an agent with `/opsx:archive` |
@@ -525,6 +565,10 @@ Every condition renders usable content rather than an error screen:
 | A schema declares the same artifact id at two positions | The CLI rejects such a schema outright (`Duplicate artifact ID`), so a change using it is permanently file-mode — this crate's own parser accepts the duplicate, as `schema-artifacts` requires, so the plugin's "usable" is strictly wider than the CLI's |
 | `openspec list --json` reports a repository root other than the one this plugin resolved | The whole CLI result is discarded, not merged: the CLI resolves its root from the **process** working directory while this plugin resolves from the invocation context's workspace working directory, and the subprocess seam forbids setting `current_dir`, so the two can legitimately disagree |
 | A CLI command exits non-zero | The reason is unavailable to the plugin: the CLI writes its diagnostic to **stdout**, not stderr, and the subprocess seam's `CliError::Failed` carries stderr only — the recorded problem names the command and its exit code, never the CLI's own message |
+| The filesystem watcher will not start (`notify` refuses the watch, or the repository root cannot be watched) | The pane runs unwatched rather than refusing to start: the reason is named as a leading `!`-marked row of the list, above every other problem row, and `r` still forces a full refresh — the one path to a corrected list on a machine where watching does not work |
+| `openspec/` is removed while the watcher runs | The next filesystem read reports an empty change set with no problem of its own — a missing `openspec/` directory means "not an OpenSpec repository", the same as it always has. The watcher's own read failure (the event channel disconnecting) is what the pane actually shows, as the same leading `!`-marked row above, and the loop keeps drawing regardless — a watch failure is never treated as a reason to stop |
+| A CLI cycle fails after the worker already sent its file-sourced result | The pane keeps the numbers the file read produced; the failure is not silently dropped, but nothing overwrites what is already on screen with a blanker state |
+| A touched path is classified to the wrong change, or conservatively to every change | Cosmetic only: a change's **progress** always comes from the same fresh `openspec list --json` call every cycle makes regardless of selection, never from the per-change cache, so a mis-classified path costs at most one cycle of stale **artifact** content — never a stale progress pair — and `r` corrects the rest immediately. This is stated so a later change does not "fix" the cache by making progress come from it, which would reintroduce exactly the staleness this design avoids |
 
 ### No terminal is not a degraded state
 
@@ -565,6 +609,16 @@ is tested against scratch `#!/bin/sh` programs rather than the real `openspec`,
   `openspec/` and the four-step binary probe chain, both tested against a
   purpose-built scratch directory tree under `std::env::temp_dir()`, not a
   faked filesystem layer
+- `watch::classify`, `watch::invalidate`, `watch::Debounce`, and
+  `watch::poll_timeout` — pure functions over values and an **injected**
+  instant, never the real clock; `watch::start` and `RealFsEvents` are the
+  one filesystem edge, tested against a real `ScratchDir` and against a path
+  that does not exist
+- `refresh::start`, `refresh::none`, and the worker body — the crate's one
+  thread, tested through a `#[cfg(test)]` constructor (`worker_for_test`)
+  that hands the test the worker's own result and exit channels directly,
+  with every assertion made **after** a `recv_timeout` returned an item,
+  never after a fixed sleep
 - `ui::layout`, `ui::app`, `ui::list`, `ui::detail`, `ui::markdown`,
   `ui::tasks`, `ui::view`, `ui::driver`, `ui::terminal`, and `ui::mod`'s
   `load` and `read_artifact` functions — the breakpoint and frame split,
@@ -592,7 +646,13 @@ directly rather than left implied by the frame pair alone: the frame itself
 at 60 and 120; the list region's interior at 38 and 58 (`ui::list`); and the
 detail region's interior at 58 and 78 (`ui::markdown`, `ui::tasks`,
 `ui::view`, and `ui::detail`, whose header, tab-bar, and content-line
-grammar is asserted at both widths directly, with no exemption).
+grammar is asserted at both widths directly, with no exemption). No `ui::`
+test starts a thread, opens a filesystem watch, or reads the system clock:
+the live tier's two collaborators (`watch::FsEvents`, `refresh::Refresher`)
+are always replaced by the two synchronous, thread-free doubles in
+`crate::testutil` (`ScriptedFs`, `RecordingRefresher`), except for the one
+acceptance scenario that deliberately opens a real watch and asserts only
+byte-identity, never a timing-sensitive claim.
 
 ### Fixtures
 

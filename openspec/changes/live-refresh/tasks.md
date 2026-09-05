@@ -1801,7 +1801,7 @@ be proven here.
 ## 13. Documentation
 <!-- kind: operational -->
 
-- [ ] 13.1 Rewrite in `SPEC.md`: **Data layer → Refresh** (audience: anyone implementing
+- [x] 13.1 Rewrite in `SPEC.md`: **Data layer → Refresh** (audience: anyone implementing
       against the contract). It is currently three lines and describes none of the mechanism.
       Replace with: the one recursive `notify` watch on `openspec/`; the 150ms debounce as a
       pure state machine taking `now` as a parameter; the classification of a touched path to
@@ -1811,7 +1811,7 @@ be proven here.
       Durable because it is the section a future reader would implement a synchronous refresh
       from.
 
-- [ ] 13.2 Rewrite in `SPEC.md`: **Architecture** (audience: the same) — the paragraph
+- [x] 13.2 Rewrite in `SPEC.md`: **Architecture** (audience: the same) — the paragraph
       enumerating the crate's one-line bindings to the real world currently names three
       (`cli::npm_prefix`, `config::env_lookup`, `ui::read_artifact`). Add the fourth, the
       `Instant::now()` call in `watch::RealFsEvents::drain`, and state why it is one: the
@@ -1820,12 +1820,12 @@ be proven here.
       (filesystem watching, debounce, and per-change invalidation) and `refresh` (the worker
       thread and the `Refresher` seam) — the second of which the map does not have at all.
 
-- [ ] 13.3 Rewrite in `SPEC.md`: **Keys** (audience: the same) — the `r` row currently reads
+- [x] 13.3 Rewrite in `SPEC.md`: **Keys** (audience: the same) — the `r` row currently reads
       "Force refresh" with no filter-mode note, while every other command key's row or the
       paragraph below it says what filtering does to it. State that `r` types itself while
       filtering, like every other printable key.
 
-- [ ] 13.4 Add to `SPEC.md`: **Degraded states**, four rows (audience: the same) — a `notify`
+- [x] 13.4 Add to `SPEC.md`: **Degraded states**, four rows (audience: the same) — a `notify`
       watcher that will not start (the pane runs unwatched, `r` still refreshes, and the
       reason is a `!`-marked row); `openspec/` removed while the pane is open (an empty list
       with the read failure named, the loop still drawing); a CLI cycle that fails after the
@@ -1835,13 +1835,13 @@ be proven here.
       fresh `list --json`, and `r` corrects the rest). The fourth is the row that stops a
       future reader "fixing" the cache by making progress come from it.
 
-- [ ] 13.5 Rewrite in `SPEC.md`: **Stack** (audience: the same) — the sentence naming `notify`
+- [x] 13.5 Rewrite in `SPEC.md`: **Stack** (audience: the same) — the sentence naming `notify`
       already exists, but with no version and no feature. Give it the same treatment
       `pulldown-cmark` has: the version, `default-features = false, features =
       ["macos_fsevent"]`, and a pointer to this change's design.md for the argument, so a
       later change needing a watcher does not re-open it.
 
-- [ ] 13.6 Rewrite in `SPEC.md`: **Testing and quality gates → Unit-tested modules**
+- [x] 13.6 Rewrite in `SPEC.md`: **Testing and quality gates → Unit-tested modules**
       (audience: the same) — the bulleted list names every unit-tested module and stops at
       `ui`. Add two bullets in the list's existing style: `watch::classify`,
       `watch::invalidate`, `watch::Debounce`, and `watch::poll_timeout` — pure functions over
@@ -1853,7 +1853,7 @@ be proven here.
       no `ui::` test starts a thread, opens a watcher, or reads a clock, and that the two
       new doubles in `crate::testutil` are synchronous by construction.
 
-- [ ] 13.7 Rewrite in `AGENTS.md`: **Current repo state**, the **dependency count**, and
+- [x] 13.7 Rewrite in `AGENTS.md`: **Current repo state**, the **dependency count**, and
       **one new Architecture rule** (audience: every future session). (a) The landed-changes
       enumeration currently ends at `tasks-tab`; add `live-refresh`, and add two sentences on
       what the pane now does — the watcher, the worker, and `r`. (b) "five third-party
@@ -1864,7 +1864,7 @@ be proven here.
       `NOBLOCK` and `NOSLEEP` checks. Rewrite all three in place; do not append a second entry
       beside the existing ones.
 
-- [ ] 13.8 CHECK: Deferred to archive time, not doable now —
+- [x] 13.8 CHECK: Deferred to archive time, not doable now —
       `openspec/IMPLEMENTATION-ORDER.md`'s `live-refresh` row and the "Notes on the ordering"
       section must be confirmed to still describe what was built, and corrected if not. In
       particular the roadmap's `degraded-states` row depends on `live-refresh` and its "audit
@@ -1874,7 +1874,7 @@ be proven here.
       (10.4b), `markdown-viewer` (11.8), `detail-view` (13.4), and `tasks-tab` (12.6) did, and
       is discharged by `openspec archive`.
 
-- [ ] 13.9 VERIFY: `BASE=f9b42e8 sh $CHECKS/OPENSPEC-UNTOUCHED.sh` — the doc edits are to
+- [x] 13.9 VERIFY: `BASE=f9b42e8 sh $CHECKS/OPENSPEC-UNTOUCHED.sh` — the doc edits are to
       `SPEC.md` and `AGENTS.md`, both outside `openspec/`, so it still prints OK. Commit.
 
 ---

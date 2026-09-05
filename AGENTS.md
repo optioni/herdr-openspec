@@ -22,9 +22,9 @@ spec is wrong, update the spec as part of that change rather than letting the tw
 `repo-foundation`, `ci-pipeline`, `plugin-config`, `repo-resolution`,
 `schema-model`, `task-parsing`, `changes-from-files`, `subprocess-seam`,
 `changes-from-cli`, `tui-shell`, `list-view`, `markdown-viewer`,
-`detail-view`, and `tasks-tab` have landed: the crate builds with five third-party dependencies (`toml`,
+`detail-view`, `tasks-tab`, and `live-refresh` have landed: the crate builds with six third-party dependencies (`toml`,
 `yaml-rust2`, `serde_json`, `ratatui` — reached through `ratatui::crossterm`'s
-re-export, not a direct dependency — and `pulldown-cmark`), `make check` runs
+re-export, not a direct dependency — `pulldown-cmark`, and `notify`), `make check` runs
 all four quality gates locally and in CI, the
 crate reads `config.toml` and derives and records agent-name mappings under
 `HERDR_PLUGIN_STATE_DIR`, it can locate the OpenSpec repository root and the
@@ -65,6 +65,14 @@ followed by task groups under their headings with a `[x]`/`[ ]` glyph per
 item — read-only, with no key that toggles one. `ui` refuses to start with exit status 3 when stdout is not a terminal, which is
 also what keeps `cargo test` (which spawns this binary) from ever putting a
 real terminal into raw mode.
+
+The pane is no longer file-once: a recursive `notify` watch on `openspec/`
+and a worker thread (both confined to `src/watch.rs` and `src/refresh.rs`,
+neither reached from `src/ui/`) now drive live updates — a touched path is
+debounced and classified to the affected change, the worker answers with the
+fast file-sourced set then the CLI-merged one, and the render loop adopts
+whichever is ready on every frame without ever waiting for either. `r`
+forces the same full refresh the pane issues once at startup.
 
 Important files:
 
@@ -198,6 +206,16 @@ unreachable and the tests become integration tests by accident.
   columns. Every test in `ui::markdown`, `ui::detail`, and `ui::tasks` asserts
   both — all three because every public function there is parameterised by
   width, which is what makes an exemption-free width check possible.
+- **The render path blocks on nothing but the terminal, and reads no clock.**
+  `src/watch.rs` and `src/refresh.rs` — both outside `src/ui/` — hold the
+  filesystem watcher and the worker thread; `run_loop` reaches them only
+  through the non-blocking `FsEvents`/`Refresher` trait objects, never a
+  channel, a lock, or `Instant::now()` directly. Checked two ways: no file
+  under `src/ui/` (tests included) names a blocking-wait or clock API, and,
+  separately, neither seam module's own production code blocks before the
+  point each hands off to its background thread — a check inside the two
+  files themselves, because a sweep scoped to `src/ui/` alone cannot see a
+  `drain` or a `take_result` that blocks in its own module.
 
 Further invariants from `SPEC.md`:
 
