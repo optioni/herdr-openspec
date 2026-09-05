@@ -1,12 +1,13 @@
 # Handoff
 
-**Written:** 2026-09-05 ~02:20 EEST · **Branch:** `main` · **Remote:** `optioni/herdr-openspec`
+**Written:** 2026-09-05 ~07:00 EEST · **Branch:** `main` · **Remote:** `optioni/herdr-openspec`
 
 ## Where things stand
 
-**Phases 1–3 complete; Phase 4 is two changes in.** Eleven changes implemented and
-archived. `main` is green: `make check` exits 0 at **98.26% line coverage over 10,493
-lines**, 532 tests. Pushed through `bf74944`.
+**Phases 1–3 complete; Phase 4 is three of six changes in.** Twelve changes
+implemented and archived. `main` is green: `make check` exits 0 at **98.04% line
+coverage over 12,267 lines**, 565 lib tests / 581 whole-suite. Pushed through
+`4f93fa7`; **16 commits unpushed after it**.
 
 **Read coverage from the line columns, not the region columns.** `cargo llvm-cov`'s
 TOTAL row leads with regions (18,087 here) and reports lines further right (10,493).
@@ -18,7 +19,7 @@ interchangeable and the line figure is the one the 80% floor gates on.
 | 1 — Foundation | `repo-foundation`, `ci-pipeline`, `plugin-config` | **Done** |
 | 2 — Reading from disk | `repo-resolution`, `schema-model`, `task-parsing`, `changes-from-files` | **Done** |
 | 3 — Subprocess seam | `subprocess-seam`, `changes-from-cli` | **Done** |
-| 4 — The dashboard | `tui-shell` ✓, `list-view` ✓, `markdown-viewer`, `detail-view`, `tasks-tab`, `live-refresh` | **In progress** |
+| 4 — The dashboard | `tui-shell` ✓, `list-view` ✓, `markdown-viewer` ✓, `detail-view`, `tasks-tab`, `live-refresh` | **In progress** |
 | 5–6 | — | Untouched |
 
 Nineteen capabilities live under `openspec/specs/`. Modules: `lib.rs`, `main.rs`,
@@ -31,13 +32,23 @@ CLI consumer was added. The `Change` conformance gate survived a second producer
 
 ## Next action
 
-Continue Phase 4 at **`markdown-viewer`**, then `detail-view`, `tasks-tab`,
-`live-refresh` — full ff → apply → archive loop each. `markdown-viewer` and
-`list-view` were siblings; `list-view` went first, so nothing blocks `markdown-viewer`.
+Continue Phase 4 at **`detail-view`**, then `tasks-tab`, `live-refresh` — full
+ff → apply → archive loop each. All three remaining changes are strictly sequential:
+`detail-view` needs `list-view` + `markdown-viewer` (both landed), and `tasks-tab` and
+`live-refresh` each need `detail-view`.
 
-**Paused here only because the 5-hour session window was at 76%**, below the ~50%-
+**Paused here only because the 5-hour session window was at 61%**, below the ~50%-
 remaining floor for starting an ff. Nothing is uncommitted and nothing is half-done —
-both completed changes are archived.
+all three completed changes are archived. Session resets 09:00 EEST.
+
+### `markdown-viewer` moved a keybinding — BREAKING, and it moved a row early
+
+`j` / `k` and the arrows now scroll detail content at `Route::Detail` instead of moving
+the list selection, and `Action::SelectNext` / `SelectPrev` are renamed `Next` / `Prev`.
+`list-view` had deferred this collision to "the first change with a competing claim on
+those keys" and guessed that would be `detail-view`; it was `markdown-viewer`, one row
+earlier. The roadmap now records this, and **`detail-view` does not re-open the
+question**.
 
 ### The weekly budget is no longer the constraint
 
@@ -47,8 +58,10 @@ below — that Phase 4's last one or two changes would slip past the weekly rese
 **stale and should not be planned against**. The binding constraint is now just the
 recurring 5-hour session window.
 
-Measured this phase: `tui-shell` ff 31 session points, `list-view` ff ~23, each apply
-~16–19, archive ~2–3. Weekly cost is running ~3 points per change.
+Measured this phase: ff 23–35 session points, apply 16–20, archive 2–3 — so roughly
+45–55 per change, i.e. **two changes per 5-hour window**. Weekly cost is running ~3
+points per change, so the three remaining changes need ~9 weekly points against 86
+remaining. Weekly cannot end this phase; only the session window interrupts it.
 
 Phase 4 introduces the render seam. Views must be **pure functions from state to a
 ratatui frame with no I/O**, tested by rendering into a `TestBackend` buffer at **both
