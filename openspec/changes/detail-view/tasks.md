@@ -959,7 +959,7 @@ files in `$CHECKS`.
 ## 5. `ui::detail::tab_bar`
 <!-- kind: behavioural -->
 
-- [ ] 5.1 RED: Add scenarios 17–25 to `src/ui/detail.rs`'s `mod tests`, every test naming
+- [x] 5.1 RED: Add scenarios 17–25 to `src/ui/detail.rs`'s `mod tests`, every test naming
       both **78** and **58**, every fixture built through `changes::fixture::with_artifacts`:
       the five tdd artifacts with their exact `x` offsets 0, 12, 21, 31, 40; duplicate ids
       staying two addressable tabs; a tenth artifact labelled without a digit; the empty list
@@ -973,23 +973,23 @@ files in `$CHECKS`.
       always-selected-visible property, and the strictly-more-cells-at-78 comparison are what
       make it a test rather than a smoke check.
 
-- [ ] 5.2 GREEN: Implement `tab_bar` and the `Tab` type per `design.md` → Contracts: labels,
+- [x] 5.2 GREEN: Implement `tab_bar` and the `Tab` type per `design.md` → Contracts: labels,
       two-space separation, the `start`/`end` window, the single-oversized-cell exception,
       and the zero-artifact placeholder.
 
-- [ ] 5.3 REFACTOR: If `header_row` and `tab_bar` grew a shared width-arithmetic helper,
+- [x] 5.3 REFACTOR: If `header_row` and `tab_bar` grew a shared width-arithmetic helper,
       name it and keep it private. Do **not** move either public function's width parameter
       away; `DETAILWIDTHS` has no exemption list and depends on every public function taking
       one.
 
-- [ ] 5.4 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'ui::detail::tests::' 14`;
+- [x] 5.4 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'ui::detail::tests::' 14`;
       `DETAIL_MIN=14 sh $CHECKS/DETAILWIDTHS.sh`; `MIN=18 sh $CHECKS/NOLIT-CHANGE.sh` — the first run at the
       new floor, proving the fixtures went through `changes::fixture` rather than through a
       literal.
       **Red when:** `NOLIT-CHANGE` reports a `Change {` or `ChangeSet {` in
       `src/ui/detail.rs`.
 
-- [ ] 5.5 Commit: `feat(detail-view): the artifact tab bar and its window`.
+- [x] 5.5 Commit: `feat(detail-view): the artifact tab bar and its window`.
 
 ## 6. `ui::detail::content_lines`
 <!-- kind: behavioural -->

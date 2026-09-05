@@ -46,10 +46,133 @@ pub fn header_row(
     crate::ui::list::pad_or_truncate_right(name, w as usize)
 }
 
+/// One drawn tab cell: its label, its column offset from the interior's
+/// first column, its position in the artifact list (`None` for the
+/// zero-artifact placeholder), and whether it is the selected tab. Carries
+/// no styling: `ui::view` maps `selected` to `Modifier::BOLD`, exactly as
+/// it does for `ui::list::Row`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tab {
+    pub text: String,
+    pub x: u16,
+    pub index: Option<usize>,
+    pub selected: bool,
+}
+
+/// `text`, unpadded, when it already fits in `width`; truncated to `width`
+/// characters with a trailing `…` — by the same `ui::list::pad_or_truncate_right`
+/// the header and the row grammar use — when it does not. Unlike
+/// `pad_or_truncate_right` itself, this never pads: a tab cell's width is
+/// its own label's length, not the whole interior's.
+fn cell_text(text: &str, width: usize) -> String {
+    if text.chars().count() <= width {
+        text.to_string()
+    } else {
+        crate::ui::list::pad_or_truncate_right(text, width)
+    }
+}
+
+/// The joined width of cells `start..=end`: their own widths plus two
+/// separating columns between every pair.
+fn joined_width(cell_lens: &[usize], start: usize, end: usize) -> usize {
+    let cells_width: usize = cell_lens[start..=end].iter().sum();
+    let seps = (end - start) * 2;
+    cells_width + seps
+}
+
+/// The tab bar: `Change::artifacts` in the schema's declared order,
+/// addressed by **position**, windowed to a contiguous run of whole cells
+/// that always contains the selected tab. `width == 0` returns an empty
+/// vector before every other branch; an empty `artifacts` returns a single
+/// `no artifacts` placeholder cell; a `selected` past the end of the list
+/// is treated as `0` for windowing purposes and marks no cell selected. See
+/// `openspec/changes/detail-view/design.md` -> Contracts and
+/// `specs/artifact-tabs/spec.md`.
+pub fn tab_bar(artifacts: &[crate::changes::ArtifactRef], selected: usize, width: u16) -> Vec<Tab> {
+    if width == 0 {
+        return Vec::new();
+    }
+    let w = width as usize;
+
+    if artifacts.is_empty() {
+        return vec![Tab {
+            text: cell_text("no artifacts", w),
+            x: 0,
+            index: None,
+            selected: false,
+        }];
+    }
+
+    let n = artifacts.len();
+    let cells: Vec<String> = artifacts
+        .iter()
+        .enumerate()
+        .map(|(i, a)| {
+            if i < 9 {
+                format!("{} {}", i + 1, a.id)
+            } else {
+                a.id.clone()
+            }
+        })
+        .collect();
+    let cell_lens: Vec<usize> = cells.iter().map(|c| c.chars().count()).collect();
+
+    let selected_valid = selected < n;
+    let anchor = if selected_valid { selected } else { 0 };
+
+    // The one exception: the anchor cell alone is wider than the bar, so no
+    // whole-cell window exists at all.
+    if cell_lens[anchor] > w {
+        return vec![Tab {
+            text: cell_text(&cells[anchor], w),
+            x: 0,
+            index: Some(anchor),
+            selected: selected_valid,
+        }];
+    }
+
+    // `start`: the smallest index not greater than `anchor` for which
+    // `start..=anchor` fits. `end`: the largest index not less than
+    // `anchor` for which `start..=end` fits, given that fixed `start`. When
+    // every cell fits, this naturally degenerates to `start == 0` and
+    // `end == n - 1` — no separate "everything fits" branch is needed.
+    let mut start = anchor;
+    while start > 0 && joined_width(&cell_lens, start - 1, anchor) <= w {
+        start -= 1;
+    }
+    let mut end = anchor;
+    while end + 1 < n && joined_width(&cell_lens, start, end + 1) <= w {
+        end += 1;
+    }
+
+    let mut out = Vec::new();
+    let mut x: u16 = 0;
+    for i in start..=end {
+        out.push(Tab {
+            text: cells[i].clone(),
+            x,
+            index: Some(i),
+            selected: selected_valid && i == selected,
+        });
+        x += cell_lens[i] as u16 + 2;
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
-    use super::header_row;
+    use super::{Tab, header_row, tab_bar};
+    use crate::changes::fixture;
     use crate::tasks::Progress;
+
+    /// Artifacts through `changes::fixture::with_artifacts`, never an
+    /// `ArtifactRef {}` literal of this module's own — `changes::fixture`
+    /// stays the one place a `Change`'s (and its artifacts') shape is
+    /// spelled out.
+    fn artifacts(ids: &[&str]) -> Vec<crate::changes::ArtifactRef> {
+        let pairs: Vec<(&str, &[&str])> = ids.iter().map(|id| (*id, &[][..])).collect();
+        fixture::with_artifacts(fixture::active("x", 0, 0), &pairs).artifacts
+    }
 
     #[test]
     fn the_full_header_grammar_at_both_mandated_interior_widths() {
@@ -143,6 +266,210 @@ mod tests {
             let got = header_row("alpha", "", &progress, width);
             assert_eq!(got.chars().count(), width as usize, "width {width}");
             assert!(got.contains("() [1/2]"), "width {width}: {got:?}");
+        }
+    }
+
+    #[test]
+    fn the_five_tdd_artifacts_become_five_numbered_tabs_at_both_mandated_widths() {
+        let a = artifacts(&["proposal", "specs", "design", "tasks", "planning-review"]);
+        for width in [78, 58] {
+            let tabs = tab_bar(&a, 0, width);
+            assert_eq!(tabs.len(), 5, "width {width}");
+            let texts: Vec<&str> = tabs.iter().map(|t| t.text.as_str()).collect();
+            assert_eq!(
+                texts,
+                vec![
+                    "1 proposal",
+                    "2 specs",
+                    "3 design",
+                    "4 tasks",
+                    "5 planning-review"
+                ],
+                "width {width}"
+            );
+            let xs: Vec<u16> = tabs.iter().map(|t| t.x).collect();
+            assert_eq!(xs, vec![0, 12, 21, 31, 40], "width {width}");
+            let last = tabs.last().unwrap();
+            let last_end = last.x as usize + last.text.chars().count() - 1;
+            assert_eq!(last_end, 56, "width {width}");
+            let indices: Vec<Option<usize>> = tabs.iter().map(|t| t.index).collect();
+            assert_eq!(
+                indices,
+                vec![Some(0), Some(1), Some(2), Some(3), Some(4)],
+                "width {width}"
+            );
+            assert!(tabs[0].selected, "width {width}");
+            assert!(tabs[1..].iter().all(|t| !t.selected), "width {width}");
+        }
+    }
+
+    #[test]
+    fn duplicate_artifact_ids_remain_two_separately_addressable_tabs() {
+        let a = artifacts(&["spec", "spec", "notes"]);
+        for width in [78, 58] {
+            let tabs = tab_bar(&a, 1, width);
+            let texts: Vec<&str> = tabs.iter().map(|t| t.text.as_str()).collect();
+            assert_eq!(texts, vec!["1 spec", "2 spec", "3 notes"], "width {width}");
+            assert_eq!(tabs[1].index, Some(1), "width {width}");
+            assert!(tabs[1].selected, "width {width}");
+            assert_eq!(tabs[0].index, Some(0), "width {width}");
+            assert!(!tabs[0].selected, "width {width}");
+        }
+    }
+
+    #[test]
+    fn a_tenth_artifact_is_labelled_without_a_digit() {
+        let ids: Vec<String> = (1..=12).map(|i| format!("a{i:02}")).collect();
+        let ids_ref: Vec<&str> = ids.iter().map(String::as_str).collect();
+        let a = artifacts(&ids_ref);
+        for width in [78, 58] {
+            let tabs = tab_bar(&a, 0, width);
+            for (i, tab) in tabs.iter().enumerate() {
+                if i < 9 {
+                    assert_eq!(
+                        tab.text,
+                        format!("{} a{:02}", i + 1, i + 1),
+                        "width {width}"
+                    );
+                } else {
+                    assert_eq!(tab.text, format!("a{:02}", i + 1), "width {width}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn no_artifacts_is_a_single_placeholder_cell_not_an_empty_bar() {
+        let a = artifacts(&[]);
+        for width in [78, 58] {
+            let tabs = tab_bar(&a, 0, width);
+            assert_eq!(tabs.len(), 1, "width {width}");
+            assert_eq!(tabs[0].text, "no artifacts", "width {width}");
+            assert_eq!(tabs[0].x, 0, "width {width}");
+            assert_eq!(tabs[0].index, None, "width {width}");
+            assert!(!tabs[0].selected, "width {width}");
+        }
+        let narrow = tab_bar(&artifacts(&[]), 0, 8);
+        assert_eq!(narrow.len(), 1);
+        assert_eq!(narrow[0].text.chars().count(), 8);
+        assert!(narrow[0].text.ends_with('…'));
+    }
+
+    #[test]
+    fn a_zero_width_bar_is_empty_and_does_not_panic() {
+        let with_five = artifacts(&["a", "b", "c", "d", "e"]);
+        assert_eq!(tab_bar(&with_five, 0, 0), Vec::new());
+        assert_eq!(tab_bar(&artifacts(&[]), 0, 0), Vec::new());
+        // Discriminating companion, naming both mandated widths: the same
+        // five-artifact list is *not* empty at either real width, so the
+        // width-0 case above is a property of the width, not a constant.
+        for width in [78, 58] {
+            assert!(!tab_bar(&with_five, 0, width).is_empty(), "width {width}");
+        }
+    }
+
+    #[test]
+    fn a_twelve_artifact_bar_windows_to_keep_the_selected_tab_visible() {
+        let ids: Vec<String> = (1..=12).map(|i| format!("artifact-{i:02}")).collect();
+        let ids_ref: Vec<&str> = ids.iter().map(String::as_str).collect();
+        let a = artifacts(&ids_ref);
+        let mut window_sizes_by_width: Vec<(u16, Vec<usize>)> = Vec::new();
+        for width in [78, 58] {
+            let mut window_sizes = Vec::new();
+            for selected in [0usize, 3, 11] {
+                let tabs = tab_bar(&a, selected, width);
+                assert!(!tabs.is_empty(), "width {width} selected {selected}");
+                let indices: Vec<usize> = tabs.iter().map(|t| t.index.unwrap()).collect();
+                for w in indices.windows(2) {
+                    assert_eq!(
+                        w[1],
+                        w[0] + 1,
+                        "width {width} selected {selected}: not contiguous"
+                    );
+                }
+                assert_eq!(tabs[0].x, 0, "width {width} selected {selected}");
+                let last = tabs.last().unwrap();
+                let last_end = last.x as usize + last.text.chars().count();
+                assert!(
+                    last_end <= width as usize,
+                    "width {width} selected {selected}: last cell's final column {last_end} \
+                     runs past width"
+                );
+                let selected_tabs: Vec<&Tab> = tabs.iter().filter(|t| t.selected).collect();
+                assert_eq!(selected_tabs.len(), 1, "width {width} selected {selected}");
+                assert_eq!(
+                    selected_tabs[0].index,
+                    Some(selected),
+                    "width {width} selected {selected}"
+                );
+                assert!(
+                    tabs.iter().all(|t| !t.text.ends_with('…')),
+                    "width {width} selected {selected}: a shown cell was truncated"
+                );
+                if selected == 0 {
+                    assert_eq!(indices[0], 0, "width {width}");
+                }
+                if selected == 11 {
+                    assert_eq!(*indices.last().unwrap(), 11, "width {width}");
+                }
+                window_sizes.push(tabs.len());
+            }
+            window_sizes_by_width.push((width, window_sizes));
+        }
+        // The 78-column window holds strictly more cells than the
+        // 58-column one, for the same selection — the width is genuinely
+        // load-bearing.
+        let wide = &window_sizes_by_width[0].1;
+        let narrow = &window_sizes_by_width[1].1;
+        for (wide_n, narrow_n) in wide.iter().zip(narrow.iter()) {
+            assert!(
+                wide_n > narrow_n,
+                "78-column window ({wide_n}) must hold strictly more cells than \
+                 58-column ({narrow_n})"
+            );
+        }
+    }
+
+    #[test]
+    fn the_window_slides_back_when_the_selection_moves_left_again() {
+        let ids: Vec<String> = (1..=12).map(|i| format!("artifact-{i:02}")).collect();
+        let ids_ref: Vec<&str> = ids.iter().map(String::as_str).collect();
+        let a = artifacts(&ids_ref);
+        for width in [78, 58] {
+            let _ = tab_bar(&a, 11, width);
+            let tabs = tab_bar(&a, 0, width);
+            assert_eq!(tabs[0].index, Some(0), "width {width}");
+        }
+    }
+
+    #[test]
+    fn a_selected_cell_wider_than_the_whole_bar_is_truncated_rather_than_dropped() {
+        let id = "x".repeat(200);
+        let a = artifacts(&[&id]);
+        for width in [78, 58] {
+            let tabs = tab_bar(&a, 0, width);
+            assert_eq!(tabs.len(), 1, "width {width}");
+            assert_eq!(tabs[0].x, 0, "width {width}");
+            assert!(tabs[0].selected, "width {width}");
+            assert_eq!(tabs[0].index, Some(0), "width {width}");
+            assert_eq!(
+                tabs[0].text.chars().count(),
+                width as usize,
+                "width {width}"
+            );
+            assert!(tabs[0].text.ends_with('…'), "width {width}");
+        }
+    }
+
+    #[test]
+    fn a_selected_index_past_the_end_of_the_list_does_not_panic() {
+        let a = artifacts(&["a", "b", "c"]);
+        for width in [78, 58] {
+            let tabs = tab_bar(&a, 7, width);
+            assert!(tabs.iter().all(|t| t.index.unwrap() < 3), "width {width}");
+            assert!(!tabs.iter().any(|t| t.selected), "width {width}");
+            assert_eq!(tabs.len(), 3, "width {width}");
+            assert_eq!(tabs[0].index, Some(0), "width {width}");
         }
     }
 }
