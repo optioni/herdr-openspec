@@ -1358,16 +1358,16 @@ files in `$CHECKS`.
 ## 15. Final validation
 <!-- kind: operational -->
 
-- [ ] 15.1 VERIFY: `make check` — the single gate. If it fails, name the failing
+- [x] 15.1 VERIFY: `make check` — the single gate. If it fails, name the failing
       sub-command (`fmt-check`, `lint`, `test`, or `coverage`) rather than reporting a
       summary.
 
-- [ ] 15.2 VERIFY: `cargo llvm-cov --summary-only` and record the TOTAL **line** figure —
+- [x] 15.2 VERIFY: `cargo llvm-cov --summary-only` and record the TOTAL **line** figure —
       the column further right, not the leading region count. It must be at or above 80%,
       and a drop of more than two points from the measured 98.04% baseline is investigated
       before this change is called done.
 
-- [ ] 15.3 VERIFY: `. $CHECKS/TESTCOUNT.sh`; then, with the argument order the helper
+- [x] 15.3 VERIFY: `. $CHECKS/TESTCOUNT.sh`; then, with the argument order the helper
       actually takes — `testcount <scope> <filter> <minimum>` —
       `testcount --lib 'ui::' 225`, `testcount --lib '' 618`, and
       `testcount --test-cli '' 5`. The empty filter is **load-bearing**: `testcount
@@ -1377,7 +1377,7 @@ files in `$CHECKS`.
       this change's 53 new library tests and no new integration test.
       **Red when:** any count falls short. A filter that matches nothing exits 0.
 
-- [ ] 15.4 VERIFY: `export PATH="$HOME/.nvm/versions/node/v24.20.0/bin:$PATH"` then
+- [x] 15.4 VERIFY: `export PATH="$HOME/.nvm/versions/node/v24.20.0/bin:$PATH"` then
       `openspec validate detail-view --strict`.
 
-- [ ] 15.5 Commit: `docs(detail-view): record group 15 lint and verify evidence — apply complete`.
+- [x] 15.5 Commit: `docs(detail-view): record group 15 lint and verify evidence — apply complete`.
