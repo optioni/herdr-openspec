@@ -13,7 +13,7 @@ use std::io::IsTerminal;
 use std::path::Path;
 
 use crate::config::Config;
-use crate::ui::app::{Dashboard, Route};
+use crate::ui::app::{Dashboard, Detail, Route};
 use crate::ui::driver::{LoopError, TICK};
 use crate::ui::event::CrosstermEvents;
 use crate::ui::terminal::{CrosstermOps, TerminalError, TerminalGuard, TerminalOps};
@@ -106,6 +106,10 @@ pub fn load(start: &Path, config: &Config) -> Dashboard {
                     query: String::new(),
                     active: false,
                 },
+                detail: Detail {
+                    source: String::new(),
+                    scroll: 0,
+                },
             }
         }
         crate::resolve::RepoSearch::NotFound { searched_from } => Dashboard {
@@ -118,6 +122,10 @@ pub fn load(start: &Path, config: &Config) -> Dashboard {
             filter: crate::ui::app::Filter {
                 query: String::new(),
                 active: false,
+            },
+            detail: Detail {
+                source: String::new(),
+                scroll: 0,
             },
         },
     }

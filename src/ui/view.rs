@@ -200,12 +200,19 @@ mod tests {
 
     use crate::changes::{Change, empty_set, fixture};
     use crate::testutil::{cell, render_at, row_text};
-    use crate::ui::app::{Action, Dashboard, Filter, Route};
+    use crate::ui::app::{Action, Dashboard, Detail, Filter, Route};
 
     fn empty_filter() -> Filter {
         Filter {
             query: String::new(),
             active: false,
+        }
+    }
+
+    fn empty_detail() -> Detail {
+        Detail {
+            source: String::new(),
+            scroll: 0,
         }
     }
 
@@ -228,6 +235,7 @@ mod tests {
             quit: false,
             selected,
             filter: empty_filter(),
+            detail: empty_detail(),
         }
     }
 
@@ -254,6 +262,7 @@ mod tests {
                 query: String::new(),
                 active: false,
             },
+            detail: empty_detail(),
         }
     }
 
@@ -737,6 +746,7 @@ mod tests {
             quit: false,
             selected: 0,
             filter: empty_filter(),
+            detail: empty_detail(),
         };
         let buf120 = render_at(120, 20, &d);
         assert!(interior_cols(&buf120, 2).starts_with("No OpenSpec repository found"));

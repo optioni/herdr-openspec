@@ -942,7 +942,7 @@ type or a test double would be the schema's own "tests demanded for plumbing" an
 Its evidence is the compiler and the construction-site sweep. Every behaviour the new field
 carries is group 6's.
 
-- [ ] 1.1 CHECK: Complete the `Dashboard` construction-site sweep **before editing anything**.
+- [x] 1.1 CHECK: Complete the `Dashboard` construction-site sweep **before editing anything**.
       Run `grep -rn 'Dashboard[[:space:]]*{' src/` and classify every hit as a literal, a
       destructuring pattern, or a signature/declaration. Record the list. The planning-time
       measurement is **28 hits, 14 of them real sites**, across six files:
@@ -965,7 +965,7 @@ carries is group 6's.
       figures above — stop and record it rather than editing blind, since `..` is forbidden
       and a missed site is a compile error at best and a silent default at worst.
 
-- [ ] 1.2 CHANGE: Add `pub struct Detail { pub source: String, pub scroll: usize }` to
+- [x] 1.2 CHANGE: Add `pub struct Detail { pub source: String, pub scroll: usize }` to
       `src/ui/app.rs`, deriving `Debug, Clone, PartialEq, Eq` and **not** `Default`, and add
       `detail: Detail` as `Dashboard`'s eighth field. **Nothing reads the field**: no render,
       no action, no clamp. Update all fourteen sites from 1.1 in this same commit, each taking
@@ -974,7 +974,7 @@ carries is group 6's.
       `dashboard_destructures_into_exactly_seven_fields` to `…_eight_fields` and add the
       eighth field to its pattern.
 
-- [ ] 1.3 CHANGE: Lift the scripted `EventSource` double from `src/ui/driver.rs`'s test module
+- [x] 1.3 CHANGE: Lift the scripted `EventSource` double from `src/ui/driver.rs`'s test module
       to `crate::testutil` — the `Script` struct with its `new`, `calls`, and `timeouts`
       methods, its `EventSource` impl, and the `press(code, modifiers)` helper — and have
       `src/ui/driver.rs`'s tests import them from there. `testutil` is already
@@ -986,7 +986,7 @@ carries is group 6's.
       module and only its items marked `pub(crate)` — that does not compile from a sibling
       module, and 1.1 recorded why.
 
-- [ ] 1.4 VERIFY: `cargo fmt --all -- --check`, `cargo clippy --all-targets --all-features --
+- [x] 1.4 VERIFY: `cargo fmt --all -- --check`, `cargo clippy --all-targets --all-features --
       -D warnings` (0 warnings — the proof that the fourteen-site sweep found every site),
       `cargo test --all-features` (**green**: this group adds no test and breaks none), and
       `cargo llvm-cov --fail-under-lines 80`. Then `sh $CHECKS/NODEFAULT-UI.sh` with **no

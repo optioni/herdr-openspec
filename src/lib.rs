@@ -206,6 +206,67 @@ pub(crate) mod testutil {
         &buffer[(x, y)]
     }
 
+    /// A scripted `EventSource`: returns each queued result in order,
+    /// recording every call's `timeout`, and errors with a named message
+    /// once the script is exhausted — never `Ok(None)` forever, which would
+    /// turn a loop bug into a hung test. Lifted from `src/ui/driver.rs`'s
+    /// private test module, which `crate::ui::tests::detail` — a sibling
+    /// module, not a descendant — cannot reach: `mod tests` there carries no
+    /// visibility modifier, so path privacy makes even a `pub(crate)` item
+    /// inside it unreachable from outside `ui::driver`. This is the one
+    /// shape that compiles from every test module that needs it.
+    pub(crate) struct Script {
+        queue: std::cell::RefCell<
+            Vec<Result<Option<ratatui::crossterm::event::Event>, crate::ui::event::EventError>>,
+        >,
+        timeouts: std::cell::RefCell<Vec<std::time::Duration>>,
+    }
+
+    impl Script {
+        pub(crate) fn new(
+            queue: Vec<
+                Result<Option<ratatui::crossterm::event::Event>, crate::ui::event::EventError>,
+            >,
+        ) -> Self {
+            Self {
+                queue: std::cell::RefCell::new(queue),
+                timeouts: std::cell::RefCell::new(Vec::new()),
+            }
+        }
+
+        pub(crate) fn calls(&self) -> usize {
+            self.timeouts.borrow().len()
+        }
+
+        pub(crate) fn timeouts(&self) -> Vec<std::time::Duration> {
+            self.timeouts.borrow().clone()
+        }
+    }
+
+    impl crate::ui::event::EventSource for Script {
+        fn next_event(
+            &mut self,
+            timeout: std::time::Duration,
+        ) -> Result<Option<ratatui::crossterm::event::Event>, crate::ui::event::EventError>
+        {
+            self.timeouts.borrow_mut().push(timeout);
+            if self.queue.borrow().is_empty() {
+                return Err(crate::ui::event::EventError("script exhausted".to_string()));
+            }
+            self.queue.borrow_mut().remove(0)
+        }
+    }
+
+    /// A key-press `Event`, for building a `Script`'s queue.
+    pub(crate) fn press(
+        code: ratatui::crossterm::event::KeyCode,
+        modifiers: ratatui::crossterm::event::KeyModifiers,
+    ) -> ratatui::crossterm::event::Event {
+        ratatui::crossterm::event::Event::Key(ratatui::crossterm::event::KeyEvent::new(
+            code, modifiers,
+        ))
+    }
+
     #[cfg(test)]
     mod tests {
         use super::{ScratchDir, cell, render_at, row_text, snapshot};
@@ -223,6 +284,10 @@ pub(crate) mod testutil {
                 filter: crate::ui::app::Filter {
                     query: String::new(),
                     active: false,
+                },
+                detail: crate::ui::app::Detail {
+                    source: String::new(),
+                    scroll: 0,
                 },
             }
         }

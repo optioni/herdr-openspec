@@ -68,19 +68,17 @@ pub fn run_loop<B: Backend, E: EventSource>(
 
 #[cfg(test)]
 mod tests {
-    use std::cell::RefCell;
     use std::time::Duration;
 
     use ratatui::backend::{Backend, ClearType, TestBackend};
     use ratatui::buffer::Cell;
-    use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+    use ratatui::crossterm::event::{Event, KeyCode, KeyModifiers};
     use ratatui::layout::{Position, Size};
 
     use crate::changes::empty_set;
-    use crate::testutil::{cell, row_text};
+    use crate::testutil::{Script, cell, press, row_text};
     use crate::ui::app::{Dashboard, Route};
     use crate::ui::driver::{LoopError, LoopSummary, TICK, run_loop};
-    use crate::ui::event::{EventError, EventSource};
 
     fn dashboard() -> Dashboard {
         Dashboard {
@@ -94,46 +92,10 @@ mod tests {
                 query: String::new(),
                 active: false,
             },
-        }
-    }
-
-    fn press(code: KeyCode, modifiers: KeyModifiers) -> Event {
-        Event::Key(KeyEvent::new(code, modifiers))
-    }
-
-    /// A scripted `EventSource`: returns each queued result in order,
-    /// recording every call's `timeout`, and errors with a named message
-    /// once the script is exhausted — never `Ok(None)` forever, which would
-    /// turn a loop bug into a hung test.
-    struct Script {
-        queue: RefCell<Vec<Result<Option<Event>, EventError>>>,
-        timeouts: RefCell<Vec<Duration>>,
-    }
-
-    impl Script {
-        fn new(queue: Vec<Result<Option<Event>, EventError>>) -> Self {
-            Self {
-                queue: RefCell::new(queue),
-                timeouts: RefCell::new(Vec::new()),
-            }
-        }
-
-        fn calls(&self) -> usize {
-            self.timeouts.borrow().len()
-        }
-
-        fn timeouts(&self) -> Vec<Duration> {
-            self.timeouts.borrow().clone()
-        }
-    }
-
-    impl EventSource for Script {
-        fn next_event(&mut self, timeout: Duration) -> Result<Option<Event>, EventError> {
-            self.timeouts.borrow_mut().push(timeout);
-            if self.queue.borrow().is_empty() {
-                return Err(EventError("script exhausted".to_string()));
-            }
-            self.queue.borrow_mut().remove(0)
+            detail: crate::ui::app::Detail {
+                source: String::new(),
+                scroll: 0,
+            },
         }
     }
 

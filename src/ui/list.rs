@@ -316,13 +316,20 @@ pub fn rows(dashboard: &Dashboard, width: u16) -> Vec<Row> {
 #[cfg(test)]
 mod tests {
     use crate::changes::fixture;
-    use crate::ui::app::{Dashboard, Filter, Route};
+    use crate::ui::app::{Dashboard, Detail, Filter, Route};
     use crate::ui::list::{Row, RowKind, rows};
 
     fn empty_filter() -> Filter {
         Filter {
             query: String::new(),
             active: false,
+        }
+    }
+
+    fn empty_detail() -> Detail {
+        Detail {
+            source: String::new(),
+            scroll: 0,
         }
     }
 
@@ -340,6 +347,7 @@ mod tests {
             quit: false,
             selected,
             filter: empty_filter(),
+            detail: empty_detail(),
         }
     }
 
@@ -410,6 +418,7 @@ mod tests {
                 quit: false,
                 selected: 0,
                 filter: empty_filter(),
+                detail: empty_detail(),
             },
         ]
     }
@@ -739,6 +748,7 @@ mod tests {
             quit: false,
             selected: 0,
             filter: empty_filter(),
+            detail: empty_detail(),
         };
         let rows38 = rows(&d, 38);
         assert_eq!(rows38.len(), 3);
@@ -783,6 +793,7 @@ mod tests {
             quit: false,
             selected: 0,
             filter: empty_filter(),
+            detail: empty_detail(),
         };
         let rows_with_problems = rows(&with_problems, 38);
         assert_eq!(rows_with_problems.len(), 3);

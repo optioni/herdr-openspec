@@ -49,6 +49,22 @@ pub struct Filter {
     pub active: bool,
 }
 
+/// The detail region's markdown source and scroll offset. Nothing in this
+/// change sets `source`: `ui::load` starts it empty, and `detail-view` — a
+/// later change — supplies it. `scroll` is a user-controlled position, the
+/// detail region's counterpart to `Dashboard::selected`, not derived
+/// geometry: the offset actually drawn is still recomputed on every draw by
+/// `layout::scroll_offset` against the current interior height. Deliberately
+/// implements no `Default`, anywhere in the crate, on the same terms as
+/// `Dashboard` and `Filter`: every construction and destructuring names both
+/// fields, with no `..` rest. See `specs/detail-scroll/spec.md` and the
+/// `NODEFAULT-UI` check, whose type list now covers this type too.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Detail {
+    pub source: String,
+    pub scroll: usize,
+}
+
 /// The dashboard's whole state. Carries no width, no layout mode, no column
 /// count, no terminal handle, and no frame — those are derived from the
 /// frame area on every draw, never stored here. Deliberately implements no
@@ -71,6 +87,10 @@ pub struct Dashboard {
     pub selected: usize,
     /// The `/` filter's mode and query. See `specs/list-filtering/spec.md`.
     pub filter: Filter,
+    /// The detail region's markdown source and scroll offset. Nothing reads
+    /// or writes it in this change beyond startup, which leaves it empty and
+    /// unscrolled. See `specs/detail-scroll/spec.md`.
+    pub detail: Detail,
 }
 
 impl Dashboard {
@@ -221,12 +241,19 @@ mod tests {
 
         use crate::changes::empty_set;
         use crate::changes::fixture;
-        use crate::ui::app::{Action, Dashboard, Filter, Route, action_for};
+        use crate::ui::app::{Action, Dashboard, Detail, Filter, Route, action_for};
 
         fn empty_filter() -> Filter {
             Filter {
                 query: String::new(),
                 active: false,
+            }
+        }
+
+        fn empty_detail() -> Detail {
+            Detail {
+                source: String::new(),
+                scroll: 0,
             }
         }
 
@@ -239,6 +266,7 @@ mod tests {
                 quit: false,
                 selected: 0,
                 filter: empty_filter(),
+                detail: empty_detail(),
             }
         }
 
@@ -264,6 +292,7 @@ mod tests {
                 quit: false,
                 selected: 0,
                 filter: empty_filter(),
+                detail: empty_detail(),
             }
         }
 
@@ -712,7 +741,7 @@ mod tests {
         }
 
         #[test]
-        fn dashboard_destructures_into_exactly_seven_fields() {
+        fn dashboard_destructures_into_exactly_eight_fields() {
             let d = dashboard_at(Route::List);
             let Dashboard {
                 repo,
@@ -722,6 +751,7 @@ mod tests {
                 quit,
                 selected,
                 filter,
+                detail,
             } = &d;
             assert_eq!(*repo, None);
             assert_eq!(
@@ -733,6 +763,7 @@ mod tests {
             assert!(!*quit);
             assert_eq!(*selected, 0);
             assert_eq!(filter, &empty_filter());
+            assert_eq!(detail, &empty_detail());
         }
 
         #[test]
