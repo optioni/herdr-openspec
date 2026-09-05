@@ -4,6 +4,13 @@
      lockfiles, CI and build config, formatter settings). Do NOT write a test that
      asserts a config key; the command that consumes the config is the check. -->
 
+<!-- Write every check out in full, RUN it at planning time against current HEAD, and
+     record its exit status beside it. A check for behavior this change adds must be RED
+     at HEAD. A check pinning an invariant that already holds is green at HEAD and proves
+     nothing without a negative control — plant the violation, show it fires, remove it,
+     show it goes quiet. Every number below (line counts, call sites, totals, coverage)
+     names the command that produced it. -->
+
 ## 0. Acceptance Test — Outer Loop RED
 <!-- kind: behavior -->
 <!-- OPT-IN. Keep this group only when the change alters a client-visible interface whose

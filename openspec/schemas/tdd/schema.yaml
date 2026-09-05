@@ -230,6 +230,25 @@ artifacts:
       setting that corrupts data without erroring. "Loudly" is the common case: if a bad
       value crashes at boot or fails the build, the boot and the build are the test.
 
+      **Every check you write must be run before the plan ships, and must be able to fail.**
+      Write the check out in full in the task, run it at planning time against current HEAD,
+      and record its exit status and the relevant line of its output next to it. Which result
+      you need depends on what the check is for:
+
+      - A check standing in for a **behavior this change adds** must be RED at HEAD. It cannot
+        be otherwise — the behavior does not exist yet. A green one is testing something else.
+      - A check **pinning an invariant that already holds** — a grep that must find nothing, a
+        boundary that must not move — is green at HEAD, which proves nothing on its own. It
+        needs a negative control: plant the violation, show the check fires, remove the plant,
+        show it goes quiet again. Record both halves. An unfalsifiable guard is worse than no
+        guard, because it is believed.
+
+      **Every number in the plan comes from a command.** Line counts, call-site counts,
+      scenario totals, coverage percentages, "the only three places that do X" — write the
+      command that produced the number beside the number. Counts arrived at by reading are
+      wrong often enough that a reviewer who recounts them will keep finding defects, and a
+      task built on a wrong count sends the implementer to the wrong places.
+
       **TDD structure — every behavior-changing implementation group MUST follow this
       pattern:**
       1. RED: write the smallest failing tests that express the group's behavior. Derive
@@ -466,6 +485,17 @@ artifacts:
       the assumptions under audit and will confirm them. This session merges the findings,
       repairs the owning artifact, and writes planning-review.md; the reviewers edit nothing.
 
+      If this repository defines a planning reviewer subagent type, dispatch one per slice,
+      simultaneously. Slice the review list four ways, which keeps each reviewer's scope
+      small enough to be thorough and stops the same gap arriving four times: (A) capability
+      coverage, scenario quality, and cross-artifact contradictions; (B) design completeness,
+      test boundaries, and the audit of whether each proposed check could fail at all;
+      (C) task alignment, lifecycle discipline, and `parallel-after` independence; and
+      (D) factual verification — take every empirical claim the artifacts make about the
+      codebase or the environment and check it by running the command or reading the source,
+      reporting each as confirmed or false. Reviewer D finds the defects the other three
+      cannot, because a document review cannot catch a number nobody measured.
+
       Review all of the following:
 
       - **Capability coverage**: every capability in proposal.md has the correct delta
@@ -583,30 +613,32 @@ apply:
 
     ## Isolation
 
-    Before the first implementation task, check whether another agent session may be
-    working in this repository — `git worktree list`, and the repository's own agent
-    listing if it has one. If one might be, implement this change in its own git
-    worktree rather than in the shared checkout:
+    **Work in the checkout you were given.** Do not create a git worktree unless the
+    project rules ask for one or the user does. Moving a change into a worktree relocates
+    the work somewhere the user is not looking and leaves a merge to be done later, so it
+    is a decision for whoever is watching the repository, not a guess to be made from
+    inside it. "Another session might be active" is not something this session can
+    establish, and acting on the possibility has proved to be wrong far more often than
+    right.
+
+    **Treat the working tree as shared state regardless**, because it is: parallel task
+    groups put two implementers in one checkout, and a working tree, its index, its HEAD
+    and any build cache keyed on the checkout path are all common ground. So, always:
+
+    - Stage explicit paths. Never `git add -A`/`-u`, never a bare directory — a broad add
+      commits the other agent's half-written files under your message.
+    - Never use a relative ref (`HEAD~1`, `HEAD^`, `@{1}`) in `reset`, `rebase` or
+      `--amend`; another commit may have landed in between. Fix forward instead.
+    - Treat a failure in a file you did not touch as suspect before you debug it — re-run,
+      and check whose work it is.
+
+    When the project rules or the user do call for isolation, create it explicitly:
 
         git worktree add ../<repo>-<change-name> -b <change-name>
 
-    A working tree is shared state, and so are the index, HEAD, and any build cache
-    keyed on the checkout path. Two sessions in one tree means a broad `git add` sweeps
-    the other's files, `git reset HEAD~1` can drop the other's commit, a build compiles
-    the other's half-finished edit, and a lint or type error in either one's uncommitted
-    work fails the shared gate for both. None of these announce themselves as
-    cross-session problems: they surface as a failure in a file you did not touch.
-
-    Work in the worktree until the change is complete and verified, then merge or
-    rebase onto the shared branch as one reviewed unit and remove the worktree. Do not
+    then work there until the change is complete and verified, merge or rebase onto the
+    shared branch as one reviewed unit, remove the worktree, and report its path. Do not
     rewrite shared history to tidy up afterwards.
-
-    If a worktree is genuinely impossible — a toolchain that resolves paths absolutely,
-    a dependency cache that cannot be duplicated — say so in the change's design or task
-    notes, and then treat every git command as a shared-state mutation: stage explicit
-    paths only, never `git add -A`/`-u` or a bare directory; never use a relative ref
-    (`HEAD~1`, `HEAD^`, `@{1}`) in `reset`, `rebase` or `--amend`, because another
-    session's commit may have landed in between; and fix forward rather than rewriting.
 
     ## Gates
 
@@ -623,8 +655,11 @@ apply:
     implementer per task group, run the gate between groups, and mark the group complete.
     Pre-gather context before dispatching — the agent starts cold and must not explore
     the codebase itself: include the proposal, the specs relevant to that group, design.md,
-    that group's task lines only, a short git state summary, the existing source files the
-    group will modify, and one similar existing implementation as a pattern reference.
+    that group's task lines only, a short git state summary, and a manifest naming the
+    exact paths the group will read or modify plus one similar existing implementation as
+    a pattern reference. Name the files rather than quoting them: naming is what stops the
+    agent exploring, while quoting charges every file to the orchestrator's context for the
+    rest of the change, which is the cost per-group dispatch exists to avoid.
     Tell it to report NEEDS_CONTEXT rather than searching for anything not provided. After
     completing group N, dispatch all remaining groups marked `<!-- parallel-after: N -->`
     simultaneously, then gate each. Dispatch the Change Review group to the reviewer agent
