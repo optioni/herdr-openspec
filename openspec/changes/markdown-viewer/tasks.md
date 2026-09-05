@@ -1482,7 +1482,7 @@ arithmetic and a green-on-arrival RED in group 7 — the defect class group 12 h
 ## 8. `ui::driver` and `ui::load` — the frame normalises the stored offset
 <!-- kind: behavior -->
 
-- [ ] 8.1 RED: Write failing tests in `src/ui/driver.rs`'s `mod tests`:
+- [x] 8.1 RED: Write failing tests in `src/ui/driver.rs`'s `mod tests`:
       - `scrolling_past_the_end_is_normalised_on_the_next_frame` — the twenty-item source at
         `Route::Detail`, a script of ten `Char('j')` Presses then `Char('q')`, over a
         `TestBackend` of 120x20 and again of 60x20; the loop ends with `detail.scroll` **4**,
@@ -1508,7 +1508,7 @@ arithmetic and a green-on-arrival RED in group 7 — the defect class group 12 h
       it yet. Record the number verbatim; a 4 here would mean the clamp is happening somewhere
       it should not.
 
-- [ ] 8.2 GREEN: In `run_loop`, capture the draw's `CompletedFrame::area` and call
+- [x] 8.2 GREEN: In `run_loop`, capture the draw's `CompletedFrame::area` and call
       `dashboard.normalise_scroll(area)` once per iteration, after the draw and before the
       poll. `CompletedFrame` borrows the terminal, so copy the `Rect` out — it is `Copy` —
       before the borrow ends. `render` keeps its `&Dashboard` signature: the view clamps for
@@ -1517,10 +1517,18 @@ arithmetic and a green-on-arrival RED in group 7 — the defect class group 12 h
       **Red when:** the implementation reaches for `&mut Dashboard` in `render` — design.md →
       Decisions rejects that by name, and `NOIO-VIEW` would not catch it.
 
-- [ ] 8.3 VERIFY: `testcount --lib 'ui::driver::tests::' 10` and
+- [x] 8.3 VERIFY: `testcount --lib 'ui::driver::tests::' 10` and
       `testcount --lib 'ui::tests::load::' 6`.
 
-- [ ] 8.4 VERIFY: the four intermediate-gate commands; still exactly one known failure.
+- [x] 8.4 VERIFY: the four intermediate-gate commands; still exactly one known failure.
+      **Recorded at implementation time:** all four passed with **zero** known failures, not
+      one — `cargo test --all-features` is fully green here, a group early. The acceptance
+      test's math checks out independently: 10 `j` presses draw 11 frames, and `run_loop` now
+      calls `normalise_scroll` after every one of them (including the 11th, drawn immediately
+      after the 10th `j` is applied and before `q` is polled), clamping `detail.scroll` from
+      10 to `min(10, 20 - 16) = 4` before the loop ever reads it. Group 9 is therefore pure
+      verification with nothing left to flip green, which task 9.1's own wording already
+      anticipates ("one test, green ... with no change to the test since 2.1").
       Commit: `feat(markdown-viewer): normalise the stored scroll against the drawn frame`.
 
 ---

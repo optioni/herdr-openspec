@@ -47,10 +47,15 @@ pub fn run_loop<B: Backend, E: EventSource>(
     let mut frames = 0usize;
     let mut polls = 0usize;
     loop {
-        terminal
+        let completed = terminal
             .draw(|frame| view::render(frame, dashboard))
             .map_err(|e| LoopError::Draw(e.to_string()))?;
+        // `CompletedFrame` borrows `terminal`; `area` is `Copy`, so it is
+        // copied out here and the borrow ends before `normalise_scroll`
+        // takes `dashboard` mutably.
+        let area = completed.area;
         frames += 1;
+        dashboard.normalise_scroll(area);
 
         let event = events.next_event(tick).map_err(LoopError::Events)?;
         polls += 1;
@@ -79,6 +84,7 @@ mod tests {
     use crate::testutil::{Script, cell, press, row_text};
     use crate::ui::app::{Dashboard, Route};
     use crate::ui::driver::{LoopError, LoopSummary, TICK, run_loop};
+    use crate::ui::view;
 
     fn dashboard() -> Dashboard {
         Dashboard {
@@ -343,6 +349,95 @@ mod tests {
         let row1: String = row_text(buf, 1).chars().skip(1).take(6).collect();
         assert_eq!(row1, "Detail");
         assert!(!(0..buf.area.height).any(|y| row_text(buf, y).contains("Changes")));
+    }
+
+    fn twenty_line_detail_dashboard() -> Dashboard {
+        Dashboard {
+            route: Route::Detail,
+            detail: crate::ui::app::Detail {
+                source: (0..20).map(|i| format!("- line-{i:02}\n")).collect(),
+                scroll: 0,
+            },
+            ..dashboard()
+        }
+    }
+
+    #[test]
+    fn scrolling_past_the_end_is_normalised_on_the_next_frame() {
+        for width in [120u16, 60] {
+            let backend = TestBackend::new(width, 20);
+            let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+            let mut dashboard = twenty_line_detail_dashboard();
+            let mut presses: Vec<_> = (0..10)
+                .map(|_| Ok(Some(press(KeyCode::Char('j'), KeyModifiers::NONE))))
+                .collect();
+            presses.push(Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))));
+            let mut events = Script::new(presses);
+
+            let summary = run_loop(
+                &mut terminal,
+                &mut dashboard,
+                &mut events,
+                Duration::from_millis(1),
+            )
+            .expect("loop ends");
+
+            assert_eq!(dashboard.detail.scroll, 4, "width {width}");
+            assert_eq!(
+                summary,
+                LoopSummary {
+                    frames: 11,
+                    polls: 11
+                },
+                "width {width}"
+            );
+
+            let buf = terminal.backend().buffer();
+            let base = if width == 60 { 1 } else { 41 };
+            let row_at = |y: u16| -> String {
+                (base..base + 9)
+                    .map(|x| row_text(buf, y).chars().nth(x as usize).unwrap())
+                    .collect()
+            };
+            assert_eq!(row_at(2), "- line-04", "width {width}");
+            assert_eq!(row_at(17), "- line-19", "width {width}");
+        }
+    }
+
+    #[test]
+    fn a_resize_renormalises_the_offset() {
+        // Drives the pair `terminal.draw` then `normalise_scroll` directly
+        // — exactly one iteration of `run_loop` — since the loop borrows
+        // the terminal for its whole run and no scripted source can
+        // resize the backend from inside it.
+        let mut dashboard = Dashboard {
+            detail: crate::ui::app::Detail {
+                scroll: 4,
+                ..twenty_line_detail_dashboard().detail
+            },
+            ..twenty_line_detail_dashboard()
+        };
+        let backend = TestBackend::new(120, 20);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+
+        let frame = terminal
+            .draw(|f| view::render(f, &dashboard))
+            .expect("draw first frame");
+        let area = frame.area;
+        dashboard.normalise_scroll(area);
+        assert_eq!(dashboard.detail.scroll, 4);
+
+        terminal.backend_mut().resize(120, 30);
+        let frame = terminal
+            .draw(|f| view::render(f, &dashboard))
+            .expect("draw second frame");
+        let area = frame.area;
+        dashboard.normalise_scroll(area);
+        assert_eq!(dashboard.detail.scroll, 0);
+
+        let buf = terminal.backend().buffer();
+        let row2: String = row_text(buf, 2).chars().skip(41).take(9).collect();
+        assert_eq!(row2, "- line-00");
     }
 
     #[test]

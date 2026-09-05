@@ -437,6 +437,62 @@ mod tests {
             let after = snapshot(root);
             assert_eq!(before, after, "ui::load wrote inside the repository");
         }
+
+        #[test]
+        fn startup_leaves_the_detail_empty_and_unscrolled() {
+            // Rendered at both mandated widths, but the detail-interior
+            // blankness assertion only applies at 120: at 60, `route`
+            // starts `List`, so the narrow layout draws the list region
+            // (which change-rows already asserts elsewhere), not the
+            // detail one at all. `render_at` at 60 here is only proving
+            // startup doesn't panic there, on the same terms the wide
+            // check proves it for the pane that IS drawn.
+            fn assert_detail_blank_at_120(dashboard: &crate::ui::app::Dashboard) {
+                let buf = render_at(120, 20, dashboard);
+                for y in 2..=17u16 {
+                    for x in 41..=118u16 {
+                        assert_eq!(
+                            row_text(&buf, y).chars().nth(x as usize).unwrap(),
+                            ' ',
+                            "x={x} y={y}"
+                        );
+                    }
+                }
+                let _ = render_at(60, 20, dashboard);
+            }
+
+            let scratch = ScratchDir::new();
+            let root = scratch.path();
+            write(&root.join("openspec/changes/alpha/proposal.md"), "# P\n");
+
+            let found = super::super::load(root, &config_with_archived_count(5));
+            assert_eq!(found.detail.source, "");
+            assert_eq!(found.detail.scroll, 0);
+            assert_detail_blank_at_120(&found);
+
+            // The RepoSearch::NotFound arm is a second Dashboard
+            // construction site and therefore a second place the field
+            // can be got wrong. Guarded the same way
+            // `no_repository_above_the_start` is: no ancestor of the
+            // scratch path may itself hold an `openspec` directory.
+            let scratch2 = ScratchDir::new();
+            let canonical_start = canonical(scratch2.path());
+            let mut ancestor = Some(canonical_start.as_path());
+            while let Some(a) = ancestor {
+                assert!(
+                    !a.join("openspec").is_dir(),
+                    "ancestor {} unexpectedly holds an openspec directory; \
+                     the fixture assumption for this test is violated on this machine",
+                    a.display()
+                );
+                ancestor = a.parent();
+            }
+            let not_found = super::super::load(scratch2.path(), &config_with_archived_count(5));
+            assert_eq!(not_found.repo, None);
+            assert_eq!(not_found.detail.source, "");
+            assert_eq!(not_found.detail.scroll, 0);
+            assert_detail_blank_at_120(&not_found);
+        }
     }
 
     mod start {
