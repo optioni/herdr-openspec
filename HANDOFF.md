@@ -139,7 +139,8 @@ What happened: 1Password holds the signing key (`commit.gpgsign true`, `gpg.form
 failure had also left 5 commits unsigned in `schema-model` and `changes-from-cli`.
 
 **Resolution (user's decision):** `git rebase --exec 'git commit --amend --no-edit -S'`
-over 180 commits, then `git push --force-with-lease`. Content verified **byte-identical**
+over the 180 commits from `777c07e` onward (the repository holds 258; the 78 before that
+base were already signed and were not rewritten), then `git push --force-with-lease`. Content verified **byte-identical**
 to the pre-rewrite tree (`git diff` empty) and the commit count unchanged, so only SHAs
 and committer dates moved.
 
