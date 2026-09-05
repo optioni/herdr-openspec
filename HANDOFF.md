@@ -1,13 +1,13 @@
 # Handoff
 
-**Written:** 2026-09-05 ~07:00 EEST · **Branch:** `main` · **Remote:** `optioni/herdr-openspec`
+**Written:** 2026-09-05 ~11:55 EEST · **Branch:** `main` · **Remote:** `optioni/herdr-openspec`
 
 ## Where things stand
 
-**Phases 1–3 complete; Phase 4 is three of six changes in.** Twelve changes
-implemented and archived. `main` is green: `make check` exits 0 at **98.04% line
-coverage over 12,267 lines**, 565 lib tests / 581 whole-suite. Pushed through
-`4f93fa7`; **16 commits unpushed after it**.
+**Phases 1–3 complete; Phase 4 is four of six changes in.** Thirteen changes
+implemented and archived. `main` is green: `make check` exits 0 at **97.81% line
+coverage over 14,178 lines**, 625 lib tests. Pushed through `d3b798c`; **19 commits
+unpushed after it**.
 
 **Read coverage from the line columns, not the region columns.** `cargo llvm-cov`'s
 TOTAL row leads with regions (18,087 here) and reports lines further right (10,493).
@@ -19,7 +19,7 @@ interchangeable and the line figure is the one the 80% floor gates on.
 | 1 — Foundation | `repo-foundation`, `ci-pipeline`, `plugin-config` | **Done** |
 | 2 — Reading from disk | `repo-resolution`, `schema-model`, `task-parsing`, `changes-from-files` | **Done** |
 | 3 — Subprocess seam | `subprocess-seam`, `changes-from-cli` | **Done** |
-| 4 — The dashboard | `tui-shell` ✓, `list-view` ✓, `markdown-viewer` ✓, `detail-view`, `tasks-tab`, `live-refresh` | **In progress** |
+| 4 — The dashboard | `tui-shell` ✓, `list-view` ✓, `markdown-viewer` ✓, `detail-view` ✓, `tasks-tab`, `live-refresh` | **In progress** |
 | 5–6 | — | Untouched |
 
 Nineteen capabilities live under `openspec/specs/`. Modules: `lib.rs`, `main.rs`,
@@ -32,14 +32,25 @@ CLI consumer was added. The `Change` conformance gate survived a second producer
 
 ## Next action
 
-Continue Phase 4 at **`detail-view`**, then `tasks-tab`, `live-refresh` — full
-ff → apply → archive loop each. All three remaining changes are strictly sequential:
-`detail-view` needs `list-view` + `markdown-viewer` (both landed), and `tasks-tab` and
-`live-refresh` each need `detail-view`.
+Continue Phase 4 at **`tasks-tab`**, then `live-refresh` — full ff → apply → archive
+loop each. Both remaining changes depend on `detail-view`, which has landed.
+`live-refresh` also needs `changes-from-cli` (Phase 3, landed), and is the change where
+the dual-source model becomes visible: files paint, the CLI corrects.
 
-**Paused here only because the 5-hour session window was at 61%**, below the ~50%-
-remaining floor for starting an ff. Nothing is uncommitted and nothing is half-done —
-all three completed changes are archived. Session resets 09:00 EEST.
+`tasks-tab` inherits `detail-view`'s tab bar unchanged — `detail-view` already renders
+a tab for every schema-declared artifact including tasks, as plain markdown. `tasks-tab`
+replaces only that one tab's *content* and adds no tab-bar code.
+
+**Paused here only because the 5-hour session window was at 52%**, a hair under the
+~50%-remaining floor for starting an ff. Nothing is uncommitted and nothing is
+half-done — all four completed changes are archived. Session resets 14:00 EEST.
+
+### When Phase 4 closes: the README keymap sync
+
+Deliberately deferred across three key-touching changes, not forgotten; `detail-view`'s
+task 13.4 re-confirmed the deferral. SPEC.md → Keys is the source and is correct
+(`j`/`k` route split, layered `Esc`, `Ctrl-C`, `1`–`9`/`[`/`]`); README's Keys table
+still describes the old behaviour. Do not let it outlive the phase.
 
 ### `markdown-viewer` moved a keybinding — BREAKING, and it moved a row early
 
