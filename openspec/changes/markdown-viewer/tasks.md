@@ -1664,14 +1664,14 @@ arithmetic and a green-on-arrival RED in group 7 — the defect class group 12 h
 ## 11. Documentation
 <!-- kind: operational -->
 
-- [ ] 11.1 CHECK: Re-read `SPEC.md` → Manifest and the `config.toml` format and confirm
+- [x] 11.1 CHECK: Re-read `SPEC.md` → Manifest and the `config.toml` format and confirm
       neither changed. This change touches no manifest key and no configuration key, so the
       documented formats must still match `herdr-plugin.toml` and `src/config.rs` byte for
       byte.
       **Red when:** either drifted, which would mean this change altered a format it claims
       not to.
 
-- [ ] 11.2 CHANGE: Rewrite in `SPEC.md`: **User interface → Detail view** (audience:
+- [x] 11.2 CHANGE: Rewrite in `SPEC.md`: **User interface → Detail view** (audience:
       `detail-view`, `tasks-tab`, and every future change that renders into that region).
       Three edits, in place:
       - Replace "Every other tab is a markdown viewer built on `pulldown-cmark`, supporting
@@ -1689,13 +1689,13 @@ arithmetic and a green-on-arrival RED in group 7 — the defect class group 12 h
         by 16 at a 60x20 frame in the detail route, as `list-view` stated 38 and 58 for the
         list.
 
-- [ ] 11.3 CHANGE: Rewrite in `SPEC.md`: **User interface → Responsive layout** (audience: the
+- [x] 11.3 CHANGE: Rewrite in `SPEC.md`: **User interface → Responsive layout** (audience: the
       same). The section gives the `Length(40)` / `Min(0)` constraints and never the interiors
       they produce. Add the detail interiors beside the list ones, with the note that 78 is a
       property of the mandated 120-column frame rather than a constant of the layout, since
       the detail column is `Min(0)` and every column gained beyond 100 goes to it.
 
-- [ ] 11.4 CHANGE: Rewrite in `SPEC.md`: **User interface → Keys** (audience: every future
+- [x] 11.4 CHANGE: Rewrite in `SPEC.md`: **User interface → Keys** (audience: every future
       change and every reader looking up one row). Two edits:
       - The `j` / `k` / arrows row reads "Move the list selection, clamped at both ends rather
         than wrapping; the list scrolls to keep it visible", which this change makes false at
@@ -1706,7 +1706,7 @@ arithmetic and a green-on-arrival RED in group 7 — the defect class group 12 h
       - The `1`–`9` / `[` / `]` row is annotated as `detail-view`'s, so a reader of this table
         does not expect tab switching to work in the change that fills the detail region.
 
-- [ ] 11.5 CHANGE: Rewrite in `SPEC.md`: four further sentences this change falsifies or
+- [x] 11.5 CHANGE: Rewrite in `SPEC.md`: four further sentences this change falsifies or
       leaves incomplete (audience: every future change; each is a one- or two-line edit):
       - **Overview → Stack** — the `pulldown-cmark` entry carries no version and no feature
         decision, while `yaml-rust2`'s carries a pointer to where its choice is argued. Give
@@ -1723,7 +1723,7 @@ arithmetic and a green-on-arrival RED in group 7 — the defect class group 12 h
         frames, 38/58 for list interiors, 58/78 for detail interiors, so a future change does
         not have to rediscover which pair applies to which module.
 
-- [ ] 11.6 CHANGE: Add to `SPEC.md`: **Degraded states** (audience: `degraded-states`, which
+- [x] 11.6 CHANGE: Add to `SPEC.md`: **Degraded states** (audience: `degraded-states`, which
       audits this table row by row in Phase 6). Two edits:
       - One new row: markdown the viewer does not model — tables, footnotes, strikethrough,
         raw HTML — renders as its literal source text, one line per source line, rather than
@@ -1733,7 +1733,7 @@ arithmetic and a green-on-arrival RED in group 7 — the defect class group 12 h
         content yet'" row as `detail-view`'s, since this change deliberately does not
         implement it and an auditor would otherwise score it as missing.
 
-- [ ] 11.7 CHANGE: Rewrite in `AGENTS.md`: **Current repo state** and **Architecture rules**
+- [x] 11.7 CHANGE: Rewrite in `AGENTS.md`: **Current repo state** and **Architecture rules**
       (audience: every session). In the first, replace the sentence "the detail region is
       still an empty bordered frame; `markdown-viewer` and `detail-view` fill it next" with
       what the region now does and what still fills it — the viewer and its scrolling are in
@@ -1744,7 +1744,7 @@ arithmetic and a green-on-arrival RED in group 7 — the defect class group 12 h
       asserting both. Net: one sentence rewritten, two lines added; nothing appended beside a
       rule it supersedes.
 
-- [ ] 11.8 CHANGE: Record, in this file and in `planning-review.md`, the edits that must be
+- [x] 11.8 CHANGE: Record, in this file and in `planning-review.md`, the edits that must be
       made at **archive** time rather than now, because `OPENSPEC-UNTOUCHED` would fail —
       correctly — if they were made here, and `openspec/config.yaml`'s archive guidance covers
       a row that "split, merged, or moved" but not one that gained scope:
@@ -1764,7 +1764,7 @@ arithmetic and a green-on-arrival RED in group 7 — the defect class group 12 h
         only at archive time.
       Naming these here is what makes the archive step catch them.
 
-- [ ] 11.9 VERIFY: `OPENSPEC-UNTOUCHED` again — 11.2–11.7 edit files outside `openspec/`, so
+- [x] 11.9 VERIFY: `OPENSPEC-UNTOUCHED` again — 11.2–11.7 edit files outside `openspec/`, so
       the result must be identical to 10.4's.
       **Red when:** a documentation edit landed under `openspec/` outside this change's own
       directory.

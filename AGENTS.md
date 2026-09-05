@@ -21,10 +21,11 @@ spec is wrong, update the spec as part of that change rather than letting the tw
 
 `repo-foundation`, `ci-pipeline`, `plugin-config`, `repo-resolution`,
 `schema-model`, `task-parsing`, `changes-from-files`, `subprocess-seam`,
-`changes-from-cli`, and `tui-shell` have landed: the crate builds with four
-third-party dependencies (`toml`, `yaml-rust2`, `serde_json`, `ratatui` — the
-last reached through `ratatui::crossterm`'s re-export, not a direct
-dependency), `make check` runs all four quality gates locally and in CI, the
+`changes-from-cli`, `tui-shell`, `list-view`, and `markdown-viewer` have
+landed: the crate builds with five third-party dependencies (`toml`,
+`yaml-rust2`, `serde_json`, `ratatui` — reached through `ratatui::crossterm`'s
+re-export, not a direct dependency — and `pulldown-cmark`), `make check` runs
+all four quality gates locally and in CI, the
 crate reads `config.toml` and derives and records agent-name mappings under
 `HERDR_PLUGIN_STATE_DIR`, it can locate the OpenSpec repository root and the
 `openspec` binary — the binary chain's fourth probe step is an injected hook
@@ -43,14 +44,16 @@ permanently file-sourced. `herdr-openspec ui` now opens a real dashboard:
 raw mode and the alternate screen entered and left in a fixed, mirrored
 order (restored on normal return, error return, and panic alike), a
 draw-then-wait event loop — `q`/`Ctrl-C` to quit, `j`/`k`/arrows to move the
-list selection, `/` to filter (where printable keys type instead of
-commanding and only `Ctrl-C` still quits), `Enter`/`Esc` to move between the
-list and detail routes outside filter mode — and a 100-column breakpoint
-deciding a one- or two-region body. The list region now fills with real
-rows — active changes, a separator, then archived ones, with selection,
-scrolling, and a `/` filter — and the detail region is still an empty
-bordered frame; `markdown-viewer` and `detail-view` fill it next. `ui`
-refuses to start with exit status 3 when stdout is not a terminal, which is
+list selection at the list route or scroll the detail content at the detail
+route, `/` to filter (where printable keys type instead of commanding and
+only `Ctrl-C` still quits), `Enter`/`Esc` to move between the list and detail
+routes outside filter mode — and a 100-column breakpoint deciding a one- or
+two-region body. The list region now fills with real rows — active changes,
+a separator, then archived ones, with selection, scrolling, and a `/` filter
+— and the detail region now renders whatever markdown source `Dashboard`
+carries, scrollable and clamped so a held key cannot run it away;
+`detail-view` is what will populate that source from the selected artifact.
+`ui` refuses to start with exit status 3 when stdout is not a terminal, which is
 also what keeps `cargo test` (which spawns this binary) from ever putting a
 real terminal into raw mode.
 
@@ -163,6 +166,14 @@ unreachable and the tests become integration tests by accident.
 - **The list region's two mandated interior widths are 38 and 58 columns** — the
   wide layout's `Length(40)` list column and the narrow layout's 60-column frame,
   each less two border columns. Every row-grammar test in `ui::list` asserts both.
+- **`pulldown_cmark` is named only in `src/ui/markdown.rs`, and that module names
+  no `ratatui` type.** The markdown parser stays replaceable by editing one file,
+  on the same terms `src/cli.rs` is the crate's only process spawner; styling a
+  segment is `ui::view`'s job, never `ui::markdown`'s.
+- **The detail region's two mandated interior widths are 78 and 58 columns** — the
+  wide layout's `Min(0)` detail column at the mandated 120-column frame and the
+  narrow layout's 60-column frame in the detail route, each less two border
+  columns. Every test in `ui::markdown` asserts both.
 
 Further invariants from `SPEC.md`:
 

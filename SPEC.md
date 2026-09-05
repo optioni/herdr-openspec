@@ -16,9 +16,11 @@ re-export and is not itself a declared dependency, so a backend type and an even
 type can never come from two different `crossterm` releases — `notify` (filesystem
 watching), `serde_json`, `yaml-rust2` (YAML — the choice is argued in
 `schema-model`'s design.md; a later change needing YAML should not re-open it),
-`pulldown-cmark` (markdown), `toml` (plugin configuration and state, both TOML).
-Exact versions are pinned to current stable releases at implementation time, not
-from memory.
+`pulldown-cmark` (markdown — the version and the `default-features = false`
+choice are argued in `markdown-viewer`'s design.md; a later change needing
+markdown should not re-open it), `toml` (plugin configuration and state, both
+TOML). Exact versions are pinned to current stable releases at implementation
+time, not from memory.
 
 ## Architecture
 
@@ -69,7 +71,7 @@ ratatui frame. They perform no I/O, so they are tested by rendering into a
 | `agents` | Attribute live Herdr agents to changes |
 | `launch` | Split a pane, start an agent, send the `/opsx:*` prompt |
 | `watch` | Filesystem watching and debounce |
-| `ui` | Views (the change-row grammar included), layout, the dashboard's own state (selection and the `/` filter), key handling, terminal lifecycle, and the event loop |
+| `ui` | Views (the change-row grammar and markdown rendering included — `ui::markdown` is now the largest single piece of the module), layout, the dashboard's own state (selection, the `/` filter, and the detail scroll offset), key handling, terminal lifecycle, and the event loop |
 | `cli` | The two subprocess traits and their real implementations |
 
 ## Data layer
@@ -264,6 +266,16 @@ touching the route, and `/` itself moves the route to the list at every width;
 constraints and the underlying every-width route rule are frozen here for
 `list-view`, `detail-view`, and `agent-attribution` to inherit.
 
+The two constraints above produce four mandated interiors, one pair per region,
+each **16 rows** at the mandated 20-row frame: the **list** region is 38 columns
+wide at the wide layout's `Length(40)` column (less two border columns) and 58 at
+the narrow layout's 60-column frame (`list-view`); the **detail** region is 78
+columns wide at the wide layout's `Min(0)` column — a property of the mandated
+120-column frame rather than a constant, since every column gained beyond 120
+also goes to it — and 58 at the narrow layout's 60-column frame in the detail
+route (`markdown-viewer`, frozen here for `detail-view` and `tasks-tab` to
+inherit).
+
 ### List view
 
 One row per active change, then a separator, then the archived changes
@@ -308,12 +320,29 @@ is what the pane can reach before that later change lands.
 
 ### Detail view
 
-A header carrying change name, schema, and progress; a tab bar built from the
-schema's artifact list; content below.
+A header carrying change name, schema, and progress (`detail-view`); a tab bar
+built from the schema's artifact list, with `1`–`9` / `[` / `]` switching
+between tabs (`detail-view`); content below, resolved for whichever artifact
+the selected tab names (`detail-view`).
 
-The **tasks tab** renders task groups under their headings, a checkbox glyph per
-item, and a progress bar. Every other tab is a markdown viewer built on
-`pulldown-cmark`, supporting headings, lists, code blocks, emphasis, and links.
+The **tasks tab** renders task groups under their headings, a checkbox glyph
+per item, and a progress bar (`tasks-tab`). Every other tab is rendered by
+`markdown-viewer`'s markdown viewer, whose rendering grammar is: a heading
+keeps its `#` markers rather than being distinguished by colour; a paragraph
+word-wraps to the interior width, with a soft break starting a new rendered
+line rather than being folded into a space; a bullet or ordered list item
+carries its marker — numbered from the list's own start value, not from 1 —
+and a hanging indent of two columns per nesting level; a fenced or indented
+code block, and a raw HTML block, are reproduced verbatim and hard-split at
+the interior width rather than word-wrapped or clipped, so a long line never
+silently loses its tail; a block quote prefixes every one of its lines,
+continuations included, with `> `; a thematic break fills the interior width;
+emphasis, strong, inline code, and links become faces on the affected text,
+with a link's destination never printed and an image rendering its alt text
+in its place; and a construct the parser does not model — a table, a
+footnote, strikethrough, a task-list item — renders as its literal source
+text rather than being dropped or mangled (see Degraded states). The content
+scrolls with `j` / `k` and the arrows at the detail route (`markdown-viewer`).
 
 Tasks are **read-only by design**. Writing a checkbox from the pane would race the
 agent editing `tasks.md` in another pane.
@@ -322,10 +351,10 @@ agent editing `tasks.md` in another pane.
 
 | Key | Action |
 |---|---|
-| `j` / `k`, arrows | Move the list selection, clamped at both ends rather than wrapping; the list scrolls to keep it visible. While filtering, the arrows still navigate, but `j` and `k` type themselves into the query instead |
+| `j` / `k`, arrows | At the list route: move the list selection, clamped at both ends rather than wrapping; the list scrolls to keep it visible (`list-view`). At the detail route: scroll the detail content by one line, clamped so the stored offset cannot run away (`markdown-viewer`). While filtering, the arrows still navigate whichever the current route uses them for, but `j` and `k` type themselves into the query instead |
 | `Enter` | Open change detail, or — while filtering — accept the query without opening detail |
 | `Esc` | Dismiss one layer: filter mode with its query when active, else a non-empty query alone, else back to list, else nothing |
-| `1`–`9`, `[`, `]` | Switch artifact tab |
+| `1`–`9`, `[`, `]` | Switch artifact tab (`detail-view`) |
 | `/` | Start filter mode from either route, moving to the list: printable keys type into the query, `Backspace` deletes, `Enter` accepts, `Esc` cancels, and `Ctrl-C` still quits |
 | `r` | Force refresh |
 | `a` | Launch an agent with `/opsx:apply` |
@@ -453,7 +482,8 @@ Every condition renders usable content rather than an error screen:
 | Schema loads with no tasks artifact (`apply.tracks` matches nothing, and no artifact has id `tasks`) | Every other tab renders; the tasks tab is absent, which is `tasks-tab`'s rendering decision. The task **count** is not deferred: it falls back to counting `<change dir>/tasks.md` directly, matching `openspec list --json`'s own behaviour for such a change, so the pane never shows a pair the CLI would immediately correct |
 | No active changes | Empty state; archived changes remain browsable |
 | A `/` filter matches no change | Two rows: `No changes match`, then `/` and the query, so the filter that produced the empty state stays visible |
-| Artifact file missing | Tab is still shown and renders "No content yet" |
+| Artifact file missing | Tab is still shown and renders "No content yet" (`detail-view`) |
+| Markdown source holds a construct the parser does not model (a table, a footnote, strikethrough, a task-list item) | Renders as its literal source text, one line per source line, rather than being dropped or mangled (`markdown-viewer`) |
 | `openspec/changes/` or its `archive/` exists and cannot be read | Empty list for the affected tier, with the reason named on `ChangeSet::problems` and rendered as a leading `!`-marked row of the list, above the change rows; the archive walk is not attempted when the parent read already failed, so a permission error is never reported twice for the same fault |
 | An artifact's `generates` pattern falls outside the file path's supported glob subset | That artifact's list is empty and the reason is named; every other artifact on the change still resolves normally, and the CLI tier supplies the correct list when it arrives |
 | A tasks file exists but cannot be read (a directory where a file was expected, a permission error, an I/O error, or invalid UTF-8) | Reported as zero tasks, named in `Tasks::problems`; the CLI's count corrects the pane when it arrives. Invalid UTF-8 is the one case where the file path knowingly disagrees with `openspec list --json`, which decodes lossily and still reports a count — every other read failure already agrees with the CLI, which records the same failure as zero tasks too |
@@ -505,17 +535,24 @@ is tested against scratch `#!/bin/sh` programs rather than the real `openspec`,
   `openspec/` and the four-step binary probe chain, both tested against a
   purpose-built scratch directory tree under `std::env::temp_dir()`, not a
   faked filesystem layer
-- `ui::layout`, `ui::app`, `ui::list`, `ui::view`, `ui::driver`, `ui::terminal`,
-  and `ui::load` — the breakpoint and frame split, `Dashboard` and key handling,
-  the change-row grammar, the render seam proper, the draw-then-wait event loop,
-  and startup state from files. `ratatui::backend::TestBackend` stands in for
-  the rendering surface and a recording `TerminalOps` double stands in for the
-  terminal; no test constructs the real terminal implementation
+- `ui::layout`, `ui::app`, `ui::list`, `ui::markdown`, `ui::view`, `ui::driver`,
+  `ui::terminal`, and `ui::load` — the breakpoint and frame split, `Dashboard`
+  and key handling, the change-row grammar, markdown source to plain-data
+  lines of faced segments (`ui::markdown` — confined to one module and
+  checked for it; see Architecture rules), the render seam proper, the
+  draw-then-wait event loop, and startup state from files.
+  `ratatui::backend::TestBackend` stands in for the rendering surface and a
+  recording `TerminalOps` double stands in for the terminal; no test
+  constructs the real terminal implementation
 
 ### View tests
 
 Views render into a ratatui `TestBackend` and assert on the resulting buffer, at
 both 60 and 120 columns so the responsive breakpoint is genuinely covered.
+Three width pairs matter, at three different tiers, and each is asserted
+directly rather than left implied by the frame pair alone: the frame itself
+at 60 and 120; the list region's interior at 38 and 58 (`ui::list`); and the
+detail region's interior at 58 and 78 (`ui::markdown`, `ui::view`).
 
 ### Fixtures
 
