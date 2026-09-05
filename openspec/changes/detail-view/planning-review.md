@@ -297,6 +297,85 @@ before/after text is recorded there at apply time, one entry per correction, in 
 Running totals across Phase 4: `tui-shell` 9, `list-view` 17, `markdown-viewer` 12,
 `detail-view` **10**.
 
+**1. Detail view — the three-way row split.**
+Before: "A header carrying change name, schema, and progress (`detail-view`); a tab bar
+built from the schema's artifact list, with `1`–`9` / `[` / `]` switching between tabs
+(`detail-view`); content below, resolved for whichever artifact the selected tab names
+(`detail-view`)."
+After: states the interior is split by `layout::split_detail` into a header row, a tab-bar
+row, and the remaining content rows, naming the mechanism rather than only the three
+things.
+
+**2. Detail view — above-nine and zero-artifact behaviour.**
+Before: silent on positions past nine and on an empty artifact list.
+After: a new paragraph states `1`–`9` address the first nine positions directly, `[`/`]`
+reach every position and clamp at both ends without wrapping, positions past nine carry
+no digit in their label, and an empty artifact list renders a single `no artifacts` cell.
+
+**3. Detail view — the no-change-selected state.**
+Before: silent on what the region shows when no change is selected.
+After: states the region is blank — no header, no tab bar, no content — exactly when the
+visible list is empty, and that a selected change always draws a header, a tab bar, and
+at least one content line.
+
+**4. Keys — the `1`–`9`/`[`/`]` row.**
+Before: `| \`1\`–\`9\`, \`[\`, \`]\` | Switch artifact tab (\`detail-view\`) |`
+After: adds that the keys act at both routes (naming why — the wide layout draws the
+detail region at the list route too), that `0` is inert, and that while filtering they
+type themselves into the query like any other printable key.
+
+**5. Responsive layout — the content area's height.**
+Before: "The two constraints above produce four mandated interiors, one pair per
+region, each **16 rows** at the mandated 20-row frame: ..." with no further division
+stated.
+After: appends that the detail region's sixteen rows are further divided by
+`layout::split_detail` into a header row, a tab-bar row, and a fourteen-row content
+area, and that the scroll clamp is computed against the content area's height, not the
+interior's.
+
+**6. Degraded states — an unreadable artifact file, and the two schema rows' tab-bar
+consequence.**
+Before: the "Schema not vendored" and "Schema unreadable or invalid" rows say the
+artifact list is empty but not what the detail region draws for such a change; no row
+covers an artifact file that exists and cannot be read.
+After: both existing rows gain "The detail region's tab bar renders `no artifacts` for
+such a change (`detail-view`)"; one new row states that an unreadable artifact file
+still shows its tab, with a `!`-marked problem line above the content, and that "No
+content yet" is not also shown.
+
+**7. Degraded states — no change selected.**
+Before: no row for a detail region with nothing selected.
+After: one new row states the region is blank in that case, and that the list region
+already names the empty state.
+
+**8. Architecture — the render seam and the Module map's `ui` row.**
+Before (render seam): "Views are pure functions from a `Dashboard` state value to a
+ratatui frame. They perform no I/O, so they are tested by rendering into a
+`TestBackend` buffer at fixed widths." No mention of an injected reader.
+After: appends that `ui::read_artifact` is the crate's third one-line binding to the
+real world, alongside `resolve`'s `npm prefix -g` hook and `config::env_lookup`, naming
+the injected `&dyn Fn` shape and that `src/ui/mod.rs` is the one place under `src/ui/`
+naming `read_to_string`.
+Before (Module map, `ui` row): "Views (the change-row grammar and markdown rendering
+included ...), layout, the dashboard's own state (selection, the `/` filter, and the
+detail scroll offset), key handling, terminal lifecycle, and the event loop".
+After: adds the detail region's header/tab-bar/content grammar to what `ui` holds, and
+the selected artifact tab and the injected artifact-read binding to the dashboard's own
+state.
+
+**9. Testing → Unit-tested modules — `ui::detail`, and `ui::load` corrected.**
+Before: names `ui::load` as though it were a module (it is a function in
+`src/ui/mod.rs`; there is no `src/ui/load.rs`) and omits `ui::detail` entirely.
+After: names `ui::detail` (plain data, no I/O, parameterised by width) alongside the
+existing list, and corrects the reference to `ui::mod`'s `load` and `read_artifact`
+functions. The `ui::load` half is pre-existing drift `markdown-viewer` did not catch;
+fixed here because this change is the one adding a module to that list.
+
+**10. Testing → View tests — `ui::detail` alongside `ui::markdown` and `ui::view`.**
+Before: "the detail region's interior at 58 and 78 (`ui::markdown`, `ui::view`)".
+After: adds `ui::detail` as a third module asserting that pair directly, so the
+paragraph and `DETAILWIDTHS` agree.
+
 Two of the ten are pre-existing drift rather than consequences of this change, and are fixed
 here because this is the change that touches the same sentences:
 

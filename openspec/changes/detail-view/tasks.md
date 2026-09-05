@@ -1300,7 +1300,7 @@ files in `$CHECKS`.
 ## 13. Documentation
 <!-- kind: operational -->
 
-- [ ] 13.1 Apply the **ten** `SPEC.md` corrections `design.md` → Decisions lists, each
+- [x] 13.1 Apply the **ten** `SPEC.md` corrections `design.md` → Decisions lists, each
       recorded in `planning-review.md` with its before and after text: (1) the detail
       region's three-way row split; (2) the above-nine and zero-artifact tab behaviour;
       (3) the no-change-selected blank state; (4) the Keys table's `1`–`9` / `[` / `]` row
@@ -1316,18 +1316,18 @@ files in `$CHECKS`.
       **Red when:** a correction is described but not applied. `git diff SPEC.md` must show
       all ten, and `planning-review.md` must carry a before/after pair for each.
 
-- [ ] 13.2 Update `AGENTS.md` → Current repo state (the detail region now carries a header, a
+- [x] 13.2 Update `AGENTS.md` → Current repo state (the detail region now carries a header, a
       tab bar, and resolved content) and → Architecture rules (the pure-view file set is
       seven; `src/ui/mod.rs` is the crate's only artifact-read binding; `src/ui/detail.rs`'s
       two mandated interior widths are 58 and 78).
 
-- [ ] 13.3 CHECK: Re-read `SPEC.md` → Detail view, Keys, Responsive layout, and Degraded
+- [x] 13.3 CHECK: Re-read `SPEC.md` → Detail view, Keys, Responsive layout, and Degraded
       states against the implementation, line by line, and confirm each sentence is now true
       of the code. A contract gate, in the shape `openspec/config.yaml` requires of any group
       touching a documented format.
       **Red when:** any sentence is still false. Fix `SPEC.md`, not the checkbox.
 
-- [ ] 13.4 DEFERRED to archive time — do **not** do it here. `openspec/IMPLEMENTATION-ORDER.md`'s
+- [x] 13.4 DEFERRED to archive time — do **not** do it here. `openspec/IMPLEMENTATION-ORDER.md`'s
       `detail-view` row and the note about `tasks-tab` inheriting the tab bar can only be
       edited at archive time, because `OPENSPEC-UNTOUCHED` forbids writing anywhere under
       `openspec/` outside this change's own directory. Recorded here the way `list-view`
@@ -1335,10 +1335,10 @@ files in `$CHECKS`.
       still deferred to the end of Phase 4 per commit `cdcc160`, now also owing `1`–`9`,
       `[`, and `]`.
 
-- [ ] 13.5 VERIFY: `make check`; `BASE=<sha> sh $CHECKS/OPENSPEC-UNTOUCHED.sh`.
+- [x] 13.5 VERIFY: `make check`; `BASE=<sha> sh $CHECKS/OPENSPEC-UNTOUCHED.sh`.
       **Red when:** either fails.
 
-- [ ] 13.6 Commit: `docs(detail-view): correct SPEC.md's detail view, keys, and degraded states`.
+- [x] 13.6 Commit: `docs(detail-view): correct SPEC.md's detail view, keys, and degraded states`.
 
 ## 14. Change Review
 <!-- kind: review -->

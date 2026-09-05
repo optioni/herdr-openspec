@@ -21,8 +21,8 @@ spec is wrong, update the spec as part of that change rather than letting the tw
 
 `repo-foundation`, `ci-pipeline`, `plugin-config`, `repo-resolution`,
 `schema-model`, `task-parsing`, `changes-from-files`, `subprocess-seam`,
-`changes-from-cli`, `tui-shell`, `list-view`, and `markdown-viewer` have
-landed: the crate builds with five third-party dependencies (`toml`,
+`changes-from-cli`, `tui-shell`, `list-view`, `markdown-viewer`, and
+`detail-view` have landed: the crate builds with five third-party dependencies (`toml`,
 `yaml-rust2`, `serde_json`, `ratatui` — reached through `ratatui::crossterm`'s
 re-export, not a direct dependency — and `pulldown-cmark`), `make check` runs
 all four quality gates locally and in CI, the
@@ -50,10 +50,15 @@ only `Ctrl-C` still quits), `Enter`/`Esc` to move between the list and detail
 routes outside filter mode — and a 100-column breakpoint deciding a one- or
 two-region body. The list region now fills with real rows — active changes,
 a separator, then archived ones, with selection, scrolling, and a `/` filter
-— and the detail region now renders whatever markdown source `Dashboard`
-carries, scrollable and clamped so a held key cannot run it away;
-`detail-view` is what will populate that source from the selected artifact.
-`ui` refuses to start with exit status 3 when stdout is not a terminal, which is
+— and the detail region now shows the selected change's own header (name,
+schema, progress), an artifact tab bar built from the schema's declared
+order and switched with `1`–`9`/`[`/`]`, and that tab's content, read
+through an injected `&dyn Fn(&Path) -> Result<String, String>` reader
+(`ui::read_artifact` is the one production binding, in `src/ui/mod.rs`) and
+resolved once per `(change directory, tab)` rather than on every frame;
+the content is scrollable and clamped against the content area's own
+height, below the header and tab-bar rows, so a held key cannot run it
+away. `ui` refuses to start with exit status 3 when stdout is not a terminal, which is
 also what keeps `cargo test` (which spawns this binary) from ever putting a
 real terminal into raw mode.
 
@@ -156,13 +161,24 @@ unreachable and the tests become integration tests by accident.
   stdout verbatim, and every JSON parse lives on the testable side of it —
   `serde_json` must never appear in `src/cli.rs`, checked the same way.
 - **Views do no I/O.** They are pure functions from state to a ratatui frame, tested
-  by rendering into a `TestBackend` buffer at 60 and 120 columns. `src/ui/terminal.rs`
+  by rendering into a `TestBackend` buffer at 60 and 120 columns. The pure set is
+  **seven** files — `src/ui/app.rs`, `src/ui/detail.rs`, `src/ui/layout.rs`,
+  `src/ui/list.rs`, `src/ui/markdown.rs`, `src/ui/view.rs`, and `src/ui/driver.rs`
+  — none of which names a filesystem, process, environment, network, or
+  standard-I/O API. `src/ui/terminal.rs`
   is the only file in the crate permitted to name a crossterm terminal-mode function
   (`enable_raw_mode`, `disable_raw_mode`, `EnterAlternateScreen`,
   `LeaveAlternateScreen`) — checked the same tree-wide-grep-with-a-positive-control
   way as the subprocess seam above, `tests/` included. A test that reaches the real
   terminal implementation corrupts the developer's own session, because `cargo test`
   spawns this binary.
+- **The artifact read is confined to one binding.** `src/ui/mod.rs` is the only
+  file under `src/ui/` permitted to name `read_to_string`, and `ui::read_artifact`
+  — its one production binding, calling `std::fs::read_to_string` — is the only
+  place naming that function itself; `Dashboard::sync_detail` and `run_loop` take
+  it as an injected `&dyn Fn(&Path) -> Result<String, String>`, never by name.
+  Checked the same tree-wide-grep-with-a-positive-control way as the subprocess
+  seam, with a second leg proving the injection is real rather than decorative.
 - **The list region's two mandated interior widths are 38 and 58 columns** — the
   wide layout's `Length(40)` list column and the narrow layout's 60-column frame,
   each less two border columns. Every row-grammar test in `ui::list` asserts both.
@@ -173,7 +189,9 @@ unreachable and the tests become integration tests by accident.
 - **The detail region's two mandated interior widths are 78 and 58 columns** — the
   wide layout's `Min(0)` detail column at the mandated 120-column frame and the
   narrow layout's 60-column frame in the detail route, each less two border
-  columns. Every test in `ui::markdown` asserts both.
+  columns. Every test in `ui::markdown` and `ui::detail` asserts both — `ui::detail`
+  because every public function there is parameterised by width, which is what
+  makes an exemption-free width check possible.
 
 Further invariants from `SPEC.md`:
 
