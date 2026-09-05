@@ -747,6 +747,88 @@ mod tests {
             }
         }
 
+        /// `tasks-checklist` -> "No action mutates a task item": every
+        /// `Action` variant, applied to a `Dashboard` whose selected
+        /// change carries a marked tracked-tasks artifact, leaves
+        /// `changes` untouched. Rendering a checkbox makes toggling one
+        /// look natural, which is exactly why this test exists.
+        #[test]
+        fn no_action_mutates_changes() {
+            // An exhaustive match with no wildcard arm: a new `Action`
+            // variant fails to compile here, which is the signal to add
+            // it to `variants` below too — an enumerate-by-hand test
+            // would silently miss it instead.
+            fn assert_known_variant(a: &Action) {
+                match a {
+                    Action::Quit
+                    | Action::OpenDetail
+                    | Action::Back
+                    | Action::Next
+                    | Action::Prev
+                    | Action::SelectTab(_)
+                    | Action::NextTab
+                    | Action::PrevTab
+                    | Action::FilterStart
+                    | Action::FilterPush(_)
+                    | Action::FilterPop
+                    | Action::Ignore => {}
+                }
+            }
+
+            let variants = [
+                Action::Quit,
+                Action::OpenDetail,
+                Action::Back,
+                Action::Next,
+                Action::Prev,
+                Action::SelectTab(0),
+                Action::NextTab,
+                Action::PrevTab,
+                Action::FilterStart,
+                Action::FilterPush('a'),
+                Action::FilterPop,
+                Action::Ignore,
+            ];
+            assert_eq!(
+                variants.len(),
+                12,
+                "the twelve variants this crate specifies"
+            );
+            for v in &variants {
+                assert_known_variant(v);
+            }
+
+            let change = crate::changes::fixture::track_tasks_at(
+                crate::changes::fixture::with_artifacts(
+                    crate::changes::fixture::active("x", 2, 5),
+                    &[("tasks", &["/repo/tasks.md"])],
+                ),
+                0,
+            );
+            let dashboard = Dashboard {
+                detail: Detail {
+                    source: "## 1. Setup\n- [x] a\n- [ ] b\n".to_string(),
+                    scroll: 0,
+                    tab: 0,
+                    problems: Vec::new(),
+                    loaded: None,
+                },
+                repo: None,
+                searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
+                changes: crate::changes::fixture::set(vec![change], Vec::new(), Vec::new()),
+                route: Route::Detail,
+                quit: false,
+                selected: 0,
+                filter: empty_filter(),
+            };
+
+            for action in variants {
+                let mut d = dashboard.clone();
+                d.apply(action);
+                assert_eq!(d.changes, dashboard.changes, "{action:?} mutated changes");
+            }
+        }
+
         #[test]
         fn navigation_and_filter_keys_are_distinguished() {
             assert_eq!(

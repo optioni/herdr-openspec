@@ -910,7 +910,7 @@ the crate compiles, every existing test still passes, and `GATE-MECH1` still hol
 ## 9. The read-only proof
 <!-- kind: behavior -->
 
-- [ ] 9.1 RED: Write one failing test in `ui::app::tests::` —
+- [x] 9.1 RED: Write one failing test in `ui::app::tests::` —
       `no_action_mutates_changes` — applying **every** `Action` variant in turn to a
       `Dashboard` whose selected change carries a marked artifact, asserting `changes` is `==`
       to its prior value after each, and asserting the variant count is exactly twelve so a
@@ -919,19 +919,19 @@ the crate compiles, every existing test still passes, and `GATE-MECH1` still hol
       an exhaustive `match` over a constructed array whose length the test also asserts, so a
       new variant is a compile error rather than a silent gap.
 
-- [ ] 9.2 GREEN: No production change is expected — no `Action` is added and
+- [x] 9.2 GREEN: No production change is expected — no `Action` is added and
       `Dashboard::apply` gains no arm. If one is needed, this change has crossed a PRD
       non-goal and must stop.
 
-- [ ] 9.3 CHECK: `UI_MIN=11 sh $CHECKS/READONLY-UI.sh` green, and its two planted-violation
+- [x] 9.3 CHECK: `UI_MIN=11 sh $CHECKS/READONLY-UI.sh` green, and its two planted-violation
       controls re-run and reverted: the `std::fs::write` in `ui::read_artifact` (expect FAIL)
       and the `std::fs::remove_file` inside a `#[cfg(test)]` module (expect OK, the
       deliberate exemption). `git status --porcelain src/` empty after both.
 
-- [ ] 9.4 REFACTOR: State that no refactor was needed, or name one — as in group 8, this
+- [x] 9.4 REFACTOR: State that no refactor was needed, or name one — as in group 8, this
       group is expected to add tests and no production code.
 
-- [ ] 9.5 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'ui::app::tests::' 48`; the four
+- [x] 9.5 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'ui::app::tests::' 48`; the four
       gate commands, still failing on exactly the one known acceptance test.
       `sh $CHECKS/OPENSPEC-UNTOUCHED.sh`. Commit.
 
