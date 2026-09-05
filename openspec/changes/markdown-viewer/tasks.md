@@ -1559,7 +1559,7 @@ arithmetic and a green-on-arrival RED in group 7 — the defect class group 12 h
 ## 10. Architectural and dependency checks
 <!-- kind: operational -->
 
-- [ ] 10.1 CHECK: Run every check against the finished tree and record each output verbatim:
+- [x] 10.1 CHECK: Run every check against the finished tree and record each output verbatim:
       `NOSPAWN-GREP` with `MIN=17`, `NOIO-VIEW`, `NOCLI-SHELL` with `UI_MIN=9`, `NORAW-GREP`,
       `NODEFAULT-UI` (no argument — the edited default `Dashboard Filter Detail`),
       `NOLIT-CHANGE` with `MIN=17`, `MDSEAM` with `MIN=17`, `WIDTHS` with `WIDTHS_MIN=57`,
@@ -1574,8 +1574,15 @@ arithmetic and a green-on-arrival RED in group 7 — the defect class group 12 h
       **Wrongly green when:** `DEPS` is run with `DEPS_SKIP_LEG5=1` — leg 5 is the only place
       the new dependency's necessity is proven, and skipping it here would leave the
       `plugin-build` scenario unverified.
+      **Recorded at implementation time:** `NOIO-VIEW` genuinely failed on first run here —
+      `ui::markdown::tests::a_table_renders_as_literal_source_rows`'s fixture text
+      `"| Gate | Command |"` contains the literal substring `Command`, tripping the check's own
+      `IO_RE`. Not a real I/O API in a pure file: the check's own known-limits note says a
+      whole-file grep is exactly this blunt. Fixed by renaming the fixture column to `Runner`
+      rather than weakening the check; re-ran green. Every other check passed first time,
+      `DEPS` full (leg 5 included) and `GRAPH-SNAP` among them.
 
-- [ ] 10.2 CHECK: Prove each check can still go **red** against a planted violation, in a
+- [x] 10.2 CHECK: Prove each check can still go **red** against a planted violation, in a
       throwaway copy under `$WORK`, then remove it. Extract and run the same `$CHECKS`
       scripts, never a retyped variant:
       1. `let _ = std::process::Command::new("ls");` in `src/ui/markdown.rs` → `NOSPAWN-GREP`
@@ -1639,14 +1646,14 @@ arithmetic and a green-on-arrival RED in group 7 — the defect class group 12 h
       **Red when:** any planted violation is **not** caught. A check that stays green against
       its own violation is the defect class this repository has shipped three times.
 
-- [ ] 10.3 CHECK: Confirm no test in the change reaches a collaborator the design's Test
+- [x] 10.3 CHECK: Confirm no test in the change reaches a collaborator the design's Test
       Boundaries table does not name. Grep `src/ui/markdown.rs` and `src/ui/view.rs` for
       `ScratchDir`, `temp_dir`, `std::fs`, and `Command` — expected: **no hits in either**.
       Grep `src/ui/mod.rs` for `run_loop` — expected: exactly the acceptance test.
       **Red when:** a view or markdown test opens a directory, which is the signal that logic
       leaked into the view.
 
-- [ ] 10.4 VERIFY: `OPENSPEC-UNTOUCHED` against `$BASE`. The only permitted paths under
+- [x] 10.4 VERIFY: `OPENSPEC-UNTOUCHED` against `$BASE`. The only permitted paths under
       `openspec/` are `openspec/changes/markdown-viewer/`.
       **Red when:** any other path appears — including an untracked one, which is the half
       `git diff` alone would miss.

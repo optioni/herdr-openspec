@@ -1300,7 +1300,7 @@ mod tests {
 
     #[test]
     fn a_table_renders_as_literal_source_rows() {
-        let source = "| Gate | Command |\n|---|---|\n| Format | cargo fmt |\n";
+        let source = "| Gate | Runner |\n|---|---|\n| Format | cargo fmt |\n";
         for width in [58, 78] {
             let texts: Vec<String> = text_of(&lines(source, width))
                 .into_iter()
@@ -1308,7 +1308,7 @@ mod tests {
                 .collect();
             assert_eq!(
                 texts,
-                vec!["| Gate | Command |", "|---|---|", "| Format | cargo fmt |"],
+                vec!["| Gate | Runner |", "|---|---|", "| Format | cargo fmt |"],
                 "width {width}"
             );
             for line in lines(source, width)
