@@ -630,25 +630,14 @@ mod tests {
 
     // --- group 6: the tracked-tasks dispatch -------------------------
 
-    /// A `Change` carrying `ids`' artifacts, the one at `marked` (when
-    /// `Some`) carrying `tracks_tasks == true` — through
-    /// `changes::fixture::with_artifacts` and `changes::fixture::track_tasks_at`,
-    /// never an `ArtifactRef {}` literal of this module's own, which
-    /// `NOLIT-CHANGE` forbids.
-    fn change_with_marked_tab(
-        ids: &[&str],
-        marked: Option<usize>,
-        progress: Progress,
-    ) -> crate::changes::Change {
-        let pairs: Vec<(&str, &[&str])> = ids.iter().map(|id| (*id, &[][..])).collect();
-        let base = fixture::with_schema(fixture::active("x", 0, 0), "tdd");
-        let mut base = base;
-        base.progress = progress;
-        let change = fixture::with_artifacts(base, &pairs);
-        match marked {
-            Some(index) => fixture::track_tasks_at(change, index),
-            None => change,
-        }
+    /// `ids`, each with no paths — the `(&str, &[&str])` shape
+    /// `changes::fixture::with_marked_artifacts` (in turn
+    /// `changes::fixture::with_artifacts`) needs. Returns pairs, not a
+    /// change value, so this helper's own return type never names that
+    /// type at all — `NOLIT-CHANGE`'s pattern would catch a return type
+    /// exactly as it would a literal.
+    fn paths_free<'a>(ids: &'a [&'a str]) -> Vec<(&'a str, &'a [&'a str])> {
+        ids.iter().map(|id| (*id, &[][..])).collect()
     }
 
     #[test]
@@ -657,7 +646,8 @@ mod tests {
             completed: 1,
             total: 3,
         };
-        let change = change_with_marked_tab(&["proposal", "tasks"], Some(1), progress);
+        let change =
+            fixture::with_marked_artifacts(&paths_free(&["proposal", "tasks"]), Some(1), progress);
         let source = "## 1. Setup\n\n- [x] a\n- [ ] b\n- [ ] c\n";
         for width in [78, 58] {
             let d = Detail {
@@ -687,7 +677,8 @@ mod tests {
             completed: 1,
             total: 3,
         };
-        let change = change_with_marked_tab(&["proposal", "tasks"], Some(1), progress);
+        let change =
+            fixture::with_marked_artifacts(&paths_free(&["proposal", "tasks"]), Some(1), progress);
         let source = "## 1. Setup\n\n- [x] a\n- [ ] b\n- [ ] c\n";
         for width in [78, 58] {
             // tab 0 ("proposal") is not the marked position.
@@ -715,7 +706,8 @@ mod tests {
             completed: 1,
             total: 1,
         };
-        let change = change_with_marked_tab(&["proposal", "tasks"], Some(1), progress);
+        let change =
+            fixture::with_marked_artifacts(&paths_free(&["proposal", "tasks"]), Some(1), progress);
         let source = "- [x] a\n";
         for width in [78, 58] {
             let d = Detail {
@@ -733,7 +725,7 @@ mod tests {
             );
 
             // The same holds for a change carrying no artifacts at all.
-            let empty_artifacts = change_with_marked_tab(&[], None, progress);
+            let empty_artifacts = fixture::with_marked_artifacts(&paths_free(&[]), None, progress);
             let lines_empty = content_lines(&d, Some(&empty_artifacts), width);
             assert_eq!(
                 lines_empty,
@@ -745,37 +737,38 @@ mod tests {
 
     #[test]
     fn content_lines_total() {
-        let marked = change_with_marked_tab(
-            &["a", "b"],
+        let marked = fixture::with_marked_artifacts(
+            &paths_free(&["a", "b"]),
             Some(0),
             Progress {
                 completed: 1,
                 total: 2,
             },
         );
-        let unmarked = change_with_marked_tab(
-            &["a", "b"],
+        let unmarked = fixture::with_marked_artifacts(
+            &paths_free(&["a", "b"]),
             None,
             Progress {
                 completed: 1,
                 total: 2,
             },
         );
-        let no_artifacts = change_with_marked_tab(
-            &[],
+        let no_artifacts = fixture::with_marked_artifacts(
+            &paths_free(&[]),
             None,
             Progress {
                 completed: 0,
                 total: 0,
             },
         );
+        let paragraph = format!("{}\n", "word ".repeat(40).trim());
         let details = [
             detail("", Vec::new()),
             detail("", vec!["/repo/a.md: boom".to_string()]),
             detail("- [ ] only\n", Vec::new()),
             detail("- [ ] only\n", vec!["/repo/a.md: boom".to_string()]),
             {
-                let mut d = detail(&format!("{}\n", "word ".repeat(40).trim()), Vec::new());
+                let mut d = detail(&paragraph, Vec::new());
                 d.tab = 0;
                 d
             },
@@ -788,10 +781,26 @@ mod tests {
         for width in [78, 58] {
             for change in [None, Some(&marked), Some(&unmarked), Some(&no_artifacts)] {
                 for d in &details {
-                    // Never panics for any combination.
-                    let _ = content_lines(d, change, width);
+                    let lines = content_lines(d, change, width);
+                    for line in &lines {
+                        assert!(
+                            line.text().chars().count() <= width as usize,
+                            "width {width}, source {:?}: {:?} exceeds its width",
+                            d.source,
+                            line.text()
+                        );
+                    }
                 }
             }
         }
+        // The wrapped paragraph (details[4], tab 0 — unmarked under every
+        // one of the four `change` shapes above) produces strictly more
+        // lines at 58 than at 78, so the width genuinely reaches the wrap.
+        let at_78 = content_lines(&details[4], None, 78).len();
+        let at_58 = content_lines(&details[4], None, 58).len();
+        assert!(
+            at_58 > at_78,
+            "58: {at_58}, 78: {at_78} — the width must genuinely reach the wrap"
+        );
     }
 }

@@ -113,8 +113,20 @@ fn plain_line(text: String) -> crate::ui::markdown::Line {
 /// carrying `Face { heading: Some(level), .. }` spelled out field by
 /// field so the view bolds it through the existing `heading` mapping,
 /// with no new mapping of its own.
-fn heading_line(heading: &crate::tasks::Heading) -> crate::ui::markdown::Line {
+fn heading_line(heading: &crate::tasks::Heading, width: u16) -> crate::ui::markdown::Line {
     let text = format!("{} {}", "#".repeat(heading.level as usize), heading.text);
+    // Truncated, never wrapped: the requirement is one line whose text is
+    // the heading verbatim, but "no line's text exceeds width" still
+    // applies, or a long heading overwrites the detail region's border
+    // exactly the way `ui::markdown`'s own long-heading test guards
+    // against. Only reached when the text is already too long, so this
+    // never pads a heading that already fits.
+    let w = width as usize;
+    let text = if text.chars().count() > w {
+        crate::ui::list::pad_or_truncate_right(&text, w)
+    } else {
+        text
+    };
     crate::ui::markdown::Line {
         segments: vec![crate::ui::markdown::Segment {
             text,
@@ -258,7 +270,7 @@ pub fn lines(
     let last_index = tasks.groups.len().saturating_sub(1);
     for (index, group) in tasks.groups.iter().enumerate() {
         if let Some(heading) = &group.heading {
-            out.push(heading_line(heading));
+            out.push(heading_line(heading, width));
         }
         for item in &group.items {
             out.extend(item_lines(item, width));
@@ -799,6 +811,46 @@ mod tests {
                 width,
             );
             assert!(out.is_empty(), "width {width}: {out:?}");
+        }
+    }
+
+    /// Found in Change Review: `heading_line` took no `width` and emitted
+    /// a heading verbatim, so a heading longer than the interior
+    /// overwrote the detail region's border — the buffer-level control
+    /// (`ui::view::tests::detail_content_never_overwrites_the_border`)
+    /// reproduces the same claim end to end.
+    #[test]
+    fn a_long_heading_is_truncated_not_wrapped() {
+        let heading_text = "x".repeat(200);
+        let source = format!("## {heading_text}\n\n- [ ] a\n");
+        let progress = Progress {
+            completed: 0,
+            total: 1,
+        };
+        for width in [78, 58] {
+            let out = lines(&source, &progress, width);
+            for line in &out {
+                assert!(
+                    line.text().chars().count() <= width as usize,
+                    "width {width}: {:?} exceeds its width",
+                    line.text()
+                );
+            }
+            let heading_line = out
+                .iter()
+                .find(|l| l.text().starts_with("##"))
+                .expect("a heading line");
+            assert!(
+                heading_line.text().starts_with("## xxx"),
+                "width {width}: {:?}",
+                heading_line.text()
+            );
+            // Exactly one heading line — truncated, not wrapped into more.
+            assert_eq!(
+                out.iter().filter(|l| l.text().starts_with("##")).count(),
+                1,
+                "width {width}"
+            );
         }
     }
 }

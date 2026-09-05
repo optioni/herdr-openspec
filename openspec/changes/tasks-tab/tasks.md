@@ -959,7 +959,7 @@ the crate compiles, every existing test still passes, and `GATE-MECH1` still hol
 ## 11. Change Review
 <!-- kind: operational -->
 
-- [ ] 11.1 CHECK: Dispatch an independent reviewer — a fresh subagent that did **not** write
+- [x] 11.1 CHECK: Dispatch an independent reviewer — a fresh subagent that did **not** write
       the implementation, given only `proposal.md`, the **nine** spec files, `design.md`, this
       file, and the diff. It reports findings and changes nothing. Point it first at the
       concentration points `openspec/config.yaml` names for this repository — nothing spawns
@@ -969,10 +969,10 @@ the crate compiles, every existing test still passes, and `GATE-MECH1` still hol
       that cannot fail, and a check that cannot see what it guards in the formatting this
       codebase really uses.
 
-- [ ] 11.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a
+- [x] 11.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a
       one-line reason, note SUGGESTIONs, and re-run the affected tests.
 
-- [ ] 11.3 VERIFY: No blocking or unowned finding remains; every accepted WARNING carries its
+- [x] 11.3 VERIFY: No blocking or unowned finding remains; every accepted WARNING carries its
       reason in `planning-review.md`. Commit.
 
 ---

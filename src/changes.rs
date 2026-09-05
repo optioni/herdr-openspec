@@ -237,9 +237,6 @@ pub(crate) mod fixture {
     /// `NOLIT-CHANGE` forbids an `ArtifactRef {` literal outside this file, so
     /// a test cannot build one for itself. `index` past the end of
     /// `artifacts` marks nothing and does not panic.
-    // First caller lands in group 6 (`ui::detail::tests::`); until then this
-    // is plumbing with no test reaching for it yet.
-    #[allow(dead_code)]
     pub(crate) fn track_tasks_at(change: Change, index: usize) -> Change {
         let Change {
             name,
@@ -273,6 +270,30 @@ pub(crate) mod fixture {
                 .collect(),
             progress,
             problems,
+        }
+    }
+
+    /// A `Change` carrying `artifacts`' ids and paths (via
+    /// [`with_artifacts`]), its `progress` set explicitly, and — when
+    /// `marked` is `Some` — that position's `tracks_tasks` flipped `true`
+    /// (via [`track_tasks_at`]). The one place `ui::detail`'s, `ui::app`'s,
+    /// and `ui::view`'s tests reach for a `Change` carrying a possibly
+    /// marked artifact and an explicit progress pair, so no test module
+    /// needs a `-> Change` (or `-> crate::changes::Change`) helper of its
+    /// own — `NOLIT-CHANGE`'s pattern catches a `Change {` return-type
+    /// signature exactly as it catches a literal, and Change Review found
+    /// three such helpers red on the unmodified pattern; the fix is here,
+    /// not an exemption.
+    pub(crate) fn with_marked_artifacts(
+        artifacts: &[(&str, &[&str])],
+        marked: Option<usize>,
+        progress: crate::tasks::Progress,
+    ) -> Change {
+        let mut change = with_artifacts(active("x", 0, 0), artifacts);
+        change.progress = progress;
+        match marked {
+            Some(index) => track_tasks_at(change, index),
+            None => change,
         }
     }
 

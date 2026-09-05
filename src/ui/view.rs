@@ -1728,11 +1728,13 @@ mod tests {
         }
 
         // The same holds with the selected tab marked `tracks_tasks` and
-        // the same source turned into thirty 200-character task lines —
-        // neither the checklist's wrap nor the progress bar's gauge can
-        // reach the border.
-        let task_source: String = (0..30)
-            .map(|_| format!("- [ ] {}\n", "x".repeat(200)))
+        // the same source turned into thirty 200-character task lines
+        // under a 200-character heading — neither the checklist's wrap,
+        // the heading's truncation, nor the progress bar's gauge can
+        // reach the border. Found in Change Review: the heading line
+        // originally had no width treatment at all.
+        let task_source: String = std::iter::once(format!("## {}\n", "h".repeat(200)))
+            .chain((0..30).map(|_| format!("- [ ] {}\n", "x".repeat(200))))
             .collect();
         let marked_change = fixture::track_tasks_at(
             fixture::with_artifacts(fixture::active("detail-view", 4, 9), &[("proposal", &[])]),
@@ -2352,28 +2354,14 @@ mod tests {
 
     // --- group 7: the rendered buffer ----------------------------------
 
-    /// A `Change` carrying `ids`' artifacts, the one at `marked` (when
-    /// `Some`) carrying `tracks_tasks == true`, through
-    /// `changes::fixture::with_artifacts` and `changes::fixture::track_tasks_at`
-    /// — never an `ArtifactRef {}` literal of this module's own, which
-    /// `NOLIT-CHANGE` forbids.
-    fn change_with_marked_ids(
-        ids: &[&str],
-        marked: Option<usize>,
-        progress: crate::tasks::Progress,
-    ) -> Change {
-        let pairs: Vec<(&str, &[&str])> = ids.iter().map(|id| (*id, &[][..])).collect();
-        let mut change = fixture::with_artifacts(fixture::active("x", 0, 0), &pairs);
-        change.progress = progress;
-        match marked {
-            Some(index) => fixture::track_tasks_at(change, index),
-            None => change,
-        }
-    }
-
     /// The repeated "build a dashboard with a marked tab and this source"
     /// setup, folded into one helper — it appeared more than three times
-    /// among this group's new tests.
+    /// among this group's new tests. Reaches
+    /// `changes::fixture::with_marked_artifacts` for the change value,
+    /// never a literal of its own type or `ArtifactRef`'s, and never a
+    /// local helper whose own return type names that type — Change Review
+    /// found three such helpers tripping `NOLIT-CHANGE` on their
+    /// return-type signature alone.
     fn dashboard_with_marked_change(
         ids: &[&str],
         marked: Option<usize>,
@@ -2382,7 +2370,8 @@ mod tests {
         problems: Vec<String>,
         tab: usize,
     ) -> Dashboard {
-        let change = change_with_marked_ids(ids, marked, progress);
+        let pairs: Vec<(&str, &[&str])> = ids.iter().map(|id| (*id, &[][..])).collect();
+        let change = fixture::with_marked_artifacts(&pairs, marked, progress);
         dashboard_with_detail(
             vec![change],
             Vec::new(),
@@ -2605,12 +2594,26 @@ mod tests {
             vec!["/repo/openspec/changes/x/tasks.md: permission denied".to_string()],
             1,
         );
-        for (width, interior) in [(120, 78usize), (60, 58)] {
+        for width in [120, 60] {
             let buf = render_at(width, 20, &d);
+            // The problem row is padded to the interior's own width and
+            // stops exactly there: the last interior column is still part
+            // of the padded row (a space, not a border character), and
+            // the border column one past it is a box-drawing character —
+            // `detail_interior_cols(buf, y, interior).len() == interior`
+            // alone cannot fail (`cols` always returns exactly the length
+            // asked for), so this checks the buffer directly instead.
+            let border_x = if width == 60 { 59 } else { 119 };
+            let last_interior_x = border_x - 1;
+            assert_ne!(
+                cell(&buf, last_interior_x, 4).symbol(),
+                "│",
+                "width {width}: the interior's last column is still row content"
+            );
             assert_eq!(
-                detail_interior_cols(&buf, 4, interior).len(),
-                interior,
-                "width {width}: row is exactly the interior width"
+                cell(&buf, border_x, 4).symbol(),
+                "│",
+                "width {width}: the border one column past it is untouched"
             );
             assert!(
                 detail_interior_cols(&buf, 4, 24).starts_with("! /repo/openspec/changes"),

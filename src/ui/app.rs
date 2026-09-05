@@ -1262,18 +1262,6 @@ mod tests {
                 total: 20,
             };
 
-            fn change_at(marked: bool, progress: crate::tasks::Progress) -> crate::changes::Change {
-                let mut change = crate::changes::fixture::with_artifacts(
-                    crate::changes::fixture::active("x", 0, 0),
-                    &[("tasks", &[])],
-                );
-                change.progress = progress;
-                if marked {
-                    change = crate::changes::fixture::track_tasks_at(change, 0);
-                }
-                change
-            }
-
             fn dashboard_for(change: crate::changes::Change, source: String) -> Dashboard {
                 Dashboard {
                     detail: Detail {
@@ -1293,10 +1281,20 @@ mod tests {
                 }
             }
 
-            let mut d_marked = dashboard_for(change_at(true, progress), source.clone());
+            let mut d_marked = dashboard_for(
+                crate::changes::fixture::with_marked_artifacts(
+                    &[("tasks", &[])],
+                    Some(0),
+                    progress,
+                ),
+                source.clone(),
+            );
             d_marked.normalise_scroll(ratatui::layout::Rect::new(0, 0, 120, 20));
 
-            let mut d_unmarked = dashboard_for(change_at(false, progress), source);
+            let mut d_unmarked = dashboard_for(
+                crate::changes::fixture::with_marked_artifacts(&[("tasks", &[])], None, progress),
+                source,
+            );
             d_unmarked.normalise_scroll(ratatui::layout::Rect::new(0, 0, 120, 20));
 
             assert_ne!(

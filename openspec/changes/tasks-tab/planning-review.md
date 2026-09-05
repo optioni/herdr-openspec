@@ -132,6 +132,26 @@ becomes a standing instruction if it is wrong:
   whose result is a `usize`, so no borrow outlives the statement and the following
   `self.detail.scroll = …` is fine under NLL.
 
+## Change Review (post-implementation, group 11)
+
+A fifth reviewer — fresh, independent, no memory of the implementation — was dispatched
+after group 10 against the finished diff (`git diff 85a5631..HEAD`), the nine spec files,
+`design.md`, and `tasks.md`. Two CRITICALs and two WARNINGs, all fixed before this line was
+written; two SUGGESTIONs, both consciously accepted below.
+
+| Severity | Problem | Repair |
+|---|---|---|
+| CRITICAL | `ui::tasks::heading_line` took no `width` and emitted a heading verbatim: a heading longer than the interior overwrote the detail region's border (`buf.set_string` clips at the buffer edge, not the interior's last column, and a single-segment line has no between-segment guard). Reproduced at 60x20 with a 200-character heading: `x=59 y=6: "w"`. The guard that should have caught it, `ui::view::tests::detail_content_never_overwrites_the_border`'s marked case, used only long *task* lines, which wrap — no heading path was exercised. | `heading_line` now takes `width` and truncates (never wraps, since the requirement is one line) via `ui::list::pad_or_truncate_right`, only when the text already exceeds `width` — never padding a heading that already fits. Border test's marked source now leads with a 200-character heading too. New regression test `ui::tasks::tests::a_long_heading_is_truncated_not_wrapped`. Both new/extended tests re-verified red against the pre-fix code (reproducing the exact `x=119 y=6: "h"` failure) and green after. |
+| CRITICAL | `NOLIT-CHANGE` was red on the finished tree: three new test helpers — `src/ui/detail.rs`'s `change_with_marked_tab`, `src/ui/app.rs`'s `change_at`, `src/ui/view.rs`'s `change_with_marked_ids` — each had a `-> crate::changes::Change {` / `-> Change {` return-type signature, which the check's pattern catches exactly as it catches a literal (a fourth false-positive shape beyond the three the check's own "known limits" comment names, never propagated to these sites). None constructed a literal; each called `changes::fixture` correctly. | Moved the shared construction into a new `changes::fixture::with_marked_artifacts` (in `src/changes.rs`, exempt from the check by path), and deleted all three local helpers — callers now call the fixture function directly, or (in `ui/detail.rs`) through a small helper returning `Vec<(&str, &[&str])>`, never a change value. `MIN=19 sh $CHECKS/NOLIT-CHANGE.sh` reproduced the failure, then confirmed green after. One round-trip defect during the fix itself: the doc comments explaining the fix used the literal words "Change {" and were themselves caught by the same check — reworded to describe the type without spelling it, the same trap `TASKSEAM`'s comment-inclusive sweep has hit twice before in this repository. |
+| WARNING | `ui::detail::tests::content_lines_total` had no assertions (`let _ = content_lines(...)`) — it pinned only "does not panic" and would pass against a stub, the exact defect class task 4.1's Red-when warns about. It is also the test that would have caught the heading CRITICAL above. | Added the two missing THEN clauses from `specs/artifact-content`: no returned line's text exceeds the width it was called with, and the wrapped paragraph produces strictly more lines at 58 than at 78. |
+| WARNING | `ui::view::tests::tasks_tab_read_failure`'s width assertion — `detail_interior_cols(&buf, 4, interior).len() == interior` — cannot fail: `detail_interior_cols` always returns exactly the length it is asked for, by construction. | Replaced with a buffer-level check: the interior's last column is still row content (not a border glyph) and the border column one past it is untouched. |
+| SUGGESTION | `No tasks yet` (12 characters) is pushed unpadded and untruncated, so it exceeds `width` for any width below 12. | Accepted as-is: it mirrors the pre-existing, equally unbounded `No content yet` in `ui/detail.rs`, so the tradeoff is consistent with the codebase rather than novel. Not fixed. |
+| SUGGESTION | `changes::tests::tracks_tasks_prefers_tracks` and `tracks_tasks_tdd` hand a `Schema::tasks` value straight to the producer under test, so neither exercises `apply.tracks`-then-id `Schema` parsing itself. | Accepted as-is: `change_artifacts`/`cli_artifacts`'s unit tests are the right boundary for "does this function place the flag at `tasks_index`'s answer", not for schema YAML parsing, which `schema.rs`'s own tests already cover; the `apply.tracks` path is additionally exercised end-to-end by `ui::tests::detail::tasks_tab_is_read_only`, and id-fallback by `changes::tests::a_fully_written_active_change_becomes_one_value`. Not fixed. |
+
+Re-verified after all fixes: 673 lib tests pass (672 + 1 new regression test), `make check`
+exits 0, coverage 97.52% lines, `NOLIT-CHANGE`/`NOIO-VIEW`/`TASKSEAM`/`READONLY-UI`/
+`OPENSPEC-UNTOUCHED` all green.
+
 ## Deferred Non-Blocking Notes
 
 - **`openspec/IMPLEMENTATION-ORDER.md`'s `tasks-tab` row and its "Notes on the ordering"
