@@ -980,7 +980,7 @@ the crate compiles, every existing test still passes, and `GATE-MECH1` still hol
 ## 12. Documentation
 <!-- kind: operational -->
 
-- [ ] 12.1 Rewrite in `SPEC.md`: Degraded states, the "Schema loads with no tasks artifact"
+- [x] 12.1 Rewrite in `SPEC.md`: Degraded states, the "Schema loads with no tasks artifact"
       row (audience: anyone implementing against the contract) — it currently claims "the
       tasks tab is absent", which contradicts `detail-view`'s tab-per-declared-artifact rule
       and the roadmap note that `tasks-tab` adds no tab-bar code. Replace it with: no artifact
@@ -988,14 +988,14 @@ the crate compiles, every existing test still passes, and `GATE-MECH1` still hol
       added, removed, or hidden. Durable because it is the row a future reader would implement
       a tab-removal branch from.
 
-- [ ] 12.2 Rewrite in `SPEC.md`: Degraded states, the "markdown source holds a construct the
+- [x] 12.2 Rewrite in `SPEC.md`: Degraded states, the "markdown source holds a construct the
       parser does not model" row (audience: the same) — it lists "a task-list item" among the
       constructs rendered as literal source text, unqualified by tab, which this change makes
       false on the tracked-tasks tab. Scope the row to every tab **other** than that one, the
       same scoping the twin sentence in Detail view already carries. Durable because it is the
       row a future reader would use to argue the tasks tab should render its source verbatim.
 
-- [ ] 12.3 Add to `SPEC.md`: Degraded states, two rows (audience: the same) — a tasks file
+- [x] 12.3 Add to `SPEC.md`: Degraded states, two rows (audience: the same) — a tasks file
       that exists and yields no task **items** renders `No tasks yet`, distinct from
       `No content yet`, with no heading line even where the source carries headings; and a
       marked tab whose artifact resolves to no file renders `No content yet` while the header
@@ -1003,7 +1003,7 @@ the crate compiles, every existing test still passes, and `GATE-MECH1` still hol
       tab's content and the change's progress legitimately disagree, and it is the row that
       stops a future reader "fixing" the divergence.
 
-- [ ] 12.4 Rewrite in `SPEC.md`: User interface → Detail view, the tasks-tab paragraph, plus
+- [x] 12.4 Rewrite in `SPEC.md`: User interface → Detail view, the tasks-tab paragraph, plus
       the Module map `ui` row, Testing → Unit-tested modules, and View tests (audience: the
       same) — name `ui::tasks`, state that the tab is identified by **position** from the
       schema's tracked-tasks artifact rather than by id, and that the bar renders
@@ -1011,7 +1011,7 @@ the crate compiles, every existing test still passes, and `GATE-MECH1` still hol
       under ten lines beyond the row rewrites above; the tasks-tab paragraph is rewritten in
       place rather than appended to.
 
-- [ ] 12.5 Rewrite in `AGENTS.md`: **two** Architecture-rules bullets plus Current repo state
+- [x] 12.5 Rewrite in `AGENTS.md`: **two** Architecture-rules bullets plus Current repo state
       (audience: every future session). (a) "Views do no I/O" — the pure set becomes **eight**
       files with `src/ui/tasks.rs` named. (b) "The detail region's two mandated interior widths
       are 78 and 58 … Every test in `ui::markdown` and `ui::detail` asserts both" — add
@@ -1022,7 +1022,7 @@ the crate compiles, every existing test still passes, and `GATE-MECH1` still hol
       description, which gains one sentence on what the tasks tab now renders. Rewrite all
       three in place; do not append a second entry beside the existing ones.
 
-- [ ] 12.6 CHECK: Deferred to archive time, not doable now —
+- [x] 12.6 CHECK: Deferred to archive time, not doable now —
       `openspec/IMPLEMENTATION-ORDER.md`'s `tasks-tab` row and the note under "Notes on the
       ordering" must be confirmed to still describe what was built, and corrected if not.
       `OPENSPEC-UNTOUCHED` forbids writing anywhere under `openspec/` outside this change's
@@ -1030,7 +1030,7 @@ the crate compiles, every existing test still passes, and `GATE-MECH1` still hol
       (10.4b), `markdown-viewer` (11.8), and `detail-view` (13.4) did, and is discharged by
       `openspec archive`.
 
-- [ ] 12.7 VERIFY: `sh $CHECKS/OPENSPEC-UNTOUCHED.sh` — the doc edits are to `SPEC.md` and
+- [x] 12.7 VERIFY: `sh $CHECKS/OPENSPEC-UNTOUCHED.sh` — the doc edits are to `SPEC.md` and
       `AGENTS.md`, both outside `openspec/`, so it still prints OK. Commit.
 
 ---

@@ -76,7 +76,7 @@ Result<String, String>` reader, whose one production binding lives in
 | `agents` | Attribute live Herdr agents to changes |
 | `launch` | Split a pane, start an agent, send the `/opsx:*` prompt |
 | `watch` | Filesystem watching and debounce |
-| `ui` | Views (the change-row grammar, the detail region's header/tab-bar/content grammar, and markdown rendering included — `ui::markdown` is now the largest single piece of the module), layout, the dashboard's own state (selection, the `/` filter, the detail scroll offset, the selected artifact tab, and the injected artifact-read binding), key handling, terminal lifecycle, and the event loop |
+| `ui` | Views (the change-row grammar, the detail region's header/tab-bar/content grammar, markdown rendering, and `ui::tasks`' checklist-and-progress-bar grammar for the tracked-tasks tab), layout, the dashboard's own state (selection, the `/` filter, the detail scroll offset, the selected artifact tab, and the injected artifact-read binding), key handling, terminal lifecycle, and the event loop |
 | `cli` | The two subprocess traits and their real implementations |
 
 ## Data layer
@@ -347,8 +347,12 @@ repository, no changes, or a `/` filter matching none); whenever a change
 **is** selected, the header and tab bar are always drawn and the content
 area always holds at least one line (`detail-view`).
 
-The **tasks tab** renders task groups under their headings, a checkbox glyph
-per item, and a progress bar (`tasks-tab`). Every other tab is rendered by
+The **tracked-tasks tab** — identified by **position**, from the schema
+artifact `ArtifactRef::tracks_tasks` marks, never by id or filename —
+renders `ui::tasks`' grammar: a progress bar showing the change's own
+`progress` (never a second count of the source), then task groups under
+their headings with a `[x]`/`[ ]` glyph per item (`tasks-tab`). Every other
+tab is rendered by
 `markdown-viewer`'s markdown viewer, whose rendering grammar is: a heading
 keeps its `#` markers rather than being distinguished by colour; a paragraph
 word-wraps to the interior width, with a soft break starting a new rendered
@@ -501,13 +505,15 @@ Every condition renders usable content rather than an error screen:
 | Schema unknown to the CLI | Per-change fall back to file mode. This is real: `learning-tool` declares schema `outside-in-tdd`, which the installed CLI rejects |
 | Schema not vendored (no `openspec/schemas/<name>/schema.yaml` locally) | Artifact list empty until the CLI tier supplies it; distinct from the row above, which is the CLI rejecting a schema the plugin already read — both can be true at once for a schema like `outside-in-tdd`. The detail region's tab bar renders `no artifacts` for such a change (`detail-view`) |
 | Schema unreadable or invalid (I/O error, or bytes that are not a usable schema) | Artifact list empty, and the reason is named. The detail region's tab bar renders `no artifacts` for such a change (`detail-view`) |
-| Schema loads with no tasks artifact (`apply.tracks` matches nothing, and no artifact has id `tasks`) | Every other tab renders; the tasks tab is absent, which is `tasks-tab`'s rendering decision. The task **count** is not deferred: it falls back to counting `<change dir>/tasks.md` directly, matching `openspec list --json`'s own behaviour for such a change, so the pane never shows a pair the CLI would immediately correct |
+| Schema loads with no tasks artifact (`apply.tracks` matches nothing, and no artifact has id `tasks`) | No artifact is marked, so every tab renders as markdown and none renders the checklist; no tab is added, removed, or hidden. The task **count** is not deferred: it falls back to counting `<change dir>/tasks.md` directly, matching `openspec list --json`'s own behaviour for such a change, so the pane never shows a pair the CLI would immediately correct |
 | No active changes | Empty state; archived changes remain browsable |
 | A `/` filter matches no change | Two rows: `No changes match`, then `/` and the query, so the filter that produced the empty state stays visible |
 | Artifact file missing | Tab is still shown and renders "No content yet" (`detail-view`) |
 | An artifact file exists and cannot be read (permission error, I/O error) | Tab is still shown; a `!`-marked problem line naming the path and the reason is rendered above the content, and "No content yet" is not also shown — the reason is known, and showing both would say two contradictory things about the same tab (`detail-view`) |
 | No change is selected (an empty visible list, or a `/` filter matching none) | The whole detail region is blank; the list region already names the empty state, and duplicating it in the detail region would say the same thing twice (`detail-view`) |
-| Markdown source holds a construct the parser does not model (a table, a footnote, strikethrough, a task-list item) | Renders as its literal source text, one line per source line, rather than being dropped or mangled (`markdown-viewer`) |
+| Markdown source holds a construct the parser does not model (a table, a footnote, strikethrough, a task-list item), on a tab **other** than the tracked-tasks one | Renders as its literal source text, one line per source line, rather than being dropped or mangled (`markdown-viewer`) |
+| A tasks file exists and yields no task **items** | The tracked-tasks tab renders `No tasks yet`, distinct from `No content yet`, with no heading line even where the source carries headings (`tasks-tab`) |
+| A marked tab's artifact resolves to no file while the change's `progress` is non-zero (the `tasks.md` fallback above counted a file the artifact itself did not) | The tab reads `No content yet` and shows no progress bar, while the header one row up still shows the counted pair — the one place the tab's content and the header legitimately disagree (`tasks-tab`) |
 | `openspec/changes/` or its `archive/` exists and cannot be read | Empty list for the affected tier, with the reason named on `ChangeSet::problems` and rendered as a leading `!`-marked row of the list, above the change rows; the archive walk is not attempted when the parent read already failed, so a permission error is never reported twice for the same fault |
 | An artifact's `generates` pattern falls outside the file path's supported glob subset | That artifact's list is empty and the reason is named; every other artifact on the change still resolves normally, and the CLI tier supplies the correct list when it arrives |
 | A tasks file exists but cannot be read (a directory where a file was expected, a permission error, an I/O error, or invalid UTF-8) | Reported as zero tasks, named in `Tasks::problems`; the CLI's count corrects the pane when it arrives. Invalid UTF-8 is the one case where the file path knowingly disagrees with `openspec list --json`, which decodes lossily and still reports a count — every other read failure already agrees with the CLI, which records the same failure as zero tasks too |
@@ -560,17 +566,22 @@ is tested against scratch `#!/bin/sh` programs rather than the real `openspec`,
   purpose-built scratch directory tree under `std::env::temp_dir()`, not a
   faked filesystem layer
 - `ui::layout`, `ui::app`, `ui::list`, `ui::detail`, `ui::markdown`,
-  `ui::view`, `ui::driver`, `ui::terminal`, and `ui::mod`'s `load` and
-  `read_artifact` functions — the breakpoint and frame split, `Dashboard`
-  and key handling, the change-row grammar, the detail region's
-  header/tab-bar/content grammar (`ui::detail` — plain data, no I/O,
-  parameterised by width; see Architecture rules), markdown source to
+  `ui::tasks`, `ui::view`, `ui::driver`, `ui::terminal`, and `ui::mod`'s
+  `load` and `read_artifact` functions — the breakpoint and frame split,
+  `Dashboard` and key handling, the change-row grammar, the detail
+  region's header/tab-bar/content grammar (`ui::detail` — plain data, no
+  I/O, parameterised by width; see Architecture rules), markdown source to
   plain-data lines of faced segments (`ui::markdown` — confined to one
-  module and checked for it; see Architecture rules), the render seam
-  proper, the draw-then-wait event loop, startup state from files, and the
-  one artifact-read binding. `ratatui::backend::TestBackend` stands in for
-  the rendering surface and a recording `TerminalOps` double stands in for
-  the terminal; no test constructs the real terminal implementation
+  module and checked for it; see Architecture rules), the tracked-tasks
+  tab's checklist-and-progress-bar grammar (`ui::tasks` — plain data, no
+  I/O, parameterised by width, on the same terms as `ui::detail` and
+  `ui::markdown`; the tab is chosen by `ArtifactRef::tracks_tasks`, never
+  an id or filename, and the bar renders `Change::progress` rather than
+  recounting the source), the render seam proper, the draw-then-wait event
+  loop, startup state from files, and the one artifact-read binding.
+  `ratatui::backend::TestBackend` stands in for the rendering surface and
+  a recording `TerminalOps` double stands in for the terminal; no test
+  constructs the real terminal implementation
 
 ### View tests
 
@@ -579,9 +590,9 @@ both 60 and 120 columns so the responsive breakpoint is genuinely covered.
 Three width pairs matter, at three different tiers, and each is asserted
 directly rather than left implied by the frame pair alone: the frame itself
 at 60 and 120; the list region's interior at 38 and 58 (`ui::list`); and the
-detail region's interior at 58 and 78 (`ui::markdown`, `ui::view`, and
-`ui::detail`, whose header, tab-bar, and content-line grammar is asserted at
-both widths directly, with no exemption).
+detail region's interior at 58 and 78 (`ui::markdown`, `ui::tasks`,
+`ui::view`, and `ui::detail`, whose header, tab-bar, and content-line
+grammar is asserted at both widths directly, with no exemption).
 
 ### Fixtures
 
