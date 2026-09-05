@@ -260,7 +260,9 @@ impl Dashboard {
         if content.width == 0 || content.height == 0 {
             return;
         }
-        let total = crate::ui::detail::content_lines(&self.detail, content.width).len();
+        let total =
+            crate::ui::detail::content_lines(&self.detail, self.selected_change(), content.width)
+                .len();
         self.detail.scroll =
             crate::ui::layout::scroll_offset(total, self.detail.scroll, content.height);
     }

@@ -29,6 +29,11 @@ pub enum Origin {
 pub struct ArtifactRef {
     pub id: String,
     pub paths: Vec<PathBuf>,
+    /// True at exactly the one position the schema's tasks-artifact rule
+    /// names — the first index of `Schema::artifacts` equal to
+    /// `Schema::tasks` — false everywhere else and everywhere when the
+    /// schema names no tasks artifact.
+    pub tracks_tasks: bool,
 }
 
 /// One OpenSpec change, reduced to what a dashboard needs. Carries no
@@ -218,6 +223,52 @@ pub(crate) mod fixture {
                 .map(|(id, paths)| super::ArtifactRef {
                     id: (*id).to_string(),
                     paths: paths.iter().map(PathBuf::from).collect(),
+                    tracks_tasks: false,
+                })
+                .collect(),
+            progress,
+            problems,
+        }
+    }
+
+    /// `change` with `artifacts[index]`'s `tracks_tasks` set `true` and every
+    /// other entry's left `false` — the one place a view test reaches for a
+    /// `Change` carrying a marked artifact, on `with_artifacts`'s terms:
+    /// `NOLIT-CHANGE` forbids an `ArtifactRef {` literal outside this file, so
+    /// a test cannot build one for itself. `index` past the end of
+    /// `artifacts` marks nothing and does not panic.
+    // First caller lands in group 6 (`ui::detail::tests::`); until then this
+    // is plumbing with no test reaching for it yet.
+    #[allow(dead_code)]
+    pub(crate) fn track_tasks_at(change: Change, index: usize) -> Change {
+        let Change {
+            name,
+            dir,
+            origin,
+            schema,
+            artifacts,
+            progress,
+            problems,
+        } = change;
+        Change {
+            name,
+            dir,
+            origin,
+            schema,
+            artifacts: artifacts
+                .into_iter()
+                .enumerate()
+                .map(|(i, artifact)| {
+                    let super::ArtifactRef {
+                        id,
+                        paths,
+                        tracks_tasks: _,
+                    } = artifact;
+                    super::ArtifactRef {
+                        id,
+                        paths,
+                        tracks_tasks: i == index,
+                    }
                 })
                 .collect(),
             progress,
@@ -619,6 +670,7 @@ pub(crate) fn change_artifacts(
         artifacts.push(ArtifactRef {
             id: artifact.id.clone(),
             paths,
+            tracks_tasks: false,
         });
     }
 
@@ -1123,6 +1175,7 @@ pub(crate) fn cli_artifacts(
         .map(|artifact| ArtifactRef {
             id: artifact.id.clone(),
             paths: context_files.get(&artifact.id).cloned().unwrap_or_default(),
+            tracks_tasks: false,
         })
         .collect();
 
@@ -1590,6 +1643,7 @@ mod tests {
             artifacts: vec![ArtifactRef {
                 id: "proposal".to_string(),
                 paths: vec![PathBuf::from("/repo/openspec/changes/add-auth/proposal.md")],
+                tracks_tasks: false,
             }],
             progress: crate::tasks::Progress {
                 completed: 4,
@@ -1651,6 +1705,7 @@ mod tests {
         change.artifacts = vec![ArtifactRef {
             id: String::new(),
             paths: vec![],
+            tracks_tasks: false,
         }];
         assert_invariants(&change);
     }
@@ -1698,18 +1753,22 @@ mod tests {
             ArtifactRef {
                 id: "zeta".to_string(),
                 paths: vec![],
+                tracks_tasks: false,
             },
             ArtifactRef {
                 id: "alpha".to_string(),
                 paths: vec![],
+                tracks_tasks: false,
             },
             ArtifactRef {
                 id: "middle".to_string(),
                 paths: vec![],
+                tracks_tasks: false,
             },
             ArtifactRef {
                 id: "zeta".to_string(),
                 paths: vec![],
+                tracks_tasks: false,
             },
         ];
         assert_invariants(&change);
@@ -2168,22 +2227,27 @@ mod tests {
                 ArtifactRef {
                     id: "proposal".to_string(),
                     paths: vec![dir.join("proposal.md")],
+                    tracks_tasks: false,
                 },
                 ArtifactRef {
                     id: "specs".to_string(),
                     paths: vec![],
+                    tracks_tasks: false,
                 },
                 ArtifactRef {
                     id: "design".to_string(),
                     paths: vec![],
+                    tracks_tasks: false,
                 },
                 ArtifactRef {
                     id: "tasks".to_string(),
                     paths: vec![dir.join("tasks.md")],
+                    tracks_tasks: false,
                 },
                 ArtifactRef {
                     id: "planning-review".to_string(),
                     paths: vec![],
+                    tracks_tasks: false,
                 },
             ]
         );
@@ -2786,22 +2850,27 @@ mod tests {
                     ArtifactRef {
                         id: "proposal".to_string(),
                         paths: vec![repo.join("openspec/changes/add-auth/proposal.md")],
+                        tracks_tasks: false,
                     },
                     ArtifactRef {
                         id: "specs".to_string(),
                         paths: vec![],
+                        tracks_tasks: false,
                     },
                     ArtifactRef {
                         id: "design".to_string(),
                         paths: vec![repo.join("openspec/changes/add-auth/design.md")],
+                        tracks_tasks: false,
                     },
                     ArtifactRef {
                         id: "tasks".to_string(),
                         paths: vec![repo.join("openspec/changes/add-auth/tasks.md")],
+                        tracks_tasks: false,
                     },
                     ArtifactRef {
                         id: "planning-review".to_string(),
                         paths: vec![],
+                        tracks_tasks: false,
                     },
                 ],
                 progress: crate::tasks::Progress {
@@ -3568,6 +3637,7 @@ mod tests {
             ArtifactRef {
                 id: id.to_string(),
                 paths: paths.into_iter().map(PathBuf::from).collect(),
+                tracks_tasks: false,
             }
         }
 
@@ -5072,10 +5142,12 @@ mod tests {
                     ArtifactRef {
                         id: "proposal".to_string(),
                         paths: vec![],
+                        tracks_tasks: false,
                     },
                     ArtifactRef {
                         id: "tasks".to_string(),
                         paths: vec![],
+                        tracks_tasks: false,
                     },
                 ],
                 (4, 9),
@@ -5206,22 +5278,27 @@ mod tests {
                     ArtifactRef {
                         id: "a".to_string(),
                         paths: vec![],
+                        tracks_tasks: false,
                     },
                     ArtifactRef {
                         id: "b".to_string(),
                         paths: vec![],
+                        tracks_tasks: false,
                     },
                     ArtifactRef {
                         id: "c".to_string(),
                         paths: vec![],
+                        tracks_tasks: false,
                     },
                     ArtifactRef {
                         id: "d".to_string(),
                         paths: vec![],
+                        tracks_tasks: false,
                     },
                     ArtifactRef {
                         id: "e".to_string(),
                         paths: vec![],
+                        tracks_tasks: false,
                     },
                 ],
                 (0, 0),
@@ -5272,10 +5349,12 @@ mod tests {
                     ArtifactRef {
                         id: "a".to_string(),
                         paths: vec![],
+                        tracks_tasks: false,
                     },
                     ArtifactRef {
                         id: "b".to_string(),
                         paths: vec![],
+                        tracks_tasks: false,
                     },
                 ],
                 (0, 0),
@@ -5291,14 +5370,17 @@ mod tests {
                     ArtifactRef {
                         id: "a".to_string(),
                         paths: vec![],
+                        tracks_tasks: false,
                     },
                     ArtifactRef {
                         id: "b".to_string(),
                         paths: vec![],
+                        tracks_tasks: false,
                     },
                     ArtifactRef {
                         id: "c".to_string(),
                         paths: vec![],
+                        tracks_tasks: false,
                     },
                 ],
                 (0, 0),

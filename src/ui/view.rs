@@ -106,7 +106,11 @@ fn render_detail_content(frame: &mut Frame, content: Rect, dashboard: &Dashboard
     if content.width == 0 || content.height == 0 {
         return;
     }
-    let lines = detail::content_lines(&dashboard.detail, content.width);
+    let lines = detail::content_lines(
+        &dashboard.detail,
+        dashboard.selected_change(),
+        content.width,
+    );
     let offset = scroll_offset(lines.len(), dashboard.detail.scroll, content.height);
     let buf = frame.buffer_mut();
     for (i, line) in lines

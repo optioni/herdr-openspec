@@ -167,8 +167,12 @@ pub fn tab_bar(artifacts: &[crate::changes::ArtifactRef], selected: usize, width
 /// reading `No content yet`. When `problems` is non-empty and `source` is
 /// empty, the problems alone are returned: the reason is known, and adding
 /// `No content yet` would say two contradictory things about the same tab.
+// `change` is unused until group 6 wires the tracked-tasks dispatch; named
+// rather than `_change` so that edit is a diff on this line, not a rename.
+#[allow(unused_variables)]
 pub fn content_lines(
     detail: &crate::ui::app::Detail,
+    change: Option<&crate::changes::Change>,
     width: u16,
 ) -> Vec<crate::ui::markdown::Line> {
     let mut out: Vec<crate::ui::markdown::Line> = detail
@@ -521,7 +525,7 @@ mod tests {
     #[test]
     fn an_empty_detail_returns_exactly_one_no_content_yet_line() {
         for width in [78, 58] {
-            let lines = content_lines(&detail("", Vec::new()), width);
+            let lines = content_lines(&detail("", Vec::new()), None, width);
             assert_eq!(lines.len(), 1, "width {width}");
             assert_eq!(lines[0].text(), "No content yet", "width {width}");
         }
@@ -531,7 +535,7 @@ mod tests {
     fn problems_only_are_returned_with_no_no_content_yet_line() {
         for width in [78, 58] {
             let d = detail("", vec!["/repo/a.md: boom".to_string()]);
-            let lines = content_lines(&d, width);
+            let lines = content_lines(&d, None, width);
             assert_eq!(lines.len(), 1, "width {width}");
             assert!(
                 lines[0].text().starts_with("! /repo/a.md: boom"),
@@ -549,7 +553,7 @@ mod tests {
     fn a_source_only_renders_as_markdown_with_no_problem_line() {
         for width in [78, 58] {
             let d = detail("# heading\n", Vec::new());
-            let lines = content_lines(&d, width);
+            let lines = content_lines(&d, None, width);
             assert!(!lines.is_empty(), "width {width}");
             assert!(
                 !lines.iter().any(|l| l.text().starts_with('!')),
@@ -566,7 +570,7 @@ mod tests {
     fn both_problems_and_source_are_returned_with_problems_first() {
         for width in [78, 58] {
             let d = detail("# heading\n", vec!["/repo/a.md: boom".to_string()]);
-            let lines = content_lines(&d, width);
+            let lines = content_lines(&d, None, width);
             assert!(
                 lines[0].text().starts_with("! /repo/a.md: boom"),
                 "width {width}: {:?}",
@@ -588,8 +592,8 @@ mod tests {
         let paragraph = format!("{}\n", "word ".repeat(40).trim());
         assert!(paragraph.chars().count() > 100);
         let d = detail(&paragraph, Vec::new());
-        let lines78 = content_lines(&d, 78);
-        let lines58 = content_lines(&d, 58);
+        let lines78 = content_lines(&d, None, 78);
+        let lines58 = content_lines(&d, None, 58);
         assert!(
             lines58.len() > lines78.len(),
             "58: {}, 78: {}",

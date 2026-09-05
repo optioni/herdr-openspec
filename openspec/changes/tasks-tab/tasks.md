@@ -562,11 +562,11 @@ A field, a signature, and a test helper. No rule and no rendering: group 1 sets
 nothing observable changes and there is no honest RED to manufacture. The evidence is that
 the crate compiles, every existing test still passes, and `GATE-MECH1` still holds.
 
-- [ ] 1.1 CHECK: `python3 $CHECKS/GATE-MECH1.py src` and
+- [x] 1.1 CHECK: `python3 $CHECKS/GATE-MECH1.py src` and
       `cargo test --all-features --lib 'changes::tests::'` both green before any edit, so the
       "no regression" claim below has a baseline.
 
-- [ ] 1.2 CHANGE: Add `pub tracks_tasks: bool` to `changes::ArtifactRef`, after `paths`.
+- [x] 1.2 CHANGE: Add `pub tracks_tasks: bool` to `changes::ArtifactRef`, after `paths`.
       Set it `false` at every one of the **32** construction sites in `src/changes.rs` —
       including `change_artifacts`, `cli_artifacts`, and `fixture::with_artifacts`. Do not
       count them with a grep: `grep -c 'ArtifactRef {'` reports 36 and includes the struct
@@ -577,7 +577,7 @@ the crate compiles, every existing test still passes, and `GATE-MECH1` still hol
       Red-when: the crate compiles without every site naming the field — that would mean a
       `Default` or a `..` slipped in.
 
-- [ ] 1.3 CHANGE: Add `pub(crate) fn track_tasks_at(change: Change, index: usize) -> Change`
+- [x] 1.3 CHANGE: Add `pub(crate) fn track_tasks_at(change: Change, index: usize) -> Change`
       to `changes::fixture` (`#[cfg(test)]`), returning `change` with `artifacts[index]`'s
       `tracks_tasks` set `true` and every other left `false`; an `index` past the end marks
       nothing and does not panic. It lives in `src/changes.rs` beside `with_artifacts` for the
@@ -585,7 +585,7 @@ the crate compiles, every existing test still passes, and `GATE-MECH1` still hol
       outside that file, and a view test that needed one would otherwise force the check to be
       weakened.
 
-- [ ] 1.4 CHANGE: Widen `ui::detail::content_lines` to
+- [x] 1.4 CHANGE: Widen `ui::detail::content_lines` to
       `(detail: &Detail, change: Option<&crate::changes::Change>, width: u16)`, **ignoring**
       `change` for now (`let _ = change;` is not needed — an unused parameter named `_change`
       would hide the group-6 edit; name it `change` and add `#[allow(unused_variables)]` only
@@ -598,12 +598,12 @@ the crate compiles, every existing test still passes, and `GATE-MECH1` still hol
       borrow by computing `total` in its own statement before assigning `self.detail.scroll`,
       **not** to clone the change or to reorder the function's steps.
 
-- [ ] 1.5 CHECK: Contract gate — re-read `design.md` → Contracts and confirm the three
+- [x] 1.5 CHECK: Contract gate — re-read `design.md` → Contracts and confirm the three
       signatures on disk match it exactly, and that `Change`'s **seven** fields are unchanged,
       so `cli-changes`' "every one of `Change`'s seven fields comes from CLI data" requirement
       is untouched.
 
-- [ ] 1.6 VERIFY: `cargo fmt --all -- --check`;
+- [x] 1.6 VERIFY: `cargo fmt --all -- --check`;
       `cargo clippy --all-targets --all-features -- -D warnings`;
       `cargo test --all-features` — **fully green**, this being the last boundary before the
       acceptance test goes red; `python3 $CHECKS/GATE-MECH1.py src`;
