@@ -752,7 +752,7 @@ the crate compiles, every existing test still passes, and `GATE-MECH1` still hol
 ## 5. The checklist grammar
 <!-- kind: behavior -->
 
-- [ ] 5.1 RED: Write seven failing tests in `ui::tasks::tests::`, named from their scenarios:
+- [x] 5.1 RED: Write seven failing tests in `ui::tasks::tests::`, named from their scenarios:
       `groups_headings_items`, `nested_indent`, `long_item_hanging_indent`,
       `unbreakable_word_hard_split`, `indent_dropped_whole`, `empty_group_keeps_heading`,
       `headingless_leading_group`. Each names both `58` and `78` unsuffixed.
@@ -760,7 +760,7 @@ the crate compiles, every existing test still passes, and `GATE-MECH1` still hol
       vector satisfies that forever; it must also assert the strict line-count inequality
       between 58 and 78 and the four-space continuation prefix.
 
-- [ ] 5.2 GREEN: Implement `pub fn lines(source: &str, progress: &crate::tasks::Progress,
+- [x] 5.2 GREEN: Implement `pub fn lines(source: &str, progress: &crate::tasks::Progress,
       width: u16) -> Vec<crate::ui::markdown::Line>` per `specs/tasks-checklist/spec.md` →
       "The checklist's line grammar": the bar and its blank line (both omitted when the bar is
       empty), then `crate::tasks::parse(source)`'s groups — heading line with
@@ -771,16 +771,16 @@ the crate compiles, every existing test still passes, and `GATE-MECH1` still hol
       Red-when: `crate::tasks::read` is called instead of `crate::tasks::parse`. `TASKSEAM`'s
       second leg catches it; `NOIO-VIEW`'s pattern does not, which is why that leg exists.
 
-- [ ] 5.3 GREEN: Implement the private plain-text wrapper `design.md` → Decisions 8 argues
+- [x] 5.3 GREEN: Implement the private plain-text wrapper `design.md` → Decisions 8 argues
       for: word-wrap at spaces, hard-split a word longer than the column, and never lose a
       tail. It stays private to `src/ui/tasks.rs`; do **not** make `ui::markdown`'s `Run` or
       its folder public to reuse `wrap_prose` — that widens `MDSEAM`'s confined module for a
       caller with no faces.
 
-- [ ] 5.4 REFACTOR: Clean up while the fourteen tests stay green, or state that none was
+- [x] 5.4 REFACTOR: Clean up while the fourteen tests stay green, or state that none was
       needed.
 
-- [ ] 5.5 CHECK: `sh $CHECKS/TASKSEAM.sh` — its parse leg is **armed for the first time**
+- [x] 5.5 CHECK: `sh $CHECKS/TASKSEAM.sh` — its parse leg is **armed for the first time**
       here, because `pub fn lines` now exists, so the run must print
       `TASKSEAM OK (parse leg)` rather than `parse leg not armed`. Then its two deferred
       plants from task 0.4: replace the `tasks::parse(...)` call with a hand-rolled
@@ -788,7 +788,7 @@ the crate compiles, every existing test still passes, and `GATE-MECH1` still hol
       (expect FAIL — the leg strips comments and matches a call shape), and restore it (expect
       OK). `git status --porcelain src/` empty after the revert.
 
-- [ ] 5.6 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'ui::tasks::tests::' 14`;
+- [x] 5.6 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'ui::tasks::tests::' 14`;
       `TASK_MIN=14 sh $CHECKS/TASKWIDTHS.sh`; `sh $CHECKS/NOIO-VIEW.sh`; the four gate
       commands, still failing on exactly the one known acceptance test.
       `sh $CHECKS/OPENSPEC-UNTOUCHED.sh`. Commit.

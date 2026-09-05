@@ -91,9 +91,180 @@ fn gauge_of(progress: &crate::tasks::Progress, g: u16) -> String {
     out
 }
 
+/// A blank separator line — an empty segment list, the same shape
+/// `ui::markdown::lines` uses between blocks.
+fn blank_line() -> crate::ui::markdown::Line {
+    crate::ui::markdown::Line {
+        segments: Vec::new(),
+    }
+}
+
+/// One line carrying `text` as a single `Face::plain()` segment.
+fn plain_line(text: String) -> crate::ui::markdown::Line {
+    crate::ui::markdown::Line {
+        segments: vec![crate::ui::markdown::Segment {
+            text,
+            face: crate::ui::markdown::Face::plain(),
+        }],
+    }
+}
+
+/// A heading line: `level` `#` markers, a space, and `text` verbatim,
+/// carrying `Face { heading: Some(level), .. }` spelled out field by
+/// field so the view bolds it through the existing `heading` mapping,
+/// with no new mapping of its own.
+fn heading_line(heading: &crate::tasks::Heading) -> crate::ui::markdown::Line {
+    let text = format!("{} {}", "#".repeat(heading.level as usize), heading.text);
+    crate::ui::markdown::Line {
+        segments: vec![crate::ui::markdown::Segment {
+            text,
+            face: crate::ui::markdown::Face {
+                heading: Some(heading.level),
+                strong: false,
+                emphasis: false,
+                code: false,
+                link: false,
+                quoted: false,
+            },
+        }],
+    }
+}
+
+/// Word-wrap `text` to `col` columns: wrap at spaces, hard-split a word
+/// longer than `col`, and never lose a tail. Private to this module —
+/// reusing `ui::markdown::wrap_prose` would mean making its internal
+/// `Run` and folder shapes public for a caller that carries no faces at
+/// all, widening `MDSEAM`'s confined module for no reason. `col == 0` is
+/// never reached: every caller in this module has already fallen back to
+/// the truncated-glyph line before wrapping would be attempted with no
+/// column to wrap into.
+fn wrap_plain(text: &str, col: usize) -> Vec<String> {
+    if col == 0 {
+        return vec![String::new()];
+    }
+    let mut lines: Vec<String> = Vec::new();
+    let mut current: Vec<char> = Vec::new();
+    for word in text.split(' ').filter(|w| !w.is_empty()) {
+        let mut remaining: Vec<char> = word.chars().collect();
+        loop {
+            if current.is_empty() {
+                if remaining.len() <= col {
+                    current = remaining;
+                    break;
+                }
+                let (head, tail) = remaining.split_at(col);
+                lines.push(head.iter().collect());
+                remaining = tail.to_vec();
+                continue;
+            }
+            if current.len() + 1 + remaining.len() <= col {
+                current.push(' ');
+                current.extend(remaining);
+                break;
+            }
+            lines.push(current.iter().collect());
+            current = Vec::new();
+        }
+    }
+    lines.push(current.iter().collect());
+    lines
+}
+
+/// One `tasks::Item`'s rendered line(s): the prefix — `item.indent`
+/// spaces, the three-character glyph, one space — followed by the
+/// word-wrapped text at a hanging indent of the prefix's own width. The
+/// indent is dropped whole when the full prefix would leave no text
+/// column, then the separating space and glyph-only prefix is tried, and
+/// when even that leaves no text column, the glyph alone — truncated by
+/// `ui::list::pad_or_truncate_right` at `width` — is the whole line, with
+/// the item's text discarded rather than wrapped into zero columns.
+fn item_lines(item: &crate::tasks::Item, width: u16) -> Vec<crate::ui::markdown::Line> {
+    let w = width as usize;
+    let glyph = if item.checked { "[x]" } else { "[ ]" };
+
+    let full_prefix_len = item.indent + 4;
+    let prefix = if full_prefix_len < w {
+        Some((
+            format!("{}{glyph} ", " ".repeat(item.indent)),
+            full_prefix_len,
+        ))
+    } else if 4 < w {
+        Some((format!("{glyph} "), 4))
+    } else {
+        None
+    };
+
+    let Some((prefix, prefix_len)) = prefix else {
+        return vec![plain_line(crate::ui::list::pad_or_truncate_right(glyph, w))];
+    };
+
+    let col = w - prefix_len;
+    let wrapped = wrap_plain(&item.text, col);
+    let indent = " ".repeat(prefix_len);
+    wrapped
+        .into_iter()
+        .enumerate()
+        .map(|(i, text)| {
+            if i == 0 {
+                plain_line(format!("{prefix}{text}"))
+            } else {
+                plain_line(format!("{indent}{text}"))
+            }
+        })
+        .collect()
+}
+
+/// The tracked-tasks tab's body: the bar, a blank line, then
+/// `tasks::parse`'s groups. Empty vector at width 0, matching
+/// `ui::markdown::lines`.
+pub fn lines(
+    source: &str,
+    progress: &crate::tasks::Progress,
+    width: u16,
+) -> Vec<crate::ui::markdown::Line> {
+    if width == 0 {
+        return Vec::new();
+    }
+
+    let mut out = Vec::new();
+    let bar = progress_bar(progress, width);
+    if !bar.is_empty() {
+        out.push(plain_line(bar));
+        out.push(blank_line());
+    }
+
+    let tasks = crate::tasks::parse(source);
+
+    // The trigger is items, not groups: `task-groups` requires `parse` to
+    // emit a group for every heading it recognises, including one holding
+    // no items, so a prose file opening with a heading returns one group
+    // and zero items. A document with zero items renders no heading line
+    // at all, because a heading with nothing under it anywhere is not a
+    // section.
+    if tasks.progress().total == 0 {
+        out.push(plain_line("No tasks yet".to_string()));
+        return out;
+    }
+
+    let last_index = tasks.groups.len().saturating_sub(1);
+    for (index, group) in tasks.groups.iter().enumerate() {
+        if let Some(heading) = &group.heading {
+            out.push(heading_line(heading));
+        }
+        for item in &group.items {
+            out.extend(item_lines(item, width));
+        }
+        if index != last_index {
+            out.push(blank_line());
+        }
+    }
+
+    out
+}
+
 #[cfg(test)]
 mod tests {
-    use super::progress_bar;
+    use super::{lines, progress_bar};
     use crate::tasks::Progress;
 
     #[test]
@@ -341,6 +512,260 @@ mod tests {
         }
         for width in [2, 1, 0] {
             assert_eq!(progress_bar(&progress, width), "", "width {width}");
+        }
+    }
+
+    // --- group 5: the checklist grammar --------------------------------
+
+    fn long_paragraph(target_chars: usize) -> String {
+        let mut s = String::new();
+        let mut i = 0usize;
+        while s.chars().count() < target_chars {
+            if !s.is_empty() {
+                s.push(' ');
+            }
+            s.push_str(&format!("word{i}"));
+            i += 1;
+        }
+        s
+    }
+
+    /// The first item line's index in `out`, after the bar and its blank
+    /// line — omitted entirely when the bar renders as the empty string at
+    /// `width`, which happens well before the checklist's own text runs out
+    /// of room.
+    fn first_content_index(progress: &Progress, width: u16) -> usize {
+        if progress_bar(progress, width).is_empty() {
+            0
+        } else {
+            2
+        }
+    }
+
+    #[test]
+    fn groups_headings_items() {
+        let source = "## 1. Setup\n\n- [x] 1.1 first\n- [ ] 1.2 second\n\n\
+                       ## 2. Build\n\n- [ ] 2.1 third\n";
+        let progress = Progress {
+            completed: 1,
+            total: 3,
+        };
+        for width in [78, 58] {
+            let out = lines(source, &progress, width);
+            let bar = progress_bar(&progress, width);
+            let texts: Vec<String> = out.iter().map(|l| l.text()).collect();
+            assert_eq!(
+                texts,
+                vec![
+                    bar,
+                    String::new(),
+                    "## 1. Setup".to_string(),
+                    "[x] 1.1 first".to_string(),
+                    "[ ] 1.2 second".to_string(),
+                    String::new(),
+                    "## 2. Build".to_string(),
+                    "[ ] 2.1 third".to_string(),
+                ],
+                "width {width}"
+            );
+            let heading_idxs = [2usize, 6usize];
+            for (i, line) in out.iter().enumerate() {
+                let face = line.segments.first().map(|s| s.face).unwrap_or_default();
+                if heading_idxs.contains(&i) {
+                    assert_eq!(face.heading, Some(2), "width {width} line {i}");
+                } else if !line.segments.is_empty() {
+                    assert_eq!(
+                        face,
+                        crate::ui::markdown::Face::plain(),
+                        "width {width} line {i}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn nested_indent() {
+        let source = "- [ ] parent\n  - [x] child\n    - [ ] grandchild\n";
+        let progress = Progress {
+            completed: 1,
+            total: 3,
+        };
+        for width in [78, 58] {
+            let out = lines(source, &progress, width);
+            let texts: Vec<String> = out.iter().map(|l| l.text()).collect();
+            assert_eq!(
+                texts,
+                vec![
+                    progress_bar(&progress, width),
+                    String::new(),
+                    "[ ] parent".to_string(),
+                    "  [x] child".to_string(),
+                    "    [ ] grandchild".to_string(),
+                ],
+                "width {width}: flat, in order, no heading line"
+            );
+        }
+    }
+
+    #[test]
+    fn long_item_hanging_indent() {
+        let text = long_paragraph(200);
+        let source = format!("- [ ] {text}\n");
+        let progress = Progress {
+            completed: 0,
+            total: 1,
+        };
+        let mut line_counts = std::collections::HashMap::new();
+        for width in [78, 58] {
+            let out = lines(&source, &progress, width);
+            let start = first_content_index(&progress, width);
+            let item_lines = &out[start..];
+            assert!(!item_lines.is_empty(), "width {width}");
+            for (i, line) in item_lines.iter().enumerate() {
+                let t = line.text();
+                assert!(
+                    t.chars().count() <= width as usize,
+                    "width {width} line {i}: {t:?}"
+                );
+                if i == 0 {
+                    assert!(t.starts_with("[ ] "), "width {width}: {t:?}");
+                } else {
+                    assert!(t.starts_with("    "), "width {width} line {i}: {t:?}");
+                }
+            }
+            line_counts.insert(width, item_lines.len());
+        }
+        assert!(
+            line_counts[&58] > line_counts[&78],
+            "{line_counts:?}: the 58-column call must produce strictly more lines"
+        );
+    }
+
+    #[test]
+    fn unbreakable_word_hard_split() {
+        let text: String = (0..300)
+            .map(|i| char::from(b'a' + (i % 26) as u8))
+            .collect();
+        let source = format!("- [x] {text}\n");
+        let progress = Progress {
+            completed: 1,
+            total: 1,
+        };
+        for width in [78, 58] {
+            let out = lines(&source, &progress, width);
+            let start = first_content_index(&progress, width);
+            let item_lines = &out[start..];
+            let mut reassembled = String::new();
+            for (i, line) in item_lines.iter().enumerate() {
+                let t = line.text();
+                assert!(
+                    t.chars().count() <= width as usize,
+                    "width {width} line {i}: {t:?}"
+                );
+                let stripped = if i == 0 {
+                    t.strip_prefix("[x] ").unwrap_or(&t).to_string()
+                } else {
+                    t.trim_start_matches(' ').to_string()
+                };
+                reassembled.push_str(&stripped);
+            }
+            assert_eq!(reassembled, text, "width {width}");
+        }
+    }
+
+    #[test]
+    fn indent_dropped_whole() {
+        let source = "      - [x] alpha\n";
+        let progress = Progress {
+            completed: 1,
+            total: 1,
+        };
+        for width in [78, 58, 12, 6, 5, 4, 3, 2, 1, 0] {
+            let out = lines(source, &progress, width);
+            for line in &out {
+                assert!(
+                    line.text().chars().count() <= width as usize,
+                    "width {width}: {:?}",
+                    line.text()
+                );
+            }
+        }
+        for width in [78, 58, 12] {
+            let out = lines(source, &progress, width);
+            let start = first_content_index(&progress, width);
+            let item = out[start].text();
+            assert!(item.starts_with("      [x]"), "width {width}: {item:?}");
+        }
+        for width in [6, 5, 4, 3] {
+            let out = lines(source, &progress, width);
+            let start = first_content_index(&progress, width);
+            let item = out[start].text();
+            assert!(item.starts_with("[x]"), "width {width}: {item:?}");
+            assert!(!item.starts_with(' '), "width {width}: {item:?}");
+        }
+        let out0 = lines(source, &progress, 0);
+        assert!(out0.is_empty());
+    }
+
+    #[test]
+    fn empty_group_keeps_heading() {
+        let source = "## 1. Empty\n\nsome prose\n\n## 2. Full\n\n- [ ] only\n";
+        let progress = Progress {
+            completed: 0,
+            total: 1,
+        };
+        for width in [78, 58] {
+            let out = lines(source, &progress, width);
+            let texts: Vec<String> = out.iter().map(|l| l.text()).collect();
+            assert!(
+                texts.contains(&"## 1. Empty".to_string()),
+                "width {width}: {texts:?}"
+            );
+            assert!(
+                texts.contains(&"## 2. Full".to_string()),
+                "width {width}: {texts:?}"
+            );
+            assert!(
+                texts.contains(&"[ ] only".to_string()),
+                "width {width}: {texts:?}"
+            );
+            assert!(
+                !texts.iter().any(|t| t.contains("prose")),
+                "width {width}: {texts:?}"
+            );
+            let empty_idx = texts.iter().position(|t| t == "## 1. Empty").unwrap();
+            let full_idx = texts.iter().position(|t| t == "## 2. Full").unwrap();
+            assert_eq!(
+                full_idx - empty_idx,
+                2,
+                "width {width}: heading, blank, heading — {texts:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn headingless_leading_group() {
+        let source = "- [x] loose\n\n## 1. Later\n\n- [ ] grouped\n";
+        let progress = Progress {
+            completed: 1,
+            total: 2,
+        };
+        for width in [78, 58] {
+            let out = lines(source, &progress, width);
+            let texts: Vec<String> = out.iter().map(|l| l.text()).collect();
+            let loose_idx = texts.iter().position(|t| t == "[x] loose").unwrap();
+            let later_idx = texts.iter().position(|t| t == "## 1. Later").unwrap();
+            assert!(loose_idx < later_idx, "width {width}: {texts:?}");
+            assert_eq!(
+                later_idx - loose_idx,
+                2,
+                "width {width}: exactly one blank line between groups — {texts:?}"
+            );
+            assert!(
+                texts.contains(&"[ ] grouped".to_string()),
+                "width {width}: {texts:?}"
+            );
         }
     }
 }
