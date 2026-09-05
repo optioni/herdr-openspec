@@ -1,14 +1,15 @@
 # Handoff
 
-**Written:** 2026-09-05 ~21:15 EEST · **Branch:** `main` · **Remote:** `optioni/herdr-openspec`
+**Written:** 2026-09-06 ~04:00 EEST · **Branch:** `main` · **Remote:** `optioni/herdr-openspec`
 
 ## Where things stand
 
-**Phases 1–3 complete; Phase 4 is five of six archived, with `live-refresh` mid-apply.**
-Fourteen changes archived. `main` builds clean with **one deliberately RED test** —
-`ui::tests::live::files_paint_then_the_cli_corrects`, the outer-loop acceptance test,
-which goes green at group 11. Coverage **97.08% over 17,938 lines**, 724 lib tests
-passing. Every commit is signed and verified by the raw-object test.
+**Phases 1–4 are complete.** Fifteen changes implemented and archived; **35 capabilities**
+live under `openspec/specs/`. `main` is green: `make check` exits 0 at **97.16% line
+coverage over 18,898 lines**, 752 library tests. Every commit in the repository is
+signed. The dashboard works end to end — it lists changes, filters them, renders every
+artifact as a schema-driven tab, shows tasks as a checklist with a progress bar, and
+refreshes live from a filesystem watcher with the CLI correcting asynchronously.
 
 **Read coverage from the line columns, not the region columns.** `cargo llvm-cov`'s
 TOTAL row leads with regions (18,087 here) and reports lines further right (10,493).
@@ -20,7 +21,7 @@ interchangeable and the line figure is the one the 80% floor gates on.
 | 1 — Foundation | `repo-foundation`, `ci-pipeline`, `plugin-config` | **Done** |
 | 2 — Reading from disk | `repo-resolution`, `schema-model`, `task-parsing`, `changes-from-files` | **Done** |
 | 3 — Subprocess seam | `subprocess-seam`, `changes-from-cli` | **Done** |
-| 4 — The dashboard | `tui-shell` ✓, `list-view` ✓, `markdown-viewer` ✓, `detail-view` ✓, `tasks-tab` ✓, `live-refresh` | **In progress** |
+| 4 — The dashboard | `tui-shell`, `list-view`, `markdown-viewer`, `detail-view`, `tasks-tab`, `live-refresh` | **Done** |
 | 5–6 | — | Untouched |
 
 Nineteen capabilities live under `openspec/specs/`. Modules: `lib.rs`, `main.rs`,
@@ -33,77 +34,56 @@ CLI consumer was added. The `Change` conformance gate survived a second producer
 
 ## Next action
 
-**Resume `live-refresh` at task group 8.** Groups 0–7 are committed and verified;
-7 of 15 remain: 8 (the `r` key, `Dashboard::adopt`, forced reload), 9 (the loop's live
-tier), 10 (rendered buffer), 11 (acceptance GREEN), 12 (Change Review), 13
-(Documentation), 14 (Lint & Verify).
+**Start Phase 5 — Herdr integration**: `agent-polling` → `agent-attribution` →
+`agent-launch`, strictly sequential. This is where the plugin first talks to the live
+Herdr socket. An unreachable socket is a **supported state, not an error** — the plugin
+runs as a standalone TUI, and `agent-polling`'s own row says so.
 
-**`make check` is not runnable until group 11** — `cargo llvm-cov` hard-fails on any
-test failure, and the acceptance test is deliberately RED until then. Until group 11,
-verify with fmt + clippy + `cargo test --lib` + `cargo llvm-cov --ignore-run-fail`.
-Expect exactly one failure, with the message unchanged since group 2. Two or zero
-failures both mean something is wrong.
+Phase 5 gets openspec-schemas v0.2.1's prose budget and v0.2.2's parallelism guidance
+from the start. They were deliberately **not** retrofitted onto `live-refresh`, whose
+plan was written under v0.2.0 and was half-implemented when they landed.
 
-**Paused at 86% session utilization**, a fully committed group boundary — the first
-mid-change pause of the phase. Session resets 00:59 EEST.
+### What `live-refresh` constrains in Phase 5
 
-### Three findings recorded for group 12's Change Review, not yet fixed
+Found during its planning and confirmed by implementation. Phase 5 adds a *second*
+poller beside the watcher, so most of these are load-bearing rather than advisory.
 
-1. **`NOBLOCK`'s Guard E is structurally vacuous.** `grep -n 'fn take_result' | head -1`
-   always matches the `Refresher` **trait's** abstract signature, which necessarily
-   precedes any `impl` and any `thread::spawn` — so moving the concrete impl's
-   `take_result` below `start` does not trip it. **Reproduced**: the impl block was
-   moved and `NOBLOCK` still reported OK.
-2. **`NOSLEEP` leg 2b** reports "`src/watch.rs` missing" on unmodified `main`, before
-   group 1 creates the file. Benign and self-resolving, but the preamble's guard table
-   omits it from the "can't be green yet" list.
-3. **The plan's "18 `run_loop` call sites" is 19** — 14 in `src/ui/driver.rs`'s tests,
-   not 13. Verified against `main` before any edit; all 19 updated.
+1. **`ui::driver::Live` is the extension point.** The agent poller becomes a third
+   field on it, non-blocking by the same contract. It must **not** become another
+   `run_loop` parameter — seven arguments trips clippy's `too_many_arguments`, and the
+   only fix would be an `#[allow]`, which this project does not add to silence lints.
+2. **`NOCLI-SHELL` forbids `src/ui/` from naming `HerdrCli`.** The poller must live
+   outside `src/ui/` — a `src/agents.rs`, exactly as `watch` and `refresh` do — or that
+   landed check needs an exemption it should not get.
+3. **`NOBLOCK` leg 3 needs a third file.** Its `src/watch.rs` / `src/refresh.rs` list is
+   literal. Phase 5's poller module must be added to it, along with Guard D's
+   `#[cfg(test)]` count and Guard E's ordering rule.
+4. **`refresh.problems` is the pattern for a standing condition.** An unreachable Herdr
+   socket belongs there or on a sibling field — **not** on `ChangeSet::problems`, which
+   `Dashboard::adopt` replaces wholesale on every refresh.
+5. **`adopt` preserves the selection by name, not index.** An agent badge attached by
+   index will drift the moment a refresh reorders the list.
+6. **Two pollers, one tick.** `watch::poll_timeout(tick, pending_in)` takes one pending
+   duration today; with a ~1s agent poll it becomes a `min` over two. `NOBLOCK` leg 2
+   forbids reading a clock under `src/ui/`, so the agent poller must report its own
+   remaining time as a `Duration`, the way `FsEvents::pending_in` does.
+7. **`OpenspecCli` / `HerdrCli` being `Send + Sync` is now load-bearing**, not
+   theoretical — `refresh` holds an `Arc<dyn OpenspecCli>` across a thread. Phase 5's
+   second worker inherits that.
+8. **`Action` reaches thirteen variants.** `agent-launch` adds `a` / `c` / `s` / `g`,
+   and both `no_action_mutates_changes` and `tasks-checklist`'s
+   `no_action_mutates_a_task_item` assert the **exact** count. Each needs bumping
+   deliberately — those assertions exist so a mutating action cannot be added silently.
 
-### The repository is shared with other sessions
+### The `ui::run` wiring bug is the one to learn from
 
-A `chore(graft): sync openspec-schemas v0.2.1` commit from another session landed
-between the group 0 and group 1 commits, and `git status` twice showed another
-session's staged files that resolved moments later. **Re-derive `BASE=$(git rev-parse
-HEAD)` fresh before every `OPENSPEC-UNTOUCHED` run** — never trust a SHA literal in a
-task file or an exported variable. A stale SHA already nearly false-redded this
-change's most important read-only gate.
+`live-refresh`'s Change Review found that `ui::run` never called `watch::start` or
+`refresh::start`. Every test passed; the whole live tier would have been **permanently
+inert in the shipped binary**. Unit and view tests drove the seams directly and so
+never noticed nothing wired them together. Phase 5 adds another background collaborator
+behind another seam and can reproduce this exactly — **an outer-loop test must drive
+the real `ui::run`, not the components it composes.**
 
-### When Phase 4 closes: the README keymap sync
-
-Deliberately deferred across three key-touching changes, not forgotten; `detail-view`'s
-task 13.4 re-confirmed the deferral. SPEC.md → Keys is the source and is correct
-(`j`/`k` route split, layered `Esc`, `Ctrl-C`, `1`–`9`/`[`/`]`); README's Keys table
-still describes the old behaviour. Do not let it outlive the phase.
-
-### `markdown-viewer` moved a keybinding — BREAKING, and it moved a row early
-
-`j` / `k` and the arrows now scroll detail content at `Route::Detail` instead of moving
-the list selection, and `Action::SelectNext` / `SelectPrev` are renamed `Next` / `Prev`.
-`list-view` had deferred this collision to "the first change with a competing claim on
-those keys" and guessed that would be `detail-view`; it was `markdown-viewer`, one row
-earlier. The roadmap now records this, and **`detail-view` does not re-open the
-question**.
-
-### The weekly budget is no longer the constraint
-
-The 7-day rolling window turned over mid-phase: weekly went **71% → 2% used** between
-`tui-shell`'s ff and its apply, and stands at **8%** now. The prediction in the section
-below — that Phase 4's last one or two changes would slip past the weekly reset — is
-**stale and should not be planned against**. The binding constraint is now just the
-recurring 5-hour session window.
-
-Measured this phase: ff 23–35 session points, apply 16–20, archive 2–3 — so roughly
-45–55 per change, i.e. **two changes per 5-hour window**. Weekly cost is running ~3
-points per change, so the three remaining changes need ~9 weekly points against 86
-remaining. Weekly cannot end this phase; only the session window interrupts it.
-
-Phase 4 introduces the render seam. Views must be **pure functions from state to a
-ratatui frame with no I/O**, tested by rendering into a `TestBackend` buffer at **both
-60 and 120 columns** — a single-width test does not cover the responsive breakpoint.
-`tui-shell` depends on `changes-from-files`, not on the CLI path: the dashboard must be
-usable with no `openspec` binary present at all. That edge is what keeps "never fail
-closed" honest.
 
 ## Measured cost, and the dominant defect class
 
