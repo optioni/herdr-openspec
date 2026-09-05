@@ -8,6 +8,7 @@ pub mod event;
 pub mod layout;
 pub mod list;
 pub mod markdown;
+pub mod tasks;
 pub mod terminal;
 pub mod view;
 

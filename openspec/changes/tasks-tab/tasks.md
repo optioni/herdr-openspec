@@ -699,7 +699,7 @@ the crate compiles, every existing test still passes, and `GATE-MECH1` still hol
 ## 4. The progress bar
 <!-- kind: behavior -->
 
-- [ ] 4.1 RED: Create `src/ui/tasks.rs` holding only its module doc comment and
+- [x] 4.1 RED: Create `src/ui/tasks.rs` holding only its module doc comment and
       `pub fn progress_bar(progress: &crate::tasks::Progress, width: u16) -> String`
       returning `String::new()`, declare `pub mod tasks;` in `src/ui/mod.rs`, and write seven
       failing tests in `ui::tasks::tests::`, named from their scenarios: `bar_full_grammar`,
@@ -710,7 +710,7 @@ the crate compiles, every existing test still passes, and `GATE-MECH1` still hol
       Red-when: a test asserts only that no panic occurred. A stub returning `String::new()`
       never panics, so such a test is green by construction and pins nothing.
 
-- [ ] 4.2 GREEN: Implement `progress_bar` per `specs/tasks-progress-bar/spec.md`: the count
+- [x] 4.2 GREEN: Implement `progress_bar` per `specs/tasks-progress-bar/spec.md`: the count
       cell from `ui::list::progress_cell` (**not** a second `format!` of the same pair), the
       truncating percentage with a saturating multiply, the `█`/`░` gauge whose fill is
       `g * completed / total` with a saturating multiply, and the drop-whole order — percent,
@@ -722,10 +722,10 @@ the crate compiles, every existing test still passes, and `GATE-MECH1` still hol
       view" and "the CLI producer". This has been red on an unmodified tree in this repository
       before.
 
-- [ ] 4.3 REFACTOR: Extract the field-dropping ladder if it reads as three near-copies;
+- [x] 4.3 REFACTOR: Extract the field-dropping ladder if it reads as three near-copies;
       otherwise state that no refactor was needed.
 
-- [ ] 4.4 CHECK: The three checks that could not run before this file existed, now green for
+- [x] 4.4 CHECK: The three checks that could not run before this file existed, now green for
       the first time, **and** their deferred planted-violation controls from task 0.4:
       `sh $CHECKS/NOIO-VIEW.sh` (must print `8 pure files`); `sh $CHECKS/TASKSEAM.sh` — which
       at this group prints `parse leg not armed` **and then** its OK line, because
@@ -743,7 +743,7 @@ the crate compiles, every existing test still passes, and `GATE-MECH1` still hol
       `MIN=19 sh $CHECKS/NOLIT-CHANGE.sh`; `MIN=19 sh $CHECKS/MDSEAM.sh`;
       `UI_MIN=11 sh $CHECKS/READONLY-UI.sh`.
 
-- [ ] 4.5 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'ui::tasks::tests::' 7`; the four
+- [x] 4.5 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'ui::tasks::tests::' 7`; the four
       gate commands, still failing on exactly the one known acceptance test.
       `sh $CHECKS/OPENSPEC-UNTOUCHED.sh`. Commit.
 
