@@ -1020,7 +1020,7 @@ files in `$CHECKS`.
 ## 7. The tab keys
 <!-- kind: behavioural -->
 
-- [ ] 7.1 RED: Add scenarios 29–35 (state half) and 50–53 (their extensions) to
+- [x] 7.1 RED: Add scenarios 29–35 (state half) and 50–53 (their extensions) to
       `src/ui/app.rs`'s `mod tests`: `1`–`9` mapping to `SelectTab(n-1)` and `0`, a
       modifier'd digit, and `!` mapping to `Ignore`; `]` and `[` mapping to `NextTab` and
       `PrevTab` while `}` and a modifier'd `]` do not; the same eight events under
@@ -1034,17 +1034,17 @@ files in `$CHECKS`.
       requirement; a test asserting only the reset passes against an implementation that
       always resets.
 
-- [ ] 7.2 GREEN: Add the bindings to `action_for` and the three arms to `apply`, plus
+- [x] 7.2 GREEN: Add the bindings to `action_for` and the three arms to `apply`, plus
       `Dashboard::selected_change()`. `apply` performs no clamp of `tab` against the artifact
       count beyond what `SelectTab`'s validity check and `NextTab`'s step need —
       `sync_detail` owns the invariant, per `design.md` → Decisions 4.
 
-- [ ] 7.3 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'ui::app::tests::' 37` — the
+- [x] 7.3 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'ui::app::tests::' 37` — the
       measured 30 plus this group's seven new test functions. The floor reaches 45 after
       group 8's eight.
       **Red when:** fewer than 37 tests run.
 
-- [ ] 7.4 Commit: `feat(detail-view): bind 1-9, [ and ] to the artifact tab`.
+- [x] 7.4 Commit: `feat(detail-view): bind 1-9, [ and ] to the artifact tab`.
 
 ## 8. `Dashboard::sync_detail`
 <!-- kind: behavioural -->

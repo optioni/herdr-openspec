@@ -161,8 +161,13 @@ impl Dashboard {
             // let a held key run the stored value arbitrarily far ahead.
             Action::Next => match self.route {
                 Route::List => {
+                    let before = self.selected;
                     self.selected = self.selected.saturating_add(1);
                     self.clamp_selection();
+                    if self.selected != before {
+                        self.detail.tab = 0;
+                        self.detail.scroll = 0;
+                    }
                 }
                 Route::Detail => {
                     self.detail.scroll = self.detail.scroll.saturating_add(1);
@@ -170,21 +175,51 @@ impl Dashboard {
             },
             Action::Prev => match self.route {
                 Route::List => {
+                    let before = self.selected;
                     self.selected = self.selected.saturating_sub(1);
                     self.clamp_selection();
+                    if self.selected != before {
+                        self.detail.tab = 0;
+                        self.detail.scroll = 0;
+                    }
                 }
                 Route::Detail => {
                     self.detail.scroll = self.detail.scroll.saturating_sub(1);
                 }
             },
-            // Nothing yet: group 7 gives these their effect. Kept as
-            // explicit no-op arms rather than folded into a wildcard, so
-            // `apply`'s match stays exhaustive without `_` and a later
-            // variant added to `Action` fails to compile here instead of
-            // silently falling through.
-            Action::SelectTab(_) => {}
-            Action::NextTab => {}
-            Action::PrevTab => {}
+            // `sync_detail` (group 8) owns clamping `detail.tab` against the
+            // selected change's artifact count; these arms perform only the
+            // validity check `artifact-tabs` -> Decisions 4 and 5 state.
+            Action::SelectTab(i) => {
+                if let Some(change) = self.selected_change()
+                    && i < change.artifacts.len()
+                {
+                    let before = self.detail.tab;
+                    self.detail.tab = i;
+                    if self.detail.tab != before {
+                        self.detail.scroll = 0;
+                    }
+                }
+            }
+            Action::NextTab => {
+                if let Some(change) = self.selected_change()
+                    && !change.artifacts.is_empty()
+                {
+                    let last = change.artifacts.len() - 1;
+                    let before = self.detail.tab;
+                    self.detail.tab = (self.detail.tab + 1).min(last);
+                    if self.detail.tab != before {
+                        self.detail.scroll = 0;
+                    }
+                }
+            }
+            Action::PrevTab => {
+                let before = self.detail.tab;
+                self.detail.tab = self.detail.tab.saturating_sub(1);
+                if self.detail.tab != before {
+                    self.detail.scroll = 0;
+                }
+            }
             Action::FilterStart => {
                 self.filter.active = true;
                 self.route = Route::List;
@@ -242,6 +277,14 @@ impl Dashboard {
     /// call sites that only need the count.
     pub fn visible_len(&self) -> usize {
         self.visible().len()
+    }
+
+    /// The change `selected` addresses in `visible()`, or `None` when the
+    /// visible list is empty or `selected` is somehow out of range. What
+    /// `sync_detail`, `SelectTab`, and `NextTab` all resolve their target
+    /// change through.
+    pub fn selected_change(&self) -> Option<&Change> {
+        self.visible().get(self.selected).copied()
     }
 
     /// Keep `selected` addressing a change that is actually shown: `0` when
@@ -305,6 +348,11 @@ pub fn action_for(event: &Event, filtering: bool) -> Action {
             Action::Prev
         }
         (KeyCode::Char('/'), KeyModifiers::NONE) => Action::FilterStart,
+        (KeyCode::Char(c @ '1'..='9'), KeyModifiers::NONE) => {
+            Action::SelectTab((c as u8 - b'1') as usize)
+        }
+        (KeyCode::Char(']'), KeyModifiers::NONE) => Action::NextTab,
+        (KeyCode::Char('['), KeyModifiers::NONE) => Action::PrevTab,
         (KeyCode::Enter, KeyModifiers::NONE) => Action::OpenDetail,
         (KeyCode::Esc, KeyModifiers::NONE) => Action::Back,
         _ => Action::Ignore,
@@ -380,6 +428,31 @@ mod tests {
 
         fn press(code: KeyCode, modifiers: KeyModifiers) -> Event {
             Event::Key(KeyEvent::new(code, modifiers))
+        }
+
+        /// A `Route::Detail` dashboard whose one active, selected change
+        /// carries `count` artifacts named `a0`, `a1`, ... — `artifact-tabs`'
+        /// key-handling scenarios need a change with a known artifact count,
+        /// not the row-grammar fixture's empty `artifacts`.
+        fn dashboard_with_artifacts(count: usize, tab: usize, scroll: usize) -> Dashboard {
+            let pairs: Vec<(&str, &[&str])> = (0..count).map(|_| ("a", &[][..])).collect();
+            let change = fixture::with_artifacts(fixture::active("detail-view", 4, 9), &pairs);
+            Dashboard {
+                repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
+                searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
+                changes: fixture::set(vec![change], Vec::new(), Vec::new()),
+                route: Route::Detail,
+                quit: false,
+                selected: 0,
+                filter: empty_filter(),
+                detail: Detail {
+                    source: String::new(),
+                    scroll,
+                    tab,
+                    problems: Vec::new(),
+                    loaded: None,
+                },
+            }
         }
 
         #[test]
@@ -553,6 +626,11 @@ mod tests {
                 KeyCode::Up,
                 KeyCode::Down,
                 KeyCode::Char('/'),
+                // detail-view: `1`-`9`, `[`, and `]` now map to `SelectTab`,
+                // `PrevTab`, and `NextTab` rather than `Ignore`.
+                KeyCode::Char('1'),
+                KeyCode::Char('['),
+                KeyCode::Char(']'),
             ];
             let codes = [
                 KeyCode::Backspace,
@@ -1135,6 +1213,233 @@ mod tests {
             let Filter { query, active } = &f;
             assert_eq!(query, "add");
             assert!(*active);
+        }
+
+        #[test]
+        fn the_digit_keys_select_tabs_and_near_misses_do_not() {
+            assert_eq!(
+                action_for(&press(KeyCode::Char('1'), KeyModifiers::NONE), false),
+                Action::SelectTab(0)
+            );
+            assert_eq!(
+                action_for(&press(KeyCode::Char('5'), KeyModifiers::NONE), false),
+                Action::SelectTab(4)
+            );
+            assert_eq!(
+                action_for(&press(KeyCode::Char('9'), KeyModifiers::NONE), false),
+                Action::SelectTab(8)
+            );
+            assert_eq!(
+                action_for(&press(KeyCode::Char('0'), KeyModifiers::NONE), false),
+                Action::Ignore
+            );
+            assert_eq!(
+                action_for(&press(KeyCode::Char('1'), KeyModifiers::CONTROL), false),
+                Action::Ignore
+            );
+            assert_eq!(
+                action_for(&press(KeyCode::Char('!'), KeyModifiers::SHIFT), false),
+                Action::Ignore
+            );
+
+            assert_eq!(
+                action_for(&press(KeyCode::Char('1'), KeyModifiers::NONE), true),
+                Action::FilterPush('1')
+            );
+            assert_eq!(
+                action_for(&press(KeyCode::Char('5'), KeyModifiers::NONE), true),
+                Action::FilterPush('5')
+            );
+            assert_eq!(
+                action_for(&press(KeyCode::Char('9'), KeyModifiers::NONE), true),
+                Action::FilterPush('9')
+            );
+            assert_eq!(
+                action_for(&press(KeyCode::Char('0'), KeyModifiers::NONE), true),
+                Action::FilterPush('0')
+            );
+            assert_eq!(
+                action_for(&press(KeyCode::Char('1'), KeyModifiers::CONTROL), true),
+                Action::Ignore
+            );
+            assert_eq!(
+                action_for(&press(KeyCode::Char('!'), KeyModifiers::SHIFT), true),
+                Action::FilterPush('!')
+            );
+        }
+
+        #[test]
+        fn the_bracket_keys_step_one_tab_and_near_misses_do_not() {
+            assert_eq!(
+                action_for(&press(KeyCode::Char(']'), KeyModifiers::NONE), false),
+                Action::NextTab
+            );
+            assert_eq!(
+                action_for(&press(KeyCode::Char('['), KeyModifiers::NONE), false),
+                Action::PrevTab
+            );
+            assert_eq!(
+                action_for(&press(KeyCode::Char(']'), KeyModifiers::CONTROL), false),
+                Action::Ignore
+            );
+            assert_eq!(
+                action_for(&press(KeyCode::Char('}'), KeyModifiers::SHIFT), false),
+                Action::Ignore
+            );
+
+            assert_eq!(
+                action_for(&press(KeyCode::Char(']'), KeyModifiers::NONE), true),
+                Action::FilterPush(']')
+            );
+            assert_eq!(
+                action_for(&press(KeyCode::Char('['), KeyModifiers::NONE), true),
+                Action::FilterPush('[')
+            );
+        }
+
+        #[test]
+        fn a_release_or_repeat_of_a_tab_key_is_ignored_under_both_modes() {
+            for filtering in [false, true] {
+                let released = Event::Key(KeyEvent::new_with_kind(
+                    KeyCode::Char('1'),
+                    KeyModifiers::NONE,
+                    KeyEventKind::Release,
+                ));
+                let repeated = Event::Key(KeyEvent::new_with_kind(
+                    KeyCode::Char('1'),
+                    KeyModifiers::NONE,
+                    KeyEventKind::Repeat,
+                ));
+                assert_eq!(action_for(&released, filtering), Action::Ignore);
+                assert_eq!(action_for(&repeated, filtering), Action::Ignore);
+
+                let released = Event::Key(KeyEvent::new_with_kind(
+                    KeyCode::Char(']'),
+                    KeyModifiers::NONE,
+                    KeyEventKind::Release,
+                ));
+                let repeated = Event::Key(KeyEvent::new_with_kind(
+                    KeyCode::Char(']'),
+                    KeyModifiers::NONE,
+                    KeyEventKind::Repeat,
+                ));
+                assert_eq!(action_for(&released, filtering), Action::Ignore);
+                assert_eq!(action_for(&repeated, filtering), Action::Ignore);
+            }
+        }
+
+        #[test]
+        fn stepping_is_clamped_at_both_ends_and_does_not_wrap() {
+            let mut d = dashboard_with_artifacts(3, 0, 0);
+            d.apply(Action::PrevTab);
+            assert_eq!(d.detail.tab, 0);
+            for expect in [1, 2, 2, 2] {
+                d.apply(Action::NextTab);
+                assert_eq!(d.detail.tab, expect);
+            }
+            for expect in [1, 0, 0, 0] {
+                d.apply(Action::PrevTab);
+                assert_eq!(d.detail.tab, expect);
+            }
+        }
+
+        #[test]
+        fn an_out_of_range_digit_is_inert() {
+            let mut d = dashboard_with_artifacts(3, 1, 5);
+            d.apply(Action::SelectTab(6));
+            assert_eq!(d.detail.tab, 1);
+            assert_eq!(d.detail.scroll, 5);
+            d.apply(Action::SelectTab(2));
+            assert_eq!(d.detail.tab, 2);
+            assert_eq!(d.detail.scroll, 0);
+        }
+
+        #[test]
+        fn switching_tabs_resets_the_scroll_and_staying_put_does_not() {
+            let mut d = dashboard_with_artifacts(3, 2, 7);
+            d.apply(Action::NextTab);
+            assert_eq!(d.detail.tab, 2);
+            assert_eq!(d.detail.scroll, 7);
+
+            let mut d2 = dashboard_with_artifacts(3, 2, 7);
+            d2.apply(Action::PrevTab);
+            assert_eq!(d2.detail.tab, 1);
+            assert_eq!(d2.detail.scroll, 0);
+        }
+
+        #[test]
+        fn moving_the_selection_resets_the_tab_and_the_scroll_and_a_clamped_move_does_not() {
+            let mut d = Dashboard {
+                repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
+                searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
+                changes: fixture::set(
+                    vec![
+                        fixture::active("a", 1, 2),
+                        fixture::active("b", 1, 2),
+                        fixture::active("c", 1, 2),
+                    ],
+                    Vec::new(),
+                    Vec::new(),
+                ),
+                route: Route::List,
+                quit: false,
+                selected: 0,
+                filter: empty_filter(),
+                detail: Detail {
+                    source: String::new(),
+                    scroll: 9,
+                    tab: 2,
+                    problems: Vec::new(),
+                    loaded: None,
+                },
+            };
+            d.apply(Action::Next);
+            assert_eq!(d.selected, 1);
+            assert_eq!(d.detail.tab, 0);
+            assert_eq!(d.detail.scroll, 0);
+
+            let mut d2 = Dashboard {
+                repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
+                searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
+                changes: fixture::set(
+                    vec![
+                        fixture::active("a", 1, 2),
+                        fixture::active("b", 1, 2),
+                        fixture::active("c", 1, 2),
+                    ],
+                    Vec::new(),
+                    Vec::new(),
+                ),
+                route: Route::List,
+                quit: false,
+                selected: 0,
+                filter: empty_filter(),
+                detail: Detail {
+                    source: String::new(),
+                    scroll: 9,
+                    tab: 2,
+                    problems: Vec::new(),
+                    loaded: None,
+                },
+            };
+            d2.apply(Action::Prev);
+            assert_eq!(d2.selected, 0);
+            assert_eq!(d2.detail.tab, 2);
+            assert_eq!(d2.detail.scroll, 9);
+        }
+
+        #[test]
+        fn tab_keys_act_at_both_routes() {
+            let mut list_route = dashboard_with_artifacts(3, 0, 0);
+            list_route.route = Route::List;
+            list_route.apply(Action::SelectTab(2));
+            assert_eq!(list_route.detail.tab, 2);
+            assert_eq!(list_route.route, Route::List);
+
+            let mut detail_route = dashboard_with_artifacts(3, 0, 0);
+            detail_route.apply(Action::SelectTab(2));
+            assert_eq!(detail_route.detail.tab, 2);
+            assert_eq!(detail_route.route, Route::Detail);
         }
     }
 }
