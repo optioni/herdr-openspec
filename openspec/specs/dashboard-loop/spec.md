@@ -13,18 +13,23 @@ at, rendered by `change-rows`' no-repository state; `changes: changes::ChangeSet
 `route: Route`, an enum of `List` and `Detail`; `quit: bool`, set by the quit action;
 `selected: usize`, the index into the visible list defined by `list-selection`;
 `filter: Filter`, the query and mode defined by `list-filtering`; and `detail: Detail`, the
-markdown source and scroll offset defined by `detail-scroll`.
+detail region's state defined by `detail-scroll`, `artifact-tabs`, and `artifact-content`.
 
 `ui::app::Filter` SHALL carry exactly two fields: `query: String` and `active: bool`.
-`ui::app::Detail` SHALL carry exactly two fields: `source: String` and `scroll: usize`.
+`ui::app::Detail` SHALL carry exactly **five** fields: `source: String`, `scroll: usize`,
+`tab: usize`, `problems: Vec<String>`, and `loaded: Option<(PathBuf, usize)>`. The three new
+ones are `detail-view`'s: `tab` is the selected artifact's position, `problems` names each
+artifact file that could not be read, and `loaded` is the `(change directory, tab)` key whose
+content `source` currently holds — the cache key `artifact-content`'s `sync_detail` compares
+against, and the reason an unchanged selection re-reads nothing.
 
 `Dashboard` SHALL carry no width, no layout mode, no column count, no interior height, no
-terminal handle, and no frame. It **does** carry `detail.scroll`, and that is not an
-exception to the rule: `scroll` is a user-controlled position, the counterpart of
+terminal handle, and no frame. It **does** carry `detail.scroll` and `detail.tab`, and that
+is not an exception to the rule: both are user-controlled positions, the counterparts of
 `selected`, while the offset actually drawn is still derived on every draw by
-`layout::scroll_offset` against the current interior height. No *derived geometry* is
-stored. The previous wording forbade "no scroll offset" without that distinction and is
-corrected here rather than left to contradict `detail-scroll`.
+`layout::scroll_offset` against the current content area's height. `detail.loaded` is not
+geometry either: it is a record of what was read, not of how it was laid out. No *derived
+geometry* is stored.
 
 None of `Dashboard`, `Filter`, and `Detail` SHALL implement `Default` — neither derived nor
 hand-written, anywhere in the crate — and every construction and every destructuring of any
@@ -33,19 +38,23 @@ at each site rather than defaulting silently. `change-model`'s existing gate doe
 these types: that gate is stated over `Change`, `ChangeSet`, `ArtifactRef`, and `Origin` in
 `src/changes.rs`, and none of these three is one of those nor there.
 
-`src/ui/app.rs`, `src/ui/layout.rs`, `src/ui/list.rs`, `src/ui/markdown.rs`,
-`src/ui/view.rs`, and `src/ui/driver.rs` SHALL name no filesystem, process, environment,
-network, or standard-I/O API. Terminal work lives in `src/ui/terminal.rs` and startup
-loading in `src/ui/mod.rs`; the six files above are the pure side of the render seam. A view
-test that needs a real directory means logic leaked across that seam.
+`src/ui/app.rs`, `src/ui/detail.rs`, `src/ui/layout.rs`, `src/ui/list.rs`,
+`src/ui/markdown.rs`, `src/ui/view.rs`, and `src/ui/driver.rs` SHALL name no filesystem,
+process, environment, network, or standard-I/O API. Terminal work lives in
+`src/ui/terminal.rs`, event reading in `src/ui/event.rs`, and startup loading and the one
+artifact-read binding in `src/ui/mod.rs`; the **seven** files above are the pure side of the
+render seam. A view test that needs a real directory means logic leaked across that seam.
 
 `Change` and `ChangeSet` literals SHALL appear only in `src/changes.rs`, test fixtures
 included, so every construction site stays inside the file `change-model`'s gate searches.
+`ui::detail`'s and `ui::view`'s tests SHALL therefore build changes carrying artifacts
+through a constructor in `src/changes.rs` — `changes::fixture::with_artifacts` — rather than
+through a literal of their own.
 
 #### Scenario: `Dashboard` has no `Default` and no site elides a field
 
 The scenario's name is kept verbatim from `tui-shell` because a delta's scenario headers are
-its merge key; its subject now covers `Detail` as well as `Filter`.
+its merge key; its subject is unchanged and only the field counts move.
 
 - **WHEN** every `*.rs` file under `src/` is searched, for each of the type names
   `Dashboard`, `Filter`, and `Detail`, for `impl Default for <name>`, for a `Default` inside
@@ -57,26 +66,31 @@ its merge key; its subject now covers `Detail` as well as `Filter`.
   text `struct Filter`, and the text `struct Detail`, so a search that matched nothing
   because it searched nothing fails instead of passing
 - **AND** the check is proven able to fail: run against a copy of `src/` carrying
-  `impl Default for Dashboard { … }`, again against a copy carrying
-  `let Dashboard { quit, .. } = d;`, again against a copy carrying
-  `impl Default for Filter { … }`, and again against a copy carrying
-  `impl Default for Detail { … }`, it reports each violation
+  `impl Default for Detail { … }`, and again against a copy carrying
+  `let Detail { source, .. } = d;`, it reports each violation
+- **AND** the planted `..` control is written in the **multi-line** form this tree's
+  rustfmt output actually produces as well as the single-line form, because the same-line
+  grep cannot see a multi-line elision and the compile-time companion is what covers it
 - **AND** a compile-time companion exists: a test destructures a `Dashboard` with an
   exhaustive pattern naming all eight fields and no `..`, a second destructures a `Filter`
-  naming both, and a third destructures a `Detail` naming both, so adding a field breaks the
-  build at that site rather than passing a source grep that never saw it
+  naming both, and a third destructures a `Detail` naming **all five** and no `..`, so
+  adding a field breaks the build at that site rather than passing a source grep that never
+  saw it
 
 #### Scenario: The pure view files name no I/O API
 
-- **WHEN** `src/ui/app.rs`, `src/ui/layout.rs`, `src/ui/list.rs`, `src/ui/markdown.rs`,
-  `src/ui/view.rs`, and `src/ui/driver.rs` are searched for `std::fs`, `std::io`,
-  `std::env`, `std::process`, `std::net`, `File::`, `read_to_string`, and `Command`
-- **THEN** there is no match in any of the six
-- **AND** the check fails when any of the six files is absent, rather than reporting a clean
-  tree
+- **WHEN** `src/ui/app.rs`, `src/ui/detail.rs`, `src/ui/layout.rs`, `src/ui/list.rs`,
+  `src/ui/markdown.rs`, `src/ui/view.rs`, and `src/ui/driver.rs` are searched for `std::fs`,
+  `std::io`, `std::env`, `std::process`, `std::net`, `File::`, `read_to_string`, and
+  `Command`
+- **THEN** there is no match in any of the seven
+- **AND** the check fails when any of the seven files is absent, rather than reporting a
+  clean tree
 - **AND** it is paired with a positive control asserting that `src/ui/terminal.rs` **does**
   name `std::io`, so a search that matched nothing because it searched nothing fails instead
   of passing
+- **AND** the check is proven able to fail against a copy carrying `std::fs::read_to_string`
+  inside `src/ui/detail.rs`, which is the file this change adds to the set
 
 #### Scenario: The shell never names the CLI seam
 
@@ -86,34 +100,36 @@ its merge key; its subject now covers `Detail` as well as `Filter`.
   `changes::from_files`, so it is complete with no `openspec` binary installed
 - **AND** it is paired with a positive control asserting that `src/changes.rs` **does**
   name `OpenspecCli`, so the search is proven to be capable of matching
-- **AND** the check fails when `src/ui/` holds no `*.rs` file at all
+- **AND** the check fails when `src/ui/` holds fewer than **ten** `*.rs` files, the count
+  this change leaves behind, so a merged or deleted module is a deliberate update to the
+  invocation rather than a silent shrink of the searched set
 
 #### Scenario: Change literals live only in the gated file
 
 - **WHEN** every `*.rs` file under `src/` other than `src/changes.rs` is searched for a
   `Change {` or `ChangeSet {` literal or pattern, the type name preceded by a
   non-identifier character so `ArtifactChange` and `Vec<&Change>` do not match
-- **THEN** there is no match, so the view tests' fixtures are built by a constructor inside
-  `src/changes.rs` rather than by literals the existing gate cannot see
+- **THEN** there is no match, so the tab-bar and header tests' fixtures — which need changes
+  carrying real `ArtifactRef` values — are built by a constructor inside `src/changes.rs`
+  rather than by literals the existing gate cannot see
 - **AND** it is paired with a positive control asserting that `src/changes.rs` **does**
   contain `ChangeSet {`, and it fails when `src/changes.rs` is absent
 - **AND** the check is proven able to fail: run against a copy of `src/` carrying a
-  `Change {` literal in `src/ui/view.rs`, it reports it
+  `Change {` literal in `src/ui/detail.rs`, it reports it
 
 ### Requirement: Key handling is a pure, total function over events
 
 `ui::app::action_for(event: &Event, filtering: bool) -> Action` SHALL map a terminal event
-and the current filter mode to one of exactly nine actions — `Quit`, `OpenDetail`, `Back`,
-`Next`, `Prev`, `FilterStart`, `FilterPush(char)`, `FilterPop`, `Ignore` — and SHALL be
-total: every `Event` value, including mouse, paste, focus-gained, focus-lost, and resize
-events, maps to one of them under either value of `filtering`, and none panics.
+and the current filter mode to one of exactly **twelve** actions — `Quit`, `OpenDetail`,
+`Back`, `Next`, `Prev`, `SelectTab(usize)`, `NextTab`, `PrevTab`, `FilterStart`,
+`FilterPush(char)`, `FilterPop`, `Ignore` — and SHALL be total: every `Event` value,
+including mouse, paste, focus-gained, focus-lost, and resize events, maps to one of them
+under either value of `filtering`, and none panics.
 
-`Next` and `Prev` are renamed from `SelectNext` and `SelectPrev`. The rename is not
-cosmetic: from this change onward the action's *effect* depends on the route — the list
-selection at `Route::List`, the detail scroll at `Route::Detail` — and a name asserting one
-of the two would be false half the time. It follows the rename of `BackToList` to `Back`
-for the same reason, and `Dashboard::apply` remains the one place a route-dependent
-decision is made.
+`SelectTab`, `NextTab`, and `PrevTab` are `detail-view`'s additions; `artifact-tabs` states
+their keys and their effect. They are route-agnostic in the same sense `Next` and `Prev`
+are: the detail region is drawn at both routes above the breakpoint, so a tab press at the
+list route is immediately visible.
 
 While `filtering` is **false** the mapping SHALL be:
 
@@ -123,13 +139,18 @@ While `filtering` is **false** the mapping SHALL be:
 | `KeyCode::Char('c')` with `KeyModifiers::CONTROL` | `Quit` |
 | `KeyCode::Char('j')` or `KeyCode::Down` with no modifiers | `Next` |
 | `KeyCode::Char('k')` or `KeyCode::Up` with no modifiers | `Prev` |
+| `KeyCode::Char('1')`–`Char('9')` with no modifiers | `SelectTab(digit - 1)` |
+| `KeyCode::Char(']')` with no modifiers | `NextTab` |
+| `KeyCode::Char('[')` with no modifiers | `PrevTab` |
 | `KeyCode::Char('/')` with no modifiers | `FilterStart` |
 | `KeyCode::Enter` with no modifiers | `OpenDetail` |
 | `KeyCode::Esc` with no modifiers | `Back` |
-| anything else, including `Char('Q')` and `Char('q')` with a modifier | `Ignore` |
+| anything else, including `Char('Q')`, `Char('0')`, and `Char('q')` with a modifier | `Ignore` |
 
 While `filtering` is **true** the mapping SHALL be the one `list-filtering` states, in which
-printable characters type into the query and only `Ctrl-C` quits.
+printable characters type into the query and only `Ctrl-C` quits. `1`–`9`, `[`, and `]` are
+printable characters and are therefore query characters there, with no exception carved out
+for them.
 
 `action_for` SHALL act only on key events whose `kind` is `KeyEventKind::Press`. A key event
 with kind `Repeat` or `Release` SHALL map to `Ignore` under either value of `filtering`, so
@@ -148,7 +169,10 @@ character twice.
   close the pane;
 - on `Next` and `Prev`, move and clamp `selected` per `list-selection` when `route` is
   `List`, and move `detail.scroll` by one line per `detail-scroll` when `route` is `Detail`,
-  never both;
+  never both; and, at `Route::List` only, reset `detail.tab` and `detail.scroll` to `0`
+  exactly when `selected` changed value;
+- on `SelectTab`, `NextTab`, and `PrevTab`, move `detail.tab` per `artifact-tabs`, resetting
+  `detail.scroll` to `0` exactly when `detail.tab` changed value;
 - set `filter.active` and `route: List` on `FilterStart`, resetting `detail.scroll` to `0`
   because that too is a route move, push on `FilterPush`, pop on `FilterPop`, clamping
   `selected` after each;
@@ -156,7 +180,9 @@ character twice.
 
 `apply` SHALL never panic, SHALL never leave `selected` addressing a change that is not
 visible, and SHALL never leave `detail.scroll` unbounded for more than one frame — the
-normalisation `detail-scroll` requires of `ui::driver::run_loop` is what bounds it.
+normalisation `detail-scroll` requires of `ui::driver::run_loop` is what bounds it. It MAY
+leave `detail.tab` out of range for the selected change after a filter edit; `sync_detail`
+is what restores that invariant, before the next draw rather than after it.
 
 #### Scenario: Both quit keys quit and neither near-miss does
 
@@ -176,6 +202,9 @@ normalisation `detail-scroll` requires of `ui::driver::run_loop` is what bounds 
   `Quit`
 - **AND** under `filtering` true the first two return `Ignore` and the third returns
   `FilterPush('q')`, so a release cannot type a character either
+- **AND** the same holds for `Char('1')` and `Char(']')`: a `Release` or `Repeat` of either
+  returns `Ignore` under both modes, so a terminal reporting releases cannot switch tabs
+  twice
 
 #### Scenario: Enter and Esc move between the two routes
 
@@ -185,6 +214,7 @@ normalisation `detail-scroll` requires of `ui::driver::run_loop` is what bounds 
 - **THEN** its route is `Detail`, then `List`, then still `List`
 - **AND** `quit` is false after all three, so `Esc` at the root does not close the pane
 - **AND** `detail.scroll` is `0` after each, since both route moves reset it
+- **AND** `detail.tab` is unchanged by all three, because a route move is not a change move
 
 #### Scenario: `Esc` dismisses one layer at a time
 
@@ -206,24 +236,34 @@ normalisation `detail-scroll` requires of `ui::driver::run_loop` is what bounds 
   and `Char('/')` with `CONTROL`
 - **THEN** the first five return `Next`, `Next`, `Prev`, `Prev`, and `FilterStart`, and the
   last three return `Ignore`
+- **AND** Presses of `Char('1')`, `Char('9')`, `Char(']')`, and `Char('[')` return
+  `SelectTab(0)`, `SelectTab(8)`, `NextTab`, and `PrevTab`, while `Char('0')`, `Char('{')`,
+  and `Char(']')` with `CONTROL` return `Ignore`
 
 #### Scenario: Non-key events are ignored without panicking
 
 - **WHEN** `action_for` is called with `Event::Resize(60, 20)`, `Event::FocusGained`,
-  `Event::FocusLost`, `Event::Paste("q".to_string())`, and a mouse event, each under
-  `filtering` false and again under `filtering` true
+  `Event::FocusLost`, `Event::Paste("q".to_string())`, `Event::Paste("1".to_string())`, and a
+  mouse event, each under `filtering` false and again under `filtering` true
 - **THEN** each returns `Ignore` under both
 - **AND** in particular a paste whose text is the single character `q` neither quits nor
-  types into the query, so pasted content cannot close the pane or edit the filter
+  types into the query, and a paste whose text is `1` does not switch tabs, so pasted content
+  cannot close the pane, edit the filter, or move the tab
+
 ### Requirement: The loop draws before it waits and stops when quit is set
 
-`ui::driver::run_loop(terminal, dashboard, events, tick)` SHALL be generic over any
+`ui::driver::run_loop(terminal, dashboard, events, read, tick)` SHALL be generic over any
 `ratatui::backend::Backend` and any `ui::event::EventSource`, so tests drive it with a
-`TestBackend` and a scripted event source and no terminal exists in the test process.
+`TestBackend` and a scripted event source and no terminal exists in the test process. `read`
+is the `artifact-content` reader: a `&dyn Fn(&Path) -> Result<String, String>`, so no
+filesystem API is named in `src/ui/driver.rs` and tests drive the loop with an in-memory
+double.
 
-Each iteration SHALL draw the frame **first** and then wait up to `tick` for an event, so
-the pane is painted before any input is read. After applying an event's action, the loop
-SHALL break when `dashboard.quit` is set, without drawing again.
+Each iteration SHALL call `dashboard.sync_detail(read)` **first**, then draw the frame, then
+wait up to `tick` for an event, so the pane is painted with the selected artifact's content
+before any input is read — not blank on the first frame and filled on the second. After
+applying an event's action, the loop SHALL break when `dashboard.quit` is set, without
+syncing or drawing again.
 
 `EventSource::next_event(&mut self, timeout: Duration) -> Result<Option<Event>,
 EventError>` SHALL return `Ok(None)` for a timeout with no event. A timeout SHALL NOT end
@@ -242,7 +282,7 @@ change adding periodic work has a wake-up already in place.
 
 - **WHEN** `run_loop` is driven over a `Terminal<TestBackend>` at 120x20 with an event
   source whose script is **empty**, so its first `next_event` call returns
-  `Err(EventError)`
+  `Err(EventError)`, and a reader returning `# proposal\n` for every path
 - **THEN** `run_loop` returns `Err(LoopError::Events)`
 - **AND** the backend's buffer nevertheless spells `OpenSpec` at row 0 column 0 and holds
   `┌` at row 1 column 0 and at row 1 column 40, so a complete frame was drawn before the
@@ -256,6 +296,18 @@ change adding periodic work has a wake-up already in place.
 - **AND** the dashboard's `quit` is true
 - **AND** the event source recorded that every `next_event` call was made with the `tick`
   the caller passed, not a hard-coded value
+- **AND** the recording reader recorded exactly **one** call across the whole run, because
+  four iterations over an unchanged selection re-read nothing
+
+#### Scenario: A backend draw failure ends the loop rather than spinning
+
+- **WHEN** `run_loop` is driven over a backend whose `draw` returns an error, with an event
+  source whose script would supply a `q` press
+- **THEN** it returns `Err(LoopError::Draw)` carrying the backend error's text
+- **AND** the event source recorded **zero** `next_event` calls, proving the loop stopped
+  at the failed draw rather than continuing past it
+- **AND** the reader recorded **one** call, because the sync precedes the draw and the
+  failure is in the draw
 
 #### Scenario: Ctrl-C ends the loop
 
@@ -279,20 +331,16 @@ change adding periodic work has a wake-up already in place.
 - **AND** the final buffer's row 1 spells `Detail` starting at column 1 and the string
   `Changes` appears nowhere, so the second frame reflected the route the first event set
 
-#### Scenario: A backend draw failure ends the loop rather than spinning
-
-- **WHEN** `run_loop` is driven over a backend whose `draw` returns an error, with an event
-  source whose script would supply a `q` press
-- **THEN** it returns `Err(LoopError::Draw)` carrying the backend error's text
-- **AND** the event source recorded **zero** `next_event` calls, proving the loop stopped
-  at the failed draw rather than continuing past it
-
 ### Requirement: Startup state is read from files only
 
 `ui::load(start: &Path, config: &Config) -> Dashboard` SHALL call `resolve::find_repo` on
 `start` and then, when a root was found, `changes::from_files(root, config.archived_count)`.
 It SHALL make no CLI call, spawn no process, and consult no `openspec` binary, so the
 dashboard opens with a complete change list on a machine where `openspec` is not installed.
+It SHALL read no artifact file either: `load` produces a `Dashboard` whose `detail` is empty
+in every field, and `sync_detail` — driven by the loop, with the injected reader — is what
+fills it. That keeps `load`'s cost proportional to the change list rather than to the total
+size of every artifact in the repository.
 
 When `find_repo` reports `NotFound`, `load` SHALL produce a `Dashboard` whose `repo` is
 `None`, whose `searched_from` is the directory the search reported, and whose `changes` is
@@ -300,8 +348,8 @@ When `find_repo` reports `NotFound`, `load` SHALL produce a `Dashboard` whose `r
 `ChangeSet` explicitly, so the crate's existing no-`Default` gate covers it.
 
 `load` SHALL always return a `Dashboard`, never a `Result`, and SHALL never panic. Its
-route SHALL start at `Route::List`, its `quit` flag at false, its `selected` at `0`, and
-its `filter` with an empty query and `active` false.
+route SHALL start at `Route::List`, its `quit` flag at false, its `selected` at `0`, its
+`filter` with an empty query and `active` false, and its `detail` empty in all five fields.
 
 #### Scenario: A scratch repository is loaded from disk with no binary present
 
@@ -339,8 +387,9 @@ its `filter` with an empty query and `active` false.
 
 #### Scenario: Loading writes nothing
 
-- **WHEN** a full recursive snapshot of the scratch repository — every entry's path, bytes,
-  and modification time — is taken immediately before `ui::load` and again immediately
-  after
-- **THEN** the two snapshots are equal, so opening the dashboard modified nothing under
-  `openspec/`
+- **WHEN** a scratch repository holding one change with a `proposal.md` and a `tasks.md` is
+  snapshotted, `ui::load` is called over it, and it is snapshotted again
+- **THEN** the two snapshots are identical — every path, its mode, and its bytes
+- **AND** the same holds after `Dashboard::sync_detail` is driven over that dashboard with
+  the real `ui::read_artifact` binding, so resolving and reading an artifact's content leaves
+  the tree byte-identical too

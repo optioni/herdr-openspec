@@ -70,7 +70,7 @@ Pure transformations. No terminal, no subprocess, no writes.
 | `tui-shell` | crossterm terminal setup and teardown, the ratatui event loop, quit handling, the 100-column responsive breakpoint, and the `TestBackend` harness that later view changes assert against. | User interface → Responsive layout | `changes-from-files` |
 | `list-view` | The change list: one row per active change with progress, the archived separator and rows below it, selection and navigation, and `/` filtering. Empty states for no repository and no changes. Also renders repository-level `ChangeSet::problems` (e.g. an unreadable `openspec/changes/`) above the list, since no other change owns its leading rows. | User interface → List view; Degraded states | `tui-shell` |
 | `markdown-viewer` | `pulldown-cmark` to ratatui text — headings, lists, code blocks, block quotes, thematic breaks, emphasis, links, images, and raw HTML — with scrolling. Carries a delta on `plugin-build`, since the change adds the crate's fifth dependency (`pulldown-cmark`). **BREAKING** — `j` / `k` and the arrows scroll the detail content at `Route::Detail` instead of moving the list selection there. | User interface → Detail view; Degraded states | `tui-shell` |
-| `detail-view` | Change header (name, schema, progress), the artifact tab bar built from the schema's ordered artifacts, `1`–`9` / `[` / `]` tab switching, and the "No content yet" state for a missing artifact. | User interface → Detail view | `list-view`, `markdown-viewer` |
+| `detail-view` | Change header (name, schema, progress), the artifact tab bar built from the schema's ordered artifacts, `1`–`9` / `[` / `]` tab switching, and the "No content yet" state for a missing artifact or a named reason for a failed read. | User interface → Detail view | `list-view`, `markdown-viewer` |
 | `tasks-tab` | The tasks artifact rendered as grouped checkbox items with a progress bar, replacing the plain markdown view for that one tab. Read-only. | User interface → Detail view | `detail-view`, `task-parsing` |
 | `live-refresh` | The `notify` watcher on `openspec/` with ~150ms debounce and per-change invalidation, the worker thread running CLI calls off the render path, and the `r` force-refresh key. This is where the dual-source model becomes visible: files paint, the CLI corrects. | Data layer → Refresh | `detail-view`, `changes-from-cli` |
 
@@ -151,6 +151,12 @@ scrollable detail content, so it is the one that binds `j` / `k` and the arrows 
 scrolling at `Route::Detail` and renames `Action::SelectNext` / `SelectPrev` to `Next` /
 `Prev`. This is marked **BREAKING** in `markdown-viewer`'s row above; `detail-view` does not
 re-open the question.
+
+**`tasks-tab` inherits `detail-view`'s tab bar unchanged.** `detail-view` already
+renders a tab for every artifact the schema declares, including the tasks artifact,
+as plain markdown like any other tab. `tasks-tab` replaces only that one tab's
+content — grouped checkbox items and a progress bar — and adds no tab-bar code of
+its own.
 
 **`agent-polling` before `agent-attribution` before `agent-launch`.** Reading agent
 state, deciding what it means, and acting on it are three separable risks. Attribution
