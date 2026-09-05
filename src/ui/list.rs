@@ -330,6 +330,9 @@ mod tests {
         Detail {
             source: String::new(),
             scroll: 0,
+            tab: 0,
+            problems: Vec::new(),
+            loaded: None,
         }
     }
 

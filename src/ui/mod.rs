@@ -81,8 +81,23 @@ pub fn run() -> Result<(), StartError> {
     let mut dashboard = load(&cwd, &config);
     let mut term =
         ratatui::Terminal::new(ratatui::backend::CrosstermBackend::new(std::io::stdout()))?;
-    driver::run_loop(&mut term, &mut dashboard, &mut CrosstermEvents, TICK)?;
+    driver::run_loop(
+        &mut term,
+        &mut dashboard,
+        &mut CrosstermEvents,
+        &read_artifact,
+        TICK,
+    )?;
     Ok(())
+}
+
+/// The crate's one artifact-file read: `std::fs::read_to_string`, mapping
+/// its error to the error's `Display` text. The only binding under
+/// `src/ui/` naming `read_to_string` — `READSEAM` is the mechanical form —
+/// so the read can be replaced, faked, or moved behind a worker thread by
+/// editing this one file. `ui::run` is the only caller that passes it.
+pub fn read_artifact(path: &Path) -> Result<String, String> {
+    std::fs::read_to_string(path).map_err(|e| e.to_string())
 }
 
 /// Startup state, read from files only: `resolve::find_repo` then, when a
@@ -110,6 +125,9 @@ pub fn load(start: &Path, config: &Config) -> Dashboard {
                 detail: Detail {
                     source: String::new(),
                     scroll: 0,
+                    tab: 0,
+                    problems: Vec::new(),
+                    loaded: None,
                 },
             }
         }
@@ -127,6 +145,9 @@ pub fn load(start: &Path, config: &Config) -> Dashboard {
             detail: Detail {
                 source: String::new(),
                 scroll: 0,
+                tab: 0,
+                problems: Vec::new(),
+                loaded: None,
             },
         },
     }
@@ -134,6 +155,40 @@ pub fn load(start: &Path, config: &Config) -> Dashboard {
 
 #[cfg(test)]
 mod tests {
+    /// `ui::read_artifact` — the crate's third one-line binding to the real
+    /// world, carrying its own assertions on the same terms
+    /// `config::env_lookup` does. Real filesystem, through
+    /// `crate::testutil::ScratchDir`: this is the one thing the binding
+    /// exists to do, so it is proven against a real directory rather than a
+    /// double.
+    mod read_artifact {
+        use crate::testutil::{ScratchDir, write_with_mode};
+
+        #[test]
+        fn agrees_with_the_standard_library_on_a_written_file() {
+            let scratch = ScratchDir::new();
+            let path = scratch.path().join("proposal.md");
+            write_with_mode(&path, b"# proposal\n", 0o644);
+
+            let got = super::super::read_artifact(&path);
+            let want = std::fs::read_to_string(&path);
+            assert_eq!(got, want.map_err(|e| e.to_string()));
+            assert_eq!(got.unwrap(), "# proposal\n");
+        }
+
+        #[test]
+        fn names_its_failure_on_a_missing_path() {
+            let scratch = ScratchDir::new();
+            let path = scratch.path().join("does-not-exist.md");
+
+            let got = super::super::read_artifact(&path);
+            match got {
+                Err(e) => assert!(!e.is_empty()),
+                Ok(_) => panic!("expected an Err for a missing path"),
+            }
+        }
+    }
+
     /// The outer-loop acceptance test: `ui::app::action_for` ->
     /// `Dashboard::apply` -> `ui::markdown::lines` -> `ui::view::render` ->
     /// `Dashboard::normalise_scroll` is a path no unit test crosses. See
@@ -160,7 +215,13 @@ mod tests {
                     query: String::new(),
                     active: false,
                 },
-                detail: Detail { source, scroll: 0 },
+                detail: Detail {
+                    source,
+                    scroll: 0,
+                    tab: 0,
+                    problems: Vec::new(),
+                    loaded: None,
+                },
             }
         }
 
@@ -208,6 +269,7 @@ mod tests {
                     &mut terminal,
                     &mut dashboard,
                     &mut events,
+                    &|_: &std::path::Path| Ok(String::new()),
                     std::time::Duration::from_millis(1),
                 )
                 .expect("loop ends");

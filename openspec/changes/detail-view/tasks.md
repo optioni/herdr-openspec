@@ -763,11 +763,11 @@ files in `$CHECKS`.
 ## 1. The state, the signature, and the doubles
 <!-- kind: operational -->
 
-- [ ] 1.1 Add the three `Detail` fields — `tab: usize`, `problems: Vec<String>`,
+- [x] 1.1 Add the three `Detail` fields — `tab: usize`, `problems: Vec<String>`,
       `loaded: Option<(PathBuf, usize)>` — to `ui::app::Detail`, with the doc comments
       `design.md` → Contracts states. Add no behaviour: nothing reads or writes them yet.
 
-- [ ] 1.2 Sweep every `Detail` literal and pattern so the crate compiles. The **measured**
+- [x] 1.2 Sweep every `Detail` literal and pattern so the crate compiles. The **measured**
       grep count is 25 hits, of which 20 are real sites across six files (`src/lib.rs`,
       `src/ui/mod.rs`, `src/ui/list.rs`, `src/ui/driver.rs`, `src/ui/view.rs`,
       `src/ui/app.rs`). Every one names all five fields; **no `..` rest anywhere**, in a
@@ -779,7 +779,7 @@ files in `$CHECKS`.
       an elision. The gate here is the compiler and that check — deliberately **not** a grep
       count, which only ever grows and so can never go red.
 
-- [ ] 1.3 Extend the compile-time companion in `src/ui/app.rs`'s tests: the `Detail`
+- [x] 1.3 Extend the compile-time companion in `src/ui/app.rs`'s tests: the `Detail`
       destructuring test names **all five** fields with no `..`, and the `Dashboard` one
       continues to name all eight. Rename it — it is currently
       `detail_destructures_into_exactly_two_fields`, which becomes a lie the moment 1.1
@@ -790,14 +790,14 @@ files in `$CHECKS`.
       destructures one value, so it catches a field added to the type and never an elision at
       another site. Half B is what covers that, which is why 1.2's Red-when names it.
 
-- [ ] 1.4 Add the three `Action` variants — `SelectTab(usize)`, `NextTab`, `PrevTab` — to
+- [x] 1.4 Add the three `Action` variants — `SelectTab(usize)`, `NextTab`, `PrevTab` — to
       `ui::app::Action`, and add a `_ => {}`-free arm for each in `Dashboard::apply` that
       does **nothing yet**, so the match stays exhaustive without `_`. Add no key binding in
       `action_for` yet: group 7 does that, RED-first.
       **Red when:** `apply`'s match gains a wildcard arm, which would let a later variant go
       unhandled silently.
 
-- [ ] 1.5 Add `pub type ArtifactReader<'a> = &'a dyn Fn(&std::path::Path) -> Result<String,
+- [x] 1.5 Add `pub type ArtifactReader<'a> = &'a dyn Fn(&std::path::Path) -> Result<String,
       String>;` to `src/ui/app.rs`, and add the `read: ArtifactReader<'_>` parameter to
       `ui::driver::run_loop`, positioned between `events` and `tick` as `design.md` →
       Contracts shows. The loop does **not** call it yet. Update **all ten** call sites — the
@@ -807,7 +807,7 @@ files in `$CHECKS`.
       **Red when:** `cargo build --all-targets` still reports a call site with four
       arguments. The count is measured, not assumed: `grep -rn 'run_loop(' src/ | wc -l`.
 
-- [ ] 1.6 RED: Add `mod read_artifact` under `src/ui/mod.rs`'s `mod tests`, holding two
+- [x] 1.6 RED: Add `mod read_artifact` under `src/ui/mod.rs`'s `mod tests`, holding two
       tests against a real `crate::testutil::ScratchDir`: `ui::read_artifact` on a written
       file equals `std::fs::read_to_string` of the same path, and on a path inside that
       directory that does not exist returns an `Err` with non-empty text and no panic. This
@@ -818,7 +818,7 @@ files in `$CHECKS`.
       `std::fs::read_to_string`. Agreement is the requirement; a literal would pass against a
       binding that silently normalised line endings.
 
-- [ ] 1.7 GREEN: Add `ui::read_artifact` to `src/ui/mod.rs` — the crate's one
+- [x] 1.7 GREEN: Add `ui::read_artifact` to `src/ui/mod.rs` — the crate's one
       `std::fs::read_to_string` for artifacts, mapping the error to its `Display` text — and
       wire `ui::run` to pass `&read_artifact` to `run_loop`.
       **Red when:** `read_artifact` is named anywhere under `src/ui/` but `src/ui/mod.rs`;
@@ -826,7 +826,7 @@ files in `$CHECKS`.
       injection is decorative. `UI_MIN=9 sh $CHECKS/READSEAM.sh` is the mechanical form and
       is run in 1.9.
 
-- [ ] 1.8 Add `crate::testutil::RecordingReader` to `src/lib.rs`'s `#[cfg(test)] pub(crate)
+- [x] 1.8 Add `crate::testutil::RecordingReader` to `src/lib.rs`'s `#[cfg(test)] pub(crate)
       mod testutil`: constructed from a list of `(path, Result<String, String>)` entries plus
       a default result, it records every call's path in order and exposes `calls()` and
       `paths()`. It performs **no I/O**, so it can be used from any test module without a
@@ -835,7 +835,7 @@ files in `$CHECKS`.
       `&read`. This is the double every group from 8 onward drives `sync_detail` with, and it
       is what makes "was not read again" assertable at all.
 
-- [ ] 1.9 Add `changes::fixture::with_artifacts(change: Change, artifacts: &[(&str,
+- [x] 1.9 Add `changes::fixture::with_artifacts(change: Change, artifacts: &[(&str,
       &[&str])]) -> Change` **inside** `src/changes.rs`'s existing `#[cfg(test)] pub(crate)
       mod fixture`, returning the change with its `artifacts` replaced by `ArtifactRef`
       values built from the given ids and path strings, in the given order, with **no
@@ -844,7 +844,7 @@ files in `$CHECKS`.
       **Red when:** the helper lives anywhere but `src/changes.rs`, which would put a
       `Change {` or `ArtifactRef {` literal outside the file `NOLIT-CHANGE` guards.
 
-- [ ] 1.10 VERIFY: `cargo fmt --all -- --check`; `cargo clippy --all-targets --all-features
+- [x] 1.10 VERIFY: `cargo fmt --all -- --check`; `cargo clippy --all-targets --all-features
       -- -D warnings`; `cargo test --all-features` — **all green**, since no behaviour
       changed beyond the new binding and its two tests; `. $CHECKS/TESTCOUNT.sh` then
       `testcount --lib 'ui::tests::read_artifact::' 2` and `testcount --lib 'ui::' 174`
@@ -855,7 +855,7 @@ files in `$CHECKS`.
       **Red when:** any test fails, either count falls short, or `READSEAM` reports
       `read_to_string` outside `src/ui/mod.rs`.
 
-- [ ] 1.11 Commit: `refactor(detail-view): add the Detail fields, the tab actions, and the
+- [x] 1.11 Commit: `refactor(detail-view): add the Detail fields, the tab actions, and the
       injected reader`.
 
 ## 2. The outer-loop acceptance test — RED until group 10

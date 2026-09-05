@@ -6,7 +6,7 @@ use std::time::Duration;
 use ratatui::Terminal;
 use ratatui::backend::Backend;
 
-use crate::ui::app::{Dashboard, action_for};
+use crate::ui::app::{ArtifactReader, Dashboard, action_for};
 use crate::ui::event::{EventError, EventSource};
 use crate::ui::view;
 
@@ -37,13 +37,16 @@ pub enum LoopError {
 /// breaking when `dashboard.quit` is set — without drawing again. A
 /// timeout (`Ok(None)`) is not an event and does not end the loop. Neither
 /// a draw error nor an event-source error is retried in a loop that could
-/// spin.
+/// spin. `read` is not yet called: `detail-view`'s group 10 is what wires
+/// `dashboard.sync_detail(read)` into this loop, before the draw.
 pub fn run_loop<B: Backend, E: EventSource>(
     terminal: &mut Terminal<B>,
     dashboard: &mut Dashboard,
     events: &mut E,
+    read: ArtifactReader<'_>,
     tick: Duration,
 ) -> Result<LoopSummary, LoopError> {
+    let _ = read;
     let mut frames = 0usize;
     let mut polls = 0usize;
     loop {
@@ -101,6 +104,9 @@ mod tests {
             detail: crate::ui::app::Detail {
                 source: String::new(),
                 scroll: 0,
+                tab: 0,
+                problems: Vec::new(),
+                loaded: None,
             },
         }
     }
@@ -193,6 +199,7 @@ mod tests {
             &mut terminal,
             &mut dashboard,
             &mut events,
+            &|_: &std::path::Path| Ok(String::new()),
             Duration::from_millis(1),
         );
         assert!(matches!(result, Err(LoopError::Events(_))));
@@ -216,8 +223,14 @@ mod tests {
             Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
         ]);
 
-        let summary =
-            run_loop(&mut terminal, &mut dashboard, &mut events, tick).expect("loop ends");
+        let summary = run_loop(
+            &mut terminal,
+            &mut dashboard,
+            &mut events,
+            &|_: &std::path::Path| Ok(String::new()),
+            tick,
+        )
+        .expect("loop ends");
         assert_eq!(
             summary,
             LoopSummary {
@@ -243,6 +256,7 @@ mod tests {
             &mut terminal,
             &mut dashboard,
             &mut events,
+            &|_: &std::path::Path| Ok(String::new()),
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -274,6 +288,7 @@ mod tests {
             &mut terminal,
             &mut dashboard,
             &mut events,
+            &|_: &std::path::Path| Ok(String::new()),
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -307,6 +322,7 @@ mod tests {
             &mut terminal,
             &mut dashboard,
             &mut events,
+            &|_: &std::path::Path| Ok(String::new()),
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -334,6 +350,7 @@ mod tests {
             &mut terminal,
             &mut dashboard,
             &mut events,
+            &|_: &std::path::Path| Ok(String::new()),
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -366,6 +383,9 @@ mod tests {
             detail: crate::ui::app::Detail {
                 source: (0..20).map(|i| format!("- line-{i:02}\n")).collect(),
                 scroll: 0,
+                tab: 0,
+                problems: Vec::new(),
+                loaded: None,
             },
         }
     }
@@ -386,6 +406,7 @@ mod tests {
                 &mut terminal,
                 &mut dashboard,
                 &mut events,
+                &|_: &std::path::Path| Ok(String::new()),
                 Duration::from_millis(1),
             )
             .expect("loop ends");
@@ -430,6 +451,9 @@ mod tests {
             detail: crate::ui::app::Detail {
                 source: base.detail.source,
                 scroll: 4,
+                tab: base.detail.tab,
+                problems: base.detail.problems,
+                loaded: base.detail.loaded,
             },
         };
         let backend = TestBackend::new(120, 20);
@@ -468,6 +492,7 @@ mod tests {
             &mut terminal,
             &mut dashboard,
             &mut events,
+            &|_: &std::path::Path| Ok(String::new()),
             Duration::from_millis(1),
         );
         match result {

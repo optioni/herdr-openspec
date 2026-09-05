@@ -7,6 +7,15 @@ use ratatui::crossterm::event::{Event, KeyCode, KeyEventKind, KeyModifiers};
 
 use crate::changes::{Change, ChangeSet};
 
+/// The artifact read, injected rather than imported: the same shape by
+/// which `resolve::openspec_bin`'s `npm prefix -g` probe and
+/// `config::env_lookup` take their environment-dependent hook. The crate's
+/// one production binding for this lives in `src/ui/mod.rs`, beside
+/// `ui::load`; this file names no I/O API and never calls that binding by
+/// name. See `openspec/changes/detail-view/design.md` -> Contracts and
+/// Decisions.
+pub type ArtifactReader<'a> = &'a dyn Fn(&std::path::Path) -> Result<String, String>;
+
 // `Route` is pulled forward from this group (3) into group 2's commit: `ui::layout`'s
 // `split_body` needs it for the narrow-mode single-region case, and layout.rs is built
 // before this file's `Dashboard`/`Action`/`action_for` content. Recorded as a deliberate,
@@ -36,6 +45,9 @@ pub enum Action {
     Back,
     Next,
     Prev,
+    SelectTab(usize),
+    NextTab,
+    PrevTab,
     FilterStart,
     FilterPush(char),
     FilterPop,
@@ -53,20 +65,30 @@ pub struct Filter {
     pub active: bool,
 }
 
-/// The detail region's markdown source and scroll offset. Nothing in this
-/// change sets `source`: `ui::load` starts it empty, and `detail-view` — a
-/// later change — supplies it. `scroll` is a user-controlled position, the
-/// detail region's counterpart to `Dashboard::selected`, not derived
-/// geometry: the offset actually drawn is still recomputed on every draw by
-/// `layout::scroll_offset` against the current interior height. Deliberately
-/// implements no `Default`, anywhere in the crate, on the same terms as
-/// `Dashboard` and `Filter`: every construction and destructuring names both
-/// fields, with no `..` rest. See `specs/detail-scroll/spec.md` and the
-/// `NODEFAULT-UI` check, whose type list now covers this type too.
+/// The detail region's markdown source and scroll offset, plus
+/// `detail-view`'s three additions. `source` is set by `Dashboard::sync_detail`,
+/// driven once per loop iteration by the injected `ArtifactReader`; `ui::load`
+/// still starts it empty. `scroll` is a user-controlled position, the detail
+/// region's counterpart to `Dashboard::selected`, not derived geometry: the
+/// offset actually drawn is still recomputed on every draw by
+/// `layout::scroll_offset` against the current content area's height. `tab`
+/// is the selected artifact's position in the selected change's `artifacts`;
+/// `problems` names each artifact file that could not be read; `loaded` is
+/// the `(change directory, tab)` key whose content `source` currently holds
+/// — `sync_detail`'s cache key, and the reason an unchanged selection
+/// re-reads nothing. Deliberately implements no `Default`, anywhere in the
+/// crate, on the same terms as `Dashboard` and `Filter`: every construction
+/// and destructuring names all five fields, with no `..` rest. See
+/// `specs/detail-scroll/spec.md`, `specs/artifact-tabs/spec.md`,
+/// `specs/artifact-content/spec.md`, and the `NODEFAULT-UI` check, whose type
+/// list covers this type too.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Detail {
     pub source: String,
     pub scroll: usize,
+    pub tab: usize,
+    pub problems: Vec<String>,
+    pub loaded: Option<(PathBuf, usize)>,
 }
 
 /// The dashboard's whole state. Carries no width, no layout mode, no column
@@ -155,6 +177,14 @@ impl Dashboard {
                     self.detail.scroll = self.detail.scroll.saturating_sub(1);
                 }
             },
+            // Nothing yet: group 7 gives these their effect. Kept as
+            // explicit no-op arms rather than folded into a wildcard, so
+            // `apply`'s match stays exhaustive without `_` and a later
+            // variant added to `Action` fails to compile here instead of
+            // silently falling through.
+            Action::SelectTab(_) => {}
+            Action::NextTab => {}
+            Action::PrevTab => {}
             Action::FilterStart => {
                 self.filter.active = true;
                 self.route = Route::List;
@@ -303,6 +333,9 @@ mod tests {
             Detail {
                 source: String::new(),
                 scroll: 0,
+                tab: 0,
+                problems: Vec::new(),
+                loaded: None,
             }
         }
 
@@ -743,15 +776,27 @@ mod tests {
             Detail {
                 source: (0..20).map(|i| format!("- line-{i:02}\n")).collect(),
                 scroll: 0,
+                tab: 0,
+                problems: Vec::new(),
+                loaded: None,
             }
         }
 
         #[test]
-        fn detail_destructures_into_exactly_two_fields() {
+        fn detail_destructures_into_exactly_five_fields() {
             let d = twenty_line_detail();
-            let Detail { source, scroll } = &d;
+            let Detail {
+                source,
+                scroll,
+                tab,
+                problems,
+                loaded,
+            } = &d;
             assert!(source.starts_with("- line-00"));
             assert_eq!(*scroll, 0);
+            assert_eq!(*tab, 0);
+            assert!(problems.is_empty());
+            assert_eq!(*loaded, None);
         }
 
         #[test]
@@ -850,6 +895,9 @@ mod tests {
                 detail: Detail {
                     source: twenty_line_detail().source,
                     scroll: 3,
+                    tab: 0,
+                    problems: Vec::new(),
+                    loaded: None,
                 },
                 repo: None,
                 searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
@@ -868,6 +916,9 @@ mod tests {
                 detail: Detail {
                     source: twenty_line_detail().source,
                     scroll: 3,
+                    tab: 0,
+                    problems: Vec::new(),
+                    loaded: None,
                 },
                 repo: None,
                 searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
@@ -885,6 +936,9 @@ mod tests {
                 detail: Detail {
                     source: twenty_line_detail().source,
                     scroll: 3,
+                    tab: 0,
+                    problems: Vec::new(),
+                    loaded: None,
                 },
                 repo: None,
                 searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
@@ -907,6 +961,9 @@ mod tests {
                 detail: Detail {
                     source: twenty_line_detail().source,
                     scroll: 99,
+                    tab: 0,
+                    problems: Vec::new(),
+                    loaded: None,
                 },
                 repo: None,
                 searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
@@ -923,6 +980,9 @@ mod tests {
                 detail: Detail {
                     source: twenty_line_detail().source,
                     scroll: 99,
+                    tab: 0,
+                    problems: Vec::new(),
+                    loaded: None,
                 },
                 repo: None,
                 searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
@@ -942,6 +1002,9 @@ mod tests {
                 detail: Detail {
                     source: twenty_line_detail().source,
                     scroll: 7,
+                    tab: 0,
+                    problems: Vec::new(),
+                    loaded: None,
                 },
                 repo: None,
                 searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),

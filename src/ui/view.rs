@@ -273,6 +273,9 @@ mod tests {
         Detail {
             source: String::new(),
             scroll: 0,
+            tab: 0,
+            problems: Vec::new(),
+            loaded: None,
         }
     }
 
@@ -1353,7 +1356,13 @@ mod tests {
             quit: false,
             selected: 0,
             filter: empty_filter(),
-            detail: Detail { source, scroll },
+            detail: Detail {
+                source,
+                scroll,
+                tab: 0,
+                problems: Vec::new(),
+                loaded: None,
+            },
         }
     }
 

@@ -257,6 +257,60 @@ pub(crate) mod testutil {
         }
     }
 
+    /// An in-memory `ArtifactReader` double: constructed from a list of
+    /// `(path, Result<String, String>)` entries plus a default result for
+    /// any path not named there, it records every call's path in order and
+    /// exposes `calls()` and `paths()`. Performs no I/O, so it can be used
+    /// from any test module without a scratch directory. Because
+    /// `crate::ui::app::ArtifactReader` (`&dyn Fn`) is not a `&mut`
+    /// receiver, calls are recorded into a `RefCell`; every call site wraps
+    /// this in a closure — `let read = |p: &Path| recorder.read(p);` then
+    /// `&read` — which is the shape every test in groups 8, 10, and 11
+    /// repeats. This is the double that makes "was not read again"
+    /// assertable at all: a real filesystem has no way to prove a path was
+    /// *not* read.
+    pub(crate) struct RecordingReader {
+        scripted: Vec<(PathBuf, Result<String, String>)>,
+        default: Result<String, String>,
+        calls: std::cell::RefCell<Vec<PathBuf>>,
+    }
+
+    impl RecordingReader {
+        pub(crate) fn new(
+            scripted: Vec<(PathBuf, Result<String, String>)>,
+            default: Result<String, String>,
+        ) -> Self {
+            Self {
+                scripted,
+                default,
+                calls: std::cell::RefCell::new(Vec::new()),
+            }
+        }
+
+        /// A reader that returns `default` for every path — the common case
+        /// where every call resolves to the same text or the same error.
+        pub(crate) fn always(default: Result<String, String>) -> Self {
+            Self::new(Vec::new(), default)
+        }
+
+        pub(crate) fn read(&self, path: &Path) -> Result<String, String> {
+            self.calls.borrow_mut().push(path.to_path_buf());
+            self.scripted
+                .iter()
+                .find(|(p, _)| p == path)
+                .map(|(_, r)| r.clone())
+                .unwrap_or_else(|| self.default.clone())
+        }
+
+        pub(crate) fn calls(&self) -> usize {
+            self.calls.borrow().len()
+        }
+
+        pub(crate) fn paths(&self) -> Vec<PathBuf> {
+            self.calls.borrow().clone()
+        }
+    }
+
     /// A key-press `Event`, for building a `Script`'s queue.
     pub(crate) fn press(
         code: ratatui::crossterm::event::KeyCode,
@@ -269,9 +323,39 @@ pub(crate) mod testutil {
 
     #[cfg(test)]
     mod tests {
-        use super::{ScratchDir, cell, render_at, row_text, snapshot};
+        use super::{RecordingReader, ScratchDir, cell, render_at, row_text, snapshot};
         use crate::changes::empty_set;
         use crate::ui::app::{Dashboard, Route};
+
+        #[test]
+        fn recording_reader_returns_the_scripted_result_and_records_the_call() {
+            let path = std::path::PathBuf::from("/repo/p.md");
+            let recorder = RecordingReader::new(
+                vec![(path.clone(), Ok("# proposal\n".to_string()))],
+                Err("no such path".to_string()),
+            );
+            assert_eq!(recorder.read(&path), Ok("# proposal\n".to_string()));
+            assert_eq!(recorder.calls(), 1);
+            assert_eq!(recorder.paths(), vec![path]);
+        }
+
+        #[test]
+        fn recording_reader_falls_back_to_the_default_and_records_every_call_in_order() {
+            let recorder = RecordingReader::always(Ok("# doc\n".to_string()));
+            let a = std::path::PathBuf::from("/repo/a.md");
+            let b = std::path::PathBuf::from("/repo/b.md");
+            assert_eq!(recorder.read(&a), Ok("# doc\n".to_string()));
+            assert_eq!(recorder.read(&b), Ok("# doc\n".to_string()));
+            assert_eq!(recorder.calls(), 2);
+            assert_eq!(recorder.paths(), vec![a, b]);
+        }
+
+        #[test]
+        fn recording_reader_can_script_an_error() {
+            let recorder = RecordingReader::always(Err("boom".to_string()));
+            let path = std::path::PathBuf::from("/repo/missing.md");
+            assert_eq!(recorder.read(&path), Err("boom".to_string()));
+        }
 
         fn empty_dashboard() -> Dashboard {
             Dashboard {
@@ -288,6 +372,9 @@ pub(crate) mod testutil {
                 detail: crate::ui::app::Detail {
                     source: String::new(),
                     scroll: 0,
+                    tab: 0,
+                    problems: Vec::new(),
+                    loaded: None,
                 },
             }
         }

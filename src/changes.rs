@@ -186,6 +186,45 @@ pub(crate) mod fixture {
         }
     }
 
+    /// `change` with its `artifacts` replaced by `ArtifactRef` values built
+    /// from `artifacts`' ids and path strings, in the given order, with
+    /// **no** de-duplication — `schema-artifacts` requires that a schema
+    /// declaring the same artifact id at two positions keeps both.
+    /// `ui::detail`'s and `ui::view`'s tests reach every artifact-carrying
+    /// `Change` through this function, so no `Change {` or `ArtifactRef {`
+    /// literal is needed outside this file, which is exactly what keeps
+    /// `NOLIT-CHANGE` honest.
+    pub(crate) fn with_artifacts(change: Change, artifacts: &[(&str, &[&str])]) -> Change {
+        // Every field named explicitly, with no `..` rest — `Change`
+        // implements no `Default` and this file's own gate (`GATE-MECH1`)
+        // forbids a functional-update expression here on the same terms as
+        // everywhere else in the crate.
+        let Change {
+            name,
+            dir,
+            origin,
+            schema,
+            artifacts: _,
+            progress,
+            problems,
+        } = change;
+        Change {
+            name,
+            dir,
+            origin,
+            schema,
+            artifacts: artifacts
+                .iter()
+                .map(|(id, paths)| super::ArtifactRef {
+                    id: (*id).to_string(),
+                    paths: paths.iter().map(PathBuf::from).collect(),
+                })
+                .collect(),
+            progress,
+            problems,
+        }
+    }
+
     /// A `ChangeSet` from already-built `active` and `archived` vectors and
     /// `problems`, preserving each vector's order untouched — `rows` and
     /// `Dashboard::visible` are what sort or filter, never the fixture.
@@ -203,7 +242,7 @@ pub(crate) mod fixture {
 
     #[cfg(test)]
     mod tests {
-        use super::{active, archived, set};
+        use super::{active, archived, set, with_artifacts};
         use crate::changes::conformance::assert_invariants;
 
         #[test]
@@ -211,6 +250,47 @@ pub(crate) mod fixture {
             assert_invariants(&active("add-token-refresh", 4, 9));
             assert_invariants(&archived(Some("2026-08-14"), "add-auth", 7, 7));
             assert_invariants(&archived(None, "legacy-cleanup", 3, 3));
+        }
+
+        #[test]
+        fn with_artifacts_replaces_only_the_artifacts_field_in_order_and_undeduplicated() {
+            let base = active("detail-view", 4, 9);
+            let with = with_artifacts(
+                base.clone(),
+                &[
+                    ("proposal", &["/repo/proposal.md"]),
+                    ("spec", &["/repo/a/spec.md", "/repo/b/spec.md"]),
+                    ("spec", &["/repo/c/spec.md"]),
+                ],
+            );
+            assert_eq!(with.name, base.name);
+            assert_eq!(with.dir, base.dir);
+            assert_eq!(with.origin, base.origin);
+            assert_eq!(with.schema, base.schema);
+            assert_eq!(with.progress, base.progress);
+            assert_eq!(with.problems, base.problems);
+            assert_eq!(with.artifacts.len(), 3);
+            assert_eq!(with.artifacts[0].id, "proposal");
+            assert_eq!(
+                with.artifacts[0].paths,
+                vec![std::path::PathBuf::from("/repo/proposal.md")]
+            );
+            assert_eq!(with.artifacts[1].id, "spec");
+            assert_eq!(with.artifacts[2].id, "spec");
+            assert_eq!(
+                with.artifacts[1].paths,
+                vec![
+                    std::path::PathBuf::from("/repo/a/spec.md"),
+                    std::path::PathBuf::from("/repo/b/spec.md"),
+                ]
+            );
+            assert_invariants(&with);
+        }
+
+        #[test]
+        fn with_artifacts_over_an_empty_list_yields_no_artifacts() {
+            let with = with_artifacts(active("alpha", 1, 2), &[]);
+            assert!(with.artifacts.is_empty());
         }
 
         #[test]
