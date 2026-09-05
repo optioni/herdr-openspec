@@ -1202,7 +1202,7 @@ passes, and `GATE-MECH1` still holds.
 ## 4. Classifying a touched path
 <!-- kind: behavior -->
 
-- [ ] 4.1 RED: Write eleven failing tests in `watch::tests::`, named from their scenarios:
+- [x] 4.1 RED: Write eleven failing tests in `watch::tests::`, named from their scenarios:
       `a_change_file_invalidates_only_that_change`,
       `a_nested_change_file_invalidates_only_that_change`,
       `the_change_directory_itself_is_a_repository_touch`,
@@ -1220,7 +1220,7 @@ passes, and `GATE-MECH1` still holds.
       `Selection::All`. It is `Only(∅)` — an empty batch must not escalate to a full CLI
       reload, and the two are different values with different costs.
 
-- [ ] 4.2 GREEN: Implement `watch::Touch`, `watch::classify`, and `watch::invalidate` per
+- [x] 4.2 GREEN: Implement `watch::Touch`, `watch::classify`, and `watch::invalidate` per
       `specs/watch-invalidation/spec.md`. Both are pure: no filesystem, no `canonicalize`, no
       clock, so a path that no longer exists classifies exactly as one that does.
       Red-when: the classification calls `Path::canonicalize`. It would turn a pure function
@@ -1230,15 +1230,15 @@ passes, and `GATE-MECH1` still holds.
       `Repository` — a wrong `Repository` costs one `list --json` on a cycle that was
       happening anyway; a wrong `Outside` silently stops the pane updating.
 
-- [ ] 4.3 REFACTOR: If `classify` reads as a chain of `starts_with` calls rather than as one
+- [x] 4.3 REFACTOR: If `classify` reads as a chain of `starts_with` calls rather than as one
       relative-path match, restructure it around `Path::strip_prefix` and a component walk;
       otherwise state that no refactor was needed.
 
-- [ ] 4.4 CHECK: `sh $CHECKS/NOIO-VIEW.sh` — unchanged and green: the classifier lives in
+- [x] 4.4 CHECK: `sh $CHECKS/NOIO-VIEW.sh` — unchanged and green: the classifier lives in
       `src/watch.rs`, outside `src/ui/`, which is what keeps the pure set at eight.
       `MIN=21 sh $CHECKS/NOSPAWN-GREP.sh`. `MIN=24 SLEEP_MIN=3 sh $CHECKS/NOSLEEP.sh`.
 
-- [ ] 4.5 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'watch::tests::' 11`; the four
+- [x] 4.5 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'watch::tests::' 11`; the four
       gate commands, still failing on exactly the one known acceptance test.
       `BASE=f9b42e8 sh $CHECKS/OPENSPEC-UNTOUCHED.sh`. Commit.
 
