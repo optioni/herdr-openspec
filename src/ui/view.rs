@@ -9,8 +9,9 @@ use ratatui::style::{Modifier, Style};
 use ratatui::widgets::Block;
 
 use crate::ui::app::{Dashboard, Filter, Route};
-use crate::ui::layout::{interior, split_body, split_frame, viewport};
+use crate::ui::layout::{interior, scroll_offset, split_body, split_frame, viewport};
 use crate::ui::list;
+use crate::ui::markdown::{self, Face};
 
 /// The footer's key hints, in the order they are drawn and dropped from.
 const FOOTER_HINTS: [&str; 3] = ["q quit", "Enter detail", "Esc back"];
@@ -34,7 +35,67 @@ fn render_body(frame: &mut Frame, body: Rect, dashboard: &Dashboard) {
     }
     if let Some(area) = detail {
         render_region(frame, area, "Detail", dashboard.route == Route::Detail);
+        render_detail(frame, interior(area), dashboard);
     }
+}
+
+/// Draw `markdown::lines(&dashboard.detail.source, interior.width)` into
+/// `interior`: the slice `layout::scroll_offset` selects, one rendered
+/// line per terminal row starting at the interior's first row and column,
+/// each segment drawn left to right with `style_for(&segment.face)` and
+/// stopping at the interior's last column. Draws nothing when the
+/// interior has zero width or zero height, or when the source is empty —
+/// `markdown-render` does not pad a line to the width, so a line shorter
+/// than the interior leaves the rest of its row untouched.
+fn render_detail(frame: &mut Frame, interior: Rect, dashboard: &Dashboard) {
+    if interior.width == 0 || interior.height == 0 || dashboard.detail.source.is_empty() {
+        return;
+    }
+    let lines = markdown::lines(&dashboard.detail.source, interior.width);
+    let offset = scroll_offset(lines.len(), dashboard.detail.scroll, interior.height);
+    let buf = frame.buffer_mut();
+    for (i, line) in lines
+        .iter()
+        .skip(offset)
+        .take(interior.height as usize)
+        .enumerate()
+    {
+        let y = interior.y + i as u16;
+        let mut x = interior.x;
+        let last_col = interior.x + interior.width;
+        for segment in &line.segments {
+            if x >= last_col {
+                break;
+            }
+            let style = style_for(&segment.face);
+            buf.set_string(x, y, &segment.text, style);
+            x += segment.text.chars().count() as u16;
+        }
+    }
+}
+
+/// The crate's only `Face`-to-`Style` mapping: `heading` present or
+/// `strong` -> `BOLD`; `emphasis` -> `ITALIC`; `code` -> `DIM`; `link` ->
+/// `UNDERLINED`; `quoted` -> `DIM`. Flags compose, so a bold link's cells
+/// carry `BOLD` and `UNDERLINED` together.
+fn style_for(face: &Face) -> Style {
+    let mut style = Style::default();
+    if face.heading.is_some() || face.strong {
+        style = style.add_modifier(Modifier::BOLD);
+    }
+    if face.emphasis {
+        style = style.add_modifier(Modifier::ITALIC);
+    }
+    if face.code {
+        style = style.add_modifier(Modifier::DIM);
+    }
+    if face.link {
+        style = style.add_modifier(Modifier::UNDERLINED);
+    }
+    if face.quoted {
+        style = style.add_modifier(Modifier::DIM);
+    }
+    style
 }
 
 /// Draw `list::rows(dashboard, interior.width)` into `interior`: the slice
@@ -1025,7 +1086,10 @@ mod tests {
                 )
             })
             .collect();
-        let d = dashboard_with(names, Vec::new(), 0, Route::List);
+        let mut d = dashboard_with(names, Vec::new(), 0, Route::List);
+        // detail-scroll: the border assertion below must hold for a
+        // markdown document too, not only for over-wide list rows.
+        d.detail.source = (0..30).map(|_| format!("{}\n", "x".repeat(200))).collect();
 
         let buf60 = render_at(60, 20, &d);
         for y in 1..=18u16 {
@@ -1270,6 +1334,296 @@ mod tests {
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
             assert!(buffer_contains(&buf, "Changes"));
+        }
+    }
+
+    /// The twenty bullet items every detail-scroll scenario in this module
+    /// renders: `- line-00` through `- line-19`, generated rather than
+    /// hand-written for the same reason `changes_named` is.
+    fn twenty_line_source() -> String {
+        (0..20).map(|i| format!("- line-{i:02}\n")).collect()
+    }
+
+    fn detail_dashboard(source: String, scroll: usize, route: Route) -> Dashboard {
+        Dashboard {
+            detail: Detail { source, scroll },
+            route,
+            ..dashboard_with(Vec::new(), Vec::new(), 0, Route::List)
+        }
+    }
+
+    /// Column range `1..=9` at 60, `41..=49` at 120 — the first nine
+    /// columns of the detail interior at either mandated width.
+    fn detail_marker_cols(buf: &Buffer, y: u16) -> String {
+        let (from, to) = if buf.area.width == 60 {
+            (1, 9)
+        } else {
+            (41, 49)
+        };
+        cols(&row_text(buf, y), from..to + 1)
+    }
+
+    #[test]
+    fn the_detail_document_fills_the_interior_at_60_and_120() {
+        let mut d = Dashboard {
+            changes: fixture::set(
+                vec![fixture::active("fix-empty-basket", 7, 7)],
+                Vec::new(),
+                Vec::new(),
+            ),
+            ..detail_dashboard(twenty_line_source(), 0, Route::List)
+        };
+
+        let buf120 = render_at(120, 20, &d);
+        assert_eq!(detail_marker_cols(&buf120, 2), "- line-00");
+        assert_eq!(detail_marker_cols(&buf120, 17), "- line-15");
+        assert_eq!(
+            cols(&row_text(&buf120, 2), 1..39),
+            "> fix-empty-basket               [7/7]"
+        );
+
+        d.route = Route::Detail;
+        let buf60 = render_at(60, 20, &d);
+        assert_eq!(detail_marker_cols(&buf60, 2), "- line-00");
+        assert_eq!(detail_marker_cols(&buf60, 17), "- line-15");
+    }
+
+    /// The style of the first cell of the first (by-char, never by-byte —
+    /// a box-drawing border is multi-byte) occurrence of `needle` anywhere
+    /// in `buf`.
+    fn find_cell_style(buf: &Buffer, needle: &str) -> ratatui::style::Style {
+        let needle_chars: Vec<char> = needle.chars().collect();
+        for y in 0..buf.area.height {
+            let row_chars: Vec<char> = row_text(buf, y).chars().collect();
+            if let Some(pos) = row_chars
+                .windows(needle_chars.len())
+                .position(|w| w == needle_chars.as_slice())
+            {
+                return cell(buf, pos as u16, y).style();
+            }
+        }
+        panic!("{needle:?} not found in the buffer");
+    }
+
+    #[test]
+    fn faces_reach_the_buffer_as_styles() {
+        let source =
+            "# Title\n\nA **bold** and *italic* line with `code` and [a link](x).\n\n> quoted\n";
+        let d = detail_dashboard(source.to_string(), 0, Route::Detail);
+        for width in [60, 120] {
+            let buf = render_at(width, 20, &d);
+
+            let title_row: Vec<char> = row_text(&buf, 2).chars().collect();
+            let needle: Vec<char> = "# Title".chars().collect();
+            let title_start = title_row
+                .windows(needle.len())
+                .position(|w| w == needle.as_slice())
+                .expect("heading present");
+            for i in 0..7 {
+                let x = (title_start + i) as u16;
+                assert!(
+                    cell(&buf, x, 2)
+                        .style()
+                        .add_modifier
+                        .contains(Modifier::BOLD),
+                    "width {width}: heading cell {i} not bold"
+                );
+            }
+
+            assert!(
+                find_cell_style(&buf, "bold")
+                    .add_modifier
+                    .contains(Modifier::BOLD),
+                "width {width}"
+            );
+            assert!(
+                find_cell_style(&buf, "italic")
+                    .add_modifier
+                    .contains(Modifier::ITALIC),
+                "width {width}"
+            );
+            assert!(
+                find_cell_style(&buf, "code")
+                    .add_modifier
+                    .contains(Modifier::DIM),
+                "width {width}"
+            );
+            assert!(
+                find_cell_style(&buf, "a link")
+                    .add_modifier
+                    .contains(Modifier::UNDERLINED),
+                "width {width}"
+            );
+            assert!(
+                find_cell_style(&buf, "quoted")
+                    .add_modifier
+                    .contains(Modifier::DIM),
+                "width {width}"
+            );
+
+            let and_style = find_cell_style(&buf, "and");
+            assert!(
+                !and_style.add_modifier.contains(Modifier::BOLD),
+                "width {width}"
+            );
+            assert!(
+                !and_style.add_modifier.contains(Modifier::ITALIC),
+                "width {width}"
+            );
+            assert!(
+                !and_style.add_modifier.contains(Modifier::DIM),
+                "width {width}"
+            );
+            assert!(
+                !and_style.add_modifier.contains(Modifier::UNDERLINED),
+                "width {width}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_empty_detail_source_leaves_the_interior_blank() {
+        let d = detail_dashboard(String::new(), 0, Route::Detail);
+        let default_style = Cell::default().style();
+
+        let buf120 = render_at(120, 20, &d);
+        for y in 2..=17u16 {
+            for x in 41..=118u16 {
+                let c = cell(&buf120, x, y);
+                assert_eq!(c.symbol(), " ", "x={x} y={y}");
+                assert_eq!(c.style(), default_style, "x={x} y={y}");
+            }
+        }
+
+        let buf60 = render_at(60, 20, &d);
+        for y in 2..=17u16 {
+            for x in 1..=58u16 {
+                let c = cell(&buf60, x, y);
+                assert_eq!(c.symbol(), " ", "x={x} y={y}");
+                assert_eq!(c.style(), default_style, "x={x} y={y}");
+            }
+        }
+    }
+
+    #[test]
+    fn detail_content_never_overwrites_the_border() {
+        let source: String = (0..20).map(|_| format!("{}\n", "x".repeat(200))).collect();
+        let d = detail_dashboard(source, 0, Route::Detail);
+
+        let buf120 = render_at(120, 20, &d);
+        for y in 1..=18u16 {
+            for x in [39u16, 40, 119] {
+                let s = cell(&buf120, x, y).symbol();
+                assert!(
+                    matches!(s, "│" | "┌" | "└" | "┐" | "┘"),
+                    "x={x} y={y}: {s:?}"
+                );
+            }
+        }
+        for y in 2..=17u16 {
+            assert!(
+                !cols(&row_text(&buf120, y), 41..119)
+                    .chars()
+                    .all(|c| c == ' ')
+            );
+        }
+
+        let buf60 = render_at(60, 20, &d);
+        for y in 1..=18u16 {
+            for x in [0u16, 59] {
+                let s = cell(&buf60, x, y).symbol();
+                assert!(
+                    matches!(s, "│" | "┌" | "└" | "┐" | "┘"),
+                    "x={x} y={y}: {s:?}"
+                );
+            }
+        }
+        for y in 2..=17u16 {
+            assert!(!cols(&row_text(&buf60, y), 1..59).chars().all(|c| c == ' '));
+        }
+    }
+
+    #[test]
+    fn a_degenerate_detail_interior_draws_nothing() {
+        let d = detail_dashboard(twenty_line_source(), 0, Route::Detail);
+        for (w, h) in [(1u16, 20u16), (2, 20), (3, 20), (60, 2), (60, 3)] {
+            let buf = render_at(w, h, &d);
+            let _ = buf;
+        }
+        // Contrasting controls: content is present at both mandated widths.
+        for width in [60, 120] {
+            let buf = render_at(width, 20, &d);
+            assert!(buffer_contains(&buf, "line-00"));
+        }
+    }
+
+    #[test]
+    fn a_scroll_past_the_end_draws_the_last_screenful() {
+        let d = detail_dashboard(twenty_line_source(), 99, Route::Detail);
+        for width in [60, 120] {
+            let buf = render_at(width, 20, &d);
+            assert_eq!(detail_marker_cols(&buf, 2), "- line-04", "width {width}");
+            assert_eq!(detail_marker_cols(&buf, 17), "- line-19", "width {width}");
+        }
+    }
+
+    #[test]
+    fn scrolling_moves_the_detail_content() {
+        let mut d = detail_dashboard(twenty_line_source(), 0, Route::Detail);
+        d.apply(Action::Next);
+        d.apply(Action::Next);
+        for width in [60, 120] {
+            let buf = render_at(width, 20, &d);
+            assert_eq!(detail_marker_cols(&buf, 2), "- line-02", "width {width}");
+            assert_eq!(detail_marker_cols(&buf, 17), "- line-17", "width {width}");
+        }
+    }
+
+    #[test]
+    fn the_list_route_still_moves_the_marker_with_detail_content_present() {
+        let mut d = Dashboard {
+            changes: fixture::set(
+                vec![
+                    fixture::active("add-token-refresh", 4, 9),
+                    fixture::active("fix-empty-basket", 7, 7),
+                    fixture::active("migrate-ai-sdk-v7", 0, 0),
+                ],
+                Vec::new(),
+                Vec::new(),
+            ),
+            ..detail_dashboard(twenty_line_source(), 0, Route::List)
+        };
+        d.apply(Action::Next);
+        d.apply(Action::Next);
+        for width in [60, 120] {
+            let buf = render_at(width, 20, &d);
+            assert_eq!(cell(&buf, 1, 4).symbol(), ">", "width {width}");
+        }
+        // The detail content, when drawn (wide layout only), is unmoved.
+        let buf120 = render_at(120, 20, &d);
+        assert_eq!(detail_marker_cols(&buf120, 2), "- line-00");
+    }
+
+    #[test]
+    fn scrolling_stops_at_the_top_on_screen() {
+        let mut d = detail_dashboard(twenty_line_source(), 0, Route::Detail);
+        for _ in 0..4 {
+            d.apply(Action::Prev);
+        }
+        for width in [60, 120] {
+            let buf = render_at(width, 20, &d);
+            assert_eq!(detail_marker_cols(&buf, 2), "- line-00", "width {width}");
+        }
+    }
+
+    #[test]
+    fn route_moves_reset_the_scroll_on_screen() {
+        let mut d = detail_dashboard(twenty_line_source(), 3, Route::Detail);
+        d.apply(Action::Back);
+        d.apply(Action::OpenDetail);
+        for width in [60, 120] {
+            let buf = render_at(width, 20, &d);
+            assert_eq!(detail_marker_cols(&buf, 2), "- line-00", "width {width}");
         }
     }
 }

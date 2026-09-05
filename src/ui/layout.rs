@@ -89,6 +89,18 @@ pub fn viewport(rows: usize, cursor: usize, height: u16) -> usize {
     cursor.saturating_sub(height / 2).min(rows - height)
 }
 
+/// The index of the first detail line to draw, so a `height`-row slice of
+/// `lines` total lines never runs past the end. Pure and total over its
+/// three arguments, derived on every draw rather than stored — the
+/// interior height is a property of the current frame, exactly like
+/// `viewport`, which this sits beside for the same reason.
+pub fn scroll_offset(lines: usize, scroll: usize, height: u16) -> usize {
+    if height == 0 {
+        return 0;
+    }
+    scroll.min(lines.saturating_sub(height as usize))
+}
+
 /// A bordered region's interior: the one place in the crate that computes
 /// this, so `Dashboard::normalise_scroll` can derive it without
 /// constructing a `ratatui::widgets::Block`. Performs exactly the
@@ -112,10 +124,60 @@ pub fn interior(area: Rect) -> Rect {
 mod tests {
     use crate::ui::app::Route;
     use crate::ui::layout::{
-        LayoutMode, WIDE_MIN_WIDTH, interior, mode, split_body, split_frame, viewport,
+        LayoutMode, WIDE_MIN_WIDTH, interior, mode, scroll_offset, split_body, split_frame,
+        viewport,
     };
     use ratatui::layout::Rect;
     use ratatui::widgets::Block;
+
+    #[test]
+    fn scroll_offset_is_exact_at_its_boundaries() {
+        let table = [
+            (0usize, 0usize, 16u16, 0usize),
+            (16, 0, 16, 0),
+            (16, 9, 16, 0),
+            (17, 0, 16, 0),
+            (17, 1, 16, 1),
+            (17, 2, 16, 1),
+            (20, 4, 16, 4),
+            (20, 99, 16, 4),
+            (20, 4, 0, 0),
+        ];
+        for (lines, scroll, height, expect) in table {
+            let got = scroll_offset(lines, scroll, height);
+            assert_eq!(
+                got, expect,
+                "scroll_offset({lines}, {scroll}, {height}) = {got}, expected {expect}"
+            );
+            assert!(
+                got <= lines.saturating_sub(height as usize),
+                "scroll_offset({lines}, {scroll}, {height}) = {got} runs past the last line"
+            );
+        }
+    }
+
+    #[test]
+    fn the_detail_interior_is_78_at_120_and_58_at_60() {
+        let (_, body120, _) = split_frame(Rect::new(0, 0, 120, 20));
+        let (_, detail120) = split_body(body120, Route::Detail);
+        assert_eq!(
+            interior(detail120.expect("detail region at 120")),
+            Rect::new(41, 2, 78, 16)
+        );
+
+        let (_, body60, _) = split_frame(Rect::new(0, 0, 60, 20));
+        let (_, detail60) = split_body(body60, Route::Detail);
+        assert_eq!(
+            interior(detail60.expect("detail region at 60, detail route")),
+            Rect::new(1, 2, 58, 16)
+        );
+
+        let (_, detail_at_list_route) = split_body(body60, Route::List);
+        assert_eq!(
+            detail_at_list_route, None,
+            "no detail rectangle at 60, list route"
+        );
+    }
 
     #[test]
     fn interior_agrees_with_a_bordered_block() {

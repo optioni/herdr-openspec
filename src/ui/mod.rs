@@ -176,26 +176,33 @@ mod tests {
 
         #[test]
         fn a_markdown_document_renders_and_scrolls_through_the_loop() {
+            // Extended from two `j` presses to ten at group 7 (task 7.6):
+            // with only two, the acceptance test started passing as soon
+            // as render_detail existed, well before ui::driver normalises
+            // the stored offset — group 8's RED would have been vacuous.
+            // Ten presses run well past the twenty-item source's four-line
+            // overshoot, so the assertion on the FINAL stored
+            // `detail.scroll` (4, not 10) is the one that stays red until
+            // `run_loop` calls `normalise_scroll` once per iteration.
             for width in [120u16, 60u16] {
                 let mut dashboard = dashboard();
                 let interior = detail_interior(width, 20, Route::Detail);
 
                 let backend = ratatui::backend::TestBackend::new(width, 20);
                 let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
-                let mut events = Script::new(vec![
-                    Ok(Some(press(
-                        ratatui::crossterm::event::KeyCode::Char('j'),
-                        ratatui::crossterm::event::KeyModifiers::NONE,
-                    ))),
-                    Ok(Some(press(
-                        ratatui::crossterm::event::KeyCode::Char('j'),
-                        ratatui::crossterm::event::KeyModifiers::NONE,
-                    ))),
-                    Ok(Some(press(
-                        ratatui::crossterm::event::KeyCode::Char('q'),
-                        ratatui::crossterm::event::KeyModifiers::NONE,
-                    ))),
-                ]);
+                let mut presses: Vec<_> = (0..10)
+                    .map(|_| {
+                        Ok(Some(press(
+                            ratatui::crossterm::event::KeyCode::Char('j'),
+                            ratatui::crossterm::event::KeyModifiers::NONE,
+                        )))
+                    })
+                    .collect();
+                presses.push(Ok(Some(press(
+                    ratatui::crossterm::event::KeyCode::Char('q'),
+                    ratatui::crossterm::event::KeyModifiers::NONE,
+                ))));
+                let mut events = Script::new(presses);
 
                 let summary = run_loop(
                     &mut terminal,
@@ -211,15 +218,15 @@ mod tests {
                         .map(|x| buf[(x, y)].symbol().to_string())
                         .collect()
                 };
-                assert_eq!(row_at(interior.y), "- line-02", "width {width}");
+                assert_eq!(row_at(interior.y), "- line-04", "width {width}");
                 assert_eq!(
                     row_at(interior.y + interior.height - 1),
-                    "- line-17",
+                    "- line-19",
                     "width {width}"
                 );
 
-                assert_eq!(dashboard.detail.scroll, 2, "width {width}");
-                assert_eq!(summary.frames, 3, "width {width}");
+                assert_eq!(dashboard.detail.scroll, 4, "width {width}");
+                assert_eq!(summary.frames, 11, "width {width}");
             }
         }
     }

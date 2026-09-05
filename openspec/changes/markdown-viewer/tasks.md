@@ -1391,7 +1391,7 @@ arithmetic and a green-on-arrival RED in group 7 — the defect class group 12 h
 ## 7. `layout::scroll_offset` and `ui::view` — the slice and the drawing
 <!-- kind: behavior -->
 
-- [ ] 7.1 RED: Write failing tests in `src/ui/layout.rs`'s `mod tests`:
+- [x] 7.1 RED: Write failing tests in `src/ui/layout.rs`'s `mod tests`:
       - `scroll_offset_is_exact_at_its_boundaries` — the nine tabled triples `(0,0,16)→0`,
         `(16,0,16)→0`, `(16,9,16)→0`, `(17,0,16)→0`, `(17,1,16)→1`, `(17,2,16)→1`,
         `(20,4,16)→4`, `(20,99,16)→4`, `(20,4,0)→0`.
@@ -1406,10 +1406,10 @@ arithmetic and a green-on-arrival RED in group 7 — the defect class group 12 h
       not a new behaviour, and its value is that it reddens if the breakpoint or the
       constraints ever move. Do not mistake it for the group's RED; `scroll_offset` is.
 
-- [ ] 7.2 GREEN: Implement `layout::scroll_offset(lines, scroll, height)` — `0` when `height`
+- [x] 7.2 GREEN: Implement `layout::scroll_offset(lines, scroll, height)` — `0` when `height`
       is `0`, otherwise `min(scroll, lines.saturating_sub(height))`.
 
-- [ ] 7.3 RED: Write failing tests in `src/ui/view.rs`'s `mod tests`. **Every one renders at
+- [x] 7.3 RED: Write failing tests in `src/ui/view.rs`'s `mod tests`. **Every one renders at
       both 60 and 120 and writes both widths unsuffixed**, because `WIDTHS` reads them:
       - `the_detail_document_fills_the_interior_at_60_and_120` — the twenty-item source,
         `scroll` 0, and a `changes` holding the single active change `fix-empty-basket` at 7
@@ -1453,7 +1453,7 @@ arithmetic and a green-on-arrival RED in group 7 — the defect class group 12 h
       200-character `detail.source`, so the border assertion covers markdown as well as rows.
       **Red when:** each fails against a detail region that draws nothing.
 
-- [ ] 7.4 GREEN: Implement `render_detail` in `src/ui/view.rs` — early-return on zero width,
+- [x] 7.4 GREEN: Implement `render_detail` in `src/ui/view.rs` — early-return on zero width,
       zero height, or an empty source; `markdown::lines(&source, interior.width)`;
       `layout::scroll_offset(lines.len(), dashboard.detail.scroll, interior.height)`; then one
       row per line, segments left to right, each with `style_for(&segment.face)`, stopping at
@@ -1464,12 +1464,12 @@ arithmetic and a green-on-arrival RED in group 7 — the defect class group 12 h
       **Red when:** a segment is drawn at a column computed from a byte offset rather than a
       character count — the same multi-byte trap `ui::list` already documents.
 
-- [ ] 7.5 VERIFY: `testcount --lib 'ui::layout::tests::' 12` and
+- [x] 7.5 VERIFY: `testcount --lib 'ui::layout::tests::' 12` and
       `testcount --lib 'ui::view::tests::' 57`, then `sh $CHECKS/WIDTHS.sh` with
       `WIDTHS_MIN=57` and `sh $CHECKS/LISTWIDTHS.sh` (default floor 17, unchanged).
       **Red when:** either count is short, or a view test names only one width.
 
-- [ ] 7.6 VERIFY: the four intermediate-gate commands; still exactly one known failure — the
+- [x] 7.6 VERIFY: the four intermediate-gate commands; still exactly one known failure — the
       acceptance test, which is still red because `run_loop` does not yet normalise.
       **Wrongly green when:** the acceptance test starts passing here. It must not: 2.1's
       script scrolls only twice, well within range, so if it passes at 7.6 the normalisation
