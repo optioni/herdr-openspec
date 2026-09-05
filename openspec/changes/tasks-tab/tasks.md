@@ -1038,28 +1038,28 @@ the crate compiles, every existing test still passes, and `GATE-MECH1` still hol
 ## 13. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 13.1 CHECK: Inspect the intended verification commands and affected tiers: the four
+- [x] 13.1 CHECK: Inspect the intended verification commands and affected tiers: the four
       `make` gates, the twenty-three extracted checks, and the **nine** `testcount`
       invocations across **seven** distinct filters (`changes::tests::`, `ui::tasks::tests::`
       twice, `ui::detail::tests::`, `ui::view::tests::`, `ui::app::tests::` twice,
       `ui::driver::tests::`, `ui::tests::detail::`). Name any that this change's groups did
       not run at their final floors.
 
-- [ ] 13.2 VERIFY: `make lint` — `cargo clippy --all-targets --all-features -- -D warnings`,
+- [x] 13.2 VERIFY: `make lint` — `cargo clippy --all-targets --all-features -- -D warnings`,
       0 errors.
 
-- [ ] 13.3 VERIFY: `make fmt-check` — `cargo fmt --all -- --check`, clean. Rust has no
+- [x] 13.3 VERIFY: `make fmt-check` — `cargo fmt --all -- --check`, clean. Rust has no
       separate type checker; `cargo clippy --all-targets` in 13.2 type-checks every target,
       including the test target, which is the equivalent step.
 
-- [ ] 13.4 VERIFY: `make test` — `cargo test --all-features`, green.
+- [x] 13.4 VERIFY: `make test` — `cargo test --all-features`, green.
 
-- [ ] 13.5 VERIFY: `make coverage` — `cargo llvm-cov --fail-under-lines 80`, passing with no
+- [x] 13.5 VERIFY: `make coverage` — `cargo llvm-cov --fail-under-lines 80`, passing with no
       exclusion and no threshold change. Quote the TOTAL row's **line** column, not the region
       column it leads with (planning-time baseline: 97.81% over 14,178 lines). Then
       `sh $CHECKS/NOWAIVER.sh`.
 
-- [ ] 13.6 VERIFY: Every check at its final floor, each printing its OK line verbatim:
+- [x] 13.6 VERIFY: Every check at its final floor, each printing its OK line verbatim:
       `MIN=19 sh $CHECKS/NOSPAWN-GREP.sh`; `sh $CHECKS/NOIO-VIEW.sh`;
       `UI_MIN=10 sh $CHECKS/READSEAM.sh`; `UI_MIN=11 sh $CHECKS/NOCLI-SHELL.sh`;
       `TYPES="Dashboard Filter Detail" SCAN_MIN=80 sh $CHECKS/NODEFAULT-UI.sh`;
@@ -1074,19 +1074,19 @@ the crate compiles, every existing test still passes, and `GATE-MECH1` still hol
       by this change, and asserted because `specs/artifact-content`'s read-binding requirement
       is one this change edits the text of without changing its verification.
 
-- [ ] 13.7 VERIFY: `sh $CHECKS/DEPS.sh` and `sh $CHECKS/GRAPH-SNAP.sh` — both **unchanged**
+- [x] 13.7 VERIFY: `sh $CHECKS/DEPS.sh` and `sh $CHECKS/GRAPH-SNAP.sh` — both **unchanged**
       scripts, both green. This is the evidence that no dependency, feature, or proc-macro
       crept in, and `Cargo.toml`, `Cargo.lock`, and `tests/fixtures/build-graph.txt` are
       untouched. `git diff --name-only $BASE -- Cargo.toml Cargo.lock
       tests/fixtures/build-graph.txt herdr-plugin.toml` must be empty.
 
-- [ ] 13.8 VERIFY: The library and `ui::` totals, asserted here and nowhere else:
+- [x] 13.8 VERIFY: The library and `ui::` totals, asserted here and nowhere else:
       `cargo test --all-features --lib 2>&1 | sed -n 's/^test result: ok\. \([0-9]*\)
       passed.*/\1/p' | awk '{t+=$1} END{print t+0}'` → **671** (625 measured + 46 new); and
       `cargo test --all-features --lib 'ui::' ...` → **258** (226 measured + 32 new). A count
       below either target means an enumerated test was not written — write it, do not lower
       the number.
 
-- [ ] 13.9 VERIFY: `export PATH="$HOME/.nvm/versions/node/v24.20.0/bin:$PATH"` and
+- [x] 13.9 VERIFY: `export PATH="$HOME/.nvm/versions/node/v24.20.0/bin:$PATH"` and
       `openspec validate tasks-tab --strict` — the `openspec` binary is nvm-installed here and
       is not on a non-login shell's default `PATH`.
