@@ -806,7 +806,7 @@ echo "GRAPH-SNAP OK: four triples match the snapshot; proc-macro set exact; four
 ## 0. Baseline, checks, and the scratchpad
 <!-- kind: operational -->
 
-- [ ] 0.1 CHECK: Record the starting state before any edit, by **measuring**, never by
+- [x] 0.1 CHECK: Record the starting state before any edit, by **measuring**, never by
       copying a number from this file.
       - `git rev-parse HEAD` → `export BASE=<sha>`. Every `OPENSPEC-UNTOUCHED` run uses it.
         A diff against the index would pass over this change's own per-group commits.
@@ -855,7 +855,7 @@ echo "GRAPH-SNAP OK: four triples match the snapshot; proc-macro set exact; four
       the tree is not the one this plan was written against and the discrepancy is resolved
       before any edit.
 
-- [ ] 0.2 CHECK: Run the checks that must **pass** on the tree as it stands, so this change
+- [x] 0.2 CHECK: Run the checks that must **pass** on the tree as it stands, so this change
       starts from clean gates rather than inheriting broken ones: `NOSPAWN-GREP` (default
       `MIN=8`), `NOCLI-SHELL` (default `UI_MIN=7`), `NORAW-GREP`, `NODEFAULT-UI` with
       `TYPES="Dashboard Filter"` (its edited default names `Detail`, which does not exist
@@ -877,7 +877,7 @@ echo "GRAPH-SNAP OK: four triples match the snapshot; proc-macro set exact; four
       is not the place to fix it.
       **Wrongly green when:** an extraction typo made a block a no-op — guarded by 0.3.
 
-- [ ] 0.3 CHECK: Prove the **existence guards** and **positive controls** of every extracted
+- [x] 0.3 CHECK: Prove the **existence guards** and **positive controls** of every extracted
       check can fail, before trusting any of them. Against throwaway copies under `$WORK`:
       - `NOSPAWN-GREP` with `SRC=$WORK/empty` → `no such directory`.
       - `NOSPAWN-GREP` with `MIN=17` on the current tree → `searched only 16 files under src
@@ -918,7 +918,7 @@ echo "GRAPH-SNAP OK: four triples match the snapshot; proc-macro set exact; four
       **Red when:** any guard reports success. A guard that cannot fail is worth nothing, and
       this repository has shipped three of them.
 
-- [ ] 0.4 CHECK: Confirm the intermediate-gate substitution stated at the top of this file is
+- [x] 0.4 CHECK: Confirm the intermediate-gate substitution stated at the top of this file is
       real: it will be exercised from group 2 onward, so verify **now**, on a green tree, that
       `cargo llvm-cov --ignore-run-fail --fail-under-lines 80` reports a TOTAL rather than
       producing no report, and record the percentage. Then confirm the claim that matters:
@@ -927,7 +927,7 @@ echo "GRAPH-SNAP OK: four triples match the snapshot; proc-macro set exact; four
       **Red when:** it produces no report, in which case every intermediate gate in groups 3–8
       must drop its coverage step and say so here instead of silently skipping it.
 
-- [ ] 0.5 VERIFY: Commit the plan-time baseline record (this file's checkbox state only; no
+- [x] 0.5 VERIFY: Commit the plan-time baseline record (this file's checkbox state only; no
       source change yet). Conventional Commits:
       `docs(markdown-viewer): record measured check baselines`.
 
