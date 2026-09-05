@@ -1882,7 +1882,7 @@ be proven here.
 ## 14. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 14.1 CHECK: Inspect the intended verification commands and affected tiers: the four
+- [x] 14.1 CHECK: Inspect the intended verification commands and affected tiers: the four
       `make` gates, the **twenty-six** extracted files (twenty-five gates plus `TESTCOUNT.sh`,
       which is sourced rather than run), and the **thirteen** `testcount` invocations across
       **eight** distinct filters — `changes::tests::`, `watch::tests::` (three times, at 11,
@@ -1890,23 +1890,23 @@ be proven here.
       `ui::list::tests::`, `ui::view::tests::`, and `ui::tests::live::`. Name any that this
       change's groups did not run at their final floors.
 
-- [ ] 14.2 VERIFY: `make lint` — `cargo clippy --all-targets --all-features -- -D warnings`,
+- [x] 14.2 VERIFY: `make lint` — `cargo clippy --all-targets --all-features -- -D warnings`,
       0 errors, no `#[allow]` added anywhere.
 
-- [ ] 14.3 VERIFY: `make fmt-check` — `cargo fmt --all -- --check`, clean. Rust has no
+- [x] 14.3 VERIFY: `make fmt-check` — `cargo fmt --all -- --check`, clean. Rust has no
       separate type checker; `cargo clippy --all-targets` in 14.2 type-checks every target,
       including the test target, which is the equivalent step.
 
-- [ ] 14.4 VERIFY: `make test` — `cargo test --all-features`, green.
+- [x] 14.4 VERIFY: `make test` — `cargo test --all-features`, green.
 
-- [ ] 14.5 VERIFY: `make coverage` — `cargo llvm-cov --fail-under-lines 80`, passing with no
+- [x] 14.5 VERIFY: `make coverage` — `cargo llvm-cov --fail-under-lines 80`, passing with no
       exclusion and no threshold change. Quote the TOTAL row's **line** column, not the region
       column it leads with (planning-time baseline: **97.52% over 16,151 lines**). Then
       `sh $CHECKS/NOWAIVER.sh`. If the figure fell, name which new module is under-covered and
       write the missing test — **the floor does not move**, and it has not moved in fifteen
       changes.
 
-- [ ] 14.6 VERIFY: Every check at its final floor, each printing its OK line verbatim:
+- [x] 14.6 VERIFY: Every check at its final floor, each printing its OK line verbatim:
       `MIN=21 sh $CHECKS/NOSPAWN-GREP.sh`; `sh $CHECKS/NOIO-VIEW.sh`;
       `UI_MIN=10 sh $CHECKS/READSEAM.sh`; `UI_MIN=11 sh $CHECKS/NOCLI-SHELL.sh`;
       `TYPES="Dashboard Filter Detail Refresh" SCAN_MIN=90 sh $CHECKS/NODEFAULT-UI.sh`;
@@ -1920,14 +1920,14 @@ be proven here.
       `TASK_MIN=16 sh $CHECKS/TASKWIDTHS.sh`; `python3 $CHECKS/GATE-MECH1.py src`;
       `sh $CHECKS/NOJSON-SEAM.sh`; `BASE=f9b42e8 sh $CHECKS/OPENSPEC-UNTOUCHED.sh`.
 
-- [ ] 14.7 VERIFY: `WORK=$WORK sh $CHECKS/DEPS.sh` and `sh $CHECKS/GRAPH-SNAP.sh` — both the
+- [x] 14.7 VERIFY: `WORK=$WORK sh $CHECKS/DEPS.sh` and `sh $CHECKS/GRAPH-SNAP.sh` — both the
       **edited** scripts, both green, with `DEPS` leg 5 now running six removal experiments
       and `GRAPH-SNAP` asserting the four-name macOS/Linux delta against a 332-line fixture.
       `cargo build --locked`. `git diff --stat $BASE -- Cargo.toml Cargo.lock
       tests/fixtures/build-graph.txt` shows exactly the three files and the `22 0` numstat on
       the fixture; `git diff --name-only $BASE -- herdr-plugin.toml` is empty.
 
-- [ ] 14.8 VERIFY: The library and `ui::` totals, asserted here and nowhere else:
+- [x] 14.8 VERIFY: The library and `ui::` totals, asserted here and nowhere else:
       `cargo test --all-features --lib 2>&1 | sed -n 's/^test result: ok\. \([0-9]*\)
       passed.*/\1/p' | awk '{t+=$1} END{print t+0}'` → **748** (673 measured + 75 new); and
       `cargo test --all-features --lib 'ui::' …` → **286** (260 measured + 26 new — the
@@ -1935,6 +1935,6 @@ be proven here.
       total). A count below either target means an enumerated test was not written — write it,
       do not lower the number.
 
-- [ ] 14.9 VERIFY: `export PATH="$HOME/.nvm/versions/node/v24.20.0/bin:$PATH"` and
+- [x] 14.9 VERIFY: `export PATH="$HOME/.nvm/versions/node/v24.20.0/bin:$PATH"` and
       `openspec validate live-refresh --strict` — the `openspec` binary is nvm-installed here
       and is not on a non-login shell's default `PATH`.
