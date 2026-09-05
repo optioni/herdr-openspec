@@ -113,6 +113,7 @@ a silent addition to what is built. After this change that set is:
 | `serde_json` | at least `1.0.151` | `std`; defaults off — the default set is exactly `std`, so turning defaults off and naming it changes nothing that is built and everything about whether a future default is adopted silently. The crate is used through `serde_json::Value` only, with no `serde::Deserialize` derive, so no proc-macro crate enters the graph |
 | `ratatui` | at least `0.30.2` | `crossterm`; defaults off — the default set additionally carries `all-widgets`, `macros`, and `layout-cache`, none of which this plugin uses, and `all-widgets` alone would pull `time` into the build for the calendar widget. `underline-color` is nominally dropped too but arrives anyway, because `ratatui` declares `ratatui-crossterm` with **its** defaults on and those include it — so a rendered `Cell`'s `Style` still carries an `underline_color` field, which is why an untouched cell's style is `fg(Reset).bg(Reset).underline_color(Reset)` rather than `Style::default()`. The `crossterm` feature also re-enables `std` transitively, so `default-features = false` is narrower on its face than in effect |
 | `pulldown-cmark` | at least `0.13.4` | `features = []`, written explicitly; defaults off — the default set is `getopts` and `html`, neither of which this plugin uses. `getopts` exists for the crate's own example binary and `html` pulls `pulldown-cmark-escape` for an HTML renderer this plugin has no surface for: `ui::markdown` walks the event stream itself. Turning both off costs nothing the plugin uses and keeps two packages out of the graph |
+| `notify` | at least `8.2.0` | `macos_fsevent`; defaults off — `notify`'s own default set is exactly `["macos_fsevent"]`, so this declaration resolves a graph **byte-identical** to a bare `notify = "8.2.0"` and changes only whether a future default is adopted silently. `default-features = false` **alone** does not compile on macOS: `notify`'s `fsevent` module is gated on `not(feature = "macos_kqueue")` rather than on the presence of `macos_fsevent`, so an empty feature list yields `error[E0432]: unresolved import fsevent_sys`. Exactly one of the two macOS backends must therefore be named, and FSEvents is chosen over kqueue because it recurses in the kernel — one watch for the whole `openspec/` subtree — while `notify`'s kqueue backend opens a file descriptor per entry and reports only that *something* in a directory changed. `crossbeam-channel`, `flume`, `serde`, and `serialization-compat-6` all stay off: `std::sync::mpsc::Sender<notify::Result<Event>>` implements `notify::EventHandler` unconditionally, with no feature flag. On Linux `inotify` and `mio` are unconditional target dependencies and need no feature at all |
 
 `crossterm` SHALL NOT be declared as a direct dependency. It is reached through
 `ratatui::crossterm`, the re-export of the exact `crossterm` version `ratatui-crossterm`
@@ -122,32 +123,54 @@ never coexist in this crate.
 `pulldown_cmark` SHALL be named in `src/ui/markdown.rs` and nowhere else in the crate, so
 the markdown parser is replaceable by editing one file. That confinement is stated and
 checked by `markdown-render`; it is recorded here because it is the reason the dependency's
-surface is one module wide.
+surface is one module wide. `notify` SHALL be named in `src/watch.rs` and nowhere else, on
+the identical terms, checked by `watch-invalidation`.
+
+No debouncing crate SHALL be declared. `notify-debouncer-mini` 0.7.0 — whose entire job is
+the coalescing this change needs — was measured at **five further packages** beyond `notify`,
+`tempfile`, `fastrand`, `getrandom`, and `once_cell` among them, as **normal** dependencies
+of the shipped binary; `notify-debouncer-full` 0.7.0 costs two further packages (`file-id`,
+for rename tracking this plugin does not do), raises a second crate's release cadence onto
+the maintenance burden, and declares an MSRV of 1.85. The hand-rolled `watch::Debounce` is a
+pure state machine taking `now` as a parameter, which is additionally what makes the window
+testable without sleeping — a property neither crate offers.
 
 Each declared version's own `rust-version` SHALL be no higher than this crate's
 `rust-version`, so the declared MSRV stays true. This crate's `rust-version` SHALL be
 `1.88`, raised from `1.85` by `ratatui` 0.30.2 and its three sibling crates, which remain
-the tightest packages in the graph — `pulldown-cmark` declares `1.71.1` and `unicase`
-declares none, so adding markdown support does not move the floor.
+the tightest packages in the graph. `notify` 8.2.0 declares `1.77` and its transitive
+`notify-types` 2.1.0 declares `1.85`, so this change does not move the floor and adds nothing
+*at* it. (`notify` 9.0.0-rc.5 declares exactly `1.88`; it is a pre-release, `cargo add`
+resolves 8.2.0, and adopting it later would put a package at the floor for the first time
+outside the `ratatui` family.)
 
 The normal build graph SHALL contain no proc-macro crate other than those on this enumerated
 allowlist: `darling_macro`, `derive_more-impl`, `document-features`, `indoc`, `instability`,
 `rustversion`, `strum_macros`, and `thiserror-impl`. Every one arrives through `ratatui`,
-which cannot be built without them; `pulldown-cmark` adds none. The rule is an allowlist
-rather than an absolute prohibition because that prohibition is unsatisfiable with any
-terminal-UI crate in this ecosystem; an allowlist keeps the property mechanical, so a
-proc-macro crate arriving from a *new* direct dependency still fails the check and still has
-to be argued.
+which cannot be built without them; `pulldown-cmark` adds none and `notify` adds none. The
+rule is an allowlist rather than an absolute prohibition because that prohibition is
+unsatisfiable with any terminal-UI crate in this ecosystem; an allowlist keeps the property
+mechanical, so a proc-macro crate arriving from a *new* direct dependency still fails the
+check and still has to be argued.
 
 The resolved normal build graph SHALL be pinned by a committed snapshot,
 `tests/fixtures/build-graph.txt`, holding one `<name> <version>` line per package, sorted,
 for each of the four supported triples, with the per-triple sets recorded separately — they
-are not identical, because `rustix`, reached through `crossterm`, pulls `linux-raw-sys` on
-Linux and not on macOS. Enumerating the graph in prose was workable at sixteen packages and
+are not identical. Enumerating the graph in prose was workable at sixteen packages and
 is not at roughly eighty; a committed snapshot is exactly as brittle as the committed
 `Cargo.lock` that determines it, and every graph change becomes a reviewable diff. This
-change's addition to that snapshot SHALL be exactly two packages per triple,
-`pulldown-cmark` and `unicase`.
+change's addition to that snapshot SHALL be exactly **five** packages per macOS triple —
+`fsevent-sys`, `notify`, `notify-types`, `same-file`, and `walkdir` — and exactly **six** per
+Linux triple, the same five with `fsevent-sys` replaced by `inotify` and `inotify-sys`. The
+file grows from 310 lines to **332**. `libc`, `log`, `mio`, and `bitflags` are `notify`
+dependencies that the baseline graph already carries through `crossterm`, `signal-hook-mio`,
+and `ratatui`, so they cost nothing.
+
+The macOS and Linux sets, previously differing by exactly one package, SHALL now differ by
+exactly **four**: `fsevent-sys` and `linux-raw-sys` as before plus `inotify` and
+`inotify-sys`. The check that asserts this SHALL be edited **on disk** to the new four-name
+list rather than left asserting one — its previous form is a hard-coded string comparison
+against `linux-raw-sys `, and this change is the first to make that comparison false.
 
 `Cargo.lock` SHALL be committed, and the change that introduces or alters a dependency SHALL
 verify `cargo build --locked` succeeds at the commit that lands it.
@@ -167,21 +190,27 @@ verify `cargo build --locked` succeeds at the commit that lands it.
 
 - **WHEN** `cargo metadata --no-deps --format-version 1` is inspected for the package's
   dependencies of kind `null` (normal, not dev or build)
-- **THEN** there are exactly five, named `pulldown-cmark`, `ratatui`, `serde_json`, `toml`,
-  and `yaml-rust2`
-- **AND** all five report `uses_default_features` as `false` — read from the resolved
+- **THEN** there are exactly **six**, named `notify`, `pulldown-cmark`, `ratatui`,
+  `serde_json`, `toml`, and `yaml-rust2`
+- **AND** all six report `uses_default_features` as `false` — read from the resolved
   metadata, not from the text of `Cargo.toml`
 - **AND** `toml`'s features are exactly `display`, `parse`, `serde`, and `std`,
-  `serde_json`'s are exactly `std`, `ratatui`'s are exactly `crossterm`, and `yaml-rust2`'s
-  and `pulldown-cmark`'s feature lists are both empty
+  `serde_json`'s are exactly `std`, `ratatui`'s are exactly `crossterm`, `notify`'s are
+  exactly `macos_fsevent`, and `yaml-rust2`'s and `pulldown-cmark`'s feature lists are both
+  empty
 - **AND** the `features` key is written out as `features = []` in the manifest, for both
   `yaml-rust2` and `pulldown-cmark`, rather than omitted. `cargo metadata` reports `[]` for
   both spellings and so cannot tell them apart; the requirement's own rationale — a
   reviewable diff rather than a silent addition — is about what the manifest says on its
-  face, so the check for this clause is reading `Cargo.toml`
+  face, so the check for this clause is reading `Cargo.toml`. `notify` is **not** in that
+  loop: its feature list is non-empty, so the resolved metadata already distinguishes it
+- **AND** `notify` declares `default-features = false` in the manifest text as well as in
+  the resolved metadata, the same two-sided check `pulldown-cmark` carries
 - **AND** `crossterm` is **not** among the declared dependencies, while `crossterm` **is**
   present in the resolved graph, so the re-export rule is observably in effect rather than
   merely written down
+- **AND** neither `notify-debouncer-mini` nor `notify-debouncer-full` appears anywhere in
+  the resolved graph, so the hand-rolled debounce is observably in effect
 - **AND** `cargo build --locked` succeeds with `Cargo.lock` committed, so the resolved
   versions in a fresh checkout are the ones this change verified
 
@@ -201,10 +230,8 @@ verify `cargo build --locked` succeeds at the commit that lands it.
   hard-coded set rots the moment a dependency bumps its own `rust-version`. On the resolution
   this change lands that set includes `ratatui`, `ratatui-core`, `ratatui-crossterm`, and
   `ratatui-widgets`, and also `darling`, `darling_core`, `darling_macro`, `instability`, and
-  `herdr-openspec` itself. The previous wording named only the four `ratatui` crates and read
-  as an exhaustive list, which it never was; it is corrected here. `pulldown-cmark` declares
-  `1.71.1` and is therefore well below the floor, and `unicase` declares no `rust-version` at
-  all and is skipped, so the crate's floor stays at `1.88`
+  `herdr-openspec` itself — unchanged by this change, because the highest MSRV `notify`
+  brings in is `notify-types`' `1.85`, below the floor
 - **AND** the intersection with `cargo tree -e normal` is load-bearing: `cargo metadata`
   alone also reports optional and dev-only resolutions cargo never builds, so a check over
   every metadata package would report on crates that are not in the build
@@ -215,8 +242,8 @@ verify `cargo build --locked` succeeds at the commit that lands it.
 
 The title is kept verbatim from the requirement this block replaces, because a MODIFIED
 requirement must carry every scenario name the live spec has. Its content is what changed:
-the snapshot gains exactly two packages, and two further named absences prove
-`pulldown-cmark`'s defaults are off.
+the snapshot gains five lines per macOS triple and six per Linux triple, and the macOS/Linux
+delta becomes four named packages rather than one.
 
 - **WHEN** `cargo tree -e normal --target <triple>` is run once for each of the four
   supported triples — `aarch64-apple-darwin`, `x86_64-apple-darwin`,
@@ -227,21 +254,27 @@ the snapshot gains exactly two packages, and two further named absences prove
 - **THEN** each triple's sorted `<name> <version>` set equals the set recorded for it in
   `tests/fixtures/build-graph.txt`, and the check fails when the fixture is missing or names
   a triple the run did not produce
-- **AND** the regenerated fixture differs from its predecessor by exactly two added lines
-  per triple, `pulldown-cmark` and `unicase`, and by nothing else — a diff a reviewer reads
-  rather than a wholesale rewrite
+- **AND** the regenerated fixture differs from its predecessor by exactly five added lines
+  per macOS triple — `fsevent-sys`, `notify`, `notify-types`, `same-file`, `walkdir` — and
+  exactly six per Linux triple — `inotify`, `inotify-sys`, `notify`, `notify-types`,
+  `same-file`, `walkdir` — with nothing removed on any triple, taking the file from 310 lines
+  to 332: a diff a reviewer reads rather than a wholesale rewrite
 - **AND** the two macOS sets are equal to each other and the two Linux sets are equal to
-  each other, while macOS and Linux differ by exactly one package, `linux-raw-sys`, which
-  `rustix` pulls in only on Linux — asserted as a named difference rather than the sets
-  being asserted identical, which they are not
+  each other, while macOS and Linux differ by exactly **four** packages —
+  `fsevent-sys`, `inotify`, `inotify-sys`, and `linux-raw-sys` — asserted as a named
+  difference rather than the sets being asserted identical, which they are not. The
+  previously-asserted single-package difference was `linux-raw-sys` alone, which `rustix`
+  pulls in only on Linux; the three new names are `notify`'s own target-scoped backends
 - **AND** the proc-macro crates present are exactly the eight on the allowlist:
   `darling_macro`, `derive_more-impl`, `document-features`, `indoc`, `instability`,
   `rustversion`, `strum_macros`, and `thiserror-impl` — a set equality, so a ninth arriving
-  from a future dependency fails and an eighth disappearing does too
+  from a future dependency fails and an eighth disappearing does too. `notify` adds none,
+  which is part of why it was chosen over a debouncer crate
 - **AND** it names no `encoding_rs`, which `yaml-rust2`'s default features would have pulled
   in, no `time`, which `ratatui`'s default `all-widgets` feature would have pulled in for
-  the calendar widget, and neither `getopts` nor `pulldown-cmark-escape`, which
-  `pulldown-cmark`'s own default features would have pulled in — so every
+  the calendar widget, neither `getopts` nor `pulldown-cmark-escape`, which
+  `pulldown-cmark`'s own default features would have pulled in, and neither `kqueue` nor
+  `kqueue-sys`, which `notify`'s `macos_kqueue` feature would have pulled in — so every
   `default-features = false` in the manifest is observably in effect rather than merely
   written down
 
@@ -263,6 +296,9 @@ the snapshot gains exactly two packages, and two further named absences prove
 - **AND** with the manifest restored again and `pulldown-cmark` removed instead,
   `cargo build` fails a fifth time, because `ui::markdown` parses every artifact's markdown
   through it
+- **AND** with the manifest restored again and `notify` removed instead, `cargo build` fails
+  a sixth time, because `watch::RealFsEvents` is the crate's only source of filesystem change
+  events
 - **AND** removing a dependency that is not declared is reported as a failure of the check
   rather than counted as a pass, so no leg can silently succeed against a manifest that
   never carried the crate

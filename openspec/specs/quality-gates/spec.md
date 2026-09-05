@@ -145,6 +145,7 @@ non-empty, does not satisfy this requirement: it stays green with the behaviour 
 A **view scenario**, for the purpose of this requirement, is one whose assertions are on a
 `Buffer` produced by `ui::view::render`. A scenario that renders only to prove loop
 sequencing — the `dashboard-loop` driver scenarios, whose subject is frame and poll
+counting, and the `live-updates` driver scenarios, whose subject is request and result
 counting — is a unit scenario and is out of scope here.
 
 Every view scenario SHALL be exercised at **both 60 and 120 columns**, one below the
@@ -162,9 +163,18 @@ The harness SHALL live in `crate::testutil`, beside the crate's existing `Scratc
 and height into a `Buffer`; reading a whole row as a `String`; and reading a named cell's
 symbol and `Style`. It SHALL be `#[cfg(test)]` and SHALL add nothing to the shipped binary.
 
-No view test SHALL touch the filesystem, the process environment, a subprocess, or a real
-terminal. A view test that needs a real directory is the signal that logic leaked out of
-the pure side of the render seam and into the view.
+`live-refresh` adds two further `#[cfg(test)]` doubles to that module — a scripted
+`watch::FsEvents` and a recording `refresh::Refresher` — on the same terms as the existing
+`Script` and `RecordingReader`. Both SHALL be **synchronous and thread-free**: they answer
+from a queue held in a `RefCell`, spawn nothing, sleep nothing, and read no clock, so every
+`ui::` test that drives the live tier stays deterministic. A `ui::` test that needed a real
+thread, a real watcher, or a real clock would be the signal that the live tier leaked across
+the render seam.
+
+No view test SHALL touch the filesystem, the process environment, a subprocess, a real
+terminal, a real thread, or a clock. A view test that needs a real directory is the signal
+that logic leaked out of the pure side of the render seam and into the view; a view test
+that needs a clock is the signal that a timing dependency leaked in with it.
 
 #### Scenario: The harness renders a state value with no repository on disk
 
@@ -193,18 +203,33 @@ the pure side of the render seam and into the view.
 
 #### Scenario: The coverage floor is unchanged by the new module
 
-- **WHEN** `cargo llvm-cov --fail-under-lines 80` is run after `ui` lands
+- **WHEN** `cargo llvm-cov --fail-under-lines 80` is run after `live-refresh` lands
 - **THEN** it passes at the same 80% floor, with no exclusion, no `#[coverage(off)]`, and
   no adjustment to the threshold
 - **AND** the code that cannot be covered without a real terminal is confined to
   `ui::terminal::CrosstermOps`, `ui::terminal::install_panic_hook`, `ui::event::CrosstermEvents`,
   and the body of `ui::run` after its terminal check — each of them a wiring binding with
   no branch of its own, which is the reason for keeping them separate from the logic
+- **AND** `live-refresh` adds to that named set, rather than leaving it to be discovered:
+  `ui::run`'s two new wiring lines that construct the live tier, and — inside `src/watch.rs`
+  and `src/refresh.rs` — nothing further, because both modules' real implementations are
+  covered by real tests. `watch::start` is exercised against both a real `ScratchDir` and a
+  path that does not exist; `refresh`'s worker is exercised end to end against a fake
+  `OpenspecCli`, with every assertion made after polling a channel to a deadline rather than
+  after a fixed sleep. A module whose only test would have to sleep is a module this design
+  would have rejected
 - **AND** further uncovered regions are expected and named rather than discovered:
   `src/main.rs`'s exit-0 and exit-1 arms, neither reachable without a real terminal attached
   to the spawned binary (`Ok(())` requires `ui::run` to complete a loop iteration and quit;
   `StartError::Terminal` and `StartError::Io` arise only from a real terminal too); the
   `Backend` methods a test double implements but `Terminal` never calls, since
-  `cargo llvm-cov` instruments `#[cfg(test)]` code too; and `ui::load`'s `canonicalize`
+  `cargo llvm-cov` instruments `#[cfg(test)]` code too; `ui::load`'s `canonicalize`
   fallback for a start path that stops existing between `resolve::find_repo` succeeding and
-  the canonicalize call — a race no deterministic test constructs
+  the canonicalize call — a race no deterministic test constructs; and the arm of the
+  worker loop that returns because its **result** channel disconnected, which requires the
+  `Refresher` to be dropped between the moment a request is taken and the moment its result
+  is sent, and which no deterministic test constructs either
+- **AND** the reported figure is read from the TOTAL row's **line** column, not the region
+  column that row leads with. The baseline before this change is **97.52% over 16,151
+  lines**; a figure below the 80% floor means a test was not written, and the floor is never
+  moved
