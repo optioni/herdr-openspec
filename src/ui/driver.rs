@@ -369,10 +369,17 @@ mod tests {
     }
 
     fn twenty_line_detail_dashboard() -> Dashboard {
+        // A real selected change, not `empty_set()`: after `detail-view`
+        // the detail region draws nothing at all when `visible()` is
+        // empty, and these scroll tests need the content area drawn.
+        let change = crate::changes::fixture::with_artifacts(
+            crate::changes::fixture::active("detail-view", 4, 9),
+            &[("proposal", &[])],
+        );
         Dashboard {
             repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
             searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
-            changes: empty_set(),
+            changes: crate::changes::fixture::set(vec![change], Vec::new(), Vec::new()),
             route: Route::Detail,
             quit: false,
             selected: 0,
@@ -428,8 +435,15 @@ mod tests {
                     .map(|x| row_text(buf, y).chars().nth(x as usize).unwrap())
                     .collect()
             };
-            assert_eq!(row_at(2), "- line-04", "width {width}");
-            assert_eq!(row_at(17), "- line-19", "width {width}");
+            // The content area starts two rows lower than the interior
+            // (the header and tab bar rows above it) and is two rows
+            // shorter. `normalise_scroll` still clamps against the whole
+            // *interior*'s height until group 10, so the last drawn
+            // frame's *unclamped* scroll is 5 (one `j` past the final
+            // stored, clamped value of 4), and the 14-row content area
+            // draws lines 5 through 18, not 4 through 19.
+            assert_eq!(row_at(4), "- line-05", "width {width}");
+            assert_eq!(row_at(17), "- line-18", "width {width}");
         }
     }
 
@@ -475,8 +489,8 @@ mod tests {
         assert_eq!(dashboard.detail.scroll, 0);
 
         let buf = terminal.backend().buffer();
-        let row2: String = row_text(buf, 2).chars().skip(41).take(9).collect();
-        assert_eq!(row2, "- line-00");
+        let row: String = row_text(buf, 4).chars().skip(41).take(9).collect();
+        assert_eq!(row, "- line-00");
     }
 
     #[test]

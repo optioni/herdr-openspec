@@ -225,6 +225,32 @@ pub(crate) mod fixture {
         }
     }
 
+    /// `change` with its `schema` replaced — `active` and `archived` both
+    /// hardcode `"tdd"`, and `detail-header`'s archived-change scenario
+    /// needs one whose schema is its own rather than the fixture's
+    /// default, on the same "no `..` rest, every field named" terms as
+    /// `with_artifacts`.
+    pub(crate) fn with_schema(change: Change, schema: &str) -> Change {
+        let Change {
+            name,
+            dir,
+            origin,
+            schema: _,
+            artifacts,
+            progress,
+            problems,
+        } = change;
+        Change {
+            name,
+            dir,
+            origin,
+            schema: schema.to_string(),
+            artifacts,
+            progress,
+            problems,
+        }
+    }
+
     /// A `ChangeSet` from already-built `active` and `archived` vectors and
     /// `problems`, preserving each vector's order untouched — `rows` and
     /// `Dashboard::visible` are what sort or filter, never the fixture.
@@ -242,7 +268,7 @@ pub(crate) mod fixture {
 
     #[cfg(test)]
     mod tests {
-        use super::{active, archived, set, with_artifacts};
+        use super::{active, archived, set, with_artifacts, with_schema};
         use crate::changes::conformance::assert_invariants;
 
         #[test]
@@ -291,6 +317,19 @@ pub(crate) mod fixture {
         fn with_artifacts_over_an_empty_list_yields_no_artifacts() {
             let with = with_artifacts(active("alpha", 1, 2), &[]);
             assert!(with.artifacts.is_empty());
+        }
+
+        #[test]
+        fn with_schema_replaces_only_the_schema_field() {
+            let base = archived(Some("2026-08-14"), "add-auth", 7, 7);
+            let with = with_schema(base.clone(), "spec-driven");
+            assert_eq!(with.schema, "spec-driven");
+            assert_eq!(with.name, base.name);
+            assert_eq!(with.dir, base.dir);
+            assert_eq!(with.origin, base.origin);
+            assert_eq!(with.artifacts, base.artifacts);
+            assert_eq!(with.progress, base.progress);
+            assert_eq!(with.problems, base.problems);
         }
 
         #[test]

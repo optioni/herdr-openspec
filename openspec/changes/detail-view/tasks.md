@@ -1080,7 +1080,7 @@ files in `$CHECKS`.
 ## 9. The detail region's render
 <!-- kind: behavioural -->
 
-- [ ] 9.1 RED (a): Add **ten new** test functions to `src/ui/view.rs`'s `mod tests`, every
+- [x] 9.1 RED (a): Add **ten new** test functions to `src/ui/view.rs`'s `mod tests`, every
       one naming both **60** and **120** and asserting **actual cell content** rather than a
       shape — scenarios 12, 13, 14, 25, 26, 34 (view half), 60, 61, 62, and 63:
       the header at both widths with its exact 78- and 58-character strings; the selection
@@ -1098,7 +1098,7 @@ files in `$CHECKS`.
       same test. A buffer assertion that renders nothing and asserts nothing-in-particular
       passes forever.
 
-- [ ] 9.2 RED (b): **Update**, do not add, the six existing tests this change invalidates.
+- [x] 9.2 RED (b): **Update**, do not add, the six existing tests this change invalidates.
       They are named here because a group that says "add scenarios" and then finds a red
       suite has discovered them rather than planned for them:
       1. `src/ui/view.rs` `the_detail_document_fills_the_interior_at_60_and_120` — asserts
@@ -1120,24 +1120,24 @@ files in `$CHECKS`.
       **Red when:** the suite is red for any test not on this list, which would mean a
       seventh was missed. Record each updated test's before and after expectation.
 
-- [ ] 9.3 GREEN: Rewrite `ui::view::render_detail` to draw, through `layout::split_detail`:
+- [x] 9.3 GREEN: Rewrite `ui::view::render_detail` to draw, through `layout::split_detail`:
       nothing at all when `Dashboard::visible()` is empty; otherwise the bold header row, the
       tab row with the selected cell bold, and the `content_lines` slice
       `layout::scroll_offset` selects against the **content area's** height. Never write past
       the interior's last column.
 
-- [ ] 9.4 REFACTOR: `render_detail` is now three drawing steps; extract each into a private
+- [x] 9.4 REFACTOR: `render_detail` is now three drawing steps; extract each into a private
       helper if it improves readability, keeping every one a pure function of a `Rect` and
       `&Dashboard`.
 
-- [ ] 9.5 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'ui::view::tests::' 67`;
+- [x] 9.5 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'ui::view::tests::' 67`;
       `WIDTHS_MIN=67 sh $CHECKS/WIDTHS.sh`; `sh $CHECKS/NOIO-VIEW.sh`.
       The floor is the measured 57 plus 9.1's **ten new** test functions. 9.2's six updates
       add nothing to it, and a floor derived from "scenarios in this group" would be
       unreachable.
       **Red when:** fewer than 67 tests run, or any view test names only one of 60 and 120.
 
-- [ ] 9.6 Commit: `feat(detail-view): draw the header, the tab bar, and the content area`.
+- [x] 9.6 Commit: `feat(detail-view): draw the header, the tab bar, and the content area`.
 
 ## 10. `normalise_scroll` over the content area — the acceptance test goes green
 <!-- kind: behavioural -->

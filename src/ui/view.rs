@@ -9,9 +9,10 @@ use ratatui::style::{Modifier, Style};
 use ratatui::widgets::Block;
 
 use crate::ui::app::{Dashboard, Filter, Route};
-use crate::ui::layout::{interior, scroll_offset, split_body, split_frame, viewport};
+use crate::ui::detail;
+use crate::ui::layout::{interior, scroll_offset, split_body, split_detail, split_frame, viewport};
 use crate::ui::list;
-use crate::ui::markdown::{self, Face};
+use crate::ui::markdown::Face;
 
 /// The footer's key hints, in the order they are drawn and dropped from.
 const FOOTER_HINTS: [&str; 3] = ["q quit", "Enter detail", "Esc back"];
@@ -39,30 +40,84 @@ fn render_body(frame: &mut Frame, body: Rect, dashboard: &Dashboard) {
     }
 }
 
-/// Draw `markdown::lines(&dashboard.detail.source, interior.width)` into
-/// `interior`: the slice `layout::scroll_offset` selects, one rendered
-/// line per terminal row starting at the interior's first row and column,
-/// each segment drawn left to right with `style_for(&segment.face)` and
-/// stopping at the interior's last column. Draws nothing when the
-/// interior has zero width or zero height, or when the source is empty —
-/// `markdown-render` does not pad a line to the width, so a line shorter
-/// than the interior leaves the rest of its row untouched.
+/// Draw the change header, the tab bar, and the content area into
+/// `interior`, through `layout::split_detail` — nothing at all when
+/// `Dashboard::visible()` is empty (`selected_change()` is `None`), which is
+/// what leaves every interior cell blank in that state. When a change
+/// **is** selected, all three rows are always drawn: the header and the
+/// tab bar unconditionally, and the content area holds at least one line
+/// because `ui::detail::content_lines` returns `No content yet` rather
+/// than nothing.
 fn render_detail(frame: &mut Frame, interior: Rect, dashboard: &Dashboard) {
-    if interior.width == 0 || interior.height == 0 || dashboard.detail.source.is_empty() {
+    let Some(change) = dashboard.selected_change() else {
+        return;
+    };
+    let (header, tabs, content) = split_detail(interior);
+    render_detail_header(frame, header, change);
+    render_detail_tabs(frame, tabs, change, dashboard.detail.tab);
+    render_detail_content(frame, content, dashboard);
+}
+
+/// The change header: `ui::detail::header_row`, bold, at the row's first
+/// column. Draws nothing at zero width or zero height.
+fn render_detail_header(frame: &mut Frame, header: Rect, change: &crate::changes::Change) {
+    if header.width == 0 || header.height == 0 {
         return;
     }
-    let lines = markdown::lines(&dashboard.detail.source, interior.width);
-    let offset = scroll_offset(lines.len(), dashboard.detail.scroll, interior.height);
+    let text = detail::header_row(&change.name, &change.schema, &change.progress, header.width);
+    frame.buffer_mut().set_string(
+        header.x,
+        header.y,
+        &text,
+        Style::default().add_modifier(Modifier::BOLD),
+    );
+}
+
+/// The tab bar: every `ui::detail::Tab` at `tabs.x + tab.x`, bold for the
+/// selected cell and plain for every other. Draws nothing at zero width or
+/// zero height.
+fn render_detail_tabs(frame: &mut Frame, tabs: Rect, change: &crate::changes::Change, tab: usize) {
+    if tabs.width == 0 || tabs.height == 0 {
+        return;
+    }
+    let buf = frame.buffer_mut();
+    let last_col = tabs.x + tabs.width;
+    for cell in detail::tab_bar(&change.artifacts, tab, tabs.width) {
+        let x = tabs.x + cell.x;
+        if x >= last_col {
+            continue;
+        }
+        let mut style = Style::default();
+        if cell.selected {
+            style = style.add_modifier(Modifier::BOLD);
+        }
+        buf.set_string(x, tabs.y, &cell.text, style);
+    }
+}
+
+/// The content area: the slice of `ui::detail::content_lines`
+/// `layout::scroll_offset` selects, one rendered line per terminal row
+/// starting at the content area's first row and column, each segment drawn
+/// left to right with `style_for(&segment.face)` and stopping at the
+/// interior's last column. Draws nothing when the content area has zero
+/// width or zero height — `content_lines` always returns at least one
+/// line, but there may be no row to draw it into.
+fn render_detail_content(frame: &mut Frame, content: Rect, dashboard: &Dashboard) {
+    if content.width == 0 || content.height == 0 {
+        return;
+    }
+    let lines = detail::content_lines(&dashboard.detail, content.width);
+    let offset = scroll_offset(lines.len(), dashboard.detail.scroll, content.height);
     let buf = frame.buffer_mut();
     for (i, line) in lines
         .iter()
         .skip(offset)
-        .take(interior.height as usize)
+        .take(content.height as usize)
         .enumerate()
     {
-        let y = interior.y + i as u16;
-        let mut x = interior.x;
-        let last_col = interior.x + interior.width;
+        let y = content.y + i as u16;
+        let mut x = content.x;
+        let last_col = content.x + content.width;
         for segment in &line.segments {
             if x >= last_col {
                 break;
@@ -299,6 +354,28 @@ mod tests {
             selected,
             filter: empty_filter(),
             detail: empty_detail(),
+        }
+    }
+
+    /// `dashboard_with`, but with an explicit `Detail` — `detail-view`'s
+    /// header/tab-bar/content scenarios need a selected change **and** a
+    /// specific `detail.tab`, `detail.source`, or `detail.problems`.
+    fn dashboard_with_detail(
+        active: Vec<Change>,
+        archived: Vec<Change>,
+        selected: usize,
+        route: Route,
+        detail: Detail,
+    ) -> Dashboard {
+        Dashboard {
+            repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
+            searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
+            changes: fixture::set(active, archived, Vec::new()),
+            route,
+            quit: false,
+            selected,
+            filter: empty_filter(),
+            detail,
         }
     }
 
@@ -885,16 +962,28 @@ mod tests {
 
     #[test]
     fn the_detail_region_stays_blank_while_the_list_fills() {
+        // Kept verbatim per the list-view era; its assertion changes with
+        // detail-view: the wide layout draws the detail region at
+        // Route::List too, and a change **is** selected here, so the
+        // region is no longer blank — it shows that change's header and
+        // tab bar. The blankness this test's name promises is now a
+        // property of an *empty visible list*, asserted as the
+        // discriminating companion below.
         let d = three_active();
-        let default_style = Cell::default().style();
         let buf120 = render_at(120, 20, &d);
+        assert!(detail_interior_cols(&buf120, 2, 78).contains("add-token-refresh"));
+
+        let empty = dashboard_with(Vec::new(), Vec::new(), 0, Route::List);
+        let default_style = Cell::default().style();
+        let buf_empty = render_at(120, 20, &empty);
         for y in 2..=17u16 {
             for x in 41..=118u16 {
-                let c = cell(&buf120, x, y);
+                let c = cell(&buf_empty, x, y);
                 assert_eq!(c.symbol(), " ", "x={x} y={y}");
                 assert_eq!(c.style(), default_style, "x={x} y={y}");
             }
         }
+
         let buf60 = render_at(60, 20, &d);
         for y in 2..=17u16 {
             assert!(matches!(cell(&buf60, 0, y).symbol(), "│" | "┌" | "└"));
@@ -904,11 +993,16 @@ mod tests {
 
     #[test]
     fn the_narrow_detail_route_draws_no_rows() {
+        // The narrow detail route draws no LIST rows: the selected
+        // change's name is legitimately visible via the detail header
+        // (detail-view), but the other two — which only a list row could
+        // have named — are not.
         let d = three_active_at_route(Route::Detail);
         let buf60 = render_at(60, 20, &d);
-        for name in ["add-token-refresh", "fix-empty-basket", "migrate-ai-sdk-v7"] {
+        for name in ["fix-empty-basket", "migrate-ai-sdk-v7"] {
             assert!(!buffer_contains(&buf60, name));
         }
+        assert!(buffer_contains(&buf60, "add-token-refresh"));
         let buf120 = render_at(120, 20, &d);
         for name in ["add-token-refresh", "fix-empty-basket", "migrate-ai-sdk-v7"] {
             assert!(buffer_contains(&buf120, name));
@@ -1347,11 +1441,18 @@ mod tests {
         (0..20).map(|i| format!("- line-{i:02}\n")).collect()
     }
 
+    /// A dashboard whose one selected active change carries one artifact —
+    /// `detail-scroll`'s scenarios are about a selected change's content,
+    /// and after `detail-view` an empty visible list draws nothing at all,
+    /// so every one of them needs a change to keep exercising what it was
+    /// written for.
     fn detail_dashboard(source: String, scroll: usize, route: Route) -> Dashboard {
+        let change =
+            fixture::with_artifacts(fixture::active("detail-view", 4, 9), &[("proposal", &[])]);
         Dashboard {
             repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
             searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
-            changes: fixture::set(Vec::new(), Vec::new(), Vec::new()),
+            changes: fixture::set(vec![change], Vec::new(), Vec::new()),
             route,
             quit: false,
             selected: 0,
@@ -1396,8 +1497,8 @@ mod tests {
         };
 
         let buf120 = render_at(120, 20, &d);
-        assert_eq!(detail_marker_cols(&buf120, 2), "- line-00");
-        assert_eq!(detail_marker_cols(&buf120, 17), "- line-15");
+        assert_eq!(detail_marker_cols(&buf120, 4), "- line-00");
+        assert_eq!(detail_marker_cols(&buf120, 17), "- line-13");
         assert_eq!(
             cols(&row_text(&buf120, 2), 1..39),
             "> fix-empty-basket               [7/7]"
@@ -1405,8 +1506,8 @@ mod tests {
 
         d.route = Route::Detail;
         let buf60 = render_at(60, 20, &d);
-        assert_eq!(detail_marker_cols(&buf60, 2), "- line-00");
-        assert_eq!(detail_marker_cols(&buf60, 17), "- line-15");
+        assert_eq!(detail_marker_cols(&buf60, 4), "- line-00");
+        assert_eq!(detail_marker_cols(&buf60, 17), "- line-13");
     }
 
     /// The style of the first cell of the first (by-char, never by-byte —
@@ -1434,7 +1535,7 @@ mod tests {
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
 
-            let title_row: Vec<char> = row_text(&buf, 2).chars().collect();
+            let title_row: Vec<char> = row_text(&buf, 4).chars().collect();
             let needle: Vec<char> = "# Title".chars().collect();
             let title_start = title_row
                 .windows(needle.len())
@@ -1443,7 +1544,7 @@ mod tests {
             for i in 0..7 {
                 let x = (title_start + i) as u16;
                 assert!(
-                    cell(&buf, x, 2)
+                    cell(&buf, x, 4)
                         .style()
                         .add_modifier
                         .contains(Modifier::BOLD),
@@ -1504,10 +1605,28 @@ mod tests {
 
     #[test]
     fn an_empty_detail_source_leaves_the_interior_blank() {
-        let d = detail_dashboard(String::new(), 0, Route::Detail);
+        // The scenario's name is kept verbatim; its subject moves from "an
+        // empty source" to "no change selected" — with a change selected
+        // the region is never blank, `No content yet` is drawn instead.
+        let no_change = Dashboard {
+            repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
+            searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
+            changes: fixture::set(Vec::new(), Vec::new(), Vec::new()),
+            route: Route::Detail,
+            quit: false,
+            selected: 0,
+            filter: empty_filter(),
+            detail: Detail {
+                source: String::new(),
+                scroll: 0,
+                tab: 0,
+                problems: Vec::new(),
+                loaded: None,
+            },
+        };
         let default_style = Cell::default().style();
 
-        let buf120 = render_at(120, 20, &d);
+        let buf120 = render_at(120, 20, &no_change);
         for y in 2..=17u16 {
             for x in 41..=118u16 {
                 let c = cell(&buf120, x, y);
@@ -1516,13 +1635,24 @@ mod tests {
             }
         }
 
-        let buf60 = render_at(60, 20, &d);
+        let buf60 = render_at(60, 20, &no_change);
         for y in 2..=17u16 {
             for x in 1..=58u16 {
                 let c = cell(&buf60, x, y);
                 assert_eq!(c.symbol(), " ", "x={x} y={y}");
                 assert_eq!(c.style(), default_style, "x={x} y={y}");
             }
+        }
+
+        // Discriminating companion: a change selected with an empty source
+        // shows "No content yet" and is therefore not blank.
+        let with_change = detail_dashboard(String::new(), 0, Route::Detail);
+        for width in [120, 60] {
+            let buf = render_at(width, 20, &with_change);
+            assert!(
+                detail_interior_cols(&buf, 4, 14).starts_with("No content yet"),
+                "width {width}"
+            );
         }
     }
 
@@ -1583,7 +1713,7 @@ mod tests {
         let d = detail_dashboard(twenty_line_source(), 99, Route::Detail);
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
-            assert_eq!(detail_marker_cols(&buf, 2), "- line-04", "width {width}");
+            assert_eq!(detail_marker_cols(&buf, 4), "- line-06", "width {width}");
             assert_eq!(detail_marker_cols(&buf, 17), "- line-19", "width {width}");
         }
     }
@@ -1595,8 +1725,8 @@ mod tests {
         d.apply(Action::Next);
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
-            assert_eq!(detail_marker_cols(&buf, 2), "- line-02", "width {width}");
-            assert_eq!(detail_marker_cols(&buf, 17), "- line-17", "width {width}");
+            assert_eq!(detail_marker_cols(&buf, 4), "- line-02", "width {width}");
+            assert_eq!(detail_marker_cols(&buf, 17), "- line-15", "width {width}");
         }
     }
 
@@ -1629,7 +1759,7 @@ mod tests {
         }
         // The detail content, when drawn (wide layout only), is unmoved.
         let buf120 = render_at(120, 20, &d);
-        assert_eq!(detail_marker_cols(&buf120, 2), "- line-00");
+        assert_eq!(detail_marker_cols(&buf120, 4), "- line-00");
     }
 
     #[test]
@@ -1640,7 +1770,7 @@ mod tests {
         }
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
-            assert_eq!(detail_marker_cols(&buf, 2), "- line-00", "width {width}");
+            assert_eq!(detail_marker_cols(&buf, 4), "- line-00", "width {width}");
         }
     }
 
@@ -1651,7 +1781,350 @@ mod tests {
         d.apply(Action::OpenDetail);
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
-            assert_eq!(detail_marker_cols(&buf, 2), "- line-00", "width {width}");
+            assert_eq!(detail_marker_cols(&buf, 4), "- line-00", "width {width}");
+        }
+    }
+
+    /// Column range `1..=to` at 60, `41..=(40+to)` at 120 — the detail
+    /// interior's first `to` columns of row `y`, at either mandated width.
+    fn detail_interior_cols(buf: &Buffer, y: u16, to: usize) -> String {
+        let from = if buf.area.width == 60 { 1 } else { 41 };
+        cols(&row_text(buf, y), from..from + to)
+    }
+
+    fn empty_detail_with_tab(source: &str, problems: Vec<String>, tab: usize) -> Detail {
+        Detail {
+            source: source.to_string(),
+            scroll: 0,
+            tab,
+            problems,
+            loaded: None,
+        }
+    }
+
+    #[test]
+    fn the_header_names_the_selected_change_at_both_mandated_widths() {
+        let d = dashboard_with(
+            vec![
+                fixture::active("add-token-refresh", 4, 9),
+                fixture::active("fix-empty-basket", 7, 7),
+            ],
+            Vec::new(),
+            0,
+            Route::Detail,
+        );
+        let progress = crate::tasks::Progress {
+            completed: 4,
+            total: 9,
+        };
+        for (width, w) in [(120, 78), (60, 58)] {
+            let buf = render_at(width, 20, &d);
+            let expected = crate::ui::detail::header_row("add-token-refresh", "tdd", &progress, w);
+            assert_eq!(
+                detail_interior_cols(&buf, 2, w as usize),
+                expected,
+                "width {width}"
+            );
+            let last_col = if width == 60 { 58u16 } else { 118 };
+            for x in (last_col - 4)..=last_col {
+                assert!(
+                    cell(&buf, x, 2)
+                        .style()
+                        .add_modifier
+                        .contains(Modifier::BOLD),
+                    "width {width} x {x}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn moving_the_selection_moves_the_header() {
+        let mut d = dashboard_with(
+            vec![
+                fixture::active("add-token-refresh", 4, 9),
+                fixture::active("fix-empty-basket", 7, 7),
+            ],
+            Vec::new(),
+            0,
+            Route::Detail,
+        );
+        let buf_first = render_at(120, 20, &d);
+        assert!(detail_interior_cols(&buf_first, 2, 78).contains("add-token-refresh"));
+
+        d.selected = 1;
+        for (width, w) in [(120, 78), (60, 58)] {
+            let buf = render_at(width, 20, &d);
+            let header = detail_interior_cols(&buf, 2, w);
+            assert!(header.contains("fix-empty-basket"), "width {width}");
+            assert!(header.contains("[7/7]"), "width {width}");
+            assert!(!header.contains("add-token-refresh"), "width {width}");
+        }
+    }
+
+    #[test]
+    fn an_archived_changes_header_carries_its_stripped_name_and_its_own_schema() {
+        let archived_change = fixture::with_schema(
+            fixture::archived(Some("2026-08-14"), "add-auth", 7, 7),
+            "spec-driven",
+        );
+        let d = dashboard_with(Vec::new(), vec![archived_change], 0, Route::Detail);
+        for width in [120, 60] {
+            let buf = render_at(width, 20, &d);
+            let row = row_text(&buf, 2);
+            assert!(
+                row.starts_with("add-auth") || row.contains("add-auth"),
+                "width {width}"
+            );
+            assert!(!row.contains("2026-08-14-add-auth"), "width {width}");
+            assert!(row.contains("(spec-driven)"), "width {width}: {row:?}");
+            assert!(row.contains("[7/7]"), "width {width}");
+        }
+    }
+
+    #[test]
+    fn an_empty_visible_list_leaves_the_whole_detail_interior_blank() {
+        let default_style = Cell::default().style();
+        let d = dashboard_with(Vec::new(), Vec::new(), 0, Route::List);
+        let buf = render_at(120, 20, &d);
+        for y in 2..=17u16 {
+            for x in 41..=118u16 {
+                assert_eq!(cell(&buf, x, y).symbol(), " ", "x={x} y={y}");
+                assert_eq!(cell(&buf, x, y).style(), default_style, "x={x} y={y}");
+            }
+        }
+
+        let mut zzz = dashboard_with(
+            vec![fixture::active("alpha", 1, 2)],
+            Vec::new(),
+            0,
+            Route::Detail,
+        );
+        zzz.filter.query = "zzz".to_string();
+        for width in [120, 60] {
+            let buf = render_at(width, 20, &zzz);
+            for y in 2..=17u16 {
+                let last = if width == 60 { 58u16 } else { 118 };
+                let from = if width == 60 { 1u16 } else { 41 };
+                for x in from..=last {
+                    assert_eq!(cell(&buf, x, y).symbol(), " ", "width {width} x={x} y={y}");
+                }
+            }
+        }
+
+        // Discriminating companion: with a change selected, the region is
+        // never blank.
+        let with_change = dashboard_with(
+            vec![fixture::active("alpha", 1, 2)],
+            Vec::new(),
+            0,
+            Route::Detail,
+        );
+        let buf = render_at(120, 20, &with_change);
+        assert!(row_text(&buf, 2).contains("alpha"));
+    }
+
+    #[test]
+    fn the_five_tab_bars_exact_string_with_the_selected_tab_bold() {
+        let change = fixture::with_artifacts(
+            fixture::active("detail-view", 4, 9),
+            &[
+                ("proposal", &[]),
+                ("specs", &[]),
+                ("design", &[]),
+                ("tasks", &[]),
+                ("planning-review", &[]),
+            ],
+        );
+        let d = dashboard_with_detail(
+            vec![change],
+            Vec::new(),
+            0,
+            Route::Detail,
+            empty_detail_with_tab("", Vec::new(), 2),
+        );
+        for (width, w) in [(120, 78), (60, 58)] {
+            let buf = render_at(width, 20, &d);
+            let expected = "1 proposal  2 specs  3 design  4 tasks  5 planning-review";
+            assert_eq!(
+                detail_interior_cols(&buf, 3, w.min(expected.chars().count())),
+                &expected[..expected.chars().count().min(w)],
+                "width {width}"
+            );
+            let from = if width == 60 { 1u16 } else { 41 };
+            // "3 design" is bold; "1 proposal" is not.
+            for x in (from + 21)..(from + 21 + 8) {
+                assert!(
+                    cell(&buf, x, 3)
+                        .style()
+                        .add_modifier
+                        .contains(Modifier::BOLD),
+                    "width {width} x {x}: `3 design` should be bold"
+                );
+            }
+            for x in from..(from + 10) {
+                assert!(
+                    !cell(&buf, x, 3)
+                        .style()
+                        .add_modifier
+                        .contains(Modifier::BOLD),
+                    "width {width} x {x}: `1 proposal` should not be bold"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_select_tab_at_route_list_is_visible_in_the_tab_row_at_120() {
+        let change = fixture::with_artifacts(
+            fixture::active("detail-view", 4, 9),
+            &[("proposal", &[]), ("specs", &[]), ("design", &[])],
+        );
+        let mut d = dashboard_with_detail(
+            vec![change],
+            Vec::new(),
+            0,
+            Route::List,
+            empty_detail_with_tab("", Vec::new(), 0),
+        );
+        d.apply(Action::SelectTab(2));
+        let buf = render_at(120, 20, &d);
+        assert!(row_text(&buf, 3).contains("3 design"));
+        for x in 41 + 21..41 + 21 + 8 {
+            assert!(
+                cell(&buf, x, 3)
+                    .style()
+                    .add_modifier
+                    .contains(Modifier::BOLD)
+            );
+        }
+        // Discriminating companion, naming the check's other mandated
+        // width: at 60, Route::List, the narrow layout draws only the list
+        // region — no detail region, and so no tab row at all.
+        let buf60 = render_at(60, 20, &d);
+        assert!(!row_text(&buf60, 3).contains("3 design"));
+    }
+
+    #[test]
+    fn the_border_sweep_holds_with_twelve_forty_character_tab_ids_and_two_hundred_character_lines()
+    {
+        let ids: Vec<String> = (0..12)
+            .map(|i| format!("{}{i}", "x".repeat(40 - i.to_string().len())))
+            .collect();
+        let pairs: Vec<(&str, &[&str])> = ids.iter().map(|id| (id.as_str(), &[][..])).collect();
+        let change = fixture::with_artifacts(fixture::active("detail-view", 4, 9), &pairs);
+        let source: String = (0..30).map(|_| format!("{}\n", "y".repeat(200))).collect();
+        let d = dashboard_with_detail(
+            vec![change],
+            Vec::new(),
+            0,
+            Route::Detail,
+            empty_detail_with_tab(&source, Vec::new(), 0),
+        );
+        let buf60 = render_at(60, 20, &d);
+        for y in 1..=18u16 {
+            assert!(matches!(cell(&buf60, 0, y).symbol(), "│" | "┌" | "└"));
+            assert!(matches!(cell(&buf60, 59, y).symbol(), "│" | "┐" | "┘"));
+        }
+        let buf120 = render_at(120, 20, &d);
+        for y in 1..=18u16 {
+            for x in [0u16, 39, 40, 119] {
+                let s = cell(&buf120, x, y).symbol();
+                assert!(
+                    matches!(s, "│" | "┌" | "└" | "┐" | "┘"),
+                    "x={x} y={y} symbol={s:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_missing_artifact_still_shows_its_tab_and_reads_no_content_yet() {
+        let change = fixture::with_artifacts(
+            fixture::active("detail-view", 4, 9),
+            &[
+                ("proposal", &[]),
+                ("specs", &[]),
+                ("design", &[]),
+                ("tasks", &[]),
+                ("planning-review", &[]),
+            ],
+        );
+        let d = dashboard_with_detail(
+            vec![change],
+            Vec::new(),
+            0,
+            Route::Detail,
+            empty_detail_with_tab("", Vec::new(), 1),
+        );
+        for width in [120, 60] {
+            let buf = render_at(width, 20, &d);
+            assert!(
+                detail_interior_cols(&buf, 4, 14).starts_with("No content yet"),
+                "width {width}"
+            );
+            assert!(
+                row_text(&buf, 3).contains("2 specs"),
+                "width {width}: tab bar still intact"
+            );
+        }
+    }
+
+    #[test]
+    fn a_read_failure_is_named_above_the_content_at_both_widths() {
+        let change =
+            fixture::with_artifacts(fixture::active("detail-view", 4, 9), &[("proposal", &[])]);
+        let d = dashboard_with_detail(
+            vec![change],
+            Vec::new(),
+            0,
+            Route::Detail,
+            empty_detail_with_tab(
+                "# b\n",
+                vec!["/repo/specs/a/spec.md: permission denied".to_string()],
+                0,
+            ),
+        );
+        for width in [120, 60] {
+            let buf = render_at(width, 20, &d);
+            assert!(
+                detail_interior_cols(&buf, 4, 24).starts_with("! /repo/specs/a/spec.md:"),
+                "width {width}"
+            );
+            assert!(
+                detail_interior_cols(&buf, 5, 3).starts_with("# b"),
+                "width {width}"
+            );
+            assert!(
+                !row_text(&buf, 4).contains("No content yet"),
+                "width {width}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_twenty_item_list_fills_the_content_area_rows_4_through_17() {
+        let change =
+            fixture::with_artifacts(fixture::active("detail-view", 4, 9), &[("proposal", &[])]);
+        let d = dashboard_with_detail(
+            vec![change],
+            Vec::new(),
+            0,
+            Route::Detail,
+            empty_detail_with_tab(&twenty_line_source(), Vec::new(), 0),
+        );
+        for width in [120, 60] {
+            let buf = render_at(width, 20, &d);
+            assert_eq!(
+                detail_interior_cols(&buf, 4, 9),
+                "- line-00",
+                "width {width}"
+            );
+            assert_eq!(
+                detail_interior_cols(&buf, 17, 9),
+                "- line-13",
+                "width {width}"
+            );
         }
     }
 }
