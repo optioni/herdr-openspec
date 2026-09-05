@@ -921,7 +921,7 @@ files in `$CHECKS`.
 ## 4. `ui::detail::header_row`
 <!-- kind: behavioural -->
 
-- [ ] 4.1 RED: Create `src/ui/detail.rs` with a `mod tests` holding scenarios 36–40, every
+- [x] 4.1 RED: Create `src/ui/detail.rs` with a `mod tests` holding scenarios 36–40, every
       test naming both **78** and **58**: the full grammar at both widths; the `[-]` cell for
       a change with no tasks; a 200-character name truncated with `…` while both cells stay
       intact; the drop-whole-in-order walk across widths 78, 58, 30, 26, 25, 20, 19, 18, 5,
@@ -936,11 +936,11 @@ files in `$CHECKS`.
       **Red when:** any test asserts only a length or a substring, or the width list omits
       12 or 7. A row grammar asserted by length passes against the wrong row.
 
-- [ ] 4.2 GREEN: Implement `header_row`, raising `ui::list::progress_cell` and
+- [x] 4.2 GREEN: Implement `header_row`, raising `ui::list::progress_cell` and
       `ui::list::pad_or_truncate_right` to `pub(crate)` and calling them rather than copying
       them. `src/ui/detail.rs` names no ratatui type.
 
-- [ ] 4.3 CHECK: Run `sh $CHECKS/NOIO-VIEW.sh` — its first run, now that
+- [x] 4.3 CHECK: Run `sh $CHECKS/NOIO-VIEW.sh` — its first run, now that
       `src/ui/detail.rs` exists — and `sh $CHECKS/NOTABSEAM.sh`. Record both OK lines.
       `NOTABSEAM` is a **whole-file** sweep, comments included: `src/ui/detail.rs`'s module
       doc comment must therefore say "the view" and must not name `Style`, `Modifier`,
@@ -949,12 +949,12 @@ files in `$CHECKS`.
       A `NOTABSEAM` failure whose only hit is a doc comment is fixed by rewording the
       comment, never by exempting comments from the check.
 
-- [ ] 4.4 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'ui::detail::tests::' 5`;
+- [x] 4.4 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'ui::detail::tests::' 5`;
       `DETAIL_MIN=5 sh $CHECKS/DETAILWIDTHS.sh`. The floor rises with each of groups 5 and 6
       and reaches 19.
       **Red when:** any test in the new file names only one of the two widths.
 
-- [ ] 4.5 Commit: `feat(detail-view): the change header's fixed-field grammar`.
+- [x] 4.5 Commit: `feat(detail-view): the change header's fixed-field grammar`.
 
 ## 5. `ui::detail::tab_bar`
 <!-- kind: behavioural -->

@@ -29,8 +29,10 @@ pub struct Row {
 
 /// The progress cell: `[<completed>/<total>]`, or the three characters
 /// `[-]` when `total` is zero, so a change with no tasks still ends its row
-/// in the same column as one that has them.
-fn progress_cell(progress: &crate::tasks::Progress) -> String {
+/// in the same column as one that has them. `pub(crate)` rather than
+/// private: `ui::detail::header_row` calls this rather than copying it, so
+/// the crate keeps exactly one progress-cell implementation.
+pub(crate) fn progress_cell(progress: &crate::tasks::Progress) -> String {
     if progress.total == 0 {
         "[-]".to_string()
     } else {
@@ -42,8 +44,10 @@ fn progress_cell(progress: &crate::tasks::Progress) -> String {
 /// truncate to `width - 1` characters and append `…` — the crate's one
 /// right-truncation implementation, shared by the name field, the problem
 /// row, and the message rows. `width == 0` truncates to the empty string:
-/// there is no room even for the ellipsis.
-fn pad_or_truncate_right(text: &str, width: usize) -> String {
+/// there is no room even for the ellipsis. `pub(crate)` rather than
+/// private: `ui::detail`'s header, tab bar, and problem-line grammar calls
+/// this rather than copying it.
+pub(crate) fn pad_or_truncate_right(text: &str, width: usize) -> String {
     let chars: Vec<char> = text.chars().collect();
     if chars.len() <= width {
         let mut s: String = chars.into_iter().collect();
