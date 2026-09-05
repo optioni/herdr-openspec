@@ -1220,7 +1220,7 @@ files in `$CHECKS`.
 ## 12. The architectural check suite and its negative controls
 <!-- kind: operational -->
 
-- [ ] 12.1 CHECK: Run the whole suite at this change's floors, in one shell, recording every
+- [x] 12.1 CHECK: Run the whole suite at this change's floors, in one shell, recording every
       OK line verbatim: `MIN=18 sh $CHECKS/NOSPAWN-GREP.sh`; `sh $CHECKS/NOIO-VIEW.sh`;
       `UI_MIN=9 sh $CHECKS/READSEAM.sh`; `sh $CHECKS/NOTABSEAM.sh`; `UI_MIN=10 sh
       $CHECKS/NOCLI-SHELL.sh`; `TYPES="Dashboard Filter Detail" SCAN_MIN=60 sh
@@ -1232,13 +1232,13 @@ files in `$CHECKS`.
       `sh $CHECKS/NOJSON-SEAM.sh`; `BASE=<sha> sh $CHECKS/OPENSPEC-UNTOUCHED.sh`.
       **Red when:** any one fails, or any reports a searched-file count below its floor.
 
-- [ ] 12.2 CHECK: Run `DEPS` (with `WORK` set, `DEPS_SKIP_LEG5=1`) and `GRAPH-SNAP`,
+- [x] 12.2 CHECK: Run `DEPS` (with `WORK` set, `DEPS_SKIP_LEG5=1`) and `GRAPH-SNAP`,
       **unedited**, and diff their output against what task 0.4 and task 0.3 recorded on
       `main`. Both must be identical line for line.
       **Red when:** either differs. This change adds no dependency; a changed dependency
       graph here means one crept in.
 
-- [ ] 12.3 CHECK: Planted-violation controls. For each, copy the tree into `$WORK`, plant the
+- [x] 12.3 CHECK: Planted-violation controls. For each, copy the tree into `$WORK`, plant the
       violation there, run the check against the copy, confirm it **fails** with the expected
       message, and delete the copy. Never plant in the working tree.
       1. `std::fs::read_to_string` inside `src/ui/detail.rs` → `NOIO-VIEW` fails.
@@ -1291,11 +1291,11 @@ files in `$CHECKS`.
       `markdown-viewer`. Control 13 is the one this change exists to add: it is the only one
       whose *expected* outcome includes a check reporting nothing.
 
-- [ ] 12.4 CHECK: Confirm `$WORK` holds no leftover copy and
+- [x] 12.4 CHECK: Confirm `$WORK` holds no leftover copy and
       `git status --porcelain` is clean but for this change's own files.
       **Red when:** a planted violation survived into the working tree.
 
-- [ ] 12.5 Commit: `test(detail-view): run the architectural check suite and its negative controls`.
+- [x] 12.5 Commit: `test(detail-view): run the architectural check suite and its negative controls`.
 
 ## 13. Documentation
 <!-- kind: operational -->
