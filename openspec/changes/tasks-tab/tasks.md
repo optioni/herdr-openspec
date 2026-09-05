@@ -798,7 +798,7 @@ the crate compiles, every existing test still passes, and `GATE-MECH1` still hol
 ## 6. The dispatch in `content_lines`
 <!-- kind: behavior -->
 
-- [ ] 6.1 RED: Write four failing tests in `ui::detail::tests::`, each naming both `58` and
+- [x] 6.1 RED: Write four failing tests in `ui::detail::tests::`, each naming both `58` and
       `78`: `marked_tab_returns_the_checklist_body`, `unmarked_tab_returns_the_markdown_body`,
       `tab_past_the_end`, `content_lines_total`. They reach a `Change` through
       `changes::fixture::with_artifacts` and `changes::fixture::track_tasks_at` — never an
@@ -807,7 +807,7 @@ the crate compiles, every existing test still passes, and `GATE-MECH1` still hol
       since everything is markdown today, so it must be paired with the marked case in a way
       that makes the pair discriminating — assert the marked body's first line is the bar.
 
-- [ ] 6.2 GREEN: In `ui::detail::content_lines`, read the `change` argument added in group 1:
+- [x] 6.2 GREEN: In `ui::detail::content_lines`, read the `change` argument added in group 1:
       when `change.and_then(|c| c.artifacts.get(detail.tab)).is_some_and(|a| a.tracks_tasks)`,
       extend with `crate::ui::tasks::lines(&detail.source, &change.progress, width)`;
       otherwise with `crate::ui::markdown::lines(&detail.source, width)`. The problems lines
@@ -818,17 +818,17 @@ the crate compiles, every existing test still passes, and `GATE-MECH1` still hol
       `specs/artifact-content` requires it in exactly one place, and two copies is how the
       draw and the clamp come to disagree.
 
-- [ ] 6.3 CHECK: Contract gate — `content_lines`' behaviour is what `detail-scroll`,
+- [x] 6.3 CHECK: Contract gate — `content_lines`' behaviour is what `detail-scroll`,
       `responsive-layout`, and `artifact-content` all describe. Re-read those three specs in
       `openspec/specs/` and confirm the only statement this change makes false is the
       signature spelling, which `specs/detail-scroll/spec.md` and
       `specs/artifact-content/spec.md` in this change already correct.
 
-- [ ] 6.4 REFACTOR: `content_lines` now has three sequential concerns — problems, body,
+- [x] 6.4 REFACTOR: `content_lines` now has three sequential concerns — problems, body,
       fallback. Extract the body selection into a named private helper if the function no
       longer reads as one thing; otherwise state that no refactor was needed.
 
-- [ ] 6.5 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'ui::detail::tests::' 23`;
+- [x] 6.5 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'ui::detail::tests::' 23`;
       `DETAIL_MIN=23 sh $CHECKS/DETAILWIDTHS.sh`; `sh $CHECKS/NOTABSEAM.sh`;
       `sh $CHECKS/NOIO-VIEW.sh`; the four gate commands, still failing on exactly the one
       known acceptance test. `sh $CHECKS/OPENSPEC-UNTOUCHED.sh`. Commit.

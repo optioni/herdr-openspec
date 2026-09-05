@@ -162,14 +162,22 @@ pub fn tab_bar(artifacts: &[crate::changes::ArtifactRef], selected: usize, width
 /// The single line list both `ui::view::render` and `Dashboard::normalise_scroll`
 /// derive the detail content from, so the drawn slice and the scroll clamp
 /// can never disagree about how many lines there are: one `"! <problem>"`
-/// line per `detail.problems` entry, then `ui::markdown::lines(&detail.source,
-/// width)` unchanged, and — only when both are empty — exactly one line
-/// reading `No content yet`. When `problems` is non-empty and `source` is
-/// empty, the problems alone are returned: the reason is known, and adding
-/// `No content yet` would say two contradictory things about the same tab.
-// `change` is unused until group 6 wires the tracked-tasks dispatch; named
-// rather than `_change` so that edit is a diff on this line, not a rename.
-#[allow(unused_variables)]
+/// line per `detail.problems` entry, then the selected tab's **body**, and
+/// — only when both are empty — exactly one line reading `No content yet`.
+/// When `problems` is non-empty and `source` is empty, the problems alone
+/// are returned: the reason is known, and adding `No content yet` would say
+/// two contradictory things about the same tab.
+///
+/// The body is `ui::tasks::lines(&detail.source, &change.progress, width)`
+/// — `tasks-checklist`'s grammar and `tasks-progress-bar`'s leading line —
+/// when `change` is `Some` and the `ArtifactRef` at `detail.tab` carries
+/// `tracks_tasks == true`, and `ui::markdown::lines(&detail.source, width)`
+/// in every other case, including a `None` change, a `detail.tab` past the
+/// end of the artifact list, and a change carrying no artifacts at all.
+/// The decision is made exactly here, once, so `ui::view::render` and
+/// `Dashboard::normalise_scroll` — both of which pass
+/// `Dashboard::selected_change()` — can never disagree about which grammar
+/// the tab holds.
 pub fn content_lines(
     detail: &crate::ui::app::Detail,
     change: Option<&crate::changes::Change>,
@@ -185,7 +193,19 @@ pub fn content_lines(
             }],
         })
         .collect();
-    out.extend(crate::ui::markdown::lines(&detail.source, width));
+
+    let tracked_tasks_progress = change.and_then(|c| {
+        c.artifacts
+            .get(detail.tab)
+            .filter(|a| a.tracks_tasks)
+            .map(|_| &c.progress)
+    });
+    let body = match tracked_tasks_progress {
+        Some(progress) => crate::ui::tasks::lines(&detail.source, progress, width),
+        None => crate::ui::markdown::lines(&detail.source, width),
+    };
+    out.extend(body);
+
     if out.is_empty() {
         out.push(crate::ui::markdown::Line {
             segments: vec![crate::ui::markdown::Segment {
@@ -605,6 +625,173 @@ mod tests {
         }
         for line in &lines58 {
             assert!(line.text().chars().count() <= 58);
+        }
+    }
+
+    // --- group 6: the tracked-tasks dispatch -------------------------
+
+    /// A `Change` carrying `ids`' artifacts, the one at `marked` (when
+    /// `Some`) carrying `tracks_tasks == true` — through
+    /// `changes::fixture::with_artifacts` and `changes::fixture::track_tasks_at`,
+    /// never an `ArtifactRef {}` literal of this module's own, which
+    /// `NOLIT-CHANGE` forbids.
+    fn change_with_marked_tab(
+        ids: &[&str],
+        marked: Option<usize>,
+        progress: Progress,
+    ) -> crate::changes::Change {
+        let pairs: Vec<(&str, &[&str])> = ids.iter().map(|id| (*id, &[][..])).collect();
+        let base = fixture::with_schema(fixture::active("x", 0, 0), "tdd");
+        let mut base = base;
+        base.progress = progress;
+        let change = fixture::with_artifacts(base, &pairs);
+        match marked {
+            Some(index) => fixture::track_tasks_at(change, index),
+            None => change,
+        }
+    }
+
+    #[test]
+    fn marked_tab_returns_the_checklist_body() {
+        let progress = Progress {
+            completed: 1,
+            total: 3,
+        };
+        let change = change_with_marked_tab(&["proposal", "tasks"], Some(1), progress);
+        let source = "## 1. Setup\n\n- [x] a\n- [ ] b\n- [ ] c\n";
+        for width in [78, 58] {
+            let d = Detail {
+                source: source.to_string(),
+                scroll: 0,
+                tab: 1,
+                problems: Vec::new(),
+                loaded: None,
+            };
+            let lines = content_lines(&d, Some(&change), width);
+            // Discriminating: the marked body's first line is the bar,
+            // which the markdown rendering of the same source never
+            // produces.
+            assert_eq!(
+                lines[0].text(),
+                crate::ui::tasks::progress_bar(&progress, width),
+                "width {width}"
+            );
+            let want = crate::ui::tasks::lines(source, &progress, width);
+            assert_eq!(lines, want, "width {width}");
+        }
+    }
+
+    #[test]
+    fn unmarked_tab_returns_the_markdown_body() {
+        let progress = Progress {
+            completed: 1,
+            total: 3,
+        };
+        let change = change_with_marked_tab(&["proposal", "tasks"], Some(1), progress);
+        let source = "## 1. Setup\n\n- [x] a\n- [ ] b\n- [ ] c\n";
+        for width in [78, 58] {
+            // tab 0 ("proposal") is not the marked position.
+            let d = Detail {
+                source: source.to_string(),
+                scroll: 0,
+                tab: 0,
+                problems: Vec::new(),
+                loaded: None,
+            };
+            let lines = content_lines(&d, Some(&change), width);
+            let want = crate::ui::markdown::lines(source, width);
+            assert_eq!(lines, want, "width {width}");
+            assert_ne!(
+                lines[0].text(),
+                crate::ui::tasks::progress_bar(&progress, width),
+                "width {width}: markdown source starts with its own text, not the bar"
+            );
+        }
+    }
+
+    #[test]
+    fn tab_past_the_end() {
+        let progress = Progress {
+            completed: 1,
+            total: 1,
+        };
+        let change = change_with_marked_tab(&["proposal", "tasks"], Some(1), progress);
+        let source = "- [x] a\n";
+        for width in [78, 58] {
+            let d = Detail {
+                source: source.to_string(),
+                scroll: 0,
+                tab: 7,
+                problems: Vec::new(),
+                loaded: None,
+            };
+            let lines = content_lines(&d, Some(&change), width);
+            assert_eq!(
+                lines,
+                crate::ui::markdown::lines(source, width),
+                "width {width}"
+            );
+
+            // The same holds for a change carrying no artifacts at all.
+            let empty_artifacts = change_with_marked_tab(&[], None, progress);
+            let lines_empty = content_lines(&d, Some(&empty_artifacts), width);
+            assert_eq!(
+                lines_empty,
+                crate::ui::markdown::lines(source, width),
+                "width {width}"
+            );
+        }
+    }
+
+    #[test]
+    fn content_lines_total() {
+        let marked = change_with_marked_tab(
+            &["a", "b"],
+            Some(0),
+            Progress {
+                completed: 1,
+                total: 2,
+            },
+        );
+        let unmarked = change_with_marked_tab(
+            &["a", "b"],
+            None,
+            Progress {
+                completed: 1,
+                total: 2,
+            },
+        );
+        let no_artifacts = change_with_marked_tab(
+            &[],
+            None,
+            Progress {
+                completed: 0,
+                total: 0,
+            },
+        );
+        let details = [
+            detail("", Vec::new()),
+            detail("", vec!["/repo/a.md: boom".to_string()]),
+            detail("- [ ] only\n", Vec::new()),
+            detail("- [ ] only\n", vec!["/repo/a.md: boom".to_string()]),
+            {
+                let mut d = detail(&format!("{}\n", "word ".repeat(40).trim()), Vec::new());
+                d.tab = 0;
+                d
+            },
+            {
+                let mut d = detail("- [ ] a\n", Vec::new());
+                d.tab = 9;
+                d
+            },
+        ];
+        for width in [78, 58] {
+            for change in [None, Some(&marked), Some(&unmarked), Some(&no_artifacts)] {
+                for d in &details {
+                    // Never panics for any combination.
+                    let _ = content_lines(d, change, width);
+                }
+            }
         }
     }
 }
