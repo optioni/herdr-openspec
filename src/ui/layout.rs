@@ -120,12 +120,44 @@ pub fn interior(area: Rect) -> Rect {
     }
 }
 
+/// Split the detail region's interior into a one-row header, a one-row tab
+/// bar, and the content area below — each the interior's full width and
+/// carrying the interior's own `x` and `width`. Heights 0, 1, and 2 are
+/// branched on explicitly rather than handed to the constraint solver,
+/// exactly as `split_frame` is and for the same measured reason.
+pub fn split_detail(interior: Rect) -> (Rect, Rect, Rect) {
+    let row = |y: u16, height: u16| Rect {
+        x: interior.x,
+        y,
+        width: interior.width,
+        height,
+    };
+    match interior.height {
+        0 => (row(interior.y, 0), row(interior.y, 0), row(interior.y, 0)),
+        1 => (
+            row(interior.y, 1),
+            row(interior.y + 1, 0),
+            row(interior.y + 1, 0),
+        ),
+        2 => (
+            row(interior.y, 1),
+            row(interior.y + 1, 1),
+            row(interior.y + 2, 0),
+        ),
+        h => (
+            row(interior.y, 1),
+            row(interior.y + 1, 1),
+            row(interior.y + 2, h - 2),
+        ),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::ui::app::Route;
     use crate::ui::layout::{
-        LayoutMode, WIDE_MIN_WIDTH, interior, mode, scroll_offset, split_body, split_frame,
-        viewport,
+        LayoutMode, WIDE_MIN_WIDTH, interior, mode, scroll_offset, split_body, split_detail,
+        split_frame, viewport,
     };
     use ratatui::layout::Rect;
     use ratatui::widgets::Block;
@@ -296,5 +328,82 @@ mod tests {
         let (list, detail) = split_body(body, Route::Detail);
         assert_eq!(list, None);
         assert_eq!(detail, Some(body));
+    }
+
+    /// `split_detail` at both mandated interior widths, at heights 0, 1, and
+    /// 2 — the three degenerate cases branched on explicitly, exactly as
+    /// `split_frame_degenerate_heights` covers `split_frame`'s. Base `y` is
+    /// non-zero so a hard-coded `0` could not pass by accident.
+    #[test]
+    fn split_detail_degenerate_heights() {
+        for width in [78u16, 58u16] {
+            let at = |height: u16| Rect::new(3, 5, width, height);
+
+            let (header, tabs, content) = split_detail(at(0));
+            assert_eq!(header, Rect::new(3, 5, width, 0), "width {width} height 0");
+            assert_eq!(tabs, Rect::new(3, 5, width, 0), "width {width} height 0");
+            assert_eq!(content, Rect::new(3, 5, width, 0), "width {width} height 0");
+
+            let (header, tabs, content) = split_detail(at(1));
+            assert_eq!(header, Rect::new(3, 5, width, 1), "width {width} height 1");
+            assert_eq!(tabs, Rect::new(3, 6, width, 0), "width {width} height 1");
+            assert_eq!(content, Rect::new(3, 6, width, 0), "width {width} height 1");
+
+            let (header, tabs, content) = split_detail(at(2));
+            assert_eq!(header, Rect::new(3, 5, width, 1), "width {width} height 2");
+            assert_eq!(tabs, Rect::new(3, 6, width, 1), "width {width} height 2");
+            assert_eq!(content, Rect::new(3, 7, width, 0), "width {width} height 2");
+        }
+    }
+
+    /// `split_detail` above the degenerate heights: the header and tab bar
+    /// stay one row each and the content area is `height - 2` rows,
+    /// starting two rows below the interior's own `y`. `artifact-tabs` ->
+    /// "`split_detail` is exact at its degenerate heights" — heights 3 and
+    /// 16 are the two samples above the degenerate band.
+    #[test]
+    fn split_detail_gives_a_header_row_a_tab_row_and_a_content_area() {
+        for width in [78u16, 58u16] {
+            let at = |height: u16| Rect::new(3, 5, width, height);
+
+            let (header, tabs, content) = split_detail(at(3));
+            assert_eq!(header, Rect::new(3, 5, width, 1), "width {width} height 3");
+            assert_eq!(tabs, Rect::new(3, 6, width, 1), "width {width} height 3");
+            assert_eq!(content, Rect::new(3, 7, width, 1), "width {width} height 3");
+
+            let (header, tabs, content) = split_detail(at(16));
+            assert_eq!(header, Rect::new(3, 5, width, 1), "width {width} height 16");
+            assert_eq!(tabs, Rect::new(3, 6, width, 1), "width {width} height 16");
+            assert_eq!(
+                content,
+                Rect::new(3, 7, width, 14),
+                "width {width} height 16"
+            );
+        }
+    }
+
+    /// Every one of the three returned rects carries the interior's own `x`
+    /// and `width`, at both mandated widths and at a non-zero `x` — the
+    /// clause `split_detail`'s degenerate-heights scenario names alongside
+    /// the row heights, checked here as its own discriminating assertion
+    /// rather than folded into the height tables above.
+    #[test]
+    fn split_detail_rects_all_carry_the_interiors_x_and_width() {
+        for width in [78u16, 58u16] {
+            for height in [0u16, 1, 2, 3, 16] {
+                let interior = Rect::new(11, 5, width, height);
+                let (header, tabs, content) = split_detail(interior);
+                for (name, rect) in [("header", header), ("tabs", tabs), ("content", content)] {
+                    assert_eq!(
+                        rect.x, interior.x,
+                        "width {width} height {height}: {name}.x"
+                    );
+                    assert_eq!(
+                        rect.width, interior.width,
+                        "width {width} height {height}: {name}.width"
+                    );
+                }
+            }
+        }
     }
 }

@@ -899,7 +899,7 @@ files in `$CHECKS`.
 ## 3. `layout::split_detail`
 <!-- kind: behavioural -->
 
-- [ ] 3.1 RED: Add tests in `src/ui/layout.rs`'s `mod tests` for scenario 28 — `split_detail`
+- [x] 3.1 RED: Add tests in `src/ui/layout.rs`'s `mod tests` for scenario 28 — `split_detail`
       at interiors of width **78** and **58**, at heights 0, 1, 2, 3, and 16 — asserting all
       four fields of all three returned rects, including that each carries the interior's own
       `x` and `width`.
@@ -907,16 +907,16 @@ files in `$CHECKS`.
       a compile failure, and the task is complete only once that failure names
       `split_detail`.
 
-- [ ] 3.2 GREEN: Implement `split_detail` in `src/ui/layout.rs`, branching on heights 0, 1,
+- [x] 3.2 GREEN: Implement `split_detail` in `src/ui/layout.rs`, branching on heights 0, 1,
       and 2 explicitly rather than handing them to the constraint solver, exactly as
       `split_frame` does and for the same measured reason.
 
-- [ ] 3.3 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'ui::layout::tests::' 15`. The
+- [x] 3.3 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'ui::layout::tests::' 15`. The
       floor is the **measured** 12 plus this group's 3.
       **Red when:** fewer than 15 tests run, which is what a renamed module or a typo'd
       filter looks like.
 
-- [ ] 3.4 Commit: `feat(detail-view): split the detail interior into header, tabs, and content`.
+- [x] 3.4 Commit: `feat(detail-view): split the detail interior into header, tabs, and content`.
 
 ## 4. `ui::detail::header_row`
 <!-- kind: behavioural -->
