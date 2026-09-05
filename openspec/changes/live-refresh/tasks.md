@@ -1096,7 +1096,7 @@ passes, and `GATE-MECH1` still holds.
 ## 2. Acceptance Test — Outer Loop RED
 <!-- kind: behavior -->
 
-- [ ] 2.1 Set up the harness and the replaced collaborators named in design.md → Test
+- [x] 2.1 Set up the harness and the replaced collaborators named in design.md → Test
       Boundaries: a `crate::testutil::ScratchDir` repository holding `openspec/config.yaml`
       (`schema: tdd`), `openspec/schemas/tdd/schema.yaml` declaring the five artifacts with
       `apply.tracks: tasks.md`, and one change `alpha` whose `tasks.md` counts **4 of 9**.
@@ -1104,7 +1104,7 @@ passes, and `GATE-MECH1` still holds.
       a `RecordingRefresher`, a `ScriptedFs`, and a `TestBackend`. Nothing else is real: no
       `openspec` binary, no `herdr` socket, no terminal, no thread, and no clock.
 
-- [ ] 2.2 RED: Write `ui::tests::live::files_paint_then_the_cli_corrects` — the failing
+- [x] 2.2 RED: Write `ui::tests::live::files_paint_then_the_cli_corrects` — the failing
       end-to-end test for **live-updates → "A full live run leaves the change tree
       byte-identical"** and **"A result is adopted before the frame that shows it"**, carrying
       the dual-source rendering assertion with it. At 120x20 and again at 60x20, in two stages
@@ -1124,18 +1124,18 @@ passes, and `GATE-MECH1` still holds.
         byte-identical, and a discriminating control rewrites one byte of `alpha`'s `tasks.md`
         between two further snapshots and asserts they **differ**.
 
-- [ ] 2.3 Confirm it fails **because the behaviour is missing**, not because the harness is
+- [x] 2.3 Confirm it fails **because the behaviour is missing**, not because the harness is
       misconfigured: the failure must be stage 1's `requests()` assertion — the loop does not
       read `refresh.requested` yet, so no request is made — and the snapshot and progress
       assertions must already **pass**, since nothing writes today. Record the exact assertion
       message; every intermediate boundary from here to group 11 must reproduce it verbatim,
       and a *different* message means the harness broke rather than the behaviour arriving.
 
-- [ ] 2.4 REFACTOR: None is possible while the test is red; state that explicitly here rather
+- [x] 2.4 REFACTOR: None is possible while the test is red; state that explicitly here rather
       than leaving the lifecycle step unaccounted for. The harness cleanup happens at task
       11.2, once the test is green and a refactor can be shown not to change its result.
 
-- [ ] 2.5 VERIFY: the four gate commands from the preamble. `cargo test --all-features` fails
+- [x] 2.5 VERIFY: the four gate commands from the preamble. `cargo test --all-features` fails
       on exactly one test, `ui::tests::live::files_paint_then_the_cli_corrects`.
       `cargo llvm-cov --ignore-run-fail --fail-under-lines 80` passes.
       `BASE=f9b42e8 sh $CHECKS/OPENSPEC-UNTOUCHED.sh`. Commit.

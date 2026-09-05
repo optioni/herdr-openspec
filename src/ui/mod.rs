@@ -1160,4 +1160,201 @@ apply:
             assert!(events.to_string().contains("script exhausted"));
         }
     }
+
+    /// The outer-loop acceptance test: `ui::app::action_for` ->
+    /// `Dashboard::apply` -> `run_loop`'s live tier -> `Refresher` ->
+    /// `Dashboard::adopt` -> `Dashboard::sync_detail` -> `ui::view::render`
+    /// is a path no unit test crosses, and "files paint, the CLI corrects"
+    /// is a claim about what the loop shows in successive frames rather
+    /// than about what a function returns. RED from group 2, green at
+    /// group 11. See design.md -> Test Strategy.
+    mod live {
+        use std::time::Duration;
+
+        use crate::changes::Selection;
+        use crate::config::Config;
+        use crate::refresh::RefreshResult;
+        use crate::testutil::{
+            RecordingRefresher, ScriptedFs, press, row_text, snapshot, write_with_mode,
+        };
+        use crate::ui::driver::{Live, LoopSummary, run_loop};
+
+        fn vendor_tdd_schema(repo: &std::path::Path) {
+            let yaml = "\
+name: tdd
+artifacts:
+  - id: proposal
+    generates: proposal.md
+  - id: specs
+    generates: specs/**/*.md
+  - id: design
+    generates: design.md
+  - id: tasks
+    generates: tasks.md
+  - id: planning-review
+    generates: planning-review.md
+apply:
+  tracks: tasks.md
+";
+            write_with_mode(
+                &repo.join("openspec/schemas/tdd/schema.yaml"),
+                yaml.as_bytes(),
+                0o644,
+            );
+            write_with_mode(&repo.join("openspec/config.yaml"), b"schema: tdd\n", 0o644);
+        }
+
+        /// A scratch repository holding one active change, `alpha`, whose
+        /// `tasks.md` counts 4 of 9.
+        fn scratch_repo_with_alpha() -> crate::testutil::ScratchDir {
+            let scratch = crate::testutil::ScratchDir::new();
+            let root = scratch.path();
+            vendor_tdd_schema(root);
+            write_with_mode(
+                &root.join("openspec/changes/alpha/proposal.md"),
+                b"# alpha\n",
+                0o644,
+            );
+            write_with_mode(
+                &root.join("openspec/changes/alpha/tasks.md"),
+                b"- [x] a\n- [x] b\n- [x] c\n- [x] d\n- [ ] e\n- [ ] f\n- [ ] g\n- [ ] h\n- [ ] i\n",
+                0o644,
+            );
+            scratch
+        }
+
+        #[test]
+        fn files_paint_then_the_cli_corrects() {
+            for width in [120u16, 60u16] {
+                let scratch = scratch_repo_with_alpha();
+                let root = scratch.path();
+                let config = Config::default();
+                let mut dashboard = super::super::load(root, &config);
+
+                let before = snapshot(root);
+
+                // Stage 1: no CLI result has arrived yet.
+                let backend = ratatui::backend::TestBackend::new(width, 20);
+                let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+                let mut events = crate::testutil::Script::new(vec![Ok(Some(press(
+                    ratatui::crossterm::event::KeyCode::Char('q'),
+                    ratatui::crossterm::event::KeyModifiers::NONE,
+                )))]);
+                let mut fs = ScriptedFs::new(Vec::new(), Vec::new());
+                let mut refresher = RecordingRefresher::new(Vec::new());
+                let mut live = Live {
+                    fs: &mut fs,
+                    refresher: &mut refresher,
+                };
+
+                let summary = run_loop(
+                    &mut terminal,
+                    &mut dashboard,
+                    &mut events,
+                    &mut live,
+                    &super::super::read_artifact,
+                    Duration::from_millis(1),
+                )
+                .expect("stage 1 ends");
+
+                assert_eq!(
+                    summary,
+                    LoopSummary {
+                        frames: 1,
+                        polls: 1
+                    },
+                    "width {width}"
+                );
+                let buf = terminal.backend().buffer();
+                assert!(
+                    row_text(buf, 2).contains("[4/9]"),
+                    "width {width}: files must paint before any CLI result existed: {}",
+                    row_text(buf, 2)
+                );
+                assert_eq!(
+                    refresher.requests(),
+                    vec![Selection::All],
+                    "width {width}: the startup request must go out"
+                );
+                assert!(
+                    !dashboard.refresh.requested,
+                    "width {width}: the flag must be cleared once the request was made"
+                );
+
+                // Stage 2: the CLI's file result, then its merged result.
+                dashboard.quit = false;
+                let files_set = crate::changes::fixture::set(
+                    vec![crate::changes::fixture::active("alpha", 4, 9)],
+                    Vec::new(),
+                    Vec::new(),
+                );
+                let merged_set = crate::changes::fixture::set(
+                    vec![crate::changes::fixture::active("alpha", 7, 9)],
+                    Vec::new(),
+                    Vec::new(),
+                );
+                let mut fs2 = ScriptedFs::new(Vec::new(), Vec::new());
+                let mut refresher2 = RecordingRefresher::new(vec![
+                    Some(RefreshResult::Files(files_set)),
+                    Some(RefreshResult::Merged(merged_set)),
+                ]);
+                let mut live2 = Live {
+                    fs: &mut fs2,
+                    refresher: &mut refresher2,
+                };
+                let mut events2 = crate::testutil::Script::new(vec![
+                    Ok(None),
+                    Ok(None),
+                    Ok(Some(press(
+                        ratatui::crossterm::event::KeyCode::Char('q'),
+                        ratatui::crossterm::event::KeyModifiers::NONE,
+                    ))),
+                ]);
+
+                run_loop(
+                    &mut terminal,
+                    &mut dashboard,
+                    &mut events2,
+                    &mut live2,
+                    &super::super::read_artifact,
+                    Duration::from_millis(1),
+                )
+                .expect("stage 2 ends");
+
+                let buf2 = terminal.backend().buffer();
+                assert!(
+                    row_text(buf2, 2).contains("[7/9]"),
+                    "width {width}: the CLI must have corrected it: {}",
+                    row_text(buf2, 2)
+                );
+                assert_eq!(
+                    refresher2.takes(),
+                    3,
+                    "width {width}: one take_result per iteration"
+                );
+
+                let after = snapshot(root);
+                assert_eq!(
+                    before, after,
+                    "width {width}: a full live run must leave the change tree byte-identical"
+                );
+
+                // Discriminating control: the same comparison must fail when
+                // a single byte of alpha's tasks.md is rewritten between two
+                // further snapshots, or the equality assertion above proves
+                // nothing.
+                let tasks_path = root.join("openspec/changes/alpha/tasks.md");
+                let original = std::fs::read_to_string(&tasks_path).expect("read tasks.md back");
+                let control_before = snapshot(root);
+                let mutated = original.replacen("[ ] e", "[x] e", 1);
+                write_with_mode(&tasks_path, mutated.as_bytes(), 0o644);
+                let control_after = snapshot(root);
+                assert_ne!(
+                    control_before, control_after,
+                    "width {width}: the snapshot comparison must discriminate a rewritten byte"
+                );
+                write_with_mode(&tasks_path, original.as_bytes(), 0o644);
+            }
+        }
+    }
 }
