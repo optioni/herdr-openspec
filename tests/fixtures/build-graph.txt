@@ -17,6 +17,7 @@ either v1.18.0
 equivalent v1.0.2
 errno v0.3.14
 foldhash v0.2.0
+fsevent-sys v4.1.0
 hashbrown v0.16.1
 hashbrown v0.17.1
 hashlink v0.12.1
@@ -35,6 +36,8 @@ log v0.4.34
 lru v0.18.4
 memchr v2.8.3
 mio v1.2.3
+notify v8.2.0
+notify-types v2.1.0
 parking_lot v0.12.5
 parking_lot_core v0.9.12
 proc-macro2 v1.0.107
@@ -47,6 +50,7 @@ ratatui-widgets v0.3.2
 rustix v1.1.4
 rustversion v1.0.23
 ryu v1.0.23
+same-file v1.0.6
 scopeguard v1.2.0
 serde_core v1.0.229
 serde_json v1.0.151
@@ -72,6 +76,7 @@ unicode-ident v1.0.24
 unicode-segmentation v1.13.3
 unicode-truncate v2.0.1
 unicode-width v0.2.2
+walkdir v2.5.0
 winnow v1.0.4
 yaml-rust2 v0.12.0
 zmij v1.0.23
@@ -94,6 +99,7 @@ either v1.18.0
 equivalent v1.0.2
 errno v0.3.14
 foldhash v0.2.0
+fsevent-sys v4.1.0
 hashbrown v0.16.1
 hashbrown v0.17.1
 hashlink v0.12.1
@@ -112,6 +118,8 @@ log v0.4.34
 lru v0.18.4
 memchr v2.8.3
 mio v1.2.3
+notify v8.2.0
+notify-types v2.1.0
 parking_lot v0.12.5
 parking_lot_core v0.9.12
 proc-macro2 v1.0.107
@@ -124,6 +132,7 @@ ratatui-widgets v0.3.2
 rustix v1.1.4
 rustversion v1.0.23
 ryu v1.0.23
+same-file v1.0.6
 scopeguard v1.2.0
 serde_core v1.0.229
 serde_json v1.0.151
@@ -149,6 +158,7 @@ unicode-ident v1.0.24
 unicode-segmentation v1.13.3
 unicode-truncate v2.0.1
 unicode-width v0.2.2
+walkdir v2.5.0
 winnow v1.0.4
 yaml-rust2 v0.12.0
 zmij v1.0.23
@@ -177,6 +187,8 @@ hashlink v0.12.1
 heck v0.5.0
 ident_case v1.0.1
 indoc v2.0.7
+inotify v0.11.5
+inotify-sys v0.1.8
 instability v0.3.13
 itertools v0.14.0
 itoa v1.0.18
@@ -190,6 +202,8 @@ log v0.4.34
 lru v0.18.4
 memchr v2.8.3
 mio v1.2.3
+notify v8.2.0
+notify-types v2.1.0
 parking_lot v0.12.5
 parking_lot_core v0.9.12
 proc-macro2 v1.0.107
@@ -202,6 +216,7 @@ ratatui-widgets v0.3.2
 rustix v1.1.4
 rustversion v1.0.23
 ryu v1.0.23
+same-file v1.0.6
 scopeguard v1.2.0
 serde_core v1.0.229
 serde_json v1.0.151
@@ -227,6 +242,7 @@ unicode-ident v1.0.24
 unicode-segmentation v1.13.3
 unicode-truncate v2.0.1
 unicode-width v0.2.2
+walkdir v2.5.0
 winnow v1.0.4
 yaml-rust2 v0.12.0
 zmij v1.0.23
@@ -255,6 +271,8 @@ hashlink v0.12.1
 heck v0.5.0
 ident_case v1.0.1
 indoc v2.0.7
+inotify v0.11.5
+inotify-sys v0.1.8
 instability v0.3.13
 itertools v0.14.0
 itoa v1.0.18
@@ -268,6 +286,8 @@ log v0.4.34
 lru v0.18.4
 memchr v2.8.3
 mio v1.2.3
+notify v8.2.0
+notify-types v2.1.0
 parking_lot v0.12.5
 parking_lot_core v0.9.12
 proc-macro2 v1.0.107
@@ -280,6 +300,7 @@ ratatui-widgets v0.3.2
 rustix v1.1.4
 rustversion v1.0.23
 ryu v1.0.23
+same-file v1.0.6
 scopeguard v1.2.0
 serde_core v1.0.229
 serde_json v1.0.151
@@ -305,6 +326,7 @@ unicode-ident v1.0.24
 unicode-segmentation v1.13.3
 unicode-truncate v2.0.1
 unicode-width v0.2.2
+walkdir v2.5.0
 winnow v1.0.4
 yaml-rust2 v0.12.0
 zmij v1.0.23

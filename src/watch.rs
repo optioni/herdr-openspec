@@ -13,6 +13,8 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use notify::Watcher as _;
+
 use crate::changes::Selection;
 
 /// The debounce window's length, exposed so `SPEC.md` -> Refresh's
@@ -198,6 +200,96 @@ impl FsEvents for NoFsEvents {
 /// The inert `FsEvents`. See [`NoFsEvents`].
 pub fn none() -> Box<dyn FsEvents> {
     Box::new(NoFsEvents)
+}
+
+/// The one real implementation: a `notify::RecommendedWatcher` (kept alive
+/// for its `Drop`, which stops the watch), the `mpsc::Receiver` it sends
+/// to, a [`Debounce`], and the `Duration` the previous `drain` computed for
+/// [`FsEvents::pending_in`] to return verbatim — the crate's one binding
+/// from the debounce's injected `now` to the real clock, `Instant::now()`,
+/// alongside `cli::npm_prefix`, `config::env_lookup`, and
+/// `ui::read_artifact`.
+pub struct RealFsEvents {
+    _watcher: notify::RecommendedWatcher,
+    rx: std::sync::mpsc::Receiver<notify::Result<notify::Event>>,
+    debounce: Debounce,
+    pending: Option<Duration>,
+}
+
+impl FsEvents for RealFsEvents {
+    fn drain(&mut self) -> Result<Option<Vec<PathBuf>>, WatchError> {
+        let mut paths = Vec::new();
+        loop {
+            match self.rx.try_recv() {
+                Ok(Ok(event)) => paths.extend(event.paths),
+                // A per-event error from notify's own backend (for
+                // example, a dropped-event overflow) is not this pane's
+                // failure to watch — it is skipped rather than surfaced,
+                // the same way a single bad line does not fail an entire
+                // read elsewhere in this crate.
+                Ok(Err(_)) => {}
+                Err(std::sync::mpsc::TryRecvError::Empty) => break,
+                Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                    return Err(WatchError(
+                        "the filesystem watcher's event channel disconnected".to_string(),
+                    ));
+                }
+            }
+        }
+        // The crate's one real clock read, captured once and reused for
+        // both the debounce and the cached `pending_in` this call leaves
+        // behind — never a second call to `Instant::now()`.
+        let now = Instant::now();
+        if !paths.is_empty() {
+            self.debounce.push(paths, now);
+        }
+        let due = self.debounce.take_due(now);
+        self.pending = self.debounce.pending_in(now);
+        Ok(due)
+    }
+
+    fn pending_in(&self) -> Option<Duration> {
+        self.pending
+    }
+}
+
+/// Start a recursive watch on `root`. Never returns a `Result`: a watcher
+/// that will not start is a degraded state, not a failure to open the
+/// pane, so it returns the inert implementation and a one-line problem
+/// naming `root` and the reason instead.
+pub fn start(root: &Path) -> (Box<dyn FsEvents>, Vec<String>) {
+    let (tx, rx) = std::sync::mpsc::channel::<notify::Result<notify::Event>>();
+    let watcher = match notify::Watcher::new(tx, notify::Config::default()) {
+        Ok(w) => w,
+        Err(e) => {
+            return (
+                none(),
+                vec![format!(
+                    "filesystem watch unavailable for {}: {e}",
+                    root.display()
+                )],
+            );
+        }
+    };
+    let mut watcher: notify::RecommendedWatcher = watcher;
+    if let Err(e) = watcher.watch(root, notify::RecursiveMode::Recursive) {
+        return (
+            none(),
+            vec![format!(
+                "filesystem watch unavailable for {}: {e}",
+                root.display()
+            )],
+        );
+    }
+    (
+        Box::new(RealFsEvents {
+            _watcher: watcher,
+            rx,
+            debounce: Debounce::new(),
+            pending: None,
+        }),
+        Vec::new(),
+    )
 }
 
 /// A pure function of two `Duration`s, reading no clock: `tick` when nothing
@@ -543,6 +635,97 @@ mod tests {
         assert_eq!(
             poll_timeout(Duration::from_millis(250), Some(Duration::from_millis(0))),
             Duration::from_millis(1)
+        );
+    }
+
+    // --- group 6: the real watcher ------------------------------------
+
+    #[test]
+    fn no_fs_events_never_yields() {
+        let mut fs = none();
+        for _ in 0..10 {
+            assert_eq!(fs.drain(), Ok(None));
+            assert_eq!(fs.pending_in(), None);
+        }
+    }
+
+    #[test]
+    fn watch_error_display_names_the_reason() {
+        let err = WatchError("boom".to_string());
+        assert_eq!(err.to_string(), "boom");
+    }
+
+    #[test]
+    fn start_on_a_missing_path_degrades_and_names_the_reason() {
+        let scratch = crate::testutil::ScratchDir::new();
+        let missing = scratch.path().join("does-not-exist");
+        let (mut fs, problems) = start(&missing);
+
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(problems[0].contains(&missing.display().to_string()));
+
+        // The returned FsEvents is the inert one, forever.
+        for _ in 0..10 {
+            assert_eq!(fs.drain(), Ok(None));
+            assert_eq!(fs.pending_in(), None);
+        }
+    }
+
+    #[test]
+    fn start_on_a_real_directory_yields_the_touched_path() {
+        let scratch = crate::testutil::ScratchDir::new();
+        let root = scratch.path();
+        std::fs::create_dir_all(root.join("changes/alpha")).expect("create fixture dir");
+        let (mut fs, problems) = start(root);
+        assert!(problems.is_empty(), "{problems:?}");
+
+        let target = root.join("changes/alpha/tasks.md");
+        std::fs::write(&target, "- [x] a\n").expect("write fixture file");
+
+        // Deadline-bounded poll, never a fixed sleep followed by an
+        // assertion: the condition is re-tested after every 10ms sleep, so
+        // a cold or loaded machine cannot make this assertion premature.
+        let deadline = Instant::now() + Duration::from_secs(10);
+        let mut found = false;
+        while Instant::now() < deadline {
+            if let Ok(Some(paths)) = fs.drain()
+                && paths.iter().any(|p| {
+                    let mut components: Vec<_> = p
+                        .components()
+                        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                        .collect();
+                    components.len() >= 2
+                        && components.pop().as_deref() == Some("tasks.md")
+                        && components.pop().as_deref() == Some("alpha")
+                })
+            {
+                found = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            found,
+            "no event named .../alpha/tasks.md arrived within 10s; \
+             this filesystem may not support change notification"
+        );
+    }
+
+    #[test]
+    fn a_started_watcher_writes_nothing() {
+        let scratch = crate::testutil::ScratchDir::new();
+        let root = scratch.path();
+        std::fs::create_dir_all(root.join("changes/alpha")).expect("create fixture dir");
+        std::fs::write(root.join("changes/alpha/tasks.md"), "- [x] a\n")
+            .expect("write fixture file");
+
+        let before = crate::testutil::snapshot(root);
+        let (fs, _problems) = start(root);
+        drop(fs);
+        let after = crate::testutil::snapshot(root);
+        assert_eq!(
+            before, after,
+            "starting and dropping a watch wrote inside the tree"
         );
     }
 }

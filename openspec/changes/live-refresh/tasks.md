@@ -1314,7 +1314,7 @@ This is the one group that touches `Cargo.toml`, `Cargo.lock`, and
 `tests/fixtures/build-graph.txt`, and it edits `DEPS` and `GRAPH-SNAP` in the same commit, so
 no intermediate state leaves a manifest and a snapshot disagreeing.
 
-- [ ] 6.1 CHANGE: Add to `Cargo.toml`, after `pulldown-cmark`:
+- [x] 6.1 CHANGE: Add to `Cargo.toml`, after `pulldown-cmark`:
       `notify = { version = "8.2.0", default-features = false, features = ["macos_fsevent"] }`.
       **Confirm the version against the registry first** — `cargo info notify` — rather than
       taking 8.2.0 from this file; it was the latest **stable** at planning time
@@ -1326,7 +1326,7 @@ no intermediate state leaves a manifest and a snapshot disagreeing.
       notify's fsevent module is gated on `not(feature = "macos_kqueue")`. This is the single
       most likely wrong edit in the whole change.
 
-- [ ] 6.2 CHANGE: Edit `$CHECKS/DEPS.sh` and `$CHECKS/GRAPH-SNAP.sh` **on disk** by the exact
+- [x] 6.2 CHANGE: Edit `$CHECKS/DEPS.sh` and `$CHECKS/GRAPH-SNAP.sh` **on disk** by the exact
       string replacements written out above — **three** in `DEPS`, and **four** in
       `GRAPH-SNAP` across its two labelled edits — then
       print `diff -u "$WORK/DEPS.src" "$CHECKS/DEPS.sh"` and
@@ -1334,7 +1334,7 @@ no intermediate state leaves a manifest and a snapshot disagreeing.
       **exactly** those hunks and nothing else. `tui-shell` recorded four `DEPS` edits as
       prose in a checkbox and never changed the file; this task's evidence is the two diffs.
 
-- [ ] 6.3 CHANGE: Regenerate the graph snapshot **on disk**:
+- [x] 6.3 CHANGE: Regenerate the graph snapshot **on disk**:
       `GRAPH_WRITE=1 sh $CHECKS/GRAPH-SNAP.sh`, then
       `git diff --stat tests/fixtures/build-graph.txt`. Expected, and **measured at planning
       time in a scratch copy**: `310 → 332` lines, a `22 0` numstat — five added lines per
@@ -1349,7 +1349,7 @@ no intermediate state leaves a manifest and a snapshot disagreeing.
       resolution moved for a reason other than this addition, and it is investigated rather
       than committed.
 
-- [ ] 6.4 RED: Write five failing tests in `watch::tests::`, named from their scenarios:
+- [x] 6.4 RED: Write five failing tests in `watch::tests::`, named from their scenarios:
       `no_fs_events_never_yields`, `start_on_a_missing_path_degrades_and_names_the_reason`,
       `start_on_a_real_directory_yields_the_touched_path`,
       `a_started_watcher_writes_nothing`, and `watch_error_display_names_the_reason`.
@@ -1374,7 +1374,7 @@ no intermediate state leaves a manifest and a snapshot disagreeing.
       non-empty. It must assert the returned `FsEvents` is the **inert** one — `drain` is
       `Ok(None)` forever — or the degraded path is untested and only its message is.
 
-- [ ] 6.5 GREEN: Implement `watch::RealFsEvents` and `watch::start` per
+- [x] 6.5 GREEN: Implement `watch::RealFsEvents` and `watch::start` per
       `specs/watch-invalidation/spec.md`: a `notify::RecommendedWatcher` constructed with an
       `std::sync::mpsc::Sender<notify::Result<Event>>` (an `EventHandler` **unconditionally**,
       with no feature enabled — verified against notify 8.2.0's source), watching the root
@@ -1394,7 +1394,7 @@ no intermediate state leaves a manifest and a snapshot disagreeing.
       `SPEC.md` → Architecture's "one binding" claim, which task 13.2 writes, is false. Sound
       because `run_loop` calls `drain` and then `pending_in` in the same iteration.
 
-- [ ] 6.6 CHECK: The checks that arm at this group, plus their deferred plants from task 0.4:
+- [x] 6.6 CHECK: The checks that arm at this group, plus their deferred plants from task 0.4:
       - `MIN=23 sh $CHECKS/WATCHSEAM.sh` — green for the first time. Then plant
         `// use notify::Event;` in `src/ui/driver.rs` (expect FAIL naming it) and
         `// a ratatui Style` in `src/watch.rs` (expect FAIL), reverting each.
@@ -1422,7 +1422,7 @@ no intermediate state leaves a manifest and a snapshot disagreeing.
         red until group 7.
       - `git status --porcelain src/ Cargo.toml` empty after every revert.
 
-- [ ] 6.7 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'watch::tests::' 27`;
+- [x] 6.7 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'watch::tests::' 27`;
       `cargo build --locked`; the four gate commands, still failing on exactly the one known
       acceptance test. `BASE=f9b42e8 sh $CHECKS/OPENSPEC-UNTOUCHED.sh` — `Cargo.toml`,
       `Cargo.lock`, and `tests/fixtures/build-graph.txt` are all outside `openspec/`, so it
