@@ -984,6 +984,143 @@ mod tests {
         assert!(interior_cols(&buf60, 3).contains("fix-empty-basket"));
     }
 
+    // `live-refresh` -> "The list region's leading rows name refresh
+    // problems first" and the view half of the dual-source claim. See
+    // `specs/live-updates/spec.md`.
+
+    #[test]
+    fn a_watch_problem_is_the_first_row() {
+        let mut d = dashboard_with(
+            vec![fixture::active("fix-empty-basket", 7, 7)],
+            Vec::new(),
+            0,
+            Route::List,
+        );
+        d.refresh.problems =
+            vec!["filesystem watch unavailable for /r/openspec: No path was found".to_string()];
+
+        for (width, height) in [(120, 20), (60, 20)] {
+            let buf = render_at(width, height, &d);
+            assert!(
+                interior_cols(&buf, 2).starts_with("! filesystem watch unavailable"),
+                "width {width}: {}",
+                interior_cols(&buf, 2)
+            );
+            assert!(
+                interior_cols(&buf, 3).contains("fix-empty-basket"),
+                "width {width}"
+            );
+        }
+    }
+
+    #[test]
+    fn refresh_problems_precede_change_problems() {
+        let mut d = dashboard_with(
+            vec![fixture::active("fix-empty-basket", 7, 7)],
+            Vec::new(),
+            0,
+            Route::List,
+        );
+        d.refresh.problems = vec!["watch failed".to_string()];
+        d.changes.problems = vec!["openspec/changes unreadable".to_string()];
+
+        for (width, height) in [(120, 20), (60, 20)] {
+            let buf = render_at(width, height, &d);
+            assert!(
+                interior_cols(&buf, 2).starts_with("! watch failed"),
+                "width {width}: the refresh problem must lead"
+            );
+            assert!(
+                interior_cols(&buf, 3).starts_with("! openspec/changes unreadable"),
+                "width {width}"
+            );
+            assert!(
+                interior_cols(&buf, 4).contains("fix-empty-basket"),
+                "width {width}"
+            );
+        }
+    }
+
+    #[test]
+    fn no_refresh_problem_draws_no_extra_row() {
+        // `refresh.problems` is empty by construction — the closest a typed
+        // `Dashboard` value can come to "the field absent", since every
+        // value must name all nine fields. Compared against a second,
+        // independently constructed dashboard (not a `.clone()`) so the
+        // equality is not tautological.
+        let d = dashboard_with(
+            vec![fixture::active("fix-empty-basket", 7, 7)],
+            Vec::new(),
+            0,
+            Route::List,
+        );
+        let same = dashboard_with(
+            vec![fixture::active("fix-empty-basket", 7, 7)],
+            Vec::new(),
+            0,
+            Route::List,
+        );
+
+        for (width, height) in [(120, 20), (60, 20)] {
+            let buf = render_at(width, height, &d);
+            let buf_same = render_at(width, height, &same);
+            assert_eq!(buf, buf_same, "width {width}");
+            assert!(
+                interior_cols(&buf, 2).contains("fix-empty-basket"),
+                "width {width}: the change row must be first, no leading problem row"
+            );
+        }
+    }
+
+    #[test]
+    fn the_corrected_progress_reaches_the_buffer() {
+        // The view has no notion of "corrected" — it draws whatever
+        // `Change::progress` holds. This is the render-only half of the
+        // dual-source claim; `ui::driver::tests::a_result_is_adopted_before_the_frame`
+        // and `ui::tests::live::files_paint_then_the_cli_corrects` are the
+        // halves that prove the loop feeds it the CLI's corrected number.
+        let d = dashboard_with(
+            vec![fixture::active("alpha", 7, 9)],
+            Vec::new(),
+            0,
+            Route::List,
+        );
+        for (width, height) in [(120, 20), (60, 20)] {
+            let buf = render_at(width, height, &d);
+            assert!(interior_cols(&buf, 2).contains("[7/9]"), "width {width}");
+        }
+    }
+
+    #[test]
+    fn a_removed_repo_shows_the_problem_row() {
+        // `watch-invalidation`: "openspec/ is removed while the watcher
+        // runs" — the view's half of the claim.
+        // `ui::driver::tests::a_watch_error_is_recorded_once` proves the
+        // drain error is recorded and the loop keeps drawing; this proves
+        // what it draws.
+        let mut d = dashboard_with(
+            vec![fixture::active("alpha", 4, 9)],
+            Vec::new(),
+            0,
+            Route::List,
+        );
+        d.refresh.problems =
+            vec!["the filesystem watcher's event channel disconnected".to_string()];
+
+        for (width, height) in [(120, 20), (60, 20)] {
+            let buf = render_at(width, height, &d);
+            assert!(
+                interior_cols(&buf, 2).starts_with("! the filesystem watcher"),
+                "width {width}: {}",
+                interior_cols(&buf, 2)
+            );
+            assert!(
+                interior_cols(&buf, 3).contains("alpha"),
+                "width {width}: the list still draws despite the watcher failure"
+            );
+        }
+    }
+
     #[test]
     fn the_detail_region_stays_blank_while_the_list_fills() {
         // Kept verbatim per the list-view era; its assertion changes with

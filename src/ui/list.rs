@@ -231,6 +231,19 @@ pub fn rows(dashboard: &Dashboard, width: u16) -> Vec<Row> {
         .collect();
 
     let mut out = Vec::new();
+    // `live-refresh`: refresh problems (a watcher that would not start, or a
+    // drain error) lead the list, ahead of change-set problems — they are
+    // the ones that outlive a reload, while a `ChangeSet` problem is
+    // re-derived every cycle and may vanish on the next one. Same grammar,
+    // same row kind: `change-rows` requires exactly one problem kind, so
+    // neither is addressable by `selected` and `ui::view` styles both alike.
+    for problem in &dashboard.refresh.problems {
+        out.push(Row {
+            text: problem_row_text(problem, width),
+            kind: RowKind::Problem,
+            selected: false,
+        });
+    }
     for problem in &dashboard.changes.problems {
         out.push(Row {
             text: problem_row_text(problem, width),
@@ -321,7 +334,7 @@ pub fn rows(dashboard: &Dashboard, width: u16) -> Vec<Row> {
 mod tests {
     use crate::changes::fixture;
     use crate::ui::app::{Dashboard, Detail, Filter, Route};
-    use crate::ui::list::{Row, RowKind, rows};
+    use crate::ui::list::{Row, RowKind, problem_row_text, rows};
 
     fn empty_filter() -> Filter {
         Filter {
@@ -898,5 +911,89 @@ mod tests {
                 }
             }
         }
+    }
+
+    // `live-refresh` -> "The list region's leading rows name refresh
+    // problems first". See `specs/live-updates/spec.md`.
+
+    #[test]
+    fn refresh_problems_lead_the_rows() {
+        let mut d = dashboard_with(
+            vec![fixture::active("add-token-refresh", 4, 9)],
+            Vec::new(),
+            Vec::new(),
+            0,
+        );
+        d.refresh.problems = vec!["filesystem watch unavailable for /r".to_string()];
+        for width in [38, 58] {
+            let all = rows(&d, width);
+            assert_eq!(all[0].kind, RowKind::Problem);
+            assert_eq!(
+                all[0].text,
+                problem_row_text("filesystem watch unavailable for /r", width),
+                "width {width}"
+            );
+            assert_eq!(all[1].kind, RowKind::Item { index: 0 }, "width {width}");
+        }
+
+        // The no-problem control: with `refresh.problems` empty, the same
+        // dashboard's rows are unchanged.
+        let mut without = d.clone();
+        without.refresh.problems = Vec::new();
+        for width in [38, 58] {
+            assert_eq!(rows(&without, width)[0].kind, RowKind::Item { index: 0 });
+        }
+    }
+
+    #[test]
+    fn refresh_and_change_problems_in_order() {
+        let mut d = dashboard_with(
+            vec![fixture::active("add-token-refresh", 4, 9)],
+            Vec::new(),
+            vec!["openspec/changes unreadable".to_string()],
+            0,
+        );
+        d.refresh.problems = vec!["watch failed".to_string()];
+        for width in [38, 58] {
+            let kinds: Vec<RowKind> = rows(&d, width).into_iter().map(|r| r.kind).collect();
+            assert_eq!(
+                kinds,
+                vec![
+                    RowKind::Problem,
+                    RowKind::Problem,
+                    RowKind::Item { index: 0 },
+                ],
+                "width {width}"
+            );
+            let texts: Vec<String> = rows(&d, width).into_iter().map(|r| r.text).collect();
+            assert_eq!(
+                texts[0],
+                problem_row_text("watch failed", width),
+                "the refresh problem must come first, width {width}"
+            );
+            assert_eq!(
+                texts[1],
+                problem_row_text("openspec/changes unreadable", width),
+                "width {width}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_refresh_problem_row_degrades_at_narrow_widths() {
+        let mut d = dashboard_with(Vec::new(), Vec::new(), Vec::new(), 0);
+        d.refresh.problems = vec!["watch failed entirely".to_string()];
+        for width in [38, 58] {
+            assert_eq!(rows(&d, width)[0].kind, RowKind::Problem, "width {width}");
+            assert_eq!(
+                rows(&d, width)[0].text.chars().count(),
+                width as usize,
+                "width {width}"
+            );
+        }
+        // The degenerate widths this scenario is named for: the row falls
+        // back to the first `width` characters of `"! "` itself.
+        assert_eq!(rows(&d, 1)[0].text, "!");
+        assert_eq!(rows(&d, 0)[0].text, "");
     }
 }

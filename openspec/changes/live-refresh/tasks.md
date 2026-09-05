@@ -1667,7 +1667,7 @@ be proven here.
 ## 10. The rendered buffer
 <!-- kind: behavior -->
 
-- [ ] 10.1 RED: Write three failing tests in `ui::list::tests::`, each naming both `38` and
+- [x] 10.1 RED: Write three failing tests in `ui::list::tests::`, each naming both `38` and
       `58`: `refresh_problems_lead_the_rows`, `refresh_and_change_problems_in_order`, and
       `a_refresh_problem_row_degrades_at_narrow_widths`; and five in `ui::view::tests::`,
       each rendering at **both** 60 and 120 columns and asserting named cells:
@@ -1682,22 +1682,22 @@ be proven here.
       exists. It must assert the buffer is **byte-identical** to the same dashboard rendered
       with the field absent — the evidence that the common case gained no row.
 
-- [ ] 10.2 GREEN: Extend `ui::list::rows` to emit `dashboard.refresh.problems` before
+- [x] 10.2 GREEN: Extend `ui::list::rows` to emit `dashboard.refresh.problems` before
       `dashboard.changes.problems`, both through the existing `problem_row_text` grammar and
       both carrying `RowKind::Problem`. The `repo.is_none()` early return is **unchanged**.
       Red-when: a new `RowKind` variant is added for refresh problems. `change-rows` requires
       one kind, so `ui::view` styles them identically and neither is addressable by
       `selected`; a second variant would need a second styling arm and a second selection rule.
 
-- [ ] 10.3 CHECK: `ui::view::style_for` and `ui::view::render_list` are **unchanged** — no new
+- [x] 10.3 CHECK: `ui::view::style_for` and `ui::view::render_list` are **unchanged** — no new
       `Face`, no new modifier mapping, no new row kind. Confirm by reading them and by
       `git diff` over those functions.
 
-- [ ] 10.4 REFACTOR: Fold the repeated "build a dashboard with a refresh problem and this
+- [x] 10.4 REFACTOR: Fold the repeated "build a dashboard with a refresh problem and this
       change set" setup into one test helper if it appears more than three times; otherwise
       state that no refactor was needed.
 
-- [ ] 10.5 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'ui::list::tests::' 20`;
+- [x] 10.5 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'ui::list::tests::' 20`;
       `testcount --lib 'ui::view::tests::' 81`; `LIST_MIN=20 sh $CHECKS/LISTWIDTHS.sh`;
       `WIDTHS_MIN=81 sh $CHECKS/WIDTHS.sh`; `sh $CHECKS/NOIO-VIEW.sh`; the four gate commands,
       still failing on exactly the one known acceptance test.
