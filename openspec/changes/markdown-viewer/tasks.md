@@ -1131,7 +1131,7 @@ carries is group 6's.
 ## 4. `ui::markdown` — the fold, paragraphs, headings, and inline faces
 <!-- kind: behavior -->
 
-- [ ] 4.1 RED: Write failing tests in a new `src/ui/markdown.rs`'s `mod tests`. **Every one
+- [x] 4.1 RED: Write failing tests in a new `src/ui/markdown.rs`'s `mod tests`. **Every one
       renders at both 58 and 78 and writes both widths unsuffixed**, because `MDWIDTHS` reads
       them and fails closed on `58u16`:
       - `paragraph_wraps_at_58_and_78` — the sixteen-word paragraph `alpha bravo charlie delta
@@ -1189,7 +1189,7 @@ carries is group 6's.
       acceptance test is the one that must stay assertion-shaped, because it is the one that
       is red across seven groups.
 
-- [ ] 4.2 GREEN: Create `src/ui/markdown.rs` and register it in `src/ui/mod.rs`. Implement
+- [x] 4.2 GREEN: Create `src/ui/markdown.rs` and register it in `src/ui/mod.rs`. Implement
       `Face` (deriving `Debug, Clone, Copy, PartialEq, Eq, Default`, with `Face::plain()`
       returning the default — design.md → Decisions records why `Face` is the one type in `ui`
       that may derive `Default`), `Segment`, `Line`, `Line::text()`, and
@@ -1203,7 +1203,7 @@ carries is group 6's.
       name `pulldown_cmark` even in prose** — `MDSEAM` is a whole-file grep and design.md
       records that limit as a deliberate cost.
 
-- [ ] 4.3 GREEN: Implement the wrapping engine as one function with two break modes — break at
+- [x] 4.3 GREEN: Implement the wrapping engine as one function with two break modes — break at
       spaces (prose) and break anywhere (code and raw HTML) — taking the width, a first-line
       indent, and a continuation indent. A token longer than the available width is hard-split
       at exactly that many characters under **both** modes, which is what keeps a
@@ -1213,7 +1213,7 @@ carries is group 6's.
       test exercise. Count characters with `chars().count()`, matching `ui::list`; the
       wide-character limitation is stated in design.md → Risks.
 
-- [ ] 4.4 VERIFY: `. $CHECKS/TESTCOUNT.sh` then
+- [x] 4.4 VERIFY: `. $CHECKS/TESTCOUNT.sh` then
       `testcount --lib 'ui::markdown::tests::' 12` — the twelve tests this group adds, run and
       counted, so a renamed module cannot pass as a green run. Then `sh $CHECKS/MDSEAM.sh`
       (default `MIN=16`; the tree has 17) and `MD_MIN=12 sh $CHECKS/MDWIDTHS.sh` — both must
@@ -1221,7 +1221,7 @@ carries is group 6's.
       added rather than evidence the floors are decorative.
       **Red when:** either still fails, or the count is below 12.
 
-- [ ] 4.5 VERIFY: the four intermediate-gate commands; still exactly one known failure.
+- [x] 4.5 VERIFY: the four intermediate-gate commands; still exactly one known failure.
       Commit: `feat(markdown-viewer): render paragraphs, headings, and inline faces`.
 
 ---
