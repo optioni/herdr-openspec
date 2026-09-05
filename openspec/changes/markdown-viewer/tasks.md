@@ -1055,7 +1055,7 @@ carries is group 6's.
 ## 3. The `pulldown-cmark` dependency
 <!-- kind: operational -->
 
-- [ ] 3.1 CHECK: Record the evidence this group changes, before changing it. Run
+- [x] 3.1 CHECK: Record the evidence this group changes, before changing it. Run
       `WORK=$WORK DEPS_SKIP_LEG5=1 sh $CHECKS/DEPS.sh` and record leg 2a's failure verbatim —
       `normal deps are ['ratatui', 'serde_json', 'toml', 'yaml-rust2'], expected
       ['pulldown-cmark', 'ratatui', 'serde_json', 'toml', 'yaml-rust2']`. Run
@@ -1067,7 +1067,7 @@ carries is group 6's.
       re-run the MSRV leg below, and record the difference here rather than silently pinning
       the planned one.
 
-- [ ] 3.2 CHANGE: Add to `Cargo.toml`'s `[dependencies]`, keeping the file's existing
+- [x] 3.2 CHANGE: Add to `Cargo.toml`'s `[dependencies]`, keeping the file's existing
       one-line-per-crate style:
       `pulldown-cmark = { version = "0.13.4", default-features = false, features = [] }`.
       Do **not** raise `rust-version`: 1.71.1 is far below the crate's 1.88 floor, which
@@ -1085,11 +1085,11 @@ carries is group 6's.
       list is not what this change argued, and the design's dependency decision must be
       re-opened rather than the check relaxed.
 
-- [ ] 3.3 CHANGE: Regenerate the build-graph snapshot with the extracted script —
+- [x] 3.3 CHANGE: Regenerate the build-graph snapshot with the extracted script —
       `GRAPH_WRITE=1 sh $CHECKS/GRAPH-SNAP.sh` — never by hand-editing
       `tests/fixtures/build-graph.txt`.
 
-- [ ] 3.4 CHECK: Review the snapshot's diff before committing it:
+- [x] 3.4 CHECK: Review the snapshot's diff before committing it:
       `git diff --numstat -- tests/fixtures/build-graph.txt` must read exactly `8 0`, and
       `git diff -- tests/fixtures/build-graph.txt` must show `+pulldown-cmark v0.13.4` and
       `+unicase v2.9.0` under each of the four `## <triple>` headings and nothing else.
@@ -1098,7 +1098,7 @@ carries is group 6's.
       this task exists to catch: it would mean the generator ran against a different toolchain
       or a different feature resolution.
 
-- [ ] 3.5 VERIFY: `sh $CHECKS/GRAPH-SNAP.sh` — passes against the regenerated snapshot, with
+- [x] 3.5 VERIFY: `sh $CHECKS/GRAPH-SNAP.sh` — passes against the regenerated snapshot, with
       the proc-macro set still exactly the eight on the allowlist and **four** named absences
       now holding (`encoding_rs`, `time`, `getopts`, `pulldown-cmark-escape`).
       Then `WORK=$WORK DEPS_SKIP_LEG5=1 sh $CHECKS/DEPS.sh` — legs 1a, 1b, 2a (five normal
@@ -1113,7 +1113,7 @@ carries is group 6's.
       **Wrongly green when:** `GRAPH-SNAP` is run before 3.3's regeneration, where it would
       fail, or after it without reading 3.4's diff, where a wholesale rewrite would pass.
 
-- [ ] 3.6 CHECK (contract gate): Re-read `SPEC.md` → Overview → Stack and
+- [x] 3.6 CHECK (contract gate): Re-read `SPEC.md` → Overview → Stack and
       `openspec/specs/plugin-build/spec.md`'s dependency table, and confirm the delta in
       `specs/plugin-build/spec.md` matches what was actually resolved: five normal
       dependencies, `pulldown-cmark` at `0.13.4` with no features and defaults off, two added
@@ -1122,7 +1122,7 @@ carries is group 6's.
       **Red when:** the resolved reality differs from the delta spec in any of those six
       particulars — fix the spec here, not at review time.
 
-- [ ] 3.7 VERIFY: the four intermediate-gate commands; `cargo test --all-features` still fails
+- [x] 3.7 VERIFY: the four intermediate-gate commands; `cargo test --all-features` still fails
       on exactly the one known acceptance test, with the identical message.
       Commit: `build(markdown-viewer): add pulldown-cmark 0.13.4 and regenerate the graph`.
 
