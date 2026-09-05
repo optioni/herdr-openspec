@@ -1696,11 +1696,60 @@ mod tests {
 
     #[test]
     fn a_degenerate_detail_interior_draws_nothing() {
+        // The frame height a detail interior row costs is four — one
+        // frame-header row, one frame-footer row, and the region's two
+        // border rows — so the interior first has one row at a frame
+        // height of 5, two at 6, and three at 7; heights 3 and 4 give a
+        // zero-row interior and exercise only the earliest guard.
+        // `detail-scroll` -> "A degenerate detail interior draws nothing
+        // and does not panic".
         let d = detail_dashboard(twenty_line_source(), 0, Route::Detail);
-        for (w, h) in [(1u16, 20u16), (2, 20), (3, 20), (60, 2), (60, 3)] {
+
+        // 1x20 and 2x20: no render panics; the spec states no further
+        // assertion at these degenerate widths.
+        for (w, h) in [(1u16, 20u16), (2, 20)] {
             let buf = render_at(w, h, &d);
             let _ = buf;
         }
+
+        // 120x4 and 60x4: the interior has zero rows, so nothing at all —
+        // not the header, not a tab cell, not a markdown line — is drawn
+        // inside the region.
+        for width in [120u16, 60] {
+            let buf = render_at(width, 4, &d);
+            assert!(!buffer_contains(&buf, "detail-view"), "width {width}");
+            assert!(!buffer_contains(&buf, "1 proposal"), "width {width}");
+            assert!(!buffer_contains(&buf, "line-00"), "width {width}");
+        }
+
+        // 120x5 and 60x5: the header row is drawn; no tab cell and no
+        // markdown line appears anywhere in the frame.
+        for width in [120u16, 60] {
+            let buf = render_at(width, 5, &d);
+            assert!(buffer_contains(&buf, "detail-view"), "width {width}");
+            assert!(!buffer_contains(&buf, "1 proposal"), "width {width}");
+            assert!(!buffer_contains(&buf, "line-00"), "width {width}");
+        }
+
+        // 120x6 and 60x6: the header row and the tab bar are drawn; no
+        // markdown line appears.
+        for width in [120u16, 60] {
+            let buf = render_at(width, 6, &d);
+            assert!(buffer_contains(&buf, "detail-view"), "width {width}");
+            assert!(buffer_contains(&buf, "1 proposal"), "width {width}");
+            assert!(!buffer_contains(&buf, "line-00"), "width {width}");
+        }
+
+        // 120x7 and 60x7: exactly one content row is drawn, holding the
+        // source's first rendered line.
+        for width in [120u16, 60] {
+            let buf = render_at(width, 7, &d);
+            assert!(buffer_contains(&buf, "detail-view"), "width {width}");
+            assert!(buffer_contains(&buf, "1 proposal"), "width {width}");
+            assert!(buffer_contains(&buf, "line-00"), "width {width}");
+            assert!(!buffer_contains(&buf, "line-01"), "width {width}");
+        }
+
         // Contrasting controls: content is present at both mandated widths.
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
