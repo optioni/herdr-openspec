@@ -226,6 +226,15 @@ pub fn lines(
         return Vec::new();
     }
 
+    // An empty source is `artifact-content`'s "No content yet" state, not
+    // this capability's "No tasks yet" — the two SHALL NOT be conflated.
+    // Both bodies return nothing for an empty `detail.source`, matching
+    // `ui::markdown::lines`, so `content_lines`' outer `No content yet`
+    // fallback fires regardless of which body was selected.
+    if source.is_empty() {
+        return Vec::new();
+    }
+
     let mut out = Vec::new();
     let bar = progress_bar(progress, width);
     if !bar.is_empty() {
@@ -766,6 +775,30 @@ mod tests {
                 texts.contains(&"[ ] grouped".to_string()),
                 "width {width}: {texts:?}"
             );
+        }
+    }
+
+    /// Caught by `ui::view::tests::a_missing_artifact_still_shows_its_tab_and_reads_no_content_yet`
+    /// (group 7): a marked artifact whose `paths` resolve to no file has a
+    /// non-zero `progress` (`change-artifacts`' `tasks.md` fallback
+    /// counted a file the marked artifact itself did not resolve to), and
+    /// an unguarded `lines` rendered the bar plus `No tasks yet` for the
+    /// empty source, instead of the empty vector `content_lines`'
+    /// `No content yet` fallback needs. An empty source is a different
+    /// state from one that exists and holds no items, and the two SHALL
+    /// NOT be conflated.
+    #[test]
+    fn empty_source_returns_nothing_regardless_of_progress() {
+        for width in [78, 58] {
+            let out = lines(
+                "",
+                &Progress {
+                    completed: 4,
+                    total: 9,
+                },
+                width,
+            );
+            assert!(out.is_empty(), "width {width}: {out:?}");
         }
     }
 }

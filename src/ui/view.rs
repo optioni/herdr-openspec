@@ -1449,7 +1449,11 @@ mod tests {
     /// `detail-scroll`'s scenarios are about a selected change's content,
     /// and after `detail-view` an empty visible list draws nothing at all,
     /// so every one of them needs a change to keep exercising what it was
-    /// written for.
+    /// written for. That one artifact is explicitly **not** marked
+    /// `tracks_tasks` — `fixture::with_artifacts` sets it `false` and this
+    /// helper never flips it, so a caller's markdown-rendering assumption
+    /// is stated by the fixture it reaches for, not by leaving a bit at
+    /// its zero value.
     fn detail_dashboard(source: String, scroll: usize, route: Route) -> Dashboard {
         let change =
             fixture::with_artifacts(fixture::active("detail-view", 4, 9), &[("proposal", &[])]);
@@ -1658,6 +1662,32 @@ mod tests {
                 "width {width}"
             );
         }
+
+        // A fourth dashboard, identical to the third but with its artifact
+        // marked `tracks_tasks`: still "No content yet", not blank, and no
+        // progress bar — a marked tab with no file is not a checklist.
+        let marked_change = fixture::track_tasks_at(
+            fixture::with_artifacts(fixture::active("detail-view", 4, 9), &[("proposal", &[])]),
+            0,
+        );
+        let with_marked_change = dashboard_with_detail(
+            vec![marked_change],
+            Vec::new(),
+            0,
+            Route::Detail,
+            empty_detail_with_tab("", Vec::new(), 0),
+        );
+        for width in [120, 60] {
+            let buf = render_at(width, 20, &with_marked_change);
+            assert!(
+                detail_interior_cols(&buf, 4, 14).starts_with("No content yet"),
+                "width {width}: marked-but-empty"
+            );
+            assert!(
+                !row_text(&buf, 4).contains('█') && !row_text(&buf, 4).contains('░'),
+                "width {width}: no progress bar"
+            );
+        }
     }
 
     #[test]
@@ -1695,6 +1725,46 @@ mod tests {
         }
         for y in 2..=17u16 {
             assert!(!cols(&row_text(&buf60, y), 1..59).chars().all(|c| c == ' '));
+        }
+
+        // The same holds with the selected tab marked `tracks_tasks` and
+        // the same source turned into thirty 200-character task lines —
+        // neither the checklist's wrap nor the progress bar's gauge can
+        // reach the border.
+        let task_source: String = (0..30)
+            .map(|_| format!("- [ ] {}\n", "x".repeat(200)))
+            .collect();
+        let marked_change = fixture::track_tasks_at(
+            fixture::with_artifacts(fixture::active("detail-view", 4, 9), &[("proposal", &[])]),
+            0,
+        );
+        let marked_d = dashboard_with_detail(
+            vec![marked_change],
+            Vec::new(),
+            0,
+            Route::Detail,
+            empty_detail_with_tab(&task_source, Vec::new(), 0),
+        );
+
+        let mbuf120 = render_at(120, 20, &marked_d);
+        for y in 1..=18u16 {
+            for x in [39u16, 40, 119] {
+                let s = cell(&mbuf120, x, y).symbol();
+                assert!(
+                    matches!(s, "│" | "┌" | "└" | "┐" | "┘"),
+                    "marked x={x} y={y}: {s:?}"
+                );
+            }
+        }
+        let mbuf60 = render_at(60, 20, &marked_d);
+        for y in 1..=18u16 {
+            for x in [0u16, 59] {
+                let s = cell(&mbuf60, x, y).symbol();
+                assert!(
+                    matches!(s, "│" | "┌" | "└" | "┐" | "┘"),
+                    "marked x={x} y={y}: {s:?}"
+                );
+            }
         }
     }
 
@@ -1757,6 +1827,70 @@ mod tests {
         // Contrasting controls: content is present at both mandated widths.
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
+            assert!(buffer_contains(&buf, "line-00"));
+        }
+
+        // Every one of the above, repeated with the selected tab marked
+        // `tracks_tasks`: the one content row at 120x7 and 60x7 holds the
+        // progress bar rather than a task item.
+        let task_source: String = (0..20).map(|i| format!("- [ ] line-{i:02}\n")).collect();
+        let marked_change = fixture::track_tasks_at(
+            fixture::with_artifacts(fixture::active("detail-view", 4, 9), &[("proposal", &[])]),
+            0,
+        );
+        let md = dashboard_with_detail(
+            vec![marked_change],
+            Vec::new(),
+            0,
+            Route::Detail,
+            empty_detail_with_tab(&task_source, Vec::new(), 0),
+        );
+
+        for (w, h) in [(1u16, 20u16), (2, 20)] {
+            let buf = render_at(w, h, &md);
+            let _ = buf;
+        }
+
+        for width in [120u16, 60] {
+            let buf = render_at(width, 4, &md);
+            assert!(
+                !buffer_contains(&buf, "detail-view"),
+                "marked width {width}"
+            );
+            assert!(!buffer_contains(&buf, "1 proposal"), "marked width {width}");
+            assert!(!buffer_contains(&buf, "line-00"), "marked width {width}");
+        }
+
+        for width in [120u16, 60] {
+            let buf = render_at(width, 5, &md);
+            assert!(buffer_contains(&buf, "detail-view"), "marked width {width}");
+            assert!(!buffer_contains(&buf, "1 proposal"), "marked width {width}");
+            assert!(!buffer_contains(&buf, "line-00"), "marked width {width}");
+        }
+
+        for width in [120u16, 60] {
+            let buf = render_at(width, 6, &md);
+            assert!(buffer_contains(&buf, "detail-view"), "marked width {width}");
+            assert!(buffer_contains(&buf, "1 proposal"), "marked width {width}");
+            assert!(!buffer_contains(&buf, "line-00"), "marked width {width}");
+        }
+
+        for width in [120u16, 60] {
+            let buf = render_at(width, 7, &md);
+            assert!(buffer_contains(&buf, "detail-view"), "marked width {width}");
+            assert!(buffer_contains(&buf, "1 proposal"), "marked width {width}");
+            assert!(
+                !buffer_contains(&buf, "line-00"),
+                "marked width {width}: bar, not an item"
+            );
+            assert!(
+                buffer_contains(&buf, "█") || buffer_contains(&buf, "[0/20]"),
+                "marked width {width}: the one content row holds the progress bar"
+            );
+        }
+
+        for width in [60, 120] {
+            let buf = render_at(width, 20, &md);
             assert!(buffer_contains(&buf, "line-00"));
         }
     }
@@ -2121,6 +2255,41 @@ mod tests {
                 "width {width}: tab bar still intact"
             );
         }
+
+        // The same holds at the tracked-tasks position (3): a missing
+        // tasks artifact reads `No content yet` and shows no progress
+        // bar, even though the change's `progress` is `[4/9]` one row up.
+        let marked = fixture::track_tasks_at(
+            fixture::with_artifacts(
+                fixture::active("detail-view", 4, 9),
+                &[
+                    ("proposal", &[]),
+                    ("specs", &[]),
+                    ("design", &[]),
+                    ("tasks", &[]),
+                    ("planning-review", &[]),
+                ],
+            ),
+            3,
+        );
+        let d = dashboard_with_detail(
+            vec![marked],
+            Vec::new(),
+            0,
+            Route::Detail,
+            empty_detail_with_tab("", Vec::new(), 3),
+        );
+        for width in [120, 60] {
+            let buf = render_at(width, 20, &d);
+            assert!(
+                detail_interior_cols(&buf, 4, 14).starts_with("No content yet"),
+                "width {width}: marked tab"
+            );
+            assert!(
+                !row_text(&buf, 4).contains('█') && !row_text(&buf, 4).contains('░'),
+                "width {width}: no progress bar for a marked tab with no file"
+            );
+        }
     }
 
     #[test]
@@ -2177,6 +2346,406 @@ mod tests {
                 detail_interior_cols(&buf, 17, 9),
                 "- line-13",
                 "width {width}"
+            );
+        }
+    }
+
+    // --- group 7: the rendered buffer ----------------------------------
+
+    /// A `Change` carrying `ids`' artifacts, the one at `marked` (when
+    /// `Some`) carrying `tracks_tasks == true`, through
+    /// `changes::fixture::with_artifacts` and `changes::fixture::track_tasks_at`
+    /// — never an `ArtifactRef {}` literal of this module's own, which
+    /// `NOLIT-CHANGE` forbids.
+    fn change_with_marked_ids(
+        ids: &[&str],
+        marked: Option<usize>,
+        progress: crate::tasks::Progress,
+    ) -> Change {
+        let pairs: Vec<(&str, &[&str])> = ids.iter().map(|id| (*id, &[][..])).collect();
+        let mut change = fixture::with_artifacts(fixture::active("x", 0, 0), &pairs);
+        change.progress = progress;
+        match marked {
+            Some(index) => fixture::track_tasks_at(change, index),
+            None => change,
+        }
+    }
+
+    /// The repeated "build a dashboard with a marked tab and this source"
+    /// setup, folded into one helper — it appeared more than three times
+    /// among this group's new tests.
+    fn dashboard_with_marked_change(
+        ids: &[&str],
+        marked: Option<usize>,
+        progress: crate::tasks::Progress,
+        source: &str,
+        problems: Vec<String>,
+        tab: usize,
+    ) -> Dashboard {
+        let change = change_with_marked_ids(ids, marked, progress);
+        dashboard_with_detail(
+            vec![change],
+            Vec::new(),
+            0,
+            Route::Detail,
+            empty_detail_with_tab(source, problems, tab),
+        )
+    }
+
+    fn interior_width(width: u16) -> u16 {
+        if width == 120 { 78 } else { 58 }
+    }
+
+    #[test]
+    fn tasks_tab_shows_checkboxes() {
+        let progress = crate::tasks::Progress {
+            completed: 1,
+            total: 3,
+        };
+        let ids = ["proposal", "specs", "design", "tasks", "planning-review"];
+        let source = "## 1. Setup\n\n- [x] 1.1 first\n- [ ] 1.2 second\n";
+
+        for width in [120, 60] {
+            let d3 = dashboard_with_marked_change(&ids, Some(3), progress, source, Vec::new(), 3);
+            let buf3 = render_at(width, 20, &d3);
+            let bar = crate::ui::tasks::progress_bar(&progress, interior_width(width));
+            assert_eq!(
+                detail_interior_cols(&buf3, 4, bar.chars().count()),
+                bar,
+                "width {width}"
+            );
+            assert_eq!(
+                detail_interior_cols(&buf3, 5, interior_width(width) as usize).trim(),
+                "",
+                "width {width}: blank row"
+            );
+            assert_eq!(
+                detail_interior_cols(&buf3, 6, 11),
+                "## 1. Setup",
+                "width {width}"
+            );
+            assert_eq!(
+                detail_interior_cols(&buf3, 7, 13),
+                "[x] 1.1 first",
+                "width {width}"
+            );
+            assert_eq!(
+                detail_interior_cols(&buf3, 8, 14),
+                "[ ] 1.2 second",
+                "width {width}"
+            );
+
+            let d0 = dashboard_with_marked_change(&ids, Some(3), progress, source, Vec::new(), 0);
+            let buf0 = render_at(width, 20, &d0);
+            assert_eq!(
+                detail_interior_cols(&buf0, 4, 11),
+                "## 1. Setup",
+                "width {width}: no bar row above it"
+            );
+            assert_eq!(
+                detail_interior_cols(&buf0, 6, 15),
+                "- [x] 1.1 first",
+                "width {width}: source bullet intact"
+            );
+            assert_eq!(
+                detail_interior_cols(&buf0, 7, 16),
+                "- [ ] 1.2 second",
+                "width {width}: source bullet intact"
+            );
+
+            assert_eq!(
+                row_text(&buf3, 3),
+                row_text(&buf0, 3),
+                "width {width}: tab bar byte-identical between the two renders"
+            );
+        }
+    }
+
+    #[test]
+    fn tasks_tab_chosen_by_flag() {
+        let progress = crate::tasks::Progress {
+            completed: 1,
+            total: 1,
+        };
+        let ids = ["checklist", "tasks"];
+        let source = "- [x] done\n";
+
+        for width in [120, 60] {
+            let d0 = dashboard_with_marked_change(&ids, Some(0), progress, source, Vec::new(), 0);
+            let buf0 = render_at(width, 20, &d0);
+            let bar = crate::ui::tasks::progress_bar(&progress, interior_width(width));
+            assert_eq!(
+                detail_interior_cols(&buf0, 4, bar.chars().count()),
+                bar,
+                "width {width}: id checklist carries the flag"
+            );
+            assert_eq!(
+                detail_interior_cols(&buf0, 6, 8),
+                "[x] done",
+                "width {width}"
+            );
+
+            let d1 = dashboard_with_marked_change(&ids, Some(0), progress, source, Vec::new(), 1);
+            let buf1 = render_at(width, 20, &d1);
+            assert_eq!(
+                detail_interior_cols(&buf1, 4, 10),
+                "- [x] done",
+                "width {width}: id tasks does not carry the flag"
+            );
+            assert_ne!(
+                detail_interior_cols(&buf1, 4, bar.chars().count()),
+                bar,
+                "width {width}"
+            );
+
+            assert!(row_text(&buf0, 3).contains("1 checklist"), "width {width}");
+            assert!(row_text(&buf0, 3).contains("2 tasks"), "width {width}");
+        }
+    }
+
+    #[test]
+    fn no_marked_artifact_renders_markdown() {
+        let progress = crate::tasks::Progress {
+            completed: 0,
+            total: 0,
+        };
+        let ids = ["alpha", "beta", "gamma"];
+        let source = "- [ ] a\n";
+
+        for width in [120, 60] {
+            for tab in [0usize, 1, 2] {
+                let d = dashboard_with_marked_change(&ids, None, progress, source, Vec::new(), tab);
+                let buf = render_at(width, 20, &d);
+                assert!(
+                    !row_text(&buf, 4).contains('█') && !row_text(&buf, 4).contains('░'),
+                    "width {width} tab {tab}: no progress-bar row"
+                );
+                assert_eq!(
+                    detail_interior_cols(&buf, 4, 7),
+                    "- [ ] a",
+                    "width {width} tab {tab}"
+                );
+                assert!(
+                    row_text(&buf, 3).contains("1 alpha")
+                        && row_text(&buf, 3).contains("2 beta")
+                        && row_text(&buf, 3).contains("3 gamma"),
+                    "width {width} tab {tab}: no tab removed"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn prose_only_reads_no_tasks_yet() {
+        let progress = crate::tasks::Progress {
+            completed: 0,
+            total: 0,
+        };
+        let d = dashboard_with_marked_change(
+            &["proposal", "tasks"],
+            Some(1),
+            progress,
+            "# Plan\n\nNothing checkable here.\n",
+            Vec::new(),
+            1,
+        );
+        for width in [120, 60] {
+            let buf = render_at(width, 20, &d);
+            assert_eq!(detail_interior_cols(&buf, 4, 3), "[-]", "width {width}");
+            assert_eq!(
+                detail_interior_cols(&buf, 6, 12),
+                "No tasks yet",
+                "width {width}"
+            );
+            assert!(!buffer_contains(&buf, "No content yet"), "width {width}");
+            assert!(!buffer_contains(&buf, "# Plan"), "width {width}");
+        }
+    }
+
+    #[test]
+    fn missing_tasks_artifact_no_content_yet() {
+        let progress = crate::tasks::Progress {
+            completed: 4,
+            total: 9,
+        };
+        let d = dashboard_with_marked_change(
+            &["proposal", "tasks"],
+            Some(1),
+            progress,
+            "",
+            Vec::new(),
+            1,
+        );
+        for width in [120, 60] {
+            let buf = render_at(width, 20, &d);
+            assert_eq!(
+                detail_interior_cols(&buf, 4, 14),
+                "No content yet",
+                "width {width}"
+            );
+            assert!(!buffer_contains(&buf, "No tasks yet"), "width {width}");
+            assert!(
+                !row_text(&buf, 4).contains('█') && !row_text(&buf, 4).contains('░'),
+                "width {width}: no progress-bar row"
+            );
+        }
+    }
+
+    #[test]
+    fn tasks_tab_read_failure() {
+        let progress = crate::tasks::Progress {
+            completed: 1,
+            total: 1,
+        };
+        let d = dashboard_with_marked_change(
+            &["proposal", "tasks"],
+            Some(1),
+            progress,
+            "",
+            vec!["/repo/openspec/changes/x/tasks.md: permission denied".to_string()],
+            1,
+        );
+        for (width, interior) in [(120, 78usize), (60, 58)] {
+            let buf = render_at(width, 20, &d);
+            assert_eq!(
+                detail_interior_cols(&buf, 4, interior).len(),
+                interior,
+                "width {width}: row is exactly the interior width"
+            );
+            assert!(
+                detail_interior_cols(&buf, 4, 24).starts_with("! /repo/openspec/changes"),
+                "width {width}"
+            );
+            assert!(!buffer_contains(&buf, "No content yet"), "width {width}");
+            assert!(!buffer_contains(&buf, "No tasks yet"), "width {width}");
+            assert!(
+                !row_text(&buf, 4).contains('█') && !row_text(&buf, 4).contains('░'),
+                "width {width}: no progress-bar row"
+            );
+        }
+    }
+
+    #[test]
+    fn progress_bar_in_the_buffer() {
+        let progress = crate::tasks::Progress {
+            completed: 4,
+            total: 9,
+        };
+        let source: String = (0..9).map(|i| format!("- [ ] t{i}\n")).collect();
+        let d = dashboard_with_marked_change(
+            &["proposal", "tasks"],
+            Some(1),
+            progress,
+            &source,
+            Vec::new(),
+            1,
+        );
+
+        let buf120 = render_at(120, 20, &d);
+        assert_eq!(
+            cols(&row_text(&buf120, 4), 41..119),
+            crate::ui::tasks::progress_bar(&progress, 78),
+        );
+        assert!(cols(&row_text(&buf120, 4), 41..119).ends_with("[4/9] 44%"));
+
+        let buf60 = render_at(60, 20, &d);
+        assert_eq!(
+            cols(&row_text(&buf60, 4), 1..59),
+            crate::ui::tasks::progress_bar(&progress, 58),
+        );
+        assert!(cols(&row_text(&buf60, 4), 1..59).ends_with("[4/9] 44%"));
+
+        for buf in [&buf120, &buf60] {
+            let iw = interior_width(buf.area.width) as usize;
+            assert!(detail_interior_cols(buf, 5, iw).trim().is_empty());
+            assert!(buffer_contains(buf, "[ ] t0"));
+        }
+    }
+
+    #[test]
+    fn no_tasks_bar_in_the_buffer() {
+        let progress = crate::tasks::Progress {
+            completed: 0,
+            total: 0,
+        };
+        let d = dashboard_with_marked_change(
+            &["proposal", "tasks"],
+            Some(1),
+            progress,
+            "# Plan\n\nprose only\n",
+            Vec::new(),
+            1,
+        );
+
+        let buf120 = render_at(120, 20, &d);
+        assert_eq!(cols(&row_text(&buf120, 4), 41..44), "[-]");
+        assert_eq!(cell(&buf120, 44, 4).symbol(), " ");
+
+        let buf60 = render_at(60, 20, &d);
+        assert_eq!(cols(&row_text(&buf60, 4), 1..4), "[-]");
+
+        for buf in [&buf120, &buf60] {
+            assert_eq!(
+                detail_interior_cols(buf, 6, 12),
+                "No tasks yet",
+                "row 6 reads No tasks yet"
+            );
+        }
+    }
+
+    #[test]
+    fn marked_tab_renders_checklist_body() {
+        let progress = crate::tasks::Progress {
+            completed: 0,
+            total: 0,
+        };
+        let d_unmarked = dashboard_with_marked_change(
+            &["proposal"],
+            None,
+            progress,
+            &twenty_line_source(),
+            Vec::new(),
+            0,
+        );
+        let d_marked = dashboard_with_marked_change(
+            &["proposal"],
+            Some(0),
+            progress,
+            &twenty_line_source(),
+            Vec::new(),
+            0,
+        );
+
+        for width in [120, 60] {
+            let buf_unmarked = render_at(width, 20, &d_unmarked);
+            let buf_marked = render_at(width, 20, &d_marked);
+
+            assert_eq!(
+                detail_interior_cols(&buf_marked, 4, 3),
+                "[-]",
+                "width {width}"
+            );
+            assert!(
+                detail_interior_cols(&buf_marked, 5, interior_width(width) as usize)
+                    .trim()
+                    .is_empty(),
+                "width {width}"
+            );
+            assert_eq!(
+                detail_interior_cols(&buf_marked, 6, 12),
+                "No tasks yet",
+                "width {width}: the twenty bullets hold no task lines"
+            );
+
+            assert_eq!(
+                row_text(&buf_unmarked, 2),
+                row_text(&buf_marked, 2),
+                "width {width}: header row byte-identical"
+            );
+            assert_eq!(
+                row_text(&buf_unmarked, 3),
+                row_text(&buf_marked, 3),
+                "width {width}: tab row byte-identical"
             );
         }
     }

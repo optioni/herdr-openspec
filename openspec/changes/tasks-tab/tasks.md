@@ -838,7 +838,7 @@ the crate compiles, every existing test still passes, and `GATE-MECH1` still hol
 ## 7. The rendered buffer
 <!-- kind: behavior -->
 
-- [ ] 7.1 RED: Write nine new failing tests in `ui::view::tests::`, each rendering at **both**
+- [x] 7.1 RED: Write nine new failing tests in `ui::view::tests::`, each rendering at **both**
       60 and 120 columns and asserting named cells: `tasks_tab_shows_checkboxes`,
       `tasks_tab_chosen_by_flag`, `no_marked_artifact_renders_markdown`,
       `prose_only_reads_no_tasks_yet`, `missing_tasks_artifact_no_content_yet`,
@@ -848,7 +848,7 @@ the crate compiles, every existing test still passes, and `GATE-MECH1` still hol
       `quality-gates` → "View behaviour is verified against a `TestBackend` buffer at both
       widths" rejects that explicitly: it stays green with the behaviour deleted.
 
-- [ ] 7.2 CHANGE: Update the **seven** existing view tests this change's scenarios modify,
+- [x] 7.2 CHANGE: Update the **seven** existing view tests this change's scenarios modify,
       without adding to the count: `missing_artifact_no_content_yet` (gains the marked tab-3
       case), `markdown_fills_content_area`, `document_fills_interior`,
       `faces_reach_the_buffer` (each has its artifact explicitly **un**marked, so the test
@@ -858,16 +858,16 @@ the crate compiles, every existing test still passes, and `GATE-MECH1` still hol
       `degenerate_interior` (every size repeated with the tab marked). Their exact names on
       disk may differ; match by the scenario they carry, not by the name written here.
 
-- [ ] 7.3 CHECK: `ui::view::style_for` is **unchanged** — no new `Face` variant and no new
+- [x] 7.3 CHECK: `ui::view::style_for` is **unchanged** — no new `Face` variant and no new
       modifier mapping. Confirm by reading it and by `git diff` over that function. A
       checklist heading reaches the buffer bold through the existing `heading` arm; a new arm
       would mean the grammar invented a face `design.md` → Decisions 11 says it does not.
 
-- [ ] 7.4 REFACTOR: Fold the repeated "build a dashboard with a marked tab and this source"
+- [x] 7.4 REFACTOR: Fold the repeated "build a dashboard with a marked tab and this source"
       setup into one test helper if it appears more than three times; otherwise state that no
       refactor was needed.
 
-- [ ] 7.5 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'ui::view::tests::' 76`;
+- [x] 7.5 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'ui::view::tests::' 76`;
       `WIDTHS_MIN=76 sh $CHECKS/WIDTHS.sh`; `sh $CHECKS/NOIO-VIEW.sh`; the four gate commands,
       still failing on exactly the one known acceptance test.
       `sh $CHECKS/OPENSPEC-UNTOUCHED.sh`. Commit.
