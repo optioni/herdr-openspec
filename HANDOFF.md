@@ -103,6 +103,71 @@ cost ran 38–44 points per change in Phase 3 (about 2.4 full 5-hour windows for
 changes, so ~15h of wall time); weekly cost ran 4.5 points per change. Both matter, and
 they are not interchangeable.
 
+## Signing incident: 20 unsigned commits, and an armed trap
+
+**Commits `a25c1b4..1ea28ef` (20 of them, all of `detail-view` plus one handoff commit)
+are unsigned and already pushed.** Everything before them — 50 commits covering Phases
+1–3 and Phase 4's first three changes, through `d3b798c` — is signed.
+
+**How it happened.** 1Password holds the signing key (`commit.gpgsign true`,
+`gpg.format ssh`, `gpg.ssh.program` → `op-ssh-sign`, global since Dec 2025). The vault
+locked around 07:00. An ff agent hit the failure, checked `%G?`, saw `N` across all
+history, concluded the repo was unsigned anyway, and `--no-gpg-sign` was written into
+subsequent dispatches.
+
+**The inference was wrong.** `gpg.ssh.allowedSignersFile` is unset, so git cannot
+*verify* SSH signatures and reports `N` for signed and unsigned commits alike. The
+reliable test is the raw object:
+
+```sh
+git cat-file commit <sha> | sed -n '1,12p' | grep -q '^gpgsig' && echo SIGNED || echo UNSIGNED
+```
+
+**The trap is still armed.** Until `gpg.ssh.allowedSignersFile` is configured, `%G?`
+will keep telling the next agent that signed history is unsigned. Fixing it is a
+one-liner and is recommended, but it edits the user's global git config and has
+deliberately **not** been done without their say-so:
+
+```sh
+git config --global gpg.ssh.allowedSignersFile ~/.ssh/allowed_signers
+```
+
+**Open decision — the user's, not an agent's.** Re-signing means
+`git rebase --exec 'git commit --amend --no-edit -S' d3b798c` plus a **force-push over
+published history**. Leaving them unsigned is also defensible: authorship is intact and
+the repo is unreleased and solo. Nothing has been rewritten.
+
+**Never work around this with `--no-gpg-sign`.** Signing is a security setting the user
+configured deliberately; when it fails, stop and surface it.
+
+## Pushing: SSH is broken, use gh over HTTPS
+
+**`~/.ssh/id_rsa` is missing** — only `id_rsa.pub` remains on disk, so `ssh-agent` has
+no identities and every SSH push fails with `sign_and_send_pubkey: signing failed ...
+communication with agent failed`, then `Permission denied (publickey)`. The `origin`
+remote is still an SSH URL.
+
+Until the key is restored, push and fetch like this:
+
+```sh
+git -c credential.helper='!gh auth git-credential' \
+    push https://github.com/optioni/herdr-openspec.git main
+```
+
+`gh` is authenticated as `juusopiikkila` with `repo` scope, so this works. Note it does
+**not** update the `origin/main` tracking ref — follow with:
+
+```sh
+git -c credential.helper='!gh auth git-credential' \
+    fetch https://github.com/optioni/herdr-openspec.git main
+git update-ref refs/remotes/origin/main FETCH_HEAD
+```
+
+**The durable fix is the user's call** and has not been made: either restore the private
+key, or switch `origin` to HTTPS (`git remote set-url origin https://github.com/optioni/herdr-openspec.git`
+plus `gh auth setup-git`). The remote has deliberately not been changed, because `gh
+auth status` reports the user's git protocol preference as `ssh`.
+
 ## Deferred: sync README's keymap at the end of Phase 4
 
 `markdown-viewer` made a **BREAKING** keybinding change — `j`/`k` and the arrows now
