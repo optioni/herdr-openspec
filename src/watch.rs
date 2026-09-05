@@ -11,9 +11,72 @@
 //! in groups 4-6.
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::changes::Selection;
+
+/// The debounce window's length, exposed so `SPEC.md` -> Refresh's
+/// "approximately 150ms" has one place it is written down.
+pub const DEBOUNCE: Duration = Duration::from_millis(150);
+
+/// The ceiling on how long a continuous writer can defer a batch. Without
+/// it a *sliding* window — one that extends on every push with no cap —
+/// starves indefinitely under a writer saving more often than every 150ms,
+/// which is this change's own motivating case: an agent editing a change's
+/// `tasks.md`, then its spec files, then its design.
+pub const DEBOUNCE_MAX: Duration = Duration::from_secs(1);
+
+/// A pure state machine coalescing touched paths over a [`DEBOUNCE`]
+/// window, taking the current instant as a **parameter** on every method
+/// rather than reading a clock — the one decision that answers hazard 1.
+/// Paths are coalesced without duplicates in a deterministic order: FSEvents
+/// emits several events for one edit, and the pane must not run the CLI
+/// several times for one save.
+#[derive(Debug, Default)]
+pub struct Debounce {
+    paths: std::collections::BTreeSet<PathBuf>,
+    end: Option<Instant>,
+    first_push: Option<Instant>,
+}
+
+impl Debounce {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record `paths` and set the window's end to `now + DEBOUNCE`,
+    /// extending it on every later push — but never past
+    /// `first_push + DEBOUNCE_MAX`.
+    pub fn push(&mut self, paths: Vec<PathBuf>, now: Instant) {
+        self.paths.extend(paths);
+        let first_push = *self.first_push.get_or_insert(now);
+        let capped_at = first_push + DEBOUNCE_MAX;
+        let candidate = now + DEBOUNCE;
+        self.end = Some(candidate.min(capped_at));
+    }
+
+    /// The accumulated paths, and empty the state — including `first_push`,
+    /// so the next batch gets a fresh `DEBOUNCE_MAX` window — exactly when
+    /// the window has ended. `None` otherwise, including when nothing was
+    /// ever pushed.
+    pub fn take_due(&mut self, now: Instant) -> Option<Vec<PathBuf>> {
+        let end = self.end?;
+        if now < end {
+            return None;
+        }
+        self.end = None;
+        self.first_push = None;
+        Some(std::mem::take(&mut self.paths).into_iter().collect())
+    }
+
+    /// The time remaining before the window ends, saturating at zero, or
+    /// `None` when nothing is pending. `end` is the receiver and `now` the
+    /// argument: `Instant - Instant` panics when its argument is the later
+    /// of the two, which `now` past `end` legitimately is.
+    pub fn pending_in(&self, now: Instant) -> Option<Duration> {
+        self.end.map(|end| end.saturating_duration_since(now))
+    }
+}
 
 /// Why a watch could not be started, or why a drain failed. Carries the
 /// reason as text, exactly as `WatchError`'s callers need it for a
@@ -139,12 +202,18 @@ pub fn none() -> Box<dyn FsEvents> {
 
 /// A pure function of two `Duration`s, reading no clock: `tick` when nothing
 /// is pending, otherwise the smaller of `tick` and the remaining window,
-/// floored at one millisecond so a faulty `FsEvents` degrades to a hot pane
-/// rather than a hung one. This stub always returns `tick`; the real rule
-/// arrives in group 5.
+/// floored at one millisecond. The floor is load-bearing rather than
+/// cosmetic: a zero timeout returned every iteration would let `run_loop`
+/// spin without bound if a watcher ever reported a pending batch it then
+/// declined to yield. One millisecond converts an unbounded spin into a
+/// bounded one — the correct case never reaches it, because the next
+/// iteration's `drain` yields the batch and `pending_in` returns `None`
+/// again.
 pub fn poll_timeout(tick: Duration, pending_in: Option<Duration>) -> Duration {
-    let _ = pending_in;
-    tick
+    match pending_in {
+        None => tick,
+        Some(remaining) => tick.min(remaining).max(Duration::from_millis(1)),
+    }
 }
 
 #[cfg(test)]
@@ -318,6 +387,162 @@ mod tests {
             result,
             Selection::Only(std::collections::BTreeSet::new()),
             "an empty batch must not escalate to a full CLI reload"
+        );
+    }
+
+    // --- group 5: the debounce, with `now` as a parameter -----------------
+    //
+    // Every test below captures `Instant::now()` exactly ONCE, as `t0`, and
+    // asserts against fabricated instants derived from it. No sleep, no
+    // second clock read — that is hazard 1 answered by a signature rather
+    // than a convention.
+
+    #[test]
+    fn nothing_is_due_before_the_window() {
+        let t0 = Instant::now();
+        let mut d = Debounce::new();
+        d.push(vec![PathBuf::from("a")], t0);
+        assert_eq!(d.take_due(t0), None);
+        assert_eq!(d.take_due(t0 + Duration::from_millis(149)), None);
+    }
+
+    #[test]
+    fn the_batch_is_due_at_the_window() {
+        let t0 = Instant::now();
+        let mut d = Debounce::new();
+        d.push(vec![PathBuf::from("a")], t0);
+        assert_eq!(
+            d.take_due(t0 + Duration::from_millis(150)),
+            Some(vec![PathBuf::from("a")])
+        );
+    }
+
+    #[test]
+    fn taking_a_due_batch_empties_the_state() {
+        let t0 = Instant::now();
+        let mut d = Debounce::new();
+        d.push(vec![PathBuf::from("a")], t0);
+        assert_eq!(
+            d.take_due(t0 + Duration::from_millis(150)),
+            Some(vec![PathBuf::from("a")])
+        );
+        assert_eq!(d.take_due(t0 + Duration::from_secs(10)), None);
+    }
+
+    #[test]
+    fn a_later_push_extends_the_window() {
+        let t0 = Instant::now();
+        let mut d = Debounce::new();
+        d.push(vec![PathBuf::from("a")], t0);
+        d.push(vec![PathBuf::from("b")], t0 + Duration::from_millis(100));
+
+        assert_eq!(d.take_due(t0 + Duration::from_millis(150)), None);
+        let due = d.take_due(t0 + Duration::from_millis(250));
+        assert_eq!(due, Some(vec![PathBuf::from("a"), PathBuf::from("b")]));
+    }
+
+    #[test]
+    fn pending_in_counts_down() {
+        let t0 = Instant::now();
+        let mut d = Debounce::new();
+        d.push(vec![PathBuf::from("a")], t0);
+        d.push(vec![PathBuf::from("b")], t0 + Duration::from_millis(100));
+
+        assert_eq!(
+            d.pending_in(t0 + Duration::from_millis(100)),
+            Some(Duration::from_millis(150))
+        );
+        assert_eq!(
+            d.pending_in(t0 + Duration::from_millis(250)),
+            Some(Duration::from_millis(0))
+        );
+        // Past the window's end: saturates at zero rather than panicking,
+        // which the obvious `end - now` would do (`Instant - Instant`
+        // panics when its argument is the later of the two).
+        assert_eq!(
+            d.pending_in(t0 + Duration::from_millis(400)),
+            Some(Duration::from_millis(0))
+        );
+    }
+
+    #[test]
+    fn pending_in_is_none_when_empty() {
+        let t0 = Instant::now();
+        let d = Debounce::new();
+        assert_eq!(d.pending_in(t0), None);
+    }
+
+    #[test]
+    fn repeated_paths_are_coalesced() {
+        let t0 = Instant::now();
+        let mut d = Debounce::new();
+        d.push(
+            vec![
+                PathBuf::from("a"),
+                PathBuf::from("a"),
+                PathBuf::from("b"),
+                PathBuf::from("a"),
+            ],
+            t0,
+        );
+        d.push(vec![PathBuf::from("b")], t0 + Duration::from_millis(10));
+
+        let due = d.take_due(t0 + Duration::from_millis(160));
+        assert_eq!(due, Some(vec![PathBuf::from("a"), PathBuf::from("b")]));
+    }
+
+    #[test]
+    fn a_continuous_writer_cannot_defer_forever() {
+        let t0 = Instant::now();
+        let mut d = Debounce::new();
+        for i in 0..=11 {
+            d.push(
+                vec![PathBuf::from(format!("f{i}"))],
+                t0 + Duration::from_millis(100 * i),
+            );
+        }
+        let due = d.take_due(t0 + Duration::from_secs(1));
+        assert!(due.is_some(), "the window's end was capped at DEBOUNCE_MAX");
+        assert_eq!(due.unwrap().len(), 12, "every path pushed up to that point");
+
+        // The cap was reset with the taken batch: a fresh push is not due
+        // at its own instant, and is due 150ms later.
+        d.push(vec![PathBuf::from("c")], t0 + Duration::from_secs(2));
+        assert_eq!(d.take_due(t0 + Duration::from_secs(2)), None);
+        assert_eq!(
+            d.take_due(t0 + Duration::from_secs(2) + Duration::from_millis(150)),
+            Some(vec![PathBuf::from("c")])
+        );
+
+        assert_eq!(DEBOUNCE_MAX, Duration::from_secs(1));
+    }
+
+    #[test]
+    fn debounce_window_is_150_milliseconds() {
+        assert_eq!(DEBOUNCE, Duration::from_millis(150));
+    }
+
+    #[test]
+    fn poll_timeout_is_the_tick_when_nothing_is_pending() {
+        assert_eq!(
+            poll_timeout(Duration::from_millis(250), None),
+            Duration::from_millis(250)
+        );
+    }
+
+    #[test]
+    fn poll_timeout_is_the_remaining_window_and_never_zero() {
+        assert_eq!(
+            poll_timeout(Duration::from_millis(250), Some(Duration::from_millis(90))),
+            Duration::from_millis(90)
+        );
+        assert_eq!(
+            poll_timeout(Duration::from_millis(250), Some(Duration::from_millis(400))),
+            Duration::from_millis(250)
+        );
+        assert_eq!(
+            poll_timeout(Duration::from_millis(250), Some(Duration::from_millis(0))),
+            Duration::from_millis(1)
         );
     }
 }

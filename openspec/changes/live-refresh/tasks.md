@@ -1253,7 +1253,7 @@ the instant as an argument. Every test below captures `Instant::now()` **once**,
 asserts against `t0 + Duration::from_millis(149)` and `t0 + Duration::from_millis(150)`. No
 test in this group may call `Instant::now()` more than once, sleep, or wait.
 
-- [ ] 5.1 RED: Write eleven failing tests in `watch::tests::`, named from their scenarios:
+- [x] 5.1 RED: Write eleven failing tests in `watch::tests::`, named from their scenarios:
       `nothing_is_due_before_the_window`, `the_batch_is_due_at_the_window`,
       `taking_a_due_batch_empties_the_state`, `a_later_push_extends_the_window`,
       `pending_in_counts_down`, `pending_in_is_none_when_empty`,
@@ -1281,7 +1281,7 @@ test in this group may call `Instant::now()` more than once, sleep, or wait.
       at `t0`, `t0 + 100ms`, … through `t0 + 1100ms` and assert `take_due(t0 + 1000ms)` is
       `Some(_)`.
 
-- [ ] 5.2 GREEN: Implement `watch::DEBOUNCE` (150ms), `watch::DEBOUNCE_MAX` (1 second),
+- [x] 5.2 GREEN: Implement `watch::DEBOUNCE` (150ms), `watch::DEBOUNCE_MAX` (1 second),
       `watch::Debounce`, and the real `watch::poll_timeout` per
       `specs/watch-invalidation/spec.md`. `push` sets the window's end to
       `min(now + DEBOUNCE, first_push + DEBOUNCE_MAX)`; `pending_in` uses
@@ -1292,16 +1292,16 @@ test in this group may call `Instant::now()` more than once, sleep, or wait.
       Red-when: `Debounce` stores an `Instant::now()` of its own. It stores the deadline it
       was **given**; the one real clock call arrives in group 6, in `RealFsEvents::drain`.
 
-- [ ] 5.3 REFACTOR: Clean up while the twenty-one tests stay green, or state that none was
+- [x] 5.3 REFACTOR: Clean up while the twenty-one tests stay green, or state that none was
       needed.
 
-- [ ] 5.4 CHECK: `MIN=24 SLEEP_MIN=3 sh $CHECKS/NOSLEEP.sh` — still exactly three sleep sites
+- [x] 5.4 CHECK: `MIN=24 SLEEP_MIN=3 sh $CHECKS/NOSLEEP.sh` — still exactly three sleep sites
       in the tree, all deadline-bounded, and none in `src/watch.rs`. This is the group where
       that number would have grown if the debounce had read the clock itself: every test here
       captures `Instant::now()` **once** as `t0` and asserts against `t0 + 149ms` and
       `t0 + 150ms`. The fourth site arrives in group 6, with the one real-watcher poll.
 
-- [ ] 5.5 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'watch::tests::' 22`; the four
+- [x] 5.5 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'watch::tests::' 22`; the four
       gate commands, still failing on exactly the one known acceptance test.
       `BASE=f9b42e8 sh $CHECKS/OPENSPEC-UNTOUCHED.sh`. Commit.
 
