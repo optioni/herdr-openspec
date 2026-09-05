@@ -127,42 +127,40 @@ cost ran 38–44 points per change in Phase 3 (about 2.4 full 5-hour windows for
 changes, so ~15h of wall time); weekly cost ran 4.5 points per change. Both matter, and
 they are not interchangeable.
 
-## Signing incident: 20 unsigned commits, and an armed trap
+## Signing: resolved — history re-signed, all commits signed
 
-**Commits `a25c1b4..1ea28ef` (20 of them, all of `detail-view` plus one handoff commit)
-are unsigned and already pushed.** Everything before them — 50 commits covering Phases
-1–3 and Phase 4's first three changes, through `d3b798c` — is signed.
+**Every commit in this repository is now signed. Verified: 0 unsigned out of the full
+history.**
 
-**How it happened.** 1Password holds the signing key (`commit.gpgsign true`,
-`gpg.format ssh`, `gpg.ssh.program` → `op-ssh-sign`, global since Dec 2025). The vault
-locked around 07:00. An ff agent hit the failure, checked `%G?`, saw `N` across all
-history, concluded the repo was unsigned anyway, and `--no-gpg-sign` was written into
-subsequent dispatches.
+What happened: 1Password holds the signing key (`commit.gpgsign true`, `gpg.format ssh`,
+`gpg.ssh.program` → `op-ssh-sign`). The vault locked on 2026-09-05, an agent checked
+`%G?`, saw `N` across all history, wrongly concluded the repo was unsigned, and
+`--no-gpg-sign` went into subsequent dispatches. A separate, earlier intermittent
+failure had also left 5 commits unsigned in `schema-model` and `changes-from-cli`.
 
-**The inference was wrong.** `gpg.ssh.allowedSignersFile` is unset, so git cannot
-*verify* SSH signatures and reports `N` for signed and unsigned commits alike. The
-reliable test is the raw object:
+**Resolution (user's decision):** `git rebase --exec 'git commit --amend --no-edit -S'`
+over 180 commits, then `git push --force-with-lease`. Content verified **byte-identical**
+to the pre-rewrite tree (`git diff` empty) and the commit count unchanged, so only SHAs
+and committer dates moved.
+
+**All commit SHAs from `777c07e` onward changed.** Any SHA recorded in an older note,
+report, or archived change artifact that is newer than `777c07e` no longer resolves.
+Content is unaffected. A pre-rewrite backup ref exists locally as `backup/pre-resign`
+(was `0b054c3`); it can be deleted once nobody needs the old SHAs.
+
+**The trap that caused this is still armed.** `gpg.ssh.allowedSignersFile` is unset, so
+`%G?` reports `N` for signed and unsigned commits alike. **Never infer signing state
+from `%G?`.** The reliable test is the raw object:
 
 ```sh
 git cat-file commit <sha> | sed -n '1,12p' | grep -q '^gpgsig' && echo SIGNED || echo UNSIGNED
 ```
 
-**The trap is still armed.** Until `gpg.ssh.allowedSignersFile` is configured, `%G?`
-will keep telling the next agent that signed history is unsigned. Fixing it is a
-one-liner and is recommended, but it edits the user's global git config and has
-deliberately **not** been done without their say-so:
+Setting `git config --global gpg.ssh.allowedSignersFile ~/.ssh/allowed_signers` would
+disarm it, and remains the user's call — it edits their global git config.
 
-```sh
-git config --global gpg.ssh.allowedSignersFile ~/.ssh/allowed_signers
-```
-
-**Open decision — the user's, not an agent's.** Re-signing means
-`git rebase --exec 'git commit --amend --no-edit -S' d3b798c` plus a **force-push over
-published history**. Leaving them unsigned is also defensible: authorship is intact and
-the repo is unreleased and solo. Nothing has been rewritten.
-
-**Never work around this with `--no-gpg-sign`.** Signing is a security setting the user
-configured deliberately; when it fails, stop and surface it.
+**Never work around a signing failure with `--no-gpg-sign`.** If signing fails, the
+vault is locked: stop and surface it.
 
 ## Pushing: SSH is broken, use gh over HTTPS
 
