@@ -538,8 +538,9 @@ PY
 # 60-column body less two border columns, and the wide layout's Min(0) column of 80 less two
 # border columns). Same script as LISTWIDTHS and MDWIDTHS pointed at a different file and the
 # same pair MDWIDTHS uses; same stated limits; same pairing — it is a FLOOR, and
-# `testcount --lib 'ui::detail::tests::' 22` is what proves the tests exist and run.
-# Because this block is new here, its default IS this change's final floor: 22.
+# `testcount --lib 'ui::detail::tests::' 19` is what proves the tests exist and run.
+# Because this block is new here, its default IS this change's final floor: 19 (the
+# sum of groups 4, 5, and 6 — 5 + 9 + 5 — per the test-module table above).
 #
 # Known limit inherited from WIDTHS: the number scan is `\b(\d+)\b`, which does NOT see a
 # suffixed literal such as `78u16`. It fails closed — a test using only suffixed literals is
@@ -552,7 +553,7 @@ PY
 # reason to name neither width. An exemption list is how a width check rots into a rubber
 # stamp.
 [ -f src/ui/detail.rs ] || { echo "DETAILWIDTHS FAIL: src/ui/detail.rs missing" >&2; exit 1; }
-DETAIL_MIN="${DETAIL_MIN:-22}" python3 - <<'PY'
+DETAIL_MIN="${DETAIL_MIN:-19}" python3 - <<'PY'
 import re, sys, os
 raw = open("src/ui/detail.rs").read()
 src = "\n".join(l for l in raw.splitlines()
@@ -1343,16 +1344,16 @@ files in `$CHECKS`.
 ## 14. Change Review
 <!-- kind: review -->
 
-- [ ] 14.1 Dispatch the `outside-in-tdd-reviewer` subagent over the finished change, with
+- [x] 14.1 Dispatch the `outside-in-tdd-reviewer` subagent over the finished change, with
       `proposal.md`, `design.md`, the six spec files, and this file as the contract. It
       reports findings only and edits no code.
 
-- [ ] 14.2 Address every CRITICAL and MAJOR finding, each with its own commit. Record each
+- [x] 14.2 Address every CRITICAL and MAJOR finding, each with its own commit. Record each
       finding and its resolution in `planning-review.md` → Change Review.
       **Red when:** a finding is closed with an argument rather than a change or a recorded,
       justified rejection.
 
-- [ ] 14.3 Commit: `review(detail-view): address Change Review findings`.
+- [x] 14.3 Commit: `review(detail-view): address Change Review findings`.
 
 ## 15. Final validation
 <!-- kind: operational -->

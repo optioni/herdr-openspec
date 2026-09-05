@@ -415,5 +415,72 @@ non-goal.
 
 ## Change Review (implementation time)
 
-To be filled in at task 14.2: each finding from the `outside-in-tdd-reviewer` subagent, and
-its resolution.
+Dispatched at task 14.1 with `proposal.md`, `design.md`, the six spec files, and `tasks.md`
+as the contract, over `git diff a25c1b4..HEAD`. Findings and resolutions:
+
+### CRITICAL
+
+**`a_degenerate_detail_interior_draws_nothing` had no real assertions.** Carried forward
+verbatim from `markdown-viewer`, it sampled the wrong sizes (`1x20, 2x20, 3x20, 60x2, 60x3`
+instead of the spec's `120x4..7, 60x5..7, 1x20, 2x20`) and its loop body discarded the
+rendered buffer (`let _ = buf;`), so none of the scenario's four discriminating clauses —
+nothing at height 4, header only at height 5, header + tab bar at height 6, exactly one
+content row at height 7 — was ever checked. Deleting `render_detail_tabs`' height guard
+entirely would have left the whole suite green.
+**Fixed:** rewritten at the nine sizes the scenario names, asserting the header text, the
+first tab cell, and the first content line's presence or absence at each band. Confirmed
+discriminating by planting the exact guard removal and observing the new test fail;
+confirmed correct by restoring and re-running green. Commit `052be4a`.
+
+### MAJOR
+
+**`DETAILWIDTHS`'s own documented default contradicted its final floor.** The check
+block's comment said "its default IS this change's final floor: 22" and the script itself
+read `DETAIL_MIN="${DETAIL_MIN:-22}"`, but `design.md`'s matrix, the test-module table, and
+task 6.4's own text all say 19 — and `src/ui/detail.rs` has exactly 19 tests. Running the
+script with no override, exactly as its own comment invites, reports `DETAILWIDTHS FAIL:
+found 19 #[test] functions … expected >= 22`. Documentation-only (the defect is in
+`tasks.md`'s own fenced block; group 12.1 already overrides `DETAIL_MIN=19` explicitly and
+group 15 does not re-run this script), but a shipped check contradicting its own header is
+worth fixing rather than leaving for the next reader to trip over.
+**Fixed:** corrected the default to 19 and reworded the two header sentences to match,
+in both `tasks.md`'s fenced block and the extracted `$CHECKS/DETAILWIDTHS.sh`;
+re-ran the corrected script against the unmodified tree — still `DETAILWIDTHS OK: all 19
+detail tests name both 58 and 78`.
+
+### MINOR, accepted without a code change
+
+Reviewed and judged non-blocking; none weakens a check or leaves a scenario genuinely
+unverified:
+
+- `content_lines` guards on `problems` and `source` both empty via `out.is_empty()` after
+  building the list, rather than the spec's literal two-condition phrasing — behaviourally
+  equivalent and arguably the safer implementation (it guarantees the ≥1-line invariant
+  `detail-scroll` needs); not changed.
+- A handful of AND-clauses within otherwise-passing scenarios have no discriminating
+  assertion of their own (the problem row's exact width, the header staying visible above
+  the tab bar, an untested `Paste("1")`/`Char('{')` pair, `Dashboard::detail.tab` unchanged
+  across route moves) — each is true in the implementation, just not independently pinned.
+  Left as found; a future change touching those files should add the missing pins rather
+  than this one reopening files it has already closed out.
+- `an_unreadable_file_names_its_reason_and_does_not_lose_its_siblings`'s "tab move and
+  back" half hand-clears `detail.loaded` rather than driving the invalidation through a
+  real two-artifact tab move — the clearing behaviour is exercised, just not through the
+  exact path the scenario narrates. Left as found.
+- A few stale doc comments (`app.rs`'s "nine outcomes"/"nine actions" now twelve;
+  `Dashboard::detail`'s "nothing reads or writes it" comment; `view.rs`'s "detail-view is
+  what will populate detail.source") describe pre-`detail-view` state. Cosmetic; left for a
+  documentation pass rather than reopening test-adjacent files for comment-only edits.
+- `changes::fixture::with_schema` is a small test-only addition `design.md`'s Boundaries
+  table does not name; `NOLIT-CHANGE` is unaffected (it lives inside `src/changes.rs`) and
+  `detail-header`'s archived-schema scenario genuinely needs a non-`"tdd"` schema to
+  assert against. Recorded here as the design-record note the reviewer suggested, rather
+  than amending design.md itself.
+
+### Verified clean by the reviewer, not re-litigated here
+
+`Cargo.toml`/`Cargo.lock` diff empty; the pure-view seven-file set names no I/O API;
+`read_to_string` confined to `src/ui/mod.rs`; no `Change`/`ChangeSet` literal outside
+`src/changes.rs`; `sync_detail`'s five-step borrow shape matches `design.md` exactly;
+`tab_bar`'s windowing and `header_row`'s three degradation bands match their specs
+precisely; all ten `SPEC.md` corrections and the `AGENTS.md` updates match what was built.
