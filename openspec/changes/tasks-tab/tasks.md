@@ -877,7 +877,7 @@ the crate compiles, every existing test still passes, and `GATE-MECH1` still hol
 ## 8. The scroll clamp across two bodies
 <!-- kind: behavior -->
 
-- [ ] 8.1 RED: Write one failing test in `ui::app::tests::` —
+- [x] 8.1 RED: Write one failing test in `ui::app::tests::` —
       `normalise_scroll_clamps_against_the_drawn_body` — and two in `ui::driver::tests::` —
       `checklist_scroll_is_clamped` and `tab_move_resets_and_reclamps` — from
       `specs/detail-scroll` → "Switching to and from the tracked-tasks tab renormalises the
@@ -886,20 +886,20 @@ the crate compiles, every existing test still passes, and `GATE-MECH1` still hol
       would also produce. The scenario requires the two to **differ**, and the test must
       assert that difference explicitly, or it cannot tell which body the clamp used.
 
-- [ ] 8.2 GREEN: No production change is expected — group 1 already routed
+- [x] 8.2 GREEN: No production change is expected — group 1 already routed
       `selected_change()` into `normalise_scroll`'s `content_lines` call, and group 6 made
       that call dispatch. If a change **is** needed, it is a divergence from `design.md` →
       Risks and must be recorded there before it is made.
 
-- [ ] 8.3 CHECK: `run_loop` gains no step and no new call: `sync_detail` before the draw,
+- [x] 8.3 CHECK: `run_loop` gains no step and no new call: `sync_detail` before the draw,
       `normalise_scroll` after it, exactly as `dashboard-loop` specifies. Confirm by
       `git diff` over `src/ui/driver.rs`'s production code showing test-module changes only.
 
-- [ ] 8.4 REFACTOR: State that no refactor was needed, or name one — this group is expected
+- [x] 8.4 REFACTOR: State that no refactor was needed, or name one — this group is expected
       to add tests and no production code, so a refactor here would be a signal that group 1
       or group 6 left something half-wired.
 
-- [ ] 8.5 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'ui::app::tests::' 47`;
+- [x] 8.5 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'ui::app::tests::' 47`;
       `testcount --lib 'ui::driver::tests::' 14`;
       `TYPES="Dashboard Filter Detail" SCAN_MIN=80 sh $CHECKS/NODEFAULT-UI.sh`; the four gate
       commands, still failing on exactly the one known acceptance test.

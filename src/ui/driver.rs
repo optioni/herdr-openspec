@@ -456,6 +456,188 @@ mod tests {
         }
     }
 
+    /// The checklist's own text: one heading, twenty unchecked items —
+    /// group 5's grammar over `task-parsing`'s parse, so its line count
+    /// (heading + bar + blank + twenty items) genuinely differs from what
+    /// `ui::markdown::lines` produces for the same bytes.
+    fn twenty_task_source() -> String {
+        std::iter::once("## Tasks\n".to_string())
+            .chain((0..20).map(|i| format!("- [ ] line-{i:02}\n")))
+            .collect()
+    }
+
+    /// A dashboard whose one selected change carries two artifacts —
+    /// `proposal` (unmarked) at position 0 and `tasks` (marked
+    /// `tracks_tasks`) at position 1 — with the tracked-tasks tab
+    /// selected. `detail-scroll`'s two group-8 scenarios both need a real
+    /// tab to move *away from* the checklist to, which a single-artifact
+    /// change cannot provide.
+    fn twenty_task_detail_dashboard() -> Dashboard {
+        let change = crate::changes::fixture::track_tasks_at(
+            crate::changes::fixture::with_artifacts(
+                crate::changes::fixture::active("detail-view", 0, 20),
+                &[
+                    ("proposal", &["/repo/p.md"]),
+                    ("tasks", &["/repo/tasks.md"]),
+                ],
+            ),
+            1,
+        );
+        Dashboard {
+            repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
+            searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
+            changes: crate::changes::fixture::set(vec![change], Vec::new(), Vec::new()),
+            route: Route::Detail,
+            quit: false,
+            selected: 0,
+            filter: crate::ui::app::Filter {
+                query: String::new(),
+                active: false,
+            },
+            detail: crate::ui::app::Detail {
+                source: String::new(),
+                scroll: 0,
+                tab: 1,
+                problems: Vec::new(),
+                loaded: None,
+            },
+        }
+    }
+
+    #[test]
+    fn checklist_scroll_is_clamped() {
+        for width in [120u16, 60] {
+            let backend = TestBackend::new(width, 20);
+            let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+            let mut dashboard = twenty_task_detail_dashboard();
+            let source = twenty_task_source();
+
+            let mut presses: Vec<_> = (0..20)
+                .map(|_| Ok(Some(press(KeyCode::Char('j'), KeyModifiers::NONE))))
+                .collect();
+            presses.push(Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))));
+            let mut events = Script::new(presses);
+
+            let recorder = crate::testutil::RecordingReader::always(Ok(source.clone()));
+            let read = |p: &std::path::Path| recorder.read(p);
+
+            run_loop(
+                &mut terminal,
+                &mut dashboard,
+                &mut events,
+                &read,
+                Duration::from_millis(1),
+            )
+            .expect("loop ends");
+
+            // heading (1) + bar (1) + blank (1) + twenty items (20) = 23
+            // lines; a 14-row content area clamps to 23 - 14 = 9, not 20.
+            assert_eq!(dashboard.detail.scroll, 9, "width {width}");
+
+            let interior = if width == 60 { 58 } else { 78 };
+            let markdown_len = crate::ui::markdown::lines(&source, interior).len();
+            let markdown_clamp = markdown_len.saturating_sub(14);
+            assert_ne!(
+                dashboard.detail.scroll, markdown_clamp,
+                "width {width}: the clamp must differ from the markdown body's own"
+            );
+
+            let buf = terminal.backend().buffer();
+            let base = if width == 60 { 1 } else { 41 };
+            let row_at = |y: u16, len: usize| -> String {
+                (base..base + len as u16)
+                    .map(|x| row_text(buf, y).chars().nth(x as usize).unwrap())
+                    .collect()
+            };
+            assert_eq!(
+                row_at(17, 11),
+                "[ ] line-19",
+                "width {width}: the clamp used the body that was actually drawn"
+            );
+        }
+    }
+
+    #[test]
+    fn tab_move_resets_and_reclamps() {
+        for width in [120u16, 60] {
+            let backend = TestBackend::new(width, 20);
+            let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+            let mut dashboard = twenty_task_detail_dashboard();
+            let source = twenty_task_source();
+            let recorder = crate::testutil::RecordingReader::always(Ok(source.clone()));
+            let read = |p: &std::path::Path| recorder.read(p);
+
+            // First: reach the same clamped state `checklist_scroll_is_clamped`
+            // does — twenty `j` presses over the checklist, then quit.
+            let mut first: Vec<_> = (0..20)
+                .map(|_| Ok(Some(press(KeyCode::Char('j'), KeyModifiers::NONE))))
+                .collect();
+            first.push(Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))));
+            let mut events = Script::new(first);
+            run_loop(
+                &mut terminal,
+                &mut dashboard,
+                &mut events,
+                &read,
+                Duration::from_millis(1),
+            )
+            .expect("first stage ends");
+            assert_eq!(dashboard.detail.scroll, 9, "width {width}: precondition");
+
+            // The same run continues: a Press of `1` — selecting the
+            // unmarked `proposal` artifact — then quit, to check the
+            // reset in isolation before the further `j` presses reclamp
+            // it against a new body.
+            dashboard.quit = false;
+            let mut select_tab = vec![
+                Ok(Some(press(KeyCode::Char('1'), KeyModifiers::NONE))),
+                Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
+            ];
+            let mut events_select = Script::new(std::mem::take(&mut select_tab));
+            run_loop(
+                &mut terminal,
+                &mut dashboard,
+                &mut events_select,
+                &read,
+                Duration::from_millis(1),
+            )
+            .expect("tab-move stage ends");
+            assert_eq!(dashboard.detail.tab, 0, "width {width}");
+            assert_eq!(
+                dashboard.detail.scroll, 0,
+                "width {width}: reset immediately, because sync_detail's key changed"
+            );
+
+            // Ten more `j` presses, then quit.
+            dashboard.quit = false;
+            let mut second: Vec<_> = (0..10)
+                .map(|_| Ok(Some(press(KeyCode::Char('j'), KeyModifiers::NONE))))
+                .collect();
+            second.push(Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))));
+            let mut events2 = Script::new(second);
+            run_loop(
+                &mut terminal,
+                &mut dashboard,
+                &mut events2,
+                &read,
+                Duration::from_millis(1),
+            )
+            .expect("second stage ends");
+            let interior = if width == 60 { 58 } else { 78 };
+            let markdown_len = crate::ui::markdown::lines(&source, interior).len();
+            let markdown_clamp = markdown_len.saturating_sub(14);
+            assert_eq!(
+                dashboard.detail.scroll, markdown_clamp,
+                "width {width}: clamped against the markdown body's own length, \
+                 not the checklist's"
+            );
+            assert_ne!(
+                dashboard.detail.scroll, 9,
+                "width {width}: not the checklist's own clamp"
+            );
+        }
+    }
+
     #[test]
     fn a_resize_renormalises_the_offset() {
         // Drives the pair `terminal.draw` then `normalise_scroll` directly

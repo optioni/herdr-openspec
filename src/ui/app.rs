@@ -1167,6 +1167,63 @@ mod tests {
             );
         }
 
+        /// `detail-scroll`: "Switching to and from the tracked-tasks tab
+        /// renormalises the scroll" — the checklist and the markdown body
+        /// produce different line counts for the same source, so the
+        /// clamp must differ between them too, or `normalise_scroll` is
+        /// reading the wrong body's length.
+        #[test]
+        fn normalise_scroll_clamps_against_the_drawn_body() {
+            let source: String = (0..20).map(|i| format!("- [ ] line-{i:02}\n")).collect();
+            let progress = crate::tasks::Progress {
+                completed: 0,
+                total: 20,
+            };
+
+            fn change_at(marked: bool, progress: crate::tasks::Progress) -> crate::changes::Change {
+                let mut change = crate::changes::fixture::with_artifacts(
+                    crate::changes::fixture::active("x", 0, 0),
+                    &[("tasks", &[])],
+                );
+                change.progress = progress;
+                if marked {
+                    change = crate::changes::fixture::track_tasks_at(change, 0);
+                }
+                change
+            }
+
+            fn dashboard_for(change: crate::changes::Change, source: String) -> Dashboard {
+                Dashboard {
+                    detail: Detail {
+                        source,
+                        scroll: 99,
+                        tab: 0,
+                        problems: Vec::new(),
+                        loaded: None,
+                    },
+                    repo: None,
+                    searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
+                    changes: crate::changes::fixture::set(vec![change], Vec::new(), Vec::new()),
+                    route: Route::Detail,
+                    quit: false,
+                    selected: 0,
+                    filter: empty_filter(),
+                }
+            }
+
+            let mut d_marked = dashboard_for(change_at(true, progress), source.clone());
+            d_marked.normalise_scroll(ratatui::layout::Rect::new(0, 0, 120, 20));
+
+            let mut d_unmarked = dashboard_for(change_at(false, progress), source);
+            d_unmarked.normalise_scroll(ratatui::layout::Rect::new(0, 0, 120, 20));
+
+            assert_ne!(
+                d_marked.detail.scroll, d_unmarked.detail.scroll,
+                "the checklist (bar + blank + 20 items) and the markdown \
+                 body (20 lines) differ in length, so their clamps must too"
+            );
+        }
+
         #[test]
         fn normalise_scroll_is_inert_when_the_detail_region_is_not_drawn() {
             let mut d = Dashboard {
