@@ -79,6 +79,21 @@ cost ran 38–44 points per change in Phase 3 (about 2.4 full 5-hour windows for
 changes, so ~15h of wall time); weekly cost ran 4.5 points per change. Both matter, and
 they are not interchangeable.
 
+## Deferred: sync README's keymap at the end of Phase 4
+
+`markdown-viewer` made a **BREAKING** keybinding change — `j`/`k` and the arrows now
+scroll detail content at the detail route while still moving selection at the list
+route. SPEC.md → Keys was updated properly and is now the accurate reference.
+
+`README.md`'s keymap table is stale against it: it says `Esc` is "Back to list" when
+SPEC now specifies layered dismissal, omits `Ctrl-C` entirely, and describes `j`/`k` as
+plain "Navigate" without the route split.
+
+**Left stale on purpose.** `detail-view`, `tasks-tab`, and `live-refresh` are all
+likely to touch keys again, so syncing now means three rounds of churn. **Do one
+accurate pass over README's Keys table when Phase 4 closes**, taking SPEC.md → Keys as
+the source. Do not let this deferral outlive the phase.
+
 ## Measured per-step cost (Phase 4)
 
 Finer-grained than the per-change figures above, and the basis for planning windows:
