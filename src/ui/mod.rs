@@ -663,6 +663,30 @@ mod tests {
         }
 
         #[test]
+        fn loading_then_syncing_with_the_real_reader_writes_nothing() {
+            // The same claim, extended past `ui::load` into
+            // `Dashboard::sync_detail` driven with the real
+            // `ui::read_artifact` binding — resolving and reading an
+            // artifact's content must leave the tree byte-identical too.
+            let scratch = ScratchDir::new();
+            let root = scratch.path();
+            write(&root.join("openspec/changes/alpha/proposal.md"), "# P\n");
+            write(
+                &root.join("openspec/changes/alpha/tasks.md"),
+                "- [x] a\n- [ ] b\n",
+            );
+
+            let before = snapshot(root);
+            let mut dashboard = super::super::load(root, &config_with_archived_count(5));
+            dashboard.sync_detail(&super::super::read_artifact);
+            let after = snapshot(root);
+            assert_eq!(
+                before, after,
+                "ui::load + sync_detail(read_artifact) wrote inside the repository"
+            );
+        }
+
+        #[test]
         fn startup_leaves_the_detail_empty_and_unscrolled() {
             // Rendered at both mandated widths, but the detail-interior
             // blankness assertion only applies at 120: at 60, `route`
@@ -685,6 +709,24 @@ mod tests {
                 let _ = render_at(60, 20, dashboard);
             }
 
+            // A change **is** selected and nothing has been read yet — the
+            // header and tab bar are drawn (a change is selected) and the
+            // content area reads `No content yet` (`sync_detail` has not
+            // run), which is exactly the state `run_loop`'s first
+            // `sync_detail` replaces.
+            fn assert_detail_shows_header_and_no_content_yet_at_120(
+                dashboard: &crate::ui::app::Dashboard,
+                name: &str,
+            ) {
+                let buf = render_at(120, 20, dashboard);
+                assert!(row_text(&buf, 2).contains(name));
+                assert!(
+                    row_text(&buf, 4).trim_end().starts_with("No content yet")
+                        || row_text(&buf, 4).contains("No content yet")
+                );
+                let _ = render_at(60, 20, dashboard);
+            }
+
             let scratch = ScratchDir::new();
             let root = scratch.path();
             write(&root.join("openspec/changes/alpha/proposal.md"), "# P\n");
@@ -692,7 +734,10 @@ mod tests {
             let found = super::super::load(root, &config_with_archived_count(5));
             assert_eq!(found.detail.source, "");
             assert_eq!(found.detail.scroll, 0);
-            assert_detail_blank_at_120(&found);
+            assert_eq!(found.detail.tab, 0);
+            assert!(found.detail.problems.is_empty());
+            assert_eq!(found.detail.loaded, None);
+            assert_detail_shows_header_and_no_content_yet_at_120(&found, "alpha");
 
             // The RepoSearch::NotFound arm is a second Dashboard
             // construction site and therefore a second place the field

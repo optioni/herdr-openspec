@@ -1182,7 +1182,7 @@ files in `$CHECKS`.
 ## 11. The read binding and the startup path
 <!-- kind: behavioural -->
 
-- [ ] 11.1 RED: **Update** the six existing tests in `ui::tests::load` for scenarios 51–54
+- [x] 11.1 RED: **Update** the six existing tests in `ui::tests::load` for scenarios 51–54
       and 70: `ui::load` leaves all five `Detail` fields empty; the `NotFound` arm does too;
       rendering the loaded dashboard at 120x20 now shows the change's header and tab bar with
       `No content yet` below it, while rendering the `NotFound` one still leaves the detail
@@ -1192,7 +1192,7 @@ files in `$CHECKS`.
       **Red when:** the count of tests in `ui::tests::load::` rises here. These are updates;
       the one new test function is 11.2's.
 
-- [ ] 11.2 RED: Add **one new** test function to `ui::tests::load`, for scenario 54's second
+- [x] 11.2 RED: Add **one new** test function to `ui::tests::load`, for scenario 54's second
       half: a `snapshot` of a real `ScratchDir` repository taken before and after `ui::load`
       **followed by** `Dashboard::sync_detail` driven with the real `ui::read_artifact`
       binding, byte-identical.
@@ -1200,22 +1200,22 @@ files in `$CHECKS`.
       binding. The point is that the **real read** writes nothing; a fake reader proves
       nothing about the filesystem.
 
-- [ ] 11.3 GREEN: Make whatever minimal change these require. `ui::load` should already
+- [x] 11.3 GREEN: Make whatever minimal change these require. `ui::load` should already
       satisfy them after group 1's sweep; if it does not, the sweep was incomplete.
 
-- [ ] 11.4 CHECK: `BASE=<sha> sh $CHECKS/OPENSPEC-UNTOUCHED.sh`, and
+- [x] 11.4 CHECK: `BASE=<sha> sh $CHECKS/OPENSPEC-UNTOUCHED.sh`, and
       `UI_MIN=9 sh $CHECKS/READSEAM.sh`.
       **Red when:** `OPENSPEC-UNTOUCHED` reports a stray path, or `READSEAM` reports
       `read_to_string` outside `src/ui/mod.rs` — group 1's `mod read_artifact` tests name
       `std::fs::read_to_string` and live in `src/ui/mod.rs`, which is why it is allowed
       there and nowhere else.
 
-- [ ] 11.5 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'ui::tests::load::' 7`;
+- [x] 11.5 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'ui::tests::load::' 7`;
       `testcount --lib 'ui::tests::read_artifact::' 2`; `testcount --lib
       'ui::driver::tests::' 12`; `make check`.
       **Red when:** any count falls short, or `make check` fails.
 
-- [ ] 11.6 Commit: `test(detail-view): the startup path and the written-nothing proof`.
+- [x] 11.6 Commit: `test(detail-view): the startup path and the written-nothing proof`.
 
 ## 12. The architectural check suite and its negative controls
 <!-- kind: operational -->
