@@ -51,6 +51,9 @@ pub enum Action {
     FilterStart,
     FilterPush(char),
     FilterPop,
+    /// `live-refresh`'s addition: request a full refresh. Route-agnostic in
+    /// a stronger sense than `Next`/`Prev` — it names no region at all.
+    Refresh,
     Ignore,
 }
 
@@ -91,11 +94,36 @@ pub struct Detail {
     pub loaded: Option<(PathBuf, usize)>,
 }
 
+/// The loop's live tier state: `requested` and `reload` are one-shot flags
+/// the loop consumes, `problems` is text that outlives a reload — none of it
+/// is derived geometry, and none of it is a watcher, a worker handle, a
+/// channel, or the clock. `requested` is set by `Action::Refresh` and by
+/// `ui::load` at startup, and cleared by `run_loop` once it has asked the
+/// refresher for a full reload; `Dashboard::apply` never reaches a
+/// collaborator, so setting it stays a pure state change. `reload` is set by
+/// `Dashboard::adopt` and consumed by `Dashboard::sync_detail`: it forces a
+/// re-read of an unchanged `(change directory, tab)` key, which is what
+/// makes an edit to the artifact currently on screen visible — the cache
+/// key `sync_detail` compares does not change when a file's *content* does.
+/// `problems` holds a watcher that would not start; everything the CLI or
+/// the file walk reports rides on `ChangeSet::problems` instead, which is
+/// why a watcher failure cannot live there. Deliberately implements no
+/// `Default`, anywhere in the crate, on the same terms as `Dashboard`,
+/// `Filter`, and `Detail`: every construction and destructuring names all
+/// three fields, with no `..` rest. See `specs/live-updates/spec.md` and the
+/// `NODEFAULT-UI` check, whose type list covers this type too.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Refresh {
+    pub requested: bool,
+    pub reload: bool,
+    pub problems: Vec<String>,
+}
+
 /// The dashboard's whole state. Carries no width, no layout mode, no column
 /// count, no terminal handle, and no frame — those are derived from the
 /// frame area on every draw, never stored here. Deliberately implements no
 /// `Default`, anywhere in the crate: every construction and every
-/// destructuring names all eight fields, so a field added later fails to
+/// destructuring names all nine fields, so a field added later fails to
 /// compile at each site rather than defaulting silently. See
 /// `specs/dashboard-loop/spec.md` and the `NODEFAULT-UI` check.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -117,6 +145,10 @@ pub struct Dashboard {
     /// or writes it in this change beyond startup, which leaves it empty and
     /// unscrolled. See `specs/detail-scroll/spec.md`.
     pub detail: Detail,
+    /// The live tier's state: the startup/`r`-triggered refresh request, the
+    /// forced-reload flag, and standing watcher problems. See
+    /// `specs/live-updates/spec.md`.
+    pub refresh: Refresh,
 }
 
 impl Dashboard {
@@ -233,6 +265,11 @@ impl Dashboard {
                 self.filter.query.pop();
                 self.clamp_selection();
             }
+            // live-refresh's own behaviour (the `r` key mapping and the
+            // startup request) arrives in group 8; for now this is a no-op
+            // arm that touches nothing else, so the crate compiles with the
+            // thirteenth variant plumbed through with no observable change.
+            Action::Refresh => {}
             Action::Ignore => {}
         }
     }
@@ -463,6 +500,11 @@ mod tests {
                 selected: 0,
                 filter: empty_filter(),
                 detail: empty_detail(),
+                refresh: crate::ui::app::Refresh {
+                    requested: false,
+                    reload: false,
+                    problems: Vec::new(),
+                },
             }
         }
 
@@ -489,6 +531,11 @@ mod tests {
                 selected: 0,
                 filter: empty_filter(),
                 detail: empty_detail(),
+                refresh: crate::ui::app::Refresh {
+                    requested: false,
+                    reload: false,
+                    problems: Vec::new(),
+                },
             }
         }
 
@@ -517,6 +564,11 @@ mod tests {
                     tab,
                     problems: Vec::new(),
                     loaded: None,
+                },
+                refresh: crate::ui::app::Refresh {
+                    requested: false,
+                    reload: false,
+                    problems: Vec::new(),
                 },
             }
         }
@@ -771,6 +823,7 @@ mod tests {
                     | Action::FilterStart
                     | Action::FilterPush(_)
                     | Action::FilterPop
+                    | Action::Refresh
                     | Action::Ignore => {}
                 }
             }
@@ -787,12 +840,13 @@ mod tests {
                 Action::FilterStart,
                 Action::FilterPush('a'),
                 Action::FilterPop,
+                Action::Refresh,
                 Action::Ignore,
             ];
             assert_eq!(
                 variants.len(),
-                12,
-                "the twelve variants this crate specifies"
+                13,
+                "the thirteen variants this crate specifies"
             );
             for v in &variants {
                 assert_known_variant(v);
@@ -820,6 +874,11 @@ mod tests {
                 quit: false,
                 selected: 0,
                 filter: empty_filter(),
+                refresh: crate::ui::app::Refresh {
+                    requested: false,
+                    reload: false,
+                    problems: Vec::new(),
+                },
             };
 
             for action in variants {
@@ -1036,6 +1095,11 @@ mod tests {
                 quit: false,
                 selected: 0,
                 filter: empty_filter(),
+                refresh: crate::ui::app::Refresh {
+                    requested: false,
+                    reload: false,
+                    problems: Vec::new(),
+                },
             };
             d.apply(Action::Next);
             assert_eq!(d.detail.scroll, 1);
@@ -1068,6 +1132,11 @@ mod tests {
                 quit: false,
                 selected: 0,
                 filter: empty_filter(),
+                refresh: crate::ui::app::Refresh {
+                    requested: false,
+                    reload: false,
+                    problems: Vec::new(),
+                },
             };
             for _ in 0..4 {
                 d.apply(Action::Prev);
@@ -1106,6 +1175,11 @@ mod tests {
                     query: String::new(),
                     active: true,
                 },
+                refresh: crate::ui::app::Refresh {
+                    requested: false,
+                    reload: false,
+                    problems: Vec::new(),
+                },
             };
             d.apply(Action::FilterPush('j'));
             d.apply(Action::FilterPush('k'));
@@ -1132,6 +1206,11 @@ mod tests {
                 quit: false,
                 selected: 0,
                 filter: empty_filter(),
+                refresh: crate::ui::app::Refresh {
+                    requested: false,
+                    reload: false,
+                    problems: Vec::new(),
+                },
             };
             d.apply(Action::Back);
             assert_eq!(d.detail.scroll, 0);
@@ -1153,6 +1232,11 @@ mod tests {
                 quit: false,
                 selected: 0,
                 filter: empty_filter(),
+                refresh: crate::ui::app::Refresh {
+                    requested: false,
+                    reload: false,
+                    problems: Vec::new(),
+                },
             };
             d2.apply(Action::FilterStart);
             assert_eq!(d2.route, Route::List);
@@ -1175,6 +1259,11 @@ mod tests {
                 filter: Filter {
                     query: String::new(),
                     active: true,
+                },
+                refresh: crate::ui::app::Refresh {
+                    requested: false,
+                    reload: false,
+                    problems: Vec::new(),
                 },
             };
             d3.apply(Action::Back);
@@ -1203,6 +1292,11 @@ mod tests {
                 quit: false,
                 selected: 0,
                 filter: empty_filter(),
+                refresh: crate::ui::app::Refresh {
+                    requested: false,
+                    reload: false,
+                    problems: Vec::new(),
+                },
             };
             d.normalise_scroll(ratatui::layout::Rect::new(0, 0, 120, 20));
             assert_eq!(d.detail.scroll, 6);
@@ -1222,6 +1316,11 @@ mod tests {
                 quit: false,
                 selected: 0,
                 filter: empty_filter(),
+                refresh: crate::ui::app::Refresh {
+                    requested: false,
+                    reload: false,
+                    problems: Vec::new(),
+                },
             };
             d2.normalise_scroll(ratatui::layout::Rect::new(0, 0, 60, 20));
             assert_eq!(d2.detail.scroll, 6);
@@ -1241,6 +1340,11 @@ mod tests {
                 quit: false,
                 selected: 0,
                 filter: empty_filter(),
+                refresh: crate::ui::app::Refresh {
+                    requested: false,
+                    reload: false,
+                    problems: Vec::new(),
+                },
             };
             d3.normalise_scroll(ratatui::layout::Rect::new(0, 0, 120, 40));
             assert_eq!(
@@ -1278,6 +1382,11 @@ mod tests {
                     quit: false,
                     selected: 0,
                     filter: empty_filter(),
+                    refresh: crate::ui::app::Refresh {
+                        requested: false,
+                        reload: false,
+                        problems: Vec::new(),
+                    },
                 }
             }
 
@@ -1321,6 +1430,11 @@ mod tests {
                 quit: false,
                 selected: 0,
                 filter: empty_filter(),
+                refresh: crate::ui::app::Refresh {
+                    requested: false,
+                    reload: false,
+                    problems: Vec::new(),
+                },
             };
             d.normalise_scroll(ratatui::layout::Rect::new(0, 0, 60, 20));
             assert_eq!(
@@ -1409,7 +1523,7 @@ mod tests {
         }
 
         #[test]
-        fn dashboard_destructures_into_exactly_eight_fields() {
+        fn dashboard_destructures_into_exactly_nine_fields() {
             let d = dashboard_at(Route::List);
             let Dashboard {
                 repo,
@@ -1420,6 +1534,7 @@ mod tests {
                 selected,
                 filter,
                 detail,
+                refresh,
             } = &d;
             assert_eq!(*repo, None);
             assert_eq!(
@@ -1432,6 +1547,9 @@ mod tests {
             assert_eq!(*selected, 0);
             assert_eq!(filter, &empty_filter());
             assert_eq!(detail, &empty_detail());
+            assert!(!refresh.requested);
+            assert!(!refresh.reload);
+            assert!(refresh.problems.is_empty());
         }
 
         #[test]
@@ -1443,6 +1561,24 @@ mod tests {
             let Filter { query, active } = &f;
             assert_eq!(query, "add");
             assert!(*active);
+
+            // The fourth compile-time companion `design.md` -> Contracts
+            // names: a `Refresh` destructured naming all three fields and no
+            // `..`, folded into this test rather than a fifth top-level one,
+            // since group 1 adds no test to `ui::app::tests::`.
+            let r = crate::ui::app::Refresh {
+                requested: true,
+                reload: false,
+                problems: vec!["watch failed".to_string()],
+            };
+            let crate::ui::app::Refresh {
+                requested,
+                reload,
+                problems,
+            } = &r;
+            assert!(*requested);
+            assert!(!*reload);
+            assert_eq!(problems, &vec!["watch failed".to_string()]);
         }
 
         #[test]
@@ -1622,6 +1758,11 @@ mod tests {
                     problems: Vec::new(),
                     loaded: None,
                 },
+                refresh: crate::ui::app::Refresh {
+                    requested: false,
+                    reload: false,
+                    problems: Vec::new(),
+                },
             };
             d.apply(Action::Next);
             assert_eq!(d.selected, 1);
@@ -1650,6 +1791,11 @@ mod tests {
                     tab: 2,
                     problems: Vec::new(),
                     loaded: None,
+                },
+                refresh: crate::ui::app::Refresh {
+                    requested: false,
+                    reload: false,
+                    problems: Vec::new(),
                 },
             };
             d2.apply(Action::Prev);
@@ -1690,6 +1836,11 @@ mod tests {
                     tab: 0,
                     problems: Vec::new(),
                     loaded: None,
+                },
+                refresh: crate::ui::app::Refresh {
+                    requested: false,
+                    reload: false,
+                    problems: Vec::new(),
                 },
             }
         }
@@ -1746,6 +1897,11 @@ mod tests {
                     problems: Vec::new(),
                     loaded: None,
                 },
+                refresh: crate::ui::app::Refresh {
+                    requested: false,
+                    reload: false,
+                    problems: Vec::new(),
+                },
             };
             let recorder = RecordingReader::always(Ok("text".to_string()));
             let read = |p: &std::path::Path| recorder.read(p);
@@ -1795,6 +1951,11 @@ mod tests {
                     tab: 0,
                     problems: Vec::new(),
                     loaded: None,
+                },
+                refresh: crate::ui::app::Refresh {
+                    requested: false,
+                    reload: false,
+                    problems: Vec::new(),
                 },
             };
             let recorder = RecordingReader::new(
@@ -1954,6 +2115,11 @@ mod tests {
                     problems: Vec::new(),
                     loaded: None,
                 },
+                refresh: crate::ui::app::Refresh {
+                    requested: false,
+                    reload: false,
+                    problems: Vec::new(),
+                },
             };
             let recorder = RecordingReader::always(Ok("t".to_string()));
             let read = |p: &std::path::Path| recorder.read(p);
@@ -2002,6 +2168,11 @@ mod tests {
                     tab: 2,
                     problems: vec!["stale problem".to_string()],
                     loaded: Some((std::path::PathBuf::from("/repo/x"), 0)),
+                },
+                refresh: crate::ui::app::Refresh {
+                    requested: false,
+                    reload: false,
+                    problems: Vec::new(),
                 },
             };
             let recorder2 = RecordingReader::always(Err("must not be called".to_string()));

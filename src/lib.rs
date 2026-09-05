@@ -9,11 +9,13 @@
 pub mod changes;
 pub mod cli;
 pub mod config;
+pub mod refresh;
 pub mod resolve;
 pub mod schema;
 pub mod state;
 pub mod tasks;
 pub mod ui;
+pub mod watch;
 
 /// The current process id. Exists so `state::record`'s temporary-file name
 /// can include it without `src/state.rs` itself naming the standard-library
@@ -321,11 +323,156 @@ pub(crate) mod testutil {
         ))
     }
 
+    /// A scripted `watch::FsEvents` double, on `Script`'s terms: a queue of
+    /// `drain` results and a queue of `pending_in` results, each recording
+    /// every call. Synchronous and thread-free — it answers from a `RefCell`
+    /// held queue, spawns nothing, sleeps nothing, and reads no clock, so
+    /// every `ui::` test that drives the live tier stays deterministic.
+    /// Exhausting either queue yields `Ok(None)` / `None` forever rather than
+    /// panicking: an `FsEvents` that errors once the script runs out would
+    /// end a test for the wrong reason.
+    pub(crate) struct ScriptedFs {
+        drain_queue: std::cell::RefCell<
+            std::collections::VecDeque<Result<Option<Vec<PathBuf>>, crate::watch::WatchError>>,
+        >,
+        pending_queue: std::cell::RefCell<std::collections::VecDeque<Option<std::time::Duration>>>,
+        drain_calls:
+            std::cell::RefCell<Vec<Result<Option<Vec<PathBuf>>, crate::watch::WatchError>>>,
+        pending_calls: std::cell::RefCell<Vec<Option<std::time::Duration>>>,
+    }
+
+    impl ScriptedFs {
+        pub(crate) fn new(
+            drains: Vec<Result<Option<Vec<PathBuf>>, crate::watch::WatchError>>,
+            pendings: Vec<Option<std::time::Duration>>,
+        ) -> Self {
+            Self {
+                drain_queue: std::cell::RefCell::new(drains.into()),
+                pending_queue: std::cell::RefCell::new(pendings.into()),
+                drain_calls: std::cell::RefCell::new(Vec::new()),
+                pending_calls: std::cell::RefCell::new(Vec::new()),
+            }
+        }
+
+        /// Every result `drain` returned, in call order.
+        pub(crate) fn drains(&self) -> Vec<Result<Option<Vec<PathBuf>>, crate::watch::WatchError>> {
+            self.drain_calls.borrow().clone()
+        }
+
+        /// Every result `pending_in` returned, in call order.
+        pub(crate) fn pendings(&self) -> Vec<Option<std::time::Duration>> {
+            self.pending_calls.borrow().clone()
+        }
+    }
+
+    impl crate::watch::FsEvents for ScriptedFs {
+        fn drain(&mut self) -> Result<Option<Vec<PathBuf>>, crate::watch::WatchError> {
+            let result = self
+                .drain_queue
+                .borrow_mut()
+                .pop_front()
+                .unwrap_or(Ok(None));
+            self.drain_calls.borrow_mut().push(result.clone());
+            result
+        }
+
+        fn pending_in(&self) -> Option<std::time::Duration> {
+            let result = self.pending_queue.borrow_mut().pop_front().unwrap_or(None);
+            self.pending_calls.borrow_mut().push(result);
+            result
+        }
+    }
+
+    /// A recording `refresh::Refresher` double: a queue of `take_result`
+    /// answers, plus `requests()` and `takes()`. Synchronous and
+    /// thread-free, on `ScriptedFs`'s terms — it is what makes "exactly one
+    /// request, carrying `Selection::All`" assertable at all, since a real
+    /// worker's timing cannot be pinned down deterministically.
+    pub(crate) struct RecordingRefresher {
+        queue:
+            std::cell::RefCell<std::collections::VecDeque<Option<crate::refresh::RefreshResult>>>,
+        requests: std::cell::RefCell<Vec<crate::changes::Selection>>,
+        takes: std::cell::RefCell<usize>,
+    }
+
+    impl RecordingRefresher {
+        pub(crate) fn new(results: Vec<Option<crate::refresh::RefreshResult>>) -> Self {
+            Self {
+                queue: std::cell::RefCell::new(results.into()),
+                requests: std::cell::RefCell::new(Vec::new()),
+                takes: std::cell::RefCell::new(0),
+            }
+        }
+
+        /// Every `Selection` passed to `request`, in call order.
+        pub(crate) fn requests(&self) -> Vec<crate::changes::Selection> {
+            self.requests.borrow().clone()
+        }
+
+        /// The number of times `take_result` was called.
+        pub(crate) fn takes(&self) -> usize {
+            *self.takes.borrow()
+        }
+    }
+
+    impl crate::refresh::Refresher for RecordingRefresher {
+        fn request(&mut self, selection: crate::changes::Selection) {
+            self.requests.borrow_mut().push(selection);
+        }
+
+        fn take_result(&mut self) -> Option<crate::refresh::RefreshResult> {
+            *self.takes.borrow_mut() += 1;
+            self.queue.borrow_mut().pop_front().unwrap_or(None)
+        }
+    }
+
     #[cfg(test)]
     mod tests {
-        use super::{RecordingReader, ScratchDir, cell, render_at, row_text, snapshot};
+        use super::{
+            RecordingReader, RecordingRefresher, ScratchDir, ScriptedFs, cell, render_at, row_text,
+            snapshot,
+        };
         use crate::changes::empty_set;
+        use crate::refresh::Refresher;
         use crate::ui::app::{Dashboard, Route};
+        use crate::watch::FsEvents;
+
+        /// `ScriptedFs` is synchronous and thread-free: it answers from a
+        /// queue, and an exhausted queue yields `Ok(None)`/`None` forever
+        /// rather than panicking. This module's own tests are the ones that
+        /// exercise it directly; group 2's acceptance test and group 9's
+        /// live-tier tests use it as a collaborator rather than testing it
+        /// for its own sake.
+        #[test]
+        fn scripted_fs_answers_its_queue_then_falls_back_to_the_inert_default() {
+            let mut fs = ScriptedFs::new(
+                vec![Ok(Some(vec![std::path::PathBuf::from("/r/openspec/x")]))],
+                vec![Some(std::time::Duration::from_millis(90))],
+            );
+            assert_eq!(
+                fs.drain(),
+                Ok(Some(vec![std::path::PathBuf::from("/r/openspec/x")]))
+            );
+            assert_eq!(fs.pending_in(), Some(std::time::Duration::from_millis(90)));
+            // The queue is now exhausted: both fall back to the inert
+            // default rather than panicking.
+            assert_eq!(fs.drain(), Ok(None));
+            assert_eq!(fs.pending_in(), None);
+            assert_eq!(fs.drains().len(), 2);
+            assert_eq!(fs.pendings().len(), 2);
+        }
+
+        #[test]
+        fn recording_refresher_records_requests_and_takes() {
+            let mut refresher = RecordingRefresher::new(vec![None]);
+            refresher.request(crate::changes::Selection::All);
+            assert_eq!(refresher.take_result(), None);
+            // The queue is now exhausted: falls back to `None` rather than
+            // panicking.
+            assert_eq!(refresher.take_result(), None);
+            assert_eq!(refresher.requests(), vec![crate::changes::Selection::All]);
+            assert_eq!(refresher.takes(), 2);
+        }
 
         #[test]
         fn recording_reader_returns_the_scripted_result_and_records_the_call() {
@@ -375,6 +522,11 @@ pub(crate) mod testutil {
                     tab: 0,
                     problems: Vec::new(),
                     loaded: None,
+                },
+                refresh: crate::ui::app::Refresh {
+                    requested: false,
+                    reload: false,
+                    problems: Vec::new(),
                 },
             }
         }

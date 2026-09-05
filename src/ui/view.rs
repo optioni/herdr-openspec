@@ -358,6 +358,11 @@ mod tests {
             selected,
             filter: empty_filter(),
             detail: empty_detail(),
+            refresh: crate::ui::app::Refresh {
+                requested: false,
+                reload: false,
+                problems: Vec::new(),
+            },
         }
     }
 
@@ -380,6 +385,11 @@ mod tests {
             selected,
             filter: empty_filter(),
             detail,
+            refresh: crate::ui::app::Refresh {
+                requested: false,
+                reload: false,
+                problems: Vec::new(),
+            },
         }
     }
 
@@ -407,6 +417,11 @@ mod tests {
                 active: false,
             },
             detail: empty_detail(),
+            refresh: crate::ui::app::Refresh {
+                requested: false,
+                reload: false,
+                problems: Vec::new(),
+            },
         }
     }
 
@@ -891,6 +906,11 @@ mod tests {
             selected: 0,
             filter: empty_filter(),
             detail: empty_detail(),
+            refresh: crate::ui::app::Refresh {
+                requested: false,
+                reload: false,
+                problems: Vec::new(),
+            },
         };
         let buf120 = render_at(120, 20, &d);
         assert!(interior_cols(&buf120, 2).starts_with("No OpenSpec repository found"));
@@ -1472,6 +1492,11 @@ mod tests {
                 problems: Vec::new(),
                 loaded: None,
             },
+            refresh: crate::ui::app::Refresh {
+                requested: false,
+                reload: false,
+                problems: Vec::new(),
+            },
         }
     }
 
@@ -1502,6 +1527,11 @@ mod tests {
             selected: base.selected,
             filter: base.filter,
             detail: base.detail,
+            refresh: crate::ui::app::Refresh {
+                requested: false,
+                reload: false,
+                problems: Vec::new(),
+            },
         };
 
         let buf120 = render_at(120, 20, &d);
@@ -1630,6 +1660,11 @@ mod tests {
                 tab: 0,
                 problems: Vec::new(),
                 loaded: None,
+            },
+            refresh: crate::ui::app::Refresh {
+                requested: false,
+                reload: false,
+                problems: Vec::new(),
             },
         };
         let default_style = Cell::default().style();
@@ -1939,6 +1974,11 @@ mod tests {
             selected: base.selected,
             filter: base.filter,
             detail: base.detail,
+            refresh: crate::ui::app::Refresh {
+                requested: false,
+                reload: false,
+                problems: Vec::new(),
+            },
         };
         d.apply(Action::Next);
         d.apply(Action::Next);

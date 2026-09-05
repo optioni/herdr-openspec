@@ -1388,6 +1388,18 @@ pub struct CliChanges {
     pub problems: Vec<String>,
 }
 
+/// Which changes the CLI must be re-asked about on a cycle. Describes CLI
+/// work only: the file producer always re-reads every file, since walking
+/// `openspec/changes/` costs well under a millisecond and is the only way to
+/// learn a change appeared or vanished. `refresh-worker` states the full
+/// contract; `union` (group 3) is what the worker uses to coalesce requests
+/// that queued while it was busy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Selection {
+    All,
+    Only(std::collections::BTreeSet<String>),
+}
+
 /// Do `a` and `b` name the same directory? Canonicalizes both and compares
 /// the canonical forms when the filesystem can resolve both, falling back
 /// to comparing the paths as given otherwise — so a symbolic link in either

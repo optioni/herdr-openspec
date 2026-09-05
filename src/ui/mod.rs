@@ -83,10 +83,17 @@ pub fn run() -> Result<(), StartError> {
     let mut dashboard = load(&cwd, &config);
     let mut term =
         ratatui::Terminal::new(ratatui::backend::CrosstermBackend::new(std::io::stdout()))?;
+    let mut fs = crate::watch::none();
+    let mut refresher = crate::refresh::none();
+    let mut live = crate::ui::driver::Live {
+        fs: &mut *fs,
+        refresher: &mut *refresher,
+    };
     driver::run_loop(
         &mut term,
         &mut dashboard,
         &mut CrosstermEvents,
+        &mut live,
         &read_artifact,
         TICK,
     )?;
@@ -131,6 +138,11 @@ pub fn load(start: &Path, config: &Config) -> Dashboard {
                     problems: Vec::new(),
                     loaded: None,
                 },
+                refresh: crate::ui::app::Refresh {
+                    requested: true,
+                    reload: false,
+                    problems: Vec::new(),
+                },
             }
         }
         crate::resolve::RepoSearch::NotFound { searched_from } => Dashboard {
@@ -150,6 +162,11 @@ pub fn load(start: &Path, config: &Config) -> Dashboard {
                 tab: 0,
                 problems: Vec::new(),
                 loaded: None,
+            },
+            refresh: crate::ui::app::Refresh {
+                requested: true,
+                reload: false,
+                problems: Vec::new(),
             },
         },
     }
@@ -231,6 +248,11 @@ mod tests {
                     problems: Vec::new(),
                     loaded: None,
                 },
+                refresh: crate::ui::app::Refresh {
+                    requested: false,
+                    reload: false,
+                    problems: Vec::new(),
+                },
             }
         }
 
@@ -283,10 +305,17 @@ mod tests {
                 let recorder = RecordingReader::always(Ok(twenty_lines));
                 let read = |p: &std::path::Path| recorder.read(p);
 
+                let mut fs = crate::watch::none();
+                let mut refresher = crate::refresh::none();
+                let mut live = crate::ui::driver::Live {
+                    fs: &mut *fs,
+                    refresher: &mut *refresher,
+                };
                 let summary = run_loop(
                     &mut terminal,
                     &mut dashboard,
                     &mut events,
+                    &mut live,
                     &read,
                     std::time::Duration::from_millis(1),
                 )
@@ -368,6 +397,11 @@ mod tests {
                         problems: Vec::new(),
                         loaded: None,
                     },
+                    refresh: crate::ui::app::Refresh {
+                        requested: false,
+                        reload: false,
+                        problems: Vec::new(),
+                    },
                 }
             };
 
@@ -399,10 +433,17 @@ mod tests {
                 ))));
                 let mut events = Script::new(presses);
 
+                let mut fs = crate::watch::none();
+                let mut refresher = crate::refresh::none();
+                let mut live = crate::ui::driver::Live {
+                    fs: &mut *fs,
+                    refresher: &mut *refresher,
+                };
                 run_loop(
                     &mut terminal,
                     &mut dashboard,
                     &mut events,
+                    &mut live,
                     &read,
                     std::time::Duration::from_millis(1),
                 )
@@ -547,10 +588,17 @@ apply:
                         ratatui::crossterm::event::KeyModifiers::CONTROL,
                     ))),
                 ]);
+                let mut fs = crate::watch::none();
+                let mut refresher = crate::refresh::none();
+                let mut live = crate::ui::driver::Live {
+                    fs: &mut *fs,
+                    refresher: &mut *refresher,
+                };
                 run_loop(
                     &mut terminal,
                     &mut dashboard,
                     &mut stage1,
+                    &mut live,
                     &crate::ui::read_artifact,
                     std::time::Duration::from_millis(1),
                 )
@@ -627,10 +675,17 @@ apply:
                 ))));
                 let mut stage2 = Script::new(presses);
 
+                let mut fs = crate::watch::none();
+                let mut refresher = crate::refresh::none();
+                let mut live = crate::ui::driver::Live {
+                    fs: &mut *fs,
+                    refresher: &mut *refresher,
+                };
                 run_loop(
                     &mut terminal,
                     &mut dashboard,
                     &mut stage2,
+                    &mut live,
                     &crate::ui::read_artifact,
                     std::time::Duration::from_millis(1),
                 )
@@ -716,6 +771,9 @@ apply:
                     active: false
                 }
             );
+            assert!(dashboard.refresh.requested);
+            assert!(!dashboard.refresh.reload);
+            assert!(dashboard.refresh.problems.is_empty());
         }
 
         #[test]
@@ -757,6 +815,9 @@ apply:
                     active: false
                 }
             );
+            assert!(dashboard.refresh.requested);
+            assert!(!dashboard.refresh.reload);
+            assert!(dashboard.refresh.problems.is_empty());
         }
 
         #[test]

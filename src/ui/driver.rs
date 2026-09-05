@@ -14,6 +14,16 @@ use crate::ui::view;
 /// work has a wake-up already in place.
 pub const TICK: Duration = Duration::from_millis(250);
 
+/// The loop's live-tier collaborators: the watcher and the worker, both
+/// reached only as non-blocking trait objects. A struct rather than two
+/// further parameters, so `run_loop`'s signature stays at six arguments and
+/// the two collaborators are named as one concept. Group 1 plumbs this
+/// through with no behaviour; `run_loop`'s body reads it starting group 9.
+pub struct Live<'a> {
+    pub fs: &'a mut dyn crate::watch::FsEvents,
+    pub refresher: &'a mut dyn crate::refresh::Refresher,
+}
+
 /// Draws performed and `next_event` calls made, over a run that ended
 /// because `dashboard.quit` was set. Draw count and poll count are
 /// otherwise unobservable, and are what distinguishes "drew before
@@ -45,9 +55,11 @@ pub fn run_loop<B: Backend, E: EventSource>(
     terminal: &mut Terminal<B>,
     dashboard: &mut Dashboard,
     events: &mut E,
+    live: &mut Live<'_>,
     read: ArtifactReader<'_>,
     tick: Duration,
 ) -> Result<LoopSummary, LoopError> {
+    let _ = &live; // group 9 reads it; group 1 plumbs it through only.
     let mut frames = 0usize;
     let mut polls = 0usize;
     loop {
@@ -109,6 +121,11 @@ mod tests {
                 tab: 0,
                 problems: Vec::new(),
                 loaded: None,
+            },
+            refresh: crate::ui::app::Refresh {
+                requested: false,
+                reload: false,
+                problems: Vec::new(),
             },
         }
     }
@@ -197,10 +214,17 @@ mod tests {
         let mut dashboard = dashboard();
         let mut events = Script::new(Vec::new());
 
+        let mut fs = crate::watch::none();
+        let mut refresher = crate::refresh::none();
+        let mut live = crate::ui::driver::Live {
+            fs: &mut *fs,
+            refresher: &mut *refresher,
+        };
         let result = run_loop(
             &mut terminal,
             &mut dashboard,
             &mut events,
+            &mut live,
             &|_: &std::path::Path| Ok(String::new()),
             Duration::from_millis(1),
         );
@@ -225,10 +249,17 @@ mod tests {
             Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
         ]);
 
+        let mut fs = crate::watch::none();
+        let mut refresher = crate::refresh::none();
+        let mut live = crate::ui::driver::Live {
+            fs: &mut *fs,
+            refresher: &mut *refresher,
+        };
         let summary = run_loop(
             &mut terminal,
             &mut dashboard,
             &mut events,
+            &mut live,
             &|_: &std::path::Path| Ok(String::new()),
             tick,
         )
@@ -254,10 +285,17 @@ mod tests {
             KeyModifiers::CONTROL,
         )))]);
 
+        let mut fs = crate::watch::none();
+        let mut refresher = crate::refresh::none();
+        let mut live = crate::ui::driver::Live {
+            fs: &mut *fs,
+            refresher: &mut *refresher,
+        };
         let summary = run_loop(
             &mut terminal,
             &mut dashboard,
             &mut events,
+            &mut live,
             &|_: &std::path::Path| Ok(String::new()),
             Duration::from_millis(1),
         )
@@ -286,10 +324,17 @@ mod tests {
             Ok(Some(press(KeyCode::Char('c'), KeyModifiers::CONTROL))),
         ]);
 
+        let mut fs = crate::watch::none();
+        let mut refresher = crate::refresh::none();
+        let mut live = crate::ui::driver::Live {
+            fs: &mut *fs,
+            refresher: &mut *refresher,
+        };
         let summary = run_loop(
             &mut terminal,
             &mut dashboard,
             &mut events,
+            &mut live,
             &|_: &std::path::Path| Ok(String::new()),
             Duration::from_millis(1),
         )
@@ -320,10 +365,17 @@ mod tests {
             Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
         ]);
 
+        let mut fs = crate::watch::none();
+        let mut refresher = crate::refresh::none();
+        let mut live = crate::ui::driver::Live {
+            fs: &mut *fs,
+            refresher: &mut *refresher,
+        };
         let summary = run_loop(
             &mut terminal,
             &mut dashboard,
             &mut events,
+            &mut live,
             &|_: &std::path::Path| Ok(String::new()),
             Duration::from_millis(1),
         )
@@ -348,10 +400,17 @@ mod tests {
             Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
         ]);
 
+        let mut fs = crate::watch::none();
+        let mut refresher = crate::refresh::none();
+        let mut live = crate::ui::driver::Live {
+            fs: &mut *fs,
+            refresher: &mut *refresher,
+        };
         let summary = run_loop(
             &mut terminal,
             &mut dashboard,
             &mut events,
+            &mut live,
             &|_: &std::path::Path| Ok(String::new()),
             Duration::from_millis(1),
         )
@@ -401,6 +460,11 @@ mod tests {
                 problems: Vec::new(),
                 loaded: None,
             },
+            refresh: crate::ui::app::Refresh {
+                requested: false,
+                reload: false,
+                problems: Vec::new(),
+            },
         }
     }
 
@@ -420,10 +484,17 @@ mod tests {
                 crate::testutil::RecordingReader::always(Ok(dashboard.detail.source.clone()));
             let read = |p: &std::path::Path| recorder.read(p);
 
+            let mut fs = crate::watch::none();
+            let mut refresher = crate::refresh::none();
+            let mut live = crate::ui::driver::Live {
+                fs: &mut *fs,
+                refresher: &mut *refresher,
+            };
             let summary = run_loop(
                 &mut terminal,
                 &mut dashboard,
                 &mut events,
+                &mut live,
                 &read,
                 Duration::from_millis(1),
             )
@@ -501,6 +572,11 @@ mod tests {
                 problems: Vec::new(),
                 loaded: None,
             },
+            refresh: crate::ui::app::Refresh {
+                requested: false,
+                reload: false,
+                problems: Vec::new(),
+            },
         }
     }
 
@@ -521,10 +597,17 @@ mod tests {
             let recorder = crate::testutil::RecordingReader::always(Ok(source.clone()));
             let read = |p: &std::path::Path| recorder.read(p);
 
+            let mut fs = crate::watch::none();
+            let mut refresher = crate::refresh::none();
+            let mut live = crate::ui::driver::Live {
+                fs: &mut *fs,
+                refresher: &mut *refresher,
+            };
             run_loop(
                 &mut terminal,
                 &mut dashboard,
                 &mut events,
+                &mut live,
                 &read,
                 Duration::from_millis(1),
             )
@@ -574,10 +657,17 @@ mod tests {
                 .collect();
             first.push(Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))));
             let mut events = Script::new(first);
+            let mut fs = crate::watch::none();
+            let mut refresher = crate::refresh::none();
+            let mut live = crate::ui::driver::Live {
+                fs: &mut *fs,
+                refresher: &mut *refresher,
+            };
             run_loop(
                 &mut terminal,
                 &mut dashboard,
                 &mut events,
+                &mut live,
                 &read,
                 Duration::from_millis(1),
             )
@@ -594,10 +684,17 @@ mod tests {
                 Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
             ];
             let mut events_select = Script::new(std::mem::take(&mut select_tab));
+            let mut fs = crate::watch::none();
+            let mut refresher = crate::refresh::none();
+            let mut live = crate::ui::driver::Live {
+                fs: &mut *fs,
+                refresher: &mut *refresher,
+            };
             run_loop(
                 &mut terminal,
                 &mut dashboard,
                 &mut events_select,
+                &mut live,
                 &read,
                 Duration::from_millis(1),
             )
@@ -615,10 +712,17 @@ mod tests {
                 .collect();
             second.push(Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))));
             let mut events2 = Script::new(second);
+            let mut fs = crate::watch::none();
+            let mut refresher = crate::refresh::none();
+            let mut live = crate::ui::driver::Live {
+                fs: &mut *fs,
+                refresher: &mut *refresher,
+            };
             run_loop(
                 &mut terminal,
                 &mut dashboard,
                 &mut events2,
+                &mut live,
                 &read,
                 Duration::from_millis(1),
             )
@@ -660,6 +764,11 @@ mod tests {
                 problems: base.detail.problems,
                 loaded: base.detail.loaded,
             },
+            refresh: crate::ui::app::Refresh {
+                requested: false,
+                reload: false,
+                problems: Vec::new(),
+            },
         };
         let backend = TestBackend::new(120, 20);
         let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
@@ -693,10 +802,17 @@ mod tests {
             KeyModifiers::NONE,
         )))]);
 
+        let mut fs = crate::watch::none();
+        let mut refresher = crate::refresh::none();
+        let mut live = crate::ui::driver::Live {
+            fs: &mut *fs,
+            refresher: &mut *refresher,
+        };
         let result = run_loop(
             &mut terminal,
             &mut dashboard,
             &mut events,
+            &mut live,
             &|_: &std::path::Path| Ok(String::new()),
             Duration::from_millis(1),
         );
@@ -736,6 +852,11 @@ mod tests {
                 problems: Vec::new(),
                 loaded: None,
             },
+            refresh: crate::ui::app::Refresh {
+                requested: false,
+                reload: false,
+                problems: Vec::new(),
+            },
         }
     }
 
@@ -751,10 +872,17 @@ mod tests {
         let recorder = crate::testutil::RecordingReader::always(Ok("# proposal\n".to_string()));
         let read = |p: &std::path::Path| recorder.read(p);
 
+        let mut fs = crate::watch::none();
+        let mut refresher = crate::refresh::none();
+        let mut live = crate::ui::driver::Live {
+            fs: &mut *fs,
+            refresher: &mut *refresher,
+        };
         let summary = run_loop(
             &mut terminal,
             &mut dashboard,
             &mut events,
+            &mut live,
             &read,
             Duration::from_millis(1),
         )
@@ -784,10 +912,17 @@ mod tests {
         let recorder = crate::testutil::RecordingReader::always(Ok("# proposal\n".to_string()));
         let read = |p: &std::path::Path| recorder.read(p);
 
+        let mut fs = crate::watch::none();
+        let mut refresher = crate::refresh::none();
+        let mut live = crate::ui::driver::Live {
+            fs: &mut *fs,
+            refresher: &mut *refresher,
+        };
         let result = run_loop(
             &mut terminal,
             &mut dashboard,
             &mut events,
+            &mut live,
             &read,
             Duration::from_millis(1),
         );

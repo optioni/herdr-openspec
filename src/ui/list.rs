@@ -355,6 +355,11 @@ mod tests {
             selected,
             filter: empty_filter(),
             detail: empty_detail(),
+            refresh: crate::ui::app::Refresh {
+                requested: false,
+                reload: false,
+                problems: Vec::new(),
+            },
         }
     }
 
@@ -426,6 +431,11 @@ mod tests {
                 selected: 0,
                 filter: empty_filter(),
                 detail: empty_detail(),
+                refresh: crate::ui::app::Refresh {
+                    requested: false,
+                    reload: false,
+                    problems: Vec::new(),
+                },
             },
         ]
     }
@@ -756,6 +766,11 @@ mod tests {
             selected: 0,
             filter: empty_filter(),
             detail: empty_detail(),
+            refresh: crate::ui::app::Refresh {
+                requested: false,
+                reload: false,
+                problems: Vec::new(),
+            },
         };
         let rows38 = rows(&d, 38);
         assert_eq!(rows38.len(), 3);
@@ -801,6 +816,11 @@ mod tests {
             selected: 0,
             filter: empty_filter(),
             detail: empty_detail(),
+            refresh: crate::ui::app::Refresh {
+                requested: false,
+                reload: false,
+                problems: Vec::new(),
+            },
         };
         let rows_with_problems = rows(&with_problems, 38);
         assert_eq!(rows_with_problems.len(), 3);

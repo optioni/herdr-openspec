@@ -977,32 +977,32 @@ no behaviour: `Action::Refresh` gets a `=> {}` arm and **no** `action_for` mappi
 honest RED to manufacture. The evidence is that the crate compiles, every existing test still
 passes, and `GATE-MECH1` still holds.
 
-- [ ] 1.1 CHECK: `python3 $CHECKS/GATE-MECH1.py src`, `cargo test --all-features --lib
+- [x] 1.1 CHECK: `python3 $CHECKS/GATE-MECH1.py src`, `cargo test --all-features --lib
       'ui::app::tests::'`, and `cargo test --all-features --lib 'ui::driver::tests::'` all
       green before any edit, so the "no regression" claim below has a baseline.
 
-- [ ] 1.2 CHANGE: Add `pub struct Refresh { pub requested: bool, pub reload: bool, pub
+- [x] 1.2 CHANGE: Add `pub struct Refresh { pub requested: bool, pub reload: bool, pub
       problems: Vec<String> }` to `src/ui/app.rs`, beside `Filter` and `Detail`. Do **not**
       derive or implement `Default` for it: `NODEFAULT-UI` forbids it, and the compile error
       at each construction site is the mechanism that keeps the nine-field `Dashboard` from
       being half-adopted. Its doc comment states what each field means, not how it is
       computed, and — per `NOBLOCK` leg 2 — names no clock type.
 
-- [ ] 1.3 CHANGE: Add `pub refresh: Refresh` to `Dashboard`, after `detail`. Name it at every
+- [x] 1.3 CHANGE: Add `pub refresh: Refresh` to `Dashboard`, after `detail`. Name it at every
       construction site. Do **not** reach for `..Default::default()` or a `..base` rest.
       Red-when: the crate compiles without every site naming the field — that would mean a
       `Default` or a `..` slipped in. **The gate is `E0063`, not the grep**: the 70 grep hits
       recorded in task 0.1 include the struct definition, doc comments, and `&Dashboard {`
       patterns, and are orientation only.
 
-- [ ] 1.4 CHANGE: Add `Refresh` to `ui::app::Action` as the thirteenth variant, with a
+- [x] 1.4 CHANGE: Add `Refresh` to `ui::app::Action` as the thirteenth variant, with a
       `Action::Refresh => {}` arm in `Dashboard::apply` and **no** arm in `action_for` — the
       key mapping and the flag are group 8's behaviour. Extend
       `ui::app::tests::no_action_mutates_changes`'s exhaustive array to thirteen and its count
       assertion from twelve to thirteen; it must stay green, since a no-op arm mutates
       nothing.
 
-- [ ] 1.5 CHANGE: Create `src/watch.rs` and `src/refresh.rs`, declare `pub mod watch;` and
+- [x] 1.5 CHANGE: Create `src/watch.rs` and `src/refresh.rs`, declare `pub mod watch;` and
       `pub mod refresh;` in `src/lib.rs`, and populate them with the **inert** halves only:
       - `src/watch.rs`: `pub struct WatchError(pub String)` with a `Display`, the `FsEvents`
         trait, `pub fn none() -> Box<dyn FsEvents>` returning an implementation whose `drain`
@@ -1027,7 +1027,7 @@ passes, and `GATE-MECH1` still holds.
       `CliChanges` would make that check red in `driver.rs`, and the fix would be to weaken
       it. `RefreshResult` carries `ChangeSet`.
 
-- [ ] 1.6 CHANGE: Add `pub struct Live<'a> { pub fs: &'a mut dyn crate::watch::FsEvents, pub
+- [x] 1.6 CHANGE: Add `pub struct Live<'a> { pub fs: &'a mut dyn crate::watch::FsEvents, pub
       refresher: &'a mut dyn crate::refresh::Refresher }` to `src/ui/driver.rs` and widen
       `run_loop` to `(terminal, dashboard, events, live, read, tick)` — `live` fourth, so
       `read` and `tick` keep their positions. The body **ignores** `live` for now. Update all
@@ -1038,7 +1038,7 @@ passes, and `GATE-MECH1` still holds.
       `too_many_arguments` threshold; a seventh would trip `-D warnings` and the fix would be
       an `#[allow]`, which is how a lint gets waived rather than satisfied.
 
-- [ ] 1.7 CHANGE: Add the two `#[cfg(test)]` doubles to `crate::testutil`, beside `Script` and
+- [x] 1.7 CHANGE: Add the two `#[cfg(test)]` doubles to `crate::testutil`, beside `Script` and
       `RecordingReader`, both **synchronous and thread-free**, both recording into a
       `RefCell`:
       - `ScriptedFs` — a queue of `Result<Option<Vec<PathBuf>>, WatchError>` for `drain`, a
@@ -1054,19 +1054,19 @@ passes, and `GATE-MECH1` still holds.
       Stating the gap is the point: a Red-when that claims a check it does not have is worse
       than none.
 
-- [ ] 1.8 CHANGE: `ui::load` sets `refresh: Refresh { requested: true, reload: false,
+- [x] 1.8 CHANGE: `ui::load` sets `refresh: Refresh { requested: true, reload: false,
       problems: Vec::new() }` in **both** its `Found` and `NotFound` arms. Extend
       `ui::tests::load::a_scratch_repository_is_loaded_from_files` and
       `no_repository_above_the_start` with the `refresh` assertion. Both stay green.
 
-- [ ] 1.9 CHECK: Contract gate — re-read `design.md` → Contracts and confirm the signatures on
+- [x] 1.9 CHECK: Contract gate — re-read `design.md` → Contracts and confirm the signatures on
       disk match it exactly: `Refresh`'s three fields, `Dashboard`'s nine, `Detail`'s
       **five** (unchanged), `Action`'s thirteen, `run_loop`'s six parameters, `Live`'s two,
       `FsEvents`' two methods, `Refresher`'s two, and `RefreshResult`'s two variants. Confirm
       `Change`'s seven fields and `ChangeSet`'s three are untouched, so `change-model`'s
       two-producer gate is unmoved.
 
-- [ ] 1.10 CHECK: The checks that arm at this group, and their deferred plants:
+- [x] 1.10 CHECK: The checks that arm at this group, and their deferred plants:
       `MIN=21 sh $CHECKS/NOSPAWN-GREP.sh`; `MIN=21 sh $CHECKS/NOLIT-CHANGE.sh` plus its
       planted `Change { … }` in `src/refresh.rs` (expect FAIL naming that file, then revert);
       `MIN=21 sh $CHECKS/MDSEAM.sh`; `MIN=24 SLEEP_MIN=3 sh $CHECKS/NOSLEEP.sh` — still
@@ -1082,7 +1082,7 @@ passes, and `GATE-MECH1` still holds.
       **unchanged** floors — that they do not move is this group's evidence that nothing was
       added under `src/ui/`. `git status --porcelain src/` empty after every revert.
 
-- [ ] 1.11 VERIFY: `cargo fmt --all -- --check`;
+- [x] 1.11 VERIFY: `cargo fmt --all -- --check`;
       `cargo clippy --all-targets --all-features -- -D warnings`;
       `cargo test --all-features` — **fully green**, this being the last boundary before the
       acceptance test goes red; `python3 $CHECKS/GATE-MECH1.py src`;
