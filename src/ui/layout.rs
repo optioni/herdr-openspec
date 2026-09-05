@@ -89,11 +89,51 @@ pub fn viewport(rows: usize, cursor: usize, height: u16) -> usize {
     cursor.saturating_sub(height / 2).min(rows - height)
 }
 
+/// A bordered region's interior: the one place in the crate that computes
+/// this, so `Dashboard::normalise_scroll` can derive it without
+/// constructing a `ratatui::widgets::Block`. Performs exactly the
+/// arithmetic `Block::bordered().inner` does: the origin advanced by one
+/// column and one row and clamped to the rectangle's own right and bottom
+/// edges, with the width and height each reduced by two, saturating to
+/// zero. The clamp is not decoration — at a 1x1 or 0x0 rectangle it is the
+/// difference between `x: 0` and `x: 1`.
+pub fn interior(area: Rect) -> Rect {
+    let x = area.x.saturating_add(1).min(area.x + area.width);
+    let y = area.y.saturating_add(1).min(area.y + area.height);
+    Rect {
+        x,
+        y,
+        width: area.width.saturating_sub(2),
+        height: area.height.saturating_sub(2),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::ui::app::Route;
-    use crate::ui::layout::{LayoutMode, WIDE_MIN_WIDTH, mode, split_body, split_frame, viewport};
+    use crate::ui::layout::{
+        LayoutMode, WIDE_MIN_WIDTH, interior, mode, split_body, split_frame, viewport,
+    };
     use ratatui::layout::Rect;
+    use ratatui::widgets::Block;
+
+    #[test]
+    fn interior_agrees_with_a_bordered_block() {
+        for area in [
+            Rect::new(0, 1, 40, 18),
+            Rect::new(40, 1, 80, 18),
+            Rect::new(0, 1, 60, 18),
+            Rect::new(0, 0, 2, 2),
+            Rect::new(0, 0, 1, 1),
+            Rect::new(0, 0, 0, 0),
+        ] {
+            assert_eq!(
+                interior(area),
+                Block::bordered().inner(area),
+                "area {area:?}"
+            );
+        }
+    }
 
     #[test]
     fn viewport_is_zero_when_everything_fits() {

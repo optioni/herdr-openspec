@@ -1299,7 +1299,7 @@ carries is group 6's.
 caller and shipping it a group early with its test a group late would be untested saturating
 arithmetic and a green-on-arrival RED in group 7 — the defect class group 12 hunts for.
 
-- [ ] 6.1 RED: Write a failing test in `src/ui/layout.rs`'s `mod tests`:
+- [x] 6.1 RED: Write a failing test in `src/ui/layout.rs`'s `mod tests`:
       - `interior_agrees_with_a_bordered_block` — `interior` and
         `ratatui::widgets::Block::bordered().inner` over `Rect::new(0,1,40,18)`,
         `Rect::new(40,1,80,18)`, `Rect::new(0,1,60,18)`, `Rect::new(0,0,2,2)`,
@@ -1312,11 +1312,11 @@ arithmetic and a green-on-arrival RED in group 7 — the defect class group 12 h
         comparison and fails this one.
       **Red when:** the crate does not compile because `layout::interior` does not exist.
 
-- [ ] 6.2 GREEN: Implement `layout::interior(area: Rect) -> Rect` with the clamp 6.1 pins, and
+- [x] 6.2 GREEN: Implement `layout::interior(area: Rect) -> Rect` with the clamp 6.1 pins, and
       replace `src/ui/view.rs`'s single `Block::bordered().inner(area)` call with it — a
       behaviour-preserving refactor, pinned by 6.1.
 
-- [ ] 6.3 RED: Write failing tests in `src/ui/app.rs`'s `mod tests` → `mod keys`:
+- [x] 6.3 RED: Write failing tests in `src/ui/app.rs`'s `mod tests` → `mod keys`:
       - `detail_destructures_into_exactly_two_fields` — an exhaustive `let Detail { source,
         scroll }` with no `..`.
       - `next_and_prev_scroll_at_the_detail_route` — a `Dashboard` at `Route::Detail` with the
@@ -1354,7 +1354,7 @@ arithmetic and a green-on-arrival RED in group 7 — the defect class group 12 h
       `Dashboard::normalise_scroll` do not exist. Confirm the compiler names those three items
       and not a typo.
 
-- [ ] 6.4 GREEN: Rename `Action::SelectNext` → `Action::Next` and `Action::SelectPrev` →
+- [x] 6.4 GREEN: Rename `Action::SelectNext` → `Action::Next` and `Action::SelectPrev` →
       `Action::Prev` throughout the crate, in one commit, so no intermediate state has a
       half-renamed enum. The sites are **measured, not guessed**: `src/ui/app.rs` holds every
       non-test site — the two enum variants, two `apply` arms, and two `action_for` arms — and
@@ -1362,14 +1362,14 @@ arithmetic and a green-on-arrival RED in group 7 — the defect class group 12 h
       `run_loop` passes an opaque `action` to `dashboard.apply(action)`. The compiler finds
       anything this list misses; record any site it finds that this list does not name.
 
-- [ ] 6.5 GREEN: Branch `apply`'s `Next` and `Prev` on `self.route` — move and clamp
+- [x] 6.5 GREEN: Branch `apply`'s `Next` and `Prev` on `self.route` — move and clamp
       `selected` at `Route::List`, move `detail.scroll` by one saturating at `Route::Detail`,
       never both. Reset `detail.scroll` to 0 on **every** arm that moves the route:
       `OpenDetail` when it sets `Route::Detail`, `Back` when it returns to `Route::List`, and
       `FilterStart`, which also sets `Route::List`. Dismissing a filter layer is **not** a
       route move and leaves `detail.scroll` alone.
 
-- [ ] 6.6 GREEN: Implement `Dashboard::normalise_scroll(&mut self, frame_area: Rect)` using
+- [x] 6.6 GREEN: Implement `Dashboard::normalise_scroll(&mut self, frame_area: Rect)` using
       `layout::split_frame`, `layout::split_body`, and the `layout::interior` landed in 6.2,
       early-returning when the detail region is `None` or its interior has zero width or zero
       height.
@@ -1377,13 +1377,13 @@ arithmetic and a green-on-arrival RED in group 7 — the defect class group 12 h
       interior — that is the duplication `layout::interior` exists to prevent, and design.md →
       Decisions rejects it by name.
 
-- [ ] 6.7 VERIFY: `testcount --lib 'ui::app::tests::' 30` and
+- [x] 6.7 VERIFY: `testcount --lib 'ui::app::tests::' 30` and
       `testcount --lib 'ui::layout::tests::' 10`, then `sh $CHECKS/NODEFAULT-UI.sh` with no
       argument — it must still pass with `Detail` now carrying a destructuring companion.
       **Red when:** either count is short, or `NODEFAULT-UI` reports a `Default` or an elided
       field for any of the three types.
 
-- [ ] 6.8 VERIFY: the four intermediate-gate commands; still exactly one known failure.
+- [x] 6.8 VERIFY: the four intermediate-gate commands; still exactly one known failure.
       Commit: `feat(markdown-viewer): scroll the detail route with j, k, and the arrows`.
 
 ---

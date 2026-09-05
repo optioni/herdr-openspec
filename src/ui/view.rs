@@ -9,7 +9,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::widgets::Block;
 
 use crate::ui::app::{Dashboard, Filter, Route};
-use crate::ui::layout::{split_body, split_frame, viewport};
+use crate::ui::layout::{interior, split_body, split_frame, viewport};
 use crate::ui::list;
 
 /// The footer's key hints, in the order they are drawn and dropped from.
@@ -30,8 +30,7 @@ fn render_body(frame: &mut Frame, body: Rect, dashboard: &Dashboard) {
     let (list_area, detail) = split_body(body, dashboard.route);
     if let Some(area) = list_area {
         render_region(frame, area, "Changes", dashboard.route == Route::List);
-        let interior = Block::bordered().inner(area);
-        render_list(frame, interior, dashboard);
+        render_list(frame, interior(area), dashboard);
     }
     if let Some(area) = detail {
         render_region(frame, area, "Detail", dashboard.route == Route::Detail);
@@ -895,8 +894,8 @@ mod tests {
     #[test]
     fn navigation_moves_the_marker() {
         let mut d = three_active();
-        d.apply(Action::SelectNext);
-        d.apply(Action::SelectNext);
+        d.apply(Action::Next);
+        d.apply(Action::Next);
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
             assert_eq!(cell(&buf, 1, 4).symbol(), ">");
@@ -908,7 +907,7 @@ mod tests {
     fn selection_clamps_at_both_ends_on_screen() {
         let mut d = three_active();
         for _ in 0..4 {
-            d.apply(Action::SelectNext);
+            d.apply(Action::Next);
         }
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
@@ -927,8 +926,8 @@ mod tests {
             0,
             Route::List,
         );
-        d.apply(Action::SelectNext);
-        d.apply(Action::SelectNext);
+        d.apply(Action::Next);
+        d.apply(Action::Next);
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
             assert!(interior_cols(&buf, 5).contains("legacy-cleanup"));

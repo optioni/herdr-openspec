@@ -23,15 +23,19 @@ pub enum Route {
 /// The nine outcomes a terminal event can map to, under either filter mode.
 /// `action_for` is total over every `Event`. `Back` replaces the earlier
 /// `BackToList`: it now dismisses one of several layers rather than only
-/// ever returning to the list route. See `specs/dashboard-loop/spec.md` and
+/// ever returning to the list route. `Next` and `Prev` are renamed from
+/// `SelectNext` and `SelectPrev`: the action is route-agnostic — the list
+/// selection at `Route::List`, the detail scroll at `Route::Detail` — and
+/// a name asserting one of the two would be false half the time. See
+/// `specs/dashboard-loop/spec.md`, `specs/detail-scroll/spec.md`, and
 /// `specs/list-filtering/spec.md`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Action {
     Quit,
     OpenDetail,
     Back,
-    SelectNext,
-    SelectPrev,
+    Next,
+    Prev,
     FilterStart,
     FilterPush(char),
     FilterPop,
@@ -104,13 +108,16 @@ impl Dashboard {
                     self.filter.active = false;
                 } else {
                     self.route = Route::Detail;
+                    self.detail.scroll = 0;
                 }
             }
             // Dismiss exactly one layer: filter mode with its query, when
             // active; else a non-empty query alone; else the route, back to
             // List; else nothing — so a stray `Esc` at the root cannot close
             // the pane. Only the first two layers can shrink the visible
-            // list, so only they clamp `selected`.
+            // list, so only they clamp `selected`; only the route layer
+            // resets `detail.scroll` — dismissing the filter is not a route
+            // move.
             Action::Back => {
                 if self.filter.active {
                     self.filter.active = false;
@@ -121,19 +128,37 @@ impl Dashboard {
                     self.clamp_selection();
                 } else if self.route == Route::Detail {
                     self.route = Route::List;
+                    self.detail.scroll = 0;
                 }
             }
-            Action::SelectNext => {
-                self.selected = self.selected.saturating_add(1);
-                self.clamp_selection();
-            }
-            Action::SelectPrev => {
-                self.selected = self.selected.saturating_sub(1);
-                self.clamp_selection();
-            }
+            // Route-dependent: the list selection at `Route::List`, the
+            // detail scroll at `Route::Detail`, never both. The scroll's
+            // upper bound is enforced by the draw-time clamp
+            // (`render_detail`) and the frame normalisation
+            // (`normalise_scroll`), not here — `saturating_add` alone would
+            // let a held key run the stored value arbitrarily far ahead.
+            Action::Next => match self.route {
+                Route::List => {
+                    self.selected = self.selected.saturating_add(1);
+                    self.clamp_selection();
+                }
+                Route::Detail => {
+                    self.detail.scroll = self.detail.scroll.saturating_add(1);
+                }
+            },
+            Action::Prev => match self.route {
+                Route::List => {
+                    self.selected = self.selected.saturating_sub(1);
+                    self.clamp_selection();
+                }
+                Route::Detail => {
+                    self.detail.scroll = self.detail.scroll.saturating_sub(1);
+                }
+            },
             Action::FilterStart => {
                 self.filter.active = true;
                 self.route = Route::List;
+                self.detail.scroll = 0;
             }
             Action::FilterPush(c) => {
                 self.filter.query.push(c);
@@ -145,6 +170,30 @@ impl Dashboard {
             }
             Action::Ignore => {}
         }
+    }
+
+    /// Recompute the detail region from `frame_area` — through
+    /// `layout::split_frame`, `layout::split_body`, and `layout::interior`
+    /// — and clamp the stored `detail.scroll` against the line count the
+    /// markdown at that interior's width actually produces. A pure total
+    /// function of `&mut self` and `frame_area`: it changes nothing when
+    /// the detail region is not drawn (the narrow list route) or its
+    /// interior has zero width or zero height. Called once per loop
+    /// iteration by `ui::driver::run_loop`, against the frame just drawn,
+    /// so a held key cannot leave the offset arbitrarily far past the end.
+    pub fn normalise_scroll(&mut self, frame_area: ratatui::layout::Rect) {
+        let (_, body, _) = crate::ui::layout::split_frame(frame_area);
+        let (_, detail_area) = crate::ui::layout::split_body(body, self.route);
+        let Some(area) = detail_area else {
+            return;
+        };
+        let interior = crate::ui::layout::interior(area);
+        if interior.width == 0 || interior.height == 0 {
+            return;
+        }
+        let total = crate::ui::markdown::lines(&self.detail.source, interior.width).len();
+        let height = interior.height as usize;
+        self.detail.scroll = self.detail.scroll.min(total.saturating_sub(height));
     }
 
     /// Active-then-archived, in `ChangeSet`'s own order, with `list-filtering`'s
@@ -211,8 +260,8 @@ pub fn action_for(event: &Event, filtering: bool) -> Action {
             (KeyCode::Backspace, KeyModifiers::NONE) => Action::FilterPop,
             (KeyCode::Enter, KeyModifiers::NONE) => Action::OpenDetail,
             (KeyCode::Esc, KeyModifiers::NONE) => Action::Back,
-            (KeyCode::Up, KeyModifiers::NONE) => Action::SelectPrev,
-            (KeyCode::Down, KeyModifiers::NONE) => Action::SelectNext,
+            (KeyCode::Up, KeyModifiers::NONE) => Action::Prev,
+            (KeyCode::Down, KeyModifiers::NONE) => Action::Next,
             _ => Action::Ignore,
         };
     }
@@ -220,10 +269,10 @@ pub fn action_for(event: &Event, filtering: bool) -> Action {
         (KeyCode::Char('q'), KeyModifiers::NONE) => Action::Quit,
         (KeyCode::Char('c'), KeyModifiers::CONTROL) => Action::Quit,
         (KeyCode::Char('j'), KeyModifiers::NONE) | (KeyCode::Down, KeyModifiers::NONE) => {
-            Action::SelectNext
+            Action::Next
         }
         (KeyCode::Char('k'), KeyModifiers::NONE) | (KeyCode::Up, KeyModifiers::NONE) => {
-            Action::SelectPrev
+            Action::Prev
         }
         (KeyCode::Char('/'), KeyModifiers::NONE) => Action::FilterStart,
         (KeyCode::Enter, KeyModifiers::NONE) => Action::OpenDetail,
@@ -419,6 +468,23 @@ mod tests {
                 action_for(&press(KeyCode::Enter, KeyModifiers::CONTROL), false),
                 Action::Ignore
             );
+
+            // detail-scroll: "Enter and Esc move between the two routes" —
+            // both route moves reset detail.scroll, whether or not it was
+            // ever nonzero.
+            let mut d = dashboard_at(Route::List);
+            d.apply(Action::OpenDetail);
+            assert_eq!(d.route, Route::Detail);
+            assert!(!d.quit);
+            assert_eq!(d.detail.scroll, 0);
+            d.apply(Action::Back);
+            assert_eq!(d.route, Route::List);
+            assert!(!d.quit);
+            assert_eq!(d.detail.scroll, 0);
+            d.apply(Action::Back);
+            assert_eq!(d.route, Route::List);
+            assert!(!d.quit);
+            assert_eq!(d.detail.scroll, 0);
         }
 
         #[test]
@@ -508,19 +574,19 @@ mod tests {
         fn navigation_and_filter_keys_are_distinguished() {
             assert_eq!(
                 action_for(&press(KeyCode::Char('j'), KeyModifiers::NONE), false),
-                Action::SelectNext
+                Action::Next
             );
             assert_eq!(
                 action_for(&press(KeyCode::Down, KeyModifiers::NONE), false),
-                Action::SelectNext
+                Action::Next
             );
             assert_eq!(
                 action_for(&press(KeyCode::Char('k'), KeyModifiers::NONE), false),
-                Action::SelectPrev
+                Action::Prev
             );
             assert_eq!(
                 action_for(&press(KeyCode::Up, KeyModifiers::NONE), false),
-                Action::SelectPrev
+                Action::Prev
             );
             assert_eq!(
                 action_for(&press(KeyCode::Char('/'), KeyModifiers::NONE), false),
@@ -545,11 +611,11 @@ mod tests {
             // the suite green without this pair.
             assert_eq!(
                 action_for(&press(KeyCode::Up, KeyModifiers::NONE), true),
-                Action::SelectPrev
+                Action::Prev
             );
             assert_eq!(
                 action_for(&press(KeyCode::Down, KeyModifiers::NONE), true),
-                Action::SelectNext
+                Action::Next
             );
         }
 
@@ -618,6 +684,7 @@ mod tests {
             let mut d = dashboard_at(Route::Detail);
             d.filter.active = true;
             d.filter.query = "add".to_string();
+            d.detail.scroll = 3;
 
             d.apply(Action::Back);
             assert!(!d.filter.active);
@@ -628,10 +695,16 @@ mod tests {
             // `Back`) left the suite green without this assertion.
             assert_eq!(d.route, Route::Detail);
             assert!(!d.quit);
+            // detail-scroll: dismissing the filter layer is not a route
+            // move, so the scroll survives it.
+            assert_eq!(d.detail.scroll, 3);
 
             d.apply(Action::Back);
             assert_eq!(d.route, Route::List);
             assert!(!d.quit);
+            // The second `Back` dismisses the route layer, which does
+            // reset the scroll.
+            assert_eq!(d.detail.scroll, 0);
 
             d.apply(Action::Back);
             assert_eq!(d.route, Route::List);
@@ -653,17 +726,198 @@ mod tests {
         }
 
         #[test]
-        fn select_next_and_prev_clamp() {
+        fn next_and_prev_clamp() {
             let mut d = five_change_dashboard();
             d.changes.archived.clear();
             for _ in 0..4 {
-                d.apply(Action::SelectNext);
+                d.apply(Action::Next);
             }
             assert_eq!(d.selected, 2);
             for _ in 0..4 {
-                d.apply(Action::SelectPrev);
+                d.apply(Action::Prev);
             }
             assert_eq!(d.selected, 0);
+        }
+
+        fn twenty_line_detail() -> Detail {
+            Detail {
+                source: (0..20).map(|i| format!("- line-{i:02}\n")).collect(),
+                scroll: 0,
+            }
+        }
+
+        #[test]
+        fn detail_destructures_into_exactly_two_fields() {
+            let d = twenty_line_detail();
+            let Detail { source, scroll } = &d;
+            assert!(source.starts_with("- line-00"));
+            assert_eq!(*scroll, 0);
+        }
+
+        #[test]
+        fn next_and_prev_scroll_at_the_detail_route() {
+            let mut d = Dashboard {
+                detail: twenty_line_detail(),
+                route: Route::Detail,
+                ..dashboard_at(Route::Detail)
+            };
+            d.apply(Action::Next);
+            assert_eq!(d.detail.scroll, 1);
+            assert_eq!(d.selected, 0);
+            d.apply(Action::Next);
+            assert_eq!(d.detail.scroll, 2);
+            assert_eq!(d.selected, 0);
+        }
+
+        #[test]
+        fn next_and_prev_select_at_the_list_route() {
+            let mut d = five_change_dashboard();
+            d.changes.archived.clear();
+            d.detail = twenty_line_detail();
+            d.route = Route::List;
+            d.apply(Action::Next);
+            d.apply(Action::Next);
+            assert_eq!(d.selected, 2);
+            assert_eq!(d.detail.scroll, 0);
+        }
+
+        #[test]
+        fn scroll_stops_at_the_top() {
+            let mut d = Dashboard {
+                detail: twenty_line_detail(),
+                route: Route::Detail,
+                ..dashboard_at(Route::Detail)
+            };
+            for _ in 0..4 {
+                d.apply(Action::Prev);
+                assert_eq!(d.detail.scroll, 0);
+            }
+        }
+
+        #[test]
+        fn filter_mode_types_j_and_k_while_arrows_scroll() {
+            assert_eq!(
+                action_for(&press(KeyCode::Char('j'), KeyModifiers::NONE), true),
+                Action::FilterPush('j')
+            );
+            assert_eq!(
+                action_for(&press(KeyCode::Char('k'), KeyModifiers::NONE), true),
+                Action::FilterPush('k')
+            );
+            assert_eq!(
+                action_for(&press(KeyCode::Down, KeyModifiers::NONE), true),
+                Action::Next
+            );
+            assert_eq!(
+                action_for(&press(KeyCode::Up, KeyModifiers::NONE), true),
+                Action::Prev
+            );
+
+            let mut d = Dashboard {
+                detail: twenty_line_detail(),
+                route: Route::Detail,
+                filter: Filter {
+                    query: String::new(),
+                    active: true,
+                },
+                ..dashboard_at(Route::Detail)
+            };
+            d.apply(Action::FilterPush('j'));
+            d.apply(Action::FilterPush('k'));
+            d.apply(Action::Next);
+            d.apply(Action::Prev);
+            assert_eq!(d.filter.query, "jk");
+            assert_eq!(d.detail.scroll, 0);
+        }
+
+        #[test]
+        fn every_route_move_resets_the_scroll() {
+            let mut d = Dashboard {
+                detail: Detail {
+                    source: twenty_line_detail().source,
+                    scroll: 3,
+                },
+                route: Route::Detail,
+                ..dashboard_at(Route::Detail)
+            };
+            d.apply(Action::Back);
+            assert_eq!(d.detail.scroll, 0);
+            d.apply(Action::OpenDetail);
+            assert_eq!(d.detail.scroll, 0);
+
+            let mut d2 = Dashboard {
+                detail: Detail {
+                    source: twenty_line_detail().source,
+                    scroll: 3,
+                },
+                route: Route::Detail,
+                ..dashboard_at(Route::Detail)
+            };
+            d2.apply(Action::FilterStart);
+            assert_eq!(d2.route, Route::List);
+            assert_eq!(d2.detail.scroll, 0);
+
+            let mut d3 = Dashboard {
+                detail: Detail {
+                    source: twenty_line_detail().source,
+                    scroll: 3,
+                },
+                route: Route::Detail,
+                filter: Filter {
+                    query: String::new(),
+                    active: true,
+                },
+                ..dashboard_at(Route::Detail)
+            };
+            d3.apply(Action::Back);
+            assert_eq!(d3.detail.scroll, 3);
+        }
+
+        #[test]
+        fn normalise_scroll_clamps_against_the_frame() {
+            let mut d = Dashboard {
+                detail: Detail {
+                    source: twenty_line_detail().source,
+                    scroll: 99,
+                },
+                route: Route::List,
+                ..dashboard_at(Route::List)
+            };
+            d.normalise_scroll(ratatui::layout::Rect::new(0, 0, 120, 20));
+            assert_eq!(d.detail.scroll, 4);
+
+            let mut d2 = Dashboard {
+                detail: Detail {
+                    source: twenty_line_detail().source,
+                    scroll: 99,
+                },
+                route: Route::Detail,
+                ..dashboard_at(Route::Detail)
+            };
+            d2.normalise_scroll(ratatui::layout::Rect::new(0, 0, 60, 20));
+            assert_eq!(d2.detail.scroll, 4);
+        }
+
+        #[test]
+        fn normalise_scroll_is_inert_when_the_detail_region_is_not_drawn() {
+            let mut d = Dashboard {
+                detail: Detail {
+                    source: twenty_line_detail().source,
+                    scroll: 7,
+                },
+                route: Route::List,
+                ..dashboard_at(Route::List)
+            };
+            d.normalise_scroll(ratatui::layout::Rect::new(0, 0, 60, 20));
+            assert_eq!(
+                d.detail.scroll, 7,
+                "narrow list route: not drawn, unchanged"
+            );
+            d.normalise_scroll(ratatui::layout::Rect::new(0, 0, 120, 20));
+            assert_eq!(
+                d.detail.scroll, 4,
+                "wide: drawn, so the early return is a real branch"
+            );
         }
 
         #[test]
@@ -688,8 +942,8 @@ mod tests {
                 Action::Quit,
                 Action::OpenDetail,
                 Action::Back,
-                Action::SelectNext,
-                Action::SelectPrev,
+                Action::Next,
+                Action::Prev,
                 Action::FilterStart,
                 Action::FilterPush('x'),
                 Action::FilterPop,
@@ -703,9 +957,9 @@ mod tests {
             }
 
             let mut empty = dashboard_at(Route::List);
-            empty.apply(Action::SelectNext);
+            empty.apply(Action::Next);
             assert_eq!(empty.selected, 0);
-            empty.apply(Action::SelectPrev);
+            empty.apply(Action::Prev);
             assert_eq!(empty.selected, 0);
         }
 
