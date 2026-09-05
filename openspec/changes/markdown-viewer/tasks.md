@@ -1032,6 +1032,12 @@ carries is group 6's.
       loudly if the breakpoint moves; at 120 the detail interior is `Rect::new(41, 2, 78, 16)`
       and at 60, in the detail route, `Rect::new(1, 2, 58, 16)`.
       Use only API that exists after group 1, so the test **compiles**.
+      **Superseded at task 7.6:** the script and its assertions described above are what this
+      task wrote; task 7.6 later extended the script from two `j` presses to ten (and the
+      assertions to `- line-04` / `- line-19` / `scroll == 4` / `frames == 11`) once the
+      two-press version started passing before `ui::driver` normalised the stored offset,
+      which would have left group 8's RED vacuous. The test's final shape is task 7.6's,
+      recorded there and in commit `dac6556`; this task's own numbers are historical.
 
 - [x] 2.2 CHECK: Confirm it fails because the behaviour is missing, not because the harness is
       misconfigured. Run `cargo test --all-features --lib
@@ -1775,7 +1781,7 @@ arithmetic and a green-on-arrival RED in group 7 — the defect class group 12 h
 ## 12. Change Review
 <!-- kind: operational -->
 
-- [ ] 12.1 CHECK: Dispatch an **independent** reviewer — a fresh subagent, never a fork of the
+- [x] 12.1 CHECK: Dispatch an **independent** reviewer — a fresh subagent, never a fork of the
       implementing session — against `proposal.md`, all six spec files, `design.md`,
       `tasks.md`, and the diff. Give it the artifacts and the diff, not this session's
       reasoning. Require it to write its findings incrementally to a file as it goes, not only
@@ -1805,12 +1811,22 @@ arithmetic and a green-on-arrival RED in group 7 — the defect class group 12 h
          assertion.
       8. **Leftovers.** `dbg!`, `println!`, `todo!`, `TODO`, `FIXME`, commented-out code, and
          hardcoded widths that should have come from the interior.
+      **Recorded at implementation time:** dispatched to an `outside-in-tdd-reviewer` subagent
+      (agent id `af40e507ec06a4b41`) with none of this session's reasoning, only the artifacts
+      and `git diff c07299a..HEAD`. Findings: 2 CRITICAL, 3 WARNING, 5 SUGGESTION. See
+      `planning-review.md` → "Change Review (implementation time)" for the full table.
 
-- [ ] 12.2 CHANGE: Fix every CRITICAL. Resolve or consciously accept each WARNING with a
+- [x] 12.2 CHANGE: Fix every CRITICAL. Resolve or consciously accept each WARNING with a
       one-line reason recorded in `planning-review.md`. Note each SUGGESTION. Re-run the
       affected tests and any check whose input changed.
+      **Recorded at implementation time:** both CRITICALs fixed (the loose-list marker/blank-
+      line bug in `Folder::start_paragraph`, plus 15 `..base` struct-update elisions on
+      `Dashboard`/`Detail` across `app.rs`/`driver.rs`/`view.rs` spelled out field-by-field);
+      all 3 WARNINGs fixed (two spec-fixture corrections, one tasks.md historical note); all 5
+      SUGGESTIONs applied. `cargo test --all-features` and the full architectural suite re-run
+      green after each fix; see `planning-review.md` for the full disposition table.
 
-- [ ] 12.3 VERIFY: Confirm no blocking or unowned finding remains, and that the finding counts
+- [x] 12.3 VERIFY: Confirm no blocking or unowned finding remains, and that the finding counts
       are recorded in `planning-review.md` alongside the planning-time findings.
       Commit: `review(markdown-viewer): address Change Review findings`.
 

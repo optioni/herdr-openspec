@@ -235,16 +235,32 @@ impl Folder {
         self.faces = vec![Face::plain()];
     }
 
+    /// `Tag::Paragraph`. `finish()` above is a no-op when nothing was
+    /// accumulated for the block still configured — which is exactly what
+    /// happens for a **loose** list, where pulldown-cmark wraps every
+    /// item's content in its own `Paragraph` even when the item is a
+    /// single line: `Start(Item)` configures the marker and `Category::Item`,
+    /// then `Start(Paragraph)` follows immediately with nothing yet
+    /// written. Overwriting the prefix/category unconditionally here would
+    /// discard the item's own marker and hanging indent the moment any
+    /// item in the list forces the whole list loose — a single blank line
+    /// anywhere in a bullet list is what CommonMark's own tightness rule
+    /// hangs the whole list on. So a paragraph opening while the ambient
+    /// state is still `Category::Item` (nothing having been finalised
+    /// since) keeps that item's prefix, category, and face; only a
+    /// paragraph opening at the top level or after a real block has
+    /// closed resets to the ambient, unprefixed configuration.
     fn start_paragraph(&mut self) {
         self.finish();
-        let qp = quote_prefix(self.quote_depth);
-        self.first_prefix = qp.clone();
-        self.cont_prefix = qp;
-        let base = self.quoted_base();
-        self.prefix_face = base;
-        self.category = Category::Other;
+        if self.category != Category::Item {
+            let qp = quote_prefix(self.quote_depth);
+            self.first_prefix = qp.clone();
+            self.cont_prefix = qp;
+            self.prefix_face = self.quoted_base();
+            self.category = Category::Other;
+        }
         self.hard_split = false;
-        self.faces = vec![base];
+        self.faces = vec![self.quoted_base()];
     }
 
     fn start_heading(&mut self, level: u8) {
@@ -786,10 +802,9 @@ mod tests {
 
     fn composite_fixture() -> String {
         // Heading, paragraph, bullet list, nested list, fenced code, block
-        // quote, thematic break, link — group 4's simplified fold treats
-        // lists/code/quotes/rules as transparent, so this fixture only
-        // needs to prove totality and width compliance, not their final
-        // styling (group 5's tests own that). Each block carries one
+        // quote, thematic break, link — this test only needs to prove
+        // totality and width compliance, not per-construct styling (the
+        // dedicated tests below own that). Each block carries one
         // distinctive one-word marker so a check can find it regardless of
         // where a wrap point lands.
         "# headingword marker\n\
@@ -1022,6 +1037,22 @@ mod tests {
                 .filter(|s| !s.is_empty())
                 .collect::<Vec<_>>(),
             expected58
+        );
+        // Both widths' exact strings must match paragraph_wraps_at_58_and_78's,
+        // per the spec scenario's "the same two strings the paragraph-wrap
+        // scenario names" clause — checking only 58 would miss a bug specific
+        // to the 78-width wrap point.
+        let expected78 = vec![
+            "alpha bravo charlie delta echo foxtrot golf hotel india juliett kilo lima mike"
+                .to_string(),
+            "november oscar papa".to_string(),
+        ];
+        assert_eq!(
+            text_of(&lines(source, 78))
+                .into_iter()
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>(),
+            expected78
         );
     }
 
@@ -1342,6 +1373,33 @@ mod tests {
             let line = out.iter().find(|l| !l.segments.is_empty()).unwrap();
             let manual: String = line.segments.iter().map(|s| s.text.as_str()).collect();
             assert_eq!(line.text(), manual, "width {width}");
+        }
+    }
+
+    #[test]
+    fn a_loose_list_keeps_its_marker_and_no_blank_between_items() {
+        // Change Review finding: a single blank line anywhere in a bullet
+        // list makes CommonMark treat the WHOLE list as loose, so every
+        // item — even a one-line one — arrives as Start(Item) ->
+        // Start(Paragraph) rather than Start(Item) -> Text directly. A
+        // fold that reset to the ambient (unprefixed) configuration on
+        // every Start(Paragraph) discarded the item's own marker the
+        // moment this happened; markdown-render's "Items SHALL NOT be
+        // separated by a blank line, whether the source list is tight or
+        // loose" and "A bullet item SHALL be marked `- `" both hold
+        // regardless.
+        let source = "- one\n\n- two\n\n- three\n";
+        for width in [58, 78] {
+            let texts: Vec<String> = text_of(&lines(source, width))
+                .into_iter()
+                .filter(|s| !s.is_empty())
+                .collect();
+            assert_eq!(texts, vec!["- one", "- two", "- three"], "width {width}");
+            let out = lines(source, width);
+            assert!(
+                !out.iter().any(|l| l.segments.is_empty()),
+                "width {width}: a loose list must not gain a blank line between its items"
+            );
         }
     }
 }

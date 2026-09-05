@@ -141,16 +141,18 @@ carry the face, so styling never falls off at a line break.
 
 #### Scenario: Inline constructs become separate segments carrying their faces
 
-- **WHEN** the paragraph ``Why **this** change *really* needs `Options::empty()` — see
-  [the design](design.md).`` is rendered at 58 and at 78
-- **THEN** at both widths there is a segment whose `text` is `this` with `strong` true and
-  every other flag false, a segment whose `text` is `really` with `emphasis` true, a
-  segment whose `text` is `Options::empty()` with `code` true, and a segment whose `text`
+- **WHEN** the paragraph ``This **is** a *very* nice `example()` call for
+  [the design](design.md) doc.`` — short enough that the whole sentence fits on one
+  line at both mandated widths, so a wrap boundary cannot split the link phrase — is
+  rendered at 58 and at 78
+- **THEN** at both widths there is a segment whose `text` is `is` with `strong` true and
+  every other flag false, a segment whose `text` is `very` with `emphasis` true, a
+  segment whose `text` is `example()` with `code` true, and a segment whose `text`
   is `the design` with `link` true
 - **AND** at both widths no segment's `text` contains `design.md`, so the destination is
   not rendered
 - **AND** at both widths the concatenated `text()` of all lines contains
-  `Why this change really needs Options::empty() — see the design.`
+  `This is a very nice example() call for the design doc.`
 
 #### Scenario: Nested emphasis composes rather than replacing
 
@@ -305,7 +307,7 @@ degraded-states table.
 
 #### Scenario: A table renders as its literal source text, one row per line
 
-- **WHEN** a three-row GitHub-flavoured table — `| Gate | Command |`,
+- **WHEN** a three-row GitHub-flavoured table — `| Gate | Runner |`,
   `|---|---|`, `| Format | cargo fmt |` — is rendered at 58 and at 78
 - **THEN** at both widths three lines are produced whose `text()` values are those three
   source rows verbatim, so no row is folded into its neighbour and nothing is dropped

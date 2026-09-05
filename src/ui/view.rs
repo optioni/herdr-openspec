@@ -25,8 +25,8 @@ pub fn render(frame: &mut Frame, dashboard: &Dashboard) {
 }
 
 /// The body: one or two bordered regions, per `layout::split_body`. The list
-/// region's interior is filled by `render_list`; the detail region's is left
-/// untouched — `markdown-viewer` and `detail-view` fill it.
+/// region's interior is filled by `render_list`; the detail region's by
+/// `render_detail` — `detail-view` is what will populate `detail.source`.
 fn render_body(frame: &mut Frame, body: Rect, dashboard: &Dashboard) {
     let (list_area, detail) = split_body(body, dashboard.route);
     if let Some(area) = list_area {
@@ -1346,9 +1346,14 @@ mod tests {
 
     fn detail_dashboard(source: String, scroll: usize, route: Route) -> Dashboard {
         Dashboard {
-            detail: Detail { source, scroll },
+            repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
+            searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
+            changes: fixture::set(Vec::new(), Vec::new(), Vec::new()),
             route,
-            ..dashboard_with(Vec::new(), Vec::new(), 0, Route::List)
+            quit: false,
+            selected: 0,
+            filter: empty_filter(),
+            detail: Detail { source, scroll },
         }
     }
 
@@ -1365,13 +1370,20 @@ mod tests {
 
     #[test]
     fn the_detail_document_fills_the_interior_at_60_and_120() {
+        let base = detail_dashboard(twenty_line_source(), 0, Route::List);
         let mut d = Dashboard {
+            repo: base.repo,
+            searched_from: base.searched_from,
             changes: fixture::set(
                 vec![fixture::active("fix-empty-basket", 7, 7)],
                 Vec::new(),
                 Vec::new(),
             ),
-            ..detail_dashboard(twenty_line_source(), 0, Route::List)
+            route: base.route,
+            quit: base.quit,
+            selected: base.selected,
+            filter: base.filter,
+            detail: base.detail,
         };
 
         let buf120 = render_at(120, 20, &d);
@@ -1581,7 +1593,10 @@ mod tests {
 
     #[test]
     fn the_list_route_still_moves_the_marker_with_detail_content_present() {
+        let base = detail_dashboard(twenty_line_source(), 0, Route::List);
         let mut d = Dashboard {
+            repo: base.repo,
+            searched_from: base.searched_from,
             changes: fixture::set(
                 vec![
                     fixture::active("add-token-refresh", 4, 9),
@@ -1591,7 +1606,11 @@ mod tests {
                 Vec::new(),
                 Vec::new(),
             ),
-            ..detail_dashboard(twenty_line_source(), 0, Route::List)
+            route: base.route,
+            quit: base.quit,
+            selected: base.selected,
+            filter: base.filter,
+            detail: base.detail,
         };
         d.apply(Action::Next);
         d.apply(Action::Next);

@@ -212,3 +212,33 @@ Each has its resolution point already recorded in `design.md` → Open Questions
   `markdown-viewer` row (the `plugin-build` delta, the keybinding change, the extra
   constructs, and a `Degraded states` spec ref), the sibling note about the answered open
   question, and the `plugin-build` MSRV wording that reaches the live spec only on archive.
+
+## Change Review (implementation time)
+
+Dispatched to a fresh `outside-in-tdd-reviewer` subagent (agent id `af40e507ec06a4b41`) at
+task 12.1, against `proposal.md`, `design.md`, `tasks.md`, all six spec files, and
+`git diff c07299a..HEAD` — none of the implementing session's own reasoning. The reviewer
+independently re-ran 9 of the 17 planted-violation controls, all thirteen grep/python checks,
+`DEPS` (legs 1a–4), `GRAPH-SNAP`, `OPENSPEC-UNTOUCHED`, and a corpus sweep of every `.md` file
+in the repository at seven widths, and wrote findings incrementally to a scratchpad file.
+
+**2 CRITICAL, 3 WARNING, 5 SUGGESTION.** All repaired.
+
+| Severity | Problem | Repair | Location |
+|---|---|---|---|
+| CRITICAL | A **loose** markdown list (any blank line anywhere in a bullet list makes CommonMark wrap *every* item in `Start(Paragraph)`, even single-line ones) lost its `- ` marker and gained a spurious blank line between items. Root cause: `finish()` early-returns without `reset_ambient()` when the currently-configured block (the `Item`) never received content, and `start_paragraph` then unconditionally overwrote `first_prefix`/`category`, discarding the item's own marker. No test covered a loose list. | `start_paragraph` now checks `self.category != Category::Item` before overwriting the prefix/category, so a paragraph opening while an item's context is still live (nothing finalised since) keeps that item's marker. New test `a_loose_list_keeps_its_marker_and_no_blank_between_items` at both widths. | `src/ui/markdown.rs` — `Folder::start_paragraph`, new test |
+| CRITICAL | This change introduced **15 `..base` struct-update elisions** on `Dashboard`/`Detail` across new test helpers in `app.rs` (9), `driver.rs` (3), and `view.rs` (3) — zero existed at BASE. `dashboard-loop` requires "every construction … SHALL name every field, with no `..` rest, so a field added later fails to compile at each site rather than defaulting silently." `NODEFAULT-UI`'s half B is line-anchored (`grep`, one line at a time) and cannot see a multi-line `Dashboard { …, ..some_fn() }`, so all fifteen were invisible to the check that exists to catch exactly this. | All fifteen sites rewritten to name every field explicitly, no `..` anywhere. Re-verified: `grep -rn '^\s*\.\.' src/ui/*.rs src/lib.rs` shows only `Face`/`Config`/`Recorder` `Default` uses, none of the three gated types. | `src/ui/app.rs`, `src/ui/driver.rs`, `src/ui/view.rs` |
+| WARNING | `specs/markdown-render/spec.md`'s table scenario named `\| Gate \| Command \|`, but the shipped test uses `\| Gate \| Runner \|` (renamed at task 10.1 to stop tripping `NOIO-VIEW`'s `Command` pattern) — the spec was never updated to match. | Spec scenario text corrected to `Runner`. | `specs/markdown-render/spec.md` → "A table renders as its literal source text" |
+| WARNING | The "Inline constructs become separate segments" scenario named an exact fixture sentence that, at width 58, splits `the`/`design` across a wrap boundary — the shipped test uses a shorter sentence that fits on one line at both widths, but the spec was never corrected to match. | Spec scenario rewritten to the shipped fixture, with a note explaining why the sentence must fit on one line at both widths. | `specs/markdown-render/spec.md` → "Inline constructs become separate segments carrying their faces" |
+| WARNING | `tasks.md` task 2.1 still describes the acceptance test's original two-`j`-press script; task 7.6 extended it to ten, recorded only in a commit message and a source comment. | A note appended to task 2.1 pointing to 7.6 as the test's final shape. | `tasks.md` 2.1 |
+| SUGGESTION (fixed) | Three stale doc comments: `render_body` said the detail region was "left untouched"; `Dashboard`'s doc said "all seven fields"; `composite_fixture`'s comment referenced "group 4's simplified fold" after group 5 replaced it. | All three corrected. | `src/ui/view.rs`, `src/ui/app.rs`, `src/ui/markdown.rs` |
+| SUGGESTION (fixed) | `Dashboard::normalise_scroll` re-implemented `layout::scroll_offset`'s clamp inline instead of calling it, once the function existed (it landed a group later, in group 7). | Now calls `layout::scroll_offset` directly. | `src/ui/app.rs` |
+| SUGGESTION (fixed) | `a_faced_run_split_across_a_wrap_keeps_its_face` asserted the exact wrapped strings at width 58 only, not 78, though the spec scenario requires both. | Added the 78-width exact-string assertion. | `src/ui/markdown.rs` |
+| SUGGESTION (noted, not changed) | `Folder::start_item`'s `.expect("Item event outside an open List")` panics on a state pulldown-cmark's own grammar guarantees cannot occur. | Left as is: a documented, unreachable-per-the-parser's-own-invariant panic with a clear message is the right shape here, not a bug. | `src/ui/markdown.rs` |
+| SUGGESTION (latent, not reproduced) | `hard_split_group` reads only `group.first()`; if a verbatim line's content ever arrived as two `Run`s in one group, the second would be silently dropped. The reviewer could not reproduce this against real pulldown-cmark output — `push_verbatim` always closes a group after each line — so it is latent rather than confirmed. | Left as is; recorded here as a known latent assumption (one `Run` per hard-split group) should the verbatim-accumulation logic change later. | `src/ui/markdown.rs` — `hard_split_group` |
+
+All fixes verified: `cargo fmt --all -- --check`, `cargo clippy --all-targets --all-features -- -D
+warnings`, `cargo test --all-features` (565 lib tests, up one for the new loose-list test), and
+the full sixteen-check architectural suite (`NOSPAWN-GREP`, `NOIO-VIEW`, `NOCLI-SHELL`,
+`NORAW-GREP`, `NODEFAULT-UI`, `NOLIT-CHANGE`, `MDSEAM`, `WIDTHS`, `LISTWIDTHS`, `MDWIDTHS`,
+`NOWAIVER`, `OPENSPEC-UNTOUCHED`) all pass, all green after every fix.

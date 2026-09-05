@@ -353,12 +353,20 @@ mod tests {
 
     fn twenty_line_detail_dashboard() -> Dashboard {
         Dashboard {
+            repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
+            searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
+            changes: empty_set(),
             route: Route::Detail,
+            quit: false,
+            selected: 0,
+            filter: crate::ui::app::Filter {
+                query: String::new(),
+                active: false,
+            },
             detail: crate::ui::app::Detail {
                 source: (0..20).map(|i| format!("- line-{i:02}\n")).collect(),
                 scroll: 0,
             },
-            ..dashboard()
         }
     }
 
@@ -410,12 +418,19 @@ mod tests {
         // — exactly one iteration of `run_loop` — since the loop borrows
         // the terminal for its whole run and no scripted source can
         // resize the backend from inside it.
+        let base = twenty_line_detail_dashboard();
         let mut dashboard = Dashboard {
+            repo: base.repo,
+            searched_from: base.searched_from,
+            changes: base.changes,
+            route: base.route,
+            quit: base.quit,
+            selected: base.selected,
+            filter: base.filter,
             detail: crate::ui::app::Detail {
+                source: base.detail.source,
                 scroll: 4,
-                ..twenty_line_detail_dashboard().detail
             },
-            ..twenty_line_detail_dashboard()
         };
         let backend = TestBackend::new(120, 20);
         let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");

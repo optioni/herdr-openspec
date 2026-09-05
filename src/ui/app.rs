@@ -73,7 +73,7 @@ pub struct Detail {
 /// count, no terminal handle, and no frame — those are derived from the
 /// frame area on every draw, never stored here. Deliberately implements no
 /// `Default`, anywhere in the crate: every construction and every
-/// destructuring names all seven fields, so a field added later fails to
+/// destructuring names all eight fields, so a field added later fails to
 /// compile at each site rather than defaulting silently. See
 /// `specs/dashboard-loop/spec.md` and the `NODEFAULT-UI` check.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -192,8 +192,8 @@ impl Dashboard {
             return;
         }
         let total = crate::ui::markdown::lines(&self.detail.source, interior.width).len();
-        let height = interior.height as usize;
-        self.detail.scroll = self.detail.scroll.min(total.saturating_sub(height));
+        self.detail.scroll =
+            crate::ui::layout::scroll_offset(total, self.detail.scroll, interior.height);
     }
 
     /// Active-then-archived, in `ChangeSet`'s own order, with `list-filtering`'s
@@ -758,8 +758,13 @@ mod tests {
         fn next_and_prev_scroll_at_the_detail_route() {
             let mut d = Dashboard {
                 detail: twenty_line_detail(),
+                repo: None,
+                searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
+                changes: empty_set(),
                 route: Route::Detail,
-                ..dashboard_at(Route::Detail)
+                quit: false,
+                selected: 0,
+                filter: empty_filter(),
             };
             d.apply(Action::Next);
             assert_eq!(d.detail.scroll, 1);
@@ -785,8 +790,13 @@ mod tests {
         fn scroll_stops_at_the_top() {
             let mut d = Dashboard {
                 detail: twenty_line_detail(),
+                repo: None,
+                searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
+                changes: empty_set(),
                 route: Route::Detail,
-                ..dashboard_at(Route::Detail)
+                quit: false,
+                selected: 0,
+                filter: empty_filter(),
             };
             for _ in 0..4 {
                 d.apply(Action::Prev);
@@ -815,12 +825,16 @@ mod tests {
 
             let mut d = Dashboard {
                 detail: twenty_line_detail(),
+                repo: None,
+                searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
+                changes: empty_set(),
                 route: Route::Detail,
+                quit: false,
+                selected: 0,
                 filter: Filter {
                     query: String::new(),
                     active: true,
                 },
-                ..dashboard_at(Route::Detail)
             };
             d.apply(Action::FilterPush('j'));
             d.apply(Action::FilterPush('k'));
@@ -837,8 +851,13 @@ mod tests {
                     source: twenty_line_detail().source,
                     scroll: 3,
                 },
+                repo: None,
+                searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
+                changes: empty_set(),
                 route: Route::Detail,
-                ..dashboard_at(Route::Detail)
+                quit: false,
+                selected: 0,
+                filter: empty_filter(),
             };
             d.apply(Action::Back);
             assert_eq!(d.detail.scroll, 0);
@@ -850,8 +869,13 @@ mod tests {
                     source: twenty_line_detail().source,
                     scroll: 3,
                 },
+                repo: None,
+                searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
+                changes: empty_set(),
                 route: Route::Detail,
-                ..dashboard_at(Route::Detail)
+                quit: false,
+                selected: 0,
+                filter: empty_filter(),
             };
             d2.apply(Action::FilterStart);
             assert_eq!(d2.route, Route::List);
@@ -862,12 +886,16 @@ mod tests {
                     source: twenty_line_detail().source,
                     scroll: 3,
                 },
+                repo: None,
+                searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
+                changes: empty_set(),
                 route: Route::Detail,
+                quit: false,
+                selected: 0,
                 filter: Filter {
                     query: String::new(),
                     active: true,
                 },
-                ..dashboard_at(Route::Detail)
             };
             d3.apply(Action::Back);
             assert_eq!(d3.detail.scroll, 3);
@@ -880,8 +908,13 @@ mod tests {
                     source: twenty_line_detail().source,
                     scroll: 99,
                 },
+                repo: None,
+                searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
+                changes: empty_set(),
                 route: Route::List,
-                ..dashboard_at(Route::List)
+                quit: false,
+                selected: 0,
+                filter: empty_filter(),
             };
             d.normalise_scroll(ratatui::layout::Rect::new(0, 0, 120, 20));
             assert_eq!(d.detail.scroll, 4);
@@ -891,8 +924,13 @@ mod tests {
                     source: twenty_line_detail().source,
                     scroll: 99,
                 },
+                repo: None,
+                searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
+                changes: empty_set(),
                 route: Route::Detail,
-                ..dashboard_at(Route::Detail)
+                quit: false,
+                selected: 0,
+                filter: empty_filter(),
             };
             d2.normalise_scroll(ratatui::layout::Rect::new(0, 0, 60, 20));
             assert_eq!(d2.detail.scroll, 4);
@@ -905,8 +943,13 @@ mod tests {
                     source: twenty_line_detail().source,
                     scroll: 7,
                 },
+                repo: None,
+                searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
+                changes: empty_set(),
                 route: Route::List,
-                ..dashboard_at(Route::List)
+                quit: false,
+                selected: 0,
+                filter: empty_filter(),
             };
             d.normalise_scroll(ratatui::layout::Rect::new(0, 0, 60, 20));
             assert_eq!(
