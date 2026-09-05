@@ -994,7 +994,7 @@ files in `$CHECKS`.
 ## 6. `ui::detail::content_lines`
 <!-- kind: behavioural -->
 
-- [ ] 6.1 RED: Add scenario 16 and its companions to `src/ui/detail.rs`'s `mod tests`, every
+- [x] 6.1 RED: Add scenario 16 and its companions to `src/ui/detail.rs`'s `mod tests`, every
       test naming both **78** and **58**: an empty `Detail` returning exactly one
       `No content yet` line; problems only; a source only; both, with the problems first;
       and a 200-character paragraph producing strictly more lines at 58 than at 78. Assert on
@@ -1002,20 +1002,20 @@ files in `$CHECKS`.
       **Red when:** the both-present case asserts only a line count. The **order** —
       problems, then markdown — is the requirement.
 
-- [ ] 6.2 GREEN: Implement `content_lines`, calling `ui::markdown::lines` for the source and
+- [x] 6.2 GREEN: Implement `content_lines`, calling `ui::markdown::lines` for the source and
       `ui::list::pad_or_truncate_right` for each `"! <problem>"` line.
 
-- [ ] 6.3 CHECK: `MIN=18 sh $CHECKS/MDSEAM.sh` — `src/ui/detail.rs` calls
+- [x] 6.3 CHECK: `MIN=18 sh $CHECKS/MDSEAM.sh` — `src/ui/detail.rs` calls
       `ui::markdown::lines` and must name `pulldown_cmark` nowhere; and `NOTABSEAM`, since
       `markdown::Line` is plain data and must not have dragged a ratatui type in.
       **Red when:** either reports a hit, or `MDSEAM` reports fewer than 18 searched files.
 
-- [ ] 6.4 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'ui::detail::tests::' 19`;
+- [x] 6.4 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'ui::detail::tests::' 19`;
       `sh $CHECKS/DETAILWIDTHS.sh` at its default floor of 19 — the value it keeps for the
       rest of this change, and the sum of groups 4 (5 tests), 5 (9), and 6 (5).
       **Red when:** the count is below 19, or any detail test names only one width.
 
-- [ ] 6.5 Commit: `feat(detail-view): the detail content's line list`.
+- [x] 6.5 Commit: `feat(detail-view): the detail content's line list`.
 
 ## 7. The tab keys
 <!-- kind: behavioural -->

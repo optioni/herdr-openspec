@@ -49,7 +49,7 @@ pub fn header_row(
 /// One drawn tab cell: its label, its column offset from the interior's
 /// first column, its position in the artifact list (`None` for the
 /// zero-artifact placeholder), and whether it is the selected tab. Carries
-/// no styling: `ui::view` maps `selected` to `Modifier::BOLD`, exactly as
+/// no styling: the view is what emphasises the selected cell, exactly as
 /// it does for `ui::list::Row`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tab {
@@ -159,11 +159,56 @@ pub fn tab_bar(artifacts: &[crate::changes::ArtifactRef], selected: usize, width
     out
 }
 
+/// The single line list both `ui::view::render` and `Dashboard::normalise_scroll`
+/// derive the detail content from, so the drawn slice and the scroll clamp
+/// can never disagree about how many lines there are: one `"! <problem>"`
+/// line per `detail.problems` entry, then `ui::markdown::lines(&detail.source,
+/// width)` unchanged, and — only when both are empty — exactly one line
+/// reading `No content yet`. When `problems` is non-empty and `source` is
+/// empty, the problems alone are returned: the reason is known, and adding
+/// `No content yet` would say two contradictory things about the same tab.
+pub fn content_lines(
+    detail: &crate::ui::app::Detail,
+    width: u16,
+) -> Vec<crate::ui::markdown::Line> {
+    let mut out: Vec<crate::ui::markdown::Line> = detail
+        .problems
+        .iter()
+        .map(|p| crate::ui::markdown::Line {
+            segments: vec![crate::ui::markdown::Segment {
+                text: crate::ui::list::pad_or_truncate_right(&format!("! {p}"), width as usize),
+                face: crate::ui::markdown::Face::plain(),
+            }],
+        })
+        .collect();
+    out.extend(crate::ui::markdown::lines(&detail.source, width));
+    if out.is_empty() {
+        out.push(crate::ui::markdown::Line {
+            segments: vec![crate::ui::markdown::Segment {
+                text: "No content yet".to_string(),
+                face: crate::ui::markdown::Face::plain(),
+            }],
+        });
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Tab, header_row, tab_bar};
+    use super::{Tab, content_lines, header_row, tab_bar};
     use crate::changes::fixture;
     use crate::tasks::Progress;
+    use crate::ui::app::Detail;
+
+    fn detail(source: &str, problems: Vec<String>) -> Detail {
+        Detail {
+            source: source.to_string(),
+            scroll: 0,
+            tab: 0,
+            problems,
+            loaded: None,
+        }
+    }
 
     /// Artifacts through `changes::fixture::with_artifacts`, never an
     /// `ArtifactRef {}` literal of this module's own — `changes::fixture`
@@ -470,6 +515,92 @@ mod tests {
             assert!(!tabs.iter().any(|t| t.selected), "width {width}");
             assert_eq!(tabs.len(), 3, "width {width}");
             assert_eq!(tabs[0].index, Some(0), "width {width}");
+        }
+    }
+
+    #[test]
+    fn an_empty_detail_returns_exactly_one_no_content_yet_line() {
+        for width in [78, 58] {
+            let lines = content_lines(&detail("", Vec::new()), width);
+            assert_eq!(lines.len(), 1, "width {width}");
+            assert_eq!(lines[0].text(), "No content yet", "width {width}");
+        }
+    }
+
+    #[test]
+    fn problems_only_are_returned_with_no_no_content_yet_line() {
+        for width in [78, 58] {
+            let d = detail("", vec!["/repo/a.md: boom".to_string()]);
+            let lines = content_lines(&d, width);
+            assert_eq!(lines.len(), 1, "width {width}");
+            assert!(
+                lines[0].text().starts_with("! /repo/a.md: boom"),
+                "width {width}: {:?}",
+                lines[0].text()
+            );
+            assert!(
+                !lines.iter().any(|l| l.text().contains("No content yet")),
+                "width {width}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_source_only_renders_as_markdown_with_no_problem_line() {
+        for width in [78, 58] {
+            let d = detail("# heading\n", Vec::new());
+            let lines = content_lines(&d, width);
+            assert!(!lines.is_empty(), "width {width}");
+            assert!(
+                !lines.iter().any(|l| l.text().starts_with('!')),
+                "width {width}"
+            );
+            assert!(
+                !lines.iter().any(|l| l.text() == "No content yet"),
+                "width {width}"
+            );
+        }
+    }
+
+    #[test]
+    fn both_problems_and_source_are_returned_with_problems_first() {
+        for width in [78, 58] {
+            let d = detail("# heading\n", vec!["/repo/a.md: boom".to_string()]);
+            let lines = content_lines(&d, width);
+            assert!(
+                lines[0].text().starts_with("! /repo/a.md: boom"),
+                "width {width}: {:?}",
+                lines[0].text()
+            );
+            assert!(
+                lines[1..].iter().any(|l| l.text().contains("heading")),
+                "width {width}"
+            );
+            assert!(
+                !lines.iter().any(|l| l.text() == "No content yet"),
+                "width {width}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_wrapped_paragraph_produces_strictly_more_lines_at_58_than_at_78() {
+        let paragraph = format!("{}\n", "word ".repeat(40).trim());
+        assert!(paragraph.chars().count() > 100);
+        let d = detail(&paragraph, Vec::new());
+        let lines78 = content_lines(&d, 78);
+        let lines58 = content_lines(&d, 58);
+        assert!(
+            lines58.len() > lines78.len(),
+            "58: {}, 78: {}",
+            lines58.len(),
+            lines78.len()
+        );
+        for line in &lines78 {
+            assert!(line.text().chars().count() <= 78);
+        }
+        for line in &lines58 {
+            assert!(line.text().chars().count() <= 58);
         }
     }
 }
