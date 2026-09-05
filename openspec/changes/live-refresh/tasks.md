@@ -1145,7 +1145,7 @@ passes, and `GATE-MECH1` still holds.
 ## 3. Per-change CLI invalidation
 <!-- kind: behavior -->
 
-- [ ] 3.1 RED: Write fourteen failing tests in `changes::tests::`, named from their scenarios:
+- [x] 3.1 RED: Write fourteen failing tests in `changes::tests::`, named from their scenarios:
       `selection_union_all_absorbs_only`, `selection_union_of_two_onlys`,
       `only_reruns_the_named_change`, `only_still_runs_an_uncached_change`,
       `cached_progress_comes_from_the_fresh_list`, `an_unlisted_cached_change_is_evicted`,
@@ -1168,7 +1168,7 @@ passes, and `GATE-MECH1` still holds.
       concludes `Only` means "never call the others", which is false on a cold cache and is
       the reason a first cycle is never degraded by an unlucky selection.
 
-- [ ] 3.2 GREEN: Implement `Selection::union`, `CliCache` (with `Default`, which clippy's
+- [x] 3.2 GREEN: Implement `Selection::union`, `CliCache` (with `Default`, which clippy's
       `new_without_default` would demand anyway and which `change-model`'s gate does not
       cover — recorded in design.md → Decisions 16 so it is not read as a breach), and
       `changes::from_cli_cached` per `specs/refresh-worker/spec.md`. Then **redefine**
@@ -1180,18 +1180,18 @@ passes, and `GATE-MECH1` still holds.
       Second Red-when: a cached change's `progress` comes from the cache. It comes from the
       fresh `list --json` entry, which is what makes a mis-classified path harmless.
 
-- [ ] 3.3 CHECK: `changes::merge` and `join_artifacts` need **no** change — they operate on
+- [x] 3.3 CHECK: `changes::merge` and `join_artifacts` need **no** change — they operate on
       whole `Change` values and a cached one is built at the same construction site by the
       same rule. Confirm by reading them, and confirm every landed `change-merge` test passes
       untouched. If a change turns out to be needed, that is a divergence from `design.md` →
       Decisions 7 and must be recorded there before it is made.
 
-- [ ] 3.4 REFACTOR: If `from_cli_cached`'s per-change loop ended up with two near-copies of
+- [x] 3.4 REFACTOR: If `from_cli_cached`'s per-change loop ended up with two near-copies of
       the "build a `Change`" expression — one fresh, one from cache — collapse them onto one
       helper, so `cli-changes`' "every one of `Change`'s seven fields comes from CLI data"
       keeps exactly one construction site. Otherwise state that no refactor was needed.
 
-- [ ] 3.5 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'changes::tests::' 194`;
+- [x] 3.5 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'changes::tests::' 194`;
       `python3 $CHECKS/GATE-MECH1.py src`; `MIN=21 sh $CHECKS/NOLIT-CHANGE.sh`;
       `sh $CHECKS/NOJSON-SEAM.sh`; `MIN=21 sh $CHECKS/NOSPAWN-GREP.sh`; the four gate
       commands, still failing on exactly the one known acceptance test with the recorded

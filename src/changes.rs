@@ -1400,6 +1400,21 @@ pub enum Selection {
     Only(std::collections::BTreeSet<String>),
 }
 
+impl Selection {
+    /// Pure and total: `All` absorbs anything, and two `Only` sets union.
+    /// Never escalates two `Only` sets — including two empty ones — to
+    /// `All`.
+    pub fn union(self, other: Selection) -> Selection {
+        match (self, other) {
+            (Selection::All, _) | (_, Selection::All) => Selection::All,
+            (Selection::Only(mut a), Selection::Only(b)) => {
+                a.extend(b);
+                Selection::Only(a)
+            }
+        }
+    }
+}
+
 /// Do `a` and `b` name the same directory? Canonicalizes both and compares
 /// the canonical forms when the filesystem can resolve both, falling back
 /// to comparing the paths as given otherwise — so a symbolic link in either
@@ -1415,13 +1430,69 @@ pub(crate) fn same_directory(a: &std::path::Path, b: &std::path::Path) -> bool {
     }
 }
 
-/// Build the CLI's view of the active changes: `openspec list --json`, the
-/// repository-root guard, then one `openspec instructions apply` call per
-/// change, schema resolution through [`resolve_cli_schema`], and artifact
-/// placement through [`cli_artifacts`]. Total — never a `Result`, never
-/// panics, never `unwrap`s on any input. See `cli-changes` for the full
-/// contract this function implements.
-pub fn from_cli(cli: &dyn crate::cli::OpenspecCli, repo: &std::path::Path) -> CliChanges {
+/// One change's CLI-fetched data, cached across cycles: the schema name, its
+/// directory, its placed artifacts, and its problems — everything but
+/// `progress`, which always comes from the fresh `openspec list --json`
+/// entry rather than from here, so a mis-classified path can never leave a
+/// change's `[completed/total]` stale. `#[derive(Default)]` only through
+/// `CliCache` below; not one of `change-model`'s no-`Default` types.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct CliCacheEntry {
+    dir: PathBuf,
+    schema: String,
+    artifacts: Vec<ArtifactRef>,
+    problems: Vec<String>,
+}
+
+/// The one cache `live-refresh` adds: per-change CLI results, keyed by name,
+/// held in memory for as long as the worker that owns it runs. Implements
+/// `Default` — clippy's `new_without_default` would demand it anyway, and
+/// `change-model`'s no-`Default` gate covers `Change`, `ChangeSet`,
+/// `ArtifactRef`, and `Origin` in this file, none of which this is. See
+/// `specs/refresh-worker/spec.md`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CliCache {
+    entries: std::collections::HashMap<String, CliCacheEntry>,
+}
+
+/// Build one `Change` from CLI-sourced parts, naming every field explicitly
+/// with no `Default` and no `..` — the one construction site both the
+/// freshly-fetched and the cache-reused branches of [`from_cli_cached`]
+/// share, so `cli-changes`' "every field comes from CLI data" rule has
+/// exactly one place to hold.
+fn build_cli_change(
+    name: String,
+    dir: PathBuf,
+    schema: String,
+    artifacts: Vec<ArtifactRef>,
+    progress: crate::tasks::Progress,
+    problems: Vec<String>,
+) -> Change {
+    Change {
+        name,
+        dir,
+        origin: Origin::Active,
+        schema,
+        artifacts,
+        progress,
+        problems,
+    }
+}
+
+/// Build the CLI's view of the active changes, re-asking about only the
+/// changes `selection` names or that `cache` holds no entry for.
+/// `openspec list --json` runs unconditionally, on every call — it carries
+/// the repository-root guard and every change's fresh progress pair, which
+/// is why a mis-classified path costs nothing but one extra CLI cycle
+/// rather than a stale number. Total — never a `Result`, never panics,
+/// never `unwrap`s on any input. See `specs/refresh-worker/spec.md` for the
+/// full contract this function implements.
+pub fn from_cli_cached(
+    cli: &dyn crate::cli::OpenspecCli,
+    repo: &std::path::Path,
+    selection: &Selection,
+    cache: &mut CliCache,
+) -> CliChanges {
     let list_args = ["list", "--json"];
     let list_text = match cli.run(&list_args) {
         Ok(text) => text,
@@ -1468,8 +1539,27 @@ pub fn from_cli(cli: &dyn crate::cli::OpenspecCli, repo: &std::path::Path) -> Cl
     let mut active = Vec::with_capacity(list_payload.changes.len());
     let mut schema_cache: std::collections::HashMap<String, CachedCliSchema> =
         std::collections::HashMap::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
 
     for entry in &list_payload.changes {
+        seen.insert(entry.name.clone());
+
+        let selected = match selection {
+            Selection::All => true,
+            Selection::Only(names) => names.contains(&entry.name),
+        };
+        if !selected && let Some(cached) = cache.entries.get(&entry.name) {
+            active.push(build_cli_change(
+                entry.name.clone(),
+                cached.dir.clone(),
+                cached.schema.clone(),
+                cached.artifacts.clone(),
+                entry.progress,
+                cached.problems.clone(),
+            ));
+            continue;
+        }
+
         let apply_args = [
             "instructions",
             "apply",
@@ -1522,20 +1612,42 @@ pub fn from_cli(cli: &dyn crate::cli::OpenspecCli, repo: &std::path::Path) -> Cl
         };
         change_problems.extend(artifact_problems);
 
-        active.push(Change {
-            name: entry.name.clone(),
-            dir: apply.change_dir,
-            origin: Origin::Active,
-            schema: apply.schema_name,
+        cache.entries.insert(
+            entry.name.clone(),
+            CliCacheEntry {
+                dir: apply.change_dir.clone(),
+                schema: apply.schema_name.clone(),
+                artifacts: artifacts.clone(),
+                problems: change_problems.clone(),
+            },
+        );
+
+        active.push(build_cli_change(
+            entry.name.clone(),
+            apply.change_dir,
+            apply.schema_name,
             artifacts,
-            progress: entry.progress,
-            problems: change_problems,
-        });
+            entry.progress,
+            change_problems,
+        ));
     }
 
+    cache.entries.retain(|name, _| seen.contains(name));
     sort_by_name_byte_order(&mut active);
 
     CliChanges { active, problems }
+}
+
+/// Build the CLI's view of the active changes: `openspec list --json`, the
+/// repository-root guard, then one `openspec instructions apply` call per
+/// change, schema resolution through [`resolve_cli_schema`], and artifact
+/// placement through [`cli_artifacts`]. Total — never a `Result`, never
+/// panics, never `unwrap`s on any input. Defined as [`from_cli_cached`] with
+/// `Selection::All` and an empty cache, so there is exactly one
+/// implementation of the CLI producer. See `cli-changes` for the full
+/// contract this function implements.
+pub fn from_cli(cli: &dyn crate::cli::OpenspecCli, repo: &std::path::Path) -> CliChanges {
+    from_cli_cached(cli, repo, &Selection::All, &mut CliCache::default())
 }
 
 /// Concatenate `items`, collapsing exactly-equal strings to their first
@@ -5613,6 +5725,601 @@ mod tests {
                 .filter(|(_, args)| args.first().map(String::as_str) == Some("schema"))
                 .count();
             assert_eq!(schema_which_calls, 1);
+        }
+    }
+
+    // --- live-refresh group 3: per-change CLI invalidation ------------------
+
+    mod from_cli_cached {
+        use super::super::{CliCache, Selection, from_cli, from_cli_cached};
+        use super::*;
+        use crate::cli::{CliError, FakeCli};
+        use crate::testutil::snapshot;
+
+        fn list_json(root: &std::path::Path, entries: &[(&str, usize, usize)]) -> String {
+            let changes: Vec<String> = entries
+                .iter()
+                .copied()
+                .map(|(name, completed, total)| {
+                    format!(
+                        r#"{{"name":{name:?},"completedTasks":{completed},"totalTasks":{total},"lastModified":"x","status":"y"}}"#
+                    )
+                })
+                .collect();
+            format!(
+                r#"{{"changes":[{}],"root":{{"path":{:?},"source":"nearest"}}}}"#,
+                changes.join(","),
+                root.display().to_string()
+            )
+        }
+
+        fn apply_json(
+            schema_name: &str,
+            change_dir: &std::path::Path,
+            context_files: &[(&str, &[&str])],
+        ) -> String {
+            let entries: Vec<String> = context_files
+                .iter()
+                .copied()
+                .map(|(id, paths)| {
+                    let paths: Vec<String> = paths.iter().map(|p| format!("{p:?}")).collect();
+                    format!("{id:?}:[{}]", paths.join(","))
+                })
+                .collect();
+            format!(
+                r#"{{"schemaName":{schema_name:?},"changeDir":{:?},"contextFiles":{{{}}}}}"#,
+                change_dir.display().to_string(),
+                entries.join(",")
+            )
+        }
+
+        fn failed(args: &[&str]) -> CliError {
+            CliError::Failed {
+                program: "openspec".to_string(),
+                args: args.iter().map(|a| a.to_string()).collect(),
+                code: Some(1),
+                stderr: String::new(),
+            }
+        }
+
+        fn only(names: &[&str]) -> Selection {
+            Selection::Only(names.iter().map(|s| s.to_string()).collect())
+        }
+
+        /// The calls recorded strictly after `before`, so an assertion can
+        /// scope to exactly one `from_cli_cached` invocation rather than
+        /// the cumulative history every fake accumulates.
+        fn calls_since(fake: &FakeCli, before: usize) -> Vec<(crate::cli::Program, Vec<String>)> {
+            fake.calls()[before..].to_vec()
+        }
+
+        #[test]
+        fn selection_union_all_absorbs_only() {
+            assert_eq!(Selection::All.union(only(&["a"])), Selection::All);
+            assert_eq!(only(&["a"]).union(Selection::All), Selection::All);
+        }
+
+        #[test]
+        fn selection_union_of_two_onlys() {
+            assert_eq!(only(&["a"]).union(only(&["b"])), only(&["a", "b"]));
+            assert_eq!(
+                Selection::Only(std::collections::BTreeSet::new())
+                    .union(Selection::Only(std::collections::BTreeSet::new())),
+                Selection::Only(std::collections::BTreeSet::new()),
+                "an empty batch does not escalate to All"
+            );
+        }
+
+        #[test]
+        fn only_reruns_the_named_change() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(list_json(&repo, &[("alpha", 1, 2), ("beta", 0, 0)])),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "alpha", "--json"],
+                Ok(apply_json("tdd", &repo.join("openspec/changes/alpha"), &[])),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "beta", "--json"],
+                Ok(apply_json("tdd", &repo.join("openspec/changes/beta"), &[])),
+            );
+
+            let mut cache = CliCache::default();
+            let first = from_cli_cached(&fake, &repo, &Selection::All, &mut cache);
+            let before = fake.calls().len();
+
+            let second = from_cli_cached(&fake, &repo, &only(&["alpha"]), &mut cache);
+
+            assert_eq!(
+                calls_since(&fake, before),
+                vec![
+                    (
+                        crate::cli::Program::Openspec,
+                        vec!["list".to_string(), "--json".to_string()]
+                    ),
+                    (
+                        crate::cli::Program::Openspec,
+                        vec![
+                            "instructions".to_string(),
+                            "apply".to_string(),
+                            "--change".to_string(),
+                            "alpha".to_string(),
+                            "--json".to_string(),
+                        ]
+                    ),
+                ],
+                "beta must not be re-asked about"
+            );
+            let first_beta = first.active.iter().find(|c| c.name == "beta").unwrap();
+            let second_beta = second.active.iter().find(|c| c.name == "beta").unwrap();
+            assert_eq!(first_beta, second_beta, "byte-identical, reused from cache");
+        }
+
+        #[test]
+        fn only_still_runs_an_uncached_change() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(list_json(&repo, &[("alpha", 1, 2), ("beta", 0, 0)])),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "alpha", "--json"],
+                Ok(apply_json("tdd", &repo.join("openspec/changes/alpha"), &[])),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "beta", "--json"],
+                Ok(apply_json("tdd", &repo.join("openspec/changes/beta"), &[])),
+            );
+
+            let mut cache = CliCache::default();
+            let result = from_cli_cached(&fake, &repo, &only(&["alpha"]), &mut cache);
+
+            assert_eq!(result.active.len(), 2, "a cold cache degrades no change");
+            let apply_names: Vec<String> = fake
+                .calls()
+                .iter()
+                .filter(|(_, args)| args.first().map(String::as_str) == Some("instructions"))
+                .map(|(_, args)| args[3].clone())
+                .collect();
+            assert_eq!(apply_names, vec!["alpha".to_string(), "beta".to_string()]);
+        }
+
+        #[test]
+        fn cached_progress_comes_from_the_fresh_list() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+            let fake = FakeCli::new();
+            // Both `list` responses are registered up front, in the order
+            // the two calls below consume them: `FakeCli`'s queue only pops
+            // once a SECOND registration exists — a single registration
+            // just repeats, so registering the second reply *between* the
+            // two calls would make the second call consume the FIRST
+            // (stale) reply rather than the fresh one.
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(list_json(&repo, &[("alpha", 4, 9), ("beta", 0, 0)])),
+            );
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(list_json(&repo, &[("alpha", 7, 9), ("beta", 0, 0)])),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "alpha", "--json"],
+                Ok(apply_json("tdd", &repo.join("openspec/changes/alpha"), &[])),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "beta", "--json"],
+                Ok(apply_json("tdd", &repo.join("openspec/changes/beta"), &[])),
+            );
+
+            let mut cache = CliCache::default();
+            let _first = from_cli_cached(&fake, &repo, &Selection::All, &mut cache);
+            let second = from_cli_cached(&fake, &repo, &only(&["beta"]), &mut cache);
+
+            let alpha = second.active.iter().find(|c| c.name == "alpha").unwrap();
+            assert_eq!(
+                alpha.progress,
+                crate::tasks::Progress {
+                    completed: 7,
+                    total: 9
+                }
+            );
+        }
+
+        #[test]
+        fn an_unlisted_cached_change_is_evicted() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+            let fake = FakeCli::new();
+            // All three `list` replies registered up front, in call order —
+            // see `cached_progress_comes_from_the_fresh_list` for why.
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(list_json(&repo, &[("alpha", 1, 2), ("beta", 0, 0)])),
+            );
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(list_json(&repo, &[("alpha", 1, 2)])),
+            );
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(list_json(&repo, &[("alpha", 1, 2), ("beta", 0, 0)])),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "alpha", "--json"],
+                Ok(apply_json("tdd", &repo.join("openspec/changes/alpha"), &[])),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "beta", "--json"],
+                Ok(apply_json("tdd", &repo.join("openspec/changes/beta"), &[])),
+            );
+
+            let mut cache = CliCache::default();
+            let _first = from_cli_cached(&fake, &repo, &Selection::All, &mut cache);
+
+            let second = from_cli_cached(&fake, &repo, &Selection::All, &mut cache);
+            assert_eq!(second.active.len(), 1);
+            assert_eq!(second.active[0].name, "alpha");
+
+            let before = fake.calls().len();
+            let third = from_cli_cached(&fake, &repo, &only(&["alpha"]), &mut cache);
+            let apply_names: Vec<String> = calls_since(&fake, before)
+                .iter()
+                .filter(|(_, args)| args.first().map(String::as_str) == Some("instructions"))
+                .map(|(_, args)| args[3].clone())
+                .collect();
+            assert!(
+                apply_names.contains(&"beta".to_string()),
+                "beta's evicted cache entry must be treated as new: {apply_names:?}"
+            );
+            assert_eq!(third.active.len(), 2);
+        }
+
+        #[test]
+        fn cached_change_keeps_its_artifacts_and_schema() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+            write(&repo.join("openspec/changes/beta/proposal.md"), "# beta\n");
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(list_json(&repo, &[("alpha", 1, 2), ("beta", 0, 0)])),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "alpha", "--json"],
+                Ok(apply_json("tdd", &repo.join("openspec/changes/alpha"), &[])),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "beta", "--json"],
+                Ok(apply_json(
+                    "tdd",
+                    &repo.join("openspec/changes/beta"),
+                    &[(
+                        "proposal",
+                        &[repo
+                            .join("openspec/changes/beta/proposal.md")
+                            .to_str()
+                            .unwrap()],
+                    )],
+                )),
+            );
+
+            let mut cache = CliCache::default();
+            let first = from_cli_cached(&fake, &repo, &Selection::All, &mut cache);
+            let second = from_cli_cached(&fake, &repo, &only(&["alpha"]), &mut cache);
+
+            let first_beta = first.active.iter().find(|c| c.name == "beta").unwrap();
+            let second_beta = second.active.iter().find(|c| c.name == "beta").unwrap();
+            assert_eq!(first_beta.schema, second_beta.schema);
+            assert_eq!(first_beta.artifacts, second_beta.artifacts);
+            assert!(!second_beta.artifacts.is_empty());
+        }
+
+        #[test]
+        fn cached_change_keeps_its_problems() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(list_json(&repo, &[("alpha", 1, 2), ("beta", 0, 0)])),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "alpha", "--json"],
+                Ok(apply_json("tdd", &repo.join("openspec/changes/alpha"), &[])),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "beta", "--json"],
+                Ok(apply_json(
+                    "outside-in-tdd",
+                    &repo.join("openspec/changes/beta"),
+                    &[],
+                )),
+            );
+            fake.register_openspec(
+                &["schema", "which", "outside-in-tdd", "--json"],
+                Err(failed(&["schema", "which", "outside-in-tdd", "--json"])),
+            );
+
+            let mut cache = CliCache::default();
+            let first = from_cli_cached(&fake, &repo, &Selection::All, &mut cache);
+            let second = from_cli_cached(&fake, &repo, &only(&["alpha"]), &mut cache);
+
+            let first_beta = first.active.iter().find(|c| c.name == "beta").unwrap();
+            let second_beta = second.active.iter().find(|c| c.name == "beta").unwrap();
+            assert_eq!(first_beta.problems.len(), 1);
+            assert_eq!(first_beta.problems, second_beta.problems);
+        }
+
+        #[test]
+        fn a_list_failure_leaves_the_cache_untouched() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+            let fake = FakeCli::new();
+            // All three `list` replies registered up front, in call order —
+            // see `cached_progress_comes_from_the_fresh_list` for why.
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(list_json(&repo, &[("alpha", 1, 2)])),
+            );
+            fake.register_openspec(&["list", "--json"], Err(failed(&["list", "--json"])));
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(list_json(&repo, &[("alpha", 1, 2)])),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "alpha", "--json"],
+                Ok(apply_json("tdd", &repo.join("openspec/changes/alpha"), &[])),
+            );
+            let mut cache = CliCache::default();
+            let _first = from_cli_cached(&fake, &repo, &Selection::All, &mut cache);
+
+            let second = from_cli_cached(&fake, &repo, &Selection::All, &mut cache);
+            assert!(second.active.is_empty());
+            assert_eq!(second.problems.len(), 1);
+
+            let before = fake.calls().len();
+            let third = from_cli_cached(
+                &fake,
+                &repo,
+                &Selection::Only(std::collections::BTreeSet::new()),
+                &mut cache,
+            );
+            assert_eq!(
+                calls_since(&fake, before).len(),
+                1,
+                "only the list call — the cache still holds alpha from before the failure"
+            );
+            assert_eq!(third.active.len(), 1);
+        }
+
+        #[test]
+        fn garbage_apply_payload_leaves_the_others_intact() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(list_json(&repo, &[("alpha", 1, 2), ("beta", 0, 0)])),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "alpha", "--json"],
+                Ok(apply_json("tdd", &repo.join("openspec/changes/alpha"), &[])),
+            );
+            // Both `beta` apply replies registered up front, in call order —
+            // see `cached_progress_comes_from_the_fresh_list` for why.
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "beta", "--json"],
+                Ok("{{{".to_string()),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "beta", "--json"],
+                Ok(apply_json("tdd", &repo.join("openspec/changes/beta"), &[])),
+            );
+
+            let mut cache = CliCache::default();
+            let result = from_cli_cached(&fake, &repo, &Selection::All, &mut cache);
+            assert!(result.active.iter().any(|c| c.name == "alpha"));
+            assert!(!result.active.iter().any(|c| c.name == "beta"));
+            assert!(result.problems.iter().any(|p| p.contains("beta")));
+
+            let before = fake.calls().len();
+            let second = from_cli_cached(
+                &fake,
+                &repo,
+                &Selection::Only(std::collections::BTreeSet::new()),
+                &mut cache,
+            );
+            let apply_names: Vec<String> = calls_since(&fake, before)
+                .iter()
+                .filter(|(_, args)| args.first().map(String::as_str) == Some("instructions"))
+                .map(|(_, args)| args[3].clone())
+                .collect();
+            assert!(
+                apply_names.contains(&"beta".to_string()),
+                "no cache entry, so beta is retried: {apply_names:?}"
+            );
+            assert_eq!(second.active.len(), 2);
+        }
+
+        #[test]
+        fn a_rejected_schema_is_cached_like_any_other() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(list_json(&repo, &[("alpha", 1, 2), ("beta", 0, 0)])),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "alpha", "--json"],
+                Ok(apply_json(
+                    "outside-in-tdd",
+                    &repo.join("openspec/changes/alpha"),
+                    &[],
+                )),
+            );
+            fake.register_openspec(
+                &["schema", "which", "outside-in-tdd", "--json"],
+                Err(failed(&["schema", "which", "outside-in-tdd", "--json"])),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "beta", "--json"],
+                Ok(apply_json("tdd", &repo.join("openspec/changes/beta"), &[])),
+            );
+
+            let mut cache = CliCache::default();
+            let first = from_cli_cached(&fake, &repo, &Selection::All, &mut cache);
+            let alpha = first.active.iter().find(|c| c.name == "alpha").unwrap();
+            assert!(alpha.artifacts.is_empty());
+            assert_eq!(alpha.problems.len(), 1);
+            assert!(alpha.problems[0].contains("outside-in-tdd"));
+
+            let before = fake.calls().len();
+            let second = from_cli_cached(&fake, &repo, &only(&["beta"]), &mut cache);
+            assert_eq!(
+                calls_since(&fake, before),
+                vec![
+                    (
+                        crate::cli::Program::Openspec,
+                        vec!["list".to_string(), "--json".to_string()]
+                    ),
+                    (
+                        crate::cli::Program::Openspec,
+                        vec![
+                            "instructions".to_string(),
+                            "apply".to_string(),
+                            "--change".to_string(),
+                            "beta".to_string(),
+                            "--json".to_string(),
+                        ]
+                    ),
+                ],
+                "no instructions apply and no schema which for alpha"
+            );
+            let alpha2 = second.active.iter().find(|c| c.name == "alpha").unwrap();
+            assert_eq!(alpha2.problems, alpha.problems);
+            assert_eq!(
+                alpha2.progress,
+                crate::tasks::Progress {
+                    completed: 1,
+                    total: 2
+                }
+            );
+
+            let third = from_cli_cached(&fake, &repo, &Selection::All, &mut cache);
+            let alpha3 = third.active.iter().find(|c| c.name == "alpha").unwrap();
+            assert_eq!(
+                alpha3.problems.len(),
+                1,
+                "r is the way out of a stale change"
+            );
+        }
+
+        #[test]
+        fn all_reruns_every_change() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(list_json(&repo, &[("alpha", 1, 2), ("beta", 0, 0)])),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "alpha", "--json"],
+                Ok(apply_json("tdd", &repo.join("openspec/changes/alpha"), &[])),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "beta", "--json"],
+                Ok(apply_json("tdd", &repo.join("openspec/changes/beta"), &[])),
+            );
+
+            let mut cache = CliCache::default();
+            let _first = from_cli_cached(&fake, &repo, &Selection::All, &mut cache);
+            let before = fake.calls().len();
+            let _second = from_cli_cached(&fake, &repo, &Selection::All, &mut cache);
+            let apply_names: Vec<String> = calls_since(&fake, before)
+                .iter()
+                .filter(|(_, args)| args.first().map(String::as_str) == Some("instructions"))
+                .map(|(_, args)| args[3].clone())
+                .collect();
+            assert_eq!(apply_names, vec!["alpha".to_string(), "beta".to_string()]);
+        }
+
+        #[test]
+        fn from_cli_is_from_cli_cached_with_all() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(list_json(&repo, &[("alpha", 1, 2)])),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "alpha", "--json"],
+                Ok(apply_json("tdd", &repo.join("openspec/changes/alpha"), &[])),
+            );
+            let result = from_cli(&fake, &repo);
+
+            let fake2 = FakeCli::new();
+            fake2.register_openspec(
+                &["list", "--json"],
+                Ok(list_json(&repo, &[("alpha", 1, 2)])),
+            );
+            fake2.register_openspec(
+                &["instructions", "apply", "--change", "alpha", "--json"],
+                Ok(apply_json("tdd", &repo.join("openspec/changes/alpha"), &[])),
+            );
+            let mut cache = CliCache::default();
+            let expected = from_cli_cached(&fake2, &repo, &Selection::All, &mut cache);
+
+            assert_eq!(result, expected);
+        }
+
+        #[test]
+        fn from_cli_cached_writes_nothing() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+            write(&repo.join("openspec/changes/alpha/tasks.md"), "- [x] a\n");
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(list_json(&repo, &[("alpha", 1, 2)])),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "alpha", "--json"],
+                Ok(apply_json("tdd", &repo.join("openspec/changes/alpha"), &[])),
+            );
+
+            let before = snapshot(&repo);
+            let mut cache = CliCache::default();
+            let _first = from_cli_cached(&fake, &repo, &Selection::All, &mut cache);
+            let _second = from_cli_cached(
+                &fake,
+                &repo,
+                &Selection::Only(std::collections::BTreeSet::new()),
+                &mut cache,
+            );
+            let after = snapshot(&repo);
+            assert_eq!(before, after, "from_cli_cached wrote inside the repository");
         }
     }
 
