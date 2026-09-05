@@ -1440,7 +1440,7 @@ is made after a sleep, and no negative assertion is made across a thread boundar
 per-change invalidation rule was proven single-threaded in group 3, precisely so it need not
 be proven here.
 
-- [ ] 7.1 RED: Write eight failing tests in `refresh::tests::`, named from their scenarios:
+- [x] 7.1 RED: Write eight failing tests in `refresh::tests::`, named from their scenarios:
       `no_refresher_never_yields`, `start_without_a_binary_is_inert`,
       `start_without_a_repo_is_inert`, `the_worker_answers_with_files_then_merged`,
       `a_failing_cli_still_sends_the_files_result`,
@@ -1472,7 +1472,7 @@ be proven here.
       `drain_and_fold(first, &rx)` **directly, on the test's own thread**, over a receiver
       into which two further selections have been sent and whose sender has been dropped.
 
-- [ ] 7.2 GREEN: Implement `refresh::Worker`, `refresh::start`, and the `#[cfg(test)]`
+- [x] 7.2 GREEN: Implement `refresh::Worker`, `refresh::start`, and the `#[cfg(test)]`
       `refresh::worker_for_test` per `specs/refresh-worker/spec.md`: two `mpsc` channels, one
       `thread::spawn`, an `Arc<dyn OpenspecCli>`, a `CliCache` owned for the thread's
       lifetime, and per request `from_files` → send `Files` → `from_cli_cached` → `merge` →
@@ -1499,16 +1499,16 @@ be proven here.
       method of both traits is non-blocking" a check rather than a doc comment, and
       `take_result` is called on **every frame**.
 
-- [ ] 7.3 REFACTOR: If the worker's body reads as one long function, extract the
+- [x] 7.3 REFACTOR: If the worker's body reads as one long function, extract the
       drain-and-fold step and the one-cycle step into named private functions; otherwise state
       that no refactor was needed.
 
-- [ ] 7.4 CHECK: Contract gate — re-read `specs/refresh-worker/spec.md` and confirm neither
+- [x] 7.4 CHECK: Contract gate — re-read `specs/refresh-worker/spec.md` and confirm neither
       `Refresher` nor `RefreshResult` names `CliChanges`, `OpenspecCli`, or `from_cli`, so
       `src/ui/driver.rs` can hold a `&mut dyn Refresher` while `NOCLI-SHELL` stays green
       unweakened. That check is the structural proof the CLI is off the render path.
 
-- [ ] 7.5 CHECK: The checks that arm at this group, plus their deferred plants from task 0.4:
+- [x] 7.5 CHECK: The checks that arm at this group, plus their deferred plants from task 0.4:
       - `UI_MIN=11 sh $CHECKS/NOBLOCK.sh` — **all three** legs green for the first time,
         since `src/refresh.rs` now names `mpsc`, `thread::spawn`, and `try_recv`. Then plant,
         reverting each: `use std::sync::mpsc;` above `pub const TICK` in `src/ui/driver.rs`
@@ -1537,7 +1537,7 @@ be proven here.
       - `MIN=21 sh $CHECKS/NOSPAWN-GREP.sh` — the worker spawns a **thread**, not a process.
       - `git status --porcelain src/` empty after every revert.
 
-- [ ] 7.6 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'refresh::tests::' 8`; the four
+- [x] 7.6 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'refresh::tests::' 8`; the four
       gate commands, still failing on exactly the one known acceptance test.
       `BASE=f9b42e8 sh $CHECKS/OPENSPEC-UNTOUCHED.sh`. Commit.
 
