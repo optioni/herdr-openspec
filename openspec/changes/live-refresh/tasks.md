@@ -765,7 +765,7 @@ than as a missing check.
 ## 0. Baseline, checks, and the scratchpad
 <!-- kind: operational -->
 
-- [ ] 0.1 CHECK: Record the starting state before any edit, by **measuring**, never by
+- [x] 0.1 CHECK: Record the starting state before any edit, by **measuring**, never by
       copying a number from this file.
       - `git rev-parse HEAD` → `export BASE=<sha>`. Every `OPENSPEC-UNTOUCHED` run uses it.
         A diff against the index would pass over this change's own per-group commits.
@@ -846,14 +846,14 @@ than as a missing check.
         each block's first **two** lines for its label so `GATE-MECH1.py`'s shebang does not
         hide it.
 
-- [ ] 0.2 CHECK: Prove every **extracted** block is byte-identical to its source. For each of
+- [x] 0.2 CHECK: Prove every **extracted** block is byte-identical to its source. For each of
       the twenty-one, re-extract the source block into `$WORK/<LABEL>.src` by the same means
       and `diff -u "$WORK/<LABEL>.src" "$CHECKS/<LABEL>.sh"` — an empty diff for all
       twenty-one, or stop. Keep `$WORK/DEPS.src` and `$WORK/GRAPH-SNAP.src`: task 6.2 diffs its edits against
       them. An extraction that silently produced the wrong bytes would otherwise pass a check
       that is not the one anybody reviewed. Record the twenty-one diff results.
 
-- [ ] 0.3 CHECK: Run every check against **unmodified `main`** and record each result
+- [x] 0.3 CHECK: Run every check against **unmodified `main`** and record each result
       verbatim, so the change starts from a known state rather than an assumed one.
       - Expected **green** at their current floors, each printing its OK line:
         `MIN=19 sh $CHECKS/NOSPAWN-GREP.sh`; `UI_MIN=10 sh $CHECKS/READSEAM.sh`;
@@ -889,7 +889,7 @@ than as a missing check.
         the extraction or the invocation, and it is fixed here — `NOTABSEAM` shipped red on an
         unmodified tree once already.
 
-- [ ] 0.4 CHECK: Prove each of the three NEW checks and the two EDITED checks can actually see
+- [x] 0.4 CHECK: Prove each of the three NEW checks and the two EDITED checks can actually see
       what it guards, by planting a violation, running the check, and reverting. Each plant is
       a working-tree edit reverted immediately; `git status --porcelain src/` must be empty
       after each revert. Every plant below was **run at planning time** with the result stated.
@@ -961,7 +961,7 @@ than as a missing check.
         macos_fsevent explicitly`, then restore. On macOS this plant **also** breaks the
         build, which is itself the measured evidence for Decisions 13.
 
-- [ ] 0.5 VERIFY: `git status --porcelain` shows only `openspec/changes/live-refresh/`; the
+- [x] 0.5 VERIFY: `git status --porcelain` shows only `openspec/changes/live-refresh/`; the
       four gate commands from the preamble all pass on unmodified `main`; and
       `BASE=f9b42e8 sh $CHECKS/OPENSPEC-UNTOUCHED.sh` prints OK. Commit the artifacts.
 
