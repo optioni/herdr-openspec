@@ -406,7 +406,7 @@ Together: **five** blocks reproduced above (`NOIO-VIEW`, `TASKSEAM`, `TASKWIDTHS
 ## 0. Baseline, checks, and the scratchpad
 <!-- kind: operational -->
 
-- [ ] 0.1 CHECK: Record the starting state before any edit, by **measuring**, never by
+- [x] 0.1 CHECK: Record the starting state before any edit, by **measuring**, never by
       copying a number from this file.
       - `git rev-parse HEAD` → `export BASE=<sha>`. Every `OPENSPEC-UNTOUCHED` run uses it.
         A diff against the index would pass over this change's own per-group commits.
@@ -483,13 +483,13 @@ Together: **five** blocks reproduced above (`NOIO-VIEW`, `TASKSEAM`, `TASKWIDTHS
         Extract every fenced block above to `$CHECKS/<LABEL>.sh` byte-identically — five of
         them — and extract the eighteen named archived blocks to their own files.
 
-- [ ] 0.2 CHECK: Prove every **extracted** block is byte-identical to its source. For each of
+- [x] 0.2 CHECK: Prove every **extracted** block is byte-identical to its source. For each of
       the eighteen, re-extract the source block into `$WORK/<LABEL>.src` by the same means and
       `diff -u "$WORK/<LABEL>.src" "$CHECKS/<LABEL>.sh"` — an empty diff for all eighteen, or
       stop. An extraction that silently produced the wrong bytes would otherwise pass a check
       that is not the one anybody reviewed. Record the eighteen diff results.
 
-- [ ] 0.3 CHECK: Run every check against **unmodified `main`** and record each result
+- [x] 0.3 CHECK: Run every check against **unmodified `main`** and record each result
       verbatim, so the change starts from a known state rather than an assumed one.
       - Expected **green** at their current floors, each printing its OK line:
         `MIN=18 sh $CHECKS/NOSPAWN-GREP.sh`; `UI_MIN=9 sh $CHECKS/READSEAM.sh`;
@@ -516,7 +516,7 @@ Together: **five** blocks reproduced above (`NOIO-VIEW`, `TASKSEAM`, `TASKWIDTHS
         the extraction or the invocation, and it is fixed here — `NOTABSEAM` shipped red on an
         unmodified tree once already.
 
-- [ ] 0.4 CHECK: Prove each of the three NEW checks and the one EDITED check can actually see
+- [x] 0.4 CHECK: Prove each of the three NEW checks and the one EDITED check can actually see
       what it guards, by planting a violation, running the check, and reverting. Each plant is
       a working-tree edit reverted immediately; `git status --porcelain src/` must be empty
       after each revert.
@@ -548,7 +548,7 @@ Together: **five** blocks reproduced above (`NOIO-VIEW`, `TASKSEAM`, `TASKWIDTHS
       - `TASKWIDTHS` (deferred to 4.4): change one test's `58` to `59`. Expect FAIL naming
         that test function.
 
-- [ ] 0.5 VERIFY: `git status --porcelain` shows only `openspec/changes/tasks-tab/`; the
+- [x] 0.5 VERIFY: `git status --porcelain` shows only `openspec/changes/tasks-tab/`; the
       four gate commands from the preamble all pass on unmodified `main`; and
       `sh $CHECKS/OPENSPEC-UNTOUCHED.sh` prints OK. Commit the artifacts.
 
