@@ -634,7 +634,7 @@ files in `$CHECKS`.
 ## 0. Baseline, checks, and the scratchpad
 <!-- kind: operational -->
 
-- [ ] 0.1 CHECK: Record the starting state before any edit, by **measuring**, never by
+- [x] 0.1 CHECK: Record the starting state before any edit, by **measuring**, never by
       copying a number from this file.
       - `git rev-parse HEAD` → `export BASE=<sha>`. Every `OPENSPEC-UNTOUCHED` run uses it.
         A diff against the index would pass over this change's own per-group commits.
@@ -709,7 +709,7 @@ files in `$CHECKS`.
       the tree is not the one this plan was written against and the discrepancy is resolved
       before any edit.
 
-- [ ] 0.2 CHECK: Prove the extraction landed, rather than assuming it. For each of the **nine**
+- [x] 0.2 CHECK: Prove the extraction landed, rather than assuming it. For each of the **nine**
       files extracted from an archived tasks file, extract the same block a second time by an
       independent route and `diff` the two; every diff must be empty. Then `ls -1 "$CHECKS" |
       wc -l` and confirm **twenty** files are present — the eleven reproduced in this file
@@ -723,7 +723,7 @@ files in `$CHECKS`.
       later task invokes is absent from that listing. A later task that runs a script which
       does not exist is exactly the failure `list-view` nearly hit.
 
-- [ ] 0.2b CHECK: Prove the "byte-identical executable logic" claim for the five blocks whose
+- [x] 0.2b CHECK: Prove the "byte-identical executable logic" claim for the five blocks whose
       **comments** move but whose code does not — `NOSPAWN-GREP`, `NOCLI-SHELL`,
       `NOLIT-CHANGE`, `MDSEAM`, and `WIDTHS`. For each, extract `markdown-viewer`'s version
       to `$WORK/<LABEL>.prev.sh`, strip full-line comments from both it and
@@ -731,7 +731,7 @@ files in `$CHECKS`.
       **Red when:** any diff shows an executable line. A silently-altered check that still
       calls itself carried forward is worse than an openly edited one.
 
-- [ ] 0.3 CHECK: Run the checks that must **pass** on the tree as it stands, so this change
+- [x] 0.3 CHECK: Run the checks that must **pass** on the tree as it stands, so this change
       starts from clean gates rather than inheriting broken ones: `NOSPAWN-GREP` (default
       `MIN=8`), `NOCLI-SHELL` (default `UI_MIN=7`), `NORAW-GREP`, `NODEFAULT-UI` with
       `TYPES="Dashboard Filter Detail" SCAN_MIN=60` (its **edited** form — it must be green
@@ -748,7 +748,7 @@ files in `$CHECKS`.
       exist yet — it is run for the first time in group 4), `READSEAM`, `NOTABSEAM`, and
       `DETAILWIDTHS`, all three of which name a file this change creates.
 
-- [ ] 0.4 CHECK: Run `DEPS` once on unmodified `main`, with `WORK` set and
+- [x] 0.4 CHECK: Run `DEPS` once on unmodified `main`, with `WORK` set and
       `DEPS_SKIP_LEG5=1`, and record its OK lines. This change adds no dependency, so this
       run is the **baseline** the identical run in group 12 is compared against, and the two
       must agree line for line.
@@ -756,7 +756,7 @@ files in `$CHECKS`.
       `markdown-viewer`'s archive recorded, which would mean the dependency set moved between
       changes.
 
-- [ ] 0.5 Commit: `chore(detail-view): record the pre-change baseline and extract the checks`.
+- [x] 0.5 Commit: `chore(detail-view): record the pre-change baseline and extract the checks`.
       Nothing under `src/` has been edited; the commit carries only this file's checkmarks
       and the recorded measurements.
 
