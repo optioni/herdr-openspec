@@ -1546,7 +1546,7 @@ be proven here.
 ## 8. The `r` key, `adopt`, and the forced reload
 <!-- kind: behavior -->
 
-- [ ] 8.1 RED: Write seven failing tests in `ui::app::tests::`, named from their scenarios:
+- [x] 8.1 RED: Write seven failing tests in `ui::app::tests::`, named from their scenarios:
       `r_maps_to_refresh_outside_filter_mode`, `refresh_sets_requested_and_changes_nothing_else`,
       `adopt_keeps_the_selection_by_name`, `adopt_clamps_when_the_change_is_gone`,
       `adopt_resolves_the_name_against_the_filtered_list`,
@@ -1560,7 +1560,7 @@ be proven here.
       has the same length and order. It must **shift** — a change inserted alphabetically
       above the selected one — or an implementation that preserved the index would pass.
 
-- [ ] 8.2 CHANGE: Extend the landed `ui::app::tests::` tests this change's scenarios modify,
+- [x] 8.2 CHANGE: Extend the landed `ui::app::tests::` tests this change's scenarios modify,
       without adding to the count. **Key tests:** `a_released_quit_key_does_not_quit` gains
       `Char('r')` Release and Repeat; `navigation_and_filter_keys_*` gains `r`, `R` with
       SHIFT, and `r` with CONTROL; `non_key_events_are_ignored` gains `Paste("r")`;
@@ -1576,7 +1576,7 @@ be proven here.
       gains `refresh.reload` false at both construction sites. Their exact names on disk may
       differ; match by the scenario they carry, not by the name written here.
 
-- [ ] 8.3 GREEN: Implement the `(KeyCode::Char('r'), KeyModifiers::NONE) => Action::Refresh`
+- [x] 8.3 GREEN: Implement the `(KeyCode::Char('r'), KeyModifiers::NONE) => Action::Refresh`
       arm in `action_for` — **in the non-filtering match only**, so `list-filtering`'s
       unchanged rule keeps `r` typing itself while filtering — the
       `Action::Refresh => self.refresh.requested = true` arm in `apply`, `Dashboard::adopt`,
@@ -1588,11 +1588,11 @@ be proven here.
       Second Red-when: `adopt` resolves the previous name against `changes.active` rather than
       `visible()`. `selected` indexes the visible list, and a `/` filter may be active.
 
-- [ ] 8.4 REFACTOR: `sync_detail` now has four sequential concerns — take the flag, clamp the
+- [x] 8.4 REFACTOR: `sync_detail` now has four sequential concerns — take the flag, clamp the
       tab, decide whether to read, read. Extract the decision into a named private helper if
       the function no longer reads as one thing; otherwise state that no refactor was needed.
 
-- [ ] 8.5 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'ui::app::tests::' 55`;
+- [x] 8.5 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'ui::app::tests::' 55`;
       `TYPES="Dashboard Filter Detail Refresh" SCAN_MIN=90 sh $CHECKS/NODEFAULT-UI.sh`;
       `sh $CHECKS/NOIO-VIEW.sh`; `UI_MIN=11 sh $CHECKS/NOBLOCK.sh`; the four gate commands,
       still failing on exactly the one known acceptance test.

@@ -1012,6 +1012,10 @@ apply:
             assert_eq!(found.detail.tab, 0);
             assert!(found.detail.problems.is_empty());
             assert_eq!(found.detail.loaded, None);
+            assert!(
+                !found.refresh.reload,
+                "live-refresh: startup must not force a reload"
+            );
             assert_detail_shows_header_and_no_content_yet_at_120(&found, "alpha");
 
             // The RepoSearch::NotFound arm is a second Dashboard
@@ -1035,6 +1039,10 @@ apply:
             assert_eq!(not_found.repo, None);
             assert_eq!(not_found.detail.source, "");
             assert_eq!(not_found.detail.scroll, 0);
+            assert!(
+                !not_found.refresh.reload,
+                "live-refresh: startup must not force a reload"
+            );
             assert_detail_blank_at_120(&not_found);
         }
     }

@@ -265,11 +265,11 @@ impl Dashboard {
                 self.filter.query.pop();
                 self.clamp_selection();
             }
-            // live-refresh's own behaviour (the `r` key mapping and the
-            // startup request) arrives in group 8; for now this is a no-op
-            // arm that touches nothing else, so the crate compiles with the
-            // thirteenth variant plumbed through with no observable change.
-            Action::Refresh => {}
+            // `live-refresh`: request a full refresh. Reaches no
+            // collaborator and changes nothing else — `run_loop`'s live
+            // tier is what turns the flag into a request. See
+            // `specs/live-updates/spec.md` -> "`r` forces a full refresh".
+            Action::Refresh => self.refresh.requested = true,
             Action::Ignore => {}
         }
     }
@@ -330,12 +330,48 @@ impl Dashboard {
         self.visible().get(self.selected).copied()
     }
 
+    /// Replace `changes` with a freshly produced set, preserving the
+    /// selection by the previously selected change's **name** rather than
+    /// its index: a refresh can add a change alphabetically above the
+    /// selected one, and an index preserved across that shift would
+    /// silently move the reader to a different change mid-read. The name is
+    /// resolved against the **new** `visible()` list, not `changes.active`,
+    /// because `selected` indexes the visible list and a `/` filter may be
+    /// active. Pure: no I/O, no clock. Sets `refresh.reload`, which is what
+    /// makes `sync_detail` re-read the (possibly unchanged) selection on
+    /// the very next call. Does **not** reset `detail.tab` or
+    /// `detail.scroll`: a refresh is not a selection move. See
+    /// `specs/live-updates/spec.md` -> "Adopting a change set preserves the
+    /// selection by name".
+    pub fn adopt(&mut self, changes: ChangeSet) {
+        let previous_name = self.selected_change().map(|c| c.name.clone());
+        self.changes = changes;
+        if let Some(name) = previous_name
+            && let Some(pos) = self.visible().iter().position(|c| c.name == name)
+        {
+            self.selected = pos;
+        }
+        self.clamp_selection();
+        self.refresh.reload = true;
+    }
+
     /// Resolve the selected tab's content through the injected reader,
-    /// re-reading only when the `(change directory, tab)` key has changed.
-    /// Total: never panics for any dashboard state, any artifact list, any
-    /// `detail.tab`, or any reader behaviour, including one that fails on
-    /// every path. Called by `ui::driver::run_loop` once per iteration,
-    /// before the draw — never by a view.
+    /// re-reading when the `(change directory, tab)` key has changed **or**
+    /// `refresh.reload` was set. Total: never panics for any dashboard
+    /// state, any artifact list, any `detail.tab`, or any reader behaviour,
+    /// including one that fails on every path. Called by
+    /// `ui::driver::run_loop` once per iteration, before the draw — never by
+    /// a view.
+    ///
+    /// `refresh.reload` is taken (and cleared) at the very start of every
+    /// call, on every branch, including the two early returns below — one
+    /// flag drives at most one re-read. `detail.scroll` is reset exactly
+    /// when the **key** changed, never merely because a reload was forced:
+    /// that split is what lets an agent's save re-render the document a
+    /// reader is halfway down without throwing them back to line one, while
+    /// a tab or change move still starts at the top. See
+    /// `specs/live-updates/spec.md` -> "A forced reload re-reads without
+    /// losing the scroll".
     ///
     /// The borrow checker forbids interleaving these steps with the borrow
     /// `selected_change()` holds over `*self`, so everything the read needs
@@ -343,6 +379,7 @@ impl Dashboard {
     /// clamped inside that expression and assigned after it. See
     /// `openspec/changes/detail-view/design.md` -> Contracts.
     pub fn sync_detail(&mut self, read: ArtifactReader<'_>) {
+        let forced = std::mem::take(&mut self.refresh.reload);
         let Some((dir, tab, paths)) = self.selected_change().map(|change| {
             let count = change.artifacts.len();
             let tab = self.detail.tab.min(count.saturating_sub(1));
@@ -363,7 +400,8 @@ impl Dashboard {
         };
         self.detail.tab = tab; // step 2
         let key = (dir, tab);
-        if self.detail.loaded.as_ref() == Some(&key) {
+        let key_changed = self.detail.loaded.as_ref() != Some(&key);
+        if !key_changed && !forced {
             return; // step 3
         }
         // Step 4: re-read every path, concatenating in order.
@@ -384,8 +422,11 @@ impl Dashboard {
                 }
             }
         }
-        // Step 5.
-        self.detail.scroll = 0;
+        // Step 5: the scroll resets on a key change only, never on a
+        // forced-but-unchanged-key reload.
+        if key_changed {
+            self.detail.scroll = 0;
+        }
         self.detail.loaded = Some(key);
     }
 
@@ -450,6 +491,7 @@ pub fn action_for(event: &Event, filtering: bool) -> Action {
             Action::Prev
         }
         (KeyCode::Char('/'), KeyModifiers::NONE) => Action::FilterStart,
+        (KeyCode::Char('r'), KeyModifiers::NONE) => Action::Refresh,
         (KeyCode::Char(c @ '1'..='9'), KeyModifiers::NONE) => {
             Action::SelectTab((c as u8 - b'1') as usize)
         }
@@ -654,6 +696,53 @@ mod tests {
         }
 
         #[test]
+        fn r_maps_to_refresh_outside_filter_mode() {
+            // `live-refresh` -> "r forces a full refresh and types itself
+            // while filtering".
+            assert_eq!(
+                action_for(&press(KeyCode::Char('r'), KeyModifiers::NONE), false),
+                Action::Refresh
+            );
+            assert_eq!(
+                action_for(&press(KeyCode::Char('r'), KeyModifiers::NONE), true),
+                Action::FilterPush('r')
+            );
+            assert_eq!(
+                action_for(&press(KeyCode::Char('r'), KeyModifiers::CONTROL), false),
+                Action::Ignore
+            );
+            assert_eq!(
+                action_for(&press(KeyCode::Char('r'), KeyModifiers::CONTROL), true),
+                Action::Ignore
+            );
+            assert_eq!(
+                action_for(&press(KeyCode::Char('R'), KeyModifiers::SHIFT), false),
+                Action::Ignore
+            );
+            assert_eq!(
+                action_for(&press(KeyCode::Char('R'), KeyModifiers::SHIFT), true),
+                Action::FilterPush('R')
+            );
+
+            // A terminal reporting releases and repeats must not refresh
+            // twice for one press, under either mode.
+            let released = Event::Key(KeyEvent::new_with_kind(
+                KeyCode::Char('r'),
+                KeyModifiers::NONE,
+                KeyEventKind::Release,
+            ));
+            let repeated = Event::Key(KeyEvent::new_with_kind(
+                KeyCode::Char('r'),
+                KeyModifiers::NONE,
+                KeyEventKind::Repeat,
+            ));
+            for filtering in [false, true] {
+                assert_eq!(action_for(&released, filtering), Action::Ignore);
+                assert_eq!(action_for(&repeated, filtering), Action::Ignore);
+            }
+        }
+
+        #[test]
         fn only_press_kind_acts() {
             let released = Event::Key(KeyEvent::new_with_kind(
                 KeyCode::Char('q'),
@@ -676,6 +765,24 @@ mod tests {
             }
             assert_eq!(action_for(&pressed, false), Action::Quit);
             assert_eq!(action_for(&pressed, true), Action::FilterPush('q'));
+
+            // `live-refresh`: a released or repeated `r` must not quit,
+            // refresh, or type — it must be ignored under either mode, the
+            // same as the landed `q` case above.
+            let r_released = Event::Key(KeyEvent::new_with_kind(
+                KeyCode::Char('r'),
+                KeyModifiers::NONE,
+                KeyEventKind::Release,
+            ));
+            let r_repeated = Event::Key(KeyEvent::new_with_kind(
+                KeyCode::Char('r'),
+                KeyModifiers::NONE,
+                KeyEventKind::Repeat,
+            ));
+            for filtering in [false, true] {
+                assert_eq!(action_for(&r_released, filtering), Action::Ignore);
+                assert_eq!(action_for(&r_repeated, filtering), Action::Ignore);
+            }
         }
 
         #[test]
@@ -701,14 +808,20 @@ mod tests {
             assert_eq!(d.route, Route::Detail);
             assert!(!d.quit);
             assert_eq!(d.detail.scroll, 0);
+            assert!(
+                !d.refresh.requested,
+                "a route move must not touch the refresh flag"
+            );
             d.apply(Action::Back);
             assert_eq!(d.route, Route::List);
             assert!(!d.quit);
             assert_eq!(d.detail.scroll, 0);
+            assert!(!d.refresh.requested);
             d.apply(Action::Back);
             assert_eq!(d.route, Route::List);
             assert!(!d.quit);
             assert_eq!(d.detail.scroll, 0);
+            assert!(!d.refresh.requested);
         }
 
         #[test]
@@ -724,6 +837,11 @@ mod tests {
                     action_for(&Event::Paste("q".to_string()), filtering),
                     Action::Ignore,
                     "a paste of the single character q must not quit or type, filtering={filtering}"
+                );
+                assert_eq!(
+                    action_for(&Event::Paste("r".to_string()), filtering),
+                    Action::Ignore,
+                    "a paste of the single character r must not refresh or type, filtering={filtering}"
                 );
                 let mouse = Event::Mouse(MouseEvent {
                     kind: MouseEventKind::Moved,
@@ -909,6 +1027,18 @@ mod tests {
             assert_eq!(
                 action_for(&press(KeyCode::Char('/'), KeyModifiers::NONE), false),
                 Action::FilterStart
+            );
+            assert_eq!(
+                action_for(&press(KeyCode::Char('r'), KeyModifiers::NONE), false),
+                Action::Refresh
+            );
+            assert_eq!(
+                action_for(&press(KeyCode::Char('R'), KeyModifiers::SHIFT), false),
+                Action::Ignore
+            );
+            assert_eq!(
+                action_for(&press(KeyCode::Char('r'), KeyModifiers::CONTROL), false),
+                Action::Ignore
             );
             assert_eq!(
                 action_for(&press(KeyCode::Char('J'), KeyModifiers::SHIFT), false),
@@ -1512,6 +1642,210 @@ mod tests {
         }
 
         #[test]
+        fn refresh_sets_requested_and_changes_nothing_else() {
+            // `live-refresh` -> "Refresh sets the flag and touches nothing
+            // else".
+            let change_a = fixture::active("alpha", 1, 4);
+            let change_b = fixture::active("beta", 2, 4);
+            let mut dashboard = Dashboard {
+                repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
+                searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
+                changes: fixture::set(vec![change_a, change_b], Vec::new(), Vec::new()),
+                route: Route::Detail,
+                quit: false,
+                selected: 1,
+                filter: Filter {
+                    query: "b".to_string(),
+                    active: false,
+                },
+                detail: Detail {
+                    source: "stale".to_string(),
+                    scroll: 5,
+                    tab: 2,
+                    problems: Vec::new(),
+                    loaded: None,
+                },
+                refresh: crate::ui::app::Refresh {
+                    requested: false,
+                    reload: false,
+                    problems: Vec::new(),
+                },
+            };
+            let before = dashboard.clone();
+
+            dashboard.apply(Action::Refresh);
+
+            assert!(dashboard.refresh.requested);
+            assert_eq!(dashboard.route, before.route);
+            assert_eq!(dashboard.selected, before.selected);
+            assert_eq!(dashboard.detail.tab, before.detail.tab);
+            assert_eq!(dashboard.detail.scroll, before.detail.scroll);
+            assert_eq!(dashboard.filter, before.filter);
+            assert_eq!(dashboard.quit, before.quit);
+            assert_eq!(dashboard.changes, before.changes);
+
+            // Applying it a second time leaves the flag true and still
+            // changes nothing else.
+            dashboard.apply(Action::Refresh);
+            assert!(dashboard.refresh.requested);
+            assert_eq!(dashboard.route, before.route);
+            assert_eq!(dashboard.selected, before.selected);
+            assert_eq!(dashboard.detail.tab, before.detail.tab);
+            assert_eq!(dashboard.detail.scroll, before.detail.scroll);
+            assert_eq!(dashboard.filter, before.filter);
+            assert_eq!(dashboard.quit, before.quit);
+            assert_eq!(dashboard.changes, before.changes);
+        }
+
+        /// A `Route::List` dashboard over `active`, with `selected` and
+        /// `filter.query` set explicitly — `adopt`'s own tests need control
+        /// over the visible list a plain `fixture::set` does not give
+        /// `dashboard_at`.
+        fn dashboard_with_active(
+            active: Vec<crate::changes::Change>,
+            selected: usize,
+            query: &str,
+        ) -> Dashboard {
+            Dashboard {
+                repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
+                searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
+                changes: fixture::set(active, Vec::new(), Vec::new()),
+                route: Route::List,
+                quit: false,
+                selected,
+                filter: Filter {
+                    query: query.to_string(),
+                    active: false,
+                },
+                detail: Detail {
+                    source: "stale".to_string(),
+                    scroll: 6,
+                    tab: 2,
+                    problems: Vec::new(),
+                    loaded: None,
+                },
+                refresh: crate::ui::app::Refresh {
+                    requested: false,
+                    reload: false,
+                    problems: Vec::new(),
+                },
+            }
+        }
+
+        #[test]
+        fn adopt_keeps_the_selection_by_name() {
+            // `live-refresh` -> "Adopting a change set preserves the
+            // selection by name" -> "The selection follows its change when
+            // the list shifts".
+            let mut d = dashboard_with_active(
+                vec![
+                    fixture::active("beta", 1, 4),
+                    fixture::active("gamma", 2, 4),
+                ],
+                1,
+                "",
+            );
+            assert_eq!(d.selected_change().unwrap().name, "gamma");
+
+            d.adopt(fixture::set(
+                vec![
+                    fixture::active("alpha", 0, 4),
+                    fixture::active("beta", 1, 4),
+                    fixture::active("gamma", 3, 4),
+                ],
+                Vec::new(),
+                Vec::new(),
+            ));
+
+            assert_eq!(d.selected, 2, "selected must still address gamma");
+            assert_eq!(d.selected_change().unwrap().name, "gamma");
+            assert_eq!(d.detail.tab, 2, "adopt must not touch detail.tab");
+            assert_eq!(d.detail.scroll, 6, "adopt must not touch detail.scroll");
+            assert!(d.refresh.reload);
+        }
+
+        #[test]
+        fn adopt_clamps_when_the_change_is_gone() {
+            // `live-refresh` -> "The selection is clamped when its change is
+            // gone".
+            let mut d = dashboard_with_active(
+                vec![
+                    fixture::active("alpha", 0, 4),
+                    fixture::active("beta", 1, 4),
+                    fixture::active("gamma", 2, 4),
+                ],
+                2,
+                "",
+            );
+            assert_eq!(d.selected_change().unwrap().name, "gamma");
+
+            d.adopt(fixture::set(
+                vec![fixture::active("alpha", 0, 4)],
+                Vec::new(),
+                Vec::new(),
+            ));
+            assert_eq!(d.selected, 0, "the last visible index, not past the end");
+            assert_eq!(d.selected_change().unwrap().name, "alpha");
+
+            // Adopting an empty set from there must not panic, and leaves
+            // `selected` at 0 with nothing selected.
+            d.adopt(crate::changes::empty_set());
+            assert_eq!(d.selected, 0);
+            assert!(d.selected_change().is_none());
+        }
+
+        #[test]
+        fn adopt_resolves_the_name_against_the_filtered_list() {
+            // `live-refresh` -> "A filter narrows what the name is resolved
+            // against". Query "b" picks out names containing a 'b'; "xyz"
+            // deliberately does not, so it is excluded from both visible
+            // lists on the same terms the scenario describes.
+            let mut d = dashboard_with_active(
+                vec![
+                    fixture::active("abc", 0, 4),
+                    fixture::active("bcd", 1, 4),
+                    fixture::active("xyz", 2, 4),
+                ],
+                1,
+                "b",
+            );
+            assert_eq!(
+                d.visible()
+                    .iter()
+                    .map(|c| c.name.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["abc", "bcd"]
+            );
+            assert_eq!(d.selected_change().unwrap().name, "bcd");
+
+            d.adopt(fixture::set(
+                vec![
+                    fixture::active("abc", 0, 4),
+                    fixture::active("bxx", 1, 4),
+                    fixture::active("bcd", 2, 4),
+                    fixture::active("xyz", 3, 4),
+                ],
+                Vec::new(),
+                Vec::new(),
+            ));
+
+            assert_eq!(
+                d.visible()
+                    .iter()
+                    .map(|c| c.name.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["abc", "bxx", "bcd"],
+                "xyz must stay excluded by the untouched filter"
+            );
+            assert_eq!(
+                d.selected, 2,
+                "still addressing bcd in the new visible list"
+            );
+            assert_eq!(d.selected_change().unwrap().name, "bcd");
+            assert_eq!(d.filter.query, "b", "adopt must not touch the filter query");
+        }
+
+        #[test]
         fn back_to_list_at_list_is_a_no_op() {
             let mut dashboard = dashboard_at(Route::List);
             dashboard.apply(Action::Back);
@@ -1856,8 +2190,14 @@ mod tests {
             let read = |p: &std::path::Path| recorder.read(p);
 
             d.sync_detail(&read);
+            assert!(
+                !d.refresh.reload,
+                "live-refresh: an unforced sync leaves the flag false"
+            );
             d.sync_detail(&read);
+            assert!(!d.refresh.reload);
             d.sync_detail(&read);
+            assert!(!d.refresh.reload);
 
             assert_eq!(d.detail.source, "# proposal");
             assert!(d.detail.problems.is_empty());
@@ -1867,6 +2207,72 @@ mod tests {
                 recorder.paths(),
                 vec![std::path::PathBuf::from("/repo/p.md")]
             );
+        }
+
+        #[test]
+        fn a_forced_reload_keeps_the_scroll() {
+            // `live-refresh` -> "A forced reload re-reads without losing the
+            // scroll" -> "A forced reload re-reads the same tab and keeps
+            // the offset".
+            let mut d = dashboard_with_artifacts_named("x", &[("proposal", &["/repo/p.md"])]);
+            let dir = d.changes.active[0].dir.clone();
+            let first = RecordingReader::always(Ok("# proposal".to_string()));
+            let read_first = |p: &std::path::Path| first.read(p);
+            d.sync_detail(&read_first);
+            d.detail.scroll = 6;
+            assert_eq!(d.detail.loaded, Some((dir.clone(), 0)));
+
+            d.refresh.reload = true;
+            let second = RecordingReader::always(Ok("# a much longer proposal now".to_string()));
+            let read_second = |p: &std::path::Path| second.read(p);
+            d.sync_detail(&read_second);
+
+            assert_eq!(
+                second.calls(),
+                1,
+                "the unchanged key must not suppress the forced re-read"
+            );
+            assert_eq!(second.paths(), vec![std::path::PathBuf::from("/repo/p.md")]);
+            assert_eq!(d.detail.source, "# a much longer proposal now");
+            assert_eq!(
+                d.detail.scroll, 6,
+                "a forced reload must not move the scroll"
+            );
+            assert!(!d.refresh.reload, "one flag must drive exactly one re-read");
+            assert_eq!(d.detail.loaded, Some((dir, 0)));
+        }
+
+        #[test]
+        fn a_tab_move_under_a_forced_reload_resets_the_scroll() {
+            // `live-refresh` -> "A tab move under a forced reload still
+            // resets the scroll" — the reset is attributed to the KEY
+            // change, not to the flag; the preceding test proves a forced
+            // reload alone preserves the offset.
+            let mut d = dashboard_with_artifacts_named(
+                "x",
+                &[("proposal", &["/repo/p.md"]), ("design", &["/repo/d.md"])],
+            );
+            let dir = d.changes.active[0].dir.clone();
+            let first = RecordingReader::always(Ok("# proposal".to_string()));
+            let read_first = |p: &std::path::Path| first.read(p);
+            d.sync_detail(&read_first);
+            d.detail.scroll = 6;
+
+            d.detail.tab = 1;
+            d.refresh.reload = true;
+            let second = RecordingReader::always(Ok("# design".to_string()));
+            let read_second = |p: &std::path::Path| second.read(p);
+            d.sync_detail(&read_second);
+
+            assert_eq!(second.calls(), 1);
+            assert_eq!(second.paths(), vec![std::path::PathBuf::from("/repo/d.md")]);
+            assert_eq!(d.detail.source, "# design");
+            assert_eq!(
+                d.detail.scroll, 0,
+                "the tab move, not the forced flag, must reset the scroll"
+            );
+            assert!(!d.refresh.reload);
+            assert_eq!(d.detail.loaded, Some((dir, 1)));
         }
 
         #[test]
@@ -2057,14 +2463,15 @@ mod tests {
             assert!(d.detail.problems[0].contains("/repo/specs/a/spec.md"));
             assert!(d.detail.problems[0].contains("permission denied"));
 
-            // A transient failure does not accumulate: a sync after a tab
-            // move and back clears the previous `problems` before
-            // recording again.
-            d.apply(Action::NextTab);
-            d.apply(Action::PrevTab);
+            // A transient failure does not accumulate: `live-refresh`'s
+            // forced reload of the SAME (unchanged) key clears the previous
+            // `problems` before recording again — the key never changes
+            // here, so this exercises the "forced re-read of an unchanged
+            // key" clause directly, rather than smuggling a re-read in
+            // through a tab move.
+            d.refresh.reload = true;
             let recorder2 = RecordingReader::always(Ok("# b\n".to_string()));
             let read2 = |p: &std::path::Path| recorder2.read(p);
-            d.detail.loaded = None;
             d.sync_detail(&read2);
             assert!(d.detail.problems.is_empty());
         }
@@ -2145,6 +2552,7 @@ mod tests {
             assert!(!d.detail.source.is_empty());
 
             d.filter.query = "zzz".to_string();
+            d.refresh.reload = true;
             d.sync_detail(&read);
 
             assert!(d.detail.source.is_empty());
@@ -2152,6 +2560,10 @@ mod tests {
             assert_eq!(d.detail.tab, 0);
             assert_eq!(d.detail.scroll, 0);
             assert_eq!(d.detail.loaded, None);
+            assert!(
+                !d.refresh.reload,
+                "the flag must still be cleared on the empty-list early return"
+            );
 
             // The same holds for a Dashboard built over `changes::empty_set()`.
             let mut d2 = Dashboard {
@@ -2171,7 +2583,7 @@ mod tests {
                 },
                 refresh: crate::ui::app::Refresh {
                     requested: false,
-                    reload: false,
+                    reload: true,
                     problems: Vec::new(),
                 },
             };
@@ -2184,6 +2596,7 @@ mod tests {
             assert_eq!(d2.detail.scroll, 0);
             assert_eq!(d2.detail.loaded, None);
             assert_eq!(recorder2.calls(), 0);
+            assert!(!d2.refresh.reload);
         }
     }
 }
