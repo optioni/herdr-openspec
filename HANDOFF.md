@@ -1,13 +1,14 @@
 # Handoff
 
-**Written:** 2026-09-05 ~16:15 EEST · **Branch:** `main` · **Remote:** `optioni/herdr-openspec`
+**Written:** 2026-09-05 ~21:15 EEST · **Branch:** `main` · **Remote:** `optioni/herdr-openspec`
 
 ## Where things stand
 
-**Phases 1–3 complete; Phase 4 is five of six changes in.** Fourteen changes
-implemented and archived. `main` is green: `make check` exits 0 at **97.52% line
-coverage over 16,151 lines**, 673 lib tests / 694 all targets. **Every commit since the
-signing incident is signed and verified** by the raw-object test.
+**Phases 1–3 complete; Phase 4 is five of six archived, with `live-refresh` mid-apply.**
+Fourteen changes archived. `main` builds clean with **one deliberately RED test** —
+`ui::tests::live::files_paint_then_the_cli_corrects`, the outer-loop acceptance test,
+which goes green at group 11. Coverage **97.08% over 17,938 lines**, 724 lib tests
+passing. Every commit is signed and verified by the raw-object test.
 
 **Read coverage from the line columns, not the region columns.** `cargo llvm-cov`'s
 TOTAL row leads with regions (18,087 here) and reports lines further right (10,493).
@@ -32,20 +33,41 @@ CLI consumer was added. The `Change` conformance gate survived a second producer
 
 ## Next action
 
-**One change left in Phase 4: `live-refresh`** — full ff → apply → archive loop. It
-depends on `detail-view` and `changes-from-cli`, both landed. Scope: the `notify`
-watcher on `openspec/` with ~150ms debounce and per-change invalidation, the worker
-thread running CLI calls off the render path, and the `r` force-refresh key. This is
-where the dual-source model becomes visible — **files paint, the CLI corrects**.
+**Resume `live-refresh` at task group 8.** Groups 0–7 are committed and verified;
+7 of 15 remain: 8 (the `r` key, `Dashboard::adopt`, forced reload), 9 (the loop's live
+tier), 10 (rendered buffer), 11 (acceptance GREEN), 12 (Change Review), 13
+(Documentation), 14 (Lint & Verify).
 
-Expect it to be the most expensive change of the phase: it is the only one that adds a
-crate (`notify`), a thread, and a time-dependent behaviour all at once. **No
-timing-based test may assert that something has already happened.**
+**`make check` is not runnable until group 11** — `cargo llvm-cov` hard-fails on any
+test failure, and the acceptance test is deliberately RED until then. Until group 11,
+verify with fmt + clippy + `cargo test --lib` + `cargo llvm-cov --ignore-run-fail`.
+Expect exactly one failure, with the message unchanged since group 2. Two or zero
+failures both mean something is wrong.
 
-**Paused here because the 5-hour session window was at 59% (41% left)** against a worst
-observed ff cost of **37 points** this phase — about 4 points of margin on the phase's
-hardest ff, which is not enough. Nothing uncommitted; all five completed changes are
-archived. Session resets 19:59 EEST.
+**Paused at 86% session utilization**, a fully committed group boundary — the first
+mid-change pause of the phase. Session resets 00:59 EEST.
+
+### Three findings recorded for group 12's Change Review, not yet fixed
+
+1. **`NOBLOCK`'s Guard E is structurally vacuous.** `grep -n 'fn take_result' | head -1`
+   always matches the `Refresher` **trait's** abstract signature, which necessarily
+   precedes any `impl` and any `thread::spawn` — so moving the concrete impl's
+   `take_result` below `start` does not trip it. **Reproduced**: the impl block was
+   moved and `NOBLOCK` still reported OK.
+2. **`NOSLEEP` leg 2b** reports "`src/watch.rs` missing" on unmodified `main`, before
+   group 1 creates the file. Benign and self-resolving, but the preamble's guard table
+   omits it from the "can't be green yet" list.
+3. **The plan's "18 `run_loop` call sites" is 19** — 14 in `src/ui/driver.rs`'s tests,
+   not 13. Verified against `main` before any edit; all 19 updated.
+
+### The repository is shared with other sessions
+
+A `chore(graft): sync openspec-schemas v0.2.1` commit from another session landed
+between the group 0 and group 1 commits, and `git status` twice showed another
+session's staged files that resolved moments later. **Re-derive `BASE=$(git rev-parse
+HEAD)` fresh before every `OPENSPEC-UNTOUCHED` run** — never trust a SHA literal in a
+task file or an exported variable. A stale SHA already nearly false-redded this
+change's most important read-only gate.
 
 ### When Phase 4 closes: the README keymap sync
 
