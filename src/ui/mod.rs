@@ -74,7 +74,20 @@ pub fn enter_if_terminal(
 
 /// Start the dashboard: refuse without a terminal, install the panic hook,
 /// load configuration and startup state, and run the event loop to
-/// completion. Straight-line wiring with no branch of its own beyond `?`.
+/// completion. Straight-line wiring with no branch of its own beyond `?`
+/// and the live tier's two wiring lines below.
+///
+/// `live-refresh`'s two new wiring lines construct the real watcher and the
+/// real worker when a repository was found, and the inert doubles when it
+/// was not — the same "no repository, no external program, costs nothing"
+/// shape `watch::start`/`crate::refresh::start` already implement. Neither
+/// line names the seam the worker reaches the external program through:
+/// the worker's handle comes from `cli::worker_cli_from_env`, whose own
+/// signature carries that type so this file never has to — the mechanical
+/// reason the shell-confinement check stays satisfied while the worker is
+/// still wired to a real binary. A watcher that would not start folds its
+/// reason into `dashboard.refresh.problems` — the pane's only reporting
+/// channel for a live-tier degradation.
 pub fn run() -> Result<(), StartError> {
     let _guard = enter_if_terminal(std::io::stdout().is_terminal(), &CrosstermOps)?;
     terminal::install_panic_hook();
@@ -83,8 +96,16 @@ pub fn run() -> Result<(), StartError> {
     let mut dashboard = load(&cwd, &config);
     let mut term =
         ratatui::Terminal::new(ratatui::backend::CrosstermBackend::new(std::io::stdout()))?;
-    let mut fs = crate::watch::none();
-    let mut refresher = crate::refresh::none();
+    let (mut fs, watch_problems) = match dashboard.repo.as_deref() {
+        Some(root) => crate::watch::start(root),
+        None => (crate::watch::none(), Vec::new()),
+    };
+    dashboard.refresh.problems = watch_problems;
+    let mut refresher = crate::refresh::start(
+        dashboard.repo.as_deref(),
+        crate::cli::worker_cli_from_env(&config),
+        config.archived_count,
+    );
     let mut live = crate::ui::driver::Live {
         fs: &mut *fs,
         refresher: &mut *refresher,

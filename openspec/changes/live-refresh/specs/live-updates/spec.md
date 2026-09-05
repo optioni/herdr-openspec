@@ -181,19 +181,26 @@ leave the offset past its end for more than one frame.
 `ui::driver::Live` carrying `&mut dyn watch::FsEvents` and `&mut dyn refresh::Refresher`, and
 SHALL perform, in this order, once per iteration, **before** the draw:
 
-1. `live.fs.drain()`; on `Ok(Some(paths))`, `refresh.request(watch::invalidate(repo, &paths))`;
-   on `Err(e)`, push the error's text onto `dashboard.refresh.problems` once and continue;
-2. `live.refresher.take_result()`; on `Some(Files(set))` or `Some(Merged(set))`,
-   `dashboard.adopt(set)`;
-3. when `dashboard.refresh.requested` is set, `live.refresher.request(Selection::All)` and
+1. when `dashboard.refresh.requested` is set, `live.refresher.request(Selection::All)` and
    clear the flag;
+2. `live.fs.drain()`; on `Ok(Some(paths))`, `refresh.request(watch::invalidate(repo, &paths))`;
+   on `Err(e)`, the reason replaces `dashboard.refresh.problems` wholesale — never grown, since
+   a watcher failing on every poll must not accumulate an unbounded list;
+3. `live.refresher.take_result()`; on `Some(Files(set))` or `Some(Merged(set))`,
+   `dashboard.adopt(set)`;
 
 then `sync_detail`, then the draw, then `normalise_scroll`, then a wait of
 `watch::poll_timeout(tick, live.fs.pending_in())` for a terminal event.
 
-Applying a result at step 2, **before** the draw, is what makes a corrected change set visible
-in the very frame that consumed it rather than the one after. Every one of the three steps is
-non-blocking by the traits' contract, so the sequence adds no wait to the render path.
+Step 1 SHALL run **before** step 2, not after: `ui::load`'s startup flag and a live watcher's
+first-ever batch can both be pending on the very same, first iteration, and the recorded
+request order that scenario proves — `[Selection::All, Selection::Only(...)]` — only holds
+when the flag is turned into a request before the drain is consulted. An implementation that
+checks the flag last would instead record `[Selection::Only(...), Selection::All]` on that same
+iteration, failing "A filesystem batch becomes one selection" below. Applying a result at step
+3, **before** the draw, is what makes a corrected change set visible in the very frame that
+consumed it rather than the one after. Every one of the three steps is non-blocking by the
+traits' contract, so the sequence adds no wait to the render path.
 
 `run_loop` SHALL NOT name a channel, a thread, a lock, a blocking receive, or a clock:
 `src/ui/driver.rs`'s production code names none of `.recv(`, `recv_timeout`, `try_recv`,
@@ -228,7 +235,7 @@ Degraded states already records — cannot degrade, delay, or fail a refresh. Ag
 
 `ui::load` SHALL produce a `Dashboard` whose `refresh` is `{ requested: true, reload: false,
 problems: [] }`, so the CLI correction is asked for on the first iteration with no keypress,
-through the same step 3 the `r` key uses. `LoopSummary` SHALL be unchanged: the live tier is
+through the same step 1 the `r` key uses. `LoopSummary` SHALL be unchanged: the live tier is
 observed through the doubles' own recorders, not through a fourth counter.
 
 #### Scenario: The startup request is issued before the first wait

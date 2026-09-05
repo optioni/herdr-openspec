@@ -17,7 +17,12 @@
 
 ## Reviewed Against
 
-- This repository HEAD: `f9b42e8d11ead35049297451996d77e70869bd2f`
+- **Planning-time review** (four rounds, below): this repository HEAD `f9b42e8d11ead35049297451996d77e70869bd2f`.
+- **Post-implementation Change Review** (task 12.1): this repository HEAD at the time of dispatch,
+  `9379690` (group 11's commit). Three further `chore(graft)` commits landed inside this change's
+  own history during implementation (`6fa43ae`, `e94511a`, `b4788b6`, syncing `openspec-schemas`
+  v0.2.0–v0.2.2) — noted here because they are why `BASE=f9b42e8` now fails `OPENSPEC-UNTOUCHED`
+  at HEAD (see Deferred Non-Blocking Notes); none of the three touch `src/` or any test.
 - Sibling repositories: **Not applicable.** This plugin has no sibling repository contract. The
   two external programs it names — `openspec` (`@fission-ai/openspec` 1.11.0) and `herdr` — are
   reached through the `cli` seam and were not touched by this change; `herdr` is not reached at
@@ -37,6 +42,7 @@ fork of the planning session, and each writing findings incrementally to a scrat
 | timing | every wait, sleep, deadline, clock read, and concurrency claim; the "must not block the draw" argument | 3 CRITICAL, 8 WARNING, 3 SUGGESTION |
 | coherence | delta-spec completeness, scenario↔matrix↔task traceability, `openspec/config.yaml` rule compliance, `SPEC.md`/`AGENTS.md` truth | 5 CRITICAL, 9 WARNING, 5 SUGGESTION |
 | fixes (second round) | verify every CRITICAL was closed and hunt for damage the repairs introduced | 2 new CRITICAL, 6 WARNING, 3 SUGGESTION |
+| Change Review (post-implementation, task 12.1) | independent subagent given only the planning artifacts and the full implementation diff (`1a3980c..HEAD`); asked to verify six specific findings the implementer surfaced first, then review broadly against the four hazards and `openspec/config.yaml`'s concentration points | 1 CRITICAL, 4 WARNING, 7 SUGGESTION (SUGGESTIONs recorded in the reviewer's own scratchpad, not reproduced here) |
 
 Every check the reviewers ran was run against the real tree, not reasoned about. Every planted
 violation was reverted and the tree confirmed clean.
@@ -85,6 +91,11 @@ violation was reverted and the tree confirmed clean.
 | SUGGESTION | tasks.md | Task 1.7's Red-when claimed a check ("`NOSLEEP` leg 2 and `NOBLOCK` leg 2 both search `src/lib.rs`?") it does not have | Rewritten to state the gap plainly and point task 12.1's reviewer at it. A Red-when claiming a check it does not have is worse than none | `tasks.md` 1.7 |
 
 | WARNING | tasks.md, design.md, planning-review.md | *(found by re-running every check at the end)* `main` moved during planning: `f9b42e8` ("chore(openspec): put the environment rules in config.yaml instead of every prompt") landed on top of `cdfd656`. Every `OPENSPEC-UNTOUCHED` invocation named `BASE=cdfd656`, so the very first run of the change's most important read-only gate would have reported `openspec/config.yaml` as a stray write inside `openspec/` — a false red that an implementer's cheapest recovery ("re-export `BASE` from the current `HEAD`") silently defeats, because every commit this change makes would then be inside the baseline | `BASE` updated to `f9b42e8` in all fifteen invocations, and task 0.1 now records **why** the sha in this file is not to be trusted over `git rev-parse HEAD`. Confirmed the new commit touched `openspec/config.yaml` and nothing else (`git diff --name-only cdfd656 f9b42e8`), that it adds `context:` prose and no new `rules:` entry, that every rule it states this plan already honours, and that the library test count is unchanged at 673 — so every measured baseline stands | `tasks.md` 0.1 and every `OPENSPEC-UNTOUCHED` invocation; `planning-review.md` → Reviewed Against |
+| CRITICAL | src/ui/mod.rs (`ui::run`) | *(Change Review, post-implementation)* `ui::run` never called `watch::start` or `refresh::start` — it still built `Live` from the two inert doubles group 1 plumbed through as a placeholder, and no task in groups 2–11 ever revisited it, though `design.md` → Boundaries and `specs/quality-gates/spec.md`'s uncoverable-residue clause ("`ui::run`'s two new wiring lines") both assumed the wiring existed. The shipped binary's live tier would have been permanently inert: no watch ever starts, and `r` sets a flag that goes nowhere | `ui::run` now wires both, guarded on `dashboard.repo`, folding a watcher-start failure into `dashboard.refresh.problems`. The CLI handle is built through a new `cli::worker_cli`/`cli::worker_cli_from_env` pair (with two new `cli::tests::` cases) rather than inline, so `ui::run`'s own source never spells the CLI seam's name — the mechanical reason `NOCLI-SHELL` stays satisfied while the wiring is real. Verified: `NOCLI-SHELL` still OK, `make check` still green, library total 748 → **752** (the two `cli::tests::` additions) | `src/ui/mod.rs` → `run`; `src/cli.rs` → `worker_cli`, `worker_cli_from_env`, and two tests |
+| WARNING | specs/live-updates | *(Change Review, post-implementation)* "The loop drives the live tier without ever waiting on it" numbered its three steps drain → take_result → requested-flag, but the concrete scenario "A filesystem batch becomes one selection" requires the recorded request vector `[Selection::All, Selection::Only(...)]` when a pending `refresh.requested` flag and a first-call filesystem batch land on the same iteration (exactly `ui::load`'s startup state plus a live watcher with an already-pending batch). The literal order produces the reverse vector, contradicting the scenario. Confirmed independently by the reviewer: no in-loop reordering satisfies both; the only alternative (a pre-loop prologue) splits flag handling across two code paths | Renumbered to requested-flag → drain → take_result, with a paragraph stating why step 1 must precede step 2. `drive_live_tier` in `src/ui/driver.rs` already implemented this order (with its own doc comment recording the same reasoning) — only the spec's prose was wrong | `specs/live-updates/spec.md` → "The loop drives the live tier without ever waiting on it" (both the numbered list and the later "through the same step 3"/"step 1" cross-reference) |
+| WARNING | specs/watch-invalidation | *(Change Review, post-implementation)* "`openspec/` is removed while the watcher runs" claimed the file producer reports the read failure on `ChangeSet::problems`. The landed producer does not: `changes::from_files`'s rule for a missing `openspec/` directory (landed before this change, unmodified by it) is an empty set with **no** problem — "not an OpenSpec repository", not a read failure | Scenario corrected to state the actual, already-settled rule, and to name the watcher's own `drain` error (via `refresh.problems`) as the pane's real signal instead | `specs/watch-invalidation/spec.md` → "`openspec/` is removed while the watcher runs" |
+| WARNING | src/changes.rs (`a_rejected_schema_is_cached_like_any_other`) | *(Change Review, post-implementation)* The third call's assertion (`alpha3.problems.len() == 1`) holds identically whether or not `Selection::All` actually re-asked about `alpha` — it cannot fail for the reason its message names ("r is the way out of a stale change") | Wrapped the third call in `calls_since`, asserting the exact four-call vector (list, apply-alpha, the failing schema-which, apply-beta) before the existing problems-length assertion. No new test — this modifies a landed one | `src/changes.rs` → `a_rejected_schema_is_cached_like_any_other` |
+| SUGGESTION (repaired anyway) | tasks.md (`NOBLOCK` Guard E) | *(found by the implementer before dispatching Change Review, independently confirmed by it)* `grep -n 'fn take_result' \| head -1` on `src/refresh.rs`'s production slice always matched the `Refresher` trait's abstract signature — the first of three `fn take_result` lines (trait, `NoRefresher` impl, `RealRefresher` impl, in that file order) — never the concrete impl whose position the guard exists to track. Reproduced: moving `impl Refresher for RealRefresher` below `start()`'s `thread::spawn` still reported `NOBLOCK OK` | `head -1` → `tail -1`: the last `fn take_result` line in the production slice is always the concrete impl closest to EOF. Verified against the exact same move: `NOBLOCK FAIL` naming the moved line, `OK` again once reverted. The reviewer independently reproduced both the original vacuous pass and the fix | `tasks.md` → the `NOBLOCK` block (Guard E), with the repair narrated inline; extracted check file re-diffed byte-identical to the corrected block |
 
 ### `SPEC.md` corrections
 
@@ -149,3 +160,17 @@ No unresolved decision requires user input.
   widens that difference from one package to four. Both platform sets are in the committed
   fixture and both are regenerated from either host, so nothing here needs a Linux runner —
   recorded because a future reader regenerating on one platform may expect a one-package delta.
+- **`BASE=f9b42e8 sh $CHECKS/OPENSPEC-UNTOUCHED.sh`, as written in every already-completed task's
+  VERIFY line, now fails at HEAD** — it names `openspec/schemas/tdd/schema.yaml` and
+  `openspec/schemas/tdd/templates/tasks.md` as stray writes, because three `chore(graft)` commits
+  (`6fa43ae`, `e94511a`, `b4788b6`) landed inside this change's own history, vendoring newer
+  `openspec-schemas` releases into the repo-wide, graft-owned path — not a code-path write this
+  change made, and not this change's own artifact directory either, so the literal exclusion
+  cannot be widened without weakening the check for every future change. Accepted rather than
+  fixed: every actual invocation in this session re-derives `BASE=$(git rev-parse HEAD)` fresh, per
+  the resuming session's own explicit instruction never to trust a SHA literal in a task file, so
+  the check has been run correctly throughout despite what the historical task text says. The
+  stale literal in already-`[x]`-marked task lines is left as a record of what was instructed at
+  the time, on the same "don't retrofit rule changes onto completed tasks" principle this session
+  was given; groups 13–14's own remaining `BASE=f9b42e8` lines are executed with the fresh
+  derivation, not edited.

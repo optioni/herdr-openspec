@@ -332,14 +332,17 @@ included — a view test reading a clock is precisely the timing flake this desi
 #### Scenario: `openspec/` is removed while the watcher runs
 
 - **WHEN** a repository is loaded, and the whole `openspec/` directory is then removed
-- **THEN** the file producer reports an empty change set with the read failure on
-  `ChangeSet::problems`, which the list region already renders as a leading `!`-marked row
-- **AND** the loop keeps drawing: a `drain` returning `Err(WatchError)` is recorded on
-  `refresh.problems` and never becomes a `LoopError`, and no frame is skipped. That clause is
-  verified **deterministically**, by a `ScriptedFs` whose `drain` returns `Err`, in
-  `live-updates`' "A watcher error is recorded once and the loop continues" — **not** by
-  opening a real watcher on a removed tree and draining it for some elapsed period, which
-  would be a negative assertion bounded by wall-clock time and therefore the very shape this
-  change forbids
+- **THEN** the file producer's next reload reports an empty change set with **no** problem of
+  its own — `changes::from_files`'s already-landed rule for a missing `openspec/` directory,
+  unmodified by this change: an absent directory means "not an OpenSpec repository", not a
+  read failure, and carries no entry on `ChangeSet::problems`
+- **AND** the loop keeps drawing regardless: a `drain` returning `Err(WatchError)` is recorded
+  on `refresh.problems` instead — the pane's actual signal that something is wrong — rendered
+  as the list region's leading `!`-marked row, and never becomes a `LoopError`, so no frame is
+  skipped. That clause is verified **deterministically**, by a `ScriptedFs` whose `drain`
+  returns `Err`, in `live-updates`'s "A watcher error is recorded once and the loop continues"
+  — **not** by opening a real watcher on a removed tree and draining it for some elapsed
+  period, which would be a negative assertion bounded by wall-clock time and therefore the
+  very shape this change forbids
 - **AND** if the watcher itself is left reporting nothing further, the dashboard is stale
   rather than broken, and `r` still forces a full re-read

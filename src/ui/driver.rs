@@ -57,10 +57,10 @@ pub enum LoopError {
 ///
 /// 1. When `dashboard.refresh.requested` is set, request `Selection::All`
 ///    and clear the flag — checked **before** the filesystem drain below, so
-///    the startup (or `r`-triggered) request is recorded before one an
-///    already-pending batch produces on the very same iteration, the case
-///    `ui::load`'s startup flag and a live watcher's batch can both hit on
-///    iteration one.
+///    the startup (or `r`-triggered) request is recorded before the request
+///    an already-pending batch produces on the same iteration:
+///    `ui::load`'s startup flag and a live watcher's first-ever batch can
+///    both be pending on iteration one.
 /// 2. `live.fs.drain()`; on `Ok(Some(paths))`, request
 ///    `watch::invalidate(repo, &paths)`; on `Err(e)`, the reason replaces
 ///    `dashboard.refresh.problems` wholesale (never grown) — a watcher

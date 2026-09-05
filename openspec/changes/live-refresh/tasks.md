@@ -341,7 +341,18 @@ prod src/watch.rs | grep -q 'try_recv' \
 # the render-path half. Without it the rule is a convention rather than a check: moving
 # take_result below start() puts a blocking recv into the worker half and the leg reports OK.
 # Measured. specs/refresh-worker states the ordering; this is what enforces it.
-tr_line=$(prod src/refresh.rs | grep -n 'fn take_result' | head -1 | cut -d: -f1)
+#
+# REPAIRED in live-refresh's own Change Review: `grep -n 'fn take_result' | head -1` always
+# matches the Refresher TRAIT's abstract signature (declared once, near the top of the file,
+# necessarily before any impl and any thread::spawn), so moving the CONCRETE impl's
+# take_result below start() left tr_line pinned to the trait line and never tripped this
+# guard. Measured: the production slice holds three `fn take_result` lines (the trait,
+# NoRefresher's impl, RealRefresher's impl, in that file order); moving the third below
+# start() still reported OK under `head -1`. `tail -1` takes the LAST such line instead — the
+# concrete impl closest to EOF, the one whose position this guard must actually track — and
+# correctly reports FAIL once that line moves past thread::spawn. Verified against that exact
+# move: red under the fixed check, OK again once reverted.
+tr_line=$(prod src/refresh.rs | grep -n 'fn take_result' | tail -1 | cut -d: -f1)
 sp_line=$(prod src/refresh.rs | grep -nE '^[^/]*thread::spawn' | head -1 | cut -d: -f1)
 [ -n "$tr_line" ] || fail "src/refresh.rs's production slice declares no take_result"
 [ -n "$sp_line" ] || fail "src/refresh.rs's production slice has no thread::spawn outside a comment"
@@ -1748,7 +1759,7 @@ be proven here.
 ## 12. Change Review
 <!-- kind: operational -->
 
-- [ ] 12.1 CHECK: Dispatch an independent reviewer — a fresh subagent that did **not** write
+- [x] 12.1 CHECK: Dispatch an independent reviewer — a fresh subagent that did **not** write
       the implementation, given only `proposal.md`, the **nine** spec files, `design.md`, this
       file, and the diff. It reports findings and changes nothing. Point it first at the
       concentration points `openspec/config.yaml` names for this repository — nothing spawns
@@ -1779,10 +1790,10 @@ be proven here.
       The reviewer writes findings incrementally to a scratchpad file as it goes, not only in
       its final message.
 
-- [ ] 12.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a
+- [x] 12.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a
       one-line reason, note SUGGESTIONs, and re-run the affected tests.
 
-- [ ] 12.3 VERIFY: No blocking or unowned finding remains; every accepted WARNING carries its
+- [x] 12.3 VERIFY: No blocking or unowned finding remains; every accepted WARNING carries its
       reason in `planning-review.md`. Commit.
 
 ---

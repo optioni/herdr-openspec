@@ -248,6 +248,33 @@ pub fn npm_prefix() -> Option<PathBuf> {
     npm_prefix_via(Path::new("npm"))
 }
 
+/// Turn a `resolve::BinResolution` into the real `OpenspecCli` the
+/// `live-refresh` worker should use — `None` when no usable binary was
+/// found, which is exactly `refresh::start`'s no-binary case: no thread, no
+/// process, the inert `Refresher`. Pure and testable, unlike its `_from_env`
+/// sibling below.
+pub fn worker_cli(
+    resolution: crate::resolve::BinResolution,
+) -> Option<std::sync::Arc<dyn OpenspecCli>> {
+    resolution.found.map(|found| {
+        std::sync::Arc::new(RealOpenspecCli::new(found.path)) as std::sync::Arc<dyn OpenspecCli>
+    })
+}
+
+/// The production binding: resolve the binary from the environment via
+/// `resolve::openspec_bin_from_env`, then [`worker_cli`]. `ui::run` calls
+/// this rather than constructing a `RealOpenspecCli` itself — the type
+/// appears only in THIS function's signature, never in `ui::run`'s own
+/// source text, which is the mechanical reason `NOCLI-SHELL` ("no file
+/// under `src/ui/` names `OpenspecCli`") stays satisfied while the live
+/// tier's worker is still wired to a real binary. See
+/// `openspec/changes/live-refresh/design.md` -> Decisions 1.
+pub fn worker_cli_from_env(
+    config: &crate::config::Config,
+) -> Option<std::sync::Arc<dyn OpenspecCli>> {
+    worker_cli(crate::resolve::openspec_bin_from_env(config))
+}
+
 /// Which program a fake invocation addressed. Recorded and keyed alongside
 /// the argument vector: one type implements both traits below, so a vector
 /// alone would let a caller that reached for the wrong handle be answered
@@ -452,6 +479,33 @@ mod tests {
             }
             other => panic!("expected Failed, got {other:?}"),
         }
+    }
+
+    // `live-refresh`: `worker_cli` is the one place a `resolve::BinResolution`
+    // becomes the real `OpenspecCli` the refresh worker spawns.
+
+    #[test]
+    fn worker_cli_is_none_when_no_binary_was_found() {
+        let resolution = crate::resolve::BinResolution {
+            found: None,
+            problems: Vec::new(),
+        };
+        assert!(super::worker_cli(resolution).is_none());
+    }
+
+    #[test]
+    fn worker_cli_spawns_the_resolved_path() {
+        let scratch = ScratchDir::new();
+        let prog = script(&scratch, "prog", "printf 'ok'\n");
+        let resolution = crate::resolve::BinResolution {
+            found: Some(crate::resolve::FoundBin {
+                path: prog.clone(),
+                source: crate::resolve::BinSource::Path,
+            }),
+            problems: Vec::new(),
+        };
+        let cli = super::worker_cli(resolution).expect("a binary was found");
+        assert_eq!(cli.run(&[]), Ok("ok".to_string()));
     }
 
     #[test]

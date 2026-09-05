@@ -6222,7 +6222,48 @@ mod tests {
                 }
             );
 
+            let before3 = fake.calls().len();
             let third = from_cli_cached(&fake, &repo, &Selection::All, &mut cache);
+            assert_eq!(
+                calls_since(&fake, before3),
+                vec![
+                    (
+                        crate::cli::Program::Openspec,
+                        vec!["list".to_string(), "--json".to_string()]
+                    ),
+                    (
+                        crate::cli::Program::Openspec,
+                        vec![
+                            "instructions".to_string(),
+                            "apply".to_string(),
+                            "--change".to_string(),
+                            "alpha".to_string(),
+                            "--json".to_string(),
+                        ]
+                    ),
+                    (
+                        crate::cli::Program::Openspec,
+                        vec![
+                            "schema".to_string(),
+                            "which".to_string(),
+                            "outside-in-tdd".to_string(),
+                            "--json".to_string(),
+                        ]
+                    ),
+                    (
+                        crate::cli::Program::Openspec,
+                        vec![
+                            "instructions".to_string(),
+                            "apply".to_string(),
+                            "--change".to_string(),
+                            "beta".to_string(),
+                            "--json".to_string(),
+                        ]
+                    ),
+                ],
+                "Selection::All re-asks about alpha too, schema rejection included — \
+                 not merely a cache hit that happens to carry the same problem count"
+            );
             let alpha3 = third.active.iter().find(|c| c.name == "alpha").unwrap();
             assert_eq!(
                 alpha3.problems.len(),
