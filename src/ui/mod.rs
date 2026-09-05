@@ -291,6 +291,151 @@ mod tests {
                 assert_eq!(summary.frames, 11, "width {width}");
             }
         }
+
+        /// `detail-view`'s outer-loop acceptance test:
+        /// `ui::app::action_for` -> `Dashboard::apply` ->
+        /// `Dashboard::sync_detail` -> `ui::detail::*` -> `ui::view::render`
+        /// -> `Dashboard::normalise_scroll` is a path no unit test crosses.
+        /// RED until group 10: the header row is not drawn at all until
+        /// group 9, and `normalise_scroll` does not use the content area's
+        /// height until group 10.
+        #[test]
+        fn a_selected_changes_artifact_is_read_shown_and_scrolled_through_the_loop() {
+            let proposal_path =
+                std::path::PathBuf::from("/repo/openspec/changes/detail-view/proposal.md");
+            let specs_path =
+                std::path::PathBuf::from("/repo/openspec/changes/detail-view/specs/spec.md");
+            let twenty_item_source: String = (0..20).map(|i| format!("- line-{i:02}\n")).collect();
+
+            let dashboard = || -> Dashboard {
+                let selected = crate::changes::fixture::with_artifacts(
+                    crate::changes::fixture::active("detail-view", 4, 9),
+                    &[
+                        (
+                            "proposal",
+                            &["/repo/openspec/changes/detail-view/proposal.md"],
+                        ),
+                        (
+                            "specs",
+                            &["/repo/openspec/changes/detail-view/specs/spec.md"],
+                        ),
+                        ("design", &["/repo/openspec/changes/detail-view/design.md"]),
+                        ("tasks", &["/repo/openspec/changes/detail-view/tasks.md"]),
+                        (
+                            "planning-review",
+                            &["/repo/openspec/changes/detail-view/planning-review.md"],
+                        ),
+                    ],
+                );
+                let other = crate::changes::fixture::active("fix-empty-basket", 7, 7);
+                Dashboard {
+                    repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
+                    searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
+                    changes: crate::changes::fixture::set(
+                        vec![selected, other],
+                        Vec::new(),
+                        Vec::new(),
+                    ),
+                    route: Route::Detail,
+                    quit: false,
+                    selected: 0,
+                    filter: Filter {
+                        query: String::new(),
+                        active: false,
+                    },
+                    detail: Detail {
+                        source: String::new(),
+                        scroll: 0,
+                        tab: 0,
+                        problems: Vec::new(),
+                        loaded: None,
+                    },
+                }
+            };
+
+            for width in [120u16, 60u16] {
+                let mut dashboard = dashboard();
+                let interior = detail_interior(width, 20, Route::Detail);
+
+                let recorder = crate::testutil::RecordingReader::new(
+                    vec![(specs_path.clone(), Ok(twenty_item_source.clone()))],
+                    Ok("# proposal\n".to_string()),
+                );
+                let read = |p: &std::path::Path| recorder.read(p);
+
+                let backend = ratatui::backend::TestBackend::new(width, 20);
+                let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+                let mut presses = vec![Ok(Some(press(
+                    ratatui::crossterm::event::KeyCode::Char(']'),
+                    ratatui::crossterm::event::KeyModifiers::NONE,
+                )))];
+                presses.extend((0..10).map(|_| {
+                    Ok(Some(press(
+                        ratatui::crossterm::event::KeyCode::Char('j'),
+                        ratatui::crossterm::event::KeyModifiers::NONE,
+                    )))
+                }));
+                presses.push(Ok(Some(press(
+                    ratatui::crossterm::event::KeyCode::Char('q'),
+                    ratatui::crossterm::event::KeyModifiers::NONE,
+                ))));
+                let mut events = Script::new(presses);
+
+                run_loop(
+                    &mut terminal,
+                    &mut dashboard,
+                    &mut events,
+                    &read,
+                    std::time::Duration::from_millis(1),
+                )
+                .expect("loop ends");
+
+                let buf = terminal.backend().buffer();
+                let row_cols = |y: u16, len: u16| -> String {
+                    (interior.x..interior.x + len)
+                        .map(|x| buf[(x, y)].symbol().to_string())
+                        .collect()
+                };
+                let header_row = row_cols(interior.y, interior.width);
+                assert!(
+                    header_row.starts_with("detail-view"),
+                    "width {width}: header row does not start with the change name: {header_row:?}"
+                );
+                assert!(
+                    header_row.ends_with("[4/9]"),
+                    "width {width}: header row does not end in its progress cell: {header_row:?}"
+                );
+
+                let tab_row = row_cols(interior.y + 1, 20);
+                assert!(
+                    tab_row.starts_with("1 proposal  2 specs"),
+                    "width {width}: tab row does not begin with the first two tabs: {tab_row:?}"
+                );
+
+                let content_row_at = |y: u16| -> String { row_cols(y, 9) };
+                assert_eq!(content_row_at(interior.y + 2), "- line-06", "width {width}");
+                assert_eq!(
+                    content_row_at(interior.y + interior.height - 1),
+                    "- line-19",
+                    "width {width}"
+                );
+
+                assert_eq!(dashboard.detail.tab, 1, "width {width}");
+                assert_eq!(
+                    dashboard.detail.scroll, 6,
+                    "width {width}: not 10 — stays red until normalise_scroll uses the \
+                     content area's fourteen rows rather than the whole interior"
+                );
+
+                assert_eq!(recorder.calls(), 2, "width {width}");
+                assert_eq!(
+                    recorder.paths(),
+                    vec![proposal_path.clone(), specs_path.clone()],
+                    "width {width}: exactly the first artifact's path, then the second's, \
+                     and nothing more across the ten j presses"
+                );
+            }
+        }
     }
 
     mod load {

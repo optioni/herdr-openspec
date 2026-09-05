@@ -861,7 +861,7 @@ files in `$CHECKS`.
 ## 2. The outer-loop acceptance test — RED until group 10
 <!-- kind: behavioural -->
 
-- [ ] 2.1 RED: Add a **second** test function to `src/ui/mod.rs`'s existing
+- [x] 2.1 RED: Add a **second** test function to `src/ui/mod.rs`'s existing
       `mod tests` → `mod detail`, beside `markdown-viewer`'s
       `a_markdown_document_renders_and_scrolls_through_the_loop` (which group 10 updates,
       since this change invalidates its `scroll == 4` / `- line-04` expectations). It drives
@@ -885,7 +885,7 @@ files in `$CHECKS`.
       test loops over both widths inside one function, so the *first* width to fail is the
       one reported — record that message, not an imagined pair.
 
-- [ ] 2.2 CHECK: Run the four-command gate. `cargo test --all-features` must fail on
+- [x] 2.2 CHECK: Run the four-command gate. `cargo test --all-features` must fail on
       **exactly one** test — the new one, in `ui::tests::detail::` — and `cargo llvm-cov
       --ignore-run-fail --fail-under-lines 80` must still produce a report.
       **Red when:** a second test fails, or `llvm-cov` produces no report, which would mean
@@ -894,7 +894,7 @@ files in `$CHECKS`.
       nothing in group 2 changes `normalise_scroll`, so its `scroll == 4` is still correct
       until group 10.
 
-- [ ] 2.3 Commit: `test(detail-view): the failing outer-loop acceptance test`.
+- [x] 2.3 Commit: `test(detail-view): the failing outer-loop acceptance test`.
 
 ## 3. `layout::split_detail`
 <!-- kind: behavioural -->
