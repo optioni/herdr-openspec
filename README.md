@@ -39,17 +39,24 @@ reachable directly with
 
 | Key | Action |
 |---|---|
-| `j` / `k`, arrows | Navigate |
+| `j` / `k`, arrows | In the list, move the selection; in the detail content, scroll a line. Clamped at both ends rather than wrapping |
 | `Enter` | Open change detail |
-| `Esc` | Back to list |
-| `1`–`9`, `[`, `]` | Switch artifact tab |
+| `Esc` | Dismiss one layer: filter mode, then a leftover query, then detail. At the list root it does nothing |
+| `1`–`9`, `[`, `]` | Switch artifact tab, from either the list or the detail. `0` is inert — tabs are 1-based |
 | `/` | Filter changes |
-| `r` | Force refresh |
+| `r` | Force a full refresh — re-read every change from disk and re-ask the CLI about each one |
 | `a` | Launch an agent with `/opsx:apply` |
 | `c` | Launch an agent with `/opsx:continue` |
 | `s` | Launch an agent with `/opsx:archive` |
 | `g` | Focus the running agent for this change |
 | `q` | Quit |
+| `Ctrl-C` | Quit |
+
+**While filtering, every printable key types into the query** — including `q`, `r`,
+`j`, `k`, and the digits. `Backspace` deletes, `Enter` accepts, `Esc` cancels, and the
+arrows still navigate. `Ctrl-C` always quits.
+
+Only `q` and `Ctrl-C` close the pane; `Esc` never does.
 
 Action keys are hidden when the Herdr socket is unreachable.
 
