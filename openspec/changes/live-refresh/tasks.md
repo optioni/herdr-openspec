@@ -1708,7 +1708,7 @@ be proven here.
 ## 11. Acceptance Test — Outer Loop GREEN
 <!-- kind: behavior -->
 
-- [ ] 11.1 CHANGE: Extend `ui::tests::live::` with its second and third tests, at 120x20 and
+- [x] 11.1 CHANGE: Extend `ui::tests::live::` with its second and third tests, at 120x20 and
       again at 60x20, driving `run_loop` over the same real `ScratchDir` repository with a
       script that presses `r`, then every ASCII printable character from `!` to `~`, then
       `Enter`, `Esc`, `Backspace`, `Tab`, the four arrows, and finally `Ctrl-C`:
@@ -1729,16 +1729,16 @@ be proven here.
       race resolved favourably, which is this change's own stated hazard.
       Red-when: the two claims are recombined into one test "to save a fixture".
 
-- [ ] 11.2 VERIFY: `cargo test --all-features --lib 'ui::tests::live::'` — three tests, all
+- [x] 11.2 VERIFY: `cargo test --all-features --lib 'ui::tests::live::'` — three tests, all
       green, including `files_paint_then_the_cli_corrects`, which has been red since group 2.
       Confirm the other four `ui::tests::` submodules still pass unchanged; if any needed its
       expectations updated, name the change and why here.
 
-- [ ] 11.3 REFACTOR: Clean up the group-2 harness — the `ScratchDir` builder and the scripted
+- [x] 11.3 REFACTOR: Clean up the group-2 harness — the `ScratchDir` builder and the scripted
       key list — if it duplicates `ui::tests::load::`'s or `ui::tests::detail::`'s existing
       tree builder; otherwise state that no refactor was needed.
 
-- [ ] 11.4 VERIFY: the literal, unqualified **`make check`** — its first run since group 1 —
+- [x] 11.4 VERIFY: the literal, unqualified **`make check`** — its first run since group 1 —
       exits 0. If it fails, name the failing sub-command rather than summarising.
       `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'ui::tests::live::' 3`.
       `BASE=f9b42e8 sh $CHECKS/OPENSPEC-UNTOUCHED.sh`. Commit.

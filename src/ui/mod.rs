@@ -1183,7 +1183,7 @@ apply:
         use crate::config::Config;
         use crate::refresh::RefreshResult;
         use crate::testutil::{
-            RecordingRefresher, ScriptedFs, press, row_text, snapshot, write_with_mode,
+            RecordingRefresher, Script, ScriptedFs, press, row_text, snapshot, write_with_mode,
         };
         use crate::ui::driver::{Live, LoopSummary, run_loop};
 
@@ -1362,6 +1362,171 @@ apply:
                     "width {width}: the snapshot comparison must discriminate a rewritten byte"
                 );
                 write_with_mode(&tasks_path, original.as_bytes(), 0o644);
+            }
+        }
+
+        /// `r`, then every ASCII printable character from `!` to `~`, then
+        /// `Enter`, `Esc`, `Backspace`, `Tab`, the four arrows, and finally
+        /// `Ctrl-C` — `tasks-checklist`'s read-only sweep, with an explicit
+        /// `r` press first. `/` occurs partway through the `!..=~` sweep, so
+        /// filter mode is active by the time the sweep's own `r` character
+        /// comes around; that later `r` types into the query rather than
+        /// refreshing again, which is what keeps the total at exactly one
+        /// `r`-driven request.
+        fn key_script()
+        -> Vec<Result<Option<ratatui::crossterm::event::Event>, crate::ui::event::EventError>>
+        {
+            let mut presses = vec![Ok(Some(press(
+                ratatui::crossterm::event::KeyCode::Char('r'),
+                ratatui::crossterm::event::KeyModifiers::NONE,
+            )))];
+            presses.extend(('!'..='~').map(|c| {
+                Ok(Some(press(
+                    ratatui::crossterm::event::KeyCode::Char(c),
+                    ratatui::crossterm::event::KeyModifiers::NONE,
+                )))
+            }));
+            presses.push(Ok(Some(press(
+                ratatui::crossterm::event::KeyCode::Enter,
+                ratatui::crossterm::event::KeyModifiers::NONE,
+            ))));
+            presses.push(Ok(Some(press(
+                ratatui::crossterm::event::KeyCode::Esc,
+                ratatui::crossterm::event::KeyModifiers::NONE,
+            ))));
+            presses.push(Ok(Some(press(
+                ratatui::crossterm::event::KeyCode::Backspace,
+                ratatui::crossterm::event::KeyModifiers::NONE,
+            ))));
+            presses.push(Ok(Some(press(
+                ratatui::crossterm::event::KeyCode::Tab,
+                ratatui::crossterm::event::KeyModifiers::NONE,
+            ))));
+            for code in [
+                ratatui::crossterm::event::KeyCode::Left,
+                ratatui::crossterm::event::KeyCode::Right,
+                ratatui::crossterm::event::KeyCode::Up,
+                ratatui::crossterm::event::KeyCode::Down,
+            ] {
+                presses.push(Ok(Some(press(
+                    code,
+                    ratatui::crossterm::event::KeyModifiers::NONE,
+                ))));
+            }
+            presses.push(Ok(Some(press(
+                ratatui::crossterm::event::KeyCode::Char('c'),
+                ratatui::crossterm::event::KeyModifiers::CONTROL,
+            ))));
+            presses
+        }
+
+        #[test]
+        fn r_forces_a_refresh_through_the_loop() {
+            for width in [120u16, 60u16] {
+                let scratch = scratch_repo_with_alpha();
+                let root = scratch.path();
+                let config = Config::default();
+                let mut dashboard = super::super::load(root, &config);
+
+                let backend = ratatui::backend::TestBackend::new(width, 20);
+                let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+
+                let mut events = Script::new(key_script());
+                // `drain` always `Ok(None)`: this `ScriptedFs` can
+                // contribute no third request under any timing, which is
+                // what makes the exact equality below sound.
+                let mut fs = ScriptedFs::new(Vec::new(), Vec::new());
+                let mut refresher = RecordingRefresher::new(Vec::new());
+                let mut live = Live {
+                    fs: &mut fs,
+                    refresher: &mut refresher,
+                };
+
+                run_loop(
+                    &mut terminal,
+                    &mut dashboard,
+                    &mut events,
+                    &mut live,
+                    &super::super::read_artifact,
+                    Duration::from_millis(1),
+                )
+                .expect("loop ends");
+
+                assert_eq!(
+                    refresher.requests(),
+                    vec![Selection::All, Selection::All],
+                    "width {width}: the startup request and the r-driven one, nothing else"
+                );
+            }
+        }
+
+        #[test]
+        fn a_live_watcher_over_the_tree_writes_nothing() {
+            for width in [120u16, 60u16] {
+                let scratch = scratch_repo_with_alpha();
+                let root = scratch.path();
+                let config = Config::default();
+                let mut dashboard = super::super::load(root, &config);
+
+                let backend = ratatui::backend::TestBackend::new(width, 20);
+                let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+
+                let before = snapshot(root);
+
+                let (mut fs, problems) = crate::watch::start(root);
+                assert!(
+                    problems.is_empty(),
+                    "width {width}: a real watch must start on a real directory: {problems:?}"
+                );
+                let mut refresher = RecordingRefresher::new(Vec::new());
+                let mut live = Live {
+                    fs: &mut *fs,
+                    refresher: &mut refresher,
+                };
+
+                let mut events = Script::new(key_script());
+                run_loop(
+                    &mut terminal,
+                    &mut dashboard,
+                    &mut events,
+                    &mut live,
+                    &super::super::read_artifact,
+                    Duration::from_millis(1),
+                )
+                .expect("loop ends");
+
+                let after = snapshot(root);
+                assert_eq!(
+                    before, after,
+                    "width {width}: a live watcher open on the tree must write nothing"
+                );
+
+                let tasks_path = root.join("openspec/changes/alpha/tasks.md");
+                let reread = crate::tasks::read(&tasks_path);
+                assert_eq!(
+                    reread.progress(),
+                    crate::tasks::Progress {
+                        completed: 4,
+                        total: 9
+                    },
+                    "width {width}"
+                );
+
+                // Discriminating control: the same comparison must fail
+                // when a single byte of tasks.md is rewritten between two
+                // further snapshots, or the equality assertion above proves
+                // nothing.
+                let original = std::fs::read_to_string(&tasks_path).expect("read tasks.md back");
+                let control_before = snapshot(root);
+                let mutated = original.replacen("[ ] e", "[x] e", 1);
+                write_with_mode(&tasks_path, mutated.as_bytes(), 0o644);
+                let control_after = snapshot(root);
+                assert_ne!(
+                    control_before, control_after,
+                    "width {width}: the snapshot comparison must discriminate a rewritten byte"
+                );
+                write_with_mode(&tasks_path, original.as_bytes(), 0o644);
+                drop(fs); // stop the watch before the ScratchDir's own Drop removes the tree
             }
         }
     }
