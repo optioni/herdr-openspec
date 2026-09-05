@@ -453,6 +453,219 @@ mod tests {
                 );
             }
         }
+
+        /// `tasks-checklist`'s outer-loop acceptance test:
+        /// `ui::app::action_for` -> `Dashboard::apply` -> `Dashboard::sync_detail`
+        /// -> `ui::detail::content_lines` -> `ui::tasks::lines` ->
+        /// `ui::view::render` -> `Dashboard::normalise_scroll` is a path no unit
+        /// test crosses, and the read-only claim is only meaningful against a
+        /// real change directory. See `specs/tasks-checklist/spec.md` ->
+        /// "Every printable key leaves the change tree byte-identical".
+        ///
+        /// The rendering half and the read-only half are checked through two
+        /// separate `run_loop` calls sharing one `Dashboard` and one
+        /// `TestBackend`, not one: `list-filtering`'s own landed and
+        /// unchanged rule ("`/` reaches the list from either route") means
+        /// the ASCII sweep's `/` unconditionally sends `route` to
+        /// `Route::List`, and nothing later in the sequence — `Enter`
+        /// closes filtering without reopening detail, by that same landed
+        /// rule — sends it back. The spec scenario's own `THEN` clauses
+        /// (termination, snapshot equality, unchanged progress, a
+        /// discriminating control) never depend on the final route, so
+        /// splitting costs nothing the spec asks for while still routing
+        /// the *entire* key sequence through one real loop over one real
+        /// directory.
+        fn vendor_tdd_schema(repo: &std::path::Path) {
+            let yaml = "\
+name: tdd
+artifacts:
+  - id: proposal
+    generates: proposal.md
+  - id: specs
+    generates: specs/**/*.md
+  - id: design
+    generates: design.md
+  - id: tasks
+    generates: tasks.md
+  - id: planning-review
+    generates: planning-review.md
+apply:
+  tracks: tasks.md
+";
+            crate::testutil::write_with_mode(
+                &repo.join("openspec/schemas/tdd/schema.yaml"),
+                yaml.as_bytes(),
+                0o644,
+            );
+            crate::testutil::write_with_mode(
+                &repo.join("openspec/config.yaml"),
+                b"schema: tdd\n",
+                0o644,
+            );
+        }
+
+        #[test]
+        fn tasks_tab_is_read_only() {
+            let scratch = crate::testutil::ScratchDir::new();
+            let root = scratch.path();
+            vendor_tdd_schema(root);
+            crate::testutil::write_with_mode(
+                &root.join("openspec/changes/tasks-tab-demo/.openspec.yaml"),
+                b"schema: tdd\n",
+                0o644,
+            );
+            let tasks_path = root.join("openspec/changes/tasks-tab-demo/tasks.md");
+            let tasks_source = "## 1. Setup\n- [x] 1.1 first\n- [x] 1.2 second\n- [ ] 1.3 third\n\n\
+                 ## 2. Build\n- [ ] 2.1 fourth\n- [ ] 2.2 fifth\n";
+            crate::testutil::write_with_mode(&tasks_path, tasks_source.as_bytes(), 0o644);
+
+            for width in [120u16, 60u16] {
+                let config = crate::config::Config::default();
+                let mut dashboard = super::super::load(root, &config);
+
+                let backend = ratatui::backend::TestBackend::new(width, 20);
+                let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+
+                let before = crate::testutil::snapshot(root);
+
+                // Stage 1: open the one active change and select the
+                // tracked-tasks tab (position 3 of the `tdd` schema), then
+                // quit cleanly — a run untouched by `/`, so its final
+                // buffer is the one the checklist grammar actually drew.
+                let mut stage1 = Script::new(vec![
+                    Ok(Some(press(
+                        ratatui::crossterm::event::KeyCode::Enter,
+                        ratatui::crossterm::event::KeyModifiers::NONE,
+                    ))),
+                    Ok(Some(press(
+                        ratatui::crossterm::event::KeyCode::Char('4'),
+                        ratatui::crossterm::event::KeyModifiers::NONE,
+                    ))),
+                    Ok(Some(press(
+                        ratatui::crossterm::event::KeyCode::Char('c'),
+                        ratatui::crossterm::event::KeyModifiers::CONTROL,
+                    ))),
+                ]);
+                run_loop(
+                    &mut terminal,
+                    &mut dashboard,
+                    &mut stage1,
+                    &crate::ui::read_artifact,
+                    std::time::Duration::from_millis(1),
+                )
+                .expect("stage 1 ends");
+
+                assert_eq!(dashboard.route, Route::Detail, "width {width}");
+                assert_eq!(dashboard.detail.tab, 3, "width {width}");
+
+                let interior = detail_interior(width, 20, Route::Detail);
+                let content_y = interior.y + 2;
+                let buf = terminal.backend().buffer();
+                let row_cols = |y: u16, len: u16| -> String {
+                    (interior.x..interior.x + len)
+                        .map(|x| buf[(x, y)].symbol().to_string())
+                        .collect()
+                };
+                let bar_row = row_cols(content_y, interior.width);
+                assert!(
+                    bar_row.trim_end().ends_with("[2/5] 40%"),
+                    "width {width}: bar row does not end in its progress cell: {bar_row:?}"
+                );
+                assert_eq!(
+                    row_cols(content_y + 1, interior.width).trim(),
+                    "",
+                    "width {width}: no blank row after the bar"
+                );
+                let first_item_row = row_cols(content_y + 3, 12);
+                assert!(
+                    first_item_row.starts_with("[x]") || first_item_row.starts_with("[ ]"),
+                    "width {width}: no checklist glyph row below the heading: {first_item_row:?}"
+                );
+
+                // Stage 2: the full read-only proof, over the same
+                // dashboard, terminal, and reader.
+                dashboard.quit = false;
+                let mut presses: Vec<_> = ('!'..='~')
+                    .map(|c| {
+                        Ok(Some(press(
+                            ratatui::crossterm::event::KeyCode::Char(c),
+                            ratatui::crossterm::event::KeyModifiers::NONE,
+                        )))
+                    })
+                    .collect();
+                presses.push(Ok(Some(press(
+                    ratatui::crossterm::event::KeyCode::Enter,
+                    ratatui::crossterm::event::KeyModifiers::NONE,
+                ))));
+                presses.push(Ok(Some(press(
+                    ratatui::crossterm::event::KeyCode::Esc,
+                    ratatui::crossterm::event::KeyModifiers::NONE,
+                ))));
+                presses.push(Ok(Some(press(
+                    ratatui::crossterm::event::KeyCode::Backspace,
+                    ratatui::crossterm::event::KeyModifiers::NONE,
+                ))));
+                presses.push(Ok(Some(press(
+                    ratatui::crossterm::event::KeyCode::Tab,
+                    ratatui::crossterm::event::KeyModifiers::NONE,
+                ))));
+                for code in [
+                    ratatui::crossterm::event::KeyCode::Left,
+                    ratatui::crossterm::event::KeyCode::Right,
+                    ratatui::crossterm::event::KeyCode::Up,
+                    ratatui::crossterm::event::KeyCode::Down,
+                ] {
+                    presses.push(Ok(Some(press(
+                        code,
+                        ratatui::crossterm::event::KeyModifiers::NONE,
+                    ))));
+                }
+                presses.push(Ok(Some(press(
+                    ratatui::crossterm::event::KeyCode::Char('c'),
+                    ratatui::crossterm::event::KeyModifiers::CONTROL,
+                ))));
+                let mut stage2 = Script::new(presses);
+
+                run_loop(
+                    &mut terminal,
+                    &mut dashboard,
+                    &mut stage2,
+                    &crate::ui::read_artifact,
+                    std::time::Duration::from_millis(1),
+                )
+                .expect("stage 2 ends");
+
+                let after = crate::testutil::snapshot(root);
+                assert_eq!(
+                    before, after,
+                    "width {width}: the change tree changed across the printable-key run"
+                );
+
+                let reread = crate::tasks::read(&tasks_path);
+                assert_eq!(
+                    reread.progress(),
+                    crate::tasks::Progress {
+                        completed: 2,
+                        total: 5
+                    },
+                    "width {width}"
+                );
+
+                // Discriminating control: the same comparison must fail
+                // when a single byte of tasks.md is rewritten between two
+                // snapshots, or the equality assertion above proves
+                // nothing.
+                let control_before = crate::testutil::snapshot(root);
+                let mutated = tasks_source.replacen("[ ] 1.3", "[x] 1.3", 1);
+                crate::testutil::write_with_mode(&tasks_path, mutated.as_bytes(), 0o644);
+                let control_after = crate::testutil::snapshot(root);
+                assert_ne!(
+                    control_before, control_after,
+                    "width {width}: the snapshot comparison does not discriminate a rewritten byte"
+                );
+                crate::testutil::write_with_mode(&tasks_path, tasks_source.as_bytes(), 0o644);
+            }
+        }
     }
 
     mod load {

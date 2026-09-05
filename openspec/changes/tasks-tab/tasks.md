@@ -616,7 +616,7 @@ the crate compiles, every existing test still passes, and `GATE-MECH1` still hol
 ## 2. Acceptance Test — Outer Loop RED
 <!-- kind: behavior -->
 
-- [ ] 2.1 Set up the harness and the replaced collaborators named in design.md → Test
+- [x] 2.1 Set up the harness and the replaced collaborators named in design.md → Test
       Boundaries: a `crate::testutil::ScratchDir` repository holding
       `openspec/config.yaml` (`schema: tdd`), `openspec/schemas/tdd/schema.yaml` declaring the
       five artifacts with `apply.tracks: tasks.md`, and one change directory holding a
@@ -625,7 +625,7 @@ the crate compiles, every existing test still passes, and `GATE-MECH1` still hol
       `TestBackend`. Nothing else is real: no `openspec` binary, no `herdr` socket, no
       terminal.
 
-- [ ] 2.2 RED: Write `ui::tests::detail::tasks_tab_is_read_only` — the failing end-to-end test
+- [x] 2.2 RED: Write `ui::tests::detail::tasks_tab_is_read_only` — the failing end-to-end test
       for **tasks-checklist → "Every printable key leaves the change tree byte-identical"**,
       carrying the headline rendering assertion with it. At 120x20 and again at 60x20: take a
       `testutil::snapshot` of the scratch tree; run `run_loop` with a script that selects the
@@ -636,7 +636,7 @@ the crate compiles, every existing test still passes, and `GATE-MECH1` still hol
       byte-identical to the pre-run one; and assert re-reading `tasks.md` still gives
       `Progress { completed: 2, total: 5 }`.
 
-- [ ] 2.3 Confirm it fails **because the behaviour is missing**, not because the harness is
+- [x] 2.3 Confirm it fails **because the behaviour is missing**, not because the harness is
       misconfigured: the failure must be the rendering assertion — the buffer holds
       `- [x] ...` source lines rather than a bar and glyph rows — and the snapshot and
       progress assertions must already **pass**, since nothing writes today. Record the exact
@@ -644,11 +644,11 @@ the crate compiles, every existing test still passes, and `GATE-MECH1` still hol
       verbatim, and a *different* message means the harness broke rather than the behaviour
       arriving.
 
-- [ ] 2.4 REFACTOR: None is possible while the test is red; state that explicitly here rather
+- [x] 2.4 REFACTOR: None is possible while the test is red; state that explicitly here rather
       than leaving the lifecycle step unaccounted for. The harness cleanup happens at task
       10.2, once the test is green and a refactor can be shown not to change its result.
 
-- [ ] 2.5 VERIFY: the four gate commands from the preamble. `cargo test --all-features` fails
+- [x] 2.5 VERIFY: the four gate commands from the preamble. `cargo test --all-features` fails
       on exactly one test, `ui::tests::detail::tasks_tab_is_read_only`.
       `cargo llvm-cov --ignore-run-fail --fail-under-lines 80` passes.
       `sh $CHECKS/OPENSPEC-UNTOUCHED.sh`. Commit.
