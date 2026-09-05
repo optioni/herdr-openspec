@@ -4,6 +4,13 @@
      lockfiles, CI and build config, formatter settings). Do NOT write a test that
      asserts a config key; the command that consumes the config is the check. -->
 
+<!-- A task is an instruction and its verification: what to do, and how you will know it
+     worked. Two sentences is the working size; past about four you are justifying rather
+     than instructing, and the justification belongs in design.md — cite it from the task
+     instead. Do not argue with the implementer; if a wrong move is reachable, the check
+     that catches it is the answer. If this file outgrows the design.md it implements, the
+     design is being written here one task at a time. Check text does not count. -->
+
 <!-- Write every check out in full, RUN it at planning time against current HEAD, and
      record its exit status beside it. A check for behavior this change adds must be RED
      at HEAD. A check pinning an invariant that already holds is green at HEAD and proves

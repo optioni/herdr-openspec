@@ -4,8 +4,8 @@ version = 1
 [[source]]
 name     = "openspec-schemas"
 git      = "github.com/optioni/openspec-schemas"
-rev      = "v0.2.0"
-resolved = "6d91ffe5039b42c46b3d36fa6b4230d377496c79"
+rev      = "v0.2.1"
+resolved = "00b18d05490c567c93629999ca2f304270d9fe4f"
 
   [[source.item]]
   id    = "agent:apply-orchestrator"

@@ -230,6 +230,28 @@ artifacts:
       setting that corrupts data without erroring. "Loudly" is the common case: if a bad
       value crashes at boot or fails the build, the boot and the build are the test.
 
+      **A task is an instruction and its verification, not an argument for itself.** Two
+      sentences is the working size: what to do, and how you will know it worked. A task
+      running past about four sentences of prose has stopped instructing and started
+      justifying — and justification belongs in design.md, where one decision is recorded
+      once instead of restated in each task that depends on it. Cite it from the task
+      (`per design.md → Decisions`) rather than reproducing the reasoning.
+
+      In particular, do not argue with the implementer. Pre-empting a wrong move the design
+      already rules out, warning about a mistake someone made last time, or defending a
+      choice against an alternative nobody proposed all read as instruction and are not.
+      If a wrong move is genuinely reachable, the check that catches it is the answer; a
+      paragraph asking the implementer not to make it is not.
+
+      This budget covers prose. It does not cover the text of a check — a check script
+      written out in full is not padding, and the rule below says why it must be there.
+
+      **Watch the ratio between tasks.md and design.md.** Tasks growing past the design they
+      implement is the signal that the design is unfinished: the decisions are being made in
+      the checklist, one task at a time, where no reviewer reads them as a whole and the next
+      change cannot inherit them. When a plan crosses that line, the repair is to move the
+      reasoning into design.md, not to write shorter tasks around it.
+
       **Every check you write must be run before the plan ships, and must be able to fail.**
       Write the check out in full in the task, run it at planning time against current HEAD,
       and record its exit status and the relevant line of its output next to it. Which result
@@ -527,7 +549,9 @@ artifacts:
         RED → GREEN → REFACTOR; refactors preserve CHARACTERIZE → REFACTOR → VERIFY;
         operational groups preserve CHECK → CHANGE → VERIFY. Mixed groups are split
         before implementation. Any `parallel-after` marker names groups that are truly
-        independent.
+        independent. Task lines instruct rather than justify, and tasks.md has not grown
+        past the design.md it implements — either is a sign the design is being written
+        in the checklist.
 
       - **Contradictions and stale assumptions**: artifacts agree about scope, contracts,
         names, persistence, dependencies, and verification expectations. Check the

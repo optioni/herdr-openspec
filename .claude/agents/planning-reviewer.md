@@ -53,6 +53,10 @@ groups CHARACTERIZE → REFACTOR → VERIFY; operational groups CHECK → CHANGE
 groups must be split. Every `<!-- parallel-after: N -->` marker names groups that are
 genuinely independent — different file trees, no shared mutable state, no ordering between
 them beyond group N. A wrongly marked group becomes two agents editing the same file at once.
+Also weigh the prose: a task line should instruct and say how it is verified, not argue for
+itself, and tasks.md outgrowing the design.md it implements means decisions are being made in
+the checklist where no reviewer sees them whole. Say which tasks carry design, and where in
+design.md it belongs.
 
 **D — Factual verification.** You are not a document reviewer. Take every empirical claim the
 artifacts make — a file exists, a function has this signature, a command exits zero, a
