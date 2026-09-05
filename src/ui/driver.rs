@@ -43,14 +43,36 @@ pub enum LoopError {
     Events(EventError),
 }
 
-/// Sync the selected tab's content through `read`, draw, then wait up to
-/// `tick` for an event, applying its action and breaking when
-/// `dashboard.quit` is set — without syncing or drawing again. The sync
-/// happens **before** the draw, so the very first frame carries the
-/// selected artifact's content rather than a blank region that fills in on
-/// the second. A timeout (`Ok(None)`) is not an event and does not end the
-/// loop. Neither a draw error nor an event-source error is retried in a
-/// loop that could spin.
+/// Drive the live tier's three one-shot steps, then sync the selected tab's
+/// content through `read`, draw, then wait up to
+/// `watch::poll_timeout(tick, live.fs.pending_in())` for an event, applying
+/// its action and breaking when `dashboard.quit` is set — without syncing or
+/// drawing again. The sync happens **before** the draw, so the very first
+/// frame carries the selected artifact's content rather than a blank region
+/// that fills in on the second. A timeout (`Ok(None)`) is not an event and
+/// does not end the loop. Neither a draw error nor an event-source error is
+/// retried in a loop that could spin.
+///
+/// The live tier, once per iteration, before the sync:
+///
+/// 1. When `dashboard.refresh.requested` is set, request `Selection::All`
+///    and clear the flag — checked **before** the filesystem drain below, so
+///    the startup (or `r`-triggered) request is recorded before one an
+///    already-pending batch produces on the very same iteration, the case
+///    `ui::load`'s startup flag and a live watcher's batch can both hit on
+///    iteration one.
+/// 2. `live.fs.drain()`; on `Ok(Some(paths))`, request
+///    `watch::invalidate(repo, &paths)`; on `Err(e)`, the reason replaces
+///    `dashboard.refresh.problems` wholesale (never grown) — a watcher
+///    failing on every poll must not accumulate an unbounded list.
+/// 3. `live.refresher.take_result()`; any result — file-sourced or
+///    CLI-merged — is adopted immediately, so it reaches the very frame
+///    that follows rather than the one after.
+///
+/// Every one of the three steps is non-blocking by the traits' contract, so
+/// the sequence adds no wait to the render path. See
+/// `specs/live-updates/spec.md` -> "The loop drives the live tier without
+/// ever waiting on it".
 pub fn run_loop<B: Backend, E: EventSource>(
     terminal: &mut Terminal<B>,
     dashboard: &mut Dashboard,
@@ -59,10 +81,11 @@ pub fn run_loop<B: Backend, E: EventSource>(
     read: ArtifactReader<'_>,
     tick: Duration,
 ) -> Result<LoopSummary, LoopError> {
-    let _ = &live; // group 9 reads it; group 1 plumbs it through only.
     let mut frames = 0usize;
     let mut polls = 0usize;
     loop {
+        drive_live_tier(dashboard, live);
+
         dashboard.sync_detail(read);
         let completed = terminal
             .draw(|frame| view::render(frame, dashboard))
@@ -74,7 +97,8 @@ pub fn run_loop<B: Backend, E: EventSource>(
         frames += 1;
         dashboard.normalise_scroll(area);
 
-        let event = events.next_event(tick).map_err(LoopError::Events)?;
+        let timeout = crate::watch::poll_timeout(tick, live.fs.pending_in());
+        let event = events.next_event(timeout).map_err(LoopError::Events)?;
         polls += 1;
 
         if let Some(event) = event {
@@ -88,6 +112,38 @@ pub fn run_loop<B: Backend, E: EventSource>(
     Ok(LoopSummary { frames, polls })
 }
 
+/// The live tier's three one-shot steps — see `run_loop`'s doc comment for
+/// the order and the reason for it. Non-blocking throughout: it calls only
+/// `FsEvents::drain`, `Refresher::request`, and `Refresher::take_result`,
+/// every one of which is non-blocking by the traits' own contract, so
+/// extracting this into its own function grows no ability to block that
+/// `run_loop`'s body did not already have.
+fn drive_live_tier(dashboard: &mut Dashboard, live: &mut Live<'_>) {
+    if dashboard.refresh.requested {
+        live.refresher.request(crate::changes::Selection::All);
+        dashboard.refresh.requested = false;
+    }
+    match live.fs.drain() {
+        Ok(Some(paths)) => {
+            if let Some(repo) = dashboard.repo.as_deref() {
+                live.refresher
+                    .request(crate::watch::invalidate(repo, &paths));
+            }
+        }
+        Ok(None) => {}
+        Err(e) => {
+            dashboard.refresh.problems = vec![e.0];
+        }
+    }
+    if let Some(result) = live.refresher.take_result() {
+        let set = match result {
+            crate::refresh::RefreshResult::Files(set)
+            | crate::refresh::RefreshResult::Merged(set) => set,
+        };
+        dashboard.adopt(set);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::time::Duration;
@@ -98,10 +154,45 @@ mod tests {
     use ratatui::layout::{Position, Size};
 
     use crate::changes::empty_set;
-    use crate::testutil::{Script, cell, press, row_text};
+    use crate::testutil::{RecordingRefresher, Script, ScriptedFs, cell, press, row_text};
     use crate::ui::app::{Dashboard, Route};
     use crate::ui::driver::{LoopError, LoopSummary, TICK, run_loop};
     use crate::ui::view;
+
+    /// A `Route::List` dashboard over one active change, `name`, at
+    /// `completed` of `total` — group 9's live-tier tests need a dashboard
+    /// whose list row carries an assertable progress pair, not
+    /// `dashboard()`'s empty set.
+    fn dashboard_with_change(repo: &str, name: &str, completed: usize, total: usize) -> Dashboard {
+        Dashboard {
+            repo: Some(std::path::PathBuf::from(repo)),
+            searched_from: std::path::PathBuf::from(repo),
+            changes: crate::changes::fixture::set(
+                vec![crate::changes::fixture::active(name, completed, total)],
+                Vec::new(),
+                Vec::new(),
+            ),
+            route: Route::List,
+            quit: false,
+            selected: 0,
+            filter: crate::ui::app::Filter {
+                query: String::new(),
+                active: false,
+            },
+            detail: crate::ui::app::Detail {
+                source: String::new(),
+                scroll: 0,
+                tab: 0,
+                problems: Vec::new(),
+                loaded: None,
+            },
+            refresh: crate::ui::app::Refresh {
+                requested: false,
+                reload: false,
+                problems: Vec::new(),
+            },
+        }
+    }
 
     fn dashboard() -> Dashboard {
         Dashboard {
@@ -929,5 +1020,387 @@ mod tests {
         assert!(matches!(result, Err(LoopError::Draw(_))));
         assert_eq!(events.calls(), 0);
         assert_eq!(recorder.calls(), 1, "the sync precedes the draw");
+    }
+
+    // `live-refresh` -> "The loop drives the live tier without ever waiting
+    // on it". See `specs/live-updates/spec.md`.
+
+    #[test]
+    fn the_startup_request_precedes_the_first_wait() {
+        for width in [120u16, 60u16] {
+            let backend = TestBackend::new(width, 20);
+            let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+            let mut dashboard = dashboard();
+            dashboard.refresh.requested = true;
+            let mut events = Script::new(vec![Ok(Some(press(
+                KeyCode::Char('q'),
+                KeyModifiers::NONE,
+            )))]);
+            let mut fs = ScriptedFs::new(Vec::new(), Vec::new());
+            let mut refresher = RecordingRefresher::new(Vec::new());
+            let mut live = crate::ui::driver::Live {
+                fs: &mut fs,
+                refresher: &mut refresher,
+            };
+            let summary = run_loop(
+                &mut terminal,
+                &mut dashboard,
+                &mut events,
+                &mut live,
+                &|_: &std::path::Path| Ok(String::new()),
+                Duration::from_millis(1),
+            )
+            .expect("loop ends");
+
+            assert_eq!(
+                summary,
+                LoopSummary {
+                    frames: 1,
+                    polls: 1
+                },
+                "width {width}"
+            );
+            assert_eq!(
+                refresher.requests(),
+                vec![crate::changes::Selection::All],
+                "width {width}"
+            );
+            assert!(
+                !dashboard.refresh.requested,
+                "width {width}: one flag must produce one request"
+            );
+        }
+    }
+
+    #[test]
+    fn a_result_is_adopted_before_the_frame() {
+        for width in [120u16, 60u16] {
+            let backend = TestBackend::new(width, 20);
+            let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+            let mut dashboard = dashboard_with_change("/r", "alpha", 4, 9);
+            let merged = crate::changes::fixture::set(
+                vec![crate::changes::fixture::active("alpha", 7, 9)],
+                Vec::new(),
+                Vec::new(),
+            );
+            let mut events = Script::new(vec![Ok(Some(press(
+                KeyCode::Char('q'),
+                KeyModifiers::NONE,
+            )))]);
+            let mut fs = ScriptedFs::new(Vec::new(), Vec::new());
+            let mut refresher =
+                RecordingRefresher::new(vec![Some(crate::refresh::RefreshResult::Merged(merged))]);
+            let mut live = crate::ui::driver::Live {
+                fs: &mut fs,
+                refresher: &mut refresher,
+            };
+            let summary = run_loop(
+                &mut terminal,
+                &mut dashboard,
+                &mut events,
+                &mut live,
+                &|_: &std::path::Path| Ok(String::new()),
+                Duration::from_millis(1),
+            )
+            .expect("loop ends");
+
+            assert_eq!(
+                summary,
+                LoopSummary {
+                    frames: 1,
+                    polls: 1
+                },
+                "width {width}: one frame, not two"
+            );
+            let buf = terminal.backend().buffer();
+            assert!(
+                row_text(buf, 2).contains("[7/9]"),
+                "width {width}: the result must reach the very frame that consumed it: {}",
+                row_text(buf, 2)
+            );
+            assert_eq!(
+                refresher.takes(),
+                1,
+                "width {width}: one take_result per iteration"
+            );
+        }
+    }
+
+    #[test]
+    fn an_fs_batch_becomes_one_selection() {
+        let backend = TestBackend::new(60, 20);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        let mut dashboard = dashboard();
+        dashboard.repo = Some(std::path::PathBuf::from("/r"));
+        // Mimics `ui::load`'s startup state: the flag and an
+        // already-pending filesystem batch can coincide on the very first
+        // iteration.
+        dashboard.refresh.requested = true;
+        let mut events = Script::new(vec![
+            Ok(None),
+            Ok(None),
+            Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
+        ]);
+        let mut fs = ScriptedFs::new(
+            vec![Ok(Some(vec![std::path::PathBuf::from(
+                "/r/openspec/changes/alpha/tasks.md",
+            )]))],
+            Vec::new(),
+        );
+        let mut refresher = RecordingRefresher::new(Vec::new());
+        let mut live = crate::ui::driver::Live {
+            fs: &mut fs,
+            refresher: &mut refresher,
+        };
+        run_loop(
+            &mut terminal,
+            &mut dashboard,
+            &mut events,
+            &mut live,
+            &|_: &std::path::Path| Ok(String::new()),
+            Duration::from_millis(1),
+        )
+        .expect("loop ends");
+
+        let mut alpha = std::collections::BTreeSet::new();
+        alpha.insert("alpha".to_string());
+        assert_eq!(
+            refresher.requests(),
+            vec![
+                crate::changes::Selection::All,
+                crate::changes::Selection::Only(alpha)
+            ],
+            "an implementation that requested All for every batch must fail here"
+        );
+    }
+
+    #[test]
+    fn a_watch_error_is_recorded_once() {
+        let backend = TestBackend::new(60, 20);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        let mut dashboard = dashboard();
+        let mut events = Script::new(vec![
+            Ok(None),
+            Ok(None),
+            Ok(None),
+            Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
+        ]);
+        let mut fs = ScriptedFs::new(
+            vec![
+                Err(crate::watch::WatchError("watch failed".to_string())),
+                Err(crate::watch::WatchError("watch failed".to_string())),
+            ],
+            Vec::new(),
+        );
+        let mut refresher = RecordingRefresher::new(Vec::new());
+        let mut live = crate::ui::driver::Live {
+            fs: &mut fs,
+            refresher: &mut refresher,
+        };
+        let summary = run_loop(
+            &mut terminal,
+            &mut dashboard,
+            &mut events,
+            &mut live,
+            &|_: &std::path::Path| Ok(String::new()),
+            Duration::from_millis(1),
+        )
+        .expect("loop ends");
+
+        assert_eq!(
+            summary,
+            LoopSummary {
+                frames: 4,
+                polls: 4
+            },
+            "a watch error must never end the loop"
+        );
+        assert_eq!(
+            dashboard.refresh.problems.len(),
+            1,
+            "a watcher failing on every poll must not grow an unbounded problem list"
+        );
+        assert!(dashboard.refresh.problems[0].contains("watch failed"));
+    }
+
+    #[test]
+    fn the_wait_shortens_to_the_debounce_deadline() {
+        let make_dashboard = dashboard;
+        let backend = TestBackend::new(60, 20);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        let mut dashboard = make_dashboard();
+        let mut events = Script::new(vec![
+            Ok(None),
+            Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
+        ]);
+        let mut fs = ScriptedFs::new(
+            vec![Ok(None), Ok(None)],
+            vec![Some(Duration::from_millis(90)), None],
+        );
+        let mut refresher = RecordingRefresher::new(Vec::new());
+        let mut live = crate::ui::driver::Live {
+            fs: &mut fs,
+            refresher: &mut refresher,
+        };
+        run_loop(
+            &mut terminal,
+            &mut dashboard,
+            &mut events,
+            &mut live,
+            &|_: &std::path::Path| Ok(String::new()),
+            Duration::from_millis(250),
+        )
+        .expect("loop ends");
+
+        let timeouts = events.timeouts();
+        assert_eq!(timeouts[0], Duration::from_millis(90));
+        assert_eq!(timeouts[1], Duration::from_millis(250));
+
+        // A `pending_in` of zero must still floor at 1ms, never 0ms — a
+        // zero timeout returned every iteration would let the loop spin
+        // without bound.
+        let backend2 = TestBackend::new(60, 20);
+        let mut terminal2 = ratatui::Terminal::new(backend2).expect("construct terminal");
+        let mut dashboard2 = make_dashboard();
+        let mut events2 = Script::new(vec![Ok(Some(press(
+            KeyCode::Char('q'),
+            KeyModifiers::NONE,
+        )))]);
+        let mut fs2 = ScriptedFs::new(vec![Ok(None)], vec![Some(Duration::from_millis(0))]);
+        let mut refresher2 = RecordingRefresher::new(Vec::new());
+        let mut live2 = crate::ui::driver::Live {
+            fs: &mut fs2,
+            refresher: &mut refresher2,
+        };
+        run_loop(
+            &mut terminal2,
+            &mut dashboard2,
+            &mut events2,
+            &mut live2,
+            &|_: &std::path::Path| Ok(String::new()),
+            Duration::from_millis(250),
+        )
+        .expect("loop ends");
+        assert_eq!(events2.timeouts()[0], Duration::from_millis(1));
+    }
+
+    #[test]
+    fn the_wait_is_the_tick_when_nothing_is_pending() {
+        let backend = TestBackend::new(60, 20);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        let mut dashboard = dashboard();
+        let mut events = Script::new(vec![Ok(Some(press(
+            KeyCode::Char('q'),
+            KeyModifiers::NONE,
+        )))]);
+        let mut fs = ScriptedFs::new(vec![Ok(None)], vec![None]);
+        let mut refresher = RecordingRefresher::new(Vec::new());
+        let mut live = crate::ui::driver::Live {
+            fs: &mut fs,
+            refresher: &mut refresher,
+        };
+        run_loop(
+            &mut terminal,
+            &mut dashboard,
+            &mut events,
+            &mut live,
+            &|_: &std::path::Path| Ok(String::new()),
+            Duration::from_millis(250),
+        )
+        .expect("loop ends");
+        assert_eq!(events.timeouts()[0], Duration::from_millis(250));
+    }
+
+    #[test]
+    fn a_files_result_and_a_merged_result_are_both_adopted() {
+        let backend = TestBackend::new(60, 20);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        let mut dashboard = dashboard_with_change("/r", "alpha", 4, 9);
+        let files_set = crate::changes::fixture::set(
+            vec![crate::changes::fixture::active("alpha", 4, 9)],
+            Vec::new(),
+            Vec::new(),
+        );
+        let merged_set = crate::changes::fixture::set(
+            vec![crate::changes::fixture::active("alpha", 7, 9)],
+            Vec::new(),
+            Vec::new(),
+        );
+        let mut events = Script::new(vec![
+            Ok(None),
+            Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
+        ]);
+        let mut fs = ScriptedFs::new(Vec::new(), Vec::new());
+        let mut refresher = RecordingRefresher::new(vec![
+            Some(crate::refresh::RefreshResult::Files(files_set)),
+            Some(crate::refresh::RefreshResult::Merged(merged_set)),
+        ]);
+        let mut live = crate::ui::driver::Live {
+            fs: &mut fs,
+            refresher: &mut refresher,
+        };
+        let summary = run_loop(
+            &mut terminal,
+            &mut dashboard,
+            &mut events,
+            &mut live,
+            &|_: &std::path::Path| Ok(String::new()),
+            Duration::from_millis(1),
+        )
+        .expect("loop ends");
+
+        assert_eq!(
+            summary,
+            LoopSummary {
+                frames: 2,
+                polls: 2
+            }
+        );
+        assert_eq!(dashboard.changes.active[0].progress.completed, 7);
+        assert_eq!(refresher.takes(), 2);
+    }
+
+    #[test]
+    fn an_inert_live_tier_takes_nothing_and_requests_nothing() {
+        let backend = TestBackend::new(60, 20);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        let mut dashboard = dashboard();
+        let mut events = Script::new(vec![Ok(Some(press(
+            KeyCode::Char('q'),
+            KeyModifiers::NONE,
+        )))]);
+        let mut fs = ScriptedFs::new(Vec::new(), Vec::new());
+        let mut refresher = RecordingRefresher::new(Vec::new());
+        let mut live = crate::ui::driver::Live {
+            fs: &mut fs,
+            refresher: &mut refresher,
+        };
+        let summary = run_loop(
+            &mut terminal,
+            &mut dashboard,
+            &mut events,
+            &mut live,
+            &|_: &std::path::Path| Ok(String::new()),
+            Duration::from_millis(1),
+        )
+        .expect("loop ends");
+
+        assert_eq!(
+            summary,
+            LoopSummary {
+                frames: 1,
+                polls: 1
+            }
+        );
+        assert!(
+            refresher.requests().is_empty(),
+            "no drain batch and no requested flag must issue no request"
+        );
+        assert_eq!(
+            refresher.takes(),
+            1,
+            "take_result is still polled once, even though it yields nothing"
+        );
+        assert_eq!(dashboard.changes, empty_set());
     }
 }

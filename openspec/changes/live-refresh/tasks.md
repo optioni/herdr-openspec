@@ -1603,7 +1603,7 @@ be proven here.
 ## 9. The loop's live tier
 <!-- kind: behavior -->
 
-- [ ] 9.1 RED: Write eight failing tests in `ui::driver::tests::`, named from their scenarios:
+- [x] 9.1 RED: Write eight failing tests in `ui::driver::tests::`, named from their scenarios:
       `the_startup_request_precedes_the_first_wait`,
       `a_result_is_adopted_before_the_frame` (at 120x20 **and** 60x20),
       `an_fs_batch_becomes_one_selection`, `a_watch_error_is_recorded_once`,
@@ -1629,14 +1629,14 @@ be proven here.
       it for some elapsed period, which would be a negative assertion bounded by wall-clock
       time.
 
-- [ ] 9.2 CHANGE: Extend the landed `ui::driver::tests::` and `ui::tests::detail::` tests to
+- [x] 9.2 CHANGE: Extend the landed `ui::driver::tests::` and `ui::tests::detail::` tests to
       pass a real inert `Live` rather than the placeholder from group 1, without adding to
       the count. Every landed frame count, poll count, buffer assertion, and reader call count
       must be **unchanged** — that is the evidence for `live-updates` → "An inert live tier
       leaves the loop exactly as it was", and it is the state a machine with no `openspec`
       binary and no working watcher runs in.
 
-- [ ] 9.3 GREEN: Implement `run_loop`'s three live-tier steps and the
+- [x] 9.3 GREEN: Implement `run_loop`'s three live-tier steps and the
       `watch::poll_timeout(tick, live.fs.pending_in())` wait, per
       `specs/live-updates/spec.md` → "The loop drives the live tier without ever waiting on
       it". Steps 1 to 3 precede `sync_detail`; nothing else in the loop moves.
@@ -1647,17 +1647,17 @@ be proven here.
       put `std::fs` into a pure view file and fail `NOIO-VIEW` — the change would have failed
       at its one job. The worker sends the file result.
 
-- [ ] 9.4 CHECK: `run_loop` gains no clock, no channel, and no thread: confirm by
+- [x] 9.4 CHECK: `run_loop` gains no clock, no channel, and no thread: confirm by
       `git diff` over `src/ui/driver.rs`'s production code, and by
       `UI_MIN=11 sh $CHECKS/NOBLOCK.sh`.
 
-- [ ] 9.5 REFACTOR: If `run_loop`'s body now reads as seven steps rather than one loop,
+- [x] 9.5 REFACTOR: If `run_loop`'s body now reads as seven steps rather than one loop,
       extract the live-tier prelude into a named private function taking `&mut Dashboard` and
       `&mut Live`; otherwise state that no refactor was needed. The function must not acquire
       the ability to block by being extracted — `NOBLOCK` searches the whole production slice,
       not just `run_loop`.
 
-- [ ] 9.6 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'ui::driver::tests::' 22`;
+- [x] 9.6 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'ui::driver::tests::' 22`;
       `sh $CHECKS/NOIO-VIEW.sh`; `UI_MIN=11 sh $CHECKS/NOCLI-SHELL.sh`; the four gate
       commands, still failing on exactly the one known acceptance test.
       `BASE=f9b42e8 sh $CHECKS/OPENSPEC-UNTOUCHED.sh`. Commit.
