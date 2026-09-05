@@ -1142,7 +1142,7 @@ files in `$CHECKS`.
 ## 10. `normalise_scroll` over the content area — the acceptance test goes green
 <!-- kind: behavioural -->
 
-- [ ] 10.1 RED: Scenarios 75, 76, and 11, plus the update to `markdown-viewer`'s acceptance
+- [x] 10.1 RED: Scenarios 75, 76, and 11, plus the update to `markdown-viewer`'s acceptance
       test. In `src/ui/app.rs`'s test module, **update** the existing `normalise_scroll`
       tests: at 120x20 the offset for a twenty-line source becomes `6`, at 120x40 it is `0`,
       and at 60x20 it is `6`; the narrow list route still leaves a stored `9` alone while the
@@ -1158,26 +1158,26 @@ files in `$CHECKS`.
       values — 6, 0, 6 — are what prove the content area's height, not the interior's, was
       used.
 
-- [ ] 10.2 GREEN: Change `Dashboard::normalise_scroll` to derive the content area through
+- [x] 10.2 GREEN: Change `Dashboard::normalise_scroll` to derive the content area through
       `layout::split_detail` and to count `ui::detail::content_lines` rather than
       `markdown::lines`, and change `run_loop` to call `dashboard.sync_detail(read)` at the
       top of each iteration, before the draw.
 
-- [ ] 10.3 CHECK: The group 2 acceptance test is now **green**, and so is the updated
+- [x] 10.3 CHECK: The group 2 acceptance test is now **green**, and so is the updated
       `markdown-viewer` one beside it. Run the module alone and record its output:
       `cargo test --all-features --lib 'ui::tests::detail::'` — **two** tests, both passing.
       **Red when:** either still fails, or the new one passes for the wrong reason — re-read
       its five assertions and confirm the `scroll == 6` and `calls() == 2` ones are among
       those that pass.
 
-- [ ] 10.4 VERIFY: `make check` — the literal, unqualified composite, runnable again from
+- [x] 10.4 VERIFY: `make check` — the literal, unqualified composite, runnable again from
       here on. Then `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'ui::tests::detail::' 2` —
       **two**, because `mod detail` already held one test on `main` and a floor of 1 would be
       satisfied before this change wrote a line; and `testcount --lib 'ui::app::tests::' 45`.
       **Red when:** `make check` fails; report the failing sub-command by name rather than a
       summary.
 
-- [ ] 10.5 Commit: `feat(detail-view): normalise the scroll against the content area`.
+- [x] 10.5 Commit: `feat(detail-view): normalise the scroll against the content area`.
 
 ## 11. The read binding and the startup path
 <!-- kind: behavioural -->

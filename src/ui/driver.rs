@@ -33,12 +33,14 @@ pub enum LoopError {
     Events(EventError),
 }
 
-/// Draw, then wait up to `tick` for an event, applying its action and
-/// breaking when `dashboard.quit` is set — without drawing again. A
-/// timeout (`Ok(None)`) is not an event and does not end the loop. Neither
-/// a draw error nor an event-source error is retried in a loop that could
-/// spin. `read` is not yet called: `detail-view`'s group 10 is what wires
-/// `dashboard.sync_detail(read)` into this loop, before the draw.
+/// Sync the selected tab's content through `read`, draw, then wait up to
+/// `tick` for an event, applying its action and breaking when
+/// `dashboard.quit` is set — without syncing or drawing again. The sync
+/// happens **before** the draw, so the very first frame carries the
+/// selected artifact's content rather than a blank region that fills in on
+/// the second. A timeout (`Ok(None)`) is not an event and does not end the
+/// loop. Neither a draw error nor an event-source error is retried in a
+/// loop that could spin.
 pub fn run_loop<B: Backend, E: EventSource>(
     terminal: &mut Terminal<B>,
     dashboard: &mut Dashboard,
@@ -46,10 +48,10 @@ pub fn run_loop<B: Backend, E: EventSource>(
     read: ArtifactReader<'_>,
     tick: Duration,
 ) -> Result<LoopSummary, LoopError> {
-    let _ = read;
     let mut frames = 0usize;
     let mut polls = 0usize;
     loop {
+        dashboard.sync_detail(read);
         let completed = terminal
             .draw(|frame| view::render(frame, dashboard))
             .map_err(|e| LoopError::Draw(e.to_string()))?;
@@ -369,12 +371,17 @@ mod tests {
     }
 
     fn twenty_line_detail_dashboard() -> Dashboard {
-        // A real selected change, not `empty_set()`: after `detail-view`
-        // the detail region draws nothing at all when `visible()` is
-        // empty, and these scroll tests need the content area drawn.
+        // A real selected change with a real artifact PATH, not
+        // `empty_set()` and not a path-free artifact: `run_loop` now
+        // calls `sync_detail` before every draw, and a path-free artifact
+        // would clear `detail.source` back to empty on the very first
+        // iteration. Tests driving this dashboard through `run_loop` pass
+        // a reader supplying `detail.source`'s own twenty-line text for
+        // that path, so the manually-set source and the injected reader
+        // agree, exactly as `ui::mod`'s acceptance test does.
         let change = crate::changes::fixture::with_artifacts(
             crate::changes::fixture::active("detail-view", 4, 9),
-            &[("proposal", &[])],
+            &[("proposal", &["/repo/p.md"])],
         );
         Dashboard {
             repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
@@ -409,16 +416,20 @@ mod tests {
             presses.push(Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))));
             let mut events = Script::new(presses);
 
+            let recorder =
+                crate::testutil::RecordingReader::always(Ok(dashboard.detail.source.clone()));
+            let read = |p: &std::path::Path| recorder.read(p);
+
             let summary = run_loop(
                 &mut terminal,
                 &mut dashboard,
                 &mut events,
-                &|_: &std::path::Path| Ok(String::new()),
+                &read,
                 Duration::from_millis(1),
             )
             .expect("loop ends");
 
-            assert_eq!(dashboard.detail.scroll, 4, "width {width}");
+            assert_eq!(dashboard.detail.scroll, 6, "width {width}");
             assert_eq!(
                 summary,
                 LoopSummary {
@@ -437,13 +448,11 @@ mod tests {
             };
             // The content area starts two rows lower than the interior
             // (the header and tab bar rows above it) and is two rows
-            // shorter. `normalise_scroll` still clamps against the whole
-            // *interior*'s height until group 10, so the last drawn
-            // frame's *unclamped* scroll is 5 (one `j` past the final
-            // stored, clamped value of 4), and the 14-row content area
-            // draws lines 5 through 18, not 4 through 19.
-            assert_eq!(row_at(4), "- line-05", "width {width}");
-            assert_eq!(row_at(17), "- line-18", "width {width}");
+            // shorter, and `normalise_scroll` now clamps against the
+            // content area's own height, so the 14-row content area draws
+            // lines 6 through 19, not 4 through 19.
+            assert_eq!(row_at(4), "- line-06", "width {width}");
+            assert_eq!(row_at(17), "- line-19", "width {width}");
         }
     }
 
@@ -516,5 +525,92 @@ mod tests {
             other => panic!("expected Err(LoopError::Draw(_)), got {other:?}"),
         }
         assert_eq!(events.calls(), 0);
+    }
+
+    /// A dashboard whose one selected active change carries one artifact
+    /// resolving to a real path, for the two `sync_detail`-before-the-draw
+    /// tests below — `twenty_line_detail_dashboard`'s artifact resolves to
+    /// no paths at all, so its reader would never be called.
+    fn dashboard_with_one_artifact_path() -> Dashboard {
+        let change = crate::changes::fixture::with_artifacts(
+            crate::changes::fixture::active("detail-view", 4, 9),
+            &[("proposal", &["/repo/p.md"])],
+        );
+        Dashboard {
+            repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
+            searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
+            changes: crate::changes::fixture::set(vec![change], Vec::new(), Vec::new()),
+            route: Route::List,
+            quit: false,
+            selected: 0,
+            filter: crate::ui::app::Filter {
+                query: String::new(),
+                active: false,
+            },
+            detail: crate::ui::app::Detail {
+                source: String::new(),
+                scroll: 0,
+                tab: 0,
+                problems: Vec::new(),
+                loaded: None,
+            },
+        }
+    }
+
+    #[test]
+    fn the_loop_syncs_before_it_draws() {
+        let backend = TestBackend::new(120, 20);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        let mut dashboard = dashboard_with_one_artifact_path();
+        let mut events = Script::new(vec![Ok(Some(press(
+            KeyCode::Char('q'),
+            KeyModifiers::NONE,
+        )))]);
+        let recorder = crate::testutil::RecordingReader::always(Ok("# proposal\n".to_string()));
+        let read = |p: &std::path::Path| recorder.read(p);
+
+        let summary = run_loop(
+            &mut terminal,
+            &mut dashboard,
+            &mut events,
+            &read,
+            Duration::from_millis(1),
+        )
+        .expect("loop ends");
+
+        assert_eq!(
+            summary,
+            LoopSummary {
+                frames: 1,
+                polls: 1
+            }
+        );
+        let buf = terminal.backend().buffer();
+        let row: String = row_text(buf, 4).chars().skip(41).take(10).collect();
+        assert_eq!(row, "# proposal");
+        assert_eq!(recorder.calls(), 1);
+    }
+
+    #[test]
+    fn a_backend_draw_failure_still_records_the_syncs_one_call() {
+        let mut terminal = ratatui::Terminal::new(FailingBackend).expect("construct terminal");
+        let mut dashboard = dashboard_with_one_artifact_path();
+        let mut events = Script::new(vec![Ok(Some(press(
+            KeyCode::Char('q'),
+            KeyModifiers::NONE,
+        )))]);
+        let recorder = crate::testutil::RecordingReader::always(Ok("# proposal\n".to_string()));
+        let read = |p: &std::path::Path| recorder.read(p);
+
+        let result = run_loop(
+            &mut terminal,
+            &mut dashboard,
+            &mut events,
+            &read,
+            Duration::from_millis(1),
+        );
+        assert!(matches!(result, Err(LoopError::Draw(_))));
+        assert_eq!(events.calls(), 0);
+        assert_eq!(recorder.calls(), 1, "the sync precedes the draw");
     }
 }

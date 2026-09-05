@@ -198,17 +198,24 @@ mod tests {
         use ratatui::layout::Rect;
         use ratatui::widgets::Block;
 
-        use crate::testutil::{Script, press};
+        use crate::testutil::{RecordingReader, Script, press};
         use crate::ui::app::{Dashboard, Detail, Filter, Route};
         use crate::ui::driver::run_loop;
         use crate::ui::layout::{split_body, split_frame};
 
+        /// A dashboard whose one selected active change carries one
+        /// artifact resolving to `/repo/p.md` — `detail-view`'s
+        /// `sync_detail` is what fills `detail.source` now, driven by the
+        /// injected reader, rather than this fixture setting it directly.
         fn dashboard() -> Dashboard {
-            let source: String = (0..20).map(|i| format!("- line-{i:02}\n")).collect();
+            let change = crate::changes::fixture::with_artifacts(
+                crate::changes::fixture::active("detail-view", 4, 9),
+                &[("proposal", &["/repo/p.md"])],
+            );
             Dashboard {
                 repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
                 searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
-                changes: crate::changes::empty_set(),
+                changes: crate::changes::fixture::set(vec![change], Vec::new(), Vec::new()),
                 route: Route::Detail,
                 quit: false,
                 selected: 0,
@@ -217,7 +224,7 @@ mod tests {
                     active: false,
                 },
                 detail: Detail {
-                    source,
+                    source: String::new(),
                     scroll: 0,
                     tab: 0,
                     problems: Vec::new(),
@@ -242,13 +249,18 @@ mod tests {
             // with only two, the acceptance test started passing as soon
             // as render_detail existed, well before ui::driver normalises
             // the stored offset — group 8's RED would have been vacuous.
-            // Ten presses run well past the twenty-item source's four-line
-            // overshoot, so the assertion on the FINAL stored
-            // `detail.scroll` (4, not 10) is the one that stays red until
-            // `run_loop` calls `normalise_scroll` once per iteration.
+            // Ten presses run well past the twenty-item source's six-line
+            // overshoot (the content area is 14 rows, two narrower than
+            // the 16-row interior since detail-view's header and tab bar
+            // now take the first two), so the assertion on the FINAL
+            // stored `detail.scroll` (6, not 10) is the one that stays red
+            // until `run_loop` calls `normalise_scroll` against the
+            // content area's own height.
             for width in [120u16, 60u16] {
                 let mut dashboard = dashboard();
                 let interior = detail_interior(width, 20, Route::Detail);
+                let content_y = interior.y + 2;
+                let content_height = interior.height - 2;
 
                 let backend = ratatui::backend::TestBackend::new(width, 20);
                 let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
@@ -266,11 +278,15 @@ mod tests {
                 ))));
                 let mut events = Script::new(presses);
 
+                let twenty_lines: String = (0..20).map(|i| format!("- line-{i:02}\n")).collect();
+                let recorder = RecordingReader::always(Ok(twenty_lines));
+                let read = |p: &std::path::Path| recorder.read(p);
+
                 let summary = run_loop(
                     &mut terminal,
                     &mut dashboard,
                     &mut events,
-                    &|_: &std::path::Path| Ok(String::new()),
+                    &read,
                     std::time::Duration::from_millis(1),
                 )
                 .expect("loop ends");
@@ -281,14 +297,14 @@ mod tests {
                         .map(|x| buf[(x, y)].symbol().to_string())
                         .collect()
                 };
-                assert_eq!(row_at(interior.y), "- line-04", "width {width}");
+                assert_eq!(row_at(content_y), "- line-06", "width {width}");
                 assert_eq!(
-                    row_at(interior.y + interior.height - 1),
+                    row_at(content_y + content_height - 1),
                     "- line-19",
                     "width {width}"
                 );
 
-                assert_eq!(dashboard.detail.scroll, 4, "width {width}");
+                assert_eq!(dashboard.detail.scroll, 6, "width {width}");
                 assert_eq!(summary.frames, 11, "width {width}");
             }
         }

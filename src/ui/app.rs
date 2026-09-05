@@ -256,9 +256,13 @@ impl Dashboard {
         if interior.width == 0 || interior.height == 0 {
             return;
         }
-        let total = crate::ui::markdown::lines(&self.detail.source, interior.width).len();
+        let (_, _, content) = crate::ui::layout::split_detail(interior);
+        if content.width == 0 || content.height == 0 {
+            return;
+        }
+        let total = crate::ui::detail::content_lines(&self.detail, content.width).len();
         self.detail.scroll =
-            crate::ui::layout::scroll_offset(total, self.detail.scroll, interior.height);
+            crate::ui::layout::scroll_offset(total, self.detail.scroll, content.height);
     }
 
     /// Active-then-archived, in `ChangeSet`'s own order, with `list-filtering`'s
@@ -1095,6 +1099,11 @@ mod tests {
 
         #[test]
         fn normalise_scroll_clamps_against_the_frame() {
+            // detail-scroll: "A resize renormalises the offset on the next
+            // frame" — three independent 99-scroll trials, each clamped
+            // against the CONTENT area's height (not the whole interior):
+            // 14 rows at 120x20 and at 60x20, 34 rows at 120x40, where the
+            // twenty-line source fits entirely and the clamp is 0.
             let mut d = Dashboard {
                 detail: Detail {
                     source: twenty_line_detail().source,
@@ -1112,7 +1121,7 @@ mod tests {
                 filter: empty_filter(),
             };
             d.normalise_scroll(ratatui::layout::Rect::new(0, 0, 120, 20));
-            assert_eq!(d.detail.scroll, 4);
+            assert_eq!(d.detail.scroll, 6);
 
             let mut d2 = Dashboard {
                 detail: Detail {
@@ -1131,7 +1140,29 @@ mod tests {
                 filter: empty_filter(),
             };
             d2.normalise_scroll(ratatui::layout::Rect::new(0, 0, 60, 20));
-            assert_eq!(d2.detail.scroll, 4);
+            assert_eq!(d2.detail.scroll, 6);
+
+            let mut d3 = Dashboard {
+                detail: Detail {
+                    source: twenty_line_detail().source,
+                    scroll: 99,
+                    tab: 0,
+                    problems: Vec::new(),
+                    loaded: None,
+                },
+                repo: None,
+                searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
+                changes: empty_set(),
+                route: Route::Detail,
+                quit: false,
+                selected: 0,
+                filter: empty_filter(),
+            };
+            d3.normalise_scroll(ratatui::layout::Rect::new(0, 0, 120, 40));
+            assert_eq!(
+                d3.detail.scroll, 0,
+                "a 34-row content area holds every line"
+            );
         }
 
         #[test]
@@ -1139,7 +1170,7 @@ mod tests {
             let mut d = Dashboard {
                 detail: Detail {
                     source: twenty_line_detail().source,
-                    scroll: 7,
+                    scroll: 9,
                     tab: 0,
                     problems: Vec::new(),
                     loaded: None,
@@ -1154,12 +1185,12 @@ mod tests {
             };
             d.normalise_scroll(ratatui::layout::Rect::new(0, 0, 60, 20));
             assert_eq!(
-                d.detail.scroll, 7,
+                d.detail.scroll, 9,
                 "narrow list route: not drawn, unchanged"
             );
             d.normalise_scroll(ratatui::layout::Rect::new(0, 0, 120, 20));
             assert_eq!(
-                d.detail.scroll, 4,
+                d.detail.scroll, 6,
                 "wide: drawn, so the early return is a real branch"
             );
         }
