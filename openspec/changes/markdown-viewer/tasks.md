@@ -1835,17 +1835,17 @@ arithmetic and a green-on-arrival RED in group 7 — the defect class group 12 h
 ## 13. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 13.1 CHECK: Inspect the intended verification commands and affected tiers. The gate is
+- [x] 13.1 CHECK: Inspect the intended verification commands and affected tiers. The gate is
       `make check`; the tiers are `--lib` unit and view tests only — this change adds no
       `tests/cli.rs` case and the binary's behaviour is unchanged.
 
-- [ ] 13.2 VERIFY: `cargo fmt --all -- --check` — clean.
+- [x] 13.2 VERIFY: `cargo fmt --all -- --check` — clean.
 
-- [ ] 13.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings.
+- [x] 13.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings.
       (This repository has no separate type checker: `cargo clippy` builds the crate, so a
       type error fails here.)
 
-- [ ] 13.4 VERIFY: `cargo test --all-features` — green. Then the counted floors, so a renamed
+- [x] 13.4 VERIFY: `cargo test --all-features` — green. Then the counted floors, so a renamed
       module cannot pass as a green run: `testcount --lib 'ui::markdown::tests::' 23`,
       `testcount --lib 'ui::app::tests::' 30`, `testcount --lib 'ui::layout::tests::' 12`,
       `testcount --lib 'ui::list::tests::' 17`, `testcount --lib 'ui::view::tests::' 57`,
@@ -1853,24 +1853,33 @@ arithmetic and a green-on-arrival RED in group 7 — the defect class group 12 h
       `testcount --lib 'ui::tests::detail::' 1`,
       `testcount --lib 'changes::fixture::tests::' 2`, and `testcount --lib '' 564`.
       Record the final lib total and the whole-suite total.
+      **Recorded at implementation time:** all counted floors pass; `ui::markdown::tests::`
+      ran **24**, one over its 23 floor (the Change Review loose-list fix added a test), and
+      the unfiltered `--lib` total is **565**, one over the predicted 564 for the same reason.
+      Whole-suite total: 565 + 11 (`ci_workflow.rs`) + 5 (`cli.rs`) + 0 (`main.rs` unit target)
+      = **581**.
 
-- [ ] 13.5 VERIFY: `make coverage` — `cargo llvm-cov --fail-under-lines 80` at the unchanged
+- [x] 13.5 VERIFY: `make coverage` — `cargo llvm-cov --fail-under-lines 80` at the unchanged
       floor. Record the TOTAL **line** percentage — the column to the right of the region
       count — and the uncovered-line count, and compare against 0.1's 98.26% over 10,493
       lines: a fall of more than about one point is a finding, not a pass.
       **Red when:** the floor is met only because an exclusion was added — `NOWAIVER` is what
       proves it was not.
+      **Recorded at implementation time:** TOTAL line coverage **98.04%** over **12,267**
+      lines, 240 missed — a 0.22-point fall from 0.1's 98.26% over 10,493 lines, well inside
+      the "about one point" tolerance and driven by the 1,774 new lines in `src/ui/markdown.rs`
+      (95.71% on its own). `NOWAIVER` passes — no exclusion, no lowered floor.
 
-- [ ] 13.6 VERIFY: `make check` as the single gate — all four in order. If it fails, name the
+- [x] 13.6 VERIFY: `make check` as the single gate — all four in order. If it fails, name the
       failing sub-command rather than reporting a summary.
 
-- [ ] 13.7 VERIFY: Re-run the whole architectural suite one last time against the final tree:
+- [x] 13.7 VERIFY: Re-run the whole architectural suite one last time against the final tree:
       `NOSPAWN-GREP` with `MIN=17`, `NOIO-VIEW`, `NOCLI-SHELL` with `UI_MIN=9`, `NORAW-GREP`,
       `NODEFAULT-UI` (no argument), `NOLIT-CHANGE` with `MIN=17`, `MDSEAM` with `MIN=17`,
       `WIDTHS` with `WIDTHS_MIN=57`, `LISTWIDTHS`, `MDWIDTHS`, `NOWAIVER`, `GATE-MECH1`,
       `NOJSON-SEAM`, `DEPS` (with `DEPS_SKIP_LEG5=1`; 10.1 ran it in full), `GRAPH-SNAP`, and
       `OPENSPEC-UNTOUCHED` against `$BASE`.
 
-- [ ] 13.8 VERIFY: `openspec validate markdown-viewer --strict` — valid. The `openspec` binary
+- [x] 13.8 VERIFY: `openspec validate markdown-viewer --strict` — valid. The `openspec` binary
       is nvm-installed: `export PATH="$HOME/.nvm/versions/node/v24.20.0/bin:$PATH"` first.
       Commit: `docs(markdown-viewer): record group 13 lint & verify evidence — apply complete`.
