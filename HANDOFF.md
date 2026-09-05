@@ -107,6 +107,23 @@ cost ran 38–44 points per change in Phase 3 (about 2.4 full 5-hour windows for
 changes, so ~15h of wall time); weekly cost ran 4.5 points per change. Both matter, and
 they are not interchangeable.
 
+## Rule: a doc claim is fixed by the change that makes it true
+
+README describes the finished plugin, so parts of it are ahead of the code. Rather than
+sync it repeatedly or let it rot, each stale claim is closed by the change that ships the
+behaviour:
+
+| README claim | Fixed by | Phase |
+|---|---|---|
+| Keymap (`j`/`k` route split, layered `Esc`, `Ctrl-C`) | `markdown-viewer` — **done** (`2d7069c`) | 4 |
+| `a` / `c` / `s` / `g` launch and focus an agent | `agent-launch` | 5 |
+| Action-menu entries "OpenSpec: dashboard" / "(tab)" | `plugin-actions` | 6 |
+
+This is why the keymap sync was deferred through Phase 4 rather than done per change:
+three changes touched keys, and syncing after each would have been churn. The same
+reasoning applies to the two rows still open — do not sync them early, and do not let
+them outlive the change named against them.
+
 ## Signing: resolved — history re-signed, all commits signed
 
 **Every commit in this repository is now signed. Verified: 0 unsigned out of the full
