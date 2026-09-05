@@ -287,6 +287,65 @@ impl Dashboard {
         self.visible().get(self.selected).copied()
     }
 
+    /// Resolve the selected tab's content through the injected reader,
+    /// re-reading only when the `(change directory, tab)` key has changed.
+    /// Total: never panics for any dashboard state, any artifact list, any
+    /// `detail.tab`, or any reader behaviour, including one that fails on
+    /// every path. Called by `ui::driver::run_loop` once per iteration,
+    /// before the draw — never by a view.
+    ///
+    /// The borrow checker forbids interleaving these steps with the borrow
+    /// `selected_change()` holds over `*self`, so everything the read needs
+    /// is copied out in one expression and the borrow ends there; `tab` is
+    /// clamped inside that expression and assigned after it. See
+    /// `openspec/changes/detail-view/design.md` -> Contracts.
+    pub fn sync_detail(&mut self, read: ArtifactReader<'_>) {
+        let Some((dir, tab, paths)) = self.selected_change().map(|change| {
+            let count = change.artifacts.len();
+            let tab = self.detail.tab.min(count.saturating_sub(1));
+            let paths = change
+                .artifacts
+                .get(tab)
+                .map(|a| a.paths.clone())
+                .unwrap_or_default();
+            (change.dir.clone(), tab, paths)
+        }) else {
+            // Step 1: nothing selected.
+            self.detail.source.clear();
+            self.detail.problems.clear();
+            self.detail.tab = 0;
+            self.detail.scroll = 0;
+            self.detail.loaded = None;
+            return;
+        };
+        self.detail.tab = tab; // step 2
+        let key = (dir, tab);
+        if self.detail.loaded.as_ref() == Some(&key) {
+            return; // step 3
+        }
+        // Step 4: re-read every path, concatenating in order.
+        self.detail.problems.clear();
+        self.detail.source.clear();
+        for path in &paths {
+            match read(path) {
+                Ok(text) => {
+                    if !self.detail.source.is_empty() && !self.detail.source.ends_with('\n') {
+                        self.detail.source.push('\n');
+                    }
+                    self.detail.source.push_str(&text);
+                }
+                Err(e) => {
+                    self.detail
+                        .problems
+                        .push(format!("{}: {e}", path.display()));
+                }
+            }
+        }
+        // Step 5.
+        self.detail.scroll = 0;
+        self.detail.loaded = Some(key);
+    }
+
     /// Keep `selected` addressing a change that is actually shown: `0` when
     /// the visible list is empty, otherwise clamped to its last index. Never
     /// *raises* `selected` — clamping shrinks the index and never restores
@@ -368,6 +427,7 @@ mod tests {
 
         use crate::changes::empty_set;
         use crate::changes::fixture;
+        use crate::testutil::RecordingReader;
         use crate::ui::app::{Action, Dashboard, Detail, Filter, Route, action_for};
 
         fn empty_filter() -> Filter {
@@ -1440,6 +1500,349 @@ mod tests {
             detail_route.apply(Action::SelectTab(2));
             assert_eq!(detail_route.detail.tab, 2);
             assert_eq!(detail_route.route, Route::Detail);
+        }
+
+        /// A `Route::Detail` dashboard over one selected active change,
+        /// built through `fixture::with_artifacts`.
+        fn dashboard_with_artifacts_named(name: &str, artifacts: &[(&str, &[&str])]) -> Dashboard {
+            let change = fixture::with_artifacts(fixture::active(name, 4, 9), artifacts);
+            Dashboard {
+                repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
+                searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
+                changes: fixture::set(vec![change], Vec::new(), Vec::new()),
+                route: Route::Detail,
+                quit: false,
+                selected: 0,
+                filter: empty_filter(),
+                detail: Detail {
+                    source: String::new(),
+                    scroll: 0,
+                    tab: 0,
+                    problems: Vec::new(),
+                    loaded: None,
+                },
+            }
+        }
+
+        #[test]
+        fn the_selected_tabs_file_is_read_once_and_reused() {
+            let mut d = dashboard_with_artifacts_named(
+                "x",
+                &[("proposal", &["/repo/p.md"]), ("design", &["/repo/d.md"])],
+            );
+            let dir = d.changes.active[0].dir.clone();
+            let recorder = RecordingReader::always(Ok("# proposal".to_string()));
+            let read = |p: &std::path::Path| recorder.read(p);
+
+            d.sync_detail(&read);
+            d.sync_detail(&read);
+            d.sync_detail(&read);
+
+            assert_eq!(d.detail.source, "# proposal");
+            assert!(d.detail.problems.is_empty());
+            assert_eq!(d.detail.loaded, Some((dir, 0)));
+            assert_eq!(recorder.calls(), 1);
+            assert_eq!(
+                recorder.paths(),
+                vec![std::path::PathBuf::from("/repo/p.md")]
+            );
+        }
+
+        #[test]
+        fn switching_the_tab_rereads_and_so_does_switching_the_change() {
+            let a = fixture::with_artifacts(
+                fixture::active("a", 0, 0),
+                &[
+                    ("proposal", &["/repo/a-p.md"]),
+                    ("design", &["/repo/a-d.md"]),
+                ],
+            );
+            let b = fixture::with_artifacts(
+                fixture::active("b", 0, 0),
+                &[("proposal", &["/repo/b-p.md"])],
+            );
+            let mut d = Dashboard {
+                repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
+                searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
+                changes: fixture::set(vec![a, b], Vec::new(), Vec::new()),
+                route: Route::Detail,
+                quit: false,
+                selected: 0,
+                filter: empty_filter(),
+                detail: Detail {
+                    source: String::new(),
+                    scroll: 0,
+                    tab: 0,
+                    problems: Vec::new(),
+                    loaded: None,
+                },
+            };
+            let recorder = RecordingReader::always(Ok("text".to_string()));
+            let read = |p: &std::path::Path| recorder.read(p);
+
+            d.sync_detail(&read);
+            d.apply(Action::NextTab);
+            d.sync_detail(&read);
+            d.selected = 1;
+            d.sync_detail(&read);
+
+            assert_eq!(
+                recorder.paths(),
+                vec![
+                    std::path::PathBuf::from("/repo/a-p.md"),
+                    std::path::PathBuf::from("/repo/a-d.md"),
+                    std::path::PathBuf::from("/repo/b-p.md"),
+                ]
+            );
+            assert_eq!(d.detail.source, "text");
+            assert_eq!(d.detail.scroll, 0);
+        }
+
+        #[test]
+        fn two_changes_with_the_same_name_are_distinguished_by_directory() {
+            let active = fixture::with_artifacts(
+                fixture::active("add-auth", 0, 0),
+                &[("proposal", &["/repo/openspec/changes/add-auth/p.md"])],
+            );
+            let archived = fixture::with_artifacts(
+                fixture::archived(Some("2026-08-14"), "add-auth", 0, 0),
+                &[(
+                    "proposal",
+                    &["/repo/openspec/changes/archive/2026-08-14-add-auth/p.md"],
+                )],
+            );
+            let mut d = Dashboard {
+                repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
+                searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
+                changes: fixture::set(vec![active], vec![archived], Vec::new()),
+                route: Route::Detail,
+                quit: false,
+                selected: 0,
+                filter: empty_filter(),
+                detail: Detail {
+                    source: String::new(),
+                    scroll: 0,
+                    tab: 0,
+                    problems: Vec::new(),
+                    loaded: None,
+                },
+            };
+            let recorder = RecordingReader::new(
+                vec![
+                    (
+                        std::path::PathBuf::from("/repo/openspec/changes/add-auth/p.md"),
+                        Ok("ACTIVE".to_string()),
+                    ),
+                    (
+                        std::path::PathBuf::from(
+                            "/repo/openspec/changes/archive/2026-08-14-add-auth/p.md",
+                        ),
+                        Ok("ARCHIVED".to_string()),
+                    ),
+                ],
+                Err("unexpected path".to_string()),
+            );
+            let read = |p: &std::path::Path| recorder.read(p);
+
+            d.sync_detail(&read);
+            d.selected = 1;
+            d.sync_detail(&read);
+
+            assert_eq!(recorder.calls(), 2);
+            assert_eq!(d.detail.source, "ARCHIVED");
+        }
+
+        #[test]
+        fn a_multi_file_artifact_is_concatenated_in_path_order_with_a_separating_newline() {
+            let mut d = dashboard_with_artifacts_named(
+                "x",
+                &[("specs", &["/repo/specs/a/spec.md", "/repo/specs/b/spec.md"])],
+            );
+            let recorder = RecordingReader::new(
+                vec![
+                    (
+                        std::path::PathBuf::from("/repo/specs/a/spec.md"),
+                        Ok("# a".to_string()),
+                    ),
+                    (
+                        std::path::PathBuf::from("/repo/specs/b/spec.md"),
+                        Ok("# b\n".to_string()),
+                    ),
+                ],
+                Err("unexpected".to_string()),
+            );
+            let read = |p: &std::path::Path| recorder.read(p);
+            d.sync_detail(&read);
+            assert_eq!(d.detail.source, "# a\n# b\n");
+
+            // The preceding file already ending in a newline gains no
+            // second one.
+            let mut d2 = dashboard_with_artifacts_named(
+                "y",
+                &[("specs", &["/repo/specs/a/spec.md", "/repo/specs/b/spec.md"])],
+            );
+            let recorder2 = RecordingReader::new(
+                vec![
+                    (
+                        std::path::PathBuf::from("/repo/specs/a/spec.md"),
+                        Ok("# a\n".to_string()),
+                    ),
+                    (
+                        std::path::PathBuf::from("/repo/specs/b/spec.md"),
+                        Ok("# b\n".to_string()),
+                    ),
+                ],
+                Err("unexpected".to_string()),
+            );
+            let read2 = |p: &std::path::Path| recorder2.read(p);
+            d2.sync_detail(&read2);
+            assert_eq!(d2.detail.source, "# a\n# b\n");
+        }
+
+        #[test]
+        fn an_unreadable_file_names_its_reason_and_does_not_lose_its_siblings() {
+            let mut d = dashboard_with_artifacts_named(
+                "x",
+                &[("specs", &["/repo/specs/a/spec.md", "/repo/specs/b/spec.md"])],
+            );
+            let recorder = RecordingReader::new(
+                vec![
+                    (
+                        std::path::PathBuf::from("/repo/specs/a/spec.md"),
+                        Err("permission denied".to_string()),
+                    ),
+                    (
+                        std::path::PathBuf::from("/repo/specs/b/spec.md"),
+                        Ok("# b\n".to_string()),
+                    ),
+                ],
+                Err("unexpected".to_string()),
+            );
+            let read = |p: &std::path::Path| recorder.read(p);
+            d.sync_detail(&read);
+
+            assert_eq!(d.detail.source, "# b\n");
+            assert_eq!(d.detail.problems.len(), 1);
+            assert!(d.detail.problems[0].contains("/repo/specs/a/spec.md"));
+            assert!(d.detail.problems[0].contains("permission denied"));
+
+            // A transient failure does not accumulate: a sync after a tab
+            // move and back clears the previous `problems` before
+            // recording again.
+            d.apply(Action::NextTab);
+            d.apply(Action::PrevTab);
+            let recorder2 = RecordingReader::always(Ok("# b\n".to_string()));
+            let read2 = |p: &std::path::Path| recorder2.read(p);
+            d.detail.loaded = None;
+            d.sync_detail(&read2);
+            assert!(d.detail.problems.is_empty());
+        }
+
+        #[test]
+        fn an_artifact_with_no_resolved_paths_reads_nothing_at_all() {
+            let mut d = dashboard_with_artifacts_named("x", &[("proposal", &[])]);
+            let recorder = RecordingReader::always(Err("should not be called".to_string()));
+            let read = |p: &std::path::Path| recorder.read(p);
+            let dir = d.changes.active[0].dir.clone();
+
+            d.sync_detail(&read);
+
+            assert!(d.detail.source.is_empty());
+            assert!(d.detail.problems.is_empty());
+            assert_eq!(d.detail.loaded, Some((dir, 0)));
+            assert_eq!(recorder.calls(), 0);
+        }
+
+        #[test]
+        fn a_tab_out_of_range_for_the_newly_selected_change_is_clamped_before_the_read() {
+            let five = fixture::with_artifacts(
+                fixture::active("five", 0, 0),
+                &[
+                    ("a0", &["/repo/five/a0.md"]),
+                    ("a1", &["/repo/five/a1.md"]),
+                    ("a2", &["/repo/five/a2.md"]),
+                    ("a3", &["/repo/five/a3.md"]),
+                    ("a4", &["/repo/five/a4.md"]),
+                ],
+            );
+            let two = fixture::with_artifacts(
+                fixture::active("two", 0, 0),
+                &[("b0", &["/repo/two/b0.md"]), ("b1", &["/repo/two/b1.md"])],
+            );
+            let mut d = Dashboard {
+                repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
+                searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
+                changes: fixture::set(vec![five, two], Vec::new(), Vec::new()),
+                route: Route::Detail,
+                quit: false,
+                selected: 0,
+                filter: empty_filter(),
+                detail: Detail {
+                    source: String::new(),
+                    scroll: 0,
+                    tab: 4,
+                    problems: Vec::new(),
+                    loaded: None,
+                },
+            };
+            let recorder = RecordingReader::always(Ok("t".to_string()));
+            let read = |p: &std::path::Path| recorder.read(p);
+            d.filter.query = "two".to_string();
+
+            d.sync_detail(&read);
+
+            assert_eq!(d.detail.tab, 1);
+            assert_eq!(
+                recorder.paths(),
+                vec![std::path::PathBuf::from("/repo/two/b1.md")]
+            );
+            assert_eq!(recorder.calls(), 1);
+            assert_eq!(d.detail.loaded, Some((d.changes.active[1].dir.clone(), 1)));
+        }
+
+        #[test]
+        fn an_empty_visible_list_clears_the_detail() {
+            let mut d = dashboard_with_artifacts_named("x", &[("proposal", &["/repo/p.md"])]);
+            let recorder = RecordingReader::always(Ok("# proposal".to_string()));
+            let read = |p: &std::path::Path| recorder.read(p);
+            d.sync_detail(&read);
+            assert!(!d.detail.source.is_empty());
+
+            d.filter.query = "zzz".to_string();
+            d.sync_detail(&read);
+
+            assert!(d.detail.source.is_empty());
+            assert!(d.detail.problems.is_empty());
+            assert_eq!(d.detail.tab, 0);
+            assert_eq!(d.detail.scroll, 0);
+            assert_eq!(d.detail.loaded, None);
+
+            // The same holds for a Dashboard built over `changes::empty_set()`.
+            let mut d2 = Dashboard {
+                repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
+                searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
+                changes: empty_set(),
+                route: Route::Detail,
+                quit: false,
+                selected: 0,
+                filter: empty_filter(),
+                detail: Detail {
+                    source: "stale".to_string(),
+                    scroll: 3,
+                    tab: 2,
+                    problems: vec!["stale problem".to_string()],
+                    loaded: Some((std::path::PathBuf::from("/repo/x"), 0)),
+                },
+            };
+            let recorder2 = RecordingReader::always(Err("must not be called".to_string()));
+            let read2 = |p: &std::path::Path| recorder2.read(p);
+            d2.sync_detail(&read2);
+            assert!(d2.detail.source.is_empty());
+            assert!(d2.detail.problems.is_empty());
+            assert_eq!(d2.detail.tab, 0);
+            assert_eq!(d2.detail.scroll, 0);
+            assert_eq!(d2.detail.loaded, None);
+            assert_eq!(recorder2.calls(), 0);
         }
     }
 }

@@ -1049,7 +1049,7 @@ files in `$CHECKS`.
 ## 8. `Dashboard::sync_detail`
 <!-- kind: behavioural -->
 
-- [ ] 8.1 RED: Add scenarios 4–11 to `src/ui/app.rs`'s `mod tests`, every one driven with a
+- [x] 8.1 RED: Add scenarios 4–11 to `src/ui/app.rs`'s `mod tests`, every one driven with a
       `RecordingReader` and **no filesystem**: read once and reuse across three syncs
       (asserting `calls() == 1`); a tab switch and a change switch each re-reading, with the
       recorded paths in order; two changes sharing the name `add-auth` distinguished by
@@ -1063,19 +1063,19 @@ files in `$CHECKS`.
       the assertion that proves the `loaded` key works, and it is the one a naive
       implementation that re-reads every iteration fails.
 
-- [ ] 8.2 GREEN: Implement `sync_detail` in the five-step order `design.md` → Contracts
+- [x] 8.2 GREEN: Implement `sync_detail` in the five-step order `design.md` → Contracts
       states, cloning the `dir` and the selected artifact's `paths` before mutating.
 
-- [ ] 8.3 CHECK: `sh $CHECKS/NOIO-VIEW.sh` and `UI_MIN=9 sh $CHECKS/READSEAM.sh`.
+- [x] 8.3 CHECK: `sh $CHECKS/NOIO-VIEW.sh` and `UI_MIN=9 sh $CHECKS/READSEAM.sh`.
       `src/ui/app.rs` now carries the whole read-decision and must still name no I/O API and
       no `read_artifact`.
       **Red when:** either reports a hit. A `use std::fs` that crept into `app.rs` is exactly
       what this pair exists to catch.
 
-- [ ] 8.4 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'ui::app::tests::' 45`.
+- [x] 8.4 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'ui::app::tests::' 45`.
       **Red when:** fewer than 45 tests run.
 
-- [ ] 8.5 Commit: `feat(detail-view): resolve the selected tab's content through the injected reader`.
+- [x] 8.5 Commit: `feat(detail-view): resolve the selected tab's content through the injected reader`.
 
 ## 9. The detail region's render
 <!-- kind: behavioural -->
