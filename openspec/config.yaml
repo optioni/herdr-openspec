@@ -32,6 +32,17 @@ context: |
   fallback but fast and authoritative: files paint the pane immediately, CLI results
   arrive asynchronously and correct them. Both paths produce the same `Change` type.
 
+  Environment and working rules, which every agent needs and none can infer: the
+  `openspec` CLI is nvm-installed and NOT on the default `PATH` — prepend the active nvm
+  node's bin directory (currently `$HOME/.nvm/versions/node/v24.20.0/bin`) in every shell
+  that invokes it. `openspec/schemas/tdd/` and `.claude/agents/` are graft-vendored copies,
+  silently overwritten by the next `graft sync`; their source is `~/Code/openspec-schemas`,
+  and an edit made here is discarded rather than collected. Work in the main checkout on
+  `main` — do not create a git worktree. Commit locally with Conventional Commits; never
+  push and never open a pull request, the user does that. Nothing writes inside
+  `openspec/` except a change's own directory. Never lower, waive, or add exclusions to the
+  80% line coverage floor; if coverage falls short, add tests.
+
   Verification tiers: unit tests over the pure modules; view tests rendering into a
   ratatui `TestBackend` at 60 and 120 columns; fixture repositories under
   `tests/fixtures/`. Coverage is enforced at 80% of lines. Commands: `make check`, or
