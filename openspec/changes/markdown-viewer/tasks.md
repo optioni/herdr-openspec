@@ -1229,7 +1229,7 @@ carries is group 6's.
 ## 5. `ui::markdown` — lists, code, quotes, rules, and unmodelled constructs
 <!-- kind: behavior -->
 
-- [ ] 5.1 RED: Write failing tests in `src/ui/markdown.rs`'s `mod tests`, each at 58 and 78:
+- [x] 5.1 RED: Write failing tests in `src/ui/markdown.rs`'s `mod tests`, each at 58 and 78:
       - `bullet_items_carry_their_marker_and_hanging_indent` — the sixteen-word item; at 58
         the first line is `- alpha bravo charlie delta echo foxtrot golf hotel india`
         (57 characters, asserted as a length too); at 78 it is `- alpha bravo charlie delta
@@ -1271,23 +1271,23 @@ carries is group 6's.
       verbatim, and confirm it is a **wrong string** rather than a panic: a panic here would
       mean group 4's fold is not total and the fix belongs in group 4.
 
-- [ ] 5.2 GREEN: Extend the fold with `Tag::List`, `Tag::Item`, `Tag::CodeBlock` (both
+- [x] 5.2 GREEN: Extend the fold with `Tag::List`, `Tag::Item`, `Tag::CodeBlock` (both
       `Fenced` and `Indented`), `Tag::BlockQuote`, `Event::Rule`, `Event::Html`, and
       `Event::InlineHtml`, with the markers, indents, and faces the specs state. Keep the
       default arm of the event match rendering an event's own text rather than dropping it,
       which is what `lines_is_total_over_arbitrary_input` holds.
 
-- [ ] 5.3 CHECK: Confirm the fold handles every `pulldown_cmark::Event` variant explicitly or
+- [x] 5.3 CHECK: Confirm the fold handles every `pulldown_cmark::Event` variant explicitly or
       through a stated default, by reading the match arms against the crate's `Event` enum.
       Record which variants reach the default arm and what it does with each.
       **Red when:** a variant is silently discarded — a discarded `Event::Text` is content
       vanishing from a reader's pane, which is the failure this whole change exists to avoid.
 
-- [ ] 5.4 VERIFY: `testcount --lib 'ui::markdown::tests::' 23`, `sh $CHECKS/MDWIDTHS.sh` with
+- [x] 5.4 VERIFY: `testcount --lib 'ui::markdown::tests::' 23`, `sh $CHECKS/MDWIDTHS.sh` with
       **no argument** (its default floor is this change's 23), and `sh $CHECKS/MDSEAM.sh`.
       **Red when:** the count is below 23, or any markdown test fails to name both widths.
 
-- [ ] 5.5 VERIFY: the four intermediate-gate commands; still exactly one known failure.
+- [x] 5.5 VERIFY: the four intermediate-gate commands; still exactly one known failure.
       Commit: `feat(markdown-viewer): render lists, code blocks, quotes, and rules`.
 
 ---

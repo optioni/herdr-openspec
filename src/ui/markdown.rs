@@ -80,12 +80,30 @@ struct Run {
 /// verbatim-line rules require.
 #[derive(Debug, Clone)]
 struct Block {
+    /// A thematic break: laid out as a single line of `width` dashes,
+    /// ignoring every other field below.
+    is_rule: bool,
     hard_split: bool,
     first_prefix: String,
     cont_prefix: String,
     prefix_face: Face,
     category: Category,
     groups: Vec<Vec<Run>>,
+}
+
+/// One level of list nesting: whether it numbers, the next number to
+/// assign (from the list's own start value, not necessarily 1), and the
+/// nesting depth for the two-columns-per-level indent.
+struct ListFrame {
+    ordered: bool,
+    next: u64,
+    depth: usize,
+}
+
+/// `"> "` repeated once per block-quote nesting level. Empty outside a
+/// quote.
+fn quote_prefix(depth: usize) -> String {
+    "> ".repeat(depth)
 }
 
 /// The fold's mutable state, one field per piece of context a nested
@@ -116,6 +134,12 @@ struct Folder {
     // rendered as a single faced run of its alt text.
     image_alt: Option<String>,
     image_face: Face,
+
+    // Container context: how many block quotes currently wrap the
+    // accumulating block, and the stack of currently-open lists (innermost
+    // last), each carrying its own numbering and nesting depth.
+    quote_depth: usize,
+    list_stack: Vec<ListFrame>,
 }
 
 impl Folder {
@@ -132,6 +156,18 @@ impl Folder {
             faces: vec![Face::plain()],
             image_alt: None,
             image_face: Face::plain(),
+            quote_depth: 0,
+            list_stack: Vec::new(),
+        }
+    }
+
+    /// The base face every construction site in this module seeds its
+    /// inline face stack with: unstyled, except `quoted` when currently
+    /// nested inside one or more block quotes.
+    fn quoted_base(&self) -> Face {
+        Face {
+            quoted: self.quote_depth > 0,
+            ..Face::plain()
         }
     }
 
@@ -154,6 +190,7 @@ impl Folder {
         }
         let groups = std::mem::take(&mut self.groups);
         self.blocks.push(Block {
+            is_rule: false,
             hard_split: self.hard_split,
             first_prefix: std::mem::take(&mut self.first_prefix),
             cont_prefix: std::mem::take(&mut self.cont_prefix),
@@ -162,6 +199,23 @@ impl Folder {
             groups,
         });
         self.reset_ambient();
+    }
+
+    /// A thematic break: no `Start`/`End` pair of its own, so it is pushed
+    /// directly rather than through the accumulate-then-`finish` path.
+    /// Finalises whatever was open first, so it never absorbs a rule into
+    /// a preceding paragraph's content.
+    fn push_rule(&mut self) {
+        self.finish();
+        self.blocks.push(Block {
+            is_rule: true,
+            hard_split: false,
+            first_prefix: String::new(),
+            cont_prefix: String::new(),
+            prefix_face: Face::plain(),
+            category: Category::Other,
+            groups: Vec::new(),
+        });
     }
 
     /// Close the current line-group (a soft/hard break, or the block's own
@@ -183,20 +237,107 @@ impl Folder {
 
     fn start_paragraph(&mut self) {
         self.finish();
-        // Already the ambient configuration — nothing to set.
+        let qp = quote_prefix(self.quote_depth);
+        self.first_prefix = qp.clone();
+        self.cont_prefix = qp;
+        let base = self.quoted_base();
+        self.prefix_face = base;
+        self.category = Category::Other;
+        self.hard_split = false;
+        self.faces = vec![base];
     }
 
     fn start_heading(&mut self, level: u8) {
         self.finish();
+        let qp = quote_prefix(self.quote_depth);
         let face = Face {
             heading: Some(level),
-            ..Face::plain()
+            ..self.quoted_base()
         };
-        self.first_prefix = "#".repeat(level as usize) + " ";
-        self.cont_prefix = " ".repeat(level as usize + 1);
+        self.first_prefix = format!("{qp}{}", "#".repeat(level as usize) + " ");
+        self.cont_prefix = format!("{qp}{}", " ".repeat(level as usize + 1));
         self.prefix_face = face;
         self.category = Category::Other;
         self.hard_split = false;
+        self.faces = vec![face];
+    }
+
+    /// `Tag::List(start)`: push a nesting frame. `start` is `Some(n)` for
+    /// an ordered list beginning at `n`, `None` for a bullet list.
+    fn start_list(&mut self, start: Option<u64>) {
+        self.finish();
+        let depth = self.list_stack.len();
+        self.list_stack.push(ListFrame {
+            ordered: start.is_some(),
+            next: start.unwrap_or(1),
+            depth,
+        });
+    }
+
+    fn end_list(&mut self) {
+        self.finish();
+        self.list_stack.pop();
+    }
+
+    /// `Tag::Item`: the marker (`- ` or the list's own sequential number),
+    /// two columns of indent per nesting level, and a hanging indent —
+    /// the marker's width plus the nesting indent — for wrapped
+    /// continuation lines. The marker itself never carries a face, even
+    /// inside a block quote: `markdown-render` states plain segments for
+    /// list markers specifically.
+    fn start_item(&mut self) {
+        self.finish();
+        let frame = self
+            .list_stack
+            .last_mut()
+            .expect("Item event outside an open List");
+        let marker = if frame.ordered {
+            let n = frame.next;
+            frame.next += 1;
+            format!("{n}. ")
+        } else {
+            "- ".to_string()
+        };
+        let indent = "  ".repeat(frame.depth);
+        let qp = quote_prefix(self.quote_depth);
+        self.first_prefix = format!("{qp}{indent}{marker}");
+        self.cont_prefix = format!(
+            "{qp}{}",
+            " ".repeat(indent.chars().count() + marker.chars().count())
+        );
+        self.prefix_face = Face::plain();
+        self.category = Category::Item;
+        self.hard_split = false;
+        let base = self.quoted_base();
+        self.faces = vec![base];
+    }
+
+    fn start_quote(&mut self) {
+        self.finish();
+        self.quote_depth += 1;
+    }
+
+    fn end_quote(&mut self) {
+        self.finish();
+        self.quote_depth -= 1;
+    }
+
+    /// `Tag::CodeBlock` (fenced or indented — pulldown-cmark strips the
+    /// indent marker for the latter, so both arrive as the same verbatim
+    /// `Text` content) and `Tag::HtmlBlock` share this configuration:
+    /// verbatim, `code` true, hard-split rather than word-wrapped.
+    fn start_verbatim_block(&mut self) {
+        self.finish();
+        let qp = quote_prefix(self.quote_depth);
+        self.first_prefix = qp.clone();
+        self.cont_prefix = qp;
+        let face = Face {
+            code: true,
+            ..self.quoted_base()
+        };
+        self.prefix_face = face;
+        self.category = Category::Other;
+        self.hard_split = true;
         self.faces = vec![face];
     }
 
@@ -205,11 +346,47 @@ impl Folder {
             alt.push_str(text);
             return;
         }
+        if self.hard_split {
+            self.push_verbatim(text);
+            return;
+        }
         let face = self.current_face();
         self.group.push(Run {
             text: text.to_string(),
             face,
         });
+    }
+
+    /// Verbatim content for a code or HTML block: split at every `\n`
+    /// (never word-wrapped here — `emit_block` hard-splits by width
+    /// later), each line becoming its own group so it always starts a
+    /// fresh output row. Handles a `\n` embedded inside one event and a
+    /// line split across two events identically, and never manufactures a
+    /// spurious trailing blank line from the final line's own newline.
+    fn push_verbatim(&mut self, text: &str) {
+        if text.is_empty() {
+            return;
+        }
+        let face = self.current_face();
+        let ends_with_newline = text.ends_with('\n');
+        let mut parts: Vec<&str> = text.split('\n').collect();
+        if ends_with_newline {
+            parts.pop();
+        }
+        for (i, part) in parts.iter().enumerate() {
+            if i > 0 {
+                self.group_break();
+            }
+            if !part.is_empty() {
+                self.group.push(Run {
+                    text: (*part).to_string(),
+                    face,
+                });
+            }
+        }
+        if ends_with_newline {
+            self.group_break();
+        }
     }
 
     fn push_code_span(&mut self, text: &str) {
@@ -265,12 +442,14 @@ impl Folder {
 
 /// Fold `source`'s event stream into a `Vec<Block>` — plain data carrying
 /// its own indent, marker, and inline runs, but nothing width-dependent.
-/// Group 4 lays out `Paragraph` and `Heading` exactly, per
-/// `markdown-render`'s heading and inline-face requirements; every other
-/// block-level construct (lists, code, quotes, rules, raw HTML) is
-/// transparent here — its inline content still reaches the ambient
-/// accumulation and is never dropped, but without a marker or a dedicated
-/// face. Group 5 replaces this fallback with the real handling for each.
+/// Every block-level construct `Options::empty()` can produce is handled:
+/// paragraphs, headings, lists (nested, ordered from their own start
+/// value), code blocks (fenced or indented, verbatim), block quotes
+/// (nested), thematic breaks, and raw HTML (block and inline), each
+/// verbatim. A table, footnote, strikethrough, or task-list source is not
+/// modelled by `Options::empty()` at all — it arrives as ordinary
+/// paragraph text, which is the literal-text degraded state
+/// `markdown-render` states.
 fn fold(source: &str) -> Vec<Block> {
     let mut f = Folder::new();
     for event in Parser::new_ext(source, Options::empty()) {
@@ -278,29 +457,45 @@ fn fold(source: &str) -> Vec<Block> {
             Event::Start(tag) => match tag {
                 Tag::Paragraph => f.start_paragraph(),
                 Tag::Heading { level, .. } => f.start_heading(level as u8),
+                Tag::List(start) => f.start_list(start),
+                Tag::Item => f.start_item(),
+                Tag::BlockQuote(_) => f.start_quote(),
+                Tag::CodeBlock(_) | Tag::HtmlBlock => f.start_verbatim_block(),
                 Tag::Emphasis => f.push_faced(|face| face.emphasis = true),
                 Tag::Strong => f.push_faced(|face| face.strong = true),
                 Tag::Link { .. } => f.push_faced(|face| face.link = true),
                 Tag::Image { .. } => f.start_image(),
-                // List, Item, BlockQuote, CodeBlock, HtmlBlock: transparent
-                // in this group. Their inner Text/Html events still reach
-                // `push_text`/`push_code_span` through the ambient block.
+                // `FootnoteDefinition`, the definition-list tags, the
+                // table tags, `Superscript`, `Subscript`, `Strikethrough`,
+                // and `MetadataBlock` cannot be produced by
+                // `Options::empty()`. The wildcard is the stated default:
+                // total over the enum, and a future pulldown-cmark variant
+                // reaches it rather than a missing-arm compile error
+                // changing this module's shape.
                 _ => {}
             },
             Event::End(tag_end) => match tag_end {
                 TagEnd::Paragraph | TagEnd::Heading(_) => f.finish(),
+                TagEnd::List(_) => f.end_list(),
+                TagEnd::Item | TagEnd::CodeBlock | TagEnd::HtmlBlock => f.finish(),
+                TagEnd::BlockQuote(_) => f.end_quote(),
                 TagEnd::Emphasis | TagEnd::Strong | TagEnd::Link => f.pop_faced(),
                 TagEnd::Image => f.end_image(),
                 _ => {}
             },
             Event::Text(text) => f.push_text(&text),
             Event::Code(text) => f.push_code_span(&text),
-            Event::InlineHtml(text) | Event::Html(text) => f.push_text(&text),
+            // Inline HTML is verbatim and `code`-faced, on the same terms
+            // as an inline code span, and shares its ordinary word-wrap
+            // path: a long inline tag hard-splits via the oversized-token
+            // rule rather than needing its own hard-split block.
+            Event::InlineHtml(text) => f.push_code_span(&text),
+            // An HTML *block*'s lines arrive through `hard_split`, set by
+            // `start_verbatim_block`; `push_text` routes to
+            // `push_verbatim` whenever that flag is set.
+            Event::Html(text) => f.push_text(&text),
             Event::SoftBreak | Event::HardBreak => f.group_break(),
-            // `Rule` carries no text of its own and is not yet laid out —
-            // group 5 gives it a dedicated fill. Dropping the bare event
-            // here loses nothing that was ever rendered as text.
-            Event::Rule => {}
+            Event::Rule => f.push_rule(),
             // `FootnoteReference`, `TaskListMarker`, `InlineMath`, and
             // `DisplayMath` cannot be produced by `Options::empty()`. The
             // wildcard is the stated default: total over the enum, and a
@@ -330,6 +525,15 @@ fn layout(blocks: &[Block], width: u16) -> Vec<Line> {
 }
 
 fn emit_block(block: &Block, width: u16, out: &mut Vec<Line>) {
+    if block.is_rule {
+        out.push(Line {
+            segments: vec![Segment {
+                text: "-".repeat(width as usize),
+                face: Face::plain(),
+            }],
+        });
+        return;
+    }
     let prefix_len = block.first_prefix.chars().count() as u16;
     let content_width = width.saturating_sub(prefix_len);
     if content_width == 0 {
@@ -863,6 +1067,281 @@ mod tests {
                 "width {width}: {blank_run_lengths:?}"
             );
             assert_eq!(blank_run_lengths.len(), 3, "width {width}");
+        }
+    }
+
+    #[test]
+    fn bullet_items_carry_their_marker_and_hanging_indent() {
+        let source = "- alpha bravo charlie delta echo foxtrot golf hotel india juliett kilo lima mike november oscar papa\n";
+        for width in [58, 78] {
+            let out = lines(source, width);
+            let non_blank: Vec<&Line> = out.iter().filter(|l| !l.segments.is_empty()).collect();
+            assert!(non_blank[0].text().starts_with("- alpha"), "width {width}");
+            for line in &non_blank[1..] {
+                let text = line.text();
+                assert!(text.starts_with("  "), "width {width}: {text:?}");
+                assert_ne!(text.chars().nth(2), Some(' '), "width {width}: {text:?}");
+            }
+            for line in &non_blank {
+                for seg in &line.segments {
+                    assert_eq!(seg.face, Face::plain());
+                }
+            }
+        }
+        let at58 = lines(source, 58);
+        let first58 = at58[0].text();
+        assert_eq!(
+            first58,
+            "- alpha bravo charlie delta echo foxtrot golf hotel india"
+        );
+        assert_eq!(first58.chars().count(), 57);
+        let at78 = lines(source, 78);
+        let first78 = at78[0].text();
+        assert_eq!(
+            first78,
+            "- alpha bravo charlie delta echo foxtrot golf hotel india juliett kilo lima"
+        );
+        assert_eq!(first78.chars().count(), 75);
+    }
+
+    #[test]
+    fn an_ordered_list_numbers_from_its_start_value() {
+        let source = "7. seven\n8. eight\n9. nine\n";
+        for width in [58, 78] {
+            let texts: Vec<String> = text_of(&lines(source, width))
+                .into_iter()
+                .filter(|s| !s.is_empty())
+                .collect();
+            assert_eq!(
+                texts,
+                vec!["7. seven", "8. eight", "9. nine"],
+                "width {width}"
+            );
+        }
+        let restart = "1. one\n1. one again\n";
+        for width in [58, 78] {
+            let texts: Vec<String> = text_of(&lines(restart, width))
+                .into_iter()
+                .filter(|s| !s.is_empty())
+                .collect();
+            assert_eq!(texts, vec!["1. one", "2. one again"], "width {width}");
+        }
+    }
+
+    #[test]
+    fn a_nested_list_indents_two_columns_per_level() {
+        let source = "- outer\n  - inner\n    - deepest\n";
+        for width in [58, 78] {
+            let texts: Vec<String> = text_of(&lines(source, width))
+                .into_iter()
+                .filter(|s| !s.is_empty())
+                .collect();
+            assert_eq!(
+                texts,
+                vec!["- outer", "  - inner", "    - deepest"],
+                "width {width}"
+            );
+        }
+
+        let wrapped = "- outer\n  - inner alpha bravo charlie delta echo foxtrot golf hotel india juliett kilo lima mike november\n";
+        for width in [58, 78] {
+            let out = lines(wrapped, width);
+            let non_blank: Vec<&Line> = out.iter().filter(|l| !l.segments.is_empty()).collect();
+            let inner_start = non_blank
+                .iter()
+                .position(|l| l.text().starts_with("  - inner"))
+                .expect("the inner item's first line");
+            for line in &non_blank[inner_start + 1..] {
+                let text = line.text();
+                assert!(text.starts_with("    "), "width {width}: {text:?}");
+                assert_ne!(text.chars().nth(4), Some(' '), "width {width}: {text:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn a_fenced_code_block_is_verbatim() {
+        let source = "```sh\ncargo test --all-features\n  indented\n```\n";
+        for width in [58, 78] {
+            let out = lines(source, width);
+            let code_lines: Vec<&Line> = out.iter().filter(|l| !l.segments.is_empty()).collect();
+            assert_eq!(code_lines.len(), 2, "width {width}");
+            assert_eq!(code_lines[0].text(), "cargo test --all-features");
+            assert_eq!(code_lines[1].text(), "  indented");
+            for line in &code_lines {
+                for seg in &line.segments {
+                    assert!(seg.face.code, "width {width}");
+                    assert!(
+                        !seg.face.strong
+                            && !seg.face.emphasis
+                            && !seg.face.link
+                            && !seg.face.quoted
+                    );
+                }
+            }
+            let joined = text_of(&out).join("\n");
+            assert!(!joined.contains("```"), "width {width}");
+            assert!(!joined.contains("sh"), "width {width}");
+        }
+    }
+
+    #[test]
+    fn a_long_code_line_is_hard_split() {
+        let source = format!("```\n{}\n```\n", "x".repeat(130));
+        let at58: Vec<String> = text_of(&lines(&source, 58))
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .collect();
+        assert_eq!(
+            at58.iter().map(|s| s.chars().count()).collect::<Vec<_>>(),
+            vec![58, 58, 14]
+        );
+        assert_eq!(at58.concat(), "x".repeat(130));
+
+        let at78: Vec<String> = text_of(&lines(&source, 78))
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .collect();
+        assert_eq!(
+            at78.iter().map(|s| s.chars().count()).collect::<Vec<_>>(),
+            vec![78, 52]
+        );
+        assert_eq!(at78.concat(), "x".repeat(130));
+    }
+
+    #[test]
+    fn an_indented_code_block_matches_the_fenced_form() {
+        let fenced = "```\nalpha bravo\ncharlie\n```\n";
+        let indented = "    alpha bravo\n    charlie\n";
+        for width in [58, 78] {
+            let fenced_texts: Vec<String> = text_of(&lines(fenced, width))
+                .into_iter()
+                .filter(|s| !s.is_empty())
+                .collect();
+            let indented_texts: Vec<String> = text_of(&lines(indented, width))
+                .into_iter()
+                .filter(|s| !s.is_empty())
+                .collect();
+            assert_eq!(fenced_texts, indented_texts, "width {width}");
+            for line in lines(indented, width)
+                .iter()
+                .filter(|l| !l.segments.is_empty())
+            {
+                for seg in &line.segments {
+                    assert!(seg.face.code, "width {width}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_raw_html_block_renders_verbatim() {
+        let source = "<details><summary>Notes</summary>\n\nAfter.\n";
+        for width in [58, 78] {
+            let out = lines(source, width);
+            let html_line = out
+                .iter()
+                .find(|l| l.text() == "<details><summary>Notes</summary>")
+                .unwrap_or_else(|| panic!("width {width}: html line missing"));
+            for seg in &html_line.segments {
+                assert!(seg.face.code, "width {width}");
+            }
+            let joined = text_of(&out).join("\n");
+            assert!(joined.contains("<details>"), "width {width}");
+        }
+    }
+
+    #[test]
+    fn a_block_quote_prefixes_every_line() {
+        let source = "> alpha bravo charlie delta echo foxtrot golf hotel india juliett kilo lima mike november oscar papa\n";
+        for width in [58, 78] {
+            let out = lines(source, width);
+            let non_blank: Vec<&Line> = out.iter().filter(|l| !l.segments.is_empty()).collect();
+            for line in &non_blank {
+                let text = line.text();
+                assert!(text.starts_with("> "), "width {width}: {text:?}");
+                for seg in &line.segments {
+                    assert!(seg.face.quoted, "width {width}: {seg:?}");
+                }
+            }
+        }
+        let at58 = lines(source, 58);
+        let first58 = at58.iter().find(|l| !l.segments.is_empty()).unwrap().text();
+        assert_eq!(
+            first58,
+            "> alpha bravo charlie delta echo foxtrot golf hotel india"
+        );
+        assert_eq!(first58.chars().count(), 57);
+
+        let nested = "> > nested alpha bravo\n";
+        for width in [58, 78] {
+            let out = lines(nested, width);
+            let first = out.iter().find(|l| !l.segments.is_empty()).unwrap().text();
+            assert!(first.starts_with("> > "), "width {width}: {first:?}");
+        }
+    }
+
+    #[test]
+    fn a_thematic_break_fills_the_width() {
+        let source = "alpha before\n\n---\n\nbravo after\n";
+        for width in [58, 78] {
+            let out = lines(source, width);
+            let idx = out
+                .iter()
+                .position(|l| l.segments.len() == 1 && l.segments[0].text.chars().all(|c| c == '-'))
+                .unwrap_or_else(|| panic!("width {width}: no rule line found"));
+            let rule = &out[idx];
+            assert_eq!(rule.text().chars().count(), width as usize);
+            assert_eq!(rule.segments[0].face, Face::plain());
+            assert!(out[idx - 1].segments.is_empty(), "width {width}");
+            assert!(out[idx + 1].segments.is_empty(), "width {width}");
+        }
+    }
+
+    #[test]
+    fn a_table_renders_as_literal_source_rows() {
+        let source = "| Gate | Command |\n|---|---|\n| Format | cargo fmt |\n";
+        for width in [58, 78] {
+            let texts: Vec<String> = text_of(&lines(source, width))
+                .into_iter()
+                .filter(|s| !s.is_empty())
+                .collect();
+            assert_eq!(
+                texts,
+                vec!["| Gate | Command |", "|---|---|", "| Format | cargo fmt |"],
+                "width {width}"
+            );
+            for line in lines(source, width)
+                .iter()
+                .filter(|l| !l.segments.is_empty())
+            {
+                for seg in &line.segments {
+                    assert_eq!(seg.face, Face::plain());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn line_text_concatenates_its_segments() {
+        let source = "Plain **bold** and *italic* text.\n";
+        let at58 = text_of(&lines(source, 58));
+        let at78 = text_of(&lines(source, 78));
+        let non_blank58: Vec<&String> = at58.iter().filter(|s| !s.is_empty()).collect();
+        let non_blank78: Vec<&String> = at78.iter().filter(|s| !s.is_empty()).collect();
+        assert_eq!(non_blank58.len(), 1);
+        assert_eq!(non_blank78.len(), 1);
+        assert_eq!(non_blank58[0], non_blank78[0]);
+        assert_eq!(non_blank58[0], "Plain bold and italic text.");
+
+        // Pin the concatenation directly against the segments, at both
+        // widths, so this is the test every other assertion in this
+        // module reads Line::text() through.
+        for width in [58, 78] {
+            let out = lines(source, width);
+            let line = out.iter().find(|l| !l.segments.is_empty()).unwrap();
+            let manual: String = line.segments.iter().map(|s| s.text.as_str()).collect();
+            assert_eq!(line.text(), manual, "width {width}");
         }
     }
 }
