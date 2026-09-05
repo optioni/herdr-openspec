@@ -11,6 +11,13 @@
      that catches it is the answer. If this file outgrows the design.md it implements, the
      design is being written here one task at a time. Check text does not count. -->
 
+<!-- Before finalising, walk the group list once and ask of each pair whether it must be
+     ordered at all — outside-in TDD tells a sequential story about work that often is not
+     one. A pair may run in parallel when they share no file, neither needs the other's
+     code to exist, and a failure stays attributable to its own group. Mark those with
+     `<!-- parallel-after: N -->`; where they are genuinely sequential, say so in one line
+     and name the reason. Silence reads as nobody having looked. -->
+
 <!-- Write every check out in full, RUN it at planning time against current HEAD, and
      record its exit status beside it. A check for behavior this change adds must be RED
      at HEAD. A check pinning an invariant that already holds is green at HEAD and proves

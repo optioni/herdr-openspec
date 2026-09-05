@@ -308,12 +308,41 @@ artifacts:
       project context for what an acceptance test costs in this repository; where the
       acceptance tier is slow or serialized, that cost is paid by every future run.
 
-      **Parallel groups**: when two or more groups operate on independent modules or
-      packages and share only an already-completed upstream group as a dependency, mark
-      them for parallel dispatch by adding `<!-- parallel-after: N -->` on the line
-      immediately after the `##` heading, where N is the last group both depend on. Only
-      mark groups as parallel if they are truly independent — touching different file
-      trees with no shared mutable state.
+      **Parallel groups — look for them, then say what you found.** Once the groups are
+      drafted, walk the list once more and ask of each pair whether it has to be ordered
+      at all. Outside-in TDD produces a narrative — outermost first, then inward — and
+      that narrative reads as a sequence even where the work underneath is not one. The
+      ordering you inherited from telling the story is not evidence that the second group
+      needs the first.
+
+      A pair may run in parallel when all three hold:
+
+      1. **No shared file.** Not "different directories" — the test is whether the two
+         groups write to the same file. Two groups adding separate modules inside one
+         package are fine; two groups editing one file are not, whatever tree it sits in.
+      2. **No dependency between them.** Neither needs the other's code to exist to write
+         its test or make it pass. This is the test that actually binds, and it is not
+         satisfied by touching different files: a factory in one file and the type it
+         constructs in another are still ordered.
+      3. **A failure stays attributable.** Concurrent implementers share a working tree,
+         and a whole-tree gate — a compile, a lint over everything, a full suite — will
+         fail one group over the other's half-written file. Mark a pair parallel only
+         where the project's rules provide isolation, or where the gate is scoped narrowly
+         enough that each group's failure is its own.
+
+      Mark each qualifying group with `<!-- parallel-after: N -->` on the line immediately
+      after its `##` heading, where N is the last group they both depend on.
+
+      **Then record the outcome either way.** If groups are parallel, the markers say so.
+      If they are not, write one line in tasks.md naming the reason — "groups 2 through 8
+      all edit `src/changes.rs`, and one file is shared mutable state" is a complete
+      answer, and a better one than silence. Sequential is a legitimate finding; an
+      unexamined sequence is not, and the reader cannot tell them apart without the line.
+
+      Mark conservatively. A wrongly marked pair is now genuinely dispatched at the same
+      time, so the cost of a false positive is two agents in one tree — worse than the
+      serial run you avoided. When you are unsure whether the second group needs the
+      first, it does.
 
       **Contract gate:**
       Add a task before "Run the group tests" in any group that adds, changes, or removes
@@ -548,8 +577,10 @@ artifacts:
         update. Every group has exactly one valid kind marker. Behavior groups preserve
         RED → GREEN → REFACTOR; refactors preserve CHARACTERIZE → REFACTOR → VERIFY;
         operational groups preserve CHECK → CHANGE → VERIFY. Mixed groups are split
-        before implementation. Any `parallel-after` marker names groups that are truly
-        independent. Task lines instruct rather than justify, and tasks.md has not grown
+        before implementation. tasks.md either carries `parallel-after` markers or states
+        why its groups are sequential — silence means nobody looked. Every marker names a
+        pair that shares no file, has no dependency between them, and can fail
+        attributably. Task lines instruct rather than justify, and tasks.md has not grown
         past the design.md it implements — either is a sign the design is being written
         in the checklist.
 
