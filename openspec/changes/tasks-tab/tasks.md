@@ -658,7 +658,7 @@ the crate compiles, every existing test still passes, and `GATE-MECH1` still hol
 ## 3. The tracked-tasks flag, in both producers
 <!-- kind: behavior -->
 
-- [ ] 3.1 RED: Write fourteen failing tests in `changes::tests::`, named from their scenarios:
+- [x] 3.1 RED: Write fourteen failing tests in `changes::tests::`, named from their scenarios:
       `tracks_tasks_tdd`, `tracks_tasks_prefers_tracks`, `tracks_tasks_id_fallback`,
       `tracks_tasks_none_marked`, `tracks_tasks_duplicate_first_only`,
       `tracks_tasks_empty_list` (change-artifacts, six);
@@ -670,7 +670,7 @@ the crate compiles, every existing test still passes, and `GATE-MECH1` still hol
       trivially, with every flag `false` on both sides, so it must assert a `true` at a named
       position and not merely that the two vectors are equal.
 
-- [ ] 3.2 GREEN: Implement `pub(crate) fn tasks_index(schema: &schema::Schema) ->
+- [x] 3.2 GREEN: Implement `pub(crate) fn tasks_index(schema: &schema::Schema) ->
       Option<usize>` in `src/changes.rs`: the **first** index of `schema.artifacts` whose
       entry equals `schema.tasks`, `None` when `schema.tasks` is `None`. Call it from
       `change_artifacts` and from `cli_artifacts`, and from nowhere else — one rule, two
@@ -678,17 +678,17 @@ the crate compiles, every existing test still passes, and `GATE-MECH1` still hol
       Red-when: the position is found by comparing ids rather than whole `Artifact` values;
       `tracks_tasks_prefers_tracks` is the test that catches it.
 
-- [ ] 3.3 CHECK: `join_artifacts` needs **no code change** — it returns whole `ArtifactRef`
+- [x] 3.3 CHECK: `join_artifacts` needs **no code change** — it returns whole `ArtifactRef`
       values and the flag rides with them. Confirm that by reading it, and confirm the four
       `join_*` tests pass without touching the function. If a change turns out to be needed,
       that is a divergence from `design.md` → Decisions 1 and must be recorded there before
       it is made.
 
-- [ ] 3.4 REFACTOR: If `change_artifacts` and `cli_artifacts` ended up with two copies of the
+- [x] 3.4 REFACTOR: If `change_artifacts` and `cli_artifacts` ended up with two copies of the
       "mark at `tasks_index`" loop, collapse them onto one helper; otherwise state that no
       refactor was needed.
 
-- [ ] 3.5 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'changes::tests::' 180`;
+- [x] 3.5 VERIFY: `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'changes::tests::' 180`;
       `python3 $CHECKS/GATE-MECH1.py src`; `MIN=18 sh $CHECKS/NOLIT-CHANGE.sh`;
       `sh $CHECKS/NOJSON-SEAM.sh`; the four gate commands, still failing on exactly the one
       known acceptance test with the recorded message.

@@ -650,6 +650,17 @@ pub(crate) fn resolve_artifact(
     }
 }
 
+/// The index of `schema.tasks` within `schema.artifacts` — the **first**
+/// entry equal to it, matching the OpenSpec CLI's own `find`. `None` when
+/// `schema.tasks` is `None`. The one implementation both `change_artifacts`
+/// and `cli_artifacts` call, so the two producers apply one rule rather
+/// than two copies. See `change-artifacts` -> "The tracked-tasks artifact
+/// is marked at its schema position".
+pub(crate) fn tasks_index(schema: &crate::schema::Schema) -> Option<usize> {
+    let tasks = schema.tasks.as_ref()?;
+    schema.artifacts.iter().position(|a| a == tasks)
+}
+
 /// Resolve every artifact `schema` declares, in the schema's declared
 /// order, against `change_dir`. One [`ArtifactRef`] per schema artifact
 /// entry — including a repeated id, which `schema-artifacts` requires kept
@@ -661,8 +672,9 @@ pub(crate) fn change_artifacts(
 ) -> (Vec<ArtifactRef>, Vec<String>) {
     let mut artifacts = Vec::with_capacity(schema.artifacts.len());
     let mut problems = Vec::new();
+    let tasks_index = tasks_index(schema);
 
-    for artifact in &schema.artifacts {
+    for (index, artifact) in schema.artifacts.iter().enumerate() {
         let (paths, problem) = resolve_artifact(change_dir, &artifact.generates);
         if let Some(reason) = problem {
             problems.push(format!("artifact {:?}: {reason}", artifact.id));
@@ -670,7 +682,7 @@ pub(crate) fn change_artifacts(
         artifacts.push(ArtifactRef {
             id: artifact.id.clone(),
             paths,
-            tracks_tasks: false,
+            tracks_tasks: tasks_index == Some(index),
         });
     }
 
@@ -1169,13 +1181,15 @@ pub(crate) fn cli_artifacts(
     schema: &crate::schema::Schema,
     context_files: &std::collections::BTreeMap<String, Vec<PathBuf>>,
 ) -> (Vec<ArtifactRef>, Vec<String>) {
+    let tasks_index = tasks_index(schema);
     let artifacts: Vec<ArtifactRef> = schema
         .artifacts
         .iter()
-        .map(|artifact| ArtifactRef {
+        .enumerate()
+        .map(|(index, artifact)| ArtifactRef {
             id: artifact.id.clone(),
             paths: context_files.get(&artifact.id).cloned().unwrap_or_default(),
-            tracks_tasks: false,
+            tracks_tasks: tasks_index == Some(index),
         })
         .collect();
 
@@ -2254,6 +2268,159 @@ mod tests {
         assert!(problems.is_empty());
     }
 
+    // --- tasks-tab group 3: the tracked-tasks flag, file producer ---------
+
+    fn schema_with_tasks(
+        artifacts: Vec<(&str, &str)>,
+        tasks: Option<crate::schema::Artifact>,
+    ) -> crate::schema::Schema {
+        crate::schema::Schema {
+            name: "tdd".to_string(),
+            artifacts: artifacts
+                .into_iter()
+                .map(|(id, generates)| crate::schema::Artifact {
+                    id: id.to_string(),
+                    generates: generates.to_string(),
+                })
+                .collect(),
+            tasks,
+        }
+    }
+
+    #[test]
+    fn tracks_tasks_tdd() {
+        let scratch = ScratchDir::new();
+        let dir = canonical(scratch.path());
+        let schema = schema_with_tasks(
+            vec![
+                ("proposal", "proposal.md"),
+                ("specs", "specs/**/*.md"),
+                ("design", "design.md"),
+                ("tasks", "tasks.md"),
+                ("planning-review", "planning-review.md"),
+            ],
+            Some(crate::schema::Artifact {
+                id: "tasks".to_string(),
+                generates: "tasks.md".to_string(),
+            }),
+        );
+
+        let (artifacts, _problems) = change_artifacts(&dir, &schema);
+        let flags: Vec<bool> = artifacts.iter().map(|a| a.tracks_tasks).collect();
+        assert_eq!(flags, vec![false, false, false, true, false]);
+        assert_eq!(flags.iter().filter(|&&f| f).count(), 1);
+    }
+
+    #[test]
+    fn tracks_tasks_prefers_tracks() {
+        // `apply.tracks: tasks.md` selects the artifact whose `generates`
+        // is `tasks.md` — here `checklist`, at position 0 — even though a
+        // different artifact at position 1 carries the id `tasks`. An id
+        // comparison would mark position 1 instead; this is the case the
+        // schema's own published rule exists to get right.
+        let scratch = ScratchDir::new();
+        let dir = canonical(scratch.path());
+        write(&dir.join("tasks.md"), "- [x] a\n");
+        let schema = schema_with_tasks(
+            vec![("checklist", "tasks.md"), ("tasks", "notes.md")],
+            Some(crate::schema::Artifact {
+                id: "checklist".to_string(),
+                generates: "tasks.md".to_string(),
+            }),
+        );
+
+        let (artifacts, _problems) = change_artifacts(&dir, &schema);
+        assert!(artifacts[0].tracks_tasks);
+        assert!(!artifacts[1].tracks_tasks);
+        // The marked artifact's own paths still come from its `generates`
+        // value — it renders `tasks.md` while being addressed as
+        // `checklist`.
+        assert_eq!(artifacts[0].paths, vec![dir.join("tasks.md")]);
+    }
+
+    #[test]
+    fn tracks_tasks_id_fallback() {
+        let scratch = ScratchDir::new();
+        let dir = canonical(scratch.path());
+        let schema = schema_with_tasks(
+            vec![("proposal", "proposal.md"), ("tasks", "tasks.md")],
+            Some(crate::schema::Artifact {
+                id: "tasks".to_string(),
+                generates: "tasks.md".to_string(),
+            }),
+        );
+
+        let (artifacts, _problems) = change_artifacts(&dir, &schema);
+        assert!(!artifacts[0].tracks_tasks);
+        assert!(artifacts[1].tracks_tasks);
+    }
+
+    #[test]
+    fn tracks_tasks_none_marked() {
+        let scratch = ScratchDir::new();
+        let dir = canonical(scratch.path());
+        write(&dir.join("tasks.md"), "- [x] a\n- [ ] b\n");
+        let schema = schema_with_tasks(vec![("alpha", "alpha.md"), ("beta", "beta.md")], None);
+
+        let (artifacts, _problems) = change_artifacts(&dir, &schema);
+        assert!(artifacts.iter().all(|a| !a.tracks_tasks));
+
+        // The marking and the counting are decided separately: the
+        // fallback still counts `<change dir>/tasks.md` even though no
+        // artifact is marked.
+        let (progress, _problems) = change_progress(&dir, schema.tasks.as_ref());
+        assert_eq!(
+            progress,
+            crate::tasks::Progress {
+                completed: 1,
+                total: 2
+            }
+        );
+    }
+
+    #[test]
+    fn tracks_tasks_duplicate_first_only() {
+        let scratch = ScratchDir::new();
+        let dir = canonical(scratch.path());
+        let schema = schema_with_tasks(
+            vec![
+                ("zeta", "tasks.md"),
+                ("alpha", "alpha.md"),
+                ("zeta", "tasks.md"),
+            ],
+            Some(crate::schema::Artifact {
+                id: "zeta".to_string(),
+                generates: "tasks.md".to_string(),
+            }),
+        );
+
+        let (artifacts, _problems) = change_artifacts(&dir, &schema);
+        assert_eq!(artifacts.len(), 3);
+        assert!(artifacts[0].tracks_tasks);
+        assert!(!artifacts[1].tracks_tasks);
+        assert!(!artifacts[2].tracks_tasks);
+    }
+
+    #[test]
+    fn tracks_tasks_empty_list() {
+        let scratch = ScratchDir::new();
+        let dir = canonical(scratch.path());
+        let schema = schema_with_tasks(vec![], None);
+
+        let (artifacts, problems) = change_artifacts(&dir, &schema);
+        assert!(artifacts.is_empty());
+        assert!(problems.is_empty());
+
+        let (progress, _problems) = change_progress(&dir, schema.tasks.as_ref());
+        assert_eq!(
+            progress,
+            crate::tasks::Progress {
+                completed: 0,
+                total: 0
+            }
+        );
+    }
+
     // --- group 6: task progress and the CLI's fallback --------------------
 
     use crate::testutil::snapshot;
@@ -2865,7 +3032,7 @@ mod tests {
                     ArtifactRef {
                         id: "tasks".to_string(),
                         paths: vec![repo.join("openspec/changes/add-auth/tasks.md")],
-                        tracks_tasks: false,
+                        tracks_tasks: true,
                     },
                     ArtifactRef {
                         id: "planning-review".to_string(),
@@ -3621,6 +3788,205 @@ mod tests {
                 vec!["proposal", "specs", "design", "tasks", "planning-review"]
             );
         }
+
+        // --- tasks-tab group 3: the tracked-tasks flag, CLI producer -----
+
+        fn tdd_schema_with_tasks() -> crate::schema::Schema {
+            let mut schema = tdd_schema();
+            schema.tasks = Some(crate::schema::Artifact {
+                id: "tasks".to_string(),
+                generates: "tasks.md".to_string(),
+            });
+            schema
+        }
+
+        #[test]
+        fn cli_tracks_tasks_tdd() {
+            let mut context_files = BTreeMap::new();
+            context_files.insert(
+                "proposal".to_string(),
+                vec![PathBuf::from("/repo/x/proposal.md")],
+            );
+            context_files.insert("tasks".to_string(), vec![PathBuf::from("/repo/x/tasks.md")]);
+
+            let (artifacts, _problems) = cli_artifacts(&tdd_schema_with_tasks(), &context_files);
+            let flags: Vec<bool> = artifacts.iter().map(|a| a.tracks_tasks).collect();
+            assert_eq!(flags, vec![false, false, false, true, false]);
+            assert_eq!(artifacts[3].paths, vec![PathBuf::from("/repo/x/tasks.md")]);
+        }
+
+        #[test]
+        fn both_producers_mark_the_same_position() {
+            use crate::testutil::{ScratchDir, canonical};
+
+            fn write(path: &std::path::Path, contents: &str) {
+                if let Some(parent) = path.parent() {
+                    std::fs::create_dir_all(parent).expect("create fixture parent");
+                }
+                std::fs::write(path, contents).expect("write fixture file");
+            }
+
+            let cases: Vec<crate::schema::Schema> = vec![
+                // The `tdd` schema.
+                tdd_schema_with_tasks(),
+                // `apply.tracks` names an artifact whose id is not `tasks`.
+                crate::schema::Schema {
+                    name: "custom".to_string(),
+                    artifacts: vec![
+                        crate::schema::Artifact {
+                            id: "checklist".to_string(),
+                            generates: "tasks.md".to_string(),
+                        },
+                        crate::schema::Artifact {
+                            id: "notes".to_string(),
+                            generates: "notes.md".to_string(),
+                        },
+                    ],
+                    tasks: Some(crate::schema::Artifact {
+                        id: "checklist".to_string(),
+                        generates: "tasks.md".to_string(),
+                    }),
+                },
+                // No `apply` block; an artifact with id `tasks` is present.
+                crate::schema::Schema {
+                    name: "fallback".to_string(),
+                    artifacts: vec![
+                        crate::schema::Artifact {
+                            id: "proposal".to_string(),
+                            generates: "proposal.md".to_string(),
+                        },
+                        crate::schema::Artifact {
+                            id: "tasks".to_string(),
+                            generates: "tasks.md".to_string(),
+                        },
+                    ],
+                    tasks: Some(crate::schema::Artifact {
+                        id: "tasks".to_string(),
+                        generates: "tasks.md".to_string(),
+                    }),
+                },
+                // A schema naming no tasks artifact at all.
+                crate::schema::Schema {
+                    name: "none".to_string(),
+                    artifacts: vec![
+                        crate::schema::Artifact {
+                            id: "alpha".to_string(),
+                            generates: "alpha.md".to_string(),
+                        },
+                        crate::schema::Artifact {
+                            id: "beta".to_string(),
+                            generates: "beta.md".to_string(),
+                        },
+                    ],
+                    tasks: None,
+                },
+            ];
+
+            for schema in cases {
+                let scratch = ScratchDir::new();
+                let dir = canonical(scratch.path());
+                for artifact in &schema.artifacts {
+                    write(&dir.join(&artifact.generates), "- [x] a\n");
+                }
+                let (file_artifacts, _) = super::super::change_artifacts(&dir, &schema);
+
+                let context_files: std::collections::BTreeMap<String, Vec<PathBuf>> = schema
+                    .artifacts
+                    .iter()
+                    .map(|a| (a.id.clone(), vec![dir.join(&a.generates)]))
+                    .collect();
+                let (cli_artifacts_list, _) = cli_artifacts(&schema, &context_files);
+
+                let file_flags: Vec<bool> = file_artifacts.iter().map(|a| a.tracks_tasks).collect();
+                let cli_flags: Vec<bool> =
+                    cli_artifacts_list.iter().map(|a| a.tracks_tasks).collect();
+                assert_eq!(
+                    file_flags, cli_flags,
+                    "schema {:?}: producers disagree on tracks_tasks",
+                    schema.name
+                );
+                // Red-when guard: a naive "always false" implementation on
+                // both sides would trivially pass an equality-only check,
+                // so also assert the expected `true` position by name.
+                if let Some(expected_true) = schema
+                    .tasks
+                    .as_ref()
+                    .and_then(|tasks| schema.artifacts.iter().position(|a| a == tasks))
+                {
+                    assert!(
+                        file_flags[expected_true],
+                        "schema {:?}: expected position {expected_true} marked",
+                        schema.name
+                    );
+                    assert!(cli_flags[expected_true]);
+                } else {
+                    assert!(file_flags.iter().all(|&f| !f));
+                    assert!(cli_flags.iter().all(|&f| !f));
+                }
+            }
+        }
+
+        #[test]
+        fn cli_only_schema_marks() {
+            let schema = crate::schema::Schema {
+                name: "cli-only".to_string(),
+                artifacts: vec![
+                    crate::schema::Artifact {
+                        id: "alpha".to_string(),
+                        generates: "alpha.md".to_string(),
+                    },
+                    crate::schema::Artifact {
+                        id: "tasks".to_string(),
+                        generates: "tasks.md".to_string(),
+                    },
+                ],
+                tasks: Some(crate::schema::Artifact {
+                    id: "tasks".to_string(),
+                    generates: "tasks.md".to_string(),
+                }),
+            };
+            let context_files = BTreeMap::new();
+
+            let (artifacts, _problems) = cli_artifacts(&schema, &context_files);
+            assert_eq!(artifacts.len(), 2);
+            assert!(!artifacts[0].tracks_tasks);
+            assert!(artifacts[1].tracks_tasks);
+        }
+
+        #[test]
+        fn cli_duplicate_first_only() {
+            let schema = crate::schema::Schema {
+                name: "dup".to_string(),
+                artifacts: vec![
+                    crate::schema::Artifact {
+                        id: "zeta".to_string(),
+                        generates: "tasks.md".to_string(),
+                    },
+                    crate::schema::Artifact {
+                        id: "alpha".to_string(),
+                        generates: "alpha.md".to_string(),
+                    },
+                    crate::schema::Artifact {
+                        id: "zeta".to_string(),
+                        generates: "tasks.md".to_string(),
+                    },
+                ],
+                tasks: Some(crate::schema::Artifact {
+                    id: "zeta".to_string(),
+                    generates: "tasks.md".to_string(),
+                }),
+            };
+            let mut context_files = BTreeMap::new();
+            context_files.insert("zeta".to_string(), vec![PathBuf::from("/repo/x/tasks.md")]);
+
+            let (artifacts, _problems) = cli_artifacts(&schema, &context_files);
+            assert_eq!(artifacts.len(), 3);
+            assert!(artifacts[0].tracks_tasks);
+            assert!(!artifacts[1].tracks_tasks);
+            assert!(!artifacts[2].tracks_tasks);
+            assert_eq!(artifacts[0].paths, vec![PathBuf::from("/repo/x/tasks.md")]);
+            assert_eq!(artifacts[2].paths, vec![PathBuf::from("/repo/x/tasks.md")]);
+        }
     }
 
     // --- group 6: `join_artifacts` — the positional cross-producer join ----
@@ -3638,6 +4004,17 @@ mod tests {
                 id: id.to_string(),
                 paths: paths.into_iter().map(PathBuf::from).collect(),
                 tracks_tasks: false,
+            }
+        }
+
+        /// Like `r`, with an explicit `tracks_tasks` — the tasks-tab join
+        /// tests need at least one marked entry, which the all-`false` `r`
+        /// helper cannot produce.
+        fn rt(id: &str, paths: Vec<&str>, tracks_tasks: bool) -> ArtifactRef {
+            ArtifactRef {
+                id: id.to_string(),
+                paths: paths.into_iter().map(PathBuf::from).collect(),
+                tracks_tasks,
             }
         }
 
@@ -3783,6 +4160,137 @@ mod tests {
             let (joined, problem) = join_artifacts(&file, &cli);
             assert_eq!(problem, None);
             assert_eq!(joined, cli);
+        }
+
+        // --- tasks-tab group 3: the tracked-tasks flag rides the join ----
+
+        #[test]
+        fn join_takes_cli_flag() {
+            let file = vec![
+                r("proposal", vec![]),
+                r("specs", vec![]),
+                rt("tasks", vec!["/f/tasks.md"], true),
+            ];
+            let cli = vec![
+                r("proposal", vec![]),
+                r("specs", vec![]),
+                rt("tasks", vec!["/c/tasks.md"], true),
+            ];
+            let (joined, problem) = join_artifacts(&file, &cli);
+            assert_eq!(problem, None);
+            assert!(!joined[0].tracks_tasks);
+            assert!(!joined[1].tracks_tasks);
+            assert!(joined[2].tracks_tasks);
+            // The CLI's paths, confirming the CLI list is what won.
+            assert_eq!(joined[2].paths, vec![PathBuf::from("/c/tasks.md")]);
+        }
+
+        #[test]
+        fn join_cli_flag_moves_the_tab() {
+            let file = vec![
+                rt("checklist", vec![], false),
+                r("notes", vec![]),
+                rt("tasks", vec![], true),
+            ];
+            let cli = vec![
+                rt("checklist", vec![], true),
+                r("notes", vec![]),
+                rt("tasks", vec![], false),
+            ];
+            let (joined, problem) = join_artifacts(&file, &cli);
+            assert_eq!(problem, None);
+            assert!(joined[0].tracks_tasks);
+            assert!(!joined[1].tracks_tasks);
+            assert!(!joined[2].tracks_tasks);
+        }
+
+        #[test]
+        fn join_rejected_keeps_file_flag() {
+            // Differing lengths: five file entries, three CLI entries.
+            let file = vec![
+                r("a", vec![]),
+                r("b", vec![]),
+                r("c", vec![]),
+                rt("tasks", vec![], true),
+                r("e", vec![]),
+            ];
+            let cli = vec![r("a", vec![]), r("b", vec![]), r("c", vec![])];
+            let (joined, problem) = join_artifacts(&file, &cli);
+            assert_eq!(joined, file);
+            assert!(joined[3].tracks_tasks);
+            let problem = problem.expect("should record a problem");
+            assert!(problem.contains('5'), "{problem}");
+            assert!(problem.contains('3'), "{problem}");
+
+            // Equal length, disagreeing id at one index: rule 5 keeps the
+            // file list and its flag too.
+            let file = vec![
+                r("proposal", vec![]),
+                rt("tasks", vec![], true),
+                r("design", vec![]),
+            ];
+            let cli = vec![
+                r("proposal", vec![]),
+                r("plan", vec![]),
+                r("design", vec![]),
+            ];
+            let (joined, problem) = join_artifacts(&file, &cli);
+            assert_eq!(joined, file);
+            assert!(joined[1].tracks_tasks);
+            assert!(problem.is_some());
+        }
+
+        #[test]
+        fn join_never_two_marked() {
+            fn assert_at_most_one_marked(
+                joined: &[ArtifactRef],
+                file: &[ArtifactRef],
+                cli: &[ArtifactRef],
+            ) {
+                assert!(joined.iter().filter(|a| a.tracks_tasks).count() <= 1);
+                for a in joined {
+                    if a.tracks_tasks {
+                        let carried_by_file = file.iter().any(|f| f.id == a.id && f.tracks_tasks);
+                        let carried_by_cli = cli.iter().any(|c| c.id == a.id && c.tracks_tasks);
+                        assert!(carried_by_file || carried_by_cli);
+                    }
+                }
+            }
+
+            // Rule: both empty.
+            let (joined, _) = join_artifacts(&[], &[]);
+            assert_at_most_one_marked(&joined, &[], &[]);
+
+            // Rule: empty file list, CLI marks position 1.
+            let cli = vec![r("a", vec![]), rt("b", vec![], true)];
+            let (joined, _) = join_artifacts(&[], &cli);
+            assert_at_most_one_marked(&joined, &[], &cli);
+
+            // Rule: empty CLI list, file marks position 0.
+            let file = vec![rt("a", vec![], true), r("b", vec![])];
+            let (joined, _) = join_artifacts(&file, &[]);
+            assert_at_most_one_marked(&joined, &file, &[]);
+
+            // Rule: differing lengths, file marks position 1.
+            let file = vec![rt("a", vec![], false), rt("b", vec![], true)];
+            let cli = vec![r("a", vec![])];
+            let (joined, _) = join_artifacts(&file, &cli);
+            assert_at_most_one_marked(&joined, &file, &cli);
+
+            // Rule: differing id at an index, file marks position 0.
+            let file = vec![rt("a", vec![], true), r("b", vec![])];
+            let cli = vec![r("a", vec![]), r("different", vec![])];
+            let (joined, _) = join_artifacts(&file, &cli);
+            assert_at_most_one_marked(&joined, &file, &cli);
+
+            // Rule: equal-shape lists, marked positions DIFFER between the
+            // two producers — the CLI's own flag wins, at its own position.
+            let file = vec![rt("a", vec![], true), rt("b", vec![], false)];
+            let cli = vec![rt("a", vec![], false), rt("b", vec![], true)];
+            let (joined, _) = join_artifacts(&file, &cli);
+            assert_at_most_one_marked(&joined, &file, &cli);
+            assert!(!joined[0].tracks_tasks);
+            assert!(joined[1].tracks_tasks);
         }
     }
 
