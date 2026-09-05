@@ -940,16 +940,16 @@ the crate compiles, every existing test still passes, and `GATE-MECH1` still hol
 ## 10. Acceptance Test — Outer Loop GREEN
 <!-- kind: behavior -->
 
-- [ ] 10.1 VERIFY: `cargo test --all-features --lib 'ui::tests::detail::'` — three tests,
+- [x] 10.1 VERIFY: `cargo test --all-features --lib 'ui::tests::detail::'` — three tests,
       all green, including `tasks_tab_is_read_only`, which has been red since group 2.
       Confirm the two pre-existing tests in that module still pass unchanged; if either
       needed its expectations updated, name the change and why here.
 
-- [ ] 10.2 REFACTOR: Clean up the group-2 harness — the ScratchDir builder and the scripted
+- [x] 10.2 REFACTOR: Clean up the group-2 harness — the ScratchDir builder and the scripted
       key list — if it duplicates `ui::tests::load::`'s existing tree builder; otherwise state
       that no refactor was needed.
 
-- [ ] 10.3 VERIFY: the literal, unqualified **`make check`** — its first run since group 1 —
+- [x] 10.3 VERIFY: the literal, unqualified **`make check`** — its first run since group 1 —
       exits 0. If it fails, name the failing sub-command rather than summarising.
       `. $CHECKS/TESTCOUNT.sh`; `testcount --lib 'ui::tests::detail::' 3`.
       `sh $CHECKS/OPENSPEC-UNTOUCHED.sh`. Commit.
