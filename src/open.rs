@@ -141,6 +141,105 @@ pub fn existing_pane(
     Ok(None)
 }
 
+/// Which kind of pane an `open`/`open-tab` invocation targets. See
+/// `specs/pane-open/spec.md` -> "`open` splits the pane the action was invoked from" and
+/// -> "`open-tab` opens a tab in the invoking workspace".
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Placement {
+    Split,
+    Tab,
+}
+
+/// The exact `herdr plugin pane open` argument vector for `placement`, built purely from
+/// `ctx`. `--target-pane` is omitted (split only) when `ctx.focused_pane_id` is absent,
+/// and `--cwd` is omitted (both) when `ctx.workspace_cwd` is absent — the pane then
+/// inherits the plugin root, a degraded view rather than a refusal. Never issues
+/// `--workspace` for a split or `--target-pane`/`--direction` for a tab: measured against
+/// Herdr 0.8.2, a split targets an existing pane and a tab needs none.
+pub fn open_args(placement: Placement, ctx: &Context) -> Vec<String> {
+    let mut argv = vec![
+        "plugin".to_string(),
+        "pane".to_string(),
+        "open".to_string(),
+        "--plugin".to_string(),
+        ctx.plugin_id.clone(),
+    ];
+    match placement {
+        Placement::Split => {
+            argv.push("--entrypoint".to_string());
+            argv.push(DASHBOARD_ENTRYPOINT.to_string());
+            argv.push("--placement".to_string());
+            argv.push("split".to_string());
+            argv.push("--direction".to_string());
+            argv.push("right".to_string());
+            if let Some(pane) = &ctx.focused_pane_id {
+                argv.push("--target-pane".to_string());
+                argv.push(pane.clone());
+            }
+        }
+        Placement::Tab => {
+            argv.push("--entrypoint".to_string());
+            argv.push(DASHBOARD_TAB_ENTRYPOINT.to_string());
+            argv.push("--placement".to_string());
+            argv.push("tab".to_string());
+            argv.push("--workspace".to_string());
+            argv.push(ctx.workspace_id.clone());
+        }
+    }
+    if let Some(cwd) = &ctx.workspace_cwd {
+        argv.push("--cwd".to_string());
+        argv.push(cwd.clone());
+    }
+    argv.push("--focus".to_string());
+    argv
+}
+
+/// The exact `herdr plugin pane focus` argument vector: one call, naming `pane_id`.
+pub fn focus_args(pane_id: &str) -> Vec<String> {
+    vec![
+        "plugin".to_string(),
+        "pane".to_string(),
+        "focus".to_string(),
+        pane_id.to_string(),
+    ]
+}
+
+/// The subcommand-to-placement mapping, pure and total, so a dispatch that sent
+/// `open-tab` to the split placement is a unit-test failure rather than an invisible
+/// one (design.md -> Decision 10).
+pub fn placement_for(invocation: &crate::Invocation) -> Option<Placement> {
+    match invocation {
+        crate::Invocation::Open => Some(Placement::Split),
+        crate::Invocation::OpenTab => Some(Placement::Tab),
+        crate::Invocation::Ui | crate::Invocation::Reject(_) => None,
+    }
+}
+
+/// `open::run`'s answer: every warning gathered along the way (a degraded step that did
+/// not stop the command), and the outcome — `Ok(())` on success, `Err(reason)` on the
+/// failure that stopped it. No `Default`; every construction and destructuring names
+/// both fields, with no `..` rest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Report {
+    pub warnings: Vec<String>,
+    pub outcome: Result<(), String>,
+}
+
+/// The stderr lines (every warning, then the error if there is one) and the exit status
+/// (0 on `Ok`, 1 on `Err` — never 2, never 3) for `report`. `main`'s two new arms hold no
+/// branch of their own; this is the whole decision (design.md -> Decision 10).
+pub fn report_output(report: &Report) -> (Vec<String>, i32) {
+    let mut lines = report.warnings.clone();
+    let status = match &report.outcome {
+        Ok(()) => 0,
+        Err(reason) => {
+            lines.push(reason.clone());
+            1
+        }
+    };
+    (lines, status)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

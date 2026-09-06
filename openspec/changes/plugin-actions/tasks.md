@@ -216,23 +216,25 @@
 ## 5. The argument vectors and the two pure `main` decisions
 <!-- kind: behavior -->
 
-- [ ] 5.1 RED: Write failing tests `split_argv`, `split_argv_without_target_pane`,
+- [x] 5.1 RED: Write failing tests `split_argv`, `split_argv_without_target_pane`,
   `split_argv_without_cwd`, `tab_argv`,
   `the_two_vectors_differ_only_in_placement_and_target`,
   `placement_for_maps_each_subcommand`, and `report_output_follows_the_report`. Each argv
   test asserts the **whole** vector against a literal, not a subset.
 
-- [ ] 5.2 GREEN: Implement `open::Placement`, `open::open_args(placement, &Context) -> Vec<String>`,
+- [x] 5.2 GREEN: Implement `open::Placement`, `open::open_args(placement, &Context) -> Vec<String>`,
   `open::focus_args(pane_id) -> Vec<String>`, `open::placement_for(&Invocation) -> Option<Placement>`,
   and `open::report_output(&Report) -> (Vec<String>, i32)`, exactly as
   `specs/pane-open/spec.md` tabulates. The last two exist so `main` holds no branch of its
   own (design.md → Decision 10).
 
-- [ ] 5.3 CHECK: Contract gate — re-read `SPEC.md` → Herdr integration and confirm the
-  documented `herdr` argument vectors match what these functions emit, including the focus
-  call group 12 adds.
+- [x] 5.3 CHECK: Contract gate — re-read `SPEC.md` → Herdr integration. `SPEC.md` still
+  shows the pre-existing `agent-launch` vectors only; this change's vectors are documented
+  in `specs/pane-open/spec.md` and match `open_args`/`focus_args` exactly (verified by
+  `split_argv`, `tab_argv`, and the exact literal assertions above). Group 13 adds the
+  `open`/`open-tab` vectors and the focus call to `SPEC.md` itself.
 
-- [ ] 5.4 Run the group tests — `cargo test --all-features --lib open::` — no regressions.
+- [x] 5.4 Run the group tests — `cargo test --all-features --lib open::` — no regressions.
 
 ## 6. The driver
 <!-- kind: behavior -->
