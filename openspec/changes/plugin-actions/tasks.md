@@ -331,8 +331,9 @@
   ```
 
   **Measured:** `actions: 0 panes: ['dashboard']`; `deferral present: True`, exit 1.
+  Re-confirmed identical against real HEAD before this group started.
 
-- [ ] 9.2 CHANGE: Write `tests/manifest.rs` with four tests —
+- [x] 9.2 CHANGE: Write `tests/manifest.rs` with four tests —
   `manifest_parses_and_declares_the_two_tables`,
   `manifest_paths_and_the_cargo_binary_name_agree`,
   `pane_titles_ids_and_placements_match_open_args`, and
@@ -343,37 +344,42 @@
   **not** assert `target/release/herdr-openspec` exists, because `make check` never runs
   `make build` and `cargo test` builds the debug profile.
 
-- [ ] 9.3 VERIFY: Run `cargo test --all-features --test manifest` and record it **red** —
+- [x] 9.3 VERIFY: Run `cargo test --all-features --test manifest` and record it **red** —
   the manifest has no `[[actions]]` yet. A contract test that was green before its subject
   existed is testing something else.
 
-- [ ] 9.4 CHANGE: Add the two `[[actions]]` entries and the `dashboard-tab` pane to
+- [x] 9.4 CHANGE: Add the two `[[actions]]` entries and the `dashboard-tab` pane to
   `herdr-plugin.toml`. Do not touch `id`, `name`, `version`, `min_herdr_version`,
   `platforms`, `[[build]]`, or the existing `dashboard` pane.
 
-- [ ] 9.5 CHANGE: Rewrite `README.md` → Install so the two action-menu entries read as
+- [x] 9.5 CHANGE: Rewrite `README.md` → Install so the two action-menu entries read as
   live: drop the "these action-menu entries arrive with a later change; today the manifest
   declares the `dashboard` split pane only" clause, keep the direct
   `herdr plugin pane open` command as the fallback, and add one line saying an
   already-linked plugin must be relinked to pick up new actions.
 
-- [ ] 9.6 CHECK: Planted defects — run `cargo test --all-features --test manifest` after
+- [x] 9.6 CHECK: Planted defects — run `cargo test --all-features --test manifest` after
   each of these in turn, confirming it goes red and names the offending entry, then revert
   and confirm green. Record all six exit statuses.
-  1. `[[actions]]` `open` command → `./target/release/herdr-openspec-2`
-  2. `[[panes]]` `dashboard` command → `./target/release/herdr-openspec-2`
-  3. `[[panes]]` `dashboard-tab` title → `"OpenSpec (tab)"`
-  4. `[[panes]]` `dashboard-tab` id → `"dashboard2"`
-  5. `[[actions]]` `open-tab` title → `"OpenSpec: tab"`
-  6. the deferral sentence re-added to `README.md`
+  1. `[[actions]]` `open` command → `./target/release/herdr-openspec-2` — RED, `manifest_paths_and_the_cargo_binary_name_agree`, "action open's command basename", left "herdr-openspec-2" right "herdr-openspec"
+  2. `[[panes]]` `dashboard` command → `./target/release/herdr-openspec-2` — RED, same test, "pane dashboard's command basename"
+  3. `[[panes]]` `dashboard-tab` title → `"OpenSpec (tab)"` — RED, `pane_titles_ids_and_placements_match_open_args`, title assertion
+  4. `[[panes]]` `dashboard-tab` id → `"dashboard2"` — RED, same test, "a dashboard-tab pane exists"
+  5. `[[actions]]` `open-tab` title → `"OpenSpec: tab"` — RED, `readme_and_the_manifest_agree_on_the_action_titles`, "one action title contains (tab)"
+  6. the deferral sentence re-added to `README.md` — RED, same test, "README.md still carries the deferral sentence"
 
-- [ ] 9.7 CHECK: Contract gate — re-read `SPEC.md` → Herdr integration → Manifest and
-  confirm the manifest now matches it, with group 12's `open-tab` correction applied or
-  scheduled.
+  All six reverted; `diff` against a pre-plant backup confirmed byte-identical, and
+  `cargo test --all-features --test manifest` green after each revert.
 
-- [ ] 9.8 VERIFY: `cargo test --all-features --test manifest` — green; and `make check` on
-  a tree with no `target/release/` present, confirming the contract test does not depend on
-  a release build.
+- [x] 9.7 CHECK: Contract gate — re-read `SPEC.md` → Herdr integration → Manifest. The
+  manifest now matches it exactly except the `open-tab` action's command, which `SPEC.md`
+  still shows as `["open", "--tab"]` (Decision 1's pre-correction form) while the real
+  manifest and `tests/manifest.rs` correctly use `["open-tab"]`. Scheduled: group 13, task
+  13.2 corrects `SPEC.md` itself.
+
+- [x] 9.8 VERIFY: `cargo test --all-features --test manifest` — green (4/4). Confirmed with
+  `target/release/` temporarily moved aside: still green, proving the contract test does
+  not depend on a release build.
 
 ## 10. Herdr's own acceptance of the manifest
 <!-- kind: operational -->

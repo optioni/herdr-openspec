@@ -12,3 +12,21 @@ id = "dashboard"
 title = "OpenSpec"
 placement = "split"
 command = ["./target/release/herdr-openspec", "ui"]
+
+[[panes]]
+id = "dashboard-tab"
+title = "OpenSpec"
+placement = "tab"
+command = ["./target/release/herdr-openspec", "ui"]
+
+[[actions]]
+id = "open"
+title = "OpenSpec: dashboard"
+contexts = ["workspace"]
+command = ["./target/release/herdr-openspec", "open"]
+
+[[actions]]
+id = "open-tab"
+title = "OpenSpec: dashboard (tab)"
+contexts = ["workspace"]
+command = ["./target/release/herdr-openspec", "open-tab"]

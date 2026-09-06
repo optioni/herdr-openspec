@@ -29,11 +29,15 @@ herdr plugin install optioni/herdr-openspec
 Herdr clones the repository and compiles it in place, so a Rust toolchain is
 required for now. Prebuilt release binaries are planned.
 
-Then open the dashboard from Herdr's action menu: **OpenSpec: dashboard** (split
-pane) or **OpenSpec: dashboard (tab)** — these action-menu entries arrive with a
-later change; today the manifest declares the `dashboard` split pane only,
-reachable directly with
+Then open the dashboard from Herdr's action menu: **OpenSpec: dashboard** opens
+it split from the current pane, and **OpenSpec: dashboard (tab)** opens it in a
+new tab. Pressing either again focuses the existing dashboard rather than
+opening a second one. The same pane is also reachable directly with
 `herdr plugin pane open --plugin herdr-openspec --entrypoint dashboard`.
+
+**An already-linked plugin must be relinked** (`herdr plugin link .`, or a
+`plugin install` reinstall) or the Herdr server restarted for these two new
+actions to appear — Herdr re-reads the manifest only then.
 
 ## Keys
 
