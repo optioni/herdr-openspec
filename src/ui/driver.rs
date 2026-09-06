@@ -208,6 +208,7 @@ mod tests {
                 reachable: false,
                 problem: None,
             },
+            agent_names: crate::state::Mapping::default(),
         }
     }
 
@@ -240,6 +241,7 @@ mod tests {
                 reachable: false,
                 problem: None,
             },
+            agent_names: crate::state::Mapping::default(),
         }
     }
 
@@ -595,6 +597,7 @@ mod tests {
                 reachable: false,
                 problem: None,
             },
+            agent_names: crate::state::Mapping::default(),
         }
     }
 
@@ -714,6 +717,7 @@ mod tests {
                 reachable: false,
                 problem: None,
             },
+            agent_names: crate::state::Mapping::default(),
         }
     }
 
@@ -919,6 +923,7 @@ mod tests {
                 reachable: false,
                 problem: None,
             },
+            agent_names: crate::state::Mapping::default(),
         };
         let backend = TestBackend::new(120, 20);
         let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
@@ -1014,6 +1019,7 @@ mod tests {
                 reachable: false,
                 problem: None,
             },
+            agent_names: crate::state::Mapping::default(),
         }
     }
 

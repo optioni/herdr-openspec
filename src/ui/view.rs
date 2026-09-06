@@ -368,6 +368,7 @@ mod tests {
                 reachable: false,
                 problem: None,
             },
+            agent_names: crate::state::Mapping::default(),
         }
     }
 
@@ -400,6 +401,7 @@ mod tests {
                 reachable: false,
                 problem: None,
             },
+            agent_names: crate::state::Mapping::default(),
         }
     }
 
@@ -437,6 +439,7 @@ mod tests {
                 reachable: false,
                 problem: None,
             },
+            agent_names: crate::state::Mapping::default(),
         }
     }
 
@@ -931,6 +934,7 @@ mod tests {
                 reachable: false,
                 problem: None,
             },
+            agent_names: crate::state::Mapping::default(),
         };
         let buf120 = render_at(120, 20, &d);
         assert!(interior_cols(&buf120, 2).starts_with("No OpenSpec repository found"));
@@ -1659,6 +1663,7 @@ mod tests {
                 reachable: false,
                 problem: None,
             },
+            agent_names: crate::state::Mapping::default(),
         }
     }
 
@@ -1699,6 +1704,7 @@ mod tests {
                 reachable: false,
                 problem: None,
             },
+            agent_names: crate::state::Mapping::default(),
         };
 
         let buf120 = render_at(120, 20, &d);
@@ -1838,6 +1844,7 @@ mod tests {
                 reachable: false,
                 problem: None,
             },
+            agent_names: crate::state::Mapping::default(),
         };
         let default_style = Cell::default().style();
 
@@ -2156,6 +2163,7 @@ mod tests {
                 reachable: false,
                 problem: None,
             },
+            agent_names: crate::state::Mapping::default(),
         };
         d.apply(Action::Next);
         d.apply(Action::Next);

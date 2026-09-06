@@ -662,6 +662,7 @@ pub(crate) mod testutil {
                     reachable: false,
                     problem: None,
                 },
+                agent_names: crate::state::Mapping::default(),
             }
         }
 

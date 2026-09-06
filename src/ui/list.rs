@@ -378,6 +378,7 @@ mod tests {
                 reachable: false,
                 problem: None,
             },
+            agent_names: crate::state::Mapping::default(),
         }
     }
 
@@ -459,6 +460,7 @@ mod tests {
                     reachable: false,
                     problem: None,
                 },
+                agent_names: crate::state::Mapping::default(),
             },
         ]
     }
@@ -799,6 +801,7 @@ mod tests {
                 reachable: false,
                 problem: None,
             },
+            agent_names: crate::state::Mapping::default(),
         };
         let rows38 = rows(&d, 38);
         assert_eq!(rows38.len(), 3);
@@ -854,6 +857,7 @@ mod tests {
                 reachable: false,
                 problem: None,
             },
+            agent_names: crate::state::Mapping::default(),
         };
         let rows_with_problems = rows(&with_problems, 38);
         assert_eq!(rows_with_problems.len(), 3);

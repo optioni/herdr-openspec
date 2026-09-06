@@ -75,6 +75,32 @@ pub struct AgentSnapshot {
     pub problem: Option<String>,
 }
 
+/// The result of `attribute`: which change each in-scope agent was attributed to, and
+/// how many in-scope agents no tier could place. Never `Default`, anywhere in the
+/// crate; every construction and destructuring names both fields. See
+/// `specs/agent-attribution/spec.md`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Attribution {
+    pub badges: std::collections::BTreeMap<String, AgentStatus>,
+    pub unattributed: usize,
+}
+
+/// Map live agents onto changes: a pure, total function of its four arguments. Group
+/// 1 lands this inert — an empty `Attribution` regardless of input — so the crate
+/// compiles against `Dashboard::attribution()`'s new call site before the real three
+/// tiers land in group 3. See `specs/agent-attribution/spec.md`.
+pub fn attribute(
+    _agents: &[Agent],
+    _repo: Option<&std::path::Path>,
+    _change_names: &[&str],
+    _mapping: &std::collections::BTreeMap<String, String>,
+) -> Attribution {
+    Attribution {
+        badges: std::collections::BTreeMap::new(),
+        unattributed: 0,
+    }
+}
+
 /// Decode one entry of the `agents` array. `None` when the entry is not a JSON object,
 /// or is missing (or holds a non-string) `pane_id`, `tab_id`, or `workspace_id` — the
 /// three of Herdr's seven required fields this crate reads — with one line pushed onto

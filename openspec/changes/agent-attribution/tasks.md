@@ -257,7 +257,7 @@ On the wired copy with `src/state.rs`'s `pub fn read(` renamed: `exit=1`,
 ## 0. Baseline, checks, and the scratchpad
 <!-- kind: operational -->
 
-- [ ] 0.1 CHECK: Record the starting state by **measuring**, never by copying a number from
+- [x] 0.1 CHECK: Record the starting state by **measuring**, never by copying a number from
       this file. `export BASE=$(git rev-parse HEAD)`; then run each command in the "Measured
       at planning time" table and record its output verbatim.
       **Red when:** `BASE` is empty or not a commit, or any measured figure differs from the
@@ -265,7 +265,7 @@ On the wired copy with `src/state.rs`'s `pub fn read(` renamed: `exit=1`,
       each invocation over an exported variable: re-exporting from the current `HEAD` after a
       fresh shell silently puts this change's own commits inside the baseline.
 
-- [ ] 0.2 CHANGE: Write `EXTENDED.sh` to `$CHECKS` from the block above, and extract the other
+- [x] 0.2 CHANGE: Write `EXTENDED.sh` to `$CHECKS` from the block above, and extract the other
       twenty-eight files from the archived tasks files that last reproduced each in full:
       `AGENTSEAM.sh`, `WIRED.sh` from `.../2026-09-06-agent-polling/tasks.md`; `WATCHSEAM.sh`,
       `READONLY-UI.sh`, `NOBLOCK.sh`, `NOSLEEP.sh`, `OPENSPEC-UNTOUCHED.sh` from
@@ -281,7 +281,7 @@ On the wired copy with `src/state.rs`'s `pub fn read(` renamed: `exit=1`,
       **second** line behind a shebang. Use a scratch directory this session owns: another live
       session in this repository may be writing to the same shared path.
 
-- [ ] 0.3 CHANGE: Re-apply `agent-polling`'s four accumulated edits, which live in that
+- [x] 0.3 CHANGE: Re-apply `agent-polling`'s four accumulated edits, which live in that
       change's tasks file as string replacements rather than in any reproduced block:
       `NODEFAULT-UI.sh`'s `HOMEFILE` parameterisation, its `|| exit 1` repair, and its OK-line
       suffix; `NOSLEEP.sh`'s leg 2b gaining `src/agents.rs`; `NOBLOCK.sh`'s leg 3 gaining
@@ -290,7 +290,7 @@ On the wired copy with `src/state.rs`'s `pub fn read(` renamed: `exit=1`,
       **Red when:** `NODEFAULT-UI.sh` still names `$SRC/ui/app.rs` in its positive control, or
       `OPENSPEC-UNTOUCHED.sh` still holds the literal `^openspec/changes/live-refresh/`.
 
-- [ ] 0.4 CHECK: Run all twenty-eight extracted gates against the unmodified tree at `BASE`,
+- [x] 0.4 CHECK: Run all twenty-eight extracted gates against the unmodified tree at `BASE`,
       at the invocations this change uses, and record each exit status and its first line
       verbatim.
       **Expected:** `EXTENDED` red on all eight pairs; `WIRED` red on leg 1;
@@ -298,13 +298,13 @@ On the wired copy with `src/state.rs`'s `pub fn read(` renamed: `exit=1`,
       `TYPES='Agent Listed AgentSnapshot Attribution' NODEFAULT-UI` red on its positive
       control; every other gate green.
 
-- [ ] 0.5 CHANGE: Apply this change's own edits — `NOIO-VIEW.sh`'s one replacement and
+- [x] 0.5 CHANGE: Apply this change's own edits — `NOIO-VIEW.sh`'s one replacement and
       `WIRED.sh`'s five, exactly as written above — printing each resulting `diff` before
       running.
       **Expected after this task:** `NOIO-VIEW` green; `WIRED` still red, now on **leg 1**
       rather than on a guard. A guard failure here is a defect in the edit.
 
-- [ ] 0.6 CHECK: Prove `NOIO-VIEW`'s edit can fail. Plant
+- [x] 0.6 CHECK: Prove `NOIO-VIEW`'s edit can fail. Plant
       `fn zz_plant(d: &std::path::Path) { let _ = crate::state::read(Some(d)); }` at the end of
       `src/ui/app.rs`, run `sh $CHECKS/NOIO-VIEW.sh`, record exit **1** and the FAIL line;
       run the **unedited** extraction against the same plant and record exit **0**; remove the
@@ -312,12 +312,12 @@ On the wired copy with `src/state.rs`'s `pub fn read(` renamed: `exit=1`,
       **Red when:** the edited check is green under the plant, or the unedited one is red —
       either means the edit is not the thing catching it.
 
-- [ ] 0.7 CHECK: Prove `OPENSPEC-UNTOUCHED`'s exclusion is still scoped. Plant an empty
+- [x] 0.7 CHECK: Prove `OPENSPEC-UNTOUCHED`'s exclusion is still scoped. Plant an empty
       `openspec/specs/STRAY.tmp`, run with `CHANGE=agent-attribution` and record exit **1**
       naming that path; remove it; then run with `CHANGE=nope` and record exit **1** naming the
       vacuous exclusion.
 
-- [ ] 0.8 VERIFY: `git status --porcelain` shows no change under `openspec/` outside
+- [x] 0.8 VERIFY: `git status --porcelain` shows no change under `openspec/` outside
       `openspec/changes/agent-attribution/`, and
       `BASE=$BASE CHANGE=agent-attribution sh $CHECKS/OPENSPEC-UNTOUCHED.sh` is green. Commit
       nothing in this group — it writes only to `$CHECKS`.
@@ -329,29 +329,29 @@ Structure only: inert signatures, no behaviour. The evidence is that the 805 lan
 green while the tree grows the API groups 2 to 7 fill in. See design.md → Test Strategy for why
 this precedes the outer-loop RED.
 
-- [ ] 1.1 CHARACTERIZE: `. $CHECKS/TESTCOUNT.sh; testcount --lib '' 805` and record the count,
+- [x] 1.1 CHARACTERIZE: `. $CHECKS/TESTCOUNT.sh; testcount --lib '' 805` and record the count,
       so the landed suite is green before any file is touched.
 
-- [ ] 1.2 REFACTOR: Add the inert shapes. `src/agents.rs`: `Attribution` with its two fields
+- [x] 1.2 REFACTOR: Add the inert shapes. `src/agents.rs`: `Attribution` with its two fields
       and an `attribute` returning an empty one. `src/ui/app.rs`: `Dashboard::agent_names:
       crate::state::Mapping` and an `attribution()` that calls `attribute` with the change
       names it derives. `src/ui/mod.rs`: `Startup::state_dir: Option<&'a Path>`, `load`'s third
       parameter (unread), and `run` passing `state::state_dir(&config::env_lookup())`.
 
-- [ ] 1.3 REFACTOR: Fix every site the new shapes break, counted rather than estimated: the
+- [x] 1.3 REFACTOR: Fix every site the new shapes break, counted rather than estimated: the
       **2** `Startup { … }` literals, the **14** `ui::load(` call sites (1 production, 13
       test), and every `Dashboard { … }` literal in the crate — `grep -rn 'Startup {' src/`,
       `grep -rn 'load(' src/ui/mod.rs`, and `NODEFAULT-UI`'s 165-span count are the three
       commands that enumerate them.
 
-- [ ] 1.4 CHECK: `sh $CHECKS/WIRED.sh` must now be **green** for the first time, including
+- [x] 1.4 CHECK: `sh $CHECKS/WIRED.sh` must now be **green** for the first time, including
       leg 5. Then plant `state_dir: None` in `run`'s `Startup` literal, re-run, record exit
       **1** naming leg 5, and revert; then delete `state::read` from `load`, re-run, record
       exit **1** naming leg 1, and revert.
       **Red when:** either plant is green — leg 5 exists precisely because no test reaches the
       value `run` passes.
 
-- [ ] 1.5 VERIFY: `testcount --lib '' 805` — the landed suite is unchanged — then
+- [x] 1.5 VERIFY: `testcount --lib '' 805` — the landed suite is unchanged — then
       `cargo clippy --all-targets --all-features -- -D warnings` and
       `cargo fmt --all -- --check`. Commit.
 

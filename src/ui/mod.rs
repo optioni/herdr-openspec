@@ -87,6 +87,13 @@ pub struct Startup<'a> {
     pub cwd: &'a Path,
     pub config: &'a Config,
     pub herdr: &'a Path,
+    /// The plugin's state directory, resolved once by `run` and passed in as
+    /// a parameter — `agent-attribution`'s addition, on exactly `herdr`'s
+    /// terms — so `load` reads the agent-name mapping from a directory a
+    /// test can point at a scratch tree without touching the process
+    /// environment. `None` is an ordinary case: no directory could be
+    /// resolved, and `load` yields an empty mapping.
+    pub state_dir: Option<&'a Path>,
 }
 
 /// The live tier's three collaborators, plus any problem folded in while
@@ -137,7 +144,7 @@ pub fn run_wired<B: Backend, E: EventSource>(
     read: ArtifactReader<'_>,
     tick: Duration,
 ) -> Result<Dashboard, StartError> {
-    let mut dashboard = load(startup.cwd, startup.config);
+    let mut dashboard = load(startup.cwd, startup.config, startup.state_dir);
     let mut collaborators =
         start_collaborators(dashboard.repo.as_deref(), startup.config, startup.herdr);
     dashboard.refresh.problems = collaborators.problems;
@@ -160,10 +167,12 @@ pub fn run() -> Result<(), StartError> {
     let config = crate::config::load_from_env();
     let cwd = std::env::current_dir()?;
     let mut term = Terminal::new(ratatui::backend::CrosstermBackend::new(std::io::stdout()))?;
+    let state_dir = crate::state::state_dir(&crate::config::env_lookup());
     let startup = Startup {
         cwd: &cwd,
         config: &config,
         herdr: Path::new(crate::cli::HERDR_PROGRAM),
+        state_dir: state_dir.as_deref(),
     };
     run_wired(
         &mut term,
@@ -189,7 +198,12 @@ pub fn read_artifact(path: &Path) -> Result<String, String> {
 /// process, and consults no `openspec` binary, so the dashboard opens with
 /// a complete change list on a machine where `openspec` is not installed.
 /// Always returns a `Dashboard`, never a `Result`, and never panics.
-pub fn load(start: &Path, config: &Config) -> Dashboard {
+pub fn load(start: &Path, config: &Config, state_dir: Option<&Path>) -> Dashboard {
+    // Group 1 skeleton: the read happens (so `WIRED`'s leg 1 sees the name, and a
+    // dropped result is exactly what its own comment says is fine at this stage), but
+    // the result is not yet threaded onto `agent_names` — group 7's RED/GREEN pair is
+    // what wires the real value through both branches below.
+    let _ = crate::state::read(state_dir);
     match crate::resolve::find_repo(start) {
         crate::resolve::RepoSearch::Found { root } => {
             let changes = crate::changes::from_files(&root, config.archived_count);
@@ -223,6 +237,7 @@ pub fn load(start: &Path, config: &Config) -> Dashboard {
                     reachable: false,
                     problem: None,
                 },
+                agent_names: crate::state::Mapping::default(),
             }
         }
         crate::resolve::RepoSearch::NotFound { searched_from } => Dashboard {
@@ -253,6 +268,7 @@ pub fn load(start: &Path, config: &Config) -> Dashboard {
                 reachable: false,
                 problem: None,
             },
+            agent_names: crate::state::Mapping::default(),
         },
     }
 }
@@ -343,6 +359,7 @@ mod tests {
                     reachable: false,
                     problem: None,
                 },
+                agent_names: crate::state::Mapping::default(),
             }
         }
 
@@ -499,6 +516,7 @@ mod tests {
                         reachable: false,
                         problem: None,
                     },
+                    agent_names: crate::state::Mapping::default(),
                 }
             };
 
@@ -662,7 +680,7 @@ apply:
 
             for width in [120u16, 60u16] {
                 let config = crate::config::Config::default();
-                let mut dashboard = super::super::load(root, &config);
+                let mut dashboard = super::super::load(root, &config, None);
 
                 let backend = ratatui::backend::TestBackend::new(width, 20);
                 let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
@@ -857,7 +875,7 @@ apply:
             let start = root.join("a").join("b");
             std::fs::create_dir_all(&start).expect("create a two-level-deep start directory");
 
-            let dashboard = super::super::load(&start, &config_with_archived_count(5));
+            let dashboard = super::super::load(&start, &config_with_archived_count(5), None);
 
             assert_eq!(dashboard.repo, Some(canonical(root)));
             assert_eq!(dashboard.changes.active.len(), 1);
@@ -905,7 +923,7 @@ apply:
                 other => panic!("expected NotFound, got {other:?}"),
             };
 
-            let dashboard = super::super::load(start, &config_with_archived_count(5));
+            let dashboard = super::super::load(start, &config_with_archived_count(5), None);
 
             assert_eq!(dashboard.repo, None);
             assert_eq!(dashboard.searched_from, expected_searched_from);
@@ -938,10 +956,10 @@ apply:
                 );
             }
 
-            let three = super::super::load(root, &config_with_archived_count(3));
+            let three = super::super::load(root, &config_with_archived_count(3), None);
             assert_eq!(three.changes.archived.len(), 3);
 
-            let seven = super::super::load(root, &config_with_archived_count(7));
+            let seven = super::super::load(root, &config_with_archived_count(7), None);
             assert_eq!(seven.changes.archived.len(), 7);
         }
 
@@ -970,7 +988,7 @@ apply:
                 "- [x] a\n- [x] b\n- [x] c\n- [x] d\n- [x] e\n- [x] f\n- [x] g\n",
             );
 
-            let dashboard = super::super::load(root, &config_with_archived_count(5));
+            let dashboard = super::super::load(root, &config_with_archived_count(5), None);
 
             fn cols(text: &str, from: usize, to_inclusive: usize) -> String {
                 text.chars()
@@ -1035,7 +1053,7 @@ apply:
             );
 
             let before = snapshot(root);
-            let _ = super::super::load(root, &config_with_archived_count(5));
+            let _ = super::super::load(root, &config_with_archived_count(5), None);
             let after = snapshot(root);
             assert_eq!(before, after, "ui::load wrote inside the repository");
         }
@@ -1055,7 +1073,7 @@ apply:
             );
 
             let before = snapshot(root);
-            let mut dashboard = super::super::load(root, &config_with_archived_count(5));
+            let mut dashboard = super::super::load(root, &config_with_archived_count(5), None);
             dashboard.sync_detail(&super::super::read_artifact);
             let after = snapshot(root);
             assert_eq!(
@@ -1109,7 +1127,7 @@ apply:
             let root = scratch.path();
             write(&root.join("openspec/changes/alpha/proposal.md"), "# P\n");
 
-            let found = super::super::load(root, &config_with_archived_count(5));
+            let found = super::super::load(root, &config_with_archived_count(5), None);
             assert_eq!(found.detail.source, "");
             assert_eq!(found.detail.scroll, 0);
             assert_eq!(found.detail.tab, 0);
@@ -1138,7 +1156,8 @@ apply:
                 );
                 ancestor = a.parent();
             }
-            let not_found = super::super::load(scratch2.path(), &config_with_archived_count(5));
+            let not_found =
+                super::super::load(scratch2.path(), &config_with_archived_count(5), None);
             assert_eq!(not_found.repo, None);
             assert_eq!(not_found.detail.source, "");
             assert_eq!(not_found.detail.scroll, 0);
@@ -1340,7 +1359,7 @@ apply:
                 let scratch = scratch_repo_with_alpha();
                 let root = scratch.path();
                 let config = Config::default();
-                let mut dashboard = super::super::load(root, &config);
+                let mut dashboard = super::super::load(root, &config, None);
 
                 let before = snapshot(root);
 
@@ -1533,7 +1552,7 @@ apply:
                 let scratch = scratch_repo_with_alpha();
                 let root = scratch.path();
                 let config = Config::default();
-                let mut dashboard = super::super::load(root, &config);
+                let mut dashboard = super::super::load(root, &config, None);
 
                 let backend = ratatui::backend::TestBackend::new(width, 20);
                 let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
@@ -1575,7 +1594,7 @@ apply:
                 let scratch = scratch_repo_with_alpha();
                 let root = scratch.path();
                 let config = Config::default();
-                let mut dashboard = super::super::load(root, &config);
+                let mut dashboard = super::super::load(root, &config, None);
 
                 let backend = ratatui::backend::TestBackend::new(width, 20);
                 let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
@@ -1679,6 +1698,7 @@ apply:
                 cwd: root,
                 config,
                 herdr,
+                state_dir: None,
             };
             let result = super::super::run_wired(
                 &mut terminal,

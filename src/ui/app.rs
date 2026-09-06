@@ -123,7 +123,7 @@ pub struct Refresh {
 /// count, no terminal handle, and no frame — those are derived from the
 /// frame area on every draw, never stored here. Deliberately implements no
 /// `Default`, anywhere in the crate: every construction and every
-/// destructuring names all ten fields, so a field added later fails to
+/// destructuring names all eleven fields, so a field added later fails to
 /// compile at each site rather than defaulting silently. See
 /// `specs/dashboard-loop/spec.md` and the `NODEFAULT-UI` check.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -151,9 +151,13 @@ pub struct Dashboard {
     pub refresh: Refresh,
     /// The most recent agent poll's outcome. Replaced wholesale, never
     /// merged: a poll that found no agents means there are no agents.
-    /// Nothing renders this field in `agent-polling`; see
-    /// `specs/agent-poller/spec.md`.
+    /// `ui::list` and `ui::view` read it, but only through `attribution()`;
+    /// see `specs/agent-poller/spec.md`.
     pub agents: crate::agents::AgentSnapshot,
+    /// The plugin-local agent-name mapping, read once by `ui::load` from the
+    /// state directory `Startup` carries. `agent-attribution`'s first tier
+    /// resolves an agent's name through it. See `specs/dashboard-loop/spec.md`.
+    pub agent_names: crate::state::Mapping,
 }
 
 impl Dashboard {
@@ -325,6 +329,27 @@ impl Dashboard {
     /// call sites that only need the count.
     pub fn visible_len(&self) -> usize {
         self.visible().len()
+    }
+
+    /// Derive the current attribution from state this dashboard already
+    /// carries — `repo`, `changes`, `agents.agents`, and `agent_names` —
+    /// beside `visible()`, recomputed on every call and stored nowhere. Group
+    /// 1 lands this calling the still-inert `agents::attribute`; group 4
+    /// gives it its real body. See `specs/agent-attribution/spec.md`.
+    pub fn attribution(&self) -> crate::agents::Attribution {
+        let change_names: Vec<&str> = self
+            .changes
+            .active
+            .iter()
+            .chain(self.changes.archived.iter())
+            .map(|c| c.name.as_str())
+            .collect();
+        crate::agents::attribute(
+            &self.agents.agents,
+            self.repo.as_deref(),
+            &change_names,
+            &self.agent_names.names,
+        )
     }
 
     /// The change `selected` addresses in `visible()`, or `None` when the
@@ -557,6 +582,7 @@ mod tests {
                     reachable: false,
                     problem: None,
                 },
+                agent_names: crate::state::Mapping::default(),
             }
         }
 
@@ -593,6 +619,7 @@ mod tests {
                     reachable: false,
                     problem: None,
                 },
+                agent_names: crate::state::Mapping::default(),
             }
         }
 
@@ -632,6 +659,7 @@ mod tests {
                     reachable: false,
                     problem: None,
                 },
+                agent_names: crate::state::Mapping::default(),
             }
         }
 
@@ -1022,6 +1050,7 @@ mod tests {
                     reachable: false,
                     problem: None,
                 },
+                agent_names: crate::state::Mapping::default(),
             };
 
             for action in variants {
@@ -1260,6 +1289,7 @@ mod tests {
                     reachable: false,
                     problem: None,
                 },
+                agent_names: crate::state::Mapping::default(),
             };
             d.apply(Action::Next);
             assert_eq!(d.detail.scroll, 1);
@@ -1302,6 +1332,7 @@ mod tests {
                     reachable: false,
                     problem: None,
                 },
+                agent_names: crate::state::Mapping::default(),
             };
             for _ in 0..4 {
                 d.apply(Action::Prev);
@@ -1350,6 +1381,7 @@ mod tests {
                     reachable: false,
                     problem: None,
                 },
+                agent_names: crate::state::Mapping::default(),
             };
             d.apply(Action::FilterPush('j'));
             d.apply(Action::FilterPush('k'));
@@ -1386,6 +1418,7 @@ mod tests {
                     reachable: false,
                     problem: None,
                 },
+                agent_names: crate::state::Mapping::default(),
             };
             d.apply(Action::Back);
             assert_eq!(d.detail.scroll, 0);
@@ -1417,6 +1450,7 @@ mod tests {
                     reachable: false,
                     problem: None,
                 },
+                agent_names: crate::state::Mapping::default(),
             };
             d2.apply(Action::FilterStart);
             assert_eq!(d2.route, Route::List);
@@ -1450,6 +1484,7 @@ mod tests {
                     reachable: false,
                     problem: None,
                 },
+                agent_names: crate::state::Mapping::default(),
             };
             d3.apply(Action::Back);
             assert_eq!(d3.detail.scroll, 3);
@@ -1487,6 +1522,7 @@ mod tests {
                     reachable: false,
                     problem: None,
                 },
+                agent_names: crate::state::Mapping::default(),
             };
             d.normalise_scroll(ratatui::layout::Rect::new(0, 0, 120, 20));
             assert_eq!(d.detail.scroll, 6);
@@ -1516,6 +1552,7 @@ mod tests {
                     reachable: false,
                     problem: None,
                 },
+                agent_names: crate::state::Mapping::default(),
             };
             d2.normalise_scroll(ratatui::layout::Rect::new(0, 0, 60, 20));
             assert_eq!(d2.detail.scroll, 6);
@@ -1545,6 +1582,7 @@ mod tests {
                     reachable: false,
                     problem: None,
                 },
+                agent_names: crate::state::Mapping::default(),
             };
             d3.normalise_scroll(ratatui::layout::Rect::new(0, 0, 120, 40));
             assert_eq!(
@@ -1592,6 +1630,7 @@ mod tests {
                         reachable: false,
                         problem: None,
                     },
+                    agent_names: crate::state::Mapping::default(),
                 }
             }
 
@@ -1645,6 +1684,7 @@ mod tests {
                     reachable: false,
                     problem: None,
                 },
+                agent_names: crate::state::Mapping::default(),
             };
             d.normalise_scroll(ratatui::layout::Rect::new(0, 0, 60, 20));
             assert_eq!(
@@ -1755,6 +1795,7 @@ mod tests {
                     reachable: false,
                     problem: None,
                 },
+                agent_names: crate::state::Mapping::default(),
             };
             let before = dashboard.clone();
 
@@ -1819,6 +1860,7 @@ mod tests {
                     reachable: false,
                     problem: None,
                 },
+                agent_names: crate::state::Mapping::default(),
             }
         }
 
@@ -1960,6 +2002,7 @@ mod tests {
                 detail,
                 refresh,
                 agents,
+                agent_names,
             } = &d;
             assert_eq!(*repo, None);
             assert_eq!(
@@ -1978,6 +2021,7 @@ mod tests {
             assert!(agents.agents.is_empty());
             assert!(!agents.reachable);
             assert!(agents.problem.is_none());
+            assert!(agent_names.names.is_empty());
         }
 
         #[test]
@@ -2286,6 +2330,7 @@ mod tests {
                     reachable: false,
                     problem: None,
                 },
+                agent_names: crate::state::Mapping::default(),
             };
             d.apply(Action::Next);
             assert_eq!(d.selected, 1);
@@ -2325,6 +2370,7 @@ mod tests {
                     reachable: false,
                     problem: None,
                 },
+                agent_names: crate::state::Mapping::default(),
             };
             d2.apply(Action::Prev);
             assert_eq!(d2.selected, 0);
@@ -2375,6 +2421,7 @@ mod tests {
                     reachable: false,
                     problem: None,
                 },
+                agent_names: crate::state::Mapping::default(),
             }
         }
 
@@ -2512,6 +2559,7 @@ mod tests {
                     reachable: false,
                     problem: None,
                 },
+                agent_names: crate::state::Mapping::default(),
             };
             let recorder = RecordingReader::always(Ok("text".to_string()));
             let read = |p: &std::path::Path| recorder.read(p);
@@ -2572,6 +2620,7 @@ mod tests {
                     reachable: false,
                     problem: None,
                 },
+                agent_names: crate::state::Mapping::default(),
             };
             let recorder = RecordingReader::new(
                 vec![
@@ -2741,6 +2790,7 @@ mod tests {
                     reachable: false,
                     problem: None,
                 },
+                agent_names: crate::state::Mapping::default(),
             };
             let recorder = RecordingReader::always(Ok("t".to_string()));
             let read = |p: &std::path::Path| recorder.read(p);
@@ -2805,6 +2855,7 @@ mod tests {
                     reachable: false,
                     problem: None,
                 },
+                agent_names: crate::state::Mapping::default(),
             };
             let recorder2 = RecordingReader::always(Err("must not be called".to_string()));
             let read2 = |p: &std::path::Path| recorder2.read(p);
