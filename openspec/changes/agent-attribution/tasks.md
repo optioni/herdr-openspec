@@ -452,7 +452,7 @@ directions; see design.md → Test Strategy.
 ## 5. The badge cell in `ui::list`
 <!-- kind: behavior -->
 
-- [ ] 5.1 RED: Write `ui::list::tests::a_badged_active_row_at_both_widths`,
+- [x] 5.1 RED: Write `ui::list::tests::a_badged_active_row_at_both_widths`,
       `a_badged_archived_row_at_both_widths`, `an_unattributed_agent_badges_nothing`,
       `a_badged_row_drops_the_badge_first`, and `a_badged_archived_row_drops_the_badge_first`,
       asserting the exact strings `change-rows`' delta gives at 38 and the badge's 0-based
@@ -464,14 +464,14 @@ directions; see design.md → Test Strategy.
       is observed red before 5.2 makes it pass. Each test names both 38 and 58 **unsuffixed**,
       or `LISTWIDTHS` reports it missing a width.
 
-- [ ] 5.2 CHECK: Confirm all ten failures are the missing badge, not a broken fixture: each
+- [x] 5.2 CHECK: Confirm all ten failures are the missing badge, not a broken fixture: each
       names the badge column or the badge character in its diff, and no test fails to compile.
 
-- [ ] 5.3 GREEN: Give `active_style_row` and `archived_row_text` an optional badge character,
+- [x] 5.3 GREEN: Give `active_style_row` and `archived_row_text` an optional badge character,
       offered only together with the progress cell and dropped whole with its separating space
       before it, so a row with no badge is byte-identical to today's.
 
-- [ ] 5.4 VERIFY: `testcount --lib 'ui::list::tests::' 25`, plus the four single-test floors
+- [x] 5.4 VERIFY: `testcount --lib 'ui::list::tests::' 25`, plus the four single-test floors
       `testcount --lib 'ui::list::tests::a_badged_active_row_at_both_widths' 1`,
       `…a_badged_archived_row_at_both_widths' 1`,
       `…an_unattributed_agent_badges_nothing' 1`, and

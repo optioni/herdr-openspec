@@ -93,13 +93,24 @@ fn shorten_left_row(text: &str, width: usize) -> String {
     }
 }
 
-/// The active-change grammar: `[marker][space][name field][space][progress]`,
-/// with the progress cell dropped whole (reclaiming its own separating
-/// space) as soon as the name field would fall below one column, and the row
-/// degenerating to the first `width` characters of `"{marker} "` below two
-/// columns. Shared, unparameterised by date, by both the active row and the
-/// final degenerate branch of the archived row.
-fn active_style_row(marker: char, name: &str, progress: Option<&str>, width: u16) -> String {
+/// The active-change grammar: `[marker][space][name field][space][badge]
+/// [space][progress]`, with the badge cell offered only together with the
+/// progress cell and dropped whole first (reclaiming its own separating
+/// space) as soon as the name field would fall below one column with it;
+/// the progress cell (and its separating space) drops next on the same
+/// condition; and the row degenerates to the first `width` characters of
+/// `"{marker} "` below two columns. `badge` `None` reproduces exactly
+/// today's `[marker][space][name field][space][progress]` grammar, byte
+/// for byte — see `agent-attribution` -> Decisions 3. Shared,
+/// unparameterised by date, by both the active row and the final
+/// degenerate branch of the archived row.
+fn active_style_row(
+    marker: char,
+    name: &str,
+    progress: Option<&str>,
+    badge: Option<char>,
+    width: u16,
+) -> String {
     let w = i64::from(width);
     if w < 2 {
         let head = format!("{marker} ");
@@ -107,6 +118,13 @@ fn active_style_row(marker: char, name: &str, progress: Option<&str>, width: u16
     }
     if let Some(progress) = progress {
         let progress_len = progress.chars().count() as i64;
+        if let Some(badge) = badge {
+            let name_field_w = w - 2 - 1 - 1 - 1 - progress_len;
+            if name_field_w >= 1 {
+                let name_field = pad_or_truncate_right(name, name_field_w as usize);
+                return format!("{marker} {name_field} {badge} {progress}");
+            }
+        }
         let name_field_w = w - 2 - 1 - progress_len;
         if name_field_w >= 1 {
             let name_field = pad_or_truncate_right(name, name_field_w as usize);
@@ -119,24 +137,37 @@ fn active_style_row(marker: char, name: &str, progress: Option<&str>, width: u16
 }
 
 /// The archived-change grammar: `[marker][space][date field: 10][space]`
-/// then the active grammar's `[name field][space][progress]`, with the date
-/// field ten spaces when `date` is `None`. Dropped whole, in order — the
-/// progress cell (and its separating space) first, then the date field (and
-/// its separating space), then degenerating to `active_style_row` — exactly
-/// as `change-rows`' "Archived changes sit below a separator" requirement
-/// states.
+/// then the active grammar's `[name field][space][badge][space][progress]`,
+/// with the date field ten spaces when `date` is `None`. Dropped whole, in
+/// order — the badge cell (and its separating space) first, then the
+/// progress cell (and its separating space), then the date field (and its
+/// separating space), then degenerating to `active_style_row` with neither
+/// a badge nor a progress cell ever offered — exactly as `change-rows`'
+/// "Archived changes sit below a separator" requirement states.
 fn archived_row_text(
     marker: char,
     date: Option<&str>,
     name: &str,
     progress: &str,
+    badge: Option<char>,
     width: u16,
 ) -> String {
     let w = i64::from(width);
     let date_field = date.map_or_else(|| " ".repeat(10), str::to_string);
     let progress_len = progress.chars().count() as i64;
 
-    // Full form: marker + space + date(10) + space + name + space + progress.
+    // Full form with the badge: marker + space + date(10) + space + name +
+    // space + badge + space + progress.
+    if let Some(badge) = badge {
+        let name_field_w = w - 14 - 1 - 1 - progress_len;
+        if name_field_w >= 1 {
+            let name_field = pad_or_truncate_right(name, name_field_w as usize);
+            return format!("{marker} {date_field} {name_field} {badge} {progress}");
+        }
+    }
+
+    // Full form without the badge (dropped, or never offered): marker +
+    // space + date(10) + space + name + space + progress.
     let name_field_full = w - 14 - progress_len;
     if name_field_full >= 1 {
         let name_field = pad_or_truncate_right(name, name_field_full as usize);
@@ -151,9 +182,9 @@ fn archived_row_text(
         return format!("{marker} {date_field} {name_field}");
     }
 
-    // Drop the date field too: degenerate to the active grammar, with no
-    // progress cell ever offered.
-    active_style_row(marker, name, None, width)
+    // Drop the date field too: degenerate to the active grammar, with
+    // neither a badge nor a progress cell ever offered.
+    active_style_row(marker, name, None, None, width)
 }
 
 /// A `Problem` row: `! `, then the text, truncated with `…` when the width
@@ -216,6 +247,7 @@ pub fn rows(dashboard: &Dashboard, width: u16) -> Vec<Row> {
         return no_repo_rows(&dashboard.searched_from, width);
     }
 
+    let attribution = dashboard.attribution();
     let query = dashboard.filter.query.as_str();
     let active: Vec<&crate::changes::Change> = dashboard
         .changes
@@ -285,11 +317,17 @@ pub fn rows(dashboard: &Dashboard, width: u16) -> Vec<Row> {
         for change in &active {
             let selected = index == dashboard.selected;
             let marker = if selected { '>' } else { ' ' };
+            let badge = attribution
+                .badges
+                .get(&change.name)
+                .copied()
+                .map(badge_char);
             out.push(Row {
                 text: active_style_row(
                     marker,
                     &change.name,
                     Some(&progress_cell(&change.progress)),
+                    badge,
                     width,
                 ),
                 kind: RowKind::Item { index },
@@ -312,12 +350,18 @@ pub fn rows(dashboard: &Dashboard, width: u16) -> Vec<Row> {
                 crate::changes::Origin::Archived { date } => date.as_deref(),
                 crate::changes::Origin::Active => None,
             };
+            let badge = attribution
+                .badges
+                .get(&change.name)
+                .copied()
+                .map(badge_char);
             out.push(Row {
                 text: archived_row_text(
                     marker,
                     date,
                     &change.name,
                     &progress_cell(&change.progress),
+                    badge,
                     width,
                 ),
                 kind: RowKind::Item { index },
@@ -330,11 +374,42 @@ pub fn rows(dashboard: &Dashboard, width: u16) -> Vec<Row> {
     out
 }
 
+/// The badge glyph for `status` — one ASCII column, collision-free against
+/// every other glyph this row grammar uses (`>`, `!`, `…`, `-`, `[`). See
+/// `specs/change-rows/spec.md` -> "The agent badge".
+fn badge_char(status: crate::agents::AgentStatus) -> char {
+    match status {
+        crate::agents::AgentStatus::Working => 'w',
+        crate::agents::AgentStatus::Idle => 'i',
+        crate::agents::AgentStatus::Blocked => 'b',
+        crate::agents::AgentStatus::Done => 'd',
+        crate::agents::AgentStatus::Unknown => '?',
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use crate::agents::{Agent, AgentStatus};
     use crate::changes::fixture;
     use crate::ui::app::{Dashboard, Detail, Filter, Route};
     use crate::ui::list::{Row, RowKind, problem_row_text, rows};
+
+    /// An in-scope `Agent` named `name` at `/tmp/demo-repo` — this module's fixture
+    /// dashboards' repository root — carrying `status`. `agent-attribution`'s own
+    /// tests build agents this way rather than through a `Change` literal, on
+    /// exactly `NOLIT-CHANGE`'s terms.
+    fn agent_at(name: &str, status: AgentStatus) -> Agent {
+        Agent {
+            name: Some(name.to_string()),
+            kind: None,
+            status,
+            cwd: Some(std::path::PathBuf::from("/tmp/demo-repo")),
+            pane_id: "p".to_string(),
+            tab_id: "t".to_string(),
+            workspace_id: "w".to_string(),
+            terminal_title: None,
+        }
+    }
 
     fn empty_filter() -> Filter {
         Filter {
@@ -492,6 +567,19 @@ mod tests {
                 assert_eq!(&row.text, expect, "width {width}");
             }
         }
+
+        // `agent-attribution`: the identical dashboard, now carrying agents, still
+        // renders every row byte-identically when none of them is in scope.
+        let mut unattributed = three_active();
+        unattributed.agents.agents = vec![agent_at("scratch-work", AgentStatus::Working)];
+        for width in [38, 58] {
+            let badgeless = rows(&d, width);
+            let still_unbadged = rows(&unattributed, width);
+            assert_eq!(
+                badgeless, still_unbadged,
+                "width {width}: an unmatched agent must badge nothing"
+            );
+        }
     }
 
     #[test]
@@ -523,6 +611,15 @@ mod tests {
                 }
             }
         }
+
+        // `agent-attribution`: a badged fixture is exactly the requested width too.
+        let mut badged = three_active();
+        badged.agents.agents = vec![agent_at("add-token-refresh", AgentStatus::Working)];
+        for width in [38, 58] {
+            for row in rows(&badged, width) {
+                assert_eq!(row.text.chars().count(), width as usize, "badged row");
+            }
+        }
     }
 
     #[test]
@@ -545,6 +642,21 @@ mod tests {
             "  a-very-long-change-name-that-will-not-fit-here     [2/5]"
         );
         assert!(!rows58[0].text.contains('…'));
+
+        // `agent-attribution`: the 46-character name is unreachable by Herdr's own
+        // 32-character cap, so it is badged only through the mapping tier — and doing
+        // so truncates the name two columns earlier to make room for the badge.
+        let long_name = "a-very-long-change-name-that-will-not-fit-here";
+        let derived = crate::state::agent_name(long_name);
+        let mut badged = d;
+        badged.agents.agents = vec![agent_at(&derived, AgentStatus::Working)];
+        badged.agent_names.names =
+            std::collections::BTreeMap::from([(derived, long_name.to_string())]);
+        let rows38_badged = rows(&badged, 38);
+        assert_eq!(
+            rows38_badged[0].text,
+            "  a-very-long-change-name-tha… w [2/5]"
+        );
     }
 
     #[test]
@@ -592,6 +704,184 @@ mod tests {
         assert!(rows(&d, 38)[2].text.contains("[7/7]"));
         assert!(rows(&d, 58)[2].text.contains("2026-08-14"));
         assert!(rows(&d, 58)[2].text.contains("[7/7]"));
+    }
+
+    /// `change-rows`: "A badged row carries its status between the name and the
+    /// progress cell" — exact strings at 38, the badge's 0-based column index at 58.
+    #[test]
+    fn a_badged_active_row_at_both_widths() {
+        let mut d = three_active();
+        d.agents.agents = vec![
+            agent_at("add-token-refresh", AgentStatus::Working),
+            agent_at("fix-empty-basket", AgentStatus::Blocked),
+            agent_at("migrate-ai-sdk-v7", AgentStatus::Unknown),
+        ];
+
+        let rows38 = rows(&d, 38);
+        assert_eq!(rows38[0].text, "> add-token-refresh            w [4/9]");
+        assert_eq!(rows38[1].text, "  fix-empty-basket             b [7/7]");
+        assert_eq!(rows38[2].text, "  migrate-ai-sdk-v7              ? [-]");
+
+        let rows58 = rows(&d, 58);
+        for row in &rows58 {
+            assert_eq!(row.text.chars().count(), 58);
+        }
+        assert_eq!(rows58[0].text.chars().nth(51), Some('w'));
+        assert_eq!(rows58[1].text.chars().nth(51), Some('b'));
+        assert_eq!(rows58[2].text.chars().nth(53), Some('?'));
+        for (row, idx) in [(&rows58[0], 51), (&rows58[1], 51), (&rows58[2], 53)] {
+            assert_eq!(
+                row.text.chars().nth(idx - 1),
+                Some(' '),
+                "column left of the badge"
+            );
+            assert_eq!(
+                row.text.chars().nth(idx + 1),
+                Some(' '),
+                "column right of the badge"
+            );
+        }
+        assert!(rows58[0].text.ends_with("[4/9]"));
+        assert!(rows58[1].text.ends_with("[7/7]"));
+        assert!(rows58[2].text.ends_with("[-]"));
+    }
+
+    /// `change-rows`: "An archived change carries a badge in the same column as an
+    /// active one".
+    #[test]
+    fn a_badged_archived_row_at_both_widths() {
+        let unbadged = dashboard_with(
+            vec![fixture::active("fix-empty-basket", 7, 7)],
+            vec![
+                fixture::archived(Some("2026-08-14"), "add-auth", 7, 7),
+                fixture::archived(None, "legacy-cleanup", 3, 3),
+            ],
+            Vec::new(),
+            0,
+        );
+        let mut d = unbadged.clone();
+        d.agents.agents = vec![agent_at("add-auth", AgentStatus::Blocked)];
+
+        let rows38 = rows(&d, 38);
+        assert_eq!(rows38[0].text, "> fix-empty-basket               [7/7]");
+        assert_eq!(rows38[2].text, "  2026-08-14 add-auth          b [7/7]");
+        assert_eq!(rows38[3].text, "             legacy-cleanup      [3/3]");
+
+        let rows58 = rows(&d, 58);
+        for row in &rows58 {
+            assert_eq!(row.text.chars().count(), 58);
+        }
+        assert_eq!(rows58[2].text.chars().nth(51), Some('b'));
+        assert_eq!(rows58[2].text.chars().nth(50), Some(' '));
+        assert_eq!(rows58[2].text.chars().nth(52), Some(' '));
+        assert_eq!(
+            rows58[3].text,
+            rows(&unbadged, 58)[3].text,
+            "the separator and every unbadged row must be byte-identical"
+        );
+    }
+
+    /// `change-rows`: "An unattributed agent badges nothing" — the agentless
+    /// rendering, byte-identical, then the discriminating half: the same agent
+    /// renamed to a change does badge.
+    #[test]
+    fn an_unattributed_agent_badges_nothing() {
+        let agentless = three_active();
+        let mut with_unattributed = three_active();
+        with_unattributed.agents.agents = vec![
+            agent_at("scratch", AgentStatus::Working),
+            Agent {
+                name: None,
+                kind: None,
+                status: AgentStatus::Working,
+                cwd: Some(std::path::PathBuf::from("/tmp/demo-repo")),
+                pane_id: "p".to_string(),
+                tab_id: "t".to_string(),
+                workspace_id: "w".to_string(),
+                terminal_title: None,
+            },
+        ];
+        for width in [38, 58] {
+            assert_eq!(
+                rows(&agentless, width),
+                rows(&with_unattributed, width),
+                "width {width}: an unmatched or unnamed agent must badge nothing"
+            );
+        }
+
+        // Discriminating half: the second agent renamed to a change does badge.
+        let mut renamed = three_active();
+        renamed.agents.agents = vec![
+            agent_at("scratch", AgentStatus::Working),
+            agent_at("migrate-ai-sdk-v7", AgentStatus::Working),
+        ];
+        for width in [38, 58] {
+            assert_ne!(
+                rows(&agentless, width),
+                rows(&renamed, width),
+                "width {width}: renaming the agent to a change must badge that row"
+            );
+        }
+    }
+
+    /// `change-rows`: "A field too narrow for both drops the progress cell whole" —
+    /// the badged form.
+    #[test]
+    fn a_badged_row_drops_the_badge_first() {
+        let mut d = dashboard_with(
+            vec![fixture::active("alpha", 4, 9)],
+            Vec::new(),
+            Vec::new(),
+            0,
+        );
+        d.agents.agents = vec![agent_at("alpha", AgentStatus::Working)];
+
+        let cases: [(u16, &str); 5] = [
+            (12, "> a… w [4/9]"),
+            (11, "> … w [4/9]"),
+            (10, "> a… [4/9]"),
+            (9, "> … [4/9]"),
+            (8, "> alpha "),
+        ];
+        for (width, expected) in cases {
+            assert_eq!(rows(&d, width)[0].text, expected, "width {width}");
+        }
+        assert_eq!(rows(&d, 1)[0].text, ">");
+        assert_eq!(rows(&d, 0)[0].text, "");
+        assert!(rows(&d, 38)[0].text.contains(" w ["));
+        assert!(rows(&d, 58)[0].text.contains(" w ["));
+    }
+
+    /// `change-rows`: "An archived row drops the progress cell, then the date, as
+    /// the width falls" — the badged form.
+    #[test]
+    fn a_badged_archived_row_drops_the_badge_first() {
+        let mut d = dashboard_with(
+            vec![fixture::active("fix-empty-basket", 7, 7)],
+            vec![fixture::archived(Some("2026-08-14"), "add-auth", 7, 7)],
+            Vec::new(),
+            1,
+        );
+        d.agents.agents = vec![agent_at("add-auth", AgentStatus::Blocked)];
+
+        let cases: [(u16, &str); 9] = [
+            (22, "> 2026-08-14 … b [7/7]"),
+            (21, "> 2026-08-14 a… [7/7]"),
+            (20, "> 2026-08-14 … [7/7]"),
+            (19, "> 2026-08-14 add-a…"),
+            (14, "> 2026-08-14 …"),
+            (13, "> add-auth   "),
+            (3, "> …"),
+            (1, ">"),
+            (0, ""),
+        ];
+        for (width, expected) in cases {
+            assert_eq!(rows(&d, width)[2].text, expected, "width {width}");
+        }
+        assert!(rows(&d, 38)[2].text.contains("2026-08-14"));
+        assert!(rows(&d, 38)[2].text.contains(" b ["));
+        assert!(rows(&d, 58)[2].text.contains("2026-08-14"));
+        assert!(rows(&d, 58)[2].text.contains(" b ["));
     }
 
     #[test]
@@ -875,6 +1165,19 @@ mod tests {
             let rows_empty = rows(&empty, width);
             assert!(rows_empty[0].text.starts_with("No changes yet"));
 
+            // `agent-attribution`: two in-scope, unattributable agents change no pixel
+            // of the message row — a `Message` row is never badged.
+            let mut empty_with_agents = dashboard_with(Vec::new(), Vec::new(), Vec::new(), 0);
+            empty_with_agents.agents.agents = vec![
+                agent_at("nothing-like-a-change", AgentStatus::Working),
+                agent_at("also-nothing", AgentStatus::Idle),
+            ];
+            assert_eq!(
+                rows(&empty_with_agents, width),
+                rows_empty,
+                "width {width}: an unattributable agent must badge no message row"
+            );
+
             let archived_only = dashboard_with(
                 Vec::new(),
                 vec![fixture::archived(Some("2026-08-14"), "add-auth", 7, 7)],
@@ -999,6 +1302,25 @@ mod tests {
                 texts[1],
                 problem_row_text("openspec/changes unreadable", width),
                 "width {width}"
+            );
+        }
+
+        // `agent-attribution`: a badged change below the two problem rows carries its
+        // badge, and neither problem row above it ever carries one.
+        d.agents.agents = vec![agent_at("add-token-refresh", AgentStatus::Blocked)];
+        for width in [38, 58] {
+            let rows = rows(&d, width);
+            assert!(
+                !rows[0].text.contains(" b ["),
+                "width {width}: a problem row is never badged"
+            );
+            assert!(
+                !rows[1].text.contains(" b ["),
+                "width {width}: a problem row is never badged"
+            );
+            assert!(
+                rows[2].text.contains(" b ["),
+                "width {width}: the change row below must carry its badge"
             );
         }
     }
