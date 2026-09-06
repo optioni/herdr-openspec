@@ -265,11 +265,13 @@ named**; a gate invoked bare runs at its block default, which is a threshold nob
 ## 2. The dependency gate becomes a file, with a re-derived want-list
 <!-- kind: operational -->
 
-- [ ] 2.1 CHECK: Run the extracted `DEPS.sh` at `BASE` and confirm the failure is byte-identical
+- [x] 2.1 CHECK: Run the extracted `DEPS.sh` at `BASE` and confirm the failure is byte-identical
   to the one task 0.3 recorded — leg 2a, five wanted against six declared. A different failure
   means the baseline moved and this group's plan needs re-deriving before it starts.
 
-- [ ] 2.2 CHANGE: Write `scripts/gates/deps.sh` from the extracted block, and **re-derive** the
+  **Confirmed:** byte-identical to task 0.3's recording.
+
+- [x] 2.2 CHANGE: Write `scripts/gates/deps.sh` from the extracted block, and **re-derive** the
   leg 2a want-list from `cargo metadata --no-deps` reconciled against `plugin-build`'s "The
   crate produces one binary from an argued dependency set" requirement — which already names
   all six crates and their exact feature lists correctly. Do not patch `notify` into the
@@ -280,25 +282,34 @@ named**; a gate invoked bare runs at its block default, which is a threshold nob
   false, matching `Cargo.toml`'s
   `notify = { version = "8.2.0", default-features = false, features = ["macos_fsevent"] }`.
 
-- [ ] 2.3 CHANGE: Default `WORK` inside the script — `WORK="${WORK:-$(mktemp -d)}"` with a
+- [x] 2.3 CHANGE: Default `WORK` inside the script — `WORK="${WORK:-$(mktemp -d)}"` with a
   `trap` that removes it — replacing the `: "${WORK:?...}"` hard requirement the extracted
   block carries. `WORK` is used by leg **4**, not only leg 5, so `env -u WORK sh deps.sh`
   exits 1 at HEAD and the `make gates` recipe could never pass without this.
 
-- [ ] 2.4 CHANGE: Add the missing `needed notify "..."` removal experiment to leg 5, so all six
+- [x] 2.4 CHANGE: Add the missing `needed notify "..."` removal experiment to leg 5, so all six
   dependencies are argued on the same terms, and gate legs **1b** and **5** behind
   `${DEPS_FULL:-}` so `make gates` runs neither. Leg 1b builds the release binary and leg 5
   rebuilds the crate six times; both run under `make gates-full` (design.md → Decisions → 3).
 
-- [ ] 2.5 CHECK: Re-read `plugin-build`'s dependency table and confirm every crate, version
+- [x] 2.5 CHECK: Re-read `plugin-build`'s dependency table and confirm every crate, version
   floor, and feature list in the new want-list matches it exactly. This is the contract gate:
   the want-list and that requirement are two sites that must agree, and the gate's whole value
   is that they do.
 
-- [ ] 2.6 VERIFY: `env -u WORK sh scripts/gates/deps.sh` exits **0**, printing one `DEPS OK (leg 2a)` line
+  **Confirmed:** all six crates, versions, and feature lists agree exactly, including
+  `notify`'s `["macos_fsevent"]` and `default-features = false`.
+
+- [x] 2.6 VERIFY: `env -u WORK sh scripts/gates/deps.sh` exits **0**, printing one `DEPS OK (leg 2a)` line
   naming six normal deps. `DEPS_FULL=1 sh scripts/gates/deps.sh` also exits 0, and its leg 5
   output names six removal experiments, not five. No refactor was needed beyond the want-list
   rebuild itself, which is 2.2's subject. Commit.
+
+  **Verified:** `env -u WORK sh scripts/gates/deps.sh` exits 0, `DEPS OK (leg 2a): exactly 6
+  normal deps, defaults off, features exact`. `DEPS_FULL=1 sh scripts/gates/deps.sh` exits 0
+  with six `DEPS OK (leg 5/<crate>)` lines (toml, yaml-rust2, serde_json, ratatui,
+  pulldown-cmark, notify) plus the not-declared guard, and the working tree unchanged
+  afterwards (`git status --porcelain` shows only the new file).
 
 ## 3. The build-graph gate becomes a file, with a direction-aware platform assertion
 <!-- kind: operational -->
