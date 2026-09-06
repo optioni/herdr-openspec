@@ -50,8 +50,9 @@ poller beside the watcher, so most of these are load-bearing rather than advisor
 
 1. **`ui::driver::Live` is the extension point.** The agent poller becomes a third
    field on it, non-blocking by the same contract. It must **not** become another
-   `run_loop` parameter — seven arguments trips clippy's `too_many_arguments`, and the
-   only fix would be an `#[allow]`, which this project does not add to silence lints.
+   `run_loop` parameter. The reason is **cohesion**, not a lint: see the correction
+   below — `too_many_arguments` fires at eight, not seven, so clippy was never the
+   constraint this was justified by.
 2. **`NOCLI-SHELL` forbids `src/ui/` from naming `HerdrCli`.** The poller must live
    outside `src/ui/` — a `src/agents.rs`, exactly as `watch` and `refresh` do — or that
    landed check needs an exemption it should not get.
@@ -123,6 +124,25 @@ Two consequences:
 - **The crate's single `#[allow]` is vestigial** and can be deleted. Verified safe, but
   deliberately **not** removed here: it is shipped code and belongs to a change, not to a
   between-changes edit. Fold it into whichever change next touches `src/changes.rs`.
+
+## Open: the dependency gate has been red on `main` since `live-refresh`
+
+`DEPS` and `GRAPH-SNAP` are command-level checks defined per change in `design.md`, run
+outside `make check`. `live-refresh` added the `notify` dependency and updated neither
+the want-list nor `tests/fixtures/build-graph.txt`. So **the gate guarding the dependency
+set has been failing for two changes and nobody noticed**, because `make check` is green
+and these run separately.
+
+**Decision: `agent-launch` owns the repair** — regenerate `tests/fixtures/build-graph.txt`
+and author a want-list matching the real dependency set. It is a small addition to an
+already-heavy change, and that is deliberate: **the snapshot is a gate artefact, and
+regenerating it unattended between changes would bless the current state without review**
+— precisely the move this project has refused everywhere else. It gets a task and a
+reviewer, not a quiet fix.
+
+The deeper lesson is worth keeping: **a check that lives outside `make check` will rot,
+because nothing forces it to run.** Any future gate should either join `make check` or
+carry an explicit task in every change that could invalidate it.
 
 ## Rule: a doc claim is fixed by the change that makes it true
 
