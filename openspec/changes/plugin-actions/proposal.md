@@ -13,12 +13,19 @@ This is Phase 6's `plugin-actions` row in `openspec/IMPLEMENTATION-ORDER.md`.
   dashboard for the workspace the action was invoked from: list panes, focus an
   existing dashboard pane, otherwise open a new one. Neither renders; neither needs a
   terminal.
-- A new `src/open.rs` — the crate's fifth `HerdrCli` consumer, reaching the `herdr`
-  program only through the trait object, spawning nothing itself.
+- A new `src/open.rs` — the crate's third `HerdrCli` consumer (after `src/agents.rs` and
+  `src/launch.rs`) and the fifth file on the seam gates' `ALLOWED` list, reaching the
+  `herdr` program only through the trait object, spawning nothing itself.
 - `herdr-plugin.toml` gains both `[[actions]]` entries and the `dashboard-tab` pane.
   **BREAKING** — a manifest change.
-- The plugin passes `--cwd` from Herdr's injected invocation context, so the pane
-  opens on the workspace's repository rather than on the plugin root.
+- **Corrected during implementation** (group 10's live check — see design.md → Decision 6):
+  neither subcommand ever passes `--cwd` to `herdr plugin pane open`, because Herdr 0.8.2
+  resolves the manifest's relative pane command against `--cwd` too, breaking the spawn
+  for every real workspace directory. `ui::run` instead reads the workspace cwd from its
+  own injected Herdr context (`ui::startup_cwd`) — the pane opens on the plugin root, but
+  the dashboard process inside it searches from the workspace's own repository. Verified
+  live: opening the dashboard from a workspace rooted at a different OpenSpec repository
+  rendered that repository's own changes, not the plugin root's.
 - A `tests/manifest.rs` contract gate, inside `make check`, that ties the manifest,
   the Cargo bin target, and `README.md`'s advertised action titles together.
 - `README.md` drops the "these action-menu entries arrive with a later change"

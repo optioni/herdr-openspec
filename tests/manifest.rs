@@ -117,6 +117,17 @@ fn manifest_paths_and_the_cargo_binary_name_agree() {
             .to_string_lossy();
         assert_eq!(file_name, basename, "pane {id}'s command basename");
         checked += 1;
+
+        // The command tail against the token `parse` accepts —
+        // `specs/plugin-manifest/spec.md` -> "the two action command tails against the
+        // two subcommand tokens `parse` accepts" applies to both tables, not only
+        // actions: a `["…herdr-openspec", "u"]` typo would otherwise pass silently.
+        let tail = command[1].as_str().expect("command[1] is a string");
+        assert_eq!(
+            herdr_openspec::parse(&[tail]),
+            herdr_openspec::Invocation::Ui,
+            "pane {id}'s command tail {tail:?} does not classify as Invocation::Ui"
+        );
     }
     for action in actions {
         let id = str_field(action, "id");
@@ -131,6 +142,21 @@ fn manifest_paths_and_the_cargo_binary_name_agree() {
             .to_string_lossy();
         assert_eq!(file_name, basename, "action {id}'s command basename");
         checked += 1;
+
+        // The command tail against the token `parse` accepts, tied to the action's own
+        // `id` — `specs/plugin-manifest/spec.md` -> "the two action command tails
+        // against the two subcommand tokens `parse` accepts".
+        let tail = command[1].as_str().expect("command[1] is a string");
+        let expected = match id {
+            "open" => herdr_openspec::Invocation::Open,
+            "open-tab" => herdr_openspec::Invocation::OpenTab,
+            other => panic!("unexpected action id {other:?}"),
+        };
+        assert_eq!(
+            herdr_openspec::parse(&[tail]),
+            expected,
+            "action {id}'s command tail {tail:?} does not classify as expected"
+        );
     }
     assert_eq!(
         checked, 4,

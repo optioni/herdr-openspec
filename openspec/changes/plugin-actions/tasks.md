@@ -313,7 +313,7 @@
 ## 9. The manifest, its contract test, and the README rows
 <!-- kind: operational -->
 
-- [ ] 9.1 CHECK: Record the current shape, which is the RED this group closes. Measured at
+- [x] 9.1 CHECK: Record the current shape, which is the RED this group closes. Measured at
   HEAD:
 
   ```sh
@@ -641,15 +641,76 @@ clean) before this group's checklist was marked done.
 ## 14. Change Review
 <!-- kind: operational -->
 
-- [ ] 14.1 CHECK: Dispatch an independent reviewer — not a fork of this session — against
+- [x] 14.1 CHECK: Dispatch an independent reviewer — not a fork of this session — against
   `proposal.md`, every scenario in `specs/`, `design.md`, and `tasks.md`, given only the
   artifacts and the diff. Have it write findings to a scratchpad file incrementally, so a
   `529 Overloaded` does not cost the whole round.
 
-- [ ] 14.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a
+  **Dispatched.** Findings at
+  `/private/tmp/claude-501/-Users-juusopiikkila-Code-herdr-openspec/d5be0e1c-512c-496f-bdf6-1ea630cd0644/scratchpad/change-review-plugin-actions.md`.
+  Result: **0 CRITICAL, 9 WARNING, 8
+  SUGGESTION**. The reviewer independently reproduced `cargo fmt`/`clippy -D
+  warnings`/`test --all-features` green and the 939/9/4 test counts, confirmed the
+  architecture rules, confirmed `main.rs` holds no branch of its own, confirmed no stale
+  `--cwd` in code, and confirmed the `EXTENDED` 7-pair removal is legitimate (spot-checked
+  three function bodies against the real tree). Its headline finding: the group-10
+  `--cwd` correction was propagated to `design.md` Decision 6 and the spec files, but
+  **not** to `proposal.md` and four other places in `design.md`, including four
+  verification-matrix Command cells naming test functions that no longer exist (would run
+  nothing if re-executed — the vacuous-filter trap design.md itself warns about). Its one
+  WARNING with real behavioural stakes: `ui::startup_cwd`'s central assumption (a
+  `[[panes]]` process, not only an `[[actions]]` one, receives `HERDR_PLUGIN_CONTEXT_JSON`
+  with `workspace_cwd`) was inferred, never live-measured.
+
+- [x] 14.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a
   one-line reason, note SUGGESTIONs, and re-run affected tests.
 
-- [ ] 14.3 VERIFY: No blocking or unowned finding remains.
+  **No CRITICALs.** All 9 WARNINGs addressed:
+  - #1–5 (stale `--cwd` text in `proposal.md` and four places in `design.md`, including
+    the four dead verification-matrix Command cells): **fixed** — rewritten in place,
+    each marked "corrected"/"RETIRED" with the reason, on `HANDOFF.md`'s "a doc claim is
+    fixed by the change that makes it true" terms.
+  - #6 (`ui::startup_cwd`'s core assumption never live-measured): **fixed by a real live
+    check**, not just a doc note — opened the `open` action from workspace `wA` (cwd
+    `/Users/juusopiikkila/Code/groceries/api`, a repository with its own unrelated
+    OpenSpec changes) and read the resulting pane's rendered content with
+    `herdr pane read`: it showed `api`'s own changes (`per-user-sort-mode`,
+    `push-notifications`, …), never `herdr-openspec`'s. **Confirmed**: a `[[panes]]`
+    process does receive `workspace_cwd`. Also confirmed the design's Risks-section
+    inversion (a pane opened by the old README command IS now focused, not duplicated)
+    live. Pane closed, plugin unlinked, workspace focus restored to `w8` afterward.
+  - #7 (missing Degraded states row for the pane-side cwd fallback): **fixed** — row
+    added to `SPEC.md`.
+  - #8 (`tests/manifest.rs` never asserts action/pane command **tails** against `parse`):
+    **fixed** — added, and verified it catches a planted `"opne"` typo (red, reverted,
+    green).
+  - #9 (`workspace_cwd = None` case unexercised after `split_argv_without_cwd` was
+    deleted): **fixed** — new `no_cwd_regardless_of_context` test, both contexts × both
+    placements.
+
+  8 SUGGESTIONs: #10 (task 9.1 left unticked) **fixed**; #11 (doc-comment cross-refs
+  pointing at the wrong file) **fixed**; #12 (no `FakeCli` assertion on the one-fatal-
+  absence scenario) **accepted, not fixed** — `context` takes no `HerdrCli` at all, so
+  the design.md matrix row was corrected to say so instead of forcing an artificial fake
+  into a function that cannot reach one; #13 (`no_match_opens_instead` never drove `run`)
+  **fixed** — both listings now driven through `run` against `FakeCli`, asserting the
+  second call is `plugin pane open`; #14 (manifest non-empty check), #15 (placements
+  derived from literals rather than `open_args`), and #16 (`every_run_pipes_and_scrubs_herdr`'s
+  `.args(` blind spot) **accepted, not fixed** — genuine polish with no correctness stake,
+  left for a future pass rather than expanding this change further; #17 (groups 15/16
+  still open) — addressed by completing them next, in order.
+
+  Re-ran the full suite after every code change: `cargo test --all-features` — **940**
+  lib / 9 cli / 4 manifest, all green; `cargo clippy --all-targets --all-features -- -D
+  warnings` — clean; `cargo fmt --all -- --check` — clean.
+
+- [x] 14.3 VERIFY: No blocking or unowned finding remains.
+
+  **Confirmed.** Zero CRITICAL findings existed. Every WARNING is either fixed (6 of 9,
+  including one with a real live-Herdr verification) or explicitly accepted with a
+  one-line reason (the remaining 3). Every SUGGESTION is either fixed (4 of 8) or
+  explicitly accepted (4 of 8, including the deferred groups-15/16 item, which the next
+  two groups close).
 
 ## 15. Documentation
 <!-- kind: operational -->

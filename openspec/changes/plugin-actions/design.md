@@ -19,7 +19,7 @@ latent bug in the shipped manifest.
 | The invocation context arrives as `HERDR_PLUGIN_CONTEXT_JSON` (with `workspace_id`, `workspace_cwd`, `tab_id`, `focused_pane_id`, `focused_pane_cwd`) plus `HERDR_PLUGIN_ID`, `HERDR_WORKSPACE_ID`, `HERDR_PANE_ID`, `HERDR_BIN_PATH`, `HERDR_SOCKET_PATH` | The `--cwd` and the target are readable with no subprocess, exactly as `HERDR_PLUGIN_CONFIG_DIR` already is |
 | An action's stdout and stdin are **not** a terminal | `open` must never require one, and must never reach status 3 |
 | `herdr plugin pane open` is **not idempotent** — a second identical call opens a second pane | "Open or focus" has to be implemented by the plugin |
-| `herdr pane list` exposes **no plugin ownership**; a plugin pane is distinguished only by a `label` field carrying the manifest pane's `title`, which ordinary panes omit entirely | The matcher keys on `label` + `workspace_id` + `cwd` |
+| `herdr pane list` exposes **no plugin ownership**; a plugin pane is distinguished only by a `label` field carrying the manifest pane's `title`, which ordinary panes omit entirely | The matcher keys on `label` + `workspace_id`. **Corrected in group 10** (Decision 6): originally `+ cwd` too, dropped once `--cwd` stopped being passed at all — see Decision 6 |
 | A `split`-placement plugin pane targets an **existing** pane — the focused one by default, or `--target-pane <id>`. Naming a non-focused `--workspace <id>` with no target fails `invalid_params` "split and zoomed plugin panes target an existing pane; use target_pane_id" at exit 1. `--direction` is **optional** here, unlike `herdr pane split` | `open` passes `--target-pane`, never `--workspace`; `open-tab` passes `--workspace`, never `--target-pane` |
 | `herdr plugin pane focus <PANE_ID>` exists in 0.8.2 and reaches the server (a bogus id answers `plugin_pane_not_found`, exit 1). It appears **nowhere** in Herdr's 110 KB changelog, so its first version is unknown and `herdr-file-viewer` (min 0.7.0) still works around focus with a `pane zoom` cycle | The focus call is used, and a **usage**-shaped failure (exit 2) falls through to opening once rather than leaving the user with nothing — see Decision 4 |
 | The open response is `{"id":"cli:plugin","result":{"plugin_pane":{"entrypoint":…,"plugin_id":…,"pane":{"pane_id":…}}}}` — a **different envelope** from `pane split`'s `result.pane.pane_id` | Recorded in `SPEC.md`; deliberately **not parsed** by this plugin |
@@ -157,18 +157,17 @@ floor on top of them is `TESTCOUNT`, which fails below a measured minimum.
 | Unreadable context JSON falls back rather than failing | two closures: non-JSON, and a JSON array | unit | injected env lookup | `cargo test --lib context_ignores_unreadable_json` |
 | The workspace cwd falls back to the focused pane's cwd | context with `focused_pane_cwd` only, then with neither | unit | injected env lookup | `cargo test --lib context_workspace_cwd_falls_back_to_focused_pane_cwd` |
 | Blank values are absent | whitespace-only and empty values | unit | injected env lookup | `cargo test --lib context_treats_blank_as_absent` |
-| No workspace at all is the one fatal absence | empty closure; error names `HERDR_WORKSPACE_ID`; `FakeCli::calls()` empty | unit | `FakeCli` | `cargo test --lib context_without_a_workspace_is_the_one_fatal_absence` |
-| A matching pane is focused and nothing is opened | `run` against `FakeCli`; exact two-call `calls()` sequence | unit (outer loop) | `FakeCli` | `cargo test --lib matches_label_workspace_and_cwd` |
+| No workspace at all is the one fatal absence | empty closure; error names `HERDR_WORKSPACE_ID` | unit | none — `context` takes no `HerdrCli`; no call is made because `run_from_env` returns before constructing one, structural by inspection of its early-`match` shape | `cargo test --lib context_without_a_workspace_is_the_one_fatal_absence` |
+| A matching pane is focused and nothing is opened | `run` against `FakeCli`; exact two-call `calls()` sequence | unit (outer loop) | `FakeCli` | `cargo test --lib cross_placement_focus` |
+| The label and workspace id alone decide a match | matcher unit test | unit | none | `cargo test --lib matches_label_and_workspace` |
 | No listed pane matches, so one is opened | unlabelled panes, then `"panes": []` | unit | `FakeCli` | `cargo test --lib no_match_opens_instead` |
 | A matching entry with no usable `pane_id` is not a match | entry with no `pane_id`, and with a non-string one | unit | `FakeCli` | `cargo test --lib entry_without_a_pane_id_is_no_match` |
 | A labelled pane in another workspace is not this workspace's dashboard | matcher unit test + `run` call sequence | unit | `FakeCli` | `cargo test --lib other_workspace_is_no_match` |
-| A labelled pane rooted elsewhere is not this workspace's dashboard | matcher unit test with the plugin-root cwd | unit | none | `cargo test --lib other_cwd_is_no_match` |
-| With no workspace cwd known, the label and workspace alone decide | matcher unit test, cwd `None` | unit | none | `cargo test --lib cwd_unknown_matches_on_label_and_workspace` |
 | Two matches focus the first in list order | matcher returns `w8:pG` | unit | none | `cargo test --lib two_matches_take_the_first` |
 | `open-tab` focuses a split dashboard, and `open` focuses a tab one | two `run` cases over one listing | unit | `FakeCli` | `cargo test --lib cross_placement_focus` |
 | The full split argument vector | `open_args(Placement::Split, …)` equals the literal vector | unit | none | `cargo test --lib split_argv` |
 | No focused pane id omits `--target-pane` rather than passing an empty one | argv holds neither the flag nor an empty element | unit | none | `cargo test --lib split_argv_without_target_pane` |
-| No workspace cwd omits `--cwd` and the pane inherits the plugin root | argv holds no `--cwd`; call still issued | unit | `FakeCli` | `cargo test --lib split_argv_without_cwd` |
+| No `--cwd` is ever passed, regardless of what the context carries | argv holds no `--cwd` whether `workspace_cwd` is `Some` or `None`, for either placement | unit | none | `cargo test --lib no_cwd_regardless_of_context` |
 | The full tab argument vector | `open_args(Placement::Tab, …)` equals the literal vector | unit | none | `cargo test --lib tab_argv` |
 | The two subcommands differ only in placement and target | one test diffing the two vectors on exactly four keys | unit | none | `cargo test --lib the_two_vectors_differ_only_in_placement_and_target` |
 | A domain error is carried verbatim and stops the command | `CliError::Failed` code 1; `Report.outcome` is `Err` holding both strings | unit | `FakeCli` | `cargo test --lib open_domain_error_stops` |
@@ -182,7 +181,7 @@ floor on top of them is `TESTCOUNT`, which fails below a measured minimum.
 | Each subcommand maps to its own placement | `placement_for` over all four `Invocation` shapes | unit | none | `cargo test --lib placement_for_maps_each_subcommand` |
 | The exit status and stderr lines follow the report | `report_output` over three reports | unit | none | `cargo test --lib report_output_follows_the_report` |
 | `open` outside Herdr fails promptly rather than hanging or rendering | real binary, `HERDR_*` scrubbed, ten-second deadline, status 1, stderr names `HERDR_WORKSPACE_ID` | binary-integration (outer loop) | real process, piped streams | `cargo test --test cli open_outside_herdr_exits_one` |
-| `main` really routes each subcommand to its own placement | real binary against a scratch `#!/bin/sh` `herdr` on `PATH`; recorded argv shows split vs tab and the `--cwd` | binary-integration (outer loop) | real process, scratch program, synthetic env | `cargo test --test cli main_routes_each_subcommand_to_its_own_placement` |
+| `main` really routes each subcommand to its own placement | real binary against a scratch `#!/bin/sh` `herdr` on `PATH`; recorded argv shows split vs tab, and that neither carries `--cwd` | binary-integration (outer loop) | real process, scratch program, synthetic env | `cargo test --test cli main_routes_each_subcommand_to_its_own_placement` |
 | The open path names no terminal API | grep of `src/open.rs`, with `src/ui/terminal.rs` as the positive control | command-level gate | none | `LAUNCHSEAM` open leg, leg 2 |
 | The module spawns nothing | grep of `src/open.rs`; tree-wide sweep excluding `src/cli.rs` | command-level gate | none | `MIN=24 sh $CHECKS/NOSPAWN-GREP.sh`; `LAUNCHSEAM` open leg, leg 1 |
 | The Herdr handle stays inside the five allowed files | leg 3 of both seam gates, with `src/open.rs` added to `ALLOWED` | command-level gate | none | `LAUNCHSEAM` / `AGENTSEAM` leg 3 at `MIN=23` |
@@ -214,8 +213,11 @@ Coverage: reported as the **line** figure from `cargo llvm-cov`, never the regio
    and the pane id (`open-tab` / `dashboard-tab`) line up. *Alternative:* teach `parse` a
    flag grammar — rejected as new parser surface bought for one boolean.
 2. **Open **or focus**, with the label as the only ownership signal.** `pane list` exposes
-   no plugin id, so the matcher is `label == DASHBOARD_LABEL` **and** same
-   `workspace_id` **and** same `cwd`. *Alternative:* record the opened pane id in
+   no plugin id, so the matcher is `label == DASHBOARD_LABEL` **and** same `workspace_id`.
+   **Corrected in group 10**: the first draft added **and** same `cwd`, dropped once
+   `--cwd` stopped being passed at all (Decision 6) — every pane this plugin opens now
+   carries the plugin root as its `cwd`, identically, so the conjunct no longer
+   discriminates anything. *Alternative:* record the opened pane id in
    `HERDR_PLUGIN_STATE_DIR` and focus that — rejected: it adds a write to a command that
    otherwise writes nothing, and a stale record survives a pane the user closed, which is
    strictly worse than re-reading the live listing.
@@ -333,25 +335,27 @@ Coverage: reported as the **line** figure from `cargo llvm-cov`, never the regio
   plugin root"). The manifest's `./target/release/herdr-openspec` is relative and predates
   this change. → Out of scope and unchanged; noted so a later relative-path bug is not
   attributed here.
-- **The `cwd` match is string-shaped and could silently never fire.** `open` passes
-  `--cwd <workspace_cwd>` and then compares the listed pane's `cwd` with the same string.
-  If Herdr canonicalizes it (a trailing separator, a symlink such as macOS `/tmp` →
-  `/private/tmp`), the match never fires and every invocation opens a new dashboard. Every
-  unit fixture makes the two equal by construction, so no automated test can see it. →
-  Compared as `std::path::Path`, which absorbs the trailing-separator case; the symlink
-  case is guarded by task 10.3/10.5 recording the pane's `cwd` field verbatim beside the
-  `--cwd` that was passed. Measured once already: in the throw-away probe, Herdr echoed
-  `--cwd /Users/juusopiikkila/Code/herdr-openspec` back byte-identically.
+- **RETIRED, corrected by group 10.** The first draft of this risk read: "The `cwd` match
+  is string-shaped and could silently never fire" — worrying that Herdr might canonicalize
+  `--cwd` before echoing it back in `pane list`, defeating a naive string comparison. Moot:
+  `--cwd` is never passed at all any more (Decision 6), so the matcher no longer compares
+  `cwd` in the first place. If a grep brings you here, this is the correction, not a live
+  risk.
 - **Two invocations racing still open two dashboards** — both list, both see nothing, both
   open. → Accepted. Decision 2 rejects the state-file fix for reasons that still hold, and
   the window is one socket round trip behind a human keypress.
 - **The label matcher would collide with another plugin whose pane title is `OpenSpec`.**
   → Accepted, and recorded in `SPEC.md` as a known limitation: `pane list` offers nothing
-  narrower, and the `workspace_id` + `cwd` conjunction makes a collision require a second
-  plugin opening a same-titled pane on the same repository in the same workspace.
-- **A dashboard opened by the old README command (no `--cwd`) will not be matched**, since
-  its cwd is the plugin root, so the action opens a second one. → Correct behaviour: that
-  pane is rooted elsewhere and shows a different (empty) repository. Named as a scenario.
+  narrower, and — **corrected by group 10**, `cwd` dropped from the matcher entirely — a
+  collision now requires only a second plugin opening a same-titled pane in the same
+  workspace, not also the same repository.
+- **RETIRED, inverted by group 10.** The first draft of this risk read: "A dashboard
+  opened by the old README command (no `--cwd`) will not be matched, since its cwd is the
+  plugin root, so the action opens a second one" — but every dashboard this plugin opens
+  now has the plugin root as its `cwd` (Decision 6), the same as the old README command
+  always produced, so that pane **is** matched and focused, not duplicated. Verified live
+  in group 10: a pane opened via the direct `herdr plugin pane open` command was correctly
+  focused by a subsequent `open` action invocation.
 - **`DEPS` and `GRAPH-SNAP` are red on `main` before this change starts.** → Task 0.3
   records both failures verbatim as a baseline so a reviewer cannot attribute them here;
   the repair is `spec-purposes`'.

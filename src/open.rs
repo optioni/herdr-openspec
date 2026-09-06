@@ -91,14 +91,14 @@ pub fn context(env: &dyn Fn(&str) -> Option<String>) -> Result<Context, String> 
 /// a string `pane_id`, its `label` equals [`DASHBOARD_LABEL`], and its `workspace_id`
 /// equals `workspace_id`. The first match in the list's own order wins. `Err` carries a
 /// reason when `listing` is not JSON or carries no `result.panes` array; the caller
-/// degrades on it rather than failing (`specs/pane-open/spec.md` -> Decision 4).
+/// degrades on it rather than failing (design.md -> Decision 4).
 ///
 /// **No longer compares `cwd`.** Measured live against Herdr 0.8.2: passing `--cwd` to
 /// `herdr plugin pane open` also changes what a *relative* pane `command` resolves
 /// against, so `open_args` never passes it (see its own doc comment) and every dashboard
 /// pane this plugin opens reports the **plugin root** as its `cwd`, identically,
 /// regardless of workspace — the value would no longer discriminate anything
-/// (`specs/pane-open/spec.md` -> Decision 6, corrected).
+/// (design.md -> Decision 6, corrected).
 pub fn existing_pane(listing: &str, workspace_id: &str) -> Result<Option<String>, String> {
     let value: serde_json::Value = serde_json::from_str(listing)
         .map_err(|e| format!("pane list payload is not valid JSON: {e}"))?;
@@ -261,7 +261,7 @@ fn herdr_reason(err: &crate::cli::CliError) -> String {
 /// Some(2), .. }` — the measured usage shape, what a Herdr without `plugin pane focus`
 /// produces — warns and falls through to opening once; any other focus failure stops.
 /// The open response is never parsed: exit status alone carries success
-/// (`specs/pane-open/spec.md` -> Decisions 4 and 5).
+/// (design.md -> Decisions 4 and 5).
 pub fn run(cli: &dyn crate::cli::HerdrCli, ctx: &Context, placement: Placement) -> Report {
     let mut warnings = Vec::new();
 
@@ -441,6 +441,29 @@ mod tests {
 
         let empty = r#"{"result":{"panes":[]}}"#;
         assert_eq!(existing_pane(empty, "w8"), Ok(None));
+
+        // Drive both listings through `run`: in both cases the second Herdr call is
+        // `plugin pane open`, never `plugin pane focus` — `specs/pane-open/spec.md` ->
+        // "No listed pane matches, so one is opened".
+        let ctx = full_context();
+        for listing in [unlabelled, empty] {
+            let fake = crate::cli::FakeCli::new();
+            fake.register_herdr(&["pane", "list"], Ok(listing.to_string()));
+            let argv = open_args(Placement::Split, &ctx);
+            let refs: Vec<&str> = argv.iter().map(String::as_str).collect();
+            fake.register_herdr(&refs, Ok(String::new()));
+
+            let report = run(&fake, &ctx, Placement::Split);
+            assert_eq!(report.outcome, Ok(()));
+            let calls = fake.calls();
+            assert_eq!(calls.len(), 2, "listing: {listing}");
+            assert_eq!(
+                calls[1].1.get(2),
+                Some(&"open".to_string()),
+                "second call should be plugin pane open, got {:?}",
+                calls[1]
+            );
+        }
     }
 
     #[test]
@@ -513,6 +536,20 @@ mod tests {
         ctx.focused_pane_id = None;
         let argv = open_args(Placement::Split, &ctx);
         assert!(!argv.contains(&"--target-pane".to_string()));
+    }
+
+    /// `specs/pane-open/spec.md` -> "No `--cwd` is ever passed, regardless of what the
+    /// context carries": `workspace_cwd` present or absent, for either placement.
+    #[test]
+    fn no_cwd_regardless_of_context() {
+        for placement in [Placement::Split, Placement::Tab] {
+            let with_cwd = full_context();
+            assert!(!open_args(placement, &with_cwd).contains(&"--cwd".to_string()));
+
+            let mut without_cwd = full_context();
+            without_cwd.workspace_cwd = None;
+            assert!(!open_args(placement, &without_cwd).contains(&"--cwd".to_string()));
+        }
     }
 
     #[test]

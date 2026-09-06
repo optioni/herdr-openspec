@@ -763,6 +763,7 @@ Every condition renders usable content rather than an error screen:
 | `open`/`open-tab`'s `pane list` call fails or its payload is unparseable | Warns (stderr) and still attempts to open a pane, rather than refusing — the plugin cannot know whether a dashboard already exists, and a socket too broken to list is one whose open call will report its own reason |
 | `open`/`open-tab`'s `plugin pane focus` call fails with a usage error (code 2) | Warns and falls through to opening once — refusing would fail closed on a Herdr the manifest's `min_herdr_version` still declares supported |
 | `open`/`open-tab`'s `plugin pane focus` call fails with a domain error, or `plugin pane open` itself fails | The command stops; the reason (carried verbatim from Herdr) goes to stderr and the process exits 1 |
+| The dashboard process opened by `open`/`open-tab` finds no workspace cwd in its own injected Herdr context (`ui::startup_cwd` returns `None`) | Falls back to `std::env::current_dir()` — the plugin root — and renders whatever `openspec/` (if any) is found there, exactly as a `--cwd`-less direct `herdr plugin pane open` always has; not a refusal |
 
 ### No terminal is not a degraded state
 
