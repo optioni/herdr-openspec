@@ -53,14 +53,14 @@ named**; a gate invoked bare runs at its block default, which is a threshold nob
 ## 0. Baseline, gate extraction, and the carve-out
 <!-- kind: operational -->
 
-- [ ] 0.1 CHECK: Derive the base SHA fresh — `BASE=$(git rev-parse HEAD)` — and record it here.
+- [x] 0.1 CHECK: Derive the base SHA fresh — `BASE=$(git rev-parse HEAD)` — and record it here.
   Every later `OPENSPEC-UNTOUCHED` run uses **this** SHA, never a re-derived `HEAD`, which
   after the first commit compares the change against itself.
 
-  **BASE=`________________________________________`** (fill in; `f6b4c3f` is the planning-time
-  value and is recorded for comparison only).
+  **BASE=`1f9f29ae1fc2870733671bcdd75cb184617a3c99`** (`f6b4c3f` is the planning-time
+  value and is recorded for comparison only; the plan's own last commit landed as `1f9f29a`).
 
-- [ ] 0.2 CHANGE: Extract the gate roster into a scratch directory `$CHECKS` following
+- [x] 0.2 CHANGE: Extract the gate roster into a scratch directory `$CHECKS` following
   `openspec/changes/archive/2026-09-06-plugin-actions/tasks.md` task 0.2, and confirm
   `ls -1 "$CHECKS" | wc -l` is **30**. This change adds none to the roster: it *removes* two
   from it by making them repository files instead (group 4), which is recorded in task 7.2 and
@@ -70,7 +70,10 @@ named**; a gate invoked bare runs at its block default, which is a threshold nob
   committed under `openspec/changes/spec-purposes/notes/extracted-gates/` and may be copied
   from there rather than re-extracted.
 
-- [ ] 0.3 CHECK: Record each gate's exit status and verbatim output at `BASE`, at the floor
+  **Done**: copied all 30 files from `notes/extracted-gates/` into a scratchpad `$CHECKS`;
+  `ls -1 "$CHECKS" | wc -l` = **30**, confirmed.
+
+- [x] 0.3 CHECK: Record each gate's exit status and verbatim output at `BASE`, at the floor
   named in the table above. Expected, and confirmed at planning time:
 
   | Gate | Exit | Verbatim |
@@ -84,7 +87,41 @@ named**; a gate invoked bare runs at its block default, which is a threshold nob
   its floor from the table above; record any that does not, because it is then a fourth
   inherited condition this plan did not anticipate.
 
-- [ ] 0.4 CHANGE: Write `$CHECKS/OPENSPEC-UNTOUCHED-SP.sh` — this change's two-leg carve-out,
+  **Recorded, run against real `BASE`:** `DEPS` and `GRAPH-SNAP` reproduce the table's
+  verbatim output exactly. `AGENTSEAM` at `MIN=24` fails exactly as predicted
+  (`searched only 23 files (expected >= 24)`); at the landed `MIN=23` it is green. Both
+  `LAUNCHSEAM` invocations reproduce the same pattern: green at the landed `MIN=23`, red at
+  `MIN=24` (`searched only 23 files`). `WATCHSEAM` green at landed `MIN=27`, red at new
+  `MIN=28` (`searched only 27 files`). `NOSLEEP`: **6** sleep sites measured (not 5 — the
+  landed invocation `SLEEP_MIN=5 MIN=28` undercounts; `SLEEP_MIN=6 MIN=28` is green at
+  `BASE`, confirming the planning-review correction), and the new-change floor
+  `SLEEP_MIN=6 MIN=29` is red as predicted (`searched only 28 files`).
+  `NOSPAWN-GREP`/`NOLIT-CHANGE`/`MDSEAM` green at `MIN=24` (unchanged). `NOCLI-SHELL`
+  `UI_MIN=11`, `READSEAM` `UI_MIN=10`, `NOBLOCK` `UI_MIN=11`, `READONLY-UI`
+  `EXTRA='src/watch.rs src/refresh.rs src/agents.rs src/launch.rs src/open.rs' UI_MIN=11` —
+  all green, unchanged. `WIDTHS_MIN=94`, `LIST_MIN=29`, `MD_MIN=24`, `TASK_MIN=16`,
+  `DETAIL_MIN=23` all green. `GATE-MECH1` (run with `python3`, not `sh` — it is a Python
+  script) green: half A 25 files, half B 84 constructions. `NOTABSEAM`, `NORAW-GREP`,
+  `NOWAIVER`, `TASKSEAM`, `NOJSON-SEAM`, `NOIO-VIEW` all green. All four `NODEFAULT-UI`
+  invocations (app `SCAN_MIN=174`, agents `SCAN_MIN=103`, launch `SCAN_MIN=23`, open
+  `SCAN_MIN=12`) green. `TESTCOUNT` is a sourced helper, not a standalone script;
+  `cargo test --all-features --lib -- --list | grep -c ': test$'` = **940**, matching the
+  baseline. `OPENSPEC-UNTOUCHED.sh` (the pre-existing single-leg form, `CHANGE=spec-purposes`)
+  is green at `BASE` (nothing has touched `openspec/` yet). `EXTENDED` is skipped: it names
+  per-change test-extension pairs and this change extends no existing Rust test.
+
+  **A fourth inherited condition, unanticipated by this plan: `WIRED` is RED at `BASE`.**
+  `sh $CHECKS/WIRED.sh` fails leg 2 — `'pub fn run()' holds a branch or a loop` — because
+  `src/ui/mod.rs::run()` now contains
+  `match startup_cwd(&crate::config::env_lookup()) { Some(cwd) => cwd, None => std::env::current_dir()? }`,
+  added by `plugin-actions`' final cwd-resolution fix (see `HANDOFF.md` →
+  "`plugin-actions` found a bug in already-shipped code") after `WIRED` was last confirmed
+  green. **Not repaired here**: fixing it means moving the branch into `run_wired` inside
+  `src/ui/mod.rs`, a `src/` behaviour edit this change's Non-Goals explicitly rule out
+  ("Not new plugin behaviour... Impact: `src/` is not modified"). Recorded as a new
+  follow-up in `HANDOFF.md` (task 6.3/6.4) rather than fixed under cover of this change.
+
+- [x] 0.4 CHANGE: Write `$CHECKS/OPENSPEC-UNTOUCHED-SP.sh` — this change's two-leg carve-out,
   per design.md → Decisions → 7. Leg 1 excludes this change's artifact directory and the 26
   spec paths **by name**; leg 2 strips the `## Purpose` section from both the `BASE` blob and the
   worktree file and requires the remainder to be byte-identical, so an edit to requirement
@@ -131,14 +168,27 @@ named**; a gate invoked bare runs at its block default, which is a threshold nob
   (the earlier grep form returned exit 0 on the same plant), a legitimate multi-line Purpose →
   exit **0**, and one of the 26 deleted outright → exit **1**.
 
-- [ ] 0.5 VERIFY: `git status --porcelain` is empty apart from this change's own artifact
+  **Re-run against real `BASE` (`1f9f29a`), all six controls reproduced exactly:** clean
+  tree → exit 0, `OPENSPEC-UNTOUCHED OK: 26 Purpose-only spec edits, nothing else under
+  openspec/`. Stray `openspec/specs/agent-list/STRAY.txt` → exit 1, leg 1 names it; removed
+  → exit 0. Appended `#### Scenario: planted` to `openspec/specs/pane-open/spec.md` → exit 1,
+  leg 2 prints the planted lines; restored → exit 0. `SHALL NOT`→`SHALL` flip in
+  `openspec/specs/plugin-config/spec.md` prose (no heading line produced) → exit 1, leg 2
+  prints the prose diff; restored → exit 0. A legitimate multi-line Purpose body in
+  `openspec/specs/quality-gates/spec.md` → exit 0. `openspec/specs/tasks-checklist/spec.md`
+  deleted outright → exit 1 (`tasks-checklist/spec.md deleted`); restored → exit 0.
+
+- [x] 0.5 VERIFY: `git status --porcelain` is empty apart from this change's own artifact
   directory, and `ls -1 "$CHECKS" | wc -l` is 30. Commit nothing in this group.
+
+  **Verified:** `git status --porcelain` empty; `ls -1 "$CHECKS" | wc -l` = 30. Nothing
+  committed for this group — it is baseline recording only, folded into this tasks.md edit.
 
 ## 1. Every capability carries a written Purpose
 <!-- kind: behavior -->
 <!-- parallel-after: 0 -->
 
-- [ ] 1.1 RED: Write `tests/spec_purposes.rs` with three tests named for their scenarios —
+- [x] 1.1 RED: Write `tests/spec_purposes.rs` with three tests named for their scenarios —
   `every_capability_has_a_written_purpose`, `an_archived_placeholder_fails_the_test`, and
   `the_test_cannot_pass_vacuously`. The first walks every directory under
   `openspec/specs/` (resolved from `CARGO_MANIFEST_DIR`, as `tests/ci_workflow.rs` does),
