@@ -224,6 +224,30 @@ pub(crate) fn startup_cwd(env: &dyn Fn(&str) -> Option<String>) -> Option<std::p
         .map(std::path::PathBuf::from)
 }
 
+/// `degraded-states`' repair of `WIRED`: the decision `run`'s own body held —
+/// `match startup_cwd(env) { Some(cwd) => cwd, None => std::env::current_dir()? }` — moved
+/// here so both arms are driven by a test, which is the whole point of moving it: `run`'s
+/// own body reaches no test, so a decision left there is a decision nothing ever runs.
+/// `fallback` arrives as an **injected** closure rather than being called directly, on
+/// exactly `AGENTS.md`'s rule for the environment lookup: `cargo test` runs tests in
+/// parallel threads of one process, so a test that changed the real working directory would
+/// corrupt its neighbours. `run` is the one caller that passes `&|| std::env::current_dir()`.
+///
+/// Moving the decision here rather than into `run_wired` is deliberate (design.md ->
+/// Decision 5): `Startup::cwd` is a `&Path` every acceptance test and every construction site
+/// already builds, so widening it to `Option<&Path>` to let `run_wired` resolve the fallback
+/// would ripple through all of them to make one two-line decision testable, and would put an
+/// `std::env` read inside the function whose whole purpose is to be driveable from a test.
+pub(crate) fn startup_dir(
+    env: &dyn Fn(&str) -> Option<String>,
+    fallback: &dyn Fn() -> std::io::Result<std::path::PathBuf>,
+) -> std::io::Result<std::path::PathBuf> {
+    match startup_cwd(env) {
+        Some(cwd) => Ok(cwd),
+        None => fallback(),
+    }
+}
+
 /// Start the dashboard: refuse without a terminal, install the panic hook,
 /// then hand everything that can be miswired to [`run_wired`], which a test
 /// drives. Holds no branch and no loop of its own beyond `?` — see the
@@ -232,10 +256,7 @@ pub fn run() -> Result<(), StartError> {
     let _guard = enter_if_terminal(std::io::stdout().is_terminal(), &CrosstermOps)?;
     terminal::install_panic_hook();
     let config = crate::config::load_from_env();
-    let cwd = match startup_cwd(&crate::config::env_lookup()) {
-        Some(cwd) => cwd,
-        None => std::env::current_dir()?,
-    };
+    let cwd = startup_dir(&crate::config::env_lookup(), &|| std::env::current_dir())?;
     let mut term = Terminal::new(ratatui::backend::CrosstermBackend::new(std::io::stdout()))?;
     let state_dir = crate::state::state_dir(&crate::config::env_lookup());
     let startup = Startup {
@@ -416,6 +437,66 @@ mod tests {
         fn a_workspace_with_no_cwd_known_falls_back_to_none() {
             let pairs = [("HERDR_WORKSPACE_ID", "w8")];
             assert_eq!(super::super::startup_cwd(&env(&pairs)), None);
+        }
+    }
+
+    /// `ui::startup_dir` — `degraded-states`' repair of `WIRED`: the decision `run`'s own
+    /// body held before this change. Distinguished from `startup_cwd` above: `startup_cwd`
+    /// (`src/ui/mod.rs:220`, three tests) answers "what does the Herdr context say", while
+    /// `startup_dir` holds the whole fallback decision `run` used to make in its own body.
+    mod startup_dir {
+        use std::path::PathBuf;
+
+        fn env<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+            let map: std::collections::BTreeMap<&str, &str> = pairs.iter().copied().collect();
+            move |name| map.get(name).map(|s| s.to_string())
+        }
+
+        #[test]
+        fn prefers_the_workspace_cwd_and_falls_back_when_there_is_none() {
+            let counter = std::cell::Cell::new(0);
+            let fallback = || {
+                counter.set(counter.get() + 1);
+                Ok(PathBuf::from("/tmp/never-used"))
+            };
+            let json = r#"{"workspace_id":"w8","workspace_cwd":"/tmp/workspace-a"}"#;
+            let pairs = [("HERDR_PLUGIN_CONTEXT_JSON", json)];
+            let got = super::super::startup_dir(&env(&pairs), &fallback);
+            assert_eq!(got.unwrap(), PathBuf::from("/tmp/workspace-a"));
+            assert_eq!(
+                counter.get(),
+                0,
+                "the fallback closure must not be called when the workspace cwd resolves"
+            );
+
+            let got = super::super::startup_dir(&env(&[]), &fallback);
+            assert_eq!(got.unwrap(), PathBuf::from("/tmp/never-used"));
+            assert_eq!(counter.get(), 1, "both arms must be driven");
+        }
+
+        #[test]
+        fn propagates_a_failing_fallback_rather_than_panicking() {
+            let fallback = || Err(std::io::Error::from(std::io::ErrorKind::NotFound));
+            let got = super::super::startup_dir(&env(&[]), &fallback);
+            let err = got.expect_err("a failing fallback must be propagated, not substituted");
+            assert_eq!(err.kind(), std::io::ErrorKind::NotFound);
+        }
+
+        #[test]
+        fn a_herdr_context_with_no_workspace_cwd_is_the_fallback_case_not_a_failure() {
+            let fallback = || Ok(PathBuf::from("/tmp/never-used"));
+
+            let no_cwd = [("HERDR_PLUGIN_CONTEXT_JSON", r#"{"workspace_id":"w8"}"#)];
+            assert_eq!(
+                super::super::startup_dir(&env(&no_cwd), &fallback).unwrap(),
+                PathBuf::from("/tmp/never-used")
+            );
+
+            let unparseable = [("HERDR_PLUGIN_CONTEXT_JSON", "not json at all")];
+            assert_eq!(
+                super::super::startup_dir(&env(&unparseable), &fallback).unwrap(),
+                PathBuf::from("/tmp/never-used")
+            );
         }
     }
 

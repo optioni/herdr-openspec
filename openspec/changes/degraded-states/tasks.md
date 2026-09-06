@@ -117,28 +117,28 @@
 <!-- `WIRED` is extracted here rather than in group 11 because this group must edit it, and
      the archived copy under openspec/changes/archive/ may not be written to. -->
 
-- [ ] 2.1 RED: Write failing unit tests for `ui::startup_dir` —
+- [x] 2.1 RED: Write failing unit tests for `ui::startup_dir` —
   `startup_dir_prefers_the_workspace_cwd`, `startup_dir_propagates_a_failing_fallback`,
   `startup_dir_treats_a_contextless_environment_as_fallback`. Each injects the environment
   lookup and a counter-instrumented fallback closure, so neither the process environment nor
   the process working directory is touched. RED at HEAD because `startup_dir` does not exist —
   `ui::startup_cwd` (`src/ui/mod.rs:220`, three tests) is a different function and stays.
-- [ ] 2.2 GREEN: Add `pub(crate) fn startup_dir(env: &dyn Fn(&str) -> Option<String>, fallback:
+- [x] 2.2 GREEN: Add `pub(crate) fn startup_dir(env: &dyn Fn(&str) -> Option<String>, fallback:
   &dyn Fn() -> std::io::Result<PathBuf>) -> std::io::Result<PathBuf>` to `src/ui/mod.rs`,
   holding the decision `run` holds today.
-- [ ] 2.3 GREEN: Replace the `match` in `pub fn run()` with
+- [x] 2.3 GREEN: Replace the `match` in `pub fn run()` with
   `let cwd = startup_dir(&crate::config::env_lookup(), &|| std::env::current_dir())?;`.
-- [ ] 2.4 CHANGE: Copy `$C/WIRED.sh` to `scripts/gates/wired.sh` — the archived copy is under
+- [x] 2.4 CHANGE: Copy `$C/WIRED.sh` to `scripts/gates/wired.sh` — the archived copy is under
   `openspec/`, which nothing in this repository may write to — and add leg 5b there: `run`'s
   body must **name** `startup_dir(`. Both halves are needed (design.md → Decision 5); leg 2
   alone passes on a body that dropped the call.
-- [ ] 2.5 VERIFY: `sh scripts/gates/wired.sh` exits 0. Plant the negative control — reinstate
+- [x] 2.5 VERIFY: `sh scripts/gates/wired.sh` exits 0. Plant the negative control — reinstate
   the `match` — confirm leg 2 fires, remove the plant, confirm green.
-- [ ] 2.6 VERIFY: Plant the second control — delete the `startup_dir(` call and inline
+- [x] 2.6 VERIFY: Plant the second control — delete the `startup_dir(` call and inline
   `std::env::current_dir()?` — confirm leg 5b fires, remove the plant.
-- [ ] 2.7 VERIFY: `git diff --name-only` names only `src/ui/mod.rs` and
+- [x] 2.7 VERIFY: `git diff --name-only` names only `src/ui/mod.rs` and
   `scripts/gates/wired.sh`; nothing under `openspec/` was written.
-- [ ] 2.8 Run `cargo test --all-features startup_dir` and `make check`. Commit.
+- [x] 2.8 Run `cargo test --all-features startup_dir` and `make check`. Commit.
 
 ## 3. The probe seam, `file_mode`, and the startup problems that reach the pane
 <!-- kind: behavior -->
