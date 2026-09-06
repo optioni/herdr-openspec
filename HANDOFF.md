@@ -165,13 +165,32 @@ assertion is two named, direction-aware lists instead of one hardcoded literal.
 
 **The other twenty-eight extracted gates are still not repository files** — they are green,
 so nothing is on fire, but they rot on exactly the terms `DEPS` and `GRAPH-SNAP` did. Worth
-doing as its own change, not smuggled into a hygiene pass.
+doing as its own change, not smuggled into a hygiene pass. Three specific clauses within
+that follow-up, found true but deliberately not added to `scripts/gates/deps.sh` here
+(they would widen this change from "repair the two red gates" into "audit the dependency
+requirement end to end"): `plugin-build`'s requirement names `notify`'s
+`default-features = false` in manifest terms — `deps.sh` checks this for `pulldown-cmark`
+(leg 2d) but not for `notify`; the same requirement names `kqueue`/`kqueue-sys` as
+absences `GRAPH-SNAP` should assert alongside its four existing named absences; and it
+names `notify-debouncer-*` as an absence neither script currently checks.
 
 **Correction to `plugin-actions`' record:** it justified `AGENTSEAM`'s `MIN=23` as
 "22 + `src/open.rs`". That reasoning is wrong twice in ways that cancelled: `src/open.rs`
 was added to `ALLOWED` in the same task, so it contributes **zero** to the searched count,
 and the real `+1` was `tests/manifest.rs`, added by the same change and never recorded.
 `22 + 0 + 1 = 23` — the floor was correct for a reason nobody wrote down.
+
+**Open: `WIRED` is red at HEAD, unrelated to the above.** `plugin-actions`' final
+cwd-resolution fix (see above) added a branch to `src/ui/mod.rs::run()` —
+`match startup_cwd(&crate::config::env_lookup()) { Some(cwd) => cwd, None =>
+std::env::current_dir()? }` — after `WIRED` was last confirmed green. `WIRED` (a
+command-level check, not yet a repository file) forbids `pub fn run()`'s own body from
+holding a branch or a loop, on the theory that undecided residue in the composition root
+is where a collaborator silently goes unwired (`live-refresh`'s lesson). `sh
+openspec/changes/spec-purposes/notes/extracted-gates/WIRED.sh` fails leg 2 naming exactly
+this. **Not fixed here**: the fix is moving that branch into `run_wired`, a `src/` edit
+`spec-purposes`' Non-Goals rule out (this change touches no `src/` file). Whichever
+change next touches `src/ui/mod.rs::run()` should pick this up.
 
 The deeper lesson still holds: **a check that lives outside `make check` will rot, because
 nothing forces it to run.** Any future gate should either join `make check` or carry an

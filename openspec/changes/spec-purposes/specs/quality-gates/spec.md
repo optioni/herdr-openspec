@@ -19,9 +19,10 @@ The repository SHALL provide a `Makefile` with phony targets `fmt`, `fmt-check`,
 `lint`, `test`, `coverage`, `gates`, `gates-full`, `build`, and `check`. `check` SHALL be
 composed from `fmt-check`, `lint`, `gates`, `test`, and `coverage` in that order, so that no
 gate is defined twice. `gates` sits third because it is the cheapest composed gate that can
-fail — sub-second, with no compilation — and a stale dependency want-list reported before the
-test and coverage runs rather than after them is the difference between a two-second failure
-and a two-minute one. `check` is the single local entry point; CI invokes the same targets
+fail — a few seconds, one debug-profile `cargo build --locked` and no release build — and a
+stale dependency want-list reported before the test and coverage runs rather than after them
+is the difference between a several-second failure and a multi-minute one. `check` is the
+single local entry point; CI invokes the same targets
 individually rather than the composite — `fmt-check`, `lint`, `gates`, and `test` on both
 supported runners and `coverage` once, on Linux — so every command below is still
 written in exactly one place, but the composite itself is a local convenience and not
@@ -36,7 +37,7 @@ exactly:
 | `lint` | `cargo clippy --all-targets --all-features -- -D warnings` |
 | `test` | `cargo test --all-features` |
 | `coverage` | `cargo llvm-cov --fail-under-lines 80` |
-| `gates` | `/bin/sh scripts/gates/deps.sh && /bin/sh scripts/gates/build-graph.sh` |
+| `gates` | `/bin/sh scripts/gates/deps.sh` then `env -u GRAPH_WRITE /bin/sh scripts/gates/build-graph.sh` |
 | `gates-full` | `DEPS_FULL=1 /bin/sh scripts/gates/deps.sh` |
 | `build` | `/bin/sh scripts/build.sh` |
 
@@ -96,7 +97,8 @@ already needs to read `Cargo.lock`, no tool `make check` does not already requir
 runs on. Where a gate's subject genuinely differs between macOS and Linux, the difference
 SHALL be asserted **per direction and by name** rather than compared against a single literal.
 
-Each script SHALL exit 0 with a one-line `OK` message naming what it proved, and exit
+Each script SHALL exit 0 printing at least one `OK` line — a single summary, or one line
+per named leg followed by a final summary naming everything the script proved — and exit
 non-zero with a message naming the leg that failed, so a CI log identifies the gate rather
 than reporting one opaque failure.
 
@@ -107,7 +109,8 @@ than reporting one opaque failure.
   readable by `/bin/sh`
 - **AND** the `Makefile`'s `gates` target invokes exactly those two paths, and no other file
   in the repository restates either script's commands
-- **AND** `make gates` exits 0 and prints one `OK` line per script
+- **AND** `make gates` exits 0 and each script prints at least one `OK` line ending in a
+  summary naming what it proved
 
 #### Scenario: A gate that cannot fail is itself a failure
 

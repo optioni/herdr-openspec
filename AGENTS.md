@@ -174,7 +174,7 @@ make check
 |---|---|
 | Format | `cargo fmt --all -- --check` |
 | Lint | `cargo clippy --all-targets --all-features -- -D warnings` |
-| Hygiene gates | `/bin/sh scripts/gates/deps.sh && /bin/sh scripts/gates/build-graph.sh` (`make gates`) |
+| Hygiene gates | `make gates` (`scripts/gates/deps.sh`, then `scripts/gates/build-graph.sh`) |
 | Test | `cargo test --all-features` |
 | Coverage | `cargo llvm-cov --fail-under-lines 80` |
 

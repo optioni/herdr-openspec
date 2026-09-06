@@ -1,3 +1,4 @@
+#!/bin/sh
 # GRAPH-SNAP — the resolved normal build graph equals the committed per-triple snapshot, and
 # the macOS/Linux platform difference is named per direction rather than compared against a
 # single literal.

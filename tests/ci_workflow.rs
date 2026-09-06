@@ -574,11 +574,13 @@ fn gates_target_exists_and_names_both_scripts() {
     );
 
     assert!(
-        std::path::Path::new("scripts/gates/deps.sh").is_file(),
+        manifest_dir().join("scripts/gates/deps.sh").is_file(),
         "scripts/gates/deps.sh must exist and be a regular file"
     );
     assert!(
-        std::path::Path::new("scripts/gates/build-graph.sh").is_file(),
+        manifest_dir()
+            .join("scripts/gates/build-graph.sh")
+            .is_file(),
         "scripts/gates/build-graph.sh must exist and be a regular file"
     );
 }

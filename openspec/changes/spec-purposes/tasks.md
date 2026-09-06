@@ -297,8 +297,13 @@ named**; a gate invoked bare runs at its block default, which is a threshold nob
   the want-list and that requirement are two sites that must agree, and the gate's whole value
   is that they do.
 
-  **Confirmed:** all six crates, versions, and feature lists agree exactly, including
-  `notify`'s `["macos_fsevent"]` and `default-features = false`.
+  **Confirmed:** all six crate names and feature lists agree exactly, including
+  `notify`'s `["macos_fsevent"]` and `default-features = false`. Corrected during Change
+  Review (task 7.2): the want-list carries no version floors — leg 2a reads resolved
+  metadata, and `Cargo.toml`'s own `version = "..."` fields are the single site for those,
+  not duplicated into the gate. Version *floors* (e.g. `plugin-build`'s "at least
+  `1.1.5`") are a separate concern from leg 4's MSRV check and are not independently
+  gated; recorded here rather than left as an overstated claim.
 
 - [x] 2.6 VERIFY: `env -u WORK sh scripts/gates/deps.sh` exits **0**, printing one `DEPS OK (leg 2a)` line
   naming six normal deps. `DEPS_FULL=1 sh scripts/gates/deps.sh` also exits 0, and its leg 5
@@ -662,7 +667,7 @@ relevant output line beside the task.
 ## 7. Change Review
 <!-- kind: operational -->
 
-- [ ] 7.1 CHECK: Dispatch an independent reviewer — not a fork of this session — against
+- [x] 7.1 CHECK: Dispatch an independent reviewer — not a fork of this session — against
   `proposal.md`, both delta specs, `design.md`, `tasks.md`, and the full diff. Instruct it to
   write findings to a scratchpad file incrementally rather than returning them only in its
   final message. Concentration points for this change specifically: (a) every one of the 26
@@ -671,10 +676,66 @@ relevant output line beside the task.
   want-list and `plugin-build`'s dependency table agree crate for crate and feature for
   feature; (d) no floor in the table above was invoked bare.
 
-- [ ] 7.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a
+  **Done.** Dispatched `outside-in-tdd-reviewer` (fresh, not a fork), instructed to write to
+  `$SCRATCH/review-findings.md` incrementally. Result: **1 CRITICAL, 5 WARNING, 5
+  SUGGESTION**. Every concentration point (a)–(d), plus five more the reviewer set for
+  itself, was independently re-verified (re-ran plants from scratch, re-derived the want-list
+  diff, grepped every floor invocation) rather than trusted from this file's own record.
+
+- [x] 7.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a
   one-line reason, note SUGGESTIONs, and re-run the affected tests.
 
-- [ ] 7.3 VERIFY: No blocking or unowned finding remains. Record the finding counts by severity.
+  **CRITICAL (1) — fixed.** The `WIRED` regression (task 0.3) was recorded as "written into
+  `HANDOFF.md`" but never actually was. Added an "Open: `WIRED` is red at HEAD" note to
+  `HANDOFF.md` naming the gate, the exact branch in `src/ui/mod.rs::run()`, the change that
+  introduced it, and the fix shape — still not fixed here, since it is a `src/` edit this
+  change's Non-Goals forbid.
+
+  **WARNING (5) — all fixed:**
+  1. `Makefile`'s `gates` recipe (two lines, second wrapped in `env -u GRAPH_WRITE`) drifted
+     from the delta spec's literal one-line `&&` command and from `AGENTS.md`. Both corrected
+     to describe the real two-step recipe.
+  2. `scripts/gates/deps.sh` and `build-graph.sh` were mode `644` with no shebang, while the
+     delta requires "an **executable** script" and `design.md` names `scripts/build.sh`
+     (`755`, `#!/bin/sh`) as the pattern. Added `#!/bin/sh` and `chmod 755` to both.
+  3. `deps.sh`'s terminal line was a bare `DEPS OK` naming nothing, against a "one-line `OK`
+     message naming what it proved" requirement, while it actually prints one line per leg.
+     Made the terminal line a real summary (`DEPS OK: one bin target; six normal deps exact;
+     MSRV floor holds[; all six removals fail to build]`) and reworded the requirement to
+     "at least one `OK` line ... a single summary, or one line per leg plus a final summary".
+  4. Task 2.5's record overclaimed "versions ... agree exactly" — the want-list carries no
+     version floors at all (leg 4's MSRV check is a different thing). Corrected the record
+     rather than adding an unplanned version-floor assertion.
+  5. Planning-review's Deferred Non-Blocking Notes said three `plugin-build` gate clauses
+     (`notify`'s `default-features = false` in manifest terms, `kqueue`/`kqueue-sys` named
+     absences, `notify-debouncer-*` absence) would land in `HANDOFF.md`'s follow-up "not left
+     floating" — only the generic 28-gates note had. Added the three clauses by name.
+
+  **SUGGESTION (5) — 4 fixed, 1 declined with reason:**
+  - `design.md` → Open Questions' "Task 9.4" → corrected to "task 8.12" (no group 9 exists).
+  - `design.md` → Migration Plan's stale group numbers → corrected to the real 1/2–3/4/5.
+  - `tests/ci_workflow.rs`'s two relative `Path::new("scripts/gates/...")` checks → now
+    `manifest_dir().join(...)`, matching every other path in the file.
+  - The delta's "sub-second, no compilation" claim about `gates` → corrected; `deps.sh` leg
+    2c runs `cargo build --locked`, so the true cost is a few seconds, not sub-second.
+  - **Declined:** `tests/spec_purposes.rs`'s vacuity floor (`>= 1` capability, not `>= 40`).
+    The scenario it implements is literally "cannot pass vacuously" — failing on an empty
+    set — not "matches the exact current count". A floor pinned to 40 would need bumping at
+    every future `openspec archive`, for no gain: the placeholder-detection scenario already
+    catches a real regression, and a magic total is a second, unrelated way for this test to
+    need editing that has nothing to do with what it guards.
+
+  All affected tests re-run after the fixes: `cargo test --test ci_workflow` (17/17),
+  `cargo fmt --all` (needed after the `manifest_dir()` edit; re-ran clean), `make gates` and
+  `DEPS_FULL=1 make gates-full` (both green with the new summary lines), `make check`
+  (exit 0, coverage 97.05%/25,674 unmoved), `openspec validate --specs --strict` (40/0),
+  `openspec validate spec-purposes --strict` (valid), `BASE=1f9f29a sh
+  $CHECKS/OPENSPEC-UNTOUCHED-SP.sh` (OK).
+
+- [x] 7.3 VERIFY: No blocking or unowned finding remains. Record the finding counts by severity.
+
+  **Verified.** 1 CRITICAL (fixed), 5 WARNING (fixed), 5 SUGGESTION (4 fixed, 1 declined
+  with a written reason). No finding remains unowned or unaddressed.
 
 ## 8. Lint & Verify
 <!-- kind: operational -->

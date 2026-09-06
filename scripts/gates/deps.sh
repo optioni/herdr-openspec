@@ -1,3 +1,4 @@
+#!/bin/sh
 # DEPS — the argued dependency set, the one binary target, the MSRV floor, and the
 # genuinely-needed experiment. Reads `cargo metadata` JSON through python3 rather than
 # adding a crate to do it.
@@ -190,4 +191,8 @@ if [ "${DEPS_FULL:-0}" = "1" ]; then
   echo "DEPS OK: the working tree is unchanged, Cargo.lock included"
 fi
 
-echo "DEPS OK"
+if [ "${DEPS_FULL:-0}" = "1" ]; then
+  echo "DEPS OK: one bin target; six normal deps exact; MSRV floor holds; all six removals fail to build"
+else
+  echo "DEPS OK: one bin target; six normal deps exact; MSRV floor holds"
+fi

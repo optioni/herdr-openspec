@@ -290,14 +290,14 @@ would then have to widen to cover.
 No deploy, no data migration, no rollback procedure. Every commit is independently revertible;
 the riskiest single commit is the `Makefile` + `ci.yml` one, and reverting it restores the
 previous four-gate composition exactly. Order: gates repaired and landed as files first
-(groups 3–4), then wired into `make`/CI (group 5), then the Purposes (group 2 may run in
-parallel — it shares no file). The Purpose test lands with the Purposes so it is never red
-against a tree it cannot pass.
+(groups 2–3), then wired into `make`/CI (group 4), then proved able to fail (group 5); the
+Purposes (group 1) run in parallel with groups 2–3 — it shares no file. The Purpose test
+lands with the Purposes so it is never red against a tree it cannot pass.
 
 ## Open Questions
 
 None blocking. One is resolved *during* the change rather than before it: whether
-`GRAPH-SNAP` leg 5's proc-macro allowlist is identical on Linux. Task 9.4 answers it from a
+`GRAPH-SNAP` leg 5's proc-macro allowlist is identical on Linux. Task 8.12 answers it from a
 real CI run, and the two outcomes and their handling are written into that task, so the answer
 does not become a decision made under time pressure.
 
