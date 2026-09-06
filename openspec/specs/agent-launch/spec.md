@@ -323,13 +323,32 @@ The launcher SHALL NOT issue `herdr pane close`, ever. A pane it created and cou
 left in place with its id named in the problem, because a failed `agent start` includes the
 readiness-timeout case, in which an agent may be starting and closing the pane would kill it.
 
+`launch::Outcome::problem: Option<String>` SHALL become `problems: Vec<String>`, and every
+reason the worker accumulates SHALL be pushed onto it in the order it occurred.
+
+This is `degraded-states`' repair of a defect `agent-launch` shipped. `SPEC.md` → Degraded
+states says of a `state::record` failure after a successful `agent start`: "the record failure
+is recorded as its own problem **alongside** the successful launch". A single `Option<String>`
+cannot hold two reasons, and the landed worker writes
+`match cli.run(&prompt_refs) { Ok(_) => record_problem, Err(err) => Some(herdr_reason(&err)) }`
+— so on the one path where **both** fail, the record's reason is silently discarded and the
+reader is told only that the prompt failed. The mapping file is wrong, the pane says nothing
+about it, and the next session badges nothing.
+
+`Dashboard::launch.problems` is already a `Vec<String>`, and `agent-launch`'s own requirement
+that it is "replaced wholesale by the next outcome or refusal, and cleared by a success" is
+unchanged: an outcome replaces the vector with its own, however many entries that is. The
+claim that it "holds at most one entry" SHALL be restated as **at most two** — the record
+failure and the prompt failure are the only pair that can co-occur — so the leading-rows cost
+`change-rows` reasons about is bounded and stated rather than assumed.
+
 The three failure points SHALL be distinguishable in what they leave behind:
 
 | Failed call | Pane | Agent | Mapping | Prompt |
 |---|---|---|---|---|
 | `pane split` | none created | none | not recorded | not sent |
 | `agent start` | created, left, id named | none | not recorded | not sent |
-| `agent prompt` | created, left | running | **recorded** | not sent |
+| `agent prompt` | created, left | running | **recorded, or its failure named** | not sent |
 
 #### Scenario: A failed split leaves nothing behind
 
@@ -362,9 +381,10 @@ The three failure points SHALL be distinguishable in what they leave behind:
   recorded between the start and the prompt — the agent exists and the pane must be able to
   badge it even though the prompt did not land
 - **AND** the outcome reports **both**: `named` is `Some((derived name, change))`, so the loop
-  updates `Dashboard::agent_names`, **and** `problem` names `agent_blocked`. This is the one
-  path on which both fields are `Some`, and it is what distinguishes "the agent exists but was
-  not prompted" from every failure before `agent start`
+  updates `Dashboard::agent_names`, **and** `problems` holds exactly one entry, naming
+  `agent_blocked`. This is the one path on which `named` is `Some` beside a non-empty
+  `problems`, and it is what distinguishes "the agent exists but was not prompted" from every
+  failure before `agent start`
 
 #### Scenario: A failed recording does not undo a successful start
 
@@ -373,8 +393,31 @@ The three failure points SHALL be distinguishable in what they leave behind:
 - **THEN** the prompt is still sent — the third log entry is present
 - **AND** the outcome carries the derived name and change, so the in-memory mapping is correct
   for this session even though the file is not
-- **AND** the outcome's problem names the state directory path and the I/O reason, rather than
-  claiming the launch failed
+- **AND** `problems` holds exactly one entry, naming the state directory path and the I/O
+  reason, rather than claiming the launch failed
+
+#### Scenario: A failed recording and a failed prompt are both reported
+
+- **WHEN** the split and the start both succeed, the state directory is a path that cannot be
+  created (an existing regular file), **and** `agent prompt` then exits `1` with
+  `{"error":{"code":"agent_blocked","message":"agent is blocked"}}`
+- **THEN** `outcome.problems` holds **two** entries, in the order they occurred: the record
+  failure naming the state directory path first, then the prompt failure naming `agent_blocked`
+- **AND** `named` is `Some((derived name, change))`: the agent is running and must stay
+  attributable, which neither failure changes
+- **AND** the list region's first two interior rows, rendered at 120x20 and again at 60x20,
+  are `! `-marked and name the state directory and `agent_blocked` in that order — so the pair
+  is observable in the pane and not only in the value
+- **AND** the landed code returns only the prompt's reason on this path, so this scenario fails
+  against `main` before the repair and passes after it
+
+#### Scenario: A success clears both entries
+
+- **WHEN** a launch in which all three calls and the record succeed follows a launch that left
+  two problems
+- **THEN** `launch.problems` is empty afterwards
+- **AND** the list's first interior row is a change row again at both widths, so the vector is
+  replaced wholesale rather than grown
 
 ### Requirement: `g` focuses the pane of the agent whose status the badge shows
 
@@ -435,7 +478,7 @@ pub trait Launcher: Send {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Outcome {
     pub named: Option<(String, String)>,
-    pub problem: Option<String>,
+    pub problems: Vec<String>,
 }
 
 pub fn none() -> Box<dyn Launcher>;
@@ -468,10 +511,11 @@ found.
 
 `Outcome::named` SHALL carry `(derived agent name, change name)` exactly when an agent was
 started, so the loop can keep `Dashboard::agent_names` current without re-reading the file, and
-`None` for a focus and for a launch that failed before `agent start`. `Outcome::problem` SHALL
-carry the failure and be `None` on complete success. `Outcome` SHALL NOT implement `Default`,
-derived or hand-written, anywhere in the crate, and every construction and destructuring SHALL
-name both fields with no `..` rest, on exactly `AgentSnapshot`'s and `Attribution`'s terms.
+`None` for a focus and for a launch that failed before `agent start`. `Outcome::problems` SHALL
+carry every failure the worker accumulated, in the order it occurred, and be empty on complete
+success. `Outcome` SHALL NOT implement `Default`, derived or hand-written, anywhere in the
+crate, and every construction and destructuring SHALL name both fields with no `..` rest, on
+exactly `AgentSnapshot`'s and `Attribution`'s terms.
 
 #### Scenario: The inert launcher answers nothing and starts nothing
 
@@ -551,10 +595,11 @@ with the rest.
 
 ### Requirement: A launch failure renders as a leading problem row and is replaced, never grown
 
-`Dashboard::launch.problems` SHALL hold at most one entry: the last outcome's failure, or the
-last refusal `decide` produced. It SHALL be replaced wholesale on every outcome and every
-refusal — never appended to — so a reader who presses `a` on a failing socket ten times sees one
-row, not ten.
+`Dashboard::launch.problems` SHALL hold at most **two** entries: the last outcome's failures —
+at most two, when both `state::record` and `agent prompt` fail on the same launch — or the last
+refusal `decide` produced, which is always exactly one. It SHALL be replaced wholesale on every
+outcome and every refusal — never appended to — so a reader who presses `a` on a failing socket
+ten times sees the same row or rows, not ten.
 
 A successful outcome SHALL clear it. There is no key to dismiss it and none is added: the row
 answers the key that produced it and is replaced by the answer to the next.

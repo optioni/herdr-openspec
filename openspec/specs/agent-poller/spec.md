@@ -429,10 +429,41 @@ measured on this crate and toolchain to fire at **eight** parameters and would t
 tripped, not avoided, by the flattened form.
 
 `run` SHALL then hold **no branch, no loop, and no field selection**: the terminal guard, the
-panic hook, `config::load_from_env`, `state::state_dir(&config::env_lookup())`, `current_dir`,
-the real `Terminal`, `CrosstermEvents`, the `HERDR_PROGRAM` literal, `read_artifact`, `TICK`,
-and one `run_wired` call. Everything that can be miswired is below that line and is driven by a
-test.
+panic hook, `config::load_from_env`, `state::state_dir(&config::env_lookup())`,
+`startup_dir(&config::env_lookup(), &|| std::env::current_dir())`, the real `Terminal`,
+`CrosstermEvents`, the `HERDR_PROGRAM` literal, `config::env_lookup()` and `cli::npm_prefix`
+passed into `Startup` (`openspec-binary`), `read_artifact`, `TICK`, and one `run_wired` call.
+Everything that can be miswired is below that line and is driven by a test.
+
+`Startup` SHALL therefore carry **six** fields rather than four: `cwd`, `config`, `herdr`,
+`state_dir`, and `degraded-states`' additions, the environment lookup and the `npm prefix -g`
+hook. They belong to the same one concept the struct already names — "where this pane starts"
+— and they are what lets an outer test drive a *failing* binary probe without consulting the
+developer's machine (`openspec-binary`).
+
+`startup_dir` is `degraded-states`' repair of a rule `plugin-actions` broke. Its cwd-resolution
+fix wrote `match startup_cwd(&config::env_lookup()) { Some(cwd) => cwd, None =>
+std::env::current_dir()? }` **into `run`'s own body**, which is a branch, and the `WIRED` check
+went red on `main` and stayed red for a change — the check lived outside `make check`, so
+nothing forced it to run. `degraded-states` both moves the decision and makes the check a
+repository file (`quality-gates`).
+
+`ui::startup_dir(env: &dyn Fn(&str) -> Option<String>, fallback: &dyn Fn() -> std::io::Result<PathBuf>)
+-> std::io::Result<PathBuf>` SHALL hold that decision: `startup_cwd(env)` when it yields a
+path, `fallback()` otherwise. Both arms SHALL be driven by a test, which is the whole point of
+moving it — `run`'s own body reaches no test, so a decision left there is a decision nothing
+ever runs. The fallback arrives as an **injected** closure rather than being called directly,
+for the reason `AGENTS.md` already gives for the environment lookup: `cargo test` runs tests in
+parallel threads of one process, so a test that changed the real working directory would
+corrupt its neighbours. `run` is the one caller that passes `&|| std::env::current_dir()`.
+
+Moving it into `startup_dir` rather than into `run_wired` is deliberate. `Startup::cwd` is a
+`&Path` that every acceptance test and every construction site already builds; widening it to
+`Option<&Path>` to let `run_wired` resolve the fallback would ripple through all of them to
+make one two-line decision testable, and would put an `std::env` read inside the function
+whose whole purpose is to be driveable from a test. A separately named, separately tested
+function is the same guarantee at a fraction of the blast radius: the residue in `run` is a
+call, and the decision is somewhere a test reaches.
 
 Neither `run_wired` nor `start_collaborators` SHALL name `OpenspecCli`, `HerdrCli`, `from_cli`,
 `CliChanges`, or `npm_prefix`: the handles arrive from `cli::worker_cli_from_env`,
@@ -605,8 +636,43 @@ mechanical reason `NOCLI-SHELL` stays green while the shell is wired to two real
   literal `state_dir: None`, which is the link no test reaches: every acceptance test builds its
   own `Startup`, so a shipped `None` would leave the mapping tier dead with every other gate
   green
+- **AND** `pub fn run()`'s own body names `startup_dir(`, and holds none of the keywords `if`,
+  `match`, `for`, `while`, `loop`, or `else` — the two halves together, because either alone
+  passes on a defect: a body with no keyword but no `startup_dir` call has silently dropped the
+  workspace cwd and reopened the bug `plugin-actions` fixed, and a body naming `startup_dir`
+  beside a reinstated `match` has grown the residue back
 - **AND** `start_collaborators`'s own body names `config.agent_kind`, and **no** production
   slice under `src/ui/` holds the literal `"claude"` — the same shape as the `"herdr"` rule,
   guarding the same class of defect one configuration key over. Both halves are proven able to
   fail at planning time, by a copy passing `"claude".to_string()` and by a copy dropping the
   `agent_kind` read
+
+#### Scenario: `startup_dir` prefers the workspace cwd and falls back when there is none
+
+- **WHEN** `ui::startup_dir` is called with an environment lookup that yields a
+  `HERDR_PLUGIN_CONTEXT_JSON` naming a workspace cwd of `/tmp/workspace-a`, and a fallback
+  closure that would return `/tmp/never-used`
+- **THEN** it returns `Ok("/tmp/workspace-a")`
+- **AND** the fallback closure was **not** called, proved by a counter the closure increments
+- **AND** the same call with a lookup that yields nothing returns `Ok("/tmp/never-used")` with
+  the counter at one, so both arms are driven and the preference is the resolution's and not
+  the closure's
+
+#### Scenario: `startup_dir` propagates a failing fallback rather than panicking
+
+- **WHEN** `ui::startup_dir` is called with a lookup that yields no workspace cwd and a
+  fallback closure returning `Err(std::io::Error::from(std::io::ErrorKind::NotFound))`
+- **THEN** it returns that `Err` unchanged
+- **AND** it does not panic, and does not substitute a path of its own — a process whose
+  working directory has been removed is a real state, and `run`'s `?` is what turns it into
+  the exit status
+
+#### Scenario: A Herdr context with no workspace cwd is the fallback case, not a failure
+
+- **WHEN** `ui::startup_dir` is called with a lookup yielding a `HERDR_PLUGIN_CONTEXT_JSON`
+  that parses but carries **no** workspace cwd, and separately with one that does not parse at
+  all
+- **THEN** both return the fallback's path, not an error
+- **AND** neither reports a problem: `open::context`'s `workspace_id` requirement is
+  deliberately ignored here, and `SPEC.md` → Degraded states' last row states exactly this —
+  the dashboard falls back to its own process cwd rather than refusing

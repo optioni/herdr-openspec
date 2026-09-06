@@ -17,7 +17,7 @@ that region's capability; this specifies only the state, the dispatch, and the o
 
 ### Requirement: `Dashboard` is a plain state value with no rendering and no I/O
 
-`ui::app::Dashboard` SHALL carry exactly **twelve** fields: `repo: Option<PathBuf>` — the
+`ui::app::Dashboard` SHALL carry exactly **thirteen** fields: `repo: Option<PathBuf>` — the
 repository root when one was found; `searched_from: PathBuf` — the directory the walk began
 at, rendered by `change-rows`' no-repository state; `changes: changes::ChangeSet`;
 `route: Route`, an enum of `List` and `Detail`; `quit: bool`, set by the quit action;
@@ -27,8 +27,21 @@ detail region's state defined by `detail-scroll`, `artifact-tabs`, and `artifact
 `refresh: Refresh`, the live tier's state defined by `live-updates`;
 `agents: agents::AgentSnapshot`, the latest agent poll's outcome defined by `agent-poller`;
 `agent_names: state::Mapping`, the plugin-local agent-name mapping defined by
-`plugin-state` and consumed by `agent-attribution`'s first tier; and `launch: Launch`, the
-launch tier's state defined by `agent-launch`.
+`plugin-state` and consumed by `agent-attribution`'s first tier; `launch: Launch`, the
+launch tier's state defined by `agent-launch`; and `file_mode: bool`, `degraded-states`'
+addition.
+
+`file_mode` is true exactly when the `openspec` binary probe resolved no usable binary, so the
+pane's change list is file-sourced for the whole session and no CLI result will ever correct
+it. It is a `Dashboard` field rather than a fourth `Refresh` field because it is decided once,
+at startup, and never moves: `requested` and `reload` are one-shot flags the loop consumes and
+`problems` is replaced by a watcher error on any iteration, while `file_mode` is a fact about
+the machine the pane is running on. It is set by `run_wired` from what
+`start_collaborators` reports, and by `ui::load` to `false` — `load` consults no binary, so it
+cannot know, and the composition root is the one place that does. `responsive-layout` is its
+only reader: the dim `file mode` badge in the header. Nothing else branches on it, and in
+particular `ui::list` does not — a file-sourced change list is a complete change list, not a
+degraded one, and marking its rows would say otherwise.
 
 `agent_names` is `agent-attribution`'s addition. It is read **once**, by `ui::load`, from the
 state directory `Startup` carries, and is not re-read per frame: `state::read` is filesystem
@@ -43,7 +56,9 @@ its bare `names` map keeps the file's own problems where `plugin-state` put them
 `ui::app::Launch` is `agent-launch`'s addition and SHALL carry exactly **two** fields:
 `pending: Option<launch::Request>` — the one-shot request `apply` produced and the loop has not
 yet handed to the launcher — and `problems: Vec<String>` — the last outcome's failure or the
-last refusal, replaced wholesale and never grown, holding at most one entry. It is a **sibling**
+last refusal, replaced wholesale and never grown, holding **at most two** entries — a
+`state::record` failure and an `agent prompt` failure are the only pair that can co-occur
+(`agent-launch`'s repaired row 23; see `specs/agent-launch/spec.md`). It is a **sibling**
 of `refresh` for the same reason `agents` is: `refresh.problems` is replaced wholesale by a
 watcher error on any iteration, and `ChangeSet::problems` is replaced wholesale by
 `Dashboard::adopt` on every refresh, so a launch's answer put in either would vanish before the
@@ -193,12 +208,16 @@ its merge key; its subject is unchanged and only the type list and the field cou
   run a second time with it set to `src/agents.rs` for `Agent`, `Listed`, `AgentSnapshot`, and
   `Attribution`, and a **third** time with it set to `src/launch.rs` for `Outcome`, so every
   type outside `src/ui/app.rs` is covered by the same executable file rather than by a fork of it
-- **AND** the search is judged against a counted minimum of literal or pattern spans, measured
-  on the tree at this change's base commit and raised from **165** to that measured figure for
-  the `src/ui/app.rs` run and from **86** for the `src/agents.rs` run, with the `src/launch.rs`
-  run's own floor measured the same way — every one of the three re-measured in the
-  implementation's first task rather than copied — so a broken pattern that scanned nothing
-  fails rather than reporting a clean tree
+- **AND** the search is judged against a counted minimum of literal or pattern spans that is
+  **per type set**, not one number shared across the runs: the `src/ui/app.rs` set, the
+  `src/agents.rs` set, the `src/launch.rs` set, and — `degraded-states`' fourth run — the
+  `Refresh` set each carry their own floor, measured on the tree at this change's base commit
+  and written as that run's own default when the gate becomes a repository file
+  (`quality-gates`). Measured at `89cb3b2` by running the extracted script: **126** spans for
+  the `src/ui/app.rs` set. Every floor is re-measured in the implementation's first task rather
+  than copied, and a single shared floor is explicitly rejected — the `Refresh` set scans far
+  fewer spans than the `Dashboard` set, so one number either passes vacuously for one run or
+  fails legitimately for the other
 - **AND** the check is proven able to fail: run against a copy of `src/` carrying
   `impl Default for Detail { … }`, again against a copy carrying
   `let Detail { source, .. } = d;`, again against a copy carrying `#[derive(Default)]`
@@ -215,10 +234,11 @@ its merge key; its subject is unchanged and only the type list and the field cou
   same-line grep with the brace-matching pass named above. The companion is kept for what it
   genuinely does, below
 - **AND** a compile-time companion exists: a test destructures a `Dashboard` with an
-  exhaustive pattern naming all **twelve** fields and no `..`, a second destructures a `Filter`
+  exhaustive pattern naming all **thirteen** fields and no `..`, a second destructures a `Filter`
   naming both, a third destructures a `Detail` naming all five and no `..`, a fourth
   destructures a `Refresh` naming all **three** and no `..`, a fifth destructures a `Launch`
-  naming both and no `..`, a sixth destructures an `Agent`
+  naming both and no `..` — `launch::Outcome`'s companion below naming its two fields after
+  `agent-launch`'s `problem` becomes `problems` — a sixth destructures an `Agent`
   naming all **eight**, a seventh destructures a `Listed` naming both, an eighth destructures
   an `AgentSnapshot` naming all **three**, a ninth destructures an `Attribution` naming all
   **three**, and a tenth destructures a `launch::Outcome` naming both, so adding a field breaks
@@ -232,9 +252,9 @@ its merge key; its subject is unchanged and only the type list and the field cou
   `struct <T> {`, so an enum cannot be added to it without breaking that control, and a
   `Default` on an enum would change nothing because every construction site is a `match` arm or
   a variant name
-- **AND** every `Dashboard` literal in the crate names `launch` explicitly: adding the
-  twelfth field is a compile error at each site until it does, which is the whole reason the
-  type carries no `Default`
+- **AND** every `Dashboard` literal in the crate names `launch` and — `degraded-states`'
+  addition — `file_mode` explicitly: adding a field is a compile error at each site until it
+  does, which is the whole reason the type carries no `Default`
 
 #### Scenario: The pure view files name no I/O API
 
@@ -426,6 +446,27 @@ its merge key; its subject is unchanged and only the type list and the field cou
   whose clock lives in `src/lib.rs`, so nothing under `src/ui/` sleeps
 - **AND** the check is proven able to fail against a copy carrying a `#[test]` function in
   `src/ui/layout.rs` that sleeps 200 milliseconds and then asserts
+
+#### Scenario: `file_mode` is set by the composition root and by nothing else
+
+- **WHEN** `ui::load` is called over a scratch repository with any `Config` and any
+  `state_dir`
+- **THEN** the returned `Dashboard`'s `file_mode` is `false`, on every branch including the
+  no-repository one: `load` consults no binary and so may not claim one is missing
+- **AND** `run_wired` driven over the same repository with an environment in which every probe
+  step fails returns a dashboard whose `file_mode` is `true`
+- **AND** the same run with a `Config` whose `openspec_bin` names a usable scratch
+  `#!/bin/sh` program returns a dashboard whose `file_mode` is `false`, so the flag is the
+  probe's answer and not a constant
+
+#### Scenario: The thirteenth field is named at every construction site
+
+- **WHEN** every `*.rs` file under `src/` is searched for a `..` inside a `Dashboard { … }`
+  literal or pattern, brace-matched from the opening `{` to its partner
+- **THEN** there is no match, so no construction site elides `file_mode`
+- **AND** the compile-time companion destructures a `Dashboard` naming all **thirteen** fields
+  with no `..`, so a fourteenth breaks the build at that site
+- **AND** `impl Default for Dashboard` appears nowhere in the crate, derived or hand-written
 
 ### Requirement: Key handling is a pure, total function over events
 
