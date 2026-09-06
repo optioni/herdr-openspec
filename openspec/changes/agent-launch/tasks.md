@@ -974,7 +974,7 @@ set; see design.md → Test Strategy.
 <!-- kind: operational -->
 <!-- parallel-after: 0 -->
 
-- [ ] 14.1 CHECK: Grep each target passage before editing and record what is there today:
+- [x] 14.1 CHECK: Grep each target passage before editing and record what is there today:
       `SPEC.md` → "Launch flow" (three lines, `<change>` where the derived name belongs),
       → "Keys" (the `a`/`c`/`s`/`g` rows and the hidden-action-keys sentence), → "Degraded
       states" (one row for an unreachable socket, none for a failed launch); `README.md` →
@@ -984,7 +984,7 @@ set; see design.md → Test Strategy.
       11.2, so this group touches no source file and its `parallel-after` marker stays true.
       **Red when:** a passage is not where this task says.
 
-- [ ] 14.2 CHANGE: Rewrite in `SPEC.md`: Herdr integration → Launch flow (audience: `plugin-actions`
+- [x] 14.2 CHANGE: Rewrite in `SPEC.md`: Herdr integration → Launch flow (audience: `plugin-actions`
       and every later change) — the three argument vectors as measured, `--direction` as
       required rather than optional, the split targeting the focused pane, the envelope
       `pane split` returns, the **derived agent name** in `agent start` and `agent prompt`
@@ -992,7 +992,7 @@ set; see design.md → Test Strategy.
       positional text and the absence of `--wait`, `agent focus`'s accepted targets, and the
       error shape every one of them uses. Replaces the current three-line block.
 
-- [ ] 14.3 CHANGE: Add to `SPEC.md`: Degraded states (audience: `degraded-states` and every later
+- [x] 14.3 CHANGE: Add to `SPEC.md`: Degraded states (audience: `degraded-states` and every later
       change) — six rows: a failed `pane split`; a failed `agent start` leaving the pane
       un-closed and named; a failed `agent prompt` leaving a recorded, running agent; a derived
       name already live, refused before any call; a failed `state::record` that does not undo
@@ -1002,7 +1002,7 @@ set; see design.md → Test Strategy.
       Amend the existing unreachable-socket row to say the action keys and their footer hints
       are both hidden.
 
-- [ ] 14.4 CHANGE: Rewrite in `SPEC.md` → Keys and `README.md` → Keys **together** (audience:
+- [x] 14.4 CHANGE: Rewrite in `SPEC.md` → Keys and `README.md` → Keys **together** (audience:
       every operator reading the documented reference, and every later change touching a
       keybinding), since they are the
       documented reference and this change is **BREAKING** per `openspec/config.yaml` →
@@ -1010,7 +1010,7 @@ set; see design.md → Test Strategy.
       and while filtering, and both files gain the footer's `a/c/s launch  g focus` form.
       Correct `README.md`'s Configuration row for `agent_kind` to name `g` as unaffected.
 
-- [ ] 14.5 CHANGE: Rewrite in `AGENTS.md`: Architecture rule 1 (audience: every future session) — the
+- [x] 14.5 CHANGE: Rewrite in `AGENTS.md`: Architecture rule 1 (audience: every future session) — the
       spawn rule gains the launcher as its second Herdr consumer and names `LAUNCHSEAM`
       alongside the tree-wide grep. Rewrite rule 7 in place to name `src/launch.rs` as the
       fourth seam module. Add **one** new rule, at most five lines: the plugin starts a process
@@ -1018,7 +1018,7 @@ set; see design.md → Test Strategy.
       writes are `agent-names.toml` and nothing else. Delete nothing else; the net addition is
       under ten lines.
 
-- [ ] 14.7 VERIFY: `BASE=$(git rev-parse HEAD) CHANGE=agent-launch sh
+- [x] 14.7 VERIFY: `BASE=$(git rev-parse HEAD) CHANGE=agent-launch sh
       $CHECKS/OPENSPEC-UNTOUCHED.sh` is green — `SPEC.md`, `README.md`, and `AGENTS.md` are
       outside `openspec/`, and `openspec/IMPLEMENTATION-ORDER.md` is deliberately **not**
       edited here; the roadmap row is `openspec archive`'s to correct. Commit.

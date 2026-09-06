@@ -45,20 +45,21 @@ reachable directly with
 | `1`–`9`, `[`, `]` | Switch artifact tab, from either the list or the detail. `0` is inert — tabs are 1-based |
 | `/` | Filter changes |
 | `r` | Force a full refresh — re-read every change from disk and re-ask the CLI about each one |
-| `a` | Launch an agent with `/opsx:apply` |
-| `c` | Launch an agent with `/opsx:continue` |
-| `s` | Launch an agent with `/opsx:archive` |
-| `g` | Focus the running agent for this change |
+| `a` | Launch an agent with `/opsx:apply`. Refused with a reason (shown as a problem row) on a change with no agent to select or a name already live in the session |
+| `c` | Launch an agent with `/opsx:continue`, on the same terms as `a` |
+| `s` | Launch an agent with `/opsx:archive`, on the same terms as `a` |
+| `g` | Focus the running agent for this change. Inert — no call, no problem — on a change with no attributed agent |
 | `q` | Quit |
 | `Ctrl-C` | Quit |
 
 **While filtering, every printable key types into the query** — including `q`, `r`,
-`j`, `k`, and the digits. `Backspace` deletes, `Enter` accepts, `Esc` cancels, and the
-arrows still navigate. `Ctrl-C` always quits.
+`j`, `k`, `a`, `c`, `s`, `g`, and the digits. `Backspace` deletes, `Enter` accepts,
+`Esc` cancels, and the arrows still navigate. `Ctrl-C` always quits.
 
 Only `q` and `Ctrl-C` close the pane; `Esc` never does.
 
-Action keys are hidden when the Herdr socket is unreachable.
+Action keys, and the footer hints naming them (`a/c/s launch  g focus`), are
+hidden when the Herdr socket is unreachable.
 
 ## Configuration
 
@@ -76,7 +77,7 @@ back to `$HOME/.config/herdr/plugins/config/herdr-openspec`.
 | Key | Default | Meaning |
 |---|---|---|
 | `openspec_bin` | auto-detected | Path to the `openspec` binary |
-| `agent_kind` | `claude` | Herdr agent kind launched by `a` / `c` / `s` |
+| `agent_kind` | `claude` | Herdr agent kind launched by `a` / `c` / `s`; does not affect `g`, which focuses whatever agent is already attributed regardless of kind |
 | `archived_count` | `5` | Archived changes listed below the separator |
 
 The OpenSpec CLI is optional. When it is present the dashboard uses it as the

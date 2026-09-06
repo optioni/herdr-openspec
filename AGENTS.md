@@ -165,10 +165,15 @@ unreachable and the tests become integration tests by accident.
   crate permitted to name a process-spawn API (`process::Command`, `Command::new`,
   `Stdio`) — `OpenspecCli` and `HerdrCli` are traits whose real implementations do
   nothing but spawn and return stdout. Parsing, merging, and decisions live on the
-  testable side of that seam. This is checked, not aspirational: a tree-wide grep
-  excludes exactly `src/cli.rs` by path (never by base name, so a future
-  `src/ui/cli.rs` is still caught) and fails if that exclusion is vacuous — if
-  `src/cli.rs` is missing, or itself names no spawn API. Plugin context — the
+  testable side of that seam. `src/agents.rs` and `src/launch.rs` are the crate's
+  two `HerdrCli` consumers, reaching it only through the trait object; neither
+  names a spawn API itself. This is checked, not aspirational: a tree-wide grep
+  (`NOSPAWN-GREP`) excludes exactly `src/cli.rs` by path (never by base name, so a
+  future `src/ui/cli.rs` is still caught) and fails if that exclusion is vacuous —
+  if `src/cli.rs` is missing, or itself names no spawn API. `LAUNCHSEAM` checks the
+  same property from `src/launch.rs`'s side: no spawn API, no `ratatui` type, and
+  the `HerdrCli` handle confined to exactly `src/cli.rs`, `src/agents.rs`,
+  `src/ui/mod.rs`, and `src/launch.rs` itself. Plugin context — the
   configuration directory, the state directory, the plugin root, and the
   workspace, tab, and pane ids — arrives in the environment of every process Herdr
   starts for a plugin (`HERDR_PLUGIN_CONFIG_DIR`, `HERDR_PLUGIN_STATE_DIR`,
@@ -211,20 +216,28 @@ unreachable and the tests become integration tests by accident.
   both — all three because every public function there is parameterised by
   width, which is what makes an exemption-free width check possible.
 - **The render path blocks on nothing but the terminal, and reads no clock.**
-  `src/watch.rs`, `src/refresh.rs`, and `src/agents.rs` — all three outside
-  `src/ui/` — hold the filesystem watcher, the refresh worker thread, and
-  the Herdr agent poller thread; `run_loop` reaches them only through the
-  non-blocking `FsEvents`/`Refresher`/`AgentPoll` trait objects, never a
-  channel, a lock, or `Instant::now()` directly. The poller lives outside
-  `src/ui/` for the same reason the other two do: `NOCLI-SHELL` forbids any
-  file under `src/ui/` from naming `HerdrCli`, and a poller placed there
-  would need an exemption from that check. Checked two ways: no file under
-  `src/ui/` (tests included) names a blocking-wait or clock API, and,
-  separately, none of the three seam modules' own production code blocks
-  before the point each hands off to its background thread — a check
-  inside the three files themselves, because a sweep scoped to `src/ui/`
-  alone cannot see a `drain` or a `take_result` that blocks in its own
-  module.
+  `src/watch.rs`, `src/refresh.rs`, `src/agents.rs`, and `src/launch.rs` — all
+  four outside `src/ui/` — hold the filesystem watcher, the refresh worker
+  thread, the Herdr agent poller thread, and the launcher's worker thread;
+  `run_loop` reaches them only through the non-blocking
+  `FsEvents`/`Refresher`/`AgentPoll`/`Launcher` trait objects, never a
+  channel, a lock, or `Instant::now()` directly. All four live outside
+  `src/ui/` for the same reason: `NOCLI-SHELL` forbids any file under
+  `src/ui/` from naming `HerdrCli`, and any of them placed there would need
+  an exemption from that check — `herdr agent start` alone blocks up to
+  thirty seconds waiting for interactive readiness, which is why the
+  launcher cannot be a synchronous call from the render path either. Checked
+  two ways: no file under `src/ui/` (tests included) names a blocking-wait or
+  clock API, and, separately, none of the four seam modules' own production
+  code blocks before the point each hands off to its background thread — a
+  check inside the four files themselves, because a sweep scoped to
+  `src/ui/` alone cannot see a `drain` or a `take_result` that blocks in its
+  own module.
+- **The write boundary is the process, not the tree.** `herdr agent start`
+  launches a process that will itself write inside `openspec/` — an agent
+  editing `tasks.md` is the point of launching it, and that write is not
+  this plugin's. The plugin's own writes stay exactly `agent-names.toml`
+  under `HERDR_PLUGIN_STATE_DIR`, launched agent or not.
 
 Further invariants from `SPEC.md`:
 

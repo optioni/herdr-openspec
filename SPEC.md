@@ -445,19 +445,23 @@ agent editing `tasks.md` in another pane.
 | `1`–`9`, `[`, `]` | Switch artifact tab, at **both** routes — the wide layout draws the detail region at the list route too, so a tab press there is immediately visible (`detail-view`). `0` is inert: tab addressing is 1-based. While filtering, all of them type themselves into the query like any other printable key |
 | `/` | Start filter mode from either route, moving to the list: printable keys type into the query, `Backspace` deletes, `Enter` accepts, `Esc` cancels, and `Ctrl-C` still quits |
 | `r` | Force a full refresh: re-read every change from files, and re-ask the CLI about every one. While filtering, `r` types itself into the query instead, like every other printable key |
-| `a` | Launch an agent with `/opsx:apply` |
-| `c` | Launch an agent with `/opsx:continue` |
-| `s` | Launch an agent with `/opsx:archive` |
-| `g` | Focus the running agent for this change |
+| `a` | Launch an agent with `/opsx:apply`. On a change with no selected change, or a name already live in the session, refused with a reason (see Launch flow, Degraded states) rather than launching |
+| `c` | Launch an agent with `/opsx:continue`, on the same terms as `a` |
+| `s` | Launch an agent with `/opsx:archive`, on the same terms as `a` |
+| `g` | Focus the running agent for this change (`herdr agent focus`); a change with no attributed agent leaves `g` inert — no call, no problem |
 | `q` | Quit — except while filtering, where it types a `q` instead |
 | `Ctrl-C` | Quit |
+
+While filtering, `a`, `c`, `s`, and `g` each type themselves into the query
+instead of launching or focusing, like every other printable key.
 
 `Esc` at the list root, with no detail open, no filter active, and no query set,
 is inert rather than a quit — the layered dismissal above is what determines
 whether there is a layer left to dismiss. Only `q` (outside filter mode) and
 `Ctrl-C` close the pane.
 
-Action keys are hidden when the Herdr socket is unreachable.
+Action keys, and their footer hints (`a/c/s launch  g focus`), are hidden when
+the Herdr socket is unreachable.
 
 ## Herdr integration
 
@@ -550,14 +554,41 @@ invisible to the pane. Recorded here rather than fixed, pending a change that re
 
 ### Launch flow
 
+Pressing `a`, `c`, or `s` on a change issues exactly three Herdr calls, in this
+order, stopping at the first failure:
+
 ```
-herdr pane split --cwd <repo> --direction right --no-focus   -> pane_id
-herdr agent start <change> --kind <kind> --pane <pane_id>
-herdr agent prompt <change> "/opsx:apply <change>"
+herdr pane split --cwd <repo> --direction right --no-focus
+herdr agent start <derived-name> --kind <kind> --pane <pane_id>
+herdr agent prompt <derived-name> "/opsx:apply <derived-name>"
 ```
 
-`<kind>` comes from plugin configuration and defaults to `claude`; Herdr supports
-more than twenty agent kinds. `g` focuses an existing agent via `herdr agent focus`.
+`--direction` is **required**, not optional, and no pane argument is given: the
+split always targets the currently focused pane. The call's response is an
+**envelope**, not a bare pane id:
+
+```json
+{"id":"cli:pane:split","result":{"pane":{"pane_id":"…", …}}}
+```
+
+`result.pane.pane_id` is what the second and third calls use; a payload that is
+not valid JSON, not an object, or missing `result.pane.pane_id` stops the launch
+before any agent is started (see Degraded states). `<derived-name>` is the
+*derived* agent name from "Attributing an agent to a change" above, never the
+raw change name — a change name is not always a legal Herdr agent name. The
+third call's text is one **positional** argument, `/opsx:apply <derived-name>`
+(or `/opsx:continue`/`/opsx:archive` for `c`/`s`), passed to the program
+directly with no shell and no `--wait` flag: the plugin does not wait for the
+agent to act on it. A failed call at any of the three carries Herdr's own
+reported reason (its stderr JSON error envelope's `code` and `message`, on
+the same terms "Agent status by polling" above already documents) rather than
+a generic failure.
+
+`<kind>` comes from plugin configuration (`agent_kind`, default `claude`);
+Herdr supports more than twenty agent kinds. `g` focuses the pane an
+attributed agent already runs in — `herdr agent focus <pane_id>` — one call,
+resolving `<pane_id>` from the same three-tier attribution above, never a
+launch of its own.
 
 ### Manifest
 
@@ -619,7 +650,14 @@ Every condition renders usable content rather than an error screen:
 | `openspec/changes/` or its `archive/` exists and cannot be read | Empty list for the affected tier, with the reason named on `ChangeSet::problems` and rendered as a leading `!`-marked row of the list, above the change rows; the archive walk is not attempted when the parent read already failed, so a permission error is never reported twice for the same fault |
 | An artifact's `generates` pattern falls outside the file path's supported glob subset | That artifact's list is empty and the reason is named; every other artifact on the change still resolves normally, and the CLI tier supplies the correct list when it arrives |
 | A tasks file exists but cannot be read (a directory where a file was expected, a permission error, an I/O error, or invalid UTF-8) | Reported as zero tasks, named in `Tasks::problems`; the CLI's count corrects the pane when it arrives. Invalid UTF-8 is the one case where the file path knowingly disagrees with `openspec list --json`, which decodes lossily and still reports a count — every other read failure already agrees with the CLI, which records the same failure as zero tasks too |
-| Herdr socket unreachable | Runs as a standalone TUI; agent column and action keys hidden |
+| Herdr socket unreachable | Runs as a standalone TUI; agent column, action keys, and their footer hints are all hidden |
+| A launch's `pane split` call fails | The launch stops before an agent is started; the reason is recorded and rendered as the list's leading problem row |
+| A launch's `agent start` call fails | The pane `pane split` opened is left in place, un-closed — `agent start`'s failure set includes the readiness *timeout*, in which an agent may in fact be starting — and the reason names the agent and the pane |
+| A launch's `agent prompt` call fails | The agent is already recorded as running for this change (the derived name is bound before the prompt is sent), so `g` can still focus it; the reason is recorded as the list's leading problem row |
+| A launch's derived agent name is already live in the session | Refused before any Herdr call is made: "`<name>` is already running for this change - press g to focus it" |
+| `state::record` fails after a successful `agent start` | The start is not undone and the prompt is still sent; the record failure is recorded as its own problem alongside the successful launch |
+| `g` on a change with no attributed agent | Nothing happens — no Herdr call, no problem recorded |
+| A `pane split` payload is not the measured envelope (a Herdr older than the manifest's `min_herdr_version` floor, `0.7.0`, might return one) | The launch stops before an agent is started, on the same terms as the JSON-decode and error-envelope failures above |
 | Pane narrower than 100 columns | Single-column list and detail |
 | `config.toml` malformed, unreadable, or a key of the wrong type | The affected key falls back to its documented default while every other key that parsed correctly is still honoured; `Config::problems` names each fallback |
 | `agent-names.toml` unusable (malformed, unreadable, or an entry Herdr would reject) | Empty or partial mapping; attribution falls back to the name-equality tier, and nothing already on disk is lost |
