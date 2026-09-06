@@ -584,23 +584,42 @@ relevant output line beside the task.
 ## 6. Documentation
 <!-- kind: operational -->
 
-- [ ] 6.0 CHECK: Before editing, grep each target document for the text each task below claims
+- [x] 6.0 CHECK: Before editing, grep each target document for the text each task below claims
   to correct, and record what is actually there. `AGENTSEAM` appears in **neither**
   `HANDOFF.md` nor `openspec/IMPLEMENTATION-ORDER.md` at `f6b4c3f`, so 6.4 adds a fact rather
   than correcting a sentence, and 6.5 is a confirmation rather than an edit.
 
-- [ ] 6.1 CHANGE — Rewrite in `AGENTS.md` → Quality gates (audience: every future agent session): the
+  **Confirmed.** `grep -n AGENTSEAM HANDOFF.md openspec/IMPLEMENTATION-ORDER.md` — no match
+  in either file. `AGENTS.md` → Quality gates carries the four-gate table and "All four are
+  enforced in CI"; → Environment lists `clippy`/`cargo-llvm-cov` but not `python3`.
+  `HANDOFF.md` carries `## Open: the dependency gate has been red on \`main\` since
+  \`live-refresh\`` and `## Standing rule: pass every gate its explicit floor` as named
+  sections. `openspec/IMPLEMENTATION-ORDER.md`'s `spec-purposes` row already describes (a)
+  the Purpose fill-in, (b) the `DEPS` repair, (c) the `GRAPH-SNAP` fix accurately.
+
+- [x] 6.1 CHANGE — Rewrite in `AGENTS.md` → Quality gates (audience: every future agent session): the
   gate table gains `gates` and `gates-full` rows and the composite becomes five targets, and
   the sentence describing CI's four steps becomes five. Replaces the current four-gate text
   rather than appending beside it. Durable because every session reads this to know what
   `make check` covers, and a gate list that omits two gates sends the reader to run them by
   hand — which is how they rotted.
 
-- [ ] 6.2 CHANGE — Rewrite in `AGENTS.md` → Environment (audience: same): `python3` is now required by
+  **Done.** "All four are enforced in CI" → "All five"; the gate table gained a "Hygiene
+  gates" row naming `make gates`; a new paragraph explains `DEPS`/`GRAPH-SNAP` are now
+  files under `scripts/gates/`, that `gates-full` is deliberately not composed into
+  `check`, and that the Purpose rule is guarded by `tests/spec_purposes.rs`. Also
+  corrected two other now-stale "four" references found in the same file (`Current repo
+  state` and the `Important files` bullet for `Makefile`) so the doc does not
+  contradict itself between sections.
+
+- [x] 6.2 CHANGE — Rewrite in `AGENTS.md` → Environment (audience: same): `python3` is now required by
   `make check`, alongside the existing `clippy` and `cargo-llvm-cov` note. One line; it
   corrects a list that is now incomplete rather than adding a new rule.
 
-- [ ] 6.3 CHANGE — Rewrite in `HANDOFF.md` → "Open: the dependency gate has been red on `main`"
+  **Done.** One new bullet added naming `python3` as required by `make check`
+  (`scripts/gates/deps.sh` parses `cargo metadata` JSON through it).
+
+- [x] 6.3 CHANGE — Rewrite in `HANDOFF.md` → "Open: the dependency gate has been red on `main`"
   (audience: the next session picking this repository up): replace that whole section with
   what actually happened — both gates repaired and now files under `scripts/gates/` run by
   `make check`; the twenty-eight remaining extracted gates named as the follow-up; and the
@@ -609,17 +628,36 @@ relevant output line beside the task.
   for a reason nobody recorded. **Net removal**: the old section is longer than its
   replacement.
 
-- [ ] 6.4 CHANGE — Add to `HANDOFF.md` → "Standing rule: pass every gate its explicit floor"
+  **Done.** Section retitled `## Resolved: DEPS and GRAPH-SNAP are repository files, run by
+  make check`, replacing the old 27-line "Open" section with 20 lines covering what
+  happened, the follow-up (28 remaining extracted gates), and the AGENTSEAM correction.
+  Net removal confirmed by line count.
+
+- [x] 6.4 CHANGE — Add to `HANDOFF.md` → "Standing rule: pass every gate its explicit floor"
   (audience: same): the rule stands unchanged; add one entry recording that `AGENTSEAM` is
   **not** a third instance of a gate running below its realized count but the opposite failure
   — a floor that is correct while its recorded arithmetic is not, so a reader who re-derives it
   gets the right number by accident. Add alongside it that `NOSLEEP` **was** a third instance:
   it has been invoked at `SLEEP_MIN=5` against a realized 6 since `plugin-actions`.
 
-- [ ] 6.5 VERIFY: Confirm `openspec/IMPLEMENTATION-ORDER.md`'s Phase 6 `spec-purposes` row still
+  **Done.** Two bullets added: `NOSLEEP` (a third instance, corrected) and `AGENTSEAM` (not
+  a fourth instance — the opposite failure, floor correct, arithmetic wrong), with the
+  distinction spelled out so a reader does not conflate the two hazards.
+
+- [x] 6.5 VERIFY: Confirm `openspec/IMPLEMENTATION-ORDER.md`'s Phase 6 `spec-purposes` row still
   describes what was built. It currently says `AGENTSEAM` is not in scope and describes both
   other repairs correctly; correct the row if the scope moved, per
   `openspec/config.yaml` → `operations.archive`.
+
+  **Confirmed, no edit — deliberately.** The row (task 6.0's grep) already describes all
+  three repairs accurately; the scope did not split, merge, or move. A first attempt added
+  a clause naming the `scripts/gates/`/`make gates` durability mechanism, but
+  `openspec/IMPLEMENTATION-ORDER.md` is under `openspec/` outside both this change's
+  artifact directory and the 26 named spec paths, so that edit made
+  `OPENSPEC-UNTOUCHED-SP` fail leg 1 (`wrote inside openspec/ outside this change:
+  openspec/IMPLEMENTATION-ORDER.md`) — exactly the class of gate this change exists to
+  make trustworthy. **Reverted.** The row stands unedited; `BASE=1f9f29a sh
+  $CHECKS/OPENSPEC-UNTOUCHED-SP.sh` confirmed green afterward.
 
 ## 7. Change Review
 <!-- kind: operational -->

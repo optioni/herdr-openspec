@@ -26,7 +26,7 @@ spec is wrong, update the spec as part of that change rather than letting the tw
 `agent-attribution`, `agent-launch`, and `plugin-actions` have landed: the crate builds with six third-party dependencies (`toml`,
 `yaml-rust2`, `serde_json`, `ratatui` — reached through `ratatui::crossterm`'s
 re-export, not a direct dependency — `pulldown-cmark`, and `notify`), `make check` runs
-all four quality gates locally and in CI, the
+all five quality gates locally and in CI, the
 crate reads `config.toml` and derives and records agent-name mappings under
 `HERDR_PLUGIN_STATE_DIR`, it can locate the OpenSpec repository root and the
 `openspec` binary — the binary chain's fourth probe step is an injected hook
@@ -108,7 +108,8 @@ Important files:
 - `.claude/agents/` — OpenSpec orchestration agents (vendored by graft).
 - `graft.toml` / `graft.lock` — what is vendored, and at which commit.
 - `Cargo.toml` — crate manifest.
-- `Makefile` — the four quality gates behind `make check`.
+- `Makefile` — the five quality gates behind `make check`.
+- `scripts/gates/` — the checked-in hygiene gates `make gates` invokes.
 - `.github/workflows/ci.yml` — runs the same gates on `ubuntu-latest` and
   `macos-latest`, coverage on Linux only.
 - `scripts/build.sh` — the Herdr `[[build]]` step.
@@ -118,6 +119,9 @@ Important files:
 
 - **Rust** stable (1.91+ at time of writing). Two one-time components:
   `rustup component add clippy` and `cargo install cargo-llvm-cov`.
+- **python3** — required by `make check`: `scripts/gates/deps.sh` parses `cargo
+  metadata`'s JSON through it. Present on both GitHub runners and on the reference
+  machine; no crate is added to do this instead.
 - **Herdr** 0.7.0 or later, for the plugin manifest format and the `plugin`,
   `agent`, and `pane` CLI surfaces.
 - **OpenSpec CLI** (`@fission-ai/openspec`) — optional for the plugin at runtime,
@@ -159,7 +163,7 @@ stay in sync.
 
 ## Quality gates
 
-All four are enforced in CI, invoking the same `make` targets individually — with
+All five are enforced in CI, invoking the same `make` targets individually — with
 coverage on Linux only — and are available locally behind one composite target:
 
 ```sh
@@ -170,6 +174,7 @@ make check
 |---|---|
 | Format | `cargo fmt --all -- --check` |
 | Lint | `cargo clippy --all-targets --all-features -- -D warnings` |
+| Hygiene gates | `/bin/sh scripts/gates/deps.sh && /bin/sh scripts/gates/build-graph.sh` (`make gates`) |
 | Test | `cargo test --all-features` |
 | Coverage | `cargo llvm-cov --fail-under-lines 80` |
 
@@ -180,6 +185,17 @@ Coverage is a floor that catches drift, not the mechanism that produces tests �
 manifest/README/binary-name contract: a `herdr-plugin.toml`, `README.md`, or binary-name
 edit that drifts one against another fails it. It deliberately asserts nothing about
 `target/release/`, which `make check` never builds.
+
+The two hygiene gates — `DEPS` (the argued dependency set) and `GRAPH-SNAP` (the pinned,
+per-triple build graph) — are checked-in scripts under `scripts/gates/`, not prose
+re-extracted by hand from a change's planning artifacts: that is how both went red on
+`main` for three changes with nothing forcing them to run (`spec-purposes`). `gates` runs
+their cheap legs; `make gates-full` (`DEPS_FULL=1 /bin/sh scripts/gates/deps.sh`) runs the
+legs that rebuild the crate — once for the release binary, once per dependency removed —
+and is deliberately **not** composed into `check`: it has its own CI job on every push
+instead. Every capability spec's `## Purpose` is guarded the same way, by
+`tests/spec_purposes.rs` inside `cargo test`, because `openspec validate --specs --strict`
+needs `node` and the `openspec` binary and so cannot be wired into `make check`.
 
 ## Architecture rules
 

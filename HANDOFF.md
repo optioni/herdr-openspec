@@ -143,33 +143,39 @@ invocation names its floor explicitly, and a floor is written as measured-plus-e
 with the arithmetic shown. This sits alongside the two older rules: a check must be able
 to *fail*, and able to *see* what it guards in the formatting this codebase actually uses.
 
-## Open: the dependency gate has been red on `main` since `live-refresh`
+- `NOSLEEP` **was** a third instance: it has been invoked at `SLEEP_MIN=5` against a
+  realized 6 since `plugin-actions` — `spec-purposes` found and corrected it.
+- `AGENTSEAM` is **not** a fourth instance, and is worth telling apart from the pattern
+  above: it is the opposite failure. Its floor (`MIN=23`) was and is **correct** — only
+  the *recorded arithmetic* behind it was wrong (see the correction below), so a reader
+  who re-derives the floor from that record gets the right number by accident rather than
+  by reason. A gate running below its realized count is one hazard; a gate whose correct
+  floor rests on wrong reasoning is a different one, worth telling apart because the fix
+  for each is not the same.
 
-`DEPS` and `GRAPH-SNAP` are command-level checks defined per change in `design.md`, run
-outside `make check`. `live-refresh` added the `notify` dependency and updated neither
-the want-list nor `tests/fixtures/build-graph.txt`. So **the gate guarding the dependency
-set has been failing for two changes and nobody noticed**, because `make check` is green
-and these run separately.
+## Resolved: `DEPS` and `GRAPH-SNAP` are repository files, run by `make check`
 
-**My first assignment of this was based on a wrong diagnosis.** I assigned it to
-`agent-launch` as "regenerate the snapshot and author a want-list". But the snapshot
-**was** already regenerated in `574b87d`; `GRAPH-SNAP` fails four legs later on a
-hardcoded macOS/Linux platform literal. So that repair would have fixed `DEPS` only, and
-`agent-launch` correctly left both alone rather than widen a change that adds no
-dependency and touches neither script.
+`spec-purposes` repaired both and, more durably, made the rot mechanism impossible to
+repeat: `scripts/gates/deps.sh` and `scripts/gates/build-graph.sh` are checked-in files,
+`make gates` composes them into `make check`, and `tests/ci_workflow.rs` now parses
+`check:`'s own prerequisites out of the `Makefile` rather than comparing against a
+hardcoded list, so a future gate joining `check` with no CI step fails on its own. `DEPS`'s
+want-list now names all six dependencies, including `notify`; `GRAPH-SNAP`'s platform
+assertion is two named, direction-aware lists instead of one hardcoded literal.
 
-**Decision: `spec-purposes` owns both.** It is already the Phase 6 hygiene change, and
-the two belong to one goal — **the repository should pass its own validation and its own
-gates before it ships.** Scope: fill in every placeholder Purpose, repair `DEPS`'s
-want-list, and fix `GRAPH-SNAP`'s platform literal. Exact failure lines are recorded in
-`agent-launch`'s `planning-review.md`.
+**The other twenty-eight extracted gates are still not repository files** — they are green,
+so nothing is on fire, but they rot on exactly the terms `DEPS` and `GRAPH-SNAP` did. Worth
+doing as its own change, not smuggled into a hygiene pass.
 
-Still true and still the reason this is a task rather than a quiet fix: **a gate
-artefact regenerated unattended blesses the current state without review.**
+**Correction to `plugin-actions`' record:** it justified `AGENTSEAM`'s `MIN=23` as
+"22 + `src/open.rs`". That reasoning is wrong twice in ways that cancelled: `src/open.rs`
+was added to `ALLOWED` in the same task, so it contributes **zero** to the searched count,
+and the real `+1` was `tests/manifest.rs`, added by the same change and never recorded.
+`22 + 0 + 1 = 23` — the floor was correct for a reason nobody wrote down.
 
-The deeper lesson is worth keeping: **a check that lives outside `make check` will rot,
-because nothing forces it to run.** Any future gate should either join `make check` or
-carry an explicit task in every change that could invalidate it.
+The deeper lesson still holds: **a check that lives outside `make check` will rot, because
+nothing forces it to run.** Any future gate should either join `make check` or carry an
+explicit task in every change that could invalidate it.
 
 ## Rule: a doc claim is fixed by the change that makes it true
 
