@@ -683,6 +683,125 @@ mod tests {
             }
         }
 
+        /// `artifact-content` :: "The line count drives the scroll clamp" —
+        /// `degraded-states`' addition. Twenty of the selected change's own `problems`, no
+        /// markdown source at all, forty `j` presses (well past the six-line overshoot the
+        /// fourteen-row content area allows), on exactly
+        /// `a_markdown_document_renders_and_scrolls_through_the_loop`'s terms: the scroll
+        /// clamp must be driven by `content_lines`' full returned length — problem lines
+        /// included — not merely by the markdown body's.
+        #[test]
+        fn change_problems_are_inside_the_scrolled_region() {
+            for width in [120u16, 60u16] {
+                let twenty_problems: Vec<String> = (0..20).map(|i| format!("p-{i:02}")).collect();
+                let change = crate::changes::fixture::with_problems(
+                    crate::changes::fixture::with_artifacts(
+                        crate::changes::fixture::active("detail-view", 4, 9),
+                        &[("proposal", &["/repo/p.md"])],
+                    ),
+                    twenty_problems,
+                );
+                let mut dashboard = Dashboard {
+                    repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
+                    searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
+                    changes: crate::changes::fixture::set(vec![change], Vec::new(), Vec::new()),
+                    route: Route::Detail,
+                    quit: false,
+                    selected: 0,
+                    filter: Filter {
+                        query: String::new(),
+                        active: false,
+                    },
+                    detail: Detail {
+                        source: String::new(),
+                        scroll: 0,
+                        tab: 0,
+                        problems: Vec::new(),
+                        loaded: None,
+                    },
+                    refresh: crate::ui::app::Refresh {
+                        requested: false,
+                        reload: false,
+                        problems: Vec::new(),
+                    },
+                    agents: crate::agents::AgentSnapshot {
+                        agents: Vec::new(),
+                        reachable: false,
+                        problem: None,
+                    },
+                    agent_names: crate::state::Mapping::default(),
+                    launch: crate::ui::app::Launch {
+                        pending: None,
+                        problems: Vec::new(),
+                    },
+                    file_mode: false,
+                };
+                let interior = detail_interior(width, 20, Route::Detail);
+                let content_y = interior.y + 2;
+                let content_height = interior.height - 2;
+
+                let backend = ratatui::backend::TestBackend::new(width, 20);
+                let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+                let mut presses: Vec<_> = (0..40)
+                    .map(|_| {
+                        Ok(Some(press(
+                            ratatui::crossterm::event::KeyCode::Char('j'),
+                            ratatui::crossterm::event::KeyModifiers::NONE,
+                        )))
+                    })
+                    .collect();
+                presses.push(Ok(Some(press(
+                    ratatui::crossterm::event::KeyCode::Char('q'),
+                    ratatui::crossterm::event::KeyModifiers::NONE,
+                ))));
+                let mut events = Script::new(presses);
+
+                // The artifact itself reads empty — every line on screen comes from
+                // `change.problems`, none from a markdown body, so this test cannot pass by
+                // accident of the body's own line count.
+                let recorder = RecordingReader::always(Ok(String::new()));
+                let read = |p: &std::path::Path| recorder.read(p);
+
+                let mut fs = crate::watch::none();
+                let mut refresher = crate::refresh::none();
+                let mut agents = crate::agents::none();
+                let mut launcher = crate::launch::none();
+                let mut live = crate::ui::driver::Live {
+                    fs: &mut *fs,
+                    refresher: &mut *refresher,
+                    agents: &mut *agents,
+                    launcher: &mut *launcher,
+                };
+                run_loop(
+                    &mut terminal,
+                    &mut dashboard,
+                    &mut events,
+                    &mut live,
+                    &read,
+                    std::time::Duration::from_millis(1),
+                )
+                .expect("loop ends");
+
+                let buf = terminal.backend().buffer();
+                let row_at = |y: u16| -> String {
+                    (interior.x..interior.x + 6)
+                        .map(|x| buf[(x, y)].symbol().to_string())
+                        .collect()
+                };
+                assert_eq!(row_at(content_y), "! p-06", "width {width}");
+                assert_eq!(
+                    row_at(content_y + content_height - 1),
+                    "! p-19",
+                    "width {width}"
+                );
+                assert_eq!(
+                    dashboard.detail.scroll, 6,
+                    "width {width}: the clamp must be driven by the full 20-line \
+                     content_lines() output, problem lines included"
+                );
+            }
+        }
+
         /// `detail-view`'s outer-loop acceptance test:
         /// `ui::app::action_for` -> `Dashboard::apply` ->
         /// `Dashboard::sync_detail` -> `ui::detail::*` -> `ui::view::render`
@@ -1511,6 +1630,17 @@ apply:
 
             let scratch = ScratchDir::new();
             let root = scratch.path();
+            // `degraded-states`: a config-less repository's default schema
+            // (`spec-driven`) is genuinely not vendored here, which now renders as the
+            // change's own leading problem line (this change's whole point) and would make
+            // this test's "no content yet" assertion fail for an unrelated reason. Vendoring
+            // a minimal schema keeps this test about what it was always about — startup
+            // state before the first read — rather than about group 5's new behaviour.
+            write(
+                &root.join("openspec/schemas/tdd/schema.yaml"),
+                "name: tdd\nartifacts:\n  - id: proposal\n    generates: proposal.md\napply:\n  tracks: proposal.md\n",
+            );
+            write(&root.join("openspec/config.yaml"), "schema: tdd\n");
             write(&root.join("openspec/changes/alpha/proposal.md"), "# P\n");
 
             let found = super::super::load(root, &config_with_archived_count(5), None);

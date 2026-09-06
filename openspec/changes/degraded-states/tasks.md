@@ -199,18 +199,18 @@
 ## 5. Per-change problems in the detail region
 <!-- kind: behavior -->
 
-- [ ] 5.1 RED: Write failing view tests `change_problems_render_above_the_content`,
+- [x] 5.1 RED: Write failing view tests `change_problems_render_above_the_content`,
   `change_problem_precedes_tab_problem`, `no_selected_change_contributes_no_lines`,
   `change_problems_are_inside_the_scrolled_region` (twenty entries, forty `j` presses, a
   fourteen-row content area). Both widths.
-- [ ] 5.2 GREEN: In `ui::detail::content_lines`, prepend one `! `-prefixed line per entry of
+- [x] 5.2 GREEN: In `ui::detail::content_lines`, prepend one `! `-prefixed line per entry of
   the selected change's own `problems`, above the `Detail::problems` lines, using the same
   `pad_or_truncate_right` call and plain face.
-- [ ] 5.3 VERIFY: `sh $C/NOTABSEAM.sh` and `sh $C/NOIO-VIEW.sh` green, and a test drives
+- [x] 5.3 VERIFY: `sh $C/NOTABSEAM.sh` and `sh $C/NOIO-VIEW.sh` green, and a test drives
   `content_lines` with `change: None`, an empty `Detail`, and width `0` without panicking.
-- [ ] 5.4 VERIFY: `detail-scroll`'s clamp computes against the full returned length, so no
+- [x] 5.4 VERIFY: `detail-scroll`'s clamp computes against the full returned length, so no
   clamp code changes; state explicitly if it turns out otherwise.
-- [ ] 5.5 Run `make check`. Commit.
+- [x] 5.5 Run `make check`. Commit.
 
 ## 6. Row 23 repair — a launch outcome carries every problem
 <!-- kind: behavior -->

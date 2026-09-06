@@ -323,6 +323,30 @@ pub(crate) mod fixture {
         }
     }
 
+    /// `change` with its `problems` replaced — `degraded-states`' addition, the one place
+    /// `ui::detail`'s tests reach for a `Change` carrying its own problems, on
+    /// `with_schema`'s "no `..` rest, every field named" terms.
+    pub(crate) fn with_problems(change: Change, problems: Vec<String>) -> Change {
+        let Change {
+            name,
+            dir,
+            origin,
+            schema,
+            artifacts,
+            progress,
+            problems: _,
+        } = change;
+        Change {
+            name,
+            dir,
+            origin,
+            schema,
+            artifacts,
+            progress,
+            problems,
+        }
+    }
+
     /// A `ChangeSet` from already-built `active` and `archived` vectors and
     /// `problems`, preserving each vector's order untouched — `rows` and
     /// `Dashboard::visible` are what sort or filter, never the fixture.

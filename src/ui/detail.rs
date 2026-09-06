@@ -162,11 +162,14 @@ pub fn tab_bar(artifacts: &[crate::changes::ArtifactRef], selected: usize, width
 /// The single line list both `ui::view::render` and `Dashboard::normalise_scroll`
 /// derive the detail content from, so the drawn slice and the scroll clamp
 /// can never disagree about how many lines there are: one `"! <problem>"`
-/// line per `detail.problems` entry, then the selected tab's **body**, and
-/// — only when both are empty — exactly one line reading `No content yet`.
-/// When `problems` is non-empty and `source` is empty, the problems alone
-/// are returned: the reason is known, and adding `No content yet` would say
-/// two contradictory things about the same tab.
+/// line per entry of the selected change's own `problems` (`degraded-states`'
+/// addition — `SPEC.md` rows naming a reason on `Change::problems` that
+/// nothing rendered before this change), then one such line per
+/// `detail.problems` entry, then the selected tab's **body**, and — only
+/// when all three are empty — exactly one line reading `No content yet`.
+/// When either problem source is non-empty and `source` is empty, the
+/// problem lines alone are returned: the reason is known, and adding `No
+/// content yet` would say two contradictory things about the same tab.
 ///
 /// The body is `ui::tasks::lines(&detail.source, &change.progress, width)`
 /// — `tasks-checklist`'s grammar and `tasks-progress-bar`'s leading line —
@@ -183,16 +186,26 @@ pub fn content_lines(
     change: Option<&crate::changes::Change>,
     width: u16,
 ) -> Vec<crate::ui::markdown::Line> {
-    let mut out: Vec<crate::ui::markdown::Line> = detail
-        .problems
-        .iter()
-        .map(|p| crate::ui::markdown::Line {
+    fn problem_line(p: &str, width: u16) -> crate::ui::markdown::Line {
+        crate::ui::markdown::Line {
             segments: vec![crate::ui::markdown::Segment {
                 text: crate::ui::list::pad_or_truncate_right(&format!("! {p}"), width as usize),
                 face: crate::ui::markdown::Face::plain(),
             }],
-        })
+        }
+    }
+
+    // `degraded-states`: the selected change's own problems lead, above `detail.problems` —
+    // "change_problem_precedes_tab_problem" — using the SAME `pad_or_truncate_right` call and
+    // plain face `detail.problems` already renders with, on the existing problem-row
+    // mechanism rather than a new one.
+    let mut out: Vec<crate::ui::markdown::Line> = change
+        .map(|c| c.problems.as_slice())
+        .unwrap_or(&[])
+        .iter()
+        .map(|p| problem_line(p, width))
         .collect();
+    out.extend(detail.problems.iter().map(|p| problem_line(p, width)));
 
     let tracked_tasks_progress = change.and_then(|c| {
         c.artifacts
@@ -607,6 +620,81 @@ mod tests {
         }
     }
 
+    // --- degraded-states: the selected change's own problems (task group 5) --------------
+
+    /// `artifact-content` :: "A change whose schema will not parse names the reason in the
+    /// detail region" — the change's own problems render above the tab content, using the
+    /// same `! `-prefixed, plain-face, `pad_or_truncate_right` grammar `detail.problems`
+    /// already uses.
+    #[test]
+    fn change_problems_render_above_the_content() {
+        for width in [78, 58] {
+            let change = fixture::with_problems(
+                fixture::active("x", 0, 0),
+                vec!["schema is not vendored".to_string()],
+            );
+            let d = detail("# heading\n", Vec::new());
+            let lines = content_lines(&d, Some(&change), width);
+            assert!(
+                lines[0].text().starts_with("! schema is not vendored"),
+                "width {width}: {:?}",
+                lines[0].text()
+            );
+            assert!(
+                lines[1..].iter().any(|l| l.text().contains("heading")),
+                "width {width}"
+            );
+        }
+    }
+
+    /// `artifact-content` :: "A change problem and a tab problem are both shown, change
+    /// first".
+    #[test]
+    fn change_problem_precedes_tab_problem() {
+        for width in [78, 58] {
+            let change = fixture::with_problems(
+                fixture::active("x", 0, 0),
+                vec!["schema is not vendored".to_string()],
+            );
+            let d = detail("", vec!["/repo/a.md: boom".to_string()]);
+            let lines = content_lines(&d, Some(&change), width);
+            assert_eq!(lines.len(), 2, "width {width}: {:?}", lines_text(&lines));
+            assert!(
+                lines[0].text().starts_with("! schema is not vendored"),
+                "width {width}: {:?}",
+                lines[0].text()
+            );
+            assert!(
+                lines[1].text().starts_with("! /repo/a.md: boom"),
+                "width {width}: {:?}",
+                lines[1].text()
+            );
+        }
+    }
+
+    /// `artifact-content` :: "No selected change contributes no lines" — a `None` change
+    /// must render identically to a change carrying an empty `problems` vector, both at the
+    /// unit level and against a blank content area.
+    #[test]
+    fn no_selected_change_contributes_no_lines() {
+        for width in [78, 58] {
+            let d = detail("# heading\n", Vec::new());
+            let with_none = content_lines(&d, None, width);
+            let empty_change = fixture::active("x", 0, 0);
+            let with_empty = content_lines(&d, Some(&empty_change), width);
+            assert_eq!(with_none, with_empty, "width {width}");
+            assert!(
+                !with_none.iter().any(|l| l.text().starts_with('!')),
+                "width {width}"
+            );
+        }
+    }
+
+    /// Renders `lines` as plain text, for an assertion failure message only.
+    fn lines_text(lines: &[crate::ui::markdown::Line]) -> Vec<String> {
+        lines.iter().map(|l| l.text().to_string()).collect()
+    }
+
     #[test]
     fn a_wrapped_paragraph_produces_strictly_more_lines_at_58_than_at_78() {
         let paragraph = format!("{}\n", "word ".repeat(40).trim());
@@ -802,5 +890,19 @@ mod tests {
             at_58 > at_78,
             "58: {at_58}, 78: {at_78} — the width must genuinely reach the wrap"
         );
+    }
+
+    /// `artifact-content` :: total function, no panic — `change: None`, an empty `Detail`,
+    /// and width `0`, per task 5.3. Also driven at 78 and 58, both of which behave
+    /// identically to width `0` here (an empty source and no problems is always "No content
+    /// yet", regardless of width).
+    #[test]
+    fn content_lines_never_panics_with_no_change_an_empty_detail_and_zero_width() {
+        let d = detail("", Vec::new());
+        for width in [0, 78, 58] {
+            let lines = content_lines(&d, None, width);
+            assert_eq!(lines.len(), 1, "width {width}");
+            assert_eq!(lines[0].text(), "No content yet", "width {width}");
+        }
     }
 }

@@ -142,4 +142,24 @@ confirmed / 21 unproven) by exactly the two reclassifications in "Findings" abov
 moves from (implicitly) unproven to confirmed because group 2 already landed, and row 6
 moves from confirmed to unproven because its view-tier proof does not exist yet. Every
 parsed condition appears exactly once above with exactly one of the five legal verdicts
+
+## Addendum — row 6 after group 5
+
+Group 5 wired `Change::problems` into `ui::detail::content_lines` wholesale, rendering
+every entry the schema-and-artifact resolution pipeline produces — not a curated subset.
+`schema::id_fallback`'s "no tasks artifact: no apply.tracks value and no artifact has id
+\"tasks\"\"" message (row 6's own condition) is one of those entries, folded into the same
+`Change::problems` vector `build_change`'s doc comment already documents as accumulating
+"selection, then load, then artifacts, then tasks" in one ordered list. So row 6 now
+renders a leading `!` line too, alongside rows 3/4/5/16/27/31.
+
+This was not separately called out as its own "reason is named" clause in `SPEC.md`'s row
+6 text at planning time — that row's wording speaks only to the tab bar ("every tab
+renders as markdown ... no tab is added, removed, or hidden") and the task count fallback,
+and is silent on whether a reason line appears. Rendering it is consistent with, not
+contradicted by, that wording, and with design.md's own instruction to make
+`Change::problems` "read by something" — there is no carve-out recorded anywhere for this
+one entry among the others sharing the same vector. Recorded here so group 9's own row-6
+proof (`no_tasks_artifact_renders_every_tab_as_markdown`) is written expecting a leading
+problem row, rather than being surprised by one.
 (task 1.5).
