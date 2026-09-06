@@ -541,22 +541,22 @@ green. It drives `ui::run_wired` — the composition root itself — not the com
 ## 3. `agents::parse_list`
 <!-- kind: behavior -->
 
-- [ ] 3.1 RED: Write the thirteen `agents::tests::parse::` tests named in design.md → Test
+- [x] 3.1 RED: Write the thirteen `agents::tests::parse::` tests named in design.md → Test
       Strategy, covering the reference payload, the empty array, a named agent, every status
       string plus three unrecognised forms, an entry with only the required identity fields, a
       skipped entry in three variants, a non-object entry in three variants, a `cwd` outside the
       repository, non-JSON text, four wrong shapes, and Herdr's own error envelope. Confirm each
       fails on the stub's `Err("not implemented")`, not on a fixture typo.
 
-- [ ] 3.2 GREEN: Implement `parse_list` over `serde_json::Value`, following
+- [x] 3.2 GREEN: Implement `parse_list` over `serde_json::Value`, following
       `changes::parse_list`'s navigation style: the envelope, then `result.agents`, then one
       `Agent` per entry with `pane_id`/`tab_id`/`workspace_id` required and everything else
       optional, and one `problems` line per skipped entry naming the fault and the index.
 
-- [ ] 3.3 REFACTOR: Extract the per-entry decode into its own function if 3.2 left `parse_list`
+- [x] 3.3 REFACTOR: Extract the per-entry decode into its own function if 3.2 left `parse_list`
       doing two jobs; otherwise record that no refactor was needed.
 
-- [ ] 3.4 VERIFY: `testcount --lib 'agents::tests::parse::' 13`, then the four gates
+- [x] 3.4 VERIFY: `testcount --lib 'agents::tests::parse::' 13`, then the four gates
       individually (`cargo llvm-cov --ignore-run-fail`). Commit.
 
 ## 4. `agents::poll_once`
