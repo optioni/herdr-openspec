@@ -1675,7 +1675,7 @@ apply:
         use std::time::Duration;
 
         use crate::config::Config;
-        use crate::testutil::{ScratchDir, UntilReady, snapshot, write_with_mode};
+        use crate::testutil::{ScratchDir, UntilReady, canonical, snapshot, write_with_mode};
         use crate::ui::app::{Dashboard, Route};
         use crate::ui::{StartError, Startup};
 
@@ -1689,6 +1689,7 @@ apply:
             root: &Path,
             config: &Config,
             herdr: &Path,
+            state_dir: Option<&Path>,
             predicate: &dyn Fn() -> bool,
         ) -> (Result<Dashboard, StartError>, Vec<String>) {
             let backend = ratatui::backend::TestBackend::new(width, 20);
@@ -1698,7 +1699,7 @@ apply:
                 cwd: root,
                 config,
                 herdr,
-                state_dir: None,
+                state_dir,
             };
             let result = super::super::run_wired(
                 &mut terminal,
@@ -1789,6 +1790,48 @@ apply:
             )
         }
 
+        /// One `agent list` JSON entry. `name` `None` omits the field entirely, matching
+        /// Herdr's own behaviour for an agent nobody has renamed; `cwd` `None` omits it
+        /// too, matching an agent whose working directory Herdr does not report. `index`
+        /// gives each entry a distinct `pane_id`/`tab_id`, two of the three of Herdr's
+        /// seven required fields this crate reads.
+        fn agent_entry(
+            index: usize,
+            name: Option<&str>,
+            status: &str,
+            cwd: Option<&str>,
+        ) -> String {
+            let mut entry = format!(
+                r#"{{"agent":"claude","agent_status":"{status}","pane_id":"w8:p{index}","tab_id":"w8:t{index}","workspace_id":"w8""#
+            );
+            if let Some(name) = name {
+                entry.push_str(&format!(r#","name":"{name}""#));
+            }
+            if let Some(cwd) = cwd {
+                entry.push_str(&format!(r#","cwd":"{cwd}""#));
+            }
+            entry.push('}');
+            entry
+        }
+
+        /// `agent-attribution`'s generalisation of `herdr_script`: a scratch `herdr`
+        /// program that appends its arguments to `log`, one line per invocation, then
+        /// prints the `agent_list` envelope built from `entries` — parameterised on the
+        /// agent list it prints, per design.md -> Test Strategy, rather than always the
+        /// reference single agent `herdr_script` prints.
+        fn herdr_script_for(dir: &Path, log: &Path, entries: &[String]) -> PathBuf {
+            let agents_json = entries.join(",");
+            write_script(
+                dir,
+                "herdr",
+                &format!(
+                    "printf '%s\\n' \"$*\" >> \"{log}\"\n\
+                     printf '%s' '{{\"id\":\"cli:agent:list\",\"result\":{{\"agents\":[{agents_json}],\"type\":\"agent_list\"}}}}'\n",
+                    log = log.display(),
+                ),
+            )
+        }
+
         /// A scratch `openspec` program: appends its arguments to `log`, one
         /// line per invocation, and answers `list --json` with an empty
         /// change list whose `root.path` agrees with `root` — enough for the
@@ -1857,7 +1900,7 @@ apply:
                     log_lines(&openspec_log) >= 2
                 };
 
-                let (result, buf) = run_wired_at(width, root, &config, &herdr, &predicate);
+                let (result, buf) = run_wired_at(width, root, &config, &herdr, None, &predicate);
                 let dashboard = result.expect("run_wired must return Ok for a supported state");
 
                 assert!(
@@ -1932,7 +1975,7 @@ apply:
 
                 let predicate = || log_lines(&openspec_log) >= 1;
 
-                let (result, buf) = run_wired_at(width, root, &config, &herdr, &predicate);
+                let (result, buf) = run_wired_at(width, root, &config, &herdr, None, &predicate);
                 let dashboard = result.expect("an unreachable socket is a supported state");
 
                 assert!(
@@ -1997,7 +2040,7 @@ apply:
 
             let predicate = || log_lines(&herdr_log) >= 1;
 
-            let (result, buf) = run_wired_at(120, root, &config, &herdr, &predicate);
+            let (result, buf) = run_wired_at(120, root, &config, &herdr, None, &predicate);
             let dashboard = result.expect("no repository is a supported state");
 
             assert_eq!(dashboard.repo, None);
@@ -2017,6 +2060,103 @@ apply:
                     .any(|row| row.contains("No OpenSpec repository found")),
                 "the list region's no-repository empty state must be on screen: {buf:?}"
             );
+        }
+
+        /// `agent-attribution`'s outer-loop acceptance test: a polled agent must reach a
+        /// rendered badge and a rendered footer count, not merely `Dashboard.agents` — see
+        /// design.md -> Test Strategy. RED until group 8 wires the mapping read, the badge
+        /// cell, and the footer count together.
+        #[test]
+        fn a_polled_agent_reaches_a_rendered_badge() {
+            for width in [120u16, 60u16] {
+                let scratch = scratch_repo_with_alpha();
+                let root = scratch.path();
+                // Replace `alpha`'s tasks.md with the two changes this scenario names —
+                // `2fa-support` and `alpha`, each counting 4 of 9 — so the fixture matches
+                // design.md's scenario exactly rather than reusing the single-change one.
+                std::fs::remove_dir_all(root.join("openspec/changes/alpha"))
+                    .expect("remove the single-change fixture");
+                for name in ["2fa-support", "alpha"] {
+                    write_with_mode(
+                        &root.join(format!("openspec/changes/{name}/proposal.md")),
+                        format!("# {name}\n").as_bytes(),
+                        0o644,
+                    );
+                    write_with_mode(
+                        &root.join(format!("openspec/changes/{name}/tasks.md")),
+                        b"- [x] a\n- [x] b\n- [x] c\n- [x] d\n- [ ] e\n- [ ] f\n- [ ] g\n- [ ] h\n- [ ] i\n",
+                        0o644,
+                    );
+                }
+
+                let state = ScratchDir::new();
+                write_with_mode(
+                    &state.path().join("agent-names.toml"),
+                    b"[names]\nc-2fa-support = \"2fa-support\"\n",
+                    0o644,
+                );
+
+                let herdr_log = root.join("herdr.log");
+                let repo_root = canonical(root).display().to_string();
+                let entries = vec![
+                    agent_entry(1, Some("c-2fa-support"), "working", Some(&repo_root)),
+                    agent_entry(2, Some("alpha"), "blocked", Some(&repo_root)),
+                    agent_entry(3, None, "idle", Some(&repo_root)),
+                    agent_entry(4, Some("alpha"), "working", Some("/definitely/elsewhere")),
+                ];
+                let herdr = herdr_script_for(root, &herdr_log, &entries);
+
+                let openspec_log = root.join("openspec.log");
+                let openspec = openspec_script(root, &openspec_log, root);
+                let config = Config {
+                    openspec_bin: Some(openspec),
+                    ..Config::default()
+                };
+
+                let predicate = || log_lines(&herdr_log) >= 1;
+
+                let (result, buf) =
+                    run_wired_at(width, root, &config, &herdr, Some(state.path()), &predicate);
+                let dashboard = result.expect("run_wired must return Ok for a supported state");
+
+                assert!(
+                    dashboard.agents.reachable,
+                    "width {width}: the poller must be reachable through the real seam"
+                );
+                assert_eq!(
+                    dashboard.agents.agents.len(),
+                    4,
+                    "width {width}: all four scratch agents must have been polled"
+                );
+
+                let two_fa_row = buf
+                    .iter()
+                    .find(|row| row.contains("2fa-support"))
+                    .unwrap_or_else(|| panic!("width {width}: no row named 2fa-support: {buf:?}"));
+                assert!(
+                    two_fa_row.contains(" w [4/9]"),
+                    "width {width}: 2fa-support's row must carry the working badge: {two_fa_row:?}"
+                );
+
+                let alpha_row = buf
+                    .iter()
+                    .find(|row| row.contains("alpha"))
+                    .unwrap_or_else(|| panic!("width {width}: no row named alpha: {buf:?}"));
+                assert!(
+                    alpha_row.contains(" b [4/9]"),
+                    "width {width}: alpha's row must carry the blocked badge: {alpha_row:?}"
+                );
+
+                let footer = "q quit  Enter detail  Esc back  1 unattributed";
+                let expected_footer = format!(
+                    "{footer}{}",
+                    " ".repeat(width as usize - footer.chars().count())
+                );
+                assert_eq!(
+                    buf[19], expected_footer,
+                    "width {width}: the footer must read exactly '{footer}'"
+                );
+            }
         }
     }
 }

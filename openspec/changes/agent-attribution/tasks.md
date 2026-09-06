@@ -362,7 +362,7 @@ The headline scenario is `agent-poller` → "A polled agent reaches a rendered b
 rendered count". Its assertions are chosen so each can fail, and the footer's in both
 directions; see design.md → Test Strategy.
 
-- [ ] 2.1 CHANGE: Extend `ui::tests::wiring`'s harness, honouring design.md → Test Boundaries:
+- [x] 2.1 CHANGE: Extend `ui::tests::wiring`'s harness, honouring design.md → Test Boundaries:
       a `ScratchDir` repository holding active changes `2fa-support` and `alpha`, each with a
       `tasks.md` counting 4 of 9; a second `ScratchDir` state directory holding
       `agent-names.toml` with `[names]` and `c-2fa-support = "2fa-support"`; and a
@@ -372,7 +372,7 @@ directions; see design.md → Test Strategy.
       `testutil::canonical(scratch.path())` — on macOS `/var` is a symlink to `/private/var`,
       so the uncanonicalized form makes the containment test pass where production fails.
 
-- [ ] 2.2 RED: Write `ui::tests::wiring::a_polled_agent_reaches_a_rendered_badge`, driving
+- [x] 2.2 RED: Write `ui::tests::wiring::a_polled_agent_reaches_a_rendered_badge`, driving
       `run_wired` at 120x20 and again at 60x20 with a four-agent payload — `c-2fa-support`
       `working` in the repository, `alpha` `blocked` in the repository, one unnamed `claude`
       `idle` in the repository, and one named `alpha` `working` at `/definitely/elsewhere` —
@@ -381,14 +381,14 @@ directions; see design.md → Test Strategy.
       row's holds `b`, and the footer row is exactly
       `q quit  Enter detail  Esc back  1 unattributed` padded to the width.
 
-- [ ] 2.3 CHECK: Confirm it fails because the behaviour is missing, not because the harness is
+- [x] 2.3 CHECK: Confirm it fails because the behaviour is missing, not because the harness is
       misconfigured: the run must reach `Ok(dashboard)` with `agents.reachable` true and
       `agents.agents` holding four agents, and fail on the badge and footer assertions alone.
       **Red when:** it fails on `StartError`, on a deadline with an empty `herdr` log, or on a
       panic — any of those is a harness fault. Record the exact assertion message; task 8.1
       requires the identical one.
 
-- [ ] 2.4 VERIFY: `cargo test --all-features` fails on **exactly** this one test. Commit.
+- [x] 2.4 VERIFY: `cargo test --all-features` fails on **exactly** this one test. Commit.
 
 ## 3. `agents::attribute` — the three tiers
 <!-- kind: behavior -->
