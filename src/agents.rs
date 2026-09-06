@@ -9,7 +9,7 @@
 //! in group 4, and the real schedule and worker body in group 7.
 
 use std::path::PathBuf;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::cli::HerdrCli;
 
@@ -283,22 +283,75 @@ pub fn none() -> Box<dyn AgentPoll> {
 struct RealAgentPoll {
     request_tx: std::sync::mpsc::Sender<()>,
     result_rx: std::sync::mpsc::Receiver<AgentSnapshot>,
+    /// The instant the next poll becomes due, computed from the same `now` an answer
+    /// arrived at. `None` means "due now, or never yet decided" — the first `drain` on a
+    /// freshly started poller.
+    next_due: Option<Instant>,
+    /// At most one poll in flight at a time: set when a request is sent, cleared when
+    /// its answer arrives.
+    in_flight: bool,
+    /// The `Duration` `pending_in` returns until the next call — left behind by `drain`
+    /// each time, so `pending_in` reads a clock never.
+    pending: Option<Duration>,
+    /// Set once the worker's result channel disconnects, so the standing "worker
+    /// stopped" snapshot is reported exactly once and the poller degrades to silence —
+    /// on `agents::none()`'s own terms — thereafter.
+    dead: bool,
 }
 
 impl AgentPoll for RealAgentPoll {
-    /// Group 7 RED shape: every call both takes an answer, if one is ready, and fires a
-    /// fresh request — no in-flight suppression and no schedule yet, so the tests
-    /// asserting "exactly one run" and "reported once" are red on behaviour rather than
-    /// on a stub that never touched the channels at all. The real schedule (design.md ->
-    /// Decisions 2) lands in the same group's GREEN step.
+    /// The schedule lives here, on the render side (design.md -> Decisions 2): read the
+    /// clock once; take the worker's answer with `try_recv`, and on an answer set the
+    /// next due instant to that same `now` plus `POLL_INTERVAL`; then, when no poll is
+    /// in flight and the next due instant has arrived or was never set, send one request
+    /// to the worker; then leave behind the `Duration` `pending_in` returns.
     fn drain(&mut self) -> Option<AgentSnapshot> {
-        let result = self.result_rx.try_recv().ok();
-        let _ = self.request_tx.send(());
+        if self.dead {
+            return None;
+        }
+        let now = Instant::now();
+        let mut result = None;
+        match self.result_rx.try_recv() {
+            Ok(snapshot) => {
+                self.next_due = Some(now + POLL_INTERVAL);
+                self.in_flight = false;
+                result = Some(snapshot);
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.dead = true;
+                self.pending = None;
+                return Some(AgentSnapshot {
+                    agents: Vec::new(),
+                    reachable: false,
+                    problem: Some("the agent poller's worker has stopped answering".to_string()),
+                });
+            }
+        }
+
+        let due = match self.next_due {
+            None => true,
+            Some(next) => now >= next,
+        };
+        if !self.in_flight && due {
+            // The request channel disconnecting here (the worker already died between
+            // this drain and the last) is handled identically to a mid-flight death: the
+            // next drain's `try_recv` observes `Disconnected` and reports it once.
+            let _ = self.request_tx.send(());
+            self.in_flight = true;
+        }
+
+        self.pending = if self.in_flight {
+            None
+        } else {
+            self.next_due
+                .map(|next| next.saturating_duration_since(now))
+        };
         result
     }
 
     fn pending_in(&self) -> Option<Duration> {
-        None
+        self.pending
     }
 }
 
@@ -312,15 +365,17 @@ pub fn start(cli: std::sync::Arc<dyn HerdrCli>) -> Box<dyn AgentPoll> {
     Box::new(RealAgentPoll {
         request_tx,
         result_rx,
+        next_due: None,
+        in_flight: false,
+        pending: None,
+        dead: false,
     })
 }
 
 // Everything below this point is the worker's own body — reached only from inside a
 // `thread::spawn` closure, never from the render path, and therefore free to block.
 // `NOBLOCK` leg 3 relies on this ordering: it cuts `src/agents.rs`'s production slice at
-// its single `thread::spawn` and only searches the half before it. Group 7 stub: shared
-// by `agents::poller_for_test` already; `agents::start` grows its own `thread::spawn` of
-// this same function in task 7.2, replacing the trivial closure above.
+// its single `thread::spawn` and only searches the half before it.
 
 /// The worker's whole body: block on the request channel, call [`poll_once`] for each
 /// request, and send the resulting [`AgentSnapshot`] back, returning when either channel
@@ -936,7 +991,7 @@ mod tests {
                 if runs >= 1 {
                     break;
                 }
-                std::thread::sleep(Duration::from_millis(10));
+                std::thread::yield_now();
             }
             assert_eq!(runs, 1, "exactly one run, not five");
         }
@@ -959,7 +1014,7 @@ mod tests {
                     first = Some(s);
                     break;
                 }
-                std::thread::sleep(Duration::from_millis(10));
+                std::thread::yield_now();
             }
             let first = first.expect("the first drain after disconnection must report once");
             assert!(!first.reachable);
@@ -992,7 +1047,7 @@ mod tests {
                     snapshot = Some(s);
                     break;
                 }
-                std::thread::sleep(Duration::from_millis(10));
+                std::thread::yield_now();
             }
             let snapshot = snapshot.expect("a snapshot should arrive within 10s");
             assert!(snapshot.reachable);
@@ -1022,7 +1077,7 @@ mod tests {
                     snapshot = Some(s);
                     break;
                 }
-                std::thread::sleep(Duration::from_millis(10));
+                std::thread::yield_now();
             }
             let snapshot = snapshot.expect("a snapshot should arrive within 10s");
             assert!(!snapshot.reachable);
@@ -1066,7 +1121,7 @@ mod tests {
                 if let Some(s) = poller.drain() {
                     snapshots.push(s);
                 }
-                std::thread::sleep(Duration::from_millis(10));
+                std::thread::yield_now();
             }
             assert_eq!(
                 snapshots.len(),

@@ -656,18 +656,18 @@ green. It drives `ui::run_wired` — the composition root itself — not the com
       has no meaningfully-wrong intermediate version to contrast against, the same precedent
       `soonest(None, None)` and `dropping_the_poller_stops_the_thread` set earlier in this change.
 
-- [ ] 7.2 GREEN: Implement `RealAgentPoll::drain` per design.md → Decisions 2 — one clock read,
+- [x] 7.2 GREEN: Implement `RealAgentPoll::drain` per design.md → Decisions 2 — one clock read,
       `try_recv`, next-due set from that same `now`, at most one request in flight, `pending_in`
       cached — and `worker_body` as a `recv` loop calling `poll_once`.
 
-- [ ] 7.3 REFACTOR: Confirm `fn drain`'s last declaration still precedes the single
+- [x] 7.3 REFACTOR: Confirm `fn drain`'s last declaration still precedes the single
       `thread::spawn`, and that the worker body sits below it; move nothing else.
 
-- [ ] 7.4 VERIFY: `testcount --lib 'agents::tests::seam::' 3` and
+- [x] 7.4 VERIFY: `testcount --lib 'agents::tests::seam::' 3` and
       `testcount --lib 'agents::tests::worker::' 7`, then `sh $CHECKS/NOBLOCK.sh` — it must now
       be **green** on all three legs. Record its three OK lines. Commit.
 
-- [ ] 7.5 CHECK: Prove `NOBLOCK`'s new coverage can fail. Plant each of (a)
+- [x] 7.5 CHECK: Prove `NOBLOCK`'s new coverage can fail. Plant each of (a)
       `self.result_rx.recv_timeout(POLL_INTERVAL)` in `RealAgentPoll::drain`, (b) the
       `impl AgentPoll for RealAgentPoll` block moved below `agents::start`, (c) a second
       line-anchored `#[cfg(test)]` above `start`, and (d) every `try_recv` renamed to a
@@ -677,10 +677,20 @@ green. It drives `ui::run_wired` — the composition root itself — not the com
       control. Plant (d) must rename the token, not wrap it — `try_recv_x` still contains
       `try_recv` and stays green, which was measured.
 
-- [ ] 7.6 CHECK: Prove `NOSLEEP`'s leg 2b extension can fail. Plant two `thread::sleep` calls in
+- [x] 7.6 CHECK: Prove `NOSLEEP`'s leg 2b extension can fail. Plant two `thread::sleep` calls in
       `src/agents.rs`, run `SLEEP_MIN=4 MIN=25 sh $CHECKS/NOSLEEP.sh`, record exit **1** naming
       `src/agents.rs names a sleep 2 times`, and revert. Then run it clean and record green.
       Commit.
+      **Found during this task, fixed before the plant:** task 7.1's own worker tests had
+      written five `std::thread::sleep(Duration::from_millis(10))` busy-poll sites in
+      `src/agents.rs`, one real violation of this exact rule the task exists to check — leg 2b
+      failed clean, before any plant, with `src/agents.rs names a sleep 5 times`. Rewritten to
+      `std::thread::yield_now()` (no duration, outside `NOSLEEP`'s pattern, matching
+      `testutil::UntilReady`'s own shape), all seven `agents::tests::worker::` tests re-verified
+      green. `NOSLEEP` leg 1 now measures exactly **4** sleep sites, matching design.md's own
+      "four before, four after" count. The plant and revert above were then run against that
+      corrected baseline: `NOSLEEP FAIL (leg 2b): src/agents.rs names a sleep 2 times` under the
+      plant, green (4 sites, none in `src/agents.rs`) after reverting.
 
 ## 8. `Dashboard.agents` and the proof that nothing renders it
 <!-- kind: operational -->
