@@ -822,7 +822,7 @@ set; see design.md → Test Strategy.
 ## 8. The loop's dispatch and drain
 <!-- kind: behavior -->
 
-- [ ] 8.1 RED: Write `ui::driver::tests::`'s five —
+- [x] 8.1 RED: Write `ui::driver::tests::`'s five —
       `a_pending_launch_request_is_handed_over_exactly_once`,
       `a_launch_outcome_updates_the_mapping_and_replaces_the_problem`,
       `a_quit_on_the_same_event_as_a_launch_dispatches_nothing`,
@@ -831,11 +831,11 @@ set; see design.md → Test Strategy.
       `testutil::RecordingLauncher` and `testutil::ScriptedLauncher` doubles. **In the same
       task**, extend the **four** landed driver tests `EXTENDED`'s pair list names.
 
-- [ ] 8.2 GREEN: Add step 1 (take `launch.pending`, hand it to `live.launcher.request`) and
+- [x] 8.2 GREEN: Add step 1 (take `launch.pending`, hand it to `live.launcher.request`) and
       step 6 (drain, insert `named` into `agent_names.names`, replace `launch.problems` with
       `problem`) to `drive_live_tier`, in the positions live-updates' delta fixes.
 
-- [ ] 8.3 VERIFY: No refactor was needed — the two steps are two statements inside
+- [x] 8.3 VERIFY: No refactor was needed — the two steps are two statements inside
       `drive_live_tier`. `testcount --lib 'ui::driver::tests::' 34` plus the five single-test
       floors,
       then `sh $CHECKS/NOBLOCK.sh` and `sh $CHECKS/NOIO-VIEW.sh`. Commit.

@@ -131,6 +131,12 @@ pub fn run_loop<B: Backend, E: EventSource>(
 /// own contract, so extracting this into its own function grows no ability
 /// to block that `run_loop`'s body did not already have.
 fn drive_live_tier(dashboard: &mut Dashboard, live: &mut Live<'_>) {
+    // `agent-launch`'s step 1: leads the iteration because it answers a key pressed at the
+    // end of the previous one. Taking the request — leaving `None` — is what makes "handed
+    // over exactly once" true even when `apply` set it on the very last event before a quit.
+    if let Some(request) = dashboard.launch.pending.take() {
+        live.launcher.request(request);
+    }
     if dashboard.refresh.requested {
         live.refresher.request(crate::changes::Selection::All);
         dashboard.refresh.requested = false;
@@ -156,6 +162,14 @@ fn drive_live_tier(dashboard: &mut Dashboard, live: &mut Live<'_>) {
     }
     if let Some(snapshot) = live.agents.drain() {
         dashboard.agents = snapshot;
+    }
+    // `agent-launch`'s step 6: follows step 5 so a launch that has just recorded a mapping is
+    // visible to the very next `attribution()` call, in the frame the draw below produces.
+    if let Some(outcome) = live.launcher.drain() {
+        if let Some((agent, change)) = outcome.named {
+            dashboard.agent_names.names.insert(agent, change);
+        }
+        dashboard.launch.problems = outcome.problem.into_iter().collect();
     }
 }
 
@@ -422,12 +436,14 @@ mod tests {
         let mut fs = crate::watch::none();
         let mut refresher = crate::refresh::none();
         let mut agents = crate::agents::none();
-        let mut launcher = crate::launch::none();
+        // `agent-launch`: a recording launcher, so "Ctrl-C did not launch" is asserted rather
+        // than merely assumed of the inert double.
+        let mut launcher = crate::testutil::RecordingLauncher::new();
         let mut live = crate::ui::driver::Live {
             fs: &mut *fs,
             refresher: &mut *refresher,
             agents: &mut *agents,
-            launcher: &mut *launcher,
+            launcher: &mut launcher,
         };
         let summary = run_loop(
             &mut terminal,
@@ -446,6 +462,10 @@ mod tests {
             }
         );
         assert!(dashboard.quit);
+        assert!(
+            launcher.requests().is_empty(),
+            "Ctrl-C must not launch anything"
+        );
     }
 
     #[test]
@@ -1528,6 +1548,11 @@ mod tests {
         let backend = TestBackend::new(60, 20);
         let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
         let mut dashboard = dashboard();
+        // `agent-launch`: a pending request set before the run must be discarded by
+        // `launch::none()`, on exactly the terms every other inert collaborator already meets.
+        dashboard.launch.pending = Some(crate::launch::Request::Focus {
+            pane_id: "w8:p1".to_string(),
+        });
         let mut events = Script::new(vec![Ok(Some(press(
             KeyCode::Char('q'),
             KeyModifiers::NONE,
@@ -1569,6 +1594,11 @@ mod tests {
             "take_result is still polled once, even though it yields nothing"
         );
         assert_eq!(dashboard.changes, empty_set());
+        assert_eq!(
+            dashboard.launch.pending, None,
+            "launch::none() discards the request it was given"
+        );
+        assert!(dashboard.launch.problems.is_empty());
     }
 
     // `agent-polling`: `Live`'s third field and the loop's fourth live step.
@@ -1778,6 +1808,10 @@ mod tests {
                 dashboard.refresh.problems.is_empty(),
                 "width {width}: an unreachable socket must never become a problem row"
             );
+            assert!(
+                dashboard.launch.problems.is_empty(),
+                "width {width}: an unreachable agent poll must not become a launch problem either"
+            );
             assert_eq!(
                 dashboard.agents.problem,
                 Some("herdr agent list exited 1: server_not_running".to_string()),
@@ -1981,5 +2015,276 @@ mod tests {
              never merged with the first snapshot's one agent"
         );
         assert!(dashboard.agents.reachable);
+    }
+
+    // --- agent-launch: the loop's dispatch and drain --------------------------------------
+
+    #[test]
+    fn a_pending_launch_request_is_handed_over_exactly_once() {
+        let backend = TestBackend::new(60, 20);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        let mut dashboard = dashboard();
+        dashboard.agents.reachable = true;
+        dashboard.changes = crate::changes::fixture::set(
+            vec![crate::changes::fixture::active("add-auth", 1, 2)],
+            Vec::new(),
+            Vec::new(),
+        );
+        dashboard.launch.pending = Some(crate::launch::Request::Launch {
+            change: "add-auth".to_string(),
+            agent: "add-auth".to_string(),
+            intent: crate::launch::Intent::Apply,
+        });
+        let mut events = Script::new(vec![
+            Ok(None),
+            Ok(None),
+            Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
+        ]);
+        let mut fs = crate::watch::none();
+        let mut refresher = crate::refresh::none();
+        let mut agents = crate::agents::none();
+        let mut launcher = crate::testutil::RecordingLauncher::new();
+        let mut live = crate::ui::driver::Live {
+            fs: &mut *fs,
+            refresher: &mut *refresher,
+            agents: &mut *agents,
+            launcher: &mut launcher,
+        };
+        run_loop(
+            &mut terminal,
+            &mut dashboard,
+            &mut events,
+            &mut live,
+            &|_: &std::path::Path| Ok(String::new()),
+            Duration::from_millis(1),
+        )
+        .expect("loop ends");
+
+        assert_eq!(
+            launcher.requests(),
+            vec![crate::launch::Request::Launch {
+                change: "add-auth".to_string(),
+                agent: "add-auth".to_string(),
+                intent: crate::launch::Intent::Apply,
+            }],
+            "exactly one request, handed over on the first iteration"
+        );
+        assert_eq!(
+            dashboard.launch.pending, None,
+            "a request cannot be handed over twice"
+        );
+    }
+
+    #[test]
+    fn a_launch_outcome_updates_the_mapping_and_replaces_the_problem() {
+        let backend = TestBackend::new(60, 20);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        let mut dashboard = dashboard();
+        let mut events = Script::new(vec![
+            Ok(None),
+            Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
+        ]);
+        let mut fs = crate::watch::none();
+        let mut refresher = crate::refresh::none();
+        let mut agents = crate::agents::none();
+        let mut launcher = crate::testutil::ScriptedLauncher::new(vec![
+            Some(crate::launch::Outcome {
+                named: None,
+                problem: Some("split failed".to_string()),
+            }),
+            Some(crate::launch::Outcome {
+                named: Some(("c-2fa-support".to_string(), "2fa-support".to_string())),
+                problem: None,
+            }),
+        ]);
+        let mut live = crate::ui::driver::Live {
+            fs: &mut *fs,
+            refresher: &mut *refresher,
+            agents: &mut *agents,
+            launcher: &mut launcher,
+        };
+        run_loop(
+            &mut terminal,
+            &mut dashboard,
+            &mut events,
+            &mut live,
+            &|_: &std::path::Path| Ok(String::new()),
+            Duration::from_millis(1),
+        )
+        .expect("loop ends");
+
+        assert_eq!(
+            dashboard.launch.problems,
+            Vec::<String>::new(),
+            "the second, successful outcome must replace the first's problem wholesale"
+        );
+        assert_eq!(
+            dashboard.agent_names.names.get("c-2fa-support"),
+            Some(&"2fa-support".to_string())
+        );
+        assert_eq!(dashboard.changes, empty_set());
+        assert_eq!(
+            dashboard.agents,
+            crate::agents::AgentSnapshot {
+                agents: Vec::new(),
+                reachable: false,
+                problem: None,
+            }
+        );
+        assert_eq!(
+            dashboard.refresh,
+            crate::ui::app::Refresh {
+                requested: false,
+                reload: false,
+                problems: Vec::new(),
+            }
+        );
+    }
+
+    #[test]
+    fn a_quit_on_the_same_event_as_a_launch_dispatches_nothing() {
+        let backend = TestBackend::new(60, 20);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        let mut first_dashboard = dashboard();
+        first_dashboard.agents.reachable = true;
+        first_dashboard.changes = crate::changes::fixture::set(
+            vec![crate::changes::fixture::active("add-auth", 1, 2)],
+            Vec::new(),
+            Vec::new(),
+        );
+        let mut events = Script::new(vec![
+            Ok(Some(press(KeyCode::Char('a'), KeyModifiers::NONE))),
+            Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
+        ]);
+        let mut fs = crate::watch::none();
+        let mut refresher = crate::refresh::none();
+        let mut agents = crate::agents::none();
+        let mut launcher = crate::testutil::RecordingLauncher::new();
+        let mut live = crate::ui::driver::Live {
+            fs: &mut *fs,
+            refresher: &mut *refresher,
+            agents: &mut *agents,
+            launcher: &mut launcher,
+        };
+        run_loop(
+            &mut terminal,
+            &mut first_dashboard,
+            &mut events,
+            &mut live,
+            &|_: &std::path::Path| Ok(String::new()),
+            Duration::from_millis(1),
+        )
+        .expect("loop ends");
+
+        assert_eq!(
+            launcher.requests().len(),
+            1,
+            "the request dispatched on the iteration between the two presses"
+        );
+
+        // Driving the same script with the `q` press first leaves the launcher with zero
+        // requests, because the loop broke before the next iteration's step 1.
+        let mut dashboard2 = dashboard();
+        let mut events2 = Script::new(vec![Ok(Some(press(
+            KeyCode::Char('q'),
+            KeyModifiers::NONE,
+        )))]);
+        let mut fs2 = crate::watch::none();
+        let mut refresher2 = crate::refresh::none();
+        let mut agents2 = crate::agents::none();
+        let mut launcher2 = crate::testutil::RecordingLauncher::new();
+        let backend2 = TestBackend::new(60, 20);
+        let mut terminal2 = ratatui::Terminal::new(backend2).expect("construct terminal");
+        let mut live2 = crate::ui::driver::Live {
+            fs: &mut *fs2,
+            refresher: &mut *refresher2,
+            agents: &mut *agents2,
+            launcher: &mut launcher2,
+        };
+        run_loop(
+            &mut terminal2,
+            &mut dashboard2,
+            &mut events2,
+            &mut live2,
+            &|_: &std::path::Path| Ok(String::new()),
+            Duration::from_millis(1),
+        )
+        .expect("loop ends");
+        assert!(launcher2.requests().is_empty());
+    }
+
+    #[test]
+    fn a_launch_failure_is_recorded_once_and_the_loop_continues() {
+        let backend = TestBackend::new(60, 20);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        let mut dashboard = dashboard();
+        let mut events = Script::new(vec![
+            Ok(None),
+            Ok(None),
+            Ok(None),
+            Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
+        ]);
+        let mut fs = crate::watch::none();
+        let mut refresher = crate::refresh::none();
+        let mut agents = crate::agents::none();
+        let failure = || {
+            Some(crate::launch::Outcome {
+                named: None,
+                problem: Some("herdr pane split exited with code 1: no space".to_string()),
+            })
+        };
+        let mut launcher =
+            crate::testutil::ScriptedLauncher::new(vec![failure(), failure(), failure(), None]);
+        let mut live = crate::ui::driver::Live {
+            fs: &mut *fs,
+            refresher: &mut *refresher,
+            agents: &mut *agents,
+            launcher: &mut launcher,
+        };
+        let summary = run_loop(
+            &mut terminal,
+            &mut dashboard,
+            &mut events,
+            &mut live,
+            &|_: &std::path::Path| Ok(String::new()),
+            Duration::from_millis(1),
+        )
+        .expect("loop ends");
+
+        assert_eq!(
+            summary,
+            LoopSummary {
+                frames: 4,
+                polls: 4
+            },
+            "a failed launch is never a LoopError and never ends the loop"
+        );
+        assert_eq!(
+            dashboard.launch.problems,
+            vec!["herdr pane split exited with code 1: no space".to_string()],
+            "replaced wholesale, not three entries"
+        );
+        // Rendered as the list region's first !-marked row is `ui::list::tests::
+        // a_launch_problem_is_the_lists_first_row`'s own claim (group 9), which is what
+        // actually renders `launch.problems`; this test's job is the loop's own bookkeeping.
+    }
+
+    #[test]
+    fn live_cannot_be_built_without_naming_the_launcher() {
+        let mut fs = crate::watch::none();
+        let mut refresher = crate::refresh::none();
+        let mut agents = crate::agents::none();
+        let mut launcher = crate::launch::none();
+        let Live {
+            fs: _,
+            refresher: _,
+            agents: _,
+            launcher: _,
+        } = crate::ui::driver::Live {
+            fs: &mut *fs,
+            refresher: &mut *refresher,
+            agents: &mut *agents,
+            launcher: &mut *launcher,
+        };
     }
 }

@@ -480,6 +480,60 @@ pub(crate) mod testutil {
         }
     }
 
+    /// A recording `launch::Launcher` double: records every `request`, on `RecordingRefresher`'s
+    /// terms — `drain` always answers `None`, so this double is for asserting on the recorded
+    /// request vector, never on an outcome. Synchronous and thread-free.
+    pub(crate) struct RecordingLauncher {
+        requests: std::cell::RefCell<Vec<crate::launch::Request>>,
+    }
+
+    impl RecordingLauncher {
+        pub(crate) fn new() -> Self {
+            Self {
+                requests: std::cell::RefCell::new(Vec::new()),
+            }
+        }
+
+        /// Every `Request` passed to `request`, in call order.
+        pub(crate) fn requests(&self) -> Vec<crate::launch::Request> {
+            self.requests.borrow().clone()
+        }
+    }
+
+    impl crate::launch::Launcher for RecordingLauncher {
+        fn request(&mut self, request: crate::launch::Request) {
+            self.requests.borrow_mut().push(request);
+        }
+
+        fn drain(&mut self) -> Option<crate::launch::Outcome> {
+            None
+        }
+    }
+
+    /// A scripted `launch::Launcher` double, on `ScriptedAgents`'s terms: a queue of `drain`
+    /// answers; `request` discards, since these tests script an outcome without needing the
+    /// request that would have produced it — `RecordingLauncher` is the double for that.
+    /// Exhausting the queue yields `None` forever rather than panicking.
+    pub(crate) struct ScriptedLauncher {
+        drain_queue: std::cell::RefCell<std::collections::VecDeque<Option<crate::launch::Outcome>>>,
+    }
+
+    impl ScriptedLauncher {
+        pub(crate) fn new(drains: Vec<Option<crate::launch::Outcome>>) -> Self {
+            Self {
+                drain_queue: std::cell::RefCell::new(drains.into()),
+            }
+        }
+    }
+
+    impl crate::launch::Launcher for ScriptedLauncher {
+        fn request(&mut self, _request: crate::launch::Request) {}
+
+        fn drain(&mut self) -> Option<crate::launch::Outcome> {
+            self.drain_queue.borrow_mut().pop_front().unwrap_or(None)
+        }
+    }
+
     /// An `EventSource` whose wait is a predicate poll, not a fixed sleep: it
     /// calls `std::thread::yield_now()` — which has no duration, so it is
     /// deliberately outside `NOSLEEP`'s pattern — and returns `Ok(None)` until
