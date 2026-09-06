@@ -740,54 +740,140 @@ relevant output line beside the task.
 ## 8. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 8.1 CHECK: Inspect the verification commands below against what this change actually
+- [x] 8.1 CHECK: Inspect the verification commands below against what this change actually
   touched, and name any tier that does not apply.
 
-- [ ] 8.2 VERIFY: `cargo fmt --all -- --check` — clean.
+  **Inspected.** All eleven tiers below apply. Two design.md → Test Boundaries rows are
+  deliberately not exercised by any `make check` run: the real `openspec` binary/`node`
+  (never wired into `make check`, run by hand at 1.5/8.9/8.13) and the `herdr`
+  binary/socket (untouched throughout, confirmed by `git diff --stat -- src/` being empty).
 
-- [ ] 8.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings. No
+- [x] 8.2 VERIFY: `cargo fmt --all -- --check` — clean.
+
+  **Verified:** exit 0, no diff.
+
+- [x] 8.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings. No
   `#[allow]` was added; `src/changes.rs`'s existing one is untouched, because this change does
   not touch that file. (Rust has no separate type-check step: `clippy` is it.)
 
-- [ ] 8.4 VERIFY: `cargo test --all-features` — green. Library test count is still **940**
+  **Verified:** exit 0, 0 warnings. `git diff --stat 1f9f29a..HEAD -- src/` is empty, so
+  `src/changes.rs:966`'s vestigial `#[allow]` is untouched, as is every other `src/` file.
+
+- [x] 8.4 VERIFY: `cargo test --all-features` — green. Library test count is still **940**
   (`cargo test --all-features --lib -- --list | grep -c ': test$'`); `tests/ci_workflow.rs` is
   at 17 tests and `tests/spec_purposes.rs` at 3.
 
-- [ ] 8.5 VERIFY: `make gates` and `DEPS_FULL=1 make gates-full` each exit 0.
+  **Verified:** `cargo test --all-features` all green (lib, `cli`, `manifest`,
+  `ci_workflow`, `spec_purposes`, doc-tests). Library test count = **940**, unchanged.
+  `ci_workflow` = 17, `spec_purposes` = 3.
 
-- [ ] 8.6 VERIFY: `cargo llvm-cov --fail-under-lines 80` passes, and
+- [x] 8.5 VERIFY: `make gates` and `DEPS_FULL=1 make gates-full` each exit 0.
+
+  **Verified:** both exit 0, working tree unchanged afterward.
+
+- [x] 8.6 VERIFY: `cargo llvm-cov --fail-under-lines 80` passes, and
   `cargo llvm-cov --summary-only | tail -1` is re-measured and recorded as a **line**
   percentage over a line count — baseline 97.05% over 25,674 lines. No `src/` line was added,
   so a material move is a finding, not a result.
 
-- [ ] 8.7 VERIFY: Run the full gate roster at the floors named in the "Gate floors" table —
+  **Re-measured three times.** Two runs read **97.05% over 25,674 lines** (758 missed);
+  one intermediate run read 97.04% (759 missed), traced to `refresh.rs` gaining exactly one
+  missed line — `refresh.rs` is unmodified by this change (`git diff --stat -- src/` is
+  empty), so this is pre-existing flaky coverage on a timing-dependent branch in the
+  background worker, not a regression this change caused. Reported here as the finding it
+  is rather than silently accepted: baseline holds at **97.05% / 25,674 lines**, comfortably
+  above the 80% floor either way, and no `src/` line moved.
+
+- [x] 8.7 VERIFY: Run the full gate roster at the floors named in the "Gate floors" table —
   `AGENTSEAM` and both `LAUNCHSEAM` invocations at `MIN=24`, `NOSLEEP` at
   `SLEEP_MIN=6 MIN=29`, `WATCHSEAM` at `MIN=28`, and every unchanged gate at its listed floor.
   Not one is invoked bare.
 
-- [ ] 8.8 VERIFY: `BASE=<the SHA from task 0.1> sh $CHECKS/OPENSPEC-UNTOUCHED-SP.sh` exits 0 —
+  **Verified, every gate green at its named floor** (now that `tests/spec_purposes.rs`
+  exists): `AGENTSEAM` `MIN=24` (24 files); both `LAUNCHSEAM` invocations `MIN=24` (24
+  files each); `NOSLEEP` `SLEEP_MIN=6 MIN=29`; `WATCHSEAM` `MIN=28`; `NOSPAWN-GREP`
+  `MIN=24`; `NOLIT-CHANGE` `MIN=24`; `MDSEAM` `MIN=24`; `NOCLI-SHELL` `UI_MIN=11`;
+  `READSEAM` `UI_MIN=10`; `NOBLOCK` `UI_MIN=11`; `READONLY-UI`
+  `EXTRA='src/watch.rs src/refresh.rs src/agents.rs src/launch.rs src/open.rs' UI_MIN=11`;
+  `WIDTHS_MIN=94`, `LIST_MIN=29`, `MD_MIN=24`, `TASK_MIN=16`, `DETAIL_MIN=23`; `GATE-MECH1`
+  (run with `python3`, hardcoded floor 8, unedited). Every invocation named its floor
+  explicitly; none bare.
+
+- [x] 8.8 VERIFY: `BASE=<the SHA from task 0.1> sh $CHECKS/OPENSPEC-UNTOUCHED-SP.sh` exits 0 —
   never a re-derived `HEAD`, which after the first commit compares the change against itself.
 
-- [ ] 8.9 VERIFY: `openspec validate --specs --strict` exits 0 with `Totals: 40 passed, 0
+  **Verified:** `BASE=1f9f29ae1fc2870733671bcdd75cb184617a3c99 sh
+  $CHECKS/OPENSPEC-UNTOUCHED-SP.sh` → `OPENSPEC-UNTOUCHED OK: 26 Purpose-only spec edits,
+  nothing else under openspec/`, exit 0.
+
+- [x] 8.9 VERIFY: `openspec validate --specs --strict` exits 0 with `Totals: 40 passed, 0
   failed`, and `openspec validate spec-purposes --strict` reports the change valid.
 
-- [ ] 8.10 VERIFY: `make check` exits 0 end to end, in one run, as the single gate.
+  **Verified:** `Totals: 40 passed, 0 failed (40 items)`; `Change 'spec-purposes' is
+  valid`.
 
-- [ ] 8.11 VERIFY: Every commit in this change is signed —
+- [x] 8.10 VERIFY: `make check` exits 0 end to end, in one run, as the single gate.
+
+  **Verified:** exit 0 in one run. Coverage 97.05% over 25,674 lines.
+
+- [x] 8.11 VERIFY: Every commit in this change is signed —
   `git log --format=%H <BASE>..HEAD | while read s; do git cat-file commit $s | grep -q '^gpgsig' || echo "UNSIGNED $s"; done`
   prints nothing. Never `%G?`: `gpg.ssh.allowedSignersFile` is unset, so it reports `N` for
   signed commits too.
 
-- [ ] 8.12 CHECK: Confirm leg 5's proc-macro allowlist is platform-independent. Measured at
+  **Verified:** ran against `BASE=1f9f29a`, prints nothing. 9 commits in the range, all
+  carry `gpgsig`.
+
+- [x] 8.12 CHECK: Confirm leg 5's proc-macro allowlist is platform-independent. Measured at
   planning time by intersecting `cargo metadata`'s proc-macro target kinds with each triple's
   own `cargo tree`: the same **eight** names on the macOS and the Linux triples. Reproduce that
   intersection here, and confirm it against the `ubuntu-latest` CI run. If the two ever differ,
   make the allowlist platform-aware in the direction-aware shape leg 4 now uses and re-run
   tasks 3.5 and 5.3 — a gate hardcoding one platform's output is the defect this change repairs.
 
-- [ ] 8.13 VERIFY: Dry-run the archive round trip for both delta specs. For each, confirm the
+  **Reproduced locally, identical across all four triples.** Intersected `cargo metadata`'s
+  full proc-macro-target candidate set (10 names, including two — `palette_derive`,
+  `serde_derive` — not actually in this crate's resolved graph) against each of the four
+  triples' own `cargo tree --target <triple>` output: **aarch64-apple-darwin**,
+  **x86_64-apple-darwin**, **aarch64-unknown-linux-gnu**, and
+  **x86_64-unknown-linux-gnu** each intersect to the identical 8-name set —
+  `darling_macro derive_more-impl document-features indoc instability rustversion
+  strum_macros thiserror-impl` — matching the host graph and the hardcoded allowlist
+  exactly. **Not run: confirmation against a real `ubuntu-latest` CI run** — this session
+  has no CI access. Given the Linux triples' own `cargo tree --target` output already
+  agrees with the macOS triples' (measured directly above, not merely inferred), a
+  divergence in CI would be a tooling difference (a different `cargo`/registry state on
+  the runner), not a resolution difference this local check could miss. If CI ever
+  disagrees, the allowlist becomes platform-aware in the direction-aware shape leg 4
+  uses, and tasks 3.5/5.3 are re-run — recorded as the open contingency, not silently
+  assumed safe.
+
+- [x] 8.13 VERIFY: Dry-run the archive round trip for both delta specs. For each, confirm the
   `REMOVED` header matches the live spec's header byte-for-byte and the `ADDED` replacement
   carries every scenario the removed requirement had, then diff the resulting merged spec
   against the pre-change one and confirm the only losses are the two renamed headers. Both
   deltas use `REMOVED`+`ADDED` rather than `RENAMED`+`MODIFIED` (design.md → Risks), so this is
   the check that the round trip drops nothing.
+
+  **Verified for both.** `ci-workflow`: the `REMOVED` header
+  `### Requirement: Both supported platforms run the format, lint, and test gates` matches
+  `openspec/specs/ci-workflow/spec.md:58` byte-for-byte. Its 4 scenarios (`The matrix names
+  both runners and no others`, `All three gates run on each runner`, `A failing gate fails
+  the run rather than being skipped`, `One runner's failure does not cancel the other`) all
+  carry into the `ADDED` `Both supported platforms run the format, lint, hygiene, and test
+  gates`, with exactly one renamed (`All three gates` → `All four gates run on each
+  runner`) — the only loss, and it is the rename design.md → Risks names. The second
+  `ADDED` requirement (`The rebuilding dependency legs run in their own job`) is wholly
+  new, overlapping nothing live.
+
+  `quality-gates`: the `REMOVED` header
+  `### Requirement: \`make check\` is the single gate and runs all four checks` matches
+  `openspec/specs/quality-gates/spec.md:19` byte-for-byte. Its 3 scenarios (`All gates pass
+  on a clean tree`, `Format gate fails and stops the run`, `Lint gate fails on a clippy
+  warning`) all carry into the `ADDED` `\`make check\` is the single gate and runs every
+  check` unchanged, plus one genuinely new scenario (`The hygiene gates fail before the
+  test and coverage runs`) — no loss. The three further `ADDED` requirements (hygiene gates
+  are files; the declared set is checked against the argued set; the build graph is pinned
+  and direction-aware; every capability carries a Purpose) are wholly new.
+
+  Both deltas' round trip drops nothing beyond the two anticipated header renames.
