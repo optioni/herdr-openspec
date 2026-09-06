@@ -408,11 +408,16 @@ named**; a gate invoked bare runs at its block default, which is a threshold nob
   any `if:` outside the `ci` job section, so it covers the new `gates-full` job
   structurally rather than by a hardcoded target list.
 
-- [ ] 4.2 GREEN: Add `gates` and `gates-full` to the `Makefile`'s `.PHONY` list and define them
+- [x] 4.2 GREEN: Add `gates` and `gates-full` to the `Makefile`'s `.PHONY` list and define them
   as design.md → Contracts specifies, and recompose `check` as
   `fmt-check lint gates test coverage`.
 
-- [ ] 4.3 GREEN: Add a `Gates` step running `make gates` to the `check` job, positioned between
+  **Done.** `gates:` runs `scripts/gates/deps.sh` then `scripts/gates/build-graph.sh` (the
+  second invoked with `env -u GRAPH_WRITE`, the belt-and-suspenders clearing task 3.3
+  calls for). `gates-full:` runs `DEPS_FULL=1 scripts/gates/deps.sh`. `check` is now
+  `fmt-check lint gates test coverage`.
+
+- [x] 4.3 GREEN: Add a `Gates` step running `make gates` to the `check` job, positioned between
   `Lint` and `Test` so the CI order matches the composite's, and a `gates-full` job on
   `ubuntu-latest` running `make gates-full`, with `timeout-minutes`, no `if:`, and added to
   the aggregate job's `needs`. It compiles, so it takes the same `actions/checkout`,
@@ -420,7 +425,13 @@ named**; a gate invoked bare runs at its block default, which is a threshold nob
   `ci-workflow`'s live "Each job installs the toolchain it needs" and "Caching speeds a run up"
   requirements apply to it unchanged, and a job without them would violate both.
 
-- [ ] 4.4 CHECK: Contract gate. `make check`'s composition is consumed by `.github/workflows/ci.yml`
+  **Done.** `Gates` step added between `Lint` and `Test` in the `check` job. New
+  `gates-full` job on `ubuntu-latest`, `timeout-minutes: 30`, no `if:`, carrying the same
+  `actions/checkout@v7` / `dtolnay/rust-toolchain@stable` / `Swatinem/rust-cache@v2`
+  preamble as `coverage` (its own `prefix-key: gates-full` so the caches don't collide).
+  Added to `ci`'s `needs: [check, coverage, gates-full]`.
+
+- [x] 4.4 CHECK: Contract gate. `make check`'s composition is consumed by `.github/workflows/ci.yml`
   through `tests/ci_workflow.rs`. Re-read all three and confirm every gate command is written
   in exactly one place — the `Makefile` — and that no CI step restates a `cargo` invocation.
   Re-read `ci-workflow`'s live "CI invokes every gate through `make`" and "The composite target
@@ -428,11 +439,38 @@ named**; a gate invoked bare runs at its block default, which is a threshold nob
   either now needs different words, the delta spec is short a requirement and this task says so
   rather than leaving the live spec stale.
 
-- [ ] 4.5 REFACTOR: If `tests/ci_workflow.rs`'s gate list is now spelled out in more than one
+  **Confirmed.** Every gate command (including `gates`/`gates-full`) is written exactly once,
+  in the `Makefile`; no `run:` step in `ci.yml` contains `cargo`, matching
+  `gate_commands_are_defined_only_in_the_makefile`'s pass. "CI invokes every gate through
+  `make`" holds unchanged: the new `Gates` step is `run: make gates` and the `gates-full`
+  job's step is `run: make gates-full`, both `make <target>` invocations. "The composite
+  target is not used" also holds — `make check` still appears nowhere in the workflow.
+  Its scenario's enumerated "appears at least once" list (`fmt-check`, `lint`, `test`,
+  `coverage`) does not literally name `gates`/`gates-full`, but this was examined and
+  **not** taken as a gap during planning-review (see `planning-review.md` → "Findings
+  examined and not taken"): the requirement's own SHALL clause ("every gate the workflow
+  runs SHALL be invoked as `make <target>`") already covers any target by construction,
+  and `proposal.md` states the existing requirement's terms already extend to `gates`
+  without modification. No delta edit needed; re-confirmed here as this task asks.
+
+- [x] 4.5 REFACTOR: If `tests/ci_workflow.rs`'s gate list is now spelled out in more than one
   test, lift it to a single `const`. If it is not, state that here.
 
-- [ ] 4.6 VERIFY: `cargo test --test ci_workflow` — 17 tests, green. `make gates` exits 0.
+  **It is not.** `check_composes_gates_third` is the only place the five-target literal
+  (`fmt-check`, `lint`, `gates`, `test`, `coverage`) appears; every other test either
+  parses it via `parse_check_prereqs` or checks a single target by name. No `const`
+  needed. (During GREEN, `cargo fmt` also reformatted two multi-line expressions in the
+  new helper/test code — folded into this task's diff.)
+
+- [x] 4.6 VERIFY: `cargo test --test ci_workflow` — 17 tests, green. `make gates` exits 0.
   `make check` exits 0 end to end. Commit.
+
+  **Verified:** `cargo test --test ci_workflow` — 17 passed, 0 failed. `make gates` exits
+  0. `make check` exits 0 end to end in one run — 97.05% line coverage over 25,674 lines,
+  unmoved from baseline. Also planted a 5th gate (`newgate`) into a set-aside copy of the
+  Makefile with no matching CI step and confirmed `every_gate_the_makefile_composes_runs_in_ci`
+  goes red naming it (`check job must run \`make newgate\``); restored → green again. This
+  is the CRITICAL fix planning-review demanded, now demonstrated against a real plant.
 
 ## 5. Every gate is proved able to fail, and to see what it guards
 <!-- kind: operational -->

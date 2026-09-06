@@ -33,8 +33,23 @@ jobs:
         run: make fmt-check
       - name: Lint
         run: make lint
+      - name: Gates
+        run: make gates
       - name: Test
         run: make test
+
+  gates-full:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: gates-full
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Gates (full)
+        run: make gates-full
 
   coverage:
     runs-on: ubuntu-latest
@@ -54,7 +69,7 @@ jobs:
 
   ci:
     runs-on: ubuntu-latest
-    needs: [check, coverage]
+    needs: [check, coverage, gates-full]
     if: always()
     steps:
       - name: Require every job to have succeeded

@@ -1,4 +1,4 @@
-.PHONY: build fmt fmt-check lint test coverage check
+.PHONY: build fmt fmt-check lint test coverage gates gates-full check
 
 build:
 	/bin/sh scripts/build.sh
@@ -26,4 +26,11 @@ coverage:
 	fi
 	cargo llvm-cov --fail-under-lines 80
 
-check: fmt-check lint test coverage
+gates:
+	/bin/sh scripts/gates/deps.sh
+	env -u GRAPH_WRITE /bin/sh scripts/gates/build-graph.sh
+
+gates-full:
+	DEPS_FULL=1 /bin/sh scripts/gates/deps.sh
+
+check: fmt-check lint gates test coverage

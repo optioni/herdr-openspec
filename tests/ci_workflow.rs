@@ -163,10 +163,7 @@ fn parse_check_prereqs(makefile: &str) -> Vec<String> {
         .lines()
         .find(|l| l.trim_start().starts_with("check:") || l.trim_start().starts_with("check :"))
         .expect("no `check:` rule found in Makefile");
-    let rest = line
-        .split_once(':')
-        .expect("`check:` line has no colon")
-        .1;
+    let rest = line.split_once(':').expect("`check:` line has no colon").1;
     rest.split_whitespace().map(|s| s.to_string()).collect()
 }
 
@@ -264,7 +261,10 @@ fn every_gate_the_makefile_composes_runs_in_ci() {
         "check: must compose gates — parsed prerequisites were {prereqs:?}"
     );
 
-    let per_step_targets: Vec<&String> = prereqs.iter().filter(|t| t.as_str() != "coverage").collect();
+    let per_step_targets: Vec<&String> = prereqs
+        .iter()
+        .filter(|t| t.as_str() != "coverage")
+        .collect();
     let mut positions = Vec::new();
     for target in &per_step_targets {
         let needle = format!("make {target}");
@@ -610,9 +610,18 @@ fn gates_full_is_not_composed_into_check() {
             l.trim_start().starts_with("gates-full:") || l.trim_start().starts_with("gates-full :")
         })
         .expect("Makefile must declare a `gates-full:` target");
+    // The recipe is the indented lines following the target line, up to the next
+    // column-0 (unindented) line — the target line itself never carries the recipe body.
+    let start = makefile.find(gates_full_line).unwrap() + gates_full_line.len();
+    let recipe: String = makefile[start..]
+        .lines()
+        .skip(1)
+        .take_while(|l| l.starts_with('\t') || l.starts_with(' ') || l.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
     assert!(
-        gates_full_line.contains("DEPS_FULL=1"),
-        "gates-full: recipe must set DEPS_FULL=1, found: {gates_full_line}"
+        recipe.contains("DEPS_FULL=1"),
+        "gates-full: recipe must set DEPS_FULL=1, found: {recipe}"
     );
 }
 
