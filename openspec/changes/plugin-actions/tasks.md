@@ -761,24 +761,69 @@ clean) before this group's checklist was marked done.
 ## 16. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 16.1 CHECK: Inspect the intended verification commands and the tiers they cover —
+- [x] 16.1 CHECK: Inspect the intended verification commands and the tiers they cover —
   unit, contract, binary-integration, the roster gates from group 11, and the manual live
   checks from group 10.
-- [ ] 16.2 VERIFY: `cargo fmt --all -- --check` — clean.
-- [ ] 16.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
+
+  Inspected: unit (`src/open.rs`, `src/ui/mod.rs::startup_cwd`), contract
+  (`tests/manifest.rs`), binary-integration (`tests/cli.rs`), the 30-gate roster (group
+  11, all green at explicit floors), and the manual live checks (group 10, plus the
+  Change Review's additional live checks for the `--cwd` correction and the un-duplicated
+  README-command pane). All tiers exercised; none skipped.
+
+- [x] 16.2 VERIFY: `cargo fmt --all -- --check` — clean.
+
+  Exit 0.
+
+- [x] 16.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
   Add no `#[allow]`; the crate's single one (`src/changes.rs:966`) stays, because this
   change does not touch `src/changes.rs`.
-- [ ] 16.4 VERIFY: `cargo test --all-features` — green. Rust's type checker runs as part of
+
+  Exit 0. Confirmed `src/changes.rs` untouched by this change (`git diff --stat` shows no
+  entry for it) and its one `#[allow(clippy::too_many_arguments)]` is still the crate's
+  only one (`grep -rn '#\[allow' src/` → exactly one hit).
+
+- [x] 16.4 VERIFY: `cargo test --all-features` — green. Rust's type checker runs as part of
   this and of clippy; there is no separate type-check command in this repository.
-- [ ] 16.5 VERIFY: `cargo llvm-cov --fail-under-lines 80` — green. Report the **line**
+
+  Green: **940** lib tests, 9 `tests/cli.rs`, 4 `tests/manifest.rs`, 11
+  `tests/ci_workflow.rs` (untouched by this change), 0 doc-tests.
+
+- [x] 16.5 VERIFY: `cargo llvm-cov --fail-under-lines 80` — green. Report the **line**
   figure from the TOTAL row, not the region count.
-- [ ] 16.6 VERIFY: `make check` — exit 0, as the single composite gate. If it fails, name
+
+  Exit 0. **Line coverage: 97.05%** over 25,674 lines, 758 uncovered (the *region* row
+  reads 96.94% over 41,572 — not the figure the floor gates on). Baseline before this
+  change was 97.02% over 24,978 lines; coverage held steady while the crate grew by ~700
+  lines.
+
+- [x] 16.6 VERIFY: `make check` — exit 0, as the single composite gate. If it fails, name
   the failing sub-command rather than summarising.
-- [ ] 16.7 VERIFY: `openspec validate --strict` and
+
+  Exit 0. All four gates (fmt, clippy, test, coverage) passed inside the composite target.
+
+- [x] 16.7 VERIFY: `openspec validate --strict` and
   `openspec status --change plugin-actions` — every artifact `done`.
-- [ ] 16.8 VERIFY: `BASE=<the SHA recorded in 0.1> CHANGE=plugin-actions
+
+  `openspec validate --strict --changes plugin-actions` — **1 passed, 0 failed.** (This
+  run caught a real defect: `specs/plugin-build/spec.md`'s new startup-cwd requirement
+  was filed under `## MODIFIED Requirements` with no matching existing requirement to
+  modify — archiving would have refused the delta. Moved to its own `## ADDED
+  Requirements` section; re-validated clean.) `openspec validate --strict --specs` shows
+  the repository's pre-existing, already-assigned `spec-purposes` placeholder-Purpose
+  failures across unrelated capabilities (`tasks-progress-bar`, `terminal-lifecycle`,
+  `watch-invalidation`, and others) — not this change's to fix. `openspec status --change
+  plugin-actions` — 5/5 planning artifacts complete.
+
+- [x] 16.8 VERIFY: `BASE=<the SHA recorded in 0.1> CHANGE=plugin-actions
   sh $CHECKS/OPENSPEC-UNTOUCHED.sh` — nothing written inside `openspec/` outside this
   change's own directory.
-- [ ] 16.9 VERIFY: Every commit this change made is signed —
+
+  `OPENSPEC-UNTOUCHED OK`.
+
+- [x] 16.9 VERIFY: Every commit this change made is signed —
   `git cat-file commit <sha> | grep -q '^gpgsig'` for each, never `%G?`, which reports `N`
   for signed commits because `gpg.ssh.allowedSignersFile` is unset.
+
+  All **24** commits from `0.1`'s recorded `BASE` through `HEAD` confirmed `SIGNED`, none
+  `UNSIGNED`.
