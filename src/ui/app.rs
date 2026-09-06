@@ -535,6 +535,227 @@ pub fn action_for(event: &Event, filtering: bool) -> Action {
 
 #[cfg(test)]
 mod tests {
+    // `agent-attribution`'s own tests live directly under `mod tests`, not nested in
+    // `mod keys` below, so `testcount`'s `ui::app::tests::attribution_` and
+    // `ui::app::tests::dashboard_names_agent_names_at_every_site` filters — which name no
+    // submodule — actually match their full test paths.
+    use crate::agents::{Agent, AgentStatus};
+    use crate::changes::fixture;
+    use crate::ui::app::{Dashboard, Detail, Filter, Refresh, Route};
+    use std::collections::BTreeMap;
+
+    fn agent(name: Option<&str>, status: AgentStatus, cwd: Option<&str>) -> Agent {
+        Agent {
+            name: name.map(str::to_string),
+            kind: None,
+            status,
+            cwd: cwd.map(std::path::PathBuf::from),
+            pane_id: "p".to_string(),
+            tab_id: "t".to_string(),
+            workspace_id: "w".to_string(),
+            terminal_title: None,
+        }
+    }
+
+    /// A `Dashboard` rooted at `/repo`, over `active`/`archived` changes, carrying
+    /// `agents` and `agent_names` — this module's own fixture, since `mod keys`'s
+    /// `dashboard_at` and `five_change_dashboard` are private to it.
+    fn dashboard_for_attribution(
+        active: Vec<crate::changes::Change>,
+        archived: Vec<crate::changes::Change>,
+        selected: usize,
+        agents: Vec<Agent>,
+        agent_names: BTreeMap<String, String>,
+    ) -> Dashboard {
+        Dashboard {
+            repo: Some(std::path::PathBuf::from("/repo")),
+            searched_from: std::path::PathBuf::from("/repo"),
+            changes: fixture::set(active, archived, Vec::new()),
+            route: Route::List,
+            quit: false,
+            selected,
+            filter: Filter {
+                query: String::new(),
+                active: false,
+            },
+            detail: Detail {
+                source: String::new(),
+                scroll: 0,
+                tab: 0,
+                problems: Vec::new(),
+                loaded: None,
+            },
+            refresh: Refresh {
+                requested: false,
+                reload: false,
+                problems: Vec::new(),
+            },
+            agents: crate::agents::AgentSnapshot {
+                agents,
+                reachable: true,
+                problem: None,
+            },
+            agent_names: crate::state::Mapping {
+                names: agent_names,
+                problems: Vec::new(),
+            },
+        }
+    }
+
+    /// `dashboard-loop`'s compile-time companion, on `agent-attribution`'s own terms:
+    /// an exhaustive destructuring naming all eleven fields with no `..` rest, so a
+    /// field added later fails to compile here rather than defaulting silently. Beside
+    /// (not a replacement for) `mod keys`'s landed
+    /// `dashboard_destructures_into_exactly_ten_fields`, which stays where it is.
+    #[test]
+    fn dashboard_names_agent_names_at_every_site() {
+        let d = dashboard_for_attribution(Vec::new(), Vec::new(), 0, Vec::new(), BTreeMap::new());
+        let Dashboard {
+            repo,
+            searched_from,
+            changes,
+            route,
+            quit,
+            selected,
+            filter,
+            detail,
+            refresh,
+            agents,
+            agent_names,
+        } = &d;
+        assert_eq!(*repo, Some(std::path::PathBuf::from("/repo")));
+        assert_eq!(searched_from, &std::path::PathBuf::from("/repo"));
+        assert_eq!(changes.active.len(), 0);
+        assert_eq!(*route, Route::List);
+        assert!(!*quit);
+        assert_eq!(*selected, 0);
+        assert_eq!(
+            filter,
+            &Filter {
+                query: String::new(),
+                active: false
+            }
+        );
+        assert_eq!(
+            detail,
+            &Detail {
+                source: String::new(),
+                scroll: 0,
+                tab: 0,
+                problems: Vec::new(),
+                loaded: None,
+            }
+        );
+        assert!(!refresh.requested);
+        assert!(!refresh.reload);
+        assert!(refresh.problems.is_empty());
+        assert!(agents.agents.is_empty());
+        assert!(agents.reachable);
+        assert!(agents.problem.is_none());
+        assert!(agent_names.names.is_empty());
+    }
+
+    /// Drives all three tiers through `Dashboard::attribution()` rather than through
+    /// `agents::attribute` directly: the mapping tier (`c-alpha` -> `alpha`), the name
+    /// tier (an agent named exactly the archived change `legacy`), and the count (an
+    /// agent matching neither).
+    #[test]
+    fn attribution_derives_the_three_tiers() {
+        let names = BTreeMap::from([("c-alpha".to_string(), "alpha".to_string())]);
+        let via_mapping = agent(Some("c-alpha"), AgentStatus::Working, Some("/repo"));
+        let via_name = agent(Some("legacy"), AgentStatus::Idle, Some("/repo"));
+        let unmatched = agent(Some("scratch"), AgentStatus::Blocked, Some("/repo"));
+        let d = dashboard_for_attribution(
+            vec![
+                fixture::active("alpha", 1, 2),
+                fixture::active("beta", 0, 1),
+            ],
+            vec![fixture::archived(Some("2026-08-14"), "legacy", 3, 3)],
+            0,
+            vec![via_mapping, via_name, unmatched],
+            names,
+        );
+
+        let attribution = d.attribution();
+        assert_eq!(
+            attribution.badges,
+            BTreeMap::from([
+                ("alpha".to_string(), AgentStatus::Working),
+                ("legacy".to_string(), AgentStatus::Idle),
+            ])
+        );
+        assert_eq!(attribution.unattributed, 1);
+    }
+
+    /// `agent-attribution`'s "A refresh that reorders the list moves the badge with its
+    /// change": `adopt` preserves the selection by name, and the badge — keyed by name,
+    /// never by index — must follow it.
+    #[test]
+    fn attribution_follows_adopt_by_name() {
+        let mut d = dashboard_for_attribution(
+            vec![
+                fixture::active("beta", 0, 1),
+                fixture::active("gamma", 0, 1),
+            ],
+            Vec::new(),
+            1,
+            vec![agent(Some("gamma"), AgentStatus::Working, Some("/repo"))],
+            BTreeMap::new(),
+        );
+        assert_eq!(d.selected_change().unwrap().name, "gamma");
+
+        d.adopt(fixture::set(
+            vec![
+                fixture::active("alpha", 0, 1),
+                fixture::active("beta", 0, 1),
+                fixture::active("gamma", 0, 1),
+            ],
+            Vec::new(),
+            Vec::new(),
+        ));
+
+        assert_eq!(
+            d.attribution().badges,
+            BTreeMap::from([("gamma".to_string(), AgentStatus::Working)])
+        );
+        assert_eq!(
+            d.selected_change().unwrap().name,
+            "gamma",
+            "the selection and the badge must agree because both are resolved by name"
+        );
+    }
+
+    /// `agent-attribution`'s "The `/` filter hides rows without changing the count":
+    /// `attribution()` is built from the full change list, never the filtered
+    /// `visible()`, so setting a query changes nothing about it.
+    #[test]
+    fn attribution_ignores_the_filter() {
+        let mut d = dashboard_for_attribution(
+            vec![
+                fixture::active("alpha", 0, 1),
+                fixture::active("beta", 0, 1),
+            ],
+            Vec::new(),
+            0,
+            vec![
+                agent(Some("alpha"), AgentStatus::Working, Some("/repo")),
+                agent(Some("scratch-one"), AgentStatus::Idle, Some("/repo")),
+                agent(Some("scratch-two"), AgentStatus::Idle, Some("/repo")),
+            ],
+            BTreeMap::new(),
+        );
+        let before = d.attribution();
+        assert_eq!(
+            before.badges,
+            BTreeMap::from([("alpha".to_string(), AgentStatus::Working)])
+        );
+        assert_eq!(before.unattributed, 2);
+
+        d.filter.query = "beta".to_string();
+        let after = d.attribution();
+        assert_eq!(before, after, "the filter must not change the attribution");
+    }
+
     mod keys {
         use ratatui::crossterm::event::{
             Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind,
@@ -2138,9 +2359,17 @@ mod tests {
                 reachable: true,
                 problem: None,
             };
+            d.agent_names = crate::state::Mapping {
+                names: std::collections::BTreeMap::from([(
+                    "c-2fa-support".to_string(),
+                    "2fa-support".to_string(),
+                )]),
+                problems: Vec::new(),
+            };
             let cloned = d.clone();
             assert_eq!(d, cloned);
             assert_eq!(d.agents.agents.len(), 1);
+            assert_eq!(d.agent_names.names.len(), 1);
         }
 
         #[test]

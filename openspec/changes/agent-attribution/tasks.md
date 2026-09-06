@@ -427,23 +427,23 @@ directions; see design.md → Test Strategy.
 ## 4. `Dashboard::attribution()`
 <!-- kind: behavior -->
 
-- [ ] 4.1 RED: Write `ui::app::tests::attribution_derives_the_three_tiers`,
+- [x] 4.1 RED: Write `ui::app::tests::attribution_derives_the_three_tiers`,
       `attribution_follows_adopt_by_name`, `attribution_ignores_the_filter`, and
       `dashboard_names_agent_names_at_every_site` — the last an exhaustive destructuring of
       `Dashboard` with no `..` rest — and extend the landed
       `ui::app::tests::dashboard_is_clone_and_eq_with_agents` to carry a non-empty
       `agent_names`.
 
-- [ ] 4.2 GREEN: Give `attribution()` its real body: build the change-name slice from
+- [x] 4.2 GREEN: Give `attribution()` its real body: build the change-name slice from
       `changes.active` and `changes.archived` in full — never the filtered `visible()` — and
       call `agents::attribute` with `repo`, `agents.agents`, and `agent_names.names`.
 
-- [ ] 4.3 CHECK: Contract gate — re-inspect `Dashboard`'s published shape against design.md →
+- [x] 4.3 CHECK: Contract gate — re-inspect `Dashboard`'s published shape against design.md →
       Contracts and confirm the eleventh field broke every construction site at compile time,
       and that `Change`, `ChangeSet`, and `Action` are untouched so `from_files` and `from_cli`
       need no new agreement and `no_action_mutates_changes`' exact count holds at thirteen.
 
-- [ ] 4.4 VERIFY: `testcount --lib 'ui::app::tests::' 63`,
+- [x] 4.4 VERIFY: `testcount --lib 'ui::app::tests::' 63`,
       `testcount --lib 'ui::app::tests::attribution_' 3`, and
       `testcount --lib 'ui::app::tests::dashboard_names_agent_names_at_every_site' 1`, then
       `SCAN_MIN=165 TYPES='Dashboard Filter Detail Refresh' sh $CHECKS/NODEFAULT-UI.sh`,
