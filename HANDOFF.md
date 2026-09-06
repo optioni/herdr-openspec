@@ -127,6 +127,21 @@ Two consequences:
   deliberately **not** removed here: it is shipped code and belongs to a change, not to a
   between-changes edit. Fold it into whichever change next touches `src/changes.rs`.
 
+## Standing rule: pass every gate its explicit floor
+
+Promoted from a per-change catch after it happened twice:
+
+- `agent-polling`'s final pass invoked `WIDTHS`, `LISTWIDTHS`, `MDWIDTHS`, `TASKWIDTHS`
+  and `DETAILWIDTHS` **bare**, so they ran at block defaults instead of their set floors.
+- `READSEAM` and `MDSEAM` had been running bare at defaults **7 and 16** against realized
+  **10 and 22 since `detail-view`** — three changes of a gate passing at a threshold
+  nobody chose.
+
+**A gate invoked without its floor is a gate passing at a default.** Every gate
+invocation names its floor explicitly, and a floor is written as measured-plus-enumerated
+with the arithmetic shown. This sits alongside the two older rules: a check must be able
+to *fail*, and able to *see* what it guards in the formatting this codebase actually uses.
+
 ## Open: the dependency gate has been red on `main` since `live-refresh`
 
 `DEPS` and `GRAPH-SNAP` are command-level checks defined per change in `design.md`, run
