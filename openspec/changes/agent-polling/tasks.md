@@ -744,7 +744,7 @@ check is 8.4's plant rather than an invented RED.
 ## 9. `Live`'s third field and the loop's fourth live step
 <!-- kind: behavior -->
 
-- [ ] 9.1 RED: Write the seven new `ui::driver::tests::` tests —
+- [x] 9.1 RED: Write the seven new `ui::driver::tests::` tests —
       `the_wait_takes_the_soonest_of_two_deadlines` (exact equality on three recorded timeouts),
       `a_snapshot_reaches_the_frame_and_survives_adopt` and
       `an_unreachable_socket_is_not_a_problem_row` (both at 120x20 **and** 60x20), the
@@ -753,18 +753,26 @@ check is 8.4's plant rather than an invented RED.
       `dashboard.agents`. Amend the thirteen landed `ui::driver::tests::` tests to build a
       three-field `Live` with `agents::none()`.
 
-- [ ] 9.2 GREEN: Add step 4 to `drive_live_tier` and change the wait to
+- [x] 9.2 GREEN: Add step 4 to `drive_live_tier` and change the wait to
       `watch::poll_timeout(tick, watch::soonest(live.fs.pending_in(), live.agents.pending_in()))`.
 
-- [ ] 9.3 REFACTOR: Keep `drive_live_tier` one function unless step 4 pushed it past the point
+- [x] 9.3 REFACTOR: Keep `drive_live_tier` one function unless step 4 pushed it past the point
       where each step is readable; otherwise record that no refactor was needed.
+      **Recorded:** no refactor needed — the function stayed at four short, clearly separated
+      steps.
 
-- [ ] 9.4 CHECK: Contract gate — `run_loop`'s parameter count is still six, and this change adds
+- [x] 9.4 CHECK: Contract gate — `run_loop`'s parameter count is still six, and this change adds
       no `#[allow]`: `git diff $BASE -- src/ tests/ | grep '^+.*#\[allow'` is empty. A tree-wide
       grep would be red before and after, since `src/changes.rs:966` already carries one.
+      **Recorded:** six parameters unchanged; the diff-scoped grep is empty.
 
-- [ ] 9.5 VERIFY: `testcount --lib 'ui::driver::tests::' 29`, then `sh $CHECKS/NOBLOCK.sh`,
+- [x] 9.5 VERIFY: `testcount --lib 'ui::driver::tests::' 29`, then `sh $CHECKS/NOBLOCK.sh`,
       `UI_MIN=11 sh $CHECKS/NOCLI-SHELL.sh`, and `sh $CHECKS/NOIO-VIEW.sh`. Commit.
+      **Found during this task:** `NOCLI-SHELL` (first run this session) failed on a group-2
+      doc comment in `src/ui/mod.rs` reading "`changes::from_cli_cached`" — `CLI_RE`'s
+      `from_cli` term is unanchored and matches that substring. Reworded to "the worker's own
+      CLI-merge step"; `NOCLI-SHELL` green afterward. 29/29 `ui::driver::tests::`; `NOBLOCK`
+      green on all three legs; `NOIO-VIEW` green.
 
 ## 10. Acceptance Test — Outer Loop GREEN
 <!-- kind: behavior -->

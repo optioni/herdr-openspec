@@ -1773,8 +1773,8 @@ apply:
 
         /// A scratch `openspec` program: appends its arguments to `log`, one
         /// line per invocation, and answers `list --json` with an empty
-        /// change list whose `root.path` agrees with `root` — enough for
-        /// `changes::from_cli_cached` to accept it without a single
+        /// change list whose `root.path` agrees with `root` — enough for the
+        /// worker's own CLI-merge step to accept it without a single
         /// `instructions apply` call, which this test does not need.
         fn openspec_script(dir: &Path, log: &Path, root: &Path) -> PathBuf {
             write_script(

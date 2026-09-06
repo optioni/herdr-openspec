@@ -99,7 +99,10 @@ pub fn run_loop<B: Backend, E: EventSource>(
         frames += 1;
         dashboard.normalise_scroll(area);
 
-        let timeout = crate::watch::poll_timeout(tick, live.fs.pending_in());
+        let timeout = crate::watch::poll_timeout(
+            tick,
+            crate::watch::soonest(live.fs.pending_in(), live.agents.pending_in()),
+        );
         let event = events.next_event(timeout).map_err(LoopError::Events)?;
         polls += 1;
 
@@ -144,6 +147,9 @@ fn drive_live_tier(dashboard: &mut Dashboard, live: &mut Live<'_>) {
         };
         dashboard.adopt(set);
     }
+    if let Some(snapshot) = live.agents.drain() {
+        dashboard.agents = snapshot;
+    }
 }
 
 #[cfg(test)]
@@ -158,7 +164,7 @@ mod tests {
     use crate::changes::empty_set;
     use crate::testutil::{RecordingRefresher, Script, ScriptedFs, cell, press, row_text};
     use crate::ui::app::{Dashboard, Route};
-    use crate::ui::driver::{LoopError, LoopSummary, TICK, run_loop};
+    use crate::ui::driver::{Live, LoopError, LoopSummary, TICK, run_loop};
     use crate::ui::view;
 
     /// A `Route::List` dashboard over one active change, `name`, at
@@ -1480,5 +1486,400 @@ mod tests {
             "take_result is still polled once, even though it yields nothing"
         );
         assert_eq!(dashboard.changes, empty_set());
+    }
+
+    // `agent-polling`: `Live`'s third field and the loop's fourth live step.
+
+    #[test]
+    fn the_wait_takes_the_soonest_of_two_deadlines() {
+        let backend = TestBackend::new(60, 20);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        let mut dashboard = dashboard();
+        let mut events = Script::new(vec![
+            Ok(None),
+            Ok(None),
+            Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
+        ]);
+        let mut fs = ScriptedFs::new(
+            Vec::new(),
+            vec![
+                Some(Duration::from_millis(900)),
+                Some(Duration::from_millis(90)),
+                None,
+            ],
+        );
+        let mut refresher = RecordingRefresher::new(Vec::new());
+        let mut agents = crate::testutil::ScriptedAgents::new(
+            Vec::new(),
+            vec![
+                Some(Duration::from_millis(40)),
+                Some(Duration::from_millis(900)),
+                Some(Duration::from_secs(3)),
+            ],
+        );
+        let mut live = crate::ui::driver::Live {
+            fs: &mut fs,
+            refresher: &mut refresher,
+            agents: &mut agents,
+        };
+        run_loop(
+            &mut terminal,
+            &mut dashboard,
+            &mut events,
+            &mut live,
+            &|_: &std::path::Path| Ok(String::new()),
+            Duration::from_millis(250),
+        )
+        .expect("loop ends");
+
+        let timeouts = events.timeouts();
+        assert_eq!(timeouts[0], Duration::from_millis(40));
+        assert_eq!(timeouts[1], Duration::from_millis(90));
+        assert_eq!(
+            timeouts[2],
+            Duration::from_millis(250),
+            "a deadline further away than the tick must never lengthen the wait"
+        );
+    }
+
+    #[test]
+    fn a_snapshot_reaches_the_frame_and_survives_adopt() {
+        for width in [120u16, 60u16] {
+            let backend = TestBackend::new(width, 20);
+            let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+            let mut dashboard = dashboard_with_change("/r", "alpha", 4, 9);
+            let merged = crate::changes::fixture::set(
+                vec![crate::changes::fixture::active("alpha", 7, 9)],
+                Vec::new(),
+                Vec::new(),
+            );
+            let mut events = Script::new(vec![
+                Ok(None),
+                Ok(None),
+                Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
+            ]);
+            let mut fs = ScriptedFs::new(Vec::new(), Vec::new());
+            let mut refresher =
+                RecordingRefresher::new(vec![Some(crate::refresh::RefreshResult::Merged(merged))]);
+            let agent = crate::agents::Agent {
+                name: None,
+                kind: Some("claude".to_string()),
+                status: crate::agents::AgentStatus::Working,
+                cwd: None,
+                pane_id: "w8:p1".to_string(),
+                tab_id: "w8:t1".to_string(),
+                workspace_id: "w8".to_string(),
+                terminal_title: None,
+            };
+            let mut agents = crate::testutil::ScriptedAgents::new(
+                vec![
+                    Some(crate::agents::AgentSnapshot {
+                        agents: vec![agent],
+                        reachable: true,
+                        problem: None,
+                    }),
+                    None,
+                    None,
+                ],
+                Vec::new(),
+            );
+            let mut live = crate::ui::driver::Live {
+                fs: &mut fs,
+                refresher: &mut refresher,
+                agents: &mut agents,
+            };
+            run_loop(
+                &mut terminal,
+                &mut dashboard,
+                &mut events,
+                &mut live,
+                &|_: &std::path::Path| Ok(String::new()),
+                Duration::from_millis(1),
+            )
+            .expect("loop ends");
+
+            assert!(dashboard.agents.reachable, "width {width}");
+            assert_eq!(dashboard.agents.agents.len(), 1, "width {width}");
+            assert_eq!(
+                dashboard.changes.active[0].progress.completed, 7,
+                "width {width}: the adopted result must still take effect"
+            );
+
+            let buf = terminal.backend().buffer();
+            let inert_agents_buf = {
+                let mut dashboard2 = dashboard_with_change("/r", "alpha", 4, 9);
+                let mut events2 = Script::new(vec![
+                    Ok(None),
+                    Ok(None),
+                    Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
+                ]);
+                let mut fs2 = ScriptedFs::new(Vec::new(), Vec::new());
+                let merged2 = crate::changes::fixture::set(
+                    vec![crate::changes::fixture::active("alpha", 7, 9)],
+                    Vec::new(),
+                    Vec::new(),
+                );
+                let mut refresher2 = RecordingRefresher::new(vec![Some(
+                    crate::refresh::RefreshResult::Merged(merged2),
+                )]);
+                let mut agents2 = crate::agents::none();
+                let mut live2 = crate::ui::driver::Live {
+                    fs: &mut fs2,
+                    refresher: &mut refresher2,
+                    agents: &mut *agents2,
+                };
+                let backend2 = TestBackend::new(width, 20);
+                let mut terminal2 = ratatui::Terminal::new(backend2).expect("construct terminal");
+                run_loop(
+                    &mut terminal2,
+                    &mut dashboard2,
+                    &mut events2,
+                    &mut live2,
+                    &|_: &std::path::Path| Ok(String::new()),
+                    Duration::from_millis(1),
+                )
+                .expect("loop ends");
+                terminal2.backend().buffer().clone()
+            };
+            assert_eq!(
+                buf, &inert_agents_buf,
+                "width {width}: the snapshot changed state without changing the frame"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unreachable_socket_is_not_a_problem_row() {
+        for width in [120u16, 60u16] {
+            let backend = TestBackend::new(width, 20);
+            let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+            let mut dashboard = dashboard();
+            let mut events = Script::new(vec![Ok(Some(press(
+                KeyCode::Char('q'),
+                KeyModifiers::NONE,
+            )))]);
+            let mut fs = ScriptedFs::new(Vec::new(), Vec::new());
+            let mut refresher = RecordingRefresher::new(Vec::new());
+            let mut agents = crate::testutil::ScriptedAgents::new(
+                vec![Some(crate::agents::AgentSnapshot {
+                    agents: Vec::new(),
+                    reachable: false,
+                    problem: Some("herdr agent list exited 1: server_not_running".to_string()),
+                })],
+                Vec::new(),
+            );
+            let mut live = crate::ui::driver::Live {
+                fs: &mut fs,
+                refresher: &mut refresher,
+                agents: &mut agents,
+            };
+            run_loop(
+                &mut terminal,
+                &mut dashboard,
+                &mut events,
+                &mut live,
+                &|_: &std::path::Path| Ok(String::new()),
+                Duration::from_millis(1),
+            )
+            .expect("loop ends");
+
+            assert!(
+                dashboard.refresh.problems.is_empty(),
+                "width {width}: an unreachable socket must never become a problem row"
+            );
+            assert_eq!(
+                dashboard.agents.problem,
+                Some("herdr agent list exited 1: server_not_running".to_string()),
+                "width {width}: the reason is available to a later change without being \
+                 rendered by this one"
+            );
+            let buf = terminal.backend().buffer();
+            for y in 0..buf.area.height {
+                assert!(
+                    !row_text(buf, y).contains('!'),
+                    "width {width}: no !-marked row: {}",
+                    row_text(buf, y)
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn live_destructures_into_exactly_three_fields() {
+        let mut fs = crate::watch::none();
+        let mut refresher = crate::refresh::none();
+        let mut agents = crate::agents::none();
+        let live = crate::ui::driver::Live {
+            fs: &mut *fs,
+            refresher: &mut *refresher,
+            agents: &mut *agents,
+        };
+        let Live {
+            fs: _,
+            refresher: _,
+            agents: _,
+        } = live;
+    }
+
+    #[test]
+    fn the_agent_poller_is_drained_exactly_once_per_frame() {
+        let backend = TestBackend::new(60, 20);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        let mut dashboard = dashboard();
+        let mut events = Script::new(vec![
+            Ok(None),
+            Ok(None),
+            Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
+        ]);
+        let mut fs = ScriptedFs::new(Vec::new(), Vec::new());
+        let mut refresher = RecordingRefresher::new(Vec::new());
+        let mut agents = crate::testutil::ScriptedAgents::new(vec![None, None, None], Vec::new());
+        let mut live = crate::ui::driver::Live {
+            fs: &mut fs,
+            refresher: &mut refresher,
+            agents: &mut agents,
+        };
+        let summary = run_loop(
+            &mut terminal,
+            &mut dashboard,
+            &mut events,
+            &mut live,
+            &|_: &std::path::Path| Ok(String::new()),
+            Duration::from_millis(1),
+        )
+        .expect("loop ends");
+
+        assert_eq!(
+            summary,
+            LoopSummary {
+                frames: 3,
+                polls: 3
+            }
+        );
+        assert_eq!(
+            agents.drains().len(),
+            3,
+            "exactly one drain call per iteration, three iterations"
+        );
+    }
+
+    #[test]
+    fn an_adopted_change_set_does_not_clear_the_agent_snapshot() {
+        let mut dashboard = dashboard_with_change("/r", "alpha", 4, 9);
+        let backend = TestBackend::new(60, 20);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        let mut events = Script::new(vec![Ok(Some(press(
+            KeyCode::Char('q'),
+            KeyModifiers::NONE,
+        )))]);
+        let mut fs = ScriptedFs::new(Vec::new(), Vec::new());
+        let merged = crate::changes::fixture::set(
+            vec![crate::changes::fixture::active("alpha", 7, 9)],
+            Vec::new(),
+            Vec::new(),
+        );
+        let mut refresher =
+            RecordingRefresher::new(vec![Some(crate::refresh::RefreshResult::Merged(merged))]);
+        let agent = crate::agents::Agent {
+            name: None,
+            kind: Some("claude".to_string()),
+            status: crate::agents::AgentStatus::Idle,
+            cwd: None,
+            pane_id: "w8:p1".to_string(),
+            tab_id: "w8:t1".to_string(),
+            workspace_id: "w8".to_string(),
+            terminal_title: None,
+        };
+        let mut agents = crate::testutil::ScriptedAgents::new(
+            vec![Some(crate::agents::AgentSnapshot {
+                agents: vec![agent],
+                reachable: true,
+                problem: None,
+            })],
+            Vec::new(),
+        );
+        let mut live = crate::ui::driver::Live {
+            fs: &mut fs,
+            refresher: &mut refresher,
+            agents: &mut agents,
+        };
+        run_loop(
+            &mut terminal,
+            &mut dashboard,
+            &mut events,
+            &mut live,
+            &|_: &std::path::Path| Ok(String::new()),
+            Duration::from_millis(1),
+        )
+        .expect("loop ends");
+
+        assert_eq!(
+            dashboard.changes.active[0].progress.completed, 7,
+            "the refresh result was adopted"
+        );
+        assert!(
+            dashboard.agents.reachable,
+            "adopting a refresh result must not clear the agent snapshot taken the same iteration"
+        );
+        assert_eq!(dashboard.agents.agents.len(), 1);
+    }
+
+    #[test]
+    fn a_second_snapshot_replaces_the_first_wholesale() {
+        let mut dashboard = dashboard();
+        let backend = TestBackend::new(60, 20);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        let mut events = Script::new(vec![
+            Ok(None),
+            Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
+        ]);
+        let mut fs = ScriptedFs::new(Vec::new(), Vec::new());
+        let mut refresher = RecordingRefresher::new(Vec::new());
+        let first_agent = crate::agents::Agent {
+            name: None,
+            kind: Some("claude".to_string()),
+            status: crate::agents::AgentStatus::Working,
+            cwd: None,
+            pane_id: "w8:p1".to_string(),
+            tab_id: "w8:t1".to_string(),
+            workspace_id: "w8".to_string(),
+            terminal_title: None,
+        };
+        let mut agents = crate::testutil::ScriptedAgents::new(
+            vec![
+                Some(crate::agents::AgentSnapshot {
+                    agents: vec![first_agent],
+                    reachable: true,
+                    problem: None,
+                }),
+                Some(crate::agents::AgentSnapshot {
+                    agents: Vec::new(),
+                    reachable: true,
+                    problem: None,
+                }),
+            ],
+            Vec::new(),
+        );
+        let mut live = crate::ui::driver::Live {
+            fs: &mut fs,
+            refresher: &mut refresher,
+            agents: &mut agents,
+        };
+        run_loop(
+            &mut terminal,
+            &mut dashboard,
+            &mut events,
+            &mut live,
+            &|_: &std::path::Path| Ok(String::new()),
+            Duration::from_millis(1),
+        )
+        .expect("loop ends");
+
+        assert!(
+            dashboard.agents.agents.is_empty(),
+            "a poll that found no agents means there are no agents — replaced wholesale, \
+             never merged with the first snapshot's one agent"
+        );
+        assert!(dashboard.agents.reachable);
     }
 }
