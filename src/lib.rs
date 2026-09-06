@@ -556,6 +556,84 @@ pub(crate) mod testutil {
         }
     }
 
+    /// A staged extension of [`UntilReady`], for `agent-launch`'s outer-loop acceptance test:
+    /// it yields timeouts until each stage's predicate has held for a settle window, presses
+    /// that stage's key, and moves to the next stage — finishing with `q` once the last stage's
+    /// key has been pressed. One overall deadline, shared across every stage, is the backstop
+    /// that turns a missing link into a red assertion rather than a hung suite: a launch that
+    /// never happens leaves a later stage's predicate permanently false, and the deadline
+    /// presses `q` immediately regardless of which stage is current, so the run still returns
+    /// `Ok(dashboard)` for the assertions to inspect. Its clock lives here, in `src/lib.rs`, and
+    /// nowhere under `src/ui/` — `NOBLOCK` leg 2 forbids a clock there, tests included.
+    pub(crate) struct Stages<'a> {
+        stages: Vec<(&'a dyn Fn() -> bool, ratatui::crossterm::event::Event)>,
+        index: usize,
+        settle_since: Option<std::time::Instant>,
+        deadline: std::time::Instant,
+        finished: bool,
+    }
+
+    impl<'a> Stages<'a> {
+        const SETTLE: std::time::Duration = std::time::Duration::from_millis(50);
+        const DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
+
+        /// `stages` is a non-empty ordered list of `(predicate, key to press)` pairs. The last
+        /// pair's key is expected to end the run (`q`, on every scenario this change writes).
+        pub(crate) fn new(
+            stages: Vec<(&'a dyn Fn() -> bool, ratatui::crossterm::event::Event)>,
+        ) -> Self {
+            assert!(!stages.is_empty(), "Stages needs at least one stage");
+            Self {
+                stages,
+                index: 0,
+                settle_since: None,
+                deadline: std::time::Instant::now() + Self::DEADLINE,
+                finished: false,
+            }
+        }
+    }
+
+    impl crate::ui::event::EventSource for Stages<'_> {
+        fn next_event(
+            &mut self,
+            _timeout: std::time::Duration,
+        ) -> Result<Option<ratatui::crossterm::event::Event>, crate::ui::event::EventError>
+        {
+            if self.finished {
+                return Err(crate::ui::event::EventError(
+                    "Stages exhausted after its last press".to_string(),
+                ));
+            }
+            let now = std::time::Instant::now();
+            if self.index < self.stages.len() {
+                let ready = (self.stages[self.index].0)();
+                if ready {
+                    let since = *self.settle_since.get_or_insert(now);
+                    if now.saturating_duration_since(since) >= Self::SETTLE {
+                        let event = self.stages[self.index].1.clone();
+                        self.index += 1;
+                        self.settle_since = None;
+                        if self.index == self.stages.len() {
+                            self.finished = true;
+                        }
+                        return Ok(Some(event));
+                    }
+                } else {
+                    self.settle_since = None;
+                }
+            }
+            if now >= self.deadline {
+                self.finished = true;
+                return Ok(Some(press(
+                    ratatui::crossterm::event::KeyCode::Char('q'),
+                    ratatui::crossterm::event::KeyModifiers::NONE,
+                )));
+            }
+            std::thread::yield_now();
+            Ok(None)
+        }
+    }
+
     #[cfg(test)]
     mod tests {
         use super::{

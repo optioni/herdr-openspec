@@ -598,7 +598,7 @@ The headline scenario is `agent-launch` → "Pressing `a` splits a pane, starts 
 sends the prompt". Its assertions are chosen so each can fail and no two plants fail the same
 set; see design.md → Test Strategy.
 
-- [ ] 2.1 RED: Extend `ui::tests::wiring`'s harness — test-side code only, under
+- [x] 2.1 RED: Extend `ui::tests::wiring`'s harness — test-side code only, under
       `#[cfg(test)]`, touching no production file — honouring design.md → Test Boundaries:
       a `ScratchDir` repository holding the active change `2fa-support`; a second `ScratchDir`
       state directory, empty; a `Config` whose `agent_kind` is `codex`; a `herdr_script`
@@ -610,7 +610,7 @@ set; see design.md → Test Strategy.
       `testutil::canonical(scratch.path())` — on macOS `/var` is a symlink to `/private/var`,
       so the uncanonicalized form makes the containment test pass where production fails.
 
-- [ ] 2.2 RED: Write `ui::tests::wiring::a_keypress_launches_an_agent`, driving `run_wired` at
+- [x] 2.2 RED: Write `ui::tests::wiring::a_keypress_launches_an_agent`, driving `run_wired` at
       120x20 and again at 60x20: wait for the log's first `agent list` entry, press `a`, wait
       for **three entries that are not `agent list`**, press `q`. Assert those three are the
       launch calls in order, `agent start`'s
@@ -623,7 +623,7 @@ set; see design.md → Test Strategy.
       `launch.problems` empty, the footer carrying `a/c/s launch  g focus`, and a
       `testutil::snapshot` pair over the repository showing byte-identity.
 
-- [ ] 2.3 RED: Write `ui::tests::wiring::g_focuses_the_agent_the_launch_started`, with
+- [x] 2.3 RED: Write `ui::tests::wiring::g_focuses_the_agent_the_launch_started`, with
       `agent_kind` **`gemini`** rather than `codex` so the two runs disagree and a hardcoded
       kind fails one of them — the scratch
       `herdr`'s `agent list` branch begins reporting the started agent once `agent start` has
@@ -632,14 +632,14 @@ set; see design.md → Test Strategy.
       `ui::tests::wiring::an_unreachable_socket_leaves_every_key_inert`, driven with a `herdr`
       path that does not exist and stages `a`, `g`, `q`.
 
-- [ ] 2.4 CHECK: Confirm all three fail because the behaviour is missing, not because the
+- [x] 2.4 CHECK: Confirm all three fail because the behaviour is missing, not because the
       harness is misconfigured: each run must reach `Ok(dashboard)`, and the first two must
       fail on the log, the mapping, and the footer assertions alone.
       **Red when:** any fails on `StartError`, on a deadline with an empty `herdr` log, or on a
       panic — all three are harness faults. Record the exact assertion messages; task 12.1
       requires the identical ones.
 
-- [ ] 2.5 VERIFY: `cargo test --all-features` fails on **exactly** these three tests. Commit.
+- [x] 2.5 VERIFY: `cargo test --all-features` fails on **exactly** these three tests. Commit.
 
 ## 3. `launch::decide`, the argument vectors, and `pane_id`
 <!-- kind: behavior -->

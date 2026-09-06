@@ -2054,6 +2054,150 @@ apply:
             f.write_all(b"x").expect("append one byte");
         }
 
+        // --- agent-launch: the outer-loop acceptance harness ------------------------------
+
+        /// A scratch `herdr` program supporting the whole launch flow — `pane split`,
+        /// `agent start`, `agent prompt`, `agent focus`, and `agent list` — logging every
+        /// invocation to `log`, one line per call. `agent start` additionally writes `marker`,
+        /// recording the derived agent name it was given; `agent list` reports that agent, at
+        /// the fixed pane id `pane split` handed out and with `cwd` the canonicalized `root`,
+        /// once `marker` exists, and an empty list otherwise. This is what lets the wiring test
+        /// observe "the started agent reaches a later poll" through a real, if scripted, round
+        /// trip rather than a shortcut.
+        fn launch_herdr_script(dir: &Path, log: &Path, marker: &Path, root: &Path) -> PathBuf {
+            let root = root.display().to_string();
+            write_script(
+                dir,
+                "herdr",
+                &format!(
+                    r#"printf '%s\n' "$*" >> "{log}"
+case "$1 $2" in
+  "pane split")
+    printf '%s' '{{"id":"cli:pane:split","result":{{"pane":{{"agent_status":"unknown","cwd":"{root}","pane_id":"wD:pJ","tab_id":"wD:t2","workspace_id":"wD"}},"type":"pane_info"}}}}'
+    ;;
+  "agent start")
+    name="$3"
+    printf 'name=%s\n' "$name" > "{marker}"
+    printf '%s' '{{"id":"cli:agent:start","result":{{"agent":{{"name":"'"$name"'","pane_id":"wD:pJ"}},"argv":["claude"],"type":"agent_started"}}}}'
+    ;;
+  "agent prompt")
+    printf '%s' '{{"id":"cli:agent:prompt","result":{{"agent":{{}},"type":"agent_prompted"}}}}'
+    ;;
+  "agent focus")
+    printf '%s' '{{"id":"cli:agent:focus","result":{{"agent":{{}},"type":"agent_focused"}}}}'
+    ;;
+  "agent list")
+    if [ -f "{marker}" ]; then
+      name=$(sed -n 's/^name=//p' "{marker}")
+      printf '%s' '{{"id":"cli:agent:list","result":{{"agents":[{{"agent":"claude","agent_status":"working","cwd":"{root}","name":"'"$name"'","pane_id":"wD:pJ","tab_id":"wD:t2","workspace_id":"wD"}}],"type":"agent_list"}}}}'
+    else
+      printf '%s' '{{"id":"cli:agent:list","result":{{"agents":[],"type":"agent_list"}}}}'
+    fi
+    ;;
+esac
+"#,
+                    log = log.display(),
+                    marker = marker.display(),
+                    root = root,
+                ),
+            )
+        }
+
+        /// The number of the log's lines that are **not** `agent list` — every predicate and
+        /// every ordering assertion in these tests counts only these, because the poller
+        /// writes `agent list` to the same log on its own one-second cadence and an absolute
+        /// count is therefore a race.
+        fn non_agent_list_lines(path: &Path) -> Vec<String> {
+            std::fs::read_to_string(path)
+                .map(|s| {
+                    s.lines()
+                        .filter(|l| *l != "agent list")
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default()
+        }
+
+        /// Whether an `agent list` line appears in the log **after** the first `agent start`
+        /// line — the proxy this harness uses for "the started agent now reaches a poll",
+        /// since a scratch program has no way to signal that directly: our `launch_herdr_script`
+        /// only reports the started agent from `agent list` once its marker file exists, and
+        /// that file is written inside the same `agent start` invocation this checks for.
+        fn agent_seen_in_a_later_poll(log: &Path) -> bool {
+            let text = std::fs::read_to_string(log).unwrap_or_default();
+            let lines: Vec<&str> = text.lines().collect();
+            let Some(start_idx) = lines.iter().position(|l| l.starts_with("agent start")) else {
+                return false;
+            };
+            lines[start_idx + 1..].contains(&"agent list")
+        }
+
+        /// Drive `run_wired` at `width`x20 with a `testutil::Stages` event source built from
+        /// `stages`, on `run_wired_at`'s terms.
+        fn run_wired_staged(
+            width: u16,
+            root: &Path,
+            config: &Config,
+            herdr: &Path,
+            state_dir: Option<&Path>,
+            stages: Vec<(&dyn Fn() -> bool, ratatui::crossterm::event::Event)>,
+        ) -> (Result<Dashboard, StartError>, Vec<String>) {
+            let backend = ratatui::backend::TestBackend::new(width, 20);
+            let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+            let mut events = crate::testutil::Stages::new(stages);
+            let startup = Startup {
+                cwd: root,
+                config,
+                herdr,
+                state_dir,
+            };
+            let result = super::super::run_wired(
+                &mut terminal,
+                &mut events,
+                &startup,
+                &crate::ui::read_artifact,
+                Duration::from_millis(1),
+            );
+            let buf = terminal.backend().buffer().clone();
+            let rows: Vec<String> = (0..buf.area.height)
+                .map(|y| {
+                    (0..buf.area.width)
+                        .map(|x| buf[(x, y)].symbol().to_string())
+                        .collect::<String>()
+                })
+                .collect();
+            (result, rows)
+        }
+
+        /// A key press, on `testutil::press`'s terms — a local alias so the stage tables below
+        /// read as a plain list of `(predicate, key)` pairs.
+        fn key(c: char) -> ratatui::crossterm::event::Event {
+            crate::testutil::press(
+                ratatui::crossterm::event::KeyCode::Char(c),
+                ratatui::crossterm::event::KeyModifiers::NONE,
+            )
+        }
+
+        /// A scratch repository holding one active change, `2fa-support`, whose derived agent
+        /// name is `c-2fa-support` — `state::agent_name`'s own output, since a leading digit
+        /// cannot begin an agent name.
+        fn scratch_repo_with_2fa_support() -> ScratchDir {
+            let scratch = ScratchDir::new();
+            let root = scratch.path();
+            vendor_tdd_schema(root);
+            write_with_mode(
+                &root.join("openspec/changes/2fa-support/proposal.md"),
+                b"# 2fa-support\n",
+                0o644,
+            );
+            write_with_mode(
+                &root.join("openspec/changes/2fa-support/tasks.md"),
+                b"- [x] a\n- [x] b\n- [x] c\n- [x] d\n- [ ] e\n- [ ] f\n- [ ] g\n- [ ] h\n- [ ] i\n",
+                0o644,
+            );
+            scratch
+        }
+
         #[test]
         fn the_real_wiring_polls_a_scratch_herdr() {
             for width in [120u16, 60u16] {
@@ -2378,6 +2522,219 @@ apply:
                     "width {width}: the footer must read exactly '{footer}'"
                 );
             }
+        }
+
+        /// `agent-launch`'s headline scenario: "Pressing `a` splits a pane, starts an agent,
+        /// and sends the prompt". Drives the real `run_wired` at both mandated widths, feeding
+        /// it an actual `a` key event and observing the three Herdr invocations, in order, at
+        /// the seam. RED until group 12: today `Dashboard::apply`'s `LaunchApply` arm does
+        /// nothing, so no Herdr call beyond `agent list` is ever logged.
+        #[test]
+        fn a_keypress_launches_an_agent() {
+            for width in [120u16, 60u16] {
+                let scratch = scratch_repo_with_2fa_support();
+                let root = scratch.path();
+                let canon_root = canonical(root);
+                let herdr_log = root.join("herdr.log");
+                let marker = root.join("marker");
+                let herdr = launch_herdr_script(root, &herdr_log, &marker, &canon_root);
+                let openspec_log = root.join("openspec.log");
+                let openspec = openspec_script(root, &openspec_log, root);
+                let state = ScratchDir::new();
+
+                let config = Config {
+                    openspec_bin: Some(openspec),
+                    agent_kind: "codex".to_string(),
+                    ..Config::default()
+                };
+
+                let before = snapshot(&root.join("openspec"));
+
+                let stage1 = || log_lines(&herdr_log) >= 1;
+                let stage2 = || non_agent_list_lines(&herdr_log).len() >= 3;
+                let stages: Vec<(&dyn Fn() -> bool, ratatui::crossterm::event::Event)> =
+                    vec![(&stage1, key('a')), (&stage2, key('q'))];
+
+                let (result, buf) =
+                    run_wired_staged(width, root, &config, &herdr, Some(state.path()), stages);
+                let dashboard = result.expect("run_wired must return Ok for a supported state");
+
+                let calls = non_agent_list_lines(&herdr_log);
+                assert_eq!(
+                    calls.len(),
+                    3,
+                    "width {width}: exactly three non-agent-list Herdr calls: {calls:?}"
+                );
+                assert_eq!(
+                    calls[0],
+                    format!(
+                        "pane split --cwd {} --direction right --no-focus",
+                        canon_root.display()
+                    ),
+                    "width {width}: call 1 must be the split, with the canonicalized root"
+                );
+                assert_eq!(
+                    calls[1], "agent start c-2fa-support --kind codex --pane wD:pJ",
+                    "width {width}: call 2 must start the derived agent name on the pane split returned"
+                );
+                assert_eq!(
+                    calls[2], "agent prompt c-2fa-support /opsx:apply 2fa-support",
+                    "width {width}: call 3 must send the /opsx:apply prompt"
+                );
+
+                let mapping_path = state.path().join("agent-names.toml");
+                let mapping_text = std::fs::read_to_string(&mapping_path).unwrap_or_default();
+                assert!(
+                    mapping_text.contains("c-2fa-support = \"2fa-support\""),
+                    "width {width}: agent-names.toml must map the derived name to the change: {mapping_text:?}"
+                );
+
+                assert_eq!(
+                    dashboard.agent_names.names.get("c-2fa-support"),
+                    Some(&"2fa-support".to_string()),
+                    "width {width}: the returned dashboard's mapping must hold the same pair"
+                );
+                assert_eq!(
+                    dashboard.launch.pending, None,
+                    "width {width}: the request must have been taken"
+                );
+                assert!(
+                    dashboard.launch.problems.is_empty(),
+                    "width {width}: a successful launch reports no problem"
+                );
+
+                let footer_row = &buf[19];
+                assert!(
+                    footer_row.contains("a/c/s launch") && footer_row.contains("g focus"),
+                    "width {width}: the footer must carry both action hints: {footer_row:?}"
+                );
+
+                let after = snapshot(&root.join("openspec"));
+                assert_eq!(
+                    before, after,
+                    "width {width}: the plugin must write nothing inside openspec/"
+                );
+            }
+        }
+
+        /// `agent-launch`: "Pressing `g` after the launch focuses the pane the launch
+        /// created." Two configured `agent_kind`s across this test and the one above (`codex`
+        /// here would be wrong; this one is `gemini`) is what makes the claim that
+        /// `start_collaborators` threads `config.agent_kind` through discriminating rather
+        /// than a presence check alone. RED until group 12.
+        #[test]
+        fn g_focuses_the_agent_the_launch_started() {
+            for width in [120u16, 60u16] {
+                let scratch = scratch_repo_with_2fa_support();
+                let root = scratch.path();
+                let canon_root = canonical(root);
+                let herdr_log = root.join("herdr.log");
+                let marker = root.join("marker");
+                let herdr = launch_herdr_script(root, &herdr_log, &marker, &canon_root);
+                let openspec_log = root.join("openspec.log");
+                let openspec = openspec_script(root, &openspec_log, root);
+                let state = ScratchDir::new();
+
+                let config = Config {
+                    openspec_bin: Some(openspec),
+                    agent_kind: "gemini".to_string(),
+                    ..Config::default()
+                };
+
+                let stage1 = || log_lines(&herdr_log) >= 1;
+                let stage2 = || agent_seen_in_a_later_poll(&herdr_log);
+                let stage3 = || non_agent_list_lines(&herdr_log).len() >= 4;
+                let stages: Vec<(&dyn Fn() -> bool, ratatui::crossterm::event::Event)> = vec![
+                    (&stage1, key('a')),
+                    (&stage2, key('g')),
+                    (&stage3, key('q')),
+                ];
+
+                let (result, buf) =
+                    run_wired_staged(width, root, &config, &herdr, Some(state.path()), stages);
+                let dashboard = result.expect("run_wired must return Ok for a supported state");
+
+                let calls = non_agent_list_lines(&herdr_log);
+                assert_eq!(
+                    calls.len(),
+                    4,
+                    "width {width}: the launch's three calls plus one focus: {calls:?}"
+                );
+                assert_eq!(
+                    calls[1], "agent start c-2fa-support --kind gemini --pane wD:pJ",
+                    "width {width}: two different configured kinds across the two tests"
+                );
+                assert_eq!(
+                    calls[3], "agent focus wD:pJ",
+                    "width {width}: the last call must be exactly one focus, on the split's pane"
+                );
+
+                let two_fa_row = buf
+                    .iter()
+                    .find(|row| row.contains("2fa-support"))
+                    .unwrap_or_else(|| panic!("width {width}: no row named 2fa-support: {buf:?}"));
+                assert!(
+                    two_fa_row.contains(" w ["),
+                    "width {width}: the mapping written by the launch must be read back through \
+                     attribution's first tier within the same run: {two_fa_row:?}"
+                );
+
+                assert_eq!(dashboard.launch.pending, None, "width {width}");
+                assert!(dashboard.launch.problems.is_empty(), "width {width}");
+            }
+        }
+
+        /// `agent-launch`: "An unreachable socket leaves every key inert and the pane a
+        /// working TUI." No scratch `herdr` program exists at all, so the poller is never
+        /// reachable; `a` and `g` are pressed regardless and must produce no Herdr call and no
+        /// mapping. RED until group 12 makes `an unreachable socket makes every action key
+        /// inert` true end to end — today the assertions already hold vacuously, because
+        /// `LaunchApply`'s `apply` arm does nothing yet, so this scenario is included for
+        /// completeness and reverified at group 12 rather than treated as one of the three
+        /// deliberately RED tests.
+        #[test]
+        fn an_unreachable_socket_leaves_every_key_inert() {
+            let scratch = scratch_repo_with_2fa_support();
+            let root = scratch.path();
+            let herdr = root.join("does-not-exist-herdr");
+            let state = ScratchDir::new();
+
+            let config = Config::default();
+
+            let before = snapshot(&root.join("openspec"));
+            let state_before = snapshot(state.path());
+
+            let mut events = crate::testutil::Script::new(vec![
+                Ok(Some(key('a'))),
+                Ok(Some(key('g'))),
+                Ok(Some(key('q'))),
+            ]);
+            let backend = ratatui::backend::TestBackend::new(120, 20);
+            let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+            let startup = Startup {
+                cwd: root,
+                config: &config,
+                herdr: &herdr,
+                state_dir: Some(state.path()),
+            };
+            let result = super::super::run_wired(
+                &mut terminal,
+                &mut events,
+                &startup,
+                &crate::ui::read_artifact,
+                Duration::from_millis(1),
+            );
+            let dashboard = result.expect("an unreachable socket is a supported state");
+
+            assert!(!dashboard.agents.reachable);
+            assert_eq!(dashboard.launch.pending, None);
+            assert!(dashboard.launch.problems.is_empty());
+            assert!(dashboard.agent_names.names.is_empty());
+
+            let after = snapshot(&root.join("openspec"));
+            assert_eq!(before, after);
+            let state_after = snapshot(state.path());
+            assert_eq!(state_before, state_after);
         }
     }
 }
