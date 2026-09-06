@@ -77,12 +77,15 @@ pub fn enter_if_terminal(
 }
 
 /// This pane's starting point: the working directory to search from, the
-/// loaded configuration, and the `herdr` program to poll — a parameter
-/// rather than the bare program name written down, precisely so a test
-/// drives [`run_wired`] against a scratch `#!/bin/sh` program. Bundled into
-/// one struct for cohesion, the same way [`driver::Live`] bundles the
-/// loop's three collaborators: `run_wired` would otherwise take seven
-/// parameters, clippy's `too_many_arguments` threshold exactly.
+/// loaded configuration, the `herdr` program to poll, and the plugin's
+/// state directory — a parameter rather than the bare program name written
+/// down, precisely so a test drives [`run_wired`] against a scratch
+/// `#!/bin/sh` program and a scratch state directory. Bundled into one
+/// struct for cohesion, the same way [`driver::Live`] bundles the loop's
+/// three collaborators: the four fields are one concept, "where this pane
+/// starts". Not justified by clippy's `too_many_arguments`: measured on
+/// this crate and toolchain, that lint fires at eight parameters, not
+/// seven, so the flattened form would not have tripped it either.
 pub struct Startup<'a> {
     pub cwd: &'a Path,
     pub config: &'a Config,
@@ -199,11 +202,12 @@ pub fn read_artifact(path: &Path) -> Result<String, String> {
 /// a complete change list on a machine where `openspec` is not installed.
 /// Always returns a `Dashboard`, never a `Result`, and never panics.
 pub fn load(start: &Path, config: &Config, state_dir: Option<&Path>) -> Dashboard {
-    // Group 1 skeleton: the read happens (so `WIRED`'s leg 1 sees the name, and a
-    // dropped result is exactly what its own comment says is fine at this stage), but
-    // the result is not yet threaded onto `agent_names` — group 7's RED/GREEN pair is
-    // what wires the real value through both branches below.
-    let _ = crate::state::read(state_dir);
+    // The one further file `load` reads, on both branches below: Herdr agents exist
+    // independently of an OpenSpec repository. `state::read` is infallible by
+    // construction — every unusable input degrades to an empty mapping, with
+    // `state::read`'s own problem string riding on `Mapping::problems` where
+    // `plugin-state` put it.
+    let agent_names = crate::state::read(state_dir);
     match crate::resolve::find_repo(start) {
         crate::resolve::RepoSearch::Found { root } => {
             let changes = crate::changes::from_files(&root, config.archived_count);
@@ -237,7 +241,7 @@ pub fn load(start: &Path, config: &Config, state_dir: Option<&Path>) -> Dashboar
                     reachable: false,
                     problem: None,
                 },
-                agent_names: crate::state::Mapping::default(),
+                agent_names,
             }
         }
         crate::resolve::RepoSearch::NotFound { searched_from } => Dashboard {
@@ -268,7 +272,7 @@ pub fn load(start: &Path, config: &Config, state_dir: Option<&Path>) -> Dashboar
                 reachable: false,
                 problem: None,
             },
-            agent_names: crate::state::Mapping::default(),
+            agent_names,
         },
     }
 }
@@ -895,6 +899,11 @@ apply:
             assert!(dashboard.refresh.requested);
             assert!(!dashboard.refresh.reload);
             assert!(dashboard.refresh.problems.is_empty());
+            assert!(
+                dashboard.agent_names.names.is_empty(),
+                "agent-attribution: a None state_dir must be an empty mapping"
+            );
+            assert!(dashboard.agent_names.problems.is_empty());
         }
 
         #[test]
@@ -1051,11 +1060,22 @@ apply:
                 &root.join("openspec/changes/alpha/tasks.md"),
                 "- [x] a\n- [ ] b\n",
             );
+            let state = ScratchDir::new();
+            write(
+                &state.path().join("agent-names.toml"),
+                "[names]\nc-2fa-support = \"2fa-support\"\n",
+            );
 
             let before = snapshot(root);
-            let _ = super::super::load(root, &config_with_archived_count(5), None);
+            let state_before = snapshot(state.path());
+            let _ = super::super::load(root, &config_with_archived_count(5), Some(state.path()));
             let after = snapshot(root);
+            let state_after = snapshot(state.path());
             assert_eq!(before, after, "ui::load wrote inside the repository");
+            assert_eq!(
+                state_before, state_after,
+                "agent-attribution: ui::load reads the mapping and must never write it"
+            );
         }
 
         #[test]
@@ -1166,6 +1186,106 @@ apply:
                 "live-refresh: startup must not force a reload"
             );
             assert_detail_blank_at_120(&not_found);
+        }
+
+        /// `dashboard-loop`: "`load` reads the agent-name mapping from the directory it
+        /// was given" — real scratch directories, both for the mapping being observable
+        /// through the field and, via `attribution()`, through what it actually does.
+        #[test]
+        fn load_reads_the_agent_name_mapping() {
+            let scratch = ScratchDir::new();
+            let root = scratch.path();
+            write(
+                &root.join("openspec/changes/2fa-support/proposal.md"),
+                "# P\n",
+            );
+
+            let state = ScratchDir::new();
+            write(
+                &state.path().join("agent-names.toml"),
+                "[names]\nc-2fa-support = \"2fa-support\"\n",
+            );
+
+            let with_state =
+                super::super::load(root, &config_with_archived_count(5), Some(state.path()));
+            assert_eq!(
+                with_state.agent_names.names,
+                std::collections::BTreeMap::from([(
+                    "c-2fa-support".to_string(),
+                    "2fa-support".to_string()
+                )])
+            );
+            assert!(with_state.agent_names.problems.is_empty());
+
+            let without_state = super::super::load(root, &config_with_archived_count(5), None);
+            assert!(
+                without_state.agent_names.names.is_empty(),
+                "the pair came from the directory, not from anywhere else"
+            );
+
+            // The mapping reaching the dashboard is observable in the attribution, not
+            // only in the field: an in-scope agent named `c-2fa-support` badges
+            // `2fa-support` on the first result, and neither on the second.
+            let mut attributed = with_state.clone();
+            attributed.agents.agents = vec![crate::agents::Agent {
+                name: Some("c-2fa-support".to_string()),
+                kind: None,
+                status: crate::agents::AgentStatus::Working,
+                cwd: with_state.repo.clone(),
+                pane_id: "p".to_string(),
+                tab_id: "t".to_string(),
+                workspace_id: "w".to_string(),
+                terminal_title: None,
+            }];
+            let attribution = attributed.attribution();
+            assert_eq!(
+                attribution.badges,
+                std::collections::BTreeMap::from([(
+                    "2fa-support".to_string(),
+                    crate::agents::AgentStatus::Working
+                )])
+            );
+
+            let mut unattributed = without_state.clone();
+            unattributed.agents.agents = attributed.agents.agents.clone();
+            assert!(unattributed.attribution().badges.is_empty());
+        }
+
+        /// `dashboard-loop`: "An unusable mapping file is an empty mapping with a named
+        /// problem" — a malformed `agent-names.toml`, and the rest of `Dashboard`
+        /// otherwise exactly what a well-formed mapping produces.
+        #[test]
+        fn a_none_state_dir_is_an_empty_mapping() {
+            let scratch = ScratchDir::new();
+            let root = scratch.path();
+            write(&root.join("openspec/changes/alpha/proposal.md"), "# P\n");
+
+            let none_result = super::super::load(root, &config_with_archived_count(5), None);
+            assert!(none_result.agent_names.names.is_empty());
+            assert!(none_result.agent_names.problems.is_empty());
+
+            let malformed = ScratchDir::new();
+            write(&malformed.path().join("agent-names.toml"), "[names");
+            let malformed_result =
+                super::super::load(root, &config_with_archived_count(5), Some(malformed.path()));
+            assert!(malformed_result.agent_names.names.is_empty());
+            assert_eq!(malformed_result.agent_names.problems.len(), 1);
+            assert!(
+                malformed_result.agent_names.problems[0].contains("agent-names.toml"),
+                "{:?}",
+                malformed_result.agent_names.problems
+            );
+
+            // An unusable mapping degrades the badge tier and nothing else: every other
+            // field is exactly what the same call produces with a well-formed mapping.
+            assert_eq!(malformed_result.repo, none_result.repo);
+            assert_eq!(malformed_result.changes, none_result.changes);
+            assert_eq!(malformed_result.route, none_result.route);
+            assert_eq!(malformed_result.selected, none_result.selected);
+            assert_eq!(malformed_result.filter, none_result.filter);
+            assert_eq!(malformed_result.detail, none_result.detail);
+            assert_eq!(malformed_result.refresh, none_result.refresh);
+            assert_eq!(malformed_result.agents, none_result.agents);
         }
     }
 
@@ -1966,16 +2086,28 @@ apply:
                     ..Config::default()
                 };
 
+                // `agent-attribution`: a real state directory holding a mapping that
+                // would badge `alpha`, so the no-badge/no-count assertions below are
+                // discriminating rather than vacuous.
+                let state = ScratchDir::new();
+                write_with_mode(
+                    &state.path().join("agent-names.toml"),
+                    b"[names]\nc-alpha = \"alpha\"\n",
+                    0o644,
+                );
+
                 // Snapshotted at `openspec/`, not the whole scratch root: the
                 // scratch programs and their logs live alongside it, outside
                 // the repository tree, and the crate's byte-identity promise
                 // ("the plugin never writes inside openspec/") is scoped to
                 // that tree, not to this test's own harness artifacts.
                 let before = snapshot(&openspec_tree);
+                let state_before = snapshot(state.path());
 
                 let predicate = || log_lines(&openspec_log) >= 1;
 
-                let (result, buf) = run_wired_at(width, root, &config, &herdr, None, &predicate);
+                let (result, buf) =
+                    run_wired_at(width, root, &config, &herdr, Some(state.path()), &predicate);
                 let dashboard = result.expect("an unreachable socket is a supported state");
 
                 assert!(
@@ -1993,11 +2125,25 @@ apply:
                         .any(|row| row.contains("alpha") && row.contains("[4/9]")),
                     "width {width}: nothing is hidden and no error screen replaces the pane"
                 );
+                assert!(
+                    !buf.iter().any(|row| row.contains("unattributed")),
+                    "width {width}: an unreachable socket must carry no count"
+                );
+                assert!(
+                    !buf.iter()
+                        .any(|row| row.contains("alpha") && row.contains(" b ")),
+                    "width {width}: an unreachable socket must carry no badge"
+                );
 
                 let after = snapshot(&openspec_tree);
                 assert_eq!(
                     before, after,
                     "width {width}: this run writes nothing of its own"
+                );
+                let state_after = snapshot(state.path());
+                assert_eq!(
+                    state_before, state_after,
+                    "width {width}: the state directory must be read, never written"
                 );
 
                 // Discriminating control: the same comparison must fail when a
@@ -2059,6 +2205,14 @@ apply:
                 buf.iter()
                     .any(|row| row.contains("No OpenSpec repository found")),
                 "the list region's no-repository empty state must be on screen: {buf:?}"
+            );
+            assert!(
+                dashboard.agent_names.names.is_empty(),
+                "agent-attribution: state_dir was None, so the mapping must be empty"
+            );
+            assert!(
+                !buf.iter().any(|row| row.contains("unattributed")),
+                "agent-attribution: with no repository no agent is in scope, so no count"
             );
         }
 

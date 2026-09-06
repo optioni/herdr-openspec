@@ -509,7 +509,7 @@ directions; see design.md → Test Strategy.
 ## 7. The composition root reads the mapping
 <!-- kind: behavior -->
 
-- [ ] 7.1 RED: Write `ui::tests::load::load_reads_the_agent_name_mapping` and
+- [x] 7.1 RED: Write `ui::tests::load::load_reads_the_agent_name_mapping` and
       `ui::tests::load::a_none_state_dir_is_an_empty_mapping`, over real `ScratchDir` trees on
       `state::tests::`' landed terms — one holding a well-formed `agent-names.toml`, one holding
       invalid TOML whose problem must survive onto `Mapping::problems` — and assert the mapping
@@ -520,19 +520,19 @@ directions; see design.md → Test Strategy.
       run's empty `agent_names` and no-count claim; and `load`'s own empty-`agent_names` and
       state-directory-untouched claims — so every new assertion is observed red first.
 
-- [ ] 7.2 GREEN: Make `load` read `state::read(state_dir)` onto `agent_names` on both branches.
+- [x] 7.2 GREEN: Make `load` read `state::read(state_dir)` onto `agent_names` on both branches.
       Delete `Startup`'s `too_many_arguments` sentence and state cohesion in its place, per
       design.md → Contracts.
 
-- [ ] 7.3 CHECK: Confirm the two new `ui::tests::load::` failures name the empty mapping rather
+- [x] 7.3 CHECK: Confirm the two new `ui::tests::load::` failures name the empty mapping rather
       than a missing fixture, and that the extended wiring assertions were red for the same
       reason.
 
-- [ ] 7.4 CHECK: Contract gate — re-inspect `Startup`, `load`, and `render_footer` against
+- [x] 7.4 CHECK: Contract gate — re-inspect `Startup`, `load`, and `render_footer` against
       design.md → Contracts, and confirm `run` still holds no branch, no loop, and no field
       selection.
 
-- [ ] 7.5 VERIFY: `testcount --lib 'ui::tests::load::' 9` plus the two single-test floors, then
+- [x] 7.5 VERIFY: `testcount --lib 'ui::tests::load::' 9` plus the two single-test floors, then
       `sh $CHECKS/WIRED.sh`, `sh $CHECKS/NOIO-VIEW.sh`, and `UI_MIN=11 EXTRA='src/watch.rs
       src/refresh.rs src/agents.rs' sh $CHECKS/READONLY-UI.sh`. Commit.
 
