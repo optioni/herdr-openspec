@@ -941,25 +941,36 @@ pub(crate) mod testutil {
 pub enum Invocation {
     /// `ui` alone: run the dashboard.
     Ui,
+    /// `open` alone: open or focus the dashboard, split from the invoking pane.
+    Open,
+    /// `open-tab` alone: open or focus the dashboard, in a new tab.
+    OpenTab,
     /// Anything else. Carries the offending token, when there is one — the
-    /// unrecognised first argument, or the trailing argument after `ui`.
-    /// `None` means the argument list was empty.
+    /// unrecognised first argument, or the trailing argument after `ui`,
+    /// `open`, or `open-tab`. `None` means the argument list was empty.
     Reject(Option<String>),
 }
 
-/// Classify a program's arguments (excluding argv[0]).
+/// Classify a program's arguments (excluding argv[0]). No flag grammar: a subcommand
+/// followed by anything else is a rejection carrying that token, exactly as `ui --tab`
+/// already was — see `specs/pane-open/spec.md` -> "`open` and `open-tab` are subcommands
+/// of their own, with no flag grammar" and design.md -> Decision 1.
 pub fn parse(args: &[&str]) -> Invocation {
     match args {
         [] => Invocation::Reject(None),
         [first] if *first == "ui" => Invocation::Ui,
+        [first] if *first == "open" => Invocation::Open,
+        [first] if *first == "open-tab" => Invocation::OpenTab,
         ["ui", rest, ..] => Invocation::Reject(Some((*rest).to_string())),
+        ["open", rest, ..] => Invocation::Reject(Some((*rest).to_string())),
+        ["open-tab", rest, ..] => Invocation::Reject(Some((*rest).to_string())),
         [first, ..] => Invocation::Reject(Some((*first).to_string())),
     }
 }
 
 /// Usage text printed to stderr for any rejected invocation.
 pub fn usage() -> &'static str {
-    "usage: herdr-openspec <ui>\n\nCommands:\n  ui    Run the OpenSpec dashboard pane\n"
+    "usage: herdr-openspec <ui|open|open-tab>\n\nCommands:\n  ui        Run the OpenSpec dashboard pane\n  open      Open or focus the dashboard pane, split from the invoking pane\n  open-tab  Open or focus the dashboard pane, in a new tab\n"
 }
 
 /// The full stderr text for a rejected invocation: an optional line naming

@@ -19,6 +19,14 @@ fn main() {
                 exit(1);
             }
         },
+        // Stub arms: group 2 lands both variants so the crate compiles again; group 7
+        // replaces these with the real open::run_from_env dispatch (design.md ->
+        // Decision 10). Until then both take the same rejection path Invocation::Reject
+        // already takes, so no test that runs before group 7 can observe them.
+        Invocation::Open | Invocation::OpenTab => {
+            eprint!("{}", rejection_text(None));
+            exit(2);
+        }
         Invocation::Reject(token) => {
             eprint!("{}", rejection_text(token.as_deref()));
             exit(2);

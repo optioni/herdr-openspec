@@ -152,13 +152,13 @@
 ## 2. Argument classification
 <!-- kind: behavior -->
 
-- [ ] 2.1 RED: Write failing tests in `src/lib.rs`: `open_alone_classifies_as_open`,
+- [x] 2.1 RED: Write failing tests in `src/lib.rs`: `open_alone_classifies_as_open`,
   `open_tab_alone_classifies_as_open_tab`, `a_flag_after_a_subcommand_is_rejected`. Extend
   the landed `usage_lists_ui` **in place**, keeping its name — `EXTENDED` reports a renamed
   test as "not found" rather than "not extended" — to split `usage()`'s `Commands:` block
   and assert three whole first tokens, since `open` is a substring of `open-tab`.
 
-- [ ] 2.2 GREEN: Add `Invocation::Open` and `Invocation::OpenTab`, extend `parse`'s match
+- [x] 2.2 GREEN: Add `Invocation::Open` and `Invocation::OpenTab`, extend `parse`'s match
   arms, and rewrite `usage()` to `usage: herdr-openspec <ui|open|open-tab>` with one
   `Commands:` line per subcommand. Add both arms to `src/main.rs` in the same task,
   dispatching to the rejection path for now: `main`'s match over `Invocation` is
@@ -166,9 +166,10 @@
   `cargo test --all-features`, `make check`, and `cargo llvm-cov` are all unrunnable until
   group 7. Task 7.3 replaces the stubs.
 
-- [ ] 2.3 REFACTOR: State whether the match arms needed consolidating; no change if not.
+- [x] 2.3 REFACTOR: No change — the new arms mirror `ui`'s existing single-token /
+  trailing-token pair exactly; nothing to consolidate.
 
-- [ ] 2.4 Run the group tests — `cargo test --all-features --lib parse` and
+- [x] 2.4 Run the group tests — `cargo test --all-features --lib parse` and
   `--lib usage_lists_ui` — no regressions.
 
 ## 3. The invocation context
