@@ -393,7 +393,7 @@ directions; see design.md → Test Strategy.
 ## 3. `agents::attribute` — the three tiers
 <!-- kind: behavior -->
 
-- [ ] 3.1 RED: Write the seventeen tests of `agents::tests::attribute::`, one per
+- [x] 3.1 RED: Write the seventeen tests of `agents::tests::attribute::`, one per
       `agent-attribution` spec scenario in the first five requirements:
       `an_unmatched_in_scope_agent_is_counted`, `the_name_tier_never_reads_the_kind`,
       `a_terminal_title_attributes_nothing`, `every_empty_input_is_total`,
@@ -408,16 +408,16 @@ directions; see design.md → Test Strategy.
       takes `&[&str]` and a `BTreeMap` per design.md → Boundaries, and
       `MIN=22 sh $CHECKS/NOLIT-CHANGE.sh` is what catches the first.
 
-- [ ] 3.2 GREEN: Implement `attribute`: scope every agent by
+- [x] 3.2 GREEN: Implement `attribute`: scope every agent by
       `repo.is_some() && cwd.is_some() && cwd.starts_with(root)`, then the mapping tier, then
       byte-equal name match, then the count; fold several agents on one change by the fixed
       precedence `Blocked > Working > Idle > Done > Unknown`.
 
-- [ ] 3.3 REFACTOR: Extract the precedence to one total `rank` function beside
+- [x] 3.3 REFACTOR: Extract the precedence to one total `rank` function beside
       `decode_entry`'s status `match`, so the order is written once — or record that the
       implementation already has exactly one.
 
-- [ ] 3.4 VERIFY: `testcount --lib 'agents::tests::attribute::' 17`, then `MIN=22 sh
+- [x] 3.4 VERIFY: `testcount --lib 'agents::tests::attribute::' 17`, then `MIN=22 sh
       $CHECKS/AGENTSEAM.sh`, `MIN=22 sh $CHECKS/NOLIT-CHANGE.sh`, `MIN=22 sh
       $CHECKS/NOSPAWN-GREP.sh`, and
       `HOMEFILE=src/agents.rs TYPES='Agent Listed AgentSnapshot Attribution' SCAN_MIN=86 sh

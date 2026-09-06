@@ -85,19 +85,83 @@ pub struct Attribution {
     pub unattributed: usize,
 }
 
-/// Map live agents onto changes: a pure, total function of its four arguments. Group
-/// 1 lands this inert — an empty `Attribution` regardless of input — so the crate
-/// compiles against `Dashboard::attribution()`'s new call site before the real three
-/// tiers land in group 3. See `specs/agent-attribution/spec.md`.
+/// Map live agents onto changes: a pure, total function of its four arguments that
+/// refuses to guess. An agent is first placed in or out of the repository's scope
+/// (`repo.is_some() && cwd.is_some() && cwd.starts_with(root)`); an in-scope agent is
+/// then decided by exactly three tiers, in this order: the plugin-local mapping,
+/// then an exact `name` match against `change_names`, then the count. Several agents
+/// on one change fold to the single highest-precedence status — see `rank` below. See
+/// `specs/agent-attribution/spec.md`.
 pub fn attribute(
-    _agents: &[Agent],
-    _repo: Option<&std::path::Path>,
-    _change_names: &[&str],
-    _mapping: &std::collections::BTreeMap<String, String>,
+    agents: &[Agent],
+    repo: Option<&std::path::Path>,
+    change_names: &[&str],
+    mapping: &std::collections::BTreeMap<String, String>,
 ) -> Attribution {
+    let mut badges: std::collections::BTreeMap<String, AgentStatus> =
+        std::collections::BTreeMap::new();
+    let mut unattributed = 0usize;
+
+    let Some(root) = repo else {
+        return Attribution {
+            badges,
+            unattributed,
+        };
+    };
+
+    for agent in agents {
+        let in_scope = agent
+            .cwd
+            .as_deref()
+            .is_some_and(|cwd| cwd.starts_with(root));
+        if !in_scope {
+            continue;
+        }
+
+        let placed = agent.name.as_deref().and_then(|name| {
+            // Tier 1: the plugin-local mapping, consulted only when it names a
+            // change still in `change_names` — a stale record falls through
+            // rather than stranding an agent the weaker tier can still place.
+            let via_mapping = mapping
+                .get(name)
+                .and_then(|mapped| change_names.iter().find(|&&cn| cn == mapped));
+            // Tier 2: an exact, byte-for-byte match against a change name.
+            via_mapping.or_else(|| change_names.iter().find(|&&cn| cn == name))
+        });
+
+        match placed {
+            Some(&change_name) => {
+                badges
+                    .entry(change_name.to_string())
+                    .and_modify(|existing| {
+                        if rank(agent.status) > rank(*existing) {
+                            *existing = agent.status;
+                        }
+                    })
+                    .or_insert(agent.status);
+            }
+            None => unattributed += 1,
+        }
+    }
+
     Attribution {
-        badges: std::collections::BTreeMap::new(),
-        unattributed: 0,
+        badges,
+        unattributed,
+    }
+}
+
+/// The one total precedence order `attribute` folds several agents on one change by:
+/// `Blocked` > `Working` > `Idle` > `Done` > `Unknown`, highest first. `Blocked` leads
+/// because it is the only status asking for a person; `Unknown` trails because it
+/// carries no information. Written once, beside `decode_entry`'s status `match`, on
+/// exactly the terms design.md -> Boundaries names.
+fn rank(status: AgentStatus) -> u8 {
+    match status {
+        AgentStatus::Blocked => 4,
+        AgentStatus::Working => 3,
+        AgentStatus::Idle => 2,
+        AgentStatus::Done => 1,
+        AgentStatus::Unknown => 0,
     }
 }
 
@@ -1230,6 +1294,561 @@ mod tests {
                     "the worker did not return within 10s after the poller was dropped: {other:?}"
                 ),
             }
+        }
+    }
+
+    mod attribute {
+        use crate::agents::{Agent, AgentStatus, attribute};
+        use std::collections::BTreeMap;
+        use std::path::PathBuf;
+
+        /// Build an `Agent` naming every field, on the module's own no-`Default` terms.
+        /// `pane_id`, `tab_id`, and `workspace_id` are never read by `attribute`, so a
+        /// fixed placeholder is enough.
+        fn agent(
+            name: Option<&str>,
+            kind: Option<&str>,
+            status: AgentStatus,
+            cwd: Option<&str>,
+            terminal_title: Option<&str>,
+        ) -> Agent {
+            Agent {
+                name: name.map(str::to_string),
+                kind: kind.map(str::to_string),
+                status,
+                cwd: cwd.map(PathBuf::from),
+                pane_id: "p".to_string(),
+                tab_id: "t".to_string(),
+                workspace_id: "w".to_string(),
+                terminal_title: terminal_title.map(str::to_string),
+            }
+        }
+
+        fn mapping(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+            pairs
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect()
+        }
+
+        fn empty_mapping() -> BTreeMap<String, String> {
+            BTreeMap::new()
+        }
+
+        #[test]
+        fn an_unmatched_in_scope_agent_is_counted() {
+            let a = agent(
+                Some("scratch-work"),
+                None,
+                AgentStatus::Working,
+                Some("/repo"),
+                None,
+            );
+            let m = empty_mapping();
+
+            let result = attribute(
+                std::slice::from_ref(&a),
+                Some(std::path::Path::new("/repo")),
+                &["add-auth", "fix-basket"],
+                &m,
+            );
+            assert!(result.badges.is_empty());
+            assert_eq!(result.unattributed, 1);
+
+            let reordered = attribute(
+                &[a],
+                Some(std::path::Path::new("/repo")),
+                &["fix-basket", "add-auth"],
+                &m,
+            );
+            assert_eq!(result, reordered, "nothing was assigned by position");
+        }
+
+        #[test]
+        fn the_name_tier_never_reads_the_kind() {
+            let m = empty_mapping();
+            let a = agent(None, Some("claude"), AgentStatus::Idle, Some("/repo"), None);
+            let result = attribute(&[a], Some(std::path::Path::new("/repo")), &["claude"], &m);
+            assert!(result.badges.is_empty());
+            assert_eq!(result.unattributed, 1);
+
+            let named = agent(
+                Some("claude"),
+                Some("claude"),
+                AgentStatus::Idle,
+                Some("/repo"),
+                None,
+            );
+            let result = attribute(
+                &[named],
+                Some(std::path::Path::new("/repo")),
+                &["claude"],
+                &m,
+            );
+            assert_eq!(
+                result.badges,
+                BTreeMap::from([("claude".to_string(), AgentStatus::Idle)])
+            );
+            assert_eq!(result.unattributed, 0);
+        }
+
+        #[test]
+        fn a_terminal_title_attributes_nothing() {
+            let m = empty_mapping();
+            let with_title = agent(
+                None,
+                None,
+                AgentStatus::Working,
+                Some("/repo"),
+                Some("\u{2733} add-auth: wiring the token refresh"),
+            );
+            let result = attribute(
+                &[with_title],
+                Some(std::path::Path::new("/repo")),
+                &["add-auth"],
+                &m,
+            );
+            assert!(result.badges.is_empty());
+            assert_eq!(result.unattributed, 1);
+
+            let without_title = agent(None, None, AgentStatus::Working, Some("/repo"), None);
+            let result2 = attribute(
+                &[without_title],
+                Some(std::path::Path::new("/repo")),
+                &["add-auth"],
+                &m,
+            );
+            assert_eq!(result, result2, "the title changed no outcome at all");
+        }
+
+        #[test]
+        fn every_empty_input_is_total() {
+            let repo = Some(std::path::Path::new("/repo"));
+            let m = empty_mapping();
+
+            // 1. an empty agents slice.
+            let r1 = attribute(&[], repo, &["alpha"], &m);
+            assert!(r1.badges.is_empty());
+            assert_eq!(r1.unattributed, 0);
+
+            // 2. one in-scope agent, an empty change_names.
+            let working_alpha = agent(
+                Some("alpha"),
+                None,
+                AgentStatus::Working,
+                Some("/repo"),
+                None,
+            );
+            let r2 = attribute(std::slice::from_ref(&working_alpha), repo, &[], &m);
+            assert!(r2.badges.is_empty());
+            assert_eq!(
+                r2.unattributed, 1,
+                "an in-scope agent no tier could place is counted, even with no changes at all"
+            );
+
+            // 3. the same agent, change_names non-empty, no repository.
+            let r3 = attribute(&[working_alpha], None, &["alpha"], &m);
+            assert!(r3.badges.is_empty());
+            assert_eq!(r3.unattributed, 0);
+
+            // 4. an agent with every optional field None.
+            let bare = agent(None, None, AgentStatus::Working, None, None);
+            let r4 = attribute(&[bare], repo, &["alpha"], &m);
+            assert!(r4.badges.is_empty());
+            assert_eq!(r4.unattributed, 0);
+
+            // 5. change_names holding a duplicate.
+            let idle_alpha = agent(Some("alpha"), None, AgentStatus::Idle, Some("/repo"), None);
+            let r5 = attribute(&[idle_alpha], repo, &["alpha", "alpha"], &m);
+            assert_eq!(
+                r5.badges,
+                BTreeMap::from([("alpha".to_string(), AgentStatus::Idle)])
+            );
+            assert_eq!(r5.unattributed, 0);
+        }
+
+        #[test]
+        fn an_agent_in_another_repository_is_invisible() {
+            let m = empty_mapping();
+            let outside = agent(
+                Some("add-auth"),
+                None,
+                AgentStatus::Working,
+                Some("/other/repo"),
+                None,
+            );
+            let inside = agent(
+                Some("nothing-like-a-change"),
+                None,
+                AgentStatus::Working,
+                Some("/repo"),
+                None,
+            );
+            let result = attribute(
+                &[outside, inside],
+                Some(std::path::Path::new("/repo")),
+                &["add-auth"],
+                &m,
+            );
+            assert!(result.badges.is_empty());
+            assert_eq!(result.unattributed, 1);
+        }
+
+        #[test]
+        fn containment_is_component_wise() {
+            let m = empty_mapping();
+            let at_root = agent(None, None, AgentStatus::Idle, Some("/repo"), None);
+            let subdir = agent(
+                None,
+                None,
+                AgentStatus::Idle,
+                Some("/repo/openspec/changes/alpha"),
+                None,
+            );
+            let sibling = agent(None, None, AgentStatus::Idle, Some("/repo-other"), None);
+            let result = attribute(
+                &[at_root, subdir, sibling],
+                Some(std::path::Path::new("/repo")),
+                &[],
+                &m,
+            );
+            assert_eq!(
+                result.unattributed, 2,
+                "the sibling /repo-other must be excluded by component-wise containment"
+            );
+        }
+
+        #[test]
+        fn no_repository_attributes_nothing() {
+            let m = mapping(&[("c-add-auth", "add-auth")]);
+            let agents: Vec<Agent> = (0..3)
+                .map(|_| agent(None, None, AgentStatus::Idle, Some("/repo"), None))
+                .collect();
+            let result = attribute(&agents, None, &["add-auth"], &m);
+            assert!(result.badges.is_empty());
+            assert_eq!(result.unattributed, 0);
+        }
+
+        #[test]
+        fn the_mapping_resolves_a_derived_name() {
+            let m = mapping(&[("c-2fa-support", "2fa-support")]);
+            let a = agent(
+                Some("c-2fa-support"),
+                None,
+                AgentStatus::Working,
+                Some("/repo"),
+                None,
+            );
+            let result = attribute(
+                std::slice::from_ref(&a),
+                Some(std::path::Path::new("/repo")),
+                &["2fa-support", "add-auth"],
+                &m,
+            );
+            assert_eq!(
+                result.badges,
+                BTreeMap::from([("2fa-support".to_string(), AgentStatus::Working)])
+            );
+            assert_eq!(result.unattributed, 0);
+
+            let empty = empty_mapping();
+            let result2 = attribute(
+                &[a],
+                Some(std::path::Path::new("/repo")),
+                &["2fa-support", "add-auth"],
+                &empty,
+            );
+            assert!(result2.badges.is_empty());
+            assert_eq!(result2.unattributed, 1);
+        }
+
+        #[test]
+        fn the_mapping_outranks_the_name() {
+            let m = mapping(&[("alpha", "beta")]);
+            let a = agent(
+                Some("alpha"),
+                None,
+                AgentStatus::Blocked,
+                Some("/repo"),
+                None,
+            );
+            let result = attribute(
+                &[a],
+                Some(std::path::Path::new("/repo")),
+                &["alpha", "beta"],
+                &m,
+            );
+            assert_eq!(
+                result.badges,
+                BTreeMap::from([("beta".to_string(), AgentStatus::Blocked)])
+            );
+            assert!(!result.badges.contains_key("alpha"));
+            assert_eq!(result.unattributed, 0);
+        }
+
+        #[test]
+        fn a_stale_mapping_falls_through() {
+            let m = mapping(&[("alpha", "long-since-archived")]);
+            let a = agent(Some("alpha"), None, AgentStatus::Idle, Some("/repo"), None);
+            let result = attribute(&[a], Some(std::path::Path::new("/repo")), &["alpha"], &m);
+            assert_eq!(
+                result.badges,
+                BTreeMap::from([("alpha".to_string(), AgentStatus::Idle)])
+            );
+
+            let m2 = mapping(&[("c-gone", "long-since-archived")]);
+            let gone = agent(Some("c-gone"), None, AgentStatus::Idle, Some("/repo"), None);
+            let result2 = attribute(
+                &[gone],
+                Some(std::path::Path::new("/repo")),
+                &["alpha"],
+                &m2,
+            );
+            assert!(result2.badges.is_empty());
+            assert_eq!(
+                result2.unattributed, 1,
+                "the fall-through must end in the count, never an invented change"
+            );
+        }
+
+        #[test]
+        fn an_empty_mapping_leaves_the_name_tier_working() {
+            let m = empty_mapping();
+            let a = agent(
+                Some("alpha"),
+                None,
+                AgentStatus::Working,
+                Some("/repo"),
+                None,
+            );
+            let result = attribute(&[a], Some(std::path::Path::new("/repo")), &["alpha"], &m);
+            assert_eq!(
+                result.badges,
+                BTreeMap::from([("alpha".to_string(), AgentStatus::Working)])
+            );
+            assert_eq!(result.unattributed, 0);
+        }
+
+        #[test]
+        fn both_tiers_of_the_change_list_are_attributable() {
+            let m = empty_mapping();
+            let alpha = agent(
+                Some("alpha"),
+                None,
+                AgentStatus::Working,
+                Some("/repo"),
+                None,
+            );
+            let legacy = agent(
+                Some("2026-08-14-legacy"),
+                None,
+                AgentStatus::Working,
+                Some("/repo"),
+                None,
+            );
+            let result = attribute(
+                &[alpha.clone(), legacy],
+                Some(std::path::Path::new("/repo")),
+                &["alpha", "legacy"],
+                &m,
+            );
+            assert_eq!(
+                result.badges,
+                BTreeMap::from([("alpha".to_string(), AgentStatus::Working)])
+            );
+            assert_eq!(result.unattributed, 1);
+
+            let renamed = agent(
+                Some("legacy"),
+                None,
+                AgentStatus::Working,
+                Some("/repo"),
+                None,
+            );
+            let result2 = attribute(
+                &[alpha, renamed],
+                Some(std::path::Path::new("/repo")),
+                &["alpha", "legacy"],
+                &m,
+            );
+            assert_eq!(
+                result2.badges,
+                BTreeMap::from([
+                    ("alpha".to_string(), AgentStatus::Working),
+                    ("legacy".to_string(), AgentStatus::Working),
+                ])
+            );
+            assert_eq!(result2.unattributed, 0);
+        }
+
+        #[test]
+        fn matching_is_exact() {
+            let m = empty_mapping();
+            let near_misses: Vec<Agent> = ["Add-Auth", "add-auth-2", "add", " add-auth"]
+                .iter()
+                .map(|n| agent(Some(n), None, AgentStatus::Idle, Some("/repo"), None))
+                .collect();
+            let result = attribute(
+                &near_misses,
+                Some(std::path::Path::new("/repo")),
+                &["add-auth"],
+                &m,
+            );
+            assert!(result.badges.is_empty());
+            assert_eq!(result.unattributed, 4);
+
+            let mut with_hit = near_misses;
+            with_hit.push(agent(
+                Some("add-auth"),
+                None,
+                AgentStatus::Idle,
+                Some("/repo"),
+                None,
+            ));
+            let result2 = attribute(
+                &with_hit,
+                Some(std::path::Path::new("/repo")),
+                &["add-auth"],
+                &m,
+            );
+            assert_eq!(
+                result2.badges,
+                BTreeMap::from([("add-auth".to_string(), AgentStatus::Idle)])
+            );
+            assert_eq!(result2.unattributed, 4);
+        }
+
+        #[test]
+        fn a_name_past_the_cap_is_mapping_only() {
+            // A change name well past Herdr's 32-character cap — the exact count is not
+            // load-bearing, only that it derives to a legal, shorter agent name.
+            let long_name = "a-change-name-that-runs-well-past-thirty-two-characters";
+            let derived = crate::state::agent_name(long_name);
+            assert!(derived.len() <= 32);
+
+            let m = empty_mapping();
+            let a = agent(
+                Some(&derived),
+                None,
+                AgentStatus::Working,
+                Some("/repo"),
+                None,
+            );
+            let result = attribute(
+                std::slice::from_ref(&a),
+                Some(std::path::Path::new("/repo")),
+                &[long_name],
+                &m,
+            );
+            assert!(result.badges.is_empty());
+            assert_eq!(
+                result.unattributed, 1,
+                "no live agent can carry a name Herdr would reject"
+            );
+
+            let mapped = mapping(&[(derived.as_str(), long_name)]);
+            let result2 = attribute(
+                &[a],
+                Some(std::path::Path::new("/repo")),
+                &[long_name],
+                &mapped,
+            );
+            assert_eq!(
+                result2.badges,
+                BTreeMap::from([(long_name.to_string(), AgentStatus::Working)])
+            );
+            assert_eq!(result2.unattributed, 0);
+        }
+
+        #[test]
+        fn an_unnamed_agent_is_counted() {
+            let m = mapping(&[("alpha", "alpha")]);
+            let a = agent(None, Some("claude"), AgentStatus::Done, Some("/repo"), None);
+            let result = attribute(&[a], Some(std::path::Path::new("/repo")), &["alpha"], &m);
+            assert!(result.badges.is_empty());
+            assert_eq!(result.unattributed, 1);
+        }
+
+        #[test]
+        fn precedence_is_total_and_order_independent() {
+            let m = empty_mapping();
+            let statuses = [
+                AgentStatus::Unknown,
+                AgentStatus::Done,
+                AgentStatus::Idle,
+                AgentStatus::Working,
+                AgentStatus::Blocked,
+            ];
+            let agents: Vec<Agent> = statuses
+                .iter()
+                .map(|s| agent(Some("alpha"), None, *s, Some("/repo"), None))
+                .collect();
+            let result = attribute(&agents, Some(std::path::Path::new("/repo")), &["alpha"], &m);
+            assert_eq!(
+                result.badges,
+                BTreeMap::from([("alpha".to_string(), AgentStatus::Blocked)])
+            );
+
+            let mut reversed = agents.clone();
+            reversed.reverse();
+            let result_rev = attribute(
+                &reversed,
+                Some(std::path::Path::new("/repo")),
+                &["alpha"],
+                &m,
+            );
+            assert_eq!(result, result_rev);
+
+            // Peel one rank at a time off the top of the precedence — Blocked, then
+            // Working, then Idle, then Done — leaving the next-highest as the winner.
+            let mut remaining = agents;
+            for (peel, expected) in [
+                (AgentStatus::Blocked, AgentStatus::Working),
+                (AgentStatus::Working, AgentStatus::Idle),
+                (AgentStatus::Idle, AgentStatus::Done),
+                (AgentStatus::Done, AgentStatus::Unknown),
+            ] {
+                let pos = remaining
+                    .iter()
+                    .position(|a| a.status == peel)
+                    .expect("the rank being peeled must still be present");
+                remaining.remove(pos);
+                let r = attribute(
+                    &remaining,
+                    Some(std::path::Path::new("/repo")),
+                    &["alpha"],
+                    &m,
+                );
+                assert_eq!(r.badges, BTreeMap::from([("alpha".to_string(), expected)]));
+            }
+        }
+
+        #[test]
+        fn one_agent_per_change_keeps_its_status() {
+            let m = empty_mapping();
+            let names = ["a", "b", "c", "d", "e"];
+            let statuses = [
+                AgentStatus::Working,
+                AgentStatus::Idle,
+                AgentStatus::Blocked,
+                AgentStatus::Done,
+                AgentStatus::Unknown,
+            ];
+            let agents: Vec<Agent> = names
+                .iter()
+                .zip(statuses.iter())
+                .map(|(n, s)| agent(Some(n), None, *s, Some("/repo"), None))
+                .collect();
+            let result = attribute(&agents, Some(std::path::Path::new("/repo")), &names, &m);
+            assert_eq!(
+                result.badges,
+                names
+                    .iter()
+                    .zip(statuses.iter())
+                    .map(|(n, s)| (n.to_string(), *s))
+                    .collect::<BTreeMap<_, _>>()
+            );
+            assert_eq!(result.unattributed, 0);
         }
     }
 }
