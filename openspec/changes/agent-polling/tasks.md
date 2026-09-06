@@ -1019,21 +1019,28 @@ Net effect on `SPEC.md` is about +16 lines and −5; on `AGENTS.md`, two rewritt
 ## 14. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 14.1 CHECK: Inspect the intended verification commands and affected tiers — the four gates
+- [x] 14.1 CHECK: Inspect the intended verification commands and affected tiers — the four gates
       below, the twenty-seven `$CHECKS` gates from task 11.1, and the eleven `testcount` floors.
+      **Recorded:** all twenty-seven gates re-run in one final pass at their landed invocations
+      (`NOSLEEP` now at `SLEEP_MIN=5`, per group 13's correction) — all green.
 
-- [ ] 14.2 VERIFY: `cargo fmt --all -- --check` — clean.
+- [x] 14.2 VERIFY: `cargo fmt --all -- --check` — clean.
 
-- [ ] 14.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings. Rust
+- [x] 14.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings. Rust
       has no separate type checker; clippy's run is the type check.
 
-- [ ] 14.4 VERIFY: `cargo test --all-features` — green, and `testcount --lib '' 805`.
+- [x] 14.4 VERIFY: `cargo test --all-features` — green, and `testcount --lib '' 805`.
+      **Recorded:** 805/805.
 
-- [ ] 14.5 VERIFY: `cargo llvm-cov --fail-under-lines 80` — green, and record the **line**
+- [x] 14.5 VERIFY: `cargo llvm-cov --fail-under-lines 80` — green, and record the **line**
       percentage and line total from the TOTAL row, not the region count. The floor is not
       lowered and no exclusion is added; if coverage falls short, tests are added.
+      **Recorded:** TOTAL row — **97.18% of lines** (20,890 lines, 589 missed). The region
+      figure (34,201 regions, 96.99%) is reported separately and is not the gating number.
 
-- [ ] 14.6 VERIFY: `make check` as the single composite gate; if it fails, name the failing
+- [x] 14.6 VERIFY: `make check` as the single composite gate; if it fails, name the failing
       sub-command rather than summarising.
+      **Recorded:** `make check` exits 0.
 
-- [ ] 14.7 VERIFY: `openspec validate agent-polling --strict` — valid.
+- [x] 14.7 VERIFY: `openspec validate agent-polling --strict` — valid.
+      **Recorded:** `Change 'agent-polling' is valid`.
