@@ -567,7 +567,7 @@ directions; see design.md → Test Strategy.
 ## 9. The architecture checks, all green together
 <!-- kind: operational -->
 
-- [ ] 9.1 CHECK: Run all twenty-eight gates at their landed invocations, in one pass, and
+- [x] 9.1 CHECK: Run all twenty-eight gates at their landed invocations, in one pass, and
       record every exit status and OK line: `MIN=22 NOSPAWN-GREP`; `MIN=22 NOLIT-CHANGE`;
       `UI_MIN=11 NOCLI-SHELL`; `NOIO-VIEW`; `READSEAM`; `MDSEAM`; `NOTABSEAM`; `TASKSEAM`;
       `MIN=24 WATCHSEAM`; `MIN=22 AGENTSEAM`; `NOBLOCK`; `SLEEP_MIN=5 MIN=25 NOSLEEP`;
@@ -580,13 +580,13 @@ directions; see design.md → Test Strategy.
       **Red when:** any is not green, including `DEPS` and `GRAPH-SNAP`, which this change does
       not edit because it adds no dependency.
 
-- [ ] 9.2 CHECK: Re-measure both `NODEFAULT-UI` span counts from their own FAIL lines at a
+- [x] 9.2 CHECK: Re-measure both `NODEFAULT-UI` span counts from their own FAIL lines at a
       deliberately high `SCAN_MIN`, and confirm the landed floors of 165 and 86 are at or below
       them.
       **Red when:** either realized count is below its floor — a literal was replaced by
       something the scan cannot see.
 
-- [ ] 9.3 VERIFY: `git status --porcelain` shows no change under `openspec/` outside this
+- [x] 9.3 VERIFY: `git status --porcelain` shows no change under `openspec/` outside this
       change's own directory. Commit any gate-invocation notes.
 
 ## 10. SPEC.md and AGENTS.md corrections
