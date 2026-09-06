@@ -512,4 +512,254 @@ mod tests {
         };
         assert_eq!(report_output(&empty), (Vec::new(), 0));
     }
+
+    // --- group 6: the driver -------------------------------------------------------------
+
+    use crate::cli::{CliError, FakeCli, Program};
+
+    fn empty_listing() -> String {
+        r#"{"result":{"panes":[]}}"#.to_string()
+    }
+
+    fn labelled_listing() -> String {
+        r#"{"result":{"panes":[{"pane_id":"w8:pG","label":"OpenSpec","workspace_id":"w8","cwd":"/repo"}]}}"#.to_string()
+    }
+
+    fn open_refs(placement: Placement, ctx: &Context) -> Vec<String> {
+        open_args(placement, ctx)
+    }
+
+    #[test]
+    fn cross_placement_focus() {
+        let ctx = full_context();
+
+        let fake_tab = FakeCli::new();
+        fake_tab.register_herdr(&["pane", "list"], Ok(labelled_listing()));
+        fake_tab.register_herdr(&["plugin", "pane", "focus", "w8:pG"], Ok(String::new()));
+        let report = run(&fake_tab, &ctx, Placement::Tab);
+        assert_eq!(
+            report,
+            Report {
+                warnings: Vec::new(),
+                outcome: Ok(())
+            }
+        );
+        assert_eq!(
+            fake_tab.calls(),
+            vec![
+                (Program::Herdr, vec!["pane".to_string(), "list".to_string()]),
+                (
+                    Program::Herdr,
+                    vec![
+                        "plugin".to_string(),
+                        "pane".to_string(),
+                        "focus".to_string(),
+                        "w8:pG".to_string()
+                    ]
+                ),
+            ]
+        );
+
+        let fake_split = FakeCli::new();
+        fake_split.register_herdr(&["pane", "list"], Ok(labelled_listing()));
+        fake_split.register_herdr(&["plugin", "pane", "focus", "w8:pG"], Ok(String::new()));
+        let report2 = run(&fake_split, &ctx, Placement::Split);
+        assert_eq!(report2.outcome, Ok(()));
+        assert_eq!(fake_split.calls().len(), 2);
+    }
+
+    #[test]
+    fn open_domain_error_stops() {
+        let ctx = full_context();
+        let fake = FakeCli::new();
+        fake.register_herdr(&["pane", "list"], Ok(empty_listing()));
+        let argv = open_refs(Placement::Split, &ctx);
+        let refs: Vec<&str> = argv.iter().map(String::as_str).collect();
+        let stderr = r#"{"error":{"code":"plugin_pane_not_found","message":"plugin pane entrypoint 'nope' not found"},"id":"cli:plugin"}"#;
+        fake.register_herdr(
+            &refs,
+            Err(CliError::Failed {
+                program: "herdr".to_string(),
+                args: argv.clone(),
+                code: Some(1),
+                stderr: stderr.to_string(),
+            }),
+        );
+        let report = run(&fake, &ctx, Placement::Split);
+        match report.outcome {
+            Err(reason) => {
+                assert!(reason.contains("plugin_pane_not_found"), "{reason}");
+                assert!(
+                    reason.contains("plugin pane entrypoint 'nope' not found"),
+                    "{reason}"
+                );
+            }
+            Ok(()) => panic!("expected Err"),
+        }
+    }
+
+    #[test]
+    fn open_usage_error_stops() {
+        let ctx = full_context();
+        let fake = FakeCli::new();
+        fake.register_herdr(&["pane", "list"], Ok(empty_listing()));
+        let argv = open_refs(Placement::Split, &ctx);
+        let refs: Vec<&str> = argv.iter().map(String::as_str).collect();
+        fake.register_herdr(
+            &refs,
+            Err(CliError::Failed {
+                program: "herdr".to_string(),
+                args: argv.clone(),
+                code: Some(2),
+                stderr: "missing required --plugin".to_string(),
+            }),
+        );
+        let report = run(&fake, &ctx, Placement::Split);
+        match report.outcome {
+            Err(reason) => assert!(reason.contains("missing required --plugin"), "{reason}"),
+            Ok(()) => panic!("expected Err"),
+        }
+    }
+
+    #[test]
+    fn herdr_not_started_names_the_program() {
+        let ctx = full_context();
+        let fake = FakeCli::new();
+        fake.register_herdr(&["pane", "list"], Ok(empty_listing()));
+        let argv = open_refs(Placement::Split, &ctx);
+        let refs: Vec<&str> = argv.iter().map(String::as_str).collect();
+        fake.register_herdr(
+            &refs,
+            Err(CliError::NotStarted {
+                program: "/scratch/herdr".to_string(),
+                args: argv.clone(),
+                reason: "No such file or directory (os error 2)".to_string(),
+            }),
+        );
+        let report = run(&fake, &ctx, Placement::Split);
+        match report.outcome {
+            Err(reason) => {
+                assert!(reason.to_lowercase().contains("herdr"), "{reason}");
+                assert!(reason.contains("No such file or directory"), "{reason}");
+            }
+            Ok(()) => panic!("expected Err"),
+        }
+    }
+
+    #[test]
+    fn focus_domain_error_stops_and_opens_nothing() {
+        let ctx = full_context();
+        let fake = FakeCli::new();
+        fake.register_herdr(&["pane", "list"], Ok(labelled_listing()));
+        fake.register_herdr(
+            &["plugin", "pane", "focus", "w8:pG"],
+            Err(CliError::Failed {
+                program: "herdr".to_string(),
+                args: vec![
+                    "plugin".to_string(),
+                    "pane".to_string(),
+                    "focus".to_string(),
+                    "w8:pG".to_string(),
+                ],
+                code: Some(1),
+                stderr: "plugin_pane_not_found".to_string(),
+            }),
+        );
+        let report = run(&fake, &ctx, Placement::Split);
+        assert!(report.outcome.is_err());
+        assert_eq!(fake.calls().len(), 2);
+        assert!(
+            !fake
+                .calls()
+                .iter()
+                .any(|(_, argv)| argv.contains(&"open".to_string()) && argv[1] == "pane")
+        );
+    }
+
+    #[test]
+    fn focus_usage_error_warns_and_opens_once() {
+        let ctx = full_context();
+        let fake = FakeCli::new();
+        fake.register_herdr(&["pane", "list"], Ok(labelled_listing()));
+        fake.register_herdr(
+            &["plugin", "pane", "focus", "w8:pG"],
+            Err(CliError::Failed {
+                program: "herdr".to_string(),
+                args: vec![
+                    "plugin".to_string(),
+                    "pane".to_string(),
+                    "focus".to_string(),
+                    "w8:pG".to_string(),
+                ],
+                code: Some(2),
+                stderr: "unrecognized subcommand".to_string(),
+            }),
+        );
+        let argv = open_refs(Placement::Split, &ctx);
+        let refs: Vec<&str> = argv.iter().map(String::as_str).collect();
+        fake.register_herdr(&refs, Ok(String::new()));
+
+        let report = run(&fake, &ctx, Placement::Split);
+        assert_eq!(fake.calls().len(), 3);
+        assert!(!report.warnings.is_empty());
+        assert_eq!(report.outcome, Ok(()));
+    }
+
+    #[test]
+    fn listing_failure_warns_and_still_opens() {
+        let ctx = full_context();
+        let fake = FakeCli::new();
+        fake.register_herdr(
+            &["pane", "list"],
+            Err(CliError::Failed {
+                program: "herdr".to_string(),
+                args: vec!["pane".to_string(), "list".to_string()],
+                code: Some(1),
+                stderr: "boom".to_string(),
+            }),
+        );
+        let argv = open_refs(Placement::Split, &ctx);
+        let refs: Vec<&str> = argv.iter().map(String::as_str).collect();
+        fake.register_herdr(&refs, Ok(String::new()));
+
+        let report = run(&fake, &ctx, Placement::Split);
+        assert!(!report.warnings.is_empty());
+        assert_eq!(report.outcome, Ok(()));
+        assert_eq!(fake.calls().len(), 2);
+    }
+
+    #[test]
+    fn listing_unparseable_warns_and_still_opens() {
+        let ctx = full_context();
+        for bad in ["not json", r#"{"result":{}}"#] {
+            let fake = FakeCli::new();
+            fake.register_herdr(&["pane", "list"], Ok(bad.to_string()));
+            let argv = open_refs(Placement::Split, &ctx);
+            let refs: Vec<&str> = argv.iter().map(String::as_str).collect();
+            fake.register_herdr(&refs, Ok(String::new()));
+
+            let report = run(&fake, &ctx, Placement::Split);
+            assert!(!report.warnings.is_empty(), "listing: {bad}");
+            assert_eq!(report.outcome, Ok(()));
+        }
+    }
+
+    #[test]
+    fn successful_open_is_silent() {
+        let ctx = full_context();
+        let fake = FakeCli::new();
+        fake.register_herdr(&["pane", "list"], Ok(empty_listing()));
+        let argv = open_refs(Placement::Split, &ctx);
+        let refs: Vec<&str> = argv.iter().map(String::as_str).collect();
+        fake.register_herdr(&refs, Ok(String::new()));
+
+        let report = run(&fake, &ctx, Placement::Split);
+        assert_eq!(
+            report,
+            Report {
+                warnings: Vec::new(),
+                outcome: Ok(())
+            }
+        );
+    }
 }
