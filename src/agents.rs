@@ -193,19 +193,52 @@ pub fn parse_list(text: &str) -> Result<Listed, String> {
     Ok(Listed { agents, problems })
 }
 
+/// Format a failed `herdr agent list` call's reason. Unlike
+/// `changes::cli_error_problem`, this carries `stderr` and the OS `reason` verbatim:
+/// the OpenSpec CLI writes its diagnostic to stdout, so `CliError::Failed`'s `stderr` is
+/// empty for it, but Herdr does the reverse — an unreachable socket exits 1 with an
+/// empty stdout and a JSON error envelope on stderr — so for `herdr` the reason *is*
+/// available and the pane should carry it. See `specs/agent-list/spec.md` -> "A failed
+/// run is an unreachable socket carrying the program's own reason".
+fn herdr_error_problem(err: &crate::cli::CliError) -> String {
+    match err {
+        crate::cli::CliError::Failed { code, stderr, .. } => {
+            let code = code
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            format!("herdr agent list exited with code {code}: {stderr}")
+        }
+        crate::cli::CliError::NotStarted { reason, .. } => {
+            format!("herdr agent list: could not start herdr: {reason}")
+        }
+    }
+}
+
 /// Map one `herdr agent list` call to an [`AgentSnapshot`], which has no error case of
 /// its own: every outcome — a clean payload, a partial one, a failed run, an absent
-/// program — becomes a snapshot.
-///
-/// Group 1 stub: a constant answer, deliberately wrong in every direction (`reachable`
-/// true with no agents, whatever the CLI actually said) so group 4's six tests are red
-/// on behaviour rather than on a stub that already guessed right. The real four-way
-/// mapping arrives in group 4.
-pub fn poll_once(_cli: &dyn HerdrCli) -> AgentSnapshot {
-    AgentSnapshot {
-        agents: Vec::new(),
-        reachable: true,
-        problem: None,
+/// program — becomes a snapshot. `problem` carries `Listed::problems` joined into one
+/// string when a successful payload held a bad entry; a payload with one bad entry is
+/// still `reachable: true`. See `specs/agent-list/spec.md` -> "A failed run is an
+/// unreachable socket carrying the program's own reason".
+pub fn poll_once(cli: &dyn HerdrCli) -> AgentSnapshot {
+    match cli.run(&["agent", "list"]) {
+        Ok(text) => match parse_list(&text) {
+            Ok(listed) => AgentSnapshot {
+                agents: listed.agents,
+                reachable: true,
+                problem: (!listed.problems.is_empty()).then(|| listed.problems.join("; ")),
+            },
+            Err(reason) => AgentSnapshot {
+                agents: Vec::new(),
+                reachable: false,
+                problem: Some(reason),
+            },
+        },
+        Err(err) => AgentSnapshot {
+            agents: Vec::new(),
+            reachable: false,
+            problem: Some(herdr_error_problem(&err)),
+        },
     }
 }
 
@@ -537,6 +570,121 @@ mod tests {
                 }
                 Ok(listed) => panic!("expected Err, got Ok({listed:?})"),
             }
+        }
+    }
+
+    mod poll {
+        use crate::cli::{CliError, FakeCli, Program};
+
+        #[test]
+        fn args_are_exactly_agent_list() {
+            let fake = FakeCli::new();
+            fake.register_herdr(&["agent", "list"], Ok(reference_payload()));
+
+            let _ = super::super::poll_once(&fake);
+
+            assert_eq!(
+                fake.calls(),
+                vec![(
+                    Program::Herdr,
+                    vec!["agent".to_string(), "list".to_string()]
+                )]
+            );
+        }
+
+        fn reference_payload() -> String {
+            r#"{"id":"cli:agent:list","result":{"agents":[{"agent":"claude","agent_status":"idle","pane_id":"w8:p1","tab_id":"w8:t1","workspace_id":"w8"}],"type":"agent_list"}}"#.to_string()
+        }
+
+        #[test]
+        fn a_clean_success_is_reachable_with_its_agents() {
+            let fake = FakeCli::new();
+            fake.register_herdr(&["agent", "list"], Ok(reference_payload()));
+
+            let snapshot = super::super::poll_once(&fake);
+
+            assert!(snapshot.reachable);
+            assert_eq!(snapshot.agents.len(), 1);
+            assert_eq!(snapshot.agents[0].pane_id, "w8:p1");
+            assert_eq!(snapshot.problem, None);
+        }
+
+        #[test]
+        fn a_failed_run_is_an_unreachable_snapshot() {
+            let fake = FakeCli::new();
+            fake.register_herdr(
+                &["agent", "list"],
+                Err(CliError::Failed {
+                    program: "herdr".to_string(),
+                    args: vec!["agent".to_string(), "list".to_string()],
+                    code: Some(1),
+                    stderr: r#"{"id":"cli:agent:list","error":{"code":"server_not_running","message":"no herdr server is running at /p/herdr.sock"}}"#
+                        .to_string(),
+                }),
+            );
+
+            let snapshot = super::super::poll_once(&fake);
+
+            assert!(!snapshot.reachable);
+            assert_eq!(snapshot.agents, Vec::new());
+            let problem = snapshot.problem.expect("a reason must be present");
+            assert!(problem.contains("herdr agent list"), "{problem}");
+            assert!(problem.contains('1'), "{problem}");
+            assert!(problem.contains("server_not_running"), "{problem}");
+        }
+
+        #[test]
+        fn not_started_is_an_unreachable_snapshot() {
+            let fake = FakeCli::new();
+            fake.register_herdr(
+                &["agent", "list"],
+                Err(CliError::NotStarted {
+                    program: "herdr".to_string(),
+                    args: vec!["agent".to_string(), "list".to_string()],
+                    reason: "No such file or directory (os error 2)".to_string(),
+                }),
+            );
+
+            let snapshot = super::super::poll_once(&fake);
+
+            assert!(!snapshot.reachable);
+            assert_eq!(snapshot.agents, Vec::new());
+            let problem = snapshot.problem.expect("a reason must be present");
+            assert!(problem.contains("herdr"), "{problem}");
+            assert!(problem.contains("No such file or directory"), "{problem}");
+        }
+
+        #[test]
+        fn an_unparsable_success_is_an_unreachable_snapshot() {
+            let fake = FakeCli::new();
+            fake.register_herdr(
+                &["agent", "list"],
+                Ok("usage: herdr agent list".to_string()),
+            );
+
+            let snapshot = super::super::poll_once(&fake);
+
+            assert!(!snapshot.reachable);
+            assert_eq!(snapshot.agents, Vec::new());
+            assert!(snapshot.problem.is_some());
+        }
+
+        #[test]
+        fn a_partial_payload_is_still_reachable() {
+            let fake = FakeCli::new();
+            let text = r#"{"id":"cli:agent:list","result":{"agents":[
+                {"pane_id":"p0","tab_id":"t0","workspace_id":"w0"},
+                {"tab_id":"t1","workspace_id":"w1"},
+                {"pane_id":"p2","tab_id":"t2","workspace_id":"w2"}
+            ],"type":"agent_list"}}"#;
+            fake.register_herdr(&["agent", "list"], Ok(text.to_string()));
+
+            let snapshot = super::super::poll_once(&fake);
+
+            assert!(snapshot.reachable);
+            assert_eq!(snapshot.agents.len(), 2);
+            let problem = snapshot.problem.expect("the skipped entry must be named");
+            assert!(problem.contains("pane_id"), "{problem}");
         }
     }
 }

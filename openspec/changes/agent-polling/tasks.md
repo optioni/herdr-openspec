@@ -562,21 +562,26 @@ green. It drives `ui::run_wired` — the composition root itself — not the com
 ## 4. `agents::poll_once`
 <!-- kind: behavior -->
 
-- [ ] 4.1 RED: Write the six `agents::tests::poll::` tests: the argument-vector equality on
+- [x] 4.1 RED: Write the six `agents::tests::poll::` tests: the argument-vector equality on
       `FakeCli::calls()`, a `Failed` error, a `NotStarted` error, an unparsable success, a
       partial payload that is still reachable, and a clean success. All six fail against 1.2's
       constant snapshot, which answers `reachable: true` with no agents whatever the CLI said.
 
-- [ ] 4.2 GREEN: Implement `poll_once`'s four-way mapping per `specs/agent-list/spec.md` → "A
+- [x] 4.2 GREEN: Implement `poll_once`'s four-way mapping per `specs/agent-list/spec.md` → "A
       failed run is an unreachable socket carrying the program's own reason", joining
       `Listed::problems` into `problem` when non-empty.
 
-- [ ] 4.3 REFACTOR: Fold the two error arms into one `CliError` formatter if 4.2 duplicated the
+- [x] 4.3 REFACTOR: Fold the two error arms into one `CliError` formatter if 4.2 duplicated the
       message shape; otherwise record that no refactor was needed.
+      **Done in 4.2 directly:** `herdr_error_problem` folds both `CliError::Failed` and
+      `CliError::NotStarted` into one formatter from the start, so no separate refactor step
+      was needed.
 
-- [ ] 4.4 VERIFY: `testcount --lib 'agents::tests::poll::' 6`, then `MIN=22 sh
+- [x] 4.4 VERIFY: `testcount --lib 'agents::tests::poll::' 6`, then `MIN=22 sh
       $CHECKS/AGENTSEAM.sh` — it must now be **green**, since `src/agents.rs` exists and names
       `HerdrCli`. Record its OK line. Commit.
+      **Recorded:** `AGENTSEAM OK: 22 files searched (>= 22); no spawn and no view type in
+      src/agents.rs; Herdr handle only in:src/cli.rs src/agents.rs src/ui/mod.rs`.
 
 ## 5. `cli::agent_cli_via` and `cli::HERDR_PROGRAM`
 <!-- kind: behavior -->
