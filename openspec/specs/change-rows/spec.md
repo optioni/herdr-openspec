@@ -24,25 +24,37 @@ rows** at a 60x20 frame.
 
 Rows SHALL be emitted in this order and no other:
 
-1. one `Problem` row per entry of `dashboard.refresh.problems`, in that vector's order;
-2. one `Problem` row per entry of `dashboard.changes.problems`, in that vector's order;
-3. the visible **active** changes, in `dashboard.changes.active`'s order, or — when that
+1. one `Problem` row per entry of `dashboard.launch.problems`, in that vector's order;
+2. one `Problem` row per entry of `dashboard.refresh.problems`, in that vector's order;
+3. one `Problem` row per entry of `dashboard.changes.problems`, in that vector's order;
+4. the visible **active** changes, in `dashboard.changes.active`'s order, or — when that
    list is empty — the `Message` row or rows the empty-state requirement below names for
    the state the dashboard is in (one row for `No changes yet` and for
    `No active changes`, two for `No changes match` and its query line, three for the
    no-repository block, which replaces the whole list);
-4. one `Separator` row, **only** when at least one visible archived change follows it;
-5. the visible **archived** changes, in `dashboard.changes.archived`'s order.
+5. one `Separator` row, **only** when at least one visible archived change follows it;
+6. the visible **archived** changes, in `dashboard.changes.archived`'s order.
+
+Launch problems lead, and that is `agent-launch`'s addition to an order `live-updates`
+otherwise owns. They are the only rows in the list produced by a key the reader has **just
+pressed**: a watcher that would not start is a standing condition and a `ChangeSet` problem is
+a fact about the tree, but a failed launch is an answer to a question, and the pane's whole job
+in the moment after `a` is to give it. `launch.problems` holds at most one entry, is replaced
+wholesale by the next outcome or refusal, and is cleared by a success, so leading the list costs
+at most one row and never accumulates.
 
 Refresh problems precede change-set problems because the two have different lifetimes:
 `refresh.problems` holds conditions that outlive a reload — today, a `notify` watcher that
 would not start — while `ChangeSet::problems` is re-derived from the tree on every cycle and
 `Dashboard::adopt` replaces it wholesale. A standing condition belongs above a transient one.
-Both use the identical `! `-prefixed grammar and the identical `RowKind::Problem`, so
-`ui::view` styles them the same way and neither is addressable by `selected`.
+All three use the identical `! `-prefixed grammar and the identical `RowKind::Problem`, so
+`ui::view` styles them the same way and none is addressable by `selected`.
 
 The `repo.is_none()` early return SHALL be unchanged: a dashboard with no repository starts
-no watcher, so it can carry no refresh problem, and the no-repository block stays exactly the
+no watcher, so it can carry no refresh problem, and — `agent-launch`'s addition to the same
+argument — `start_collaborators` gives it `launch::none()` and `launch::decide` returns
+`Decision::Nothing` for every key with no selected change, so it can carry no launch problem
+either. The no-repository block stays exactly the
 three rows the empty-state requirement names. It carries no badge either: with no repository
 `attribution()` badges nothing, which the early return makes moot.
 
@@ -75,9 +87,9 @@ character-for-character the row this grammar already specified, so the widths at
 progress cell and the date field drop are unchanged.
 
 A badge cell SHALL be drawn on a **change row only**. A `Problem`, `Separator`, or `Message`
-row — including the `No changes yet`, `No active changes`, `No changes match`, and
-no-repository rows — carries no badge cell and no reserved column, at any width and whatever
-`badges` holds.
+row — including a launch problem, the `No changes yet`, `No active changes`,
+`No changes match`, and no-repository rows — carries no badge cell and no reserved column, at
+any width and whatever `badges` holds.
 
 #### Scenario: Active rows render at both mandated widths
 
@@ -142,12 +154,17 @@ no-repository rows — carries no badge cell and no reserved column, at any widt
 
 #### Scenario: A watch problem leads the list, above a change-set problem
 
-- **WHEN** a `Dashboard` with one active change, one `refresh.problems` entry
+- **WHEN** a `Dashboard` with one active change, one `launch.problems` entry
+  `herdr pane split exited with code 1: no space to split`, one `refresh.problems` entry
   `filesystem watch unavailable for /r/openspec: No path was found`, and one
   `changes.problems` entry `openspec/changes unreadable: permission denied`, is rendered at
   120x20 and at 60x20
-- **THEN** the list interior's row 0 begins `! filesystem watch unavailable` at both widths,
-  its row 1 begins `! openspec/changes unreadable`, and its row 2 is the change row
+- **THEN** the list interior's row 0 begins `! herdr pane split exited` at both widths, its
+  row 1 begins `! filesystem watch unavailable`, its row 2 begins
+  `! openspec/changes unreadable`, and its row 3 is the change row
+- **AND** the same dashboard with `launch.problems` emptied renders rows 0, 1, and 2
+  byte-identically to the two-problem list this scenario specified before `agent-launch`
+  existed, so a pane that has launched nothing gains no row
 - **AND** both problem rows carry `RowKind::Problem` and neither carries `selected`
 - **AND** each row's text is exactly the interior width in characters — 38 and 58 — padded
   with trailing spaces or truncated with a trailing `…` by the same

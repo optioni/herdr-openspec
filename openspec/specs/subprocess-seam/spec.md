@@ -33,8 +33,11 @@ The contract is the same for both, and is deliberately thin:
 - The program's **stderr** SHALL NOT appear in an `Ok` value under any circumstance.
 - Both error variants SHALL carry the **argument vector** alongside the program name. One
   `RealOpenspecCli` serves four distinct invocations in `changes-from-cli` and one
-  `RealHerdrCli` four more in `agent-launch`; without the arguments every one of those
-  eight failures produces the same message and a caller cannot say which call failed.
+  `RealHerdrCli` **five** — `agent list` from `agent-polling`, and `pane split`,
+  `agent start`, `agent prompt`, and `agent focus` from `agent-launch`; without the arguments
+  every one of those **nine** failures produces the same message and a caller cannot say which
+  call failed. The prediction this bullet carried until `agent-launch` was "four more", which
+  counted the launch flow and forgot the poll already in the tree.
 - A non-zero exit SHALL be `Err(CliError::Failed)` carrying the program name, the argument
   vector, the exit code when the platform reports one, and the program's stderr decoded
   lossily and returned **verbatim**. Trimming stderr would be a decision, and this module
@@ -111,6 +114,17 @@ substrings in a message.
   called from a spawned thread whose join handle is awaited
 - **THEN** the call compiles and returns the same value it returns on the calling thread
 - **AND** the same holds for `Arc<dyn HerdrCli>`
+
+#### Scenario: A four-element argument vector distinguishes one failure from another
+
+- **WHEN** a real `HerdrCli` over a scratch program that exits `1` is run once with
+  `["agent", "list"]` and once with `["agent", "prompt", "a", "/opsx:apply x"]`
+- **THEN** both return `Err(CliError::Failed)` with the same exit code, and their `args`
+  vectors differ — the second holding four elements, its last containing a space
+- **AND** the space needs no quoting and is given none: the seam passes the vector to the
+  program directly with no shell, so the element arrives whole
+- **AND** a caller rendering the two failures can tell them apart, which is the whole reason
+  the variant carries the vector
 
 ### Requirement: The real implementations spawn and return stdout and do nothing else
 
@@ -473,21 +487,29 @@ builds no resolution chain for `herdr`, deliberately: failing to start it is alr
 documented "Herdr socket unreachable" degraded state, and `RealHerdrCli::default()` already
 names the bare program for exactly that reason.
 
-Parameterising the program is what makes the poller and the composition root testable without
-spawning the real Herdr binary. It follows `cli::npm_prefix_via`'s established shape precisely:
+Parameterising the program is what makes the poller, the launcher, and the composition root
+testable without spawning the real Herdr binary. It follows `cli::npm_prefix_via`'s established shape precisely:
 `npm_prefix_via(program)` exists so a scenario can drive a real spawn on a machine with no
 `npm`, without touching `PATH` — `std::env::set_var` is `unsafe` in edition 2024 and races
 parallel tests, which `AGENTS.md` forbids outright. The same argument applies unchanged here,
-and `agent-polling`'s outer-loop test depends on it.
+and both `agent-polling`'s and `agent-launch`'s outer-loop tests depend on it — the second more
+heavily, since a launch that spawned the installed `herdr` would split a real pane and start a
+real coding agent in the developer's own session every time the suite ran.
 
 `agent_cli_via` SHALL be the only function whose signature carries `Arc<dyn HerdrCli>` into the
-shell. `src/ui/mod.rs` calls it and stores the result in a value whose type it never spells, the
-way it already calls `cli::worker_cli_from_env`; `NOCLI-SHELL` — no file under `src/ui/` names
+shell. `src/ui/mod.rs` calls it **twice** — once for `agents::start` and once for
+`launch::start`, `agent-launch`'s addition — and stores each result in a value whose type it
+never spells, the
+way it already calls `cli::worker_cli_from_env`. Two handles rather than one shared handle:
+`RealHerdrCli` holds only a program path, the two consumers run on different threads with
+different cadences, and a shared `Arc` would suggest a shared resource that does not exist; `NOCLI-SHELL` — no file under `src/ui/` names
 `from_cli`, `OpenspecCli`, `HerdrCli`, `CliChanges`, or `npm_prefix` — therefore stays green
 unweakened, with no exemption and no widening of its pattern.
 
-The Herdr handle SHALL be reachable from exactly three files: `src/cli.rs`, which declares and
-constructs it; `src/agents.rs`, which uses it; and `src/ui/mod.rs`, which composes it. That is
+The Herdr handle SHALL be reachable from exactly **four** files: `src/cli.rs`, which declares and
+constructs it; `src/agents.rs`, which uses it to poll; `src/launch.rs`, which uses it to split a
+pane, start an agent, prompt it, and focus it — `agent-launch`'s addition, and the reason the
+number moves from three to four; and `src/ui/mod.rs`, which composes it. That is
 checked over `src/` **and** `tests/`, and on the names `HerdrCli`, `RealHerdrCli`, **and**
 `agent_cli_via` together rather than the trait alone — `agent_cli_via` returns
 `Arc<dyn HerdrCli>` and type inference hides the trait entirely, so a trait-only sweep reported
@@ -496,8 +518,19 @@ a clean tree against a `crate::cli::agent_cli_via(...)` call planted in `src/ui/
 trait's own name across all of `src/ui/` independently.
 
 The seam SHALL gain no parsing. `agent_cli_via` returns stdout verbatim through the existing
-`run_and_map`, and every JSON parse for `herdr agent list` lives in `src/agents.rs`, on the
-testable side. `serde_json` SHALL still not appear in `src/cli.rs`.
+`run_and_map`, every JSON parse for `herdr agent list` lives in `src/agents.rs`, and every JSON
+parse for `herdr pane split` lives in `src/launch.rs` — both on the testable side.
+`serde_json` SHALL still not appear in `src/cli.rs`.
+
+The seam SHALL gain no argument, no retry, no timeout, and no special case for the launch
+commands. `herdr agent start` blocks for up to thirty seconds waiting for interactive readiness,
+and that wait is absorbed by `launch`'s worker thread rather than by a timeout in `cli`: the
+seam's contract is "spawn, wait, return stdout", and a timeout here would be a policy decision
+made in the one module that is supposed to make none. A landed doc comment on `cli::CliError`
+predicts that `agent-launch` drives "four more" invocations through one `RealHerdrCli`; it is
+**five** — `pane split`, `agent start`, `agent prompt`, `agent focus`, and the `agent list`
+`agent-polling` already drives — and the comment is corrected by this change, which is also why
+the error type carries the argument vector.
 
 #### Scenario: The binding spawns the program it was given
 
@@ -509,6 +542,11 @@ testable side. `serde_json` SHALL still not appear in `src/cli.rs`.
   `["agent", "list"]` and `stderr` containing `boom`
 - **AND** the same call against a path that does not exist returns `Err(CliError::NotStarted)`
   naming that path, rather than panicking
+- **AND** the same three hold for `run(&["agent", "prompt", "a", "/opsx:apply x"])`, whose third
+  argument contains a space: the seam passes the vector to the program directly with no shell, so
+  the element arrives whole and needs no quoting — and the `CliError::Failed` it produces carries
+  that four-element `args` vector, which is how a reader tells a failed `agent prompt` from a
+  failed `agent list` at the same exit code
 
 #### Scenario: The default program name is written down once
 
@@ -523,7 +561,7 @@ testable side. `serde_json` SHALL still not appear in `src/cli.rs`.
   `HerdrCli`, `CliChanges`, and `npm_prefix`
 - **THEN** there is no match, after `src/ui/mod.rs` has been wired to a second real binary
 - **AND** the file count guard still requires **eleven** `*.rs` files under `src/ui/`: this
-  change adds no file there, because the poller lives in `src/agents.rs`, outside the swept
-  directory entirely
+  change adds no file there either, because the launcher lives in `src/launch.rs`, outside the
+  swept directory entirely, exactly as the poller lives in `src/agents.rs`
 - **AND** the positive control still matches — `src/changes.rs` names `OpenspecCli` — so the
   sweep is proven capable of matching
