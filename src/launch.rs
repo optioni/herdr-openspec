@@ -394,18 +394,21 @@ pub fn start(
 /// three-call sequence arrives in group 4. Returns when the request channel disconnects, on
 /// exactly `refresh::worker_body`'s and `agents::worker_body`'s lifecycle.
 fn worker_body(
-    _cli: std::sync::Arc<dyn crate::cli::HerdrCli>,
-    _repo: std::path::PathBuf,
-    _kind: String,
-    _state_dir: Option<std::path::PathBuf>,
+    cli: std::sync::Arc<dyn crate::cli::HerdrCli>,
+    repo: std::path::PathBuf,
+    kind: String,
+    state_dir: Option<std::path::PathBuf>,
     request_rx: std::sync::mpsc::Receiver<Request>,
-    _result_tx: std::sync::mpsc::Sender<Outcome>,
+    result_tx: std::sync::mpsc::Sender<Outcome>,
 ) {
     loop {
-        if request_rx.recv().is_err() {
+        let Ok(request) = request_rx.recv() else {
             return; // the launcher was dropped
+        };
+        let outcome = run_request(cli.as_ref(), &repo, &kind, state_dir.as_deref(), request);
+        if result_tx.send(outcome).is_err() {
+            return; // nobody reads the result any more
         }
-        // group 1: the request is discarded here; group 4 implements run_request.
     }
 }
 
@@ -702,7 +705,7 @@ mod tests {
 
     mod run_request {
         use crate::cli::{CliError, FakeCli};
-        use crate::launch::{Intent, Request, run_request};
+        use crate::launch::{Intent, Outcome, Request, run_request};
         use crate::testutil::{ScratchDir, snapshot};
         use std::path::Path;
 
@@ -801,10 +804,12 @@ mod tests {
                 ]
             );
             assert_eq!(
-                outcome.named,
-                Some(("c-2fa-support".to_string(), "2fa-support".to_string()))
+                outcome,
+                Outcome {
+                    named: Some(("c-2fa-support".to_string(), "2fa-support".to_string())),
+                    problem: None,
+                }
             );
-            assert_eq!(outcome.problem, None);
 
             let mapping = crate::state::read(Some(state.path()));
             assert_eq!(
@@ -842,8 +847,9 @@ mod tests {
             );
 
             assert_eq!(fake.calls().len(), 1);
-            assert_eq!(outcome.named, None);
-            let problem = outcome.problem.expect("a reason must be present");
+            let Outcome { named, problem } = outcome;
+            assert_eq!(named, None);
+            let problem = problem.expect("a reason must be present");
             assert!(problem.contains("result"), "{problem}");
         }
 
@@ -881,10 +887,11 @@ mod tests {
             );
 
             assert_eq!(fake.calls().len(), 1);
-            let problem = outcome.problem.expect("a reason must be present");
+            let Outcome { named, problem } = outcome;
+            let problem = problem.expect("a reason must be present");
             assert!(problem.contains("pane_split_failed"), "{problem}");
             assert!(problem.contains("no space to split"), "{problem}");
-            assert_eq!(outcome.named, None);
+            assert_eq!(named, None);
             assert_eq!(before, snapshot(state.path()));
         }
 
@@ -921,11 +928,12 @@ mod tests {
                         && args.get(1).map(String::as_str) == Some("close")),
                 "the plugin must never issue pane close"
             );
-            let problem = outcome.problem.expect("a reason must be present");
+            let Outcome { named, problem } = outcome;
+            let problem = problem.expect("a reason must be present");
             assert!(problem.contains("agent_pane_not_found"), "{problem}");
             assert!(problem.contains("c-2fa-support"), "{problem}");
             assert!(problem.contains("wD:pJ"), "{problem}");
-            assert_eq!(outcome.named, None);
+            assert_eq!(named, None);
         }
 
         #[test]
@@ -965,12 +973,13 @@ mod tests {
                 mapping.names.get("c-2fa-support"),
                 Some(&"2fa-support".to_string())
             );
+            let Outcome { named, problem } = outcome;
             assert_eq!(
-                outcome.named,
+                named,
                 Some(("c-2fa-support".to_string(), "2fa-support".to_string())),
                 "the agent exists even though the prompt did not land"
             );
-            let problem = outcome.problem.expect("a reason must be present");
+            let problem = problem.expect("a reason must be present");
             assert!(problem.contains("agent_blocked"), "{problem}");
         }
 
@@ -1001,13 +1010,12 @@ mod tests {
                 3,
                 "the prompt must still be sent despite the recording failure"
             );
+            let Outcome { named, problem } = outcome;
             assert_eq!(
-                outcome.named,
+                named,
                 Some(("c-2fa-support".to_string(), "2fa-support".to_string()))
             );
-            let problem = outcome
-                .problem
-                .expect("a reason must be present, naming the recording failure");
+            let problem = problem.expect("a reason must be present, naming the recording failure");
             assert!(
                 problem.contains(&blocked.display().to_string()),
                 "{problem}"
@@ -1059,7 +1067,13 @@ mod tests {
             );
             let mapping = crate::state::read(Some(state.path()));
             assert_eq!(mapping.names.get(&derived), Some(&change.to_string()));
-            assert_eq!(outcome.named, Some((derived, change.to_string())));
+            assert_eq!(
+                outcome,
+                Outcome {
+                    named: Some((derived, change.to_string())),
+                    problem: None,
+                }
+            );
         }
 
         #[test]
@@ -1089,7 +1103,13 @@ mod tests {
 
             let mapping = crate::state::read(Some(state.path()));
             assert_eq!(mapping.names.get(&derived), Some(&change.to_string()));
-            assert_eq!(outcome.named, Some((derived, change.to_string())));
+            assert_eq!(
+                outcome,
+                Outcome {
+                    named: Some((derived, change.to_string())),
+                    problem: None,
+                }
+            );
         }
 
         #[test]
@@ -1115,8 +1135,11 @@ mod tests {
 
             assert_eq!(before, snapshot(state.path()));
             assert_eq!(
-                outcome.named,
-                Some(("add-auth".to_string(), "add-auth".to_string()))
+                outcome,
+                Outcome {
+                    named: Some(("add-auth".to_string(), "add-auth".to_string())),
+                    problem: None,
+                }
             );
         }
 
@@ -1152,14 +1175,15 @@ mod tests {
                     .any(|(_, args)| args.get(1).map(String::as_str) == Some("close")),
                 "no pane close entry"
             );
-            let problem = outcome.problem.expect("a reason must be present");
+            let Outcome { named: _, problem } = outcome;
+            let problem = problem.expect("a reason must be present");
             assert!(problem.contains("agent_name_taken"), "{problem}");
         }
     }
 
     mod focus {
         use crate::cli::FakeCli;
-        use crate::launch::{Request, run_request};
+        use crate::launch::{Outcome, Request, run_request};
         use std::path::Path;
 
         #[test]
@@ -1191,8 +1215,13 @@ mod tests {
                     ]
                 )]
             );
-            assert_eq!(outcome.named, None);
-            assert_eq!(outcome.problem, None);
+            assert_eq!(
+                outcome,
+                Outcome {
+                    named: None,
+                    problem: None,
+                }
+            );
         }
 
         #[test]
@@ -1219,9 +1248,279 @@ mod tests {
                 },
             );
 
-            assert_eq!(outcome.named, None);
-            let problem = outcome.problem.expect("a reason must be present");
+            let Outcome { named, problem } = outcome;
+            assert_eq!(named, None);
+            let problem = problem.expect("a reason must be present");
             assert!(problem.contains("agent_not_found"), "{problem}");
+        }
+    }
+
+    mod seam {
+        use crate::cli::FakeCli;
+        use crate::launch::{Intent, Launcher, Outcome, Request};
+        use crate::testutil::{ScratchDir, snapshot};
+        use std::path::PathBuf;
+        use std::time::{Duration, Instant};
+
+        /// A launcher seam for tests, on `agents::poller_for_test`'s and
+        /// `refresh::worker_for_test`'s exact terms: the second element is the worker's result
+        /// `Receiver`, handed to the test directly, so this seam's own `drain` always answers
+        /// `None`; the third receives from a channel whose `Sender` the worker thread owns and
+        /// drops only when its body returns.
+        fn launcher_for_test(
+            cli: std::sync::Arc<dyn crate::cli::HerdrCli>,
+        ) -> (
+            Box<dyn Launcher>,
+            std::sync::mpsc::Receiver<Outcome>,
+            std::sync::mpsc::Receiver<()>,
+        ) {
+            let (request_tx, request_rx) = std::sync::mpsc::channel::<Request>();
+            let (result_tx, result_rx) = std::sync::mpsc::channel::<Outcome>();
+            let (exit_tx, exit_rx) = std::sync::mpsc::channel::<()>();
+            std::thread::spawn(move || {
+                let _exit_tx = exit_tx;
+                super::super::worker_body(
+                    cli,
+                    PathBuf::from("/repo"),
+                    "codex".to_string(),
+                    None,
+                    request_rx,
+                    result_tx,
+                );
+            });
+            (Box::new(TestLauncher { request_tx }), result_rx, exit_rx)
+        }
+
+        struct TestLauncher {
+            request_tx: std::sync::mpsc::Sender<Request>,
+        }
+
+        impl Launcher for TestLauncher {
+            fn request(&mut self, request: Request) {
+                let _ = self.request_tx.send(request);
+            }
+
+            fn drain(&mut self) -> Option<Outcome> {
+                None
+            }
+        }
+
+        #[test]
+        fn the_inert_launcher_answers_nothing() {
+            let mut launcher = super::super::none();
+            launcher.request(Request::Launch {
+                change: "x".to_string(),
+                agent: "x".to_string(),
+                intent: Intent::Apply,
+            });
+            for _ in 0..10 {
+                assert_eq!(launcher.drain(), None);
+            }
+        }
+
+        /// A `HerdrCli` whose first call blocks until the test releases it, on a channel it
+        /// owns — the only synchronisation this change's tests own, and the reason none of
+        /// them sleeps. Every call after the first proceeds immediately, since `.take()`
+        /// yields `None` from then on.
+        struct GatedCli {
+            release_rx: std::sync::Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+        }
+
+        impl crate::cli::HerdrCli for GatedCli {
+            fn run(&self, args: &[&str]) -> Result<String, crate::cli::CliError> {
+                if let Some(rx) = self.release_rx.lock().expect("gate mutex poisoned").take() {
+                    let _ = rx.recv();
+                }
+                match (args.first().copied(), args.get(1).copied()) {
+                    (Some("pane"), Some("split")) => Ok(r#"{"id":"cli:pane:split","result":{"pane":{"pane_id":"wD:pJ","tab_id":"t","workspace_id":"w"}},"type":"pane_info"}"#.to_string()),
+                    _ => Ok(String::new()),
+                }
+            }
+        }
+
+        #[test]
+        fn the_real_launcher_answers_on_a_later_drain() {
+            let (release_tx, release_rx) = std::sync::mpsc::channel();
+            let cli: std::sync::Arc<dyn crate::cli::HerdrCli> = std::sync::Arc::new(GatedCli {
+                release_rx: std::sync::Mutex::new(Some(release_rx)),
+            });
+            let mut launcher =
+                super::super::start(cli, PathBuf::from("/repo"), "codex".to_string(), None);
+            launcher.request(Request::Launch {
+                change: "add-auth".to_string(),
+                agent: "add-auth".to_string(),
+                intent: Intent::Apply,
+            });
+
+            // The drain immediately after the request must answer None — the worker is still
+            // blocked on the gate, so the work is on the worker thread, not the caller's.
+            assert_eq!(launcher.drain(), None);
+
+            release_tx.send(()).expect("release the gate");
+
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let mut outcome = None;
+            while Instant::now() < deadline {
+                if let Some(o) = launcher.drain() {
+                    outcome = Some(o);
+                    break;
+                }
+                std::thread::yield_now();
+            }
+            let outcome = outcome.expect("a later drain must answer within 10s");
+            assert_eq!(outcome.problem, None);
+        }
+
+        #[test]
+        fn dropping_the_launcher_stops_its_worker() {
+            let cli: std::sync::Arc<dyn crate::cli::HerdrCli> = std::sync::Arc::new(FakeCli::new());
+            let (launcher, _result_rx, exit_rx) = launcher_for_test(cli);
+            drop(launcher);
+
+            match exit_rx.recv_timeout(Duration::from_secs(10)) {
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {}
+                other => panic!(
+                    "the worker did not return within 10s after the launcher was dropped: {other:?}"
+                ),
+            }
+        }
+
+        #[test]
+        fn the_launcher_writes_only_the_state_directory() {
+            let fake = FakeCli::new();
+            fake.register_herdr(
+                &["pane", "split", "--cwd", "/repo", "--direction", "right", "--no-focus"],
+                Ok(r#"{"id":"cli:pane:split","result":{"pane":{"pane_id":"wD:pJ","tab_id":"t","workspace_id":"w"}},"type":"pane_info"}"#.to_string()),
+            );
+            fake.register_herdr(
+                &[
+                    "agent",
+                    "start",
+                    "c-2fa-support",
+                    "--kind",
+                    "codex",
+                    "--pane",
+                    "wD:pJ",
+                ],
+                Ok(
+                    r#"{"id":"cli:agent:start","result":{"agent":{},"type":"agent_started"}}"#
+                        .to_string(),
+                ),
+            );
+            fake.register_herdr(
+                &[
+                    "agent",
+                    "prompt",
+                    "c-2fa-support",
+                    "/opsx:apply 2fa-support",
+                ],
+                Ok(String::new()),
+            );
+            let cli: std::sync::Arc<dyn crate::cli::HerdrCli> = std::sync::Arc::new(fake);
+
+            // Stands in for the repository: the launcher never touches it on disk, only
+            // passes its path as --cwd.
+            let repo_scratch = ScratchDir::new();
+            let state = ScratchDir::new();
+            let before_repo = snapshot(repo_scratch.path());
+            let before_state = snapshot(state.path());
+
+            let mut launcher = super::super::start(
+                cli,
+                PathBuf::from("/repo"),
+                "codex".to_string(),
+                Some(state.path().to_path_buf()),
+            );
+            launcher.request(Request::Launch {
+                change: "2fa-support".to_string(),
+                agent: "c-2fa-support".to_string(),
+                intent: Intent::Apply,
+            });
+
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let mut outcome = None;
+            while Instant::now() < deadline {
+                if let Some(o) = launcher.drain() {
+                    outcome = Some(o);
+                    break;
+                }
+                std::thread::yield_now();
+            }
+            let outcome = outcome.expect("the launch must complete within 10s");
+            assert_eq!(outcome.problem, None);
+
+            let after_repo = snapshot(repo_scratch.path());
+            assert_eq!(
+                before_repo, after_repo,
+                "the repository must never be written to"
+            );
+
+            let after_state = snapshot(state.path());
+            assert_ne!(before_state, after_state);
+            let mut names: Vec<_> = std::fs::read_dir(state.path())
+                .expect("read state dir")
+                .map(|e| e.expect("entry").file_name())
+                .collect();
+            names.sort();
+            assert_eq!(names, vec![std::ffi::OsString::from("agent-names.toml")]);
+        }
+
+        /// The compile-time companion for this module's own no-`Default` type: exhaustive
+        /// destructuring, no `..` rest, so a field added to `Outcome` fails to compile here
+        /// rather than defaulting silently.
+        #[test]
+        fn outcome_destructures_exhaustively_with_no_default() {
+            let outcome = Outcome {
+                named: None,
+                problem: None,
+            };
+            let Outcome { named, problem } = outcome;
+            assert_eq!(named, None);
+            assert_eq!(problem, None);
+        }
+
+        /// An exhaustive match with no wildcard arm: a new `Intent` variant fails to compile
+        /// here.
+        #[test]
+        fn intent_match_is_exhaustive() {
+            fn assert_known(intent: Intent) {
+                match intent {
+                    Intent::Apply | Intent::Continue | Intent::Archive | Intent::Focus => {}
+                }
+            }
+            for intent in [
+                Intent::Apply,
+                Intent::Continue,
+                Intent::Archive,
+                Intent::Focus,
+            ] {
+                assert_known(intent);
+            }
+        }
+
+        /// An exhaustive match with no wildcard arm and no `..` inside either variant's
+        /// pattern: a new `Request` variant, or a field added to either one, fails to compile
+        /// here.
+        #[test]
+        fn request_match_is_exhaustive() {
+            fn assert_known(request: &Request) {
+                match request {
+                    Request::Launch {
+                        change: _,
+                        agent: _,
+                        intent: _,
+                    } => {}
+                    Request::Focus { pane_id: _ } => {}
+                }
+            }
+            assert_known(&Request::Launch {
+                change: "x".to_string(),
+                agent: "x".to_string(),
+                intent: Intent::Apply,
+            });
+            assert_known(&Request::Focus {
+                pane_id: "x".to_string(),
+            });
         }
     }
 }

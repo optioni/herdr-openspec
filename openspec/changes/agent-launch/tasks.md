@@ -719,7 +719,7 @@ set; see design.md → Test Strategy.
 ## 5. The launcher seam and the crate's third worker thread
 <!-- kind: behavior -->
 
-- [ ] 5.1 RED: Write `launch::tests::seam::`'s four — `the_inert_launcher_answers_nothing`,
+- [x] 5.1 RED: Write `launch::tests::seam::`'s four — `the_inert_launcher_answers_nothing`,
       `the_real_launcher_answers_on_a_later_drain`, `dropping_the_launcher_stops_its_worker`,
       and `the_launcher_writes_only_the_state_directory` — plus the three shape tests
       (`Outcome`'s exhaustive destructuring and the exhaustive matches over `Intent` and
@@ -731,14 +731,14 @@ set; see design.md → Test Strategy.
       `yield_now` deadline poll, per design.md → Test Strategy, and a `thread::sleep` here would
       be an elapsed-time assertion about a worker thread.
 
-- [ ] 5.2 GREEN: Give `RealLauncher` its body — `request` sends, `drain` `try_recv`s — and
+- [x] 5.2 GREEN: Give `RealLauncher` its body — `request` sends, `drain` `try_recv`s — and
       `worker_body` its loop, written **below** the single `thread::spawn`.
 
-- [ ] 5.3 CHECK: Contract gate — re-inspect `src/launch.rs`'s published shape against
+- [x] 5.3 CHECK: Contract gate — re-inspect `src/launch.rs`'s published shape against
       design.md → Contracts, and confirm `Launcher` carries no `pending_in`, so
       `watch::soonest` still takes two arguments and no landed loop test's timeout changes.
 
-- [ ] 5.4 VERIFY: No refactor was needed — the seam is `refresh::start`'s shape, copied.
+- [x] 5.4 VERIFY: No refactor was needed — the seam is `refresh::start`'s shape, copied.
       `testcount --lib 'launch::tests::seam::' 4` and
       `testcount --lib 'launch::tests::' 36`; `sh $CHECKS/NOBLOCK.sh` with leg 3, Guard D, and
       Guard E extended to `src/launch.rs`; `SLEEP_MIN=5 MIN=26 sh $CHECKS/NOSLEEP.sh`;
