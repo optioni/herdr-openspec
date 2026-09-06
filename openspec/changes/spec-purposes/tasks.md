@@ -479,52 +479,107 @@ Every plant below is made in a `cp -R` copy of the tree, or in a file restored f
 set-aside copy; the working tree is never left modified. Record each exit status and the
 relevant output line beside the task.
 
-- [ ] 5.0 CHECK: The two pre-existing gates still stop the run. Misformat a set-aside copy of
+- [x] 5.0 CHECK: The two pre-existing gates still stop the run. Misformat a set-aside copy of
   `src/config.rs` and run `make check` → non-zero at `cargo fmt --all -- --check`, with no
   lint, gates, test, or coverage output; restore → exit 0. Then add `let _ = x.clone();` on a
   `Copy` value and run `make lint` → non-zero, reported by clippy rather than `cargo build`;
   restore → exit 0. These two scenarios are carried forward unchanged from `ci-pipeline` and
   are re-run because `check`'s composition moved underneath them.
 
-- [ ] 5.1 CHECK: `deps.sh` catches an unargued dependency. Add `once_cell = "1"` **inside the
+  **Confirmed.** Misformatted `src/config.rs` (blank lines inside a fn body) → `make check`
+  exit 2 at `cargo fmt --all -- --check`, only the `Diff in ...` output and
+  `make: *** [fmt-check] Error 1`, no lint/gates/test/coverage ran; restore → exit 0.
+  `let _ = x.clone();` on the `&dyn Fn` reference parameter in `config_dir` → `make lint`
+  exit 2, reported by `cargo clippy` (`noop_method_call`), not `cargo build`; restore →
+  exit 0.
+
+- [x] 5.1 CHECK: `deps.sh` catches an unargued dependency. Add `once_cell = "1"` **inside the
   `[dependencies]` table** of a copied `Cargo.toml` — appended at the end of the file it lands
   in `[dev-dependencies]`, which leg 2a correctly ignores, and the plant passes — run the script there → non-zero, leg 2a naming `once_cell` in the declared set.
   Remove it → exit 0.
 
-- [ ] 5.2 CHECK: `deps.sh` cannot pass vacuously. Delete the whole `[dependencies]` table in a
+  **Confirmed**, in a `cp -R` copy: `once_cell = "1"` inserted directly under `notify`
+  inside `[dependencies]` → `sh scripts/gates/deps.sh` fails at leg 2a,
+  `AssertionError: normal deps are [..., 'once_cell', ...], expected [...]`,
+  `DEPS FAIL: leg 2a`. Removed → `DEPS OK` (all legs through leg 4) in the copy.
+
+- [x] 5.2 CHECK: `deps.sh` cannot pass vacuously. Delete the whole `[dependencies]` table in a
   copy → the script must **fail**, not report success over an empty set. If it passes, add the
   guard that makes it fail and re-run both halves.
 
-- [ ] 5.3 CHECK: `build-graph.sh`'s platform assertion is direction-aware. Swap the macOS-only
+  **Confirmed, no guard needed.** In a copy with `[dependencies]` emptied, leg 2a's fixed
+  six-crate want-list already fails against the empty declared set:
+  `AssertionError: normal deps are [], expected [...]`, `DEPS FAIL: leg 2a`. The gate
+  cannot pass vacuously by construction — it compares against a fixed non-empty want-list,
+  never merely counts.
+
+- [x] 5.3 CHECK: `build-graph.sh`'s platform assertion is direction-aware. Swap the macOS-only
   and Linux-only expected lists in a copied script → non-zero, and the message names which
   side each package appeared on rather than one merged set. Restore → exit 0.
 
-- [ ] 5.4 CHECK: `build-graph.sh` catches a graph-moving feature change. Set `notify`'s
+  **Confirmed.** Swapped `expected_macos_only`/`expected_linux_only` in a set-aside copy of
+  `scripts/gates/build-graph.sh` → `GRAPH-SNAP FAIL: macOS-only packages are [fsevent-sys ],
+  expected [inotify inotify-sys linux-raw-sys ]` — names the actual side and the swapped
+  expectation distinctly, not a merged set. Restore → `GRAPH-SNAP OK`, exit 0.
+
+- [x] 5.4 CHECK: `build-graph.sh` catches a graph-moving feature change. Set `notify`'s
   features to `["macos_kqueue"]` in a copied tree and run without regenerating → non-zero at
   the snapshot diff. Confirm `tests/fixtures/build-graph.txt` in the copy is unmodified by the
   failing run.
 
-- [ ] 5.5 CHECK: The CI wiring test catches an omitted step. Delete the `Gates` step from
+  **Confirmed**, in a `cp -R` copy: `notify`'s features changed to `["macos_kqueue"]` →
+  `sh scripts/gates/build-graph.sh` exits 1 at `GRAPH-SNAP FAIL: graph differs from the
+  snapshot`, printing the diff (`fsevent-sys` removed, `kqueue`/`kqueue-sys` added). The
+  copy's `tests/fixtures/build-graph.txt` md5 was identical before and after the failing
+  run — unmodified.
+
+- [x] 5.5 CHECK: The CI wiring test catches an omitted step. Delete the `Gates` step from
   `.github/workflows/ci.yml`, run `cargo test --test ci_workflow` → red on
   `every_gate_the_makefile_composes_runs_in_ci`. Restore from the set-aside copy → green. This
   is the `live-refresh` wiring lesson's analogue: it proves the Makefile→CI link is enforced
   rather than merely written.
 
-- [ ] 5.6 CHECK: The Purpose test catches a fresh placeholder. Replace one capability's Purpose
+  **Confirmed.** Deleted the `Gates` step from a set-aside copy of `.github/workflows/ci.yml`
+  → `cargo test --test ci_workflow every_gate_the_makefile_composes_runs_in_ci` red:
+  `check job must run \`make gates\` — check: composes gates, parsed from the Makefile`.
+  Restored from the set-aside copy → green again.
+
+- [x] 5.6 CHECK: The Purpose test catches a fresh placeholder. Replace one capability's Purpose
   body with `TBD - created by archiving change some-change`, run
   `cargo test --test spec_purposes` → red, naming that capability. Restore → green.
 
-- [ ] 5.7 CHECK: `make check` stops at the gates rather than after coverage. In a copied tree,
+  **Confirmed.** Replaced `agent-list`'s Purpose body with
+  `TBD - created by archiving change some-change` → `cargo test --test spec_purposes
+  every_capability_has_a_written_purpose` red, naming `agent-list` and stating the Purpose
+  must be written in the main spec. Restored → green.
+
+- [x] 5.7 CHECK: `make check` stops at the gates rather than after coverage. In a copied tree,
   add a seventh dependency and run `make check` → non-zero at `scripts/gates/deps.sh`, with no
   `cargo test` and no `cargo llvm-cov` output in the run.
 
-- [ ] 5.8 CHECK: The two `OPENSPEC-UNTOUCHED-SP` legs. Plant a stray file under
+  **Confirmed**, in a full `cp -R` copy (own `target/`, so `cargo build` for `lint`
+  genuinely ran there): added `once_cell = "1"` to the copy's `Cargo.toml` → `make check`
+  ran `fmt-check` and `lint` to completion (both green), then failed at `gates`
+  (`scripts/gates/deps.sh` leg 2a naming `once_cell`), `make: *** [gates] Error 1` — no
+  `cargo test` and no `cargo llvm-cov` output anywhere in the run.
+
+- [x] 5.8 CHECK: The two `OPENSPEC-UNTOUCHED-SP` legs. Plant a stray file under
   `openspec/specs/agent-list/` → leg 1 fires naming it; remove it. Append a
   `#### Scenario:` block to one of the 26 → leg 2 fires printing the planted lines; restore.
   Confirm the gate goes quiet again both times.
 
-- [ ] 5.9 VERIFY: `git status --porcelain` is empty. Every plant above is recorded with its
+  **Confirmed**, re-run against the current tree (`BASE=1f9f29a`): stray
+  `openspec/specs/agent-list/STRAY.txt` → leg 1 fires, names it; removed → quiet
+  (`OPENSPEC-UNTOUCHED OK`). Appended `#### Scenario: planted` to
+  `openspec/specs/pane-open/spec.md` → leg 2 fires, prints the planted lines; restored →
+  quiet again.
+
+- [x] 5.9 VERIFY: `git status --porcelain` is empty. Every plant above is recorded with its
   exit status and output line. Nothing in this group is committed except this file's updates.
+
+  **Verified.** `git status --porcelain` empty after every plant/restore pair above. All
+  nine sub-tasks recorded with exit status and the relevant output line. Committing only
+  this file's updates for this group, per its own instruction.
 
 ## 6. Documentation
 <!-- kind: operational -->
