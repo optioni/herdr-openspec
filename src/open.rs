@@ -322,6 +322,26 @@ pub fn run(cli: &dyn crate::cli::HerdrCli, ctx: &Context, placement: Placement) 
     }
 }
 
+/// The production binding: resolve the invocation context from the real environment,
+/// construct the real `HerdrCli` over [`crate::cli::HERDR_PROGRAM`], and run — following
+/// `cli::worker_cli_from_env`'s shape, so `src/main.rs` never names `RealHerdrCli` or
+/// `agent_cli_via`. When the context cannot be resolved (no workspace id at all — the one
+/// fatal absence), no Herdr call is made.
+pub fn run_from_env(placement: Placement) -> Report {
+    let env = crate::config::env_lookup();
+    let ctx = match context(&env) {
+        Ok(ctx) => ctx,
+        Err(reason) => {
+            return Report {
+                warnings: Vec::new(),
+                outcome: Err(reason),
+            };
+        }
+    };
+    let cli = crate::cli::agent_cli_via(Path::new(crate::cli::HERDR_PROGRAM));
+    run(cli.as_ref(), &ctx, placement)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

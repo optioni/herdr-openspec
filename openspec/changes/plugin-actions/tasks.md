@@ -261,27 +261,30 @@
 ## 7. The composition root
 <!-- kind: behavior -->
 
-- [ ] 7.1 RED: Confirm group 1's acceptance tests are still red, and red on the dispatch
+- [x] 7.1 RED: Confirm group 1's acceptance tests are still red, and red on the dispatch
   rather than on `parse` — after group 2 the subcommands are recognised but `main`'s stub
   arms still take the rejection path, so both runs exit 2 where the tests demand 1 and 0.
 
-- [ ] 7.2 GREEN: Add `open::run_from_env(placement) -> Report`, a one-line production
+- [x] 7.2 GREEN: Add `open::run_from_env(placement) -> Report`, a one-line production
   binding constructing the real handle through
   `cli::agent_cli_via(Path::new(cli::HERDR_PROGRAM))` and `config::env_lookup()`, following
   `cli::worker_cli_from_env` so `src/main.rs` never names `RealHerdrCli` or
   `agent_cli_via`.
 
-- [ ] 7.3 GREEN: Replace group 2's stub arms: each calls `open::placement_for`, then
+- [x] 7.3 GREEN: Replace group 2's stub arms: each calls `open::placement_for`, then
   `open::run_from_env`, then writes `open::report_output`'s lines to stderr and exits with
   its status. No branch of `main`'s own.
 
-- [ ] 7.4 CHECK: Planted defect — re-point `main`'s `Invocation::OpenTab` arm at
-  `Placement::Split` (a change that still compiles, unlike deleting an arm from an
-  exhaustive match), run `cargo test --all-features --test cli`, confirm
-  `main_routes_each_subcommand_to_its_own_placement` goes **red** on the recorded argv,
-  then restore and confirm green. Record both exit statuses.
+- [x] 7.4 CHECK: Planted defect — `main` has no per-variant arm to re-point (its single
+  `Open | OpenTab` arm delegates entirely to `open::placement_for`, which is where the
+  mapping actually lives per Decision 10), so the plant targets that function instead:
+  `crate::Invocation::OpenTab => Some(Placement::Tab)` re-pointed to
+  `Some(Placement::Split)`. `cargo test --all-features --test cli
+  main_routes_each_subcommand_to_its_own_placement` went **red**, panicking on `open call
+  1` carrying `--placement split` where the test expected `--placement tab --workspace`.
+  Restored and confirmed green (`git status` clean of the plant).
 
-- [ ] 7.5 Run the group tests — `cargo test --all-features --test cli` and
+- [x] 7.5 Run the group tests — `cargo test --all-features --test cli` and
   `--lib open::` — no regressions.
 
 ## 8. The binary-integration tier

@@ -333,22 +333,31 @@ fn main_routes_each_subcommand_to_its_own_placement() {
         String::from_utf8_lossy(&open_tab_out.stderr)
     );
 
+    // Each subcommand issues `pane list` before its own `plugin pane open` call (design.md
+    // -> "An already-open dashboard is focused, never duplicated"), so four lines total —
+    // filter down to the two `plugin pane open` calls to read the placement each produced.
     let argv_log =
         std::fs::read_to_string(scratch.path().join("argv.log")).expect("read argv.log");
     let lines: Vec<&str> = argv_log.lines().collect();
-    assert_eq!(lines.len(), 2, "argv.log:\n{argv_log}");
+    assert_eq!(lines.len(), 4, "argv.log:\n{argv_log}");
+    let opens: Vec<&str> = lines
+        .iter()
+        .copied()
+        .filter(|l| l.contains("plugin pane open"))
+        .collect();
+    assert_eq!(opens.len(), 2, "argv.log:\n{argv_log}");
     assert!(
-        lines[0].contains("--placement split --direction right"),
-        "line 0: {}",
-        lines[0]
+        opens[0].contains("--placement split --direction right"),
+        "open call 0: {}",
+        opens[0]
     );
     assert!(
-        lines[1].contains("--placement tab --workspace"),
-        "line 1: {}",
-        lines[1]
+        opens[1].contains("--placement tab --workspace"),
+        "open call 1: {}",
+        opens[1]
     );
-    assert!(lines[0].contains("--cwd /repo"), "line 0: {}", lines[0]);
-    assert!(lines[1].contains("--cwd /repo"), "line 1: {}", lines[1]);
+    assert!(opens[0].contains("--cwd /repo"), "open call 0: {}", opens[0]);
+    assert!(opens[1].contains("--cwd /repo"), "open call 1: {}", opens[1]);
 
     let tab_flag_out = scrubbed()
         .arg("open")
