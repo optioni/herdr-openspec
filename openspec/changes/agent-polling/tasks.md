@@ -623,7 +623,7 @@ green. It drives `ui::run_wired` — the composition root itself — not the com
 ## 7. The poller: schedule, worker, and the seam
 <!-- kind: behavior -->
 
-- [ ] 7.1 RED: Write the three `agents::tests::seam::` tests (the inert poller, `POLL_INTERVAL`,
+- [x] 7.1 RED: Write the three `agents::tests::seam::` tests (the inert poller, `POLL_INTERVAL`,
       and the no-`Default` companions) and the seven `agents::tests::worker::` tests (first
       drain polls immediately, a poll in flight suppresses the next, a started poller yields the
       scratch program's agents, a failing scratch program is unreachable, a failed poll is
@@ -631,6 +631,30 @@ green. It drives `ui::run_wired` — the composition root itself — not the com
       `poller_for_test` **inside** `mod tests`, shaped exactly as `refresh::worker_for_test` is
       — its poller's `drain` yields nothing and the answers arrive on a raw receiver — so Guard D
       still sees exactly one line-anchored `#[cfg(test)]`.
+      **Task-file note (found during implementation):** `a_dead_worker_is_reported_once` uses
+      `agents::start` with an unregistered `FakeCli` rather than `poller_for_test` with a
+      manually dropped `Sender` — `poller_for_test`'s own poller structurally cannot detect a
+      disconnected result channel (its `drain` never touches `result_rx`, which lives with the
+      test instead; a single-consumer channel cannot serve both), so the scenario that needs
+      `drain`'s own return value on disconnection is a fourth case added to the three
+      planning-review already moved to `agents::start`. An unregistered `FakeCli` call panics
+      inside the worker's own `poll_once`, unwinding the worker thread and dropping both channel
+      ends — a real disconnection, not a Sender dropped by hand from outside the seam.
+      **Also found:** `worker_body` needs a production caller in the same commit as its own
+      declaration, or `cargo clippy --all-targets` reports it `dead_code` on the plain (non-test)
+      lib target, which `#[cfg(test)]`-only code cannot satisfy. `RealAgentPoll::drain` and
+      `agents::start` were therefore wired to real channels and `worker_body` in this task,
+      deliberately without the in-flight/schedule logic yet (every call both `try_recv`s and
+      fires a fresh request), so the group's run-count- and reported-once-sensitive tests are red
+      on that missing throttle rather than on dead code or a compile error. Confirmed:
+      `agents::tests::seam::` all pass (no dependency on the schedule);
+      `agents::tests::worker::a_dead_worker_is_reported_once`,
+      `a_failed_poll_is_recovered_from`, and `a_started_poller_yields_the_scratch_programs_agents`
+      fail with real assertion messages (`left: 6 right: 2` run counts, a `None` where `Some`
+      was expected); the remaining four worker tests pass immediately because their own
+      behaviour — `TestAgentPoll`'s fixed "send once" schedule, and a failing run's content —
+      has no meaningfully-wrong intermediate version to contrast against, the same precedent
+      `soonest(None, None)` and `dropping_the_poller_stops_the_thread` set earlier in this change.
 
 - [ ] 7.2 GREEN: Implement `RealAgentPoll::drain` per design.md → Decisions 2 — one clock read,
       `try_recv`, next-due set from that same `now`, at most one request in flight, `pending_in`

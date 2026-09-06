@@ -281,12 +281,20 @@ pub fn none() -> Box<dyn AgentPoll> {
 /// schedule (design.md -> Decisions 2) that reads a clock on the render side and hands
 /// requests to the worker below.
 struct RealAgentPoll {
-    _worker: std::thread::JoinHandle<()>,
+    request_tx: std::sync::mpsc::Sender<()>,
+    result_rx: std::sync::mpsc::Receiver<AgentSnapshot>,
 }
 
 impl AgentPoll for RealAgentPoll {
+    /// Group 7 RED shape: every call both takes an answer, if one is ready, and fires a
+    /// fresh request — no in-flight suppression and no schedule yet, so the tests
+    /// asserting "exactly one run" and "reported once" are red on behaviour rather than
+    /// on a stub that never touched the channels at all. The real schedule (design.md ->
+    /// Decisions 2) lands in the same group's GREEN step.
     fn drain(&mut self) -> Option<AgentSnapshot> {
-        None
+        let result = self.result_rx.try_recv().ok();
+        let _ = self.request_tx.send(());
+        result
     }
 
     fn pending_in(&self) -> Option<Duration> {
@@ -297,19 +305,107 @@ impl AgentPoll for RealAgentPoll {
 /// Start the crate's second worker thread. `cli` is the same seam `poll_once` takes,
 /// reached only through the trait object — the worker spawns no process itself, and
 /// `src/cli.rs` remains the crate's single spawn site.
-///
-/// Group 1 stub: the spawned thread answers nothing yet — it exists so later groups
-/// extend a real worker rather than introduce one. The real request/response channel
-/// and the `recv` loop calling [`poll_once`] arrive in group 7.
 pub fn start(cli: std::sync::Arc<dyn HerdrCli>) -> Box<dyn AgentPoll> {
-    let worker = std::thread::spawn(move || {
-        let _cli = cli;
-    });
-    Box::new(RealAgentPoll { _worker: worker })
+    let (request_tx, request_rx) = std::sync::mpsc::channel();
+    let (result_tx, result_rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || worker_body(cli, request_rx, result_tx));
+    Box::new(RealAgentPoll {
+        request_tx,
+        result_rx,
+    })
+}
+
+// Everything below this point is the worker's own body — reached only from inside a
+// `thread::spawn` closure, never from the render path, and therefore free to block.
+// `NOBLOCK` leg 3 relies on this ordering: it cuts `src/agents.rs`'s production slice at
+// its single `thread::spawn` and only searches the half before it. Group 7 stub: shared
+// by `agents::poller_for_test` already; `agents::start` grows its own `thread::spawn` of
+// this same function in task 7.2, replacing the trivial closure above.
+
+/// The worker's whole body: block on the request channel, call [`poll_once`] for each
+/// request, and send the resulting [`AgentSnapshot`] back, returning when either channel
+/// disconnects — the same lifecycle `refresh::worker_body` already has, so dropping the
+/// poller drops the request `Sender` and the thread returns.
+fn worker_body(
+    cli: std::sync::Arc<dyn HerdrCli>,
+    request_rx: std::sync::mpsc::Receiver<()>,
+    result_tx: std::sync::mpsc::Sender<AgentSnapshot>,
+) {
+    loop {
+        if request_rx.recv().is_err() {
+            return; // the poller was dropped
+        }
+        let snapshot = poll_once(cli.as_ref());
+        if result_tx.send(snapshot).is_err() {
+            return; // nobody reads the result any more
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    /// A poller for the module's own worker tests, shaped exactly like
+    /// `refresh::worker_for_test`: its own `drain` **never yields a snapshot** — a
+    /// single-consumer channel cannot answer both `drain` and a raw receiver — so the
+    /// test reads the worker's answers off the returned `mpsc::Receiver<AgentSnapshot>`
+    /// directly, with a deadline-bounded `recv_timeout`. The third channel's `Sender` is
+    /// owned by the worker thread, so its return after a drop is observable on the third
+    /// element rather than assumed. Declared **inside** `mod tests` so the single
+    /// line-anchored `#[cfg(test)]` count `NOBLOCK`'s Guard D requires is unaffected.
+    pub(crate) fn poller_for_test(
+        cli: std::sync::Arc<dyn crate::cli::HerdrCli>,
+    ) -> (
+        Box<dyn super::AgentPoll>,
+        std::sync::mpsc::Receiver<super::AgentSnapshot>,
+        std::sync::mpsc::Receiver<()>,
+    ) {
+        let (request_tx, request_rx) = std::sync::mpsc::channel::<()>();
+        let (result_tx, result_rx) = std::sync::mpsc::channel::<super::AgentSnapshot>();
+        // `exit_tx` is never sent on: its `Sender` is simply owned by the worker thread
+        // and moved into the closure, so it drops only when `worker_body` returns and
+        // the closure ends — observable on `exit_rx` as a channel disconnection, never
+        // as a received value. Mirrors `refresh::worker_for_test` exactly.
+        let (exit_tx, exit_rx) = std::sync::mpsc::channel::<()>();
+        std::thread::spawn(move || {
+            let _exit_tx = exit_tx;
+            super::worker_body(cli, request_rx, result_tx);
+        });
+        (
+            Box::new(TestAgentPoll {
+                request_tx,
+                sent: false,
+            }),
+            result_rx,
+            exit_rx,
+        )
+    }
+
+    /// `poller_for_test`'s own poller: forwards a single request the first time
+    /// `drain` is called and never again, and never yields a snapshot of its own — the
+    /// test reads answers off the raw receiver `poller_for_test` hands back instead.
+    struct TestAgentPoll {
+        request_tx: std::sync::mpsc::Sender<()>,
+        sent: bool,
+    }
+
+    impl super::AgentPoll for TestAgentPoll {
+        fn drain(&mut self) -> Option<super::AgentSnapshot> {
+            if !self.sent {
+                let _ = self.request_tx.send(());
+                self.sent = true;
+            }
+            None
+        }
+
+        fn pending_in(&self) -> Option<std::time::Duration> {
+            if self.sent {
+                None
+            } else {
+                Some(std::time::Duration::ZERO)
+            }
+        }
+    }
+
     mod parse {
         use crate::agents::{Agent, AgentStatus, Listed};
 
@@ -685,6 +781,322 @@ mod tests {
             assert_eq!(snapshot.agents.len(), 2);
             let problem = snapshot.problem.expect("the skipped entry must be named");
             assert!(problem.contains("pane_id"), "{problem}");
+        }
+    }
+
+    mod seam {
+        use crate::agents::{Agent, AgentSnapshot, AgentStatus, Listed, POLL_INTERVAL};
+
+        #[test]
+        fn the_inert_poller_yields_nothing() {
+            let mut poller = super::super::none();
+            for _ in 0..10 {
+                assert_eq!(poller.drain(), None);
+                assert_eq!(poller.pending_in(), None);
+            }
+        }
+
+        #[test]
+        fn poll_interval_is_one_second() {
+            assert_eq!(POLL_INTERVAL, std::time::Duration::from_secs(1));
+        }
+
+        /// The compile-time companion for this module's own three no-`Default` types:
+        /// exhaustive destructuring, no `..` rest, so a field added to any of the three
+        /// fails to compile here rather than defaulting silently.
+        #[test]
+        fn agent_types_destructure_exhaustively_with_no_default() {
+            let agent = Agent {
+                name: None,
+                kind: None,
+                status: AgentStatus::Unknown,
+                cwd: None,
+                pane_id: "p".to_string(),
+                tab_id: "t".to_string(),
+                workspace_id: "w".to_string(),
+                terminal_title: None,
+            };
+            let Agent {
+                name,
+                kind,
+                status,
+                cwd,
+                pane_id,
+                tab_id,
+                workspace_id,
+                terminal_title,
+            } = agent;
+            assert_eq!(name, None);
+            assert_eq!(kind, None);
+            assert_eq!(status, AgentStatus::Unknown);
+            assert_eq!(cwd, None);
+            assert_eq!(pane_id, "p");
+            assert_eq!(tab_id, "t");
+            assert_eq!(workspace_id, "w");
+            assert_eq!(terminal_title, None);
+
+            let listed = Listed {
+                agents: Vec::new(),
+                problems: Vec::new(),
+            };
+            let Listed { agents, problems } = listed;
+            assert!(agents.is_empty());
+            assert!(problems.is_empty());
+
+            let snapshot = AgentSnapshot {
+                agents: Vec::new(),
+                reachable: false,
+                problem: None,
+            };
+            let AgentSnapshot {
+                agents,
+                reachable,
+                problem,
+            } = snapshot;
+            assert!(agents.is_empty());
+            assert!(!reachable);
+            assert_eq!(problem, None);
+        }
+    }
+
+    mod worker {
+        use std::time::{Duration, Instant};
+
+        use crate::testutil::{ScratchDir, write_with_mode};
+
+        fn script(dir: &ScratchDir, name: &str, body: &str) -> std::path::PathBuf {
+            let path = dir.path().join(name);
+            write_with_mode(&path, format!("#!/bin/sh\n{body}").as_bytes(), 0o755);
+            path
+        }
+
+        const ONE_AGENT: &str = r#"{"id":"cli:agent:list","result":{"agents":[{"agent":"claude","agent_status":"idle","pane_id":"w8:p1","tab_id":"w8:t1","workspace_id":"w8"}],"type":"agent_list"}}"#;
+
+        const UNREACHABLE_STDERR: &str = r#"{"id":"cli:agent:list","error":{"code":"server_not_running","message":"no herdr server is running at /p/herdr.sock"}}"#;
+
+        #[test]
+        fn the_first_drain_polls_immediately() {
+            let scratch = ScratchDir::new();
+            let log = scratch.path().join("log");
+            let prog = script(
+                &scratch,
+                "herdr",
+                &format!(
+                    "printf '%s\\n' \"$*\" >> \"{}\"\nprintf '%s' '{ONE_AGENT}'\n",
+                    log.display()
+                ),
+            );
+            let cli = crate::cli::agent_cli_via(&prog);
+            let (mut poller, result_rx, _exit_rx) = super::poller_for_test(cli);
+
+            assert_eq!(poller.drain(), None);
+            let snapshot = result_rx
+                .recv_timeout(Duration::from_secs(10))
+                .expect("the worker did not answer within 10s");
+            assert!(snapshot.reachable);
+
+            assert_eq!(poller.drain(), None);
+            assert_eq!(poller.drain(), None);
+            assert_eq!(poller.pending_in(), None);
+
+            let runs = std::fs::read_to_string(&log).unwrap_or_default();
+            assert_eq!(
+                runs.lines().count(),
+                1,
+                "exactly one run across the three drains: {runs:?}"
+            );
+            assert_eq!(runs.lines().next(), Some("agent list"));
+        }
+
+        #[test]
+        fn a_poll_in_flight_suppresses_the_next() {
+            let scratch = ScratchDir::new();
+            let log = scratch.path().join("log");
+            // Blocks forever on stdin so the run never completes and the poll never
+            // clears the in-flight state within the test's short life.
+            let prog = script(
+                &scratch,
+                "herdr",
+                &format!("printf '%s\\n' \"$*\" >> \"{}\"\ncat\n", log.display()),
+            );
+            let cli = crate::cli::agent_cli_via(&prog);
+            let (mut poller, _result_rx, _exit_rx) = super::poller_for_test(cli);
+
+            for _ in 0..5 {
+                assert_eq!(poller.drain(), None);
+                assert_eq!(poller.pending_in(), None);
+            }
+
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut runs = 0;
+            while Instant::now() < deadline {
+                runs = std::fs::read_to_string(&log)
+                    .map(|s| s.lines().count())
+                    .unwrap_or(0);
+                if runs >= 1 {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert_eq!(runs, 1, "exactly one run, not five");
+        }
+
+        #[test]
+        fn a_dead_worker_is_reported_once() {
+            // A dropped `Sender`/`Receiver` pair, on real channels: an unregistered
+            // `FakeCli` panics inside the worker's own call to `poll_once`, which
+            // unwinds the whole worker thread and drops both ends of its channels —
+            // observed by the render-side poller exactly as a real crash would be,
+            // rather than a Sender dropped by hand from outside the seam.
+            let cli: std::sync::Arc<dyn crate::cli::HerdrCli> =
+                std::sync::Arc::new(crate::cli::FakeCli::new());
+            let mut poller = super::super::start(cli);
+
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let mut first = None;
+            while Instant::now() < deadline {
+                if let Some(s) = poller.drain() {
+                    first = Some(s);
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let first = first.expect("the first drain after disconnection must report once");
+            assert!(!first.reachable);
+            assert!(first.problem.is_some());
+
+            assert_eq!(poller.drain(), None);
+            assert_eq!(poller.drain(), None);
+            assert_eq!(poller.pending_in(), None);
+        }
+
+        #[test]
+        fn a_started_poller_yields_the_scratch_programs_agents() {
+            let scratch = ScratchDir::new();
+            let log = scratch.path().join("log");
+            let prog = script(
+                &scratch,
+                "herdr",
+                &format!(
+                    "printf '%s\\n' \"$*\" >> \"{}\"\nprintf '%s' '{ONE_AGENT}'\n",
+                    log.display()
+                ),
+            );
+            let cli = crate::cli::agent_cli_via(&prog);
+            let mut poller = super::super::start(cli);
+
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let mut snapshot = None;
+            while Instant::now() < deadline {
+                if let Some(s) = poller.drain() {
+                    snapshot = Some(s);
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let snapshot = snapshot.expect("a snapshot should arrive within 10s");
+            assert!(snapshot.reachable);
+            assert_eq!(snapshot.agents.len(), 1);
+            assert_eq!(snapshot.agents[0].pane_id, "w8:p1");
+
+            let runs = std::fs::read_to_string(&log).unwrap_or_default();
+            assert_eq!(runs.lines().count(), 1);
+            assert_eq!(runs.lines().next(), Some("agent list"));
+        }
+
+        #[test]
+        fn a_failing_scratch_program_is_unreachable() {
+            let scratch = ScratchDir::new();
+            let prog = script(
+                &scratch,
+                "herdr",
+                &format!("printf '%s' '{UNREACHABLE_STDERR}' >&2\nexit 1\n"),
+            );
+            let cli = crate::cli::agent_cli_via(&prog);
+            let mut poller = super::super::start(cli);
+
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let mut snapshot = None;
+            while Instant::now() < deadline {
+                if let Some(s) = poller.drain() {
+                    snapshot = Some(s);
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            let snapshot = snapshot.expect("a snapshot should arrive within 10s");
+            assert!(!snapshot.reachable);
+            let problem = snapshot.problem.expect("a reason must be present");
+            assert!(problem.contains('1'), "{problem}");
+            assert!(problem.contains("server_not_running"), "{problem}");
+        }
+
+        #[test]
+        fn a_failed_poll_is_recovered_from() {
+            let scratch = ScratchDir::new();
+            let log = scratch.path().join("log");
+            let counter = scratch.path().join("counter");
+            write_with_mode(&counter, b"0", 0o644);
+            // Fails on its first run, then succeeds on every later one — deciding
+            // by reading and rewriting a counter file, since a scratch program has
+            // no other memory across invocations.
+            let prog = script(
+                &scratch,
+                "herdr",
+                &format!(
+                    "printf '%s\\n' \"$*\" >> \"{log}\"\n\
+                     n=$(cat \"{counter}\")\n\
+                     n=$((n + 1))\n\
+                     printf '%s' \"$n\" > \"{counter}\"\n\
+                     if [ \"$n\" -eq 1 ]; then\n\
+                     printf '%s' '{UNREACHABLE_STDERR}' >&2\n\
+                     exit 1\n\
+                     fi\n\
+                     printf '%s' '{ONE_AGENT}'\n",
+                    log = log.display(),
+                    counter = counter.display(),
+                ),
+            );
+            let cli = crate::cli::agent_cli_via(&prog);
+            let mut poller = super::super::start(cli);
+
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let mut snapshots = Vec::new();
+            while Instant::now() < deadline && snapshots.len() < 2 {
+                if let Some(s) = poller.drain() {
+                    snapshots.push(s);
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert_eq!(
+                snapshots.len(),
+                2,
+                "expected two snapshots within the deadline"
+            );
+            assert!(!snapshots[0].reachable, "the first poll must fail");
+            assert!(snapshots[1].reachable, "the second poll must recover");
+            assert_eq!(snapshots[1].agents.len(), 1);
+
+            let runs = std::fs::read_to_string(&log).unwrap_or_default();
+            assert_eq!(
+                runs.lines().count(),
+                2,
+                "the poller neither backed off nor stopped after the failure: {runs:?}"
+            );
+        }
+
+        #[test]
+        fn dropping_the_poller_stops_the_thread() {
+            let cli = std::sync::Arc::new(crate::cli::RealHerdrCli::new("herdr"));
+            let (poller, _result_rx, exit_rx) = super::poller_for_test(cli);
+            drop(poller);
+
+            match exit_rx.recv_timeout(Duration::from_secs(10)) {
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {}
+                other => panic!(
+                    "the worker did not return within 10s after the poller was dropped: {other:?}"
+                ),
+            }
         }
     }
 }
