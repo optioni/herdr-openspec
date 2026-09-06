@@ -882,14 +882,21 @@ check is 8.4's plant rather than an invented RED.
 Four corrections, every one of which this change proved false by running Herdr 0.8.2 live.
 Net effect on `SPEC.md` is about +16 lines and −5; on `AGENTS.md`, two rewritten sentences.
 
-- [ ] 12.1 CHECK: Before editing, record what each target currently says:
+- [x] 12.1 CHECK: Before editing, record what each target currently says:
       `grep -n 'agent_status\|terminal_title' SPEC.md`; `grep -n "crate's only clock binding"
       SPEC.md`; `grep -n 'one thread' SPEC.md`; `grep -n 'exits non-zero' SPEC.md`;
       `grep -n 'src/watch.rs. and .src/refresh.rs' AGENTS.md`. Every one must match something —
       a pattern that already matches nothing is a target that has already moved, and 12.6's
       after-grep would then prove nothing.
+      **Task-file correction (found during this task):** the plain single-line `grep -n` for
+      `"crate's only clock binding"` and `'one thread'` reported no match, not because the
+      targets had moved, but because SPEC.md's prose wraps each phrase across a line break —
+      a single-line grep cannot see across it. A whitespace-collapsing search (`tr`/`python3`)
+      confirmed both phrases exist, at "...so this is the crate's / only clock binding..." and
+      "A worker thread — the crate's only one...". All five targets existed; recorded via the
+      line-wrap-tolerant search rather than the literal command as written.
 
-- [ ] 12.2 Rewrite in `SPEC.md`: "Herdr integration → Agent status by polling" (audience:
+- [x] 12.2 Rewrite in `SPEC.md`: "Herdr integration → Agent status by polling" (audience:
       every later change reading the design contract) — replace the bare field list with the
       real envelope `{"id":…,"result":{"agents":[…],"type":"agent_list"}}`, name `name` beside
       `agent`, say that `agent` is the agent **kind**, record that only `pane_id`, `tab_id`,
@@ -898,31 +905,40 @@ Net effect on `SPEC.md` is about +16 lines and −5; on `AGENTS.md`, two rewritt
       This replaces a field list that would have had `agent-attribution` matching change names
       against the string `claude`.
 
-- [ ] 12.3 Rewrite in `SPEC.md`: "Degraded states" (audience: same) — scope the row "A CLI
+- [x] 12.3 Rewrite in `SPEC.md`: "Degraded states" (audience: same) — scope the row "A CLI
       command exits non-zero | the reason is unavailable to the plugin" to the **`openspec`**
       CLI, and add a row for `herdr`, which exits 1 with an empty stdout and a JSON error
       envelope on stderr, so `CliError::Failed`'s stderr does carry the reason.
 
-- [ ] 12.4 Rewrite in `SPEC.md`: "Architecture" and "Testing and quality gates → Unit-tested
+- [x] 12.4 Rewrite in `SPEC.md`: "Architecture" and "Testing and quality gates → Unit-tested
       modules" (audience: same) — the sentence calling `watch::RealFsEvents::drain`'s
       `Instant::now()` "the crate's only clock binding" is now false; there are **two**. The
       "the crate's only one" thread claim about `refresh` is now false; there are **two**. Also
       update the module-map row for `agents` to name the poll and the parse, not attribution
       alone, and add `agents` to the unit-tested module list.
+      **Recorded:** both claims occur twice in SPEC.md (Architecture's own prose, and the
+      Refresh section's restatement) — both pairs corrected, not just the first occurrence
+      each.
 
-- [ ] 12.5 Rewrite in `AGENTS.md`: "Architecture rules" → the render-path bullet (audience:
+- [x] 12.5 Rewrite in `AGENTS.md`: "Architecture rules" → the render-path bullet (audience:
       every agent session) — it names `src/watch.rs` and `src/refresh.rs` as the two seam
       modules and says "neither seam module's own production code blocks". Rewrite in place to
       name three, and add one line stating that the poller lives outside `src/ui/` because
       `NOCLI-SHELL` forbids naming `HerdrCli` there. Delete the two-module wording rather than
       appending beside it. **`AGENTS.md` carries no "only clock binding" claim** — that sentence
       is `SPEC.md`'s alone, and 12.4 owns it.
+      **Found during this task:** a second, narrative two-module mention in AGENTS.md's
+      "Current repo state" section (naming `src/watch.rs` and `src/refresh.rs` as the pane's
+      live-update collaborators) was not named by this task but matches the same 12.6 grep;
+      updated to name the poller as a third collaborator too.
 
-- [ ] 12.6 VERIFY: `grep -n "only clock binding\|one real clock" SPEC.md` returns nothing;
+- [x] 12.6 VERIFY: `grep -n "only clock binding\|one real clock" SPEC.md` returns nothing;
       `grep -n 'the crate.s only one' SPEC.md` returns nothing; `grep -n 'src/watch.rs. and
       .src/refresh.rs' AGENTS.md` returns nothing. Do **not** grep for the absence of `--json`
       near "Herdr" in `SPEC.md`: 12.2 requires that pair of words to appear together, so such a
       gate would be red exactly when the task was done correctly. Commit.
+      **Recorded:** all three greps return nothing (confirmed). `make check` still green: 805
+      tests, 97.26% lines.
 
 ## 13. Change Review
 <!-- kind: operational -->

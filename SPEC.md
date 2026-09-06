@@ -69,10 +69,14 @@ Result<String, String>` reader, whose one production binding lives in
 `src/ui/mod.rs` and is the only place under `src/ui/` naming
 `read_to_string` (`detail-view`). The fourth is `watch::RealFsEvents::drain`'s
 one `Instant::now()` call (`live-refresh`): the debounce it drives takes `now`
-as a parameter rather than reading the clock itself, so this is the crate's
-only clock binding and no view test can reach it — `NOBLOCK`'s leg 2 makes
-that a checked fact, not merely a claim, by forbidding every file under
-`src/ui/` (tests included) from naming `Instant::now`.
+as a parameter rather than reading the clock itself, so no view test can
+reach it — `NOBLOCK`'s leg 2 makes that a checked fact, not merely a claim,
+by forbidding every file under `src/ui/` (tests included) from naming
+`Instant::now`. `src/agents.rs`'s `RealAgentPoll::drain` (`agent-polling`)
+reads a clock the same way, for the same reason: the schedule lives on the
+render side of the poller seam so the loop can shorten its wait for a poll
+without reading a clock itself, which makes it the crate's **second** clock
+binding, not its only one — `NOBLOCK` leg 2 covers it identically.
 
 **Module map:**
 
@@ -84,7 +88,7 @@ that a checked fact, not merely a claim, by forbidding every file under
 | `schema` | Parse `schema.yaml` into an ordered artifact list; identify the tasks artifact |
 | `changes` | Build `Change` values from files and from CLI JSON |
 | `tasks` | Parse markdown checkboxes into groups, items, and counts |
-| `agents` | Attribute live Herdr agents to changes |
+| `agents` | Poll `herdr agent list`, parse its envelope into agent values, and attribute live Herdr agents to changes |
 | `launch` | Split a pane, start an agent, send the `/opsx:*` prompt |
 | `watch` | The recursive `notify` watch, the debounce, and classifying a touched path to a per-change `Selection` |
 | `refresh` | The worker thread and the non-blocking `Refresher` seam it answers through |
@@ -263,10 +267,12 @@ the clock itself, so its window-boundary behaviour is asserted directly
 (`take_due(t0 + 149ms)` is `None`, `take_due(t0 + 150ms)` is `Some(_)`) instead of
 through a real sleep. The window is 150ms, capped at one second of total deferral
 (`DEBOUNCE_MAX`) so a writer saving more often than that — an agent editing
-`tasks.md`, then a spec, then a design doc — cannot defer a batch forever. The one
-real `Instant::now()` call in the whole crate lives in `watch::RealFsEvents::drain`,
-which captures it once per call and reuses it for both the debounce and the
-`pending_in` value the next frame's wait consults.
+`tasks.md`, then a spec, then a design doc — cannot defer a batch forever. A real
+`Instant::now()` call lives in `watch::RealFsEvents::drain`, which captures it
+once per call and reuses it for both the debounce and the `pending_in` value the
+next frame's wait consults; `src/agents.rs`'s `RealAgentPoll::drain`
+(`agent-polling`) reads a second, on the same terms, for its own one-second
+poll schedule.
 
 A batch of touched paths is classified to a `changes::Selection`: a path under a
 specific `openspec/changes/<name>/` narrows the selection to that change alone; a
@@ -274,12 +280,16 @@ touch to the `changes/` directory itself, to `archive/`, or to anything the
 classifier does not recognise widens it to every change (conservative by design — a
 wrong "every change" costs one extra CLI cycle that was already going to happen on
 the next `list --json`; a wrong "just this one" would silently stop the pane
-noticing a change elsewhere). A worker thread — the crate's only one, confined to
-`src/refresh.rs` — takes a `Selection` request and answers it twice: first the
-file-sourced `ChangeSet` (sub-millisecond, since it is a directory walk), then the
-CLI-merged one 200–400ms later. The loop applies whichever result is ready on every
-frame without ever waiting for either, which is what makes "files paint, the CLI
+noticing a change elsewhere). A worker thread confined to `src/refresh.rs` takes a
+`Selection` request and answers it twice: first the file-sourced `ChangeSet`
+(sub-millisecond, since it is a directory walk), then the CLI-merged one
+200–400ms later. The loop applies whichever result is ready on every frame
+without ever waiting for either, which is what makes "files paint, the CLI
 corrects" a property of two successive frames rather than a synchronous read.
+`src/agents.rs` (`agent-polling`) confines the crate's **second** worker
+thread the same way, answering an `AgentSnapshot` request instead of a
+`Selection` one — `src/refresh.rs` and `src/agents.rs` are the crate's only
+two threads, not the one.
 
 Pressing `r` sets the same one-shot request the pane issues automatically at
 startup — `Selection::All`, so the CLI corrects every change's numbers once,
@@ -441,9 +451,28 @@ Action keys are hidden when the Herdr socket is unreachable.
 
 ### Agent status by polling
 
-`herdr agent list` is polled at roughly one-second intervals. It returns, per
-agent: `agent`, `agent_status`, `cwd`, `pane_id`, `tab_id`, `workspace_id`, and
-`terminal_title`.
+`herdr agent list` is polled at roughly one-second intervals — **no `--json`
+flag**: Herdr 0.8.2 rejects one with exit status 2 and `usage: herdr agent
+list` on stderr, even though the command's only output format is already
+JSON. The payload is an **envelope**, not a bare array:
+
+```json
+{"id":"cli:agent:list","result":{"agents":[ … ],"type":"agent_list"}}
+```
+
+Each entry in `result.agents` carries `agent` (the agent **kind**, e.g.
+`"claude"`) separately from `name` (the name a user or this plugin gave the
+agent, **omitted entirely** when unset) — the two are not interchangeable,
+and attribution below keys on `name`, never on `agent`. Herdr's own schema
+marks seven fields required — `pane_id`, `tab_id`, `workspace_id`,
+`terminal_id`, `focused`, `revision`, and `agent_status` — and omits every
+other field when its value is null or default, so `agent`, `cwd`, `name`,
+and `terminal_title` are routinely absent from a real payload. This plugin
+reads `agent`, `agent_status`, `cwd`, `pane_id`, `tab_id`, `workspace_id`,
+`name`, and `terminal_title`; of those, only `pane_id`, `tab_id`, and
+`workspace_id` are required for an entry to parse at all, and an
+unrecognised `agent_status` decodes to `Unknown` rather than being treated
+as a fault.
 
 Polling is chosen over an event hook deliberately. The call is a Unix-socket
 round trip costing milliseconds — unlike the Node CLI — and needs no manifest
@@ -564,7 +593,8 @@ Every condition renders usable content rather than an error screen:
 | A configured `openspec_bin` that does not name a usable binary | Falls through to the remaining probe steps rather than winning or ending the chain; the fallback is named in `BinResolution::problems` rather than being silent |
 | A schema declares the same artifact id at two positions | The CLI rejects such a schema outright (`Duplicate artifact ID`), so a change using it is permanently file-mode — this crate's own parser accepts the duplicate, as `schema-artifacts` requires, so the plugin's "usable" is strictly wider than the CLI's |
 | `openspec list --json` reports a repository root other than the one this plugin resolved | The whole CLI result is discarded, not merged: the CLI resolves its root from the **process** working directory while this plugin resolves from the invocation context's workspace working directory, and the subprocess seam forbids setting `current_dir`, so the two can legitimately disagree |
-| A CLI command exits non-zero | The reason is unavailable to the plugin: the CLI writes its diagnostic to **stdout**, not stderr, and the subprocess seam's `CliError::Failed` carries stderr only — the recorded problem names the command and its exit code, never the CLI's own message |
+| An `openspec` command exits non-zero | The reason is unavailable to the plugin: the CLI writes its diagnostic to **stdout**, not stderr, and the subprocess seam's `CliError::Failed` carries stderr only — the recorded problem names the command and its exit code, never the CLI's own message |
+| A `herdr agent list` call exits non-zero, or the program cannot be started at all | The reverse of the row above: Herdr writes its diagnostic to **stderr** as a JSON error envelope (`{"id":…,"error":{"code":…,"message":…}}`), with an empty stdout, so the reason **is** available and is recorded on `AgentSnapshot::problem` — never rendered as a `!`-marked row, since an unreachable socket is the silent "runs as a standalone TUI" state above, not an error |
 | The filesystem watcher will not start (`notify` refuses the watch, or the repository root cannot be watched) | The pane runs unwatched rather than refusing to start: the reason is named as a leading `!`-marked row of the list, above every other problem row, and `r` still forces a full refresh — the one path to a corrected list on a machine where watching does not work |
 | `openspec/` is removed while the watcher runs | The next filesystem read reports an empty change set with no problem of its own — a missing `openspec/` directory means "not an OpenSpec repository", the same as it always has. The watcher's own read failure (the event channel disconnecting) is what the pane actually shows, as the same leading `!`-marked row above, and the loop keeps drawing regardless — a watch failure is never treated as a reason to stop |
 | A CLI cycle fails after the worker already sent its file-sourced result | The pane keeps the numbers the file read produced; the failure is not silently dropped, but nothing overwrites what is already on screen with a blanker state |
@@ -614,11 +644,18 @@ is tested against scratch `#!/bin/sh` programs rather than the real `openspec`,
   instant, never the real clock; `watch::start` and `RealFsEvents` are the
   one filesystem edge, tested against a real `ScratchDir` and against a path
   that does not exist
-- `refresh::start`, `refresh::none`, and the worker body — the crate's one
-  thread, tested through a `#[cfg(test)]` constructor (`worker_for_test`)
-  that hands the test the worker's own result and exit channels directly,
-  with every assertion made **after** a `recv_timeout` returned an item,
-  never after a fixed sleep
+- `refresh::start`, `refresh::none`, and the worker body — one of the
+  crate's two worker threads, tested through a `#[cfg(test)]` constructor
+  (`worker_for_test`) that hands the test the worker's own result and exit
+  channels directly, with every assertion made **after** a `recv_timeout`
+  returned an item, never after a fixed sleep
+- `agents::parse_list`, `agents::poll_once`, and the `AgentPoll` seam
+  (`agent-polling`) — the reference envelope and every unusable-shape
+  reason for the parse; the four-way mapping from a CLI outcome to an
+  `AgentSnapshot` for the poll; and the worker — the crate's second
+  thread, confined to `src/agents.rs` and reached only through
+  `cli::HerdrCli` — tested through its own `#[cfg(test)]` constructor
+  (`poller_for_test`), on `worker_for_test`'s terms
 - `ui::layout`, `ui::app`, `ui::list`, `ui::detail`, `ui::markdown`,
   `ui::tasks`, `ui::view`, `ui::driver`, `ui::terminal`, and `ui::mod`'s
   `load` and `read_artifact` functions — the breakpoint and frame split,

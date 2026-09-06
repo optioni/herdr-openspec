@@ -67,12 +67,16 @@ also what keeps `cargo test` (which spawns this binary) from ever putting a
 real terminal into raw mode.
 
 The pane is no longer file-once: a recursive `notify` watch on `openspec/`
-and a worker thread (both confined to `src/watch.rs` and `src/refresh.rs`,
-neither reached from `src/ui/`) now drive live updates — a touched path is
-debounced and classified to the affected change, the worker answers with the
-fast file-sourced set then the CLI-merged one, and the render loop adopts
-whichever is ready on every frame without ever waiting for either. `r`
-forces the same full refresh the pane issues once at startup.
+(confined to `src/watch.rs`) and a worker thread (confined to
+`src/refresh.rs`) drive live updates, neither reached from `src/ui/` — a
+touched path is debounced and classified to the affected change, the
+worker answers with the fast file-sourced set then the CLI-merged one, and
+the render loop adopts whichever is ready on every frame without ever
+waiting for either. `r` forces the same full refresh the pane issues once
+at startup. A third collaborator, the Herdr agent poller (`src/agents.rs`,
+also outside `src/ui/`), polls `herdr agent list` on roughly the same
+one-second cadence and answers on its own non-blocking seam, so one wait
+now serves all three.
 
 Important files:
 
@@ -207,15 +211,20 @@ unreachable and the tests become integration tests by accident.
   both — all three because every public function there is parameterised by
   width, which is what makes an exemption-free width check possible.
 - **The render path blocks on nothing but the terminal, and reads no clock.**
-  `src/watch.rs` and `src/refresh.rs` — both outside `src/ui/` — hold the
-  filesystem watcher and the worker thread; `run_loop` reaches them only
-  through the non-blocking `FsEvents`/`Refresher` trait objects, never a
-  channel, a lock, or `Instant::now()` directly. Checked two ways: no file
-  under `src/ui/` (tests included) names a blocking-wait or clock API, and,
-  separately, neither seam module's own production code blocks before the
-  point each hands off to its background thread — a check inside the two
-  files themselves, because a sweep scoped to `src/ui/` alone cannot see a
-  `drain` or a `take_result` that blocks in its own module.
+  `src/watch.rs`, `src/refresh.rs`, and `src/agents.rs` — all three outside
+  `src/ui/` — hold the filesystem watcher, the refresh worker thread, and
+  the Herdr agent poller thread; `run_loop` reaches them only through the
+  non-blocking `FsEvents`/`Refresher`/`AgentPoll` trait objects, never a
+  channel, a lock, or `Instant::now()` directly. The poller lives outside
+  `src/ui/` for the same reason the other two do: `NOCLI-SHELL` forbids any
+  file under `src/ui/` from naming `HerdrCli`, and a poller placed there
+  would need an exemption from that check. Checked two ways: no file under
+  `src/ui/` (tests included) names a blocking-wait or clock API, and,
+  separately, none of the three seam modules' own production code blocks
+  before the point each hands off to its background thread — a check
+  inside the three files themselves, because a sweep scoped to `src/ui/`
+  alone cannot see a `drain` or a `take_result` that blocks in its own
+  module.
 
 Further invariants from `SPEC.md`:
 
