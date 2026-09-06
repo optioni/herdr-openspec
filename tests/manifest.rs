@@ -18,7 +18,8 @@ use std::path::Path;
 
 fn manifest() -> toml::Table {
     let text = std::fs::read_to_string("herdr-plugin.toml").expect("read herdr-plugin.toml");
-    text.parse::<toml::Table>().expect("parse herdr-plugin.toml as TOML")
+    text.parse::<toml::Table>()
+        .expect("parse herdr-plugin.toml as TOML")
 }
 
 fn table_array<'a>(manifest: &'a toml::Table, key: &str) -> &'a Vec<toml::Value> {
@@ -131,7 +132,10 @@ fn manifest_paths_and_the_cargo_binary_name_agree() {
         assert_eq!(file_name, basename, "action {id}'s command basename");
         checked += 1;
     }
-    assert_eq!(checked, 4, "expected to check exactly four command basenames");
+    assert_eq!(
+        checked, 4,
+        "expected to check exactly four command basenames"
+    );
     assert_eq!(env!("CARGO_PKG_NAME"), basename);
 }
 

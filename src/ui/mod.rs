@@ -197,6 +197,33 @@ pub fn run_wired<B: Backend, E: EventSource>(
     Ok(dashboard)
 }
 
+/// The directory to search for a repository from, preferring the invoking workspace's own
+/// cwd over the process's own OS-level working directory. `open::context`'s `workspace_id`
+/// requirement is deliberately ignored here — `Err` (no Herdr context at all, or no
+/// workspace cwd within it) means "fall back to the caller's own `current_dir()`", never a
+/// failure of `run()` itself.
+///
+/// **Corrected during `plugin-actions`' group 10 live check**: the first draft of this
+/// design passed `--cwd` to `herdr plugin pane open` to solve exactly this problem. Measured
+/// live against Herdr 0.8.2, that call also changes what the manifest's *relative* pane
+/// `command` resolves against, so a workspace directory holding no `target/release/`
+/// binary of its own makes the pane fail to open at all — confirmed directly and
+/// independently corroborated by `herdr-file-viewer` (installed locally), whose own
+/// launcher never passes `--cwd` either and instead reads this same variable from its own
+/// pane process's environment (`src/host.rs` there). Every process Herdr starts for a
+/// plugin — a `[[panes]]` entry no less than an `[[actions]]` one — receives the same
+/// injected context (`AGENTS.md` -> Architecture rules already documents this), so `ui::run`
+/// reads it exactly where `open::context` already does, rather than `open_args` passing
+/// `--cwd` at all. See `specs/pane-open/spec.md` -> "The dashboard's own starting directory
+/// prefers the workspace context over the process cwd" and design.md -> Decision 6
+/// (corrected).
+pub(crate) fn startup_cwd(env: &dyn Fn(&str) -> Option<String>) -> Option<std::path::PathBuf> {
+    crate::open::context(env)
+        .ok()
+        .and_then(|ctx| ctx.workspace_cwd)
+        .map(std::path::PathBuf::from)
+}
+
 /// Start the dashboard: refuse without a terminal, install the panic hook,
 /// then hand everything that can be miswired to [`run_wired`], which a test
 /// drives. Holds no branch and no loop of its own beyond `?` — see the
@@ -205,7 +232,10 @@ pub fn run() -> Result<(), StartError> {
     let _guard = enter_if_terminal(std::io::stdout().is_terminal(), &CrosstermOps)?;
     terminal::install_panic_hook();
     let config = crate::config::load_from_env();
-    let cwd = std::env::current_dir()?;
+    let cwd = match startup_cwd(&crate::config::env_lookup()) {
+        Some(cwd) => cwd,
+        None => std::env::current_dir()?,
+    };
     let mut term = Terminal::new(ratatui::backend::CrosstermBackend::new(std::io::stdout()))?;
     let state_dir = crate::state::state_dir(&crate::config::env_lookup());
     let startup = Startup {
@@ -355,6 +385,37 @@ mod tests {
                 Err(e) => assert!(!e.is_empty()),
                 Ok(_) => panic!("expected an Err for a missing path"),
             }
+        }
+    }
+
+    /// `ui::startup_cwd` — added correcting group 10's live-check discovery that
+    /// `--cwd` on `plugin pane open` breaks the manifest's relative command instead of
+    /// solving the plugin-root problem. See its own doc comment.
+    mod startup_cwd {
+        fn env<'a>(pairs: &'a [(&'a str, &'a str)]) -> impl Fn(&str) -> Option<String> + 'a {
+            let map: std::collections::BTreeMap<&str, &str> = pairs.iter().copied().collect();
+            move |name| map.get(name).map(|s| s.to_string())
+        }
+
+        #[test]
+        fn prefers_the_workspace_cwd_from_context() {
+            let json = r#"{"workspace_id":"w8","workspace_cwd":"/repo"}"#;
+            let pairs = [("HERDR_PLUGIN_CONTEXT_JSON", json)];
+            assert_eq!(
+                super::super::startup_cwd(&env(&pairs)),
+                Some(std::path::PathBuf::from("/repo"))
+            );
+        }
+
+        #[test]
+        fn no_herdr_context_at_all_falls_back_to_none() {
+            assert_eq!(super::super::startup_cwd(&env(&[])), None);
+        }
+
+        #[test]
+        fn a_workspace_with_no_cwd_known_falls_back_to_none() {
+            let pairs = [("HERDR_WORKSPACE_ID", "w8")];
+            assert_eq!(super::super::startup_cwd(&env(&pairs)), None);
         }
     }
 

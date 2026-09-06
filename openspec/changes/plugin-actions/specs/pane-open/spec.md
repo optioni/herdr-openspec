@@ -98,8 +98,10 @@ neither call below can be addressed without it.
   `{"workspace_id":"w8","focused_pane_cwd":"/repo","focused_pane_id":"w8:p1"}` — no
   `workspace_cwd` key at all
 - **THEN** the returned context's workspace cwd is `/repo`
-- **AND** when neither key is present the workspace cwd is absent, and the split and tab
-  argument vectors below omit `--cwd` rather than passing an empty one
+- **AND** when neither key is present the workspace cwd is absent — `ui::run`'s own
+  `startup_cwd` then falls back to its own OS working directory rather than a fixed value
+  (`specs/plugin-build/spec.md` -> "The dashboard's own starting directory prefers the
+  workspace context over the process cwd")
 
 #### Scenario: Blank values are absent
 
@@ -127,17 +129,17 @@ dashboard pane rather than opening another.
 `herdr pane list` exposes no plugin ownership: measured, a plugin pane is distinguished
 from an ordinary pane only by a `label` field carrying the manifest pane's `title`, which
 ordinary panes omit entirely. A listed pane SHALL be treated as this workspace's dashboard
-when **all four** hold: it carries a string `pane_id`, its `label` equals
+when **all three** hold: it carries a string `pane_id`, its `label` equals
 `open::DASHBOARD_LABEL` (the constant the manifest's two pane titles are checked against),
-its `workspace_id` equals the context's workspace id, and its `cwd` equals the context's
-workspace cwd. When the context carries no workspace cwd, the `cwd` test SHALL be skipped
-rather than matching every pane. The first match in the list's own order SHALL be used.
+and its `workspace_id` equals the context's workspace id. The first match in the list's own
+order SHALL be used.
 
-The `cwd` comparison SHALL be `std::path::Path` equality — component-wise, so a trailing
-separator does not defeat it — and SHALL NOT canonicalize: `open` performs no filesystem
-access, and both strings originate from Herdr itself (the `--cwd` this plugin passed, and
-the `cwd` Herdr echoes back), so a canonicalizing comparison would buy nothing and cost a
-`stat`.
+**`cwd` is not compared, corrected from the first draft of this requirement** (which
+matched on `cwd` too, mirroring the context's workspace cwd). Every dashboard pane this
+plugin opens now carries the **plugin root** as its `cwd`, identically, regardless of
+workspace — see "`open`/`open-tab` never pass `--cwd`" below — so the value no longer
+discriminates anything, and comparing it would only ever match or fail to match by
+coincidence.
 
 Both manifest panes carry the title `OpenSpec`, so `open` and `open-tab` are deliberately
 indistinguishable in `pane list` and each will focus the other's pane. This is the intended
@@ -146,8 +148,8 @@ is not given a distinct title.
 
 #### Scenario: A matching pane is focused and nothing is opened
 
-- **WHEN** `open` runs with a workspace id of `w8` and workspace cwd `/repo`, and
-  `herdr pane list` answers with a pane `{"pane_id":"w8:pG","label":"OpenSpec","workspace_id":"w8","cwd":"/repo"}`
+- **WHEN** `open` runs with a workspace id of `w8`, and `herdr pane list` answers with a
+  pane `{"pane_id":"w8:pG","label":"OpenSpec","workspace_id":"w8"}`
 - **THEN** exactly two Herdr calls are made: `["pane","list"]` then
   `["plugin","pane","focus","w8:pG"]`
 - **AND** no `plugin pane open` call is made
@@ -172,19 +174,6 @@ is not given a distinct title.
   `"workspace_id":"wA"`
 - **THEN** no focus call is made and a pane is opened instead
 
-#### Scenario: A labelled pane rooted elsewhere is not this workspace's dashboard
-
-- **WHEN** the context's workspace cwd is `/repo` and the only labelled pane in `w8`
-  reports `"cwd":"/Users/x/.config/herdr/plugins/github/herdr-openspec-abc"` — the plugin
-  root a `--cwd`-less open would have produced
-- **THEN** no focus call is made and a pane is opened instead
-
-#### Scenario: With no workspace cwd known, the label and workspace alone decide
-
-- **WHEN** the context carries no workspace cwd and one labelled pane in `w8` exists with
-  any `cwd`
-- **THEN** it is focused
-
 #### Scenario: Two matches focus the first in list order
 
 - **WHEN** `herdr pane list` answers with two panes both matching, `w8:pG` before `w8:pH`
@@ -193,7 +182,7 @@ is not given a distinct title.
 #### Scenario: `open-tab` focuses a split dashboard, and `open` focuses a tab one
 
 - **WHEN** `open-tab` runs while a pane labelled `OpenSpec` opened by `open` is listed for
-  this workspace and cwd
+  this workspace
 - **THEN** that pane is focused and no tab is created
 - **AND** the symmetric case — `open` while only the tab dashboard is listed — focuses the
   tab's pane
@@ -212,22 +201,18 @@ When no dashboard is listed, `open` SHALL issue exactly:
 ```
 herdr plugin pane open --plugin <plugin id> --entrypoint dashboard
                        --placement split --direction right
-                       --target-pane <focused pane id> --cwd <workspace cwd> --focus
+                       --target-pane <focused pane id> --focus
 ```
 
 `--workspace` SHALL NOT be passed. `--target-pane` SHALL be omitted when the context
-carries no focused pane id, in which case Herdr targets the focused pane itself. `--cwd`
-SHALL be omitted when the context carries no workspace cwd; the pane then inherits the
-plugin root, which is the pre-change behaviour and is named as a degraded state rather than
-a failure.
+carries no focused pane id, in which case Herdr targets the focused pane itself.
 
 #### Scenario: The full split argument vector
 
-- **WHEN** `open` opens with plugin id `herdr-openspec`, focused pane `w8:p1`, and
-  workspace cwd `/repo`
+- **WHEN** `open` opens with plugin id `herdr-openspec` and focused pane `w8:p1`
 - **THEN** the argument vector is exactly
-  `["plugin","pane","open","--plugin","herdr-openspec","--entrypoint","dashboard","--placement","split","--direction","right","--target-pane","w8:p1","--cwd","/repo","--focus"]`
-- **AND** it contains no `--workspace` and no `--no-focus`
+  `["plugin","pane","open","--plugin","herdr-openspec","--entrypoint","dashboard","--placement","split","--direction","right","--target-pane","w8:p1","--focus"]`
+- **AND** it contains no `--workspace`, no `--no-focus`, and no `--cwd`
 
 #### Scenario: No focused pane id omits `--target-pane` rather than passing an empty one
 
@@ -235,12 +220,42 @@ a failure.
 - **THEN** the argument vector contains neither `--target-pane` nor an empty argument
   after it
 
-#### Scenario: No workspace cwd omits `--cwd` and the pane inherits the plugin root
+### Requirement: `open`/`open-tab` never pass `--cwd`
 
-- **WHEN** the context carries no workspace cwd
-- **THEN** the argument vector contains no `--cwd`
-- **AND** the call is still made, because a dashboard rooted at the plugin root is a
-  degraded view rather than a refusal
+The first draft of this requirement had `open` pass `--cwd <workspace cwd>` — see the two
+scenarios below this one for the specific vectors that carried it — reasoning that the
+pane would otherwise inherit the **plugin root** rather than the workspace's own
+repository (the empty-dashboard problem `plugin-actions`' own proposal names). Measured
+live against Herdr 0.8.2, during this change's own group 10 manual check, `--cwd` does
+something more consequential than set the pane's cwd: it changes what the manifest's
+*relative* pane `command` (`./target/release/herdr-openspec`) resolves against.
+`herdr plugin pane open --cwd /tmp …` failed outright —
+`{"error":{"code":"plugin_pane_open_failed","message":"Unable to spawn
+/tmp/./target/release/herdr-openspec because it does not exist"}}` — for **every**
+workspace directory that does not itself hold a `target/release/herdr-openspec` binary,
+which is effectively every real workspace. This directly contradicts Herdr's own
+changelog ("Relative plugin commands now resolve from the plugin root", unqualified,
+0.8.0) for the `--cwd`-given case; a `--cwd`-less open resolves correctly, exactly as the
+changelog describes. `herdr-file-viewer` (installed locally, `min_herdr_version = 0.7.0`)
+independently reaches the identical conclusion in its own shipped code: its launcher
+script never passes `--cwd` to `plugin pane open` either.
+
+`open` and `open-tab` SHALL therefore never pass `--cwd`, on any path. Every dashboard
+pane this plugin opens carries the plugin root as its `cwd`. The pane's own starting
+directory for the OpenSpec search is instead resolved by the process Herdr starts for
+that pane — `ui::run` — from its own injected `HERDR_PLUGIN_CONTEXT_JSON` /
+`HERDR_WORKSPACE_ID` environment, preferring the workspace cwd over the process's own OS
+working directory. This is `AGENTS.md`'s already-documented fact that "every process
+Herdr starts for a plugin" (`[[panes]]` no less than `[[actions]]`) receives this
+injected context, read exactly where `open::context` already reads it — see
+`specs/plugin-build/spec.md` -> "The dashboard's own starting directory prefers the
+workspace context over the process cwd" for `ui::run`'s side of this correction.
+
+#### Scenario: No `--cwd` is ever passed, regardless of what the context carries
+
+- **WHEN** `open_args` is called with a context whose `workspace_cwd` is `Some("/repo")`,
+  and again with one whose `workspace_cwd` is `None`
+- **THEN** neither argument vector contains `--cwd`, for either placement
 
 ### Requirement: `open-tab` opens a tab in the invoking workspace
 
@@ -249,7 +264,7 @@ When no dashboard is listed, `open-tab` SHALL issue exactly:
 ```
 herdr plugin pane open --plugin <plugin id> --entrypoint dashboard-tab
                        --placement tab --workspace <workspace id>
-                       --cwd <workspace cwd> --focus
+                       --focus
 ```
 
 `--target-pane` and `--direction` SHALL NOT be passed: a tab placement needs no target
@@ -257,16 +272,15 @@ pane, and `--workspace` is measured to work for a tab where it fails for a split
 
 #### Scenario: The full tab argument vector
 
-- **WHEN** `open-tab` opens with plugin id `herdr-openspec`, workspace `w8`, and workspace
-  cwd `/repo`
+- **WHEN** `open-tab` opens with plugin id `herdr-openspec` and workspace `w8`
 - **THEN** the argument vector is exactly
-  `["plugin","pane","open","--plugin","herdr-openspec","--entrypoint","dashboard-tab","--placement","tab","--workspace","w8","--cwd","/repo","--focus"]`
-- **AND** it contains neither `--target-pane` nor `--direction`
+  `["plugin","pane","open","--plugin","herdr-openspec","--entrypoint","dashboard-tab","--placement","tab","--workspace","w8","--focus"]`
+- **AND** it contains neither `--target-pane`, `--direction`, nor `--cwd`
 
 #### Scenario: The two subcommands differ only in placement and target
 
 - **WHEN** the split and tab argument vectors are built from the same context
-- **THEN** they agree on `--plugin`, `--cwd`, and `--focus`
+- **THEN** they agree on `--plugin` and `--focus`
 - **AND** they differ on exactly four keys: `--entrypoint` (`dashboard` against
   `dashboard-tab`), `--placement` (`split` against `tab`), `--direction right` and
   `--target-pane` (split only), and `--workspace` (tab only)
@@ -420,7 +434,7 @@ from the action menu at all. Neither subcommand SHALL exit with status 3, which 
 - **AND** the recorded argument vectors show `--placement split --direction right` for
   `open` and `--placement tab --workspace` for `open-tab`, so a `main` that dispatched
   both to one placement fails — the wiring defect a status-only assertion cannot see
-- **AND** the recorded vectors carry the `--cwd` the synthetic context named
+- **AND** neither recorded vector carries `--cwd`
 - **AND** `herdr-openspec open --tab` still exits 2 with usage on stderr
 
 #### Scenario: The open path names no terminal API

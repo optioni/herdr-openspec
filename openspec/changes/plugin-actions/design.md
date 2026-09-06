@@ -244,10 +244,33 @@ Coverage: reported as the **line** figure from `cargo llvm-cov`, never the regio
    already carries success, and the open envelope's measured shape
    (`result.plugin_pane.pane.pane_id`) differs from `pane split`'s (`result.pane.pane_id`),
    so parsing it would add a failure mode for information nothing needs.
-6. **`--cwd` comes from the injected context, not from `std::env::current_dir`.** The
-   action's cwd is the plugin root; using it would ship a dashboard that resolves no
-   repository once installed from GitHub. `workspace_cwd`, else `focused_pane_cwd`, else
-   omit the flag and accept the degraded pane rather than refuse.
+6. **CORRECTED during this change's own group 10 live check — `--cwd` is never passed to
+   `plugin pane open` at all.** The first draft of this decision read: "`--cwd` comes from
+   the injected context, not from `std::env::current_dir`. The action's cwd is the plugin
+   root; using it would ship a dashboard that resolves no repository once installed from
+   GitHub. `workspace_cwd`, else `focused_pane_cwd`, else omit the flag and accept the
+   degraded pane rather than refuse." Measured live against Herdr 0.8.2:
+   `herdr plugin pane open --cwd /tmp …` fails outright —
+   `{"error":{"code":"plugin_pane_open_failed","message":"Unable to spawn
+   /tmp/./target/release/herdr-openspec because it does not exist"}}` — because Herdr
+   resolves the manifest's **relative** pane `command` against `--cwd` too, not only
+   against the plugin root, contradicting its own changelog's unqualified "Relative plugin
+   commands now resolve from the plugin root" (0.8.0) for the `--cwd`-given case. This is
+   not a corner case: it fails for every real workspace directory, which is exactly the
+   case this flag existed to serve. `herdr-file-viewer` (installed locally, min 0.7.0)
+   independently reaches the same conclusion — its shipped launcher never passes `--cwd`
+   either. **Repair:** `open_args` never emits `--cwd`, on any path; `existing_pane` drops
+   its `cwd` parameter (every pane this plugin opens now carries the plugin root
+   identically, so `cwd` no longer discriminates); and `ui::run` gains `startup_cwd`,
+   which prefers the workspace cwd from its own injected `HERDR_PLUGIN_CONTEXT_JSON` /
+   `HERDR_WORKSPACE_ID` — read through the same `open::context` — over
+   `std::env::current_dir()`, falling back to it when no Herdr context is present at all.
+   This is the one place this change crosses its own "No dashboard behaviour change"
+   Non-Goal, and it does so because the alternative (keep `--cwd`) does not work at all;
+   see `specs/plugin-build/spec.md` -> "The dashboard's own starting directory prefers the
+   workspace context over the process cwd" and `HANDOFF.md`'s "a doc claim is fixed by the
+   change that makes it true" — the same principle applied to a design decision found wrong
+   at implementation time rather than a stale doc.
 7. **`--target-pane` for the split, `--workspace` for the tab.** Forced by measurement, not
    preference: `--placement split --workspace <id>` is `invalid_params` unless that
    workspace happens to be focused, and a tab needs no target. Passing the context's

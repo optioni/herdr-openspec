@@ -290,10 +290,7 @@ fn open_outside_herdr_exits_one() {
     assert_eq!(output.status.code(), Some(1), "status: {:?}", output.status);
     assert!(output.stdout.is_empty(), "stdout: {:?}", output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("HERDR_WORKSPACE_ID"),
-        "stderr: {stderr}"
-    );
+    assert!(stderr.contains("HERDR_WORKSPACE_ID"), "stderr: {stderr}");
 }
 
 /// `main` really routes `open` to the split placement and `open-tab` to the tab
@@ -310,8 +307,7 @@ fn main_routes_each_subcommand_to_its_own_placement() {
         bin_dir.display(),
         std::env::var("PATH").unwrap_or_default()
     );
-    let context_json =
-        r#"{"workspace_id":"w8","workspace_cwd":"/repo","focused_pane_id":"w8:p1"}"#;
+    let context_json = r#"{"workspace_id":"w8","workspace_cwd":"/repo","focused_pane_id":"w8:p1"}"#;
 
     let run = |sub: &str| {
         scrubbed()
@@ -343,8 +339,7 @@ fn main_routes_each_subcommand_to_its_own_placement() {
     // Each subcommand issues `pane list` before its own `plugin pane open` call (design.md
     // -> "An already-open dashboard is focused, never duplicated"), so four lines total —
     // filter down to the two `plugin pane open` calls to read the placement each produced.
-    let argv_log =
-        std::fs::read_to_string(scratch.path().join("argv.log")).expect("read argv.log");
+    let argv_log = std::fs::read_to_string(scratch.path().join("argv.log")).expect("read argv.log");
     let lines: Vec<&str> = argv_log.lines().collect();
     assert_eq!(lines.len(), 4, "argv.log:\n{argv_log}");
     let opens: Vec<&str> = lines
@@ -363,8 +358,12 @@ fn main_routes_each_subcommand_to_its_own_placement() {
         "open call 1: {}",
         opens[1]
     );
-    assert!(opens[0].contains("--cwd /repo"), "open call 0: {}", opens[0]);
-    assert!(opens[1].contains("--cwd /repo"), "open call 1: {}", opens[1]);
+    // No --cwd is ever passed to `plugin pane open` — corrected in group 10 after a live
+    // check found Herdr 0.8.2 resolves the manifest's *relative* command against --cwd
+    // too, breaking the spawn entirely for any workspace directory that holds no
+    // target/release/ binary of its own (design.md -> Decision 6, corrected).
+    assert!(!opens[0].contains("--cwd"), "open call 0: {}", opens[0]);
+    assert!(!opens[1].contains("--cwd"), "open call 1: {}", opens[1]);
 
     let tab_flag_out = scrubbed()
         .arg("open")
@@ -419,7 +418,11 @@ fn open_never_reaches_status_three() {
         ("open-tab", &open_tab),
         ("open --tab", &open_tab_flag),
     ] {
-        assert!(output.stdout.is_empty(), "{name} stdout: {:?}", output.stdout);
+        assert!(
+            output.stdout.is_empty(),
+            "{name} stdout: {:?}",
+            output.stdout
+        );
     }
     let usage_stderr = String::from_utf8_lossy(&open_tab_flag.stderr);
     assert!(usage_stderr.contains("usage"), "{usage_stderr}");
@@ -496,8 +499,8 @@ fn every_run_pipes_and_scrubs_herdr() {
         spawn_sites += 1;
 
         let uses_output = code[end..].starts_with(".output()");
-        let stdout_piped_or_null = chain.contains(".stdout(Stdio::piped())")
-            || chain.contains(".stdout(Stdio::null())");
+        let stdout_piped_or_null =
+            chain.contains(".stdout(Stdio::piped())") || chain.contains(".stdout(Stdio::null())");
         assert!(
             uses_output || stdout_piped_or_null,
             "spawn site at byte {start} neither uses .output() (which always pipes \

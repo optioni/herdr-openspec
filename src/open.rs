@@ -58,11 +58,10 @@ fn json_field(
 /// **workspace id** is fatal — see `specs/pane-open/spec.md` for the exact field-by-field
 /// fallback table.
 pub fn context(env: &dyn Fn(&str) -> Option<String>) -> Result<Context, String> {
-    let json_obj: Option<serde_json::Map<String, serde_json::Value>> = env(
-        "HERDR_PLUGIN_CONTEXT_JSON",
-    )
-    .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-    .and_then(|v| v.as_object().cloned());
+    let json_obj: Option<serde_json::Map<String, serde_json::Value>> =
+        env("HERDR_PLUGIN_CONTEXT_JSON")
+            .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+            .and_then(|v| v.as_object().cloned());
 
     let plugin_id = crate::config::non_blank(env("HERDR_PLUGIN_ID"))
         .unwrap_or_else(|| "herdr-openspec".to_string());
@@ -76,8 +75,8 @@ pub fn context(env: &dyn Fn(&str) -> Option<String>) -> Result<Context, String> 
     let workspace_cwd = json_field(&json_obj, "workspace_cwd")
         .or_else(|| json_field(&json_obj, "focused_pane_cwd"));
 
-    let focused_pane_id =
-        json_field(&json_obj, "focused_pane_id").or_else(|| crate::config::non_blank(env("HERDR_PANE_ID")));
+    let focused_pane_id = json_field(&json_obj, "focused_pane_id")
+        .or_else(|| crate::config::non_blank(env("HERDR_PANE_ID")));
 
     Ok(Context {
         plugin_id,
@@ -88,22 +87,21 @@ pub fn context(env: &dyn Fn(&str) -> Option<String>) -> Result<Context, String> 
 }
 
 /// Decide whether `listing` (a `herdr pane list` payload) names an existing dashboard
-/// pane for this workspace, and if so, its pane id. A listed pane counts when **all
-/// four** hold: it carries a string `pane_id`, its `label` equals [`DASHBOARD_LABEL`],
-/// its `workspace_id` equals `workspace_id`, and — when `cwd` is `Some` — its `cwd` is
-/// `std::path::Path`-equal to it (component-wise, no canonicalization: both strings
-/// originate from Herdr itself, so a `stat` would buy nothing). When `cwd` is `None` the
-/// cwd test is skipped rather than matching every pane. The first match in the list's
-/// own order wins. `Err` carries a reason when `listing` is not JSON or carries no
-/// `result.panes` array; the caller degrades on it rather than failing
-/// (`specs/pane-open/spec.md` -> Decision 4).
-pub fn existing_pane(
-    listing: &str,
-    workspace_id: &str,
-    cwd: Option<&str>,
-) -> Result<Option<String>, String> {
-    let value: serde_json::Value =
-        serde_json::from_str(listing).map_err(|e| format!("pane list payload is not valid JSON: {e}"))?;
+/// pane for this workspace, and if so, its pane id. A listed pane counts when it carries
+/// a string `pane_id`, its `label` equals [`DASHBOARD_LABEL`], and its `workspace_id`
+/// equals `workspace_id`. The first match in the list's own order wins. `Err` carries a
+/// reason when `listing` is not JSON or carries no `result.panes` array; the caller
+/// degrades on it rather than failing (`specs/pane-open/spec.md` -> Decision 4).
+///
+/// **No longer compares `cwd`.** Measured live against Herdr 0.8.2: passing `--cwd` to
+/// `herdr plugin pane open` also changes what a *relative* pane `command` resolves
+/// against, so `open_args` never passes it (see its own doc comment) and every dashboard
+/// pane this plugin opens reports the **plugin root** as its `cwd`, identically,
+/// regardless of workspace — the value would no longer discriminate anything
+/// (`specs/pane-open/spec.md` -> Decision 6, corrected).
+pub fn existing_pane(listing: &str, workspace_id: &str) -> Result<Option<String>, String> {
+    let value: serde_json::Value = serde_json::from_str(listing)
+        .map_err(|e| format!("pane list payload is not valid JSON: {e}"))?;
     let panes = value
         .get("result")
         .and_then(|r| r.get("panes"))
@@ -129,13 +127,6 @@ pub fn existing_pane(
         if pane_workspace != workspace_id {
             continue;
         }
-        if let Some(want_cwd) = cwd {
-            let pane_cwd = obj.get("cwd").and_then(|v| v.as_str());
-            match pane_cwd {
-                Some(pc) if Path::new(pc) == Path::new(want_cwd) => {}
-                _ => continue,
-            }
-        }
         return Ok(Some(pane_id.to_string()));
     }
     Ok(None)
@@ -151,11 +142,22 @@ pub enum Placement {
 }
 
 /// The exact `herdr plugin pane open` argument vector for `placement`, built purely from
-/// `ctx`. `--target-pane` is omitted (split only) when `ctx.focused_pane_id` is absent,
-/// and `--cwd` is omitted (both) when `ctx.workspace_cwd` is absent — the pane then
-/// inherits the plugin root, a degraded view rather than a refusal. Never issues
-/// `--workspace` for a split or `--target-pane`/`--direction` for a tab: measured against
-/// Herdr 0.8.2, a split targets an existing pane and a tab needs none.
+/// `ctx`. `--target-pane` is omitted (split only) when `ctx.focused_pane_id` is absent.
+/// Never issues `--workspace` for a split or `--target-pane`/`--direction` for a tab:
+/// measured against Herdr 0.8.2, a split targets an existing pane and a tab needs none.
+///
+/// **Never issues `--cwd`**, on any path — corrected from the first draft of this design.
+/// Measured live against Herdr 0.8.2: `herdr plugin pane open --cwd <dir>` resolves the
+/// manifest's *relative* `command` (`./target/release/herdr-openspec`) against `<dir>`
+/// too, not against the plugin root, so passing a workspace directory that holds no
+/// `target/release/herdr-openspec` of its own makes the whole call fail with
+/// `plugin_pane_open_failed` — confirmed directly (`herdr plugin pane open --cwd /tmp
+/// …` → `"Unable to spawn /tmp/./target/release/herdr-openspec because it does not
+/// exist"`), contradicting Herdr's own changelog ("Relative plugin commands now resolve
+/// from the plugin root", unqualified). `herdr-file-viewer` (installed locally, min
+/// 0.7.0) independently reaches the same conclusion: its launcher never passes `--cwd`
+/// either, and instead reads `HERDR_PLUGIN_CONTEXT_JSON` from its own pane process's
+/// environment. This plugin does the same — see `ui::run`'s `startup_cwd`.
 pub fn open_args(placement: Placement, ctx: &Context) -> Vec<String> {
     let mut argv = vec![
         "plugin".to_string(),
@@ -185,10 +187,6 @@ pub fn open_args(placement: Placement, ctx: &Context) -> Vec<String> {
             argv.push("--workspace".to_string());
             argv.push(ctx.workspace_id.clone());
         }
-    }
-    if let Some(cwd) = &ctx.workspace_cwd {
-        argv.push("--cwd".to_string());
-        argv.push(cwd.clone());
     }
     argv.push("--focus".to_string());
     argv
@@ -268,7 +266,7 @@ pub fn run(cli: &dyn crate::cli::HerdrCli, ctx: &Context, placement: Placement) 
     let mut warnings = Vec::new();
 
     let existing = match cli.run(&["pane", "list"]) {
-        Ok(listing) => match existing_pane(&listing, &ctx.workspace_id, ctx.workspace_cwd.as_deref()) {
+        Ok(listing) => match existing_pane(&listing, &ctx.workspace_id) {
             Ok(found) => found,
             Err(reason) => {
                 warnings.push(reason);
@@ -370,10 +368,7 @@ mod tests {
 
     #[test]
     fn context_from_discrete_variables() {
-        let pairs = [
-            ("HERDR_WORKSPACE_ID", "w8"),
-            ("HERDR_PANE_ID", "w8:p1"),
-        ];
+        let pairs = [("HERDR_WORKSPACE_ID", "w8"), ("HERDR_PANE_ID", "w8:p1")];
         let ctx = context(&env(&pairs)).expect("context reads");
         assert_eq!(ctx.workspace_id, "w8");
         assert_eq!(ctx.focused_pane_id.as_deref(), Some("w8:p1"));
@@ -427,63 +422,51 @@ mod tests {
     }
 
     // --- group 4: the pane matcher -----------------------------------------------------
+    // Corrected during group 10's live check: `cwd` dropped entirely (see
+    // `existing_pane`'s doc comment and `open_args`' — every dashboard pane this plugin
+    // opens now reports the plugin root as its `cwd`, identically, so it no longer
+    // discriminates anything).
 
     #[test]
-    fn matches_label_workspace_and_cwd() {
-        let listing = r#"{"id":"cli:pane:list","result":{"panes":[{"pane_id":"w8:pG","label":"OpenSpec","workspace_id":"w8","cwd":"/repo"}],"type":"pane_list"}}"#;
-        let result = existing_pane(listing, "w8", Some("/repo")).expect("parses");
+    fn matches_label_and_workspace() {
+        let listing = r#"{"id":"cli:pane:list","result":{"panes":[{"pane_id":"w8:pG","label":"OpenSpec","workspace_id":"w8","cwd":"/plugin/root"}],"type":"pane_list"}}"#;
+        let result = existing_pane(listing, "w8").expect("parses");
         assert_eq!(result, Some("w8:pG".to_string()));
     }
 
     #[test]
     fn no_match_opens_instead() {
-        let unlabelled = r#"{"result":{"panes":[{"pane_id":"w8:pX","workspace_id":"w8","cwd":"/repo"}]}}"#;
-        assert_eq!(existing_pane(unlabelled, "w8", Some("/repo")), Ok(None));
+        let unlabelled = r#"{"result":{"panes":[{"pane_id":"w8:pX","workspace_id":"w8"}]}}"#;
+        assert_eq!(existing_pane(unlabelled, "w8"), Ok(None));
 
         let empty = r#"{"result":{"panes":[]}}"#;
-        assert_eq!(existing_pane(empty, "w8", Some("/repo")), Ok(None));
+        assert_eq!(existing_pane(empty, "w8"), Ok(None));
     }
 
     #[test]
     fn entry_without_a_pane_id_is_no_match() {
-        let no_id = r#"{"result":{"panes":[{"label":"OpenSpec","workspace_id":"w8","cwd":"/repo"}]}}"#;
-        assert_eq!(existing_pane(no_id, "w8", Some("/repo")), Ok(None));
+        let no_id = r#"{"result":{"panes":[{"label":"OpenSpec","workspace_id":"w8"}]}}"#;
+        assert_eq!(existing_pane(no_id, "w8"), Ok(None));
 
-        let non_string_id = r#"{"result":{"panes":[{"pane_id":5,"label":"OpenSpec","workspace_id":"w8","cwd":"/repo"}]}}"#;
-        assert_eq!(existing_pane(non_string_id, "w8", Some("/repo")), Ok(None));
+        let non_string_id =
+            r#"{"result":{"panes":[{"pane_id":5,"label":"OpenSpec","workspace_id":"w8"}]}}"#;
+        assert_eq!(existing_pane(non_string_id, "w8"), Ok(None));
     }
 
     #[test]
     fn other_workspace_is_no_match() {
-        let listing = r#"{"result":{"panes":[{"pane_id":"wA:pG","label":"OpenSpec","workspace_id":"wA","cwd":"/repo"}]}}"#;
-        assert_eq!(existing_pane(listing, "w8", Some("/repo")), Ok(None));
-    }
-
-    #[test]
-    fn other_cwd_is_no_match() {
-        let listing = r#"{"result":{"panes":[{"pane_id":"w8:pG","label":"OpenSpec","workspace_id":"w8","cwd":"/Users/x/.config/herdr/plugins/github/herdr-openspec-abc"}]}}"#;
-        assert_eq!(existing_pane(listing, "w8", Some("/repo")), Ok(None));
-    }
-
-    #[test]
-    fn cwd_unknown_matches_on_label_and_workspace() {
-        let listing = r#"{"result":{"panes":[{"pane_id":"w8:pG","label":"OpenSpec","workspace_id":"w8","cwd":"/anything"}]}}"#;
-        assert_eq!(
-            existing_pane(listing, "w8", None),
-            Ok(Some("w8:pG".to_string()))
-        );
+        let listing =
+            r#"{"result":{"panes":[{"pane_id":"wA:pG","label":"OpenSpec","workspace_id":"wA"}]}}"#;
+        assert_eq!(existing_pane(listing, "w8"), Ok(None));
     }
 
     #[test]
     fn two_matches_take_the_first() {
         let listing = r#"{"result":{"panes":[
-            {"pane_id":"w8:pG","label":"OpenSpec","workspace_id":"w8","cwd":"/repo"},
-            {"pane_id":"w8:pH","label":"OpenSpec","workspace_id":"w8","cwd":"/repo"}
+            {"pane_id":"w8:pG","label":"OpenSpec","workspace_id":"w8"},
+            {"pane_id":"w8:pH","label":"OpenSpec","workspace_id":"w8"}
         ]}}"#;
-        assert_eq!(
-            existing_pane(listing, "w8", Some("/repo")),
-            Ok(Some("w8:pG".to_string()))
-        );
+        assert_eq!(existing_pane(listing, "w8"), Ok(Some("w8:pG".to_string())));
     }
 
     // --- group 5: the argument vectors and the two pure `main` decisions ---------------
@@ -503,13 +486,25 @@ mod tests {
         assert_eq!(
             argv,
             vec![
-                "plugin", "pane", "open", "--plugin", "herdr-openspec", "--entrypoint",
-                "dashboard", "--placement", "split", "--direction", "right", "--target-pane",
-                "w8:p1", "--cwd", "/repo", "--focus"
+                "plugin",
+                "pane",
+                "open",
+                "--plugin",
+                "herdr-openspec",
+                "--entrypoint",
+                "dashboard",
+                "--placement",
+                "split",
+                "--direction",
+                "right",
+                "--target-pane",
+                "w8:p1",
+                "--focus"
             ]
         );
         assert!(!argv.contains(&"--workspace".to_string()));
         assert!(!argv.contains(&"--no-focus".to_string()));
+        assert!(!argv.contains(&"--cwd".to_string()));
     }
 
     #[test]
@@ -521,26 +516,28 @@ mod tests {
     }
 
     #[test]
-    fn split_argv_without_cwd() {
-        let mut ctx = full_context();
-        ctx.workspace_cwd = None;
-        let argv = open_args(Placement::Split, &ctx);
-        assert!(!argv.contains(&"--cwd".to_string()));
-    }
-
-    #[test]
     fn tab_argv() {
         let argv = open_args(Placement::Tab, &full_context());
         assert_eq!(
             argv,
             vec![
-                "plugin", "pane", "open", "--plugin", "herdr-openspec", "--entrypoint",
-                "dashboard-tab", "--placement", "tab", "--workspace", "w8", "--cwd", "/repo",
+                "plugin",
+                "pane",
+                "open",
+                "--plugin",
+                "herdr-openspec",
+                "--entrypoint",
+                "dashboard-tab",
+                "--placement",
+                "tab",
+                "--workspace",
+                "w8",
                 "--focus"
             ]
         );
         assert!(!argv.contains(&"--target-pane".to_string()));
         assert!(!argv.contains(&"--direction".to_string()));
+        assert!(!argv.contains(&"--cwd".to_string()));
     }
 
     #[test]
@@ -550,7 +547,6 @@ mod tests {
         let tab = open_args(Placement::Tab, &ctx);
         assert_eq!(split[3], tab[3]); // --plugin
         assert_eq!(split[4], tab[4]); // herdr-openspec
-        assert!(split.contains(&"--cwd".to_string()) && tab.contains(&"--cwd".to_string()));
         assert!(split.last().unwrap() == "--focus");
         assert!(tab.last().unwrap() == "--focus");
         // The differing keys: --entrypoint value, --placement value, --direction/--target-pane

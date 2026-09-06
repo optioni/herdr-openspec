@@ -1,5 +1,36 @@
 ## MODIFIED Requirements
 
+### Requirement: The dashboard's own starting directory prefers the workspace context over the process cwd
+
+**Added correcting a finding from this change's own group 10 live check** — see
+`specs/pane-open/spec.md` -> "`open`/`open-tab` never pass `--cwd`" for the full
+measurement. Because `open`/`open-tab` never pass `--cwd`, every dashboard pane Herdr
+starts (whether opened by an action or the pre-existing manual
+`herdr plugin pane open --entrypoint dashboard`) runs with the **plugin root** as its OS
+working directory. `ui::run` SHALL therefore prefer the workspace cwd from its own
+injected `HERDR_PLUGIN_CONTEXT_JSON` / `HERDR_WORKSPACE_ID` environment — read through
+`open::context`, exactly as `open::run_from_env` reads it — over
+`std::env::current_dir()`, falling back to `std::env::current_dir()` only when no usable
+Herdr context is present at all (a bare terminal, `cargo test`, or a Herdr older than
+0.7.0's context injection). This is a pure decision, `ui::startup_cwd(env) ->
+Option<PathBuf>`, taking the same injected-lookup shape `config::config_dir` and
+`state::state_dir` already use.
+
+#### Scenario: The workspace cwd is preferred when Herdr's context names one
+
+- **WHEN** `ui::run`'s process environment carries `HERDR_WORKSPACE_ID` and a
+  `HERDR_PLUGIN_CONTEXT_JSON` naming `workspace_cwd`
+- **THEN** the dashboard searches for `openspec/` starting from that workspace cwd, not
+  from the process's own working directory
+
+#### Scenario: No Herdr context at all falls back to the process's own working directory
+
+- **WHEN** `ui::run`'s process environment carries no Herdr variables
+- **THEN** the dashboard searches starting from `std::env::current_dir()`, exactly as
+  before this change — unchanged for a bare-terminal run, and for every existing
+  `tui-shell`/`repo-resolution`/`changes-from-files` scenario, none of which sets Herdr
+  context
+
 ### Requirement: The `ui` invocation runs the dashboard and needs a terminal
 
 The binary SHALL accept exactly three arguments, each on its own and each with no flags:

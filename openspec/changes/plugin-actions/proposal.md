@@ -51,8 +51,9 @@ This is Phase 6's `plugin-actions` row in `openspec/IMPLEMENTATION-ORDER.md`.
 ## Impact
 
 `src/open.rs` (new), `src/lib.rs` (`parse`, `usage`), `src/main.rs` (dispatch),
-`tests/manifest.rs` (new), `tests/cli.rs`, `herdr-plugin.toml`, `README.md`, `SPEC.md`,
-`AGENTS.md`.
+`src/ui/mod.rs` (`startup_cwd`, added correcting a group 10 live-check finding — see
+design.md -> Decision 6, corrected), `tests/manifest.rs` (new), `tests/cli.rs`,
+`herdr-plugin.toml`, `README.md`, `SPEC.md`, `AGENTS.md`.
 
 Gates: `LAUNCHSEAM`'s script body gains an `ENTRY` parameter and a second invocation;
 `LAUNCHSEAM` and `AGENTSEAM` take a deliberate `ALLOWED` edit and `READONLY-UI` an `EXTRA`

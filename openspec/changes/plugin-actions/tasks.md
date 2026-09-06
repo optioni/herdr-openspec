@@ -384,45 +384,91 @@
 ## 10. Herdr's own acceptance of the manifest
 <!-- kind: operational -->
 
-- [ ] 10.1 CHECK: Confirm `herdr --version` reports 0.8.2 and record `herdr pane list` and
+- [x] 10.1 CHECK: Confirm `herdr --version` reports 0.8.2 and record `herdr pane list` and
   `herdr plugin list` as the pre-task state this group restores. These three scenarios
   cannot run in `make check` (`quality-gates` → "The gates do not depend on Herdr"), so
   this group is the only place they are exercised.
 
-- [ ] 10.2 VERIFY: `make build`, confirm `target/release/herdr-openspec` exists and is
+  **Recorded:** `herdr 0.8.2`. `herdr pane list` — 9 panes across 5 workspaces (`wD`, `wA`,
+  `w8`, `w9`, `wC`), none belonging to this plugin. `herdr plugin list` — `herdr-openspec`
+  **not** linked.
+
+- [x] 10.2 VERIFY: `make build`, confirm `target/release/herdr-openspec` exists and is
   executable, then `herdr plugin link .` and
   `herdr plugin action list --plugin herdr-openspec`. Paste the output; it must list `open`
   and `open-tab` with the titles `OpenSpec: dashboard` and `OpenSpec: dashboard (tab)`.
   Covers "Herdr links the working tree".
 
-- [ ] 10.3 VERIFY: Open, confirm, and close the split pane. Read the pane id from
-  `result.plugin_pane.pane.pane_id`, and record the returned pane's `cwd` field **verbatim**
-  beside the `--cwd` that was passed — that comparison is the only guard on the matcher's
-  string equality (design.md → Risks).
+  **Recorded:** `make build` — release binary built (Mach-O 64-bit arm64). `herdr plugin
+  link .` — exit 0, `"type":"plugin_linked"`. `herdr plugin action list --plugin
+  herdr-openspec` — both actions listed with exactly the titles above.
 
-  ```sh
-  herdr plugin pane open --plugin herdr-openspec --entrypoint dashboard \
-    --placement split --direction right \
-    --target-pane "$(herdr pane current | python3 -c 'import sys,json;print(json.load(sys.stdin)["result"]["pane"]["pane_id"])')" \
-    --cwd "$PWD" --focus
-  herdr plugin pane close <pane_id>
-  ```
+- [x] 10.3 VERIFY: Open, confirm, and close the split pane. Read the pane id from
+  `result.plugin_pane.pane.pane_id`.
+
+  **First run (as originally written, `--cwd "$PWD"` where `$PWD` happened to equal the
+  plugin root) succeeded** — pane `w8:pK` opened, `cwd` echoed back
+  `/Users/juusopiikkila/Code/herdr-openspec`, byte-identical to `--cwd`. Closed cleanly.
+
+  **A follow-up probe with `--cwd` set to a directory that is NOT the plugin root
+  (`/tmp`, then a real second workspace's cwd) failed outright** —
+  `{"error":{"code":"plugin_pane_open_failed","message":"Unable to spawn
+  /tmp/./target/release/herdr-openspec because it does not exist"}}` — revealing that
+  Herdr 0.8.2 resolves the manifest's relative `command` against `--cwd` too, not only
+  against the plugin root. See design.md → Decision 6 (corrected) for the full
+  measurement and the repair (`open_args` never passes `--cwd`; `ui::run` gains
+  `startup_cwd`). **Re-run after the repair**, with no `--cwd` at all: pane opens
+  correctly, `cwd` is the plugin root, and stays open. Closed cleanly.
 
   Covers "The dashboard pane launches the binary and stays open".
 
-- [ ] 10.4 VERIFY: The same for `--entrypoint dashboard-tab --placement tab --workspace <id>
-  --cwd "$PWD"`, confirming a new tab holding a pane labelled `OpenSpec`, then close it.
+- [x] 10.4 VERIFY: The same for `--entrypoint dashboard-tab --placement tab --workspace <id>`
+  (no `--cwd`, per the group 10 correction), confirming a new tab holding a pane labelled
+  `OpenSpec`, then close it.
+
+  **Recorded:** opened in workspace `wC` (`oracle`, previously 1 tab) — new pane `wC:p7`,
+  tab count 1→2, `label: "OpenSpec"`. Closed: tab count back to 1.
   Covers "The tab pane opens in its own tab".
 
-- [ ] 10.5 VERIFY: Invoke each action for real — `herdr plugin action invoke open --plugin
+- [x] 10.5 VERIFY: Invoke each action for real — `herdr plugin action invoke open --plugin
   herdr-openspec`, then again — and confirm the second invocation **focuses** rather than
-  opening a second pane (`herdr pane list` shows one pane labelled `OpenSpec`, and its
-  `cwd` equals the workspace cwd). Repeat for `open-tab`.
+  opening a second pane. Repeat for `open-tab`.
 
-- [ ] 10.6 CHECK: Record `herdr plugin log` for the invoked actions, confirming stdout was
+  **First attempt (before the `--cwd` repair) failed**: invoking `open` from workspace
+  `wC` (whose cwd is `/Users/juusopiikkila/Code/kubernetes/oracle`, not the plugin root)
+  produced `plugin_log`'s `status: "failed"`, `exit_code: 1`,
+  `"Unable to spawn /Users/juusopiikkila/Code/kubernetes/oracle/./target/release/herdr-openspec
+  because it does not exist"` — this **is** the group 10 discovery; task 10.3's own probe
+  above just isolated the cause. **After the repair, rebuilt (`make build`) and re-run**:
+  `open` invoked twice from workspace `wC` — first opens pane `wC:p9` (`cwd`: plugin
+  root), second **focuses** it (`herdr pane list` still shows exactly one `OpenSpec`
+  pane). `open-tab` invoked twice more — both **also** focus the same `wC:p9` (cross-
+  placement focus, Decision 3), pane count still 1. All four invocations `exit_code: 0`.
+
+- [x] 10.6 CHECK: Record `herdr plugin log` for the invoked actions, confirming stdout was
   empty and no reason was written on success. Then close every pane opened, `herdr plugin
   unlink herdr-openspec` if the tree was not linked before 10.2, and confirm `herdr pane
   list` and `herdr plugin list` match 10.1's recorded state.
+
+  **Recorded:** all four post-repair invocations logged `"status":"succeeded"`,
+  `"exit_code":0`, `"stdout":""`, `"stderr":""`. Closed `wC:p9`; `herdr plugin unlink
+  herdr-openspec` — `"removed":true`. Final: `herdr pane list` — 9 panes (matches 10.1);
+  `herdr plugin list` — `herdr-openspec` not present (matches 10.1).
+
+**Correction recorded**: this group's own live check found that design.md's Decision 6
+(pass `--cwd` to make the pane follow the workspace) does not work on Herdr 0.8.2 — see
+design.md → Decision 6 (corrected), `specs/pane-open/spec.md` → "`open`/`open-tab` never
+pass `--cwd`", and `specs/plugin-build/spec.md` → "The dashboard's own starting directory
+prefers the workspace context over the process cwd". Repairs applied to `src/open.rs`
+(`existing_pane` drops its `cwd` parameter; `open_args` never emits `--cwd`) and
+`src/ui/mod.rs` (new `startup_cwd`, 3 new unit tests). Groups 4 and 5's own tests updated
+to match (`matches_label_workspace_and_cwd` → `matches_label_and_workspace`;
+`other_cwd_is_no_match` and `cwd_unknown_matches_on_label_and_workspace` removed —
+no longer meaningful; `split_argv_without_cwd` removed — folded into `split_argv`, since
+`--cwd` is now never emitted). `tests/cli.rs`'s `main_routes_each_subcommand_to_its_own_placement`
+updated to assert the **absence** of `--cwd` rather than its presence. Full suite
+re-verified green after the repair (939 lib tests, 9 cli tests, 4 manifest tests, clippy
+clean) before this group's checklist was marked done.
 
 ## 11. The gate roster at its measured floors
 <!-- kind: operational -->
