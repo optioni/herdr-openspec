@@ -2009,6 +2009,96 @@ mod tests {
             assert_eq!(problems, &vec!["watch failed".to_string()]);
         }
 
+        /// `agent-polling`'s three compile-time companions `design.md` -> Contracts
+        /// names alongside `Dashboard`'s own: an `Agent` destructured naming all eight
+        /// fields, a `Listed` naming both, and an `AgentSnapshot` naming all three — so
+        /// a field added to any of the three fails to compile at this site rather than
+        /// passing a source grep that never saw it.
+        #[test]
+        fn agent_destructures_into_exactly_eight_fields() {
+            let agent = crate::agents::Agent {
+                name: Some("agent-polling".to_string()),
+                kind: Some("claude".to_string()),
+                status: crate::agents::AgentStatus::Idle,
+                cwd: Some(std::path::PathBuf::from("/repo")),
+                pane_id: "w8:p1".to_string(),
+                tab_id: "w8:t1".to_string(),
+                workspace_id: "w8".to_string(),
+                terminal_title: Some("a title".to_string()),
+            };
+            let crate::agents::Agent {
+                name,
+                kind,
+                status,
+                cwd,
+                pane_id,
+                tab_id,
+                workspace_id,
+                terminal_title,
+            } = &agent;
+            assert_eq!(name, &Some("agent-polling".to_string()));
+            assert_eq!(kind, &Some("claude".to_string()));
+            assert_eq!(*status, crate::agents::AgentStatus::Idle);
+            assert_eq!(cwd, &Some(std::path::PathBuf::from("/repo")));
+            assert_eq!(pane_id, "w8:p1");
+            assert_eq!(tab_id, "w8:t1");
+            assert_eq!(workspace_id, "w8");
+            assert_eq!(terminal_title, &Some("a title".to_string()));
+        }
+
+        #[test]
+        fn listed_destructures_into_exactly_two_fields() {
+            let listed = crate::agents::Listed {
+                agents: Vec::new(),
+                problems: vec!["bad entry".to_string()],
+            };
+            let crate::agents::Listed { agents, problems } = &listed;
+            assert!(agents.is_empty());
+            assert_eq!(problems, &vec!["bad entry".to_string()]);
+        }
+
+        #[test]
+        fn agent_snapshot_destructures_into_exactly_three_fields() {
+            let snapshot = crate::agents::AgentSnapshot {
+                agents: Vec::new(),
+                reachable: true,
+                problem: Some("partial".to_string()),
+            };
+            let crate::agents::AgentSnapshot {
+                agents,
+                reachable,
+                problem,
+            } = &snapshot;
+            assert!(agents.is_empty());
+            assert!(*reachable);
+            assert_eq!(problem, &Some("partial".to_string()));
+        }
+
+        /// `Dashboard` still carries no thread, channel, or clock: `AgentSnapshot` is
+        /// plain data, and the poller itself reaches the loop through
+        /// `ui::driver::Live`, never through the state value.
+        #[test]
+        fn dashboard_is_clone_and_eq_with_agents() {
+            let mut d = dashboard_at(Route::List);
+            d.agents = crate::agents::AgentSnapshot {
+                agents: vec![crate::agents::Agent {
+                    name: None,
+                    kind: Some("claude".to_string()),
+                    status: crate::agents::AgentStatus::Working,
+                    cwd: None,
+                    pane_id: "w8:p1".to_string(),
+                    tab_id: "w8:t1".to_string(),
+                    workspace_id: "w8".to_string(),
+                    terminal_title: None,
+                }],
+                reachable: true,
+                problem: None,
+            };
+            let cloned = d.clone();
+            assert_eq!(d, cloned);
+            assert_eq!(d.agents.agents.len(), 1);
+        }
+
         #[test]
         fn the_digit_keys_select_tabs_and_near_misses_do_not() {
             assert_eq!(

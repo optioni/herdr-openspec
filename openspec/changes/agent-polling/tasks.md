@@ -700,7 +700,7 @@ honestly start red. These are guards written against structure that already exis
 lifecycle the schema names for that is CHECK → CHANGE → VERIFY, and the deterministic failing
 check is 8.4's plant rather than an invented RED.
 
-- [ ] 8.1 CHECK: Write `ui::view::tests::agents_change_no_pixel` — the same `Dashboard` rendered
+- [x] 8.1 CHECK: Write `ui::view::tests::agents_change_no_pixel` — the same `Dashboard` rendered
       at 120x20 and 60x20 with the initial snapshot, a two-agent reachable snapshot, and an
       unreachable snapshot carrying a long `problem`, asserting the three buffers are identical
       cell for cell at each width — and the four `ui::app::tests::` tests (the ten-field
@@ -708,27 +708,38 @@ check is 8.4's plant rather than an invented RED.
       `dashboard_is_clone_and_eq_with_agents`). Run them and record that they pass, which is the
       finding: the field is inert and stays inert.
 
-- [ ] 8.2 CHANGE: If any of the five is red, fix `src/ui/app.rs` or `src/ui/view.rs` until it is
+- [x] 8.2 CHANGE: If any of the five is red, fix `src/ui/app.rs` or `src/ui/view.rs` until it is
       green — a red result here means group 1 left the field rendered or defaulted. Otherwise
       record that no change was needed.
+      **Recorded:** all five passed immediately (`ui::view::tests::agents_change_no_pixel`,
+      `agent_destructures_into_exactly_eight_fields`, `listed_destructures_into_exactly_two_fields`,
+      `agent_snapshot_destructures_into_exactly_three_fields`, `dashboard_is_clone_and_eq_with_agents`)
+      — no change was needed, confirming the field is inert and stays inert.
 
-- [ ] 8.3 CHECK: Plant `#[derive(Default)]` above `struct Agent` and, separately, a multi-line
+- [x] 8.3 CHECK: Plant `#[derive(Default)]` above `struct Agent` and, separately, a multi-line
       `..s` inside an `AgentSnapshot` literal; run
       `HOMEFILE=src/agents.rs TYPES='Agent Listed AgentSnapshot' SCAN_MIN=<measured>
       sh $CHECKS/NODEFAULT-UI.sh` after each, record exit **1** and the FAIL line, and revert.
       Both were run against a stub module at planning time and reported half A and half B
       respectively.
+      **Recorded:** half A: `NODEFAULT-UI FAIL: Agent has a Default:` naming the planted derive
+      line; half B: `NODEFAULT-UI FAIL: multi-line-aware half B: src/agents.rs:85: AgentSnapshot
+      literal or pattern elides a field`. Both reverted; clean run green at 78 spans.
 
-- [ ] 8.4 CHECK: Plant a `Change {` literal in `src/agents.rs`, run
+- [x] 8.4 CHECK: Plant a `Change {` literal in `src/agents.rs`, run
       `MIN=22 sh $CHECKS/NOLIT-CHANGE.sh`, record exit **1**, and revert — the plant
       `specs/dashboard-loop/spec.md` requires and the only one that proves the file-count raise
       from 21 to 22 covers the new module.
+      **Recorded:** `NOLIT-CHANGE FAIL: a Change/ChangeSet literal outside src/changes.rs:`
+      naming `src/agents.rs`. Reverted; clean run green at 22 files searched.
 
-- [ ] 8.5 VERIFY: `testcount --lib 'ui::app::tests::' 59` and `testcount --lib
+- [x] 8.5 VERIFY: `testcount --lib 'ui::app::tests::' 59` and `testcount --lib
       'ui::view::tests::' 82`, then `SCAN_MIN=90 TYPES='Dashboard Filter Detail Refresh' sh
       $CHECKS/NODEFAULT-UI.sh` and the second invocation above. Measure the second invocation's
       span count from its own OK line and set its `SCAN_MIN` to that measured value — never
       above it, and never below 1. Commit.
+      **Recorded:** 59/59 and 82/82 tests; first invocation 165 spans (>= 90); second invocation
+      measured at **78** spans, `SCAN_MIN=78` set accordingly.
 
 ## 9. `Live`'s third field and the loop's fourth live step
 <!-- kind: behavior -->

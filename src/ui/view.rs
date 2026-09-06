@@ -2969,4 +2969,79 @@ mod tests {
             );
         }
     }
+
+    /// `agent-polling`: nothing renders `Dashboard.agents` in this change — the same
+    /// `Dashboard` rendered with three different `agents` snapshots must draw the exact
+    /// same buffer, cell for cell, at both mandated widths. `SPEC.md` -> Degraded states
+    /// records an unreachable socket as "runs as a standalone TUI", which is silence,
+    /// not a message, so even a long `problem` string must appear nowhere on screen.
+    #[test]
+    fn agents_change_no_pixel() {
+        for width in [120u16, 60u16] {
+            let base = dashboard_with(
+                vec![fixture::active("alpha", 4, 9)],
+                Vec::new(),
+                0,
+                Route::List,
+            );
+
+            // `base` already carries `ui::load`'s own startup default: no agents,
+            // unreachable, no problem — this is the "initial" snapshot.
+            let initial = base.clone();
+
+            let mut reachable = base.clone();
+            reachable.agents = crate::agents::AgentSnapshot {
+                agents: vec![
+                    crate::agents::Agent {
+                        name: Some("agent-polling".to_string()),
+                        kind: Some("claude".to_string()),
+                        status: crate::agents::AgentStatus::Working,
+                        cwd: Some(std::path::PathBuf::from("/repo")),
+                        pane_id: "w8:p1".to_string(),
+                        tab_id: "w8:t1".to_string(),
+                        workspace_id: "w8".to_string(),
+                        terminal_title: None,
+                    },
+                    crate::agents::Agent {
+                        name: None,
+                        kind: Some("claude".to_string()),
+                        status: crate::agents::AgentStatus::Idle,
+                        cwd: None,
+                        pane_id: "w8:p2".to_string(),
+                        tab_id: "w8:t2".to_string(),
+                        workspace_id: "w8".to_string(),
+                        terminal_title: None,
+                    },
+                ],
+                reachable: true,
+                problem: None,
+            };
+
+            let mut unreachable = base.clone();
+            unreachable.agents = crate::agents::AgentSnapshot {
+                agents: Vec::new(),
+                reachable: false,
+                problem: Some(
+                    "herdr agent list: could not start herdr: No such file or directory \
+                     (os error 2) — a deliberately long reason, long enough to overflow \
+                     any reasonable terminal width if it were ever rendered anywhere"
+                        .to_string(),
+                ),
+            };
+
+            let buf_initial = render_at(width, 20, &initial);
+            let buf_reachable = render_at(width, 20, &reachable);
+            let buf_unreachable = render_at(width, 20, &unreachable);
+
+            assert_eq!(
+                buf_initial, buf_reachable,
+                "width {width}: a reachable snapshot must change no pixel"
+            );
+            assert_eq!(
+                buf_initial, buf_unreachable,
+                "width {width}: an unreachable snapshot, even with a long problem, must \
+                 change no pixel"
+            );
+        }
+    }
 }
