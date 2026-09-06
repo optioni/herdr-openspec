@@ -2977,7 +2977,7 @@ mod tests {
     /// not a message, so even a long `problem` string must appear nowhere on screen.
     #[test]
     fn agents_change_no_pixel() {
-        for width in [120u16, 60u16] {
+        for width in [120, 60] {
             let base = dashboard_with(
                 vec![fixture::active("alpha", 4, 9)],
                 Vec::new(),

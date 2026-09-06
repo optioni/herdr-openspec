@@ -845,7 +845,7 @@ check is 8.4's plant rather than an invented RED.
 ## 11. The architecture checks, all green together
 <!-- kind: operational -->
 
-- [ ] 11.1 CHECK: Run all twenty-seven gates at their landed invocations, in one pass, and
+- [x] 11.1 CHECK: Run all twenty-seven gates at their landed invocations, in one pass, and
       record every exit status and OK line: `MIN=22 NOSPAWN-GREP`; `MIN=22 NOLIT-CHANGE`;
       `UI_MIN=11 NOCLI-SHELL`; `NOIO-VIEW`; `READSEAM`; `MDSEAM`; `NOTABSEAM`; `TASKSEAM`;
       `MIN=24 WATCHSEAM`; `MIN=22 AGENTSEAM`; `NOBLOCK`; `SLEEP_MIN=4 MIN=25 NOSLEEP`;
@@ -855,13 +855,26 @@ check is 8.4's plant rather than an invented RED.
       `GRAPH-SNAP`; `BASE=$BASE OPENSPEC-UNTOUCHED`.
       **Red when:** any is not green, including `DEPS` and `GRAPH-SNAP`, which this change does
       not edit because it adds no dependency.
+      **Found and fixed during this pass:** `WIDTHS` failed on `agents_change_no_pixel` —
+      `for width in [120u16, 60u16]` suffixes the integer literals, and the check's
+      `\b(\d+)\b` word-boundary regex does not match a digit run directly touching a
+      following letter (`120u16` is one token, not `120` + `u16`), so neither number counted.
+      Every other width-parameterised test in `src/ui/view.rs` already writes the bare form;
+      changed to `for width in [120, 60]` (type inferred from `render_at`'s signature, as
+      elsewhere in the file) and reverified green. All twenty-seven gates green in one pass
+      after that fix; every exit status and OK line recorded above in this session's own
+      command output.
 
-- [ ] 11.2 CHECK: Prove `READONLY-UI`'s extension is load-bearing, not decorative. Plant
+- [x] 11.2 CHECK: Prove `READONLY-UI`'s extension is load-bearing, not decorative. Plant
       `std::fs::write` in `src/agents.rs`'s **production** slice, run with `src/agents.rs` in
       `EXTRA` (expect exit 1) and again without it (expect exit 0), then revert. Both were run at
       planning time and produced exactly that pair.
+      **Recorded:** with `src/agents.rs` in `EXTRA` — `READONLY-UI FAIL: a write API in
+      production code under src/ui:` naming the planted line; without it — green. Reverted.
 
-- [ ] 11.3 VERIFY: `make check`, then `BASE=$BASE sh $CHECKS/OPENSPEC-UNTOUCHED.sh`. Commit.
+- [x] 11.3 VERIFY: `make check`, then `BASE=$BASE sh $CHECKS/OPENSPEC-UNTOUCHED.sh`. Commit.
+      **Recorded:** `make check` exits 0, 805 tests passed, 97.26% lines. `OPENSPEC-UNTOUCHED`
+      green.
 
 ## 12. Documentation
 <!-- kind: operational -->
