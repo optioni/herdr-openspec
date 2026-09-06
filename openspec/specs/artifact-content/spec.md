@@ -1,7 +1,17 @@
 # artifact-content Specification
 
 ## Purpose
-TBD - created by archiving change detail-view. Update Purpose after archive.
+Governs what the detail region's body actually holds: `Dashboard::sync_detail` resolves the
+selected `(change directory, tab)` pair into text by reading the artifact's files through a
+single injected reader closure — one production binding, `ui::read_artifact`, so no view file
+ever names a filesystem API — concatenating multiple paths in resolution order, caching on the
+key so an unchanged selection re-reads nothing, and re-reading when a live refresh forces it
+without throwing a mid-document reader back to line one. It also fixes what the content area
+shows: problem rows for files that failed to read, then either the markdown body or, for the
+schema's tracked-tasks artifact, the checklist body, and `No content yet` only when there is
+neither content nor a reason. Which tabs exist is `artifact-tabs`', how far the body scrolls is
+`detail-scroll`'s, and the two bodies' own grammars belong to `markdown-render` and
+`tasks-checklist`.
 
 ## Requirements
 

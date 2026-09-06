@@ -1,7 +1,16 @@
 # tasks-checklist Specification
 
 ## Purpose
-TBD - created by archiving change tasks-tab. Update Purpose after archive.
+The detail tab that renders a change's task file as a checklist instead of markdown: the
+single decision — made from the selected artifact's `tracks_tasks` flag, never from its id or
+filename — that swaps `ui::markdown::lines` for `ui::tasks::lines`, and the line grammar that
+results, with heading lines reproduced from their level, one `[x]`/`[ ]` glyph line per item
+preserving the parse's own indent, hanging-indent wrapping, whole-indent dropping as the width
+collapses, and blank separators between groups. It fixes `No tasks yet` for a source that
+holds no items, kept distinct from `artifact-content`'s `No content yet` for a source that
+does not exist, and it carries the read-only guarantee: no key toggles an item, no action
+mutates a `Change`, and no module the dashboard reaches names a filesystem write API. The bar
+that leads the tab is `tasks-progress-bar`'s.
 
 ## Requirements
 

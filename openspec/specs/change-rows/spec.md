@@ -1,7 +1,16 @@
 # change-rows Specification
 
 ## Purpose
-TBD - created by archiving change list-view. Update Purpose after archive.
+Fixes the text of every line the Changes region can hold and the order they appear in: launch
+problems, then refresh problems, then change-set problems, then the active changes, then an
+archived separator emitted only when archived rows follow it, then those rows. The row grammar
+itself lives here — the selection marker, the padded-or-ellipsised name field, an archived row's
+ten-column date field, the optional one-character agent badge, and the right-aligned `[n/m]` or
+`[-]` progress cell — together with the fixed order in which whole cells are dropped as the
+width falls, and the exact wording of every empty and degraded body state, from
+`No changes yet` to the three-row no-repository block. Rows are pure and never re-order what
+the `ChangeSet` gave them; which slice of them is on screen is `list-selection`'s and which
+survive the query is `list-filtering`'s.
 
 ## Requirements
 

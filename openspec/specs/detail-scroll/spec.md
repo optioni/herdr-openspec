@@ -1,7 +1,16 @@
 # detail-scroll Specification
 
 ## Purpose
-TBD - created by archiving change markdown-viewer. Update Purpose after archive.
+Answers where in a long artifact the reader is and which slice of it reaches the buffer: the
+`detail.scroll` offset as a user-controlled position, `j`/`k`/arrows moving it by a line at the
+detail route while the same actions move the list selection at the list route, every route move
+resetting it to the top, and `layout::scroll_offset` deriving the drawn window on every frame
+from the current content area rather than from anything stored. It also fixes the drawing side —
+lines painted below the header and tab-bar rows, each segment styled by the one `Face`-to-`Style`
+mapping in `ui::view`, never past a border, never panicking at a one-row interior — and requires
+`normalise_scroll` to clamp the stored offset against the same `content_lines` the draw used, so
+a switch between the markdown and checklist bodies cannot leave an offset valid for one applied
+to the other. The line lists themselves come from `markdown-render` and `tasks-checklist`.
 
 ## Requirements
 

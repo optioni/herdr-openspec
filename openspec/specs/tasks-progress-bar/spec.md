@@ -1,7 +1,15 @@
 # tasks-progress-bar Specification
 
 ## Purpose
-TBD - created by archiving change tasks-tab. Update Purpose after archive.
+The single line that leads the tracked-tasks tab: a bare `█`/`░` gauge, then
+`ui::list::progress_cell`'s `[<completed>/<total>]`, then a truncated integer percentage,
+separated by one space each and filling exactly the interior width. It fixes that the gauge
+is full if and only if the change is complete and empty whenever nothing is done, that the
+fields degrade by being dropped whole in a fixed order — percentage, then gauge, then the
+whole line — as the width narrows, and that a change with no tasks shows `[-]` alone rather
+than an invented `0%`. The number it renders is the change's own `progress` field, shared with
+the list row and the detail header, never a recount of the source the checklist beneath it
+parses.
 
 ## Requirements
 

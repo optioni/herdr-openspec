@@ -1,7 +1,16 @@
 # schema-cli-fallback Specification
 
 ## Purpose
-TBD - created by archiving change changes-from-cli. Update Purpose after archive.
+Recovers the one schema-loading failure a disk-only read cannot fix: when `schema::load`
+reports the schema is simply not vendored in the repository, `from_cli` asks
+`openspec schema which <name> --json` for the directory it lives in — the user or
+CLI-package tier that holds `spec-driven` — and parses it with the same loader. It fixes
+that an unreadable or invalid vendored file is never re-asked of the CLI, that every way this
+tier can fail (unstartable binary, non-zero exit, unusable payload, a named directory with no
+or a broken `schema.yaml`) degrades that change alone with exactly one named problem, that the
+payload must be whole JSON with no tolerated leading noise, and that resolution is cached per
+name per call so twelve changes sharing a schema cost one invocation. Parsing the schema file
+itself remains `schema-artifacts`'.
 
 ## Requirements
 

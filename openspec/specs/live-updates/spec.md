@@ -1,7 +1,17 @@
 # live-updates Specification
 
 ## Purpose
-TBD - created by archiving change live-refresh. Update Purpose after archive.
+Covers the dashboard side of keeping the pane current: the `Refresh` state, the `r`
+key that only sets a flag the loop later turns into a request, `Dashboard::adopt` preserving the
+reader's selection by change **name** across a refresh that reorders the list, and the forced
+reload that re-reads the artifact on screen without throwing a scrolled reader back to line one.
+Its central obligation is that none of this may ever make the draw wait: the loop's live
+steps run in a fixed order before the frame, every collaborator method is non-blocking, and that
+claim is enforced structurally inside the seam modules rather than by any elapsed-time test.
+It also fixes that the whole live tier writes nothing under `openspec/`, and that refresh
+problems render as leading `!` rows between launch problems and change-set problems. The
+watcher, the worker and the poller themselves are `watch-invalidation`'s, `refresh-worker`'s
+and `agent-poller`'s.
 
 ## Requirements
 

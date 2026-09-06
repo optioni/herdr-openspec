@@ -1,7 +1,15 @@
 # plugin-config Specification
 
 ## Purpose
-TBD - created by archiving change plugin-config. Update Purpose after archive.
+Reads the plugin's own `config.toml` into the settings the dashboard is tuned by —
+`openspec_bin`, `agent_kind`, and `archived_count` — each with a documented default, after
+resolving the configuration directory from an injected environment lookup
+(`HERDR_PLUGIN_CONFIG_DIR`, else the `$HOME/.config/herdr/...` path Herdr itself prints,
+deliberately ignoring `XDG_CONFIG_HOME`). Loading never fails: malformed TOML, wrong-typed
+keys, and a negative count each degrade to the default while recording a human-readable
+problem, and a configured `openspec_bin` is tilde/`$HOME`-expanded but never tested for
+existence — probing it belongs to `openspec-binary`. Reading configuration spawns nothing and
+writes nothing; the writing half of the plugin's own directories is `plugin-state`'s.
 
 ## Requirements
 

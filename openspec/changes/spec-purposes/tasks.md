@@ -206,7 +206,7 @@ named**; a gate invoked bare runs at its block default, which is a threshold nob
   Run at planning time: exit **1**, `FAIL: 26 capability specs still hold the archiver
   placeholder`. It cannot be green before group 1.2 — the behaviour does not exist yet.
 
-- [ ] 1.2 GREEN: Write the Purpose for the first thirteen capabilities — `artifact-content`,
+- [x] 1.2 GREEN: Write the Purpose for the first thirteen capabilities — `artifact-content`,
   `artifact-tabs`, `change-merge`, `change-rows`, `ci-workflow`, `cli-changes`,
   `dashboard-loop`, `detail-header`, `detail-scroll`, `list-filtering`, `list-selection`,
   `live-updates`, `markdown-render`. Read each capability's own `### Requirement:` headings
@@ -214,7 +214,11 @@ named**; a gate invoked bare runs at its block default, which is a threshold nob
   draft per capability with the requirements it was derived from, and is a reference, not an
   authority. Two capabilities must not end up with interchangeable Purposes.
 
-- [ ] 1.3 GREEN: The same for the remaining thirteen — `pane-open`, `plugin-build`,
+  **Done.** Each of the 13 was re-derived from its own `### Requirement:` headings (the
+  drafts were used as a starting point, lightly tightened where they referenced a stale
+  count).
+
+- [x] 1.3 GREEN: The same for the remaining thirteen — `pane-open`, `plugin-build`,
   `plugin-config`, `plugin-manifest`, `plugin-state`, `quality-gates`, `refresh-worker`,
   `responsive-layout`, `schema-cli-fallback`, `tasks-checklist`, `tasks-progress-bar`,
   `terminal-lifecycle`, `watch-invalidation`. The `tasks-*` cluster and
@@ -226,14 +230,37 @@ named**; a gate invoked bare runs at its block default, which is a threshold nob
   `repo-discovery`, `schema-artifacts`, `schema-selection`, `subprocess-seam`,
   `task-checkboxes`, `task-groups`.
 
-- [ ] 1.4 REFACTOR: Read the 26 Purposes as a set and remove any that restates its
+  **Done.** `plugin-build`'s draft was updated to also name `scripts/gates/deps.sh` and
+  `scripts/gates/build-graph.sh` (this change's own repair) rather than the pre-repair
+  command-level gates. `quality-gates`'s draft was updated the same way, plus naming the
+  Purpose-guard test itself. `tasks-checklist` (the grammar) and `tasks-progress-bar` (the
+  leading gauge line) read as clearly distinct subjects; `schema-cli-fallback` (asking the
+  CLI when a schema is not vendored) does not overlap the already-written
+  `schema-artifacts` (parsing a vendored schema) or `schema-selection` (choosing a schema
+  name).
+
+- [x] 1.4 REFACTOR: Read the 26 Purposes as a set and remove any that restates its
   capability's name or duplicates a sibling's scope claim. If none does, state that here and
   say what was compared.
 
-- [ ] 1.5 VERIFY: `cargo test --test spec_purposes` — three tests, green.
+  **None does.** Compared all 26 opening sentences pairwise for restated names and
+  overlapping scope claims (see the grep of each spec's fourth line, run during this task):
+  every one opens on a distinct verb and subject (e.g. "Governs...", "Owns...", "Fixes...",
+  "Specifies...", "Recovers...", "Turns..."), and each closes by naming the sibling
+  capability its own scope stops at (e.g. `artifact-content` → `artifact-tabs`/
+  `detail-scroll`; `tasks-checklist` → `tasks-progress-bar`). No edit was needed.
+
+- [x] 1.5 VERIFY: `cargo test --test spec_purposes` — three tests, green.
   `grep -l 'TBD - created by archiving' openspec/specs/*/spec.md | wc -l` is **0**.
   `openspec validate --specs --strict` exits **0** with `Totals: 40 passed, 0 failed`.
   `BASE=<0.1> sh $CHECKS/OPENSPEC-UNTOUCHED-SP.sh` exits 0. Commit.
+
+  **Verified:** `cargo test --test spec_purposes` — 3 passed, 0 failed. Placeholder grep
+  count = 0. `openspec validate --specs --strict` → `Totals: 40 passed, 0 failed (40 items)`
+  (INFO-level "Requirement text is very long" notices on several capabilities are
+  pre-existing and not warnings or failures). `OPENSPEC-UNTOUCHED-SP.sh` at
+  `BASE=1f9f29a` → `OPENSPEC-UNTOUCHED OK: 26 Purpose-only spec edits, nothing else under
+  openspec/`.
 
 ## 2. The dependency gate becomes a file, with a re-derived want-list
 <!-- kind: operational -->

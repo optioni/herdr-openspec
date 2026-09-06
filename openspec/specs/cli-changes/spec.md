@@ -1,7 +1,17 @@
 # cli-changes Specification
 
 ## Purpose
-TBD - created by archiving change changes-from-cli. Update Purpose after archive.
+Describes the second producer of a change set, `changes::from_cli`: the exact two argument
+vectors it may run through the `OpenspecCli` seam (`list --json` once, then
+`instructions apply --change <n> --json` per change), what it takes from each payload —
+progress from the list envelope rather than apply's differently-computed figure, artifacts
+placed at their schema positions from `contextFiles`, all seven `Change` fields named
+explicitly — and its own byte-order re-sort rather than the CLI's locale-collated `--sort`.
+Everything else here is refusal and degradation: no mutating or `status` vector is ever run,
+an envelope reporting a different repository root is discarded whole, and every failure from an
+absent binary to one change's malformed payload leaves the affected changes out of the result
+with a named problem instead of failing closed. How this result meets the file-sourced one is
+`change-merge`'s.
 
 ## Requirements
 

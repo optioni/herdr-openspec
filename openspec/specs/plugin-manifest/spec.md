@@ -1,7 +1,15 @@
 # plugin-manifest Specification
 
 ## Purpose
-TBD - created by archiving change repo-foundation. Update Purpose after archive.
+Pins the contents of `herdr-plugin.toml` — the one contract this crate has with a consumer
+outside itself: the required top-level keys, the single `[[build]]` step, the two
+`[[panes]]` entries (a split placement and a tab placement, both titled `OpenSpec`), and the
+two workspace `[[actions]]` that invoke `open` and `open-tab`. It also holds the agreement
+checks that keep the manifest from drifting from its second sites — the Cargo binary name,
+the entrypoint/placement literals `open`'s argument builder emits, the subcommand tokens the
+binary's argument parser accepts, and the action titles named in `README.md` — deliberately
+leaving `version`, `min_herdr_version`, and `platforms` unpinned because they have no second
+site.
 
 ## Requirements
 

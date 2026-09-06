@@ -1,7 +1,16 @@
 # responsive-layout Specification
 
 ## Purpose
-TBD - created by archiving change tui-shell. Update Purpose after archive.
+The dashboard's outer frame and how it reflows with terminal width: a one-row bold `OpenSpec`
+header carrying the repository root right-aligned and shortened from the left, a bordered
+body, and a footer of key hints dropped whole from the end rather than truncated, with
+explicit branches for degenerate heights and one-column frames. It owns the 100-column
+breakpoint that decides whether the body holds a 40-column `Changes` region beside a `Detail`
+one or a single region showing only the routed side, which region's border is emphasised,
+that content never bleeds across a border, and the two interior widths — 78 at a 120-column
+frame and 58 at a 60-column one — that the detail-side capabilities render into. What fills
+those interiors belongs to `change-rows`, `detail-header`, `artifact-tabs`, and
+`artifact-content`.
 
 ## Requirements
 

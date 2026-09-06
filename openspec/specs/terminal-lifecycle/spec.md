@@ -1,7 +1,14 @@
 # terminal-lifecycle Specification
 
 ## Purpose
-TBD - created by archiving change tui-shell. Update Purpose after archive.
+Owns the process's terminal mode: a `TerminalOps` seam whose only real implementation calls
+the crossterm functions and nothing else, a `TerminalGuard` that enters raw mode then the
+alternate screen and leaves them in exactly the mirrored order, unwinding a partial entry when
+the second step fails and swallowing teardown errors rather than panicking in `Drop`, and a
+panic hook that restores before delegating to the hook it replaces. It also holds the pure
+decision that refuses to start the dashboard when stdout is not a terminal without touching a
+single terminal operation. The exit status and message that refusal produces belong to
+`plugin-build`.
 
 ## Requirements
 

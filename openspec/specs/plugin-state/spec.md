@@ -1,7 +1,16 @@
 # plugin-state Specification
 
 ## Purpose
-TBD - created by archiving change plugin-config. Update Purpose after archive.
+Owns the plugin's writable state directory and the one file it keeps there:
+`agent-names.toml`, mapping each Herdr-legal agent name back to the change it was launched
+for. It fixes how the directory is resolved from the environment (`HERDR_PLUGIN_STATE_DIR`,
+then `XDG_STATE_HOME`, then `$HOME/.local/state`, deliberately separate from the hand-edited
+config directory), the pure deterministic change-name-to-agent-name derivation including
+truncation with an FNV-1a base-36 suffix, when a mapping is worth recording at all, how an
+unusable mapping file degrades to an empty mapping, and that recording is atomic by rename
+and confined to the state directory. Consuming the mapping to attribute a live agent to a
+change belongs to `agent-attribution`, and checking a name against Herdr's live agents to
+`agent-launch`.
 
 ## Requirements
 

@@ -1,7 +1,16 @@
 # plugin-build Specification
 
 ## Purpose
-TBD - created by archiving change repo-foundation. Update Purpose after archive.
+Governs how the crate is turned into the single `target/release/herdr-openspec` artifact and
+what that artifact is made of: `scripts/build.sh` as the POSIX-shell `[[build]]` step Herdr
+runs (including its `~/.cargo/env` fallback and its refusal to build when `cargo` is
+unreachable), the binary's subcommand argument surface with its stable exit statuses,
+`ui::run`'s preference for the Herdr workspace cwd over the process working directory, and
+the argued dependency set — six direct crates with defaults off, a pinned build-graph
+snapshot checked by `scripts/gates/build-graph.sh`, a proc-macro allowlist, and an MSRV floor,
+all reconciled against `Cargo.toml` by `scripts/gates/deps.sh`. It is about what gets built
+and how it starts, not about how the manifest declares it to Herdr, which `plugin-manifest`
+owns.
 
 ## Requirements
 

@@ -1,7 +1,16 @@
 # artifact-tabs Specification
 
 ## Purpose
-TBD - created by archiving change detail-view. Update Purpose after archive.
+Owns the row of tabs across the top of the detail region: one cell per entry of
+`Change::artifacts` in the schema's declared order, addressed strictly by position so
+duplicate artifact ids stay two separately selectable tabs, labelled `"<n> <id>"` for the nine
+positions a digit key can reach and by bare id beyond that, windowed to whole cells that always
+keep the selected tab on screen, and reduced to a single `no artifacts` placeholder when a
+change declares none. It also defines where the bar sits — the second interior row of the
+detail region, via `split_detail`'s header/tab-bar/content split — and the keys that move it:
+`1`-`9`, `[` and `]` outside filter mode, inert rather than clamped on an out-of-range digit,
+resetting the scroll only when the tab actually changed. Reading the selected tab's file is
+`artifact-content`'s.
 
 ## Requirements
 

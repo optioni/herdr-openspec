@@ -1,7 +1,17 @@
 # ci-workflow Specification
 
 ## Purpose
-TBD - created by archiving change ci-pipeline. Update Purpose after archive.
+Specifies the repository's single GitHub Actions workflow, `.github/workflows/ci.yml`: its
+three triggers with no path filters, a ref-keyed concurrency group that spares `main`, a
+`check` matrix over `ubuntu-latest` and `macos-latest` with `fail-fast` off, a Linux-only
+`coverage` job, a `gates-full` job carrying the rebuilding dependency legs, per-job toolchain
+installs and caching that can only change a run's duration, and one aggregate `ci` job that
+every other job feeds so branch protection has a stable status name. Its central constraint is
+that CI defines no command of its own — every gate is invoked as `make <target>`, no `run:`
+step may mention `cargo` or restate a threshold, and no `env:` mapping may alter a gate through
+a door the guard cannot read — which is what makes `quality-gates`' claim of local/CI parity
+checkable rather than aspirational. The gates themselves are defined in the Makefile and under
+`scripts/gates/`, not here.
 
 ## Requirements
 

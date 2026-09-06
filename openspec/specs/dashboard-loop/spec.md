@@ -1,7 +1,17 @@
 # dashboard-loop Specification
 
 ## Purpose
-TBD - created by archiving change tui-shell. Update Purpose after archive.
+Holds the render seam itself: `Dashboard`, the plain state value that carries no
+geometry, no terminal handle, no watcher, no thread and no `Default`, so every view is a pure
+function of it and every construction site fails to compile when a field is added; `action_for`,
+the total mapping from a terminal event and the filter mode to one of the plugin's actions;
+`run_loop`, which on each iteration hands off a pending launch, drains the non-blocking live
+collaborators, syncs the detail, draws, normalises the scroll and only then waits; and
+`ui::load`, which builds the startup dashboard from files alone so the pane opens with a full
+change list on a machine that has no `openspec` binary. It is also where the purity boundary is
+enforced by name — the files under `src/ui/` that may name no filesystem, process,
+environment, network or standard-I/O API. What each action then means to a region belongs to
+that region's capability; this specifies only the state, the dispatch, and the order.
 
 ## Requirements
 

@@ -1,7 +1,16 @@
 # watch-invalidation Specification
 
 ## Purpose
-TBD - created by archiving change live-refresh. Update Purpose after archive.
+Turns filesystem activity under `openspec/` into the refresh requests the worker acts on:
+classifying a touched path to the one change it invalidates, to the repository as a whole, to
+the archive tier, or to nothing outside the tree — conservatively, so an unrecognised path
+costs a reload rather than silence — and folding a batch of them into a `Selection`. It owns
+the debounce that coalesces a burst of saves, written as a pure state machine over an injected
+`Instant` with a sliding window capped at one second so a continuously-writing agent cannot
+defer a batch forever, the arithmetic that shortens the event loop's wake-up to the nearest
+pending deadline, and the non-blocking `FsEvents` seam whose one real implementation confines
+`notify` to `src/watch.rs` and holds the crate's single binding to the real clock. Acting on
+the resulting selection is `refresh-worker`'s.
 
 ## Requirements
 

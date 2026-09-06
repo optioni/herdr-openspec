@@ -1,7 +1,18 @@
 # quality-gates Specification
 
 ## Purpose
-TBD - created by archiving change repo-foundation. Update Purpose after archive.
+Defines the verification contract for the repository: the `Makefile` targets behind
+`make check` — format check, clippy with warnings denied, the repository-hygiene gates under
+`scripts/gates/`, tests, and `cargo llvm-cov` at an 80% line floor, in that order, first
+failure stopping the run — the guards that name the one-time install command when clippy or
+`cargo-llvm-cov` is missing, the checked-in `rustfmt.toml` that keeps a bare `rustfmt` on the
+crate's edition, and the rule that no gate may touch Herdr. Every gate that guards a
+repository-wide invariant is a checked-in, reviewable script under `scripts/gates/` rather
+than prose re-extracted from a change's planning artifacts by hand — a gate nothing forces to
+run does not run, which is exactly what let `DEPS` and `GRAPH-SNAP` go red on `main` for three
+changes before anyone noticed. It also carries the testing discipline the `ui` layer is held
+to and the standing rule that every capability spec carries a Purpose someone wrote, checked
+by a test inside `cargo test` rather than left to periodic hand-running.
 
 ## Requirements
 

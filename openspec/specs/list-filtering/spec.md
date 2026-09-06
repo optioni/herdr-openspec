@@ -1,7 +1,15 @@
 # list-filtering Specification
 
 ## Purpose
-TBD - created by archiving change list-view. Update Purpose after archive.
+Describes the `/` query layer over the change list: entering it from either route, the modal
+keymap in which every printable character — `q`, `j`, `k`, `/`, `r`, the digits, and the action
+keys alike — types itself rather than commanding, leaving only `Ctrl-C` to quit,
+`Backspace` to delete, `Enter` to accept and `Esc` to cancel. The matching rule is deliberately
+narrow: an ASCII-case-insensitive substring test against `Change::name` alone, applied to the
+active and archived tiers alike, never against a path, schema, artifact id or problem text. It
+also owns the footer while a query exists — a `/query_` prompt that replaces the hint row
+outright while filtering and keeps its tail when it overruns the width, and a leading `/query`
+hint once accepted.
 
 ## Requirements
 

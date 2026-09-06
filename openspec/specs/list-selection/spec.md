@@ -1,7 +1,15 @@
 # list-selection Specification
 
 ## Purpose
-TBD - created by archiving change list-view. Update Purpose after archive.
+Fixes what "the selected change" means: a single `usize` index into the *visible* list — active
+then archived, with the filter applied — clamped on every action that could change either the
+index or the list, so it can never address a row that is not shown, and never lands on a
+separator, problem or message row, which are not selectable at all. `Next` and `Prev` move it
+only at the list route, clamping at both ends rather than wrapping; at the detail route the same
+keys scroll instead. The second half is the viewport: `layout::viewport` derives the first drawn
+row from the row count, the cursor's row, and the current interior height on every frame, so the
+selection is always on screen and no scroll offset is stored on `Dashboard` where a resize could
+stale it.
 
 ## Requirements
 

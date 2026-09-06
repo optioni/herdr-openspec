@@ -1,7 +1,16 @@
 # pane-open Specification
 
 ## Purpose
-TBD - created by archiving change plugin-actions. Update Purpose after archive.
+Covers the `open` and `open-tab` subcommands that Herdr's action menu invokes to put the
+dashboard on screen: reading the invocation context out of Herdr's injected environment
+through one injected lookup, listing panes first so an existing dashboard in the workspace is
+focused rather than duplicated, and issuing the exact `herdr plugin pane open` argument
+vectors for a split placement targeting the invoking pane and for a tab placement in the
+invoking workspace — never passing `--cwd`, which would break the manifest's relative
+command. It also fixes how Herdr's own failure reasons are carried verbatim, which failures
+stop the command and which degrade to opening anyway, and that this path renders nothing and
+needs no terminal, leaving everything the opened pane then draws to the dashboard
+capabilities.
 
 ## Requirements
 

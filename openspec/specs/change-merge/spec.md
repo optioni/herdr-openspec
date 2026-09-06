@@ -1,7 +1,16 @@
 # change-merge Specification
 
 ## Purpose
-TBD - created by archiving change changes-from-cli. Update Purpose after archive.
+Reconciles the two producers of a change set into the one the pane renders: `changes::merge`
+pairs active changes by name, layers the CLI's schema, progress and artifacts over the file
+tier's while keeping the file tier's `dir`, passes archived changes through untouched, and
+re-sorts the union so a CLI-only change lands in name order rather than at the end. Its hardest
+rule is the artifact join, which is positional — never by path, which the two producers
+canonicalize differently, and never by id, which a schema may legally repeat — with six stated
+outcomes for empty, mismatched-length, and disagreeing lists, and the `tracks_tasks` flag
+travelling with whichever whole list survives. Problems from both sides are kept in full rather
+than dropped when a field is superseded. Producing either input is `change-enumeration`'s and
+`cli-changes`' work; this is only the join.
 
 ## Requirements
 

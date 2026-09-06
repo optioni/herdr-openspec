@@ -1,7 +1,17 @@
 # markdown-render Specification
 
 ## Purpose
-TBD - created by archiving change markdown-viewer. Update Purpose after archive.
+Turns an artifact's markdown text into plain-data lines and segments sized for a given column
+width — a pure, total transformation that carries a `Face` per segment and never a `ratatui`
+type, leaving the mapping from face to style to `ui::view`. It settles every rendering question
+a spec-reading pane raises: greedy word wrap with a hard split for tokens that cannot fit,
+headings that keep their `#` markers and wrap under their own text column, composing inline
+faces with link destinations dropped and images shown as alt text, list markers with a hanging
+indent, code and raw HTML reproduced verbatim and split rather than reflowed, quotes and
+thematic breaks, soft breaks that preserve the author's line structure, and one blank line
+between blocks. Constructs the parser is deliberately not configured for — tables, footnotes,
+strikethrough — render as their literal source rather than vanishing, and `pulldown_cmark` is
+confined to this one module.
 
 ## Requirements
 

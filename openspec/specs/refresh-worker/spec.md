@@ -1,7 +1,15 @@
 # refresh-worker Specification
 
 ## Purpose
-TBD - created by archiving change live-refresh. Update Purpose after archive.
+The background tier that keeps the dashboard's data fresh without ever making a frame wait: a
+`Selection` naming which changes the expensive `openspec instructions apply` call must be
+re-asked about, a `CliCache` that reuses schema and artifact lists for unselected changes
+while always taking progress from the fresh `list --json`, and a `Refresher` trait whose
+`request`/`take_result` pair is non-blocking by contract. Its worker owns the crate's refresh
+thread, coalesces queued requests by union, and answers each request twice — the cheap
+file-sourced set first, then the CLI-merged one — so the render loop adopts whichever is
+ready. Deciding *when* to request a refresh from filesystem events is `watch-invalidation`'s
+job; adopting the results into the view is `live-updates`'.
 
 ## Requirements
 
