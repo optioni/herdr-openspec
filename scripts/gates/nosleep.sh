@@ -22,7 +22,7 @@
 #        SLEEP_MIN  minimum number of sleep sites the scan must FIND (guards a scan that
 #                   matched nothing and reported a clean tree)
 set -u
-MIN="${MIN:-29}"
+MIN="${MIN:-30}"
 SLEEP_MIN="${SLEEP_MIN:-6}"
 [ -d src ] && [ -d tests ] || { echo "NOSLEEP FAIL: run from the crate root" >&2; exit 1; }
 n=$(find src tests -name '*.rs' | wc -l | tr -d ' ')

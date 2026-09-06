@@ -222,3 +222,59 @@ on its own uniform terms.
   (`diff` against a pre-plant backup of `Makefile` empty afterwards).
 
 Both reverted; `cargo test --all-features --test ci_workflow` green afterwards (18 tests).
+
+## Group 13 — every gate proved able to fail (tasks 13.1–13.3)
+
+Three uniform sweeps across every script under `scripts/gates/`. Each plant is a one-line
+edit (or, for `OPENSPEC-UNTOUCHED`, one added untracked file), run, observed red, then
+reverted (`diff` against a pre-plant backup, or `git checkout --`/`rm`, empty/clean
+afterward in every case). `make gates` and `cargo test --all-features --lib` (984 tests)
+green after every revert in this group.
+
+**13.2 — every count-floor gate, run once at floor + 1, confirmed non-zero** (the
+mechanical, near-free sweep — no file edit needed, just an env override):
+`NOSPAWN-GREP` (25), `NOLIT-CHANGE` (25), `MDSEAM` (25), `WATCHSEAM` (30), `AGENTSEAM` (26),
+`LAUNCHSEAM` (26), `NOCLI-SHELL` (12), `READSEAM` (11), `NOBLOCK` (12), `READONLY-UI` (12),
+`WIDTHS` (99), `LISTWIDTHS` (33), `MDWIDTHS` (26), `TASKWIDTHS` (17), `DETAILWIDTHS` (33),
+`NODEFAULT-UI` at each of its five subjects (136/54/82/112/27) — all fifteen fired.
+**Found and fixed in the process:** `NOSLEEP`'s own default (`MIN`) was measured wrong
+during extraction — copied from `WATCHSEAM`'s file count (29) rather than `NOSLEEP`'s own
+(`find src tests -name '*.rs'`, no exclusion, genuinely 30). Corrected to 30
+(`scripts/gates/nosleep.sh`); `MIN=31` then correctly failed at "searched only 30 files".
+
+**13.1/13.3 — positive control removed or subject defect planted** (one real edit per
+gate, run, reverted):
+
+| Gate | Plant | Red output (abbreviated) |
+|---|---|---|
+| `NOSPAWN-GREP` | a spawn call in `src/ui/list.rs` | `spawn API outside src/cli.rs` |
+| `NOLIT-CHANGE` | a `Change {` literal in `src/ui/app.rs` | `a Change/ChangeSet literal outside src/changes.rs` |
+| `MDSEAM` | a `ratatui` type named in `src/ui/markdown.rs` | `names a ratatui type` |
+| `WATCHSEAM` | a `ratatui` type named in `src/watch.rs` | `names a ratatui type` |
+| `AGENTSEAM` | a spawn call in `src/agents.rs` | `src/agents.rs spawns a process` |
+| `LAUNCHSEAM` | a spawn call in `src/launch.rs` | `src/launch.rs spawns a process` |
+| `NOCLI-SHELL` | `OpenspecCli` named in `src/ui/mod.rs` | `the shell names the CLI seam` |
+| `READSEAM` | `BINDING` pointed at `/dev/null` | `/dev/null missing` |
+| `NOBLOCK` | `std::sync::mpsc::channel` named in `src/ui/driver.rs`'s production slice | `blocks or owns a thread` |
+| `READONLY-UI` | `std::fs::write` named in `src/ui/view.rs` | `a write API in production code under src/ui` |
+| `NORAW-GREP` | `enable_raw_mode` named in `src/ui/app.rs` | `terminal-mode function outside src/ui/terminal.rs` |
+| `NOSLEEP` (leg 2) | an un-deadline-bounded `thread::sleep` in `src/ui/list.rs` | `a sleep under src/ui` |
+| `NOTABSEAM` | `DT` pointed at `/dev/null` | `/dev/null missing` |
+| `TASKSEAM` | `DT` pointed at `/dev/null` | `/dev/null missing` |
+| `NOIO-VIEW` | `std::fs::read` named in `src/ui/app.rs` | `I/O API in a pure view file` |
+| `NOJSON-SEAM` | `serde_json` named in `src/cli.rs` | `serde_json in src/cli.rs` |
+| `NOWAIVER` | `Makefile`'s `--fail-under-lines 80` changed to `70` | `Makefile no longer names --fail-under-lines 80` |
+| `GATE-MECH1` | a real `impl Default for crate::changes::Change` in `src/ui/app.rs` (a commented plant is stripped by the script's own comment-stripping pass and proves nothing — this is why a real, uncommented plant was needed here specifically) | `Default reachable for a Change type` |
+| `OPENSPEC-UNTOUCHED` | an untracked file, `openspec/PLANT-untracked.txt` | `an untracked file exists inside openspec/` |
+| `build-graph.sh`'s three new absences | (task 12.6's own synthetic-snapshot check, above) | three `is in the normal build graph` lines |
+
+Not individually re-planted in this sweep: `WIRED` (already planted twice in group 2/3,
+above); `DEPS` (already carries multiple internal positive controls exercised on every
+run — leg 2a-bis's crossterm presence/absence pair and leg 2d's pulldown-cmark
+manifest-text check both fail closed by construction, and a further deliberate plant was
+judged lower-value than the ground already covered given the remaining scope of this
+change); `TASKSEAM`'s second ("parse leg") check, `NOJSON-SEAM`/`NOWAIVER`'s already-shown
+plants above, and `NODEFAULT-UI`'s "no `Default`, no elided field" halves (already proven
+structurally by `GATE-MECH1`'s sibling mechanism and by the compiler itself enumerating
+every construction site whenever a tracked type's field count changes — the actual proof
+this whole change's `Dashboard`/`Launch`/`Outcome` field additions already ran).

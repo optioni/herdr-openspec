@@ -389,22 +389,22 @@
 ## 13. Every gate proved able to fail
 <!-- kind: operational -->
 
-- [ ] 13.1 CHECK: For **every** script under `scripts/gates/` — the two that landed with
+- [x] 13.1 CHECK: For **every** script under `scripts/gates/` — the two that landed with
   `spec-purposes`, `wired.sh`, and everything group 12 added — remove the file its **positive
   control** names and confirm the gate fails on the control rather than passing vacuously;
   restore it. This is the uniform, mechanical proof that a grep gate can fail, and it applies
   to all of them.
-- [ ] 13.2 CHECK: For every gate carrying a count floor, run it once with the floor one above
+- [x] 13.2 CHECK: For every gate carrying a count floor, run it once with the floor one above
   measured and confirm it exits non-zero — proved at planning time to fire. The floor is
   load-bearing, not decorative.
-- [ ] 13.3 CHECK: For every gate, plant the **subject** defect it exists to catch — a spawn API
+- [x] 13.3 CHECK: For every gate, plant the **subject** defect it exists to catch — a spawn API
   in `src/ui/list.rs` for `NOSPAWN-GREP`, a `ratatui` type in `src/ui/markdown.rs` for
   `MDSEAM`, and so on. About seven of the scripts record their measured plant in their own
   header; for the rest, derive one, run it, and **write it into the script's header** so the
   next reader can re-run the proof rather than taking it on trust.
-- [ ] 13.4 VERIFY: `git status --porcelain` is empty and `git diff $BASE --stat` names no file
+- [x] 13.4 VERIFY: `git status --porcelain` is empty and `git diff $BASE --stat` names no file
   outside this change's intended set. No planted defect survived.
-- [ ] 13.5 VERIFY: `make check` green. Commit.
+- [x] 13.5 VERIFY: `make check` green. Commit.
 
 ## 14. `SPEC.md` corrections
 <!-- kind: operational -->
