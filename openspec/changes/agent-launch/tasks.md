@@ -911,10 +911,10 @@ set; see design.md → Test Strategy.
 ## 12. Acceptance Test — Outer Loop GREEN
 <!-- kind: operational -->
 
-- [ ] 12.1 VERIFY: `testcount --lib 'ui::tests::wiring::' 7` — all seven pass, and the
+- [x] 12.1 VERIFY: `testcount --lib 'ui::tests::wiring::' 7` — all seven pass, and the
       assertion messages recorded in task 2.4 no longer appear.
 
-- [ ] 12.2 CHECK: Run the seven plants design.md → Test Strategy names, one at a time, recording
+- [x] 12.2 CHECK: Run the seven plants design.md → Test Strategy names, one at a time, recording
       the exit status and the failing assertions verbatim for each and reverting after each:
       `agents::none()`, `launch::none()`, `run_loop` not dispatching `launch.pending`,
       `run_request` passing a constant `--pane w0:p0`, `state::record` not called,
@@ -925,11 +925,11 @@ set; see design.md → Test Strategy.
       **Red when:** any plant leaves the suite green, or two plants fail the identical *set* of
       assertions — the table in design.md → Test Strategy names what separates each pair.
 
-- [ ] 12.3 CHECK: Re-run the six plants `agent-poller`'s "The wiring test fails when the poller
+- [x] 12.3 CHECK: Re-run the six plants `agent-poller`'s "The wiring test fails when the poller
       is replaced by the inert double" names, against the now-amended landed wiring tests, and
       record that each is still red.
 
-- [ ] 12.4 VERIFY: `make check` — the first unqualified run since group 2. Commit.
+- [x] 12.4 VERIFY: `make check` — the first unqualified run since group 2. Commit.
 
 ## 13. The architecture checks, all green together
 <!-- kind: operational -->
