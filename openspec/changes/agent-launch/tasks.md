@@ -681,7 +681,7 @@ set; see design.md → Test Strategy.
 ## 4. `launch::run_request` — three calls and every failure path
 <!-- kind: behavior -->
 
-- [ ] 4.1 RED: Write `launch::tests::run_request::`'s ten and `launch::tests::focus::`'s two,
+- [x] 4.1 RED: Write `launch::tests::run_request::`'s ten and `launch::tests::focus::`'s two,
       one per `agent-launch` spec scenario in the third, fourth, and fifth requirements, over a
       recording `HerdrCli` fake answering by argument vector and — for the four that record —
       a real `testutil::ScratchDir` state directory.
@@ -694,21 +694,21 @@ set; see design.md → Test Strategy.
       `a_collision_herdr_sees_is_reported_with_its_reason`, `a_focus_request_is_one_call`, and
       `a_failed_focus_is_reported`.
 
-- [ ] 4.2 CHECK: Confirm every failure is the missing behaviour: each names the argument vector
+- [x] 4.2 CHECK: Confirm every failure is the missing behaviour: each names the argument vector
       or the outcome field in its diff, and none fails to compile or to find its scratch
       directory.
 
-- [ ] 4.3 GREEN: Implement `run_request`: derive the name, split, parse, start, record, prompt,
+- [x] 4.3 GREEN: Implement `run_request`: derive the name, split, parse, start, record, prompt,
       stopping at the first failure and carrying `CliError`'s stderr verbatim. `Focus` is one
       call. **No `pane close` is issued on any path** (design.md → Decisions 3).
 
-- [ ] 4.4 CHECK: Concentration point — the 32-character cap. Confirm
+- [x] 4.4 CHECK: Concentration point — the 32-character cap. Confirm
       `a_name_past_the_cap_is_truncated_hashed_and_recorded` asserts the argv name is ≤ 32
       characters **and** matches `[a-z][a-z0-9_-]{0,31}` **and** equals `state::agent_name`'s
       output, and that `an_unchanged_name_writes_no_file` asserts the state directory is
       byte-identical rather than merely that no error was returned.
 
-- [ ] 4.5 VERIFY: No refactor was needed — `run_request` is one linear sequence with one early
+- [x] 4.5 VERIFY: No refactor was needed — `run_request` is one linear sequence with one early
       return per call. `testcount --lib 'launch::tests::run_request::' 10`,
       `testcount --lib 'launch::tests::focus::' 2`, then
       `UI_MIN=11 EXTRA='src/watch.rs src/refresh.rs src/agents.rs src/launch.rs' sh

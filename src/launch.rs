@@ -210,6 +210,112 @@ pub fn prompt_text(intent: Intent, change: &str) -> String {
     format!("/opsx:{command} {change}")
 }
 
+/// Format a failed Herdr call's reason, on `agents::herdr_error_problem`'s established terms:
+/// Herdr's diagnostic goes to **stderr** as a JSON error envelope, unlike the OpenSpec CLI's
+/// stdout diagnostic, so the reason is available and carried verbatim rather than parsed.
+fn herdr_reason(err: &crate::cli::CliError) -> String {
+    match err {
+        crate::cli::CliError::Failed { code, stderr, .. } => {
+            let code = code
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            format!("herdr exited with code {code}: {stderr}")
+        }
+        crate::cli::CliError::NotStarted { reason, .. } => {
+            format!("could not start herdr: {reason}")
+        }
+    }
+}
+
+/// Run one `Request` to completion against a real `HerdrCli`, in the order the spec fixes:
+/// split, parse the pane id, start, record, prompt — stopping at the first failure and
+/// carrying Herdr's own reason verbatim. `Focus` is one call and nothing else. Never issues
+/// `pane close`, on any path — a pane this fails to use is left in place, named in the
+/// problem, because `agent start`'s failure set includes the readiness *timeout*, in which an
+/// agent may be starting. See `specs/agent-launch/spec.md` -> "A failed call stops the launch
+/// at that call and carries Herdr's own reason".
+fn run_request(
+    cli: &dyn crate::cli::HerdrCli,
+    repo: &std::path::Path,
+    kind: &str,
+    state_dir: Option<&std::path::Path>,
+    request: Request,
+) -> Outcome {
+    match request {
+        Request::Focus { pane_id } => {
+            let args = focus_args(&pane_id);
+            let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+            match cli.run(&refs) {
+                Ok(_) => Outcome {
+                    named: None,
+                    problem: None,
+                },
+                Err(err) => Outcome {
+                    named: None,
+                    problem: Some(herdr_reason(&err)),
+                },
+            }
+        }
+        Request::Launch {
+            change,
+            agent,
+            intent,
+        } => {
+            let split = split_args(repo);
+            let split_refs: Vec<&str> = split.iter().map(String::as_str).collect();
+            let payload = match cli.run(&split_refs) {
+                Ok(text) => text,
+                Err(err) => {
+                    return Outcome {
+                        named: None,
+                        problem: Some(herdr_reason(&err)),
+                    };
+                }
+            };
+            let pane = match pane_id(&payload) {
+                Ok(p) => p,
+                Err(reason) => {
+                    return Outcome {
+                        named: None,
+                        problem: Some(reason),
+                    };
+                }
+            };
+
+            let start = start_args(&agent, kind, &pane);
+            let start_refs: Vec<&str> = start.iter().map(String::as_str).collect();
+            if let Err(err) = cli.run(&start_refs) {
+                return Outcome {
+                    named: None,
+                    problem: Some(format!(
+                        "{} (agent {agent}, pane {pane})",
+                        herdr_reason(&err)
+                    )),
+                };
+            }
+
+            // `state::record` runs between `agent start` and `agent prompt` (design.md ->
+            // Decisions 12): a failure here is reported but does not undo the start, and the
+            // prompt is still sent.
+            let record_problem = crate::state::record(state_dir, &agent, &change)
+                .err()
+                .map(|e| e.to_string());
+
+            let prompt_text_value = prompt_text(intent, &change);
+            let prompt = prompt_args(&agent, &prompt_text_value);
+            let prompt_refs: Vec<&str> = prompt.iter().map(String::as_str).collect();
+            let problem = match cli.run(&prompt_refs) {
+                Ok(_) => record_problem,
+                Err(err) => Some(herdr_reason(&err)),
+            };
+            Outcome {
+                named: Some((agent, change)),
+                problem,
+            }
+        }
+    }
+}
+
 /// A non-blocking source of launch outcomes. Every method SHALL be non-blocking, on exactly
 /// `watch::FsEvents`'s, `refresh::Refresher`'s, and `agents::AgentPoll`'s terms: the render path
 /// calls both on every iteration and neither may wait on anything. Carries no `pending_in`: the
@@ -591,6 +697,531 @@ mod tests {
             let err = pane_id(text).unwrap_err();
             assert!(err.contains("pane_not_found"), "{err}");
             assert!(err.contains("no such pane"), "{err}");
+        }
+    }
+
+    mod run_request {
+        use crate::cli::{CliError, FakeCli};
+        use crate::launch::{Intent, Request, run_request};
+        use crate::testutil::{ScratchDir, snapshot};
+        use std::path::Path;
+
+        const REPO: &str = "/repo";
+        const KIND: &str = "codex";
+
+        fn split_ok(fake: &FakeCli, pane: &str) {
+            fake.register_herdr(
+                &["pane", "split", "--cwd", REPO, "--direction", "right", "--no-focus"],
+                Ok(format!(
+                    r#"{{"id":"cli:pane:split","result":{{"pane":{{"pane_id":"{pane}","tab_id":"t","workspace_id":"w"}},"type":"pane_info"}}}}"#
+                )),
+            );
+        }
+
+        fn start_ok(fake: &FakeCli, agent: &str, pane: &str) {
+            fake.register_herdr(
+                &["agent", "start", agent, "--kind", KIND, "--pane", pane],
+                Ok(format!(
+                    r#"{{"id":"cli:agent:start","result":{{"agent":{{"name":"{agent}"}},"argv":["{KIND}"],"type":"agent_started"}}}}"#
+                )),
+            );
+        }
+
+        fn prompt_ok(fake: &FakeCli, agent: &str, text: &str) {
+            fake.register_herdr(
+                &["agent", "prompt", agent, text],
+                Ok(
+                    r#"{"id":"cli:agent:prompt","result":{"agent":{},"type":"agent_prompted"}}"#
+                        .to_string(),
+                ),
+            );
+        }
+
+        fn failed(code: i32, stderr: &str) -> Result<String, CliError> {
+            Err(CliError::Failed {
+                program: "herdr".to_string(),
+                args: Vec::new(),
+                code: Some(code),
+                stderr: stderr.to_string(),
+            })
+        }
+
+        #[test]
+        fn the_three_calls_appear_in_order_with_the_splits_pane_id() {
+            let fake = FakeCli::new();
+            split_ok(&fake, "wD:pJ");
+            start_ok(&fake, "c-2fa-support", "wD:pJ");
+            prompt_ok(&fake, "c-2fa-support", "/opsx:apply 2fa-support");
+            let state = ScratchDir::new();
+
+            let outcome = run_request(
+                &fake,
+                Path::new(REPO),
+                KIND,
+                Some(state.path()),
+                Request::Launch {
+                    change: "2fa-support".to_string(),
+                    agent: "c-2fa-support".to_string(),
+                    intent: Intent::Apply,
+                },
+            );
+
+            assert_eq!(fake.calls().len(), 3);
+            assert_eq!(
+                fake.calls()[0].1,
+                vec![
+                    "pane",
+                    "split",
+                    "--cwd",
+                    REPO,
+                    "--direction",
+                    "right",
+                    "--no-focus"
+                ]
+            );
+            assert_eq!(
+                fake.calls()[1].1,
+                vec![
+                    "agent",
+                    "start",
+                    "c-2fa-support",
+                    "--kind",
+                    KIND,
+                    "--pane",
+                    "wD:pJ"
+                ]
+            );
+            assert_eq!(
+                fake.calls()[2].1,
+                vec![
+                    "agent",
+                    "prompt",
+                    "c-2fa-support",
+                    "/opsx:apply 2fa-support"
+                ]
+            );
+            assert_eq!(
+                outcome.named,
+                Some(("c-2fa-support".to_string(), "2fa-support".to_string()))
+            );
+            assert_eq!(outcome.problem, None);
+
+            let mapping = crate::state::read(Some(state.path()));
+            assert_eq!(
+                mapping.names.get("c-2fa-support"),
+                Some(&"2fa-support".to_string())
+            );
+        }
+
+        #[test]
+        fn an_unusable_payload_stops_before_agent_start() {
+            let fake = FakeCli::new();
+            fake.register_herdr(
+                &[
+                    "pane",
+                    "split",
+                    "--cwd",
+                    REPO,
+                    "--direction",
+                    "right",
+                    "--no-focus",
+                ],
+                Ok("{}".to_string()),
+            );
+
+            let outcome = run_request(
+                &fake,
+                Path::new(REPO),
+                KIND,
+                None,
+                Request::Launch {
+                    change: "add-auth".to_string(),
+                    agent: "add-auth".to_string(),
+                    intent: Intent::Apply,
+                },
+            );
+
+            assert_eq!(fake.calls().len(), 1);
+            assert_eq!(outcome.named, None);
+            let problem = outcome.problem.expect("a reason must be present");
+            assert!(problem.contains("result"), "{problem}");
+        }
+
+        #[test]
+        fn a_failed_split_leaves_nothing_behind() {
+            let fake = FakeCli::new();
+            fake.register_herdr(
+                &[
+                    "pane",
+                    "split",
+                    "--cwd",
+                    REPO,
+                    "--direction",
+                    "right",
+                    "--no-focus",
+                ],
+                failed(
+                    1,
+                    r#"{"error":{"code":"pane_split_failed","message":"no space to split"}}"#,
+                ),
+            );
+            let state = ScratchDir::new();
+            let before = snapshot(state.path());
+
+            let outcome = run_request(
+                &fake,
+                Path::new(REPO),
+                KIND,
+                Some(state.path()),
+                Request::Launch {
+                    change: "add-auth".to_string(),
+                    agent: "add-auth".to_string(),
+                    intent: Intent::Apply,
+                },
+            );
+
+            assert_eq!(fake.calls().len(), 1);
+            let problem = outcome.problem.expect("a reason must be present");
+            assert!(problem.contains("pane_split_failed"), "{problem}");
+            assert!(problem.contains("no space to split"), "{problem}");
+            assert_eq!(outcome.named, None);
+            assert_eq!(before, snapshot(state.path()));
+        }
+
+        #[test]
+        fn a_failed_start_leaves_the_pane_and_names_it() {
+            let fake = FakeCli::new();
+            split_ok(&fake, "wD:pJ");
+            fake.register_herdr(
+                &["agent", "start", "c-2fa-support", "--kind", KIND, "--pane", "wD:pJ"],
+                failed(
+                    1,
+                    r#"{"error":{"code":"agent_pane_not_found","message":"agent target wD:pJ not found"}}"#,
+                ),
+            );
+
+            let outcome = run_request(
+                &fake,
+                Path::new(REPO),
+                KIND,
+                None,
+                Request::Launch {
+                    change: "2fa-support".to_string(),
+                    agent: "c-2fa-support".to_string(),
+                    intent: Intent::Apply,
+                },
+            );
+
+            assert_eq!(fake.calls().len(), 2);
+            assert!(
+                !fake
+                    .calls()
+                    .iter()
+                    .any(|(_, args)| args.first().map(String::as_str) == Some("pane")
+                        && args.get(1).map(String::as_str) == Some("close")),
+                "the plugin must never issue pane close"
+            );
+            let problem = outcome.problem.expect("a reason must be present");
+            assert!(problem.contains("agent_pane_not_found"), "{problem}");
+            assert!(problem.contains("c-2fa-support"), "{problem}");
+            assert!(problem.contains("wD:pJ"), "{problem}");
+            assert_eq!(outcome.named, None);
+        }
+
+        #[test]
+        fn a_failed_prompt_leaves_a_recorded_agent() {
+            let fake = FakeCli::new();
+            split_ok(&fake, "wD:pJ");
+            start_ok(&fake, "c-2fa-support", "wD:pJ");
+            fake.register_herdr(
+                &[
+                    "agent",
+                    "prompt",
+                    "c-2fa-support",
+                    "/opsx:apply 2fa-support",
+                ],
+                failed(
+                    1,
+                    r#"{"error":{"code":"agent_blocked","message":"agent is blocked"}}"#,
+                ),
+            );
+            let state = ScratchDir::new();
+
+            let outcome = run_request(
+                &fake,
+                Path::new(REPO),
+                KIND,
+                Some(state.path()),
+                Request::Launch {
+                    change: "2fa-support".to_string(),
+                    agent: "c-2fa-support".to_string(),
+                    intent: Intent::Apply,
+                },
+            );
+
+            assert_eq!(fake.calls().len(), 3);
+            let mapping = crate::state::read(Some(state.path()));
+            assert_eq!(
+                mapping.names.get("c-2fa-support"),
+                Some(&"2fa-support".to_string())
+            );
+            assert_eq!(
+                outcome.named,
+                Some(("c-2fa-support".to_string(), "2fa-support".to_string())),
+                "the agent exists even though the prompt did not land"
+            );
+            let problem = outcome.problem.expect("a reason must be present");
+            assert!(problem.contains("agent_blocked"), "{problem}");
+        }
+
+        #[test]
+        fn a_failed_recording_does_not_undo_the_start() {
+            let fake = FakeCli::new();
+            split_ok(&fake, "wD:pJ");
+            start_ok(&fake, "c-2fa-support", "wD:pJ");
+            prompt_ok(&fake, "c-2fa-support", "/opsx:apply 2fa-support");
+            let scratch = ScratchDir::new();
+            let blocked = scratch.path().join("blocked");
+            std::fs::write(&blocked, b"not a directory").expect("write blocking file");
+
+            let outcome = run_request(
+                &fake,
+                Path::new(REPO),
+                KIND,
+                Some(&blocked),
+                Request::Launch {
+                    change: "2fa-support".to_string(),
+                    agent: "c-2fa-support".to_string(),
+                    intent: Intent::Apply,
+                },
+            );
+
+            assert_eq!(
+                fake.calls().len(),
+                3,
+                "the prompt must still be sent despite the recording failure"
+            );
+            assert_eq!(
+                outcome.named,
+                Some(("c-2fa-support".to_string(), "2fa-support".to_string()))
+            );
+            let problem = outcome
+                .problem
+                .expect("a reason must be present, naming the recording failure");
+            assert!(
+                problem.contains(&blocked.display().to_string()),
+                "{problem}"
+            );
+        }
+
+        #[test]
+        fn a_name_past_the_cap_is_truncated_hashed_and_recorded() {
+            let change = "a-very-long-change-name-that-exceeds-the-cap";
+            assert_eq!(change.len(), 44);
+            let derived = crate::state::agent_name(change);
+            assert!(derived.len() <= 32);
+            assert!(derived.chars().next().unwrap().is_ascii_lowercase());
+            assert!(
+                derived
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+            );
+            assert_eq!(derived, crate::state::agent_name(change));
+
+            let fake = FakeCli::new();
+            split_ok(&fake, "wD:pJ");
+            fake.register_herdr(
+                &["agent", "start", &derived, "--kind", KIND, "--pane", "wD:pJ"],
+                Ok(format!(
+                    r#"{{"id":"cli:agent:start","result":{{"agent":{{"name":"{derived}"}},"type":"agent_started"}}}}"#
+                )),
+            );
+            let text = format!("/opsx:apply {change}");
+            fake.register_herdr(&["agent", "prompt", &derived, &text], Ok(String::new()));
+            let state = ScratchDir::new();
+
+            let outcome = run_request(
+                &fake,
+                Path::new(REPO),
+                KIND,
+                Some(state.path()),
+                Request::Launch {
+                    change: change.to_string(),
+                    agent: derived.clone(),
+                    intent: Intent::Apply,
+                },
+            );
+
+            assert_eq!(
+                fake.calls()[1].1[2],
+                derived,
+                "the agent start argument must be the derived name"
+            );
+            let mapping = crate::state::read(Some(state.path()));
+            assert_eq!(mapping.names.get(&derived), Some(&change.to_string()));
+            assert_eq!(outcome.named, Some((derived, change.to_string())));
+        }
+
+        #[test]
+        fn a_legal_but_derived_name_is_recorded_too() {
+            let change = "2FA_Support!";
+            let derived = crate::state::agent_name(change);
+            assert_eq!(derived, "c-2fa_support");
+
+            let fake = FakeCli::new();
+            split_ok(&fake, "wD:pJ");
+            start_ok(&fake, &derived, "wD:pJ");
+            let text = format!("/opsx:apply {change}");
+            prompt_ok(&fake, &derived, &text);
+            let state = ScratchDir::new();
+
+            let outcome = run_request(
+                &fake,
+                Path::new(REPO),
+                KIND,
+                Some(state.path()),
+                Request::Launch {
+                    change: change.to_string(),
+                    agent: derived.clone(),
+                    intent: Intent::Apply,
+                },
+            );
+
+            let mapping = crate::state::read(Some(state.path()));
+            assert_eq!(mapping.names.get(&derived), Some(&change.to_string()));
+            assert_eq!(outcome.named, Some((derived, change.to_string())));
+        }
+
+        #[test]
+        fn an_unchanged_name_writes_no_file() {
+            let fake = FakeCli::new();
+            split_ok(&fake, "wD:pJ");
+            start_ok(&fake, "add-auth", "wD:pJ");
+            prompt_ok(&fake, "add-auth", "/opsx:apply add-auth");
+            let state = ScratchDir::new();
+            let before = snapshot(state.path());
+
+            let outcome = run_request(
+                &fake,
+                Path::new(REPO),
+                KIND,
+                Some(state.path()),
+                Request::Launch {
+                    change: "add-auth".to_string(),
+                    agent: "add-auth".to_string(),
+                    intent: Intent::Apply,
+                },
+            );
+
+            assert_eq!(before, snapshot(state.path()));
+            assert_eq!(
+                outcome.named,
+                Some(("add-auth".to_string(), "add-auth".to_string()))
+            );
+        }
+
+        #[test]
+        fn a_collision_herdr_sees_is_reported_with_its_reason() {
+            let fake = FakeCli::new();
+            split_ok(&fake, "wD:pJ");
+            fake.register_herdr(
+                &["agent", "start", "c-2fa-support", "--kind", KIND, "--pane", "wD:pJ"],
+                failed(
+                    1,
+                    r#"{"error":{"code":"agent_name_taken","message":"agent name c-2fa-support is already used; candidates: c-2fa-support-2"}}"#,
+                ),
+            );
+
+            let outcome = run_request(
+                &fake,
+                Path::new(REPO),
+                KIND,
+                None,
+                Request::Launch {
+                    change: "2fa-support".to_string(),
+                    agent: "c-2fa-support".to_string(),
+                    intent: Intent::Apply,
+                },
+            );
+
+            assert_eq!(fake.calls().len(), 2);
+            assert!(
+                !fake
+                    .calls()
+                    .iter()
+                    .any(|(_, args)| args.get(1).map(String::as_str) == Some("close")),
+                "no pane close entry"
+            );
+            let problem = outcome.problem.expect("a reason must be present");
+            assert!(problem.contains("agent_name_taken"), "{problem}");
+        }
+    }
+
+    mod focus {
+        use crate::cli::FakeCli;
+        use crate::launch::{Request, run_request};
+        use std::path::Path;
+
+        #[test]
+        fn a_focus_request_is_one_call() {
+            let fake = FakeCli::new();
+            fake.register_herdr(
+                &["agent", "focus", "wD:pJ"],
+                Ok(r#"{"id":"cli:agent:focus","result":{}}"#.to_string()),
+            );
+
+            let outcome = run_request(
+                &fake,
+                Path::new("/repo"),
+                "codex",
+                None,
+                Request::Focus {
+                    pane_id: "wD:pJ".to_string(),
+                },
+            );
+
+            assert_eq!(
+                fake.calls(),
+                vec![(
+                    crate::cli::Program::Herdr,
+                    vec![
+                        "agent".to_string(),
+                        "focus".to_string(),
+                        "wD:pJ".to_string()
+                    ]
+                )]
+            );
+            assert_eq!(outcome.named, None);
+            assert_eq!(outcome.problem, None);
+        }
+
+        #[test]
+        fn a_failed_focus_is_reported() {
+            let fake = FakeCli::new();
+            fake.register_herdr(
+                &["agent", "focus", "wD:pJ"],
+                Err(crate::cli::CliError::Failed {
+                    program: "herdr".to_string(),
+                    args: Vec::new(),
+                    code: Some(1),
+                    stderr: r#"{"error":{"code":"agent_not_found","message":"no such agent"}}"#
+                        .to_string(),
+                }),
+            );
+
+            let outcome = run_request(
+                &fake,
+                Path::new("/repo"),
+                "codex",
+                None,
+                Request::Focus {
+                    pane_id: "wD:pJ".to_string(),
+                },
+            );
+
+            assert_eq!(outcome.named, None);
+            let problem = outcome.problem.expect("a reason must be present");
+            assert!(problem.contains("agent_not_found"), "{problem}");
         }
     }
 }
