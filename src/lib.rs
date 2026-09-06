@@ -999,7 +999,52 @@ mod tests {
     }
 
     #[test]
+    fn open_alone_classifies_as_open() {
+        assert_eq!(parse(&["open"]), Invocation::Open);
+    }
+
+    #[test]
+    fn open_tab_alone_classifies_as_open_tab() {
+        assert_eq!(parse(&["open-tab"]), Invocation::OpenTab);
+    }
+
+    #[test]
+    fn a_flag_after_a_subcommand_is_rejected() {
+        assert_eq!(
+            parse(&["open", "--tab"]),
+            Invocation::Reject(Some("--tab".to_string()))
+        );
+        assert_eq!(
+            parse(&["open-tab", "x"]),
+            Invocation::Reject(Some("x".to_string()))
+        );
+        assert_eq!(
+            parse(&["ui", "--tab"]),
+            Invocation::Reject(Some("--tab".to_string()))
+        );
+    }
+
+    /// Split `usage()`'s `Commands:` block into lines and assert exactly three, whose
+    /// first whitespace-delimited tokens are `ui`, `open`, and `open-tab` — asserted as
+    /// whole tokens, since `open` is a substring of `open-tab` and `.contains("open")`
+    /// would be satisfied by either alone.
+    #[test]
     fn usage_lists_ui() {
-        assert!(usage().contains("ui"));
+        let text = usage();
+        assert!(text.starts_with("usage: herdr-openspec <ui|open|open-tab>"));
+        let commands_block = text
+            .split("Commands:\n")
+            .nth(1)
+            .expect("usage() has a Commands: block");
+        let lines: Vec<&str> = commands_block
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .collect();
+        assert_eq!(lines.len(), 3, "commands block: {commands_block:?}");
+        let first_tokens: Vec<&str> = lines
+            .iter()
+            .map(|l| l.trim().split_whitespace().next().expect("non-empty line"))
+            .collect();
+        assert_eq!(first_tokens, vec!["ui", "open", "open-tab"]);
     }
 }
