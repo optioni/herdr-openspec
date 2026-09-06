@@ -388,6 +388,7 @@ mod tests {
                 pending: None,
                 problems: Vec::new(),
             },
+            file_mode: false,
         }
     }
 
@@ -425,6 +426,7 @@ mod tests {
                 pending: None,
                 problems: Vec::new(),
             },
+            file_mode: false,
         }
     }
 
@@ -467,6 +469,7 @@ mod tests {
                 pending: None,
                 problems: Vec::new(),
             },
+            file_mode: false,
         }
     }
 
@@ -1330,6 +1333,7 @@ mod tests {
                 pending: None,
                 problems: Vec::new(),
             },
+            file_mode: false,
         };
         let buf120 = render_at(120, 20, &d);
         assert!(interior_cols(&buf120, 2).starts_with("No OpenSpec repository found"));
@@ -2121,6 +2125,7 @@ mod tests {
                 pending: None,
                 problems: Vec::new(),
             },
+            file_mode: false,
         }
     }
 
@@ -2166,6 +2171,7 @@ mod tests {
                 pending: None,
                 problems: Vec::new(),
             },
+            file_mode: false,
         };
 
         let buf120 = render_at(120, 20, &d);
@@ -2310,6 +2316,7 @@ mod tests {
                 pending: None,
                 problems: Vec::new(),
             },
+            file_mode: false,
         };
         let default_style = Cell::default().style();
 
@@ -2633,6 +2640,7 @@ mod tests {
                 pending: None,
                 problems: Vec::new(),
             },
+            file_mode: false,
         };
         d.apply(Action::Next);
         d.apply(Action::Next);

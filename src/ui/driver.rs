@@ -241,6 +241,7 @@ mod tests {
                 pending: None,
                 problems: Vec::new(),
             },
+            file_mode: false,
         }
     }
 
@@ -278,6 +279,7 @@ mod tests {
                 pending: None,
                 problems: Vec::new(),
             },
+            file_mode: false,
         }
     }
 
@@ -656,6 +658,7 @@ mod tests {
                 pending: None,
                 problems: Vec::new(),
             },
+            file_mode: false,
         }
     }
 
@@ -782,6 +785,7 @@ mod tests {
                 pending: None,
                 problems: Vec::new(),
             },
+            file_mode: false,
         }
     }
 
@@ -1000,6 +1004,7 @@ mod tests {
                 pending: None,
                 problems: Vec::new(),
             },
+            file_mode: false,
         };
         let backend = TestBackend::new(120, 20);
         let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
@@ -1102,6 +1107,7 @@ mod tests {
                 pending: None,
                 problems: Vec::new(),
             },
+            file_mode: false,
         }
     }
 

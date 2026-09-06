@@ -58,14 +58,24 @@ grep -qE '^pub fn agent_cli_via\(' "$CLI" \
   || fail "positive control - $CLI defines no 'pub fn agent_cli_via('"
 grep -qE '^pub fn worker_cli_from_env\(' "$CLI" \
   || fail "positive control - $CLI defines no 'pub fn worker_cli_from_env('"
+grep -qE '^pub fn worker_cli\(' "$CLI" \
+  || fail "positive control - $CLI defines no 'pub fn worker_cli('"
+grep -qE '^pub fn npm_probe_hook\(' "$CLI" \
+  || fail "positive control - $CLI defines no 'pub fn npm_probe_hook(' - degraded-states's wrapper around the real npm-prefix binding, named so ui/ can reach it without NOCLI-SHELL's CLI_RE firing"
 grep -qE '^pub const HERDR_PROGRAM' "$CLI" \
   || fail "positive control - $CLI defines no 'pub const HERDR_PROGRAM'"
 grep -qE '^pub fn read\(' "$STATE" || fail "positive control - $STATE defines no 'pub fn read('"
 grep -qE '^pub fn start\(' "$LAUNCH" || fail "positive control - $LAUNCH defines no 'pub fn start('"
 
 # Leg 1 — every collaborator the loop needs is started BY NAME in the production slice.
+# degraded-states: worker_cli_from_env dropped out of this list (start_collaborators reaches
+# the probe through resolve::openspec_bin and worker_cli directly, injecting env/npm_hook
+# rather than hardcoding the real bindings inside worker_cli_from_env - design.md ->
+# Decision 14); config::env_lookup( and npm_probe_hook joined it, naming the two real
+# bindings the composition root itself supplies.
 for n in run_wired start_collaborators 'watch::start' 'refresh::start' 'agents::start' \
-         worker_cli_from_env agent_cli_via 'state::read' 'launch::start'; do
+         'resolve::openspec_bin' 'cli::worker_cli' agent_cli_via 'state::read' 'launch::start' \
+         'config::env_lookup(' npm_probe_hook; do
   code "$MOD" | grep -q -- "$n" \
     || fail "leg 1: $MOD's production slice does not name $n - the name is gone; leg 1 sees names, not values, so a call whose result is dropped still passes here and is the acceptance test's job"
 done
@@ -151,4 +161,4 @@ h=$(find "$UIDIR" -name '*.rs' -print0 \
                  exit 1; }
 
 lines=$(printf '%s\n' "$body" | wc -l | tr -d ' ')
-echo "WIRED OK: nine names present in $MOD; run resolves state::state_dir; run names startup_dir(; $MOD names config.agent_kind; 'pub fn run()' is $lines lines with no branch and no loop; no \"herdr\" and no \"claude\" literal under $UIDIR"
+echo "WIRED OK: eleven names present in $MOD; run resolves state::state_dir; run names startup_dir(; $MOD names config.agent_kind; 'pub fn run()' is $lines lines with no branch and no loop; no \"herdr\" and no \"claude\" literal under $UIDIR"

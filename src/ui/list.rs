@@ -471,6 +471,7 @@ mod tests {
                 pending: None,
                 problems: Vec::new(),
             },
+            file_mode: false,
         }
     }
 
@@ -557,6 +558,7 @@ mod tests {
                     pending: None,
                     problems: Vec::new(),
                 },
+                file_mode: false,
             },
         ]
     }
@@ -1125,6 +1127,7 @@ mod tests {
                 pending: None,
                 problems: Vec::new(),
             },
+            file_mode: false,
         };
         let rows38 = rows(&d, 38);
         assert_eq!(rows38.len(), 3);
@@ -1185,6 +1188,7 @@ mod tests {
                 pending: None,
                 problems: Vec::new(),
             },
+            file_mode: false,
         };
         let rows_with_problems = rows(&with_problems, 38);
         assert_eq!(rows_with_problems.len(), 3);

@@ -154,7 +154,7 @@ pub struct Launch {
 /// count, no terminal handle, and no frame — those are derived from the
 /// frame area on every draw, never stored here. Deliberately implements no
 /// `Default`, anywhere in the crate: every construction and every
-/// destructuring names all twelve fields, so a field added later fails to
+/// destructuring names all thirteen fields, so a field added later fails to
 /// compile at each site rather than defaulting silently. See
 /// `specs/dashboard-loop/spec.md` and the `NODEFAULT-UI` check.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -192,6 +192,11 @@ pub struct Dashboard {
     /// `agent-launch`'s addition: the launch tier's one-shot request and last reported
     /// problem. See `specs/agent-launch/spec.md`.
     pub launch: Launch,
+    /// `degraded-states`' addition: whether the binary probe resolved nothing. Set only by
+    /// the composition root (`run_wired`, via `start_collaborators`'s real probe) -- `ui::load`
+    /// sets `false` on both branches, since it never probes for a binary. Read only by the
+    /// header badge (`ui::view::render_header`). See `specs/responsive-layout/spec.md`.
+    pub file_mode: bool,
 }
 
 impl Dashboard {
@@ -697,6 +702,7 @@ mod tests {
                 pending: None,
                 problems: Vec::new(),
             },
+            file_mode: false,
         }
     }
 
@@ -721,6 +727,7 @@ mod tests {
             agents,
             agent_names,
             launch,
+            file_mode: _,
         } = &d;
         assert_eq!(*repo, Some(std::path::PathBuf::from("/repo")));
         assert_eq!(searched_from, &std::path::PathBuf::from("/repo"));
@@ -1065,6 +1072,7 @@ mod tests {
             agents: _,
             agent_names: _,
             launch,
+            file_mode: _,
         } = &d;
         assert_eq!(launch.pending, None);
         assert!(launch.problems.is_empty());
@@ -1240,6 +1248,7 @@ mod tests {
                     pending: None,
                     problems: Vec::new(),
                 },
+                file_mode: false,
             }
         }
 
@@ -1281,6 +1290,7 @@ mod tests {
                     pending: None,
                     problems: Vec::new(),
                 },
+                file_mode: false,
             }
         }
 
@@ -1325,6 +1335,7 @@ mod tests {
                     pending: None,
                     problems: Vec::new(),
                 },
+                file_mode: false,
             }
         }
 
@@ -1749,6 +1760,7 @@ mod tests {
                     pending: None,
                     problems: Vec::new(),
                 },
+                file_mode: false,
             };
 
             for action in variants {
@@ -2005,6 +2017,7 @@ mod tests {
                     pending: None,
                     problems: Vec::new(),
                 },
+                file_mode: false,
             };
             d.apply(Action::Next);
             assert_eq!(d.detail.scroll, 1);
@@ -2052,6 +2065,7 @@ mod tests {
                     pending: None,
                     problems: Vec::new(),
                 },
+                file_mode: false,
             };
             for _ in 0..4 {
                 d.apply(Action::Prev);
@@ -2105,6 +2119,7 @@ mod tests {
                     pending: None,
                     problems: Vec::new(),
                 },
+                file_mode: false,
             };
             d.apply(Action::FilterPush('j'));
             d.apply(Action::FilterPush('k'));
@@ -2146,6 +2161,7 @@ mod tests {
                     pending: None,
                     problems: Vec::new(),
                 },
+                file_mode: false,
             };
             d.apply(Action::Back);
             assert_eq!(d.detail.scroll, 0);
@@ -2182,6 +2198,7 @@ mod tests {
                     pending: None,
                     problems: Vec::new(),
                 },
+                file_mode: false,
             };
             d2.apply(Action::FilterStart);
             assert_eq!(d2.route, Route::List);
@@ -2220,6 +2237,7 @@ mod tests {
                     pending: None,
                     problems: Vec::new(),
                 },
+                file_mode: false,
             };
             d3.apply(Action::Back);
             assert_eq!(d3.detail.scroll, 3);
@@ -2262,6 +2280,7 @@ mod tests {
                     pending: None,
                     problems: Vec::new(),
                 },
+                file_mode: false,
             };
             d.normalise_scroll(ratatui::layout::Rect::new(0, 0, 120, 20));
             assert_eq!(d.detail.scroll, 6);
@@ -2296,6 +2315,7 @@ mod tests {
                     pending: None,
                     problems: Vec::new(),
                 },
+                file_mode: false,
             };
             d2.normalise_scroll(ratatui::layout::Rect::new(0, 0, 60, 20));
             assert_eq!(d2.detail.scroll, 6);
@@ -2330,6 +2350,7 @@ mod tests {
                     pending: None,
                     problems: Vec::new(),
                 },
+                file_mode: false,
             };
             d3.normalise_scroll(ratatui::layout::Rect::new(0, 0, 120, 40));
             assert_eq!(
@@ -2382,6 +2403,7 @@ mod tests {
                         pending: None,
                         problems: Vec::new(),
                     },
+                    file_mode: false,
                 }
             }
 
@@ -2440,6 +2462,7 @@ mod tests {
                     pending: None,
                     problems: Vec::new(),
                 },
+                file_mode: false,
             };
             d.normalise_scroll(ratatui::layout::Rect::new(0, 0, 60, 20));
             assert_eq!(
@@ -2555,6 +2578,7 @@ mod tests {
                     pending: None,
                     problems: Vec::new(),
                 },
+                file_mode: false,
             };
             let before = dashboard.clone();
 
@@ -2624,6 +2648,7 @@ mod tests {
                     pending: None,
                     problems: Vec::new(),
                 },
+                file_mode: false,
             }
         }
 
@@ -2767,6 +2792,7 @@ mod tests {
                 agents,
                 agent_names,
                 launch,
+                file_mode: _,
             } = &d;
             assert_eq!(*repo, None);
             assert_eq!(
@@ -3109,6 +3135,7 @@ mod tests {
                     pending: None,
                     problems: Vec::new(),
                 },
+                file_mode: false,
             };
             d.apply(Action::Next);
             assert_eq!(d.selected, 1);
@@ -3153,6 +3180,7 @@ mod tests {
                     pending: None,
                     problems: Vec::new(),
                 },
+                file_mode: false,
             };
             d2.apply(Action::Prev);
             assert_eq!(d2.selected, 0);
@@ -3208,6 +3236,7 @@ mod tests {
                     pending: None,
                     problems: Vec::new(),
                 },
+                file_mode: false,
             }
         }
 
@@ -3350,6 +3379,7 @@ mod tests {
                     pending: None,
                     problems: Vec::new(),
                 },
+                file_mode: false,
             };
             let recorder = RecordingReader::always(Ok("text".to_string()));
             let read = |p: &std::path::Path| recorder.read(p);
@@ -3415,6 +3445,7 @@ mod tests {
                     pending: None,
                     problems: Vec::new(),
                 },
+                file_mode: false,
             };
             let recorder = RecordingReader::new(
                 vec![
@@ -3589,6 +3620,7 @@ mod tests {
                     pending: None,
                     problems: Vec::new(),
                 },
+                file_mode: false,
             };
             let recorder = RecordingReader::always(Ok("t".to_string()));
             let read = |p: &std::path::Path| recorder.read(p);
@@ -3658,6 +3690,7 @@ mod tests {
                     pending: None,
                     problems: Vec::new(),
                 },
+                file_mode: false,
             };
             let recorder2 = RecordingReader::always(Err("must not be called".to_string()));
             let read2 = |p: &std::path::Path| recorder2.read(p);

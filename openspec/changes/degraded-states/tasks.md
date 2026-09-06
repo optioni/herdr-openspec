@@ -143,7 +143,7 @@
 ## 3. The probe seam, `file_mode`, and the startup problems that reach the pane
 <!-- kind: behavior -->
 
-- [ ] 3.1 RED: Write failing tests for `run_wired_probes_through_the_injected_hook` (fixture
+- [x] 3.1 RED: Write failing tests for `run_wired_probes_through_the_injected_hook` (fixture
   environment map with no `PATH`, `npm` hook returning `None`, **plus** a resolving control
   where the hook returns a scratch prefix holding a usable `openspec`),
   `load_never_claims_file_mode`, `run_wired_sets_file_mode_from_the_probe`,
@@ -151,29 +151,29 @@
   `a_resolved_binary_adds_no_problem_and_no_badge`,
   `config_fallback_renders_as_a_leading_problem_row`,
   `startup_problems_are_ordered_config_then_binary_then_watcher`, `a_clean_config_adds_no_row`.
-- [ ] 3.2 GREEN: Add the environment lookup and the `npm prefix -g` hook to `ui::Startup`
+- [x] 3.2 GREEN: Add the environment lookup and the `npm prefix -g` hook to `ui::Startup`
   (design.md → Decision 14), have `start_collaborators` reach the probe through
   `resolve::openspec_bin` and `cli::worker_cli` rather than `worker_cli_from_env`, and pass
   `config::env_lookup()` and `cli::npm_prefix` from `run`. Without this the file-mode tests
   read the developer's `PATH` and spawn the real `npm`.
-- [ ] 3.3 GREEN: Add `file_mode: bool` to `ui::app::Dashboard` and name it at every
+- [x] 3.3 GREEN: Add `file_mode: bool` to `ui::app::Dashboard` and name it at every
   construction site. The compiler enumerates them.
-- [ ] 3.4 GREEN: Change `cli::worker_cli` to surrender `BinResolution::problems` alongside the
+- [x] 3.4 GREEN: Change `cli::worker_cli` to surrender `BinResolution::problems` alongside the
   handle instead of dropping it.
-- [ ] 3.5 GREEN: In `start_collaborators`, fold `Config::problems`, then the resolution's
+- [x] 3.5 GREEN: In `start_collaborators`, fold `Config::problems`, then the resolution's
   problems, into the `problems` vector already handed to `run_wired`, and report `file_mode`.
   `run_wired` assigns it; `ui::load` sets `false` on both branches.
-- [ ] 3.6 CHECK: The two whole-buffer-equality tests in 3.1
+- [x] 3.6 CHECK: The two whole-buffer-equality tests in 3.1
   (`a_resolved_binary_adds_no_problem_and_no_badge`, `a_clean_config_adds_no_row`) each carry a
   **discriminating control** — a sibling assertion on a dashboard that *does* produce the row,
   so the equality cannot be satisfied by both buffers being empty.
-- [ ] 3.7 CHECK: Contract gate — re-inspect `cli::worker_cli`'s and `ui::Startup`'s shapes
+- [x] 3.7 CHECK: Contract gate — re-inspect `cli::worker_cli`'s and `ui::Startup`'s shapes
   against design.md → Contracts, and every caller. `sh scripts/gates/wired.sh`,
   `UI_MIN=11 sh $C/NOCLI-SHELL.sh`, and `UI_MIN=11 sh $C/NOBLOCK.sh` stay green —
   `start_collaborators` must still name no `npm_prefix`.
-- [ ] 3.8 REFACTOR: Extract the problem ordering into one named helper if
+- [x] 3.8 REFACTOR: Extract the problem ordering into one named helper if
   `start_collaborators` has grown past readable; otherwise state that no refactor was needed.
-- [ ] 3.9 Run `make check`. Commit.
+- [x] 3.9 Run `make check`. Commit.
 
 ## 4. The `file mode` header badge
 <!-- kind: behavior -->

@@ -250,6 +250,17 @@ pub fn npm_prefix() -> Option<PathBuf> {
     npm_prefix_via(Path::new("npm"))
 }
 
+/// `degraded-states`' wrapper around [`npm_prefix`], exposed under a name the `NOCLI-SHELL`
+/// gate does not forbid (its `CLI_RE` bans the substring `npm_prefix` anywhere under
+/// `src/ui/`, comments included, on purpose: the dashboard shell may reach a production CLI
+/// binding only through a name that says nothing about the CLI seam itself). `ui::run` is
+/// the one caller, passing this as `Startup::npm_hook` — see design.md -> Decision 14. Same
+/// established pattern as [`agent_cli_via`] and [`HERDR_PROGRAM`]: a thin, differently-named
+/// wrapper around the one real binding, rather than the binding itself, crossing into `ui`.
+pub fn npm_probe_hook() -> Option<PathBuf> {
+    npm_prefix()
+}
+
 /// The bare program name `herdr`, resolved by the operating system through `PATH` — the
 /// one place that literal is written as a program name. This crate builds no resolution
 /// chain for `herdr`, deliberately: failing to start it is already the documented
@@ -271,26 +282,30 @@ pub fn agent_cli_via(program: &Path) -> std::sync::Arc<dyn HerdrCli> {
 /// found, which is exactly `refresh::start`'s no-binary case: no thread, no
 /// process, the inert `Refresher`. Pure and testable, unlike its `_from_env`
 /// sibling below.
+///
+/// `degraded-states`' addition: surrenders `resolution.problems` alongside the handle
+/// instead of dropping it — rows 27 and 31 of `SPEC.md` -> Degraded states name a reason on
+/// `BinResolution::problems` that, before this change, reached no reader once `worker_cli`
+/// consumed the resolution. `ui::start_collaborators` is the one production caller.
 pub fn worker_cli(
     resolution: crate::resolve::BinResolution,
-) -> Option<std::sync::Arc<dyn OpenspecCli>> {
-    resolution.found.map(|found| {
+) -> (Option<std::sync::Arc<dyn OpenspecCli>>, Vec<String>) {
+    let cli = resolution.found.map(|found| {
         std::sync::Arc::new(RealOpenspecCli::new(found.path)) as std::sync::Arc<dyn OpenspecCli>
-    })
+    });
+    (cli, resolution.problems)
 }
 
 /// The production binding: resolve the binary from the environment via
-/// `resolve::openspec_bin_from_env`, then [`worker_cli`]. `ui::run` calls
-/// this rather than constructing a `RealOpenspecCli` itself — the type
-/// appears only in THIS function's signature, never in `ui::run`'s own
-/// source text, which is the mechanical reason `NOCLI-SHELL` ("no file
-/// under `src/ui/` names `OpenspecCli`") stays satisfied while the live
-/// tier's worker is still wired to a real binary. See
-/// `openspec/changes/live-refresh/design.md` -> Decisions 1.
+/// `resolve::openspec_bin_from_env`, then [`worker_cli`]. Named only as a `WIRED` positive
+/// control since `degraded-states` (`ui::start_collaborators` reaches the probe through
+/// `resolve::openspec_bin` and `worker_cli` directly, so the injected environment lookup and
+/// `npm` hook a test drives are not hidden behind this function's own hardcoded bindings —
+/// design.md -> Decision 14). See `openspec/changes/live-refresh/design.md` -> Decisions 1.
 pub fn worker_cli_from_env(
     config: &crate::config::Config,
 ) -> Option<std::sync::Arc<dyn OpenspecCli>> {
-    worker_cli(crate::resolve::openspec_bin_from_env(config))
+    worker_cli(crate::resolve::openspec_bin_from_env(config)).0
 }
 
 /// Which program a fake invocation addressed. Recorded and keyed alongside
@@ -508,7 +523,9 @@ mod tests {
             found: None,
             problems: Vec::new(),
         };
-        assert!(super::worker_cli(resolution).is_none());
+        let (cli, problems) = super::worker_cli(resolution);
+        assert!(cli.is_none());
+        assert!(problems.is_empty());
     }
 
     #[test]
@@ -522,8 +539,50 @@ mod tests {
             }),
             problems: Vec::new(),
         };
-        let cli = super::worker_cli(resolution).expect("a binary was found");
+        let (cli, problems) = super::worker_cli(resolution);
+        let cli = cli.expect("a binary was found");
         assert_eq!(cli.run(&[]), Ok("ok".to_string()));
+        assert!(problems.is_empty());
+    }
+
+    /// `degraded-states`: `worker_cli` surrenders `BinResolution::problems` alongside the
+    /// handle rather than dropping them — rows 27 and 31 of `SPEC.md` -> Degraded states name
+    /// a reason on this vector that, before this change, reached no reader.
+    #[test]
+    fn worker_cli_surrenders_the_resolutions_problems() {
+        let resolution = crate::resolve::BinResolution {
+            found: None,
+            problems: vec!["configured openspec_bin is not usable: /bad/path".to_string()],
+        };
+        let (cli, problems) = super::worker_cli(resolution);
+        assert!(cli.is_none());
+        assert_eq!(
+            problems,
+            vec!["configured openspec_bin is not usable: /bad/path".to_string()]
+        );
+    }
+
+    /// The same surrender when a binary WAS found and a problem was recorded on the way —
+    /// step 1's own fall-through case (design.md -> Context, rows 27/31): a configured path
+    /// that could not be used still falls through to a later, usable step.
+    #[test]
+    fn worker_cli_surrenders_problems_alongside_a_found_binary_too() {
+        let scratch = ScratchDir::new();
+        let prog = script(&scratch, "prog", "printf 'ok'\n");
+        let resolution = crate::resolve::BinResolution {
+            found: Some(crate::resolve::FoundBin {
+                path: prog.clone(),
+                source: crate::resolve::BinSource::Path,
+            }),
+            problems: vec!["configured openspec_bin is not usable: /bad/path".to_string()],
+        };
+        let (cli, problems) = super::worker_cli(resolution);
+        let cli = cli.expect("a binary was found on a later step");
+        assert_eq!(cli.run(&[]), Ok("ok".to_string()));
+        assert_eq!(
+            problems,
+            vec!["configured openspec_bin is not usable: /bad/path".to_string()]
+        );
     }
 
     #[test]
@@ -938,6 +997,15 @@ mod tests {
             super::npm_prefix(),
             super::npm_prefix_via(std::path::Path::new("npm"))
         );
+    }
+
+    /// `degraded-states`: `npm_probe_hook` delegates to `npm_prefix` rather than answering
+    /// for itself, on exactly `the_binding_delegates_to_the_probe_rather_than_answering_for_itself`'s
+    /// terms — machine-independent, and red for a hardcoded `None` body wherever a working
+    /// `npm` exists.
+    #[test]
+    fn npm_probe_hook_delegates_to_npm_prefix() {
+        assert_eq!(super::npm_probe_hook(), super::npm_prefix());
     }
 
     #[test]

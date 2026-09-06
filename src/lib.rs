@@ -801,6 +801,7 @@ pub(crate) mod testutil {
                     pending: None,
                     problems: Vec::new(),
                 },
+                file_mode: false,
             }
         }
 

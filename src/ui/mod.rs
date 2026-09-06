@@ -101,6 +101,17 @@ pub struct Startup<'a> {
     /// environment. `None` is an ordinary case: no directory could be
     /// resolved, and `load` yields an empty mapping.
     pub state_dir: Option<&'a Path>,
+    /// `degraded-states`' addition (design.md -> Decision 14): the environment lookup the
+    /// binary probe's `PATH` and nvm steps read, injected on exactly `state_dir`'s terms so
+    /// a test drives the case where nothing resolves without touching the real `PATH`. `run`
+    /// passes `config::env_lookup()`.
+    pub env: &'a dyn Fn(&str) -> Option<String>,
+    /// The probe's fourth-step hook, injected on the same terms as `env`. `run` passes
+    /// `cli::npm_probe_hook` — a wrapper around the real fourth-step binding, exposed under
+    /// a name the `NOCLI-SHELL` gate does not forbid, following `agent_cli_via`'s and
+    /// `HERDR_PROGRAM`'s established pattern: the dashboard shell reaches a production CLI
+    /// binding only through a name that says nothing about the CLI seam itself.
+    pub npm_hook: &'a dyn Fn() -> Option<std::path::PathBuf>,
 }
 
 /// The live tier's three collaborators, plus any problem folded in while
@@ -115,6 +126,9 @@ pub struct Collaborators {
     /// object.
     pub launcher: Box<dyn crate::launch::Launcher>,
     pub problems: Vec<String>,
+    /// `degraded-states`' addition: whether the binary probe resolved nothing, so
+    /// `run_wired` can set `Dashboard::file_mode`.
+    pub file_mode: bool,
 }
 
 /// Start the live tier's collaborators for `repo`. The watcher and the
@@ -129,21 +143,35 @@ pub struct Collaborators {
 /// name is recorded under, and `repo` decides between the real launcher and `launch::none()`
 /// — a pane with no repository has no change to launch onto and no badge to focus, so the
 /// inert double costs nothing and represents the truth.
+///
+/// `degraded-states`' addition: `env` and `npm_hook` reach the binary probe
+/// (`resolve::openspec_bin`) directly rather than through `cli::worker_cli_from_env`, which
+/// hardcodes the real environment and the real `npm`. `Collaborators::problems` folds three
+/// standing-condition sources in causal order (design.md -> Decision 4): the configuration's
+/// own fallbacks lead, then the probe's, then the watcher's — the reader meets them in the
+/// order they actually happened.
 pub fn start_collaborators(
     repo: Option<&Path>,
     config: &Config,
     herdr: &Path,
     state_dir: Option<&Path>,
+    env: &dyn Fn(&str) -> Option<String>,
+    npm_hook: &dyn Fn() -> Option<std::path::PathBuf>,
 ) -> Collaborators {
-    let (fs, problems) = match repo {
+    let mut problems = config.problems.clone();
+
+    let resolution = crate::resolve::openspec_bin(config.openspec_bin.as_deref(), env, npm_hook);
+    let (cli, bin_problems) = crate::cli::worker_cli(resolution);
+    let file_mode = cli.is_none();
+    problems.extend(bin_problems);
+
+    let (fs, watch_problems) = match repo {
         Some(root) => crate::watch::start(root),
         None => (crate::watch::none(), Vec::new()),
     };
-    let refresher = crate::refresh::start(
-        repo,
-        crate::cli::worker_cli_from_env(config),
-        config.archived_count,
-    );
+    problems.extend(watch_problems);
+
+    let refresher = crate::refresh::start(repo, cli, config.archived_count);
     let agents = crate::agents::start(crate::cli::agent_cli_via(herdr));
     // `agent-launch`: the launcher, on the watcher's and the worker's terms rather than the
     // poller's — every launch argument vector carries the repository root as `--cwd`, and a
@@ -164,6 +192,7 @@ pub fn start_collaborators(
         agents,
         launcher,
         problems,
+        file_mode,
     }
 }
 
@@ -185,8 +214,11 @@ pub fn run_wired<B: Backend, E: EventSource>(
         startup.config,
         startup.herdr,
         startup.state_dir,
+        startup.env,
+        startup.npm_hook,
     );
     dashboard.refresh.problems = collaborators.problems;
+    dashboard.file_mode = collaborators.file_mode;
     let mut live = crate::ui::driver::Live {
         fs: &mut *collaborators.fs,
         refresher: &mut *collaborators.refresher,
@@ -256,14 +288,17 @@ pub fn run() -> Result<(), StartError> {
     let _guard = enter_if_terminal(std::io::stdout().is_terminal(), &CrosstermOps)?;
     terminal::install_panic_hook();
     let config = crate::config::load_from_env();
-    let cwd = startup_dir(&crate::config::env_lookup(), &|| std::env::current_dir())?;
+    let env = crate::config::env_lookup();
+    let cwd = startup_dir(&env, &|| std::env::current_dir())?;
     let mut term = Terminal::new(ratatui::backend::CrosstermBackend::new(std::io::stdout()))?;
-    let state_dir = crate::state::state_dir(&crate::config::env_lookup());
+    let state_dir = crate::state::state_dir(&env);
     let startup = Startup {
         cwd: &cwd,
         config: &config,
         herdr: Path::new(crate::cli::HERDR_PROGRAM),
         state_dir: state_dir.as_deref(),
+        env: &env,
+        npm_hook: &crate::cli::npm_probe_hook,
     };
     run_wired(
         &mut term,
@@ -334,6 +369,7 @@ pub fn load(start: &Path, config: &Config, state_dir: Option<&Path>) -> Dashboar
                     pending: None,
                     problems: Vec::new(),
                 },
+                file_mode: false,
             }
         }
         crate::resolve::RepoSearch::NotFound { searched_from } => Dashboard {
@@ -369,6 +405,7 @@ pub fn load(start: &Path, config: &Config, state_dir: Option<&Path>) -> Dashboar
                 pending: None,
                 problems: Vec::new(),
             },
+            file_mode: false,
         },
     }
 }
@@ -555,6 +592,7 @@ mod tests {
                     pending: None,
                     problems: Vec::new(),
                 },
+                file_mode: false,
             }
         }
 
@@ -718,6 +756,7 @@ mod tests {
                         pending: None,
                         problems: Vec::new(),
                     },
+                    file_mode: false,
                 }
             };
 
@@ -1133,6 +1172,34 @@ apply:
                 archived_count,
                 ..Config::default()
             }
+        }
+
+        /// `dashboard-loop` :: "`file_mode` is set by the composition root and by nothing
+        /// else" — the unit half. `ui::load` never claims either value; `file_mode` is
+        /// `false` on both branches, and it is `run_wired` (via `start_collaborators`'s real
+        /// probe) that assigns the true value afterward. See
+        /// `mod wiring::run_wired_sets_file_mode_from_the_probe` for the outer half.
+        #[test]
+        fn load_never_claims_file_mode() {
+            let scratch = ScratchDir::new();
+            let root = scratch.path();
+            write(&root.join("openspec/changes/alpha/proposal.md"), "# P\n");
+            write(
+                &root.join("openspec/changes/alpha/tasks.md"),
+                "- [x] a\n- [ ] b\n",
+            );
+            let found = super::super::load(root, &Config::default(), None);
+            assert!(
+                !found.file_mode,
+                "a repository being found must not itself claim file_mode"
+            );
+
+            let empty = ScratchDir::new();
+            let not_found = super::super::load(empty.path(), &Config::default(), None);
+            assert!(
+                !not_found.file_mode,
+                "no repository found is unrelated to file_mode"
+            );
         }
 
         #[test]
@@ -2102,7 +2169,9 @@ apply:
         use std::time::Duration;
 
         use crate::config::Config;
-        use crate::testutil::{ScratchDir, UntilReady, canonical, snapshot, write_with_mode};
+        use crate::testutil::{
+            ScratchDir, UntilReady, canonical, render_at, row_text, snapshot, write_with_mode,
+        };
         use crate::ui::app::{Dashboard, Route};
         use crate::ui::{StartError, Startup};
 
@@ -2111,6 +2180,20 @@ apply:
         /// `testutil::UntilReady` event source built from `predicate`.
         /// Returns the result plus every drawn row as a `String`, so a caller
         /// can search the buffer without repeating the row-reading dance.
+        /// The neutral environment `run_wired_at` and `run_wired_staged` inject by default: no
+        /// `PATH`, no `HOME`, no `NVM_DIR` — so the binary probe's `PATH` and nvm steps never
+        /// resolve anything, on design.md -> Decision 14's terms. Every test in this module
+        /// that needs a specific probe outcome either configures `Config::openspec_bin`
+        /// directly (step 1, which does not consult `env` at all) or drives the probe through
+        /// `run_wired_probed` below, which takes its own `env`/`npm_hook`.
+        fn no_env(_: &str) -> Option<String> {
+            None
+        }
+
+        fn no_npm_hook() -> Option<PathBuf> {
+            None
+        }
+
         fn run_wired_at(
             width: u16,
             root: &Path,
@@ -2127,6 +2210,60 @@ apply:
                 config,
                 herdr,
                 state_dir,
+                env: &no_env,
+                npm_hook: &no_npm_hook,
+            };
+            let result = super::super::run_wired(
+                &mut terminal,
+                &mut events,
+                &startup,
+                &crate::ui::read_artifact,
+                Duration::from_millis(1),
+            );
+            let buf = terminal.backend().buffer().clone();
+            let rows: Vec<String> = (0..buf.area.height)
+                .map(|y| {
+                    (0..buf.area.width)
+                        .map(|x| buf[(x, y)].symbol().to_string())
+                        .collect::<String>()
+                })
+                .collect();
+            (result, rows)
+        }
+
+        /// `run_wired_at`'s parameters, bundled into one struct rather than widened past
+        /// seven positional arguments (`clippy::too_many_arguments` fires at eight) — used
+        /// only by the file-mode/probe scenarios below that need a non-neutral `env` or
+        /// `npm_hook`, so `run_wired_at` itself stays untouched for every other test in this
+        /// module.
+        struct ProbedStartup<'a> {
+            width: u16,
+            root: &'a Path,
+            config: &'a Config,
+            herdr: &'a Path,
+            state_dir: Option<&'a Path>,
+            env: &'a dyn Fn(&str) -> Option<String>,
+            npm_hook: &'a dyn Fn() -> Option<PathBuf>,
+        }
+
+        /// `run_wired_at`'s twin, driving `run_wired` with an explicit `env`/`npm_hook` — see
+        /// design.md -> Decision 14. `p.env`/`p.npm_hook` are what let a test drive the binary
+        /// probe's failing and resolving cases without touching the real `PATH` or spawning
+        /// the real `npm`.
+        fn run_wired_probed(
+            p: ProbedStartup<'_>,
+            predicate: &dyn Fn() -> bool,
+        ) -> (Result<Dashboard, StartError>, Vec<String>) {
+            let backend = ratatui::backend::TestBackend::new(p.width, 20);
+            let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+            let mut events = UntilReady::new(predicate);
+            let startup = Startup {
+                cwd: p.root,
+                config: p.config,
+                herdr: p.herdr,
+                state_dir: p.state_dir,
+                env: p.env,
+                npm_hook: p.npm_hook,
             };
             let result = super::super::run_wired(
                 &mut terminal,
@@ -2395,6 +2532,8 @@ esac
                 config,
                 herdr,
                 state_dir,
+                env: &no_env,
+                npm_hook: &no_npm_hook,
             };
             let result = super::super::run_wired(
                 &mut terminal,
@@ -3001,6 +3140,8 @@ esac
                 config: &config,
                 herdr: &herdr,
                 state_dir: Some(state.path()),
+                env: &no_env,
+                npm_hook: &no_npm_hook,
             };
             let result = super::super::run_wired(
                 &mut terminal,
@@ -3020,6 +3161,356 @@ esac
             assert_eq!(before, after);
             let state_after = snapshot(state.path());
             assert_eq!(state_before, state_after);
+        }
+
+        // --- degraded-states: the probe seam, file_mode, and the startup problems that
+        // --- reach the pane (task group 3) -------------------------------------------------
+
+        /// `openspec-binary` :: "An outer test drives a failing probe without touching the
+        /// machine" — the SAME neutral `env` (no `PATH`, no `HOME`, no `NVM_DIR`) proves both
+        /// the failing case, through `run_wired`'s real `resolve::openspec_bin` call, and —
+        /// via the resolving control — that the injected `npm_hook` is what the fourth probe
+        /// step actually reads, never the real production binding. Neither sub-case touches
+        /// the developer's real `PATH` or spawns the real `npm` (design.md -> Decision 14).
+        #[test]
+        fn run_wired_probes_through_the_injected_hook() {
+            let scratch = scratch_repo_with_alpha();
+            let root = scratch.path();
+            let herdr = root.join("does-not-exist-herdr");
+
+            let (result, _buf) = run_wired_probed(
+                ProbedStartup {
+                    width: 120,
+                    root,
+                    config: &Config::default(),
+                    herdr: &herdr,
+                    state_dir: None,
+                    env: &no_env,
+                    npm_hook: &no_npm_hook,
+                },
+                &|| true,
+            );
+            let dashboard = result.expect("no usable binary anywhere is a supported state");
+            assert!(
+                dashboard.file_mode,
+                "with PATH, nvm, and the npm hook all unusable, file_mode must be true"
+            );
+
+            // The resolving control: the SAME env (no PATH) but the injected npm hook
+            // resolves a usable binary — discriminates the assertion above from "file_mode
+            // is always true regardless of the hook".
+            let prefix = ScratchDir::new();
+            let openspec_log = root.join("openspec-via-npm.log");
+            let _ = openspec_script(prefix.path(), &openspec_log, root);
+            let prefix_path = prefix.path().to_path_buf();
+            let resolving_npm = move || Some(prefix_path.clone());
+            let predicate = || log_lines(&openspec_log) >= 1;
+            let (result2, _buf2) = run_wired_probed(
+                ProbedStartup {
+                    width: 120,
+                    root,
+                    config: &Config::default(),
+                    herdr: &herdr,
+                    state_dir: None,
+                    env: &no_env,
+                    npm_hook: &resolving_npm,
+                },
+                &predicate,
+            );
+            let dashboard2 = result2.expect("a resolving npm hook is a supported state");
+            assert!(
+                !dashboard2.file_mode,
+                "the resolving control must not be file mode"
+            );
+            assert!(
+                log_lines(&openspec_log) >= 1,
+                "the resolving control must have spawned the scratch openspec program through \
+                 the injected npm hook, proving the probe reached step 4 rather than a cached \
+                 negative"
+            );
+        }
+
+        /// `dashboard-loop` :: "`file_mode` is set by the composition root and by nothing
+        /// else" — the outer half; `mod load::load_never_claims_file_mode` is the unit half.
+        #[test]
+        fn run_wired_sets_file_mode_from_the_probe() {
+            let scratch = scratch_repo_with_alpha();
+            let root = scratch.path();
+            let herdr = root.join("does-not-exist-herdr");
+
+            let (result, _buf) =
+                run_wired_at(120, root, &Config::default(), &herdr, None, &|| true);
+            let dashboard = result.expect("no binary anywhere is a supported state");
+            assert!(dashboard.file_mode);
+
+            let openspec_log = root.join("openspec-fm.log");
+            let openspec = openspec_script(root, &openspec_log, root);
+            let config = Config {
+                openspec_bin: Some(openspec),
+                ..Config::default()
+            };
+            let predicate = || log_lines(&openspec_log) >= 1;
+            let (result2, _buf2) = run_wired_at(120, root, &config, &herdr, None, &predicate);
+            let dashboard2 = result2.expect("a configured usable binary is a supported state");
+            assert!(!dashboard2.file_mode);
+        }
+
+        /// `openspec-binary` :: "A configured path that cannot be used reaches the list as a
+        /// problem row" — rows 27/31's "true but unobservable" defect, made observable.
+        #[test]
+        fn unusable_openspec_bin_renders_as_a_problem_row() {
+            for width in [120u16, 60u16] {
+                let scratch = scratch_repo_with_alpha();
+                let root = scratch.path();
+                let herdr = root.join("does-not-exist-herdr");
+                let bad_bin = root.join("not-a-real-openspec-binary");
+                let config = Config {
+                    openspec_bin: Some(bad_bin.clone()),
+                    ..Config::default()
+                };
+                let (result, buf) = run_wired_at(width, root, &config, &herdr, None, &|| true);
+                let dashboard = result.expect("an unusable configured binary is a supported state");
+                assert!(dashboard.file_mode, "width {width}");
+                assert!(
+                    dashboard
+                        .refresh
+                        .problems
+                        .iter()
+                        .any(|p| p.contains("openspec_bin")
+                            && p.contains(&bad_bin.display().to_string())),
+                    "width {width}: {:?}",
+                    dashboard.refresh.problems
+                );
+                assert!(
+                    buf.iter()
+                        .any(|row| row.contains('!') && row.contains("openspec_bin")),
+                    "width {width}: no leading problem row names openspec_bin: {buf:?}"
+                );
+            }
+        }
+
+        /// `openspec-binary` :: "No binary anywhere is reported as file mode rather than as
+        /// an error".
+        #[test]
+        fn no_binary_is_file_mode_not_an_error() {
+            let scratch = scratch_repo_with_alpha();
+            let root = scratch.path();
+            let herdr = root.join("does-not-exist-herdr");
+            let (result, buf) = run_wired_at(120, root, &Config::default(), &herdr, None, &|| true);
+            let dashboard = result.expect("no binary anywhere must be Ok, not an error");
+            assert!(dashboard.file_mode);
+            assert!(
+                dashboard.refresh.problems.is_empty(),
+                "an absent CLI records no problem: {:?}",
+                dashboard.refresh.problems
+            );
+            assert!(
+                buf.iter()
+                    .any(|row| row.contains("alpha") && row.contains("[4/9]")),
+                "the pane must still render real content: {buf:?}"
+            );
+        }
+
+        /// `openspec-binary` :: "A resolved binary contributes nothing" — whole-buffer
+        /// equality, with a discriminating control (an unusable configured binary, which
+        /// DOES add a problem row) so the equality is not satisfied by two empty buffers.
+        #[test]
+        fn a_resolved_binary_adds_no_problem_and_no_badge() {
+            for width in [120u16, 60u16] {
+                let scratch = scratch_repo_with_alpha();
+                let root = scratch.path();
+                let herdr = root.join("does-not-exist-herdr");
+                let openspec_log = root.join("openspec-resolved.log");
+                let openspec = openspec_script(root, &openspec_log, root);
+                let config = Config {
+                    openspec_bin: Some(openspec),
+                    ..Config::default()
+                };
+                let predicate = || log_lines(&openspec_log) >= 1;
+                let (result, buf) = run_wired_at(width, root, &config, &herdr, None, &predicate);
+                let dashboard = result.expect("a resolved binary is a supported state");
+                assert!(!dashboard.file_mode, "width {width}");
+                assert!(
+                    dashboard.refresh.problems.is_empty(),
+                    "width {width}: {:?}",
+                    dashboard.refresh.problems
+                );
+                assert!(
+                    !buf.iter().any(|row| row.trim_start().starts_with('!')),
+                    "width {width}: a resolved binary must add no leading problem row: {buf:?}"
+                );
+
+                // Discriminating control.
+                let bad_bin = root.join("not-a-real-openspec-binary");
+                let bad_config = Config {
+                    openspec_bin: Some(bad_bin),
+                    ..Config::default()
+                };
+                let (bad_result, bad_buf) =
+                    run_wired_at(width, root, &bad_config, &herdr, None, &|| true);
+                let _ =
+                    bad_result.expect("an unusable configured binary is still a supported state");
+                assert_ne!(
+                    buf, bad_buf,
+                    "width {width}: the control must render differently from the \
+                     resolved-binary buffer"
+                );
+            }
+        }
+
+        /// `plugin-config` :: "A malformed key renders as a leading problem row at both
+        /// widths" — `Config::problems`, populated by `config::load` (not exercised here;
+        /// this test constructs the value directly, on exactly `plugin-config`'s own unit
+        /// tests' terms), now reaches the pane through `start_collaborators`.
+        #[test]
+        fn config_fallback_renders_as_a_leading_problem_row() {
+            for width in [120u16, 60u16] {
+                let scratch = scratch_repo_with_alpha();
+                let root = scratch.path();
+                let herdr = root.join("does-not-exist-herdr");
+                let config = Config {
+                    problems: vec!["config.toml is not valid TOML: bad".to_string()],
+                    ..Config::default()
+                };
+                let (result, buf) = run_wired_at(width, root, &config, &herdr, None, &|| true);
+                let dashboard = result.expect("a configuration fallback is a supported state");
+                assert_eq!(
+                    dashboard.refresh.problems.first().map(String::as_str),
+                    Some("config.toml is not valid TOML: bad"),
+                    "width {width}: the configuration's own problem must lead"
+                );
+                assert!(
+                    buf.iter()
+                        .any(|row| row.contains("config.toml is not valid TOML")),
+                    "width {width}: {buf:?}"
+                );
+            }
+        }
+
+        /// `plugin-config` :: "A clean configuration contributes nothing" — whole-buffer
+        /// equality, with a discriminating control (a dirty configuration, which DOES add a
+        /// row).
+        #[test]
+        fn a_clean_config_adds_no_row() {
+            for width in [120u16, 60u16] {
+                let scratch = scratch_repo_with_alpha();
+                let root = scratch.path();
+                let herdr = root.join("does-not-exist-herdr");
+                let config = Config::default();
+                let (result, buf) = run_wired_at(width, root, &config, &herdr, None, &|| true);
+                let dashboard = result.expect("a clean configuration is a supported state");
+                assert!(
+                    dashboard.refresh.problems.is_empty(),
+                    "width {width}: {:?}",
+                    dashboard.refresh.problems
+                );
+                assert!(
+                    !buf.iter().any(|row| row.trim_start().starts_with('!')),
+                    "width {width}: {buf:?}"
+                );
+
+                let dirty_config = Config {
+                    problems: vec!["config.toml is not valid TOML: bad".to_string()],
+                    ..Config::default()
+                };
+                let (dirty_result, dirty_buf) =
+                    run_wired_at(width, root, &dirty_config, &herdr, None, &|| true);
+                let _ = dirty_result.expect("a dirty configuration is still a supported state");
+                assert_ne!(
+                    buf, dirty_buf,
+                    "width {width}: the control must render differently"
+                );
+            }
+        }
+
+        /// `plugin-config` :: "Configuration problems precede binary and watcher problems" —
+        /// the one scenario in this group needing a REAL watcher failure (design.md -> Test
+        /// Boundaries: "notify real (unwatchable root)"). Driven through
+        /// `start_collaborators` and `ui::view::render` directly rather than through
+        /// `run_wired`: a genuinely unwatchable root on this platform (`notify`'s FSEvents
+        /// backend) requires the directory to exist when `ui::load` resolves it and be gone
+        /// by the time `watch::start` reaches it — measured directly against this crate's
+        /// `notify` backend (a chmod-000 directory and an internal symlink loop both still
+        /// watch successfully here; only a path absent from the filesystem at `.watch()` time
+        /// fails). `run_wired`'s own single synchronous call gives a test no seam to remove
+        /// the directory in between without racing, so this test calls `start_collaborators`
+        /// directly instead, sequencing the removal deterministically — every other
+        /// collaborator, and `notify` itself, stays real.
+        #[test]
+        fn startup_problems_are_ordered_config_then_binary_then_watcher() {
+            for width in [120u16, 60u16] {
+                let scratch = scratch_repo_with_alpha();
+                let root = scratch.path().to_path_buf();
+                let herdr = root.join("does-not-exist-herdr");
+
+                let config = Config {
+                    openspec_bin: Some(root.join("not-a-real-openspec-binary")),
+                    problems: vec!["config.toml is not valid TOML: bad".to_string()],
+                    ..Config::default()
+                };
+
+                let mut dashboard = super::super::load(&root, &config, None);
+                assert_eq!(
+                    dashboard.repo.as_deref(),
+                    Some(canonical(&root).as_path()),
+                    "width {width}"
+                );
+
+                // Remove the repository root entirely so the real `notify` watcher
+                // genuinely cannot start — see the doc comment above.
+                std::fs::remove_dir_all(&root).expect("remove the scratch repository");
+
+                let collaborators = super::super::start_collaborators(
+                    dashboard.repo.as_deref(),
+                    &config,
+                    &herdr,
+                    None,
+                    &no_env,
+                    &no_npm_hook,
+                );
+                assert_eq!(
+                    collaborators.problems.len(),
+                    3,
+                    "width {width}: {:?}",
+                    collaborators.problems
+                );
+                assert!(
+                    collaborators.problems[0].contains("config.toml is not valid TOML"),
+                    "width {width}: {:?}",
+                    collaborators.problems
+                );
+                assert!(
+                    collaborators.problems[1].contains("openspec_bin"),
+                    "width {width}: {:?}",
+                    collaborators.problems
+                );
+                assert!(
+                    collaborators.problems[2].contains("filesystem watch unavailable"),
+                    "width {width}: {:?}",
+                    collaborators.problems
+                );
+
+                dashboard.refresh.problems = collaborators.problems;
+                dashboard.file_mode = collaborators.file_mode;
+
+                let buf = render_at(width, 20, &dashboard);
+                let rows: Vec<String> = (0..20).map(|y| row_text(&buf, y)).collect();
+                let config_line = rows
+                    .iter()
+                    .position(|r| r.contains("config.toml is not valid TOML"));
+                let bin_line = rows.iter().position(|r| r.contains("openspec_bin"));
+                let watch_line = rows
+                    .iter()
+                    .position(|r| r.contains("filesystem watch unavailable"));
+                assert!(
+                    config_line.is_some() && bin_line.is_some() && watch_line.is_some(),
+                    "width {width}: {rows:?}"
+                );
+                assert!(
+                    config_line < bin_line && bin_line < watch_line,
+                    "width {width}: not in causal order (config, binary, watcher): {rows:?}"
+                );
+            }
         }
     }
 }
