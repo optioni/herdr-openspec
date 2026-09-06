@@ -596,6 +596,19 @@ launch of its own.
 
 ### Manifest
 
+`min_herdr_version` stays `0.7.0`: Herdr's own changelog records manifest-declared
+actions, managed plugin panes, plugin pane placement, and plugin invocation-context and
+environment injection as 0.7.0 additions. `herdr plugin pane focus`, which `open`/
+`open-tab` use to avoid duplicating an already-open dashboard, is confirmed working on the
+installed 0.8.2 but appears **nowhere** in Herdr's changelog, so its true first version is
+unknown; `herdr-file-viewer` (also `min_herdr_version = 0.7.0`, installed locally) still
+works around focus with a `pane zoom --on`/`--off` cycle rather than `plugin pane focus`,
+suggesting the subcommand may postdate 0.7.0. This plugin does not raise its floor on that
+suspicion alone — see "Focus can fail two ways" above for how a Herdr without the
+subcommand degrades, which is bounded to one extra dashboard rather than a refusal. A
+floor bump, if one is ever measured necessary, belongs to whichever change first measures
+a real failure on an older Herdr.
+
 ```toml
 id = "herdr-openspec"
 name = "OpenSpec"
@@ -616,7 +629,7 @@ command = ["./target/release/herdr-openspec", "open"]
 id = "open-tab"
 title = "OpenSpec: dashboard (tab)"
 contexts = ["workspace"]
-command = ["./target/release/herdr-openspec", "open", "--tab"]
+command = ["./target/release/herdr-openspec", "open-tab"]
 
 [[panes]]
 id = "dashboard"
@@ -630,6 +643,76 @@ title = "OpenSpec"
 placement = "tab"
 command = ["./target/release/herdr-openspec", "ui"]
 ```
+
+The tab action's command is the flat `open-tab` subcommand, not `["open", "--tab"]`: `parse`
+stays a total function over a flat token list with no flag state, and the landed `ui --tab`
+rejection keeps its meaning rather than becoming an exception to a flag grammar introduced
+for one boolean (`plugin-actions` design.md → Decision 1).
+
+### Opening the pane
+
+`open` and `open-tab` are one-shot binary subcommands, not part of the render path — they
+never enter raw mode, the alternate screen, or construct a `ratatui` terminal. Everything
+below is measured live against the installed Herdr **0.8.2**.
+
+**Invocation context.** An action's process working directory is the **plugin root**, not
+the workspace's. The invocation context arrives as `HERDR_PLUGIN_CONTEXT_JSON` — an object
+carrying `workspace_id`, `workspace_cwd`, `tab_id`, `focused_pane_id`, and
+`focused_pane_cwd` — alongside the discrete `HERDR_PLUGIN_ID`, `HERDR_WORKSPACE_ID`, and
+`HERDR_PANE_ID` variables, read purely through one injected lookup (`open::context`). Only
+an absent workspace id is fatal; every other field falls back in turn and a context this
+plugin cannot read (unset, not valid JSON, or valid JSON that is not an object) is treated
+as absent rather than a failure.
+
+**Open or focus.** `herdr plugin pane open` is **not** idempotent — a second call with the
+same `--plugin`/`--entrypoint` opens a second pane — so both subcommands run
+`herdr pane list` first. `pane list` exposes no plugin ownership field; a plugin pane is
+distinguished only by a `label` carrying the manifest pane's `title`, which both `[[panes]]`
+entries deliberately share (`OpenSpec`), so `open` and `open-tab` focus each other's pane —
+"show me the dashboard" has one answer per workspace. A listed pane counts as this
+workspace's dashboard when it carries a string `pane_id`, its `label` matches, and its
+`workspace_id` matches; the first match in list order wins.
+
+**The two argument vectors.** A split targets an **existing** pane — the focused one by
+default, or `--target-pane <id>` — and fails `invalid_params` with `--workspace` unless
+that workspace happens to be focused; `--direction` is optional here, unlike
+`herdr pane split`, which requires it. A tab needs no target and passes `--workspace`
+instead.
+
+```
+open:      plugin pane open --plugin <id> --entrypoint dashboard
+                            --placement split --direction right
+                            --target-pane <focused pane id> --focus
+open-tab:  plugin pane open --plugin <id> --entrypoint dashboard-tab
+                            --placement tab --workspace <workspace id> --focus
+```
+
+**Neither ever passes `--cwd`.** The first draft of this design did, to make the pane
+follow the workspace's own repository rather than the plugin root. Measured live: Herdr
+resolves the manifest's *relative* pane `command` against `--cwd` too, not only against the
+plugin root, so a workspace directory holding no `target/release/herdr-openspec` binary of
+its own makes the whole call fail (`plugin_pane_open_failed`, "Unable to spawn
+`<dir>/./target/release/herdr-openspec` because it does not exist") — for every real
+workspace, which is exactly the case `--cwd` existed to serve. `ui::run` instead prefers
+the workspace cwd from its own injected context (`ui::startup_cwd`, reading the same
+`open::context`) over `std::env::current_dir()`, since every process Herdr starts for a
+plugin — a `[[panes]]` entry no less than an `[[actions]]` one — receives this same
+injected context.
+
+**Focus can fail two ways.** `herdr plugin pane focus <pane_id>` reaches the server in
+0.8.2 but appears nowhere in Herdr's changelog, so its first supported version is unknown.
+A usage error (`CliError::Failed { code: Some(2), .. }` — plain text on stderr, what a
+Herdr without this subcommand produces) warns and falls through to opening once, rather
+than refusing on a Herdr the manifest's own `min_herdr_version` still declares supported.
+Any other focus failure — including the recoverable case of a pane that closed between the
+listing and the focus call — stops the command; invoking the action again recovers it, once
+the pane is no longer listed.
+
+**Nothing about the open response is parsed.** Its envelope
+(`result.plugin_pane.pane.pane_id`) differs from `pane split`'s (`result.pane.pane_id`);
+exit status alone carries success or failure, on the same domain-error-vs-usage-error split
+(exit 1 JSON on stderr, exit 2 plain text) every other `plugin`/`pane`/`agent` call in this
+crate already carries.
 
 ## Degraded states
 
@@ -676,11 +759,18 @@ Every condition renders usable content rather than an error screen:
 | `openspec/` is removed while the watcher runs | The next filesystem read reports an empty change set with no problem of its own — a missing `openspec/` directory means "not an OpenSpec repository", the same as it always has. The watcher's own read failure (the event channel disconnecting) is what the pane actually shows, as the same leading `!`-marked row above, and the loop keeps drawing regardless — a watch failure is never treated as a reason to stop |
 | A CLI cycle fails after the worker already sent its file-sourced result | The pane keeps the numbers the file read produced; the failure is not silently dropped, but nothing overwrites what is already on screen with a blanker state |
 | A touched path is classified to the wrong change, or conservatively to every change | Cosmetic only: a change's **progress** always comes from the same fresh `openspec list --json` call every cycle makes regardless of selection, never from the per-change cache, so a mis-classified path costs at most one cycle of stale **artifact** content — never a stale progress pair — and `r` corrects the rest immediately. This is stated so a later change does not "fix" the cache by making progress come from it, which would reintroduce exactly the staleness this design avoids |
+| `open`/`open-tab` invoked with no Herdr context at all (no workspace id) | Exits 1 immediately, naming `HERDR_WORKSPACE_ID` and that the command must be invoked from Herdr; no Herdr call is made |
+| `open`/`open-tab`'s `pane list` call fails or its payload is unparseable | Warns (stderr) and still attempts to open a pane, rather than refusing — the plugin cannot know whether a dashboard already exists, and a socket too broken to list is one whose open call will report its own reason |
+| `open`/`open-tab`'s `plugin pane focus` call fails with a usage error (code 2) | Warns and falls through to opening once — refusing would fail closed on a Herdr the manifest's `min_herdr_version` still declares supported |
+| `open`/`open-tab`'s `plugin pane focus` call fails with a domain error, or `plugin pane open` itself fails | The command stops; the reason (carried verbatim from Herdr) goes to stderr and the process exits 1 |
 
 ### No terminal is not a degraded state
 
 `ui` refuses to start at all when stdout is not a terminal, exiting status 3 with a
-message naming `herdr-openspec` and the words `not a terminal`. This is deliberately
+message naming `herdr-openspec` and the words `not a terminal`. `open` and `open-tab` are
+not covered by this either: they are one-shot commands with nothing to render, so their
+degrade is a named reason and an exit status, never usable content — the same as every row
+above, on different terms than `ui`'s. This is deliberately
 outside the table above: every row there is a precondition the pane still renders
 *something* for, but a TUI has nothing to render into a pipe — there is no content
 to degrade to. Treating it as a table row would make the section's opening sentence

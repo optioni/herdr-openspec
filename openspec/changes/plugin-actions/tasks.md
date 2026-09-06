@@ -598,14 +598,16 @@ clean) before this group's checklist was marked done.
 <!-- kind: operational -->
 <!-- parallel-after: 9 -->
 
-- [ ] 13.1 CHECK: Confirm each correction below is still needed by re-reading `SPEC.md` →
-  Herdr integration → Manifest and → Degraded states at HEAD.
+- [x] 13.1 CHECK: Confirm each correction below is still needed by re-reading `SPEC.md` →
+  Herdr integration → Manifest and → Degraded states at HEAD. **Confirmed all still
+  needed** — the manifest block still showed `["open", "--tab"]`, no "Opening the pane"
+  subsection existed, and the Degraded states table had no `open`/`open-tab` rows.
 
-- [ ] 13.2 CHANGE: Correct the manifest block's tab action to
+- [x] 13.2 CHANGE: Correct the manifest block's tab action to
   `command = ["./target/release/herdr-openspec", "open-tab"]`, recording in one sentence
   why (design.md → Decision 1).
 
-- [ ] 13.3 CHANGE: Add an "Opening the pane" subsection under Herdr integration recording,
+- [x] 13.3 CHANGE: Add an "Opening the pane" subsection under Herdr integration recording,
   as measured against Herdr 0.8.2: the action process's cwd is the plugin root and the
   invocation context arrives in `HERDR_PLUGIN_CONTEXT_JSON` plus the discrete `HERDR_*`
   variables; `herdr plugin pane open` is not idempotent; `herdr pane list` exposes no plugin
@@ -616,20 +618,23 @@ clean) before this group's checklist was marked done.
   `result.plugin_pane.pane.pane_id`, a different envelope from `pane split`'s
   `result.pane.pane_id`, which this plugin deliberately does not parse.
 
-- [ ] 13.4 CHANGE: Add the `open`/`open-tab` rows to the Degraded states table — no Herdr
+- [x] 13.4 CHANGE: Add the `open`/`open-tab` rows to the Degraded states table — no Herdr
   context; a failed or unparseable `pane list` (warn, still open); a usage-error
   `plugin pane focus` (warn, open once); a domain-error focus (stop, open nothing); a failed
   `plugin pane open`; no workspace cwd known — and one carve-out sentence beside the
   existing "No terminal is not a degraded state": the open family is a one-shot command with
   nothing to render, so its degrade is a named reason and an exit status, not usable
-  content.
+  content. **Both done, plus the `--cwd` correction (never passed, ever) recorded** in
+  the new subsection — see design.md → Decision 6 (corrected).
 
-- [ ] 13.5 CHANGE: Record in the Manifest section that `min_herdr_version` stays `0.7.0` on
+- [x] 13.5 CHANGE: Record in the Manifest section that `min_herdr_version` stays `0.7.0` on
   the evidence of Herdr's own changelog, and what is and is not known about
   `herdr plugin pane focus`'s first version (design.md → Risks).
 
-- [ ] 13.6 CHECK: Confirm `openspec/IMPLEMENTATION-ORDER.md`'s Phase 6 row still describes
-  what was built. `HANDOFF.md` → "Known-deferred doc fixes" item 3 is **already fixed** —
+- [x] 13.6 CHECK: Confirm `openspec/IMPLEMENTATION-ORDER.md`'s Phase 6 row still describes
+  what was built. Re-checked against real HEAD: it does — describes the `open`/`open-tab`
+  subcommands, both `[[actions]]`, and the `dashboard-tab` pane exactly. `HANDOFF.md` →
+  "Known-deferred doc fixes" item 3 is **already fixed** —
   the row reads "(`min_herdr_version` and `platforms` ship in `repo-foundation`, not
   here.)" — so do not re-fix it; record that it was re-checked.
 
