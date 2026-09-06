@@ -310,13 +310,13 @@
 <!-- Separated from group 9 because it is a `src/` edit with no test of its own; `HANDOFF.md`
      asks the next change touching `src/changes.rs` to make it, and this is the last one. -->
 
-- [ ] 10.1 CHARACTERIZE: `cargo clippy --all-targets --all-features -- -D warnings` is green at
+- [x] 10.1 CHARACTERIZE: `cargo clippy --all-targets --all-features -- -D warnings` is green at
   HEAD, and `cargo test --all-features changes::` is green — the behaviour this refactor must
   not disturb.
-- [ ] 10.2 REFACTOR: Delete the single `#[allow(clippy::too_many_arguments)]` in
+- [x] 10.2 REFACTOR: Delete the single `#[allow(clippy::too_many_arguments)]` in
   `src/changes.rs`. `build_change` takes seven parameters and the lint fires at eight
   (design.md → Decision 13); do not cite seven as the constraint anywhere.
-- [ ] 10.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors, no
+- [x] 10.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors, no
   `#[allow]` remains anywhere: `grep -rn '#\[allow(' src/ tests/` is empty. Commit.
 
 ## 11. The coverage map and its checker

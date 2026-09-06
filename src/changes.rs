@@ -987,7 +987,10 @@ fn load_schema_cached<'a>(
 /// change with an unvendored schema still reports a real progress pair
 /// rather than `0/0`. Problems accumulate in the order `schema::resolve`
 /// already establishes: selection, then load, then artifacts, then tasks.
-#[allow(clippy::too_many_arguments)]
+///
+/// `degraded-states` removes the vestigial `#[allow(clippy::too_many_arguments)]` that
+/// once sat here (design.md -> Decision 13): `build_change` takes seven parameters, and
+/// the lint's default threshold fires at eight, not seven — the allow suppressed nothing.
 fn build_change(
     repo: &std::path::Path,
     dir: &std::path::Path,
