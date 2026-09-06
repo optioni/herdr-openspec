@@ -259,11 +259,8 @@ pub const HERDR_PROGRAM: &str = "herdr";
 /// scratch `#!/bin/sh` program without touching `PATH`. `ui::run` is the only caller
 /// that passes [`HERDR_PROGRAM`]; every other caller — the poller's own tests, the
 /// outer-loop acceptance test — passes a scratch path instead.
-///
-/// Group 1 stub: the program path is fixed rather than read from `program`, so group
-/// 5's tests are red on behaviour rather than on a stub that already answers correctly.
-pub fn agent_cli_via(_program: &Path) -> std::sync::Arc<dyn HerdrCli> {
-    std::sync::Arc::new(RealHerdrCli::new("herdr"))
+pub fn agent_cli_via(program: &Path) -> std::sync::Arc<dyn HerdrCli> {
+    std::sync::Arc::new(RealHerdrCli::new(program))
 }
 
 /// Turn a `resolve::BinResolution` into the real `OpenspecCli` the
@@ -1090,5 +1087,49 @@ mod tests {
 
         assert_eq!(before_scratch, after_scratch);
         assert_eq!(before_cwd, after_cwd);
+    }
+
+    // --- group 5: agent_cli_via — what the binding DOES, not what it is called ---
+
+    #[test]
+    fn agent_cli_via_spawns_the_program_it_was_given() {
+        let scratch = ScratchDir::new();
+        let prog = script(&scratch, "prog", "printf 'hello\\n'\n");
+        let cli = super::agent_cli_via(&prog);
+        let result = cli.run(&["agent", "list"]);
+        assert_eq!(result, Ok("hello\n".to_string()));
+    }
+
+    #[test]
+    fn agent_cli_via_reports_a_nonzero_exit() {
+        let scratch = ScratchDir::new();
+        let prog = script(&scratch, "prog", "printf 'boom' >&2; exit 3\n");
+        let cli = super::agent_cli_via(&prog);
+        let result = cli.run(&["agent", "list"]);
+        match result {
+            Err(super::CliError::Failed {
+                code, stderr, args, ..
+            }) => {
+                assert_eq!(code, Some(3));
+                assert!(stderr.contains("boom"), "{stderr}");
+                assert_eq!(args, vec!["agent".to_string(), "list".to_string()]);
+            }
+            other => panic!("expected Failed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn agent_cli_via_reports_a_missing_program() {
+        let scratch = ScratchDir::new();
+        let missing = scratch.path().join("does-not-exist");
+        assert!(!missing.exists());
+        let cli = super::agent_cli_via(&missing);
+        let result = cli.run(&["agent", "list"]);
+        match result {
+            Err(super::CliError::NotStarted { program, .. }) => {
+                assert_eq!(program, missing.display().to_string());
+            }
+            other => panic!("expected NotStarted, got {other:?}"),
+        }
     }
 }

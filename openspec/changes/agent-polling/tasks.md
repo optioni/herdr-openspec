@@ -586,22 +586,22 @@ green. It drives `ui::run_wired` — the composition root itself — not the com
 ## 5. `cli::agent_cli_via` and `cli::HERDR_PROGRAM`
 <!-- kind: behavior -->
 
-- [ ] 5.1 RED: Write the three `cli::tests::` tests, all three about what the binding *does*
+- [x] 5.1 RED: Write the three `cli::tests::` tests, all three about what the binding *does*
       rather than what it is called: `agent_cli_via` against a scratch `#!/bin/sh` printing
       `hello`, against one exiting `3` with `boom` on stderr, and against a path that does not
       exist. They fail against 1.3's fixed-program stub. No test asserts the value of
       `HERDR_PROGRAM`: a test restating a constant the implementation also declares proves only
       that the string was typed twice, and `WIRED`'s positive control is what pins it.
 
-- [ ] 5.2 GREEN: Implement `agent_cli_via` as one line over `RealHerdrCli::new(program)`, with
+- [x] 5.2 GREEN: Implement `agent_cli_via` as one line over `RealHerdrCli::new(program)`, with
       `HERDR_PROGRAM` the only place the literal `herdr` is written as a program name.
 
-- [ ] 5.3 REFACTOR: No refactor is expected — the function is one expression. Record that.
+- [x] 5.3 REFACTOR: No refactor is expected — the function is one expression. Record that.
 
-- [ ] 5.4 CHECK: Contract gate — `src/cli.rs` still names no `serde_json` and no parse
+- [x] 5.4 CHECK: Contract gate — `src/cli.rs` still names no `serde_json` and no parse
       (`grep -n 'serde_json' src/cli.rs` is empty), so the seam gained a binding and no logic.
 
-- [ ] 5.5 VERIFY: `testcount --lib 'cli::tests::' 40`, then `MIN=22 sh $CHECKS/NOSPAWN-GREP.sh`
+- [x] 5.5 VERIFY: `testcount --lib 'cli::tests::' 40`, then `MIN=22 sh $CHECKS/NOSPAWN-GREP.sh`
       and `sh $CHECKS/NOJSON-SEAM.sh`. Commit.
 
 ## 6. `watch::soonest`
