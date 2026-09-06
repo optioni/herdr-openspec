@@ -12,13 +12,16 @@
 ## 0. Gate extraction and baseline
 <!-- kind: operational -->
 
-- [ ] 0.1 CHECK: Derive the base SHA fresh — `BASE=$(git rev-parse HEAD)` — and record it
+- [x] 0.1 CHECK: Derive the base SHA fresh — `BASE=$(git rev-parse HEAD)` — and record it
   here. The repository is shared with other live sessions and its history was rewritten
   once, so a SHA copied from an older note does not resolve. Every later
   `OPENSPEC-UNTOUCHED` run uses **this** SHA, never a re-derived `HEAD`, which after the
   first commit would compare the change against itself.
 
-- [ ] 0.2 CHANGE: Extract the 30-gate roster into a scratch directory following
+  **BASE=`0beb0e11c7f5214d6c1572ccc038e8d44ce57473`** (recorded, used for every later
+  `OPENSPEC-UNTOUCHED` invocation in this change).
+
+- [x] 0.2 CHANGE: Extract the 30-gate roster into a scratch directory following
   `openspec/changes/archive/2026-09-06-agent-launch/tasks.md` task 0.2, then apply that
   change's own task 0.3 and 0.5 replacement sets (`WIRED` ×4, `NOBLOCK` ×4, `NOIO-VIEW`,
   `NODEFAULT-UI`, and the sets it inherited). Extraction alone yields the pre-`agent-launch`
@@ -32,7 +35,18 @@
   This change adds **no** gate to the roster (design.md → Decision 9), so the count is 30
   before and after.
 
-- [ ] 0.3 CHECK: Record the baseline. Run every gate at the floor the **landed**
+  Extracted to `$CHECKS` (a scratchpad directory this session owns); roster confirmed at
+  exactly 30 files. `WIRED.sh`, `NOBLOCK.sh`, `NOSLEEP.sh`, `OPENSPEC-UNTOUCHED.sh`,
+  `NODEFAULT-UI.sh`'s `HOMEFILE` parameterisation, and `NOIO-VIEW.sh`'s `state::read`
+  alternative were already present at their post-agent-attribution state from this
+  session's earlier agent-launch apply; this task additionally applied agent-launch's own
+  0.5 edits on top: `LAUNCHSEAM.sh` written fresh, `WIRED.sh` gained `LAUNCH`, the
+  `pub fn start(` positive control, the ninth `launch::start` name, and leg 6
+  (`config.agent_kind` / no bare `"claude"`), `NOBLOCK.sh` already carried `src/launch.rs`
+  as the fourth seam module, and `NOIO-VIEW.sh`'s `IO_RE` gained `state::record|launch::start`.
+  Verified working against real HEAD in task 0.3 below.
+
+- [x] 0.3 CHECK: Record the baseline. Run every gate at the floor the **landed**
   invocation used and record each exit status verbatim here. Two are expected RED before
   any work starts and are not this change's to repair
   (`openspec/IMPLEMENTATION-ORDER.md` → Phase 6 assigns both to `spec-purposes`):
@@ -48,7 +62,45 @@
   `MIN=23` cannot pass. Record what the landed invocation actually used and note the
   correction.
 
-- [ ] 0.4 CHECK: Record the measured file counts this change's floors derive from. Run
+  **Recorded, run against real HEAD:** `DEPS` (`WORK=<scratch> DEPS_SKIP_LEG5=1`) — FAIL,
+  leg 2a, `AssertionError: normal deps are ['notify', 'pulldown-cmark', 'ratatui',
+  'serde_json', 'toml', 'yaml-rust2'], expected [...without notify...]` — matches the
+  expected inherited RED exactly. `GRAPH-SNAP` — FAIL, `macOS/Linux differ by [fsevent-sys
+  inotify inotify-sys linux-raw-sys ], expected [linux-raw-sys ]` — matches exactly.
+  `AGENTSEAM` at `MIN=23 ALLOWED='src/cli.rs src/agents.rs src/ui/mod.rs src/launch.rs'` —
+  FAIL, `searched only 22 files (expected >= 23)`, confirming the correction: the floor
+  this change uses is `MIN=23` for the **plugin-actions**-final set (22 + `src/open.rs`),
+  which will pass only once `src/open.rs` exists.
+  Every other gate ran green at its documented floor: `NOSPAWN-GREP` `MIN=23`,
+  `NOLIT-CHANGE` `MIN=23`, `MDSEAM` `MIN=22`, `NOTABSEAM`, `WATCHSEAM` `MIN=25`, `NOSLEEP`
+  `SLEEP_MIN=5 MIN=26`, `LAUNCHSEAM` `MIN=22 ALLOWED='src/cli.rs src/agents.rs
+  src/ui/mod.rs src/launch.rs'`, `NOCLI-SHELL` `UI_MIN=11`, `READSEAM` `UI_MIN=10`,
+  `NOBLOCK` `UI_MIN=11`, `READONLY-UI` `UI_MIN=11`, `WIRED`, `WIDTHS` `WIDTHS_MIN=94`,
+  `LISTWIDTHS` `LIST_MIN=29`, `MDWIDTHS` `MD_MIN=24`, `TASKWIDTHS` `TASK_MIN=16`,
+  `DETAILWIDTHS` `DETAIL_MIN=23`, all three `NODEFAULT-UI` runs (app `TYPES='Dashboard
+  Filter Detail Refresh Launch'` `SCAN_MIN=174`; agents `TYPES='Agent Listed AgentSnapshot
+  Attribution'` `SCAN_MIN=100`, realized 103; launch `TYPES='Outcome'` `SCAN_MIN=20`,
+  realized 23), `NORAW-GREP`, `NOWAIVER`, `TASKSEAM`, `NOJSON-SEAM`, `GATE-MECH1`,
+  `OPENSPEC-UNTOUCHED` (`BASE`+`CHANGE=plugin-actions`). `TESTCOUNT`'s
+  `cargo test --all-features --lib -- --list | grep -c ': test$'` = **907**, matching
+  `agent-launch`'s asserted library total exactly.
+
+  **`EXTENDED` note:** the planning-time 46-pair list (8 landed + `agent-launch`'s 38) was
+  re-run against real HEAD and **7 pairs did not match**: `esc_dismisses_one_layer_at_a_time`,
+  `enter_and_esc_map_to_routes`, `non_key_events_are_ignored`, and
+  `dashboard_is_clone_and_eq_with_agents` (all predicted `launch`/`Paste("a"` tokens),
+  `attribution_follows_adopt_by_name` and `attribution_ignores_the_filter` (predicted
+  `panes`), and `agents_change_no_pixel` (predicted `g focus`). Inspected each function
+  body directly: the real, landed `agent-launch` implementation extended these tests with
+  different wording than its own planning-stage Command-level-checks section predicted
+  (e.g. `attribution_follows_adopt_by_name` adds a third `Vec::new()` panes argument to
+  `fixture::set(...)` rather than any literal text containing `panes`). `TESTCOUNT`'s 907
+  and every other gate above confirm the codebase itself is not regressed — this is a
+  stale planning-doc artifact, not a real gap. Deferred to task 11.4, whose own guidance is
+  to re-measure the pair list against real code before writing it in; this change's
+  invocation there uses a corrected 46+2 list rather than the stale planning-time tokens.
+
+- [x] 0.4 CHECK: Record the measured file counts this change's floors derive from. Run
   under `sh`, never zsh — zsh does not word-split `$ALLOWED` and the gate scripts rely on
   it:
 
@@ -64,6 +116,9 @@
   **Measured at HEAD, exit 0:** `src` = 24, `src+tests` = 26, `src/ui` = 11, sleep
   sites = 5. This change adds `src/open.rs` and `tests/manifest.rs` and no file under
   `src/ui/`, so after it: `src` = 25, `src+tests` = 28, `src/ui` = 11.
+
+  **Confirmed by re-running the exact commands above against real HEAD**: identical
+  output, exit 0.
 
 ## 1. Acceptance Test — Outer Loop RED
 <!-- kind: behavior -->
