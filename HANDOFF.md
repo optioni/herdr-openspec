@@ -110,9 +110,11 @@ they are not interchangeable.
 
 ## Correction: clippy's `too_many_arguments` fires at 8, not 7
 
-Since `live-refresh` this project has repeated that "a seventh parameter trips
-`too_many_arguments`". **That is false and has been propagated through several briefs,
-including mine.** Measured: `changes::build_change` takes **seven** parameters, and with
+**RETIRED CLAIM — do not reinstate.** Since `live-refresh` this project repeated that
+seven parameters trip `too_many_arguments`. **That is false**, it was propagated through
+several briefs including mine, and it has now been struck from every constraint in this
+file — constraint 1 cites cohesion instead. If a grep brings you to this paragraph, you
+have found the correction, not a live claim. Measured: `changes::build_change` takes **seven** parameters, and with
 its `#[allow(clippy::too_many_arguments)]` removed, `cargo clippy -- -D warnings` emits
 nothing. The default threshold warns above 7, so the eighth parameter is the trigger.
 
@@ -133,12 +135,21 @@ the want-list nor `tests/fixtures/build-graph.txt`. So **the gate guarding the d
 set has been failing for two changes and nobody noticed**, because `make check` is green
 and these run separately.
 
-**Decision: `agent-launch` owns the repair** — regenerate `tests/fixtures/build-graph.txt`
-and author a want-list matching the real dependency set. It is a small addition to an
-already-heavy change, and that is deliberate: **the snapshot is a gate artefact, and
-regenerating it unattended between changes would bless the current state without review**
-— precisely the move this project has refused everywhere else. It gets a task and a
-reviewer, not a quiet fix.
+**My first assignment of this was based on a wrong diagnosis.** I assigned it to
+`agent-launch` as "regenerate the snapshot and author a want-list". But the snapshot
+**was** already regenerated in `574b87d`; `GRAPH-SNAP` fails four legs later on a
+hardcoded macOS/Linux platform literal. So that repair would have fixed `DEPS` only, and
+`agent-launch` correctly left both alone rather than widen a change that adds no
+dependency and touches neither script.
+
+**Decision: `spec-purposes` owns both.** It is already the Phase 6 hygiene change, and
+the two belong to one goal — **the repository should pass its own validation and its own
+gates before it ships.** Scope: fill in every placeholder Purpose, repair `DEPS`'s
+want-list, and fix `GRAPH-SNAP`'s platform literal. Exact failure lines are recorded in
+`agent-launch`'s `planning-review.md`.
+
+Still true and still the reason this is a task rather than a quiet fix: **a gate
+artefact regenerated unattended blesses the current state without review.**
 
 The deeper lesson is worth keeping: **a check that lives outside `make check` will rot,
 because nothing forces it to run.** Any future gate should either join `make check` or
@@ -240,19 +251,29 @@ likely to touch keys again, so syncing now means three rounds of churn. **Do one
 accurate pass over README's Keys table when Phase 4 closes**, taking SPEC.md → Keys as
 the source. Do not let this deferral outlive the phase.
 
-## Measured per-step cost (Phase 4)
+## Measured cost — Phase 5 figures supersede Phase 4's
 
-Finer-grained than the per-change figures above, and the basis for planning windows:
+The earlier 45–50 session points per change is **low**. Phase 5, measured:
 
-| Step | Session points |
-|---|---|
-| ff-change | 23–31 |
-| apply | 16–19 |
-| archive | 2–3 |
+| Change | groups / scenarios | ff | apply | archive | total |
+|---|---|---|---|---|---|
+| `agent-polling` | 15 / 62 | 30 | 20 | 3 | **53** |
+| `agent-attribution` | 12 / 64 | 33 | 16 | 1 | **50** |
+| `agent-launch` | 17 / **142** | **64** | 20 | 2 | **~86** |
 
-So **45–50 session points per change — about two changes per 5-hour window.** Weekly is
-no longer a factor: the rolling 7-day window turned over mid-phase (71% → 8% used), so
-the session window is the only limit, and it interrupts a phase without ending it.
+**Scenario count is the driver, and it is not knowable until the ff has read the Spec
+refs.** `agent-launch`'s ff alone cost a full window's worth. Weekly ran 40% → 60% across
+the phase — **~6.7 weekly points per change**, roughly double the 3.4 blended figure this
+file carried before.
+
+Planning rules that follow:
+
+- **Do not start an ff below ~65 session points remaining.**
+- **Budget nearer 85 than 50** for any change that looks like it will exceed ~100
+  scenarios.
+- **A large change no longer fits ff + apply in one 5-hour window.** Waiting out a reset
+  at a committed boundary is the correct move, not a failure — Phase 5 did it twice and
+  both resumptions were clean.
 
 ## The ~50% floor governs starting a change, not resuming one
 
