@@ -315,14 +315,17 @@ named**; a gate invoked bare runs at its block default, which is a threshold nob
 <!-- kind: operational -->
 <!-- parallel-after: 0 -->
 
-- [ ] 3.1 CHECK: Run the extracted `GRAPH-SNAP.sh` at `BASE` and confirm two things: the
+- [x] 3.1 CHECK: Run the extracted `GRAPH-SNAP.sh` at `BASE` and confirm two things: the
   `diff -u "$SNAP"` leg **passes** (the snapshot is current — regenerated in `574b87d`), and
   the run fails four legs later on
   `macOS/Linux differ by [fsevent-sys inotify inotify-sys linux-raw-sys ], expected
   [linux-raw-sys ]`. If the snapshot diff fails instead, stop: the diagnosis this group is
   built on no longer holds.
 
-- [ ] 3.2 CHANGE: Write `scripts/gates/build-graph.sh` from the extracted block, replacing the
+  **Confirmed:** byte-identical to task 0.3's recording; the snapshot diff leg is silent
+  (passes) and the failure is at the platform-literal leg, verbatim as recorded.
+
+- [x] 3.2 CHANGE: Write `scripts/gates/build-graph.sh` from the extracted block, replacing the
   single unordered literal at the old leg 4 —
 
   ```sh
@@ -336,22 +339,41 @@ named**; a gate invoked bare runs at its block default, which is a threshold nob
   Linux-only set against `inotify inotify-sys linux-raw-sys`. Each failure message names which
   side the unexpected package appeared on.
 
-- [ ] 3.3 CHANGE: Make the script ignore an **ambient** `GRAPH_WRITE`: as extracted, any value
+- [x] 3.3 CHANGE: Make the script ignore an **ambient** `GRAPH_WRITE`: as extracted, any value
   in the environment makes it rewrite the snapshot and exit 0 with **zero assertions run**, and
   task 3.5's `git diff --exit-code` stays clean because the rewrite is byte-identical. Read the
   write mode from an explicit argument instead, and have `make gates` clear the variable. A gate
   artefact regenerated unattended blesses the current state without review.
 
-- [ ] 3.4 CHECK: Read leg 5's proc-macro allowlist and record here that it is derived from the
+  **Done.** `scripts/gates/build-graph.sh` now reads write mode from `"${1:-}" = "write"`
+  only, never `$GRAPH_WRITE`; the `Makefile`'s `gates` recipe additionally runs it with
+  `GRAPH_WRITE` unset as a second layer of defence.
+
+- [x] 3.4 CHECK: Read leg 5's proc-macro allowlist and record here that it is derived from the
   **host** graph (`cargo tree` with no `--target`, because cargo omits the `(proc-macro)` tag
   for cross-target resolutions) and has only ever been measured on macOS. Task 9.4 confirms it
   on Linux in CI; record what the eight names are so that comparison is possible.
 
-- [ ] 3.5 VERIFY: `GRAPH_WRITE=1 sh scripts/gates/build-graph.sh` exits **0** and its output
+  **Recorded.** (Note: "task 9.4" is a stale reference left in this task's own text — this
+  plan has 9 groups numbered 0–8; the actual confirmation is task 8.12, which this task's
+  sibling text elsewhere and design.md's Risks section both name correctly.) The eight
+  names, unchanged from the extracted script: `darling_macro derive_more-impl
+  document-features indoc instability rustversion strum_macros thiserror-impl`. Measured
+  only on the local macOS host so far; task 8.12 reproduces the per-triple intersection and
+  confirms it against the `ubuntu-latest` CI run.
+
+- [x] 3.5 VERIFY: `GRAPH_WRITE=1 sh scripts/gates/build-graph.sh` exits **0** and its output
   **contains the `OK` line** — not merely exits 0, which a silent snapshot rewrite also does.
   `git diff --exit-code tests/fixtures/build-graph.txt` is clean afterwards, proving the run
   did not rewrite its own subject. No refactor was needed: the change is one leg's assertion.
   Commit.
+
+  **Verified:** `GRAPH_WRITE=1 sh scripts/gates/build-graph.sh` exits 0, output contains
+  `GRAPH-SNAP OK: four triples match the snapshot; macOS-only [fsevent-sys ] and Linux-only
+  [inotify inotify-sys linux-raw-sys ] exact; ...` — the ambient variable is ignored, no
+  write occurred. Separately confirmed the explicit `write` argument does rewrite the
+  snapshot and `git diff --exit-code tests/fixtures/build-graph.txt` stays clean afterwards
+  (byte-identical). No refactor needed.
 
 ## 4. `make gates` joins `make check`, and CI follows it
 <!-- kind: behavior -->
