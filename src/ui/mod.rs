@@ -2478,7 +2478,7 @@ apply:
                 "herdr",
                 &format!(
                     "printf '%s\\n' \"$*\" >> \"{log}\"\n\
-                     printf '%s' '{{\"id\":\"cli:agent:list\",\"result\":{{\"agents\":[{{\"agent\":\"claude\",\"agent_session\":{{\"agent\":\"claude\",\"kind\":\"id\",\"source\":\"herdr:claude\",\"value\":\"0e80c276-952e-4150-b32f-06cc6247ce01\"}},\"agent_status\":\"idle\",\"cwd\":\"/repo\",\"focused\":true,\"foreground_cwd\":\"/repo\",\"pane_id\":\"w8:p1\",\"revision\":35,\"state_change_seq\":963,\"tab_id\":\"w8:t1\",\"terminal_id\":\"term_65a34df386c314\",\"terminal_title\":\"\u{2733} a title\",\"terminal_title_stripped\":\"a title\",\"workspace_id\":\"w8\"}}],\"type\":\"agent_list\"}}}}'\n",
+                     printf '%s' '{{\"id\":\"cli:agent:list\",\"result\":{{\"agents\":[{{\"agent\":\"claude\",\"agent_session\":{{\"agent\":\"claude\",\"kind\":\"id\",\"source\":\"herdr:claude\",\"value\":\"0e80c276-952e-4150-b32f-06cc6247ce01\"}},\"agent_status\":\"idle\",\"cwd\":\"/repo\",\"name\":\"alpha\",\"focused\":true,\"foreground_cwd\":\"/repo\",\"pane_id\":\"w8:p1\",\"revision\":35,\"state_change_seq\":963,\"tab_id\":\"w8:t1\",\"terminal_id\":\"term_65a34df386c314\",\"terminal_title\":\"\u{2733} a title\",\"terminal_title_stripped\":\"a title\",\"workspace_id\":\"w8\"}}],\"type\":\"agent_list\"}}}}'\n",
                     log = log.display(),
                 ),
             )
@@ -2540,6 +2540,25 @@ apply:
                      printf '%s' '{{\"changes\":[],\"root\":{{\"path\":\"{root}\",\"source\":\"nearest\"}}}}'\n",
                     log = log.display(),
                     root = root.display(),
+                ),
+            )
+        }
+
+        /// `degraded-coverage`'s two CLI-cycle failure fixtures: a scratch `openspec`
+        /// program that either reports a repository root disagreeing with `root`, or exits
+        /// non-zero — both after logging its own argv, on `openspec_script`'s terms.
+        fn openspec_script_failing(dir: &Path, log: &Path, kind: &str) -> PathBuf {
+            let body = match kind {
+                "wrong_root" => "printf '%s' '{\"changes\":[],\"root\":{\"path\":\"/definitely/elsewhere\",\"source\":\"nearest\"}}'\n".to_string(),
+                "nonzero" => "exit 1\n".to_string(),
+                other => unreachable!("unexpected kind {other}"),
+            };
+            write_script(
+                dir,
+                "openspec",
+                &format!(
+                    "printf '%s\\n' \"$*\" >> \"{log}\"\n{body}",
+                    log = log.display(),
                 ),
             )
         }
@@ -3640,6 +3659,337 @@ esac
                     config_line < bin_line && bin_line < watch_line,
                     "width {width}: not in causal order (config, binary, watcher): {rows:?}"
                 );
+            }
+        }
+
+        // --- degraded-states: group 8 proofs — launch, agent, and CLI/watcher rows ---------
+
+        /// `degraded-coverage` :: "`g` with no attributed agent changes nothing the pane
+        /// shows" — SPEC.md row 24. `herdr_script`'s reference payload names no `name` field
+        /// at all, so attribution's name-equality tier matches nothing and `g` finds no pane
+        /// to focus. Whole-buffer equality between a run that presses `g` and one that does
+        /// not, plus the empty-argv-log proof that `g` issued no Herdr call at all.
+        #[test]
+        fn g_with_no_agent_renders_the_same_buffer() {
+            for width in [120u16, 60u16] {
+                let scratch = scratch_repo_with_alpha();
+                let root = scratch.path();
+                let herdr_log = root.join("herdr.log");
+                let herdr = herdr_script(root, &herdr_log);
+                let config = Config::default();
+
+                let stage1 = || log_lines(&herdr_log) >= 1;
+                let with_g: Vec<(&dyn Fn() -> bool, ratatui::crossterm::event::Event)> =
+                    vec![(&stage1, key('g')), (&stage1, key('q'))];
+                let (result_g, buf_g) =
+                    run_wired_staged(width, root, &config, &herdr, None, with_g);
+                let dashboard_g = result_g.expect("no attributed agent is a supported state");
+
+                assert!(
+                    non_agent_list_lines(&herdr_log).is_empty(),
+                    "width {width}: g must issue no Herdr call at all: {:?}",
+                    non_agent_list_lines(&herdr_log)
+                );
+
+                let herdr_log2 = root.join("herdr2.log");
+                let herdr2 = herdr_script(root, &herdr_log2);
+                let stage1b = || log_lines(&herdr_log2) >= 1;
+                let without_g: Vec<(&dyn Fn() -> bool, ratatui::crossterm::event::Event)> =
+                    vec![(&stage1b, key('q'))];
+                let (result_plain, buf_plain) =
+                    run_wired_staged(width, root, &config, &herdr2, None, without_g);
+                let dashboard_plain = result_plain.expect("the control run is supported too");
+
+                assert_eq!(
+                    buf_g, buf_plain,
+                    "width {width}: pressing g must render the identical buffer"
+                );
+                assert_eq!(dashboard_g.launch.pending, None, "width {width}");
+                assert_eq!(dashboard_plain.launch.pending, None, "width {width}");
+            }
+        }
+
+        /// A scratch `herdr` program for one of `every_launch_failure_renders_as_a_leading_row`'s
+        /// six cases. Every case logs its argv exactly like `launch_herdr_script`; `case`
+        /// selects which call (if any) fails and how. `"refusal"` reports `derived_name` as
+        /// already live from the very first `agent list` poll, so `launch::decide` refuses
+        /// before any of the other three calls are ever reached.
+        fn launch_case_herdr_script(
+            dir: &Path,
+            log: &Path,
+            marker: &Path,
+            case: &str,
+            derived_name: &str,
+        ) -> PathBuf {
+            let split_body = match case {
+                "split" => "exit 3\n".to_string(),
+                "malformed" => "printf '%s' '{\"id\":\"cli:pane:split\",\"result\":{}}'\n".to_string(),
+                _ => "printf '%s' '{\"id\":\"cli:pane:split\",\"result\":{\"pane\":{\"agent_status\":\"unknown\",\"cwd\":\"/repo\",\"pane_id\":\"wD:pJ\",\"tab_id\":\"wD:t2\",\"workspace_id\":\"wD\"}}}'\n".to_string(),
+            };
+            let start_body = if case == "start" {
+                "exit 3\n".to_string()
+            } else {
+                format!(
+                    "printf 'name=%s\\n' \"$3\" > \"{}\"\nprintf '%s' '{{\"id\":\"cli:agent:start\",\"result\":{{\"agent\":{{\"name\":\"'\"$3\"'\",\"pane_id\":\"wD:pJ\"}}}},\"argv\":[\"claude\"],\"type\":\"agent_started\"}}}}'\n",
+                    marker.display()
+                )
+            };
+            let prompt_body = if case == "prompt" {
+                "exit 3\n".to_string()
+            } else {
+                "printf '%s' '{\"id\":\"cli:agent:prompt\",\"result\":{\"agent\":{}},\"type\":\"agent_prompted\"}'\n"
+                    .to_string()
+            };
+            let agent_list_body = if case == "refusal" {
+                format!(
+                    "printf '%s' '{{\"id\":\"cli:agent:list\",\"result\":{{\"agents\":[{{\"agent\":\"claude\",\"agent_status\":\"working\",\"name\":\"{derived_name}\",\"pane_id\":\"wD:pJ\",\"tab_id\":\"wD:t2\",\"workspace_id\":\"wD\"}}],\"type\":\"agent_list\"}}}}'\n"
+                )
+            } else {
+                "printf '%s' '{\"id\":\"cli:agent:list\",\"result\":{\"agents\":[],\"type\":\"agent_list\"}}'\n"
+                    .to_string()
+            };
+
+            write_script(
+                dir,
+                "herdr",
+                &format!(
+                    "printf '%s\\n' \"$*\" >> \"{log}\"\ncase \"$1 $2\" in\n  \"pane split\")\n    {split_body}    ;;\n  \"agent start\")\n    {start_body}    ;;\n  \"agent prompt\")\n    {prompt_body}    ;;\n  \"agent list\")\n    {agent_list_body}    ;;\nesac\n",
+                    log = log.display(),
+                ),
+            )
+        }
+
+        /// `degraded-coverage` :: "A CLI root disagreement and a non-zero exit both leave
+        /// the file numbers standing" — rows 33/34/38. The worker's initial file-sourced
+        /// result already painted the pane before the failing CLI cycle completes, and
+        /// `merge`'s own per-change fallback (an empty `CliChanges::active`) leaves every
+        /// file-sourced change's progress untouched — no special-case is needed to prove.
+        #[test]
+        fn a_failed_cli_cycle_keeps_the_file_numbers() {
+            for kind in ["wrong_root", "nonzero"] {
+                for width in [120u16, 60u16] {
+                    let scratch = scratch_repo_with_alpha();
+                    let root = scratch.path();
+                    let herdr = root.join("does-not-exist-herdr");
+                    let openspec_log = root.join("openspec.log");
+                    let openspec = openspec_script_failing(root, &openspec_log, kind);
+                    let config = Config {
+                        openspec_bin: Some(openspec),
+                        ..Config::default()
+                    };
+                    let predicate = || log_lines(&openspec_log) >= 1;
+                    let (result, buf) =
+                        run_wired_at(width, root, &config, &herdr, None, &predicate);
+                    let dashboard = result.expect("a failed CLI cycle is a supported state");
+                    assert!(
+                        buf.iter()
+                            .any(|row| row.contains("alpha") && row.contains("[4/9]")),
+                        "kind {kind}, width {width}: the file-sourced numbers must still show: {buf:?}"
+                    );
+                    assert!(
+                        !dashboard.changes.problems.is_empty(),
+                        "kind {kind}, width {width}: the CLI failure must be recorded"
+                    );
+                    assert!(
+                        buf.iter().any(|row| row.contains('!')),
+                        "kind {kind}, width {width}: {buf:?}"
+                    );
+                }
+            }
+        }
+
+        /// `degraded-coverage` :: "A watcher failure and a mid-run removal both keep the
+        /// loop drawing" — rows 36/37. Sub-case 1: a genuinely unwatchable root — real
+        /// `notify`, which on this platform's `notify` backend (FSEvents) only fails for a
+        /// path absent from the filesystem at `.watch()`'s own call (measured directly:
+        /// chmod 000 and an internal symlink loop both still succeed), so it is obtained
+        /// independently of the dashboard's own, fully real, existing repository rather
+        /// than by racing a removal against `ui::load`. Sub-case 2: `openspec/` removed
+        /// while the watcher runs, driven through the real `run_wired` with the removal
+        /// performed as a side effect of the predicate itself, on
+        /// `the_real_wiring_polls_a_scratch_herdr`'s own established pattern for a mid-run
+        /// filesystem change. Both sub-cases confirm `r` still forces a refresh request.
+        #[test]
+        fn a_watch_failure_keeps_the_loop_drawing() {
+            // Sub-case 1.
+            for width in [120u16, 60u16] {
+                let scratch = scratch_repo_with_alpha();
+                let root = scratch.path();
+                let config = Config::default();
+                let mut dashboard = super::super::load(root, &config, None);
+
+                let unwatchable = root.join("does-not-exist-at-all");
+                let (mut fs, watch_problems) = crate::watch::start(&unwatchable);
+                assert!(
+                    !watch_problems.is_empty(),
+                    "width {width}: the watcher must genuinely fail here"
+                );
+                dashboard.refresh.problems = watch_problems;
+
+                let mut refresher = crate::testutil::RecordingRefresher::new(Vec::new());
+                let mut agents = crate::agents::none();
+                let mut launcher = crate::launch::none();
+                let mut live = crate::ui::driver::Live {
+                    fs: &mut *fs,
+                    refresher: &mut refresher,
+                    agents: &mut *agents,
+                    launcher: &mut *launcher,
+                };
+
+                let backend = ratatui::backend::TestBackend::new(width, 20);
+                let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+                let mut events = crate::testutil::Script::new(vec![
+                    Ok(Some(crate::testutil::press(
+                        ratatui::crossterm::event::KeyCode::Char('r'),
+                        ratatui::crossterm::event::KeyModifiers::NONE,
+                    ))),
+                    Ok(Some(crate::testutil::press(
+                        ratatui::crossterm::event::KeyCode::Char('q'),
+                        ratatui::crossterm::event::KeyModifiers::NONE,
+                    ))),
+                ]);
+                let summary = crate::ui::driver::run_loop(
+                    &mut terminal,
+                    &mut dashboard,
+                    &mut events,
+                    &mut live,
+                    &crate::ui::read_artifact,
+                    std::time::Duration::from_millis(1),
+                )
+                .expect("the loop keeps drawing despite the watcher failure");
+                assert!(summary.frames >= 2, "width {width}");
+
+                let buf = terminal.backend().buffer();
+                let saw_problem = (0..20u16).any(|y| {
+                    (0..width)
+                        .map(|x| buf[(x, y)].symbol().to_string())
+                        .collect::<String>()
+                        .contains('!')
+                });
+                assert!(
+                    saw_problem,
+                    "width {width}: the watch problem must still render"
+                );
+                assert!(
+                    !refresher.requests().is_empty(),
+                    "width {width}: r must still reach the refresher despite the degraded watcher"
+                );
+            }
+
+            // Sub-case 2: `openspec/` removed mid-run.
+            for width in [120u16, 60u16] {
+                let scratch = scratch_repo_with_alpha();
+                let root = scratch.path().to_path_buf();
+                let herdr = root.join("does-not-exist-herdr");
+                let removed = std::cell::Cell::new(false);
+                let openspec_dir = root.join("openspec");
+                let predicate = || {
+                    if !removed.get() {
+                        std::fs::remove_dir_all(&openspec_dir).ok();
+                        removed.set(true);
+                    }
+                    true
+                };
+                let (result, buf) =
+                    run_wired_at(width, &root, &Config::default(), &herdr, None, &predicate);
+                let _dashboard =
+                    result.expect("openspec/ removed mid-run must still be a supported state");
+                assert!(
+                    !buf.is_empty(),
+                    "width {width}: the loop must still have drawn something: {buf:?}"
+                );
+            }
+        }
+
+        /// `degraded-coverage` :: "Each of the six launch failures renders as a leading
+        /// problem row" — rows 19, 20, 21, 22, 23, and 25, each driven by a real `a`
+        /// keypress through the real `run_wired`. Six cases, both mandated widths.
+        #[test]
+        fn every_launch_failure_renders_as_a_leading_row() {
+            for width in [120u16, 60u16] {
+                for case in ["split", "start", "prompt", "malformed", "record", "refusal"] {
+                    let scratch = scratch_repo_with_2fa_support();
+                    let root = scratch.path();
+                    let herdr_log = root.join("herdr.log");
+                    let marker = root.join("marker");
+                    let herdr =
+                        launch_case_herdr_script(root, &herdr_log, &marker, case, "c-2fa-support");
+                    let openspec_log = root.join("openspec.log");
+                    let openspec = openspec_script(root, &openspec_log, root);
+                    let config = Config {
+                        openspec_bin: Some(openspec),
+                        ..Config::default()
+                    };
+                    // Every case but "record" gets a real, writable state directory, so
+                    // `state::record` succeeds silently and contributes no problem of its
+                    // own — otherwise a `None` state dir's own "no state directory could be
+                    // resolved" problem would double up with the case under test. "record"
+                    // itself points state_dir at an existing regular file instead, so
+                    // `state::record` fails while the launch itself still succeeds.
+                    let state = ScratchDir::new();
+                    let bad_state_path = state.path().join("not-a-directory");
+                    if case == "record" {
+                        write_with_mode(&bad_state_path, b"x", 0o644);
+                    }
+                    let state_dir: Option<&Path> = if case == "record" {
+                        Some(&bad_state_path)
+                    } else {
+                        Some(state.path())
+                    };
+
+                    let stage1 = || log_lines(&herdr_log) >= 1;
+                    let expected_calls = match case {
+                        "refusal" => 0,
+                        "split" => 1,
+                        "start" => 2,
+                        "malformed" => 1,
+                        "prompt" | "record" => 3,
+                        other => unreachable!("unexpected case {other}"),
+                    };
+                    let stage2 = || non_agent_list_lines(&herdr_log).len() >= expected_calls.max(1);
+                    let stages: Vec<(&dyn Fn() -> bool, ratatui::crossterm::event::Event)> =
+                        if expected_calls == 0 {
+                            vec![(&stage1, key('a')), (&stage1, key('q'))]
+                        } else {
+                            vec![(&stage1, key('a')), (&stage2, key('q'))]
+                        };
+
+                    let (result, buf) =
+                        run_wired_staged(width, root, &config, &herdr, state_dir, stages);
+                    let dashboard = result.expect("every launch failure is a supported state");
+
+                    let calls = non_agent_list_lines(&herdr_log);
+                    assert_eq!(
+                        calls.len(),
+                        expected_calls,
+                        "case {case}, width {width}: {calls:?}"
+                    );
+                    assert_eq!(
+                        dashboard.launch.problems.len(),
+                        1,
+                        "case {case}, width {width}: {:?}",
+                        dashboard.launch.problems
+                    );
+                    if case == "refusal" {
+                        let expected = "c-2fa-support is already running for this change - press g to focus it";
+                        assert_eq!(
+                            dashboard.launch.problems[0], expected,
+                            "case {case}, width {width}"
+                        );
+                        if width == 120 {
+                            assert!(
+                                buf.iter().any(|row| row.contains('!')
+                                    && row.contains("c-2fa-support is already running")),
+                                "case {case}, width {width}: {buf:?}"
+                            );
+                        }
+                    } else {
+                        assert!(
+                            buf.iter().any(|row| row.contains('!')),
+                            "case {case}, width {width}: no leading problem row: {buf:?}"
+                        );
+                    }
+                }
             }
         }
     }

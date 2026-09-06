@@ -940,6 +940,60 @@ mod tests {
             let problem = snapshot.problem.expect("the skipped entry must be named");
             assert!(problem.contains("pane_id"), "{problem}");
         }
+
+        /// `agent-list` :: "Every unreachable path yields an empty agent list" —
+        /// `degraded-states`' consolidation of the four distinct ways `poll_once` can fail
+        /// to reach a usable payload, plus a reachable control so the empty-list assertion
+        /// is not satisfied vacuously by every snapshot being empty.
+        #[test]
+        fn every_unreachable_path_yields_no_agents() {
+            let cases: Vec<(&str, Result<String, CliError>)> = vec![
+                (
+                    "a failed run",
+                    Err(CliError::Failed {
+                        program: "herdr".to_string(),
+                        args: vec!["agent".to_string(), "list".to_string()],
+                        code: Some(1),
+                        stderr: "no herdr server is running".to_string(),
+                    }),
+                ),
+                (
+                    "the program could not be started",
+                    Err(CliError::NotStarted {
+                        program: "herdr".to_string(),
+                        args: vec!["agent".to_string(), "list".to_string()],
+                        reason: "No such file or directory".to_string(),
+                    }),
+                ),
+                (
+                    "not valid JSON at all",
+                    Ok("usage: herdr agent list".to_string()),
+                ),
+                (
+                    "valid JSON with no usable \"result\"",
+                    Ok(r#"{"id":"cli:agent:list","type":"agent_list"}"#.to_string()),
+                ),
+            ];
+
+            for (label, response) in cases {
+                let fake = FakeCli::new();
+                fake.register_herdr(&["agent", "list"], response);
+                let snapshot = super::super::poll_once(&fake);
+                assert!(!snapshot.reachable, "{label}");
+                assert_eq!(snapshot.agents, Vec::new(), "{label}");
+                assert!(
+                    snapshot.problem.is_some(),
+                    "{label}: a reason must be present"
+                );
+            }
+
+            // The reachable control: the same call, a usable payload, at least one agent.
+            let fake = FakeCli::new();
+            fake.register_herdr(&["agent", "list"], Ok(reference_payload()));
+            let snapshot = super::super::poll_once(&fake);
+            assert!(snapshot.reachable);
+            assert!(!snapshot.agents.is_empty());
+        }
     }
 
     mod seam {

@@ -605,6 +605,108 @@ mod tests {
         }
     }
 
+    /// `agent-list` :: "An unreachable socket renders a list with no badge column at both
+    /// widths" — whole-rows equality against the reachable-empty control, since
+    /// `Dashboard::attribution` reads only `agents.agents`, never `agents.reachable`: an
+    /// unreachable snapshot and a reachable-but-empty one must render identically. A
+    /// reachable snapshot that DOES match an agent is the discriminating control.
+    #[test]
+    fn unreachable_socket_renders_no_badge_column() {
+        let mut unreachable = three_active();
+        unreachable.agents = crate::agents::AgentSnapshot {
+            agents: Vec::new(),
+            reachable: false,
+            problem: None,
+        };
+        let mut reachable_empty = three_active();
+        reachable_empty.agents = crate::agents::AgentSnapshot {
+            agents: Vec::new(),
+            reachable: true,
+            problem: None,
+        };
+        let mut reachable_matched = three_active();
+        reachable_matched.agents = crate::agents::AgentSnapshot {
+            agents: vec![agent_at("add-token-refresh", AgentStatus::Working)],
+            reachable: true,
+            problem: None,
+        };
+
+        for width in [38, 58] {
+            assert_eq!(
+                rows(&unreachable, width),
+                rows(&reachable_empty, width),
+                "width {width}: reachable-but-empty must render identically to unreachable"
+            );
+            assert_ne!(
+                rows(&unreachable, width),
+                rows(&reachable_matched, width),
+                "width {width}: a matched agent must actually add a badge, or the equality \
+                 above proves nothing"
+            );
+        }
+    }
+
+    /// `degraded-coverage` :: "An out-of-scope agent and a worktree agent are both
+    /// invisible" — rows 29/30. No cwd, a foreign cwd, and a linked-worktree-shaped cwd
+    /// (`<repo-parent>/.worktrees/<repo>-<branch>`, per `SPEC.md` row 30) all fail the same
+    /// `cwd.starts_with(root)` containment check row 29's own mechanism applies — there is
+    /// no separate worktree-detection code. Whole-rows equality against a control carrying
+    /// only the in-scope agent, so the three additions change nothing; the in-scope agent's
+    /// own badge is the discriminating control.
+    #[test]
+    fn out_of_scope_and_worktree_agents_are_invisible() {
+        fn agent_with_cwd(name: &str, cwd: Option<&str>) -> Agent {
+            Agent {
+                name: Some(name.to_string()),
+                kind: None,
+                status: AgentStatus::Working,
+                cwd: cwd.map(std::path::PathBuf::from),
+                pane_id: "p".to_string(),
+                tab_id: "t".to_string(),
+                workspace_id: "w".to_string(),
+                terminal_title: None,
+            }
+        }
+
+        let in_scope = agent_at("add-token-refresh", AgentStatus::Working);
+        let no_cwd = agent_with_cwd("fix-empty-basket", None);
+        let foreign_cwd = agent_with_cwd("fix-empty-basket", Some("/definitely/elsewhere"));
+        let worktree_cwd = agent_with_cwd(
+            "fix-empty-basket",
+            Some("/tmp/demo-repo-worktrees/.worktrees/demo-repo-feature"),
+        );
+
+        let mut control = three_active();
+        control.agents = crate::agents::AgentSnapshot {
+            agents: vec![in_scope.clone()],
+            reachable: true,
+            problem: None,
+        };
+        let mut with_invisible_agents = three_active();
+        with_invisible_agents.agents = crate::agents::AgentSnapshot {
+            agents: vec![in_scope, no_cwd, foreign_cwd, worktree_cwd],
+            reachable: true,
+            problem: None,
+        };
+
+        for width in [38, 58] {
+            assert_eq!(
+                rows(&control, width),
+                rows(&with_invisible_agents, width),
+                "width {width}: the three out-of-scope agents must change nothing"
+            );
+            // Discriminating control: the in-scope agent's own badge must actually be
+            // present, or the equality above is satisfied by two badgeless renders.
+            assert!(
+                rows(&control, width)
+                    .iter()
+                    .any(|r| r.text.contains(" w [")),
+                "width {width}: the in-scope agent's badge must render: {:?}",
+                rows(&control, width)
+            );
+        }
+    }
+
     #[test]
     fn progress_cell_is_dash_when_total_is_zero() {
         let d = three_active();

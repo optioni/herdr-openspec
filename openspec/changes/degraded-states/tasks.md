@@ -257,30 +257,30 @@
 ## 8. Proofs: the launch, agent, and CLI/watcher rows
 <!-- kind: operational -->
 
-- [ ] 8.1 CHANGE: Write `every_launch_failure_renders_as_a_leading_row` — six `run_wired` runs
+- [x] 8.1 CHANGE: Write `every_launch_failure_renders_as_a_leading_row` — six `run_wired` runs
   against a scratch `herdr` failing at each of the six points, each driven by a real `a`
   keypress, each asserting the first interior row and the argv log. Run (f) asserts the refusal
   sentence in full at 120 columns and an **empty** log.
-- [ ] 8.2 CHANGE: Write `g_with_no_agent_renders_the_same_buffer`,
+- [x] 8.2 CHANGE: Write `g_with_no_agent_renders_the_same_buffer`,
   `every_unreachable_path_yields_no_agents` (four failing stubs plus a reachable control),
   `unreachable_socket_renders_no_badge_column`,
   `out_of_scope_and_worktree_agents_are_invisible` (absent cwd, foreign cwd, `.worktrees` cwd,
   plus an in-scope control).
-- [ ] 8.3 CHANGE: Write `a_failed_cli_cycle_keeps_the_file_numbers` (root disagreement and
+- [x] 8.3 CHANGE: Write `a_failed_cli_cycle_keeps_the_file_numbers` (root disagreement and
   non-zero exit) and `a_watch_failure_keeps_the_loop_drawing` (unwatchable root, and
   `openspec/` removed mid-run, including that `r` still forces a refresh).
-- [ ] 8.4 CHECK: Plant **one defect per test** — eight tests, eight plants. Enumerate them in
+- [x] 8.4 CHECK: Plant **one defect per test** — eight tests, eight plants. Enumerate them in
   the task before running: badge the out-of-scope agent; return a non-empty `agents` on an
   unreachable poll; drop the launch problem before rendering; make `g` issue a focus call;
   swallow the watcher's reason; let a failed CLI cycle blank the progress pair; and so on.
   Record each in `notes/planted-defects.md`.
-- [ ] 8.5 CHECK: Each of the three whole-buffer-equality tests
+- [x] 8.5 CHECK: Each of the three whole-buffer-equality tests
   (`g_with_no_agent_renders_the_same_buffer`, `unreachable_socket_renders_no_badge_column`,
   `out_of_scope_and_worktree_agents_are_invisible`) names its **discriminating control** in the
   task, so an equality satisfied by two empty buffers is impossible.
-- [ ] 8.6 CHECK: No test spawned the real `openspec` or `herdr`; `git diff --name-only` names
+- [x] 8.6 CHECK: No test spawned the real `openspec` or `herdr`; `git diff --name-only` names
   only this group's intended files.
-- [ ] 8.7 Run `make check`. Commit.
+- [x] 8.7 Run `make check`. Commit.
 
 ## 9. Proofs: markdown, state, and the one-shot commands
 <!-- kind: operational -->

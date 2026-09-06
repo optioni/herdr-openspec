@@ -88,3 +88,40 @@ backup afterwards reports no difference in every case).
 
 All five reverted; `cargo test --all-features --lib` green afterwards at 972 tests, and
 `git status --porcelain` / `diff` against each pre-plant backup empty.
+
+## Group 8 — one plant per test (task 8.4)
+
+Seven test functions, seven plants (task 8.4's own text names six examples "and so on" —
+seven is the actual count of new test functions this group adds). Each plant is a one-line
+edit, run, observed red, then reverted (`git diff --stat` / `diff` against a pre-plant
+backup empty afterwards in every case).
+
+- **`out_of_scope_and_worktree_agents_are_invisible`** (`src/ui/list.rs`) — badged the
+  out-of-scope agent: changed `foreign_cwd`'s cwd from `/definitely/elsewhere` to the
+  in-scope `/tmp/demo-repo`. Red: the equality assertion showed a `w` badge appearing on
+  `fix-empty-basket`'s row where the control had none.
+- **`unreachable_socket_renders_no_badge_column`** (`src/ui/list.rs`) — badged the
+  unreachable case: gave the `unreachable` snapshot a matched agent. Red: `w [4/9]` on one
+  side of the equality, `[4/9]` (no badge) on the other.
+- **`every_unreachable_path_yields_no_agents`** (`src/agents.rs`, production code) —
+  `poll_once`'s `Err(err)` arm returns a fabricated agent alongside `reachable: false`.
+  Red: `left: [Agent { name: Some("PLANT"), ... }], right: []`.
+- **`g_with_no_agent_renders_the_same_buffer`** (`src/ui/app.rs`, production code) —
+  `apply_launch_action`'s `pane` resolution falls back to a fabricated pane id instead of
+  `None` when attribution finds nothing. Red: `g must issue no Herdr call at all: ["agent
+  focus PLANT-PANE"]`.
+- **`a_watch_failure_keeps_the_loop_drawing`** (`src/ui/mod.rs`) — swallowed the watcher's
+  reason: skipped `dashboard.refresh.problems = watch_problems`. Red: "the watch problem
+  must still render" failed — nothing on screen named it.
+- **`a_failed_cli_cycle_keeps_the_file_numbers`** (`src/changes.rs`, production code) —
+  `merge`'s per-change fallback arm (`None => merged.push(file_change)`) blanks the
+  progress pair to `{0, 0}` instead of keeping the file-sourced value. Red: `[-]` where
+  `[4/9]` was expected.
+- **`every_launch_failure_renders_as_a_leading_row`** (`src/ui/driver.rs`, production
+  code) — dropped the launch problem: `dashboard.launch.problems = Vec::new()` instead of
+  `outcome.problems`. Red: `case split, width 120: []` (expected length 1, got 0).
+
+All seven reverted; `cargo test --all-features --lib` green afterwards at 979 tests,
+`cargo fmt --all -- --check` and `cargo clippy --all-targets --all-features -- -D
+warnings` clean, and `git status --porcelain` shows only the three files this group's real
+(non-plant) changes touch: `src/agents.rs`, `src/ui/list.rs`, `src/ui/mod.rs`.
