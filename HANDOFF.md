@@ -38,6 +38,24 @@ repository and confirming it rendered *that* repo's changes.
 verified by review.** Every phase that touched it found SPEC wrong in ways no reading
 would have caught.
 
+## The last change cannot describe its own completion
+
+Found at the finish line, and the doc-claim rule's blind spot.
+
+This project's rule was **each stale doc claim is closed by the change that ships the
+behaviour** — which assumes the change making a claim true comes *after* the claim was
+written. At the end of a roadmap that ordering inverts. `degraded-states`' group 16 wrote
+the documentation; group 17 and the `openspec archive` step then changed the very state
+that documentation described. So `README.md` shipped saying *"Status: in development"*
+and `HANDOFF.md` shipped naming the archive as the one remaining step — both accurate
+when written, both false an hour later, and neither catchable by the rule that governed
+every other doc claim in the project.
+
+**If you run a roadmap to completion: the final documentation pass belongs after the
+final archive, not inside the last change.** Either sequence a closing commit outside the
+change, or have the archive step re-read and correct the completion claims. Fixed here in
+`a0336ec`, after the fact.
+
 ## Next action
 
 **None.** The roadmap is finished and the archive is done. Nothing is planned,
