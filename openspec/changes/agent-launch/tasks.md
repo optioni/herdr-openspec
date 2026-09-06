@@ -1047,24 +1047,24 @@ set; see design.md → Test Strategy.
 ## 16. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 16.1 CHECK: Inspect the intended verification commands and affected tiers, and confirm
+- [x] 16.1 CHECK: Inspect the intended verification commands and affected tiers, and confirm
       each one can fail: every `testcount` invocation carries a minimum above the count that
       existed on `main`, every single-test filter names its function in full, and every gate
       carries its explicit floor rather than a block default.
 
-- [ ] 16.2 VERIFY: `cargo fmt --all -- --check` — clean.
+- [x] 16.2 VERIFY: `cargo fmt --all -- --check` — clean.
 
-- [ ] 16.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings.
+- [x] 16.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings.
       This crate has no separate type checker; `cargo clippy` compiles and is that step.
 
-- [ ] 16.4 VERIFY: `cargo test --all-features` — green, and
+- [x] 16.4 VERIFY: `cargo test --all-features` — green, and
       `cargo test --all-features --lib -- --list | grep -c ': test$'` reports **907**.
 
-- [ ] 16.5 VERIFY: `cargo llvm-cov --fail-under-lines 80`, and record the **line** percentage
+- [x] 16.5 VERIFY: `cargo llvm-cov --fail-under-lines 80`, and record the **line** percentage
       from the TOTAL row's line columns — never the region count, which leads that row.
 
-- [ ] 16.6 VERIFY: `make check` — the single gate, green. If it fails, report the failing
+- [x] 16.6 VERIFY: `make check` — the single gate, green. If it fails, report the failing
       sub-command rather than a summary.
 
-- [ ] 16.7 VERIFY: `openspec validate agent-launch --strict`, with
+- [x] 16.7 VERIFY: `openspec validate agent-launch --strict`, with
       `export PATH="$HOME/.nvm/versions/node/v24.20.0/bin:$PATH"` in the shell. Commit.
