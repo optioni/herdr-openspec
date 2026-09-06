@@ -87,6 +87,7 @@ Pure transformations. No terminal, no subprocess, no writes.
 | Change | Scope | Spec refs | Depends on |
 |---|---|---|---|
 | `plugin-actions` | The `open` and `open-tab` binary subcommands that open or focus the dashboard pane via `herdr plugin pane`, and the manifest entries that go with them: both `[[actions]]` and the `dashboard-tab` pane. (`min_herdr_version` and `platforms` ship in `repo-foundation`, not here.) | Herdr integration → Manifest | `agent-launch` |
+| `spec-purposes` | Fill in the Purpose of every capability under `openspec/specs/`. `openspec archive` writes `TBD - created by archiving change <x>` and nothing replaces it, so `openspec validate --specs --strict` currently fails on 25 of 37 specs. The specs are part of the deliverable; the repository should not ship failing its own validation. | Testing and quality gates | `plugin-actions` |
 | `degraded-states` | Close the degraded-states table end to end: audit every row against the running plugin, add the `file mode` header badge, and cover each state with a view test. Nothing here should be new behaviour — this change exists to prove the table is true. | Degraded states | `plugin-actions`, `live-refresh` |
 
 ## Dependencies
@@ -122,6 +123,7 @@ graph TD
   detail-view --> agent-launch
   plugin-config --> agent-launch
   agent-launch --> plugin-actions
+  plugin-actions --> spec-purposes
   plugin-actions --> degraded-states
   live-refresh --> degraded-states
 ```

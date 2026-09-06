@@ -107,6 +107,23 @@ cost ran 38–44 points per change in Phase 3 (about 2.4 full 5-hour windows for
 changes, so ~15h of wall time); weekly cost ran 4.5 points per change. Both matter, and
 they are not interchangeable.
 
+## Correction: clippy's `too_many_arguments` fires at 8, not 7
+
+Since `live-refresh` this project has repeated that "a seventh parameter trips
+`too_many_arguments`". **That is false and has been propagated through several briefs,
+including mine.** Measured: `changes::build_change` takes **seven** parameters, and with
+its `#[allow(clippy::too_many_arguments)]` removed, `cargo clippy -- -D warnings` emits
+nothing. The default threshold warns above 7, so the eighth parameter is the trigger.
+
+Two consequences:
+
+- **The shape decisions stand on their own merits.** Making the agent poller a third
+  field on `ui::driver::Live` rather than another `run_loop` parameter is right for
+  cohesion — not because clippy forced it. Do not cite the lint as the reason.
+- **The crate's single `#[allow]` is vestigial** and can be deleted. Verified safe, but
+  deliberately **not** removed here: it is shipped code and belongs to a change, not to a
+  between-changes edit. Fold it into whichever change next touches `src/changes.rs`.
+
 ## Rule: a doc claim is fixed by the change that makes it true
 
 README describes the finished plugin, so parts of it are ahead of the code. Rather than
