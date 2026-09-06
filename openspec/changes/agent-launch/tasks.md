@@ -751,7 +751,7 @@ set; see design.md → Test Strategy.
 ## 6. `Attribution::panes`
 <!-- kind: behavior -->
 
-- [ ] 6.1 RED: Write `agents::tests::attribute::the_pane_map_and_the_badge_map_agree` and
+- [x] 6.1 RED: Write `agents::tests::attribute::the_pane_map_and_the_badge_map_agree` and
       `::a_tie_keeps_the_first_agents_pane`. **In the same task**, extend the six landed
       `attribute` tests `EXTENDED`'s pair list names — `an_unmatched_in_scope_agent_is_counted`,
       `the_name_tier_never_reads_the_kind`, `a_terminal_title_attributes_nothing`,
@@ -759,10 +759,10 @@ set; see design.md → Test Strategy.
       `one_agent_per_change_keeps_its_status` — with their `panes` assertions, so every new
       assertion is observed red before 6.2 makes it pass.
 
-- [ ] 6.2 GREEN: Fill `panes` in the same fold that fills `badges`, updated by the same
+- [x] 6.2 GREEN: Fill `panes` in the same fold that fills `badges`, updated by the same
       strictly-greater comparison so a tie keeps the first agent.
 
-- [ ] 6.3 VERIFY: No refactor was needed — `panes` is filled inside the fold that already
+- [x] 6.3 VERIFY: No refactor was needed — `panes` is filled inside the fold that already
       exists. `testcount --lib 'agents::tests::attribute::' 19`,
       `testcount --lib 'agents::tests::attribute::the_pane_map_and_the_badge_map_agree' 1`,
       `testcount --lib 'agents::tests::attribute::a_tie_keeps_the_first_agents_pane' 1`, then

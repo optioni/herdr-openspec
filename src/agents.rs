@@ -104,9 +104,8 @@ pub fn attribute(
 ) -> Attribution {
     let mut badges: std::collections::BTreeMap<String, AgentStatus> =
         std::collections::BTreeMap::new();
-    // `agent-launch`'s addition, filled in the same fold as `badges` starting group 6; always
-    // empty here.
-    let panes: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
+    // `agent-launch`'s addition: filled in the same fold as `badges`, below.
+    let mut panes: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
     let mut unattributed = 0usize;
 
     let Some(root) = repo else {
@@ -139,14 +138,19 @@ pub fn attribute(
 
         match placed {
             Some(&change_name) => {
-                badges
-                    .entry(change_name.to_string())
-                    .and_modify(|existing| {
-                        if rank(agent.status) > rank(*existing) {
-                            *existing = agent.status;
-                        }
-                    })
-                    .or_insert(agent.status);
+                let key = change_name.to_string();
+                // `agent-launch`'s addition: `panes` follows the same strictly-greater fold as
+                // `badges`, in lockstep, so a tie keeps the first agent's pane exactly as it
+                // keeps the first agent's status — the two maps can never disagree about which
+                // agent a change's row is talking about.
+                let wins = match badges.get(&key) {
+                    None => true,
+                    Some(existing) => rank(agent.status) > rank(*existing),
+                };
+                if wins {
+                    badges.insert(key.clone(), agent.status);
+                    panes.insert(key, agent.pane_id.clone());
+                }
             }
             None => unattributed += 1,
         }
@@ -1362,6 +1366,7 @@ mod tests {
                 &m,
             );
             assert!(result.badges.is_empty());
+            assert!(result.panes.is_empty());
             assert_eq!(result.unattributed, 1);
 
             let reordered = attribute(
@@ -1379,6 +1384,7 @@ mod tests {
             let a = agent(None, Some("claude"), AgentStatus::Idle, Some("/repo"), None);
             let result = attribute(&[a], Some(std::path::Path::new("/repo")), &["claude"], &m);
             assert!(result.badges.is_empty());
+            assert!(result.panes.is_empty());
             assert_eq!(result.unattributed, 1);
 
             let named = agent(
@@ -1397,6 +1403,10 @@ mod tests {
             assert_eq!(
                 result.badges,
                 BTreeMap::from([("claude".to_string(), AgentStatus::Idle)])
+            );
+            assert_eq!(
+                result.panes,
+                BTreeMap::from([("claude".to_string(), "p".to_string())])
             );
             assert_eq!(result.unattributed, 0);
         }
@@ -1418,6 +1428,7 @@ mod tests {
                 &m,
             );
             assert!(result.badges.is_empty());
+            assert!(result.panes.is_empty());
             assert_eq!(result.unattributed, 1);
 
             let without_title = agent(None, None, AgentStatus::Working, Some("/repo"), None);
@@ -1438,6 +1449,7 @@ mod tests {
             // 1. an empty agents slice.
             let r1 = attribute(&[], repo, &["alpha"], &m);
             assert!(r1.badges.is_empty());
+            assert!(r1.panes.is_empty());
             assert_eq!(r1.unattributed, 0);
 
             // 2. one in-scope agent, an empty change_names.
@@ -1450,6 +1462,7 @@ mod tests {
             );
             let r2 = attribute(std::slice::from_ref(&working_alpha), repo, &[], &m);
             assert!(r2.badges.is_empty());
+            assert!(r2.panes.is_empty());
             assert_eq!(
                 r2.unattributed, 1,
                 "an in-scope agent no tier could place is counted, even with no changes at all"
@@ -1458,12 +1471,14 @@ mod tests {
             // 3. the same agent, change_names non-empty, no repository.
             let r3 = attribute(&[working_alpha], None, &["alpha"], &m);
             assert!(r3.badges.is_empty());
+            assert!(r3.panes.is_empty());
             assert_eq!(r3.unattributed, 0);
 
             // 4. an agent with every optional field None.
             let bare = agent(None, None, AgentStatus::Working, None, None);
             let r4 = attribute(&[bare], repo, &["alpha"], &m);
             assert!(r4.badges.is_empty());
+            assert!(r4.panes.is_empty());
             assert_eq!(r4.unattributed, 0);
 
             // 5. change_names holding a duplicate.
@@ -1472,6 +1487,11 @@ mod tests {
             assert_eq!(
                 r5.badges,
                 BTreeMap::from([("alpha".to_string(), AgentStatus::Idle)])
+            );
+            assert_eq!(
+                r5.panes,
+                BTreeMap::from([("alpha".to_string(), "p".to_string())]),
+                "one entry each, not two, for a duplicated change name"
             );
             assert_eq!(r5.unattributed, 0);
         }
@@ -1797,6 +1817,10 @@ mod tests {
                 result.badges,
                 BTreeMap::from([("alpha".to_string(), AgentStatus::Blocked)])
             );
+            assert_eq!(
+                result.panes,
+                BTreeMap::from([("alpha".to_string(), "p".to_string())])
+            );
 
             let mut reversed = agents.clone();
             reversed.reverse();
@@ -1829,6 +1853,11 @@ mod tests {
                     &m,
                 );
                 assert_eq!(r.badges, BTreeMap::from([("alpha".to_string(), expected)]));
+                assert_eq!(
+                    r.panes,
+                    BTreeMap::from([("alpha".to_string(), "p".to_string())]),
+                    "panes follows each winner in turn, {expected:?}"
+                );
             }
         }
 
@@ -1857,7 +1886,136 @@ mod tests {
                     .map(|(n, s)| (n.to_string(), *s))
                     .collect::<BTreeMap<_, _>>()
             );
+            assert_eq!(
+                result.panes,
+                names
+                    .iter()
+                    .map(|n| (n.to_string(), "p".to_string()))
+                    .collect::<BTreeMap<_, _>>()
+            );
             assert_eq!(result.unattributed, 0);
+        }
+
+        /// `agent-launch`'s addition: `panes` and `badges` always hold the same key set, and
+        /// for every key, `panes[key]` is the `pane_id` of the agent whose status
+        /// `badges[key]` shows — proved across every fixture the tiers, the reordering, the
+        /// out-of-scope, the no-repository, and the precedence scenarios above use.
+        #[test]
+        fn the_pane_map_and_the_badge_map_agree() {
+            fn assert_agree(result: &super::super::Attribution) {
+                let badge_keys: std::collections::BTreeSet<_> = result.badges.keys().collect();
+                let pane_keys: std::collections::BTreeSet<_> = result.panes.keys().collect();
+                assert_eq!(
+                    badge_keys, pane_keys,
+                    "badges and panes must share a key set"
+                );
+            }
+
+            let m = empty_mapping();
+
+            let a = agent(
+                Some("scratch-work"),
+                None,
+                AgentStatus::Working,
+                Some("/repo"),
+                None,
+            );
+            assert_agree(&attribute(
+                &[a],
+                Some(std::path::Path::new("/repo")),
+                &["add-auth", "fix-basket"],
+                &m,
+            ));
+
+            let named = agent(
+                Some("claude"),
+                Some("claude"),
+                AgentStatus::Idle,
+                Some("/repo"),
+                None,
+            );
+            assert_agree(&attribute(
+                &[named],
+                Some(std::path::Path::new("/repo")),
+                &["claude"],
+                &m,
+            ));
+
+            let names = ["a", "b", "c", "d", "e"];
+            let statuses = [
+                AgentStatus::Working,
+                AgentStatus::Idle,
+                AgentStatus::Blocked,
+                AgentStatus::Done,
+                AgentStatus::Unknown,
+            ];
+            let agents: Vec<Agent> = names
+                .iter()
+                .zip(statuses.iter())
+                .map(|(n, s)| agent(Some(n), None, *s, Some("/repo"), None))
+                .collect();
+            assert_agree(&attribute(
+                &agents,
+                Some(std::path::Path::new("/repo")),
+                &names,
+                &m,
+            ));
+
+            assert_agree(&attribute(
+                &[],
+                Some(std::path::Path::new("/repo")),
+                &[],
+                &m,
+            ));
+        }
+
+        /// `agent-attribution`'s "A tie keeps the first agent's pane": two agents on the same
+        /// change, the same status, distinct panes — the fold's strictly-greater comparison
+        /// never fires for the second, so its pane never overwrites the first's.
+        #[test]
+        fn a_tie_keeps_the_first_agents_pane() {
+            fn agent_at(pane_id: &str) -> Agent {
+                Agent {
+                    name: Some("alpha".to_string()),
+                    kind: None,
+                    status: AgentStatus::Working,
+                    cwd: Some(PathBuf::from("/repo")),
+                    pane_id: pane_id.to_string(),
+                    tab_id: "t".to_string(),
+                    workspace_id: "w".to_string(),
+                    terminal_title: None,
+                }
+            }
+            let m = empty_mapping();
+            let first = agent_at("w:p1");
+            let second = agent_at("w:p2");
+
+            let result = attribute(
+                &[first.clone(), second.clone()],
+                Some(std::path::Path::new("/repo")),
+                &["alpha"],
+                &m,
+            );
+            assert_eq!(
+                result.badges,
+                BTreeMap::from([("alpha".to_string(), AgentStatus::Working)])
+            );
+            assert_eq!(
+                result.panes,
+                BTreeMap::from([("alpha".to_string(), "w:p1".to_string())])
+            );
+
+            let reversed = attribute(
+                &[second, first],
+                Some(std::path::Path::new("/repo")),
+                &["alpha"],
+                &m,
+            );
+            assert_eq!(
+                reversed.panes,
+                BTreeMap::from([("alpha".to_string(), "w:p2".to_string())]),
+                "the payload order is Herdr's own and is stable across polls"
+            );
         }
     }
 }
