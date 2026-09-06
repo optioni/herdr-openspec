@@ -161,4 +161,4 @@ h=$(find "$UIDIR" -name '*.rs' -print0 \
                  exit 1; }
 
 lines=$(printf '%s\n' "$body" | wc -l | tr -d ' ')
-echo "WIRED OK: eleven names present in $MOD; run resolves state::state_dir; run names startup_dir(; $MOD names config.agent_kind; 'pub fn run()' is $lines lines with no branch and no loop; no \"herdr\" and no \"claude\" literal under $UIDIR"
+echo "WIRED OK: twelve names present in $MOD; run resolves state::state_dir; run names startup_dir(; $MOD names config.agent_kind; 'pub fn run()' is $lines lines with no branch and no loop; no \"herdr\" and no \"claude\" literal under $UIDIR"

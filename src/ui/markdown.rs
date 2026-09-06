@@ -1352,21 +1352,74 @@ mod tests {
         for width in [58, 78] {
             for (label, source) in sources {
                 let rendered = lines(source, width);
-                let source_line_count = source.lines().count();
+                let source_lines: Vec<&str> = source.lines().collect();
                 assert_eq!(
                     rendered.len(),
-                    source_line_count,
+                    source_lines.len(),
                     "width {width}, {label}: rendered {} lines for {} source lines: {:?}",
                     rendered.len(),
-                    source_line_count,
+                    source_lines.len(),
                     text_of(&rendered)
                 );
-                for line in &rendered {
-                    for seg in &line.segments {
+                // The rendered text, not merely its LINE COUNT, must equal the source: a
+                // renderer emitting the right number of blank lines would satisfy the count
+                // assertion above and prove nothing (`degraded-states`' own Change Review
+                // caught exactly this — a check that cannot fail is this project's own
+                // defect class). Every line's text is compared byte-for-byte, in order, and
+                // every line must carry SOME non-blank content (a construct rendered as
+                // whitespace would still pass a bare inequality check).
+                for (i, (rendered_line, source_line)) in
+                    rendered.iter().zip(source_lines.iter()).enumerate()
+                {
+                    let text = rendered_line.text();
+                    assert_eq!(
+                        text.trim_end(),
+                        *source_line,
+                        "width {width}, {label}, source line {i}: rendered text does not \
+                         match the source line verbatim"
+                    );
+                    assert!(
+                        !text.trim().is_empty() || source_line.trim().is_empty(),
+                        "width {width}, {label}, source line {i}: rendered as blank, not the \
+                         source line's own text"
+                    );
+                    for seg in &rendered_line.segments {
                         assert_eq!(seg.face, Face::plain(), "width {width}, {label}");
                     }
                 }
             }
+        }
+
+        // The tracked-tasks carve-out this row's own wording names ("on a tab **other**
+        // than the tracked-tasks one"): the SAME task-list source, dispatched through
+        // `ui::tasks::lines` (what `ui::detail::content_lines` reaches for a tracked tab)
+        // instead of `ui::markdown::lines`, renders the checklist grammar — a progress bar
+        // and `[ ]`/`[x]` glyphs — rather than the literal source text, discriminating this
+        // test's own claim that the OTHER tabs render literally.
+        let task_list_source = "- [ ] an item\n- [x] a done item\n";
+        let progress = crate::tasks::Progress {
+            completed: 1,
+            total: 2,
+        };
+        for width in [58u16, 78u16] {
+            let tracked = crate::ui::tasks::lines(task_list_source, &progress, width);
+            let tracked_text: Vec<String> = tracked
+                .iter()
+                .map(|l| l.text().trim_end().to_string())
+                .collect();
+            assert!(
+                tracked_text
+                    .iter()
+                    .any(|l| l.contains('[') && l.contains(']')),
+                "width {width}: the tracked-tasks tab must render the checklist grammar, \
+                 not literal source: {tracked_text:?}"
+            );
+            assert_ne!(
+                tracked_text,
+                text_of(&lines(task_list_source, width)),
+                "width {width}: the tracked tab must differ from the markdown rendering, or \
+                 the carve-out proves nothing"
+            );
         }
     }
 

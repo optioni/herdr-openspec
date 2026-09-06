@@ -431,19 +431,20 @@
 ## 15. Change Review
 <!-- kind: operational -->
 
-- [ ] 15.1 CHECK: Dispatch an independent reviewer — not a fork of this session — against
+- [x] 15.1 CHECK: Dispatch an independent reviewer — not a fork of this session — against
   proposal.md, every spec scenario, design.md, tasks.md, and the diff against the recorded
   `BASE`. Instruct it to write findings to a scratchpad file incrementally; two reviewer rounds
   have been lost to `529 Overloaded` on this project.
-- [ ] 15.2 CHECK: Point the reviewer at the concentration points that bind here: a view test
+- [x] 15.2 CHECK: Point the reviewer at the concentration points that bind here: a view test
   that would pass against a pane rendering nothing; a whole-buffer-equality test with no
   discriminating control; a gate extracted with a floor below its measured value; a coverage
   map entry whose `tier` is cheaper than the row's wording; a plant that could not redden the
   test it was written for; and any row this change repaired without naming the earlier change
   that owed it.
-- [ ] 15.3 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a
-  one-line reason, note SUGGESTIONs, re-run affected tests.
-- [ ] 15.4 VERIFY: No blocking or unowned finding remains. Commit.
+- [x] 15.3 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a
+  one-line reason, note SUGGESTIONs, re-run affected tests. See
+  `notes/change-review.md` for the disposition of every finding.
+- [x] 15.4 VERIFY: No blocking or unowned finding remains. Commit.
 
 ## 16. Documentation
 <!-- kind: operational -->

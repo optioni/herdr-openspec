@@ -168,11 +168,18 @@ not a proof of a degraded state.
   both widths, and separately a change whose `schema.yaml` holds bytes that are not a usable
   schema
 - **THEN** the detail region's tab bar row spells `no artifacts` in both cases
-- **AND** the unparseable case additionally shows a `! `-marked content row naming the file and
-  the parse reason, and the not-vendored case shows **no** such row — the two rows of the table
-  are distinguished by what is rendered, not only by what is stored
+- **AND** both cases show a `! `-marked content row naming the reason — the not-vendored
+  path and the unparseable path both push onto `Change::problems`, which `content_lines`
+  renders uniformly regardless of which of the two produced it; the two rows of the table
+  are distinguished by their own wording, not by one of them staying silent
 - **AND** both changes still appear in the list with their progress pair, so an unusable schema
   degrades the detail region alone
+
+  Corrected during Change Review: the first draft of this scenario claimed the not-vendored
+  case shows no problem row at all. Measured against the actual implementation
+  (`an_unusable_schema_renders_no_artifacts`, `src/ui/detail.rs`): both sub-cases populate
+  `Change::problems`, and group 5 renders that vector wholesale with no case-by-case
+  filtering — there is no mechanism that would suppress one and not the other.
 
 #### Scenario: A schema with no tasks artifact renders every tab as markdown and still counts
 

@@ -67,7 +67,7 @@ line per design.md -> Decision 6.
 | `NOBLOCK` | `UI_MIN` | 11 | unchanged |
 | `READONLY-UI` | `UI_MIN`, `EXTRA` | 11, the 5-file list | `EXTRA` now defaults to the list, not empty |
 | `NORAW-GREP` | hardcoded (fixed, not exposed) | 29 | was hardcoded at 16 (stale since list-view); fixed to 29 |
-| `NOSLEEP` | `MIN`, `SLEEP_MIN` | 29, 6 | `MIN` +1 |
+| `NOSLEEP` | `MIN`, `SLEEP_MIN` | 30, 6 | `MIN` +1 (corrected from a mis-measured 29 default; see notes/planted-defects.md) |
 | `NODEFAULT-UI` (Dashboard/Filter/Detail) | `SCAN_MIN` | 135 | +9 (`file_mode` field added at every site) |
 | `NODEFAULT-UI` (`Refresh`) | `SCAN_MIN` | 53 | +2 |
 | `NODEFAULT-UI` (`Launch`, `ui::app::Launch`) | `SCAN_MIN` | 81 | +3 |
