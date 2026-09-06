@@ -37,7 +37,16 @@ state with a view test."*
 - **One behavioural repair, named against the change that should have shipped it**: a launch
   outcome that discards its `state::record` failure whenever the prompt also fails, so the
   mapping is wrong and the pane says nothing — **`agent-launch`'s**, repaired here only
-  because there is no later change (design.md → Context).
+  because there is no later change (design.md → Context). The gap is `agent-launch`'s own:
+  its archived spec (`openspec/changes/archive/2026-09-06-agent-launch/specs/agent-launch/spec.md`)
+  carries two separate scenarios — "A failed prompt leaves a running, un-prompted agent that
+  is still attributable" and "A failed recording does not undo a successful start" — that
+  each exercise one of the two failures `Outcome::problem`'s single `Option<String>` cannot
+  hold at once; neither scenario, nor any other in that spec, ever drove both together. That
+  is a structural gap visible in the type's own signature, not a defect this change
+  introduced. `notes/audit.md` records the exact citations; `openspec/IMPLEMENTATION-ORDER.md`'s
+  `agent-launch` row is corrected to name the gap and point at the commit that closed it
+  (`51318d3`), so the archived roadmap does not read as more complete than it was.
 - **`WIRED` repaired and brought under `make check`.** `plugin-actions` put a branch into
   `pub fn run()`'s own body; the check that forbids one lives outside `make check`, so it went
   red on `main` and stayed red for a change.

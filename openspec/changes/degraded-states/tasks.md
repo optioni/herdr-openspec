@@ -72,7 +72,7 @@
 <!-- No behaviour changes here. The evidence is `notes/audit.md` plus the `verdict` key of the
      coverage map group 10 builds; task 1.5's check is what fails when a row has no entry. -->
 
-- [ ] 1.1 CHECK: Re-derive the table's row count from the tree. Use **this** parse rather than
+- [x] 1.1 CHECK: Re-derive the table's row count from the tree. Use **this** parse rather than
   a `grep -c '^| '`, which misses the `|---|---|` separator (no space after the pipe) and
   reports one too many:
 
@@ -92,25 +92,25 @@
   last row `The dashboard process opened by \`open\`/\`open-tab\` finds no workspace cwd…`. This
   is the same parse `tests/degraded_coverage.rs` implements in group 10, so the plan's floor
   and the checker's floor come from one rule.
-- [ ] 1.2 CHECK: Confirm the number matches the 44 in proposal.md, design.md, and
+- [x] 1.2 CHECK: Confirm the number matches the 44 in proposal.md, design.md, and
   `specs/degraded-coverage/spec.md`. If `SPEC.md` has moved since planning, correct all three
   and the coverage floor together.
-- [ ] 1.3 CHANGE: For each row, record in `notes/audit.md`: the condition verbatim, the
+- [x] 1.3 CHANGE: For each row, record in `notes/audit.md`: the condition verbatim, the
   production code implementing it (file, line, deciding expression), the test that proves it
   today (or `none`), and one of the **five** verdicts — `confirmed`, `unproven`,
   `spec-corrected`, `repaired`, `implemented`. The same five, and no others, are the legal
   values of the coverage map's `verdict` key. Design.md → Context carries the pre-planning
   audit's verdicts and its row-number partition; this task **re-checks** each against the tree
   rather than transcribing it.
-- [ ] 1.4 CHANGE: For every `repaired` verdict, name the earlier archived change that should
+- [x] 1.4 CHANGE: For every `repaired` verdict, name the earlier archived change that should
   have shipped the behaviour. Design.md names one (`agent-launch`, row 23). A row that turns
   out to need repair and is not that one is **reported to the user as a finding** before it is
   folded in.
-- [ ] 1.5 CHECK: Every parsed condition appears exactly once in `notes/audit.md` with one of
+- [x] 1.5 CHECK: Every parsed condition appears exactly once in `notes/audit.md` with one of
   the five verdicts. A one-off script here; group 10 turns the machine-checkable half into
   `tests/degraded_coverage.rs`, keyed on `tests/degraded-coverage.toml` rather than on a path
   under `openspec/changes/`, which archiving moves.
-- [ ] 1.6 Commit the audit.
+- [x] 1.6 Commit the audit.
 
 ## 2. `startup_dir`, `WIRED`'s repair, and `WIRED` as a repository file
 <!-- kind: behavior -->

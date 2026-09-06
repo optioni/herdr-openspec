@@ -180,17 +180,26 @@ was added to `ALLOWED` in the same task, so it contributes **zero** to the searc
 and the real `+1` was `tests/manifest.rs`, added by the same change and never recorded.
 `22 + 0 + 1 = 23` — the floor was correct for a reason nobody wrote down.
 
-**Open: `WIRED` is red at HEAD, unrelated to the above.** `plugin-actions`' final
-cwd-resolution fix (see above) added a branch to `src/ui/mod.rs::run()` —
+**Resolved by `degraded-states`: `WIRED` was red at `spec-purposes`' HEAD.**
+`plugin-actions`' final cwd-resolution fix added a branch to `src/ui/mod.rs::run()` —
 `match startup_cwd(&crate::config::env_lookup()) { Some(cwd) => cwd, None =>
-std::env::current_dir()? }` — after `WIRED` was last confirmed green. `WIRED` (a
-command-level check, not yet a repository file) forbids `pub fn run()`'s own body from
-holding a branch or a loop, on the theory that undecided residue in the composition root
-is where a collaborator silently goes unwired (`live-refresh`'s lesson). `sh
-openspec/changes/spec-purposes/notes/extracted-gates/WIRED.sh` fails leg 2 naming exactly
-this. **Not fixed here**: the fix is moving that branch into `run_wired`, a `src/` edit
-`spec-purposes`' Non-Goals rule out (this change touches no `src/` file). Whichever
-change next touches `src/ui/mod.rs::run()` should pick this up.
+std::env::current_dir()? }` — after `WIRED` was last confirmed green, and it stayed red for
+a whole change because `WIRED` lived outside `make check`. The repair **landed** is
+`ui::startup_dir(env, fallback)`, a named function holding the decision `run()`'s body used
+to hold, with both arms driven by a unit test (`ui::tests::startup_dir`) rather than by the
+process environment or the process cwd. An earlier draft of this fix considered moving the
+branch into `run_wired` instead; that alternative was rejected on measurement
+(`degraded-states`' design.md → Decision 5: `Startup::cwd` is a `&Path` every acceptance
+test and every construction site already builds, so widening it to `Option<&Path>` would
+ripple through all of them for one two-line decision, and it would put a
+`std::env::current_dir()` read inside the one function whose whole purpose is to be
+driveable from a test) — recorded here so a later reader does not pick that alternative back
+up believing it the plan.
+`WIRED` itself is now `scripts/gates/wired.sh`, a repository file composed into `make gates`
+(and so into `make check`), with a new leg **5b** requiring `run()`'s body to *name*
+`startup_dir(` — leg 2 alone (no branch, no loop) is not enough, since it passes just as
+well on a body that dropped the `startup_dir(` call entirely and reinlined
+`std::env::current_dir()?`; leg 5b is the half that actually catches that regression.
 
 The deeper lesson still holds: **a check that lives outside `make check` will rot, because
 nothing forces it to run.** Any future gate should either join `make check` or carry an
