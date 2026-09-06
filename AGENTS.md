@@ -22,7 +22,8 @@ spec is wrong, update the spec as part of that change rather than letting the tw
 `repo-foundation`, `ci-pipeline`, `plugin-config`, `repo-resolution`,
 `schema-model`, `task-parsing`, `changes-from-files`, `subprocess-seam`,
 `changes-from-cli`, `tui-shell`, `list-view`, `markdown-viewer`,
-`detail-view`, `tasks-tab`, and `live-refresh` have landed: the crate builds with six third-party dependencies (`toml`,
+`detail-view`, `tasks-tab`, `live-refresh`, `agent-polling`,
+`agent-attribution`, `agent-launch`, and `plugin-actions` have landed: the crate builds with six third-party dependencies (`toml`,
 `yaml-rust2`, `serde_json`, `ratatui` — reached through `ratatui::crossterm`'s
 re-export, not a direct dependency — `pulldown-cmark`, and `notify`), `make check` runs
 all four quality gates locally and in CI, the
@@ -77,6 +78,25 @@ at startup. A third collaborator, the Herdr agent poller (`src/agents.rs`,
 also outside `src/ui/`), polls `herdr agent list` on its own roughly
 one-second cadence and answers on its own non-blocking seam, so one wait
 now serves all three.
+
+Each polled agent is attributed to a change (name-equality against a
+`HERDR_PLUGIN_STATE_DIR`-recorded mapping, falling back to a count of
+unattributed agents rather than a guess) and badged in the list; `a`/`c`/`s`
+launch an agent onto the selected change with `/opsx:apply`/`continue`/`archive`
+through a fourth collaborator, the launcher (`src/launch.rs`, also outside
+`src/ui/`, the crate's third worker thread), and `g` focuses the agent already
+running for it — both inert with no problem recorded when nothing applies, both
+refused with a reason rendered as a problem row when the derived name is
+already live. Two more binary subcommands, `open` and `open-tab` (`src/open.rs`,
+the crate's third `HerdrCli` consumer and the fifth file on the seam gates'
+`ALLOWED` list), open or focus the dashboard pane from Herdr's action menu —
+`herdr-plugin.toml` declares both `[[actions]]` and a second, tab-placed
+`[[panes]]` entry alongside the original split one. Neither subcommand renders
+or needs a terminal, and neither ever passes `--cwd` to `herdr plugin pane
+open`: Herdr 0.8.2 was measured to resolve the manifest's relative pane
+`command` against `--cwd` too, not only against the plugin root, so `ui::run`
+instead reads the workspace's own cwd from its injected Herdr context
+(`ui::startup_cwd`) in preference to `std::env::current_dir()`.
 
 Important files:
 
@@ -156,6 +176,11 @@ make check
 Coverage is a floor that catches drift, not the mechanism that produces tests — the
 `tdd` schema drives RED → GREEN → REFACTOR, so tests come first by construction.
 
+`tests/manifest.rs` (run by `cargo test`, and therefore by the Test gate above) is the
+manifest/README/binary-name contract: a `herdr-plugin.toml`, `README.md`, or binary-name
+edit that drifts one against another fails it. It deliberately asserts nothing about
+`target/release/`, which `make check` never builds.
+
 ## Architecture rules
 
 Two boundaries carry the design. Respect them, or the coverage target becomes
@@ -165,20 +190,27 @@ unreachable and the tests become integration tests by accident.
   crate permitted to name a process-spawn API (`process::Command`, `Command::new`,
   `Stdio`) — `OpenspecCli` and `HerdrCli` are traits whose real implementations do
   nothing but spawn and return stdout. Parsing, merging, and decisions live on the
-  testable side of that seam. `src/agents.rs` and `src/launch.rs` are the crate's
-  two `HerdrCli` consumers, reaching it only through the trait object; neither
-  names a spawn API itself. This is checked, not aspirational: a tree-wide grep
-  (`NOSPAWN-GREP`) excludes exactly `src/cli.rs` by path (never by base name, so a
-  future `src/ui/cli.rs` is still caught) and fails if that exclusion is vacuous —
-  if `src/cli.rs` is missing, or itself names no spawn API. `LAUNCHSEAM` checks the
-  same property from `src/launch.rs`'s side: no spawn API, no `ratatui` type, and
-  the `HerdrCli` handle confined to exactly `src/cli.rs`, `src/agents.rs`,
-  `src/ui/mod.rs`, and `src/launch.rs` itself. Plugin context — the
-  configuration directory, the state directory, the plugin root, and the
-  workspace, tab, and pane ids — arrives in the environment of every process Herdr
-  starts for a plugin (`HERDR_PLUGIN_CONFIG_DIR`, `HERDR_PLUGIN_STATE_DIR`,
-  `HERDR_PLUGIN_ROOT`, and friends), so reading it is never a reason to spawn
-  `herdr` from anywhere in the crate. The seam also parses nothing: it returns
+  testable side of that seam. `src/agents.rs`, `src/launch.rs`, and `src/open.rs`
+  are the crate's **three** `HerdrCli` consumers, reaching it only through the
+  trait object; none names a spawn API itself. This is checked, not aspirational: a
+  tree-wide grep (`NOSPAWN-GREP`) excludes exactly `src/cli.rs` by path (never by
+  base name, so a future `src/ui/cli.rs` is still caught) and fails if that
+  exclusion is vacuous — if `src/cli.rs` is missing, or itself names no spawn API.
+  `LAUNCHSEAM` checks the same property from `src/launch.rs`'s and `src/open.rs`'s
+  side (run a second time, `ENTRY` pointed at `src/open.rs`'s own entry point): no
+  spawn API, no `ratatui` type, and the `HerdrCli` handle confined to exactly
+  **five** files — `src/cli.rs`, `src/agents.rs`, `src/ui/mod.rs`,
+  `src/launch.rs`, and `src/open.rs`. `src/open.rs` starts no thread, unlike the
+  other three consumers, so it is not added to `NOBLOCK`'s seam-module list — a
+  one-shot subcommand that exits is not a collaborator beside the render loop.
+  Plugin context — the configuration directory, the state directory, the plugin
+  root, the workspace, tab, and pane ids, and (as `HERDR_PLUGIN_CONTEXT_JSON`,
+  parsed by `open::context`) the workspace's own **cwd** — arrives in the
+  environment of every process Herdr starts for a plugin (`HERDR_PLUGIN_CONFIG_DIR`,
+  `HERDR_PLUGIN_STATE_DIR`, `HERDR_PLUGIN_ROOT`, and friends) — a `[[panes]]`
+  process no less than an `[[actions]]` one, measured live in `plugin-actions`'
+  own Change Review — so reading it is never a reason to spawn `herdr` from
+  anywhere in the crate. The seam also parses nothing: it returns
   stdout verbatim, and every JSON parse lives on the testable side of it —
   `serde_json` must never appear in `src/cli.rs`, checked the same way.
 - **Views do no I/O.** They are pure functions from state to a ratatui frame, tested

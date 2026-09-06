@@ -258,9 +258,10 @@ pub const HERDR_PROGRAM: &str = "herdr";
 
 /// Construct the real `HerdrCli` over `program`, following `npm_prefix_via`'s shape
 /// precisely: a parameterised spawner, so a scenario can drive a real spawn against a
-/// scratch `#!/bin/sh` program without touching `PATH`. `ui::run` is the only caller
-/// that passes [`HERDR_PROGRAM`]; every other caller — the poller's own tests, the
-/// outer-loop acceptance test — passes a scratch path instead.
+/// scratch `#!/bin/sh` program without touching `PATH`. `ui::run` and
+/// `open::run_from_env` are the only two callers that pass [`HERDR_PROGRAM`]; every
+/// other caller — the poller's own tests, the outer-loop acceptance tests — passes a
+/// scratch path instead.
 pub fn agent_cli_via(program: &Path) -> std::sync::Arc<dyn HerdrCli> {
     std::sync::Arc::new(RealHerdrCli::new(program))
 }

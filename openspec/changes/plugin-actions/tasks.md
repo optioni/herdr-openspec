@@ -716,30 +716,47 @@ clean) before this group's checklist was marked done.
 <!-- kind: operational -->
 <!-- parallel-after: 0 -->
 
-- [ ] 15.1 Rewrite in `AGENTS.md` → "Current repo state" (audience: every future session):
+- [x] 15.1 Rewrite in `AGENTS.md` → "Current repo state" (audience: every future session):
   the landed-changes list ends at `live-refresh` and omits `agent-polling`,
   `agent-attribution`, and `agent-launch`; bring it current and name `src/open.rs` and the
   `open`/`open-tab` subcommands in the same sentence. Durable because the list is how a
   session orients before touching anything.
 
-- [ ] 15.2 Rewrite in `AGENTS.md` → "Architecture rules" (audience: every future session):
+  Extended the landed-changes list with `agent-polling`, `agent-attribution`,
+  `agent-launch`, `plugin-actions`; added a new paragraph describing agent attribution,
+  the launcher (`a`/`c`/`s`/`g`), and `open`/`open-tab` (naming `src/open.rs`, the
+  `--cwd` correction, and `ui::startup_cwd`) in the same dense style as the surrounding
+  prose.
+
+- [x] 15.2 Rewrite in `AGENTS.md` → "Architecture rules" (audience: every future session):
   the sentence claiming "`src/agents.rs` and `src/launch.rs` are the crate's two `HerdrCli`
   consumers" and the `LAUNCHSEAM` sentence naming four allowed files. Both become three
   consumers and five allowed files, and the rule states that a one-shot subcommand is not
   added to `NOBLOCK`'s seam-module list. Rewrite in place; do not add a second entry beside
   them.
 
-- [ ] 15.3 Add to `AGENTS.md` → "Quality gates" (audience: every future session), two
+  Done; also extended the plugin-context sentence to name `workspace_cwd` (via
+  `HERDR_PLUGIN_CONTEXT_JSON`), which was previously undocumented despite becoming
+  load-bearing for `ui::startup_cwd` (a gap the Change Review's `startup_cwd` doc-comment
+  citation exposed).
+
+- [x] 15.3 Add to `AGENTS.md` → "Quality gates" (audience: every future session), two
   lines: `tests/manifest.rs` is the manifest/README/binary-name contract and runs inside
   `make check`, so a manifest, `README.md`, or binary-name edit must keep it green, and it
   deliberately asserts nothing about `target/release/`, which `make check` never builds.
 
-- [ ] 15.4 Rewrite the doc comment on `cli::agent_cli_via` (`src/cli.rs`), which claims
+- [x] 15.4 Rewrite the doc comment on `cli::agent_cli_via` (`src/cli.rs`), which claims
   "`ui::run` is the only caller that passes `HERDR_PROGRAM`" — `open::run_from_env` is a
   second. One line, in place.
 
-- [ ] 15.5 CHECK: Net size — this group rewrites four existing passages and adds two lines.
+- [x] 15.5 CHECK: Net size — this group rewrites four existing passages and adds two lines.
   Confirm nothing else in `AGENTS.md` is now stale.
+
+  Checked: dependency count ("six third-party dependencies") is still accurate (`toml`,
+  `yaml-rust2`, `serde_json`, `ratatui`, `pulldown-cmark`, `notify` — unchanged by this
+  change). No other stale claim found. `cargo build` and `cargo test --all-features --lib`
+  (940 passing) re-run clean after the `src/cli.rs` doc-comment edit; `cargo fmt`/`clippy`
+  clean.
 
 ## 16. Lint & Verify
 <!-- kind: operational -->
