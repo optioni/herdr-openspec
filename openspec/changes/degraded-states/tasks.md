@@ -178,23 +178,23 @@
 ## 4. The `file mode` header badge
 <!-- kind: behavior -->
 
-- [ ] 4.1 RED: Write failing view tests `file_mode_badge_is_dim_after_the_label`,
+- [x] 4.1 RED: Write failing view tests `file_mode_badge_is_dim_after_the_label`,
   `no_badge_is_byte_identical_to_the_landed_header`, `badge_rebases_the_shortening_arithmetic`,
   `badge_drops_whole_below_eighteen_columns`. The dim assertion reads the buffer's `Modifier`,
   not only its characters. Every one names **both 60 and 120** — the drop test renders at 17,
   18, 60 **and** 120, because `WIDTHS` requires every view test to name both mandated widths
   and a 17/18/60 test would fail it.
-- [ ] 4.2 CHECK: `no_badge_is_byte_identical_to_the_landed_header` carries a discriminating
+- [x] 4.2 CHECK: `no_badge_is_byte_identical_to_the_landed_header` carries a discriminating
   control: the same fixture with `file_mode` true must differ, so the equality is not satisfied
   by two blank headers.
-- [ ] 4.3 GREEN: Draw `file mode` in columns 9–17 with `Modifier::DIM` when
+- [x] 4.3 GREEN: Draw `file mode` in columns 9–17 with `Modifier::DIM` when
   `dashboard.file_mode`; re-base the shortening arithmetic to `width - 19` with the badge and
   `width - 9` without, floored at zero either way.
-- [ ] 4.4 GREEN: Drop the badge whole below 18 columns, before the path is shortened.
-- [ ] 4.5 VERIFY: The four landed header scenarios pass unchanged — they build dashboards with
+- [x] 4.4 GREEN: Drop the badge whole below 18 columns, before the path is shortened.
+- [x] 4.5 VERIFY: The four landed header scenarios pass unchanged — they build dashboards with
   `file_mode` false, so their column spans must not move.
-- [ ] 4.6 VERIFY: `WIDTHS` at its raised floor (11.4) and `sh $C/NOIO-VIEW.sh`.
-- [ ] 4.7 Run `make check`. Commit.
+- [x] 4.6 VERIFY: `WIDTHS` at its raised floor (11.4) and `sh $C/NOIO-VIEW.sh`.
+- [x] 4.7 Run `make check`. Commit.
 
 ## 5. Per-change problems in the detail region
 <!-- kind: behavior -->

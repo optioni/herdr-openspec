@@ -198,9 +198,20 @@ fn render_region(frame: &mut Frame, area: Rect, title: &'static str, emphasised:
     frame.render_widget(block, area);
 }
 
-/// The header row: `OpenSpec`, bold, at column 0, and the repository's
+/// The `file mode` badge's own text — nine columns, drawn dim, immediately
+/// after `OpenSpec`'s separating blank. See `specs/responsive-layout/spec.md`.
+const FILE_MODE_BADGE: &str = "file mode";
+
+/// The narrowest header the badge is drawn in at all — `degraded-states`'
+/// addition. Below this the badge is dropped whole, before the path's own
+/// shortening arithmetic ever runs, rather than being truncated itself.
+const BADGE_MIN_WIDTH: u16 = 18;
+
+/// The header row: `OpenSpec`, bold, at column 0; when `dashboard.file_mode`
+/// and the header is wide enough, the dim `file mode` badge in columns 9-17
+/// (`degraded-states`' addition — `SPEC.md` row 2); then the repository's
 /// display path (or `no repository`) right-aligned, shortened from the left
-/// when the header is too narrow to hold it whole.
+/// when the remaining width cannot hold it whole.
 fn render_header(frame: &mut Frame, header: Rect, dashboard: &Dashboard) {
     if header.height == 0 {
         return;
@@ -213,11 +224,30 @@ fn render_header(frame: &mut Frame, header: Rect, dashboard: &Dashboard) {
         Style::default().add_modifier(Modifier::BOLD),
     );
 
+    let show_badge = dashboard.file_mode && header.width >= BADGE_MIN_WIDTH;
+    if show_badge {
+        buf.set_string(
+            header.x + 9,
+            header.y,
+            FILE_MODE_BADGE,
+            Style::default().add_modifier(Modifier::DIM),
+        );
+    }
+
     let text = match &dashboard.repo {
         Some(path) => path.display().to_string(),
         None => "no repository".to_string(),
     };
-    if let Some(shown) = shorten_for_header(&text, header.width) {
+    // `A` is the budget left for the path: the header width minus 9 (the eight columns of
+    // `OpenSpec` plus one separating blank) when no badge is drawn, or minus 19 (that same
+    // nine, plus the badge's own nine columns, plus a second separating blank) when it is —
+    // the badge's columns come from the path's own budget, never from `OpenSpec`'s.
+    let a = if show_badge {
+        header.width.saturating_sub(19)
+    } else {
+        header.width.saturating_sub(9)
+    };
+    if let Some(shown) = shorten_for_header(&text, a) {
         let shown_len = shown.chars().count() as u16;
         let x = header.x + header.width.saturating_sub(shown_len);
         buf.set_string(x, header.y, &shown, Style::default());
@@ -225,13 +255,13 @@ fn render_header(frame: &mut Frame, header: Rect, dashboard: &Dashboard) {
 }
 
 /// The header-shortening rule, isolated so it is readable independently of
-/// the frame: `A` is the header width minus 9 (the eight columns of
-/// `OpenSpec` plus one separating blank), floored at zero. `text` fitting in
-/// `A` characters is shown whole; longer text is shown as `…` plus its last
-/// `A - 1` characters when `A >= 8`; otherwise nothing is shown at all, and
-/// only the (possibly itself truncated) `OpenSpec` label is drawn.
-fn shorten_for_header(text: &str, header_width: u16) -> Option<String> {
-    let a = header_width.saturating_sub(9) as usize;
+/// the frame: `text` fitting in `a` characters is shown whole; longer text
+/// is shown as `…` plus its last `a - 1` characters when `a >= 8`; otherwise
+/// nothing is shown at all, and only the (possibly itself truncated)
+/// `OpenSpec` label — and the badge, when [`render_header`] drew one — is
+/// shown.
+fn shorten_for_header(text: &str, a: u16) -> Option<String> {
+    let a = a as usize;
     let char_count = text.chars().count();
     if char_count <= a {
         Some(text.to_string())
@@ -470,6 +500,41 @@ mod tests {
                 problems: Vec::new(),
             },
             file_mode: false,
+        }
+    }
+
+    /// `dashboard`'s twin with `file_mode: true` — `degraded-states`' addition, kept as its
+    /// own fully-spelled literal rather than a `..dashboard(repo, route)` update, on this
+    /// module's own established rule that every construction names all thirteen fields.
+    fn dashboard_in_file_mode(repo: Option<&str>, route: Route) -> Dashboard {
+        Dashboard {
+            repo: repo.map(std::path::PathBuf::from),
+            searched_from: std::path::PathBuf::from("/tmp/searched-from"),
+            changes: empty_set(),
+            route,
+            quit: false,
+            selected: 0,
+            filter: crate::ui::app::Filter {
+                query: String::new(),
+                active: false,
+            },
+            detail: empty_detail(),
+            refresh: crate::ui::app::Refresh {
+                requested: false,
+                reload: false,
+                problems: Vec::new(),
+            },
+            agents: crate::agents::AgentSnapshot {
+                agents: Vec::new(),
+                reachable: false,
+                problem: None,
+            },
+            agent_names: crate::state::Mapping::default(),
+            launch: crate::ui::app::Launch {
+                pending: None,
+                problems: Vec::new(),
+            },
+            file_mode: true,
         }
     }
 
@@ -1157,6 +1222,140 @@ mod tests {
         assert_eq!(cols(&row_text(&buf, 0), 107..120), "no repository");
         assert!(!row_text(&buf, 0).contains("/tmp/searched-from"));
         assert!(row_text(&buf, 4).contains("/tmp/searched-from"));
+    }
+
+    /// `responsive-layout` :: "The badge is drawn dim after the label at both widths" —
+    /// reads the buffer's `Modifier`, not only its characters, since a badge that renders
+    /// the right text with the wrong style is still a defect a plain string comparison would
+    /// miss.
+    #[test]
+    fn file_mode_badge_is_dim_after_the_label() {
+        for width in [120, 60] {
+            let d = dashboard_in_file_mode(Some("/tmp/demo-repo"), Route::List);
+            let buf = render_at(width, 20, &d);
+            assert_eq!(
+                cols(&row_text(&buf, 0), 9..18),
+                "file mode",
+                "width {width}"
+            );
+            for x in 9..18u16 {
+                assert!(
+                    cell(&buf, x, 0)
+                        .style()
+                        .add_modifier
+                        .contains(Modifier::DIM),
+                    "width {width}: column {x} of the badge is not dim"
+                );
+            }
+            // Discriminating control: column 8 (the separator) and the OpenSpec label itself
+            // must not carry DIM, so the assertion above is not satisfied by the whole row
+            // being dim.
+            assert!(
+                !cell(&buf, 0, 0)
+                    .style()
+                    .add_modifier
+                    .contains(Modifier::DIM),
+                "width {width}: the OpenSpec label must not be dim"
+            );
+        }
+    }
+
+    /// `responsive-layout` :: "A false flag renders the header that landed before this
+    /// change" — whole-buffer equality at both widths, with a discriminating control (the
+    /// same fixture with `file_mode` true) so the equality is not satisfied by two blank
+    /// headers.
+    #[test]
+    fn no_badge_is_byte_identical_to_the_landed_header() {
+        for width in [120, 60] {
+            let plain = dashboard(Some("/tmp/demo-repo"), Route::List);
+            let buf = render_at(width, 20, &plain);
+            assert_eq!(
+                row_text(&buf, 0),
+                format!(
+                    "OpenSpec{}/tmp/demo-repo",
+                    " ".repeat(width as usize - 8 - "/tmp/demo-repo".chars().count())
+                ),
+                "width {width}: the landed header must be unchanged"
+            );
+
+            let badged = dashboard_in_file_mode(Some("/tmp/demo-repo"), Route::List);
+            let badged_buf = render_at(width, 20, &badged);
+            assert_ne!(
+                row_text(&buf, 0),
+                row_text(&badged_buf, 0),
+                "width {width}: the control must render differently"
+            );
+        }
+    }
+
+    /// `responsive-layout` :: "The badge takes its columns from the path, not from the
+    /// label" — a path long enough to be shortened differently by the two budgets (`width -
+    /// 9` without the badge, `width - 19` with it) at BOTH mandated widths.
+    #[test]
+    fn badge_rebases_the_shortening_arithmetic() {
+        let long_path = format!("/repo/{}", "x".repeat(99));
+        assert_eq!(long_path.chars().count(), 105);
+
+        for width in [120, 60] {
+            let plain = dashboard(Some(&long_path), Route::List);
+            let plain_buf = render_at(width, 20, &plain);
+            let plain_a = width as usize - 9;
+            let plain_shown = crate::ui::list::shorten_left(&long_path, plain_a);
+            assert_eq!(
+                cols(
+                    &row_text(&plain_buf, 0),
+                    (width as usize - plain_shown.chars().count())..width as usize
+                ),
+                plain_shown,
+                "width {width}: no-badge path"
+            );
+
+            let badged = dashboard_in_file_mode(Some(&long_path), Route::List);
+            let badged_buf = render_at(width, 20, &badged);
+            let badged_a = width as usize - 19;
+            let badged_shown = crate::ui::list::shorten_left(&long_path, badged_a);
+            assert_eq!(
+                cols(
+                    &row_text(&badged_buf, 0),
+                    (width as usize - badged_shown.chars().count())..width as usize
+                ),
+                badged_shown,
+                "width {width}: badged path"
+            );
+            assert_ne!(
+                plain_shown, badged_shown,
+                "width {width}: the two budgets must actually differ for this fixture"
+            );
+        }
+    }
+
+    /// `responsive-layout` :: "A header too narrow for the badge drops it whole" — rendered
+    /// at 17, 18, 60, and 120: below 18 the badge is dropped before the path's own
+    /// shortening arithmetic ever runs; at 18 and above it is drawn.
+    #[test]
+    fn badge_drops_whole_below_eighteen_columns() {
+        for width in [17, 18, 60, 120] {
+            let d = dashboard_in_file_mode(Some("/tmp/demo-repo"), Route::List);
+            let buf = render_at(width, 20, &d);
+            let row = row_text(&buf, 0);
+            if width < 18 {
+                assert!(
+                    !row.contains("file mode"),
+                    "width {width}: the badge must be dropped whole below 18 columns: {row:?}"
+                );
+            } else {
+                assert_eq!(cols(&row, 9..18), "file mode", "width {width}");
+                for x in 9..18u16 {
+                    assert!(
+                        cell(&buf, x, 0)
+                            .style()
+                            .add_modifier
+                            .contains(Modifier::DIM),
+                        "width {width}: column {x} of the badge is not dim"
+                    );
+                }
+            }
+        }
     }
 
     fn three_active() -> Dashboard {
