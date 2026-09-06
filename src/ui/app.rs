@@ -29,7 +29,10 @@ pub enum Route {
     Detail,
 }
 
-/// The nine outcomes a terminal event can map to, under either filter mode.
+/// The seventeen outcomes a terminal event can map to, under either filter mode. The count
+/// has moved twice since this comment was last true: to thirteen with `live-refresh`'s
+/// `Refresh`, and to seventeen with `agent-launch`'s `LaunchApply`, `LaunchContinue`,
+/// `LaunchArchive`, and `FocusAgent`.
 /// `action_for` is total over every `Event`. `Back` replaces the earlier
 /// `BackToList`: it now dismisses one of several layers rather than only
 /// ever returning to the list route. `Next` and `Prev` are renamed from
@@ -310,13 +313,60 @@ impl Dashboard {
             // tier is what turns the flag into a request. See
             // `specs/live-updates/spec.md` -> "`r` forces a full refresh".
             Action::Refresh => self.refresh.requested = true,
-            // `agent-launch`: group 1 skeleton only — the real decision arrives in group 7,
-            // once `launch::decide` exists. These arms deliberately change nothing yet.
+            // `agent-launch`: map the action to an `Intent`, decide, and write the result.
+            // Reaches no collaborator, spawns nothing, touches no filesystem, reads no clock —
+            // `apply` stays a pure function of `&mut self` and its argument; `run_loop` is what
+            // turns `launch.pending` into a request to a collaborator outside `src/ui/`
+            // entirely. See `specs/agent-launch/spec.md` and design.md -> Decisions 6.
             Action::LaunchApply
             | Action::LaunchContinue
             | Action::LaunchArchive
-            | Action::FocusAgent => {}
+            | Action::FocusAgent => self.apply_launch_action(action),
             Action::Ignore => {}
+        }
+    }
+
+    /// The one place all four launch actions gather the same five values — the selected
+    /// change's name, the focus pane `attribution().panes` holds for it, whether the socket is
+    /// reachable, and the live agents' names — and hand them to `launch::decide`.
+    /// `Decision::Nothing` changes nothing; `Decision::Refuse` replaces `launch.problems` with
+    /// the one reason and leaves `launch.pending` alone; `Decision::Go` sets `launch.pending`
+    /// and clears `launch.problems`.
+    fn apply_launch_action(&mut self, action: Action) {
+        let intent = match action {
+            Action::LaunchApply => crate::launch::Intent::Apply,
+            Action::LaunchContinue => crate::launch::Intent::Continue,
+            Action::LaunchArchive => crate::launch::Intent::Archive,
+            Action::FocusAgent => crate::launch::Intent::Focus,
+            _ => unreachable!("apply_launch_action is called only for the four launch actions"),
+        };
+        let change = self.selected_change().map(|c| c.name.clone());
+        let attribution = self.attribution();
+        let pane = change
+            .as_deref()
+            .and_then(|name| attribution.panes.get(name))
+            .cloned();
+        let live_names: Vec<&str> = self
+            .agents
+            .agents
+            .iter()
+            .filter_map(|a| a.name.as_deref())
+            .collect();
+        match crate::launch::decide(
+            intent,
+            change.as_deref(),
+            pane.as_deref(),
+            self.agents.reachable,
+            &live_names,
+        ) {
+            crate::launch::Decision::Nothing => {}
+            crate::launch::Decision::Refuse(reason) => {
+                self.launch.problems = vec![reason];
+            }
+            crate::launch::Decision::Go(request) => {
+                self.launch.pending = Some(request);
+                self.launch.problems.clear();
+            }
         }
     }
 
@@ -585,7 +635,7 @@ mod tests {
     // submodule — actually match their full test paths.
     use crate::agents::{Agent, AgentStatus};
     use crate::changes::fixture;
-    use crate::ui::app::{Dashboard, Detail, Filter, Refresh, Route};
+    use crate::ui::app::{Action, Dashboard, Detail, Filter, Refresh, Route, action_for};
     use std::collections::BTreeMap;
 
     fn agent(name: Option<&str>, status: AgentStatus, cwd: Option<&str>) -> Agent {
@@ -805,6 +855,337 @@ mod tests {
         d.filter.query = "beta".to_string();
         let after = d.attribution();
         assert_eq!(before, after, "the filter must not change the attribution");
+    }
+
+    /// `dashboard-loop`: "The four action keys map, and their near misses do not."
+    #[test]
+    fn the_four_action_keys_map_and_their_near_misses_do_not() {
+        use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+
+        fn press(code: KeyCode, modifiers: KeyModifiers) -> Event {
+            Event::Key(KeyEvent::new(code, modifiers))
+        }
+
+        assert_eq!(
+            action_for(&press(KeyCode::Char('a'), KeyModifiers::NONE), false),
+            Action::LaunchApply
+        );
+        assert_eq!(
+            action_for(&press(KeyCode::Char('c'), KeyModifiers::NONE), false),
+            Action::LaunchContinue
+        );
+        assert_eq!(
+            action_for(&press(KeyCode::Char('s'), KeyModifiers::NONE), false),
+            Action::LaunchArchive
+        );
+        assert_eq!(
+            action_for(&press(KeyCode::Char('g'), KeyModifiers::NONE), false),
+            Action::FocusAgent
+        );
+        assert_eq!(
+            action_for(&press(KeyCode::Char('c'), KeyModifiers::CONTROL), false),
+            Action::Quit
+        );
+        assert_eq!(
+            action_for(&press(KeyCode::Char('A'), KeyModifiers::SHIFT), false),
+            Action::Ignore
+        );
+        assert_eq!(
+            action_for(&press(KeyCode::Char('G'), KeyModifiers::SHIFT), false),
+            Action::Ignore
+        );
+        assert_eq!(
+            action_for(&press(KeyCode::Char('a'), KeyModifiers::CONTROL), false),
+            Action::Ignore
+        );
+        assert_eq!(
+            action_for(&press(KeyCode::Char('s'), KeyModifiers::ALT), false),
+            Action::Ignore
+        );
+
+        assert_eq!(
+            action_for(&press(KeyCode::Char('a'), KeyModifiers::NONE), true),
+            Action::FilterPush('a')
+        );
+        assert_eq!(
+            action_for(&press(KeyCode::Char('c'), KeyModifiers::NONE), true),
+            Action::FilterPush('c')
+        );
+        assert_eq!(
+            action_for(&press(KeyCode::Char('s'), KeyModifiers::NONE), true),
+            Action::FilterPush('s')
+        );
+        assert_eq!(
+            action_for(&press(KeyCode::Char('g'), KeyModifiers::NONE), true),
+            Action::FilterPush('g')
+        );
+        assert_eq!(
+            action_for(&press(KeyCode::Char('c'), KeyModifiers::CONTROL), true),
+            Action::Quit
+        );
+        assert_eq!(
+            action_for(&press(KeyCode::Char('A'), KeyModifiers::SHIFT), true),
+            Action::FilterPush('A')
+        );
+        assert_eq!(
+            action_for(&press(KeyCode::Char('G'), KeyModifiers::SHIFT), true),
+            Action::FilterPush('G')
+        );
+        assert_eq!(
+            action_for(&press(KeyCode::Char('a'), KeyModifiers::CONTROL), true),
+            Action::Ignore
+        );
+        assert_eq!(
+            action_for(&press(KeyCode::Char('s'), KeyModifiers::ALT), true),
+            Action::Ignore
+        );
+
+        for code in [
+            KeyCode::Char('a'),
+            KeyCode::Char('c'),
+            KeyCode::Char('s'),
+            KeyCode::Char('g'),
+        ] {
+            let released = Event::Key(KeyEvent::new_with_kind(
+                code,
+                KeyModifiers::NONE,
+                KeyEventKind::Release,
+            ));
+            let repeated = Event::Key(KeyEvent::new_with_kind(
+                code,
+                KeyModifiers::NONE,
+                KeyEventKind::Repeat,
+            ));
+            for filtering in [false, true] {
+                assert_eq!(action_for(&released, filtering), Action::Ignore, "{code:?}");
+                assert_eq!(action_for(&repeated, filtering), Action::Ignore, "{code:?}");
+            }
+        }
+    }
+
+    /// `dashboard-loop`: "A launch action reaches no collaborator and starts no work."
+    #[test]
+    fn a_launch_action_reaches_no_collaborator_and_starts_no_work() {
+        let mut d = dashboard_for_attribution(
+            vec![fixture::active("add-auth", 1, 2)],
+            Vec::new(),
+            0,
+            Vec::new(),
+            BTreeMap::new(),
+        );
+        let before = d.clone();
+        d.apply(Action::LaunchApply);
+
+        assert_eq!(
+            d.launch.pending,
+            Some(crate::launch::Request::Launch {
+                change: "add-auth".to_string(),
+                agent: "add-auth".to_string(),
+                intent: crate::launch::Intent::Apply,
+            })
+        );
+        assert!(d.launch.problems.is_empty());
+        assert_eq!(d.changes, before.changes);
+        assert_eq!(d.selected, before.selected);
+        assert_eq!(d.route, before.route);
+        assert_eq!(d.detail, before.detail);
+        assert_eq!(d.filter, before.filter);
+        assert_eq!(d.quit, before.quit);
+        assert_eq!(d.refresh, before.refresh);
+        assert_eq!(d.agents, before.agents);
+        assert_eq!(d.agent_names, before.agent_names);
+    }
+
+    /// `dashboard-loop`: "A refused launch records the reason and produces no request."
+    #[test]
+    fn a_refused_launch_records_the_reason_and_produces_no_request() {
+        let mut d = dashboard_for_attribution(
+            vec![fixture::active("2fa-support", 1, 2)],
+            Vec::new(),
+            0,
+            vec![agent(
+                Some("c-2fa-support"),
+                AgentStatus::Working,
+                Some("/repo"),
+            )],
+            BTreeMap::new(),
+        );
+        for _ in 0..3 {
+            d.apply(Action::LaunchApply);
+        }
+        assert_eq!(d.launch.pending, None);
+        assert_eq!(
+            d.launch.problems.len(),
+            1,
+            "replaced wholesale, never grown"
+        );
+        assert!(d.launch.problems[0].contains("c-2fa-support"));
+        assert!(d.launch.problems[0].contains('g'));
+    }
+
+    /// `dashboard-loop`: "An unreachable socket makes the four keys change nothing."
+    #[test]
+    fn an_unreachable_socket_makes_the_four_keys_change_nothing() {
+        let mut d = dashboard_for_attribution(
+            vec![fixture::active("add-auth", 1, 2)],
+            Vec::new(),
+            0,
+            Vec::new(),
+            BTreeMap::new(),
+        );
+        d.agents.reachable = false;
+        let before = d.clone();
+        for action in [
+            Action::LaunchApply,
+            Action::LaunchContinue,
+            Action::LaunchArchive,
+            Action::FocusAgent,
+        ] {
+            d.apply(action);
+        }
+        assert_eq!(d, before);
+    }
+
+    /// `dashboard-loop`: "Dashboard has no Default and no site elides a field" — a third
+    /// exhaustive destructuring naming `launch` explicitly, beside
+    /// `dashboard_names_agent_names_at_every_site` and `mod keys`'s own companion.
+    #[test]
+    fn dashboard_names_launch_at_every_site() {
+        let d = dashboard_for_attribution(Vec::new(), Vec::new(), 0, Vec::new(), BTreeMap::new());
+        let Dashboard {
+            repo: _,
+            searched_from: _,
+            changes: _,
+            route: _,
+            quit: _,
+            selected: _,
+            filter: _,
+            detail: _,
+            refresh: _,
+            agents: _,
+            agent_names: _,
+            launch,
+        } = &d;
+        assert_eq!(launch.pending, None);
+        assert!(launch.problems.is_empty());
+    }
+
+    /// `agent-launch`: "`g` focuses an agent attributed through the mapping" and "`g` focuses
+    /// an agent attributed by name" — both tiers `Attribution::panes` follows.
+    #[test]
+    fn focus_resolves_the_pane_for_each_attribution_tier() {
+        let names = BTreeMap::from([("c-2fa-support".to_string(), "2fa-support".to_string())]);
+        let mut mapped = dashboard_for_attribution(
+            vec![fixture::active("2fa-support", 1, 2)],
+            Vec::new(),
+            0,
+            vec![agent(
+                Some("c-2fa-support"),
+                AgentStatus::Working,
+                Some("/repo"),
+            )],
+            names,
+        );
+        mapped.apply(Action::FocusAgent);
+        assert_eq!(
+            mapped.launch.pending,
+            Some(crate::launch::Request::Focus {
+                pane_id: "p".to_string()
+            })
+        );
+
+        let mut named = dashboard_for_attribution(
+            vec![fixture::active("add-auth", 1, 2)],
+            Vec::new(),
+            0,
+            vec![agent(Some("add-auth"), AgentStatus::Idle, Some("/repo"))],
+            BTreeMap::new(),
+        );
+        named.apply(Action::FocusAgent);
+        assert_eq!(
+            named.launch.pending,
+            Some(crate::launch::Request::Focus {
+                pane_id: "p".to_string()
+            })
+        );
+    }
+
+    /// `agent-launch`: "`g` on a change no tier could attribute does nothing" — including the
+    /// empty-list half.
+    #[test]
+    fn g_on_an_unattributed_change_does_nothing() {
+        let mut d = dashboard_for_attribution(
+            vec![fixture::active("add-auth", 1, 2)],
+            Vec::new(),
+            0,
+            vec![agent(
+                Some("scratch-work"),
+                AgentStatus::Working,
+                Some("/repo"),
+            )],
+            BTreeMap::new(),
+        );
+        let before = d.clone();
+        d.apply(Action::FocusAgent);
+        assert_eq!(d, before);
+
+        let mut empty =
+            dashboard_for_attribution(Vec::new(), Vec::new(), 0, Vec::new(), BTreeMap::new());
+        let before_empty = empty.clone();
+        empty.apply(Action::FocusAgent);
+        assert_eq!(empty, before_empty);
+    }
+
+    /// `agent-launch`: "An archived change launches on the same terms as an active one" —
+    /// restated in terms `Dashboard::apply` can observe: `launch.pending` is field-for-field
+    /// identical to what the same press produces on an active change of that name.
+    #[test]
+    fn an_archived_change_launches_on_the_same_terms() {
+        let mut d = dashboard_for_attribution(
+            Vec::new(),
+            vec![fixture::archived(Some("2026-08-14"), "add-auth", 1, 2)],
+            0,
+            Vec::new(),
+            BTreeMap::new(),
+        );
+        d.apply(Action::LaunchApply);
+        assert_eq!(
+            d.launch.pending,
+            Some(crate::launch::Request::Launch {
+                change: "add-auth".to_string(),
+                agent: "add-auth".to_string(),
+                intent: crate::launch::Intent::Apply,
+            })
+        );
+    }
+
+    /// `agent-launch`: each launch action maps to its own `Intent`, one to one.
+    #[test]
+    fn launch_intent_maps_one_to_one_from_the_action() {
+        for (action, intent) in [
+            (Action::LaunchApply, crate::launch::Intent::Apply),
+            (Action::LaunchContinue, crate::launch::Intent::Continue),
+            (Action::LaunchArchive, crate::launch::Intent::Archive),
+        ] {
+            let mut d = dashboard_for_attribution(
+                vec![fixture::active("add-auth", 1, 2)],
+                Vec::new(),
+                0,
+                Vec::new(),
+                BTreeMap::new(),
+            );
+            d.apply(action);
+            match d.launch.pending {
+                Some(crate::launch::Request::Launch {
+                    change: _,
+                    agent: _,
+                    intent: got,
+                }) => {
+                    assert_eq!(got, intent, "{action:?}")
+                }
+                other => panic!("expected Go(Launch), got {other:?}"),
+            }
+        }
     }
 
     mod keys {
@@ -1278,9 +1659,6 @@ mod tests {
                     | Action::FilterPush(_)
                     | Action::FilterPop
                     | Action::Refresh
-                    // `agent-launch`: group 1 compile-fix only — the count assertion below
-                    // moves from thirteen to seventeen in group 7, which is where these four
-                    // belong in the array too.
                     | Action::LaunchApply
                     | Action::LaunchContinue
                     | Action::LaunchArchive
@@ -1302,12 +1680,19 @@ mod tests {
                 Action::FilterPush('a'),
                 Action::FilterPop,
                 Action::Refresh,
+                // `agent-launch`'s four, bumping the count from thirteen to seventeen — the
+                // number moved deliberately, as this test's own subject, in the same commit
+                // that gave the four launch actions their `apply` arms.
+                Action::LaunchApply,
+                Action::LaunchContinue,
+                Action::LaunchArchive,
+                Action::FocusAgent,
                 Action::Ignore,
             ];
             assert_eq!(
                 variants.len(),
-                13,
-                "the thirteen variants this crate specifies"
+                17,
+                "the seventeen variants this crate specifies"
             );
             for v in &variants {
                 assert_known_variant(v);
@@ -1328,7 +1713,12 @@ mod tests {
                     problems: Vec::new(),
                     loaded: None,
                 },
-                repo: None,
+                // `agent-launch`: a real repository root and one in-scope, named agent, so
+                // `attribution()` populates `panes` and the four launch arms genuinely reach
+                // `launch::decide` — `g` finds a pane to focus, and `a`/`c`/`s` find the same
+                // name already live and are refused, both real decisions rather than the
+                // vacuous `Nothing` an unreachable socket or an empty agent list would produce.
+                repo: Some(std::path::PathBuf::from("/repo")),
                 searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
                 changes: crate::changes::fixture::set(vec![change], Vec::new(), Vec::new()),
                 route: Route::Detail,
@@ -1341,8 +1731,17 @@ mod tests {
                     problems: Vec::new(),
                 },
                 agents: crate::agents::AgentSnapshot {
-                    agents: Vec::new(),
-                    reachable: false,
+                    agents: vec![crate::agents::Agent {
+                        name: Some("x".to_string()),
+                        kind: None,
+                        status: crate::agents::AgentStatus::Working,
+                        cwd: Some(std::path::PathBuf::from("/repo")),
+                        pane_id: "p1".to_string(),
+                        tab_id: "t1".to_string(),
+                        workspace_id: "w1".to_string(),
+                        terminal_title: None,
+                    }],
+                    reachable: true,
                     problem: None,
                 },
                 agent_names: crate::state::Mapping::default(),
@@ -1356,6 +1755,19 @@ mod tests {
                 let mut d = dashboard.clone();
                 d.apply(action);
                 assert_eq!(d.changes, dashboard.changes, "{action:?} mutated changes");
+                if matches!(
+                    action,
+                    Action::LaunchApply
+                        | Action::LaunchContinue
+                        | Action::LaunchArchive
+                        | Action::FocusAgent
+                ) {
+                    assert!(
+                        d.launch.pending.is_some() || !d.launch.problems.is_empty(),
+                        "{action:?} must reach the decision rather than satisfy the equality \
+                         above vacuously through an unreachable socket"
+                    );
+                }
             }
         }
 

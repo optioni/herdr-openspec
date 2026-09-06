@@ -773,7 +773,7 @@ set; see design.md → Test Strategy.
 ## 7. `Action`'s four variants and `Dashboard::apply`
 <!-- kind: behavior -->
 
-- [ ] 7.1 RED: Write `ui::app::tests::`'s nine —
+- [x] 7.1 RED: Write `ui::app::tests::`'s nine —
       `the_four_action_keys_map_and_their_near_misses_do_not`,
       `a_launch_action_reaches_no_collaborator_and_starts_no_work`,
       `a_refused_launch_records_the_reason_and_produces_no_request`,
@@ -786,18 +786,18 @@ set; see design.md → Test Strategy.
       `no_action_mutates_changes` and the two `attribution_*` tests, whose `panes` extensions
       belong here rather than in group 6 because they assert through `Dashboard::attribution()`.
 
-- [ ] 7.2 CHECK: Confirm the failures are the missing arms, and in particular that
+- [x] 7.2 CHECK: Confirm the failures are the missing arms, and in particular that
       `no_action_mutates_changes` fails on its **exhaustive match** first — a new variant is a
       compile error there before it is an array-length mismatch.
 
-- [ ] 7.3 GREEN: Give the four `apply` arms their bodies: map the action to an `Intent`, gather
+- [x] 7.3 GREEN: Give the four `apply` arms their bodies: map the action to an `Intent`, gather
       the selected change's name, `attribution().panes`, `agents.reachable`, and the live
       agent names, call `launch::decide`, and write `launch.pending` or `launch.problems`.
       Bump `no_action_mutates_changes`' count assertion from **13** to **17** and add the four
       names to its exhaustive match and its `variants` array, in one edit whose commit message
       says why the number moved.
 
-- [ ] 7.4 CHECK: Contract gate — re-inspect `Dashboard`'s published shape against design.md →
+- [x] 7.4 CHECK: Contract gate — re-inspect `Dashboard`'s published shape against design.md →
       Contracts and confirm the twelfth field broke every construction site at compile time,
       and that `Change`, `ChangeSet`, `from_files`, and `from_cli` are untouched. Then
       **re-measure** the app run's span count —
@@ -806,11 +806,11 @@ set; see design.md → Test Strategy.
       **Red when:** the realized figure is not above 174; the twelfth field adds literals to a
       type that had 174 spans, so a floor left at 174 bites nothing.
 
-- [ ] 7.4b CHANGE: Correct `src/ui/app.rs`'s `Action` doc comment — "The nine outcomes" becomes
+- [x] 7.4b CHANGE: Correct `src/ui/app.rs`'s `Action` doc comment — "The nine outcomes" becomes
       seventeen — in the same commit that moves the count, so the comment and the assertion move
       together.
 
-- [ ] 7.5 VERIFY: The four `apply` arms each gather the same five values, so extract that
+- [x] 7.5 VERIFY: The four `apply` arms each gather the same five values, so extract that
       gathering into one private helper if they read as four copies; otherwise record that no
       refactor was needed. `testcount --lib 'ui::app::tests::' 72`,
       `testcount --lib 'ui::app::tests::no_action_mutates_changes' 1`, and the eight other

@@ -472,12 +472,12 @@ mod tests {
                     Decision::Go(Request::Launch {
                         change: c1,
                         agent: a1,
-                        ..
+                        intent: _,
                     }),
                     Decision::Go(Request::Launch {
                         change: c2,
                         agent: a2,
-                        ..
+                        intent: _,
                     }),
                 ) = (&pair[0], &pair[1])
                 else {
