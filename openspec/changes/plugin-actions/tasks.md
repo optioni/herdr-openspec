@@ -290,7 +290,7 @@
 ## 8. The binary-integration tier
 <!-- kind: behavior -->
 
-- [ ] 8.1 RED: Write `open_never_reaches_status_three` (statuses 1, 1, 2 for `open`,
+- [x] 8.1 RED: Write `open_never_reaches_status_three` (statuses 1, 1, 2 for `open`,
   `open-tab`, `open --tab`) and `every_run_pipes_and_scrubs_herdr` — an executing
   inspection test reading `tests/cli.rs` through `std::fs::read_to_string(file!())`,
   asserting every `bin()` spawn site sets stdout to a pipe or null, that every site whose
@@ -298,15 +298,16 @@
   the number of spawn sites found is at or above the count measured here. The landed
   scenario of this name was satisfied by manual inspection, not by a test.
 
-- [ ] 8.2 GREEN: Extend the landed `failing_statuses_are_distinct` to assert the new usage
+- [x] 8.2 GREEN: Extend the landed `failing_statuses_are_distinct` to assert the new usage
   text — the `Commands:` block now naming three whole tokens — leaving its four runs and
   their statuses unchanged.
 
-- [ ] 8.3 CHECK: Planted defect — add a `bin()` spawn of `open` that neither scrubs nor
-  stubs, confirm `every_run_pipes_and_scrubs_herdr` goes red naming it, then remove it and
-  confirm green.
+- [x] 8.3 CHECK: Planted defect — added `zz_planted_unscrubbed_open_spawn`, a `bin()`
+  spawn of `open` with no scrubbing. `every_run_pipes_and_scrubs_herdr` went red, naming
+  the exact chain (`bin()\n .arg("open")\n .stdin(Stdio::null())`) and the reason. Removed
+  and confirmed green; `git status` clean of the plant.
 
-- [ ] 8.4 Run the group tests — `cargo test --all-features --test cli` — no regressions,
+- [x] 8.4 Run the group tests — `cargo test --all-features --test cli` — no regressions,
   `ui_without_a_terminal_exits_three` included and unchanged.
 
 ## 9. The manifest, its contract test, and the README rows

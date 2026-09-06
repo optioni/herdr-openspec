@@ -175,6 +175,13 @@ fn failing_statuses_are_distinct() {
     for (name, output) in [("wat", &wat), ("ui --tab", &ui_tab), ("no-args", &none)] {
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(stderr.contains("ui"), "{name} stderr: {stderr}");
+        // The Commands: block now names three whole tokens — see
+        // specs/pane-open/spec.md -> "Usage names all three commands".
+        assert!(stderr.contains("open-tab"), "{name} stderr: {stderr}");
+        assert!(
+            stderr.contains("usage: herdr-openspec <ui|open|open-tab>"),
+            "{name} stderr: {stderr}"
+        );
     }
     let wat_stderr = String::from_utf8_lossy(&wat.stderr);
     assert!(wat_stderr.contains("wat"), "wat stderr: {wat_stderr}");
@@ -369,6 +376,150 @@ fn main_routes_each_subcommand_to_its_own_placement() {
     assert_eq!(tab_flag_out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&tab_flag_out.stderr);
     assert!(stderr.contains("usage"), "stderr: {stderr}");
+}
+
+/// The open family never reaches status 3 — that stays `ui`'s alone, since a plugin
+/// action's stdout is measured not to be a terminal. See `specs/plugin-build/spec.md` ->
+/// "The open family never reaches status 3".
+#[test]
+fn open_never_reaches_status_three() {
+    let run = |args: &[&str]| {
+        scrubbed()
+            .args(args)
+            .stdin(Stdio::null())
+            .output()
+            .expect("failed to run binary")
+    };
+
+    let open = run(&["open"]);
+    let open_tab = run(&["open-tab"]);
+    let open_tab_flag = run(&["open", "--tab"]);
+
+    assert_eq!(
+        open.status.code(),
+        Some(1),
+        "open stderr: {}",
+        String::from_utf8_lossy(&open.stderr)
+    );
+    assert_eq!(
+        open_tab.status.code(),
+        Some(1),
+        "open-tab stderr: {}",
+        String::from_utf8_lossy(&open_tab.stderr)
+    );
+    assert_eq!(
+        open_tab_flag.status.code(),
+        Some(2),
+        "open --tab stderr: {}",
+        String::from_utf8_lossy(&open_tab_flag.stderr)
+    );
+
+    for (name, output) in [
+        ("open", &open),
+        ("open-tab", &open_tab),
+        ("open --tab", &open_tab_flag),
+    ] {
+        assert!(output.stdout.is_empty(), "{name} stdout: {:?}", output.stdout);
+    }
+    let usage_stderr = String::from_utf8_lossy(&open_tab_flag.stderr);
+    assert!(usage_stderr.contains("usage"), "{usage_stderr}");
+}
+
+/// Every place this file spawns the crate's own binary sets stdout to a pipe or to null
+/// (never inheriting the test process's own terminal), and every such site whose
+/// arguments name `open` or `open-tab` goes through `scrubbed()` rather than the bare
+/// `bin()`. An **executing** inspection of this file's own source through `file!()` —
+/// the landed scenario of this name was satisfied by manual inspection, not a test. See
+/// `specs/plugin-build/spec.md` -> "Every binary-integration run pipes stdout".
+#[test]
+fn every_run_pipes_and_scrubs_herdr() {
+    let source = std::fs::read_to_string(file!()).expect("read own source");
+
+    // Comment lines (including doc comments, which mention `bin()`/`scrubbed()` by name
+    // in prose) are blanked before scanning, so a doc comment cannot be mistaken for a
+    // call site — every line's length and position is otherwise preserved.
+    let mut code = String::with_capacity(source.len());
+    for line in source.lines() {
+        if line.trim_start().starts_with("//") {
+            code.push('\n');
+        } else {
+            code.push_str(line);
+            code.push('\n');
+        }
+    }
+
+    // A "spawn site" is a call chain starting at a `bin()` or `scrubbed()` **call** (not
+    // their own `fn` definitions) and ending at the next `.output()` or `.spawn(` in the
+    // source — the two ways this file starts the crate's own binary. Measured against
+    // this file's own landed shape: 9. The floor is the realized count, not a round
+    // number below it — a rewritten harness that hid a site would drop below it.
+    const MIN_SPAWN_SITES: usize = 9;
+
+    let mut starts: Vec<(usize, usize, bool)> = Vec::new();
+    for (i, m) in code.match_indices("bin()") {
+        starts.push((i, m.len(), false));
+    }
+    for (i, m) in code.match_indices("scrubbed()") {
+        starts.push((i, m.len(), true));
+    }
+    starts.sort_by_key(|(i, ..)| *i);
+
+    let mut spawn_sites = 0usize;
+    for (start, matched_len, is_scrubbed) in starts {
+        // Skip the two functions' own definitions (`fn bin() -> Command {` / `fn
+        // scrubbed() -> Command {`), which are not call sites.
+        let before = &code[start.saturating_sub(4)..start];
+        if before.contains("fn ") {
+            continue;
+        }
+        // Skip a bare, non-chained call (`let mut cmd = bin();` inside `scrubbed()`'s own
+        // body) — a real spawn site always continues the chain with `.arg(`/`.args(`.
+        let after = code[start + matched_len..].trim_start();
+        if !after.starts_with('.') {
+            continue;
+        }
+
+        let rel_end = code[start..]
+            .find(".output()")
+            .into_iter()
+            .chain(code[start..].find(".spawn("))
+            .min();
+        let Some(rel_end) = rel_end else {
+            continue;
+        };
+        let end = start + rel_end;
+        let chain = &code[start..end];
+        assert!(
+            !chain.contains("\nfn ") && !chain.contains("    fn "),
+            "spawn-site scan at byte {start} ran past a function boundary: {chain:?}"
+        );
+        spawn_sites += 1;
+
+        let uses_output = code[end..].starts_with(".output()");
+        let stdout_piped_or_null = chain.contains(".stdout(Stdio::piped())")
+            || chain.contains(".stdout(Stdio::null())");
+        assert!(
+            uses_output || stdout_piped_or_null,
+            "spawn site at byte {start} neither uses .output() (which always pipes \
+             stdout) nor sets .stdout(Stdio::piped()/null()) before .spawn(): {chain}"
+        );
+
+        let names_open = chain.contains("\"open\"") || chain.contains("\"open-tab\"");
+        if names_open {
+            assert!(
+                is_scrubbed,
+                "spawn site at byte {start} names open/open-tab but was built from bin() \
+                 rather than scrubbed(), so it does not remove HERDR_* from the child's \
+                 environment: {chain}"
+            );
+        }
+    }
+
+    assert!(
+        spawn_sites >= MIN_SPAWN_SITES,
+        "found only {spawn_sites} spawn sites (expected >= {MIN_SPAWN_SITES}) - the scan \
+         is vacuous"
+    );
 }
 
 #[test]
