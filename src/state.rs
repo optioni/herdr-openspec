@@ -485,6 +485,20 @@ mod tests {
         assert!(mapping.problems.iter().any(|p| p.contains("has spaces!")));
     }
 
+    /// `plugin-state` :: "Reading an unusable mapping leaves the file byte-identical" —
+    /// row 28's correction (design.md -> Decision 12 #4): `read` never writes, unlike
+    /// `record`, which rewrites from the entries the parse recovered.
+    #[test]
+    fn reading_an_unusable_mapping_writes_nothing() {
+        let scratch = ScratchDir::new();
+        write_mapping(scratch.path(), "[names\nbad-agent = 7\n");
+        let before = snapshot(scratch.path());
+        let mapping = super::read(Some(scratch.path()));
+        let after = snapshot(scratch.path());
+        assert_eq!(before, after, "read must never write");
+        assert!(mapping.names.is_empty());
+    }
+
     #[test]
     fn names_is_present_but_is_not_a_table() {
         let scratch = ScratchDir::new();
@@ -557,6 +571,53 @@ mod tests {
             mapping.names.get("c-another"),
             Some(&"another!!!".to_string())
         );
+    }
+
+    /// `plugin-state` :: "Recording after an unusable read drops what the parse could not
+    /// recover" — row 28's correction: `record` rewrites the file from the entries `read`
+    /// recovered alone, so a malformed entry that the parse could not keep is genuinely
+    /// gone from the raw bytes afterward, not merely absent from the returned `Mapping`.
+    #[test]
+    fn recording_drops_what_the_parse_could_not_recover() {
+        let scratch = ScratchDir::new();
+        write_mapping(
+            scratch.path(),
+            "[names]\ngood-agent = \"a-real-change\"\nbad-agent = 7\n",
+        );
+        super::record(Some(scratch.path()), "c-new", "new-change").expect("record");
+
+        let raw = fs::read_to_string(scratch.path().join("agent-names.toml"))
+            .expect("read the rewritten file back");
+        assert!(raw.contains("good-agent"), "{raw}");
+        assert!(raw.contains("c-new"), "{raw}");
+        assert!(
+            !raw.contains("bad-agent"),
+            "the entry the parse could not recover must not survive a record: {raw}"
+        );
+    }
+
+    /// `plugin-state` :: "Recording over a clean mapping preserves every entry" —
+    /// discriminating control for the test above: when every entry parses cleanly, none
+    /// is lost.
+    #[test]
+    fn recording_over_a_clean_mapping_preserves_every_entry() {
+        let scratch = ScratchDir::new();
+        write_mapping(
+            scratch.path(),
+            "[names]\nc-alpha = \"alpha\"\nc-beta = \"beta\"\nc-gamma = \"gamma\"\n",
+        );
+        super::record(Some(scratch.path()), "c-delta", "delta").expect("record");
+
+        let mapping = super::read(Some(scratch.path()));
+        assert_eq!(mapping.names.len(), 4, "{:?}", mapping.names);
+        for (agent, change) in [
+            ("c-alpha", "alpha"),
+            ("c-beta", "beta"),
+            ("c-gamma", "gamma"),
+            ("c-delta", "delta"),
+        ] {
+            assert_eq!(mapping.names.get(agent), Some(&change.to_string()));
+        }
     }
 
     #[test]

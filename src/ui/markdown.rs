@@ -1329,6 +1329,47 @@ mod tests {
         }
     }
 
+    /// `degraded-coverage` :: "A footnote, strikethrough, and a table each render as literal
+    /// source" — row 12. Four constructs the parser does not model — a footnote reference
+    /// and its definition, strikethrough, a GFM table row, and a task-list item — each on a
+    /// tab this test never marks tracked, so `ui::markdown::lines` (not `ui::tasks::lines`)
+    /// is what renders them: rendered line count equals source line count, one line per
+    /// source line, at both mandated markdown widths.
+    #[test]
+    fn unmodelled_constructs_render_as_source() {
+        let sources = [
+            (
+                "footnote reference and definition",
+                "See it here[^1].\n\n[^1]: The note.\n",
+            ),
+            ("strikethrough", "~~gone~~ text.\n"),
+            (
+                "GFM table row",
+                "| Gate | Runner |\n|---|---|\n| Format | cargo fmt |\n",
+            ),
+            ("task-list item", "- [ ] an item\n- [x] a done item\n"),
+        ];
+        for width in [58, 78] {
+            for (label, source) in sources {
+                let rendered = lines(source, width);
+                let source_line_count = source.lines().count();
+                assert_eq!(
+                    rendered.len(),
+                    source_line_count,
+                    "width {width}, {label}: rendered {} lines for {} source lines: {:?}",
+                    rendered.len(),
+                    source_line_count,
+                    text_of(&rendered)
+                );
+                for line in &rendered {
+                    for seg in &line.segments {
+                        assert_eq!(seg.face, Face::plain(), "width {width}, {label}");
+                    }
+                }
+            }
+        }
+    }
+
     #[test]
     fn a_table_renders_as_literal_source_rows() {
         let source = "| Gate | Runner |\n|---|---|\n| Format | cargo fmt |\n";

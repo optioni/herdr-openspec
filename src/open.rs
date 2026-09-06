@@ -414,9 +414,13 @@ mod tests {
     #[test]
     fn context_without_a_workspace_is_the_one_fatal_absence() {
         let err = context(&env(&[])).expect_err("no workspace id at all");
+        // `degraded-states`: two separate assertions rather than one
+        // `err.to_lowercase().contains("herdr")`, which was tautological — the variable
+        // name `HERDR_WORKSPACE_ID` already contains "herdr" lowercased, so that check
+        // passed even if the "must be invoked from Herdr" clause were deleted entirely.
         assert!(err.contains("HERDR_WORKSPACE_ID"), "{err}");
         assert!(
-            err.to_lowercase().contains("herdr"),
+            err.contains("must be invoked from Herdr"),
             "should say it must be invoked from Herdr: {err}"
         );
     }

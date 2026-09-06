@@ -927,6 +927,63 @@ mod tests {
         }
     }
 
+    /// `degraded-coverage` :: "A duplicate artifact id is accepted by this crate and stays
+    /// file-mode" — row 32, driven from real YAML bytes through `changes::from_files` (and
+    /// so through `schema::parse`) rather than from a hand-built `Schema` or `ArtifactRef`
+    /// list, over a real scratch repository.
+    #[test]
+    fn a_duplicate_artifact_id_parses_and_renders() {
+        let scratch = crate::testutil::ScratchDir::new();
+        let root = scratch.path();
+        crate::testutil::write_with_mode(
+            &root.join("openspec/changes/x/.openspec.yaml"),
+            b"schema: dupe\n",
+            0o644,
+        );
+        crate::testutil::write_with_mode(
+            &root.join("openspec/schemas/dupe/schema.yaml"),
+            b"name: dupe\nartifacts:\n  - id: spec\n    generates: a.md\n  - id: spec\n    generates: b.md\n  - id: tasks\n    generates: tasks.md\n",
+            0o644,
+        );
+        crate::testutil::write_with_mode(&root.join("openspec/changes/x/a.md"), b"# a\n", 0o644);
+        crate::testutil::write_with_mode(&root.join("openspec/changes/x/b.md"), b"# b\n", 0o644);
+        crate::testutil::write_with_mode(
+            &root.join("openspec/changes/x/tasks.md"),
+            b"- [x] a\n",
+            0o644,
+        );
+
+        let files = crate::changes::from_files(root, 5);
+        let change = files
+            .active
+            .iter()
+            .find(|c| c.name == "x")
+            .expect("change x is read");
+
+        // The CLI would reject this schema outright ("Duplicate artifact ID"); this crate's
+        // own parser accepts it, keeping both positions rather than de-duplicating —
+        // exactly the row's "usable is strictly wider than the CLI's" claim.
+        let spec_positions: Vec<usize> = change
+            .artifacts
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| a.id == "spec")
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(spec_positions, vec![0, 1], "{:?}", change.artifacts);
+
+        for width in [78, 58] {
+            let tabs = tab_bar(&change.artifacts, 1, width);
+            let texts: Vec<&str> = tabs.iter().map(|t| t.text.as_str()).collect();
+            assert!(
+                texts.iter().filter(|t| t.ends_with("spec")).count() == 2,
+                "width {width}: {texts:?}"
+            );
+            assert_eq!(tabs[1].index, Some(1), "width {width}");
+            assert!(tabs[1].selected, "width {width}");
+        }
+    }
+
     /// `degraded-coverage` :: "A tasks file that cannot be read is zero tasks with a named
     /// reason" — SPEC.md row 17, both fixtures: a directory where a file was expected, and
     /// invalid UTF-8. Real scratch repositories, real `changes::from_files`.

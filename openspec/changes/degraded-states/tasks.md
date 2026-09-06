@@ -285,24 +285,24 @@
 ## 9. Proofs: markdown, state, and the one-shot commands
 <!-- kind: operational -->
 
-- [ ] 9.1 CHANGE: Write `unmodelled_constructs_render_as_source` — footnote reference and
+- [x] 9.1 CHANGE: Write `unmodelled_constructs_render_as_source` — footnote reference and
   definition, strikethrough, GFM table row, and task-list item, each on a non-tracked tab, at
   58 and 78 columns, asserting rendered line count equals source line count; plus the
   tracked-tab carve-out.
-- [ ] 9.2 CHANGE: Write `reading_an_unusable_mapping_writes_nothing`,
+- [x] 9.2 CHANGE: Write `reading_an_unusable_mapping_writes_nothing`,
   `recording_drops_what_the_parse_could_not_recover` (raw bytes read back), and
   `recording_over_a_clean_mapping_preserves_every_entry`.
-- [ ] 9.3 CHANGE: Write `a_duplicate_artifact_id_parses_and_renders`, driven from YAML bytes
+- [x] 9.3 CHANGE: Write `a_duplicate_artifact_id_parses_and_renders`, driven from YAML bytes
   through `schema::parse` rather than from a hand-built `Schema`.
-- [ ] 9.4 CHANGE: Extend `tests/cli.rs` for rows 40–43: replace the tautological
+- [x] 9.4 CHANGE: Extend `tests/cli.rs` for rows 40–43: replace the tautological
   `err.to_lowercase().contains("herdr")` assertion (`src/open.rs:420`) with two separate
   assertions — the variable name, and the "must be invoked from Herdr" clause — and add the
   missing **empty argv log** assertion by putting a logging stub `herdr` first on `PATH`.
-- [ ] 9.5 CHECK: Plant one defect per test. For 9.4 the plant is a build in which
+- [x] 9.5 CHECK: Plant one defect per test. For 9.4 the plant is a build in which
   `open::run_from_env` issues a `pane list` call **before** the workspace-id check, so the
   stub's log is non-empty — a stub that merely succeeds leaves the log assertion green and
   proves nothing. Record each in `notes/planted-defects.md`.
-- [ ] 9.6 CHECK: `git diff --name-only` names only this group's intended files. Run
+- [x] 9.6 CHECK: `git diff --name-only` names only this group's intended files. Run
   `make check`. Commit.
 
 ## 10. Remove the vestigial clippy allow

@@ -266,8 +266,19 @@ fn extra_arguments_after_ui() {
 /// or rendering".
 #[test]
 fn open_outside_herdr_exits_one() {
+    // `degraded-states` (row 40): a logging stub `herdr` first on `PATH`, so the missing
+    // empty-argv-log assertion below is a real proof rather than an assumption — a build
+    // that issued a Herdr call before the workspace-id check would leave this log
+    // non-empty, and nothing before this change caught that.
+    let (scratch, bin_dir) = stub_herdr();
+    let path_var = format!(
+        "{}:{}",
+        bin_dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
     let mut child = scrubbed()
         .arg("open")
+        .env("PATH", &path_var)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -291,6 +302,17 @@ fn open_outside_herdr_exits_one() {
     assert!(output.stdout.is_empty(), "stdout: {:?}", output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("HERDR_WORKSPACE_ID"), "stderr: {stderr}");
+    assert!(
+        stderr.contains("must be invoked from Herdr"),
+        "stderr: {stderr}"
+    );
+
+    let argv_log = scratch.path().join("argv.log");
+    let log_text = std::fs::read_to_string(&argv_log).unwrap_or_default();
+    assert!(
+        log_text.is_empty(),
+        "no Herdr call may be made before the workspace-id check: {log_text:?}"
+    );
 }
 
 /// `main` really routes `open` to the split placement and `open-tab` to the tab

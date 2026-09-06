@@ -125,3 +125,36 @@ All seven reverted; `cargo test --all-features --lib` green afterwards at 979 te
 `cargo fmt --all -- --check` and `cargo clippy --all-targets --all-features -- -D
 warnings` clean, and `git status --porcelain` shows only the three files this group's real
 (non-plant) changes touch: `src/agents.rs`, `src/ui/list.rs`, `src/ui/mod.rs`.
+
+## Group 9 — one plant per test (task 9.5)
+
+Six tests, six plants — every new test group 9 adds. Each plant is a one-line edit, run,
+observed red, then reverted (`diff` against a pre-plant backup empty afterwards in every
+case).
+
+- **`unmodelled_constructs_render_as_source`** (`src/ui/markdown.rs`) — the footnote case's
+  source was swapped for `""` before `lines()` ran, simulating a parser that swallowed the
+  construct entirely. Red: `rendered 0 lines for 3 source lines: []`.
+- **`reading_an_unusable_mapping_writes_nothing`** (`src/state.rs`, production code) —
+  `read`'s "not valid TOML" branch wrote a marker file before returning. Red: the
+  before/after snapshot gained a `PLANT-marker` entry.
+- **`recording_drops_what_the_parse_could_not_recover`** (`src/state.rs`, production code)
+  — `record`'s rewrite prefixed the bad entry's original text as a comment instead of
+  building the new contents from `mapping.names` alone. Red: `bad-agent = 7` reappeared in
+  the raw bytes.
+- **`recording_over_a_clean_mapping_preserves_every_entry`** (`src/state.rs`, production
+  code) — `record` dropped one pre-existing entry (`c-alpha`) before rewriting. Red: 3
+  entries where 4 were expected.
+- **`a_duplicate_artifact_id_parses_and_renders`** (`src/ui/detail.rs`) — the fixture
+  schema's second `id: spec` was renamed to `id: spec2`, so the id is no longer a
+  duplicate. Red: `spec_positions` was `[0]`, not `[0, 1]`.
+- **`open_outside_herdr_exits_one`**'s new argv-log assertion (`src/open.rs`, production
+  code) — task 9.5's own named plant: `run_from_env` issued a `pane list` Herdr call before
+  the workspace-id check. Red (via the real binary, `cargo test --test cli`): `no Herdr
+  call may be made before the workspace-id check: "pane list\n"`.
+
+All six reverted; `cargo test --all-features` green afterwards (984 lib tests, 9 `tests/cli.rs`
+tests), `cargo fmt --all -- --check` and `cargo clippy --all-targets --all-features -- -D
+warnings` clean, and `git status --porcelain` shows only the five files this group's real
+changes touch: `src/open.rs`, `src/state.rs`, `src/ui/detail.rs`, `src/ui/markdown.rs`,
+`tests/cli.rs`.
