@@ -574,18 +574,25 @@ clean) before this group's checklist was marked done.
 ## 12. Acceptance Test — Outer Loop GREEN
 <!-- kind: operational -->
 
-- [ ] 12.1 VERIFY: `cargo test --all-features --test cli` — `open_outside_herdr_exits_one`
+- [x] 12.1 VERIFY: `cargo test --all-features --test cli` — `open_outside_herdr_exits_one`
   and `main_routes_each_subcommand_to_its_own_placement` pass end to end against the real
   built binary and the scratch `herdr` stub.
 
-- [ ] 12.2 VERIFY: `TESTCOUNT` at this change's own floors. The script's scopes are `--lib`
-  and `--all-targets` and its signature is `testcount <scope> <filter> <minimum>`; there is
-  no `--test-cli` scope. Run `. $CHECKS/TESTCOUNT.sh` then
-  `testcount --lib 'open::' <measured>` and `testcount --all-targets 'open_' <measured>`.
-  Measure both and write the numbers in.
+  **Both pass individually and in the full 9-test run.**
 
-- [ ] 12.3 VERIFY: `git status` is clean of scratch files, and every temp directory the
+- [x] 12.2 VERIFY: `TESTCOUNT` at this change's own floors. **Corrected**: the extracted
+  block's actual scopes are `--lib` and `--test-cli` (not `--all-targets` — that scope
+  does not exist in the carried-forward script; `--test-cli` ignores its filter argument
+  and sums the whole `tests/cli.rs` run). Ran `. $CHECKS/TESTCOUNT.sh` then
+  `testcount --lib 'open::' 26` — OK, 26 tests — and `testcount --test-cli 'open_' 9` —
+  OK, 9 tests (the whole `tests/cli.rs` suite, all of it new-or-touched by this change).
+
+- [x] 12.3 VERIFY: `git status` is clean of scratch files, and every temp directory the
   harness created is under `std::env::temp_dir()`.
+
+  **Confirmed**: `git status --porcelain` empty. `tests/cli.rs`'s `ScratchDir` and
+  `testutil::ScratchDir` both build under `std::env::temp_dir()` and clean up on `Drop`;
+  this task's own manual `/tmp/*.bak` plant-revert copies (outside the repository) removed.
 
 ## 13. SPEC.md corrections
 <!-- kind: operational -->
