@@ -60,3 +60,31 @@ Reverted; `diff` against the pre-plant backup of `src/ui/mod.rs` reports no diff
 separately — it is unconditionally present via `startup_dir`'s own call and `state_dir`'s
 resolution, both already covered by legs 5/5b, so a leg 1 plant on that name would test
 nothing leg 5 doesn't already.)
+
+## Group 7 — one plant per proof test (task 7.2)
+
+Each plant is a one-line edit inline in the test (before its final assertion loop), run,
+observed red, then the file was restored from a pre-plant backup (`diff` against the
+backup afterwards reports no difference in every case).
+
+- **`a_cli_rejected_schema_names_its_reason_per_change`** (`src/changes.rs`) — presence
+  plant: `let learning_tool = &{ let mut c = learning_tool.clone(); c.problems.clear(); c };`
+  before the width loop. Red: `width 78: "No content yet"` (the leading `!` row vanished).
+- **`an_unusable_schema_renders_no_artifacts`** (`src/ui/detail.rs`) — absence plant (per
+  the task's own instruction: "the plant must add what must not be there"): fabricated an
+  artifact via `fixture::with_artifacts` on the not-vendored change before the tab-bar
+  loop. Red: `left: "1 fake"`, `right: "no artifacts"`.
+- **`no_tasks_artifact_renders_every_tab_as_markdown`** (`src/ui/detail.rs`) — absence
+  plant: `fixture::track_tasks_at(change.clone(), 0)` before the per-tab loop, forcing tab
+  0 into the checklist dispatch. Red: the rendered lines included a progress bar
+  (`"██…[1/3] 33%"`), tripping the "no `[` glyph" assertion.
+- **`an_unsupported_glob_names_its_reason_and_spares_the_others`** (`src/ui/detail.rs`) —
+  presence plant: `fixture::with_problems(change.clone(), Vec::new())` before the render
+  loop. Red: `["No content yet"]`.
+- **`an_unreadable_tasks_file_is_zero_with_a_named_reason`** (`src/ui/detail.rs`) —
+  presence plant: cleared both `change` and `change2`'s problems via
+  `fixture::with_problems(..., Vec::new())` before the final loop. Red: `["No content
+  yet"]`.
+
+All five reverted; `cargo test --all-features --lib` green afterwards at 972 tests, and
+`git status --porcelain` / `diff` against each pre-plant backup empty.

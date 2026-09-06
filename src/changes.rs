@@ -6296,6 +6296,134 @@ mod tests {
             );
         }
 
+        // --- degraded-states: group 7 proofs — schema, artifact, and tasks rows -----------
+
+        /// `degraded-coverage` :: "A schema the CLI rejects falls back per change and names
+        /// the reason" — SPEC.md row 3. Real `from_files`, a real `FakeCli` driving the real
+        /// `from_cli`/`merge`, over a repository holding TWO changes: `learning-tool`, whose
+        /// schema neither producer can vendor or resolve, and `sibling`, an ordinary `tdd`
+        /// change — proving the fallback is genuinely per-change, not repository-wide.
+        #[test]
+        fn a_cli_rejected_schema_names_its_reason_per_change() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+            write(
+                &repo.join("openspec/changes/learning-tool/.openspec.yaml"),
+                "schema: outside-in-tdd\n",
+            );
+            write(
+                &repo.join("openspec/changes/learning-tool/proposal.md"),
+                "# learning-tool\n",
+            );
+            write(
+                &repo.join("openspec/changes/sibling/.openspec.yaml"),
+                "schema: tdd\n",
+            );
+            write(&repo.join("openspec/changes/sibling/proposal.md"), "# P\n");
+            write(&repo.join("openspec/changes/sibling/tasks.md"), "- [x] a\n");
+
+            let files = from_files(&repo, 5);
+            let learning_tool_file = files
+                .active
+                .iter()
+                .find(|c| c.name == "learning-tool")
+                .expect("learning-tool is read from files");
+            assert!(learning_tool_file.artifacts.is_empty());
+            assert!(!learning_tool_file.problems.is_empty());
+
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(list_json(
+                    &repo,
+                    &[("learning-tool", 0, 0), ("sibling", 1, 1)],
+                )),
+            );
+            fake.register_openspec(
+                &[
+                    "instructions",
+                    "apply",
+                    "--change",
+                    "learning-tool",
+                    "--json",
+                ],
+                Ok(apply_json(
+                    "outside-in-tdd",
+                    &repo.join("openspec/changes/learning-tool"),
+                    &[],
+                )),
+            );
+            fake.register_openspec(
+                &["schema", "which", "outside-in-tdd", "--json"],
+                Err(failed(&["schema", "which", "outside-in-tdd", "--json"])),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "sibling", "--json"],
+                Ok(apply_json(
+                    "tdd",
+                    &repo.join("openspec/changes/sibling"),
+                    &[("proposal", &["proposal.md"])],
+                )),
+            );
+
+            let cli = from_cli(&fake, &repo);
+            let merged = merge(files, cli);
+
+            let learning_tool = merged
+                .active
+                .iter()
+                .find(|c| c.name == "learning-tool")
+                .expect("learning-tool survives the merge");
+            assert!(
+                learning_tool
+                    .problems
+                    .iter()
+                    .any(|p| p.contains("outside-in-tdd")),
+                "{:?}",
+                learning_tool.problems
+            );
+            assert!(learning_tool.artifacts.is_empty());
+
+            let sibling = merged
+                .active
+                .iter()
+                .find(|c| c.name == "sibling")
+                .expect("sibling survives the merge");
+            assert!(
+                sibling.problems.is_empty(),
+                "per-change: the sibling must be unaffected: {:?}",
+                sibling.problems
+            );
+            assert!(!sibling.artifacts.is_empty());
+
+            // The rendering half: the same problem reaches ui::detail::content_lines' leading
+            // "! "-prefixed line for learning-tool, and no such line for sibling — both mandated
+            // detail-interior widths.
+            for width in [78, 58] {
+                let empty_detail = crate::ui::app::Detail {
+                    source: String::new(),
+                    scroll: 0,
+                    tab: 0,
+                    problems: Vec::new(),
+                    loaded: None,
+                };
+                let lt_lines =
+                    crate::ui::detail::content_lines(&empty_detail, Some(learning_tool), width);
+                assert!(
+                    lt_lines[0].text().starts_with('!'),
+                    "width {width}: {:?}",
+                    lt_lines[0].text()
+                );
+                let sib_lines =
+                    crate::ui::detail::content_lines(&empty_detail, Some(sibling), width);
+                assert!(
+                    !sib_lines.iter().any(|l| l.text().starts_with('!')),
+                    "width {width}: sibling must show no problem row"
+                );
+            }
+        }
+
         #[test]
         fn all_reruns_every_change() {
             let scratch = ScratchDir::new();

@@ -238,21 +238,21 @@
      Each test is instead proved by planting the ABSENCE of the degraded state, showing the
      test red, removing the plant, and showing it green. -->
 
-- [ ] 7.1 CHANGE: Write `a_cli_rejected_schema_names_its_reason_per_change`,
+- [x] 7.1 CHANGE: Write `a_cli_rejected_schema_names_its_reason_per_change`,
   `an_unusable_schema_renders_no_artifacts` (not-vendored and unparseable sub-cases),
   `no_tasks_artifact_renders_every_tab_as_markdown`,
   `an_unsupported_glob_names_its_reason_and_spares_the_others`,
   `an_unreadable_tasks_file_is_zero_with_a_named_reason` (directory and invalid-UTF-8
   fixtures). All at both mandated widths.
-- [ ] 7.2 CHECK: Plant **one defect per test**, not one for the group. For the four that assert
+- [x] 7.2 CHECK: Plant **one defect per test**, not one for the group. For the four that assert
   a line is *present*, the plant clears the source vector before rendering. For
   `an_unusable_schema_renders_no_artifacts`'s not-vendored half and for
   `no_tasks_artifact_renders_every_tab_as_markdown`, which assert an *absence*, the plant must
   add what must not be there — a fabricated artifact list, and a `tracks_tasks` flag on one
   artifact respectively. Record each plant and its red output in `notes/planted-defects.md`.
-- [ ] 7.3 CHECK: After every plant is removed, `git diff --name-only` names only this group's
+- [x] 7.3 CHECK: After every plant is removed, `git diff --name-only` names only this group's
   intended files and no scratch fixture is left behind.
-- [ ] 7.4 Run `make check`. Commit.
+- [x] 7.4 Run `make check`. Commit.
 
 ## 8. Proofs: the launch, agent, and CLI/watcher rows
 <!-- kind: operational -->

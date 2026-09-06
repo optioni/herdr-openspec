@@ -695,6 +695,351 @@ mod tests {
         lines.iter().map(|l| l.text().to_string()).collect()
     }
 
+    // --- degraded-states: group 7 proofs — the not-vendored/unparseable rows -------------
+
+    /// `degraded-coverage` :: "A schema that is not vendored and one that will not parse
+    /// both empty the tab bar" — SPEC.md rows 4 and 5, driven through the REAL
+    /// `changes::from_files` against two real scratch repositories, rather than a
+    /// hand-built fixture that already assumes an empty artifact list.
+    #[test]
+    fn an_unusable_schema_renders_no_artifacts() {
+        // Sub-case 1: not vendored at all.
+        let not_vendored = crate::testutil::ScratchDir::new();
+        let root = not_vendored.path();
+        crate::testutil::write_with_mode(
+            &root.join("openspec/changes/x/.openspec.yaml"),
+            b"schema: nowhere\n",
+            0o644,
+        );
+        crate::testutil::write_with_mode(
+            &root.join("openspec/changes/x/proposal.md"),
+            b"# x\n",
+            0o644,
+        );
+        let files = crate::changes::from_files(root, 5);
+        let change = files
+            .active
+            .iter()
+            .find(|c| c.name == "x")
+            .expect("change x is read");
+        assert!(change.artifacts.is_empty());
+        assert!(!change.problems.is_empty());
+
+        // Sub-case 2: vendored but unparseable (not a YAML mapping at all).
+        let unparseable = crate::testutil::ScratchDir::new();
+        let root2 = unparseable.path();
+        crate::testutil::write_with_mode(
+            &root2.join("openspec/changes/y/.openspec.yaml"),
+            b"schema: broken\n",
+            0o644,
+        );
+        crate::testutil::write_with_mode(
+            &root2.join("openspec/schemas/broken/schema.yaml"),
+            b"just a bare scalar, not a mapping\n",
+            0o644,
+        );
+        crate::testutil::write_with_mode(
+            &root2.join("openspec/changes/y/proposal.md"),
+            b"# y\n",
+            0o644,
+        );
+        let files2 = crate::changes::from_files(root2, 5);
+        let change2 = files2
+            .active
+            .iter()
+            .find(|c| c.name == "y")
+            .expect("change y is read");
+        assert!(change2.artifacts.is_empty());
+        assert!(!change2.problems.is_empty());
+
+        for width in [78, 58] {
+            for change in [change, change2] {
+                let tabs = tab_bar(&change.artifacts, 0, width as u16);
+                assert_eq!(tabs.len(), 1, "width {width}: {tabs:?}");
+                assert_eq!(tabs[0].text, "no artifacts", "width {width}");
+                assert_eq!(tabs[0].index, None, "width {width}");
+            }
+        }
+    }
+
+    /// `degraded-coverage` :: "A schema with no tasks artifact renders every tab as
+    /// markdown and still counts" — SPEC.md row 6. A real schema with three artifacts, no
+    /// `apply.tracks` and no artifact whose id is `tasks`, so `tracks_tasks` is `false`
+    /// everywhere; every tab must dispatch to the markdown grammar, never the checklist one,
+    /// and the change's own progress must still fall back to counting `tasks.md` directly.
+    #[test]
+    fn no_tasks_artifact_renders_every_tab_as_markdown() {
+        let scratch = crate::testutil::ScratchDir::new();
+        let root = scratch.path();
+        crate::testutil::write_with_mode(
+            &root.join("openspec/changes/x/.openspec.yaml"),
+            b"schema: notrack\n",
+            0o644,
+        );
+        crate::testutil::write_with_mode(
+            &root.join("openspec/schemas/notrack/schema.yaml"),
+            b"name: notrack\nartifacts:\n  - id: proposal\n    generates: proposal.md\n  - id: specs\n    generates: specs.md\n  - id: design\n    generates: design.md\n",
+            0o644,
+        );
+        crate::testutil::write_with_mode(
+            &root.join("openspec/changes/x/proposal.md"),
+            b"# proposal\n",
+            0o644,
+        );
+        crate::testutil::write_with_mode(
+            &root.join("openspec/changes/x/specs.md"),
+            b"# specs\n",
+            0o644,
+        );
+        crate::testutil::write_with_mode(
+            &root.join("openspec/changes/x/design.md"),
+            b"# design\n",
+            0o644,
+        );
+        crate::testutil::write_with_mode(
+            &root.join("openspec/changes/x/tasks.md"),
+            b"- [x] a\n- [ ] b\n- [ ] c\n",
+            0o644,
+        );
+
+        let files = crate::changes::from_files(root, 5);
+        let change = files
+            .active
+            .iter()
+            .find(|c| c.name == "x")
+            .expect("change x is read");
+        assert_eq!(change.artifacts.len(), 3);
+        assert!(
+            change.artifacts.iter().all(|a| !a.tracks_tasks),
+            "no artifact may be marked: {:?}",
+            change.artifacts
+        );
+        // The task count is not deferred: it falls back to counting tasks.md directly.
+        assert_eq!(
+            change.progress,
+            Progress {
+                completed: 1,
+                total: 3
+            }
+        );
+
+        for width in [78, 58] {
+            for (tab, source_heading) in [(0, "proposal"), (1, "specs"), (2, "design")] {
+                let d = Detail {
+                    source: crate::ui::read_artifact(&change.artifacts[tab].paths[0])
+                        .expect("read the artifact's own file"),
+                    scroll: 0,
+                    tab,
+                    problems: Vec::new(),
+                    loaded: None,
+                };
+                let lines = content_lines(&d, Some(change), width);
+                // Markdown, not the checklist grammar: a `# heading` renders as one line
+                // carrying the heading text, never a `[ ]`/`[x]` glyph or a progress bar.
+                assert!(
+                    lines.iter().any(|l| l.text().contains(source_heading)),
+                    "width {width}, tab {tab}: {:?}",
+                    lines_text(&lines)
+                );
+                assert!(
+                    !lines.iter().any(|l| l.text().contains('[')),
+                    "width {width}, tab {tab}: rendered the checklist grammar instead of \
+                     markdown: {:?}",
+                    lines_text(&lines)
+                );
+            }
+        }
+    }
+
+    /// `degraded-coverage` :: "An unsupported `generates` glob empties one artifact and
+    /// names why" — SPEC.md row 16. A real schema names one artifact with an unsupported
+    /// glob pattern (a metacharacter inside a directory segment that is not the trailing
+    /// `**`) alongside one ordinary artifact, over a real scratch repository — the bad
+    /// artifact's own list is empty and the reason names its id; the good one is untouched.
+    #[test]
+    fn an_unsupported_glob_names_its_reason_and_spares_the_others() {
+        let scratch = crate::testutil::ScratchDir::new();
+        let root = scratch.path();
+        crate::testutil::write_with_mode(
+            &root.join("openspec/changes/x/.openspec.yaml"),
+            b"schema: globby\n",
+            0o644,
+        );
+        crate::testutil::write_with_mode(
+            &root.join("openspec/schemas/globby/schema.yaml"),
+            b"name: globby\nartifacts:\n  - id: proposal\n    generates: proposal.md\n  - id: bad\n    generates: a*/x.md\n  - id: tasks\n    generates: tasks.md\n",
+            0o644,
+        );
+        crate::testutil::write_with_mode(
+            &root.join("openspec/changes/x/proposal.md"),
+            b"# proposal\n",
+            0o644,
+        );
+        crate::testutil::write_with_mode(
+            &root.join("openspec/changes/x/tasks.md"),
+            b"- [x] a\n",
+            0o644,
+        );
+
+        let files = crate::changes::from_files(root, 5);
+        let change = files
+            .active
+            .iter()
+            .find(|c| c.name == "x")
+            .expect("change x is read");
+
+        let good = change
+            .artifacts
+            .iter()
+            .find(|a| a.id == "proposal")
+            .expect("the good artifact still resolves");
+        assert_eq!(good.paths.len(), 1);
+
+        let bad = change
+            .artifacts
+            .iter()
+            .find(|a| a.id == "bad")
+            .expect("the bad artifact is still listed, just empty");
+        assert!(bad.paths.is_empty());
+
+        assert_eq!(change.problems.len(), 1, "{:?}", change.problems);
+        assert!(change.problems[0].contains("bad"), "{:?}", change.problems);
+        assert!(
+            !change.problems[0].contains("proposal"),
+            "the reason must name only the affected artifact: {:?}",
+            change.problems
+        );
+
+        for width in [78, 58] {
+            let d = Detail {
+                source: String::new(),
+                scroll: 0,
+                tab: 0,
+                problems: Vec::new(),
+                loaded: None,
+            };
+            let lines = content_lines(&d, Some(change), width);
+            assert!(
+                lines[0].text().starts_with('!') && lines[0].text().contains("bad"),
+                "width {width}: {:?}",
+                lines_text(&lines)
+            );
+        }
+    }
+
+    /// `degraded-coverage` :: "A tasks file that cannot be read is zero tasks with a named
+    /// reason" — SPEC.md row 17, both fixtures: a directory where a file was expected, and
+    /// invalid UTF-8. Real scratch repositories, real `changes::from_files`.
+    #[test]
+    fn an_unreadable_tasks_file_is_zero_with_a_named_reason() {
+        // Fixture 1: tasks.md is a directory.
+        let scratch = crate::testutil::ScratchDir::new();
+        let root = scratch.path();
+        crate::testutil::write_with_mode(
+            &root.join("openspec/changes/x/.openspec.yaml"),
+            b"schema: tdd\n",
+            0o644,
+        );
+        crate::testutil::write_with_mode(
+            &root.join("openspec/schemas/tdd/schema.yaml"),
+            b"name: tdd\nartifacts:\n  - id: proposal\n    generates: proposal.md\n  - id: tasks\n    generates: tasks.md\n",
+            0o644,
+        );
+        crate::testutil::write_with_mode(
+            &root.join("openspec/changes/x/proposal.md"),
+            b"# x\n",
+            0o644,
+        );
+        // Writing a file *inside* `tasks.md` makes `tasks.md` itself a directory, without
+        // this file naming an I/O API directly — `NOIO-VIEW` forbids that under
+        // `src/ui/detail.rs`, tests included.
+        crate::testutil::write_with_mode(
+            &root.join("openspec/changes/x/tasks.md/marker"),
+            b"x",
+            0o644,
+        );
+
+        let files = crate::changes::from_files(root, 5);
+        let change = files
+            .active
+            .iter()
+            .find(|c| c.name == "x")
+            .expect("change x is read");
+        assert_eq!(
+            change.progress,
+            Progress {
+                completed: 0,
+                total: 0
+            }
+        );
+        assert!(
+            change.problems.iter().any(|p| p.contains("tasks.md")),
+            "{:?}",
+            change.problems
+        );
+
+        // Fixture 2: tasks.md holds invalid UTF-8.
+        let scratch2 = crate::testutil::ScratchDir::new();
+        let root2 = scratch2.path();
+        crate::testutil::write_with_mode(
+            &root2.join("openspec/changes/y/.openspec.yaml"),
+            b"schema: tdd\n",
+            0o644,
+        );
+        crate::testutil::write_with_mode(
+            &root2.join("openspec/schemas/tdd/schema.yaml"),
+            b"name: tdd\nartifacts:\n  - id: proposal\n    generates: proposal.md\n  - id: tasks\n    generates: tasks.md\n",
+            0o644,
+        );
+        crate::testutil::write_with_mode(
+            &root2.join("openspec/changes/y/proposal.md"),
+            b"# y\n",
+            0o644,
+        );
+        crate::testutil::write_with_mode(
+            &root2.join("openspec/changes/y/tasks.md"),
+            &[0x2d, 0x20, 0xff, 0xfe, b'\n'],
+            0o644,
+        );
+
+        let files2 = crate::changes::from_files(root2, 5);
+        let change2 = files2
+            .active
+            .iter()
+            .find(|c| c.name == "y")
+            .expect("change y is read");
+        assert_eq!(
+            change2.progress,
+            Progress {
+                completed: 0,
+                total: 0
+            }
+        );
+        assert!(
+            change2.problems.iter().any(|p| p.contains("tasks.md")),
+            "{:?}",
+            change2.problems
+        );
+
+        for width in [78, 58] {
+            for change in [change, change2] {
+                let d = Detail {
+                    source: String::new(),
+                    scroll: 0,
+                    tab: 0,
+                    problems: Vec::new(),
+                    loaded: None,
+                };
+                let lines = content_lines(&d, Some(change), width);
+                assert!(
+                    lines.iter().any(|l| l.text().starts_with('!')),
+                    "width {width}: {:?}",
+                    lines_text(&lines)
+                );
+            }
+        }
+    }
+
     #[test]
     fn a_wrapped_paragraph_produces_strictly_more_lines_at_58_than_at_78() {
         let paragraph = format!("{}\n", "word ".repeat(40).trim());
