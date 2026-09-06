@@ -55,11 +55,15 @@ obsolete while a `main` run always completes.
 - **AND** `cancel-in-progress` is an expression that evaluates false when
   `github.ref` is `refs/heads/main` and true otherwise, rather than a bare `true`
 
-### Requirement: Both supported platforms run the format, lint, and test gates
+### Requirement: Both supported platforms run the format, lint, hygiene, and test gates
 
 The workflow SHALL define a `check` job running on a matrix of exactly
 `ubuntu-latest` and `macos-latest` — the two platforms `herdr-plugin.toml` declares in
-`platforms` — and SHALL run the format, lint, and test gates on each. The matrix SHALL
+`platforms` — and SHALL run the format, lint, hygiene-gate, and test gates on each. The
+hygiene gates run on **both** runners rather than once, because their subject is precisely
+what differs between the two: `build-graph.sh` asserts the macOS-only and Linux-only halves
+of the resolved dependency graph, and a gate about a platform difference that runs on one
+platform proves half of what it claims. The matrix SHALL
 set `fail-fast: false`, so a failure on one runner does not cancel the other and hide a
 second, independent failure. The job SHALL declare a `timeout-minutes` bound rather than
 inheriting GitHub's 360-minute default, so a hung run cannot bill six hours of
@@ -75,11 +79,11 @@ declared: Windows is a PRD non-goal.
 - **AND** the job declares `timeout-minutes`
 - **AND** the string `windows` appears nowhere in the workflow
 
-#### Scenario: All three gates run on each runner
+#### Scenario: All four gates run on each runner
 
 - **WHEN** the `check` job's steps are read
-- **THEN** they invoke `make fmt-check`, then `make lint`, then `make test`, in that
-  order — the same order `make check` composes locally
+- **THEN** they invoke `make fmt-check`, then `make lint`, then `make gates`, then
+  `make test`, in that order — the same order `make check` composes locally
 - **AND** each is a separate, named step, so the workflow log names the gate that
   failed rather than reporting one opaque failure
 - **AND** no step is marked `continue-on-error`, so a failing gate fails the job
@@ -186,6 +190,35 @@ which is the reason SPEC.md gives for preferring it over `tarpaulin` in the firs
   step
 - **AND** with both present the `Makefile`'s `coverage` guard does not fire, and the job
   reports a coverage figure rather than skipping the gate
+
+### Requirement: The rebuilding dependency legs run in their own job
+
+The workflow SHALL define a `gates-full` job invoking `make gates-full`, running once on
+`ubuntu-latest`, declaring a `timeout-minutes` bound, and listed in the aggregate job's
+`needs`. The job exists so that the dependency-removal experiments — which rebuild the crate
+once per declared dependency — are forced to run on every push and pull request without
+adding several minutes to every local `make check`.
+
+The job SHALL NOT be guarded by an `if:` condition, a path filter, or `continue-on-error`: a
+check that runs only sometimes is the failure mode this whole change exists to close.
+
+#### Scenario: The heavy legs run on every push and are required to pass
+
+- **WHEN** the workflow is read
+- **THEN** a `gates-full` job exists, runs on `ubuntu-latest`, and invokes `make gates-full`
+  as its only gate step
+- **AND** it declares `timeout-minutes` and carries no `if:`, no path filter, and no
+  `continue-on-error`
+- **AND** the aggregate job's `needs` list contains `gates-full`, so the run fails when it
+  fails and fails when it is skipped
+
+#### Scenario: The heavy legs are not duplicated into the per-platform job
+
+- **WHEN** the `check` job's steps are read
+- **THEN** none of them invokes `make gates-full`, so the crate is not rebuilt six times on
+  each of two runners
+- **AND** `gates-full` is not composed into the `Makefile`'s `check` target either, so a
+  local `make check` stays under the time a developer will actually wait
 
 ### Requirement: Each job installs the toolchain it needs rather than inheriting one
 
