@@ -1,4 +1,4 @@
-## MODIFIED Requirements
+## ADDED Requirements
 
 ### Requirement: The dashboard's own starting directory prefers the workspace context over the process cwd
 
@@ -30,6 +30,8 @@ Option<PathBuf>`, taking the same injected-lookup shape `config::config_dir` and
   before this change — unchanged for a bare-terminal run, and for every existing
   `tui-shell`/`repo-resolution`/`changes-from-files` scenario, none of which sets Herdr
   context
+
+## MODIFIED Requirements
 
 ### Requirement: The `ui` invocation runs the dashboard and needs a terminal
 
