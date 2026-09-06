@@ -123,7 +123,7 @@
 ## 1. Acceptance Test — Outer Loop RED
 <!-- kind: behavior -->
 
-- [ ] 1.1 Set up the harness in `tests/cli.rs`: a `scrubbed()` spawn helper that removes
+- [x] 1.1 Set up the harness in `tests/cli.rs`: a `scrubbed()` spawn helper that removes
   `HERDR_ENV`, `HERDR_BIN_PATH`, `HERDR_SOCKET_PATH`, `HERDR_PANE_ID`, `HERDR_TAB_ID`,
   `HERDR_WORKSPACE_ID`, `HERDR_PLUGIN_ID`, `HERDR_PLUGIN_ROOT`, `HERDR_PLUGIN_CONFIG_DIR`,
   `HERDR_PLUGIN_STATE_DIR`, `HERDR_PLUGIN_ACTION_ID`, and `HERDR_PLUGIN_CONTEXT_JSON`, and
@@ -131,17 +131,17 @@
   `testutil::ScratchDir`, which appends its argument vector to a file and answers
   `pane list` with `{"result":{"panes":[]}}` (design.md → Test Boundaries).
 
-- [ ] 1.2 RED: Write `open_outside_herdr_exits_one` — `open` with the environment scrubbed
+- [x] 1.2 RED: Write `open_outside_herdr_exits_one` — `open` with the environment scrubbed
   exits 1 within a ten-second deadline, stderr names `HERDR_WORKSPACE_ID`, stdout empty.
 
-- [ ] 1.3 RED: Write `main_routes_each_subcommand_to_its_own_placement` — run `open` and
+- [x] 1.3 RED: Write `main_routes_each_subcommand_to_its_own_placement` — run `open` and
   `open-tab` with `PATH` set to the stub directory and a synthetic `HERDR_WORKSPACE_ID` and
   `HERDR_PLUGIN_CONTEXT_JSON`; both exit 0 and the recorded argument vectors show
   `--placement split --direction right` against `--placement tab --workspace`, plus the
   `--cwd` the synthetic context named. A status-only assertion would pass a `main` that
   sent both subcommands to one placement (design.md → Decision 12).
 
-- [ ] 1.4 Confirm the failure is the missing behaviour, not the harness. Measured at HEAD:
+- [x] 1.4 Confirm the failure is the missing behaviour, not the harness. Measured at HEAD:
 
   ```sh
   ./target/release/herdr-openspec open </dev/null >/dev/null; echo "exit=$?"
