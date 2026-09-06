@@ -152,6 +152,24 @@ fn parse_needs_list(line: &str) -> BTreeSet<String> {
         .collect()
 }
 
+/// Parses `check:`'s own prerequisite list out of the `Makefile` — the targets after the
+/// colon on the line `check: <prereq> <prereq> ...` — in declaration order. This is what
+/// makes `every_gate_the_makefile_composes_runs_in_ci` force a real guarantee rather than
+/// compare against a hardcoded literal: a fifth gate joining `check` with no matching CI
+/// step is caught because the parser sees it, not because someone remembered to update a
+/// list here too.
+fn parse_check_prereqs(makefile: &str) -> Vec<String> {
+    let line = makefile
+        .lines()
+        .find(|l| l.trim_start().starts_with("check:") || l.trim_start().starts_with("check :"))
+        .expect("no `check:` rule found in Makefile");
+    let rest = line
+        .split_once(':')
+        .expect("`check:` line has no colon")
+        .1;
+    rest.split_whitespace().map(|s| s.to_string()).collect()
+}
+
 #[test]
 fn ci_yml_is_the_only_workflow_file() {
     let dir = workflows_dir_path();
@@ -223,38 +241,60 @@ fn both_declared_platforms_run_the_gates() {
     );
 }
 
+/// `check:`'s own prerequisites run individually in CI, so the Makefile-composed guarantee
+/// is real for this gate and for the next one that joins `check` — a fifth gate added to
+/// `check` with no matching CI step fails this test, because the prerequisite list is
+/// parsed out of the Makefile rather than compared against a hardcoded literal. `coverage`
+/// is excluded from the per-step, in-order check below: it runs once, in its own job, on
+/// Linux only, and `coverage_gate_runs_exactly_once_and_only_on_linux` is what covers it.
 #[test]
 fn every_gate_the_makefile_composes_runs_in_ci() {
     let content = read_workflow();
+    let makefile = read_makefile();
     let sections = job_sections(&content);
     let check = find_job(&sections, "check");
-    let fmt_pos = check
-        .text
-        .find("make fmt-check")
-        .expect("check job must run make fmt-check");
-    let lint_pos = check
-        .text
-        .find("make lint")
-        .expect("check job must run make lint");
-    let test_pos = check
-        .text
-        .find("make test")
-        .expect("check job must run make test");
+
+    let prereqs = parse_check_prereqs(&makefile);
     assert!(
-        fmt_pos < lint_pos && lint_pos < test_pos,
-        "gates must run in order fmt-check, lint, test"
+        !prereqs.is_empty(),
+        "check: rule names no prerequisites — the Makefile is unparseable"
     );
+    assert!(
+        prereqs.contains(&"gates".to_string()),
+        "check: must compose gates — parsed prerequisites were {prereqs:?}"
+    );
+
+    let per_step_targets: Vec<&String> = prereqs.iter().filter(|t| t.as_str() != "coverage").collect();
+    let mut positions = Vec::new();
+    for target in &per_step_targets {
+        let needle = format!("make {target}");
+        let pos = check.text.find(&needle).unwrap_or_else(|| {
+            panic!(
+                "check job must run `{needle}` — check: composes {target}, parsed from the Makefile"
+            )
+        });
+        positions.push((target.as_str(), pos));
+    }
+    for pair in positions.windows(2) {
+        assert!(
+            pair[0].1 < pair[1].1,
+            "gates must run in the order check: composes them: {prereqs:?} (found {} after {})",
+            pair[1].0,
+            pair[0].0
+        );
+    }
 
     assert!(
         !content.contains("make check"),
         "workflow must not invoke the composite make check target"
     );
-    for target in ["make fmt-check", "make lint", "make test", "make coverage"] {
-        assert!(
-            content.contains(target),
-            "workflow must invoke `{target}` at least once"
-        );
-    }
+    // `coverage` runs once, in its own job — checked in full by
+    // coverage_gate_runs_exactly_once_and_only_on_linux — but its presence somewhere in the
+    // workflow is asserted here too, since it is one of check:'s own prerequisites.
+    assert!(
+        content.contains("make coverage"),
+        "workflow must invoke `make coverage` at least once — coverage is one of check:'s prerequisites"
+    );
 }
 
 #[test]
@@ -365,8 +405,8 @@ fn parser_preconditions_hold() {
     let sections = job_sections(&workflow);
     assert_eq!(
         sections.len(),
-        3,
-        "expected exactly three job sections, found {}",
+        4,
+        "expected exactly four job sections (check, coverage, gates-full, ci), found {}",
         sections.len()
     );
 
@@ -495,5 +535,158 @@ fn workflow_grants_no_write_and_reads_no_secret() {
     assert!(
         !content.contains(": write"),
         "workflow must grant no write permission"
+    );
+}
+
+#[test]
+fn gates_target_exists_and_names_both_scripts() {
+    let makefile = read_makefile();
+    let gates_line = makefile
+        .lines()
+        .find(|l| l.trim_start().starts_with("gates:") || l.trim_start().starts_with("gates :"))
+        .expect("Makefile must declare a `gates:` target");
+    // The recipe is the indented lines following the target line, up to the next
+    // column-0 (unindented) line.
+    let start = makefile.find(gates_line).unwrap() + gates_line.len();
+    let recipe: String = makefile[start..]
+        .lines()
+        .skip(1)
+        .take_while(|l| l.starts_with('\t') || l.starts_with(' ') || l.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        recipe.contains("scripts/gates/deps.sh"),
+        "gates: recipe must invoke scripts/gates/deps.sh, found: {recipe}"
+    );
+    assert!(
+        recipe.contains("scripts/gates/build-graph.sh"),
+        "gates: recipe must invoke scripts/gates/build-graph.sh, found: {recipe}"
+    );
+
+    let phony = phony_targets(&makefile);
+    assert!(
+        phony.iter().any(|t| t == "gates"),
+        "gates must be declared .PHONY"
+    );
+    assert!(
+        phony.iter().any(|t| t == "gates-full"),
+        "gates-full must be declared .PHONY"
+    );
+
+    assert!(
+        std::path::Path::new("scripts/gates/deps.sh").is_file(),
+        "scripts/gates/deps.sh must exist and be a regular file"
+    );
+    assert!(
+        std::path::Path::new("scripts/gates/build-graph.sh").is_file(),
+        "scripts/gates/build-graph.sh must exist and be a regular file"
+    );
+}
+
+#[test]
+fn check_composes_gates_third() {
+    let makefile = read_makefile();
+    let prereqs = parse_check_prereqs(&makefile);
+    assert_eq!(
+        prereqs,
+        vec!["fmt-check", "lint", "gates", "test", "coverage"],
+        "check: must compose fmt-check, lint, gates, test, coverage in that order"
+    );
+}
+
+#[test]
+fn gates_full_is_not_composed_into_check() {
+    let makefile = read_makefile();
+    let prereqs = parse_check_prereqs(&makefile);
+    assert!(
+        !prereqs.iter().any(|t| t == "gates-full"),
+        "check: must not compose gates-full — it rebuilds the crate several times and gets \
+         its own CI job instead, per design.md -> Decisions -> 3"
+    );
+
+    let gates_full_line = makefile
+        .lines()
+        .find(|l| {
+            l.trim_start().starts_with("gates-full:") || l.trim_start().starts_with("gates-full :")
+        })
+        .expect("Makefile must declare a `gates-full:` target");
+    assert!(
+        gates_full_line.contains("DEPS_FULL=1"),
+        "gates-full: recipe must set DEPS_FULL=1, found: {gates_full_line}"
+    );
+}
+
+#[test]
+fn both_runners_run_the_gates_step() {
+    let content = read_workflow();
+    let sections = job_sections(&content);
+    let check = find_job(&sections, "check");
+
+    let lint_pos = check
+        .text
+        .find("make lint")
+        .expect("check job must run make lint");
+    let gates_pos = check
+        .text
+        .find("make gates")
+        .expect("check job must run make gates");
+    let test_pos = check
+        .text
+        .find("make test")
+        .expect("check job must run make test");
+    assert!(
+        lint_pos < gates_pos && gates_pos < test_pos,
+        "the Gates step must sit between Lint and Test"
+    );
+    assert!(
+        !check.text.contains("make gates-full"),
+        "the check job must not invoke make gates-full"
+    );
+}
+
+#[test]
+fn gates_full_has_its_own_unconditional_job() {
+    let content = read_workflow();
+    let sections = job_sections(&content);
+    let gates_full = find_job(&sections, "gates-full");
+
+    assert!(
+        gates_full.text.contains("make gates-full"),
+        "gates-full job must invoke make gates-full"
+    );
+    assert!(
+        gates_full.text.contains("runs-on: ubuntu-latest"),
+        "gates-full job must run on ubuntu-latest"
+    );
+    assert!(
+        gates_full.text.contains("timeout-minutes"),
+        "gates-full job must declare timeout-minutes"
+    );
+    assert!(
+        !gates_full.text.contains("strategy:"),
+        "gates-full job must declare no strategy/matrix — it runs once"
+    );
+    let has_if = gates_full.text.lines().any(|l| {
+        let t = l.trim();
+        t.starts_with("if:") || t.starts_with("- if:")
+    });
+    assert!(!has_if, "gates-full job must carry no `if:` condition");
+    assert!(
+        !gates_full.text.contains("continue-on-error"),
+        "gates-full job must not set continue-on-error"
+    );
+}
+
+#[test]
+fn gates_full_is_in_the_aggregate_needs() {
+    let content = read_workflow();
+    let needs_line = content
+        .lines()
+        .find(|l| l.trim_start().starts_with("needs:"))
+        .expect("`ci` job must declare `needs:`");
+    let needs_set = parse_needs_list(needs_line);
+    assert!(
+        needs_set.contains("gates-full"),
+        "ci job's needs must list gates-full, found {needs_set:?}"
     );
 }

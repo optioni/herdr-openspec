@@ -378,7 +378,7 @@ named**; a gate invoked bare runs at its block default, which is a threshold nob
 ## 4. `make gates` joins `make check`, and CI follows it
 <!-- kind: behavior -->
 
-- [ ] 4.1 RED: Extend `tests/ci_workflow.rs` with six tests — `gates_target_exists_and_names_both_scripts`,
+- [x] 4.1 RED: Extend `tests/ci_workflow.rs` with six tests — `gates_target_exists_and_names_both_scripts`,
   `check_composes_gates_third`, `gates_full_is_not_composed_into_check`,
   `both_runners_run_the_gates_step`, `gates_full_has_its_own_unconditional_job`, and
   `gates_full_is_in_the_aggregate_needs` — and **rewrite**
@@ -400,6 +400,13 @@ named**; a gate invoked bare runs at its block default, which is a threshold nob
   ```
 
   Run at planning time: exit **1**. `grep -c gates Makefile` is `0` at `BASE`.
+
+  **Red, confirmed:** `cargo test --test ci_workflow` — 9 passed, 8 failed, all failing
+  for the expected reason (missing `gates`/`gates-full` Makefile targets and CI wiring).
+  `grep -c '#\[test\]' tests/ci_workflow.rs` = 17. `no_gate_step_can_be_skipped_or_ignored`
+  needed **no edit**: it already sweeps the whole workflow text for `continue-on-error` and
+  any `if:` outside the `ci` job section, so it covers the new `gates-full` job
+  structurally rather than by a hardcoded target list.
 
 - [ ] 4.2 GREEN: Add `gates` and `gates-full` to the `Makefile`'s `.PHONY` list and define them
   as design.md → Contracts specifies, and recompose `check` as
