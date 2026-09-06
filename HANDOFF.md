@@ -4,15 +4,16 @@
 
 ## Where things stand
 
-**19 of 21 changes archived.** Phases 1–5 complete; Phase 6 is one of three done.
-`main` is green: `make check` exits 0 at **97.05% line coverage over 25,674 lines**,
-940 library tests, **40 capabilities**, `Command::new` confined to `src/cli.rs`, every
-commit in the history signed.
+**Project complete.** All 21 changes on `openspec/IMPLEMENTATION-ORDER.md`'s roadmap are
+implemented; `degraded-states`, the last one, is fully applied (groups 1–17) and only
+needs `openspec archive` to move its artifacts under `openspec/changes/archive/`. There
+is no Phase 7 and no further planned work — see "Next action" below, which is now just
+that one archive step.
 
 | Phase | State |
 |---|---|
 | 1–5 | **Done** — 18 changes |
-| 6 — Packaging | `plugin-actions` **done**; `spec-purposes` and `degraded-states` remain |
+| 6 — Packaging | **Done** — `plugin-actions`, `spec-purposes`, `degraded-states` all implemented |
 
 ### `plugin-actions` found a bug in already-shipped code
 
@@ -35,14 +36,96 @@ would have caught.
 
 ## Next action
 
-**Start Phase 5 — Herdr integration**: `agent-polling` → `agent-attribution` →
-`agent-launch`, strictly sequential. This is where the plugin first talks to the live
-Herdr socket. An unreachable socket is a **supported state, not an error** — the plugin
-runs as a standalone TUI, and `agent-polling`'s own row says so.
+**Run `openspec archive` for `degraded-states`.** That is the only remaining step in
+the project. Nothing else is planned, scheduled, or deferred — see the three findings
+below (paired forks, `NODEFAULT-UI`'s per-subject floors, and unsound outer tests) for
+what should transfer to whatever project reads this file next; they are lessons, not
+open work items here.
 
-Phase 5 gets openspec-schemas v0.2.1's prose budget and v0.2.2's parallelism guidance
-from the start. They were deliberately **not** retrofitted onto `live-refresh`, whose
-plan was written under v0.2.0 and was half-implemented when they landed.
+The sections below this point are largely historical record from earlier phases,
+kept for the reasoning they carry (measured costs, resolved traps, standing rules) —
+not because anything in them is still an open task. Three findings from
+`degraded-states`, immediately below, transfer beyond this project and are not
+historical in the same sense.
+
+## Finding: a fork is not a sandbox — and a mutating tree is not necessarily a collision
+
+Two agents working `degraded-states` independently drew opposite, and equally wrong,
+inferences from the same signal: **a shared working tree with unfamiliar commits or
+dirty files in it.**
+
+- One driver saw unfamiliar commits and dirty files, assumed another session had
+  invaded the checkout, and stood down. It had not: the commits and files were its own
+  sibling implementer's committed work, mid-flight. **Sibling implementers legitimately
+  share the working tree** — its own dispatched subagents write there. Unfamiliar state
+  is the *expected* signature of that, not evidence of a collision.
+- Separately, in the very same change, a fork dispatched to **research** — "gather
+  audit evidence for degraded-states rows," read-only in intent — was found to have
+  written roughly 200 unplanned, untested, unreviewed lines of implementation across 8
+  files in `src/`. **A fork is not a sandbox.** It inherits the parent's full context and
+  shares the same working tree; nothing about being a fork stops it from writing. A
+  subagent dispatched to research must not write regardless of type; anything that needs
+  to write must be dispatched as an implementer against a planned task group, where the
+  work is expected, reviewable, and land in a real commit. This was caught before commit
+  and discarded rather than integrated.
+
+**Keep the symmetry, because either half alone teaches the wrong lesson.** The first
+driver's *instinct* was sound (something changed that I didn't do) and its *inference*
+was wrong (therefore someone else is here). The second case is the mirror image: the
+instinct to trust a fork because "it's just gathering evidence" was wrong, and the
+underlying signal (a mutating tree) was the one that actually mattered. Teaching only
+"don't assume collision" produces an agent that ignores a rogue writer; teaching only
+"forks can write" without the collision half produces an agent that stands down every
+time a sibling commits.
+
+**The one-step diagnostic that resolves both cases:** check what is actually running.
+A mutating tree *with* a dispatched implementer running against it is a sibling, not a
+collision. A mutating tree *with no* dispatched implementer running — including a fork
+whose task was framed as research-only — is a rogue writer, whether that writer is a
+foreign session or one of your own mis-scoped forks. `ListAgents` (or the harness's
+equivalent process/agent listing) answers this in one call; check it before inferring
+anything from unfamiliar tree state either way.
+
+## Finding: a floor that cannot exist — one `SCAN_MIN` across four subjects
+
+`NODEFAULT-UI`, as measured before `degraded-states`' group 12 extraction, ran with one
+shared `SCAN_MIN` floor applied across four structurally different subjects, whose real
+construction-site counts measured 126, 51, 103, and 23. **No single floor value is
+correct for all four**: set it to guard the largest subject and it passes vacuously for
+the smallest three; set it to guard the smallest and it never fires for the largest
+three, no matter how badly that one regresses. This is a different defect from an
+ordinary stale floor (a value that was once right and drifted) — this floor was **never
+satisfiable at any value**, for as long as the four subjects shared one invocation.
+
+The fix, per design.md's Decision 6: give a multi-subject gate one floor **per subject**,
+each its own recipe line with its own explicit value, rather than one shared default.
+`degraded-states` applied this to all five of `NODEFAULT-UI`'s subjects (the fifth,
+`src/agents.rs`'s type set, had been named in planning prose but never actually measured
+or wired in — found and closed in the same pass). Generalize this the next time a gate
+is written to scan more than one structurally distinct subject: ask whether one floor can
+ever be simultaneously tight for the smallest subject and loose enough not to
+false-positive on the largest. If the honest answer is no, the gate needs per-subject
+floors from the day it is written, not after it is caught passing vacuously.
+
+## Finding: an outer test can dodge the exact case it exists to drive
+
+Every landed outer-loop test for the file-mode/probe-failure scenarios, across earlier
+review passes, resolved `openspec_bin` to something usable before asserting on the
+result — which means every one of them tested the case where the binary resolves, never
+the case the scenario is actually about. The file-mode badge and the per-change problem
+rows exist specifically to cover **the probe resolving nothing**; a test suite that
+always hands the probe something usable can pass at 100% while the one behavior it was
+written to prove has no outer-loop coverage at all.
+
+This is the clearest single instance in the project of the standing rule "an
+outer-loop test must drive the real wiring, not a component with a pre-resolved
+dependency swapped in" (see `HANDOFF.md`'s own earlier note on `ui::run`'s wiring bug)
+failing inside the very change whose purpose was to eliminate exactly this defect class.
+The fix was not a cleverer assertion; it was refusing to let any outer test supply a
+working `openspec_bin` when the scenario under test is what happens when nothing
+resolves — `run_wired_probed` and the `no_env`/`no_npm_hook` default closures exist for
+this reason, and every file-mode outer test in `src/ui/mod.rs` routes through them rather
+than through a stubbed-usable binary.
 
 ### What `live-refresh` constrains in Phase 5
 
@@ -163,16 +246,23 @@ hardcoded list, so a future gate joining `check` with no CI step fails on its ow
 want-list now names all six dependencies, including `notify`; `GRAPH-SNAP`'s platform
 assertion is two named, direction-aware lists instead of one hardcoded literal.
 
-**The other twenty-eight extracted gates are still not repository files** — they are green,
-so nothing is on fire, but they rot on exactly the terms `DEPS` and `GRAPH-SNAP` did. Worth
-doing as its own change, not smuggled into a hygiene pass. Three specific clauses within
-that follow-up, found true but deliberately not added to `scripts/gates/deps.sh` here
-(they would widen this change from "repair the two red gates" into "audit the dependency
-requirement end to end"): `plugin-build`'s requirement names `notify`'s
-`default-features = false` in manifest terms — `deps.sh` checks this for `pulldown-cmark`
-(leg 2d) but not for `notify`; the same requirement names `kqueue`/`kqueue-sys` as
-absences `GRAPH-SNAP` should assert alongside its four existing named absences; and it
-names `notify-debouncer-*` as an absence neither script currently checks.
+**Resolved by `degraded-states`: every extracted gate is now a repository file.**
+`spec-purposes` closed `DEPS` and `GRAPH-SNAP`; `degraded-states` (task 12) closed the
+remaining ~27 by the same method — each one a checked-in file under `scripts/gates/`,
+composed into the `Makefile`'s `gates:` recipe, and `tests/ci_workflow.rs` checks the
+recipe and the directory name each other's contents, so a gate can no longer be extracted
+and silently left out of `make gates`. See `AGENTS.md` → Quality gates for the current
+description.
+
+The three dependency-gate clauses parked above are also resolved. The `notify`
+`default-features = false` clause was **already closed**: `scripts/gates/deps.sh`'s leg
+2a already carried `"notify":["macos_fsevent"]` and its generic
+`uses_default_features is False` assertion already covered it — this parked note had
+simply gone stale. `kqueue`/`kqueue-sys` and `notify-debouncer-*` were genuinely open and
+are now closed: `scripts/gates/build-graph.sh` gained both as named absences, each
+verified absent from the real resolved build graph and verified the check fires on a
+planted defect (a synthetic snapshot line naming each), then reverted
+(`openspec/changes/degraded-states/notes/planted-defects.md`).
 
 **Correction to `plugin-actions`' record:** it justified `AGENTSEAM`'s `MIN=23` as
 "22 + `src/open.rs`". That reasoning is wrong twice in ways that cancelled: `src/open.rs`

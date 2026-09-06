@@ -26,12 +26,25 @@ spec is wrong, update the spec as part of that change rather than letting the tw
 `agent-attribution`, `agent-launch`, and `plugin-actions` have landed: the crate builds with six third-party dependencies (`toml`,
 `yaml-rust2`, `serde_json`, `ratatui` — reached through `ratatui::crossterm`'s
 re-export, not a direct dependency — `pulldown-cmark`, and `notify`), `make check` runs
-all five quality gates locally and in CI, the
+every quality gate locally and in CI, the
 crate reads `config.toml` and derives and records agent-name mappings under
 `HERDR_PLUGIN_STATE_DIR`, it can locate the OpenSpec repository root and the
-`openspec` binary — the binary chain's fourth probe step is an injected hook
-whose production binding, `cli::npm_prefix`, runs the real `npm prefix -g`
-probe behind the subprocess seam — it reads the repository's schema and
+`openspec` binary — the binary chain's fourth probe step and the environment
+lookup its `PATH`/nvm steps read both arrive as fields on `Startup`
+(`degraded-states`' addition), injected on the same terms as `state_dir`:
+`run` passes `config::env_lookup()` for the environment and
+`cli::npm_probe_hook` (itself a thin wrapper around the real `npm prefix -g`
+binding, named to keep the CLI seam's own name out of `src/ui/`) for the
+fourth-step hook, so a test can drive "nothing resolves" without touching
+the real process environment. When every probe step comes up empty, the
+dashboard runs in **file mode** — no `openspec` binary backs it, every
+change is file-sourced, and the header badges `file mode` once the header is
+wide enough to hold it — never an error screen. Every change's own
+unresolved problems (an absent schema, an unparseable one, a
+`tasks`-artifact that could not be found) render as a row in that change's
+own detail pane, above whichever artifact-specific problems that tab
+already showed, so a bad schema degrades one change's detail region rather
+than the dashboard as a whole. It reads the repository's schema and
 produces the ordered artifact list including the tasks artifact, it parses a
 task file into groups, items, and completion counts that agree with the
 CLI's own, and it enumerates `openspec/changes/` into the
@@ -108,7 +121,7 @@ Important files:
 - `.claude/agents/` — OpenSpec orchestration agents (vendored by graft).
 - `graft.toml` / `graft.lock` — what is vendored, and at which commit.
 - `Cargo.toml` — crate manifest.
-- `Makefile` — the five quality gates behind `make check`.
+- `Makefile` — the quality gates behind `make check`.
 - `scripts/gates/` — the checked-in hygiene gates `make gates` invokes.
 - `.github/workflows/ci.yml` — runs the same gates on `ubuntu-latest` and
   `macos-latest`, coverage on Linux only.
@@ -163,7 +176,7 @@ stay in sync.
 
 ## Quality gates
 
-All five are enforced in CI, invoking the same `make` targets individually — with
+Four are enforced in CI, invoking the same `make` targets individually — with
 coverage on Linux only — and are available locally behind one composite target:
 
 ```sh
@@ -174,7 +187,7 @@ make check
 |---|---|
 | Format | `cargo fmt --all -- --check` |
 | Lint | `cargo clippy --all-targets --all-features -- -D warnings` |
-| Hygiene gates | `make gates` (`scripts/gates/deps.sh`, then `scripts/gates/build-graph.sh`) |
+| Hygiene gates | `make gates` |
 | Test | `cargo test --all-features` |
 | Coverage | `cargo llvm-cov --fail-under-lines 80` |
 
@@ -186,16 +199,32 @@ manifest/README/binary-name contract: a `herdr-plugin.toml`, `README.md`, or bin
 edit that drifts one against another fails it. It deliberately asserts nothing about
 `target/release/`, which `make check` never builds.
 
-The two hygiene gates — `DEPS` (the argued dependency set) and `GRAPH-SNAP` (the pinned,
-per-triple build graph) — are checked-in scripts under `scripts/gates/`, not prose
-re-extracted by hand from a change's planning artifacts: that is how both went red on
-`main` for three changes with nothing forcing them to run (`spec-purposes`). `gates` runs
-their cheap legs; `make gates-full` (`DEPS_FULL=1 /bin/sh scripts/gates/deps.sh`) runs the
-legs that rebuild the crate — once for the release binary, once per dependency removed —
-and is deliberately **not** composed into `check`: it has its own CI job on every push
-instead. Every capability spec's `## Purpose` is guarded the same way, by
-`tests/spec_purposes.rs` inside `cargo test`, because `openspec validate --specs --strict`
-needs `node` and the `openspec` binary and so cannot be wired into `make check`.
+`make gates` is not two scripts — it is every hygiene gate this project has ever argued
+for, extracted into its own repository file under `scripts/gates/` and composed into the
+`Makefile`'s `gates:` recipe (`degraded-states`): a tree-wide grep, a per-file-set seam
+check, a width assertion, a dependency argument, a build-graph snapshot, and a coverage-map
+checker among them. **A gate's floor is its own script default** — every line in the
+recipe runs the script bare, with no `MIN`/`SCAN_MIN` override, because the default is
+kept at the gate's true measured floor rather than a value someone must remember to pass.
+The one stated exception is a **multi-subject gate**: `NODEFAULT-UI` scans five distinct
+type sets across the codebase (the view-layer dashboard types, `Refresh`, `Launch`,
+`src/agents.rs`'s set, and `src/launch.rs`'s `Outcome`), and one shared default would
+either pass vacuously for the smallest set or fail legitimately for the largest — so each
+of its five recipe lines carries its own explicit `SCAN_MIN`, the only floors that live on
+the `Makefile` line rather than the script default (`notes/gate-floors.md` in the
+`degraded-states` change records how each was measured). A test proves every gate can
+still fail: `tests/ci_workflow.rs` checks the recipe names every script under
+`scripts/gates/` and vice versa, so an extracted gate can never silently drop out of
+`make gates` again.
+
+Two things are deliberately **not** composed into `make gates`/`make check`, each with its
+own reason: `make gates-full` (`DEPS_FULL=1 /bin/sh scripts/gates/deps.sh`) runs the
+`DEPS` legs that rebuild the crate — once for the release binary, once per dependency
+removed — and has its own CI job on every push instead, because that cost does not belong
+in every local run; and every capability spec's `## Purpose` is guarded by
+`tests/spec_purposes.rs` inside `cargo test` rather than by a `make gates` script, because
+`openspec validate --specs --strict` needs `node` and the `openspec` binary and so cannot
+be wired into `make check` at all.
 
 ## Architecture rules
 
@@ -302,6 +331,10 @@ Further invariants from `SPEC.md`:
   count comes from `openspec list --json`'s `completedTasks`/`totalTasks` pair, never
   from `instructions apply`'s own `progress` field, which disagrees whenever a
   schema's `apply.tracks` is a glob.
+- **`SPEC.md`'s degraded-states table is machine-bound to named tests.**
+  `tests/degraded-coverage.toml` names, for each of that table's rows, a test that proves
+  it; `tests/degraded_coverage.rs` fails `make check` if a row is added or reworded with
+  no matching proof, or if a proof's own test stops existing or stops passing.
 
 Do not attribute an agent to a change on weak evidence. A terminal title is a
 summary, not a change id. Unattributable agents are reported as a count, not guessed at.

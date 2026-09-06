@@ -449,30 +449,30 @@
 ## 16. Documentation
 <!-- kind: operational -->
 
-- [ ] 16.1 Rewrite in `AGENTS.md` → Quality gates (audience: every future session) — the table
+- [x] 16.1 Rewrite in `AGENTS.md` → Quality gates (audience: every future session) — the table
   names five gates and describes `make gates` as two scripts. Replace that with the extracted
   set, the rule that a gate's floor is its own default so a bare invocation is correct, the one
   stated exception (a multi-subject gate's per-subject floor), and the two exclusions with
   their reasons. Net: replaces the two-script paragraph rather than adding beside it.
-- [ ] 16.2 Add in `AGENTS.md` → Further invariants (audience: every future session) — one rule,
+- [x] 16.2 Add in `AGENTS.md` → Further invariants (audience: every future session) — one rule,
   ≤5 lines: `SPEC.md`'s degraded-states table is machine-bound to named tests in
   `tests/degraded-coverage.toml`, so a row added or reworded without a proof fails `make
   check`.
-- [ ] 16.3 Rewrite in `AGENTS.md` → Current repo state (audience: every future session) — one
+- [x] 16.3 Rewrite in `AGENTS.md` → Current repo state (audience: every future session) — one
   sentence each for the `file mode` badge, the per-change problem lines, and `Startup`'s
   injected probe bindings. Delete any sentence this change makes false rather than appending.
-- [ ] 16.4 Rewrite `openspec/IMPLEMENTATION-ORDER.md`'s `degraded-states` row (audience: anyone
+- [x] 16.4 Rewrite `openspec/IMPLEMENTATION-ORDER.md`'s `degraded-states` row (audience: anyone
   reading the roadmap afterwards) — it says "Nothing here should be new behaviour", which the
   badge, the detail-region problem lines, and the gate extraction make false. State what the
   change actually did. `openspec/config.yaml` → `operations.archive` already requires this at
   archive time; doing it here means the archived row is right on the first read.
-- [ ] 16.5 Rewrite `HANDOFF.md` (audience: the next session, and the user) — the project is
+- [x] 16.5 Rewrite `HANDOFF.md` (audience: the next session, and the user) — the project is
   complete when this change archives. Replace the two open items (`WIRED` red; the unextracted
   gates) and the three parked dependency clauses with their resolutions, remove the "next
   action" pointing at Phase 5, and state plainly what is and is not left. Delete what is now
   false; this file has grown across the whole project and a closing pass that only adds would
   leave it unreadable.
-- [ ] 16.6 CHECK: Confirm `README.md` needs no edit — its two deferred rows were closed by
+- [x] 16.6 CHECK: Confirm `README.md` needs no edit — its two deferred rows were closed by
   their own changes. Fix any still-stale claim here; this is the last change that can.
 
 ## 17. Lint & Verify

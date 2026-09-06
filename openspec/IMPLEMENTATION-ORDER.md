@@ -88,7 +88,7 @@ Pure transformations. No terminal, no subprocess, no writes.
 |---|---|---|---|
 | `plugin-actions` | The `open` and `open-tab` binary subcommands that open or focus the dashboard pane via `herdr plugin pane`, and the manifest entries that go with them: both `[[actions]]` and the `dashboard-tab` pane. (`min_herdr_version` and `platforms` ship in `repo-foundation`, not here.) | Herdr integration → Manifest | `agent-launch` |
 | `spec-purposes` | Green the repository against its own checks before it ships. (a) Fill in the Purpose of every capability under `openspec/specs/` — `openspec archive` writes `TBD - created by archiving change <x>` and nothing replaces it, so `openspec validate --specs --strict` fails on most specs. (b) Repair `DEPS`'s want-list, which has not listed `notify` since `live-refresh`. (c) Fix `GRAPH-SNAP`'s hardcoded macOS/Linux platform literal — its snapshot was regenerated in `574b87d`, but it fails four legs later. Both gates have been red on `main` for three changes because they run outside `make check`. Exact failure lines are in `agent-launch`'s planning-review. | Testing and quality gates | `plugin-actions` |
-| `degraded-states` | Close the degraded-states table end to end: audit every row against the running plugin, add the `file mode` header badge, and cover each state with a view test. Nothing here should be new behaviour — this change exists to prove the table is true. | Degraded states | `plugin-actions`, `live-refresh` |
+| `degraded-states` | Audited all 44 rows of `SPEC.md`'s degraded-states table against the running plugin: 17 confirmed already true, 20 needed a dedicated new test to prove (one, row 6, had regressed from "confirmed" to unproven since the audit that first classed it), 5 rows were themselves wrong and were corrected in `SPEC.md`, 1 was a genuine behavioural gap closed here (row 23, see the `agent-launch` row above), and 1 (row 2 — the `file mode` badge) was new behaviour: no probe-failure signal reached the view at all before this change. Added `file_mode: bool` to `Dashboard`, set only by the composition root from whether the CLI/binary probe resolved anything, and a header badge shown once the header is wide enough. Rendered every change's own accumulated `Change::problems` as rows in that change's detail pane, above the tab-specific problems already shown, so a bad schema or missing artifact degrades one change's detail region rather than staying invisible. Injected the binary probe's environment lookup and its fourth-step (`npm prefix -g`) hook onto `Startup` on the same terms as `state_dir`, so both are test-driven rather than reaching the real process environment. Extracted every quality-gate script the project had accumulated by hand across earlier changes into checked-in files under `scripts/gates/`, composed into the `Makefile`'s `gates:` recipe, each proved able to fail via a real planted defect. Built a machine-checked coverage map (`tests/degraded-coverage.toml` + `tests/degraded_coverage.rs`) binding every row of the table to a named, passing test, so a row added or reworded without a proof now fails `make check`. This change discovered real gaps rather than only confirming existing behaviour — see the note below, corrected accordingly. | Degraded states | `plugin-actions`, `live-refresh` |
 
 ## Dependencies
 
@@ -164,6 +164,14 @@ its own.
 state, deciding what it means, and acting on it are three separable risks. Attribution
 is the one most likely to need revision after real use, and it sits alone.
 
-**`degraded-states` last, and deliberately additive-free.** Every earlier change
-handles its own empty states. If this change discovers new behaviour rather than
-confirming existing behaviour, an earlier change was incomplete.
+**`degraded-states` last, and mostly confirmation.** Every earlier change handles its
+own empty states, and 38 of the table's 44 rows bore that out — 17 needed no new work
+to trust and 21 more (20 unproven, 1 already regressed) needed only a test, not a
+repair, to prove. The audit still found three real gaps this plan did not predict: row
+23 (an earlier collision in `agent-launch`'s own `Outcome::problem`, closed here and
+attributed there), row 2 (no signal at all reached the view when every probe step came
+up empty — the `file mode` badge is genuinely new), and the wholesale rendering of
+`Change::problems` into the detail pane, which no earlier change had wired end to end.
+A "close the table" change finding a small number of real gaps is not evidence an
+earlier change was incomplete on its own terms; it is evidence that closing a table
+this large should never have been assumed additive-free going in.
