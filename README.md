@@ -9,9 +9,10 @@ Browse active and archived changes, read their artifacts, watch task progress, s
 which agent is working on which change — and launch an agent onto a change with one
 keystroke.
 
-**Status: in development.** The design is settled (see [SPEC.md](SPEC.md) and
-[PRD.md](PRD.md)); the implementation is being built change by change under
-[`openspec/IMPLEMENTATION-ORDER.md`](openspec/IMPLEMENTATION-ORDER.md).
+**Status: complete.** All 21 changes on the roadmap are implemented and archived —
+see [SPEC.md](SPEC.md) for the design contract, [PRD.md](PRD.md) for the requirements,
+and [`openspec/IMPLEMENTATION-ORDER.md`](openspec/IMPLEMENTATION-ORDER.md) for the
+roadmap that built it.
 
 ## Why
 

@@ -4,11 +4,15 @@
 
 ## Where things stand
 
-**Project complete.** All 21 changes on `openspec/IMPLEMENTATION-ORDER.md`'s roadmap are
-implemented; `degraded-states`, the last one, is fully applied (groups 1–17) and only
-needs `openspec archive` to move its artifacts under `openspec/changes/archive/`. There
-is no Phase 7 and no further planned work — see "Next action" below, which is now just
-that one archive step.
+**Project complete — nothing is outstanding.** All 21 changes on
+`openspec/IMPLEMENTATION-ORDER.md`'s roadmap are implemented **and archived**, including
+`degraded-states` (`c993f10`). `openspec list` reports zero active changes. There is no
+Phase 7 and no further planned work.
+
+Verified independently at `c993f10`: `make check` exit 0, **96.78% line coverage over
+27,392 lines**, 1021 tests, **41 capabilities**, `openspec validate --specs --strict`
+41 passed / 0 failed, **386 commits and 0 unsigned**, and `Command::new` confined to
+`src/cli.rs` with zero `#[allow]` attributes anywhere in `src/`.
 
 | Phase | State |
 |---|---|
@@ -36,11 +40,10 @@ would have caught.
 
 ## Next action
 
-**Run `openspec archive` for `degraded-states`.** That is the only remaining step in
-the project. Nothing else is planned, scheduled, or deferred — see the three findings
-below (paired forks, `NODEFAULT-UI`'s per-subject floors, and unsound outer tests) for
-what should transfer to whatever project reads this file next; they are lessons, not
-open work items here.
+**None.** The roadmap is finished and the archive is done. Nothing is planned,
+scheduled, or deferred. The three findings below (paired forks, `NODEFAULT-UI`'s
+per-subject floors, and unsound outer tests) are what should transfer to whatever
+project reads this file next — they are lessons, not open work items here.
 
 The sections below this point are largely historical record from earlier phases,
 kept for the reasoning they carry (measured costs, resolved traps, standing rules) —
