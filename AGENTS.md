@@ -74,7 +74,7 @@ worker answers with the fast file-sourced set then the CLI-merged one, and
 the render loop adopts whichever is ready on every frame without ever
 waiting for either. `r` forces the same full refresh the pane issues once
 at startup. A third collaborator, the Herdr agent poller (`src/agents.rs`,
-also outside `src/ui/`), polls `herdr agent list` on roughly the same
+also outside `src/ui/`), polls `herdr agent list` on its own roughly
 one-second cadence and answers on its own non-blocking seam, so one wait
 now serves all three.
 

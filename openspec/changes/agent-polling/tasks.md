@@ -943,17 +943,78 @@ Net effect on `SPEC.md` is about +16 lines and −5; on `AGENTS.md`, two rewritt
 ## 13. Change Review
 <!-- kind: operational -->
 
-- [ ] 13.1 CHECK: Dispatch an independent reviewer — not a fork of this session — against
+- [x] 13.1 CHECK: Dispatch an independent reviewer — not a fork of this session — against
       `proposal.md`, all six spec files, `design.md`, `tasks.md`, and `git diff $BASE`. Give it
       the concentration points from `openspec/config.yaml` → `rules.tasks` and, additionally:
       every verification command must be able to fail and to see what it guards; no test may
       assert on a double's own return value; the acceptance test's three wiring assertions must
       each be separately discriminating; and `run`'s untested residue must hold no decision.
+      **Recorded:** dispatched to `outside-in-tdd-reviewer` with the planning artifacts and
+      `git diff 551300f..HEAD`. Reported 1 CRITICAL, 4 WARNING, 7 SUGGESTION.
 
-- [ ] 13.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a
+- [x] 13.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a
       one-line reason, note each SUGGESTION, and re-run the affected tests and gates.
+      **CRITICAL fixed:** `the_first_drain_polls_immediately` and
+      `a_poll_in_flight_suppresses_the_next` exercised `poller_for_test`'s hand-written
+      `TestAgentPoll` double, whose own "send once" schedule is hardcoded — neither test could
+      fail against a broken `RealAgentPoll::drain`, confirmed by replaying the RED-commit's
+      naive drain body and observing both stay green. Rewritten to drive the real
+      `RealAgentPoll` through `agents::start`. Fixing this surfaced a **second**, deeper gap the
+      reviewer had not named: the worker's own body is a single sequential loop, so a scratch
+      program that blocks forever makes "exactly one run" true regardless of whether
+      `RealAgentPoll` suppressed the other four requests or merely queued them behind the
+      first — the worker could never reach a queued one either way. `a_poll_in_flight_
+      suppresses_the_next` was redesigned around a scratch program answering after a **bounded**
+      300ms delay instead, with a deadline-bounded poll checking for a backlog once the first
+      run should have completed; replaying the naive drain now shows a real second run within
+      the window (`left: 2, right: 1`), and the correct implementation stays at one. Both
+      re-verified: green against the real implementation, red against the naive one, in three
+      repeated runs.
+      **WARNINGs fixed:** (1) `pending_in`'s `Some` branch is now asserted (`<= POLL_INTERVAL`)
+      in `the_first_drain_polls_immediately`, not just its `None` branch elsewhere. (2)
+      `no_repository_still_polls_for_agents` now configures `Config::openspec_bin` at a real
+      scratch `openspec` program, so the empty-log assertion is a fact about `refresh::start`
+      being the inert double rather than an accident of `Config::default()` never reaching the
+      real `PATH`/nvm/`npm` probe steps `design.md` → Test Boundaries says are never spawned. (3)
+      `the_real_wiring_polls_a_scratch_herdr`'s shared `>= 2` discriminator is split into two
+      separately named assertions (`>= 1` naming `refresh::start`, `>= 2` naming `watch::start`),
+      matching the spec's own "each names its own collaborator" requirement — task 10.3's
+      recorded plant messages were also affected by this shared discriminator and are superseded
+      by this split. (4) `run_loop`'s and `drive_live_tier`'s doc comments, which still described
+      three live-tier steps, are updated to four, naming `AgentPoll::drain`.
+      **SUGGESTIONs taken:** `a_dead_worker_is_reported_once` now asserts the reason names
+      "worker", not just that a reason exists; `no_repository_still_polls_for_agents`'s
+      previously-discarded buffer is now asserted to show the no-repository empty state;
+      AGENTS.md's "on roughly the same one-second cadence" (nothing in the surrounding text
+      established a shared cadence to be "the same" as) is reworded to "on its own roughly
+      one-second cadence".
+      **SUGGESTIONs accepted without a code change, with reason:** the two scratch logs living
+      inside the watched tree in `the_real_wiring_polls_a_scratch_herdr` (so the watcher's own
+      second `openspec` invocation is partly caused by the harness's own logging, not solely
+      the deliberate one-byte write) — still correctly discriminates `watch::none()`, and moving
+      the logs to a second `ScratchDir` is a larger harness change for a causal-purity point that
+      doesn't change what the test can catch; the unreachable-herdr wiring test asserting a
+      substring rather than true buffer byte-identity against the reachable run — the stronger
+      claim is already proven once, at the right tier, by `ui::view::tests::agents_change_no_pixel`;
+      `herdr_error_problem` hardcoding the literal `herdr` rather than formatting `CliError`'s own
+      `program` field — cosmetic, and no test needs it corrected to pass; the ~1s busy-spin in
+      `a_failed_poll_is_recovered_from` — already noted by the reviewer as a wash given `NOSLEEP`'s
+      constraints.
+      **Task-file correction (found while fixing the CRITICAL):** the redesigned
+      `a_poll_in_flight_suppresses_the_next` needs a real, bounded time delay (not a busy
+      `yield_now` spin) to distinguish "one request" from "a backlog drained once the worker
+      frees up", adding a fifth crate-wide `thread::sleep` site (still inside a deadline-bounded
+      poll, and `src/agents.rs` still holds only the one `NOSLEEP` leg 2b caps it to). This moves
+      design.md's and task 7.6's "measured at four before agent-polling and four after" to
+      **five** after. `NOSLEEP` leg 1's own floor (`MIN=25`) already accounted for headroom and
+      needed no change; only the specific "four after" figure is superseded here.
+      All affected tests and gates re-run: `agents::` (29 tests), `ui::tests::wiring::` (3),
+      `NOBLOCK`, `NOSLEEP` (now 5 sites), `WIRED`, `AGENTSEAM`, `OPENSPEC-UNTOUCHED` — all green.
 
-- [ ] 13.3 VERIFY: No blocking or unowned finding remains, and `make check` is green. Commit.
+- [x] 13.3 VERIFY: No blocking or unowned finding remains, and `make check` is green. Commit.
+      **Recorded:** no CRITICAL or unowned WARNING remains. `make check` exits 0: 805 tests
+      passed (unchanged — this group strengthened existing tests and fixed one test's fixture,
+      adding none), 97.18% lines.
 
 ## 14. Lint & Verify
 <!-- kind: operational -->

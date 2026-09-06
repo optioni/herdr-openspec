@@ -1857,10 +1857,22 @@ apply:
                     "width {width}: the herdr log must record an 'agent list' call: {herdr_calls:?}"
                 );
 
+                // Two separately discriminating assertions, not one shared threshold —
+                // a Change Review finding: `refresh::none()` in place of `refresh::start`
+                // leaves the log at zero entries (the startup request never fires at
+                // all), while `watch::none()` in place of `watch::start` leaves it at
+                // exactly one (the startup request fires, but the one-byte write is
+                // never detected, so no second request follows). A single `>= 2` bound
+                // catches both, but names neither.
+                assert!(
+                    log_lines(&openspec_log) >= 1,
+                    "width {width}: the openspec log must show at least one run, proving \
+                     refresh::start was wired rather than refresh::none()"
+                );
                 assert!(
                     log_lines(&openspec_log) >= 2,
-                    "width {width}: the openspec log must show both refresh::start and \
-                     watch::start were wired, not their inert doubles"
+                    "width {width}: the openspec log must reach a second run, proving \
+                     watch::start was wired rather than watch::none()"
                 );
                 assert!(
                     dashboard.refresh.problems.is_empty(),
@@ -1949,12 +1961,23 @@ apply:
             let herdr_log = root.join("herdr.log");
             let herdr = herdr_script(root, &herdr_log);
             let openspec_log = root.join("openspec.log");
+            // A scratch `openspec` program exists here too, and `Config::openspec_bin`
+            // names it — same as every other test in this module — so the assertion
+            // below that its log stays empty is a real proof that `refresh::start` is
+            // the inert double, not merely a fact about no program having been
+            // configured at all. Without this, the real probe chain's later steps
+            // (`PATH`, nvm, `npm prefix -g`) would still run on a machine where one of
+            // them resolves, which `design.md` -> Test Boundaries rules out.
+            let openspec = openspec_script(root, &openspec_log, root);
 
-            let config = Config::default();
+            let config = Config {
+                openspec_bin: Some(openspec),
+                ..Config::default()
+            };
 
             let predicate = || log_lines(&herdr_log) >= 1;
 
-            let (result, _buf) = run_wired_at(120, root, &config, &herdr, &predicate);
+            let (result, buf) = run_wired_at(120, root, &config, &herdr, &predicate);
             let dashboard = result.expect("no repository is a supported state");
 
             assert_eq!(dashboard.repo, None);
@@ -1969,6 +1992,11 @@ apply:
             );
             assert!(dashboard.refresh.problems.is_empty());
             assert_eq!(dashboard.route, Route::List);
+            assert!(
+                buf.iter()
+                    .any(|row| row.contains("No OpenSpec repository found")),
+                "the list region's no-repository empty state must be on screen: {buf:?}"
+            );
         }
     }
 }

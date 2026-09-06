@@ -266,10 +266,14 @@ its merge key; its subject is unchanged and only the type list and the field cou
   rule. A blanket rule would have been red on an unmodified tree and the only ways out would
   have been deleting three correct tests or exempting two files
 - **AND** the scan is judged against a floor on the number of sleep sites it **found** —
-  measured at **four** before `agent-polling` and **four** after, because this change's own
-  waits are `recv_timeout` against a deadline inside `src/agents.rs`'s test module and
-  `std::thread::yield_now` inside `testutil::UntilReady`, neither of which is a sleep — so a
-  broken pattern that matched nothing fails rather than reporting a clean tree
+  measured at **four** before `agent-polling` and **five** after: most of this change's own
+  waits are `recv_timeout` against a deadline inside `src/agents.rs`'s test module or
+  `std::thread::yield_now` inside `testutil::UntilReady`, neither of which is a sleep, but
+  proving "a poll in flight suppresses the next request" against the real seam needs a
+  scratch program answering after a genuine bounded delay, checked by a deadline-bounded
+  `thread::sleep` poll on `watch::RealFsEvents`'s own established terms — the fifth site,
+  and the reason the floor moves rather than staying flat. A broken pattern that matched
+  nothing still fails rather than reporting a clean tree
 - **AND** `yield_now` remains deliberately outside the pattern: it has no duration, so a loop
   around it is a condition poll and cannot make an assertion premature
 - **AND** the check carries a self-contained negative control run on **every** invocation, not

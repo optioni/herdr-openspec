@@ -929,6 +929,14 @@ mod tests {
 
         const UNREACHABLE_STDERR: &str = r#"{"id":"cli:agent:list","error":{"code":"server_not_running","message":"no herdr server is running at /p/herdr.sock"}}"#;
 
+        /// Drives the **real** `RealAgentPoll` through `agents::start`, not
+        /// `poller_for_test`'s hand-written `TestAgentPoll` double — a Change Review
+        /// finding: `TestAgentPoll`'s own "send once" schedule is hardcoded, so a test
+        /// built on it cannot discriminate a broken `RealAgentPoll::drain`. Both this
+        /// scenario and `a_poll_in_flight_suppresses_the_next` are explicitly about
+        /// `RealAgentPoll`'s own in-flight/next-due bookkeeping, so both now go through
+        /// the real seam, on `a_started_poller_yields_the_scratch_programs_agents`'s
+        /// terms.
         #[test]
         fn the_first_drain_polls_immediately() {
             let scratch = ScratchDir::new();
@@ -942,23 +950,44 @@ mod tests {
                 ),
             );
             let cli = crate::cli::agent_cli_via(&prog);
-            let (mut poller, result_rx, _exit_rx) = super::poller_for_test(cli);
+            let mut poller = super::super::start(cli);
 
+            // The first drain never yields synchronously — try_recv is empty before
+            // any request has been answered — but it must have fired the request.
             assert_eq!(poller.drain(), None);
-            let snapshot = result_rx
-                .recv_timeout(Duration::from_secs(10))
-                .expect("the worker did not answer within 10s");
+
+            // Deadline-bounded wait for the answer, which may arrive on any later
+            // drain call — a scratch `#!/bin/sh` program's real latency is not
+            // controlled here, only bounded.
+            let deadline = Instant::now() + Duration::from_secs(10);
+            let mut snapshot = None;
+            while Instant::now() < deadline {
+                if let Some(s) = poller.drain() {
+                    snapshot = Some(s);
+                    break;
+                }
+                std::thread::yield_now();
+            }
+            let snapshot = snapshot.expect("the worker did not answer within 10s");
             assert!(snapshot.reachable);
 
+            // Two more drains, well inside the one-second POLL_INTERVAL gap the
+            // schedule now holds until the next poll is due: no further request.
             assert_eq!(poller.drain(), None);
             assert_eq!(poller.drain(), None);
-            assert_eq!(poller.pending_in(), None);
+            let pending = poller
+                .pending_in()
+                .expect("a completed poll must report a deadline for the next one");
+            assert!(
+                pending <= super::super::POLL_INTERVAL,
+                "the reported deadline must be no further out than POLL_INTERVAL: {pending:?}"
+            );
 
             let runs = std::fs::read_to_string(&log).unwrap_or_default();
             assert_eq!(
                 runs.lines().count(),
                 1,
-                "exactly one run across the three drains: {runs:?}"
+                "exactly one run despite every later drain: {runs:?}"
             );
             assert_eq!(runs.lines().next(), Some("agent list"));
         }
@@ -967,33 +996,52 @@ mod tests {
         fn a_poll_in_flight_suppresses_the_next() {
             let scratch = ScratchDir::new();
             let log = scratch.path().join("log");
-            // Blocks forever on stdin so the run never completes and the poll never
-            // clears the in-flight state within the test's short life.
+            // Answers after a bounded 300ms, rather than blocking forever: the
+            // worker's own body is a single sequential loop, so a script that never
+            // returns would make "exactly one run" true regardless of whether the
+            // render side suppressed the other four requests or merely queued them
+            // behind the first — the worker could never reach a queued one either
+            // way. A bounded delay lets a queued backlog drain and show itself: if
+            // `drain` sent five requests instead of one, the worker answers them
+            // one after another once the first completes, and a second (or third,
+            // or more) invocation appears in the log well within this test's wait.
             let prog = script(
                 &scratch,
                 "herdr",
-                &format!("printf '%s\\n' \"$*\" >> \"{}\"\ncat\n", log.display()),
+                &format!(
+                    "printf '%s\\n' \"$*\" >> \"{}\"\nsleep 0.3\nprintf '%s' '{ONE_AGENT}'\n",
+                    log.display()
+                ),
             );
             let cli = crate::cli::agent_cli_via(&prog);
-            let (mut poller, _result_rx, _exit_rx) = super::poller_for_test(cli);
+            let mut poller = super::super::start(cli);
 
             for _ in 0..5 {
                 assert_eq!(poller.drain(), None);
                 assert_eq!(poller.pending_in(), None);
             }
 
-            let deadline = Instant::now() + Duration::from_secs(5);
+            // Deadline-bounded poll, well short of POLL_INTERVAL, so a second
+            // *legitimate* poll is not yet due either: if the render side queued
+            // five requests instead of one, the worker drains the backlog as soon
+            // as the first 300ms answer arrives, and a second entry shows up in the
+            // log well inside this window. If only one was ever queued, the count
+            // stays at one for the whole 2s wait.
+            let deadline = Instant::now() + Duration::from_millis(2000);
             let mut runs = 0;
             while Instant::now() < deadline {
                 runs = std::fs::read_to_string(&log)
                     .map(|s| s.lines().count())
                     .unwrap_or(0);
-                if runs >= 1 {
+                if runs >= 2 {
                     break;
                 }
-                std::thread::yield_now();
+                std::thread::sleep(Duration::from_millis(50));
             }
-            assert_eq!(runs, 1, "exactly one run, not five");
+            assert_eq!(
+                runs, 1,
+                "exactly one run, not a backlog of five processed once the worker freed up"
+            );
         }
 
         #[test]
@@ -1018,7 +1066,11 @@ mod tests {
             }
             let first = first.expect("the first drain after disconnection must report once");
             assert!(!first.reachable);
-            assert!(first.problem.is_some());
+            let problem = first.problem.expect("a reason must be present");
+            assert!(
+                problem.to_lowercase().contains("worker"),
+                "the reason must name the poller's worker as stopped: {problem}"
+            );
 
             assert_eq!(poller.drain(), None);
             assert_eq!(poller.drain(), None);

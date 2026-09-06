@@ -45,15 +45,15 @@ pub enum LoopError {
     Events(EventError),
 }
 
-/// Drive the live tier's three one-shot steps, then sync the selected tab's
+/// Drive the live tier's four one-shot steps, then sync the selected tab's
 /// content through `read`, draw, then wait up to
-/// `watch::poll_timeout(tick, live.fs.pending_in())` for an event, applying
-/// its action and breaking when `dashboard.quit` is set — without syncing or
-/// drawing again. The sync happens **before** the draw, so the very first
-/// frame carries the selected artifact's content rather than a blank region
-/// that fills in on the second. A timeout (`Ok(None)`) is not an event and
-/// does not end the loop. Neither a draw error nor an event-source error is
-/// retried in a loop that could spin.
+/// `watch::poll_timeout(tick, watch::soonest(live.fs.pending_in(), live.agents.pending_in()))`
+/// for an event, applying its action and breaking when `dashboard.quit` is
+/// set — without syncing or drawing again. The sync happens **before** the
+/// draw, so the very first frame carries the selected artifact's content
+/// rather than a blank region that fills in on the second. A timeout
+/// (`Ok(None)`) is not an event and does not end the loop. Neither a draw
+/// error nor an event-source error is retried in a loop that could spin.
 ///
 /// The live tier, once per iteration, before the sync:
 ///
@@ -70,8 +70,12 @@ pub enum LoopError {
 /// 3. `live.refresher.take_result()`; any result — file-sourced or
 ///    CLI-merged — is adopted immediately, so it reaches the very frame
 ///    that follows rather than the one after.
+/// 4. `live.agents.drain()`; on `Some(snapshot)`, `dashboard.agents` is
+///    replaced wholesale with it — never merged, independently of step 3,
+///    so a refresh landing on the same iteration as a poll cannot discard
+///    the poll (`agent-polling`).
 ///
-/// Every one of the three steps is non-blocking by the traits' contract, so
+/// Every one of the four steps is non-blocking by the traits' contract, so
 /// the sequence adds no wait to the render path. See
 /// `specs/live-updates/spec.md` -> "The loop drives the live tier without
 /// ever waiting on it".
@@ -117,12 +121,12 @@ pub fn run_loop<B: Backend, E: EventSource>(
     Ok(LoopSummary { frames, polls })
 }
 
-/// The live tier's three one-shot steps — see `run_loop`'s doc comment for
+/// The live tier's four one-shot steps — see `run_loop`'s doc comment for
 /// the order and the reason for it. Non-blocking throughout: it calls only
-/// `FsEvents::drain`, `Refresher::request`, and `Refresher::take_result`,
-/// every one of which is non-blocking by the traits' own contract, so
-/// extracting this into its own function grows no ability to block that
-/// `run_loop`'s body did not already have.
+/// `FsEvents::drain`, `Refresher::request`, `Refresher::take_result`, and
+/// `AgentPoll::drain`, every one of which is non-blocking by the traits'
+/// own contract, so extracting this into its own function grows no ability
+/// to block that `run_loop`'s body did not already have.
 fn drive_live_tier(dashboard: &mut Dashboard, live: &mut Live<'_>) {
     if dashboard.refresh.requested {
         live.refresher.request(crate::changes::Selection::All);
