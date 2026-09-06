@@ -843,17 +843,17 @@ set; see design.md → Test Strategy.
 ## 9. The launch problem rows in `ui::list`
 <!-- kind: behavior -->
 
-- [ ] 9.1 RED: Write `ui::list::tests::a_launch_problem_is_the_lists_first_row`,
+- [x] 9.1 RED: Write `ui::list::tests::a_launch_problem_is_the_lists_first_row`,
       `::launch_refresh_and_change_problems_in_order`, `::no_launch_problem_draws_no_extra_row`,
       and `::a_launch_problem_row_carries_no_badge`, asserting the exact strings
       `change-rows`' and `live-updates`' deltas give at 38 and 58. **In the same task**, extend
       the three landed list tests `EXTENDED`'s pair list names. Each test names both 38 and 58
       **unsuffixed**, or `LISTWIDTHS` reports it missing a width.
 
-- [ ] 9.2 GREEN: Emit one `RowKind::Problem` row per `launch.problems` entry, ahead of the
+- [x] 9.2 GREEN: Emit one `RowKind::Problem` row per `launch.problems` entry, ahead of the
       refresh problems, through the same `pad_or_truncate_right` every other row uses.
 
-- [ ] 9.3 VERIFY: No refactor was needed — the launch rows reuse the loop the refresh rows
+- [x] 9.3 VERIFY: No refactor was needed — the launch rows reuse the loop the refresh rows
       already use. `testcount --lib 'ui::list::tests::' 29` plus the four single-test floors,
       then `LIST_MIN=29 sh $CHECKS/LISTWIDTHS.sh` — green for the first time. Commit.
 

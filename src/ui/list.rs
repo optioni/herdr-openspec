@@ -263,6 +263,18 @@ pub fn rows(dashboard: &Dashboard, width: u16) -> Vec<Row> {
         .collect();
 
     let mut out = Vec::new();
+    // `agent-launch`: launch problems lead the whole list, ahead of even refresh problems —
+    // they are the only rows that answer a key the reader has just pressed, and burying the
+    // reply under a standing condition is how a reader concludes the key did nothing.
+    // `launch.problems` holds at most one entry and is replaced wholesale, so this costs at
+    // most one row.
+    for problem in &dashboard.launch.problems {
+        out.push(Row {
+            text: problem_row_text(problem, width),
+            kind: RowKind::Problem,
+            selected: false,
+        });
+    }
     // `live-refresh`: refresh problems (a watcher that would not start, or a
     // drain error) lead the list, ahead of change-set problems — they are
     // the ones that outlive a reload, while a `ChangeSet` problem is
@@ -1004,7 +1016,7 @@ mod tests {
 
     #[test]
     fn row_order_is_problems_then_active_then_separator_then_archived() {
-        let d = dashboard_with(
+        let mut d = dashboard_with(
             vec![
                 fixture::active("add-token-refresh", 4, 9),
                 fixture::active("fix-empty-basket", 7, 7),
@@ -1016,11 +1028,14 @@ mod tests {
             vec!["openspec/changes: broken".to_string()],
             0,
         );
+        // `agent-launch`: a launch problem leads even the refresh and change-set problems.
+        d.launch.problems = vec!["launch failed".to_string()];
         for width in [38, 58] {
             let kinds: Vec<RowKind> = rows(&d, width).into_iter().map(|r| r.kind).collect();
             assert_eq!(
                 kinds,
                 vec![
+                    RowKind::Problem,
                     RowKind::Problem,
                     RowKind::Item { index: 0 },
                     RowKind::Item { index: 1 },
@@ -1291,6 +1306,20 @@ mod tests {
         for width in [38, 58] {
             assert_eq!(rows(&without, width)[0].kind, RowKind::Item { index: 0 });
         }
+
+        // `agent-launch`: the same holds for `launch.problems` — a pane that has launched
+        // nothing renders byte-identically to one with no launch tier at all.
+        assert!(without.launch.problems.is_empty());
+        let mut with_launch_failure = without.clone();
+        with_launch_failure.launch.problems = vec!["launch failed".to_string()];
+        for width in [38, 58] {
+            assert_eq!(
+                rows(&with_launch_failure, width)[0].kind,
+                RowKind::Problem,
+                "width {width}"
+            );
+            assert_eq!(rows(&without, width)[0].kind, RowKind::Item { index: 0 });
+        }
     }
 
     #[test]
@@ -1302,11 +1331,14 @@ mod tests {
             0,
         );
         d.refresh.problems = vec!["watch failed".to_string()];
+        // `agent-launch`: a launch problem leads even the refresh problem.
+        d.launch.problems = vec!["launch failed".to_string()];
         for width in [38, 58] {
             let kinds: Vec<RowKind> = rows(&d, width).into_iter().map(|r| r.kind).collect();
             assert_eq!(
                 kinds,
                 vec![
+                    RowKind::Problem,
                     RowKind::Problem,
                     RowKind::Problem,
                     RowKind::Item { index: 0 },
@@ -1316,18 +1348,43 @@ mod tests {
             let texts: Vec<String> = rows(&d, width).into_iter().map(|r| r.text).collect();
             assert_eq!(
                 texts[0],
-                problem_row_text("watch failed", width),
-                "the refresh problem must come first, width {width}"
+                problem_row_text("launch failed", width),
+                "the launch problem must come first, width {width}"
             );
             assert_eq!(
                 texts[1],
+                problem_row_text("watch failed", width),
+                "the refresh problem must come second, width {width}"
+            );
+            assert_eq!(
+                texts[2],
                 problem_row_text("openspec/changes unreadable", width),
                 "width {width}"
             );
         }
 
-        // `agent-attribution`: a badged change below the two problem rows carries its
-        // badge, and neither problem row above it ever carries one.
+        // The empty control: with `launch.problems` emptied, the rows are byte-identical to
+        // the two-problem list this scenario specified before `agent-launch` existed.
+        let mut without_launch = d.clone();
+        without_launch.launch.problems = Vec::new();
+        for width in [38, 58] {
+            let kinds: Vec<RowKind> = rows(&without_launch, width)
+                .into_iter()
+                .map(|r| r.kind)
+                .collect();
+            assert_eq!(
+                kinds,
+                vec![
+                    RowKind::Problem,
+                    RowKind::Problem,
+                    RowKind::Item { index: 0 },
+                ],
+                "width {width}"
+            );
+        }
+
+        // `agent-attribution`: a badged change below the three problem rows carries its
+        // badge, and none of the problem rows above it ever carries one.
         d.agents.agents = vec![agent_at("add-token-refresh", AgentStatus::Blocked)];
         for width in [38, 58] {
             let rows = rows(&d, width);
@@ -1340,8 +1397,123 @@ mod tests {
                 "width {width}: a problem row is never badged"
             );
             assert!(
-                rows[2].text.contains(" b ["),
+                !rows[2].text.contains(" b ["),
+                "width {width}: a problem row is never badged"
+            );
+            assert!(
+                rows[3].text.contains(" b ["),
                 "width {width}: the change row below must carry its badge"
+            );
+        }
+    }
+
+    /// `agent-launch`: "A refused launch renders one row at both widths."
+    #[test]
+    fn a_launch_problem_is_the_lists_first_row() {
+        let mut d = dashboard_with(
+            vec![fixture::active("2fa-support", 1, 2)],
+            Vec::new(),
+            Vec::new(),
+            0,
+        );
+        d.launch.problems = vec![
+            "c-2fa-support is already running for this change - press g to focus it".to_string(),
+        ];
+        for width in [38, 58] {
+            let all = rows(&d, width);
+            assert_eq!(all[0].kind, RowKind::Problem, "width {width}");
+            assert!(
+                all[0].text.starts_with("! "),
+                "width {width}: {}",
+                all[0].text
+            );
+            assert!(all[0].text.contains("c-2fa-support"), "width {width}");
+            assert!(all[0].text.contains('g'), "width {width}");
+            assert_eq!(
+                all[0].text.chars().count(),
+                width as usize,
+                "width {width}: padded or truncated to the interior width exactly"
+            );
+            assert_eq!(all[1].kind, RowKind::Item { index: 0 }, "width {width}");
+
+            // Pressing `a` twice more (replacing the entry wholesale, never growing it)
+            // leaves exactly one such row.
+            let count = rows(&d, width)
+                .into_iter()
+                .filter(|r| r.kind == RowKind::Problem)
+                .count();
+            assert_eq!(count, 1, "width {width}");
+        }
+    }
+
+    /// `agent-launch`: "A launch problem leads the refresh and change-set problems."
+    #[test]
+    fn launch_refresh_and_change_problems_in_order() {
+        let mut d = dashboard_with(
+            vec![fixture::active("alpha", 1, 2)],
+            Vec::new(),
+            vec!["openspec/changes unreadable".to_string()],
+            0,
+        );
+        d.refresh.problems = vec!["watch failed".to_string()];
+        d.launch.problems = vec!["launch failed".to_string()];
+        for width in [38, 58] {
+            let all = rows(&d, width);
+            assert_eq!(all[0].kind, RowKind::Problem, "width {width}");
+            assert_eq!(all[1].kind, RowKind::Problem, "width {width}");
+            assert_eq!(all[2].kind, RowKind::Problem, "width {width}");
+            assert_eq!(all[0].text, problem_row_text("launch failed", width));
+            assert_eq!(all[1].text, problem_row_text("watch failed", width));
+            assert_eq!(
+                all[2].text,
+                problem_row_text("openspec/changes unreadable", width)
+            );
+            assert!(!all[0].selected && !all[1].selected && !all[2].selected);
+        }
+    }
+
+    /// `agent-launch`: "No refresh problem draws no extra row" restated for
+    /// `launch.problems` — a pane that has launched nothing renders exactly as before.
+    #[test]
+    fn no_launch_problem_draws_no_extra_row() {
+        let d = dashboard_with(
+            vec![fixture::active("alpha", 1, 2)],
+            Vec::new(),
+            Vec::new(),
+            0,
+        );
+        assert!(d.launch.problems.is_empty());
+        for width in [38, 58] {
+            assert_eq!(
+                rows(&d, width)[0].kind,
+                RowKind::Item { index: 0 },
+                "width {width}"
+            );
+        }
+    }
+
+    /// `agent-launch`: a launch problem row carries no badge, whatever `attribution().badges`
+    /// holds — only a change row is badged.
+    #[test]
+    fn a_launch_problem_row_carries_no_badge() {
+        let mut d = dashboard_with(
+            vec![fixture::active("alpha", 1, 2)],
+            Vec::new(),
+            Vec::new(),
+            0,
+        );
+        d.launch.problems = vec!["launch failed".to_string()];
+        d.agents.agents = vec![agent_at("alpha", AgentStatus::Working)];
+        for width in [38, 58] {
+            let all = rows(&d, width);
+            assert_eq!(all[0].kind, RowKind::Problem, "width {width}");
+            assert!(
+                !all[0].text.contains(" w ["),
+                "width {width}: a launch problem row must carry no badge"
+            );
+            assert!(
+                all[1].text.contains(" w ["),
+                "width {width}: the change row below must still carry its badge"
             );
         }
     }
