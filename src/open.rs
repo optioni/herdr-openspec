@@ -284,4 +284,133 @@ mod tests {
             Ok(Some("w8:pG".to_string()))
         );
     }
+
+    // --- group 5: the argument vectors and the two pure `main` decisions ---------------
+
+    fn full_context() -> Context {
+        Context {
+            plugin_id: "herdr-openspec".to_string(),
+            workspace_id: "w8".to_string(),
+            workspace_cwd: Some("/repo".to_string()),
+            focused_pane_id: Some("w8:p1".to_string()),
+        }
+    }
+
+    #[test]
+    fn split_argv() {
+        let argv = open_args(Placement::Split, &full_context());
+        assert_eq!(
+            argv,
+            vec![
+                "plugin", "pane", "open", "--plugin", "herdr-openspec", "--entrypoint",
+                "dashboard", "--placement", "split", "--direction", "right", "--target-pane",
+                "w8:p1", "--cwd", "/repo", "--focus"
+            ]
+        );
+        assert!(!argv.contains(&"--workspace".to_string()));
+        assert!(!argv.contains(&"--no-focus".to_string()));
+    }
+
+    #[test]
+    fn split_argv_without_target_pane() {
+        let mut ctx = full_context();
+        ctx.focused_pane_id = None;
+        let argv = open_args(Placement::Split, &ctx);
+        assert!(!argv.contains(&"--target-pane".to_string()));
+    }
+
+    #[test]
+    fn split_argv_without_cwd() {
+        let mut ctx = full_context();
+        ctx.workspace_cwd = None;
+        let argv = open_args(Placement::Split, &ctx);
+        assert!(!argv.contains(&"--cwd".to_string()));
+    }
+
+    #[test]
+    fn tab_argv() {
+        let argv = open_args(Placement::Tab, &full_context());
+        assert_eq!(
+            argv,
+            vec![
+                "plugin", "pane", "open", "--plugin", "herdr-openspec", "--entrypoint",
+                "dashboard-tab", "--placement", "tab", "--workspace", "w8", "--cwd", "/repo",
+                "--focus"
+            ]
+        );
+        assert!(!argv.contains(&"--target-pane".to_string()));
+        assert!(!argv.contains(&"--direction".to_string()));
+    }
+
+    #[test]
+    fn the_two_vectors_differ_only_in_placement_and_target() {
+        let ctx = full_context();
+        let split = open_args(Placement::Split, &ctx);
+        let tab = open_args(Placement::Tab, &ctx);
+        assert_eq!(split[3], tab[3]); // --plugin
+        assert_eq!(split[4], tab[4]); // herdr-openspec
+        assert!(split.contains(&"--cwd".to_string()) && tab.contains(&"--cwd".to_string()));
+        assert!(split.last().unwrap() == "--focus");
+        assert!(tab.last().unwrap() == "--focus");
+        // The differing keys: --entrypoint value, --placement value, --direction/--target-pane
+        // (split only), --workspace (tab only).
+        assert_ne!(
+            split[split.iter().position(|s| s == "--entrypoint").unwrap() + 1],
+            tab[tab.iter().position(|s| s == "--entrypoint").unwrap() + 1]
+        );
+        assert_ne!(
+            split[split.iter().position(|s| s == "--placement").unwrap() + 1],
+            tab[tab.iter().position(|s| s == "--placement").unwrap() + 1]
+        );
+        assert!(split.contains(&"--direction".to_string()));
+        assert!(!tab.contains(&"--direction".to_string()));
+        assert!(split.contains(&"--target-pane".to_string()));
+        assert!(!tab.contains(&"--target-pane".to_string()));
+        assert!(!split.contains(&"--workspace".to_string()));
+        assert!(tab.contains(&"--workspace".to_string()));
+    }
+
+    #[test]
+    fn placement_for_maps_each_subcommand() {
+        assert_eq!(
+            placement_for(&crate::Invocation::Open),
+            Some(Placement::Split)
+        );
+        assert_eq!(
+            placement_for(&crate::Invocation::OpenTab),
+            Some(Placement::Tab)
+        );
+        assert_eq!(placement_for(&crate::Invocation::Ui), None);
+        assert_eq!(placement_for(&crate::Invocation::Reject(None)), None);
+    }
+
+    #[test]
+    fn report_output_follows_the_report() {
+        let with_error = Report {
+            warnings: vec!["w1".to_string(), "w2".to_string()],
+            outcome: Err("boom".to_string()),
+        };
+        assert_eq!(
+            report_output(&with_error),
+            (
+                vec!["w1".to_string(), "w2".to_string(), "boom".to_string()],
+                1
+            )
+        );
+
+        let with_warnings_ok = Report {
+            warnings: vec!["w1".to_string()],
+            outcome: Ok(()),
+        };
+        assert_eq!(
+            report_output(&with_warnings_ok),
+            (vec!["w1".to_string()], 0)
+        );
+
+        let empty = Report {
+            warnings: Vec::new(),
+            outcome: Ok(()),
+        };
+        assert_eq!(report_output(&empty), (Vec::new(), 0));
+    }
 }
