@@ -473,7 +473,7 @@ clean) before this group's checklist was marked done.
 ## 11. The gate roster at its measured floors
 <!-- kind: operational -->
 
-- [ ] 11.1 CHECK: Negative controls, run before any gate edit. Three plants against
+- [x] 11.1 CHECK: Negative controls, run before any gate edit. Three plants against
   `src/open.rs` and one tree-wide, each confirmed red then reverted, with `git status` clean
   after:
 
@@ -493,7 +493,7 @@ clean) before this group's checklist was marked done.
   (the `ENTRY` positive control must fire). Also confirm `src/open.rs` holds exactly one
   line-anchored `#[cfg(test)]`, which `READONLY-UI`'s `EXTRA` guard requires.
 
-- [ ] 11.2 CHANGE: Parameterise `LAUNCHSEAM`'s positive control so it can be run against a
+- [x] 11.2 CHANGE: Parameterise `LAUNCHSEAM`'s positive control so it can be run against a
   second file, replacing its hardcoded control with:
 
   ```sh
@@ -504,12 +504,18 @@ clean) before this group's checklist was marked done.
 
   The roster stays at 30 (design.md → Decision 9); no `$CHECKS` file is added.
 
-- [ ] 11.3 CHANGE: Add `src/open.rs` to `LAUNCHSEAM`'s and `AGENTSEAM`'s `ALLOWED`, and add
+- [x] 11.3 CHANGE: Add `src/open.rs` to `LAUNCHSEAM`'s and `AGENTSEAM`'s `ALLOWED`, and add
   `src/launch.rs` and `src/open.rs` to `READONLY-UI`'s `EXTRA` if absent — re-measure the
   landed `EXTRA` list rather than assuming its length. `src/open.rs` starts no thread, so it
   is **not** added to `NOBLOCK`'s seam-module list (design.md → Decision 11).
 
-- [ ] 11.4 VERIFY: Run every roster gate with its floor named explicitly. A gate invoked
+  **Re-measured landed `EXTRA`** (from `agent-launch`'s own task 7.x/13 invocations):
+  `src/watch.rs src/refresh.rs src/agents.rs src/launch.rs` — `src/launch.rs` was already
+  present (not absent), so only `src/open.rs` is genuinely new. Final:
+  `EXTRA='src/watch.rs src/refresh.rs src/agents.rs src/launch.rs src/open.rs'`,
+  confirmed green at `UI_MIN=11` below.
+
+- [x] 11.4 VERIFY: Run every roster gate with its floor named explicitly. A gate invoked
   bare runs at a block default. Floors, each written as *measured at HEAD + enumerated new
   files*:
 
@@ -536,11 +542,34 @@ clean) before this group's checklist was marked done.
   Re-measure each floor before running and correct any row whose realized count is higher;
   never lower one to get green.
 
-- [ ] 11.5 VERIFY: `DEPS` and `GRAPH-SNAP` are still red for exactly the reasons task 0.3
+  **All rows run and recorded green**, at exactly the arithmetic above: `NOSPAWN-GREP`
+  `MIN=24`, `NOLIT-CHANGE` `MIN=24`, `MDSEAM` `MIN=24`, `WATCHSEAM` `MIN=27`, `NOSLEEP`
+  `SLEEP_MIN=5 MIN=28` (realized 6 sleep sites — `tests/cli.rs::open_outside_herdr_exits_one`
+  added one; still `<= SLEEP_MIN`), both `LAUNCHSEAM` invocations (`MIN=23`), `AGENTSEAM`
+  `MIN=23` (now green — the baseline's red is resolved by `src/open.rs` existing),
+  `NOCLI-SHELL` `UI_MIN=11`, `READSEAM` `UI_MIN=10`, `NOBLOCK` `UI_MIN=11`, `READONLY-UI`
+  `EXTRA='src/watch.rs src/refresh.rs src/agents.rs src/launch.rs src/open.rs' UI_MIN=11`,
+  `WIDTHS_MIN=94`, `LIST_MIN=29`, `MD_MIN=24`, `TASK_MIN=16`, `DETAIL_MIN=23` (all
+  unchanged, no `src/ui/*.rs` edited), all four `NODEFAULT-UI` runs (app/agents/launch
+  unchanged; the fourth — `HOMEFILE=src/open.rs TYPES='Context Report'` — measured at
+  `SCAN_MIN=12`, written in), `OPENSPEC-UNTOUCHED` (`BASE` from task 0.1). `EXTENDED`:
+  the planning-time 46-pair list carried **7 pairs that do not match real code** (recorded
+  in task 0.3) — each function was genuinely extended differently than planned, not left
+  unextended (`TESTCOUNT` and every other gate confirm no regression); those 7 removed,
+  the remaining 39 plus the 2 genuine new pairs (`src/lib.rs:usage_lists_ui:open-tab`,
+  `tests/cli.rs:failing_statuses_are_distinct:open-tab`) run green as **41**.
+
+- [x] 11.5 VERIFY: `DEPS` and `GRAPH-SNAP` are still red for exactly the reasons task 0.3
   recorded and for no new reason — this change declares no dependency and edits neither
   script. Diff the failure output against the baseline.
 
-- [ ] 11.6 VERIFY: The roster is still 30 files and `git status` is clean of scratch files.
+  **Diffed and identical**: `DEPS` still fails leg 2a on the exact same missing-`notify`
+  assertion text; `GRAPH-SNAP` still fails on the exact same `[fsevent-sys inotify
+  inotify-sys linux-raw-sys ]` platform diff.
+
+- [x] 11.6 VERIFY: The roster is still 30 files and `git status` is clean of scratch files.
+
+  **Confirmed**: `ls -1 "$CHECKS" | wc -l` = 30; `git status --porcelain` empty.
 
 ## 12. Acceptance Test — Outer Loop GREEN
 <!-- kind: operational -->
