@@ -193,14 +193,14 @@
 ## 4. The pane matcher
 <!-- kind: behavior -->
 
-- [ ] 4.1 RED: Write failing tests `matches_label_workspace_and_cwd`,
+- [x] 4.1 RED: Write failing tests `matches_label_workspace_and_cwd`,
   `no_match_opens_instead`, `entry_without_a_pane_id_is_no_match`,
   `other_workspace_is_no_match`, `other_cwd_is_no_match`,
   `cwd_unknown_matches_on_label_and_workspace`, and `two_matches_take_the_first`. Fixtures
   are literal `herdr pane list` payloads in the measured envelope shape
   `{"id":"cli:pane:list","result":{"panes":[…],"type":"pane_list"}}`.
 
-- [ ] 4.2 GREEN: Implement `open::DASHBOARD_LABEL` (`"OpenSpec"`),
+- [x] 4.2 GREEN: Implement `open::DASHBOARD_LABEL` (`"OpenSpec"`),
   `open::DASHBOARD_ENTRYPOINT` (`"dashboard"`), `open::DASHBOARD_TAB_ENTRYPOINT`
   (`"dashboard-tab"`), and
   `open::existing_pane(listing: &str, workspace_id: &str, cwd: Option<&str>) -> Result<Option<String>, String>`.
@@ -208,9 +208,10 @@
   no string `pane_id` is skipped. `Err` carries a reason for output that is not JSON or
   carries no `result.panes` array; the caller degrades on it (design.md → Decision 4).
 
-- [ ] 4.3 REFACTOR: State whether the JSON navigation needed extracting; no change if not.
+- [x] 4.3 REFACTOR: No change — the JSON navigation is already a single small loop; nothing
+  to extract.
 
-- [ ] 4.4 Run the group tests — `cargo test --all-features --lib open::` — no regressions.
+- [x] 4.4 Run the group tests — `cargo test --all-features --lib open::` — no regressions.
 
 ## 5. The argument vectors and the two pure `main` decisions
 <!-- kind: behavior -->

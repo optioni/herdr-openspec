@@ -13,6 +13,8 @@
 //! `run_from_env` is the one-line production binding, on `cli::worker_cli_from_env`'s
 //! terms.
 
+use std::path::Path;
+
 /// The dashboard's pane title, and the matcher's only ownership signal — `herdr pane
 /// list` exposes no plugin ownership field. Both `[[panes]]` entries in
 /// `herdr-plugin.toml` carry this same title (design.md -> Decision 3).
@@ -83,6 +85,60 @@ pub fn context(env: &dyn Fn(&str) -> Option<String>) -> Result<Context, String> 
         workspace_cwd,
         focused_pane_id,
     })
+}
+
+/// Decide whether `listing` (a `herdr pane list` payload) names an existing dashboard
+/// pane for this workspace, and if so, its pane id. A listed pane counts when **all
+/// four** hold: it carries a string `pane_id`, its `label` equals [`DASHBOARD_LABEL`],
+/// its `workspace_id` equals `workspace_id`, and — when `cwd` is `Some` — its `cwd` is
+/// `std::path::Path`-equal to it (component-wise, no canonicalization: both strings
+/// originate from Herdr itself, so a `stat` would buy nothing). When `cwd` is `None` the
+/// cwd test is skipped rather than matching every pane. The first match in the list's
+/// own order wins. `Err` carries a reason when `listing` is not JSON or carries no
+/// `result.panes` array; the caller degrades on it rather than failing
+/// (`specs/pane-open/spec.md` -> Decision 4).
+pub fn existing_pane(
+    listing: &str,
+    workspace_id: &str,
+    cwd: Option<&str>,
+) -> Result<Option<String>, String> {
+    let value: serde_json::Value =
+        serde_json::from_str(listing).map_err(|e| format!("pane list payload is not valid JSON: {e}"))?;
+    let panes = value
+        .get("result")
+        .and_then(|r| r.get("panes"))
+        .and_then(|p| p.as_array())
+        .ok_or_else(|| "pane list payload has no \"result\".\"panes\" array".to_string())?;
+
+    for pane in panes {
+        let Some(obj) = pane.as_object() else {
+            continue;
+        };
+        let Some(pane_id) = obj.get("pane_id").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let Some(label) = obj.get("label").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if label != DASHBOARD_LABEL {
+            continue;
+        }
+        let Some(pane_workspace) = obj.get("workspace_id").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if pane_workspace != workspace_id {
+            continue;
+        }
+        if let Some(want_cwd) = cwd {
+            let pane_cwd = obj.get("cwd").and_then(|v| v.as_str());
+            match pane_cwd {
+                Some(pc) if Path::new(pc) == Path::new(want_cwd) => {}
+                _ => continue,
+            }
+        }
+        return Ok(Some(pane_id.to_string()));
+    }
+    Ok(None)
 }
 
 #[cfg(test)]
