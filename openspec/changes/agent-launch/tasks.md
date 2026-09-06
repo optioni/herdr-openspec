@@ -644,7 +644,7 @@ set; see design.md → Test Strategy.
 ## 3. `launch::decide`, the argument vectors, and `pane_id`
 <!-- kind: behavior -->
 
-- [ ] 3.1 RED: Write `launch::tests::decide::`'s seven tests — `an_unreachable_socket_makes_
+- [x] 3.1 RED: Write `launch::tests::decide::`'s seven tests — `an_unreachable_socket_makes_
       every_key_inert`, `no_change_means_no_launch_and_no_agent_means_no_focus`,
       `each_intent_carries_its_own_change_and_name`, `a_live_derived_name_is_refused`,
       `every_combination_is_total`, `decide_reads_nothing_but_its_arguments`, and
@@ -654,26 +654,26 @@ set; see design.md → Test Strategy.
       takes an `Option<&str>` and a `&[&str]` per design.md → Boundaries, and
       `MIN=23 sh $CHECKS/NOLIT-CHANGE.sh` is what catches the first.
 
-- [ ] 3.2 RED: Write `launch::tests::argv::`'s five — `split_args_are_exact`,
+- [x] 3.2 RED: Write `launch::tests::argv::`'s five — `split_args_are_exact`,
       `start_args_are_exact`, `prompt_args_are_exact`, `focus_args_are_exact`, and
       `a_non_utf8_repo_root_is_lossy` — and `launch::tests::prompt::`'s two,
       `each_intent_has_its_own_opsx_command` and `the_prompt_text_is_one_argument`,
       asserting the exact vectors design.md → Contracts gives, including the non-UTF-8 root's
       lossy rendering and the prompt text being one element containing exactly one space.
 
-- [ ] 3.3 RED: Write `launch::tests::pane_id::`'s three —
+- [x] 3.3 RED: Write `launch::tests::pane_id::`'s three —
       `a_well_formed_envelope_yields_the_pane_id`, `every_unusable_payload_is_an_error` (the
       eight-input sweep), and `an_error_envelope_is_reported_by_code_and_message`.
 
-- [ ] 3.4 GREEN: Implement `decide` in the order the spec fixes — reachability, focus, the
+- [x] 3.4 GREEN: Implement `decide` in the order the spec fixes — reachability, focus, the
       selection, the collision, then `Go` — plus the four argv builders, `prompt_text`, and
       `pane_id`.
 
-- [ ] 3.5 REFACTOR: Extract the derived-name call to one place beside `decide`, so
+- [x] 3.5 REFACTOR: Extract the derived-name call to one place beside `decide`, so
       `state::agent_name` is named once in the module — or record that the implementation
       already names it once.
 
-- [ ] 3.6 VERIFY: `testcount --lib 'launch::tests::decide::' 7`,
+- [x] 3.6 VERIFY: `testcount --lib 'launch::tests::decide::' 7`,
       `testcount --lib 'launch::tests::argv::' 5`, `testcount --lib 'launch::tests::prompt::' 2`,
       `testcount --lib 'launch::tests::pane_id::' 3`, then `MIN=23 sh $CHECKS/NOSPAWN-GREP.sh`,
       `MIN=23 sh $CHECKS/NOLIT-CHANGE.sh`, and `MIN=22 sh $CHECKS/LAUNCHSEAM.sh`. Commit.
