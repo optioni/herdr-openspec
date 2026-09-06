@@ -322,27 +322,27 @@
 ## 11. The coverage map and its checker
 <!-- kind: behavior -->
 
-- [ ] 11.1 RED: Write `tests/degraded_coverage.rs` with `every_table_row_has_a_proof`,
+- [x] 11.1 RED: Write `tests/degraded_coverage.rs` with `every_table_row_has_a_proof`,
   `every_row_carries_a_verdict`, and `an_empty_table_fails_the_floor`. RED at HEAD: neither the
   target nor `tests/degraded-coverage.toml` exists.
-- [ ] 11.2 GREEN: Write the parser (table between `## Degraded states` and `### No terminal is
+- [x] 11.2 GREEN: Write the parser (table between `## Degraded states` and `### No terminal is
   not a degraded state`, first pipe cell trimmed, header and separator skipped — the same parse
   as 1.1) and the six failure conditions in `specs/degraded-coverage/spec.md`. Condition 5
   checks the named function's **own body** for `TestBackend`, not its file: only three of the
   eleven files under `src/ui/` name it, and a file-level rule is both too coarse there and
   unsatisfiable for a proof belonging in `detail.rs` or `markdown.rs`.
-- [ ] 11.3 GREEN: Write `tests/degraded-coverage.toml` — one `[[row]]` per table row with
+- [x] 11.3 GREEN: Write `tests/degraded-coverage.toml` — one `[[row]]` per table row with
   `condition`, `tier` (`view` | `outer` | `unit` | `integration`), `proof`, `verdict`, `why`.
   Every `proof` name comes from a test that now exists.
-- [ ] 11.4 CHECK: Plant each of the six failure conditions in turn — an extra `SPEC.md` row; a
+- [x] 11.4 CHECK: Plant each of the six failure conditions in turn — an extra `SPEC.md` row; a
   bad `proof` identifier; a one-character reworded `condition`; a `view` tier pointed at a
   function in `src/changes.rs`; a `view` tier pointed at a non-rendering function *inside*
   `src/ui/view.rs`; a table cut to its header — confirm each fires with its own message, and
   remove each plant. Plants against `SPEC.md` are made in the working tree and reverted;
   `git diff --exit-code SPEC.md` afterwards is the proof none survived.
-- [ ] 11.5 CHECK: Plant a seventh — a `verdict` of `probably-fine` — and confirm
+- [x] 11.5 CHECK: Plant a seventh — a `verdict` of `probably-fine` — and confirm
   `every_row_carries_a_verdict` fires.
-- [ ] 11.6 Run `cargo test --all-features --test degraded_coverage` and `make check`. Commit.
+- [x] 11.6 Run `cargo test --all-features --test degraded_coverage` and `make check`. Commit.
 
 ## 12. Extract the standing gates into `scripts/gates/`
 <!-- kind: operational -->

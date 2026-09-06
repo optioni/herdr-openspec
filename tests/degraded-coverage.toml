@@ -1,0 +1,312 @@
+# The executable coverage map SPEC.md's "## Degraded states" table is bound to.
+# See openspec/changes/degraded-states/specs/degraded-coverage/spec.md for the full
+# contract, and openspec/changes/degraded-states/notes/audit.md for the narrative audit
+# each verdict and "why" here summarises.
+
+[[row]]
+condition = "No `openspec/` found while walking up"
+tier = "view"
+proof = ["no_repository_names_the_directory_searched"]
+verdict = "confirmed"
+why = "the list region renders the empty state naming the directory searched, via render_at"
+
+[[row]]
+condition = "`openspec` binary not found"
+tier = "view"
+proof = ["file_mode_badge_is_dim_after_the_label", "badge_drops_whole_below_eighteen_columns"]
+verdict = "implemented"
+why = "the header renders a dim file mode badge, driven through render_at at both widths"
+
+[[row]]
+condition = "Schema unknown to the CLI"
+tier = "unit"
+proof = ["a_cli_rejected_schema_names_its_reason_per_change"]
+verdict = "unproven"
+why = "a real FakeCli-driven from_cli merge falls back per change and content_lines renders the reason"
+
+[[row]]
+condition = "Schema not vendored (no `openspec/schemas/<name>/schema.yaml` locally)"
+tier = "unit"
+proof = ["an_unusable_schema_renders_no_artifacts"]
+verdict = "unproven"
+why = "a real not-vendored schema, read through changes::from_files, empties tab_bar"
+
+[[row]]
+condition = "Schema unreadable or invalid (I/O error, or bytes that are not a usable schema)"
+tier = "unit"
+proof = ["an_unusable_schema_renders_no_artifacts"]
+verdict = "unproven"
+why = "a real unparseable schema.yaml, read through changes::from_files, empties tab_bar"
+
+[[row]]
+condition = "Schema loads with no tasks artifact (`apply.tracks` matches nothing, and no artifact has id `tasks`)"
+tier = "unit"
+proof = ["no_tasks_artifact_renders_every_tab_as_markdown"]
+verdict = "unproven"
+why = "every tab dispatches to markdown, never the checklist grammar, and progress falls back to tasks.md"
+
+[[row]]
+condition = "No active changes"
+tier = "view"
+proof = ["a_repository_with_no_changes_says_so"]
+verdict = "confirmed"
+why = "the list region's empty state, rendered through render_at"
+
+[[row]]
+condition = "A `/` filter matches no change"
+tier = "view"
+proof = ["a_query_matching_nothing_names_itself"]
+verdict = "confirmed"
+why = "the filter's no-match rows, rendered through render_at"
+
+[[row]]
+condition = "Artifact file missing"
+tier = "view"
+proof = ["a_missing_artifact_still_shows_its_tab_and_reads_no_content_yet"]
+verdict = "confirmed"
+why = "the detail region's No content yet state, rendered through render_at"
+
+[[row]]
+condition = "An artifact file exists and cannot be read (permission error, I/O error)"
+tier = "view"
+proof = ["a_read_failure_is_named_above_the_content_at_both_widths"]
+verdict = "confirmed"
+why = "the detail region's leading problem line, rendered through render_at"
+
+[[row]]
+condition = "No change is selected (an empty visible list, or a `/` filter matching none)"
+tier = "view"
+proof = ["an_empty_visible_list_leaves_the_whole_detail_interior_blank"]
+verdict = "confirmed"
+why = "the whole detail interior stays blank, rendered through render_at"
+
+[[row]]
+condition = "Markdown source holds a construct the parser does not model (a table, a footnote, strikethrough, a task-list item), on a tab **other** than the tracked-tasks one"
+tier = "unit"
+proof = ["unmodelled_constructs_render_as_source"]
+verdict = "unproven"
+why = "ui::markdown::lines renders each unmodelled construct as literal source, one line per source line"
+
+[[row]]
+condition = "A tasks file exists and yields no task **items**"
+tier = "view"
+proof = ["prose_only_reads_no_tasks_yet"]
+verdict = "confirmed"
+why = "the tracked-tasks tab's No tasks yet state, rendered through render_at"
+
+[[row]]
+condition = "A marked tab's artifact resolves to no file while the change's `progress` is non-zero (the `tasks.md` fallback above counted a file the artifact itself did not)"
+tier = "view"
+proof = ["missing_tasks_artifact_no_content_yet"]
+verdict = "confirmed"
+why = "the header's counted pair beside the tab's own No content yet, rendered through render_at"
+
+[[row]]
+condition = "`openspec/changes/` or its `archive/` exists and cannot be read"
+tier = "view"
+proof = ["repository_problems_are_named_above_the_rows"]
+verdict = "confirmed"
+why = "the list's leading problem row naming the unreadable directory, rendered through render_at"
+
+[[row]]
+condition = "An artifact's `generates` pattern falls outside the file path's supported glob subset"
+tier = "unit"
+proof = ["an_unsupported_glob_names_its_reason_and_spares_the_others"]
+verdict = "unproven"
+why = "a real unsupported glob, read through changes::from_files, empties one artifact and names why"
+
+[[row]]
+condition = "A tasks file exists but cannot be read (a directory where a file was expected, a permission error, an I/O error, or invalid UTF-8)"
+tier = "unit"
+proof = ["an_unreadable_tasks_file_is_zero_with_a_named_reason"]
+verdict = "unproven"
+why = "a real unreadable tasks.md (directory and invalid-UTF-8 fixtures), read through changes::from_files"
+
+[[row]]
+condition = "Herdr socket unreachable"
+tier = "view"
+proof = ["an_unreachable_socket_renders_the_agentless_pane"]
+verdict = "spec-corrected"
+why = "the pane renders identically whether AgentSnapshot::problem is Some or None, via render_at"
+
+[[row]]
+condition = "A launch's `pane split` call fails"
+tier = "outer"
+proof = ["every_launch_failure_renders_as_a_leading_row"]
+verdict = "unproven"
+why = "a real run_wired run against a scratch herdr failing at pane split, both widths"
+
+[[row]]
+condition = "A launch's `agent start` call fails"
+tier = "outer"
+proof = ["every_launch_failure_renders_as_a_leading_row"]
+verdict = "unproven"
+why = "a real run_wired run against a scratch herdr failing at agent start, both widths"
+
+[[row]]
+condition = "A launch's `agent prompt` call fails"
+tier = "outer"
+proof = ["every_launch_failure_renders_as_a_leading_row"]
+verdict = "unproven"
+why = "a real run_wired run against a scratch herdr failing at agent prompt, both widths"
+
+[[row]]
+condition = "A launch's derived agent name is already live in the session"
+tier = "outer"
+proof = ["every_launch_failure_renders_as_a_leading_row"]
+verdict = "unproven"
+why = "a real run_wired run refused before any Herdr call, the sentence asserted in full at 120 columns"
+
+[[row]]
+condition = "`state::record` fails after a successful `agent start`"
+tier = "outer"
+proof = ["a_success_clears_both_entries", "every_launch_failure_renders_as_a_leading_row"]
+verdict = "repaired"
+why = "openspec/changes/archive/2026-09-06-agent-launch should have shipped this: Outcome::problems now accumulates both the record and prompt failures, proved through run_wired and run_loop"
+
+[[row]]
+condition = "`g` on a change with no attributed agent"
+tier = "outer"
+proof = ["g_with_no_agent_renders_the_same_buffer"]
+verdict = "unproven"
+why = "a real run_wired run pressing g on an unattributed change renders the identical buffer, with an empty argv log"
+
+[[row]]
+condition = "A `pane split` payload is not the measured envelope (a Herdr older than the manifest's `min_herdr_version` floor, `0.7.0`, might return one)"
+tier = "outer"
+proof = ["every_launch_failure_renders_as_a_leading_row"]
+verdict = "unproven"
+why = "a real run_wired run against a scratch herdr returning a malformed pane-split payload"
+
+[[row]]
+condition = "Pane narrower than 100 columns"
+tier = "view"
+proof = ["wide_draws_two_regions_divided_at_40"]
+verdict = "confirmed"
+why = "the single-column/two-region layout switch, rendered through render_at"
+
+[[row]]
+condition = "`config.toml` malformed, unreadable, or a key of the wrong type"
+tier = "outer"
+proof = ["config_fallback_renders_as_a_leading_problem_row"]
+verdict = "unproven"
+why = "a real run_wired run with Config::problems set renders the leading problem row"
+
+[[row]]
+condition = "`agent-names.toml` unusable (malformed, unreadable, or an entry Herdr would reject)"
+tier = "unit"
+proof = ["reading_an_unusable_mapping_writes_nothing", "recording_drops_what_the_parse_could_not_recover", "recording_over_a_clean_mapping_preserves_every_entry"]
+verdict = "spec-corrected"
+why = "read never writes; record rewrites from the entries the parse recovered alone, dropping what it could not"
+
+[[row]]
+condition = "A live agent's `cwd` is absent, or outside the resolved repository root"
+tier = "unit"
+proof = ["out_of_scope_and_worktree_agents_are_invisible"]
+verdict = "confirmed"
+why = "rows() equality proves an absent or foreign cwd badges and counts nothing"
+
+[[row]]
+condition = "An agent works in a **linked worktree** of this repository"
+tier = "unit"
+proof = ["out_of_scope_and_worktree_agents_are_invisible"]
+verdict = "unproven"
+why = "rows() equality proves a linked-worktree-shaped cwd fails the same containment check as row 29"
+
+[[row]]
+condition = "A configured `openspec_bin` that does not name a usable binary"
+tier = "outer"
+proof = ["unusable_openspec_bin_renders_as_a_problem_row"]
+verdict = "unproven"
+why = "a real run_wired run with an unusable configured openspec_bin renders the leading problem row"
+
+[[row]]
+condition = "A schema declares the same artifact id at two positions"
+tier = "unit"
+proof = ["a_duplicate_artifact_id_parses_and_renders"]
+verdict = "unproven"
+why = "a real duplicate-id schema, read through changes::from_files and schema::parse, stays two addressable tabs"
+
+[[row]]
+condition = "`openspec list --json` reports a repository root other than the one this plugin resolved"
+tier = "outer"
+proof = ["a_failed_cli_cycle_keeps_the_file_numbers"]
+verdict = "unproven"
+why = "a real run_wired run against a scratch openspec reporting a disagreeing root keeps the file-sourced numbers"
+
+[[row]]
+condition = "An `openspec` command exits non-zero"
+tier = "outer"
+proof = ["a_failed_cli_cycle_keeps_the_file_numbers"]
+verdict = "unproven"
+why = "a real run_wired run against a scratch openspec exiting non-zero keeps the file-sourced numbers"
+
+[[row]]
+condition = "A `herdr agent list` call exits non-zero, or the program cannot be started at all"
+tier = "unit"
+proof = ["every_unreachable_path_yields_no_agents"]
+verdict = "confirmed"
+why = "poll_once maps every failing HerdrCli path to an empty, unreachable snapshot"
+
+[[row]]
+condition = "The filesystem watcher will not start (`notify` refuses the watch, or the repository root cannot be watched)"
+tier = "outer"
+proof = ["a_watch_failure_keeps_the_loop_drawing"]
+verdict = "spec-corrected"
+why = "a real unwatchable root's reason renders as a leading row and the loop keeps drawing, driven through run_loop with a real TestBackend"
+
+[[row]]
+condition = "`openspec/` is removed while the watcher runs"
+tier = "outer"
+proof = ["a_watch_failure_keeps_the_loop_drawing"]
+verdict = "spec-corrected"
+why = "a real run_wired run with openspec/ removed mid-run keeps the loop drawing"
+
+[[row]]
+condition = "A CLI cycle fails after the worker already sent its file-sourced result"
+tier = "outer"
+proof = ["a_failed_cli_cycle_keeps_the_file_numbers"]
+verdict = "unproven"
+why = "a real run_wired run keeps the file-sourced result after a later failing CLI cycle"
+
+[[row]]
+condition = "A touched path is classified to the wrong change, or conservatively to every change"
+tier = "unit"
+proof = ["a_mixed_batch_unions_its_classifications"]
+verdict = "confirmed"
+why = "watch::classify's own unit proof of the touch-classification rule"
+
+[[row]]
+condition = "`open`/`open-tab` invoked with no Herdr context at all (no workspace id)"
+tier = "integration"
+proof = ["open_outside_herdr_exits_one"]
+verdict = "confirmed"
+why = "the real binary, spawned with no HERDR_WORKSPACE_ID, exits 1 with an empty Herdr argv log"
+
+[[row]]
+condition = "`open`/`open-tab`'s `pane list` call fails or its payload is unparseable"
+tier = "unit"
+proof = ["listing_failure_warns_and_still_opens", "listing_unparseable_warns_and_still_opens"]
+verdict = "confirmed"
+why = "open::run's own unit proof that a failed or unparseable pane list still opens the pane"
+
+[[row]]
+condition = "`open`/`open-tab`'s `plugin pane focus` call fails with a usage error (code 2)"
+tier = "unit"
+proof = ["focus_usage_error_warns_and_opens_once"]
+verdict = "confirmed"
+why = "open::run's own unit proof that a usage-error focus warns and still opens once"
+
+[[row]]
+condition = "`open`/`open-tab`'s `plugin pane focus` call fails with a domain error, or `plugin pane open` itself fails"
+tier = "unit"
+proof = ["focus_domain_error_stops_and_opens_nothing"]
+verdict = "spec-corrected"
+why = "herdr_reason's own formatted prefix, not Herdr's raw message verbatim, is what reaches stderr"
+
+[[row]]
+condition = "The dashboard process opened by `open`/`open-tab` finds no workspace cwd in its own injected Herdr context (`ui::startup_cwd` returns `None`)"
+tier = "unit"
+proof = ["prefers_the_workspace_cwd_and_falls_back_when_there_is_none", "a_herdr_context_with_no_workspace_cwd_is_the_fallback_case_not_a_failure"]
+verdict = "confirmed"
+why = "startup_dir's own unit tests drive both arms of the fallback decision directly"

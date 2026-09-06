@@ -158,3 +158,42 @@ tests), `cargo fmt --all -- --check` and `cargo clippy --all-targets --all-featu
 warnings` clean, and `git status --porcelain` shows only the five files this group's real
 changes touch: `src/open.rs`, `src/state.rs`, `src/ui/detail.rs`, `src/ui/markdown.rs`,
 `tests/cli.rs`.
+
+## Group 11 — the coverage map's own six failure conditions, plus the seventh (task 11.4/11.5)
+
+Each plant is a one-line edit to `SPEC.md` or `tests/degraded-coverage.toml` (both checked
+in), run against `every_table_row_has_a_proof`, observed red, then reverted (`diff` against
+a pre-plant backup of each file empty afterwards in every case).
+
+1. **Uncovered row** — added `| A planted condition | A planted behaviour |` to `SPEC.md`'s
+   table. Red: `SPEC.md row "A planted condition" has no tests/degraded-coverage.toml
+   [[row]] entry`.
+2. **Reworded condition (orphan)** — appended `X` to one `[[row]]`'s `condition` in the
+   TOML. Red: the same "has no ... entry" message, on the original (now-unmatched)
+   condition — rewordemding a condition necessarily uncovers the original row, which is
+   exactly the "the same happens when reworded" case the spec names.
+3. **Duplicate condition** — copied one `[[row]]`'s `condition` onto a different row. Red:
+   `tests/degraded-coverage.toml has two [[row]] entries with the same condition`, a message
+   distinct from cases 1/2.
+4. **Bad proof identifier** — changed one `proof` entry to `"a_function_that_does_not_exist"`.
+   Red: `proof "a_function_that_does_not_exist" is not defined as "fn
+   a_function_that_does_not_exist(" anywhere under src/ or tests/`.
+5a. **`view` tier pointed at a non-rendering unit test in `src/changes.rs`** —
+   `a_fully_written_active_change_becomes_one_value`. Red: `tier "view" names
+   "a_fully_written_active_change_becomes_one_value", whose body renders nothing`.
+5b. **`view` tier pointed at a non-rendering helper *inside* `src/ui/view.rs`** — `cols`, a
+   plain string-slicing helper in the same file real view tests live in. Red: the identical
+   message, proving the check is function-granular, not file-granular (file 5a and 5b share
+   one condition number in `specs/degraded-coverage/spec.md`, both counted here).
+6. **Table cut to header only** — replaced `SPEC.md`'s whole degraded-states section with
+   just the heading, intro sentence, header, and separator row. Red: `SPEC.md's
+   degraded-states table holds 0 rows, expected at least 44`.
+7. **A seventh verdict, `probably-fine`** — not a checked-in-file plant: `every_row_carries_a_
+   verdict` mutates an in-memory copy of the parsed rows and re-runs `check_coverage`
+   against the mutated TOML text, asserting the result is `Err` — a permanent, self-contained
+   proof rather than a transient edit-run-revert cycle, since the mutation never touches the
+   checked-in file at all.
+
+All six file-level plants reverted; `cargo test --all-features --test degraded_coverage`
+green afterwards (3 tests), `git status --porcelain` shows `tests/degraded-coverage.toml`
+and `tests/degraded_coverage.rs` as the only new (untracked) files this group adds.
