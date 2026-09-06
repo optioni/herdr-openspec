@@ -14,11 +14,15 @@ pub mod view;
 
 use std::io::IsTerminal;
 use std::path::Path;
+use std::time::Duration;
+
+use ratatui::Terminal;
+use ratatui::backend::Backend;
 
 use crate::config::Config;
-use crate::ui::app::{Dashboard, Detail, Route};
+use crate::ui::app::{ArtifactReader, Dashboard, Detail, Route};
 use crate::ui::driver::{LoopError, TICK};
-use crate::ui::event::CrosstermEvents;
+use crate::ui::event::{CrosstermEvents, EventSource};
 use crate::ui::terminal::{CrosstermOps, TerminalError, TerminalGuard, TerminalOps};
 
 /// Why the dashboard failed to start.
@@ -72,49 +76,101 @@ pub fn enter_if_terminal(
     TerminalGuard::enter(ops).map_err(StartError::Terminal)
 }
 
-/// Start the dashboard: refuse without a terminal, install the panic hook,
-/// load configuration and startup state, and run the event loop to
-/// completion. Straight-line wiring with no branch of its own beyond `?`
-/// and the live tier's two wiring lines below.
+/// This pane's starting point: the working directory to search from, the
+/// loaded configuration, and the `herdr` program to poll — a parameter
+/// rather than the literal `"herdr"`, precisely so a test drives
+/// [`run_wired`] against a scratch `#!/bin/sh` program. Bundled into one
+/// struct for cohesion, the same way [`driver::Live`] bundles the loop's
+/// three collaborators: `run_wired` would otherwise take seven parameters,
+/// clippy's `too_many_arguments` threshold exactly.
+pub struct Startup<'a> {
+    pub cwd: &'a Path,
+    pub config: &'a Config,
+    pub herdr: &'a Path,
+}
+
+/// The live tier's three collaborators, plus any problem folded in while
+/// starting them (a watcher that would not start, for instance) —
+/// everything [`start_collaborators`] produces for [`run_wired`] to wire
+/// into a [`driver::Live`].
+pub struct Collaborators {
+    pub fs: Box<dyn crate::watch::FsEvents>,
+    pub refresher: Box<dyn crate::refresh::Refresher>,
+    pub agents: Box<dyn crate::agents::AgentPoll>,
+    pub problems: Vec<String>,
+}
+
+/// Start the live tier's collaborators for `repo`. The watcher and the
+/// worker are about a repository, and are the inert doubles when none was
+/// found; the poller is about the Herdr session and is unrelated to any
+/// repository.
 ///
-/// `live-refresh`'s two new wiring lines construct the real watcher and the
-/// real worker when a repository was found, and the inert doubles when it
-/// was not — the same "no repository, no external program, costs nothing"
-/// shape `watch::start`/`crate::refresh::start` already implement. Neither
-/// line names the seam the worker reaches the external program through:
-/// the worker's handle comes from `cli::worker_cli_from_env`, whose own
-/// signature carries that type so this file never has to — the mechanical
-/// reason the shell-confinement check stays satisfied while the worker is
-/// still wired to a real binary. A watcher that would not start folds its
-/// reason into `dashboard.refresh.problems` — the pane's only reporting
-/// channel for a live-tier degradation.
+/// Group 1 stub: the poller is `agents::none()` here, hardcoded rather than
+/// reaching the real seam — group 10 replaces it with
+/// `agents::start(cli::agent_cli_via(herdr))`, started unconditionally.
+pub fn start_collaborators(repo: Option<&Path>, config: &Config, _herdr: &Path) -> Collaborators {
+    let (fs, problems) = match repo {
+        Some(root) => crate::watch::start(root),
+        None => (crate::watch::none(), Vec::new()),
+    };
+    let refresher = crate::refresh::start(
+        repo,
+        crate::cli::worker_cli_from_env(config),
+        config.archived_count,
+    );
+    let agents = crate::agents::none();
+    Collaborators {
+        fs,
+        refresher,
+        agents,
+        problems,
+    }
+}
+
+/// Everything `run` does once a terminal exists: load startup state, start
+/// the live tier's collaborators, fold any starting problem into
+/// `dashboard.refresh.problems`, build the loop's `Live`, and run it to
+/// completion — returning the final `Dashboard` so a test can assert on
+/// state the frame does not show.
+pub fn run_wired<B: Backend, E: EventSource>(
+    terminal: &mut Terminal<B>,
+    events: &mut E,
+    startup: &Startup<'_>,
+    read: ArtifactReader<'_>,
+    tick: Duration,
+) -> Result<Dashboard, StartError> {
+    let mut dashboard = load(startup.cwd, startup.config);
+    let mut collaborators =
+        start_collaborators(dashboard.repo.as_deref(), startup.config, startup.herdr);
+    dashboard.refresh.problems = collaborators.problems;
+    let mut live = crate::ui::driver::Live {
+        fs: &mut *collaborators.fs,
+        refresher: &mut *collaborators.refresher,
+        agents: &mut *collaborators.agents,
+    };
+    driver::run_loop(terminal, &mut dashboard, events, &mut live, read, tick)?;
+    Ok(dashboard)
+}
+
+/// Start the dashboard: refuse without a terminal, install the panic hook,
+/// then hand everything that can be miswired to [`run_wired`], which a test
+/// drives. Holds no branch and no loop of its own beyond `?` — see the
+/// `WIRED` check.
 pub fn run() -> Result<(), StartError> {
     let _guard = enter_if_terminal(std::io::stdout().is_terminal(), &CrosstermOps)?;
     terminal::install_panic_hook();
     let config = crate::config::load_from_env();
     let cwd = std::env::current_dir()?;
-    let mut dashboard = load(&cwd, &config);
-    let mut term =
-        ratatui::Terminal::new(ratatui::backend::CrosstermBackend::new(std::io::stdout()))?;
-    let (mut fs, watch_problems) = match dashboard.repo.as_deref() {
-        Some(root) => crate::watch::start(root),
-        None => (crate::watch::none(), Vec::new()),
+    let mut term = Terminal::new(ratatui::backend::CrosstermBackend::new(std::io::stdout()))?;
+    let startup = Startup {
+        cwd: &cwd,
+        config: &config,
+        herdr: Path::new(crate::cli::HERDR_PROGRAM),
     };
-    dashboard.refresh.problems = watch_problems;
-    let mut refresher = crate::refresh::start(
-        dashboard.repo.as_deref(),
-        crate::cli::worker_cli_from_env(&config),
-        config.archived_count,
-    );
-    let mut live = crate::ui::driver::Live {
-        fs: &mut *fs,
-        refresher: &mut *refresher,
-    };
-    driver::run_loop(
+    run_wired(
         &mut term,
-        &mut dashboard,
         &mut CrosstermEvents,
-        &mut live,
+        &startup,
         &read_artifact,
         TICK,
     )?;
@@ -164,6 +220,11 @@ pub fn load(start: &Path, config: &Config) -> Dashboard {
                     reload: false,
                     problems: Vec::new(),
                 },
+                agents: crate::agents::AgentSnapshot {
+                    agents: Vec::new(),
+                    reachable: false,
+                    problem: None,
+                },
             }
         }
         crate::resolve::RepoSearch::NotFound { searched_from } => Dashboard {
@@ -188,6 +249,11 @@ pub fn load(start: &Path, config: &Config) -> Dashboard {
                 requested: true,
                 reload: false,
                 problems: Vec::new(),
+            },
+            agents: crate::agents::AgentSnapshot {
+                agents: Vec::new(),
+                reachable: false,
+                problem: None,
             },
         },
     }
@@ -274,6 +340,11 @@ mod tests {
                     reload: false,
                     problems: Vec::new(),
                 },
+                agents: crate::agents::AgentSnapshot {
+                    agents: Vec::new(),
+                    reachable: false,
+                    problem: None,
+                },
             }
         }
 
@@ -328,9 +399,11 @@ mod tests {
 
                 let mut fs = crate::watch::none();
                 let mut refresher = crate::refresh::none();
+                let mut agents = crate::agents::none();
                 let mut live = crate::ui::driver::Live {
                     fs: &mut *fs,
                     refresher: &mut *refresher,
+                    agents: &mut *agents,
                 };
                 let summary = run_loop(
                     &mut terminal,
@@ -423,6 +496,11 @@ mod tests {
                         reload: false,
                         problems: Vec::new(),
                     },
+                    agents: crate::agents::AgentSnapshot {
+                        agents: Vec::new(),
+                        reachable: false,
+                        problem: None,
+                    },
                 }
             };
 
@@ -456,9 +534,11 @@ mod tests {
 
                 let mut fs = crate::watch::none();
                 let mut refresher = crate::refresh::none();
+                let mut agents = crate::agents::none();
                 let mut live = crate::ui::driver::Live {
                     fs: &mut *fs,
                     refresher: &mut *refresher,
+                    agents: &mut *agents,
                 };
                 run_loop(
                     &mut terminal,
@@ -611,9 +691,11 @@ apply:
                 ]);
                 let mut fs = crate::watch::none();
                 let mut refresher = crate::refresh::none();
+                let mut agents = crate::agents::none();
                 let mut live = crate::ui::driver::Live {
                     fs: &mut *fs,
                     refresher: &mut *refresher,
+                    agents: &mut *agents,
                 };
                 run_loop(
                     &mut terminal,
@@ -698,9 +780,11 @@ apply:
 
                 let mut fs = crate::watch::none();
                 let mut refresher = crate::refresh::none();
+                let mut agents = crate::agents::none();
                 let mut live = crate::ui::driver::Live {
                     fs: &mut *fs,
                     refresher: &mut *refresher,
+                    agents: &mut *agents,
                 };
                 run_loop(
                     &mut terminal,
@@ -1206,7 +1290,7 @@ apply:
         use crate::testutil::{
             RecordingRefresher, Script, ScriptedFs, press, row_text, snapshot, write_with_mode,
         };
-        use crate::ui::driver::{Live, LoopSummary, run_loop};
+        use crate::ui::driver::{LoopSummary, run_loop};
 
         fn vendor_tdd_schema(repo: &std::path::Path) {
             let yaml = "\
@@ -1271,9 +1355,11 @@ apply:
                 )))]);
                 let mut fs = ScriptedFs::new(Vec::new(), Vec::new());
                 let mut refresher = RecordingRefresher::new(Vec::new());
-                let mut live = Live {
+                let mut agents = crate::agents::none();
+                let mut live = crate::ui::driver::Live {
                     fs: &mut fs,
                     refresher: &mut refresher,
+                    agents: &mut *agents,
                 };
 
                 let summary = run_loop(
@@ -1327,9 +1413,11 @@ apply:
                     Some(RefreshResult::Files(files_set)),
                     Some(RefreshResult::Merged(merged_set)),
                 ]);
-                let mut live2 = Live {
+                let mut agents2 = crate::agents::none();
+                let mut live2 = crate::ui::driver::Live {
                     fs: &mut fs2,
                     refresher: &mut refresher2,
+                    agents: &mut *agents2,
                 };
                 let mut events2 = crate::testutil::Script::new(vec![
                     Ok(None),
@@ -1458,9 +1546,11 @@ apply:
                 // what makes the exact equality below sound.
                 let mut fs = ScriptedFs::new(Vec::new(), Vec::new());
                 let mut refresher = RecordingRefresher::new(Vec::new());
-                let mut live = Live {
+                let mut agents = crate::agents::none();
+                let mut live = crate::ui::driver::Live {
                     fs: &mut fs,
                     refresher: &mut refresher,
+                    agents: &mut *agents,
                 };
 
                 run_loop(
@@ -1500,9 +1590,11 @@ apply:
                     "width {width}: a real watch must start on a real directory: {problems:?}"
                 );
                 let mut refresher = RecordingRefresher::new(Vec::new());
-                let mut live = Live {
+                let mut agents = crate::agents::none();
+                let mut live = crate::ui::driver::Live {
                     fs: &mut *fs,
                     refresher: &mut refresher,
+                    agents: &mut *agents,
                 };
 
                 let mut events = Script::new(key_script());

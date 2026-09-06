@@ -373,7 +373,7 @@ green unchanged, and a failure there is a real finding.
 ## 0. Baseline, checks, and the scratchpad
 <!-- kind: operational -->
 
-- [ ] 0.1 CHECK: Record the starting state by **measuring**, never by copying a number from
+- [x] 0.1 CHECK: Record the starting state by **measuring**, never by copying a number from
       this file. `export BASE=$(git rev-parse HEAD)`; then run each command in the "Measured
       at planning time" table and record its output verbatim.
       **Red when:** `BASE` is empty or not a commit, or any measured figure differs from the
@@ -381,13 +381,13 @@ green unchanged, and a failure there is a real finding.
       exported variable: re-exporting from the current `HEAD` after a fresh shell silently puts
       this change's own commits inside the baseline.
 
-- [ ] 0.2 CHECK: Extract all twenty-eight files to `$CHECKS`, then prove the extraction landed.
+- [x] 0.2 CHECK: Extract all twenty-eight files to `$CHECKS`, then prove the extraction landed.
       For each of the twenty-six extracted from an archived tasks file, extract the same block
       a second time by an independent route and `diff` the two; every diff must be empty.
       **Red when:** `ls -1 "$CHECKS" | wc -l` is not 28, any diff is non-empty, or
       `$CHECKS/GATE-MECH1.py` is absent because the extractor read only each block's first line.
 
-- [ ] 0.3 CHECK: Run all twenty-seven gates against the unmodified tree at `BASE` and record
+- [x] 0.3 CHECK: Run all twenty-seven gates against the unmodified tree at `BASE` and record
       each exit status and its first line of output verbatim.
       **Expected:** `AGENTSEAM` red with `src/agents.rs missing - the subject is gone`; `WIRED`
       red with `positive control - src/cli.rs defines no 'pub fn agent_cli_via('`;
@@ -395,13 +395,21 @@ green unchanged, and a failure there is a real finding.
       at its **landed** invocation. A *different* failure message from any of the three is a
       defect in the block, not the expected guard, and is fixed here.
 
-- [ ] 0.4 CHANGE: Apply the four edits above to `NOBLOCK.sh`, `NODEFAULT-UI.sh`, `NOSLEEP.sh`,
+- [x] 0.4 CHANGE: Apply the four edits above to `NOBLOCK.sh`, `NODEFAULT-UI.sh`, `NOSLEEP.sh`,
       and `OPENSPEC-UNTOUCHED.sh` by exact string replacement, printing each resulting `diff`
       before running. Then re-run all four at their landed invocations.
       **Expected:** `NOBLOCK` red with `src/agents.rs missing - leg 3 has a third seam module
-      to sweep`; the other three green.
+      to sweep`; `NODEFAULT-UI` and `OPENSPEC-UNTOUCHED` green.
+      **Task-file correction (found during implementation):** `NOSLEEP` is **also** red here,
+      with `NOSLEEP FAIL (leg 2b): src/agents.rs missing` — its own edit adds `src/agents.rs`
+      to leg 2b's `for f in …; do [ -f "$f" ] || fail "$f missing"` loop, the same
+      existence-guard shape `NOBLOCK`'s edit adds, and that guard fires for the same reason
+      `NOBLOCK`'s does: the file does not exist until task 1.2. The original "the other three
+      green" was written without accounting for that guard; it is a task-file bookkeeping
+      correction, not a behavior or contract change, and does not affect `OPENSPEC-UNTOUCHED`,
+      `git status --porcelain` outside `$CHECKS`, or any other verification.
 
-- [ ] 0.5 CHECK: Prove `NODEFAULT-UI`'s repair actually repaired it. Plant
+- [x] 0.5 CHECK: Prove `NODEFAULT-UI`'s repair actually repaired it. Plant
       `fn zz(d: Dashboard) -> Dashboard { Dashboard {\n quit: true,\n ..d\n} }` at the end of
       `src/ui/app.rs`'s production slice, run the edited check, and record exit **1**; run the
       **unedited** extraction against the same plant and record exit **0**; remove the plant and
@@ -409,13 +417,13 @@ green unchanged, and a failure there is a real finding.
       **Red when:** the edited check exits 0 under the plant, or the unedited one exits 1 —
       either means the defect design.md → Decisions 12 describes is not the one that was there.
 
-- [ ] 0.6 CHECK: Prove `OPENSPEC-UNTOUCHED`'s repair is not a widening. Plant an empty
+- [x] 0.6 CHECK: Prove `OPENSPEC-UNTOUCHED`'s repair is not a widening. Plant an empty
       `openspec/specs/STRAY.tmp`, run the edited check and record exit **1** naming that path;
       remove it; then run with `CHANGE=nope` and record exit **1** naming the vacuous exclusion.
       **Red when:** either plant is green — the exclusion has been widened past this change's own
       directory.
 
-- [ ] 0.7 VERIFY: `git status --porcelain` shows no change under `openspec/` outside
+- [x] 0.7 VERIFY: `git status --porcelain` shows no change under `openspec/` outside
       `openspec/changes/agent-polling/`, and `BASE=$BASE sh $CHECKS/OPENSPEC-UNTOUCHED.sh` is
       green. Commit nothing in this group — it writes only to `$CHECKS`.
 
@@ -425,7 +433,7 @@ green unchanged, and a failure there is a real finding.
 Structure only: inert signatures, no behaviour. The evidence is that the 752 landed tests stay
 green while the tree grows the API groups 2 to 10 fill in.
 
-- [ ] 1.1 CHARACTERIZE: Run `. $CHECKS/TESTCOUNT.sh; testcount --lib '' 752` and record the
+- [x] 1.1 CHARACTERIZE: Run `. $CHECKS/TESTCOUNT.sh; testcount --lib '' 752` and record the
       count, so the 752 landed tests are green before any file is touched.
       **This characterization deliberately does not cover `ui::run`**, which task 1.5 splits:
       the landed suite never drives it, which is precisely why `live-refresh` shipped it
@@ -433,7 +441,7 @@ green while the tree grows the API groups 2 to 10 fill in.
       are red until group 10 — so 1.8's green `make check` is evidence about the other nine
       files this group touches, and not about the split.
 
-- [ ] 1.2 REFACTOR: Add `pub mod agents;` to `src/lib.rs` and create `src/agents.rs` with the
+- [x] 1.2 REFACTOR: Add `pub mod agents;` to `src/lib.rs` and create `src/agents.rs` with the
       full shape from design.md → Contracts: `POLL_INTERVAL`, `AgentStatus`, `Agent`, `Listed`,
       `AgentSnapshot`, `parse_list` returning `Err("not implemented")`, `poll_once` returning a
       constant `AgentSnapshot { agents: vec![], reachable: true, problem: None }` **whatever the
@@ -443,22 +451,22 @@ green while the tree grows the API groups 2 to 10 fill in.
       direction so group 4's six tests are red on behaviour rather than on a stub that already
       guessed right.
 
-- [ ] 1.3 REFACTOR: Add `cli::HERDR_PROGRAM` and `cli::agent_cli_via` to `src/cli.rs`, the
+- [x] 1.3 REFACTOR: Add `cli::HERDR_PROGRAM` and `cli::agent_cli_via` to `src/cli.rs`, the
       latter returning a handle over a **fixed** program path so group 5's tests are red, and
       `watch::soonest` to `src/watch.rs` returning `None` unconditionally.
 
-- [ ] 1.4 REFACTOR: Add the third field `agents: &'a mut dyn crate::agents::AgentPoll` to
+- [x] 1.4 REFACTOR: Add the third field `agents: &'a mut dyn crate::agents::AgentPoll` to
       `ui::driver::Live` and the tenth field `agents: agents::AgentSnapshot` to
       `ui::app::Dashboard`, initialised at both of `ui::load`'s branches to
       `AgentSnapshot { agents: Vec::new(), reachable: false, problem: None }` written as a
       literal. Update every landed construction site the compiler names — no `..` rest anywhere.
 
-- [ ] 1.5 REFACTOR: Add `ui::Startup`, `ui::Collaborators`, `ui::start_collaborators`, and
+- [x] 1.5 REFACTOR: Add `ui::Startup`, `ui::Collaborators`, `ui::start_collaborators`, and
       `ui::run_wired` per design.md → Contracts, and reduce `ui::run` to the terminal guard, the
       panic hook, `config::load_from_env`, `current_dir`, the real `Terminal`, the `Startup`
       literal, and one `run_wired` call.
 
-- [ ] 1.6 REFACTOR: Add `testutil::ScriptedAgents` — an `AgentPoll` double returning a scripted
+- [x] 1.6 REFACTOR: Add `testutil::ScriptedAgents` — an `AgentPoll` double returning a scripted
       `Vec<Option<AgentSnapshot>>` from `drain` and a scripted `Vec<Option<Duration>>` from
       `pending_in`, recording both call counts — and `testutil::UntilReady`, an `EventSource`
       that calls `std::thread::yield_now()` and returns `Ok(None)` until a caller-supplied
@@ -466,7 +474,7 @@ green while the tree grows the API groups 2 to 10 fill in.
       `q` press, recording its timeouts as `Script` does. The clock lives here and nowhere under
       `src/ui/`.
 
-- [ ] 1.7 CHECK: Contract gate — re-inspect the published interface. `git add -N src/agents.rs`
+- [x] 1.7 CHECK: Contract gate — re-inspect the published interface. `git add -N src/agents.rs`
       first so the new file is visible to `git diff`, then
       `git diff $BASE -- src/lib.rs src/agents.rs src/cli.rs src/watch.rs src/ui/driver.rs
       src/ui/app.rs src/ui/mod.rs | grep '^+pub '` and confirm every added `pub` item is one
@@ -474,7 +482,7 @@ green while the tree grows the API groups 2 to 10 fill in.
       **Red when:** the diff is empty for `src/agents.rs` — that means the file is still
       untracked and the gate saw nothing.
 
-- [ ] 1.8 VERIFY: `testcount --lib '' 754` — the 752 landed tests plus `testutil::tests::`'s two
+- [x] 1.8 VERIFY: `testcount --lib '' 754` — the 752 landed tests plus `testutil::tests::`'s two
       new ones from 1.6 — then `cargo fmt --all -- --check`, `cargo clippy --all-targets
       --all-features -- -D warnings`, and `make check`. Commit.
 

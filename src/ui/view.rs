@@ -363,6 +363,11 @@ mod tests {
                 reload: false,
                 problems: Vec::new(),
             },
+            agents: crate::agents::AgentSnapshot {
+                agents: Vec::new(),
+                reachable: false,
+                problem: None,
+            },
         }
     }
 
@@ -389,6 +394,11 @@ mod tests {
                 requested: false,
                 reload: false,
                 problems: Vec::new(),
+            },
+            agents: crate::agents::AgentSnapshot {
+                agents: Vec::new(),
+                reachable: false,
+                problem: None,
             },
         }
     }
@@ -421,6 +431,11 @@ mod tests {
                 requested: false,
                 reload: false,
                 problems: Vec::new(),
+            },
+            agents: crate::agents::AgentSnapshot {
+                agents: Vec::new(),
+                reachable: false,
+                problem: None,
             },
         }
     }
@@ -910,6 +925,11 @@ mod tests {
                 requested: false,
                 reload: false,
                 problems: Vec::new(),
+            },
+            agents: crate::agents::AgentSnapshot {
+                agents: Vec::new(),
+                reachable: false,
+                problem: None,
             },
         };
         let buf120 = render_at(120, 20, &d);
@@ -1634,6 +1654,11 @@ mod tests {
                 reload: false,
                 problems: Vec::new(),
             },
+            agents: crate::agents::AgentSnapshot {
+                agents: Vec::new(),
+                reachable: false,
+                problem: None,
+            },
         }
     }
 
@@ -1668,6 +1693,11 @@ mod tests {
                 requested: false,
                 reload: false,
                 problems: Vec::new(),
+            },
+            agents: crate::agents::AgentSnapshot {
+                agents: Vec::new(),
+                reachable: false,
+                problem: None,
             },
         };
 
@@ -1802,6 +1832,11 @@ mod tests {
                 requested: false,
                 reload: false,
                 problems: Vec::new(),
+            },
+            agents: crate::agents::AgentSnapshot {
+                agents: Vec::new(),
+                reachable: false,
+                problem: None,
             },
         };
         let default_style = Cell::default().style();
@@ -2115,6 +2150,11 @@ mod tests {
                 requested: false,
                 reload: false,
                 problems: Vec::new(),
+            },
+            agents: crate::agents::AgentSnapshot {
+                agents: Vec::new(),
+                reachable: false,
+                problem: None,
             },
         };
         d.apply(Action::Next);

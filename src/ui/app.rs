@@ -123,7 +123,7 @@ pub struct Refresh {
 /// count, no terminal handle, and no frame — those are derived from the
 /// frame area on every draw, never stored here. Deliberately implements no
 /// `Default`, anywhere in the crate: every construction and every
-/// destructuring names all nine fields, so a field added later fails to
+/// destructuring names all ten fields, so a field added later fails to
 /// compile at each site rather than defaulting silently. See
 /// `specs/dashboard-loop/spec.md` and the `NODEFAULT-UI` check.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -149,6 +149,11 @@ pub struct Dashboard {
     /// forced-reload flag, and standing watcher problems. See
     /// `specs/live-updates/spec.md`.
     pub refresh: Refresh,
+    /// The most recent agent poll's outcome. Replaced wholesale, never
+    /// merged: a poll that found no agents means there are no agents.
+    /// Nothing renders this field in `agent-polling`; see
+    /// `specs/agent-poller/spec.md`.
+    pub agents: crate::agents::AgentSnapshot,
 }
 
 impl Dashboard {
@@ -547,6 +552,11 @@ mod tests {
                     reload: false,
                     problems: Vec::new(),
                 },
+                agents: crate::agents::AgentSnapshot {
+                    agents: Vec::new(),
+                    reachable: false,
+                    problem: None,
+                },
             }
         }
 
@@ -577,6 +587,11 @@ mod tests {
                     requested: false,
                     reload: false,
                     problems: Vec::new(),
+                },
+                agents: crate::agents::AgentSnapshot {
+                    agents: Vec::new(),
+                    reachable: false,
+                    problem: None,
                 },
             }
         }
@@ -611,6 +626,11 @@ mod tests {
                     requested: false,
                     reload: false,
                     problems: Vec::new(),
+                },
+                agents: crate::agents::AgentSnapshot {
+                    agents: Vec::new(),
+                    reachable: false,
+                    problem: None,
                 },
             }
         }
@@ -997,6 +1017,11 @@ mod tests {
                     reload: false,
                     problems: Vec::new(),
                 },
+                agents: crate::agents::AgentSnapshot {
+                    agents: Vec::new(),
+                    reachable: false,
+                    problem: None,
+                },
             };
 
             for action in variants {
@@ -1230,6 +1255,11 @@ mod tests {
                     reload: false,
                     problems: Vec::new(),
                 },
+                agents: crate::agents::AgentSnapshot {
+                    agents: Vec::new(),
+                    reachable: false,
+                    problem: None,
+                },
             };
             d.apply(Action::Next);
             assert_eq!(d.detail.scroll, 1);
@@ -1266,6 +1296,11 @@ mod tests {
                     requested: false,
                     reload: false,
                     problems: Vec::new(),
+                },
+                agents: crate::agents::AgentSnapshot {
+                    agents: Vec::new(),
+                    reachable: false,
+                    problem: None,
                 },
             };
             for _ in 0..4 {
@@ -1310,6 +1345,11 @@ mod tests {
                     reload: false,
                     problems: Vec::new(),
                 },
+                agents: crate::agents::AgentSnapshot {
+                    agents: Vec::new(),
+                    reachable: false,
+                    problem: None,
+                },
             };
             d.apply(Action::FilterPush('j'));
             d.apply(Action::FilterPush('k'));
@@ -1341,6 +1381,11 @@ mod tests {
                     reload: false,
                     problems: Vec::new(),
                 },
+                agents: crate::agents::AgentSnapshot {
+                    agents: Vec::new(),
+                    reachable: false,
+                    problem: None,
+                },
             };
             d.apply(Action::Back);
             assert_eq!(d.detail.scroll, 0);
@@ -1366,6 +1411,11 @@ mod tests {
                     requested: false,
                     reload: false,
                     problems: Vec::new(),
+                },
+                agents: crate::agents::AgentSnapshot {
+                    agents: Vec::new(),
+                    reachable: false,
+                    problem: None,
                 },
             };
             d2.apply(Action::FilterStart);
@@ -1394,6 +1444,11 @@ mod tests {
                     requested: false,
                     reload: false,
                     problems: Vec::new(),
+                },
+                agents: crate::agents::AgentSnapshot {
+                    agents: Vec::new(),
+                    reachable: false,
+                    problem: None,
                 },
             };
             d3.apply(Action::Back);
@@ -1427,6 +1482,11 @@ mod tests {
                     reload: false,
                     problems: Vec::new(),
                 },
+                agents: crate::agents::AgentSnapshot {
+                    agents: Vec::new(),
+                    reachable: false,
+                    problem: None,
+                },
             };
             d.normalise_scroll(ratatui::layout::Rect::new(0, 0, 120, 20));
             assert_eq!(d.detail.scroll, 6);
@@ -1451,6 +1511,11 @@ mod tests {
                     reload: false,
                     problems: Vec::new(),
                 },
+                agents: crate::agents::AgentSnapshot {
+                    agents: Vec::new(),
+                    reachable: false,
+                    problem: None,
+                },
             };
             d2.normalise_scroll(ratatui::layout::Rect::new(0, 0, 60, 20));
             assert_eq!(d2.detail.scroll, 6);
@@ -1474,6 +1539,11 @@ mod tests {
                     requested: false,
                     reload: false,
                     problems: Vec::new(),
+                },
+                agents: crate::agents::AgentSnapshot {
+                    agents: Vec::new(),
+                    reachable: false,
+                    problem: None,
                 },
             };
             d3.normalise_scroll(ratatui::layout::Rect::new(0, 0, 120, 40));
@@ -1516,6 +1586,11 @@ mod tests {
                         requested: false,
                         reload: false,
                         problems: Vec::new(),
+                    },
+                    agents: crate::agents::AgentSnapshot {
+                        agents: Vec::new(),
+                        reachable: false,
+                        problem: None,
                     },
                 }
             }
@@ -1564,6 +1639,11 @@ mod tests {
                     requested: false,
                     reload: false,
                     problems: Vec::new(),
+                },
+                agents: crate::agents::AgentSnapshot {
+                    agents: Vec::new(),
+                    reachable: false,
+                    problem: None,
                 },
             };
             d.normalise_scroll(ratatui::layout::Rect::new(0, 0, 60, 20));
@@ -1670,6 +1750,11 @@ mod tests {
                     reload: false,
                     problems: Vec::new(),
                 },
+                agents: crate::agents::AgentSnapshot {
+                    agents: Vec::new(),
+                    reachable: false,
+                    problem: None,
+                },
             };
             let before = dashboard.clone();
 
@@ -1728,6 +1813,11 @@ mod tests {
                     requested: false,
                     reload: false,
                     problems: Vec::new(),
+                },
+                agents: crate::agents::AgentSnapshot {
+                    agents: Vec::new(),
+                    reachable: false,
+                    problem: None,
                 },
             }
         }
@@ -1857,7 +1947,7 @@ mod tests {
         }
 
         #[test]
-        fn dashboard_destructures_into_exactly_nine_fields() {
+        fn dashboard_destructures_into_exactly_ten_fields() {
             let d = dashboard_at(Route::List);
             let Dashboard {
                 repo,
@@ -1869,6 +1959,7 @@ mod tests {
                 filter,
                 detail,
                 refresh,
+                agents,
             } = &d;
             assert_eq!(*repo, None);
             assert_eq!(
@@ -1884,6 +1975,9 @@ mod tests {
             assert!(!refresh.requested);
             assert!(!refresh.reload);
             assert!(refresh.problems.is_empty());
+            assert!(agents.agents.is_empty());
+            assert!(!agents.reachable);
+            assert!(agents.problem.is_none());
         }
 
         #[test]
@@ -2097,6 +2191,11 @@ mod tests {
                     reload: false,
                     problems: Vec::new(),
                 },
+                agents: crate::agents::AgentSnapshot {
+                    agents: Vec::new(),
+                    reachable: false,
+                    problem: None,
+                },
             };
             d.apply(Action::Next);
             assert_eq!(d.selected, 1);
@@ -2130,6 +2229,11 @@ mod tests {
                     requested: false,
                     reload: false,
                     problems: Vec::new(),
+                },
+                agents: crate::agents::AgentSnapshot {
+                    agents: Vec::new(),
+                    reachable: false,
+                    problem: None,
                 },
             };
             d2.apply(Action::Prev);
@@ -2175,6 +2279,11 @@ mod tests {
                     requested: false,
                     reload: false,
                     problems: Vec::new(),
+                },
+                agents: crate::agents::AgentSnapshot {
+                    agents: Vec::new(),
+                    reachable: false,
+                    problem: None,
                 },
             }
         }
@@ -2308,6 +2417,11 @@ mod tests {
                     reload: false,
                     problems: Vec::new(),
                 },
+                agents: crate::agents::AgentSnapshot {
+                    agents: Vec::new(),
+                    reachable: false,
+                    problem: None,
+                },
             };
             let recorder = RecordingReader::always(Ok("text".to_string()));
             let read = |p: &std::path::Path| recorder.read(p);
@@ -2362,6 +2476,11 @@ mod tests {
                     requested: false,
                     reload: false,
                     problems: Vec::new(),
+                },
+                agents: crate::agents::AgentSnapshot {
+                    agents: Vec::new(),
+                    reachable: false,
+                    problem: None,
                 },
             };
             let recorder = RecordingReader::new(
@@ -2527,6 +2646,11 @@ mod tests {
                     reload: false,
                     problems: Vec::new(),
                 },
+                agents: crate::agents::AgentSnapshot {
+                    agents: Vec::new(),
+                    reachable: false,
+                    problem: None,
+                },
             };
             let recorder = RecordingReader::always(Ok("t".to_string()));
             let read = |p: &std::path::Path| recorder.read(p);
@@ -2585,6 +2709,11 @@ mod tests {
                     requested: false,
                     reload: true,
                     problems: Vec::new(),
+                },
+                agents: crate::agents::AgentSnapshot {
+                    agents: Vec::new(),
+                    reachable: false,
+                    problem: None,
                 },
             };
             let recorder2 = RecordingReader::always(Err("must not be called".to_string()));

@@ -373,6 +373,11 @@ mod tests {
                 reload: false,
                 problems: Vec::new(),
             },
+            agents: crate::agents::AgentSnapshot {
+                agents: Vec::new(),
+                reachable: false,
+                problem: None,
+            },
         }
     }
 
@@ -448,6 +453,11 @@ mod tests {
                     requested: false,
                     reload: false,
                     problems: Vec::new(),
+                },
+                agents: crate::agents::AgentSnapshot {
+                    agents: Vec::new(),
+                    reachable: false,
+                    problem: None,
                 },
             },
         ]
@@ -784,6 +794,11 @@ mod tests {
                 reload: false,
                 problems: Vec::new(),
             },
+            agents: crate::agents::AgentSnapshot {
+                agents: Vec::new(),
+                reachable: false,
+                problem: None,
+            },
         };
         let rows38 = rows(&d, 38);
         assert_eq!(rows38.len(), 3);
@@ -833,6 +848,11 @@ mod tests {
                 requested: false,
                 reload: false,
                 problems: Vec::new(),
+            },
+            agents: crate::agents::AgentSnapshot {
+                agents: Vec::new(),
+                reachable: false,
+                problem: None,
             },
         };
         let rows_with_problems = rows(&with_problems, 38);

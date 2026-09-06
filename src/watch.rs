@@ -308,6 +308,17 @@ pub fn poll_timeout(tick: Duration, pending_in: Option<Duration>) -> Duration {
     }
 }
 
+/// The minimum of two optional `Duration`s, reading no clock: `None` when both are
+/// `None`, the present one when exactly one is, and the smaller when both are. One tick
+/// serves two pollers — see `specs/watch-invalidation/spec.md` -> "One tick serves two
+/// pollers".
+///
+/// Group 1 stub: returns `None` unconditionally, so group 6's tests are red on
+/// behaviour rather than on a stub that already guessed right.
+pub fn soonest(_a: Option<Duration>, _b: Option<Duration>) -> Option<Duration> {
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

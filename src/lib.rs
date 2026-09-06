@@ -6,6 +6,7 @@
 //! `main` is what makes it unit-testable — see design.md -> Decisions
 //! ("Library plus thin `main`").
 
+pub mod agents;
 pub mod changes;
 pub mod cli;
 pub mod config;
@@ -426,6 +427,134 @@ pub(crate) mod testutil {
         }
     }
 
+    /// A scripted `agents::AgentPoll` double, on `ScriptedFs`'s terms: a queue of
+    /// `drain` results and a queue of `pending_in` results, each recording every
+    /// call. Synchronous and thread-free — spawns nothing, sleeps nothing, reads
+    /// no clock — so every `ui::` test that drives the live tier's third
+    /// collaborator stays deterministic. Exhausting either queue yields
+    /// `None` forever rather than panicking.
+    pub(crate) struct ScriptedAgents {
+        drain_queue:
+            std::cell::RefCell<std::collections::VecDeque<Option<crate::agents::AgentSnapshot>>>,
+        pending_queue: std::cell::RefCell<std::collections::VecDeque<Option<std::time::Duration>>>,
+        drain_calls: std::cell::RefCell<Vec<Option<crate::agents::AgentSnapshot>>>,
+        pending_calls: std::cell::RefCell<Vec<Option<std::time::Duration>>>,
+    }
+
+    impl ScriptedAgents {
+        pub(crate) fn new(
+            drains: Vec<Option<crate::agents::AgentSnapshot>>,
+            pendings: Vec<Option<std::time::Duration>>,
+        ) -> Self {
+            Self {
+                drain_queue: std::cell::RefCell::new(drains.into()),
+                pending_queue: std::cell::RefCell::new(pendings.into()),
+                drain_calls: std::cell::RefCell::new(Vec::new()),
+                pending_calls: std::cell::RefCell::new(Vec::new()),
+            }
+        }
+
+        /// Every result `drain` returned, in call order.
+        pub(crate) fn drains(&self) -> Vec<Option<crate::agents::AgentSnapshot>> {
+            self.drain_calls.borrow().clone()
+        }
+
+        /// Every result `pending_in` returned, in call order.
+        pub(crate) fn pendings(&self) -> Vec<Option<std::time::Duration>> {
+            self.pending_calls.borrow().clone()
+        }
+    }
+
+    impl crate::agents::AgentPoll for ScriptedAgents {
+        fn drain(&mut self) -> Option<crate::agents::AgentSnapshot> {
+            let result = self.drain_queue.borrow_mut().pop_front().unwrap_or(None);
+            self.drain_calls.borrow_mut().push(result.clone());
+            result
+        }
+
+        fn pending_in(&self) -> Option<std::time::Duration> {
+            let result = self.pending_queue.borrow_mut().pop_front().unwrap_or(None);
+            self.pending_calls.borrow_mut().push(result);
+            result
+        }
+    }
+
+    /// An `EventSource` whose wait is a predicate poll, not a fixed sleep: it
+    /// calls `std::thread::yield_now()` — which has no duration, so it is
+    /// deliberately outside `NOSLEEP`'s pattern — and returns `Ok(None)` until
+    /// a caller-supplied predicate has held for a 50ms settle window, or until
+    /// a 5s deadline passes, and then presses `q` exactly once. The deadline
+    /// is the backstop that turns a wiring regression into a red assertion
+    /// rather than a hung suite.
+    ///
+    /// Its clock lives here, in `src/lib.rs`, and nowhere under `src/ui/` —
+    /// `NOBLOCK` leg 2 forbids a clock there, tests included.
+    pub(crate) struct UntilReady<'a> {
+        predicate: &'a dyn Fn() -> bool,
+        deadline: std::time::Instant,
+        settle_since: Option<std::time::Instant>,
+        pressed: bool,
+        timeouts: std::cell::RefCell<Vec<std::time::Duration>>,
+    }
+
+    impl<'a> UntilReady<'a> {
+        const SETTLE: std::time::Duration = std::time::Duration::from_millis(50);
+        const DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
+
+        pub(crate) fn new(predicate: &'a dyn Fn() -> bool) -> Self {
+            Self {
+                predicate,
+                deadline: std::time::Instant::now() + Self::DEADLINE,
+                settle_since: None,
+                pressed: false,
+                timeouts: std::cell::RefCell::new(Vec::new()),
+            }
+        }
+
+        /// Every `timeout` passed to `next_event`, in call order — `Script`'s
+        /// own recorder, on the same terms.
+        pub(crate) fn timeouts(&self) -> Vec<std::time::Duration> {
+            self.timeouts.borrow().clone()
+        }
+    }
+
+    impl crate::ui::event::EventSource for UntilReady<'_> {
+        fn next_event(
+            &mut self,
+            timeout: std::time::Duration,
+        ) -> Result<Option<ratatui::crossterm::event::Event>, crate::ui::event::EventError>
+        {
+            self.timeouts.borrow_mut().push(timeout);
+            if self.pressed {
+                return Err(crate::ui::event::EventError(
+                    "UntilReady exhausted after pressing q".to_string(),
+                ));
+            }
+            let now = std::time::Instant::now();
+            if (self.predicate)() {
+                let since = *self.settle_since.get_or_insert(now);
+                if now.saturating_duration_since(since) >= Self::SETTLE {
+                    self.pressed = true;
+                    return Ok(Some(press(
+                        ratatui::crossterm::event::KeyCode::Char('q'),
+                        ratatui::crossterm::event::KeyModifiers::NONE,
+                    )));
+                }
+            } else {
+                self.settle_since = None;
+            }
+            if now >= self.deadline {
+                self.pressed = true;
+                return Ok(Some(press(
+                    ratatui::crossterm::event::KeyCode::Char('q'),
+                    ratatui::crossterm::event::KeyModifiers::NONE,
+                )));
+            }
+            std::thread::yield_now();
+            Ok(None)
+        }
+    }
+
     #[cfg(test)]
     mod tests {
         use super::{
@@ -528,6 +657,11 @@ pub(crate) mod testutil {
                     reload: false,
                     problems: Vec::new(),
                 },
+                agents: crate::agents::AgentSnapshot {
+                    agents: Vec::new(),
+                    reachable: false,
+                    problem: None,
+                },
             }
         }
 
@@ -575,6 +709,91 @@ pub(crate) mod testutil {
                         .contains(ratatui::style::Modifier::BOLD)
                 );
             }
+        }
+
+        /// `ScriptedAgents` is synchronous and thread-free, on `ScriptedFs`'s
+        /// terms: it answers from a queue, and an exhausted queue yields
+        /// `None` forever rather than panicking.
+        #[test]
+        fn scripted_agents_answers_its_queue_then_falls_back_to_none() {
+            use crate::agents::{AgentPoll, AgentSnapshot};
+
+            let mut agents = super::ScriptedAgents::new(
+                vec![Some(AgentSnapshot {
+                    agents: Vec::new(),
+                    reachable: true,
+                    problem: None,
+                })],
+                vec![Some(std::time::Duration::from_millis(40))],
+            );
+            assert_eq!(
+                agents.drain(),
+                Some(AgentSnapshot {
+                    agents: Vec::new(),
+                    reachable: true,
+                    problem: None,
+                })
+            );
+            assert_eq!(
+                agents.pending_in(),
+                Some(std::time::Duration::from_millis(40))
+            );
+            // The queue is now exhausted: both fall back to the inert
+            // default rather than panicking.
+            assert_eq!(agents.drain(), None);
+            assert_eq!(agents.pending_in(), None);
+            assert_eq!(agents.drains().len(), 2);
+            assert_eq!(agents.pendings().len(), 2);
+        }
+
+        /// `UntilReady` presses `q` once the predicate has held for its
+        /// settle window, and its own deadline is the backstop when the
+        /// predicate never becomes true — never a hang, never a panic.
+        #[test]
+        fn until_ready_presses_q_once_settled_and_again_never_hangs_past_its_deadline() {
+            use crate::ui::event::EventSource;
+
+            let ready = std::cell::Cell::new(false);
+            let predicate = || ready.get();
+            let mut source = super::UntilReady::new(&predicate);
+
+            // Not ready yet: yields Ok(None) rather than pressing q.
+            assert_eq!(
+                source
+                    .next_event(std::time::Duration::from_millis(1))
+                    .expect("not ready yet"),
+                None
+            );
+
+            ready.set(true);
+            // Poll until it presses q, bounded by its own 5s deadline so a
+            // regression here fails this test rather than hanging it.
+            let mut pressed = false;
+            for _ in 0..1_000_000 {
+                match source
+                    .next_event(std::time::Duration::from_millis(1))
+                    .expect("predicate is true")
+                {
+                    Some(_) => {
+                        pressed = true;
+                        break;
+                    }
+                    None => continue,
+                }
+            }
+            assert!(pressed, "UntilReady never pressed q once settled");
+            assert!(source.timeouts().len() >= 2);
+
+            // Never a fixed sleep followed by an assertion: a predicate that
+            // never becomes true still ends, at the deadline, rather than
+            // hanging the suite.
+            let never = || false;
+            let mut deadline_source = super::UntilReady::new(&never);
+            deadline_source.deadline = std::time::Instant::now();
+            let event = deadline_source
+                .next_event(std::time::Duration::from_millis(1))
+                .expect("deadline path does not error");
+            assert!(event.is_some(), "the deadline path must still press q");
         }
     }
 }

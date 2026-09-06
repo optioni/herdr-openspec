@@ -248,6 +248,24 @@ pub fn npm_prefix() -> Option<PathBuf> {
     npm_prefix_via(Path::new("npm"))
 }
 
+/// The bare program name `herdr`, resolved by the operating system through `PATH` — the
+/// one place that literal is written as a program name. This crate builds no resolution
+/// chain for `herdr`, deliberately: failing to start it is already the documented
+/// "Herdr socket unreachable" degraded state.
+pub const HERDR_PROGRAM: &str = "herdr";
+
+/// Construct the real `HerdrCli` over `program`, following `npm_prefix_via`'s shape
+/// precisely: a parameterised spawner, so a scenario can drive a real spawn against a
+/// scratch `#!/bin/sh` program without touching `PATH`. `ui::run` is the only caller
+/// that passes [`HERDR_PROGRAM`]; every other caller — the poller's own tests, the
+/// outer-loop acceptance test — passes a scratch path instead.
+///
+/// Group 1 stub: the program path is fixed rather than read from `program`, so group
+/// 5's tests are red on behaviour rather than on a stub that already answers correctly.
+pub fn agent_cli_via(_program: &Path) -> std::sync::Arc<dyn HerdrCli> {
+    std::sync::Arc::new(RealHerdrCli::new("herdr"))
+}
+
 /// Turn a `resolve::BinResolution` into the real `OpenspecCli` the
 /// `live-refresh` worker should use — `None` when no usable binary was
 /// found, which is exactly `refresh::start`'s no-binary case: no thread, no
