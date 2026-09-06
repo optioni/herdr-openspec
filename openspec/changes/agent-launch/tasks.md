@@ -471,7 +471,7 @@ asserts the OK line reports **46**.
 ## 0. Baseline, checks, and the scratchpad
 <!-- kind: operational -->
 
-- [ ] 0.1 CHECK: Record the starting state by **measuring**, never by copying a number from
+- [x] 0.1 CHECK: Record the starting state by **measuring**, never by copying a number from
       this file. `export BASE=$(git rev-parse HEAD)`; then run each command in the "Measured
       at planning time" table and record its output verbatim.
       **Red when:** `BASE` is empty or not a commit, or any measured figure differs from the
@@ -480,7 +480,7 @@ asserts the OK line reports **46**.
       re-exporting from the current `HEAD` after a fresh shell silently puts this change's own
       commits inside the baseline.
 
-- [ ] 0.2 CHANGE: Write `LAUNCHSEAM.sh` to `$CHECKS` from the block above, and extract the
+- [x] 0.2 CHANGE: Write `LAUNCHSEAM.sh` to `$CHECKS` from the block above, and extract the
       other twenty-nine files from the archived tasks files that last reproduced each in full:
       `EXTENDED.sh` from `.../2026-09-06-agent-attribution/tasks.md`; `AGENTSEAM.sh`,
       `WIRED.sh` from `.../2026-09-06-agent-polling/tasks.md`; `WATCHSEAM.sh`,
@@ -496,7 +496,7 @@ asserts the OK line reports **46**.
       because the extractor read only each block's first line — its label sits on the block's
       **second** line behind a shebang. Use a scratch directory this session owns.
 
-- [ ] 0.3 CHANGE: Re-apply the accumulated edits that live in earlier changes' tasks files as
+- [x] 0.3 CHANGE: Re-apply the accumulated edits that live in earlier changes' tasks files as
       string replacements rather than in any reproduced block: `agent-polling`'s
       `NODEFAULT-UI.sh` `HOMEFILE` parameterisation, its `|| exit 1` repair, and its OK-line
       suffix; `NOSLEEP.sh`'s leg 2b gaining `src/agents.rs`; `NOBLOCK.sh`'s leg 3 gaining
@@ -506,7 +506,7 @@ asserts the OK line reports **46**.
       **Red when:** `NODEFAULT-UI.sh` still names `$SRC/ui/app.rs` in its positive control, or
       `WIRED.sh` holds no `leg 5`.
 
-- [ ] 0.4 CHECK: Run all thirty extracted gates against the unmodified tree at `BASE`, at the
+- [x] 0.4 CHECK: Run all thirty extracted gates against the unmodified tree at `BASE`, at the
       invocations this change uses, and record each exit status and its first line verbatim.
       **Expected:** `LAUNCHSEAM` red on its missing subject; `WIRED` and `NOBLOCK` red on the
       same;
@@ -524,13 +524,13 @@ asserts the OK line reports **46**.
       `live-refresh` (commit `574b87d`), contrary to what `HANDOFF.md` records; and
       every other gate green.
 
-- [ ] 0.5 CHANGE: Apply this change's own edits — `NOIO-VIEW.sh`'s one replacement,
+- [x] 0.5 CHANGE: Apply this change's own edits — `NOIO-VIEW.sh`'s one replacement,
       `WIRED.sh`'s four, and `NOBLOCK.sh`'s four, exactly as written above — printing each
       resulting `diff` before running.
       **Expected after this task:** `NOIO-VIEW` green; `WIRED` and `NOBLOCK` both still red, each
       on its `src/launch.rs` guard rather than on a leg.
 
-- [ ] 0.6 CHECK: Prove `NOIO-VIEW`'s edit can fail. Plant
+- [x] 0.6 CHECK: Prove `NOIO-VIEW`'s edit can fail. Plant
       `fn zz(a:&str,b:&str){let _=crate::state::record(None,a,b);}` at the end of
       `src/ui/app.rs` and `fn zz2(){let _=crate::launch::start;}` at the end of
       `src/ui/driver.rs`, run `sh $CHECKS/NOIO-VIEW.sh`, record exit **1** and the FAIL line
@@ -538,12 +538,12 @@ asserts the OK line reports **46**.
       remove the plants and record exit **0** for the edited block.
       **Red when:** the edited check is green under a plant, or the unedited one is red.
 
-- [ ] 0.7 CHECK: Prove `OPENSPEC-UNTOUCHED`'s exclusion is still scoped. Plant an empty
+- [x] 0.7 CHECK: Prove `OPENSPEC-UNTOUCHED`'s exclusion is still scoped. Plant an empty
       `openspec/specs/STRAY.tmp`, run with `CHANGE=agent-launch` and record exit **1** naming
       that path; remove it; then run with `CHANGE=nope` and record exit **1** naming the
       vacuous exclusion.
 
-- [ ] 0.8 VERIFY: `git status --porcelain` shows no change under `openspec/` outside
+- [x] 0.8 VERIFY: `git status --porcelain` shows no change under `openspec/` outside
       `openspec/changes/agent-launch/`, and
       `BASE=$(git rev-parse HEAD) CHANGE=agent-launch sh $CHECKS/OPENSPEC-UNTOUCHED.sh` is
       green. Commit nothing in this group — it writes only to `$CHECKS`.
