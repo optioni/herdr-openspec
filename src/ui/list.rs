@@ -266,8 +266,9 @@ pub fn rows(dashboard: &Dashboard, width: u16) -> Vec<Row> {
     // `agent-launch`: launch problems lead the whole list, ahead of even refresh problems —
     // they are the only rows that answer a key the reader has just pressed, and burying the
     // reply under a standing condition is how a reader concludes the key did nothing.
-    // `launch.problems` holds at most one entry and is replaced wholesale, so this costs at
-    // most one row.
+    // `launch.problems` holds at most **two** entries (`degraded-states`' repair of row 23: a
+    // recording failure and a prompt failure can co-occur) and is replaced wholesale, so this
+    // costs at most two rows.
     for problem in &dashboard.launch.problems {
         out.push(Row {
             text: problem_row_text(problem, width),
@@ -1443,6 +1444,34 @@ mod tests {
                 .filter(|r| r.kind == RowKind::Problem)
                 .count();
             assert_eq!(count, 1, "width {width}");
+        }
+    }
+
+    /// `degraded-states`' repair of row 23 (task 6.2): the two reasons — a recording failure
+    /// and a prompt failure — render as the list's first two `!`-marked interior rows, in
+    /// occurrence order, at both widths. RED at `main`: `launch::Outcome::problem` could not
+    /// hold both, so `Dashboard::launch.problems` never carried more than one entry.
+    #[test]
+    fn a_failed_record_and_a_failed_prompt_are_both_reported() {
+        let mut d = dashboard_with(
+            vec![fixture::active("2fa-support", 1, 2)],
+            Vec::new(),
+            Vec::new(),
+            0,
+        );
+        d.launch.problems = vec![
+            "/state/dir: not a directory".to_string(),
+            "agent_blocked: agent is blocked".to_string(),
+        ];
+        for width in [38, 58] {
+            let all = rows(&d, width);
+            assert_eq!(all[0].kind, RowKind::Problem, "width {width}");
+            assert_eq!(all[1].kind, RowKind::Problem, "width {width}");
+            assert!(all[0].text.starts_with("! "), "width {width}");
+            assert!(all[1].text.starts_with("! "), "width {width}");
+            assert!(all[0].text.contains("/state/dir"), "width {width}");
+            assert!(all[1].text.contains("agent_blocked"), "width {width}");
+            assert_eq!(all[2].kind, RowKind::Item { index: 0 }, "width {width}");
         }
     }
 

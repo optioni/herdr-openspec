@@ -12,20 +12,20 @@
 ## 0. Baseline and measurement
 <!-- kind: operational -->
 
-- [ ] 0.1 CHECK: Capture the base SHA **once** and record it in `notes/baseline.md`:
+- [x] 0.1 CHECK: Capture the base SHA **once** and record it in `notes/baseline.md`:
   `git rev-parse HEAD` (`89cb3b2` while this plan was written). Every later
   `OPENSPEC-UNTOUCHED` run reads that recorded value and first confirms it still resolves
   (`git cat-file -e $BASE^{commit}`); it does **not** re-derive `BASE` as the current `HEAD`,
   which would diff `HEAD` against a clean tree and pass over the writes the check exists to
   catch. If the recorded SHA stops resolving — this repository's history was rewritten once —
   re-derive it as the parent of this change's first commit and record why.
-- [ ] 0.2 CHECK: Record the coverage baseline as the **line** figure:
+- [x] 0.2 CHECK: Record the coverage baseline as the **line** figure:
   `cargo llvm-cov --fail-under-lines 80 2>&1 | tail -3`. Expected at HEAD: **97.05% of
   25,674 lines**. The floor is never lowered and no exclusion is ever added.
-- [ ] 0.3 CHECK: Reproduce `WIRED` red and paste the failure into `notes/baseline.md`:
+- [x] 0.3 CHECK: Reproduce `WIRED` red and paste the failure into `notes/baseline.md`:
   `sh $C/WIRED.sh` — **run at planning time, exit 1:**
   `WIRED FAIL (leg 2): 'pub fn run()' holds a branch or a loop: 5:    let cwd = match startup_cwd(&crate::config::env_lookup()) {`
-- [ ] 0.4 CHECK: Record every gate's realized count into `notes/gate-floors.md` by running each
+- [x] 0.4 CHECK: Record every gate's realized count into `notes/gate-floors.md` by running each
   **from the repository root** — run from its own directory each fails "no src directory",
   which is a false failure. Measured at planning time and independently re-verified; each
   number is the gate's own `OK` line:
@@ -56,15 +56,15 @@
 
   Confirm each variable's **name** against the script before 11.2 edits it — three of the
   width gates take `LIST_MIN`/`MD_MIN`/`TASK_MIN`, not the gate's own name.
-- [ ] 0.5 CHECK: Measure `NODEFAULT-UI`'s `SCAN_MIN` for **each** of its four type sets
+- [x] 0.5 CHECK: Measure `NODEFAULT-UI`'s `SCAN_MIN` for **each** of its four type sets
   separately (the `src/ui/app.rs` `Dashboard`/`Filter`/`Detail` set measures 126; the
   `Refresh` set, the `src/agents.rs` set, and the `src/launch.rs` set each measure their own,
   and at least one is below the script's default of 60). One shared floor is rejected in
   design.md → Decision 6. Record all four.
-- [ ] 0.6 CHECK: Measure `READONLY-UI` with `EXTRA='src/watch.rs src/refresh.rs src/agents.rs
+- [x] 0.6 CHECK: Measure `READONLY-UI` with `EXTRA='src/watch.rs src/refresh.rs src/agents.rs
   src/launch.rs src/open.rs'`, confirm each file exists, and record the resulting count — this
   becomes the extracted script's default.
-- [ ] 0.7 VERIFY: `make check` is green at HEAD before any edit — the control that a later red
+- [x] 0.7 VERIFY: `make check` is green at HEAD before any edit — the control that a later red
   belongs to this change.
 
 ## 1. Audit every row of the degraded-states table
@@ -216,21 +216,21 @@
 <!-- kind: behavior -->
 <!-- The one behavioural defect the audit found. `agent-launch` should have shipped it. -->
 
-- [ ] 6.1 RED: Write `a_failed_record_and_a_failed_prompt_are_both_reported` — split and start
+- [x] 6.1 RED: Write `a_failed_record_and_a_failed_prompt_are_both_reported` — split and start
   succeed, the state directory is an existing regular file, `agent prompt` then exits 1 with
   `agent_blocked`. Assert `problems` holds **two** entries in occurrence order and `named` is
   `Some`. RED at HEAD: `src/launch.rs:308-313` returns only the prompt's reason.
-- [ ] 6.2 RED: Write the view half — the two reasons as the list's first two `! `-marked
+- [x] 6.2 RED: Write the view half — the two reasons as the list's first two `! `-marked
   interior rows, in that order, both widths — and `a_success_clears_both_entries`.
-- [ ] 6.3 GREEN: Change `launch::Outcome::problem: Option<String>` to `problems: Vec<String>`
+- [x] 6.3 GREEN: Change `launch::Outcome::problem: Option<String>` to `problems: Vec<String>`
   and push each accumulated reason. Update the three internal call sites.
-- [ ] 6.4 CHANGE: Update the four landed `src/launch.rs` failure tests for the new shape
+- [x] 6.4 CHANGE: Update the four landed `src/launch.rs` failure tests for the new shape
   without weakening any assertion — each still names its own reason and its own `named` value.
   Update the `launch::Outcome` compile-time destructuring companion.
-- [ ] 6.5 CHECK: Contract gate — re-inspect `Outcome` against design.md → Contracts, and
+- [x] 6.5 CHECK: Contract gate — re-inspect `Outcome` against design.md → Contracts, and
   confirm `agent-launch`'s "at most one entry" claim reads "at most two" in the delta spec and
   in `SPEC.md`.
-- [ ] 6.6 Run `cargo test --all-features launch` and `make check`. Commit.
+- [x] 6.6 Run `cargo test --all-features launch` and `make check`. Commit.
 
 ## 7. Proofs: the schema, artifact, and tasks rows
 <!-- kind: operational -->

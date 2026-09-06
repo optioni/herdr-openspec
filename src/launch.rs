@@ -50,14 +50,19 @@ pub enum Decision {
 
 /// The launcher's answer to one request, once it has one. `named` carries the
 /// `(derived agent name, change name)` pair exactly when an agent was started, so the loop can
-/// keep `Dashboard::agent_names` current without re-reading the file; `problem` carries the
-/// failure, and is `None` on complete success. Never `Default`, anywhere in the crate; every
-/// construction and destructuring names both fields, with no `..` rest — on exactly
-/// `agents::AgentSnapshot`'s and `agents::Attribution`'s terms.
+/// keep `Dashboard::agent_names` current without re-reading the file; `problems` carries every
+/// reason the worker accumulated, in the order it occurred, and is empty on complete success.
+/// **`degraded-states`' repair of row 23**: a single `Option<String>` could not hold both a
+/// `state::record` failure and an `agent prompt` failure, so the one path where both fail
+/// silently discarded the record's reason. `problems` holds **at most two** entries — the
+/// record failure and the prompt failure are the only pair that can co-occur — never more,
+/// since every earlier failure point returns immediately with exactly one. Never `Default`,
+/// anywhere in the crate; every construction and destructuring names both fields, with no
+/// `..` rest — on exactly `agents::AgentSnapshot`'s and `agents::Attribution`'s terms.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Outcome {
     pub named: Option<(String, String)>,
-    pub problem: Option<String>,
+    pub problems: Vec<String>,
 }
 
 /// The whole launch policy, a pure total function of its five arguments. Performs no
@@ -248,11 +253,11 @@ fn run_request(
             match cli.run(&refs) {
                 Ok(_) => Outcome {
                     named: None,
-                    problem: None,
+                    problems: Vec::new(),
                 },
                 Err(err) => Outcome {
                     named: None,
-                    problem: Some(herdr_reason(&err)),
+                    problems: vec![herdr_reason(&err)],
                 },
             }
         }
@@ -268,7 +273,7 @@ fn run_request(
                 Err(err) => {
                     return Outcome {
                         named: None,
-                        problem: Some(herdr_reason(&err)),
+                        problems: vec![herdr_reason(&err)],
                     };
                 }
             };
@@ -277,7 +282,7 @@ fn run_request(
                 Err(reason) => {
                     return Outcome {
                         named: None,
-                        problem: Some(reason),
+                        problems: vec![reason],
                     };
                 }
             };
@@ -287,30 +292,32 @@ fn run_request(
             if let Err(err) = cli.run(&start_refs) {
                 return Outcome {
                     named: None,
-                    problem: Some(format!(
+                    problems: vec![format!(
                         "{} (agent {agent}, pane {pane})",
                         herdr_reason(&err)
-                    )),
+                    )],
                 };
             }
 
             // `state::record` runs between `agent start` and `agent prompt` (design.md ->
             // Decisions 12): a failure here is reported but does not undo the start, and the
-            // prompt is still sent.
-            let record_problem = crate::state::record(state_dir, &agent, &change)
-                .err()
-                .map(|e| e.to_string());
+            // prompt is still sent. `degraded-states`' repair of row 23: both this and the
+            // prompt's own failure are pushed onto `problems` in occurrence order, rather than
+            // the prompt's outcome silently replacing the record's.
+            let mut problems = Vec::new();
+            if let Err(e) = crate::state::record(state_dir, &agent, &change) {
+                problems.push(e.to_string());
+            }
 
             let prompt_text_value = prompt_text(intent, &change);
             let prompt = prompt_args(&agent, &prompt_text_value);
             let prompt_refs: Vec<&str> = prompt.iter().map(String::as_str).collect();
-            let problem = match cli.run(&prompt_refs) {
-                Ok(_) => record_problem,
-                Err(err) => Some(herdr_reason(&err)),
-            };
+            if let Err(err) = cli.run(&prompt_refs) {
+                problems.push(herdr_reason(&err));
+            }
             Outcome {
                 named: Some((agent, change)),
-                problem,
+                problems,
             }
         }
     }
@@ -806,7 +813,7 @@ mod tests {
                 outcome,
                 Outcome {
                     named: Some(("c-2fa-support".to_string(), "2fa-support".to_string())),
-                    problem: None,
+                    problems: Vec::new(),
                 }
             );
 
@@ -851,9 +858,10 @@ mod tests {
             );
 
             assert_eq!(fake.calls().len(), 1);
-            let Outcome { named, problem } = outcome;
+            let Outcome { named, problems } = outcome;
             assert_eq!(named, None);
-            let problem = problem.expect("a reason must be present");
+            assert_eq!(problems.len(), 1, "a reason must be present");
+            let problem = &problems[0];
             assert!(problem.contains("result"), "{problem}");
             assert!(
                 !state.path().join("agent-names.toml").exists(),
@@ -895,8 +903,9 @@ mod tests {
             );
 
             assert_eq!(fake.calls().len(), 1);
-            let Outcome { named, problem } = outcome;
-            let problem = problem.expect("a reason must be present");
+            let Outcome { named, problems } = outcome;
+            assert_eq!(problems.len(), 1, "a reason must be present");
+            let problem = &problems[0];
             assert!(problem.contains("pane_split_failed"), "{problem}");
             assert!(problem.contains("no space to split"), "{problem}");
             assert_eq!(named, None);
@@ -936,8 +945,9 @@ mod tests {
                         && args.get(1).map(String::as_str) == Some("close")),
                 "the plugin must never issue pane close"
             );
-            let Outcome { named, problem } = outcome;
-            let problem = problem.expect("a reason must be present");
+            let Outcome { named, problems } = outcome;
+            assert_eq!(problems.len(), 1, "a reason must be present");
+            let problem = &problems[0];
             assert!(problem.contains("agent_pane_not_found"), "{problem}");
             assert!(problem.contains("c-2fa-support"), "{problem}");
             assert!(problem.contains("wD:pJ"), "{problem}");
@@ -981,13 +991,14 @@ mod tests {
                 mapping.names.get("c-2fa-support"),
                 Some(&"2fa-support".to_string())
             );
-            let Outcome { named, problem } = outcome;
+            let Outcome { named, problems } = outcome;
             assert_eq!(
                 named,
                 Some(("c-2fa-support".to_string(), "2fa-support".to_string())),
                 "the agent exists even though the prompt did not land"
             );
-            let problem = problem.expect("a reason must be present");
+            assert_eq!(problems.len(), 1, "a reason must be present");
+            let problem = &problems[0];
             assert!(problem.contains("agent_blocked"), "{problem}");
         }
 
@@ -1018,15 +1029,80 @@ mod tests {
                 3,
                 "the prompt must still be sent despite the recording failure"
             );
-            let Outcome { named, problem } = outcome;
+            let Outcome { named, problems } = outcome;
             assert_eq!(
                 named,
                 Some(("c-2fa-support".to_string(), "2fa-support".to_string()))
             );
-            let problem = problem.expect("a reason must be present, naming the recording failure");
+            assert_eq!(
+                problems.len(),
+                1,
+                "a reason must be present, naming the recording failure"
+            );
+            let problem = &problems[0];
             assert!(
                 problem.contains(&blocked.display().to_string()),
                 "{problem}"
+            );
+        }
+
+        /// `degraded-states`' repair of row 23: the landed worker's
+        /// `match cli.run(&prompt_refs) { Ok(_) => record_problem, Err(err) => Some(...) }`
+        /// discarded the record's reason whenever the prompt also failed. RED at `main`: this
+        /// test fails there because `outcome.problem` (a single `Option<String>`) can hold only
+        /// the prompt's reason, never both.
+        #[test]
+        fn a_failed_record_and_a_failed_prompt_are_both_reported() {
+            let fake = FakeCli::new();
+            split_ok(&fake, "wD:pJ");
+            start_ok(&fake, "c-2fa-support", "wD:pJ");
+            fake.register_herdr(
+                &[
+                    "agent",
+                    "prompt",
+                    "c-2fa-support",
+                    "/opsx:apply 2fa-support",
+                ],
+                failed(
+                    1,
+                    r#"{"error":{"code":"agent_blocked","message":"agent is blocked"}}"#,
+                ),
+            );
+            let scratch = ScratchDir::new();
+            let blocked = scratch.path().join("blocked");
+            std::fs::write(&blocked, b"not a directory").expect("write blocking file");
+
+            let outcome = run_request(
+                &fake,
+                Path::new(REPO),
+                KIND,
+                Some(&blocked),
+                Request::Launch {
+                    change: "2fa-support".to_string(),
+                    agent: "c-2fa-support".to_string(),
+                    intent: Intent::Apply,
+                },
+            );
+
+            assert_eq!(fake.calls().len(), 3);
+            let Outcome { named, problems } = outcome;
+            assert_eq!(
+                named,
+                Some(("c-2fa-support".to_string(), "2fa-support".to_string())),
+                "the agent is running and must stay attributable"
+            );
+            assert_eq!(
+                problems.len(),
+                2,
+                "both the record failure and the prompt failure must be reported: {problems:?}"
+            );
+            assert!(
+                problems[0].contains(&blocked.display().to_string()),
+                "the record failure must be first: {problems:?}"
+            );
+            assert!(
+                problems[1].contains("agent_blocked"),
+                "the prompt failure must be second: {problems:?}"
             );
         }
 
@@ -1079,7 +1155,7 @@ mod tests {
                 outcome,
                 Outcome {
                     named: Some((derived, change.to_string())),
-                    problem: None,
+                    problems: Vec::new(),
                 }
             );
         }
@@ -1115,7 +1191,7 @@ mod tests {
                 outcome,
                 Outcome {
                     named: Some((derived, change.to_string())),
-                    problem: None,
+                    problems: Vec::new(),
                 }
             );
         }
@@ -1146,7 +1222,7 @@ mod tests {
                 outcome,
                 Outcome {
                     named: Some(("add-auth".to_string(), "add-auth".to_string())),
-                    problem: None,
+                    problems: Vec::new(),
                 }
             );
         }
@@ -1183,8 +1259,9 @@ mod tests {
                     .any(|(_, args)| args.get(1).map(String::as_str) == Some("close")),
                 "no pane close entry"
             );
-            let Outcome { named: _, problem } = outcome;
-            let problem = problem.expect("a reason must be present");
+            let Outcome { named: _, problems } = outcome;
+            assert_eq!(problems.len(), 1, "a reason must be present");
+            let problem = &problems[0];
             assert!(problem.contains("agent_name_taken"), "{problem}");
         }
     }
@@ -1227,7 +1304,7 @@ mod tests {
                 outcome,
                 Outcome {
                     named: None,
-                    problem: None,
+                    problems: Vec::new(),
                 }
             );
         }
@@ -1256,9 +1333,10 @@ mod tests {
                 },
             );
 
-            let Outcome { named, problem } = outcome;
+            let Outcome { named, problems } = outcome;
             assert_eq!(named, None);
-            let problem = problem.expect("a reason must be present");
+            assert_eq!(problems.len(), 1, "a reason must be present");
+            let problem = &problems[0];
             assert!(problem.contains("agent_not_found"), "{problem}");
         }
     }
@@ -1376,7 +1454,7 @@ mod tests {
                 std::thread::yield_now();
             }
             let outcome = outcome.expect("a later drain must answer within 10s");
-            assert_eq!(outcome.problem, None);
+            assert_eq!(outcome.problems, Vec::<String>::new());
         }
 
         #[test]
@@ -1455,7 +1533,7 @@ mod tests {
                 std::thread::yield_now();
             }
             let outcome = outcome.expect("the launch must complete within 10s");
-            assert_eq!(outcome.problem, None);
+            assert_eq!(outcome.problems, Vec::<String>::new());
 
             let after_repo = snapshot(repo_scratch.path());
             assert_eq!(
@@ -1480,11 +1558,11 @@ mod tests {
         fn outcome_destructures_exhaustively_with_no_default() {
             let outcome = Outcome {
                 named: None,
-                problem: None,
+                problems: Vec::new(),
             };
-            let Outcome { named, problem } = outcome;
+            let Outcome { named, problems } = outcome;
             assert_eq!(named, None);
-            assert_eq!(problem, None);
+            assert_eq!(problems, Vec::<String>::new());
         }
 
         /// An exhaustive match with no wildcard arm: a new `Intent` variant fails to compile

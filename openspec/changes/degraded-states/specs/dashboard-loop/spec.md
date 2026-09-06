@@ -41,7 +41,9 @@ its bare `names` map keeps the file's own problems where `plugin-state` put them
 `ui::app::Launch` is `agent-launch`'s addition and SHALL carry exactly **two** fields:
 `pending: Option<launch::Request>` — the one-shot request `apply` produced and the loop has not
 yet handed to the launcher — and `problems: Vec<String>` — the last outcome's failure or the
-last refusal, replaced wholesale and never grown, holding at most one entry. It is a **sibling**
+last refusal, replaced wholesale and never grown, holding **at most two** entries — a
+`state::record` failure and an `agent prompt` failure are the only pair that can co-occur
+(`agent-launch`'s repaired row 23; see `specs/agent-launch/spec.md`). It is a **sibling**
 of `refresh` for the same reason `agents` is: `refresh.problems` is replaced wholesale by a
 watcher error on any iteration, and `ChangeSet::problems` is replaced wholesale by
 `Dashboard::adopt` on every refresh, so a launch's answer put in either would vanish before the

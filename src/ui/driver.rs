@@ -180,7 +180,7 @@ fn drive_live_tier(dashboard: &mut Dashboard, live: &mut Live<'_>) {
         if let Some((agent, change)) = outcome.named {
             dashboard.agent_names.names.insert(agent, change);
         }
-        dashboard.launch.problems = outcome.problem.into_iter().collect();
+        dashboard.launch.problems = outcome.problems;
     }
 }
 
@@ -2109,11 +2109,11 @@ mod tests {
         let mut launcher = crate::testutil::ScriptedLauncher::new(vec![
             Some(crate::launch::Outcome {
                 named: None,
-                problem: Some("split failed".to_string()),
+                problems: vec!["split failed".to_string()],
             }),
             Some(crate::launch::Outcome {
                 named: Some(("c-2fa-support".to_string(), "2fa-support".to_string())),
-                problem: None,
+                problems: Vec::new(),
             }),
         ]);
         let mut live = crate::ui::driver::Live {
@@ -2158,6 +2158,67 @@ mod tests {
                 problems: Vec::new(),
             }
         );
+    }
+
+    /// `degraded-states`' task 6.2, view half: a launch outcome carrying **two** problems
+    /// (`degraded-states`' repair of row 23) is replaced wholesale by the next outcome's
+    /// success, on exactly `a_launch_outcome_updates_the_mapping_and_replaces_the_problem`'s
+    /// terms, at both mandated widths — so the list's first interior row is a change row
+    /// again rather than a leftover problem row.
+    #[test]
+    fn a_success_clears_both_entries() {
+        for width in [120u16, 60u16] {
+            let backend = TestBackend::new(width, 20);
+            let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+            let mut dashboard = dashboard_with_change("/tmp/demo-repo", "2fa-support", 4, 9);
+            let mut events = Script::new(vec![
+                Ok(None),
+                Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
+            ]);
+            let mut fs = crate::watch::none();
+            let mut refresher = crate::refresh::none();
+            let mut agents = crate::agents::none();
+            let mut launcher = crate::testutil::ScriptedLauncher::new(vec![
+                Some(crate::launch::Outcome {
+                    named: Some(("c-2fa-support".to_string(), "2fa-support".to_string())),
+                    problems: vec![
+                        "/state/dir: Not a directory (os error 20)".to_string(),
+                        "herdr agent prompt exited with code 1: agent is blocked".to_string(),
+                    ],
+                }),
+                Some(crate::launch::Outcome {
+                    named: Some(("c-2fa-support".to_string(), "2fa-support".to_string())),
+                    problems: Vec::new(),
+                }),
+            ]);
+            let mut live = crate::ui::driver::Live {
+                fs: &mut *fs,
+                refresher: &mut *refresher,
+                agents: &mut *agents,
+                launcher: &mut launcher,
+            };
+            run_loop(
+                &mut terminal,
+                &mut dashboard,
+                &mut events,
+                &mut live,
+                &|_: &std::path::Path| Ok(String::new()),
+                Duration::from_millis(1),
+            )
+            .expect("loop ends");
+
+            assert_eq!(
+                dashboard.launch.problems,
+                Vec::<String>::new(),
+                "width {width}: the second, successful outcome must replace both entries wholesale"
+            );
+            let buf = terminal.backend().buffer();
+            assert!(
+                row_text(buf, 2).contains("2fa-support"),
+                "width {width}: the list's first interior row must be the change row again: {:?}",
+                row_text(buf, 2)
+            );
+        }
     }
 
     #[test]
@@ -2249,7 +2310,7 @@ mod tests {
         let failure = || {
             Some(crate::launch::Outcome {
                 named: None,
-                problem: Some("herdr pane split exited with code 1: no space".to_string()),
+                problems: vec!["herdr pane split exited with code 1: no space".to_string()],
             })
         };
         let mut launcher =
