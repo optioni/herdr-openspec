@@ -934,7 +934,7 @@ set; see design.md → Test Strategy.
 ## 13. The architecture checks, all green together
 <!-- kind: operational -->
 
-- [ ] 13.1 CHECK: Run all thirty gates at their landed invocations, in one pass, and record
+- [x] 13.1 CHECK: Run all thirty gates at their landed invocations, in one pass, and record
       every exit status and OK line: `MIN=23 NOSPAWN-GREP`; `MIN=23 NOLIT-CHANGE`;
       `UI_MIN=11 NOCLI-SHELL`; `NOIO-VIEW`; `UI_MIN=10 READSEAM`; `MIN=23 MDSEAM`; `NOTABSEAM`;
       `TASKSEAM`;
@@ -953,12 +953,12 @@ set; see design.md → Test Strategy.
       dependency and edits neither script, and an identical failure is the evidence that it
       did not make them worse.
 
-- [ ] 13.2 CHECK: Re-measure all three `NODEFAULT-UI` span counts from their own FAIL lines at
+- [x] 13.2 CHECK: Re-measure all three `NODEFAULT-UI` span counts from their own FAIL lines at
       `SCAN_MIN=9999`, and confirm the landed floors are at or below them.
       **Red when:** any realized count is below its floor — a literal was replaced by something
       the scan cannot see.
 
-- [ ] 13.3 CHECK: Confirm every gate that reads a floor was passed one **explicitly** in 13.1
+- [x] 13.3 CHECK: Confirm every gate that reads a floor was passed one **explicitly** in 13.1
       and none ran at a block default. Read each script's own `${VAR:-N}` line and compare:
       `WIDTHS_MIN`, `LIST_MIN`, `MD_MIN`, `TASK_MIN`, `DETAIL_MIN`, `MIN` (NOSPAWN-GREP,
       NOLIT-CHANGE, AGENTSEAM, WATCHSEAM, LAUNCHSEAM, MDSEAM, NOSLEEP), `UI_MIN` (NOCLI-SHELL,
@@ -967,7 +967,7 @@ set; see design.md → Test Strategy.
       `agent-polling` shipped for `WIDTHS` and `LISTWIDTHS` and `agent-attribution` left in place
       for `MDWIDTHS`, `TASKWIDTHS`, `DETAILWIDTHS`, `READSEAM`, and `MDSEAM`.
 
-- [ ] 13.4 VERIFY: `git status --porcelain` shows no change under `openspec/` outside this
+- [x] 13.4 VERIFY: `git status --porcelain` shows no change under `openspec/` outside this
       change's own directory. Commit any gate-invocation notes.
 
 ## 14. SPEC.md, README.md, and AGENTS.md corrections
