@@ -136,12 +136,16 @@ Neither `run_wired` nor `start_collaborators` SHALL name `OpenspecCli`, `HerdrCl
   envelope of **four** agents whose `cwd` is the repository root for three of them and
   `/definitely/elsewhere` for the fourth: `c-2fa-support` `working`, `alpha` `blocked`, one with
   no `name` at all and `agent` `claude` and status `idle`, and — the fourth, out of scope —
-  one named `alpha` and `working`
+  one named `nothing-like-a-change` and `working`. The fourth agent's name is deliberately
+  chosen to match **no** change on screen: a name that collided with `alpha` would still be
+  folded into `alpha`'s badge once the repository-scope test were removed (precedence, not the
+  count, would absorb it), which would make the scope-removal control below pass for the wrong
+  reason — measured, and corrected here rather than left to be rediscovered at group 8
 - **THEN** the list row for `2fa-support` carries the badge character `w` and the row for
   `alpha` carries `b`, at both widths, in the badge column `change-rows` specifies
 - **AND** the footer row reads exactly `q quit  Enter detail  Esc back  1 unattributed` at both
-  widths: the unnamed in-scope agent is counted, and the out-of-scope agent named `alpha` is
-  neither counted nor badged
+  widths: the unnamed in-scope agent is counted, and the out-of-scope agent named
+  `nothing-like-a-change` is neither counted nor badged
 - **AND** that count is discriminating in **both** directions — it reads `0` if the poller was
   never wired or the mapping was never read, and `2` if the repository-scope test were removed —
   which is what the landed `refresh.problems` assertion was not

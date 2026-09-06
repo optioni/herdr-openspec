@@ -375,9 +375,13 @@ directions; see design.md → Test Strategy.
 - [x] 2.2 RED: Write `ui::tests::wiring::a_polled_agent_reaches_a_rendered_badge`, driving
       `run_wired` at 120x20 and again at 60x20 with a four-agent payload — `c-2fa-support`
       `working` in the repository, `alpha` `blocked` in the repository, one unnamed `claude`
-      `idle` in the repository, and one named `alpha` `working` at `/definitely/elsewhere` —
-      and a readiness predicate that waits for the scratch `herdr` log's first entry and
-      **writes nothing**. Assert the `2fa-support` row's badge column holds `w`, the `alpha`
+      `idle` in the repository, and one named `nothing-like-a-change` `working` at
+      `/definitely/elsewhere` — **corrected from the planned `alpha` at group 8**: naming the
+      out-of-scope agent after an in-repository change let it be folded into that change's
+      badge by precedence once the repository-scope test was removed, which made task 8.3's
+      scope-removal control pass for the wrong reason (see specs/agent-poller/spec.md for the
+      repair) — and a readiness predicate that waits for the scratch `herdr` log's first entry
+      and **writes nothing**. Assert the `2fa-support` row's badge column holds `w`, the `alpha`
       row's holds `b`, and the footer row is exactly
       `q quit  Enter detail  Esc back  1 unattributed` padded to the width.
 
@@ -539,10 +543,10 @@ directions; see design.md → Test Strategy.
 ## 8. Acceptance Test — Outer Loop GREEN
 <!-- kind: behavior -->
 
-- [ ] 8.1 VERIFY: `testcount --lib 'ui::tests::wiring::' 4` — all four pass, and the assertion
+- [x] 8.1 VERIFY: `testcount --lib 'ui::tests::wiring::' 4` — all four pass, and the assertion
       message recorded in task 2.3 no longer appears.
 
-- [ ] 8.2 CHECK: Run the six plants named in `agent-poller`'s "The wiring test fails when the
+- [x] 8.2 CHECK: Run the six plants named in `agent-poller`'s "The wiring test fails when the
       poller is replaced by the inert double", one at a time, recording the exit status and the
       failing assertions verbatim for each, and reverting after each: `agents::none()`,
       `watch::none()`, `refresh::none()`, `load` passing `Mapping::default()`, `list::rows`
@@ -551,14 +555,14 @@ directions; see design.md → Test Strategy.
       assertions — three of the six necessarily share the footer assertion, and the badge
       assertions are what must separate them.
 
-- [ ] 8.3 CHECK: Prove the footer assertion fails in the **other** direction too: delete the
+- [x] 8.3 CHECK: Prove the footer assertion fails in the **other** direction too: delete the
       `cwd.starts_with(root)` scope test in `agents::attribute`, run
       `testcount --lib 'ui::tests::wiring::' 4`, record that the footer read `2 unattributed`
       rather than `1`, and revert.
       **Red when:** the count is still `1` — the out-of-scope agent is not reaching the
       function, and the scenario is not testing what it claims.
 
-- [ ] 8.4 VERIFY: `make check` — the first unqualified run since group 2. Commit.
+- [x] 8.4 VERIFY: `make check` — the first unqualified run since group 2. Commit.
 
 ## 9. The architecture checks, all green together
 <!-- kind: operational -->

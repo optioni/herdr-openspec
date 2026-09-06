@@ -2256,7 +2256,12 @@ apply:
                     agent_entry(1, Some("c-2fa-support"), "working", Some(&repo_root)),
                     agent_entry(2, Some("alpha"), "blocked", Some(&repo_root)),
                     agent_entry(3, None, "idle", Some(&repo_root)),
-                    agent_entry(4, Some("alpha"), "working", Some("/definitely/elsewhere")),
+                    agent_entry(
+                        4,
+                        Some("nothing-like-a-change"),
+                        "working",
+                        Some("/definitely/elsewhere"),
+                    ),
                 ];
                 let herdr = herdr_script_for(root, &herdr_log, &entries);
 
