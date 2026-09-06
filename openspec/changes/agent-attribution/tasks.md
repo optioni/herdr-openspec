@@ -593,7 +593,7 @@ directions; see design.md → Test Strategy.
 <!-- kind: operational -->
 <!-- parallel-after: 0 -->
 
-- [ ] 10.1 CHECK: Grep each target passage before editing and record what is there today:
+- [x] 10.1 CHECK: Grep each target passage before editing and record what is there today:
       `SPEC.md` → "Attributing an agent to a change" (three numbered tiers, scope stated for
       tier 3 alone), → "List view" (the paragraph reserving the third column), → Degraded
       states (no row for an absent or out-of-repository `cwd`, none for a worktree); and
@@ -601,33 +601,33 @@ directions; see design.md → Test Strategy.
       **Red when:** a passage is not where this task says — the edit below would then be
       appending a second entry beside a rule rather than rewriting it.
 
-- [ ] 10.2 Rewrite in `SPEC.md`: Herdr integration → Attributing an agent (audience: every
+- [x] 10.2 Rewrite in `SPEC.md`: Herdr integration → Attributing an agent (audience: every
       later change and every agent planning one) — state that `herdr agent list` is
       session-global and that **every** tier is scoped to the repository, not tier 3 alone;
       that `cwd` is optional and an agent without one is out of scope; and that tier 1 is
       consulted before tier 2 and falls through when it names a change that no longer exists.
       Replaces the current text, which scopes only tier 3 and states no precedence.
 
-- [ ] 10.3 Rewrite in `SPEC.md`: User interface → List view (audience: `degraded-states` and
+- [x] 10.3 Rewrite in `SPEC.md`: User interface → List view (audience: `degraded-states` and
       any later change touching the row grammar) — replace the paragraph reserving the third
       column with the badge's actual grammar, its glyphs, and its position in the drop order,
       show it in the mock, and add the footer's `<n> unattributed` hint. Name the collision
       `degraded-states` inherits: it plans a per-change problem indicator in the same column on
       an archived row, and must place it elsewhere or specify a precedence.
 
-- [ ] 10.4 Add to `SPEC.md`: Degraded states (audience: as above) — one row for an agent whose
+- [x] 10.4 Add to `SPEC.md`: Degraded states (audience: as above) — one row for an agent whose
       `cwd` is absent or outside the repository (neither badged nor counted), and one for an
       agent working in a **linked worktree** of this repository, which Herdr places outside the
       root and which this design deliberately does not attribute.
 
-- [ ] 10.5 Rewrite in `AGENTS.md`: Architecture rules, the existing "Do not attribute an agent
+- [x] 10.5 Rewrite in `AGENTS.md`: Architecture rules, the existing "Do not attribute an agent
       to a change on weak evidence" paragraph (audience: every future session) — keep the rule
       and add the two facts a future change would otherwise re-derive: the agent list is
       session-global, so repository scope is the plugin's job and not Herdr's; and the tier-2
       match is on `name`, never on `agent`, which is the agent kind. Rewrite in place; add no
       second entry.
 
-- [ ] 10.6 VERIFY: `BASE=$BASE CHANGE=agent-attribution sh $CHECKS/OPENSPEC-UNTOUCHED.sh` is
+- [x] 10.6 VERIFY: `BASE=$BASE CHANGE=agent-attribution sh $CHECKS/OPENSPEC-UNTOUCHED.sh` is
       green — `SPEC.md` and `AGENTS.md` are outside `openspec/`, and
       `openspec/IMPLEMENTATION-ORDER.md` is deliberately **not** edited here, since nothing
       writes inside `openspec/` except this change's own directory; the roadmap row is

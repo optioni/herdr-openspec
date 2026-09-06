@@ -341,10 +341,10 @@ One row per active change, then a separator, then the archived changes
 (`archived_count` in plugin configuration, five by default) — the real
 rendering against the wide layout's 38-column list-region interior
 (`Length(40)` less two border columns; the narrow layout's 60-column frame
-leaves 58):
+leaves 58), a `2fa-support` row carrying `w` shown for scale:
 
 ```
-> add-token-refresh              [4/9]
+> 2fa-support                  w [4/9]
   fix-empty-basket               [7/7]
   migrate-ai-sdk-v7                [-]
   -- archived ------------------------
@@ -359,17 +359,29 @@ tasks — its cell still ends in the same column as one that has them. An
 archived row additionally carries a ten-column date field (`YYYY-MM-DD`, or
 ten spaces when the entry is undated) between the marker and the name field.
 
-A cell too narrow for the interior is dropped **whole**, never cut short, in
-a fixed order: the progress cell first (reclaiming its separating space too),
-then an archived row's date field (reclaiming its separating space), and
-then the row degenerates to the marker-plus-name grammar an active row
-always has. A name too long for its field is truncated with a trailing `…`.
+**The third column is the agent badge**, `agent-attribution`'s addition: one
+ASCII character, present only when a live agent is attributed to that row —
+`w` `Working`, `i` `Idle`, `b` `Blocked`, `d` `Done`, `?` `Unknown` — placed
+between the name field and the progress cell, separated from each by one
+space. A row with no attributed agent carries no badge cell and no
+separating space, so it renders byte-identically to a pane with no agents at
+all. `degraded-states` also plans a per-change problem indicator in this same
+third column on an archived row; the two cannot both occupy it, and
+`degraded-states` must place its indicator elsewhere or specify a precedence.
 
-The mock's **third column**, reserved here for an agent badge and (on an
-archived row) a per-change problem indicator, belongs to `agent-attribution`
-and `degraded-states` respectively; `list-view` reserves no width for it. The
-footer reporting agents that could not be attributed to a change is
-`agent-attribution`'s addition too — its absence here is not an omission.
+A cell too narrow for the interior is dropped **whole**, never cut short, in
+a fixed order: the badge cell first (reclaiming its separating space too),
+then the progress cell (reclaiming its separating space too), then an
+archived row's date field (reclaiming its separating space), and then the
+row degenerates to the marker-plus-name grammar an active row always has. A
+name too long for its field is truncated with a trailing `…`.
+
+**The footer's last hint is `<n> unattributed`**, `agent-attribution`'s other
+addition: present only when at least one in-scope agent could not be placed
+on any row, dropped first as the width falls since it is the last of the
+footer's hints. It is never a per-agent listing and never a `!`-marked
+problem row — a shared Herdr session commonly has agents this pane cannot
+place, and that is a normal state, not a fault.
 
 Progress comes from the CLI when available and from checkbox counts
 otherwise; the rendered list is **file-sourced at every width** until
@@ -484,7 +496,18 @@ as a pure optimisation.
 
 ### Attributing an agent to a change
 
-Three tiers, and the design refuses to guess beyond them:
+`herdr agent list` is **session-global**: measured live against Herdr 0.8.2, it returns
+byte-identical output from three different working directories, including from `/`, and
+lists agents whose `cwd` lies in a repository other than the current one. **Every tier
+below is therefore scoped to the resolved repository, not tier 3 alone**: an agent is
+placed in scope only when its `cwd` is present and is inside (or equal to) the repository
+root, by Rust's component-wise `starts_with`, never a textual prefix. An agent carrying no
+`cwd` at all — `cwd` is not one of Herdr's seven required fields — cannot be shown to be in
+the repository and is out of scope on the same terms as one reported elsewhere. An
+out-of-scope agent is invisible to the pane: neither attributed nor counted.
+
+An in-scope agent is then decided by exactly three tiers, evaluated in this order and no
+other, and the design refuses to guess beyond them:
 
 1. **Launched by the plugin.** `herdr agent start` takes a name positionally, but a
    change name is not always a legal Herdr agent name
@@ -508,12 +531,22 @@ Three tiers, and the design refuses to guess beyond them:
    `herdr agent start <change>` and `herdr agent prompt <change>` below refer
    to this *derived* name, not the raw change name; correcting those two
    lines to say so explicitly is `agent-launch`'s work, planned from this
-   paragraph.
-2. **Named manually.** Any live agent whose name equals a change name is
-   attributed, making `herdr agent rename` a deliberate way to opt in.
-3. **Everything else.** Agents whose `cwd` is inside the repository but which carry
-   no change name are *not* attributed to any row. They are reported as a count in
-   the footer.
+   paragraph. Tier 1 is consulted **before** tier 2, and falls through to it
+   when the mapping names a change that is no longer in the visible window
+   (archived out of range, renamed, or deleted since the launch) — a stale
+   record never strands an agent the weaker tier can still place, and never
+   invents a change.
+2. **Named manually.** Any live agent whose `name` — never its `agent` field, which is
+   the agent *kind* (`"claude"` on every live agent measured) — equals a change name,
+   byte for byte, is attributed, making `herdr agent rename` a deliberate way to opt in.
+3. **Everything else.** An in-scope agent no tier could place is *not* attributed to any
+   row. It is reported as a count in the footer — never guessed at, never assigned.
+
+Linked worktrees are a known limitation: Herdr places one at
+`<repo-parent>/.worktrees/<repo>-<branch>`, **outside** the repository root, so an agent
+working in a worktree of this repository fails the containment test in tier 1 above and is
+invisible to the pane. Recorded here rather than fixed, pending a change that reads
+`herdr worktree list` deliberately.
 
 ### Launch flow
 
@@ -590,6 +623,8 @@ Every condition renders usable content rather than an error screen:
 | Pane narrower than 100 columns | Single-column list and detail |
 | `config.toml` malformed, unreadable, or a key of the wrong type | The affected key falls back to its documented default while every other key that parsed correctly is still honoured; `Config::problems` names each fallback |
 | `agent-names.toml` unusable (malformed, unreadable, or an entry Herdr would reject) | Empty or partial mapping; attribution falls back to the name-equality tier, and nothing already on disk is lost |
+| A live agent's `cwd` is absent, or outside the resolved repository root | Neither badged nor counted, at any tier — `herdr agent list` is session-global, so an agent this pane cannot place in its own repository must not badge or count toward it |
+| An agent works in a **linked worktree** of this repository | Herdr places a linked worktree at `<repo-parent>/.worktrees/<repo>-<branch>`, outside the repository root, so the agent fails the containment test above and is invisible to the pane — a known, deliberate limitation rather than a silent mis-count, recorded pending a change that reads `herdr worktree list` |
 | A configured `openspec_bin` that does not name a usable binary | Falls through to the remaining probe steps rather than winning or ending the chain; the fallback is named in `BinResolution::problems` rather than being silent |
 | A schema declares the same artifact id at two positions | The CLI rejects such a schema outright (`Duplicate artifact ID`), so a change using it is permanently file-mode — this crate's own parser accepts the duplicate, as `schema-artifacts` requires, so the plugin's "usable" is strictly wider than the CLI's |
 | `openspec list --json` reports a repository root other than the one this plugin resolved | The whole CLI result is discarded, not merged: the CLI resolves its root from the **process** working directory while this plugin resolves from the invocation context's workspace working directory, and the subprocess seam forbids setting `current_dir`, so the two can legitimately disagree |

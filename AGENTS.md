@@ -244,6 +244,12 @@ Further invariants from `SPEC.md`:
 
 Do not attribute an agent to a change on weak evidence. A terminal title is a
 summary, not a change id. Unattributable agents are reported as a count, not guessed at.
+`herdr agent list` is **session-global** — measured live, it returns byte-identical output
+regardless of working directory and lists agents from other repositories — so repository
+scope is this plugin's job, never Herdr's: every attribution tier is scoped to the
+resolved repository, not only the fallback count. The name-match tier reads an agent's
+`name` field, never its `agent` field, which is the agent *kind* (`"claude"` on every live
+agent measured) and not a change identifier.
 
 ## Development
 
