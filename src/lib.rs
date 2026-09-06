@@ -1055,7 +1055,7 @@ mod tests {
         assert_eq!(lines.len(), 3, "commands block: {commands_block:?}");
         let first_tokens: Vec<&str> = lines
             .iter()
-            .map(|l| l.trim().split_whitespace().next().expect("non-empty line"))
+            .map(|l| l.split_whitespace().next().expect("non-empty line"))
             .collect();
         assert_eq!(first_tokens, vec!["ui", "open", "open-tab"]);
     }

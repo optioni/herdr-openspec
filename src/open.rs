@@ -13,6 +13,78 @@
 //! `run_from_env` is the one-line production binding, on `cli::worker_cli_from_env`'s
 //! terms.
 
+/// The dashboard's pane title, and the matcher's only ownership signal — `herdr pane
+/// list` exposes no plugin ownership field. Both `[[panes]]` entries in
+/// `herdr-plugin.toml` carry this same title (design.md -> Decision 3).
+pub const DASHBOARD_LABEL: &str = "OpenSpec";
+/// The manifest pane id `open` targets.
+pub const DASHBOARD_ENTRYPOINT: &str = "dashboard";
+/// The manifest pane id `open-tab` targets.
+pub const DASHBOARD_TAB_ENTRYPOINT: &str = "dashboard-tab";
+
+/// The invocation context read from Herdr's injected environment. See
+/// `specs/pane-open/spec.md` -> "The invocation context is read from Herdr's injected
+/// environment through one injected lookup". No `Default`, anywhere in the crate; every
+/// construction and destructuring names every field, with no `..` rest.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Context {
+    pub plugin_id: String,
+    pub workspace_id: String,
+    pub workspace_cwd: Option<String>,
+    pub focused_pane_id: Option<String>,
+}
+
+/// Read a string field from a parsed `HERDR_PLUGIN_CONTEXT_JSON` object, blank-filtered
+/// on `config::non_blank`'s terms. `obj` is `None` when the variable was absent, was not
+/// valid JSON, or was valid JSON that was not an object — every case folds to "no JSON
+/// context", never a failure (`specs/pane-open/spec.md` -> "Unreadable context JSON falls
+/// back rather than failing").
+fn json_field(
+    obj: &Option<serde_json::Map<String, serde_json::Value>>,
+    key: &str,
+) -> Option<String> {
+    let raw = obj
+        .as_ref()
+        .and_then(|o| o.get(key))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+    crate::config::non_blank(raw)
+}
+
+/// Read the invocation context purely from an injected lookup, exactly as
+/// `config::config_dir` and `state::state_dir` do. Performs no other I/O. Only an absent
+/// **workspace id** is fatal — see `specs/pane-open/spec.md` for the exact field-by-field
+/// fallback table.
+pub fn context(env: &dyn Fn(&str) -> Option<String>) -> Result<Context, String> {
+    let json_obj: Option<serde_json::Map<String, serde_json::Value>> = env(
+        "HERDR_PLUGIN_CONTEXT_JSON",
+    )
+    .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
+    .and_then(|v| v.as_object().cloned());
+
+    let plugin_id = crate::config::non_blank(env("HERDR_PLUGIN_ID"))
+        .unwrap_or_else(|| "herdr-openspec".to_string());
+
+    let workspace_id = json_field(&json_obj, "workspace_id")
+        .or_else(|| crate::config::non_blank(env("HERDR_WORKSPACE_ID")))
+        .ok_or_else(|| {
+            "HERDR_WORKSPACE_ID is not set - this command must be invoked from Herdr".to_string()
+        })?;
+
+    let workspace_cwd = json_field(&json_obj, "workspace_cwd")
+        .or_else(|| json_field(&json_obj, "focused_pane_cwd"));
+
+    let focused_pane_id =
+        json_field(&json_obj, "focused_pane_id").or_else(|| crate::config::non_blank(env("HERDR_PANE_ID")));
+
+    Ok(Context {
+        plugin_id,
+        workspace_id,
+        workspace_cwd,
+        focused_pane_id,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -175,19 +175,20 @@
 ## 3. The invocation context
 <!-- kind: behavior -->
 
-- [ ] 3.1 RED: Write failing tests in a new `src/open.rs`: `context_full`,
+- [x] 3.1 RED: Write failing tests in a new `src/open.rs`: `context_full`,
   `context_from_discrete_variables`, `context_ignores_unreadable_json`,
   `context_workspace_cwd_falls_back_to_focused_pane_cwd`, `context_treats_blank_as_absent`,
   and `context_without_a_workspace_is_the_one_fatal_absence`. Each drives a
   `&dyn Fn(&str) -> Option<String>` fixture closure, never `std::env::var`.
 
-- [ ] 3.2 GREEN: Implement `open::Context` and `open::context`, reading
+- [x] 3.2 GREEN: Implement `open::Context` and `open::context`, reading
   `HERDR_PLUGIN_CONTEXT_JSON` through `serde_json::Value` with the fallbacks tabulated in
   `specs/pane-open/spec.md`. Blank handling follows `config::non_blank`.
 
-- [ ] 3.3 REFACTOR: Reuse `config::non_blank` rather than adding a second blank test.
+- [x] 3.3 REFACTOR: Reuses `config::non_blank` via the `json_field` helper; no separate
+  blank test was added. No further change needed.
 
-- [ ] 3.4 Run the group tests — `cargo test --all-features --lib open::` — no regressions.
+- [x] 3.4 Run the group tests — `cargo test --all-features --lib open::` — no regressions.
 
 ## 4. The pane matcher
 <!-- kind: behavior -->
