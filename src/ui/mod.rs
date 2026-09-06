@@ -124,11 +124,11 @@ pub struct Collaborators {
 /// `reachable` to decide whether to offer its keys in a pane that never
 /// found one.
 ///
-/// `state_dir` is unread in this group's skeleton — `launch::start`'s fourth parameter is
-/// threaded through so the signature is settled, and group 11 is what actually wires it into
-/// the launcher rather than discarding it. The launcher is started **unconditionally** here,
-/// on the skeleton's own terms (design.md -> Test Strategy): group 11 is what makes it
-/// `launch::none()` when no repository was found, mirroring the watcher and the worker.
+/// The launcher is about a repository too, on exactly the watcher's and the worker's terms:
+/// `state_dir` is threaded into `launch::start` for the state directory a launched agent's
+/// name is recorded under, and `repo` decides between the real launcher and `launch::none()`
+/// — a pane with no repository has no change to launch onto and no badge to focus, so the
+/// inert double costs nothing and represents the truth.
 pub fn start_collaborators(
     repo: Option<&Path>,
     config: &Config,

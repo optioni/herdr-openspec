@@ -45,7 +45,7 @@ reachable directly with
 | `1`–`9`, `[`, `]` | Switch artifact tab, from either the list or the detail. `0` is inert — tabs are 1-based |
 | `/` | Filter changes |
 | `r` | Force a full refresh — re-read every change from disk and re-ask the CLI about each one |
-| `a` | Launch an agent with `/opsx:apply`. Refused with a reason (shown as a problem row) on a change with no agent to select or a name already live in the session |
+| `a` | Launch an agent with `/opsx:apply`. Inert — no call, no problem — with no change selected; refused with a reason (shown as a problem row) when the derived name is already running for this change |
 | `c` | Launch an agent with `/opsx:continue`, on the same terms as `a` |
 | `s` | Launch an agent with `/opsx:archive`, on the same terms as `a` |
 | `g` | Focus the running agent for this change. Inert — no call, no problem — on a change with no attributed agent |

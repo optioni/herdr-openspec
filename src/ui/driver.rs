@@ -48,7 +48,7 @@ pub enum LoopError {
     Events(EventError),
 }
 
-/// Drive the live tier's four one-shot steps, then sync the selected tab's
+/// Drive the live tier's six one-shot steps, then sync the selected tab's
 /// content through `read`, draw, then wait up to
 /// `watch::poll_timeout(tick, watch::soonest(live.fs.pending_in(), live.agents.pending_in()))`
 /// for an event, applying its action and breaking when `dashboard.quit` is
@@ -60,25 +60,36 @@ pub enum LoopError {
 ///
 /// The live tier, once per iteration, before the sync:
 ///
-/// 1. When `dashboard.refresh.requested` is set, request `Selection::All`
+/// 1. `dashboard.launch.pending.take()`, if set, is handed to
+///    `live.launcher.request` — `agent-launch`'s addition, leading the
+///    iteration because it answers a key pressed at the end of the previous
+///    one; taking the request is what makes "handed over exactly once" true
+///    even when `apply` set it on the very last event before a quit.
+/// 2. When `dashboard.refresh.requested` is set, request `Selection::All`
 ///    and clear the flag — checked **before** the filesystem drain below, so
 ///    the startup (or `r`-triggered) request is recorded before the request
 ///    an already-pending batch produces on the same iteration:
 ///    `ui::load`'s startup flag and a live watcher's first-ever batch can
 ///    both be pending on iteration one.
-/// 2. `live.fs.drain()`; on `Ok(Some(paths))`, request
+/// 3. `live.fs.drain()`; on `Ok(Some(paths))`, request
 ///    `watch::invalidate(repo, &paths)`; on `Err(e)`, the reason replaces
 ///    `dashboard.refresh.problems` wholesale (never grown) — a watcher
 ///    failing on every poll must not accumulate an unbounded list.
-/// 3. `live.refresher.take_result()`; any result — file-sourced or
+/// 4. `live.refresher.take_result()`; any result — file-sourced or
 ///    CLI-merged — is adopted immediately, so it reaches the very frame
 ///    that follows rather than the one after.
-/// 4. `live.agents.drain()`; on `Some(snapshot)`, `dashboard.agents` is
-///    replaced wholesale with it — never merged, independently of step 3,
+/// 5. `live.agents.drain()`; on `Some(snapshot)`, `dashboard.agents` is
+///    replaced wholesale with it — never merged, independently of step 4,
 ///    so a refresh landing on the same iteration as a poll cannot discard
 ///    the poll (`agent-polling`).
+/// 6. `live.launcher.drain()`, if it answers, folds `Outcome::named` into
+///    `dashboard.agent_names.names` and replaces `dashboard.launch.problems`
+///    wholesale with `Outcome::problem` — `agent-launch`'s addition,
+///    trailing the iteration so a launch that has just recorded a mapping
+///    is visible to the very next `attribution()` call, in the frame the
+///    draw below produces.
 ///
-/// Every one of the four steps is non-blocking by the traits' contract, so
+/// Every one of the six steps is non-blocking by the traits' contract, so
 /// the sequence adds no wait to the render path. See
 /// `specs/live-updates/spec.md` -> "The loop drives the live tier without
 /// ever waiting on it".

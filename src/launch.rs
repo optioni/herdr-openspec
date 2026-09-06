@@ -10,10 +10,10 @@
 //! seconds waiting for interactive readiness, which is why the launcher cannot be a synchronous
 //! call from the render path and must be a worker thread instead.
 //!
-//! Group 1 populates only the inert halves: the types, a `decide` returning
-//! `Decision::Nothing`, a `pane_id` returning `Err`, and a worker that answers nothing. The
-//! real policy arrives in group 3, the real Herdr calls in group 4, and the real seam in
-//! group 5.
+//! `decide` is a pure, total policy function; `pane_id` navigates the `pane split` envelope;
+//! `run_request` issues the real three-call sequence (or the single `agent focus` call for
+//! `Focus`) against a real `HerdrCli`; and `start`/`worker_body` run that sequence on the
+//! crate's third worker thread, behind the `Launcher` trait every consumer reaches it through.
 
 /// Which `/opsx:*` command a launch sends, or that `g` is a focus rather than a launch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -347,9 +347,8 @@ pub fn none() -> Box<dyn Launcher> {
 
 /// The real implementation, private on exactly `refresh::RealRefresher`'s and
 /// `agents::RealAgentPoll`'s terms: nothing outside this module names it, since every consumer
-/// reaches it through `Box<dyn Launcher>`. Structure only in this group: `request` sends and
-/// `drain` `try_recv`s, but the worker below answers nothing yet — group 5 fills in the real
-/// three-call sequence.
+/// reaches it through `Box<dyn Launcher>`. `request` sends to the worker thread and `drain`
+/// `try_recv`s its answers; the worker itself runs `run_request`'s real three-call sequence.
 struct RealLauncher {
     request_tx: std::sync::mpsc::Sender<Request>,
     result_rx: std::sync::mpsc::Receiver<Outcome>,
@@ -390,9 +389,9 @@ pub fn start(
 // leg 3 relies on this ordering: it cuts `src/launch.rs`'s production slice at its single
 // `thread::spawn` and only searches the half before it.
 
-/// The worker's whole body. Group 1: consumes every request and answers nothing — the real
-/// three-call sequence arrives in group 4. Returns when the request channel disconnects, on
-/// exactly `refresh::worker_body`'s and `agents::worker_body`'s lifecycle.
+/// The worker's whole body: consumes every request and runs it through `run_request`, sending
+/// its `Outcome` back. Returns when the request channel disconnects, on exactly
+/// `refresh::worker_body`'s and `agents::worker_body`'s lifecycle.
 fn worker_body(
     cli: std::sync::Arc<dyn crate::cli::HerdrCli>,
     repo: std::path::PathBuf,
@@ -833,15 +832,20 @@ mod tests {
                 ],
                 Ok("{}".to_string()),
             );
+            let state = ScratchDir::new();
 
             let outcome = run_request(
                 &fake,
                 Path::new(REPO),
                 KIND,
-                None,
+                Some(state.path()),
                 Request::Launch {
-                    change: "add-auth".to_string(),
-                    agent: "add-auth".to_string(),
+                    // A change/agent pair that genuinely differ, so a `state::record` call
+                    // that erroneously ran before this failure would produce a file — an
+                    // `add-auth`/`add-auth` pair would pass this assertion vacuously, since
+                    // `state::record` itself writes nothing for an unchanged name.
+                    change: "2fa-support".to_string(),
+                    agent: "c-2fa-support".to_string(),
                     intent: Intent::Apply,
                 },
             );
@@ -851,6 +855,10 @@ mod tests {
             assert_eq!(named, None);
             let problem = problem.expect("a reason must be present");
             assert!(problem.contains("result"), "{problem}");
+            assert!(
+                !state.path().join("agent-names.toml").exists(),
+                "a launch stopped before agent start must record no mapping"
+            );
         }
 
         #[test]

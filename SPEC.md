@@ -445,7 +445,7 @@ agent editing `tasks.md` in another pane.
 | `1`–`9`, `[`, `]` | Switch artifact tab, at **both** routes — the wide layout draws the detail region at the list route too, so a tab press there is immediately visible (`detail-view`). `0` is inert: tab addressing is 1-based. While filtering, all of them type themselves into the query like any other printable key |
 | `/` | Start filter mode from either route, moving to the list: printable keys type into the query, `Backspace` deletes, `Enter` accepts, `Esc` cancels, and `Ctrl-C` still quits |
 | `r` | Force a full refresh: re-read every change from files, and re-ask the CLI about every one. While filtering, `r` types itself into the query instead, like every other printable key |
-| `a` | Launch an agent with `/opsx:apply`. On a change with no selected change, or a name already live in the session, refused with a reason (see Launch flow, Degraded states) rather than launching |
+| `a` | Launch an agent with `/opsx:apply`. Inert — no call, no problem — with no change selected; refused with a reason when the derived name is already running for this change (see Launch flow, Degraded states) |
 | `c` | Launch an agent with `/opsx:continue`, on the same terms as `a` |
 | `s` | Launch an agent with `/opsx:archive`, on the same terms as `a` |
 | `g` | Focus the running agent for this change (`herdr agent focus`); a change with no attributed agent leaves `g` inert — no call, no problem |
@@ -560,7 +560,7 @@ order, stopping at the first failure:
 ```
 herdr pane split --cwd <repo> --direction right --no-focus
 herdr agent start <derived-name> --kind <kind> --pane <pane_id>
-herdr agent prompt <derived-name> "/opsx:apply <derived-name>"
+herdr agent prompt <derived-name> "/opsx:apply <change>"
 ```
 
 `--direction` is **required**, not optional, and no pane argument is given: the
@@ -575,14 +575,18 @@ split always targets the currently focused pane. The call's response is an
 not valid JSON, not an object, or missing `result.pane.pane_id` stops the launch
 before any agent is started (see Degraded states). `<derived-name>` is the
 *derived* agent name from "Attributing an agent to a change" above, never the
-raw change name — a change name is not always a legal Herdr agent name. The
-third call's text is one **positional** argument, `/opsx:apply <derived-name>`
-(or `/opsx:continue`/`/opsx:archive` for `c`/`s`), passed to the program
-directly with no shell and no `--wait` flag: the plugin does not wait for the
-agent to act on it. A failed call at any of the three carries Herdr's own
-reported reason (its stderr JSON error envelope's `code` and `message`, on
-the same terms "Agent status by polling" above already documents) rather than
-a generic failure.
+raw change name — a change name is not always a legal Herdr agent name — and it
+is what both `agent start` and `agent prompt` name **positionally**, as the
+agent to act on. The **prompt text itself** names `<change>`, the real change
+name, not the derived name: `/opsx:apply <change>` (or `/opsx:continue`/
+`/opsx:archive` for `c`/`s`) is an OpenSpec slash-command the launched agent
+reads, and OpenSpec knows the change by its real name, never by a Herdr-legal
+agent identifier that may be truncated or hashed. The prompt is one
+**positional** argument, passed to the program directly with no shell and no
+`--wait` flag: the plugin does not wait for the agent to act on it. A failed
+call at any of the three carries Herdr's own reported reason (its stderr JSON
+error envelope's `code` and `message`, on the same terms "Agent status by
+polling" above already documents) rather than a generic failure.
 
 `<kind>` comes from plugin configuration (`agent_kind`, default `claude`);
 Herdr supports more than twenty agent kinds. `g` focuses the pane an

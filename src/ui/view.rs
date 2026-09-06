@@ -250,9 +250,13 @@ fn shorten_for_header(text: &str, header_width: u16) -> Option<String> {
 /// - not filtering, a non-empty query: `/` + query leads the hint list,
 ///   dropped last rather than first, with the count still last;
 /// - otherwise: `q quit`, `Enter detail`, and `Esc back`, then —
-///   `agent-attribution`'s addition — `<n> unattributed` when
-///   `Dashboard::attribution().unattributed` is greater than zero, dropped
-///   *first* as the width falls since it is the last hint in the list.
+///   `agent-launch`'s addition — `a/c/s launch` and `g focus`, each its own
+///   hint, when `Dashboard::agents.reachable`, then — `agent-attribution`'s
+///   addition — `<n> unattributed` when `Dashboard::attribution().unattributed`
+///   is greater than zero. Hints are dropped whole, one at a time, from the
+///   **end** of this list as the width falls: `<n> unattributed` first, then
+///   `g focus`, then `a/c/s launch`, then the landed hints from `Esc back`
+///   backward — never a partial hint.
 fn render_footer(frame: &mut Frame, footer: Rect, dashboard: &Dashboard) {
     if footer.height == 0 {
         return;
