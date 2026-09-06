@@ -492,7 +492,7 @@ green while the tree grows the API groups 2 to 10 fill in.
 This is the group that exists because `live-refresh` shipped an inert live tier with every test
 green. It drives `ui::run_wired` — the composition root itself — not the components it composes.
 
-- [ ] 2.1 RED (harness): Set up what design.md → Test Boundaries names — a
+- [x] 2.1 RED (harness): Set up what design.md → Test Boundaries names — a
       `testutil::ScratchDir` repository holding `alpha` with a `tasks.md` counting 4 of 9 and a
       vendored `tdd` schema (the helpers `ui::tests::live` already has); a scratch `#!/bin/sh`
       `herdr` program that appends its arguments to a log file and prints the one-agent
@@ -500,7 +500,7 @@ green. It drives `ui::run_wired` — the composition root itself — not the com
       `openspec` program that appends its arguments to a second log and answers `list --json`,
       named through `Config::openspec_bin` so the probe chain stops at step 1.
 
-- [ ] 2.2 RED: Write `ui::tests::wiring::the_real_wiring_polls_a_scratch_herdr` for the scenario
+- [x] 2.2 RED: Write `ui::tests::wiring::the_real_wiring_polls_a_scratch_herdr` for the scenario
       "The real wiring polls a scratch Herdr and adopts what it says", at 120x20 and 60x20. Its
       `UntilReady` predicate waits for both logs, then writes one byte to
       `openspec/changes/alpha/proposal.md`, then waits for the `openspec` log to reach **two**
@@ -508,24 +508,35 @@ green. It drives `ui::run_wired` — the composition root itself — not the com
       recording `agent list`; the `openspec` log holding two or more runs; `refresh.problems`
       empty; and the `alpha` row reading `[4/9]`.
 
-- [ ] 2.3 RED: Write `ui::tests::wiring::an_unreachable_scratch_herdr_is_a_standalone_tui` for
+- [x] 2.3 RED: Write `ui::tests::wiring::an_unreachable_scratch_herdr_is_a_standalone_tui` for
       "An unreachable scratch Herdr leaves the pane a working standalone TUI", with a `herdr`
       path that does not exist and a predicate naming only the `openspec` log and writing
       nothing. This is where the byte-identity snapshot pair and its one-byte discriminating
       control live, since this run writes nothing of its own.
 
-- [ ] 2.4 RED: Write `ui::tests::wiring::no_repository_still_polls_for_agents` for "A pane with
+- [x] 2.4 RED: Write `ui::tests::wiring::no_repository_still_polls_for_agents` for "A pane with
       no OpenSpec repository still polls for agents", over a `ScratchDir` holding no `openspec/`
       directory, asserting `agents.reachable` true and the `openspec` log **empty**.
 
-- [ ] 2.5 Confirm all three fail for the right reason: run them and record each assertion
+- [x] 2.5 Confirm all three fail for the right reason: run them and record each assertion
       message.
       **Red when:** the failure is a compile error, a missing fixture, or an `UntilReady`
       deadline with no assertion message — each means the harness is misconfigured rather than
       the behaviour missing. The expected message names `reachable` as `false`.
+      **Recorded verbatim:** `the_real_wiring_polls_a_scratch_herdr` → `width 120: the poller
+      must be reachable through the real seam`; `an_unreachable_scratch_herdr_is_a_standalone_tui`
+      → `width 120: the reason must be recorded`; `no_repository_still_polls_for_agents` →
+      `the poller runs unconditionally`. All three are real assertion failures inside
+      `run_wired`'s returned `Dashboard` — group 1's `start_collaborators` hardcodes
+      `agents::none()`, so `agents.reachable` and `agents.problem` never move off their
+      `ui::load` initial values regardless of the scratch `herdr` program. None is a compile
+      error, a missing fixture, or a silent `UntilReady` deadline.
 
-- [ ] 2.6 VERIFY: `cargo test --all-features` fails on **exactly** these three tests, and
+- [x] 2.6 VERIFY: `cargo test --all-features` fails on **exactly** these three tests, and
       `cargo llvm-cov --ignore-run-fail --fail-under-lines 80` is green. Commit.
+      **Recorded:** `cargo test --all-features` → `754 passed; 3 failed`, the three named
+      above and no others; `cargo llvm-cov --ignore-run-fail --fail-under-lines 80` → green at
+      96.89% lines.
 
 ## 3. `agents::parse_list`
 <!-- kind: behavior -->

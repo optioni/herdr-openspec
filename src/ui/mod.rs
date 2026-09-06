@@ -1643,4 +1643,334 @@ apply:
             }
         }
     }
+
+    /// The outer-loop acceptance test — see design.md -> Test Strategy. Drives
+    /// `ui::run_wired`, the composition root itself, with the real `ui::load`,
+    /// the real `watch::start`, the real `refresh::start`, the real
+    /// `agents::start`, and the real `ui::read_artifact`, against a scratch
+    /// repository and two scratch programs. RED from group 2 — group 1's
+    /// `start_collaborators` hardcodes the inert `agents::none()` poller, so
+    /// every scenario here fails on `agents.reachable` being `false` — until
+    /// group 10 wires `agents::start` for real. See design.md -> Decisions 13
+    /// for why `make check` is not run unqualified across that span.
+    mod wiring {
+        use std::path::{Path, PathBuf};
+        use std::time::Duration;
+
+        use crate::config::Config;
+        use crate::testutil::{ScratchDir, UntilReady, snapshot, write_with_mode};
+        use crate::ui::app::{Dashboard, Route};
+        use crate::ui::{StartError, Startup};
+
+        /// Drive `run_wired` at `width`x20 over a real `TestBackend`, with
+        /// `startup.cwd` at `root`, the real `ui::read_artifact`, and a
+        /// `testutil::UntilReady` event source built from `predicate`.
+        /// Returns the result plus every drawn row as a `String`, so a caller
+        /// can search the buffer without repeating the row-reading dance.
+        fn run_wired_at(
+            width: u16,
+            root: &Path,
+            config: &Config,
+            herdr: &Path,
+            predicate: &dyn Fn() -> bool,
+        ) -> (Result<Dashboard, StartError>, Vec<String>) {
+            let backend = ratatui::backend::TestBackend::new(width, 20);
+            let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+            let mut events = UntilReady::new(predicate);
+            let startup = Startup {
+                cwd: root,
+                config,
+                herdr,
+            };
+            let result = super::super::run_wired(
+                &mut terminal,
+                &mut events,
+                &startup,
+                &crate::ui::read_artifact,
+                Duration::from_millis(1),
+            );
+            let buf = terminal.backend().buffer().clone();
+            let rows: Vec<String> = (0..buf.area.height)
+                .map(|y| {
+                    (0..buf.area.width)
+                        .map(|x| buf[(x, y)].symbol().to_string())
+                        .collect::<String>()
+                })
+                .collect();
+            (result, rows)
+        }
+
+        fn vendor_tdd_schema(repo: &Path) {
+            let yaml = "\
+name: tdd
+artifacts:
+  - id: proposal
+    generates: proposal.md
+  - id: specs
+    generates: specs/**/*.md
+  - id: design
+    generates: design.md
+  - id: tasks
+    generates: tasks.md
+  - id: planning-review
+    generates: planning-review.md
+apply:
+  tracks: tasks.md
+";
+            write_with_mode(
+                &repo.join("openspec/schemas/tdd/schema.yaml"),
+                yaml.as_bytes(),
+                0o644,
+            );
+            write_with_mode(&repo.join("openspec/config.yaml"), b"schema: tdd\n", 0o644);
+        }
+
+        /// A scratch repository holding one active change, `alpha`, whose
+        /// `tasks.md` counts 4 of 9.
+        fn scratch_repo_with_alpha() -> ScratchDir {
+            let scratch = ScratchDir::new();
+            let root = scratch.path();
+            vendor_tdd_schema(root);
+            write_with_mode(
+                &root.join("openspec/changes/alpha/proposal.md"),
+                b"# alpha\n",
+                0o644,
+            );
+            write_with_mode(
+                &root.join("openspec/changes/alpha/tasks.md"),
+                b"- [x] a\n- [x] b\n- [x] c\n- [x] d\n- [ ] e\n- [ ] f\n- [ ] g\n- [ ] h\n- [ ] i\n",
+                0o644,
+            );
+            scratch
+        }
+
+        /// Write a scratch `#!/bin/sh` program under `<dir>/bin/<name>` — a
+        /// `bin/` subdirectory rather than `dir` itself, since the scratch
+        /// repository's own `openspec/` directory already lives at `dir` and
+        /// a program literally named `openspec` would collide with it.
+        fn write_script(dir: &Path, name: &str, body: &str) -> PathBuf {
+            let path = dir.join("bin").join(name);
+            write_with_mode(&path, format!("#!/bin/sh\n{body}").as_bytes(), 0o755);
+            path
+        }
+
+        /// A scratch `herdr` program: appends its arguments to `log`, one line
+        /// per invocation, then prints the reference one-agent `agent_list`
+        /// envelope captured verbatim from Herdr 0.8.2 — see
+        /// `specs/agent-list/spec.md` -> "The reference payload parses into
+        /// one agent".
+        fn herdr_script(dir: &Path, log: &Path) -> PathBuf {
+            write_script(
+                dir,
+                "herdr",
+                &format!(
+                    "printf '%s\\n' \"$*\" >> \"{log}\"\n\
+                     printf '%s' '{{\"id\":\"cli:agent:list\",\"result\":{{\"agents\":[{{\"agent\":\"claude\",\"agent_session\":{{\"agent\":\"claude\",\"kind\":\"id\",\"source\":\"herdr:claude\",\"value\":\"0e80c276-952e-4150-b32f-06cc6247ce01\"}},\"agent_status\":\"idle\",\"cwd\":\"/repo\",\"focused\":true,\"foreground_cwd\":\"/repo\",\"pane_id\":\"w8:p1\",\"revision\":35,\"state_change_seq\":963,\"tab_id\":\"w8:t1\",\"terminal_id\":\"term_65a34df386c314\",\"terminal_title\":\"\u{2733} a title\",\"terminal_title_stripped\":\"a title\",\"workspace_id\":\"w8\"}}],\"type\":\"agent_list\"}}}}'\n",
+                    log = log.display(),
+                ),
+            )
+        }
+
+        /// A scratch `openspec` program: appends its arguments to `log`, one
+        /// line per invocation, and answers `list --json` with an empty
+        /// change list whose `root.path` agrees with `root` — enough for
+        /// `changes::from_cli_cached` to accept it without a single
+        /// `instructions apply` call, which this test does not need.
+        fn openspec_script(dir: &Path, log: &Path, root: &Path) -> PathBuf {
+            write_script(
+                dir,
+                "openspec",
+                &format!(
+                    "printf '%s\\n' \"$*\" >> \"{log}\"\n\
+                     printf '%s' '{{\"changes\":[],\"root\":{{\"path\":\"{root}\",\"source\":\"nearest\"}}}}'\n",
+                    log = log.display(),
+                    root = root.display(),
+                ),
+            )
+        }
+
+        /// The number of lines a scratch program's log currently holds — `0`
+        /// when the log does not exist yet, so a predicate can poll a log no
+        /// invocation has produced.
+        fn log_lines(path: &Path) -> usize {
+            std::fs::read_to_string(path)
+                .map(|s| s.lines().count())
+                .unwrap_or(0)
+        }
+
+        /// Append one byte to `path` — the discriminating write scenario
+        /// 2.2's own predicate makes on purpose, since a real filesystem event
+        /// is the only thing that distinguishes a real watcher from the inert
+        /// double.
+        fn append_one_byte(path: &Path) {
+            use std::io::Write;
+            let mut f = std::fs::OpenOptions::new()
+                .append(true)
+                .open(path)
+                .expect("open the file to append one byte");
+            f.write_all(b"x").expect("append one byte");
+        }
+
+        #[test]
+        fn the_real_wiring_polls_a_scratch_herdr() {
+            for width in [120u16, 60u16] {
+                let scratch = scratch_repo_with_alpha();
+                let root = scratch.path();
+                let herdr_log = root.join("herdr.log");
+                let openspec_log = root.join("openspec.log");
+                let herdr = herdr_script(root, &herdr_log);
+                let openspec = openspec_script(root, &openspec_log, root);
+
+                let config = Config {
+                    openspec_bin: Some(openspec),
+                    ..Config::default()
+                };
+
+                let written = std::cell::Cell::new(false);
+                let proposal = root.join("openspec/changes/alpha/proposal.md");
+                let predicate = || {
+                    if log_lines(&herdr_log) < 1 || log_lines(&openspec_log) < 1 {
+                        return false;
+                    }
+                    if !written.get() {
+                        append_one_byte(&proposal);
+                        written.set(true);
+                    }
+                    log_lines(&openspec_log) >= 2
+                };
+
+                let (result, buf) = run_wired_at(width, root, &config, &herdr, &predicate);
+                let dashboard = result.expect("run_wired must return Ok for a supported state");
+
+                assert!(
+                    dashboard.agents.reachable,
+                    "width {width}: the poller must be reachable through the real seam"
+                );
+                assert_eq!(
+                    dashboard.agents.agents.len(),
+                    1,
+                    "width {width}: exactly one agent from the scratch herdr program"
+                );
+                assert_eq!(dashboard.agents.agents[0].pane_id, "w8:p1", "width {width}");
+
+                let herdr_calls = std::fs::read_to_string(&herdr_log).unwrap_or_default();
+                assert!(
+                    herdr_calls.lines().any(|l| l == "agent list"),
+                    "width {width}: the herdr log must record an 'agent list' call: {herdr_calls:?}"
+                );
+
+                assert!(
+                    log_lines(&openspec_log) >= 2,
+                    "width {width}: the openspec log must show both refresh::start and \
+                     watch::start were wired, not their inert doubles"
+                );
+                assert!(
+                    dashboard.refresh.problems.is_empty(),
+                    "width {width}: supporting assertion only — both watch::start and \
+                     watch::none() produce an empty problems vector"
+                );
+
+                assert!(
+                    buf.iter()
+                        .any(|row| row.contains("alpha") && row.contains("[4/9]")),
+                    "width {width}: the real ui::load and the real artifact reader must have run"
+                );
+            }
+        }
+
+        #[test]
+        fn an_unreachable_scratch_herdr_is_a_standalone_tui() {
+            for width in [120u16, 60u16] {
+                let scratch = scratch_repo_with_alpha();
+                let root = scratch.path();
+                let openspec_tree = root.join("openspec");
+                let herdr = root.join("does-not-exist-herdr");
+                let openspec_log = root.join("openspec.log");
+                let openspec = openspec_script(root, &openspec_log, root);
+
+                let config = Config {
+                    openspec_bin: Some(openspec),
+                    ..Config::default()
+                };
+
+                // Snapshotted at `openspec/`, not the whole scratch root: the
+                // scratch programs and their logs live alongside it, outside
+                // the repository tree, and the crate's byte-identity promise
+                // ("the plugin never writes inside openspec/") is scoped to
+                // that tree, not to this test's own harness artifacts.
+                let before = snapshot(&openspec_tree);
+
+                let predicate = || log_lines(&openspec_log) >= 1;
+
+                let (result, buf) = run_wired_at(width, root, &config, &herdr, &predicate);
+                let dashboard = result.expect("an unreachable socket is a supported state");
+
+                assert!(
+                    !dashboard.agents.reachable,
+                    "width {width}: no herdr program at all is the standalone-TUI case"
+                );
+                assert!(dashboard.agents.agents.is_empty(), "width {width}");
+                assert!(
+                    dashboard.agents.problem.is_some(),
+                    "width {width}: the reason must be recorded"
+                );
+
+                assert!(
+                    buf.iter()
+                        .any(|row| row.contains("alpha") && row.contains("[4/9]")),
+                    "width {width}: nothing is hidden and no error screen replaces the pane"
+                );
+
+                let after = snapshot(&openspec_tree);
+                assert_eq!(
+                    before, after,
+                    "width {width}: this run writes nothing of its own"
+                );
+
+                // Discriminating control: the same comparison must fail when a
+                // single byte of tasks.md is rewritten between two further
+                // snapshots, or the equality assertion above proves nothing.
+                let tasks_path = root.join("openspec/changes/alpha/tasks.md");
+                let original = std::fs::read_to_string(&tasks_path).expect("read tasks.md back");
+                let control_before = snapshot(&openspec_tree);
+                let mutated = original.replacen("[ ] e", "[x] e", 1);
+                write_with_mode(&tasks_path, mutated.as_bytes(), 0o644);
+                let control_after = snapshot(&openspec_tree);
+                assert_ne!(
+                    control_before, control_after,
+                    "width {width}: the snapshot comparison must discriminate a rewritten byte"
+                );
+                write_with_mode(&tasks_path, original.as_bytes(), 0o644);
+            }
+        }
+
+        #[test]
+        fn no_repository_still_polls_for_agents() {
+            let scratch = ScratchDir::new();
+            let root = scratch.path();
+            let herdr_log = root.join("herdr.log");
+            let herdr = herdr_script(root, &herdr_log);
+            let openspec_log = root.join("openspec.log");
+
+            let config = Config::default();
+
+            let predicate = || log_lines(&herdr_log) >= 1;
+
+            let (result, _buf) = run_wired_at(120, root, &config, &herdr, &predicate);
+            let dashboard = result.expect("no repository is a supported state");
+
+            assert_eq!(dashboard.repo, None);
+            assert!(
+                dashboard.agents.reachable,
+                "the poller runs unconditionally"
+            );
+            assert_eq!(dashboard.agents.agents.len(), 1);
+            assert!(
+                !openspec_log.exists() || log_lines(&openspec_log) == 0,
+                "with no repository, refresh::start must be the inert double"
+            );
+            assert!(dashboard.refresh.problems.is_empty());
+            assert_eq!(dashboard.route, Route::List);
+        }
+    }
 }
