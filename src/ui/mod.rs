@@ -78,11 +78,11 @@ pub fn enter_if_terminal(
 
 /// This pane's starting point: the working directory to search from, the
 /// loaded configuration, and the `herdr` program to poll — a parameter
-/// rather than the literal `"herdr"`, precisely so a test drives
-/// [`run_wired`] against a scratch `#!/bin/sh` program. Bundled into one
-/// struct for cohesion, the same way [`driver::Live`] bundles the loop's
-/// three collaborators: `run_wired` would otherwise take seven parameters,
-/// clippy's `too_many_arguments` threshold exactly.
+/// rather than the bare program name written down, precisely so a test
+/// drives [`run_wired`] against a scratch `#!/bin/sh` program. Bundled into
+/// one struct for cohesion, the same way [`driver::Live`] bundles the
+/// loop's three collaborators: `run_wired` would otherwise take seven
+/// parameters, clippy's `too_many_arguments` threshold exactly.
 pub struct Startup<'a> {
     pub cwd: &'a Path,
     pub config: &'a Config,
@@ -102,13 +102,11 @@ pub struct Collaborators {
 
 /// Start the live tier's collaborators for `repo`. The watcher and the
 /// worker are about a repository, and are the inert doubles when none was
-/// found; the poller is about the Herdr session and is unrelated to any
-/// repository.
-///
-/// Group 1 stub: the poller is `agents::none()` here, hardcoded rather than
-/// reaching the real seam — group 10 replaces it with
-/// `agents::start(cli::agent_cli_via(herdr))`, started unconditionally.
-pub fn start_collaborators(repo: Option<&Path>, config: &Config, _herdr: &Path) -> Collaborators {
+/// found; the poller is about the Herdr session — unrelated to any
+/// repository — and is started **unconditionally**: `agent-launch` reads
+/// `reachable` to decide whether to offer its keys in a pane that never
+/// found one.
+pub fn start_collaborators(repo: Option<&Path>, config: &Config, herdr: &Path) -> Collaborators {
     let (fs, problems) = match repo {
         Some(root) => crate::watch::start(root),
         None => (crate::watch::none(), Vec::new()),
@@ -118,7 +116,7 @@ pub fn start_collaborators(repo: Option<&Path>, config: &Config, _herdr: &Path) 
         crate::cli::worker_cli_from_env(config),
         config.archived_count,
     );
-    let agents = crate::agents::none();
+    let agents = crate::agents::start(crate::cli::agent_cli_via(herdr));
     Collaborators {
         fs,
         refresher,

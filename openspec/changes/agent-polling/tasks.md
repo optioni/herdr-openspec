@@ -777,14 +777,16 @@ check is 8.4's plant rather than an invented RED.
 ## 10. Acceptance Test — Outer Loop GREEN
 <!-- kind: behavior -->
 
-- [ ] 10.1 GREEN: Fill in `start_collaborators` and `run_wired` per design.md → Contracts, with
+- [x] 10.1 GREEN: Fill in `start_collaborators` and `run_wired` per design.md → Contracts, with
       the poller started unconditionally and the watcher and worker only when a repository was
       found, so all three group-2 tests pass end to end.
+      **Recorded:** all three `ui::tests::wiring::` tests green, stable across repeated runs.
 
-- [ ] 10.2 VERIFY: `testcount --lib 'ui::tests::wiring::' 3` and `testcount --lib
+- [x] 10.2 VERIFY: `testcount --lib 'ui::tests::wiring::' 3` and `testcount --lib
       'ui::tests::live::' 3`, and confirm every landed `ui::` buffer assertion is unchanged.
+      **Recorded:** both green; `cargo test --all-features --lib 'ui::'` — 301 passed, 0 failed.
 
-- [ ] 10.3 CHECK: Run the three wiring plants and record each red result verbatim, reverting
+- [x] 10.3 CHECK: Run the three wiring plants and record each red result verbatim, reverting
       after each: `agents::none()` for `agents::start` must fail on `agents.reachable`;
       `refresh::none()` for `refresh::start` must fail on the scratch `openspec` log being
       empty; `watch::none()` for `watch::start` must fail on that log stopping at **one** entry.
@@ -792,24 +794,53 @@ check is 8.4's plant rather than an invented RED.
       the group-2 test is the `live-refresh` defect reproduced rather than caught. The watcher
       plant is the one that matters most: `refresh.problems` is empty under both arms, so it is
       a supporting assertion only.
+      **Recorded:** `agents::none()` plant — all three wiring tests fail (`the poller must be
+      reachable through the real seam`, `the reason must be recorded`, `the poller runs
+      unconditionally`). `refresh::none()` plant — `the_real_wiring_polls_a_scratch_herdr` fails
+      on `the openspec log must show both refresh::start and watch::start were wired, not their
+      inert doubles`; the other two pass (they do not exercise this collaborator). `watch::none()`
+      plant — the same single discriminating test fails on the same assertion. All reverted;
+      clean run green again after each.
 
-- [ ] 10.4 VERIFY: `sh $CHECKS/WIRED.sh` — it must now be **green**. Then run its six plants
+- [x] 10.4 VERIFY: `sh $CHECKS/WIRED.sh` — it must now be **green**. Then run its six plants
       (drop each of the three `*::start` calls, add a branch to `run`, hardcode `"herdr"` in
       `run`, and move the seven names into `mod tests` behind a mis-anchored `#[cfg(test)]`),
       record each FAIL line, and revert. All six were run against a scratch tree at planning
       time and reported leg 1 three times, leg 2, leg 4, and Guard D.
+      **Found before green:** `WIRED` leg 4 first reported red on a genuine, pre-existing doc
+      comment in `Startup`'s own docs quoting the literal `"herdr"` — reworded to "the bare
+      program name written down" and reverified green.
+      **Recorded (all six plants):** dropping `watch::start`/`refresh::start`/`agents::start`
+      each reported `leg 1: ... does not name <name> - the name is gone`; a branch in `run`
+      reported `leg 2: 'pub fn run()' holds a branch or a loop`; hardcoding `"herdr"` in `run`
+      reported `leg 4: the "herdr" literal appears under src/ui`; a mis-anchored `#[cfg(test)]`
+      (trailing space) reported `src/ui/mod.rs holds 0 line-anchored #[cfg(test)] attributes,
+      expected exactly 1`. All reverted; green again.
 
-- [ ] 10.5 CHECK: Prove `AGENTSEAM`'s legs can fail at implementation time, not only at planning
+- [x] 10.5 CHECK: Prove `AGENTSEAM`'s legs can fail at implementation time, not only at planning
       time: plant `Command::new` in `src/agents.rs`, a doc comment naming `Frame` there, and a
       `crate::cli::agent_cli_via(...)` call in `src/ui/list.rs`; record the three FAIL lines and
       revert each.
+      **Recorded:** leg 1 — `src/agents.rs spawns a process`; leg 2 — `src/agents.rs names a
+      ratatui type` (the planted "Frame" prose); leg 3 — `the Herdr handle is reached outside`,
+      naming `src/ui/list.rs`. All reverted; green again.
 
-- [ ] 10.6 REFACTOR: Fold the two scratch-program builders and the scratch repository helper
+- [x] 10.6 REFACTOR: Fold the two scratch-program builders and the scratch repository helper
       into one place in `ui::tests::wiring` if 2.1 left them duplicated; otherwise record that
       no refactor was needed.
+      **Recorded:** no refactor needed — `write_script`, `herdr_script`, `openspec_script`,
+      `vendor_tdd_schema`, and `scratch_repo_with_alpha` were each already declared exactly once
+      inside `mod wiring`, shared by all three of its tests. (`ui::tests::live` and
+      `ui::tests::detail` carry their own separate copies, following this codebase's
+      established per-submodule fixture convention; task 10.6 scopes the fold to `mod wiring`
+      itself, which has no internal duplication to fold.)
 
-- [ ] 10.7 VERIFY: `make check` unqualified — the first run of the literal composite target
+- [x] 10.7 VERIFY: `make check` unqualified — the first run of the literal composite target
       since group 1. Commit.
+      **Recorded:** `make check` exits 0. `cargo test --all-features` — **805** library tests
+      passed (matching the design's own final arithmetic), 0 failed. `cargo llvm-cov` TOTAL row
+      — **97.26% of lines** (20,859 lines, 571 missed) — the line figure, not the region count
+      (34,169 regions, 97.03%), which is not interchangeable with it. Floor is 80%, not lowered.
 
 ## 11. The architecture checks, all green together
 <!-- kind: operational -->
