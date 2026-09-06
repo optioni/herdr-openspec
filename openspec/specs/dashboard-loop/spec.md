@@ -7,15 +7,25 @@ TBD - created by archiving change tui-shell. Update Purpose after archive.
 
 ### Requirement: `Dashboard` is a plain state value with no rendering and no I/O
 
-`ui::app::Dashboard` SHALL carry exactly **ten** fields: `repo: Option<PathBuf>` — the
+`ui::app::Dashboard` SHALL carry exactly **eleven** fields: `repo: Option<PathBuf>` — the
 repository root when one was found; `searched_from: PathBuf` — the directory the walk began
 at, rendered by `change-rows`' no-repository state; `changes: changes::ChangeSet`;
 `route: Route`, an enum of `List` and `Detail`; `quit: bool`, set by the quit action;
 `selected: usize`, the index into the visible list defined by `list-selection`;
 `filter: Filter`, the query and mode defined by `list-filtering`; `detail: Detail`, the
 detail region's state defined by `detail-scroll`, `artifact-tabs`, and `artifact-content`;
-`refresh: Refresh`, the live tier's state defined by `live-updates`; and
-`agents: agents::AgentSnapshot`, the latest agent poll's outcome defined by `agent-poller`.
+`refresh: Refresh`, the live tier's state defined by `live-updates`;
+`agents: agents::AgentSnapshot`, the latest agent poll's outcome defined by `agent-poller`;
+and `agent_names: state::Mapping`, the plugin-local agent-name mapping defined by
+`plugin-state` and consumed by `agent-attribution`'s first tier.
+
+`agent_names` is `agent-attribution`'s addition. It is read **once**, by `ui::load`, from the
+state directory `Startup` carries, and is not re-read per frame: `state::read` is filesystem
+I/O and `Dashboard` is constructed outside the render path, which is what keeps every view a
+pure function of this value. `agent-launch` is the change that will keep it current in memory
+as it records new pairs; until then the mapping a pane starts with is the mapping it uses.
+Holding `state::Mapping` rather than its bare `names` map keeps the file's own problems where
+`plugin-state` put them, available to `degraded-states` without a second read.
 
 `ui::app::Filter` SHALL carry exactly two fields: `query: String` and `active: bool`.
 `ui::app::Detail` SHALL carry exactly **five** fields: `source: String`, `scroll: usize`,
@@ -44,6 +54,14 @@ of `refresh`, not an entry on `Refresh::problems` and not one on `ChangeSet::pro
 produce, and `ChangeSet::problems` is replaced wholesale by `Dashboard::adopt` on every refresh,
 which a standing condition must survive.
 
+`agents::Attribution` is `agent-attribution`'s addition and SHALL carry exactly **two** fields:
+`badges: BTreeMap<String, agents::AgentStatus>` and `unattributed: usize`. It is **not** a field
+on `Dashboard`. `Dashboard::attribution(&self) -> agents::Attribution` derives it on every call
+from `repo`, `changes`, `agents.agents`, and `agent_names`, beside `visible()`, `visible_len()`,
+and `selected_change()`, which are derived on every call for the same reason: a badge attached
+by index would drift the moment `adopt` reordered the list, and a badge stored at all would be a
+second copy of state the dashboard already holds.
+
 `Dashboard` SHALL carry no width, no layout mode, no column count, no interior height, no
 terminal handle, and no frame. It **does** carry `detail.scroll` and `detail.tab`, and that
 is not an exception to the rule: both are user-controlled positions, the counterparts of
@@ -52,7 +70,8 @@ is not an exception to the rule: both are user-controlled positions, the counter
 geometry either: it is a record of what was read, not of how it was laid out. `refresh` is
 not geometry: `requested` and `reload` are one-shot flags the loop consumes, and `problems` is
 text. `agents` is not geometry: it is the most recent answer to a question, replaced wholesale.
-No *derived geometry* is stored.
+`agent_names` is not geometry: it is a file's contents, read once. No *derived geometry* is
+stored, and neither is the attribution derived from all of it.
 
 `Dashboard` SHALL carry no watcher, no worker handle, no poller, no channel, and no `Instant`.
 The live tier's three collaborators reach the loop through `ui::driver::Live`, never through the
@@ -63,10 +82,15 @@ None of `Dashboard`, `Filter`, `Detail`, and `Refresh` SHALL implement `Default`
 derived nor hand-written, anywhere in the crate — and every construction and every
 destructuring of any of them SHALL name every field, with no `..` rest, so a field added later
 fails to compile at each site rather than defaulting silently. The same SHALL hold for
-`agents::Agent`, `agents::Listed`, and `agents::AgentSnapshot`, and the check SHALL be the same
-check run a second time with its positive-control file parameterised to `src/agents.rs` rather
-than a second copy of it on disk: two versions of one check is how a run and a record drift
-apart. `change-model`'s existing gate does not reach any of these seven types: that gate is
+`agents::Agent`, `agents::Listed`, `agents::AgentSnapshot`, and `agents::Attribution`, and the
+check SHALL be the same check run a second time with its positive-control file parameterised to
+`src/agents.rs` rather than a second copy of it on disk: two versions of one check is how a run
+and a record drift apart. `state::Mapping` is deliberately **outside** that set: it derives
+`Default`, it did so before this change, and `plugin-state`'s `state::read` returns
+`Mapping::default()` on four separate absent-input paths, so removing the derive would replace
+four total returns with four literals for no gain. What the check enforces about it is the
+enclosing `Dashboard` literal, which must still name the `agent_names` field explicitly at every
+site. `change-model`'s existing gate does not reach any of these eight types: that gate is
 stated over `Change`, `ChangeSet`, `ArtifactRef`, and `Origin` in `src/changes.rs`, and none of
 these is one of those nor there.
 
@@ -74,11 +98,17 @@ these is one of those nor there.
 `src/ui/markdown.rs`, `src/ui/tasks.rs`, `src/ui/view.rs`, and `src/ui/driver.rs` SHALL name
 no filesystem, process, environment, network, or standard-I/O API. Terminal work lives in
 `src/ui/terminal.rs`, event reading in `src/ui/event.rs`, and startup loading, the one
-artifact-read binding, and the composition root in `src/ui/mod.rs`; the **eight** files above
-are the pure side of the render seam, and `agent-polling` adds no ninth — `src/watch.rs`,
-`src/refresh.rs`, and `src/agents.rs` sit outside `src/ui/` entirely, which is what keeps this
-set and the `NOCLI-SHELL` set unchanged, at **eleven** `*.rs` files under `src/ui/`.
+artifact-read binding, the mapping read, and the composition root in `src/ui/mod.rs`; the
+**eight** files above are the pure side of the render seam, and neither `agent-polling` nor
+`agent-attribution` adds a ninth — `src/watch.rs`, `src/refresh.rs`, and `src/agents.rs` sit
+outside `src/ui/` entirely, which is what keeps this set and the `NOCLI-SHELL` set unchanged, at
+**eleven** `*.rs` files under `src/ui/`. `agent-attribution` adds no file to the crate at all.
 A view test that needs a real directory means logic leaked across that seam.
+
+`state::read` is a filesystem call and SHALL be named only in `src/ui/mod.rs` among the files
+under `src/ui/`, on exactly `tasks::read`'s terms below: the eight pure files SHALL
+additionally be searched for `state::read`, so the one filesystem call an attribution renderer
+would plausibly reach for is caught by the same check rather than by nothing.
 
 `src/ui/tasks.rs` is `tasks-tab`'s addition to that set. It renders the tracked-tasks tab by
 calling `tasks::parse` — a pure function over a `&str` — on the source
@@ -94,7 +124,10 @@ included, so every construction site stays inside the file `change-model`'s gate
 artifacts through a constructor in `src/changes.rs` — `changes::fixture::with_artifacts`, and
 `changes::fixture::track_tasks_at` for one carrying a marked artifact — rather than through a
 literal of their own. The same holds for `src/watch.rs`, `src/refresh.rs`, and `src/agents.rs`,
-which the same tree-wide search now covers at a file count of **22**.
+which the same tree-wide search now covers at a file count of **22**. `agents::attribute`
+therefore takes the change names as a `&[&str]` slice rather than a `&[Change]`: it needs
+nothing else from the type, and the slice keeps `src/agents.rs` free of any reason to name a
+`Change` literal, in its tests as well as its production code.
 
 #### Scenario: `Dashboard` has no `Default` and no site elides a field
 
@@ -102,27 +135,31 @@ The scenario's name is kept verbatim from `tui-shell` because a delta's scenario
 its merge key; its subject is unchanged and only the type list and the field count move.
 
 - **WHEN** every `*.rs` file under `src/` is searched, for each of the type names
-  `Dashboard`, `Filter`, `Detail`, `Refresh`, `Agent`, `Listed`, and `AgentSnapshot`, for
-  `impl Default for <name>` — the target path-qualified or bare — for a `Default` inside the
-  `#[derive(...)]` immediately preceding `struct <name>`, and for a `..` appearing inside a
-  `<name> { … }` literal or pattern, brace-matched from the opening `{` to its partner so a
-  multi-line elision rustfmt spread over several lines is seen
-- **THEN** there is no match for any of the seven
+  `Dashboard`, `Filter`, `Detail`, `Refresh`, `Agent`, `Listed`, `AgentSnapshot`, and
+  `Attribution`, for `impl Default for <name>` — the target path-qualified or bare — for a
+  `Default` inside the `#[derive(...)]` immediately preceding `struct <name>`, and for a `..`
+  appearing inside a `<name> { … }` literal or pattern, brace-matched from the opening `{` to
+  its partner so a multi-line elision rustfmt spread over several lines is seen
+- **THEN** there is no match for any of the eight
 - **AND** the check fails when `src/ui/app.rs` is absent, and it is paired with a positive
   control asserting that `src/ui/app.rs` **does** contain `struct Dashboard`, `struct Filter`,
   `struct Detail`, and `struct Refresh`, anchored on both sides so a rename fails the control
   rather than leaving every leg searching for a name that is no longer there
 - **AND** the control's file is a **parameter**, defaulting to `src/ui/app.rs`, and the check is
-  run a second time with it set to `src/agents.rs` for `Agent`, `Listed`, and `AgentSnapshot`,
-  so the three new types are covered by the same executable file rather than by a fork of it
-- **AND** the search is judged against a counted minimum of literal or pattern spans, raised
-  to **90** for this change and measured at **107** on the tree before it, so a broken pattern
-  that scanned nothing fails rather than reporting a clean tree
+  run a second time with it set to `src/agents.rs` for `Agent`, `Listed`, `AgentSnapshot`, and
+  `Attribution`, so the four types outside `src/ui/app.rs` are covered by the same executable
+  file rather than by a fork of it
+- **AND** the search is judged against a counted minimum of literal or pattern spans, measured
+  on the tree at this change's base commit and raised from **90** to that measured figure —
+  **165** at planning time, re-measured in the implementation's first task rather than copied —
+  so a broken pattern that scanned nothing fails rather than reporting a clean tree
 - **AND** the check is proven able to fail: run against a copy of `src/` carrying
   `impl Default for Detail { … }`, again against a copy carrying
   `let Detail { source, .. } = d;`, again against a copy carrying `#[derive(Default)]`
-  immediately above `struct Refresh`, and again against a copy carrying
-  `#[derive(Default)]` immediately above `struct Agent`, it reports each violation
+  immediately above `struct Refresh`, again against a copy carrying `#[derive(Default)]`
+  immediately above `struct Agent`, and — `agent-attribution`'s fifth plant — again against a
+  copy carrying `#[derive(Default)]` immediately above `struct Attribution`, it reports each
+  violation
 - **AND** the planted `..` control is written in the **multi-line** form this tree's rustfmt
   output actually produces as well as the single-line form. The reason recorded in
   `markdown-viewer`'s version — "the compile-time companion is what covers it" — is
@@ -131,27 +168,35 @@ its merge key; its subject is unchanged and only the type list and the field cou
   same-line grep with the brace-matching pass named above. The companion is kept for what it
   genuinely does, below
 - **AND** a compile-time companion exists: a test destructures a `Dashboard` with an
-  exhaustive pattern naming all **ten** fields and no `..`, a second destructures a `Filter`
+  exhaustive pattern naming all **eleven** fields and no `..`, a second destructures a `Filter`
   naming both, a third destructures a `Detail` naming all five and no `..`, a fourth
   destructures a `Refresh` naming all **three** and no `..`, a fifth destructures an `Agent`
-  naming all **eight**, a sixth destructures a `Listed` naming both, and a seventh destructures
-  an `AgentSnapshot` naming all **three**, so adding a field breaks the build at that site
-  rather than passing a source grep that never saw it
+  naming all **eight**, a sixth destructures a `Listed` naming both, a seventh destructures
+  an `AgentSnapshot` naming all **three**, and an eighth destructures an `Attribution` naming
+  both, so adding a field breaks the build at that site rather than passing a source grep that
+  never saw it
 - **AND** `agents::AgentStatus` is deliberately outside the swept type list: the check's positive
   control is anchored on `struct <T> {`, so an enum cannot be added to it without breaking that
   control, and a `Default` on the enum would change nothing because every construction site is a
   `match` arm naming a variant
+- **AND** every `Dashboard` literal in the crate names `agent_names` explicitly: adding the
+  eleventh field is a compile error at each site until it does, which is the whole reason the
+  type carries no `Default`
 
 #### Scenario: The pure view files name no I/O API
 
 - **WHEN** `src/ui/app.rs`, `src/ui/detail.rs`, `src/ui/layout.rs`, `src/ui/list.rs`,
   `src/ui/markdown.rs`, `src/ui/tasks.rs`, `src/ui/view.rs`, and `src/ui/driver.rs` are
   searched for `std::fs`, `std::io`, `std::env`, `std::process`, `std::net`, `File::`,
-  `read_to_string`, `tasks::read`, and `Command`
+  `read_to_string`, `tasks::read`, `state::read`, and `Command`
 - **THEN** there is no match in any of the eight
-- **AND** the searched set is still exactly those eight after `agent-polling`: the watcher lives
-  in `src/watch.rs`, the worker in `src/refresh.rs`, and the poller in `src/agents.rs`, all
-  three outside `src/ui/`, so the pure set neither grows nor shrinks
+- **AND** the searched set is still exactly those eight after `agent-polling` and
+  `agent-attribution`: the watcher lives in `src/watch.rs`, the worker in `src/refresh.rs`, and
+  the poller in `src/agents.rs`, all three outside `src/ui/`, and attribution is a pure
+  function in `src/agents.rs` too, so the pure set neither grows nor shrinks
+- **AND** `state::read` joins the searched names for `agent-attribution`: the mapping read is a
+  filesystem call, it lives in `src/ui/mod.rs` beside `read_artifact`, and a view reaching for
+  it directly is the one leak this change makes plausible
 - **AND** the check fails when any of the eight files is absent, rather than reporting a
   clean tree
 - **AND** it is paired with a positive control asserting that `src/ui/terminal.rs` **does**
@@ -160,7 +205,8 @@ its merge key; its subject is unchanged and only the type list and the field cou
 - **AND** the check is proven able to fail against a copy carrying `use std::fs;` inside
   `src/ui/tasks.rs`, which is the file `tasks-tab` added to the set, and against a copy
   carrying `crate::tasks::read(p)` inside `src/ui/detail.rs`, which is the pattern that change
-  added to the search
+  added to the search, and against a copy carrying `crate::state::read(dir)` inside
+  `src/ui/app.rs`, which is the pattern this change adds
 
 #### Scenario: The shell never names the CLI seam
 
@@ -300,6 +346,9 @@ its merge key; its subject is unchanged and only the type list and the field cou
 - **AND** the leg still covers `src/ui/mod.rs` after `agent-polling`'s outer-loop test lands
   there: that test waits through `testutil::UntilReady`, whose own wait is `yield_now` and
   whose clock lives in `src/lib.rs`, so nothing under `src/ui/` sleeps
+- **AND** `agent-attribution` adds **no** sleep site: its unit tests are pure, its view tests
+  render into a `TestBackend`, and its outer-loop tests wait through `testutil::UntilReady`, so
+  the floor stays at **five** and a sixth site would be a deliberate raise rather than drift
 - **AND** the check is proven able to fail against a copy carrying a `#[test]` function in
   `src/ui/layout.rs` that sleeps 200 milliseconds and then asserts
 
@@ -588,14 +637,26 @@ moment either becomes due rather than at the next tick.
 
 ### Requirement: Startup state is read from files only
 
-`ui::load(start: &Path, config: &Config) -> Dashboard` SHALL call `resolve::find_repo` on
-`start` and then, when a root was found, `changes::from_files(root, config.archived_count)`.
+`ui::load(start: &Path, config: &Config, state_dir: Option<&Path>) -> Dashboard` SHALL call
+`resolve::find_repo` on `start` and then, when a root was found,
+`changes::from_files(root, config.archived_count)`.
 It SHALL make no CLI call, spawn no process, start no thread, start no watcher, and consult
 no `openspec` binary, so the dashboard opens with a complete change list on a machine where
 `openspec` is not installed. It SHALL read no artifact file either: `load` produces a
 `Dashboard` whose `detail` is empty in every field, and `sync_detail` — driven by the loop,
 with the injected reader — is what fills it. That keeps `load`'s cost proportional to the
 change list rather than to the total size of every artifact in the repository.
+
+`state_dir` is `agent-attribution`'s addition, and the plugin-local mapping is the **one**
+further file `load` reads. `load` SHALL set `agent_names` to `state::read(state_dir)` — on
+**both** the found and the not-found branch, since Herdr agents exist independently of an
+OpenSpec repository — and SHALL treat every unusable input as an ordinary absent one:
+`state_dir` of `None`, an absent directory, an absent `agent-names.toml`, and an empty file
+all yield `Mapping::default()` with no problem, while a malformed file yields an empty
+mapping carrying `state::read`'s own problem string. `load` SHALL NOT resolve the state
+directory itself: it arrives as a parameter, so the crate's one `std::env::var` binding stays
+where `plugin-config` put it and a test drives `load` against a scratch directory without
+touching the process environment.
 
 `load` SHALL set `refresh.requested` to **true**, `refresh.reload` to false, and
 `refresh.problems` to empty. Setting the flag is not a CLI call: it is a state value the
@@ -612,19 +673,23 @@ When `find_repo` reports `NotFound`, `load` SHALL produce a `Dashboard` whose `r
 
 `load` SHALL always return a `Dashboard`, never a `Result`, and SHALL never panic. Its
 route SHALL start at `Route::List`, its `quit` flag at false, its `selected` at `0`, its
-`filter` with an empty query and `active` false, and its `detail` empty in all five fields.
+`filter` with an empty query and `active` false, its `detail` empty in all five fields, and
+its `agents` the inert `AgentSnapshot` — empty, `reachable` false, no problem — which the
+loop's first poll replaces.
 
 #### Scenario: A scratch repository is loaded from disk with no binary present
 
 - **WHEN** a scratch tree holding `openspec/changes/alpha/proposal.md` and
   `openspec/changes/alpha/tasks.md` with two checked and one unchecked task is loaded by
-  `ui::load` from a subdirectory two levels below the root, with `archived_count` 5
+  `ui::load` from a subdirectory two levels below the root, with `archived_count` 5 and
+  `state_dir` `None`
 - **THEN** the returned `Dashboard`'s `repo` is the canonicalized scratch root
 - **AND** its `changes.active` holds exactly one change named `alpha` whose progress is
   2 of 3
 - **AND** its `route` is `Route::List`, its `quit` is false, its `selected` is 0, and its
   `filter` is an empty, inactive query
 - **AND** its `refresh` is `{ requested: true, reload: false, problems: [] }`
+- **AND** its `agent_names.names` and `agent_names.problems` are both empty
 - **AND** no `openspec` binary was consulted and no thread was started: `load` takes no
   `OpenspecCli` argument and no `Refresher`, and the source checks above prove `src/ui/`
   names neither the CLI seam nor a thread
@@ -659,7 +724,37 @@ route SHALL start at `Route::List`, its `quit` flag at false, its `selected` at 
 - **AND** the same holds after `Dashboard::sync_detail` is driven over that dashboard with
   the real `ui::read_artifact` binding, so resolving and reading an artifact's content leaves
   the tree byte-identical too
+- **AND** a scratch **state** directory holding an `agent-names.toml` is snapshotted around
+  the same call and is identical too: `load` reads the mapping and never writes it, and
+  `agent-launch` is the change that will
 - **AND** the equivalent claim for the watcher is made by
   `watch::tests::a_started_watcher_writes_nothing`, **not** here: `ui::load` starts no
   watcher, and the Test Boundaries rule that no `ui::` test may open one is absolute rather
   than carrying an exemption for this test
+
+#### Scenario: `load` reads the agent-name mapping from the directory it was given
+
+- **WHEN** `ui::load` is called over a scratch repository with a `state_dir` naming a second
+  scratch directory holding `agent-names.toml` with `[names]` and
+  `c-2fa-support = "2fa-support"`
+- **THEN** the returned `Dashboard`'s `agent_names.names` holds exactly that one pair and
+  `agent_names.problems` is empty
+- **AND** calling `load` again with the same repository and `state_dir` `None` returns a
+  `Dashboard` whose `agent_names.names` is empty, so the pair came from the directory rather
+  than from anywhere else
+- **AND** `Dashboard::attribution()` on the first result badges `2fa-support` for an in-scope
+  agent named `c-2fa-support`, and on the second badges nothing — the mapping reaching the
+  dashboard is observable in the attribution, not only in the field
+
+#### Scenario: An unusable mapping file is an empty mapping with a named problem
+
+- **WHEN** `ui::load` is called with a `state_dir` naming a scratch directory whose
+  `agent-names.toml` is not valid TOML
+- **THEN** the returned `Dashboard`'s `agent_names.names` is empty and
+  `agent_names.problems` holds exactly one entry naming the file
+- **AND** `load` still returns a complete `Dashboard`: `repo`, `changes`, `route`,
+  `selected`, `filter`, `detail`, `refresh`, and `agents` are all exactly what the same call
+  produces with a well-formed mapping, so an unusable mapping degrades the badge tier and
+  nothing else
+- **AND** nothing renders that problem: `agent_names.problems` reaches no row and no hint in
+  this change, and `degraded-states` is the change that owns whether it ever does

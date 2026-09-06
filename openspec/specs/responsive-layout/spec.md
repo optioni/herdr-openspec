@@ -19,13 +19,30 @@ The header SHALL render the literal `OpenSpec` at column 0 with
 `Esc back` in that order, separated by two spaces, starting at column 0, dropping hints
 from the **end** when the remaining width cannot hold the next one whole.
 
+`agent-attribution` adds a **fourth hint, placed last**: when
+`Dashboard::attribution().unattributed` is greater than zero, the footer SHALL append that
+count, a single space, and the word `unattributed` — `1 unattributed`, `12 unattributed` —
+after `Esc back`, joined by the same two-space separator. When the count is zero the hint
+SHALL be absent entirely, so an agentless pane's footer is byte-identical to the footer this
+requirement already specified. Being last means it is the **first** hint dropped as the width
+falls, which is the correct priority: the three key hints tell a reader how to drive the
+pane, and the count tells them something they can act on later.
+
+`SPEC.md` → Attributing an agent's tier 3 requires a count and forbids a row: an agent that
+no tier attributed is reported here, in one shared cell, and never against a change. The
+footer is the whole of that report — there is no per-agent listing, no expansion, and no key
+that opens one. It is also never a `!`-marked problem row: an unattributed agent is a normal
+state of a shared Herdr session, not a fault.
+
 The footer has two further forms, specified by `list-filtering` and restated here because
 this requirement owns the row: while `dashboard.filter.active` is set the hints are
-**replaced** by the prompt `/`, the query, and `_`, keeping its tail when it overflows;
-while the filter is inactive with a non-empty query, `/` and the query become a fourth
-hint placed **first** in the list above, dropped last rather than first. Every scenario
-below renders a `Dashboard` with an empty, inactive filter, so the three-hint form is what
-they assert.
+**replaced** by the prompt `/`, the query, and `_`, keeping its tail when it overflows —
+and the unattributed count is replaced along with them, because the prompt replaces the whole
+row rather than the three key hints specifically; while the filter is inactive with a
+non-empty query, `/` and the query become a further hint placed **first** in the list above,
+dropped last rather than first, with the unattributed count still last. Every scenario below
+except the three the count names renders a `Dashboard` with an empty, inactive filter and no
+agents, so the three-hint form is what they assert.
 
 Scenarios in this capability render a `Dashboard` whose `changes` is
 `changes::empty_set()` unless they say otherwise. That state is no longer inert: with a
@@ -100,6 +117,62 @@ frame produces.
   width
 - **AND** the 120-column footer row is the same thirty characters followed by ninety
   spaces
+
+#### Scenario: The unattributed count is the footer's last hint at both widths
+
+- **WHEN** a `Dashboard` whose repository root is `/tmp/demo-repo`, whose `changes` holds
+  one active change `alpha`, and whose `agents.agents` holds one in-scope agent named
+  `nothing-like-a-change`, is rendered at 60x20 and at 120x20
+- **THEN** the 60-column footer row is exactly
+  `q quit  Enter detail  Esc back  1 unattributed` — forty-six characters — followed by
+  fourteen spaces
+- **AND** the 120-column footer row is the same forty-six characters followed by
+  seventy-four spaces
+- **AND** rendering the identical dashboard with `agents.agents` empty produces a footer row
+  of exactly `q quit  Enter detail  Esc back` and thirty spaces at 60 columns, byte-identical
+  to the row this capability specified before the count existed
+- **AND** the count is a number of agents, not of changes: adding a second in-scope agent
+  named `also-nothing` makes the hint read `2 unattributed` at both widths, while the list
+  region's rows are unchanged
+
+#### Scenario: The count is reported with an empty change list
+
+- **WHEN** a `Dashboard` whose repository root is `/tmp/demo-repo`, whose `changes` is
+  `changes::empty_set()`, and whose `agents.agents` holds two in-scope agents named
+  `nothing-like-a-change` and `also-nothing` is rendered at 60x20 and at 120x20
+- **THEN** the footer row reads `q quit  Enter detail  Esc back  2 unattributed` at both
+  widths
+- **AND** the list region's interior holds exactly the single `No changes yet` message row
+  `change-rows` specifies, byte-identical to the agentless rendering of the same dashboard —
+  a `Message` row is never badged
+- **AND** the same holds with a `/` query matching nothing: the two message rows are
+  byte-identical and the count is unchanged, because the count is over agents and the filter
+  is over changes
+
+#### Scenario: The count is dropped whole before the three key hints
+
+- **WHEN** the one-unattributed-agent dashboard is rendered at 46x20 and at 45x20
+- **THEN** the 46-column footer row is exactly
+  `q quit  Enter detail  Esc back  1 unattributed`, filling the row with no trailing space
+- **AND** the 45-column footer row is exactly `q quit  Enter detail  Esc back` followed by
+  fifteen spaces — the count and its two-space separator need sixteen columns and only
+  fifteen remain, so it is dropped whole rather than cut to `1 unattribute`
+- **AND** at 45 columns the three key hints are all still present, so the count is dropped
+  before any of them
+
+#### Scenario: The filter prompt replaces the count along with the hints
+
+- **WHEN** the one-unattributed-agent dashboard is rendered at 60x20 and at 120x20 with
+  `filter.active` set and `filter.query` `be`, and then again with `filter.active` cleared
+  and the same query kept
+- **THEN** the active-filter footer row is exactly `/be_` followed by spaces at both widths,
+  and the string `unattributed` appears nowhere in it
+- **AND** the accepted-query footer row is exactly
+  `/be  q quit  Enter detail  Esc back  1 unattributed` at both widths, so the query leads
+  the list and the count still trails it
+- **AND** both forms are byte-identical to what `list-filtering` specifies once the same
+  dashboard's `agents.agents` is emptied, so the count is additive rather than a rewrite of
+  either form
 
 ### Requirement: The 100-column breakpoint decides one region or two
 
