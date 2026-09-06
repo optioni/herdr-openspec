@@ -145,12 +145,19 @@ pub fn start_collaborators(
         config.archived_count,
     );
     let agents = crate::agents::start(crate::cli::agent_cli_via(herdr));
-    let launcher = crate::launch::start(
-        crate::cli::agent_cli_via(herdr),
-        repo.map(Path::to_path_buf).unwrap_or_default(),
-        config.agent_kind.clone(),
-        state_dir.map(Path::to_path_buf),
-    );
+    // `agent-launch`: the launcher, on the watcher's and the worker's terms rather than the
+    // poller's — every launch argument vector carries the repository root as `--cwd`, and a
+    // pane with no repository has no change to launch onto and no badge to focus, so the
+    // inert double costs nothing and represents the truth.
+    let launcher = match repo {
+        Some(root) => crate::launch::start(
+            crate::cli::agent_cli_via(herdr),
+            root.to_path_buf(),
+            config.agent_kind.clone(),
+            state_dir.map(Path::to_path_buf),
+        ),
+        None => crate::launch::none(),
+    };
     Collaborators {
         fs,
         refresher,
@@ -876,6 +883,71 @@ apply:
                     "width {width}: the change tree changed across the printable-key run"
                 );
 
+                // `agent-launch`: `a`, `c`, `s`, and `g` reach `launch::decide` for real, over
+                // a fresh dashboard and a recording launcher, driven **before** the sweep
+                // above would otherwise carry them into filter mode as query characters (the
+                // sweep's own `/` switches into filtering, and every character after it —
+                // including every lower-case letter — types into the query rather than
+                // launching, on `list-filtering`'s own terms). The snapshot claim is worth
+                // nothing if the keys did nothing.
+                let mut launch_dashboard = super::super::load(root, &config, None);
+                launch_dashboard.agents.reachable = true;
+                let mut launch_events = Script::new(vec![
+                    Ok(Some(press(
+                        ratatui::crossterm::event::KeyCode::Char('a'),
+                        ratatui::crossterm::event::KeyModifiers::NONE,
+                    ))),
+                    Ok(Some(press(
+                        ratatui::crossterm::event::KeyCode::Char('c'),
+                        ratatui::crossterm::event::KeyModifiers::NONE,
+                    ))),
+                    Ok(Some(press(
+                        ratatui::crossterm::event::KeyCode::Char('s'),
+                        ratatui::crossterm::event::KeyModifiers::NONE,
+                    ))),
+                    Ok(Some(press(
+                        ratatui::crossterm::event::KeyCode::Char('g'),
+                        ratatui::crossterm::event::KeyModifiers::NONE,
+                    ))),
+                    Ok(Some(press(
+                        ratatui::crossterm::event::KeyCode::Char('c'),
+                        ratatui::crossterm::event::KeyModifiers::CONTROL,
+                    ))),
+                ]);
+                let launch_backend = ratatui::backend::TestBackend::new(width, 20);
+                let mut launch_terminal =
+                    ratatui::Terminal::new(launch_backend).expect("construct terminal");
+                let mut fs2 = crate::watch::none();
+                let mut refresher2 = crate::refresh::none();
+                let mut agents2 = crate::agents::none();
+                let mut recording_launcher = crate::testutil::RecordingLauncher::new();
+                let mut live2 = crate::ui::driver::Live {
+                    fs: &mut *fs2,
+                    refresher: &mut *refresher2,
+                    agents: &mut *agents2,
+                    launcher: &mut recording_launcher,
+                };
+                run_loop(
+                    &mut launch_terminal,
+                    &mut launch_dashboard,
+                    &mut launch_events,
+                    &mut live2,
+                    &crate::ui::read_artifact,
+                    std::time::Duration::from_millis(1),
+                )
+                .expect("the launch-keys run ends");
+                assert!(
+                    !recording_launcher.requests().is_empty(),
+                    "width {width}: the recording launcher must have received requests from \
+                     the a/c/s/g presses"
+                );
+                let after_launch_keys = crate::testutil::snapshot(root);
+                assert_eq!(
+                    before, after_launch_keys,
+                    "width {width}: the tree must still be byte-identical after a/c/s/g \
+                     genuinely reached decide"
+                );
+
                 let reread = crate::tasks::read(&tasks_path);
                 assert_eq!(
                     reread.progress(),
@@ -958,6 +1030,37 @@ apply:
                 "agent-attribution: a None state_dir must be an empty mapping"
             );
             assert!(dashboard.agent_names.problems.is_empty());
+        }
+
+        /// `dashboard-loop`: "The startup request is issued before the first wait" extended
+        /// by `agent-launch` to name the initial launch tier — on both branches of `load`.
+        #[test]
+        fn load_initialises_an_empty_launch_tier() {
+            let scratch = ScratchDir::new();
+            let root = scratch.path();
+            write(&root.join("openspec/changes/alpha/proposal.md"), "# P\n");
+            write(
+                &root.join("openspec/changes/alpha/tasks.md"),
+                "- [x] a\n- [ ] b\n",
+            );
+            let found = super::super::load(root, &Config::default(), None);
+            assert_eq!(
+                found.launch,
+                crate::ui::app::Launch {
+                    pending: None,
+                    problems: Vec::new(),
+                }
+            );
+
+            let empty = ScratchDir::new();
+            let not_found = super::super::load(empty.path(), &Config::default(), None);
+            assert_eq!(
+                not_found.launch,
+                crate::ui::app::Launch {
+                    pending: None,
+                    problems: Vec::new(),
+                }
+            );
         }
 
         #[test]
@@ -2245,6 +2348,10 @@ esac
                     herdr_calls.lines().any(|l| l == "agent list"),
                     "width {width}: the herdr log must record an 'agent list' call: {herdr_calls:?}"
                 );
+                assert!(
+                    !herdr_calls.lines().any(|l| l.starts_with("pane split")),
+                    "width {width}: polling alone must launch nothing: {herdr_calls:?}"
+                );
 
                 // Two separately discriminating assertions, not one shared threshold —
                 // a Change Review finding: `refresh::none()` in place of `refresh::start`
@@ -2351,6 +2458,14 @@ esac
                     state_before, state_after,
                     "width {width}: the state directory must be read, never written"
                 );
+                assert_eq!(
+                    dashboard.launch.pending, None,
+                    "width {width}: an unreachable socket leaves nothing pending"
+                );
+                assert!(
+                    dashboard.launch.problems.is_empty(),
+                    "width {width}: an unreachable socket produces no launch problem"
+                );
 
                 // Discriminating control: the same comparison must fail when a
                 // single byte of tasks.md is rewritten between two further
@@ -2390,9 +2505,17 @@ esac
                 ..Config::default()
             };
 
-            let predicate = || log_lines(&herdr_log) >= 1;
-
-            let (result, buf) = run_wired_at(120, root, &config, &herdr, None, &predicate);
+            // `agent-launch`: `a` then `g` are pressed too, before `q` — with no
+            // repository selected, both keys must produce no Herdr call beyond the
+            // poller's own `agent list`, and the footer must still offer both hints
+            // since the socket is reachable.
+            let stage1 = || log_lines(&herdr_log) >= 1;
+            let stages: Vec<(&dyn Fn() -> bool, ratatui::crossterm::event::Event)> = vec![
+                (&stage1, key('a')),
+                (&stage1, key('g')),
+                (&stage1, key('q')),
+            ];
+            let (result, buf) = run_wired_staged(120, root, &config, &herdr, None, stages);
             let dashboard = result.expect("no repository is a supported state");
 
             assert_eq!(dashboard.repo, None);
@@ -2420,6 +2543,19 @@ esac
                 !buf.iter().any(|row| row.contains("unattributed")),
                 "agent-attribution: with no repository no agent is in scope, so no count"
             );
+            assert!(
+                buf.iter()
+                    .any(|row| row.contains("a/c/s launch") && row.contains("g focus")),
+                "the footer must still carry both action hints: {buf:?}"
+            );
+            let herdr_calls = std::fs::read_to_string(&herdr_log).unwrap_or_default();
+            assert!(
+                herdr_calls.lines().all(|l| l == "agent list"),
+                "pressing a and g with no repository selected must produce no Herdr call \
+                 beyond agent list: {herdr_calls:?}"
+            );
+            assert_eq!(dashboard.launch.pending, None);
+            assert!(dashboard.launch.problems.is_empty());
         }
 
         /// `agent-attribution`'s outer-loop acceptance test: a polled agent must reach a

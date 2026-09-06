@@ -16,9 +16,11 @@ use std::process::{Command, Stdio};
 /// Everything that can go wrong running a program through this seam. Both
 /// variants carry the **argument vector** alongside the program name:
 /// `changes-from-cli` drives four distinct invocations through one
-/// `RealOpenspecCli` and `agent-launch` four more through one
-/// `RealHerdrCli`, and without the arguments all eight failures would render
-/// identically, leaving a caller unable to say which call failed.
+/// `RealOpenspecCli` and one `RealHerdrCli` drives **five** — `agent list`
+/// (`agent-polling`), and `pane split`, `agent start`, `agent prompt`, and
+/// `agent focus` (`agent-launch`) — for **nine** in all, and without the
+/// arguments every one of those nine failures would render identically,
+/// leaving a caller unable to say which call failed.
 ///
 /// There is deliberately no `Utf8` variant. `SPEC.md` -> Degraded states
 /// records that the OpenSpec CLI itself decodes a tasks file lossily and
@@ -1130,6 +1132,50 @@ mod tests {
                 assert_eq!(program, missing.display().to_string());
             }
             other => panic!("expected NotStarted, got {other:?}"),
+        }
+    }
+
+    /// `subprocess-seam`: "A four-element argument vector distinguishes one failure from
+    /// another." A caller's own reported problem carries the argument vector, and that is
+    /// what lets a failed `agent list` be told apart from a failed `agent prompt` at the same
+    /// exit code.
+    #[test]
+    fn a_prompt_argument_with_a_space_survives_the_seam() {
+        let scratch = ScratchDir::new();
+        let prog = script(&scratch, "prog", "printf 'boom' >&2; exit 1\n");
+        let cli = super::agent_cli_via(&prog);
+
+        let list_result = cli.run(&["agent", "list"]);
+        let prompt_result = cli.run(&["agent", "prompt", "a", "/opsx:apply x"]);
+
+        match (list_result, prompt_result) {
+            (
+                Err(super::CliError::Failed {
+                    code: list_code,
+                    args: list_args,
+                    ..
+                }),
+                Err(super::CliError::Failed {
+                    code: prompt_code,
+                    args: prompt_args,
+                    ..
+                }),
+            ) => {
+                assert_eq!(list_code, prompt_code);
+                assert_ne!(list_args, prompt_args);
+                assert_eq!(
+                    prompt_args,
+                    vec![
+                        "agent".to_string(),
+                        "prompt".to_string(),
+                        "a".to_string(),
+                        "/opsx:apply x".to_string()
+                    ]
+                );
+                assert_eq!(prompt_args.len(), 4);
+                assert!(prompt_args[3].contains(' '));
+            }
+            other => panic!("expected two Failed results, got {other:?}"),
         }
     }
 }

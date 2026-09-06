@@ -886,23 +886,23 @@ set; see design.md → Test Strategy.
 ## 11. The composition root starts the launcher
 <!-- kind: behavior -->
 
-- [ ] 11.1 RED: Write `ui::tests::load::load_initialises_an_empty_launch_tier` and
+- [x] 11.1 RED: Write `ui::tests::load::load_initialises_an_empty_launch_tier` and
       `cli::tests::a_prompt_argument_with_a_space_survives_the_seam`. **In the same task**,
       extend the five landed `ui::tests::` tests `EXTENDED`'s pair list names — the four
       wiring tests and `tasks_tab_is_read_only`, the last driven with `agents.reachable` true
       and a recording launcher so `a`/`c`/`s`/`g` really reach `decide` while the tree stays
       byte-identical.
 
-- [ ] 11.2 GREEN: Give `start_collaborators` the two behaviours group 1's skeleton left out:
+- [x] 11.2 GREEN: Give `start_collaborators` the two behaviours group 1's skeleton left out:
       thread the state directory into `launch::start`, and use `launch::none()` on the
       no-repository arm. Correct `src/cli.rs`'s `CliError` doc comment — "`agent-launch` four
       more" becomes five, named, and "all eight failures" becomes nine.
 
-- [ ] 11.3 CHECK: Contract gate — re-inspect `Startup`, `Collaborators`,
+- [x] 11.3 CHECK: Contract gate — re-inspect `Startup`, `Collaborators`,
       `start_collaborators`, and `run_wired` against design.md → Contracts, and confirm `run`
       still holds no branch, no loop, and no field selection.
 
-- [ ] 11.4 VERIFY: No refactor was needed — `start_collaborators` gains one `match` arm beside
+- [x] 11.4 VERIFY: No refactor was needed — `start_collaborators` gains one `match` arm beside
       the one it already has. `testcount --lib 'ui::tests::load::' 10`,
       `testcount --lib 'cli::tests::' 41`, then `sh $CHECKS/WIRED.sh`,
       `UI_MIN=11 sh $CHECKS/NOCLI-SHELL.sh`, `MIN=22 sh $CHECKS/LAUNCHSEAM.sh`, and
