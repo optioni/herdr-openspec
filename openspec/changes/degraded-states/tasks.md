@@ -478,21 +478,21 @@
 ## 17. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 17.1 CHECK: Inspect the intended verification commands and the tiers this change
+- [x] 17.1 CHECK: Inspect the intended verification commands and the tiers this change
   affected — unit, view, outer, integration, source, and meta.
-- [ ] 17.2 VERIFY: `cargo fmt --all -- --check` — clean.
-- [ ] 17.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors, and
+- [x] 17.2 VERIFY: `cargo fmt --all -- --check` — clean.
+- [x] 17.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors, and
   no `#[allow]` was added anywhere.
-- [ ] 17.4 VERIFY: `make gates` — every script exits 0.
-- [ ] 17.5 VERIFY: `cargo test --all-features` — green.
-- [ ] 17.6 VERIFY: `cargo llvm-cov --fail-under-lines 80` — report the **line** figure and
+- [x] 17.4 VERIFY: `make gates` — every script exits 0.
+- [x] 17.5 VERIFY: `cargo test --all-features` — green.
+- [x] 17.6 VERIFY: `cargo llvm-cov --fail-under-lines 80` — report the **line** figure and
   confirm it did not fall below the 0.2 baseline. If it did, add tests; the floor is never
   lowered and no exclusion is ever added.
-- [ ] 17.7 VERIFY: `make check` — the single gate, green.
-- [ ] 17.8 VERIFY: `openspec validate degraded-states --strict`, and
+- [x] 17.7 VERIFY: `make check` — the single gate, green.
+- [x] 17.8 VERIFY: `openspec validate degraded-states --strict`, and
   `openspec validate --specs --strict` still passing at 40/40 — `spec-purposes` made that pass
   and this change must not regress it. (`export PATH="$HOME/.nvm/versions/node/v24.20.0/bin:$PATH"`.)
-- [ ] 17.9 VERIFY: Every commit in the change is signed, and the sweep is **not vacuous** — a
+- [x] 17.9 VERIFY: Every commit in the change is signed, and the sweep is **not vacuous** — a
   loop over zero commits reports success:
 
   ```sh
