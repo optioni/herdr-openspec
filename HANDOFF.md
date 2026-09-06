@@ -4,33 +4,34 @@
 
 ## Where things stand
 
-**Phases 1–4 are complete.** Fifteen changes implemented and archived; **35 capabilities**
-live under `openspec/specs/`. `main` is green: `make check` exits 0 at **97.16% line
-coverage over 18,898 lines**, 752 library tests. Every commit in the repository is
-signed. The dashboard works end to end — it lists changes, filters them, renders every
-artifact as a schema-driven tab, shows tasks as a checklist with a progress bar, and
-refreshes live from a filesystem watcher with the CLI correcting asynchronously.
+**19 of 21 changes archived.** Phases 1–5 complete; Phase 6 is one of three done.
+`main` is green: `make check` exits 0 at **97.05% line coverage over 25,674 lines**,
+940 library tests, **40 capabilities**, `Command::new` confined to `src/cli.rs`, every
+commit in the history signed.
 
-**Read coverage from the line columns, not the region columns.** `cargo llvm-cov`'s
-TOTAL row leads with regions (18,087 here) and reports lines further right (10,493).
-Two reports have quoted the region count as a line count; the numbers are not
-interchangeable and the line figure is the one the 80% floor gates on.
+| Phase | State |
+|---|---|
+| 1–5 | **Done** — 18 changes |
+| 6 — Packaging | `plugin-actions` **done**; `spec-purposes` and `degraded-states` remain |
 
-| Phase | Changes | State |
-|---|---|---|
-| 1 — Foundation | `repo-foundation`, `ci-pipeline`, `plugin-config` | **Done** |
-| 2 — Reading from disk | `repo-resolution`, `schema-model`, `task-parsing`, `changes-from-files` | **Done** |
-| 3 — Subprocess seam | `subprocess-seam`, `changes-from-cli` | **Done** |
-| 4 — The dashboard | `tui-shell`, `list-view`, `markdown-viewer`, `detail-view`, `tasks-tab`, `live-refresh` | **Done** |
-| 5–6 | — | Untouched |
+### `plugin-actions` found a bug in already-shipped code
 
-Nineteen capabilities live under `openspec/specs/`. Modules: `lib.rs`, `main.rs`,
-`config.rs`, `state.rs`, `resolve.rs`, `schema.rs`, `tasks.rs`, `changes.rs`, `cli.rs`.
-Dependencies: `toml`, `yaml-rust2`, `serde_json`.
+Verifying against live Herdr 0.8.2 rather than SPEC caught seven divergences, one of
+them a latent failure in the **`dashboard` pane shipped back in `repo-foundation`**: an
+action's process cwd is the *plugin root*, so once installed from GitHub the dashboard
+would have opened on `~/.config/herdr/plugins/github/…`, found no `openspec/`, and shown
+an empty state to every installed user — while working perfectly for anyone running it
+from a linked working tree.
 
-**Both architectural seams are verified holding**, not merely asserted:
-`Command::new` appears in `src/cli.rs` and nowhere else in the crate, after a second
-CLI consumer was added. The `Change` conformance gate survived a second producer.
+The planned fix made it worse: passing `--cwd` broke the pane spawn outright, because
+Herdr resolves the manifest's relative command against `--cwd` too. Final shape: never
+pass `--cwd`; `ui::run` reads the workspace directory from its own injected Herdr
+context (`ui::startup_cwd`). Verified by opening the dashboard from an unrelated
+repository and confirming it rendered *that* repo's changes.
+
+**The general lesson, now three phases old: the plugin's contract with Herdr cannot be
+verified by review.** Every phase that touched it found SPEC wrong in ways no reading
+would have caught.
 
 ## Next action
 
