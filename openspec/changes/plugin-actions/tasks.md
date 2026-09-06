@@ -239,7 +239,7 @@
 ## 6. The driver
 <!-- kind: behavior -->
 
-- [ ] 6.1 RED: Write failing tests driving `open::run` against `cli::FakeCli`:
+- [x] 6.1 RED: Write failing tests driving `open::run` against `cli::FakeCli`:
   `cross_placement_focus`, `open_domain_error_stops`, `open_usage_error_stops`,
   `herdr_not_started_names_the_program`, `focus_domain_error_stops_and_opens_nothing`,
   `focus_usage_error_warns_and_opens_once`, `listing_failure_warns_and_still_opens`,
@@ -247,15 +247,16 @@
   asserts `FakeCli::calls()` as an **exact ordered sequence** of `(Program::Herdr, argv)`
   pairs, so a call to the wrong program or a reordered vector fails.
 
-- [ ] 6.2 GREEN: Implement `open::Report { warnings: Vec<String>, outcome: Result<(), String> }`
+- [x] 6.2 GREEN: Implement `open::Report { warnings: Vec<String>, outcome: Result<(), String> }`
   and `open::run(&dyn HerdrCli, &Context, Placement) -> Report`: `pane list`, then focus or
   open. A failed or unparseable listing warns and still opens; a focus failing with
   `CliError::Failed { code: Some(2) }` warns and opens once; any other focus failure stops
   (design.md → Decision 4). The open response is never parsed (Decision 5).
 
-- [ ] 6.3 REFACTOR: State whether the failure paths needed a shared reason formatter.
+- [x] 6.3 REFACTOR: Already factored — every failure path (listing, focus, open, not-
+  started) formats through the one shared `herdr_reason` helper. No further change needed.
 
-- [ ] 6.4 Run the group tests — `cargo test --all-features --lib open::` — no regressions.
+- [x] 6.4 Run the group tests — `cargo test --all-features --lib open::` — no regressions.
 
 ## 7. The composition root
 <!-- kind: behavior -->

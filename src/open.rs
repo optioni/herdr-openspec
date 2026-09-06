@@ -240,6 +240,88 @@ pub fn report_output(report: &Report) -> (Vec<String>, i32) {
     (lines, status)
 }
 
+/// Format a failed Herdr call's reason, on `launch::herdr_reason`'s and
+/// `agents::herdr_error_problem`'s established terms: Herdr's diagnostic is carried
+/// verbatim, never parsed.
+fn herdr_reason(err: &crate::cli::CliError) -> String {
+    match err {
+        crate::cli::CliError::Failed { code, stderr, .. } => {
+            let code = code
+                .map(|c| c.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            format!("herdr exited with code {code}: {stderr}")
+        }
+        crate::cli::CliError::NotStarted { reason, .. } => {
+            format!("could not start herdr: {reason}")
+        }
+    }
+}
+
+/// Run one `open`/`open-tab` invocation to completion against a real `HerdrCli`: list,
+/// then focus or open. A failed or unparseable listing warns and still opens
+/// (`existing_pane`'s `Err` case). A focus failing with `CliError::Failed { code:
+/// Some(2), .. }` — the measured usage shape, what a Herdr without `plugin pane focus`
+/// produces — warns and falls through to opening once; any other focus failure stops.
+/// The open response is never parsed: exit status alone carries success
+/// (`specs/pane-open/spec.md` -> Decisions 4 and 5).
+pub fn run(cli: &dyn crate::cli::HerdrCli, ctx: &Context, placement: Placement) -> Report {
+    let mut warnings = Vec::new();
+
+    let existing = match cli.run(&["pane", "list"]) {
+        Ok(listing) => match existing_pane(&listing, &ctx.workspace_id, ctx.workspace_cwd.as_deref()) {
+            Ok(found) => found,
+            Err(reason) => {
+                warnings.push(reason);
+                None
+            }
+        },
+        Err(err) => {
+            warnings.push(herdr_reason(&err));
+            None
+        }
+    };
+
+    if let Some(pane_id) = existing {
+        let focus = focus_args(&pane_id);
+        let refs: Vec<&str> = focus.iter().map(String::as_str).collect();
+        match cli.run(&refs) {
+            Ok(_) => {
+                return Report {
+                    warnings,
+                    outcome: Ok(()),
+                };
+            }
+            Err(err) => {
+                let is_usage_error =
+                    matches!(&err, crate::cli::CliError::Failed { code: Some(2), .. });
+                if is_usage_error {
+                    warnings.push(herdr_reason(&err));
+                    // Fall through to opening once: refusing here would fail closed on a
+                    // Herdr this manifest's min_herdr_version still declares supported.
+                } else {
+                    return Report {
+                        warnings,
+                        outcome: Err(herdr_reason(&err)),
+                    };
+                }
+            }
+        }
+    }
+
+    let open = open_args(placement, ctx);
+    let refs: Vec<&str> = open.iter().map(String::as_str).collect();
+    match cli.run(&refs) {
+        Ok(_) => Report {
+            warnings,
+            outcome: Ok(()),
+        },
+        Err(err) => Report {
+            warnings,
+            outcome: Err(herdr_reason(&err)),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
