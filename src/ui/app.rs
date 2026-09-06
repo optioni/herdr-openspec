@@ -54,6 +54,17 @@ pub enum Action {
     /// `live-refresh`'s addition: request a full refresh. Route-agnostic in
     /// a stronger sense than `Next`/`Prev` — it names no region at all.
     Refresh,
+    /// `agent-launch`'s additions: launch the selected change with
+    /// `/opsx:apply`, `/opsx:continue`, or `/opsx:archive`, or focus the
+    /// agent already attributed to it. Four flat variants rather than one
+    /// carrying an `Intent`, so a hand-written enumeration cannot silently
+    /// omit one. Route-agnostic in the same stronger sense as `Refresh`:
+    /// they act on the selected change, which is the same change at either
+    /// route.
+    LaunchApply,
+    LaunchContinue,
+    LaunchArchive,
+    FocusAgent,
     Ignore,
 }
 
@@ -119,11 +130,28 @@ pub struct Refresh {
     pub problems: Vec<String>,
 }
 
+/// `agent-launch`'s addition: the launch tier's state. `pending` is the one-shot request
+/// `Dashboard::apply` produced and the loop has not yet handed to the launcher; `problems`
+/// holds the last outcome's failure or the last refusal, replaced wholesale and never grown, at
+/// most one entry. A sibling of `Refresh` for the same reason `agents` is: a launch's answer
+/// put anywhere `adopt` or a watcher error can replace wholesale would vanish before the reader
+/// saw it. `pending` carries plain data — a `launch::Request` names no trait, no handle, and no
+/// thread — so the state value stays `Clone`, `PartialEq`, and constructible in a test.
+/// Deliberately implements no `Default`, anywhere in the crate, on the same terms as
+/// `Dashboard`, `Filter`, `Detail`, and `Refresh`: every construction and destructuring names
+/// both fields, with no `..` rest. See `specs/agent-launch/spec.md` and the `NODEFAULT-UI`
+/// check, whose type list covers this type too.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Launch {
+    pub pending: Option<crate::launch::Request>,
+    pub problems: Vec<String>,
+}
+
 /// The dashboard's whole state. Carries no width, no layout mode, no column
 /// count, no terminal handle, and no frame — those are derived from the
 /// frame area on every draw, never stored here. Deliberately implements no
 /// `Default`, anywhere in the crate: every construction and every
-/// destructuring names all eleven fields, so a field added later fails to
+/// destructuring names all twelve fields, so a field added later fails to
 /// compile at each site rather than defaulting silently. See
 /// `specs/dashboard-loop/spec.md` and the `NODEFAULT-UI` check.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -158,6 +186,9 @@ pub struct Dashboard {
     /// state directory `Startup` carries. `agent-attribution`'s first tier
     /// resolves an agent's name through it. See `specs/dashboard-loop/spec.md`.
     pub agent_names: crate::state::Mapping,
+    /// `agent-launch`'s addition: the launch tier's one-shot request and last reported
+    /// problem. See `specs/agent-launch/spec.md`.
+    pub launch: Launch,
 }
 
 impl Dashboard {
@@ -279,6 +310,12 @@ impl Dashboard {
             // tier is what turns the flag into a request. See
             // `specs/live-updates/spec.md` -> "`r` forces a full refresh".
             Action::Refresh => self.refresh.requested = true,
+            // `agent-launch`: group 1 skeleton only — the real decision arrives in group 7,
+            // once `launch::decide` exists. These arms deliberately change nothing yet.
+            Action::LaunchApply
+            | Action::LaunchContinue
+            | Action::LaunchArchive
+            | Action::FocusAgent => {}
             Action::Ignore => {}
         }
     }
@@ -523,6 +560,12 @@ pub fn action_for(event: &Event, filtering: bool) -> Action {
         }
         (KeyCode::Char('/'), KeyModifiers::NONE) => Action::FilterStart,
         (KeyCode::Char('r'), KeyModifiers::NONE) => Action::Refresh,
+        // `agent-launch`: `a`/`c`/`s` launch, `g` focuses. `Char('c')` with `CONTROL` is
+        // matched above and still quits; bare `c` is this arm.
+        (KeyCode::Char('a'), KeyModifiers::NONE) => Action::LaunchApply,
+        (KeyCode::Char('c'), KeyModifiers::NONE) => Action::LaunchContinue,
+        (KeyCode::Char('s'), KeyModifiers::NONE) => Action::LaunchArchive,
+        (KeyCode::Char('g'), KeyModifiers::NONE) => Action::FocusAgent,
         (KeyCode::Char(c @ '1'..='9'), KeyModifiers::NONE) => {
             Action::SelectTab((c as u8 - b'1') as usize)
         }
@@ -600,6 +643,10 @@ mod tests {
                 names: agent_names,
                 problems: Vec::new(),
             },
+            launch: crate::ui::app::Launch {
+                pending: None,
+                problems: Vec::new(),
+            },
         }
     }
 
@@ -623,6 +670,7 @@ mod tests {
             refresh,
             agents,
             agent_names,
+            launch,
         } = &d;
         assert_eq!(*repo, Some(std::path::PathBuf::from("/repo")));
         assert_eq!(searched_from, &std::path::PathBuf::from("/repo"));
@@ -654,6 +702,8 @@ mod tests {
         assert!(agents.reachable);
         assert!(agents.problem.is_none());
         assert!(agent_names.names.is_empty());
+        assert_eq!(launch.pending, None);
+        assert!(launch.problems.is_empty());
     }
 
     /// Drives all three tiers through `Dashboard::attribution()` rather than through
@@ -805,6 +855,10 @@ mod tests {
                     problem: None,
                 },
                 agent_names: crate::state::Mapping::default(),
+                launch: crate::ui::app::Launch {
+                    pending: None,
+                    problems: Vec::new(),
+                },
             }
         }
 
@@ -842,6 +896,10 @@ mod tests {
                     problem: None,
                 },
                 agent_names: crate::state::Mapping::default(),
+                launch: crate::ui::app::Launch {
+                    pending: None,
+                    problems: Vec::new(),
+                },
             }
         }
 
@@ -882,6 +940,10 @@ mod tests {
                     problem: None,
                 },
                 agent_names: crate::state::Mapping::default(),
+                launch: crate::ui::app::Launch {
+                    pending: None,
+                    problems: Vec::new(),
+                },
             }
         }
 
@@ -939,8 +1001,10 @@ mod tests {
                 Action::Ignore
             );
             assert_eq!(
+                // `agent-launch`: bare `c` is now `LaunchContinue` where it was `Ignore` —
+                // `Ctrl-C` (asserted above) is the one that still quits.
                 action_for(&press(KeyCode::Char('c'), KeyModifiers::NONE), false),
-                Action::Ignore
+                Action::LaunchContinue
             );
 
             assert_eq!(
@@ -1137,6 +1201,8 @@ mod tests {
                 KeyCode::Char('1'),
                 KeyCode::Char('['),
                 KeyCode::Char(']'),
+                // `agent-launch`: `a` now maps to `LaunchApply` rather than `Ignore`.
+                KeyCode::Char('a'),
             ];
             let codes = [
                 KeyCode::Backspace,
@@ -1212,6 +1278,13 @@ mod tests {
                     | Action::FilterPush(_)
                     | Action::FilterPop
                     | Action::Refresh
+                    // `agent-launch`: group 1 compile-fix only — the count assertion below
+                    // moves from thirteen to seventeen in group 7, which is where these four
+                    // belong in the array too.
+                    | Action::LaunchApply
+                    | Action::LaunchContinue
+                    | Action::LaunchArchive
+                    | Action::FocusAgent
                     | Action::Ignore => {}
                 }
             }
@@ -1273,6 +1346,10 @@ mod tests {
                     problem: None,
                 },
                 agent_names: crate::state::Mapping::default(),
+                launch: crate::ui::app::Launch {
+                    pending: None,
+                    problems: Vec::new(),
+                },
             };
 
             for action in variants {
@@ -1512,6 +1589,10 @@ mod tests {
                     problem: None,
                 },
                 agent_names: crate::state::Mapping::default(),
+                launch: crate::ui::app::Launch {
+                    pending: None,
+                    problems: Vec::new(),
+                },
             };
             d.apply(Action::Next);
             assert_eq!(d.detail.scroll, 1);
@@ -1555,6 +1636,10 @@ mod tests {
                     problem: None,
                 },
                 agent_names: crate::state::Mapping::default(),
+                launch: crate::ui::app::Launch {
+                    pending: None,
+                    problems: Vec::new(),
+                },
             };
             for _ in 0..4 {
                 d.apply(Action::Prev);
@@ -1604,6 +1689,10 @@ mod tests {
                     problem: None,
                 },
                 agent_names: crate::state::Mapping::default(),
+                launch: crate::ui::app::Launch {
+                    pending: None,
+                    problems: Vec::new(),
+                },
             };
             d.apply(Action::FilterPush('j'));
             d.apply(Action::FilterPush('k'));
@@ -1641,6 +1730,10 @@ mod tests {
                     problem: None,
                 },
                 agent_names: crate::state::Mapping::default(),
+                launch: crate::ui::app::Launch {
+                    pending: None,
+                    problems: Vec::new(),
+                },
             };
             d.apply(Action::Back);
             assert_eq!(d.detail.scroll, 0);
@@ -1673,6 +1766,10 @@ mod tests {
                     problem: None,
                 },
                 agent_names: crate::state::Mapping::default(),
+                launch: crate::ui::app::Launch {
+                    pending: None,
+                    problems: Vec::new(),
+                },
             };
             d2.apply(Action::FilterStart);
             assert_eq!(d2.route, Route::List);
@@ -1707,6 +1804,10 @@ mod tests {
                     problem: None,
                 },
                 agent_names: crate::state::Mapping::default(),
+                launch: crate::ui::app::Launch {
+                    pending: None,
+                    problems: Vec::new(),
+                },
             };
             d3.apply(Action::Back);
             assert_eq!(d3.detail.scroll, 3);
@@ -1745,6 +1846,10 @@ mod tests {
                     problem: None,
                 },
                 agent_names: crate::state::Mapping::default(),
+                launch: crate::ui::app::Launch {
+                    pending: None,
+                    problems: Vec::new(),
+                },
             };
             d.normalise_scroll(ratatui::layout::Rect::new(0, 0, 120, 20));
             assert_eq!(d.detail.scroll, 6);
@@ -1775,6 +1880,10 @@ mod tests {
                     problem: None,
                 },
                 agent_names: crate::state::Mapping::default(),
+                launch: crate::ui::app::Launch {
+                    pending: None,
+                    problems: Vec::new(),
+                },
             };
             d2.normalise_scroll(ratatui::layout::Rect::new(0, 0, 60, 20));
             assert_eq!(d2.detail.scroll, 6);
@@ -1805,6 +1914,10 @@ mod tests {
                     problem: None,
                 },
                 agent_names: crate::state::Mapping::default(),
+                launch: crate::ui::app::Launch {
+                    pending: None,
+                    problems: Vec::new(),
+                },
             };
             d3.normalise_scroll(ratatui::layout::Rect::new(0, 0, 120, 40));
             assert_eq!(
@@ -1853,6 +1966,10 @@ mod tests {
                         problem: None,
                     },
                     agent_names: crate::state::Mapping::default(),
+                    launch: crate::ui::app::Launch {
+                        pending: None,
+                        problems: Vec::new(),
+                    },
                 }
             }
 
@@ -1907,6 +2024,10 @@ mod tests {
                     problem: None,
                 },
                 agent_names: crate::state::Mapping::default(),
+                launch: crate::ui::app::Launch {
+                    pending: None,
+                    problems: Vec::new(),
+                },
             };
             d.normalise_scroll(ratatui::layout::Rect::new(0, 0, 60, 20));
             assert_eq!(
@@ -2018,6 +2139,10 @@ mod tests {
                     problem: None,
                 },
                 agent_names: crate::state::Mapping::default(),
+                launch: crate::ui::app::Launch {
+                    pending: None,
+                    problems: Vec::new(),
+                },
             };
             let before = dashboard.clone();
 
@@ -2083,6 +2208,10 @@ mod tests {
                     problem: None,
                 },
                 agent_names: crate::state::Mapping::default(),
+                launch: crate::ui::app::Launch {
+                    pending: None,
+                    problems: Vec::new(),
+                },
             }
         }
 
@@ -2211,7 +2340,7 @@ mod tests {
         }
 
         #[test]
-        fn dashboard_destructures_into_exactly_ten_fields() {
+        fn dashboard_destructures_into_exactly_twelve_fields() {
             let d = dashboard_at(Route::List);
             let Dashboard {
                 repo,
@@ -2225,6 +2354,7 @@ mod tests {
                 refresh,
                 agents,
                 agent_names,
+                launch,
             } = &d;
             assert_eq!(*repo, None);
             assert_eq!(
@@ -2244,6 +2374,8 @@ mod tests {
             assert!(!agents.reachable);
             assert!(agents.problem.is_none());
             assert!(agent_names.names.is_empty());
+            assert_eq!(launch.pending, None);
+            assert!(launch.problems.is_empty());
         }
 
         #[test]
@@ -2561,6 +2693,10 @@ mod tests {
                     problem: None,
                 },
                 agent_names: crate::state::Mapping::default(),
+                launch: crate::ui::app::Launch {
+                    pending: None,
+                    problems: Vec::new(),
+                },
             };
             d.apply(Action::Next);
             assert_eq!(d.selected, 1);
@@ -2601,6 +2737,10 @@ mod tests {
                     problem: None,
                 },
                 agent_names: crate::state::Mapping::default(),
+                launch: crate::ui::app::Launch {
+                    pending: None,
+                    problems: Vec::new(),
+                },
             };
             d2.apply(Action::Prev);
             assert_eq!(d2.selected, 0);
@@ -2652,6 +2792,10 @@ mod tests {
                     problem: None,
                 },
                 agent_names: crate::state::Mapping::default(),
+                launch: crate::ui::app::Launch {
+                    pending: None,
+                    problems: Vec::new(),
+                },
             }
         }
 
@@ -2790,6 +2934,10 @@ mod tests {
                     problem: None,
                 },
                 agent_names: crate::state::Mapping::default(),
+                launch: crate::ui::app::Launch {
+                    pending: None,
+                    problems: Vec::new(),
+                },
             };
             let recorder = RecordingReader::always(Ok("text".to_string()));
             let read = |p: &std::path::Path| recorder.read(p);
@@ -2851,6 +2999,10 @@ mod tests {
                     problem: None,
                 },
                 agent_names: crate::state::Mapping::default(),
+                launch: crate::ui::app::Launch {
+                    pending: None,
+                    problems: Vec::new(),
+                },
             };
             let recorder = RecordingReader::new(
                 vec![
@@ -3021,6 +3173,10 @@ mod tests {
                     problem: None,
                 },
                 agent_names: crate::state::Mapping::default(),
+                launch: crate::ui::app::Launch {
+                    pending: None,
+                    problems: Vec::new(),
+                },
             };
             let recorder = RecordingReader::always(Ok("t".to_string()));
             let read = |p: &std::path::Path| recorder.read(p);
@@ -3086,6 +3242,10 @@ mod tests {
                     problem: None,
                 },
                 agent_names: crate::state::Mapping::default(),
+                launch: crate::ui::app::Launch {
+                    pending: None,
+                    problems: Vec::new(),
+                },
             };
             let recorder2 = RecordingReader::always(Err("must not be called".to_string()));
             let read2 = |p: &std::path::Path| recorder2.read(p);

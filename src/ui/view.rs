@@ -373,6 +373,10 @@ mod tests {
                 problem: None,
             },
             agent_names: crate::state::Mapping::default(),
+            launch: crate::ui::app::Launch {
+                pending: None,
+                problems: Vec::new(),
+            },
         }
     }
 
@@ -406,6 +410,10 @@ mod tests {
                 problem: None,
             },
             agent_names: crate::state::Mapping::default(),
+            launch: crate::ui::app::Launch {
+                pending: None,
+                problems: Vec::new(),
+            },
         }
     }
 
@@ -444,6 +452,10 @@ mod tests {
                 problem: None,
             },
             agent_names: crate::state::Mapping::default(),
+            launch: crate::ui::app::Launch {
+                pending: None,
+                problems: Vec::new(),
+            },
         }
     }
 
@@ -1207,6 +1219,10 @@ mod tests {
                 problem: None,
             },
             agent_names: crate::state::Mapping::default(),
+            launch: crate::ui::app::Launch {
+                pending: None,
+                problems: Vec::new(),
+            },
         };
         let buf120 = render_at(120, 20, &d);
         assert!(interior_cols(&buf120, 2).starts_with("No OpenSpec repository found"));
@@ -1963,6 +1979,10 @@ mod tests {
                 problem: None,
             },
             agent_names: crate::state::Mapping::default(),
+            launch: crate::ui::app::Launch {
+                pending: None,
+                problems: Vec::new(),
+            },
         }
     }
 
@@ -2004,6 +2024,10 @@ mod tests {
                 problem: None,
             },
             agent_names: crate::state::Mapping::default(),
+            launch: crate::ui::app::Launch {
+                pending: None,
+                problems: Vec::new(),
+            },
         };
 
         let buf120 = render_at(120, 20, &d);
@@ -2144,6 +2168,10 @@ mod tests {
                 problem: None,
             },
             agent_names: crate::state::Mapping::default(),
+            launch: crate::ui::app::Launch {
+                pending: None,
+                problems: Vec::new(),
+            },
         };
         let default_style = Cell::default().style();
 
@@ -2463,6 +2491,10 @@ mod tests {
                 problem: None,
             },
             agent_names: crate::state::Mapping::default(),
+            launch: crate::ui::app::Launch {
+                pending: None,
+                problems: Vec::new(),
+            },
         };
         d.apply(Action::Next);
         d.apply(Action::Next);

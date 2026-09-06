@@ -555,15 +555,15 @@ Structure only: inert signatures, no behaviour. The evidence is that the 840 lan
 green while the tree grows the API groups 2 to 11 fill in. See design.md → Test Strategy for
 why this precedes the outer-loop RED.
 
-- [ ] 1.1 CHARACTERIZE: `. $CHECKS/TESTCOUNT.sh; testcount --lib '' 840` and record the count,
+- [x] 1.1 CHARACTERIZE: `. $CHECKS/TESTCOUNT.sh; testcount --lib '' 840` and record the count,
       so the landed suite is green before any file is touched.
 
-- [ ] 1.2 REFACTOR: Add `src/launch.rs` and `pub mod launch;` with the inert shapes from
+- [x] 1.2 REFACTOR: Add `src/launch.rs` and `pub mod launch;` with the inert shapes from
       design.md → Contracts: `Intent`, `Request`, `Decision`, `Outcome`, a `decide` returning
       `Decision::Nothing`, a `pane_id` returning `Err`, the `Launcher` trait, `none()`, and a
       `start` that spawns a worker answering nothing.
 
-- [ ] 1.3 REFACTOR: Add the inert shapes elsewhere: `Attribution::panes` (always empty);
+- [x] 1.3 REFACTOR: Add the inert shapes elsewhere: `Attribution::panes` (always empty);
       `ui::app::Launch` and `Dashboard::launch`; `Action`'s four variants mapped by
       `action_for` but with `apply` arms that do nothing; `Live::launcher`;
       `Collaborators::launcher`; `start_collaborators`'s fourth parameter (unread), and
@@ -571,7 +571,7 @@ why this precedes the outer-loop RED.
       `WIRED` leg 1's ninth name and leg 6 half (i) are satisfied by the skeleton rather than
       eleven groups later.
 
-- [ ] 1.4 REFACTOR: Fix every site the new shapes break, counted rather than estimated: the
+- [x] 1.4 REFACTOR: Fix every site the new shapes break, counted rather than estimated: the
       **5** `Attribution {` literals, the **41** `Live {` literals, and every `Dashboard { … }`
       literal in the crate — `grep -rn 'Attribution {' src/`, `grep -rn 'Live {' src/`, and
       `NODEFAULT-UI`'s 174-span count are the three commands that enumerate them. Rename
@@ -579,7 +579,7 @@ why this precedes the outer-loop RED.
       `ui::app::tests::dashboard_destructures_into_exactly_ten_fields` to `…_twelve_fields`;
       the second name has been stale at eleven since `agent-attribution`.
 
-- [ ] 1.5 CHECK: `MIN=22 sh $CHECKS/LAUNCHSEAM.sh` and `sh $CHECKS/WIRED.sh` must both be
+- [x] 1.5 CHECK: `MIN=22 sh $CHECKS/LAUNCHSEAM.sh` and `sh $CHECKS/WIRED.sh` must both be
       **green** for the first time, `WIRED` including leg 6. Then plant
       `"claude".to_string()` in place of `config.agent_kind` in `start_collaborators`, re-run
       `WIRED`, record exit **1** naming leg 6, and revert; then plant
@@ -587,7 +587,7 @@ why this precedes the outer-loop RED.
       **1** naming leg 1, and revert.
       **Red when:** either plant is green.
 
-- [ ] 1.6 VERIFY: `testcount --lib '' 840` — the landed suite is unchanged — then
+- [x] 1.6 VERIFY: `testcount --lib '' 840` — the landed suite is unchanged — then
       `cargo clippy --all-targets --all-features -- -D warnings` and
       `cargo fmt --all -- --check`. Commit.
 

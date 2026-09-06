@@ -10,6 +10,7 @@ pub mod agents;
 pub mod changes;
 pub mod cli;
 pub mod config;
+pub mod launch;
 pub mod refresh;
 pub mod resolve;
 pub mod schema;
@@ -663,6 +664,10 @@ pub(crate) mod testutil {
                     problem: None,
                 },
                 agent_names: crate::state::Mapping::default(),
+                launch: crate::ui::app::Launch {
+                    pending: None,
+                    problems: Vec::new(),
+                },
             }
         }
 

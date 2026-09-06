@@ -111,6 +111,9 @@ pub struct Collaborators {
     pub fs: Box<dyn crate::watch::FsEvents>,
     pub refresher: Box<dyn crate::refresh::Refresher>,
     pub agents: Box<dyn crate::agents::AgentPoll>,
+    /// `agent-launch`'s addition: the fourth collaborator, reached only through this trait
+    /// object.
+    pub launcher: Box<dyn crate::launch::Launcher>,
     pub problems: Vec<String>,
 }
 
@@ -120,7 +123,18 @@ pub struct Collaborators {
 /// repository — and is started **unconditionally**: `agent-launch` reads
 /// `reachable` to decide whether to offer its keys in a pane that never
 /// found one.
-pub fn start_collaborators(repo: Option<&Path>, config: &Config, herdr: &Path) -> Collaborators {
+///
+/// `state_dir` is unread in this group's skeleton — `launch::start`'s fourth parameter is
+/// threaded through so the signature is settled, and group 11 is what actually wires it into
+/// the launcher rather than discarding it. The launcher is started **unconditionally** here,
+/// on the skeleton's own terms (design.md -> Test Strategy): group 11 is what makes it
+/// `launch::none()` when no repository was found, mirroring the watcher and the worker.
+pub fn start_collaborators(
+    repo: Option<&Path>,
+    config: &Config,
+    herdr: &Path,
+    state_dir: Option<&Path>,
+) -> Collaborators {
     let (fs, problems) = match repo {
         Some(root) => crate::watch::start(root),
         None => (crate::watch::none(), Vec::new()),
@@ -131,10 +145,17 @@ pub fn start_collaborators(repo: Option<&Path>, config: &Config, herdr: &Path) -
         config.archived_count,
     );
     let agents = crate::agents::start(crate::cli::agent_cli_via(herdr));
+    let launcher = crate::launch::start(
+        crate::cli::agent_cli_via(herdr),
+        repo.map(Path::to_path_buf).unwrap_or_default(),
+        config.agent_kind.clone(),
+        state_dir.map(Path::to_path_buf),
+    );
     Collaborators {
         fs,
         refresher,
         agents,
+        launcher,
         problems,
     }
 }
@@ -152,13 +173,18 @@ pub fn run_wired<B: Backend, E: EventSource>(
     tick: Duration,
 ) -> Result<Dashboard, StartError> {
     let mut dashboard = load(startup.cwd, startup.config, startup.state_dir);
-    let mut collaborators =
-        start_collaborators(dashboard.repo.as_deref(), startup.config, startup.herdr);
+    let mut collaborators = start_collaborators(
+        dashboard.repo.as_deref(),
+        startup.config,
+        startup.herdr,
+        startup.state_dir,
+    );
     dashboard.refresh.problems = collaborators.problems;
     let mut live = crate::ui::driver::Live {
         fs: &mut *collaborators.fs,
         refresher: &mut *collaborators.refresher,
         agents: &mut *collaborators.agents,
+        launcher: &mut *collaborators.launcher,
     };
     driver::run_loop(terminal, &mut dashboard, events, &mut live, read, tick)?;
     Ok(dashboard)
@@ -246,6 +272,10 @@ pub fn load(start: &Path, config: &Config, state_dir: Option<&Path>) -> Dashboar
                     problem: None,
                 },
                 agent_names,
+                launch: crate::ui::app::Launch {
+                    pending: None,
+                    problems: Vec::new(),
+                },
             }
         }
         crate::resolve::RepoSearch::NotFound { searched_from } => Dashboard {
@@ -277,6 +307,10 @@ pub fn load(start: &Path, config: &Config, state_dir: Option<&Path>) -> Dashboar
                 problem: None,
             },
             agent_names,
+            launch: crate::ui::app::Launch {
+                pending: None,
+                problems: Vec::new(),
+            },
         },
     }
 }
@@ -368,6 +402,10 @@ mod tests {
                     problem: None,
                 },
                 agent_names: crate::state::Mapping::default(),
+                launch: crate::ui::app::Launch {
+                    pending: None,
+                    problems: Vec::new(),
+                },
             }
         }
 
@@ -423,10 +461,12 @@ mod tests {
                 let mut fs = crate::watch::none();
                 let mut refresher = crate::refresh::none();
                 let mut agents = crate::agents::none();
+                let mut launcher = crate::launch::none();
                 let mut live = crate::ui::driver::Live {
                     fs: &mut *fs,
                     refresher: &mut *refresher,
                     agents: &mut *agents,
+                    launcher: &mut *launcher,
                 };
                 let summary = run_loop(
                     &mut terminal,
@@ -525,6 +565,10 @@ mod tests {
                         problem: None,
                     },
                     agent_names: crate::state::Mapping::default(),
+                    launch: crate::ui::app::Launch {
+                        pending: None,
+                        problems: Vec::new(),
+                    },
                 }
             };
 
@@ -559,10 +603,12 @@ mod tests {
                 let mut fs = crate::watch::none();
                 let mut refresher = crate::refresh::none();
                 let mut agents = crate::agents::none();
+                let mut launcher = crate::launch::none();
                 let mut live = crate::ui::driver::Live {
                     fs: &mut *fs,
                     refresher: &mut *refresher,
                     agents: &mut *agents,
+                    launcher: &mut *launcher,
                 };
                 run_loop(
                     &mut terminal,
@@ -716,10 +762,12 @@ apply:
                 let mut fs = crate::watch::none();
                 let mut refresher = crate::refresh::none();
                 let mut agents = crate::agents::none();
+                let mut launcher = crate::launch::none();
                 let mut live = crate::ui::driver::Live {
                     fs: &mut *fs,
                     refresher: &mut *refresher,
                     agents: &mut *agents,
+                    launcher: &mut *launcher,
                 };
                 run_loop(
                     &mut terminal,
@@ -805,10 +853,12 @@ apply:
                 let mut fs = crate::watch::none();
                 let mut refresher = crate::refresh::none();
                 let mut agents = crate::agents::none();
+                let mut launcher = crate::launch::none();
                 let mut live = crate::ui::driver::Live {
                     fs: &mut *fs,
                     refresher: &mut *refresher,
                     agents: &mut *agents,
+                    launcher: &mut *launcher,
                 };
                 run_loop(
                     &mut terminal,
@@ -1497,10 +1547,12 @@ apply:
                 let mut fs = ScriptedFs::new(Vec::new(), Vec::new());
                 let mut refresher = RecordingRefresher::new(Vec::new());
                 let mut agents = crate::agents::none();
+                let mut launcher = crate::launch::none();
                 let mut live = crate::ui::driver::Live {
                     fs: &mut fs,
                     refresher: &mut refresher,
                     agents: &mut *agents,
+                    launcher: &mut *launcher,
                 };
 
                 let summary = run_loop(
@@ -1555,10 +1607,12 @@ apply:
                     Some(RefreshResult::Merged(merged_set)),
                 ]);
                 let mut agents2 = crate::agents::none();
+                let mut launcher = crate::launch::none();
                 let mut live2 = crate::ui::driver::Live {
                     fs: &mut fs2,
                     refresher: &mut refresher2,
                     agents: &mut *agents2,
+                    launcher: &mut *launcher,
                 };
                 let mut events2 = crate::testutil::Script::new(vec![
                     Ok(None),
@@ -1688,10 +1742,12 @@ apply:
                 let mut fs = ScriptedFs::new(Vec::new(), Vec::new());
                 let mut refresher = RecordingRefresher::new(Vec::new());
                 let mut agents = crate::agents::none();
+                let mut launcher = crate::launch::none();
                 let mut live = crate::ui::driver::Live {
                     fs: &mut fs,
                     refresher: &mut refresher,
                     agents: &mut *agents,
+                    launcher: &mut *launcher,
                 };
 
                 run_loop(
@@ -1732,10 +1788,12 @@ apply:
                 );
                 let mut refresher = RecordingRefresher::new(Vec::new());
                 let mut agents = crate::agents::none();
+                let mut launcher = crate::launch::none();
                 let mut live = crate::ui::driver::Live {
                     fs: &mut *fs,
                     refresher: &mut refresher,
                     agents: &mut *agents,
+                    launcher: &mut *launcher,
                 };
 
                 let mut events = Script::new(key_script());

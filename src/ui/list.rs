@@ -454,6 +454,10 @@ mod tests {
                 problem: None,
             },
             agent_names: crate::state::Mapping::default(),
+            launch: crate::ui::app::Launch {
+                pending: None,
+                problems: Vec::new(),
+            },
         }
     }
 
@@ -536,6 +540,10 @@ mod tests {
                     problem: None,
                 },
                 agent_names: crate::state::Mapping::default(),
+                launch: crate::ui::app::Launch {
+                    pending: None,
+                    problems: Vec::new(),
+                },
             },
         ]
     }
@@ -1097,6 +1105,10 @@ mod tests {
                 problem: None,
             },
             agent_names: crate::state::Mapping::default(),
+            launch: crate::ui::app::Launch {
+                pending: None,
+                problems: Vec::new(),
+            },
         };
         let rows38 = rows(&d, 38);
         assert_eq!(rows38.len(), 3);
@@ -1153,6 +1165,10 @@ mod tests {
                 problem: None,
             },
             agent_names: crate::state::Mapping::default(),
+            launch: crate::ui::app::Launch {
+                pending: None,
+                problems: Vec::new(),
+            },
         };
         let rows_with_problems = rows(&with_problems, 38);
         assert_eq!(rows_with_problems.len(), 3);

@@ -82,6 +82,10 @@ pub struct AgentSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Attribution {
     pub badges: std::collections::BTreeMap<String, AgentStatus>,
+    /// `agent-launch`'s addition: for every change that has a badge, the `pane_id` of the
+    /// **same** agent whose status that badge shows — maintained in lockstep with `badges` so
+    /// the two maps always hold exactly the same key set. `g` focuses the pane this map names.
+    pub panes: std::collections::BTreeMap<String, String>,
     pub unattributed: usize,
 }
 
@@ -100,11 +104,15 @@ pub fn attribute(
 ) -> Attribution {
     let mut badges: std::collections::BTreeMap<String, AgentStatus> =
         std::collections::BTreeMap::new();
+    // `agent-launch`'s addition, filled in the same fold as `badges` starting group 6; always
+    // empty here.
+    let panes: std::collections::BTreeMap<String, String> = std::collections::BTreeMap::new();
     let mut unattributed = 0usize;
 
     let Some(root) = repo else {
         return Attribution {
             badges,
+            panes,
             unattributed,
         };
     };
@@ -146,6 +154,7 @@ pub fn attribute(
 
     Attribution {
         badges,
+        panes,
         unattributed,
     }
 }
