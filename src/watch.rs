@@ -312,11 +312,12 @@ pub fn poll_timeout(tick: Duration, pending_in: Option<Duration>) -> Duration {
 /// `None`, the present one when exactly one is, and the smaller when both are. One tick
 /// serves two pollers — see `specs/watch-invalidation/spec.md` -> "One tick serves two
 /// pollers".
-///
-/// Group 1 stub: returns `None` unconditionally, so group 6's tests are red on
-/// behaviour rather than on a stub that already guessed right.
-pub fn soonest(_a: Option<Duration>, _b: Option<Duration>) -> Option<Duration> {
-    None
+pub fn soonest(a: Option<Duration>, b: Option<Duration>) -> Option<Duration> {
+    match (a, b) {
+        (None, None) => None,
+        (Some(d), None) | (None, Some(d)) => Some(d),
+        (Some(a), Some(b)) => Some(a.min(b)),
+    }
 }
 
 #[cfg(test)]
@@ -646,6 +647,71 @@ mod tests {
         assert_eq!(
             poll_timeout(Duration::from_millis(250), Some(Duration::from_millis(0))),
             Duration::from_millis(1)
+        );
+    }
+
+    // --- group 6: `soonest` — one tick serves two pollers -------------
+
+    #[test]
+    fn soonest_of_two_absent_is_absent() {
+        assert_eq!(soonest(None, None), None);
+    }
+
+    #[test]
+    fn soonest_of_one_present_is_that_one() {
+        assert_eq!(
+            soonest(Some(Duration::from_millis(90)), None),
+            Some(Duration::from_millis(90))
+        );
+        assert_eq!(
+            soonest(None, Some(Duration::from_millis(40))),
+            Some(Duration::from_millis(40))
+        );
+    }
+
+    #[test]
+    fn soonest_of_two_present_is_the_smaller_and_commutative() {
+        assert_eq!(
+            soonest(
+                Some(Duration::from_millis(90)),
+                Some(Duration::from_millis(40))
+            ),
+            Some(Duration::from_millis(40))
+        );
+        assert_eq!(
+            soonest(
+                Some(Duration::from_millis(40)),
+                Some(Duration::from_millis(90))
+            ),
+            Some(Duration::from_millis(40)),
+            "soonest must be commutative"
+        );
+    }
+
+    #[test]
+    fn soonest_composes_with_poll_timeout() {
+        assert_eq!(
+            poll_timeout(
+                Duration::from_millis(250),
+                soonest(
+                    Some(Duration::from_millis(900)),
+                    Some(Duration::from_millis(120))
+                )
+            ),
+            Duration::from_millis(120),
+            "an agent poll becoming due inside the tick shortens the wait exactly as a \
+             debounce deadline does"
+        );
+        assert_eq!(
+            poll_timeout(
+                Duration::from_millis(250),
+                soonest(
+                    Some(Duration::from_millis(900)),
+                    Some(Duration::from_secs(3))
+                )
+            ),
+            Duration::from_millis(250),
+            "a deadline further away than the tick must never lengthen the wait"
         );
     }
 

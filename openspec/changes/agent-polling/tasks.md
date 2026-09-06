@@ -607,17 +607,17 @@ green. It drives `ui::run_wired` — the composition root itself — not the com
 ## 6. `watch::soonest`
 <!-- kind: behavior -->
 
-- [ ] 6.1 RED: Write the four `watch::tests::soonest_*` tests covering all four presence
+- [x] 6.1 RED: Write the four `watch::tests::soonest_*` tests covering all four presence
       combinations, commutativity, and the two `poll_timeout(250ms, soonest(...))` compositions
       from `specs/watch-invalidation/spec.md` → "One tick serves two pollers". Confirm they fail
       against the group-1 stub's unconditional `None`.
 
-- [ ] 6.2 GREEN: Implement `soonest` as a pure minimum over two `Option<Duration>`, reading no
+- [x] 6.2 GREEN: Implement `soonest` as a pure minimum over two `Option<Duration>`, reading no
       clock and taking no `Instant`.
 
-- [ ] 6.3 REFACTOR: No refactor is expected — the function is one `match`. Record that.
+- [x] 6.3 REFACTOR: No refactor is expected — the function is one `match`. Record that.
 
-- [ ] 6.4 VERIFY: `testcount --lib 'watch::tests::' 31`, then `MIN=24 sh $CHECKS/WATCHSEAM.sh`.
+- [x] 6.4 VERIFY: `testcount --lib 'watch::tests::' 31`, then `MIN=24 sh $CHECKS/WATCHSEAM.sh`.
       Commit.
 
 ## 7. The poller: schedule, worker, and the seam
