@@ -168,4 +168,64 @@ mod tests {
             "should say it must be invoked from Herdr: {err}"
         );
     }
+
+    // --- group 4: the pane matcher -----------------------------------------------------
+
+    #[test]
+    fn matches_label_workspace_and_cwd() {
+        let listing = r#"{"id":"cli:pane:list","result":{"panes":[{"pane_id":"w8:pG","label":"OpenSpec","workspace_id":"w8","cwd":"/repo"}],"type":"pane_list"}}"#;
+        let result = existing_pane(listing, "w8", Some("/repo")).expect("parses");
+        assert_eq!(result, Some("w8:pG".to_string()));
+    }
+
+    #[test]
+    fn no_match_opens_instead() {
+        let unlabelled = r#"{"result":{"panes":[{"pane_id":"w8:pX","workspace_id":"w8","cwd":"/repo"}]}}"#;
+        assert_eq!(existing_pane(unlabelled, "w8", Some("/repo")), Ok(None));
+
+        let empty = r#"{"result":{"panes":[]}}"#;
+        assert_eq!(existing_pane(empty, "w8", Some("/repo")), Ok(None));
+    }
+
+    #[test]
+    fn entry_without_a_pane_id_is_no_match() {
+        let no_id = r#"{"result":{"panes":[{"label":"OpenSpec","workspace_id":"w8","cwd":"/repo"}]}}"#;
+        assert_eq!(existing_pane(no_id, "w8", Some("/repo")), Ok(None));
+
+        let non_string_id = r#"{"result":{"panes":[{"pane_id":5,"label":"OpenSpec","workspace_id":"w8","cwd":"/repo"}]}}"#;
+        assert_eq!(existing_pane(non_string_id, "w8", Some("/repo")), Ok(None));
+    }
+
+    #[test]
+    fn other_workspace_is_no_match() {
+        let listing = r#"{"result":{"panes":[{"pane_id":"wA:pG","label":"OpenSpec","workspace_id":"wA","cwd":"/repo"}]}}"#;
+        assert_eq!(existing_pane(listing, "w8", Some("/repo")), Ok(None));
+    }
+
+    #[test]
+    fn other_cwd_is_no_match() {
+        let listing = r#"{"result":{"panes":[{"pane_id":"w8:pG","label":"OpenSpec","workspace_id":"w8","cwd":"/Users/x/.config/herdr/plugins/github/herdr-openspec-abc"}]}}"#;
+        assert_eq!(existing_pane(listing, "w8", Some("/repo")), Ok(None));
+    }
+
+    #[test]
+    fn cwd_unknown_matches_on_label_and_workspace() {
+        let listing = r#"{"result":{"panes":[{"pane_id":"w8:pG","label":"OpenSpec","workspace_id":"w8","cwd":"/anything"}]}}"#;
+        assert_eq!(
+            existing_pane(listing, "w8", None),
+            Ok(Some("w8:pG".to_string()))
+        );
+    }
+
+    #[test]
+    fn two_matches_take_the_first() {
+        let listing = r#"{"result":{"panes":[
+            {"pane_id":"w8:pG","label":"OpenSpec","workspace_id":"w8","cwd":"/repo"},
+            {"pane_id":"w8:pH","label":"OpenSpec","workspace_id":"w8","cwd":"/repo"}
+        ]}}"#;
+        assert_eq!(
+            existing_pane(listing, "w8", Some("/repo")),
+            Ok(Some("w8:pG".to_string()))
+        );
+    }
 }
