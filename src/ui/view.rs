@@ -266,6 +266,13 @@ fn render_footer(frame: &mut Frame, footer: Rect, dashboard: &Dashboard) {
             hints.push(format!("/{}", filter.query));
         }
         hints.extend(FOOTER_HINTS.iter().map(|s| (*s).to_string()));
+        // `agent-launch`: the action hints, offered only when the socket is reachable — read
+        // from `Dashboard::agents` and nowhere else, never from `ChangeSet::problems`, which
+        // `adopt` replaces wholesale on every refresh.
+        if dashboard.agents.reachable {
+            hints.push("a/c/s launch".to_string());
+            hints.push("g focus".to_string());
+        }
         let unattributed = dashboard.attribution().unattributed;
         if unattributed > 0 {
             hints.push(format!("{unattributed} unattributed"));
@@ -508,6 +515,9 @@ mod tests {
     #[test]
     fn frame_rows_at_60_and_120() {
         let d = dashboard(Some("/tmp/demo-repo"), Route::List);
+        // `agent-launch`: pinned unreachable, so this footer is the one this capability
+        // specified before the action hints existed.
+        assert!(!d.agents.reachable);
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
             assert_eq!(cols(&row_text(&buf, 0), 0..8), "OpenSpec");
@@ -579,11 +589,22 @@ mod tests {
             assert_eq!(cols(&row_text(&buf, 0), 0..8), "OpenSpec");
             assert_eq!(cols(&row_text(&buf, 19), 0..6), "q quit");
         }
+
+        // `agent-launch`: the same holds with `agents.reachable` `true`, which adds no hint
+        // that could fit in one column and therefore changes no cell of the 1x20 buffer.
+        let mut reachable = d.clone();
+        reachable.agents.reachable = true;
+        let buf1 = render_at(1, 20, &d);
+        let buf1_reachable = render_at(1, 20, &reachable);
+        assert_eq!(buf1, buf1_reachable);
     }
 
     #[test]
     fn footer_drops_whole_hints() {
         let d = dashboard(Some("/tmp/demo-repo"), Route::List);
+        // `agent-launch`: pinned unreachable, so the action hints never enter this test's
+        // own drop sequence.
+        assert!(!d.agents.reachable);
         let buf = render_at(18, 20, &d);
         assert_eq!(row_text(&buf, 19), format!("q quit{}", " ".repeat(12)));
 
@@ -644,6 +665,23 @@ mod tests {
                 "width {width}: the count is over agents, adding a second must read 2"
             );
         }
+
+        // `agent-launch`: with `agents.reachable` set, the action hints sit between
+        // `Esc back` and the count, and at 60 the count is the one dropped.
+        let mut reachable = d.clone();
+        reachable.agents.agents = vec![unattributed_agent("nothing-like-a-change")];
+        reachable.agents.reachable = true;
+        let expected_120 = "q quit  Enter detail  Esc back  a/c/s launch  g focus  1 unattributed";
+        assert_eq!(expected_120.chars().count(), 69);
+        assert_eq!(
+            row_text(&render_at(120, 20, &reachable), 19),
+            format!("{expected_120}{}", " ".repeat(51))
+        );
+        let expected_60 = "q quit  Enter detail  Esc back  a/c/s launch  g focus";
+        assert_eq!(
+            row_text(&render_at(60, 20, &reachable), 19),
+            format!("{expected_60}{}", " ".repeat(7))
+        );
     }
 
     /// `responsive-layout`: "The count is reported with an empty change list".
@@ -684,6 +722,23 @@ mod tests {
                 "width {width}"
             );
         }
+
+        // `agent-launch`: with `agents.reachable` set, the list region's interior is
+        // unchanged, cell for cell, at both widths — the action hints live in the footer
+        // and never in the list.
+        let mut reachable = d.clone();
+        reachable.agents.reachable = true;
+        for width in [60, 120] {
+            let unreachable_buf = render_at(width, 20, &d);
+            let reachable_buf = render_at(width, 20, &reachable);
+            for y in 2..=17u16 {
+                assert_eq!(
+                    row_text(&unreachable_buf, y),
+                    row_text(&reachable_buf, y),
+                    "width {width} row {y}"
+                );
+            }
+        }
     }
 
     /// `responsive-layout`: "The count is dropped whole before the three key hints".
@@ -708,6 +763,25 @@ mod tests {
         for width in [60, 120] {
             assert!(row_text(&render_at(width, 20, &d), 19).contains("1 unattributed"));
         }
+
+        // `agent-launch`: with `agents.reachable` set, the boundary moves one hint list
+        // further out — `g focus` is `agent-launch`'s addition and the count still drops
+        // before the (now longer) key hint list.
+        let mut reachable = d.clone();
+        reachable.agents.reachable = true;
+        let buf69 = render_at(69, 20, &reachable);
+        assert_eq!(
+            row_text(&buf69, 19),
+            "q quit  Enter detail  Esc back  a/c/s launch  g focus  1 unattributed"
+        );
+        let buf68 = render_at(68, 20, &reachable);
+        assert_eq!(
+            row_text(&buf68, 19),
+            format!(
+                "q quit  Enter detail  Esc back  a/c/s launch  g focus{}",
+                " ".repeat(15)
+            )
+        );
     }
 
     /// `responsive-layout`: "The filter prompt replaces the count along with the
@@ -786,6 +860,30 @@ mod tests {
             assert!(accepted_no_agents_footer.starts_with("/be  q quit  Enter detail  Esc back"));
             assert!(!accepted_no_agents_footer.contains("unattributed"));
         }
+
+        // `agent-launch`: with `agents.reachable` set, the active-filter row is still
+        // exactly `/be_` (the prompt replaces the whole row, action hints included), and
+        // the accepted-query row still leads with the query and still trails with the count.
+        let mut active_reachable = active_form.clone();
+        active_reachable.agents.reachable = true;
+        let mut accepted_reachable = accepted_form.clone();
+        accepted_reachable.agents.reachable = true;
+        for width in [60, 120] {
+            let active_footer = row_text(&render_at(width, 20, &active_reachable), 19);
+            assert!(active_footer.starts_with("/be_"), "width {width}");
+            assert!(!active_footer.contains("a/c/s launch"), "width {width}");
+            assert!(!active_footer.contains("g focus"), "width {width}");
+        }
+        assert!(
+            row_text(&render_at(120, 20, &accepted_reachable), 19).starts_with(
+                "/be  q quit  Enter detail  Esc back  a/c/s launch  g focus  1 unattributed"
+            )
+        );
+        assert!(
+            row_text(&render_at(60, 20, &accepted_reachable), 19)
+                .starts_with("/be  q quit  Enter detail  Esc back  a/c/s launch  g focus"),
+            "width 60: the count is dropped, the action hints are kept"
+        );
     }
 
     /// `change-rows`: "A badged row carries its status between the name and the
@@ -853,6 +951,11 @@ mod tests {
                 "width {width}: the recorded reason must be carried and never drawn"
             );
         }
+        // `agent-launch`: `changes.problems`, `refresh.problems`, and `launch.problems` are
+        // all still empty, so nothing about the socket reached any problem list.
+        assert!(with_problem.changes.problems.is_empty());
+        assert!(with_problem.refresh.problems.is_empty());
+        assert!(with_problem.launch.problems.is_empty());
     }
 
     #[test]
@@ -1722,6 +1825,15 @@ mod tests {
         for width in [60u16, 120u16] {
             assert!(!row_text(&render_at(width, 20, &d), 19).contains("unattributed"));
         }
+
+        // `agent-launch`: the same holds with `agents.reachable` set to `true` — the prompt
+        // replaces the action hints too.
+        d.agents.reachable = true;
+        for width in [60u16, 120u16] {
+            let footer = row_text(&render_at(width, 20, &d), 19);
+            assert!(!footer.contains("a/c/s launch"), "width {width}");
+            assert!(!footer.contains("g focus"), "width {width}");
+        }
     }
 
     #[test]
@@ -1772,6 +1884,22 @@ mod tests {
             row_text(&buf120, 19),
             format!("{with_count}{}", " ".repeat(68))
         );
+
+        // `agent-launch`: with `agents.reachable` set, the action hints sit between
+        // `Esc back` and the count, and at 60 the count is the one dropped.
+        d.agents.reachable = true;
+        let with_hints_and_count =
+            "/add  q quit  Enter detail  Esc back  a/c/s launch  g focus  1 unattributed";
+        assert_eq!(with_hints_and_count.chars().count(), 75);
+        assert!(
+            row_text(&render_at(120, 20, &d), 19).starts_with(with_hints_and_count),
+            "width 120"
+        );
+        let with_hints_only = "/add  q quit  Enter detail  Esc back  a/c/s launch  g focus";
+        assert!(
+            row_text(&render_at(60, 20, &d), 19).starts_with(with_hints_only),
+            "width 60: the count is the one dropped"
+        );
     }
 
     #[test]
@@ -1791,6 +1919,12 @@ mod tests {
         let row120 = row_text(&buf120, 19);
         let expected = format!("/{}_{}", "a".repeat(70), " ".repeat(48));
         assert_eq!(row120, expected);
+
+        // `agent-launch`: the same holds with `agents.reachable` `true`, because the prompt
+        // form has no hint list to grow.
+        d.agents.reachable = true;
+        assert_eq!(row_text(&render_at(60, 20, &d), 19), row60);
+        assert_eq!(row_text(&render_at(120, 20, &d), 19), row120);
     }
 
     #[test]
@@ -3352,7 +3486,10 @@ mod tests {
                         terminal_title: None,
                     },
                 ],
-                reachable: true,
+                // `agent-launch`: held at `false` here, like every fixture in this test —
+                // `reachable` now moves the footer, so comparing a reachable buffer against
+                // an unreachable one would say nothing about scope.
+                reachable: false,
                 problem: None,
             };
 
@@ -3396,7 +3533,7 @@ mod tests {
                     workspace_id: "w8".to_string(),
                     terminal_title: None,
                 }],
-                reachable: true,
+                reachable: false,
                 problem: None,
             };
             let buf_absent_cwd = render_at(width, 20, &absent_cwd);
@@ -3415,6 +3552,197 @@ mod tests {
             assert_ne!(
                 buf_initial, buf_moved,
                 "width {width}: an in-scope, matched agent must change a pixel"
+            );
+
+            // `agent-launch`'s own discriminating control: flipping `reachable` to `true` on
+            // the first fixture alone must change a pixel too — in the footer and only the
+            // footer — which is exactly why the four fixtures above hold it constant.
+            let mut reachable_flag_only = initial.clone();
+            reachable_flag_only.agents.reachable = true;
+            let buf_reachable_flag = render_at(width, 20, &reachable_flag_only);
+            assert_ne!(
+                buf_initial, buf_reachable_flag,
+                "width {width}: flipping reachable alone must change the footer"
+            );
+            for y in 0..=17u16 {
+                assert_eq!(
+                    row_text(&buf_initial, y),
+                    row_text(&buf_reachable_flag, y),
+                    "width {width} row {y}: only the footer may differ"
+                );
+            }
+        }
+    }
+
+    // --- agent-launch: the action hints -----------------------------------------------
+
+    /// `responsive-layout`: "The action hints follow `Esc back` when the socket is
+    /// reachable."
+    #[test]
+    fn the_action_hints_follow_esc_back_when_reachable() {
+        let mut d = dashboard(Some("/tmp/demo-repo"), Route::List);
+        d.agents.reachable = true;
+        let expected = "q quit  Enter detail  Esc back  a/c/s launch  g focus";
+        assert_eq!(expected.chars().count(), 53);
+        let buf60 = render_at(60, 20, &d);
+        assert_eq!(row_text(&buf60, 19), format!("{expected}{}", " ".repeat(7)));
+        let buf120 = render_at(120, 20, &d);
+        assert_eq!(
+            row_text(&buf120, 19),
+            format!("{expected}{}", " ".repeat(67))
+        );
+
+        let mut unreachable = d.clone();
+        unreachable.agents.reachable = false;
+        assert_eq!(
+            row_text(&render_at(60, 20, &unreachable), 19),
+            format!("q quit  Enter detail  Esc back{}", " ".repeat(30)),
+            "byte-identical to the row this capability specified before the action hints existed"
+        );
+
+        for width in [60u16, 120u16] {
+            let reachable_buf = render_at(width, 20, &d);
+            let unreachable_buf = render_at(width, 20, &unreachable);
+            for y in 0..=18u16 {
+                assert_eq!(
+                    row_text(&reachable_buf, y),
+                    row_text(&unreachable_buf, y),
+                    "width {width} row {y}: the reachability flag moves the footer and nothing else"
+                );
+            }
+        }
+    }
+
+    /// `responsive-layout`: "The action hints are dropped whole, `g focus` first."
+    #[test]
+    fn the_action_hints_are_dropped_whole_g_focus_first() {
+        let mut d = dashboard(Some("/tmp/demo-repo"), Route::List);
+        d.agents.reachable = true;
+
+        let buf53 = render_at(53, 20, &d);
+        assert_eq!(
+            row_text(&buf53, 19),
+            "q quit  Enter detail  Esc back  a/c/s launch  g focus"
+        );
+
+        let buf52 = render_at(52, 20, &d);
+        assert_eq!(
+            row_text(&buf52, 19),
+            format!(
+                "q quit  Enter detail  Esc back  a/c/s launch{}",
+                " ".repeat(8)
+            ),
+            "g focus and its separator need nine columns and only eight remain"
+        );
+
+        let buf44 = render_at(44, 20, &d);
+        assert_eq!(
+            row_text(&buf44, 19),
+            "q quit  Enter detail  Esc back  a/c/s launch"
+        );
+
+        let buf43 = render_at(43, 20, &d);
+        assert_eq!(
+            row_text(&buf43, 19),
+            format!("q quit  Enter detail  Esc back{}", " ".repeat(13)),
+            "both action hints are dropped before any of the three key hints"
+        );
+
+        // 60 and 120 as contrasting controls: comfortably wide enough that both hints are
+        // never dropped there.
+        for width in [60, 120] {
+            let row = row_text(&render_at(width, 20, &d), 19);
+            assert!(row.contains("a/c/s launch"), "width {width}");
+            assert!(row.contains("g focus"), "width {width}");
+        }
+    }
+
+    /// `agent-launch`: "An unreachable socket hides both hints at both widths."
+    #[test]
+    fn an_unreachable_socket_hides_both_hints() {
+        let d = dashboard(Some("/tmp/demo-repo"), Route::List);
+        assert!(!d.agents.reachable);
+        for width in [60, 120] {
+            let row = row_text(&render_at(width, 20, &d), 19);
+            assert!(
+                row.starts_with("q quit  Enter detail  Esc back"),
+                "width {width}"
+            );
+            assert!(!row.contains("a/c/s launch"), "width {width}");
+            assert!(!row.contains("g focus"), "width {width}");
+        }
+    }
+
+    /// `agent-launch`: "The count is dropped before the action hints as the width falls."
+    #[test]
+    fn the_count_is_dropped_before_the_action_hints() {
+        let mut d = dashboard(Some("/tmp/demo-repo"), Route::List);
+        d.agents.reachable = true;
+        d.agents.agents = vec![unattributed_agent("nothing-like-a-change")];
+
+        let buf120 = row_text(&render_at(120, 20, &d), 19);
+        assert!(
+            buf120.starts_with(
+                "q quit  Enter detail  Esc back  a/c/s launch  g focus  1 unattributed"
+            )
+        );
+
+        let buf60 = render_at(60, 20, &d);
+        assert_eq!(
+            row_text(&buf60, 19),
+            format!(
+                "q quit  Enter detail  Esc back  a/c/s launch  g focus{}",
+                " ".repeat(7)
+            ),
+            "the count is 69 columns in and does not fit; fit_hints drops it whole"
+        );
+
+        let mut unreachable = d.clone();
+        unreachable.agents.reachable = false;
+        assert!(
+            row_text(&render_at(60, 20, &unreachable), 19).contains("1 unattributed"),
+            "with the two hints absent, the count reappears at 60"
+        );
+    }
+
+    /// `dashboard-loop`: "The action keys type into the query while filtering."
+    #[test]
+    fn the_action_hints_survive_a_filter() {
+        let mut d = dashboard(Some("/tmp/demo-repo"), Route::List);
+        d.agents.reachable = true;
+        d.filter = Filter {
+            query: "acsg".to_string(),
+            active: true,
+        };
+        for width in [60, 120] {
+            let footer = row_text(&render_at(width, 20, &d), 19);
+            assert!(footer.starts_with("/acsg_"), "width {width}: {footer:?}");
+            assert!(!footer.contains("a/c/s launch"), "width {width}");
+            assert!(!footer.contains("g focus"), "width {width}");
+        }
+    }
+
+    /// `agent-launch`: "A launch problem leads the refresh and change-set problems", at the
+    /// view tier.
+    #[test]
+    fn a_launch_problem_renders_above_a_watch_problem() {
+        let mut d = dashboard_with(
+            vec![fixture::active("alpha", 1, 2)],
+            Vec::new(),
+            0,
+            Route::List,
+        );
+        d.refresh.problems = vec!["watch failed".to_string()];
+        d.launch.problems = vec!["launch failed".to_string()];
+        for width in [60, 120] {
+            let buf = render_at(width, 20, &d);
+            assert!(
+                interior_cols(&buf, 2).contains("launch failed"),
+                "width {width}"
+            );
+            assert!(
+                interior_cols(&buf, 3).contains("watch failed"),
+                "width {width}"
             );
         }
     }

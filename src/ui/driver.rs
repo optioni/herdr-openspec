@@ -1760,10 +1760,18 @@ mod tests {
                 .expect("loop ends");
                 terminal2.backend().buffer().clone()
             };
-            assert_eq!(
-                buf, &inert_agents_buf,
-                "width {width}: the snapshot changed state without changing the frame"
-            );
+            // `agent-launch`: the footer row is excepted from "the snapshot changed state
+            // without changing the frame" — `agents.reachable` now moves the footer's action
+            // hints directly, which is this change's own addition and is proved separately by
+            // `ui::view::tests::the_action_hints_follow_esc_back_when_reachable`. Every row
+            // above the footer must still be byte-identical.
+            for y in 0..buf.area.height.saturating_sub(1) {
+                assert_eq!(
+                    row_text(buf, y),
+                    row_text(&inert_agents_buf, y),
+                    "width {width} row {y}: the badge and count must not move without a rendered pixel elsewhere"
+                );
+            }
         }
     }
 

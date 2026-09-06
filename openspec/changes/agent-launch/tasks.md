@@ -860,7 +860,7 @@ set; see design.md → Test Strategy.
 ## 10. The action hints in `ui::view`
 <!-- kind: behavior -->
 
-- [ ] 10.1 RED: Write `ui::view::tests::the_action_hints_follow_esc_back_when_reachable`,
+- [x] 10.1 RED: Write `ui::view::tests::the_action_hints_follow_esc_back_when_reachable`,
       `::the_action_hints_are_dropped_whole_g_focus_first`,
       `::an_unreachable_socket_hides_both_hints`,
       `::the_count_is_dropped_before_the_action_hints`, `::the_action_hints_survive_a_filter`,
@@ -868,14 +868,14 @@ set; see design.md → Test Strategy.
       **twelve** landed view tests `EXTENDED`'s pair list names. Each test names both 60 and 120
       unsuffixed, or `WIDTHS` reports it missing a width.
 
-- [ ] 10.2 CHECK: Confirm the failures are the missing hints and not a broken fixture, and that
+- [x] 10.2 CHECK: Confirm the failures are the missing hints and not a broken fixture, and that
       the landed tests whose extension pins `agents.reachable` to `false` fail for the
       opposite reason — they are red because the field is now read.
 
-- [ ] 10.3 GREEN: Insert `a/c/s launch` and `g focus` into the hint list `render_footer`
+- [x] 10.3 GREEN: Insert `a/c/s launch` and `g focus` into the hint list `render_footer`
       builds, after `Esc back` and before the count, only when `dashboard.agents.reachable`.
 
-- [ ] 10.4 VERIFY: No refactor was needed — the two hints are two `push` calls into the list
+- [x] 10.4 VERIFY: No refactor was needed — the two hints are two `push` calls into the list
       `render_footer` already builds. `testcount --lib 'ui::view::tests::' 94` plus the six
       single-test floors,
       then `WIDTHS_MIN=94 sh $CHECKS/WIDTHS.sh` — green for the first time — plus

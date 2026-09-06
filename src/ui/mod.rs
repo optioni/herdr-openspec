@@ -2512,7 +2512,14 @@ esac
                     "width {width}: alpha's row must carry the blocked badge: {alpha_row:?}"
                 );
 
-                let footer = "q quit  Enter detail  Esc back  1 unattributed";
+                // `agent-launch`: the socket is reachable, so the two action hints are
+                // offered too — at 120 the count still fits after them; at 60 it no longer
+                // does and is dropped whole.
+                let footer = if width == 120 {
+                    "q quit  Enter detail  Esc back  a/c/s launch  g focus  1 unattributed"
+                } else {
+                    "q quit  Enter detail  Esc back  a/c/s launch  g focus"
+                };
                 let expected_footer = format!(
                     "{footer}{}",
                     " ".repeat(width as usize - footer.chars().count())
