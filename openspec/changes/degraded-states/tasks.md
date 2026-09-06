@@ -409,24 +409,24 @@
 ## 14. `SPEC.md` corrections
 <!-- kind: operational -->
 
-- [ ] 14.1 CHANGE: Apply the seven corrections in design.md → Decision 12, each with its
+- [x] 14.1 CHANGE: Apply the seven corrections in design.md → Decision 12, each with its
   measurement recorded in `notes/audit.md` beside the row.
-- [ ] 14.2 CHANGE: Apply an eighth: row 30's "recorded pending a change that reads `herdr
+- [x] 14.2 CHANGE: Apply an eighth: row 30's "recorded pending a change that reads `herdr
   worktree list`" is a forward reference to a change that will not exist. Restate it as a
   standing, accepted limitation.
-- [ ] 14.3 CHANGE: Rewrite the List view paragraph recording the third-column collision so it
+- [x] 14.3 CHANGE: Rewrite the List view paragraph recording the third-column collision so it
   states the resolution — the indicator lives in the detail region — rather than leaving a plan
   open. Record the accepted trade-off: below 100 columns the list and detail are separate
   routes, so a per-change reason costs one keypress to reach.
-- [ ] 14.4 CHECK: No correction rewords a **condition** column without the coverage map being
+- [x] 14.4 CHECK: No correction rewords a **condition** column without the coverage map being
   updated in the same commit: re-run `cargo test --all-features --test degraded_coverage` after
   14.1 and fix any orphan in the map rather than reverting the correction.
-- [ ] 14.5 CHECK: Nothing wrote inside `openspec/`. Run `sh scripts/gates/openspec-untouched.sh`,
+- [x] 14.5 CHECK: Nothing wrote inside `openspec/`. Run `sh scripts/gates/openspec-untouched.sh`,
   and the `BASE`-diff leg as `CHANGE=degraded-states BASE=<the SHA recorded in 0.1> sh
   $C/OPENSPEC-UNTOUCHED.sh` — with the recorded `BASE`, never the current `HEAD`, and with
   `CHANGE` set, since the script's default names an archived change that no longer exists.
   `SPEC.md` is at the repository root and outside that check; state so.
-- [ ] 14.6 VERIFY: `make check` green. Commit.
+- [x] 14.6 VERIFY: `make check` green. Commit.
 
 ## 15. Change Review
 <!-- kind: operational -->

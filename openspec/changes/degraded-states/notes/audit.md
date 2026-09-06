@@ -163,3 +163,52 @@ one entry among the others sharing the same vector. Recorded here so group 9's o
 proof (`no_tasks_artifact_renders_every_tab_as_markdown`) is written expecting a leading
 problem row, rather than being surprised by one.
 (task 1.5).
+
+## Group 14 — SPEC.md corrections applied (Decision 12)
+
+All eight corrections from design.md -> Decision 12 applied to `SPEC.md`, each to the
+**Behaviour** column only — no **Condition** column was reworded, verified by re-running
+`cargo test --all-features --test degraded_coverage` after the edit (still green, no
+uncovered row, no orphan entry).
+
+1. Rows 36/37 (watcher won't start / `openspec/` removed while watching): "above every
+   other problem row" corrected to "above every change-set problem row, and below a launch
+   problem row when one is present" — matching `ui::list::rows`' actual order (launch, then
+   refresh, then change-set problems).
+2. Row 43 (`plugin pane focus` domain error / `plugin pane open` fails): "carried verbatim
+   from Herdr" corrected to name `herdr_reason`'s own formatted prefix
+   (`herdr exited with code <n>: <stderr>`), never Herdr's raw message byte-for-byte.
+3. Row 28 (`agent-names.toml` unusable): "nothing already on disk is lost" corrected to
+   state the read is non-destructive but the next successful `record` rewrites from the
+   recovered entries alone, so an unrecoverable entry does not survive that later write.
+4. Row 18 (Herdr socket unreachable): "agent column ... hidden" corrected to state the
+   column is empty because an unreachable snapshot carries no agents — the view applies no
+   hiding rule of its own.
+5. Row 2 (`openspec` binary not found): stated the badge's position (after the `OpenSpec`
+   label), and its drop rule (dropped whole below 18 columns) — this change's own
+   implementation (group 4).
+6. List view paragraph (the third-column collision): restated the resolution design.md ->
+   Decision 3 made — the per-change indicator lives in the detail region, not the list's
+   third column — and recorded the accepted trade-off (a per-change reason costs one
+   keypress below 100 columns).
+7. Row 30 (linked worktree agent invisible): "recorded pending a change that reads
+   `herdr worktree list`" corrected to a standing, accepted limitation — the roadmap ends
+   with this change, so there is no future change to be pending on.
+
+(Seven corrections listed — Decision 12's own table names eight, but its #6 and this
+audit's #5 are the same row-2 correction, this change's own badge implementation; no
+double-count.)
+
+Verified nothing wrote inside `openspec/` outside this change's own directory except one
+deliberate, directed edit: `openspec/IMPLEMENTATION-ORDER.md`'s `agent-launch` row (ruling 2,
+recorded in this change's `proposal.md` and in group 1's commit). `sh
+scripts/gates/openspec-untouched.sh` (the tree-only legs) is green. The `BASE`-diff leg,
+`CHANGE=degraded-states BASE=31fc7f59cf5357c4ba8ee7c0ab6ba5957be8ff36 sh
+openspec/changes/archive/2026-09-06-spec-purposes/notes/extracted-gates/OPENSPEC-UNTOUCHED.sh`,
+reports `openspec/IMPLEMENTATION-ORDER.md` as written — this is the one, single, tracked,
+directed edit, not a stray or untracked runtime write (`git diff $BASE --stat -- ':(top)openspec/'`
+confirms it is the only file outside `openspec/changes/degraded-states/` this change's
+entire history touches). Recorded here as a known, explained, non-blocking exception: this
+leg is not composed into `make check` (design.md -> Decision 9), and the non-goal it guards
+is the *running plugin* never writing inside `openspec/`, not the change-authoring process
+itself editing a tracked planning document under direction.
