@@ -482,7 +482,7 @@ directions; see design.md → Test Strategy.
 ## 6. The footer count in `ui::view`
 <!-- kind: behavior -->
 
-- [ ] 6.1 RED: Write `ui::view::tests::badged_rows_render_at_both_widths`,
+- [x] 6.1 RED: Write `ui::view::tests::badged_rows_render_at_both_widths`,
       `the_unattributed_count_is_the_last_hint`, `the_count_drops_before_the_key_hints`,
       `the_count_survives_a_filter`, `the_count_is_reported_with_an_empty_list`, and
       `an_unreachable_socket_renders_the_agentless_pane`. **In the same task**, extend the
@@ -493,15 +493,15 @@ directions; see design.md → Test Strategy.
       observed red first. Each test names both 60 and 120 unsuffixed, or `WIDTHS` reports it
       missing a width.
 
-- [ ] 6.2 CHECK: Confirm the nine failures are the missing count and the missing badge, not a
+- [x] 6.2 CHECK: Confirm the nine failures are the missing count and the missing badge, not a
       broken fixture, and that `agents_change_no_pixel`'s `assert_ne!` is the one failing for
       the opposite reason — it is red because the badge does not exist yet.
 
-- [ ] 6.3 GREEN: Append `<n> unattributed` as the last entry of the hint list `render_footer`
+- [x] 6.3 GREEN: Append `<n> unattributed` as the last entry of the hint list `render_footer`
       builds, only when the count is non-zero, so `fit_hints` drops it first; `render_footer`
       takes the `Dashboard` rather than the `Filter` alone, since it now needs both.
 
-- [ ] 6.4 VERIFY: `testcount --lib 'ui::view::tests::' 88` plus the five single-test floors for
+- [x] 6.4 VERIFY: `testcount --lib 'ui::view::tests::' 88` plus the five single-test floors for
       the new functions, then `WIDTHS_MIN=88 sh $CHECKS/WIDTHS.sh` — green for the first time,
       and the first run of this gate at a real floor — plus `sh $CHECKS/EXTENDED.sh`, green for
       the first time, and `sh $CHECKS/NOIO-VIEW.sh`. Commit.

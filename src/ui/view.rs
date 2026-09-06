@@ -8,7 +8,7 @@ use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 use ratatui::widgets::Block;
 
-use crate::ui::app::{Dashboard, Filter, Route};
+use crate::ui::app::{Dashboard, Route};
 use crate::ui::detail;
 use crate::ui::layout::{interior, scroll_offset, split_body, split_detail, split_frame, viewport};
 use crate::ui::list;
@@ -21,7 +21,7 @@ const FOOTER_HINTS: [&str; 3] = ["q quit", "Enter detail", "Esc back"];
 pub fn render(frame: &mut Frame, dashboard: &Dashboard) {
     let (header, body, footer) = split_frame(frame.area());
     render_header(frame, header, dashboard);
-    render_footer(frame, footer, &dashboard.filter);
+    render_footer(frame, footer, dashboard);
     render_body(frame, body, dashboard);
 }
 
@@ -244,28 +244,32 @@ fn shorten_for_header(text: &str, header_width: u16) -> Option<String> {
 
 /// The footer row, in one of three forms — `list-filtering` -> "The footer
 /// shows the filter prompt while filtering and the query after":
-/// - filtering: the prompt `/` + query + `_`, replacing the hints entirely,
-///   keeping its **tail** when it overflows the footer;
+/// - filtering: the prompt `/` + query + `_`, replacing the hints (and the
+///   unattributed count) entirely, keeping its **tail** when it overflows
+///   the footer;
 /// - not filtering, a non-empty query: `/` + query leads the hint list,
-///   dropped last rather than first;
-/// - otherwise: `q quit`, `Enter detail`, and `Esc back`, unchanged.
-fn render_footer(frame: &mut Frame, footer: Rect, filter: &Filter) {
+///   dropped last rather than first, with the count still last;
+/// - otherwise: `q quit`, `Enter detail`, and `Esc back`, then —
+///   `agent-attribution`'s addition — `<n> unattributed` when
+///   `Dashboard::attribution().unattributed` is greater than zero, dropped
+///   *first* as the width falls since it is the last hint in the list.
+fn render_footer(frame: &mut Frame, footer: Rect, dashboard: &Dashboard) {
     if footer.height == 0 {
         return;
     }
+    let filter = &dashboard.filter;
     let text = if filter.active {
         footer_prompt(&filter.query, footer.width)
-    } else if filter.query.is_empty() {
-        fit_hints(
-            &FOOTER_HINTS
-                .iter()
-                .map(|s| (*s).to_string())
-                .collect::<Vec<_>>(),
-            footer.width,
-        )
     } else {
-        let mut hints = vec![format!("/{}", filter.query)];
+        let mut hints = Vec::new();
+        if !filter.query.is_empty() {
+            hints.push(format!("/{}", filter.query));
+        }
         hints.extend(FOOTER_HINTS.iter().map(|s| (*s).to_string()));
+        let unattributed = dashboard.attribution().unattributed;
+        if unattributed > 0 {
+            hints.push(format!("{unattributed} unattributed"));
+        }
         fit_hints(&hints, footer.width)
     };
     if !text.is_empty() {
@@ -443,6 +447,22 @@ mod tests {
         }
     }
 
+    /// An in-scope `Agent` at `/tmp/demo-repo` named `name`, matching no change —
+    /// `agent-attribution`'s own footer-count fixtures build every unattributed
+    /// agent this way rather than through a `Change` literal.
+    fn unattributed_agent(name: &str) -> crate::agents::Agent {
+        crate::agents::Agent {
+            name: Some(name.to_string()),
+            kind: None,
+            status: crate::agents::AgentStatus::Working,
+            cwd: Some(std::path::PathBuf::from("/tmp/demo-repo")),
+            pane_id: "p".to_string(),
+            tab_id: "t".to_string(),
+            workspace_id: "w".to_string(),
+            terminal_title: None,
+        }
+    }
+
     /// Columns `range` of `text`, by character index — never by byte offset,
     /// since a box-drawing border or the header's `…` are multi-byte.
     fn cols(text: &str, range: std::ops::Range<usize>) -> String {
@@ -569,6 +589,258 @@ mod tests {
             row_text(&buf, 19),
             format!("q quit  Enter detail  Esc back{}", " ".repeat(90))
         );
+    }
+
+    /// `responsive-layout`: "The unattributed count is the footer's last hint at
+    /// both widths".
+    #[test]
+    fn the_unattributed_count_is_the_last_hint() {
+        let mut d = dashboard_with(
+            vec![fixture::active("alpha", 0, 1)],
+            Vec::new(),
+            0,
+            Route::List,
+        );
+        d.agents.agents = vec![unattributed_agent("nothing-like-a-change")];
+
+        let expected = "q quit  Enter detail  Esc back  1 unattributed";
+        assert_eq!(expected.chars().count(), 46);
+        let buf60 = render_at(60, 20, &d);
+        assert_eq!(
+            row_text(&buf60, 19),
+            format!("{expected}{}", " ".repeat(14))
+        );
+        let buf120 = render_at(120, 20, &d);
+        assert_eq!(
+            row_text(&buf120, 19),
+            format!("{expected}{}", " ".repeat(74))
+        );
+
+        let mut without_agents = d.clone();
+        without_agents.agents.agents = Vec::new();
+        assert_eq!(
+            row_text(&render_at(60, 20, &without_agents), 19),
+            format!("q quit  Enter detail  Esc back{}", " ".repeat(30)),
+            "byte-identical to the row this capability specified before the count existed"
+        );
+
+        d.agents.agents.push(unattributed_agent("also-nothing"));
+        for width in [60u16, 120u16] {
+            assert!(
+                row_text(&render_at(width, 20, &d), 19)
+                    .starts_with("q quit  Enter detail  Esc back  2 unattributed"),
+                "width {width}: the count is over agents, adding a second must read 2"
+            );
+        }
+    }
+
+    /// `responsive-layout`: "The count is reported with an empty change list".
+    #[test]
+    fn the_count_is_reported_with_an_empty_list() {
+        let mut d = dashboard(Some("/tmp/demo-repo"), Route::List);
+        d.agents.agents = vec![
+            unattributed_agent("nothing-like-a-change"),
+            unattributed_agent("also-nothing"),
+        ];
+        for width in [60, 120] {
+            let buf = render_at(width, 20, &d);
+            assert!(
+                row_text(&buf, 19).starts_with("q quit  Enter detail  Esc back  2 unattributed")
+            );
+            assert!(buffer_contains(&buf, "No changes yet"));
+        }
+
+        let agentless_no_match = {
+            let mut x = dashboard(Some("/tmp/demo-repo"), Route::List);
+            x.filter.query = "zzz".to_string();
+            x
+        };
+        let mut no_match = agentless_no_match.clone();
+        no_match.agents.agents = d.agents.agents.clone();
+        for width in [60, 120] {
+            let buf = render_at(width, 20, &no_match);
+            let buf_agentless = render_at(width, 20, &agentless_no_match);
+            for y in 2..=17u16 {
+                assert_eq!(
+                    row_text(&buf, y),
+                    row_text(&buf_agentless, y),
+                    "width {width} row {y}: the message rows must be byte-identical"
+                );
+            }
+            assert!(
+                row_text(&buf, 19).contains("2 unattributed"),
+                "width {width}"
+            );
+        }
+    }
+
+    /// `responsive-layout`: "The count is dropped whole before the three key hints".
+    #[test]
+    fn the_count_drops_before_the_key_hints() {
+        let mut d = dashboard(Some("/tmp/demo-repo"), Route::List);
+        d.agents.agents = vec![unattributed_agent("nothing-like-a-change")];
+
+        let buf46 = render_at(46, 20, &d);
+        assert_eq!(
+            row_text(&buf46, 19),
+            "q quit  Enter detail  Esc back  1 unattributed"
+        );
+        let buf45 = render_at(45, 20, &d);
+        assert_eq!(
+            row_text(&buf45, 19),
+            format!("q quit  Enter detail  Esc back{}", " ".repeat(15))
+        );
+
+        // 60 and 120 as controls: comfortably wide enough that the count is never
+        // dropped there.
+        for width in [60, 120] {
+            assert!(row_text(&render_at(width, 20, &d), 19).contains("1 unattributed"));
+        }
+    }
+
+    /// `responsive-layout`: "The filter prompt replaces the count along with the
+    /// hints", carrying both its own fixture and `agent-attribution`'s "The `/`
+    /// filter hides rows without changing the count" — one function, per
+    /// design.md -> Test Strategy.
+    #[test]
+    fn the_count_survives_a_filter() {
+        // `agent-attribution`'s own fixture: alpha + beta, one agent matching
+        // alpha and two unattributable, query "beta".
+        let mut ab = dashboard_with(
+            vec![
+                fixture::active("alpha", 0, 1),
+                fixture::active("beta", 0, 1),
+            ],
+            Vec::new(),
+            0,
+            Route::List,
+        );
+        let mut alpha_agent = unattributed_agent("alpha");
+        alpha_agent.status = crate::agents::AgentStatus::Working;
+        ab.agents.agents = vec![
+            alpha_agent,
+            unattributed_agent("nothing-like-a-change"),
+            unattributed_agent("also-nothing"),
+        ];
+        ab.filter.query = "beta".to_string();
+        for width in [120, 60] {
+            let buf = render_at(width, 20, &ab);
+            assert!(
+                !buffer_contains(&buf, "alpha"),
+                "width {width}: the alpha row must be hidden by the filter"
+            );
+            assert!(
+                row_text(&buf, 19).contains("2 unattributed"),
+                "width {width}"
+            );
+        }
+
+        // `responsive-layout`'s own fixture: one change, one unattributed agent.
+        let mut base = dashboard(Some("/tmp/demo-repo"), Route::List);
+        base.agents.agents = vec![unattributed_agent("nothing-like-a-change")];
+
+        let mut active_form = base.clone();
+        active_form.filter = Filter {
+            query: "be".to_string(),
+            active: true,
+        };
+        let mut accepted_form = base.clone();
+        accepted_form.filter = Filter {
+            query: "be".to_string(),
+            active: false,
+        };
+        let mut active_form_no_agents = active_form.clone();
+        active_form_no_agents.agents.agents = Vec::new();
+        let mut accepted_form_no_agents = accepted_form.clone();
+        accepted_form_no_agents.agents.agents = Vec::new();
+
+        for width in [60, 120] {
+            let active_footer = row_text(&render_at(width, 20, &active_form), 19);
+            assert!(active_footer.starts_with("/be_"), "width {width}");
+            assert!(!active_footer.contains("unattributed"), "width {width}");
+            assert_eq!(
+                active_footer,
+                row_text(&render_at(width, 20, &active_form_no_agents), 19),
+                "width {width}: byte-identical once agents are emptied"
+            );
+
+            let accepted_footer = row_text(&render_at(width, 20, &accepted_form), 19);
+            assert!(
+                accepted_footer.starts_with("/be  q quit  Enter detail  Esc back  1 unattributed"),
+                "width {width}: {accepted_footer:?}"
+            );
+            let accepted_no_agents_footer =
+                row_text(&render_at(width, 20, &accepted_form_no_agents), 19);
+            assert!(accepted_no_agents_footer.starts_with("/be  q quit  Enter detail  Esc back"));
+            assert!(!accepted_no_agents_footer.contains("unattributed"));
+        }
+    }
+
+    /// `change-rows`: "A badged row carries its status between the name and the
+    /// progress cell" at the view tier.
+    #[test]
+    fn badged_rows_render_at_both_widths() {
+        let mut d = three_active();
+        let mut working = unattributed_agent("add-token-refresh");
+        working.status = crate::agents::AgentStatus::Working;
+        let mut blocked = unattributed_agent("fix-empty-basket");
+        blocked.status = crate::agents::AgentStatus::Blocked;
+        let mut unknown = unattributed_agent("migrate-ai-sdk-v7");
+        unknown.status = crate::agents::AgentStatus::Unknown;
+        d.agents.agents = vec![working, blocked, unknown];
+
+        let buf120 = render_at(120, 20, &d);
+        assert_eq!(
+            interior_cols(&buf120, 2),
+            "> add-token-refresh            w [4/9]"
+        );
+        assert_eq!(
+            interior_cols(&buf120, 3),
+            "  fix-empty-basket             b [7/7]"
+        );
+        assert_eq!(
+            interior_cols(&buf120, 4),
+            "  migrate-ai-sdk-v7              ? [-]"
+        );
+
+        let buf60 = render_at(60, 20, &d);
+        for y in [2u16, 3, 4] {
+            assert_eq!(interior_cols(&buf60, y).chars().count(), 58);
+        }
+        assert_eq!(interior_cols(&buf60, 2).chars().nth(51), Some('w'));
+        assert_eq!(interior_cols(&buf60, 3).chars().nth(51), Some('b'));
+        assert_eq!(interior_cols(&buf60, 4).chars().nth(53), Some('?'));
+    }
+
+    /// `agent-attribution`: "An unreachable socket yields no badge, no count, and
+    /// no problem" — the rendered frame is byte-identical to the one the same
+    /// dashboard produces with `agents.problem` set to `None`.
+    #[test]
+    fn an_unreachable_socket_renders_the_agentless_pane() {
+        let mut with_problem = dashboard_with(
+            vec![
+                fixture::active("alpha", 0, 1),
+                fixture::active("beta", 0, 1),
+            ],
+            Vec::new(),
+            0,
+            Route::List,
+        );
+        with_problem.agents = crate::agents::AgentSnapshot {
+            agents: Vec::new(),
+            reachable: false,
+            problem: Some("herdr agent list: could not start herdr".to_string()),
+        };
+        let mut without_problem = with_problem.clone();
+        without_problem.agents.problem = None;
+
+        for width in [120, 60] {
+            assert_eq!(
+                render_at(width, 20, &with_problem),
+                render_at(width, 20, &without_problem),
+                "width {width}: the recorded reason must be carried and never drawn"
+            );
+        }
     }
 
     #[test]
@@ -1424,6 +1696,16 @@ mod tests {
             assert!(!footer.contains("Enter detail"));
             assert!(!footer.contains("Esc back"));
         }
+
+        // `agent-attribution`: the unattributed count is replaced along with the
+        // hints — the prompt replaces the whole row, not the three key hints alone.
+        d.agents.agents = vec![
+            unattributed_agent("nothing-like-a-change"),
+            unattributed_agent("also-nothing"),
+        ];
+        for width in [60u16, 120u16] {
+            assert!(!row_text(&render_at(width, 20, &d), 19).contains("unattributed"));
+        }
     }
 
     #[test]
@@ -1456,6 +1738,23 @@ mod tests {
         assert_eq!(
             row_text(&buf120, 19),
             format!("q quit  Enter detail  Esc back{}", " ".repeat(90))
+        );
+
+        // `agent-attribution`: with a query leading and one unattributed agent, the
+        // count still trails the query at both widths.
+        d.filter.query = "add".to_string();
+        d.agents.agents = vec![unattributed_agent("nothing-like-a-change")];
+        let with_count = "/add  q quit  Enter detail  Esc back  1 unattributed";
+        assert_eq!(with_count.chars().count(), 52);
+        let buf60 = render_at(60, 20, &d);
+        assert_eq!(
+            row_text(&buf60, 19),
+            format!("{with_count}{}", " ".repeat(8))
+        );
+        let buf120 = render_at(120, 20, &d);
+        assert_eq!(
+            row_text(&buf120, 19),
+            format!("{with_count}{}", " ".repeat(68))
         );
     }
 
@@ -3049,6 +3348,41 @@ mod tests {
                 buf_initial, buf_unreachable,
                 "width {width}: an unreachable snapshot, even with a long problem, must \
                  change no pixel"
+            );
+
+            // `agent-attribution`: an agent with no `cwd` at all is out of scope, on
+            // exactly the same terms as one outside the repository root.
+            let mut absent_cwd = base.clone();
+            absent_cwd.agents = crate::agents::AgentSnapshot {
+                agents: vec![crate::agents::Agent {
+                    name: Some("agent-polling".to_string()),
+                    kind: Some("claude".to_string()),
+                    status: crate::agents::AgentStatus::Working,
+                    cwd: None,
+                    pane_id: "w8:p3".to_string(),
+                    tab_id: "w8:t3".to_string(),
+                    workspace_id: "w8".to_string(),
+                    terminal_title: None,
+                }],
+                reachable: true,
+                problem: None,
+            };
+            let buf_absent_cwd = render_at(width, 20, &absent_cwd);
+            assert_eq!(
+                buf_initial, buf_absent_cwd,
+                "width {width}: an agent with no cwd at all must change no pixel"
+            );
+
+            // Discriminating control: moving one agent INTO the repository root and
+            // naming it after the change on screen must change a pixel — the identity
+            // above is a scope branch, not a constant.
+            let mut moved_into_repo = reachable.clone();
+            moved_into_repo.agents.agents[0].cwd = Some(std::path::PathBuf::from("/tmp/demo-repo"));
+            moved_into_repo.agents.agents[0].name = Some("alpha".to_string());
+            let buf_moved = render_at(width, 20, &moved_into_repo);
+            assert_ne!(
+                buf_initial, buf_moved,
+                "width {width}: an in-scope, matched agent must change a pixel"
             );
         }
     }
