@@ -347,43 +347,43 @@
 ## 12. Extract the standing gates into `scripts/gates/`
 <!-- kind: operational -->
 
-- [ ] 12.1 CHECK: Confirm each gate named in `specs/quality-gates/spec.md` is green at its
+- [x] 12.1 CHECK: Confirm each gate named in `specs/quality-gates/spec.md` is green at its
   measured floor before extraction (0.4–0.6 recorded them; `WIRED` went green in group 2). A
   gate red at extraction time is reported, not extracted.
-- [ ] 12.2 CHANGE: Copy each remaining gate into `scripts/gates/<lowercase-name>.sh` (and
+- [x] 12.2 CHANGE: Copy each remaining gate into `scripts/gates/<lowercase-name>.sh` (and
   `gate-mech1.py`), editing **only** each floor default to its measured value, so a bare
   invocation is an invocation at the right floor. `wired.sh` already landed in group 2. Record
   any other edit and why.
-- [ ] 12.3 CHANGE: Extract `OPENSPEC-UNTOUCHED`'s two `git ls-files` legs as
+- [x] 12.3 CHANGE: Extract `OPENSPEC-UNTOUCHED`'s two `git ls-files` legs as
   `scripts/gates/openspec-untouched.sh`, leaving the `BASE`-diff leg as a per-change
   invocation (design.md → Decision 9). It is the only mechanical guard on the PRD non-goal
   that nothing writes inside `openspec/`.
-- [ ] 12.4 CHANGE: Set `READONLY-UI`'s default `EXTRA` to the five files measured in 0.6, and
+- [x] 12.4 CHANGE: Set `READONLY-UI`'s default `EXTRA` to the five files measured in 0.6, and
   `AGENTSEAM`/`LAUNCHSEAM`'s default `ALLOWED` to the five-file list, so neither runs weaker
   bare than `plugin-actions` ran it. Fix `NORAW-GREP`'s hardcoded `16` to its measured 28.
-- [ ] 12.5 CHANGE: Raise each test-count floor to measured-plus-enumerated-new, and note the
+- [x] 12.5 CHANGE: Raise each test-count floor to measured-plus-enumerated-new, and note the
   gates count `#[test]` functions **per file**, so the arithmetic is per file rather than per
   task group: `WIDTHS_MIN` = 94 + the view tests groups 4–9 add; `LIST_MIN` = 29 + those added
   to `src/ui/list.rs`; `MD_MIN` = 24 + those added to `src/ui/markdown.rs`; `TASK_MIN` = 16 +
   those added to `src/ui/tasks.rs`; `DETAIL_MIN` = 23 + those added to `src/ui/detail.rs`.
   Enumerate the new tests by name and file, show each sum, and re-measure — using the
   re-measured value only if it is not lower.
-- [ ] 12.6 CHANGE: Close the three dependency clauses `spec-purposes` parked: `notify`'s
+- [x] 12.6 CHANGE: Close the three dependency clauses `spec-purposes` parked: `notify`'s
   `default-features = false` in `deps.sh`; `kqueue` and `kqueue-sys` among `build-graph.sh`'s
   named absences; `notify-debouncer-*` as an absence in one of the two.
-- [ ] 12.7 CHANGE: Add each script to the `Makefile`'s `gates` recipe — bare, except
+- [x] 12.7 CHANGE: Add each script to the `Makefile`'s `gates` recipe — bare, except
   `LAUNCHSEAM`'s two subjects and `NODEFAULT-UI`'s four type sets. `NODEFAULT-UI`'s lines carry
   each subject's own `SCAN_MIN` from 0.5, because that floor is a property of the subject
   (design.md → Decision 6); no other recipe line carries a floor.
-- [ ] 12.8 CHANGE: Extend `tests/ci_workflow.rs` to assert the recipe↔directory correspondence
+- [x] 12.8 CHANGE: Extend `tests/ci_workflow.rs` to assert the recipe↔directory correspondence
   in both directions, and that no script exists for `EXTENDED` or `TESTCOUNT`.
-- [ ] 12.9 CHECK: Plant a script in `scripts/gates/` the recipe does not name — confirm 12.8
+- [x] 12.9 CHECK: Plant a script in `scripts/gates/` the recipe does not name — confirm 12.8
   fires; plant a recipe line naming a file that does not exist — confirm it fires; remove both.
-- [ ] 12.10 VERIFY: `make gates` exits 0, every script prints an `OK` line, and
+- [x] 12.10 VERIFY: `make gates` exits 0, every script prints an `OK` line, and
   `time make gates` completes in under **15 seconds** on the reference machine (measured: all
   29 scripts ran in ~3.5 s at planning time, the slowest at 0.58 s). Report rather than accept
   a figure above that.
-- [ ] 12.11 VERIFY: `make check` green; `git diff --name-only` names no file outside this
+- [x] 12.11 VERIFY: `make check` green; `git diff --name-only` names no file outside this
   group's intended set. Commit.
 
 ## 13. Every gate proved able to fail

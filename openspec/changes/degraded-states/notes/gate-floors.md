@@ -46,3 +46,69 @@ literal count) rather than frozen at the BASE figure, since the floor must refle
 `READONLY-UI`'s `EXTRA` default becomes the five-file list above once extracted (task 12.4) —
 the script does not report a numeric count for `EXTRA`; it is the fixed set itself that is
 recorded as the new default, each existence-checked by the script's own guard.
+
+## Final floors, re-measured at group 12 extraction (after groups 1–11's own new tests)
+
+Every gate below is now a repository file under `scripts/gates/`, invoked bare in the
+`Makefile`'s `gates:` recipe (task 12.7) except `LAUNCHSEAM`'s two subjects and
+`NODEFAULT-UI`'s five type sets, each of which carries its own `SCAN_MIN` on the recipe
+line per design.md -> Decision 6.
+
+| Gate | Floor variable | Re-measured | Delta from BASE |
+|---|---|---|---|
+| `NOSPAWN-GREP` | `MIN` | 24 | unchanged |
+| `NOLIT-CHANGE` | `MIN` | 24 | unchanged |
+| `MDSEAM` | `MIN` | 24 | unchanged |
+| `WATCHSEAM` | `MIN` | 29 | +1 (`tests/degraded_coverage.rs`) |
+| `AGENTSEAM` | `MIN`, `ALLOWED` | 25, 5 files | +1 file searched; `ALLOWED` now the 5-file list by default |
+| `LAUNCHSEAM` (both subjects) | `MIN`, `ALLOWED` | 25, 5 files | same |
+| `NOCLI-SHELL` | `UI_MIN` | 11 | unchanged |
+| `READSEAM` | `UI_MIN` | 10 | unchanged |
+| `NOBLOCK` | `UI_MIN` | 11 | unchanged |
+| `READONLY-UI` | `UI_MIN`, `EXTRA` | 11, the 5-file list | `EXTRA` now defaults to the list, not empty |
+| `NORAW-GREP` | hardcoded (fixed, not exposed) | 29 | was hardcoded at 16 (stale since list-view); fixed to 29 |
+| `NOSLEEP` | `MIN`, `SLEEP_MIN` | 29, 6 | `MIN` +1 |
+| `NODEFAULT-UI` (Dashboard/Filter/Detail) | `SCAN_MIN` | 135 | +9 (`file_mode` field added at every site) |
+| `NODEFAULT-UI` (`Refresh`) | `SCAN_MIN` | 53 | +2 |
+| `NODEFAULT-UI` (`Launch`, `ui::app::Launch`) | `SCAN_MIN` | 81 | +3 |
+| `NODEFAULT-UI` (`src/agents.rs` set) | `SCAN_MIN` | 111 | +8 — **this set was never actually recorded as one of the "four" in the BASE table above; found and closed here.** |
+| `NODEFAULT-UI` (`src/launch.rs` `Outcome`) | `SCAN_MIN` | 26 | +3 — re-measured post-group-6's `problem` → `problems: Vec<String>` widening, exactly as flagged |
+| `WIDTHS` | `WIDTHS_MIN` | 98 | +4 new view tests (group 4) |
+| `LISTWIDTHS` | `LIST_MIN` | 32 | +3 new tests (group 8) |
+| `MDWIDTHS` | `MD_MIN` | 25 | +1 new test (group 9) |
+| `TASKWIDTHS` | `TASK_MIN` | 16 | unchanged (no group touched `src/ui/tasks.rs`) |
+| `DETAILWIDTHS` | `DETAIL_MIN` | 32 | +9 new tests (groups 5, 7, 9) |
+| `GATE-MECH1` | none | 25 files, 87 constructions | +3 constructions |
+
+**Finding on `NODEFAULT-UI`'s `src/agents.rs` set:** design.md -> Context and task 0.5 both
+describe "four type sets", but `notes/gate-floors.md`'s own BASE table (above) recorded only
+three (`Dashboard`/`Filter`/`Detail`, `Refresh`, `Launch`/`ui::app::Launch`) plus
+`src/launch.rs`'s `Outcome` — omitting the `src/agents.rs` set entirely from the recorded
+BASE measurement, even though task 0.5's own text names it. Re-measured here at 111 and
+added as its own `Makefile` recipe line (five `NODEFAULT-UI` lines total, not four), so the
+gap does not silently persist into the extracted gate set.
+
+`AGENTSEAM`/`LAUNCHSEAM` verified they do **not** regress from `spec-purposes`' original
+"5 instances of a gate run without its floor" defect: run bare (no `ALLOWED` override) both
+failed with `src/open.rs` and (for `LAUNCHSEAM`) `src/launch.rs` reported as reaching the
+Herdr handle "outside" the allowed set — exactly the class of failure this whole change
+exists to close, confirmed pre-existing (not a regression from groups 1–11's own work) and
+closed by task 12.4's `ALLOWED` default.
+
+Two incidental gate violations found and fixed during extraction, both self-inflicted by
+this change's own new test/doc-comment text rather than by groups 1–11's actual production
+changes: `NOCLI-SHELL` tripped on a doc comment naming `CliChanges` in a `mod.rs` test
+(reworded); `READSEAM` tripped on a `src/ui/detail.rs` test that read an artifact file back
+through `ui::read_artifact` to satisfy `NOIO-VIEW` — `READSEAM` confines that binding to
+`src/ui/mod.rs` alone, so the test was rewritten to spell the known file contents directly
+rather than reading them back at all.
+
+The three dependency-gate clauses `spec-purposes` parked (task 12.6): `notify`'s
+`default-features = false` was **already closed** — `scripts/gates/deps.sh`'s leg 2a's
+`want` dict already includes `"notify":["macos_fsevent"]` and its generic
+`uses_default_features is False` assertion already covers it (closed by `spec-purposes`
+itself when it added `notify` to leg 2a for the DEPS repair; the roadmap's "parked" list was
+stale on this one clause). `kqueue`/`kqueue-sys` and `notify-debouncer-*` were genuinely
+open and are now closed: `scripts/gates/build-graph.sh` gained both as named absences,
+verified absent from the real resolved graph and verified the check fires on planted data
+(a synthetic snapshot line for each — see `notes/planted-defects.md`).

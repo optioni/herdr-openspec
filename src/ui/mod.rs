@@ -3762,7 +3762,7 @@ esac
         /// `degraded-coverage` :: "A CLI root disagreement and a non-zero exit both leave
         /// the file numbers standing" — rows 33/34/38. The worker's initial file-sourced
         /// result already painted the pane before the failing CLI cycle completes, and
-        /// `merge`'s own per-change fallback (an empty `CliChanges::active`) leaves every
+        /// `merge`'s own per-change fallback (an empty CLI-merged active list) leaves every
         /// file-sourced change's progress untouched — no special-case is needed to prove.
         #[test]
         fn a_failed_cli_cycle_keeps_the_file_numbers() {

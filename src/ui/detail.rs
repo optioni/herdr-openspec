@@ -823,11 +823,16 @@ mod tests {
             }
         );
 
+        // The exact bytes already written to each artifact file above, spelled out directly
+        // rather than read back — this file names no file-reading API at all (`READSEAM`
+        // and `NOIO-VIEW` both forbid it here), on exactly the terms `content_lines` itself
+        // is proven against: `detail.source` is filled by the injected reader before this
+        // function ever runs.
+        let sources = ["# proposal\n", "# specs\n", "# design\n"];
         for width in [78, 58] {
             for (tab, source_heading) in [(0, "proposal"), (1, "specs"), (2, "design")] {
                 let d = Detail {
-                    source: crate::ui::read_artifact(&change.artifacts[tab].paths[0])
-                        .expect("read the artifact's own file"),
+                    source: sources[tab].to_string(),
                     scroll: 0,
                     tab,
                     problems: Vec::new(),

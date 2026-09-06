@@ -197,3 +197,28 @@ a pre-plant backup of each file empty afterwards in every case).
 All six file-level plants reverted; `cargo test --all-features --test degraded_coverage`
 green afterwards (3 tests), `git status --porcelain` shows `tests/degraded-coverage.toml`
 and `tests/degraded_coverage.rs` as the only new (untracked) files this group adds.
+
+## Group 12 — extraction plants (tasks 12.6, 12.9)
+
+**`build-graph.sh`'s three new named absences (`kqueue`, `kqueue-sys`,
+`notify-debouncer-*`):** verified against a synthetic snapshot (not the real, always-clean
+graph) rather than a Cargo.toml edit, since forcing a real `kqueue`/`notify-debouncer`
+dependency into the resolved graph would need a manifest change with its own risk. A
+scratch file holding `kqueue v1.0.3`, `kqueue-sys v1.0.4`, and
+`notify-debouncer-mini v0.4.1` lines, fed through the extracted grep logic directly (not
+the whole script, which needs a real `cargo tree`), reported all three as
+"in the normal build graph" — confirming the detection fires. This is not the standing
+proof group 13 runs against every gate (a positive-control removal against the real tree);
+it is recorded here as 12.6's own closing check, and group 13 covers `build-graph.sh` again
+on its own uniform terms.
+
+**`tests/ci_workflow.rs`'s new correspondence test (task 12.9):**
+- Plant 1 — an unlisted script: `echo PLANT > scripts/gates/plant-unlisted.sh`. Red:
+  `scripts/gates/plant-unlisted.sh exists but is not named anywhere in the gates: recipe`.
+  Removed.
+- Plant 2 — a recipe line naming a nonexistent script: appended
+  `\t/bin/sh scripts/gates/does-not-exist.sh\n` to the `Makefile`'s `gates:` recipe. Red:
+  `gates: recipe names scripts/gates/does-not-exist.sh, which does not exist`. Reverted
+  (`diff` against a pre-plant backup of `Makefile` empty afterwards).
+
+Both reverted; `cargo test --all-features --test ci_workflow` green afterwards (18 tests).

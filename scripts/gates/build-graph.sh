@@ -74,13 +74,24 @@ got=$(cargo tree -e normal --prefix none 2>/dev/null | grep '(proc-macro)' \
 want=$(printf '%s\n' $allow | sort -u | tr '\n' ' ')
 [ "$got" = "$want" ] || { echo "GRAPH-SNAP FAIL: proc-macro set is [$got], expected [$want]" >&2; exit 1; }
 
-# Four named absences, each proving a default-feature decision is in effect rather than
+# Seven named absences, each proving a default-feature decision is in effect rather than
 # merely written down. encoding_rs would arrive with yaml-rust2's defaults, time with
 # ratatui's all-widgets, and getopts and pulldown-cmark-escape with pulldown-cmark's own
-# `getopts` and `html` defaults.
-for absent in encoding_rs time getopts pulldown-cmark-escape; do
+# `getopts` and `html` defaults. `degraded-states` closes three clauses `spec-purposes`
+# parked: kqueue and kqueue-sys are notify's own BSD/kqueue backend, which
+# `default-features = false, features = ["macos_fsevent"]` (asserted in scripts/gates/deps.sh's
+# leg 2a) excludes on every one of the four triples above, including the two Linux ones —
+# notify's Linux backend is inotify, never kqueue; notify-debouncer-* is a separate crate this
+# project never depends on at all, named here so its absence is asserted rather than merely
+# assumed.
+for absent in encoding_rs time getopts pulldown-cmark-escape kqueue kqueue-sys; do
   if grep -qE "^$absent " "$TMP/all"; then
     echo "GRAPH-SNAP FAIL: $absent is in the normal build graph" >&2; exit 1
   fi
 done
-echo "GRAPH-SNAP OK: four triples match the snapshot; macOS-only [$macos_only] and Linux-only [$linux_only] exact; proc-macro set exact; four named absences hold"
+# `notify-debouncer-*` — a name PREFIX, not an exact package name: `notify-debouncer-mini`
+# and `notify-debouncer-full` are two different crates this project depends on neither of.
+if grep -qE "^notify-debouncer-" "$TMP/all"; then
+  echo "GRAPH-SNAP FAIL: a notify-debouncer-* crate is in the normal build graph" >&2; exit 1
+fi
+echo "GRAPH-SNAP OK: four triples match the snapshot; macOS-only [$macos_only] and Linux-only [$linux_only] exact; proc-macro set exact; seven named absences hold"

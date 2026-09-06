@@ -29,6 +29,37 @@ coverage:
 gates:
 	/bin/sh scripts/gates/deps.sh
 	env -u GRAPH_WRITE /bin/sh scripts/gates/build-graph.sh
+	/bin/sh scripts/gates/wired.sh
+	/bin/sh scripts/gates/agentseam.sh
+	/bin/sh scripts/gates/launchseam.sh
+	LAUNCH=src/open.rs ENTRY='pub fn run_from_env\(' /bin/sh scripts/gates/launchseam.sh
+	/bin/sh scripts/gates/detailwidths.sh
+	/bin/sh scripts/gates/listwidths.sh
+	/bin/sh scripts/gates/mdseam.sh
+	/bin/sh scripts/gates/mdwidths.sh
+	/bin/sh scripts/gates/noblock.sh
+	/bin/sh scripts/gates/nocli-shell.sh
+	SCAN_MIN=135 /bin/sh scripts/gates/nodefault-ui.sh
+	SCAN_MIN=53 TYPES='Refresh' /bin/sh scripts/gates/nodefault-ui.sh
+	SCAN_MIN=81 TYPES='Launch' /bin/sh scripts/gates/nodefault-ui.sh
+	SCAN_MIN=111 HOMEFILE=src/agents.rs TYPES='Agent Listed AgentSnapshot Attribution' /bin/sh scripts/gates/nodefault-ui.sh
+	SCAN_MIN=26 HOMEFILE=src/launch.rs TYPES='Outcome' /bin/sh scripts/gates/nodefault-ui.sh
+	/bin/sh scripts/gates/noio-view.sh
+	/bin/sh scripts/gates/nojson-seam.sh
+	/bin/sh scripts/gates/nolit-change.sh
+	/bin/sh scripts/gates/noraw-grep.sh
+	/bin/sh scripts/gates/nosleep.sh
+	/bin/sh scripts/gates/nospawn-grep.sh
+	/bin/sh scripts/gates/notabseam.sh
+	/bin/sh scripts/gates/nowaiver.sh
+	/bin/sh scripts/gates/openspec-untouched.sh
+	/bin/sh scripts/gates/readonly-ui.sh
+	/bin/sh scripts/gates/readseam.sh
+	/bin/sh scripts/gates/taskseam.sh
+	/bin/sh scripts/gates/taskwidths.sh
+	/bin/sh scripts/gates/watchseam.sh
+	/bin/sh scripts/gates/widths.sh
+	python3 scripts/gates/gate-mech1.py
 
 gates-full:
 	DEPS_FULL=1 /bin/sh scripts/gates/deps.sh

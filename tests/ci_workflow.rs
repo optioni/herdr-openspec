@@ -585,6 +585,85 @@ fn gates_target_exists_and_names_both_scripts() {
     );
 }
 
+/// The `gates:` recipe's own body — the indented lines following the `gates:` target line,
+/// up to the next column-0 line. Shared by `gates_target_exists_and_names_both_scripts` and
+/// `degraded_states`'s own correspondence test below (not refactored into one call site,
+/// since the existing test's own inline copy is left byte-for-byte unchanged).
+fn gates_recipe(makefile: &str) -> String {
+    let gates_line = makefile
+        .lines()
+        .find(|l| l.trim_start().starts_with("gates:") || l.trim_start().starts_with("gates :"))
+        .expect("Makefile must declare a `gates:` target");
+    let start = makefile.find(gates_line).unwrap() + gates_line.len();
+    makefile[start..]
+        .lines()
+        .skip(1)
+        .take_while(|l| l.starts_with('\t') || l.starts_with(' ') || l.is_empty())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// `degraded-states` :: every script under `scripts/gates/` is named at least once in the
+/// `gates:` recipe, and every `scripts/gates/<name>` the recipe names exists on disk — both
+/// directions, so a script added without a recipe line and a recipe line naming a deleted
+/// script are both caught. `EXTENDED` and `TESTCOUNT` are named nowhere in either direction
+/// (design.md -> Decision 9): a per-change ratchet and a shell function respectively, neither
+/// composed into `make gates`.
+#[test]
+fn every_gate_script_the_recipe_names_exists_and_every_script_is_named() {
+    let makefile = read_makefile();
+    let recipe = gates_recipe(&makefile);
+
+    let dir = manifest_dir().join("scripts/gates");
+    let on_disk: BTreeSet<String> = fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("failed to read {}: {e}", dir.display()))
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(
+        on_disk.len() >= 25,
+        "expected at least 25 files under scripts/gates/, found {}",
+        on_disk.len()
+    );
+
+    // Every file on disk must be named in the recipe (direction 1).
+    for name in &on_disk {
+        assert!(
+            recipe.contains(&format!("scripts/gates/{name}")),
+            "scripts/gates/{name} exists but is not named anywhere in the gates: recipe"
+        );
+    }
+
+    // Every `scripts/gates/<name>` the recipe mentions must exist on disk (direction 2).
+    let mut named_in_recipe: BTreeSet<String> = BTreeSet::new();
+    for token in recipe.split(|c: char| c.is_whitespace()) {
+        if let Some(rest) = token.strip_prefix("scripts/gates/") {
+            named_in_recipe.insert(rest.to_string());
+            assert!(
+                dir.join(rest).is_file(),
+                "gates: recipe names scripts/gates/{rest}, which does not exist"
+            );
+        }
+    }
+    assert_eq!(
+        on_disk, named_in_recipe,
+        "the set of files under scripts/gates/ and the set the recipe names must match exactly"
+    );
+
+    // No script exists, and none is named, for the two deliberately-excluded gates.
+    for excluded in ["extended.sh", "testcount.sh", "EXTENDED.sh", "TESTCOUNT.sh"] {
+        assert!(
+            !dir.join(excluded).exists(),
+            "scripts/gates/{excluded} must not exist — EXTENDED and TESTCOUNT are deliberately \
+             not extracted (design.md -> Decision 9)"
+        );
+    }
+    assert!(
+        !recipe.to_uppercase().contains("EXTENDED") && !recipe.to_uppercase().contains("TESTCOUNT"),
+        "the gates: recipe must name neither EXTENDED nor TESTCOUNT: {recipe}"
+    );
+}
+
 #[test]
 fn check_composes_gates_third() {
     let makefile = read_makefile();
