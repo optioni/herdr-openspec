@@ -636,7 +636,7 @@ directions; see design.md → Test Strategy.
 ## 11. Change Review
 <!-- kind: operational -->
 
-- [ ] 11.1 CHECK: Dispatch an independent reviewer — not a fork of this session — against
+- [x] 11.1 CHECK: Dispatch an independent reviewer — not a fork of this session — against
       proposal.md, every spec scenario, design.md, and tasks.md, given the diff and the
       artifacts only. Require it to write findings to a scratchpad file as it goes rather than
       returning them only in a final message.
@@ -647,10 +647,10 @@ directions; see design.md → Test Strategy.
       `from_files` and `from_cli` still produce the same `Change`; view tests run at 60 and
       120; agent names are capped at 32 characters and match `[a-z][a-z0-9_-]{0,31}`.
 
-- [ ] 11.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a
+- [x] 11.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a
       one-line reason, note SUGGESTIONs, and re-run every affected test and gate.
 
-- [ ] 11.3 VERIFY: No blocking or unowned finding remains, and every artifact that a fix
+- [x] 11.3 VERIFY: No blocking or unowned finding remains, and every artifact that a fix
       contradicted has been refreshed. Commit.
 
 ## 12. Lint & Verify

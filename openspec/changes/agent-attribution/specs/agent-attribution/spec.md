@@ -133,8 +133,14 @@ cannot canonicalize either side without breaking that.
   attributed
 - **AND** `unattributed` is exactly `1`, counting the in-scope agent alone and not the
   out-of-scope one
-- **AND** the count therefore fails in both directions: it reads `0` if the poller supplied no
-  agents and `2` if the scope test were removed
+- **AND** removing the scope test is still discriminating here, though not through the count:
+  this fixture's out-of-scope agent shares its name with the one change on screen, so without
+  the scope test it would be placed by the **name tier** rather than counted — `badges` would
+  become `{"add-auth": Working}` instead of staying empty, and `unattributed` would stay `1`.
+  The count-moves-to-`2` direction is proven by `agent-poller`'s outer-loop scenario below,
+  whose out-of-scope agent is deliberately named to match **no** change on screen for exactly
+  this reason — a repair recorded in planning-review.md after task 8.3 found the same collision
+  in that scenario's own fixture
 
 #### Scenario: A subdirectory is inside the repository and a sibling prefix is not
 

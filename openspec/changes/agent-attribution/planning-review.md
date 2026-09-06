@@ -123,4 +123,13 @@ at their raised floors and green at the measured ones.
 |---|---|---|---|---|
 | CRITICAL | specs/agent-poller, tasks.md | The outer-loop acceptance scenario's fourth agent — out of scope, named `alpha` to prove a name collision does not leak across the repository boundary — defeated task 8.3's own scope-removal control: with the `cwd.starts_with(root)` test deleted, this agent became in-scope and matched the **name tier** for the existing change `alpha`, folding into that row's badge by precedence (`Blocked` already outranked `Working`) rather than adding to `unattributed`. The footer stayed `1 unattributed` instead of the `2` the control requires, discovered only by running task 8.3 itself — exactly the "Red when" condition tasks.md names for that task | Renamed the fourth agent from `alpha` to `nothing-like-a-change`, which matches no change on screen, so removing the scope test now correctly raises the count to 2. Re-verified: task 8.3 passes with the corrected fixture, and the group 2 test (already committed) was updated in the same commit as the group 8 verification that found the defect | specs/agent-poller/spec.md → "A polled agent reaches a rendered badge and a rendered count"; tasks.md task 2.2; `src/ui/mod.rs` → `a_polled_agent_reaches_a_rendered_badge` |
 
-No other scenario shares this defect: every other fixture's out-of-scope or unattributed agent in this change's test suite is named to match nothing on screen already (`scratch-work`, `nothing-like-a-change`, `also-nothing`), so this was the one place a name was chosen to prove a different property (exact matching, not scope) and happened to collide.
+**Correction, found by Change Review (group 11):** the claim above — "no other scenario shares
+this defect" — was itself wrong. `specs/agent-attribution/spec.md`'s unit-level scenario "An
+agent in another repository is neither badged nor counted" carries the identical collision in
+prose only, never in a planted test: its out-of-scope agent is named `add-auth`, the one change
+on screen, so its own "reads `2` if the scope test were removed" sentence was false for the same
+reason — removing scope places that agent via the name tier instead of raising the count.
+Every out-of-scope or unattributed **test fixture** in the suite is still collision-free
+(`scratch`, `scratch-work`, `scratch-one`, `scratch-two`, `nothing-like-a-change`,
+`also-nothing`, `agent-polling`, or unnamed) and no test needed a code change; only the spec
+prose was wrong, and it is corrected in the same scenario, in the same commit as this note.

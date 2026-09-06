@@ -83,9 +83,13 @@ pub fn enter_if_terminal(
 /// `#!/bin/sh` program and a scratch state directory. Bundled into one
 /// struct for cohesion, the same way [`driver::Live`] bundles the loop's
 /// three collaborators: the four fields are one concept, "where this pane
-/// starts". Not justified by clippy's `too_many_arguments`: measured on
-/// this crate and toolchain, that lint fires at eight parameters, not
-/// seven, so the flattened form would not have tripped it either.
+/// starts" — not clippy's `too_many_arguments`. A landed doc comment once
+/// claimed the flattened form would sit just under that lint's threshold;
+/// this change is the one that would actually trip it, since flattening
+/// `Startup`'s four fields into [`run_wired`]'s five parameters gives eight,
+/// and eight is measured, on this crate and toolchain, to be exactly where
+/// the lint fires. Cohesion is the real reason for the struct, on both
+/// sides of that threshold.
 pub struct Startup<'a> {
     pub cwd: &'a Path,
     pub config: &'a Config,

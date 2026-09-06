@@ -72,12 +72,15 @@ the mapping is state, not a collaborator, and it is read by `load`.
 `ui::driver::Live` from all three collaborators, then `run_loop` — and SHALL return the final
 `Dashboard` so a test can assert on state the frame does not show. It takes a `Startup` struct
 rather than four further parameters for cohesion, on the same grounds `Live` is a struct: the
-four are one concept, "where this pane starts", and bundling them keeps the function at five
-arguments. The struct is **not** justified by clippy's `too_many_arguments`: measured on this
-crate and toolchain, that lint fires at **eight** parameters, not seven, so the flattened form
-would not have tripped it either. `agent-polling` retired that claim in its design and left a
-copy of it in this function's doc comment; `agent-attribution` deletes the copy, because a
-false rationale left in shipped source is how the claim was propagated in the first place.
+four are one concept, "where this pane starts" — not clippy's `too_many_arguments`. A landed
+doc comment once claimed the flattened form would sit just under that lint's threshold;
+`agent-attribution` is the change that would actually trip it, since flattening `Startup`'s
+**four** fields into `run_wired`'s five parameters gives **eight**, and eight is measured, on
+this crate and toolchain, to be exactly where the lint fires. `agent-polling` retired the
+seven-parameter claim in its own design and left a copy of it in this function's doc comment;
+`agent-attribution` deletes that copy and states the truth measured against its own four-field
+`Startup`, rather than repeating a number that was already stale before this change added the
+fourth field.
 
 `run` SHALL then hold **no branch, no loop, and no field selection**: the terminal guard, the
 panic hook, `config::load_from_env`, `state::state_dir(&config::env_lookup())`, `current_dir`,

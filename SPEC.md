@@ -668,8 +668,9 @@ is tested against scratch `#!/bin/sh` programs rather than the real `openspec`,
   flat counts and to grouped items, both by the OpenSpec CLI's own counting
   rule; `read` is the filesystem edge, tested against a scratch directory
   tree, not a faked filesystem layer
-- `agents::attribute` — agent-list JSON plus change list to per-change badges,
-  covering all three tiers including the deliberate non-attribution case
+- `agents::attribute` — live agents, the repository root, the change names, and the
+  plugin-local mapping to per-change badges and one unattributed count, covering all
+  three tiers including the deliberate non-attribution case
 - `resolve::find_repo` and `resolve::openspec_bin` — the upward walk for
   `openspec/` and the four-step binary probe chain, both tested against a
   purpose-built scratch directory tree under `std::env::temp_dir()`, not a

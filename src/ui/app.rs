@@ -333,9 +333,10 @@ impl Dashboard {
 
     /// Derive the current attribution from state this dashboard already
     /// carries — `repo`, `changes`, `agents.agents`, and `agent_names` —
-    /// beside `visible()`, recomputed on every call and stored nowhere. Group
-    /// 1 lands this calling the still-inert `agents::attribute`; group 4
-    /// gives it its real body. See `specs/agent-attribution/spec.md`.
+    /// beside `visible()`, recomputed on every call and stored nowhere. The
+    /// change-name slice is built from `changes.active` and `changes.archived`
+    /// in full, never the filtered `visible()`, so the `/` filter hides rows
+    /// without changing the count. See `specs/agent-attribution/spec.md`.
     pub fn attribution(&self) -> crate::agents::Attribution {
         let change_names: Vec<&str> = self
             .changes

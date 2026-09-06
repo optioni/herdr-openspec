@@ -821,6 +821,11 @@ mod tests {
                 rows(&renamed, width),
                 "width {width}: renaming the agent to a change must badge that row"
             );
+            assert!(
+                rows(&renamed, width)[2].text.contains(" w ["),
+                "width {width}: migrate-ai-sdk-v7's row must carry the working badge: {:?}",
+                rows(&renamed, width)[2].text
+            );
         }
     }
 
