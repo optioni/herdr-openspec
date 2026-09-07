@@ -56,12 +56,12 @@ apart by exit code.
 <!-- kind: behavior -->
 <!-- parallel-after: 2 -->
 
-- [ ] 5.1 RED: Write failing tests for: `A poll outstanding past the stall threshold is announced once`, `A poll answering normally never reports a stall`, `A stalled socket that recovers restores the badges`, `An herdr that answers with an error is not a stall`, `The stall threshold is a named constant and is asserted`, `A symlinked repository path still badges its agents`, `An unresolvable working directory is kept verbatim, not dropped`. RED at HEAD: `grep -c 'STALL_AFTER\|stalled' src/agents.rs` → `0` (exit 1).
-- [ ] 5.2 GREEN: Add `agents::STALL_AFTER` (`5 * POLL_INTERVAL`) and `AgentSnapshot::stalled`, and report a stalled poll once per episode from `RealAgentPoll::drain`'s existing single clock read.
-- [ ] 5.3 GREEN: Canonicalize each agent's `cwd` through an injected `&dyn Fn(&Path) -> Option<PathBuf>` before the snapshot leaves the poller, keeping an unresolvable path verbatim. `attribute` is untouched (design.md -> Decision 5).
-- [ ] 5.4 CHECK: Contract gate — `AgentSnapshot` gains a field, so every literal and pattern must name it. `grep -rn 'AgentSnapshot {' src/ tests/ | wc -l` → `78` sites at HEAD; the compile is the check, since the type implements no `Default` and no site may use `..`. Two landed loop scenarios carry `AgentSnapshot` literals under `src/ui/` and are updated by the same compile: `An agent snapshot reaches the frame that consumed it and survives a refresh` and `An unreachable socket never becomes a problem row`.
-- [ ] 5.5 CHECK: `make gates` — `NODEFAULT-UI`'s `src/agents.rs` leg still passes with its own `SCAN_MIN`, and the count has grown rather than shrunk.
-- [ ] 5.6 Run `cargo test --all-features agents` — no regressions.
+- [x] 5.1 RED: Write failing tests for: `A poll outstanding past the stall threshold is announced once`, `A poll answering normally never reports a stall`, `A stalled socket that recovers restores the badges`, `An herdr that answers with an error is not a stall`, `The stall threshold is a named constant and is asserted`, `A symlinked repository path still badges its agents`, `An unresolvable working directory is kept verbatim, not dropped`. RED at HEAD: `grep -c 'STALL_AFTER\|stalled' src/agents.rs` → `0` (exit 1).
+- [x] 5.2 GREEN: Add `agents::STALL_AFTER` (`5 * POLL_INTERVAL`) and `AgentSnapshot::stalled`, and report a stalled poll once per episode from `RealAgentPoll::drain`'s existing single clock read.
+- [x] 5.3 GREEN: Canonicalize each agent's `cwd` through an injected `&dyn Fn(&Path) -> Option<PathBuf>` before the snapshot leaves the poller, keeping an unresolvable path verbatim. `attribute` is untouched (design.md -> Decision 5).
+- [x] 5.4 CHECK: Contract gate — `AgentSnapshot` gains a field, so every literal and pattern must name it. `grep -rn 'AgentSnapshot {' src/ tests/ | wc -l` → `78` sites at HEAD; the compile is the check, since the type implements no `Default` and no site may use `..`. Two landed loop scenarios carry `AgentSnapshot` literals under `src/ui/` and are updated by the same compile: `An agent snapshot reaches the frame that consumed it and survives a refresh` and `An unreachable socket never becomes a problem row`.
+- [x] 5.5 CHECK: `make gates` — `NODEFAULT-UI`'s `src/agents.rs` leg still passes with its own `SCAN_MIN`, and the count has grown rather than shrunk.
+- [x] 5.6 Run `cargo test --all-features agents` — no regressions.
 
 ## 6. The panic hook restores only on the render thread
 <!-- kind: behavior -->
