@@ -23,29 +23,29 @@ The outer loop is the control suite: a gate's real contract is its exit status o
 defective tree, which no unit test of a shell script's internals can observe (design.md →
 Test Strategy). Written first, it is RED for exactly the five gates this change repairs.
 
-- [ ] 0.1 Add `tests/gate-controls.toml`: one `[[control]]` per file under `scripts/gates/`,
+- [x] 0.1 Add `tests/gate-controls.toml`: one `[[control]]` per file under `scripts/gates/`,
   each with `script`, `env` (the invocation prefix the `gates:` recipe uses for that subject —
   `LAUNCH`/`ENTRY`, `SCAN_MIN`/`HOMEFILE`/`TYPES`, `env -u GRAPH_WRITE`), `plant` (file +
   edit), and `expect` (a fragment of that script's own `FAIL:` message). Count the required
   entries with `ls scripts/gates | wc -l` → **28** at HEAD; the recipe's
   `awk '/^gates:/{f=1;next} /^[^\t]/{f=0} f && NF' Makefile | wc -l` → **33** lines, so a
   multi-subject gate contributes more than one entry.
-- [ ] 0.2 Add `tests/gate_controls.rs`: for each entry, copy the tree to a scratch directory,
+- [x] 0.2 Add `tests/gate_controls.rs`: for each entry, copy the tree to a scratch directory,
   assert the gate exits 0 unplanted, apply the plant, assert it exits non-zero and its output
   contains `expect`, then drop the copy. Fail when a script has no entry and when an entry
   names no script — both directions, as `tests/ci_workflow.rs` already does for the recipe.
   Carry a private scratch-directory helper: `crate::testutil::ScratchDir` is
   `#[cfg(test)] pub(crate)` in `src/lib.rs:38` and invisible from `tests/`, which is why
   `tests/cli.rs` and `tests/spec_purposes.rs` each declare their own.
-- [ ] 0.2b Give `openspec-untouched.sh` a working control: its first line is
+- [x] 0.2b Give `openspec-untouched.sh` a working control: its first line is
   `git rev-parse --show-toplevel`, so the scratch copy needs `git init && git add -A &&
   git commit` and the copy set needs `openspec/`. Without it the unplanted assertion fails
   every run and the planted one passes on the missing repository rather than on the plant.
-- [ ] 0.2c Bound the two `cargo`-invoking gates per design.md → Decision 6a: run `deps.sh` and
+- [x] 0.2c Bound the two `cargo`-invoking gates per design.md → Decision 6a: run `deps.sh` and
   `build-graph.sh` controls with `CARGO_TARGET_DIR` pointed at the real `target/` so the
   control is a re-link, and mark them `#[ignore]` with a `gates-full`-style job if they still
   dominate the suite.
-- [ ] 0.3 RED: `cargo test --all-features gate_controls` — expect failures naming
+- [x] 0.3 RED: `cargo test --all-features gate_controls` — expect failures naming
   `nospawn-grep.sh`, `readonly-ui.sh`, `noblock.sh`, and `wired.sh` (twice: the panic-hook
   plant and the block-comment plant). Recorded at HEAD, each plant applied to a scratch copy
   and the gate run bare:
@@ -58,13 +58,13 @@ Test Strategy). Written first, it is RED for exactly the five gates this change 
   | `terminal::install_panic_hook();` line deleted | `wired.sh` | **0** | all 27 others green |
   | `/* crate::launch::start( is gone */ crate::launch::begin(` | `wired.sh` | **0**, printing `WIRED OK: twelve names present` | `deps.sh` goes **red** — `launch::begin` does not exist, so `cargo build --locked` at leg 2c fails |
 
-- [ ] 0.4 Confirm the five failures are the missing repairs, not harness misconfiguration.
+- [x] 0.4 Confirm the five failures are the missing repairs, not harness misconfiguration.
   Two of the five plants do **not** leave `make gates` wholly green, and the map records the
   compensating detail rather than a tidier claim: the spawn plant must avoid the `"herdr"`
   literal (`WIRED` leg 4), and the block-comment plant necessarily breaks compilation, so its
   entry asserts `wired.sh`'s exit alone and is not run under `make gates`. Verified by running
   every script in `scripts/gates/` against each planted tree, one plant at a time.
-- [ ] 0.5 Run the group tests — the other 23 controls pass, proving the harness works.
+- [x] 0.5 Run the group tests — the other 23 controls pass, proving the harness works.
 
 ## 1. Production coverage floor (G1)
 <!-- kind: behavior -->
