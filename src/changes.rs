@@ -5559,12 +5559,12 @@ apply:
             );
             fake.register_openspec(
                 &["instructions", "apply", "--change", "zulu", "--json"],
-                // A non-empty stderr, deliberately unlike the real CLI's
-                // (which is always empty on this path): this is what makes
-                // "the problem does not leak the CLI's own message" a
-                // discriminating assertion rather than one that could never
-                // fail, since `failed`'s bare `stderr: String::new()` would
-                // leave nothing to leak either way.
+                // Empty stderr: `instructions apply` was measured writing
+                // its diagnostic ("Unknown schema \"outside-in-tdd\"") to
+                // stdout with a 0-byte stderr, which `CliError::Failed`
+                // never carries. The assertion below is the proof that no
+                // reason is invented when the seam carried none — not that
+                // a carried one is dropped.
                 Err(CliError::Failed {
                     program: "openspec".to_string(),
                     args: vec![
@@ -5575,7 +5575,7 @@ apply:
                         "--json".to_string(),
                     ],
                     code: Some(1),
-                    stderr: "Unknown schema \"outside-in-tdd\"".to_string(),
+                    stderr: String::new(),
                 }),
             );
             let result = from_cli(&fake, &repo);
