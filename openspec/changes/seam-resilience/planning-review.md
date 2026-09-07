@@ -28,7 +28,11 @@ independent reviewer over the finished implementation to cover them.
 
 ## Reviewed Against
 
-- This repository HEAD: `f947ab262db392d258298e7bc71ec92848f7baa4`
+- This repository HEAD: `f947ab262db392d258298e7bc71ec92848f7baa4` at the time of the review.
+  HEAD has since advanced to `8113eea` through three commits from a parallel session
+  (`994a6d1`, `6816a97`, `8113eea`), all of which touch `openspec/changes/` only:
+  `git diff --stat f947ab2..HEAD -- src/ tests/ Makefile scripts/` is empty, so every
+  code-level number, grep result, and gate floor recorded here still holds.
 - Sibling repository (`~/Code/openspec-schemas`) HEAD: Not applicable — this change edits no
   vendored schema or agent definition.
 - Working tree: clean of tracked modifications. Five untracked change directories are present

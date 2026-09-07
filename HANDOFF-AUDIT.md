@@ -27,13 +27,24 @@ reviewed or approved. None may be implemented until it is.**
 | Change | Findings | State |
 |---|---|---|
 | `gate-integrity` | G1–G8, D1–D3 | Drafting in progress — no `planning-review.md` yet |
-| `seam-resilience` | S1–S9, U3, **S10** | Complete + validates, **but has an outstanding revision — see below** |
+| `seam-resilience` | S1–S9, U3, **S10** | Validates, **but has an outstanding revision — see below** |
 | `view-fidelity` | U1, U2, U4, U5 | Drafting in progress — no `planning-review.md` yet |
-| `cli-parity` | C1–C8 | Drafting in progress — no `planning-review.md` yet |
-| `doc-conformance` | D4–D10 | `planning-review.md` present; completion unconfirmed |
+| `cli-parity` | C1–C8 | **Complete**, `Change 'cli-parity' is valid` |
+| `doc-conformance` | D4–D10 | **Complete**, `Change 'doc-conformance' is valid` |
 
-Run `openspec validate --strict` on each before treating any as ready. Only
-`seam-resilience` is confirmed to have passed (`Change 'seam-resilience' is valid`).
+Run `openspec validate --strict` on each before treating any as ready.
+`seam-resilience`, `cli-parity` and `doc-conformance` are confirmed passing.
+Two remain unfinished: **`gate-integrity`** and **`view-fidelity`**.
+
+### What the two finished ones decided
+
+`cli-parity` closes C1, C2, C3, C5, C7, C8 and documents C4 and C6 as
+degraded-states rows (`MIN_ROWS` 44 → 46). `doc-conformance` adds one new
+capability of the same name, whose anti-drift mechanism is `tests/doc_contract.rs`
+— an ordinary `cargo test` target (so it runs inside `make check`) with six legs,
+each binding a documented claim to a computable second site. It recommends keeping
+`HANDOFF.md`, deleting its open-work sections and marking it closed, because it holds
+the only copy of several transferable findings.
 
 `openspec` is not on a non-login `PATH` here — it is at
 `~/.nvm/versions/node/v24.18.0/bin/openspec` (v1.12.0). Source nvm first.
@@ -100,6 +111,30 @@ the `Failed` arm (the child *did* start, so this is `CliError::Failed`, not
   measures" is literal. Dependency count stays at six.
 - The 80% coverage floor cannot fail: 33,101 of 40,500 lines in `src/` are inside
   `#[cfg(test)]` modules and ~96% covered, so test code alone clears 83%.
+
+## Corrections the drafting agents made to the audit itself
+
+Three findings were wrong or understated as briefed. The proposals carry the
+corrected versions; the audit artifact does not.
+
+- **C4 was inverted.** Measured against openspec 1.12.0 in scratch repos: for a
+  symlink resolving *outside* the change directory the CLI does **not** over-list —
+  it fails closed (`Path is outside the allowed directory`, surfacing as an empty
+  `list --json`). The divergence exists only for a link resolving *inside* the
+  change directory. `cli-parity`'s spec, row and `1/5` constant are written around
+  that narrower case, with the outside case given its own scenario stating it is
+  explicitly not the row's subject.
+- **D5b was understated.** The audit named `launch` and `open` as absent from
+  `SPEC.md`'s § Unit-tested modules. Running the check's rule at HEAD reports
+  **four** — `config` and `state` are missing too.
+- **D7's python3 count was low.** Ten gate scripts invoke `python3`, not seven —
+  `taskseam.sh`, `taskwidths.sh` and `widths.sh` also do.
+
+Also note `cli-parity`'s C1 **reverses a divergence a previous change stated
+deliberately**: `schema-artifacts` currently argues the id-fallback is more useful.
+That argument ignored the count — the fallback selects a possibly-glob `generates`
+and sums files the CLI never counts, which is what the dual-source model forbids.
+Worth a second opinion at review time, since it overrides a recorded decision.
 
 ## Recommended order
 
