@@ -26,7 +26,7 @@ coverage:
 	fi
 	cargo llvm-cov --fail-under-lines 80 --json --output-path target/llvm-cov.json
 	cargo llvm-cov report --summary-only
-	python3 scripts/coverage-prod.py target/llvm-cov.json
+	python3 scripts/coverage-prod.py target/llvm-cov.json tests/degraded-coverage.toml
 
 gates:
 	/bin/sh scripts/gates/deps.sh

@@ -27,20 +27,19 @@ fn fixtures_dir() -> PathBuf {
 /// Runs the checker against `report`, with an optional `PROD_MIN` override. Returns
 /// whether it exited 0 and the combined stdout+stderr text.
 ///
-/// Always sets `SKIP_DEGRADED_COVERS=1` — gate-integrity task 6.4's addition, the
-/// `covers`-range check, reads `tests/degraded-coverage.toml` by default (there is no
-/// per-test fixture map otherwise), and every test above this comment drives the checker
-/// with a small, ad hoc report that names none of that real map's `src/*.rs` files. Without
-/// the skip, every one of them would fail on the covers check rather than on whatever the
-/// test itself means to exercise. `run_checker_with_covers_toml` below is the one function
-/// that does NOT set it, for exactly the tests that mean to exercise that check. The real
-/// `make coverage` invocation never sets this variable, so the covers check is unconditional
-/// there — the spec's own requirement.
+/// Passes no second (covers-map) argument at all — gate-integrity task 6.4's addition, the
+/// `covers`-range check, runs only when a map path is named on the command line, and every
+/// test above this comment drives the checker with a small, ad hoc report that names none of
+/// the real `tests/degraded-coverage.toml`'s `src/*.rs` files. Without omitting the argument,
+/// every one of them would fail on the covers check rather than on whatever the test itself
+/// means to exercise. `run_checker_with_covers_toml` below is the one function that DOES pass
+/// a map, for exactly the tests that mean to exercise that check. The real `make coverage`
+/// invocation always names `tests/degraded-coverage.toml` as this argument, so the covers
+/// check is unconditional there — the spec's own requirement.
 fn run_checker(report: &Path, prod_min: Option<&str>) -> (bool, String) {
     let mut cmd = Command::new("python3");
     cmd.arg(script_path())
         .arg(report)
-        .env("SKIP_DEGRADED_COVERS", "1")
         .current_dir(manifest_dir());
     if let Some(min) = prod_min {
         cmd.env("PROD_MIN", min);
@@ -53,17 +52,17 @@ fn run_checker(report: &Path, prod_min: Option<&str>) -> (bool, String) {
     (output.status.success(), combined)
 }
 
-/// Runs the checker against `report`, pointed at `toml_path` via `DEGRADED_COVERAGE_TOML`
-/// (task 6.4's override, on `PROD_MIN`'s own terms) rather than the real
-/// `tests/degraded-coverage.toml`, and with the production floor disabled (`PROD_MIN=0`) so
-/// only the covers-range check can fail these tests. Used by the covers-range scenarios
+/// Runs the checker against `report`, pointed at `toml_path` via the checker's second
+/// positional argument (task 6.4's map path, on `run_checker`'s own terms) rather than the
+/// real `tests/degraded-coverage.toml`, and with the production floor disabled (`PROD_MIN=0`)
+/// so only the covers-range check can fail these tests. Used by the covers-range scenarios
 /// below, never by the production-floor tests above.
 fn run_checker_with_covers_toml(report: &Path, toml_path: &Path) -> (bool, String) {
     let mut cmd = Command::new("python3");
     cmd.arg(script_path())
         .arg(report)
+        .arg(toml_path)
         .env("PROD_MIN", "0")
-        .env("DEGRADED_COVERAGE_TOML", toml_path)
         .current_dir(manifest_dir());
     let output = cmd
         .output()

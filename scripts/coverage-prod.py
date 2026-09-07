@@ -26,39 +26,43 @@ cannot desync it - see mask_non_code below). The number of extents found is prin
 per file specifically so a tracker defeated in some other way shows up as a
 suspicious count rather than a silently shifted floor.
 
-usage: python3 coverage-prod.py <llvm-cov-json-report>
+usage: python3 coverage-prod.py <llvm-cov-json-report> [<degraded-coverage-map>]
 environment:
-    PROD_MIN               overrides the floor (a percentage, e.g. "80"). Defaults
-                            to the constant below, which SHALL be this checker's
-                            own measured production-slice figure on the
-                            unmodified tree, rounded down to a whole point - not
-                            a number transcribed from a planning document.
-    DEGRADED_COVERAGE_TOML  overrides the path read for the covers-range check
-                            below (a test-only escape hatch, on PROD_MIN's own
-                            terms). Defaults to tests/degraded-coverage.toml.
-    SKIP_DEGRADED_COVERS    when set (to anything), skips the covers-range check
-                            entirely. A test-only escape hatch for
-                            tests/coverage_prod.rs's own, unrelated fixtures,
-                            each of which names none of the real map's src/*.rs
-                            files - never set by `make coverage` itself, so the
-                            check is unconditional there, per the spec.
+    PROD_MIN                overrides the floor (a percentage, e.g. "80"). Defaults
+                             to the constant below, which SHALL be this checker's
+                             own measured production-slice figure on the
+                             unmodified tree, rounded down to a whole point - not
+                             a number transcribed from a planning document.
 
 gate-integrity task 6.4: this checker also requires every line of every
-`covers` range in tests/degraded-coverage.toml to be executed - a `proof` that
+`covers` range in a degraded-coverage map to be executed - a `proof` that
 resolves and a `covers` range that resolves (tests/degraded_coverage.rs's own
 job) still leave open whether the degraded path actually RAN, which only a
-real per-line coverage report can answer. The map is read with a small,
-regex-based extractor (`parse_covers_map` below) rather than a TOML parser,
-on `scripts/gates/gate-mech1.py`'s own established terms for a narrow,
-fully-controlled, checked-in input shape - the file is never third-party
-input, and pulling in a TOML dependency (stdlib `tomllib` needs Python
-3.11, which `AGENTS.md` does not otherwise require of this repository) to
-parse six fixed keys would be new machinery for a fact this script can read
-directly. Known limit, recorded on `mask_non_code`'s own terms: the
-extractor does not parse Rust either, so a `covers` range is checked whether
-or not it is actually within the array-of-tables structure the coverage
-spec assumes - it is checked against `tests/degraded-coverage.toml` itself,
-which `tests/degraded_coverage.rs` already keeps honest.
+real per-line coverage report can answer. The map path is the checker's
+SECOND positional argument, not an environment variable and not a default:
+the covers-range check runs only when a map is named on the command line, so
+the enforcing invocation (`make coverage`, which always names
+tests/degraded-coverage.toml) opts the check IN rather than every other
+caller having to opt it OUT through an escape-hatch environment variable -
+gate-integrity's own correction, task 6.4b, removed the environment-variable
+skip flag this check used to carry, as a waiver inside the guard whose whole
+thesis is that waivers are the defect. `tests/coverage_prod.rs`'s
+production-floor fixtures accordingly pass no second argument at all; its
+covers-range scenarios pass a small fixture map as that argument instead of
+the real one.
+
+The map is read with a small, regex-based extractor (`parse_covers_map`
+below) rather than a TOML parser, on `scripts/gates/gate-mech1.py`'s own
+established terms for a narrow, fully-controlled, checked-in input shape -
+the file is never third-party input, and pulling in a TOML dependency
+(stdlib `tomllib` needs Python 3.11, which `AGENTS.md` does not otherwise
+require of this repository) to parse six fixed keys would be new machinery
+for a fact this script can read directly. Known limit, recorded on
+`mask_non_code`'s own terms: the extractor does not parse Rust either, so a
+`covers` range is checked whether or not it is actually within the
+array-of-tables structure the coverage spec assumes - it is checked against
+the named map file itself, which `tests/degraded_coverage.rs` already keeps
+honest for the real tests/degraded-coverage.toml.
 """
 import json
 import os
@@ -232,8 +236,6 @@ def is_under_src(filename: str) -> bool:
     return SRC_COMPONENT in Path(filename).parts
 
 
-DEGRADED_COVERAGE_TOML_DEFAULT = "tests/degraded-coverage.toml"
-
 # A small, regex-based extractor for exactly the two keys this check needs from each
 # [[row]] block - see the module docstring's "gate-integrity task 6.4" note for why this
 # is not a TOML parser.
@@ -304,13 +306,12 @@ def find_counts_for_path(line_counts: dict, path: str):
     return None
 
 
-def check_covers_ranges(report_data) -> None:
+def check_covers_ranges(report_data, toml_path: Path) -> None:
     """gate-integrity task 6.4: every line of every `covers` range in the degraded-coverage
     map SHALL be executed. Fails naming the offending row's `condition`, per the spec, and
     cannot pass vacuously: an unreadable map, a map with no rows, an entry whose every
     `covers` array is empty, or a map holding fewer total ranges than rows are each a
     failure, not a report of 100% over nothing."""
-    toml_path = Path(os.environ.get("DEGRADED_COVERAGE_TOML", DEGRADED_COVERAGE_TOML_DEFAULT))
     if not toml_path.is_file():
         fail(f"degraded-coverage map not found: {toml_path}")
     text = toml_path.read_text()
@@ -410,8 +411,9 @@ def classify_file(filename: str, segments: list) -> dict:
 
 def main(argv: list) -> int:
     if len(argv) < 2:
-        fail("usage: python3 coverage-prod.py <llvm-cov-json-report>")
+        fail("usage: python3 coverage-prod.py <llvm-cov-json-report> [<degraded-coverage-map>]")
     report_path = Path(argv[1])
+    covers_map_path = Path(argv[2]) if len(argv) > 2 else None
 
     floor = DEFAULT_PROD_MIN
     override = os.environ.get("PROD_MIN")
@@ -423,8 +425,8 @@ def main(argv: list) -> int:
 
     data = load_report(report_path)
 
-    if not os.environ.get("SKIP_DEGRADED_COVERS"):
-        check_covers_ranges(data)
+    if covers_map_path is not None:
+        check_covers_ranges(data, covers_map_path)
 
     all_files = iter_report_files(data)
     src_files = [
