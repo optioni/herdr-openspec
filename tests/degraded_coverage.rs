@@ -69,6 +69,13 @@ struct Row {
     proof: Vec<String>,
     verdict: String,
     why: String,
+    /// `path:first-last` line ranges naming the production code the row's `proof`
+    /// exercises — the coverage spec's sixth key. Parsed leniently here (an absent
+    /// `covers` key parses as an empty `Vec`) so `parse_coverage_toml` keeps reading
+    /// every row of the checked-in map before task 6.3's backfill lands; the "must be
+    /// non-empty and every entry must resolve" rule itself lives in
+    /// [`validate_covers`], called from `check_coverage`.
+    covers: Vec<(String, usize, usize)>,
 }
 
 /// Parse `tests/degraded-coverage.toml`'s `[[row]]` array via the `toml` crate's own
@@ -128,12 +135,49 @@ fn parse_coverage_toml(text: &str) -> Result<Vec<Row>, String> {
             .and_then(|v| v.as_str())
             .ok_or_else(|| format!("row {index} ({condition:?}): missing or non-string \"why\""))?
             .to_string();
+        let mut covers = Vec::new();
+        if let Some(covers_value) = table.get("covers") {
+            let covers_array = covers_value.as_array().ok_or_else(|| {
+                format!("row {index} ({condition:?}): \"covers\" is not an array")
+            })?;
+            for c in covers_array {
+                let raw = c.as_str().ok_or_else(|| {
+                    format!("row {index} ({condition:?}): a \"covers\" entry is not a string")
+                })?;
+                let (path, range) = raw.rsplit_once(':').ok_or_else(|| {
+                    format!(
+                        "row {index} ({condition:?}): covers entry {raw:?} is not \
+                         \"path:first-last\""
+                    )
+                })?;
+                let (first_s, last_s) = range.split_once('-').ok_or_else(|| {
+                    format!(
+                        "row {index} ({condition:?}): covers entry {raw:?} has no \
+                         \"first-last\" range"
+                    )
+                })?;
+                let first: usize = first_s.parse().map_err(|_| {
+                    format!(
+                        "row {index} ({condition:?}): covers entry {raw:?} has a \
+                         non-numeric first line"
+                    )
+                })?;
+                let last: usize = last_s.parse().map_err(|_| {
+                    format!(
+                        "row {index} ({condition:?}): covers entry {raw:?} has a \
+                         non-numeric last line"
+                    )
+                })?;
+                covers.push((path.to_string(), first, last));
+            }
+        }
         rows.push(Row {
             condition,
             tier,
             proof,
             verdict,
             why,
+            covers,
         });
     }
     Ok(rows)
@@ -410,7 +454,27 @@ fn render_rows_as_toml(rows: &[Row]) -> String {
         );
         out.push_str("]\n");
         out.push_str(&format!("verdict = {:?}\n", row.verdict));
-        out.push_str(&format!("why = {:?}\n\n", row.why));
+        out.push_str(&format!("why = {:?}\n", row.why));
+        // An empty `covers` renders no key at all, rather than `covers = []` — the two
+        // read identically to `parse_coverage_toml` (both leave `Row::covers` empty), and
+        // omitting the key is what lets a test exercise the "no `covers` key at all"
+        // failure case directly, rather than only the "present but empty" one.
+        if !row.covers.is_empty() {
+            let entries: Vec<String> = row
+                .covers
+                .iter()
+                .map(|(path, first, last)| format!("{path}:{first}-{last}"))
+                .collect();
+            out.push_str(&format!(
+                "covers = [{}]\n",
+                entries
+                    .iter()
+                    .map(|e| format!("{e:?}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ));
+        }
+        out.push('\n');
     }
     out
 }
@@ -439,4 +503,133 @@ fn an_empty_table_fails_the_floor() {
     // The same holds when the heading is absent entirely.
     let no_heading = "Nothing here names a degraded state.\n";
     assert!(parse_spec_conditions(no_heading).is_err());
+}
+
+// --- gate-integrity, group 6: conditions 4b and 4c ---------------------------------------
+
+/// This file's own RED/GREEN fixture for `a_proof_naming_an_ignored_test_fails` below: a
+/// real test, resolvable by condition 4's "fn <name>(" search, `#[ignore]`d so nothing ever
+/// runs it. Its own `#[ignore]` is not a defect to fix — it exists so a `proof` entry can be
+/// repointed at it.
+#[test]
+#[ignore = "intentionally ignored: this crate's own fixture for the coverage binding's \
+            \"a proof naming an #[ignore]d test fails\" case (gate-integrity task 6.1), \
+            not a test anyone should un-ignore"]
+fn ignored_fixture_for_coverage_binding_tests() {}
+
+/// Task 6.1 RED / 6.2 GREEN, condition 4b: a `proof` naming a real, non-test production
+/// function must fail as "not a test" — not as "not defined" (condition 4 already resolves
+/// it) and not silently pass. `fn start(` does not work as the plant: every `start` in the
+/// crate is `pub fn start(` (`src/watch.rs:260`, `src/agents.rs:464`, `src/refresh.rs:78`,
+/// `src/launch.rs:379`), and condition 4 matches only a bare, non-`pub` `fn <name>(`, so that
+/// plant fails as "not defined" — passing for the wrong reason. `is_usable_binary` in
+/// `src/resolve.rs` is the plant `specs/degraded-coverage/spec.md`'s own scenario names:
+/// declared `fn` without `pub`, resolved by condition 4, carrying no `#[test]` anywhere it is
+/// defined, and never named in the body of a test either.
+/// The index of the first `unit`-tier row — used by the two tests immediately below so
+/// condition 5's own "a view/outer proof must render" rule (which also names the offending
+/// proof in its own failure message) cannot mask condition 4b's, on a tier where condition
+/// 5 does not even apply.
+fn first_unit_row_index(rows: &[Row]) -> usize {
+    rows.iter()
+        .position(|r| r.tier == "unit")
+        .expect("the coverage map names at least one unit-tier row")
+}
+
+#[test]
+fn a_proof_naming_a_non_test_function_fails() {
+    let mut mutated = parse_coverage_toml(&coverage_toml()).expect("parse the coverage map");
+    let idx = first_unit_row_index(&mutated);
+    mutated[idx].proof = vec!["is_usable_binary".to_string()];
+    let mutated_toml = render_rows_as_toml(&mutated);
+    let files = searchable_files();
+    let err = check_coverage(&spec_md(), &mutated_toml, &files)
+        .expect_err("a proof naming a real, non-test function must fail");
+    assert!(
+        err.contains("is_usable_binary"),
+        "the error must name the offending proof: {err:?}"
+    );
+    assert!(
+        !err.contains("renders nothing"),
+        "this must fail on the \"not a test\" rule, not condition 5's rendering rule: {err:?}"
+    );
+}
+
+/// The same rule catches a real test whose `#[test]` attribute was replaced with
+/// `#[ignore]` — a test nothing runs proves nothing.
+#[test]
+fn a_proof_naming_an_ignored_test_fails() {
+    let mut mutated = parse_coverage_toml(&coverage_toml()).expect("parse the coverage map");
+    let idx = first_unit_row_index(&mutated);
+    mutated[idx].proof = vec!["ignored_fixture_for_coverage_binding_tests".to_string()];
+    let mutated_toml = render_rows_as_toml(&mutated);
+    let files = searchable_files();
+    let err = check_coverage(&spec_md(), &mutated_toml, &files)
+        .expect_err("a proof naming an #[ignore]d test must fail");
+    assert!(
+        err.contains("ignored_fixture_for_coverage_binding_tests"),
+        "{err:?}"
+    );
+}
+
+/// Task 6.1 RED / 6.2 GREEN, condition 4c: a `covers` range past the end of its file fails.
+#[test]
+fn a_covers_range_past_the_end_of_the_file_fails() {
+    let mut mutated = parse_coverage_toml(&coverage_toml()).expect("parse the coverage map");
+    mutated[0].covers = vec![("src/watch.rs".to_string(), 9000, 9001)];
+    let mutated_toml = render_rows_as_toml(&mutated);
+    let files = searchable_files();
+    let err = check_coverage(&spec_md(), &mutated_toml, &files)
+        .expect_err("a covers range past the end of the file must fail");
+    assert!(err.contains("src/watch.rs"), "{err:?}");
+}
+
+/// Condition 4c: a reversed (`last` < `first`) `covers` range fails.
+#[test]
+fn a_reversed_covers_range_fails() {
+    let mut mutated = parse_coverage_toml(&coverage_toml()).expect("parse the coverage map");
+    mutated[0].covers = vec![("src/watch.rs".to_string(), 280, 270)];
+    let mutated_toml = render_rows_as_toml(&mutated);
+    let files = searchable_files();
+    let err = check_coverage(&spec_md(), &mutated_toml, &files)
+        .expect_err("a reversed covers range must fail");
+    assert!(err.contains("src/watch.rs"), "{err:?}");
+}
+
+/// Condition 4c: a `covers` entry naming a path that does not exist under `src/` fails.
+#[test]
+fn a_covers_range_naming_a_missing_path_fails() {
+    let mut mutated = parse_coverage_toml(&coverage_toml()).expect("parse the coverage map");
+    mutated[0].covers = vec![("src/does-not-exist.rs".to_string(), 1, 2)];
+    let mutated_toml = render_rows_as_toml(&mutated);
+    let files = searchable_files();
+    let err = check_coverage(&spec_md(), &mutated_toml, &files)
+        .expect_err("a covers entry naming a missing path must fail");
+    assert!(err.contains("src/does-not-exist.rs"), "{err:?}");
+}
+
+/// Condition 4c: a `covers` range holding only the module doc comment — no code at all —
+/// fails. `src/watch.rs:1-9` is entirely `//!` lines at HEAD.
+#[test]
+fn a_comment_only_covers_range_fails() {
+    let mut mutated = parse_coverage_toml(&coverage_toml()).expect("parse the coverage map");
+    mutated[0].covers = vec![("src/watch.rs".to_string(), 1, 9)];
+    let mutated_toml = render_rows_as_toml(&mutated);
+    let files = searchable_files();
+    let err = check_coverage(&spec_md(), &mutated_toml, &files)
+        .expect_err("a comment-only covers range must fail");
+    assert!(err.contains("src/watch.rs"), "{err:?}");
+}
+
+/// The six-key rule: an entry with no `covers` key at all fails, so the twenty `unproven`
+/// rows cannot keep their verdict without saying where the behaviour lives.
+#[test]
+fn a_row_with_no_covers_entries_fails_the_six_key_rule() {
+    let mut mutated = parse_coverage_toml(&coverage_toml()).expect("parse the coverage map");
+    mutated[0].covers = Vec::new();
+    let mutated_toml = render_rows_as_toml(&mutated);
+    let files = searchable_files();
+    let err = check_coverage(&spec_md(), &mutated_toml, &files)
+        .expect_err("a row with no covers key at all must fail the six-key rule");
+    assert!(err.contains(&mutated[0].condition), "{err:?}");
 }
