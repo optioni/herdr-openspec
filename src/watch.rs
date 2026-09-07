@@ -806,99 +806,31 @@ mod tests {
         );
     }
 
-    /// Task 6.5 (`gate-integrity`): drives `start`'s OTHER failure arm — `notify::Watcher::new`
-    /// itself refusing to construct the platform watcher, not `.watch()` refusing a bad root
-    /// (already driven by `a_watch_failure_keeps_the_loop_drawing` in `src/ui/mod.rs`, which
-    /// points `start` at an unwatchable path). Measured at HEAD via `cargo llvm-cov --json`:
-    /// `src/watch.rs`'s lines 264-268 — this arm's `Err` body — carry execution count 0 while
-    /// every other line inside `start` is hit 59 times.
+    /// Task 6.5 correction (`gate-integrity`): drives `start`'s OTHER failure arm —
+    /// `new_watcher` itself refusing to construct the platform watcher, not `.watch()`
+    /// refusing a bad root (already driven by `start_on_a_missing_path_degrades_and_names_the_reason`
+    /// above and by `a_watch_failure_keeps_the_loop_drawing` in `src/ui/mod.rs`, which points
+    /// `start` at an unwatchable path).
     ///
-    /// Linux-only, and deliberately so: on macOS, `notify`'s `FsEventWatcher::new` (this
-    /// crate's `macos_fsevent` feature, `Cargo.toml`) allocates nothing but an in-memory
-    /// `CFMutableArrayRef` and cannot fail from any condition a hermetic test can produce — its
-    /// own body is `Ok(FsEventWatcher { .. })` unconditionally. On Linux,
-    /// `notify::RecommendedWatcher::new` is `INotifyWatcher::new`, which calls
-    /// `Inotify::init()` — one `inotify_init1()` syscall — and returns `Err` on `EMFILE`.
-    /// Lowering the process's own `RLIMIT_NOFILE` soft limit below its current open-file count
-    /// for the width of exactly one call (verified live: a `Watcher::new` under a `cur: 3`
-    /// limit reports `Error { kind: Io(Os { code: 24, kind: TooManyOpenFiles, .. }), .. }`)
-    /// forces that syscall to fail; the limit is restored immediately afterward via a `Drop`
-    /// guard, so a panic mid-call cannot leave every other test in this process starved of
-    /// file descriptors. This is `AGENTS.md`'s own "coverage on Linux only" convention: `make
-    /// coverage`'s job runs on `ubuntu-latest` alone, which is where this arm's `covers` range
-    /// is actually exercised and enforced — on macOS the range stays genuinely unreachable, and
-    /// `make coverage` there is not part of the CI matrix for this reason.
-    ///
-    /// No new dependency: `getrlimit`/`setrlimit` are declared here as raw FFI against the
-    /// platform's own `libc` (already linked into every Rust binary), never through the `libc`
-    /// crate — the `DEPS` gate counts exactly six third-party dependencies and this change adds
-    /// none.
-    #[cfg(target_os = "linux")]
+    /// `start_with` takes the watcher constructor as an injected
+    /// `&dyn Fn(Sender<..>, notify::Config) -> notify::Result<notify::RecommendedWatcher>`, on
+    /// exactly the terms `ui::read_artifact` (an injected `&dyn Fn(&Path) -> Result<String,
+    /// String>`), `config::env_lookup`, and `cli::npm_probe_hook` already establish for this
+    /// crate: environment-dependent construction takes an injected lookup rather than being
+    /// driven by starving the real process (`AGENTS.md` -> Conventions). This drives the
+    /// construction-failure arm hermetically, on every platform, with no FFI and no process
+    /// state shared with any other test.
     #[test]
     fn notify_construction_failure_returns_the_inert_watcher() {
-        #[repr(C)]
-        struct RLimit {
-            cur: u64,
-            max: u64,
-        }
-
-        unsafe extern "C" {
-            fn getrlimit(resource: i32, rlim: *mut RLimit) -> i32;
-            fn setrlimit(resource: i32, rlim: *const RLimit) -> i32;
-        }
-
-        const RLIMIT_NOFILE: i32 = 7;
-
-        /// Restores the original `RLIMIT_NOFILE` on drop, panic unwind included, so a failed
-        /// assertion below cannot leave the process's file-descriptor limit lowered for every
-        /// test that runs after this one.
-        struct RestoreRlimit(RLimit);
-        impl Drop for RestoreRlimit {
-            fn drop(&mut self) {
-                unsafe {
-                    setrlimit(RLIMIT_NOFILE, &self.0);
-                }
-            }
-        }
-
-        let mut original = RLimit { cur: 0, max: 0 };
-        // Safety: `getrlimit`/`setrlimit` are POSIX syscalls taking a valid resource id and a
-        // pointer to a correctly-sized, correctly-aligned `rlimit` struct — `RLimit` matches
-        // the platform's own `struct rlimit` field-for-field (two `rlim_t`s, `u64` on Linux).
-        let got = unsafe { getrlimit(RLIMIT_NOFILE, &mut original) };
-        assert_eq!(
-            got, 0,
-            "getrlimit(RLIMIT_NOFILE) must succeed to run this test"
-        );
-        let restore_guard = RestoreRlimit(RLimit {
-            cur: original.cur,
-            max: original.max,
+        let root = Path::new("/does-not-need-to-exist-for-this-test");
+        let (mut fs, problems) = start_with(root, &|_tx, _cfg| {
+            Err(notify::Error::new(notify::ErrorKind::MaxFilesWatch))
         });
-
-        let starved = RLimit {
-            cur: 3,
-            max: original.max,
-        };
-        let set = unsafe { setrlimit(RLIMIT_NOFILE, &starved) };
-        assert_eq!(
-            set, 0,
-            "setrlimit(RLIMIT_NOFILE, 3) must succeed to run this test"
-        );
-
-        let root = Path::new(
-            "/does-not-need-to-exist-for-this-test: the failure this test \
-                               drives happens before start() ever calls watch()",
-        );
-        let (mut fs, problems) = start(root);
-
-        // Restore the limit as soon as `start` has returned, minimising the window during
-        // which this process's other, concurrently-running tests could observe it starved.
-        drop(restore_guard);
 
         assert_eq!(
             problems.len(),
             1,
-            "a Watcher::new failure must report exactly one problem: {problems:?}"
+            "a watcher-construction failure must report exactly one problem: {problems:?}"
         );
         assert!(
             problems[0].contains("filesystem watch unavailable"),
