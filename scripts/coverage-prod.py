@@ -28,10 +28,37 @@ suspicious count rather than a silently shifted floor.
 
 usage: python3 coverage-prod.py <llvm-cov-json-report>
 environment:
-    PROD_MIN   overrides the floor (a percentage, e.g. "80"). Defaults to the
-               constant below, which SHALL be this checker's own measured
-               production-slice figure on the unmodified tree, rounded down to a
-               whole point - not a number transcribed from a planning document.
+    PROD_MIN               overrides the floor (a percentage, e.g. "80"). Defaults
+                            to the constant below, which SHALL be this checker's
+                            own measured production-slice figure on the
+                            unmodified tree, rounded down to a whole point - not
+                            a number transcribed from a planning document.
+    DEGRADED_COVERAGE_TOML  overrides the path read for the covers-range check
+                            below (a test-only escape hatch, on PROD_MIN's own
+                            terms). Defaults to tests/degraded-coverage.toml.
+    SKIP_DEGRADED_COVERS    when set (to anything), skips the covers-range check
+                            entirely. A test-only escape hatch for
+                            tests/coverage_prod.rs's own, unrelated fixtures,
+                            each of which names none of the real map's src/*.rs
+                            files - never set by `make coverage` itself, so the
+                            check is unconditional there, per the spec.
+
+gate-integrity task 6.4: this checker also requires every line of every
+`covers` range in tests/degraded-coverage.toml to be executed - a `proof` that
+resolves and a `covers` range that resolves (tests/degraded_coverage.rs's own
+job) still leave open whether the degraded path actually RAN, which only a
+real per-line coverage report can answer. The map is read with a small,
+regex-based extractor (`parse_covers_map` below) rather than a TOML parser,
+on `scripts/gates/gate-mech1.py`'s own established terms for a narrow,
+fully-controlled, checked-in input shape - the file is never third-party
+input, and pulling in a TOML dependency (stdlib `tomllib` needs Python
+3.11, which `AGENTS.md` does not otherwise require of this repository) to
+parse six fixed keys would be new machinery for a fact this script can read
+directly. Known limit, recorded on `mask_non_code`'s own terms: the
+extractor does not parse Rust either, so a `covers` range is checked whether
+or not it is actually within the array-of-tables structure the coverage
+spec assumes - it is checked against `tests/degraded-coverage.toml` itself,
+which `tests/degraded_coverage.rs` already keeps honest.
 """
 import json
 import os
@@ -205,6 +232,136 @@ def is_under_src(filename: str) -> bool:
     return SRC_COMPONENT in Path(filename).parts
 
 
+DEGRADED_COVERAGE_TOML_DEFAULT = "tests/degraded-coverage.toml"
+
+# A small, regex-based extractor for exactly the two keys this check needs from each
+# [[row]] block - see the module docstring's "gate-integrity task 6.4" note for why this
+# is not a TOML parser.
+ROW_BLOCK_RE = re.compile(r"\[\[row\]\](.*?)(?=\n\[\[row\]\]|\Z)", re.S)
+CONDITION_RE = re.compile(r'condition\s*=\s*"((?:[^"\\]|\\.)*)"')
+COVERS_ARRAY_RE = re.compile(r"covers\s*=\s*\[(.*?)\]", re.S)
+COVERS_ITEM_RE = re.compile(r'"((?:[^"\\]|\\.)*)"')
+
+
+def parse_covers_map(text: str) -> list:
+    """Returns one (condition, [(path, first, last), ...]) pair per `[[row]]` block found
+    in `text` - a row with no `covers` array, or an unparseable one, contributes an empty
+    range list rather than being dropped, so the caller's own row/range count comparison
+    stays meaningful."""
+    rows = []
+    for block in ROW_BLOCK_RE.findall(text):
+        cond_m = CONDITION_RE.search(block)
+        if not cond_m:
+            continue
+        condition = cond_m.group(1)
+        entries = []
+        covers_m = COVERS_ARRAY_RE.search(block)
+        if covers_m:
+            for item in COVERS_ITEM_RE.findall(covers_m.group(1)):
+                path, sep, rng = item.rpartition(":")
+                if not sep or "-" not in rng:
+                    continue
+                first_s, _, last_s = rng.partition("-")
+                try:
+                    entries.append((path, int(first_s), int(last_s)))
+                except ValueError:
+                    continue
+        rows.append((condition, entries))
+    return rows
+
+
+def build_line_counts(report_data) -> dict:
+    """Per-file `{line: max(count)}`, over every `hasCount` segment in every file the
+    report names - not only the ones under `src/`, since a `covers` fixture in
+    `tests/fixtures/coverage/` legitimately points elsewhere."""
+    line_counts = {}
+    for f in iter_report_files(report_data):
+        filename = f.get("filename")
+        if not isinstance(filename, str):
+            continue
+        counts = {}
+        for seg in f.get("segments") or []:
+            if not isinstance(seg, (list, tuple)) or len(seg) < 4:
+                continue
+            line, _col, count, has_count = seg[0], seg[1], seg[2], seg[3]
+            if not has_count:
+                continue
+            prev = counts.get(line)
+            if prev is None or count > prev:
+                counts[line] = count
+        line_counts[filename] = counts
+    return line_counts
+
+
+def find_counts_for_path(line_counts: dict, path: str):
+    """Match a `covers` entry's `path` against the report's own filenames - exactly, or as
+    a `/`-bounded suffix, since a real `cargo llvm-cov` report names files by an absolute
+    path (see `classify_file`'s own resolution) while a fixture report may name one
+    relatively already."""
+    for filename, counts in line_counts.items():
+        if filename == path or filename.endswith("/" + path):
+            return counts
+    return None
+
+
+def check_covers_ranges(report_data) -> None:
+    """gate-integrity task 6.4: every line of every `covers` range in the degraded-coverage
+    map SHALL be executed. Fails naming the offending row's `condition`, per the spec, and
+    cannot pass vacuously: an unreadable map, a map with no rows, an entry whose every
+    `covers` array is empty, or a map holding fewer total ranges than rows are each a
+    failure, not a report of 100% over nothing."""
+    toml_path = Path(os.environ.get("DEGRADED_COVERAGE_TOML", DEGRADED_COVERAGE_TOML_DEFAULT))
+    if not toml_path.is_file():
+        fail(f"degraded-coverage map not found: {toml_path}")
+    text = toml_path.read_text()
+
+    total_row_blocks = text.count("[[row]]")
+    if total_row_blocks == 0:
+        fail(f"{toml_path} names no [[row]] entries - refusing to report every range covered")
+
+    rows = parse_covers_map(text)
+    total_ranges = sum(len(entries) for _, entries in rows)
+    if total_ranges == 0:
+        fail(
+            f"{toml_path}: every row's \"covers\" array is empty - refusing to report "
+            "every range covered"
+        )
+    if total_ranges < total_row_blocks:
+        fail(
+            f"{toml_path} holds {total_row_blocks} row(s) but only {total_ranges} "
+            "covers range(s) in total - dropping a range is a failure, not a silent "
+            "reduction in what is proved"
+        )
+
+    line_counts = build_line_counts(report_data)
+    failures = []
+    for condition, entries in rows:
+        for path, first, last in entries:
+            counts = find_counts_for_path(line_counts, path)
+            if counts is None:
+                failures.append(f"{condition!r}: {path}:{first}-{last} - report names no such file")
+                continue
+            instrumented = [ln for ln in range(first, last + 1) if ln in counts]
+            if not instrumented:
+                failures.append(
+                    f"{condition!r}: {path}:{first}-{last} - report instruments no line "
+                    "in this range"
+                )
+                continue
+            cold = [ln for ln in instrumented if counts[ln] == 0]
+            if cold:
+                failures.append(
+                    f"{condition!r}: {path}:{first}-{last} has uncovered line(s) {cold}"
+                )
+    if failures:
+        fail("degraded-coverage covers range(s) uncovered:\n  " + "\n  ".join(failures))
+
+    print(
+        f"COVERAGE-PROD DEGRADED-COVERS OK: {total_row_blocks} row(s), {total_ranges} "
+        f"range(s) from {toml_path}, all covered"
+    )
+
+
 def classify_file(filename: str, segments: list) -> dict:
     src_path = Path(filename)
     if not src_path.is_file():
@@ -265,6 +422,10 @@ def main(argv: list) -> int:
             fail(f"PROD_MIN={override!r} is not a number")
 
     data = load_report(report_path)
+
+    if not os.environ.get("SKIP_DEGRADED_COVERS"):
+        check_covers_ranges(data)
+
     all_files = iter_report_files(data)
     src_files = [
         f
