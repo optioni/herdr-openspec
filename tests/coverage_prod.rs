@@ -365,10 +365,7 @@ fn default_prod_min() -> u32 {
                 .unwrap_or_else(|e| panic!("bad DEFAULT_PROD_MIN {rest:?}: {e}"));
         }
     }
-    panic!(
-        "DEFAULT_PROD_MIN not found in {}",
-        script_path().display()
-    );
+    panic!("DEFAULT_PROD_MIN not found in {}", script_path().display());
 }
 
 /// Every real `.rs` file under `src/`, found by walking the directory rather than shelling
@@ -408,8 +405,8 @@ fn synthetic_all_covered_report_for_tree() -> String {
             .unwrap_or(&path)
             .to_string_lossy()
             .replace('\\', "/");
-        let text = fs::read_to_string(&path)
-            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        let text =
+            fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
         let n = text.lines().count();
         let mut segments = Vec::with_capacity(n);
         for line in 1..=n {
@@ -427,12 +424,12 @@ fn synthetic_all_covered_report_for_tree() -> String {
 /// output line, e.g. "COVERAGE-PROD OK: production 100.00% (...)".
 fn extract_prod_pct(out: &str) -> f64 {
     for line in out.lines() {
-        if let Some(rest) = line.strip_prefix("COVERAGE-PROD OK: production ") {
-            if let Some(pct_str) = rest.split('%').next() {
-                return pct_str.trim().parse().unwrap_or_else(|e| {
-                    panic!("bad production percentage {pct_str:?} in line {line:?}: {e}")
-                });
-            }
+        if let Some(rest) = line.strip_prefix("COVERAGE-PROD OK: production ")
+            && let Some(pct_str) = rest.split('%').next()
+        {
+            return pct_str.trim().parse().unwrap_or_else(|e| {
+                panic!("bad production percentage {pct_str:?} in line {line:?}: {e}")
+            });
         }
     }
     panic!("no \"COVERAGE-PROD OK: production\" line found in output:\n{out}");
@@ -464,7 +461,10 @@ fn default_prod_min_does_not_exceed_the_checkers_own_measurement() {
     let report = synthetic_all_covered_report_for_tree();
     let scratch = ScratchFile::new("whole-tree-all-covered", &report);
     let (ok, out) = run_checker(scratch.path(), Some("0"));
-    assert!(ok, "synthetic all-covered whole-tree report should pass:\n{out}");
+    assert!(
+        ok,
+        "synthetic all-covered whole-tree report should pass:\n{out}"
+    );
 
     let ceiling = extract_prod_pct(&out);
     let min = default_prod_min();
