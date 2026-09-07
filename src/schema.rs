@@ -1568,7 +1568,16 @@ apply:
         let scratch = ScratchDir::new();
         let repo = scratch.path();
 
-        let rejected: [&str; 8] = ["", "   ", ".", "..", "a/b", "a\\b", "/absolute/path", "a\0b"];
+        let rejected: [&str; 8] = [
+            "",
+            "   ",
+            ".",
+            "..",
+            "a/b",
+            "a\\b",
+            "/absolute/path",
+            "a\0b",
+        ];
         for name in rejected {
             match load(repo, name) {
                 Err(LoadError::IllegalName { .. }) => {}
