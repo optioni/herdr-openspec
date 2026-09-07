@@ -5,14 +5,33 @@
 # Two legs, each with its own positive control, and each pattern verified against the real
 # tree at planning time rather than assumed:
 #
-#  1. src/ui/driver.rs's PRODUCTION slice names no channel, thread, or blocking-wait API.
-#     run_loop reaches the watcher and the worker only through the two trait objects
-#     ui::driver::Live carries, whose every method is non-blocking by contract, so there is
-#     no expression in that file that can wait on a worker.
+#  1. The PRODUCTION slice of every `.rs` file under src/ui/ names no channel, thread, or
+#     blocking-wait API. src/ui/driver.rs is the paradigm case — run_loop reaches the watcher
+#     and the worker only through the two trait objects ui::driver::Live carries, whose every
+#     method is non-blocking by contract, so there is no expression in that file that can wait
+#     on a worker — but the same property is required of the WHOLE directory, not driver.rs
+#     alone: a blocking `rx.recv()` behind a `Mutex::lock()` planted in src/ui/app.rs (or any
+#     other file under src/ui/) is exactly as much a hazard as one in driver.rs, and was
+#     measured, at planning time, to pass every gate in the tree including this one when leg 1
+#     read driver.rs only.
 #     `\.join\(\)` — with EMPTY parentheses — not a bare `\.join\(`: Path::join and
 #     str::join both take an argument and are ordinary, correct code; a JoinHandle's join
 #     takes none. A bare pattern would be a false red waiting to happen the first time the
 #     loop built a path.
+#
+#     GAIN-INTEGRITY (G4): leg 1 now sweeps the SAME file set leg 2 already reads — every
+#     `.rs` file under src/ui/, found the same way — but stays PRODUCTION-ONLY where leg 2
+#     stays WHOLE-FILE, and that asymmetry is deliberate, not an oversight now that the two
+#     legs share a file set: a test that spawns a thread to drive a seam double (an
+#     `mpsc`/`thread::spawn` fixture standing in for `Refresher`/`AgentPoll`/`Launcher`) is
+#     ordinary, correct test code, and stripping `#[cfg(test)]` before this leg's sweep is
+#     what keeps such a fixture from ever tripping it. A test that reads the clock is a
+#     different animal entirely — it is precisely the timing flake leg 2 exists to prevent, so
+#     leg 2 sweeps the whole file, tests included, and stripping would defeat its own purpose.
+#     Measured at planning time: the widening is free — no production slice under src/ui/
+#     matches leg 1's pattern on `main`, so this repair changes no production code, only the
+#     file set this leg walks and its own `OK` line, which now names the file COUNT it swept
+#     rather than a single path so a sweep that silently narrowed back to one file is visible.
 #  2. NO file under src/ui/ reads a clock, tests included. This one is deliberately
 #     whole-file rather than production-only: a TEST that reads the clock is precisely the
 #     timing flake this change exists not to reintroduce, and the debounce is a pure state
@@ -96,10 +115,14 @@ prod src/agents.rs | grep -qE 'mpsc' \
 prod src/agents.rs | grep -qE 'thread::spawn' \
   || fail "positive control - src/agents.rs's production slice does not spawn a thread"
 
-h=$(prod "$UIDIR/driver.rs" | grep -nE "$BLOCK_RE" || true)
-[ -z "$h" ] || { echo "NOBLOCK FAIL (leg 1): $UIDIR/driver.rs blocks or owns a thread:" >&2
-                 echo "$h" >&2; exit 1; }
-echo "NOBLOCK OK (leg 1): $UIDIR/driver.rs's production slice names no channel, thread, or blocking wait"
+hits1=""
+for f in $(find "$UIDIR" -name '*.rs' | sort); do
+  m=$(prod "$f" | grep -nE "$BLOCK_RE" | sed "s|^|$f:|" || true)
+  hits1="$hits1$m"
+done
+[ -z "$hits1" ] || { echo "NOBLOCK FAIL (leg 1): a channel, thread, or blocking wait in production code under $UIDIR:" >&2
+                     echo "$hits1" >&2; exit 1; }
+echo "NOBLOCK OK (leg 1): $n files under $UIDIR's production slice name no channel, thread, or blocking wait"
 
 CLOCK_RE='Instant::now|SystemTime::now|\.elapsed\(\)|Instant::'
 
