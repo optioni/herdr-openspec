@@ -103,9 +103,7 @@ pub fn decide(
     // contain the derived name. See specs/agent-launch/spec.md -> "A second press while a
     // launch is in flight is refused, not queued".
     if in_flight {
-        return Decision::Refuse(
-            "a launch is already running - wait for it to finish".to_string(),
-        );
+        return Decision::Refuse("a launch is already running - wait for it to finish".to_string());
     }
     // The derived name is `state::agent_name`'s own output, named once here — see task 3.5.
     let agent = crate::state::agent_name(change);
@@ -626,7 +624,10 @@ mod tests {
                             reason.to_lowercase().contains("already running"),
                             "{intent:?}: {reason}"
                         );
-                        assert!(reason.to_lowercase().contains("wait"), "{intent:?}: {reason}");
+                        assert!(
+                            reason.to_lowercase().contains("wait"),
+                            "{intent:?}: {reason}"
+                        );
                     }
                     other => panic!("expected Refuse for {intent:?}, got {other:?}"),
                 }
@@ -701,14 +702,35 @@ mod tests {
             // No filesystem, process, environment, network, terminal, or clock read: calling
             // it twice with identical arguments, with nothing else touched in between, must
             // yield identical results.
-            let a = decide(Intent::Apply, Some("add-auth"), Some("w8:p1"), true, &["x"], false);
-            let b = decide(Intent::Apply, Some("add-auth"), Some("w8:p1"), true, &["x"], false);
+            let a = decide(
+                Intent::Apply,
+                Some("add-auth"),
+                Some("w8:p1"),
+                true,
+                &["x"],
+                false,
+            );
+            let b = decide(
+                Intent::Apply,
+                Some("add-auth"),
+                Some("w8:p1"),
+                true,
+                &["x"],
+                false,
+            );
             assert_eq!(a, b);
         }
 
         #[test]
         fn the_derived_name_is_state_agent_name() {
-            let result = decide(Intent::Continue, Some("2FA_Support!"), None, true, &[], false);
+            let result = decide(
+                Intent::Continue,
+                Some("2FA_Support!"),
+                None,
+                true,
+                &[],
+                false,
+            );
             assert_eq!(
                 result,
                 Decision::Go(Request::Launch {
@@ -1737,9 +1759,9 @@ mod tests {
                     assert_eq!(problems.len(), 1, "a reason must be present: {problems:?}");
                     assert!(problems[0].contains("launch"), "{}", problems[0]);
                 }
-                None => panic!(
-                    "the first drain after the result channel disconnects must report it"
-                ),
+                None => {
+                    panic!("the first drain after the result channel disconnects must report it")
+                }
             }
             assert_eq!(
                 launcher.drain(),
