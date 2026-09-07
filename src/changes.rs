@@ -7144,6 +7144,177 @@ apply:
         }
     }
 
+    // --- cli-parity group 7: the archive race becomes a proven degraded-
+    // states row. These two live directly in `mod tests` (not nested inside
+    // `mod merge` below) so their full paths (`changes::tests::<fn name>`)
+    // match design.md's own filters (`changes::tests::changes_are_paired_by_name`,
+    // `changes::tests::a_change_archived_mid_cycle`) — a filter nested one
+    // module deeper (`changes::tests::merge::...`) would not contain those
+    // strings contiguously. ---------------------------------------------
+
+    /// change-merge, "Changes are paired by name, not by position": the file
+    /// set's active list and the CLI's carry `alpha` and `zulu` in opposite
+    /// orders, and each CLI entry carries a schema naming itself. Pairing by
+    /// index would swap the two changes' schemas; pairing by name (what
+    /// `merge` actually does) keeps them straight.
+    #[test]
+    fn changes_are_paired_by_name_not_by_position() {
+        let mut files = ChangeSet {
+            active: Vec::new(),
+            archived: Vec::new(),
+            problems: Vec::new(),
+        };
+        files.active.push(Change {
+            name: "alpha".to_string(),
+            dir: PathBuf::from("/repo/openspec/changes/alpha"),
+            origin: Origin::Active,
+            schema: "tdd".to_string(),
+            artifacts: vec![],
+            progress: crate::tasks::Progress {
+                completed: 0,
+                total: 0,
+            },
+            problems: vec![],
+        });
+        files.active.push(Change {
+            name: "zulu".to_string(),
+            dir: PathBuf::from("/repo/openspec/changes/zulu"),
+            origin: Origin::Active,
+            schema: "tdd".to_string(),
+            artifacts: vec![],
+            progress: crate::tasks::Progress {
+                completed: 0,
+                total: 0,
+            },
+            problems: vec![],
+        });
+
+        let mut cli = CliChanges {
+            active: Vec::new(),
+            problems: Vec::new(),
+        };
+        cli.active.push(Change {
+            name: "zulu".to_string(),
+            dir: PathBuf::from("/repo/openspec/changes/zulu"),
+            origin: Origin::Active,
+            schema: "zulu-schema".to_string(),
+            artifacts: vec![],
+            progress: crate::tasks::Progress {
+                completed: 0,
+                total: 0,
+            },
+            problems: vec![],
+        });
+        cli.active.push(Change {
+            name: "alpha".to_string(),
+            dir: PathBuf::from("/repo/openspec/changes/alpha"),
+            origin: Origin::Active,
+            schema: "alpha-schema".to_string(),
+            artifacts: vec![],
+            progress: crate::tasks::Progress {
+                completed: 0,
+                total: 0,
+            },
+            problems: vec![],
+        });
+
+        let merged = merge(files, cli);
+        let alpha = merged
+            .active
+            .iter()
+            .find(|c| c.name == "alpha")
+            .expect("alpha survives the merge");
+        let zulu = merged
+            .active
+            .iter()
+            .find(|c| c.name == "zulu")
+            .expect("zulu survives the merge");
+        assert_eq!(
+            alpha.schema, "alpha-schema",
+            "pairing by index would give alpha the zulu-schema"
+        );
+        assert_eq!(
+            zulu.schema, "zulu-schema",
+            "pairing by index would give zulu the alpha-schema"
+        );
+    }
+
+    /// change-merge, "A change archived mid-cycle appears in both lists for
+    /// one cycle" (design.md -> Decision D6): the merge SHALL NOT consult
+    /// `files.archived` when deciding whether a CLI change is CLI-only, so a
+    /// change archived between the worker's `list --json` call and its file
+    /// walk appears in both `active` (from the CLI's stale answer) and
+    /// `archived` (from the fresh file walk) for exactly one cycle.
+    #[test]
+    fn a_change_archived_mid_cycle_appears_in_both_lists_for_one_cycle() {
+        let files = ChangeSet {
+            active: Vec::new(),
+            archived: vec![Change {
+                name: "add-auth".to_string(),
+                dir: PathBuf::from("/repo/openspec/changes/archive/2026-08-14-add-auth"),
+                origin: Origin::Archived {
+                    date: Some("2026-08-14".to_string()),
+                },
+                schema: "tdd".to_string(),
+                artifacts: vec![],
+                progress: crate::tasks::Progress {
+                    completed: 3,
+                    total: 3,
+                },
+                problems: vec![],
+            }],
+            problems: Vec::new(),
+        };
+
+        let cli = CliChanges {
+            active: vec![Change {
+                name: "add-auth".to_string(),
+                dir: PathBuf::from("/repo/openspec/changes/add-auth"),
+                origin: Origin::Active,
+                schema: "tdd".to_string(),
+                artifacts: vec![],
+                progress: crate::tasks::Progress {
+                    completed: 3,
+                    total: 3,
+                },
+                problems: vec![],
+            }],
+            problems: Vec::new(),
+        };
+
+        let merged = merge(files.clone(), cli);
+        assert!(
+            merged.active.iter().any(|c| c.name == "add-auth"),
+            "the stale CLI answer still names add-auth as active for this cycle"
+        );
+        assert!(
+            merged.archived.iter().any(|c| c.name == "add-auth"),
+            "the fresh file walk already sees add-auth as archived"
+        );
+        assert!(
+            merged.problems.is_empty(),
+            "neither producer is faulty, so no problem is recorded: {:?}",
+            merged.problems
+        );
+
+        // The next cycle: the CLI no longer reports add-auth at all, because
+        // it has finished archiving. The race self-corrects rather than
+        // sticking.
+        let next_cli = CliChanges {
+            active: Vec::new(),
+            problems: Vec::new(),
+        };
+        let next = merge(files, next_cli);
+        assert!(
+            !next.active.iter().any(|c| c.name == "add-auth"),
+            "add-auth must not still be reported active once the CLI stops naming it"
+        );
+        assert!(
+            next.archived.iter().any(|c| c.name == "add-auth"),
+            "add-auth stays archived"
+        );
+    }
+
     // --- group 9: `merge` — layering CLI over files (`mod merge`) ----------
 
     mod merge {
