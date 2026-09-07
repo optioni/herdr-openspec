@@ -27,7 +27,7 @@ reviewed or approved. None may be implemented until it is.**
 | Change | Findings | State |
 |---|---|---|
 | `gate-integrity` | G1–G8, D1–D3 | Drafting in progress — no `planning-review.md` yet |
-| `seam-resilience` | S1–S9, U3, **S10** | Validates, **but has an outstanding revision — see below** |
+| `seam-resilience` | S1–S9, U3, S10 | **Complete**, `Change 'seam-resilience' is valid` |
 | `view-fidelity` | U1, U2, U4, U5 | Drafting in progress — no `planning-review.md` yet |
 | `cli-parity` | C1–C8 | **Complete**, `Change 'cli-parity' is valid` |
 | `doc-conformance` | D4–D10 | **Complete**, `Change 'doc-conformance' is valid` |
@@ -49,12 +49,10 @@ the only copy of several transferable findings.
 `openspec` is not on a non-login `PATH` here — it is at
 `~/.nvm/versions/node/v24.18.0/bin/openspec` (v1.12.0). Source nvm first.
 
-## THE ONE OUTSTANDING ACTION
+## S10 — RESOLVED, recorded for review
 
-`seam-resilience` was sent back for a revision that had **not** been applied when
-the session ended. The agent may or may not have completed it — check for the
-strings `127`, `shim`, `shebang` or `overlay` in
-`openspec/changes/seam-resilience/`; if they are absent, the revision is still owed.
+`seam-resilience`'s S10 revision **was applied and validates**. Nothing is owed here;
+this section is kept because the reviewer should understand what changed and why.
 
 **The defect (S10), measured and reproduced, not hypothesised:**
 
@@ -95,6 +93,27 @@ at all, and setting `current_dir` fixes nothing. Same symptom, earlier layer.
 `cli_error_problem` is **not** part of this — `cli-parity` owns carrying stderr on
 the `Failed` arm (the child *did* start, so this is `CliError::Failed`, not
 `NotStarted`).
+
+**How it was resolved.** The agent reproduced all three facts, then measured the
+one data point the brief lacked: `env -i PATH=<nvmbin>:/usr/bin:/bin <nvmbin>/openspec
+--version` → `exit=0`, `1.12.0`. That is what let it choose a mechanism instead of
+arguing three in the abstract. It took the environment overlay — `RealOpenspecCli`
+sets exactly the variables it is handed, clears nothing, derives nothing — and both
+relaxations now sit in one paragraph under one shared rationale, since `current_dir`
+assumed the two directories coincide and the environment clause assumed an executable
+is self-contained, and measurement falsified both. The blanket line now reads "SHALL
+NOT add an argument of its own, **clear** the environment, retry, cache, or inspect
+the output." Two alternatives were argued down in `design.md` → Decision 2: a resolved
+interpreter path (needs a second probe chain for `node`, which the seam refuses to
+build even for `herdr`, plus shebang parsing, and picks the wrong `node` when a
+different one resolves) and a self-contained binary (none exists — the npm package
+ships a JS entry with an `env node` shebang and nothing else). The rule is one `PATH`
+entry, the resolved binary's parent prepended to the inherited value, applied for
+every probe step so neither the seam nor the composition root need know which won.
+
+S10 is its own requirement in `refresh-worker`, and task group 1 now classifies:
+a 127 with `env: node:` is S10 and not S7; a payload plus a root-disagreement row is
+S7; both can be true, and it records which. 93 scenarios, up from 86.
 
 ## Facts already verified — do not re-derive
 

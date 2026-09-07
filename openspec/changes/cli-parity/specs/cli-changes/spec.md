@@ -11,15 +11,16 @@ one human-readable problem naming what failed.
   seam carried**. This is `SPEC.md` → Degraded states' "`openspec` binary not found"
   reaching this module.
 - **`list --json` exited non-zero** (`CliError::Failed`) — `active` is empty and one
-  problem names the vector and the exit code.
+  problem names the vector, the exit code, **and the first non-blank line of `stderr` when
+  `stderr` is not blank**.
 - **`list --json` output is not JSON, or not the expected envelope** — `active` is empty
   and one problem names the payload as unusable.
 - **A change's apply call failed, for any reason** — that change is absent from `active`
-  and one problem names the change and the vector. A schema the CLI rejects is exactly this
-  case: the CLI answers exit 1 with its diagnostic on **stdout** and an **empty stderr**
-  (`dist/cli/index.js:624-627`), and `subprocess-seam`'s `CliError::Failed` carries stderr
-  only, so the recorded problem SHALL name the change, the argument vector, and the exit
-  code, and SHALL NOT claim to report the CLI's own message.
+  and one problem names the change, the vector, the exit code, and the same conditional
+  `stderr` line. A schema the CLI rejects is the empty-`stderr` case: the CLI answers exit 1
+  with its diagnostic on **stdout** and a **0-byte stderr** (`dist/cli/index.js:624-627`,
+  measured), and `subprocess-seam`'s `CliError::Failed` carries stderr only, so for that
+  failure the problem SHALL name the change, the vector, and the exit code and nothing more.
 - **A change's apply output is not JSON, or lacks `schemaName`, `changeDir`, or
   `contextFiles`** — that change is absent from `active` and one problem names it.
 - **A change's apply output reports a `schemaName` that is not a legal schema name** — that
@@ -34,12 +35,33 @@ join. An empty or whitespace-only `schemaName` remains covered by the existing m
 branch, whose message differs; both outcomes drop the change, and the two messages are not
 required to be equal.
 
-A `NotStarted` reason SHALL be carried into the problem text; a `Failed` stderr SHALL NOT.
-The two are not symmetric and the asymmetry is the point: a `Failed` stderr is empty because
-`openspec` writes its diagnostic to stdout, so there is nothing to report, while a
-`NotStarted` reason is the **operating system's** message about the spawn itself — it
-distinguishes a binary deleted between probe and run from one with a bad interpreter line,
-and it is the only diagnostic an `openspec` failure ever supplies.
+**Both** carried diagnostics SHALL reach the problem text: a `NotStarted` reason always, and
+a `Failed` stderr whenever it is not blank. Neither is dropped, and the rule is one rule
+rather than two: *report every diagnostic the seam actually carried*.
+
+The earlier rule — that a `Failed` stderr is never worth reporting because `openspec` writes
+its diagnostics to stdout — is true only of `openspec`'s **own** diagnostics. It is false for
+a failure of the **shim**, which is reachable by construction on this project's reference
+machine. `~/.nvm/versions/node/<v>/bin/openspec` is a symlink to a `.js` file whose first
+line is `#!/usr/bin/env node`. Run with `node` off `PATH`, it exits **127** with an empty
+stdout and `env: node: No such file or directory` on **stderr** (measured). That is
+`CliError::Failed`, not `NotStarted` — `env` started, so `Command::output()` returns `Ok`
+with a non-zero status — and the probe chain lands on that shim precisely when the failure
+is possible: `openspec`'s symlink lives in the same nvm `bin` directory as `node`, so
+whenever that directory is off `PATH`, `resolve::step2_path` misses and `step3_nvm` finds
+the shim anyway.
+
+Dropping stderr therefore turns the one self-diagnosing failure in the crate into
+`openspec list --json exited with code 127` — a row naming a number the user cannot act on.
+
+The **first non-blank line, trimmed**, is what is carried, not the whole stream: a problem is
+rendered as one row of the list region, and a multi-line diagnostic would either be truncated
+by the view or break the row grammar. A blank or whitespace-only stderr appends nothing, so
+`openspec`'s own stdout-diagnostic failures read exactly as they did.
+
+A `NotStarted` reason is the **operating system's** message about the spawn itself — it
+distinguishes a binary deleted between probe and run from one with an unusable interpreter
+line — and it is carried unconditionally.
 
 `schemaName` is rejected rather than sanitized, and rejected at the parse rather than at the
 use, because the value does not only reach `schema::load`'s path join: it also becomes the
@@ -67,6 +89,32 @@ A per-change failure SHALL NOT abort the remaining changes.
 - **AND** an implementation that discards `reason` produces two byte-identical strings and
   fails this scenario, which is the whole content of the finding
 
+#### Scenario: An exec failure of the `openspec` shim reports its own stderr
+
+- **WHEN** the fake answers `["list", "--json"]` with
+  `Err(CliError::Failed { code: Some(127), stderr: "env: node: No such file or directory\n" })`
+  — the exact shape measured by running the nvm-installed `openspec` shim with `node` off
+  `PATH`
+- **THEN** `active` is empty and `problems` holds exactly one entry naming the
+  `list --json` vector, exit code `127`, and the text `env: node: No such file or directory`
+- **AND** an implementation that discards `stderr` produces a row naming only the code and
+  fails this scenario
+- **AND** the trailing newline is not in the recorded problem, because the first non-blank
+  line is taken trimmed
+
+#### Scenario: A multi-line stderr contributes only its first non-blank line
+
+- **WHEN** a `Failed` carries `stderr` `"\n\n  first line  \nsecond line\nthird line"`
+- **THEN** the recorded problem contains `first line` and contains neither `second line` nor
+  `third line`
+- **AND** the problem is a single line, so it renders as one row of the list region
+
+#### Scenario: A whitespace-only stderr appends nothing
+
+- **WHEN** a `Failed` carries `stderr` `"   \n\t\n"`
+- **THEN** the recorded problem is byte-identical to the one produced for an empty `stderr`
+- **AND** it ends at the exit code, with no trailing separator left dangling
+
 #### Scenario: A schema the CLI rejects removes one change and keeps the others
 
 - **WHEN** `list --json` reports `alpha`, `mike`, and `zulu`, and the apply call for `zulu`
@@ -74,8 +122,8 @@ A per-change failure SHALL NOT abort the remaining changes.
 - **THEN** `active` holds `alpha` and `mike` only, in that order
 - **AND** `problems` holds exactly one entry naming `zulu`, the vector
   `["instructions", "apply", "--change", "zulu", "--json"]`, and exit code `1`
-- **AND** that entry does not assert any reason for the failure, because the CLI wrote its
-  diagnostic to stdout, which the seam discards on a non-zero exit
+- **AND** that entry appends no reason, because the fake's `stderr` is empty — the CLI wrote
+  its diagnostic to stdout, which the seam discards on a non-zero exit
 
 #### Scenario: Malformed JSON from a single apply call is contained to that change
 
@@ -127,8 +175,8 @@ A per-change failure SHALL NOT abort the remaining changes.
   resolved, since it writes its diagnostic to stdout and exits 1
 - **THEN** `active` is empty and `problems` holds exactly one entry naming the
   `list --json` vector and exit code `1`
-- **AND** no apply invocation is recorded, and the entry claims no reason for the failure,
-  because stderr was empty
+- **AND** no apply invocation is recorded, and the entry appends no reason, because stderr
+  was empty
 
 #### Scenario: Empty stdout from `list --json` is a parse failure, not an empty repository
 
