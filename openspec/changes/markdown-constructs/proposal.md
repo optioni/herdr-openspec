@@ -28,11 +28,18 @@ table-shaped.
 - **Tables render as tables.** `pulldown_cmark::Options::ENABLE_TABLES`, and a table block
   laid out as aligned columns within the region's interior width, honouring the header row
   and per-column alignment markers.
-- **A table never exceeds its region.** The detail region's mandated interior widths are 78
-  and 58 columns and this repository's tables routinely exceed both, so degrading is the
-  normal path, not the edge: the change specifies one stated rule for a table wider than
-  its region and holds to it at every width. Which rule — wrap within cells, or allocate
-  and truncate — is `design.md`'s to argue and measure.
+- **A table never exceeds its region, and a table is never truncated.** The detail region's
+  mandated interior widths are 78 and 58 columns and this repository's tables routinely
+  exceed both, so degrading is the normal path, not the edge. **A cell wider than its
+  column wraps within that column**, continuation lines aligned under the cell's own first
+  line. Row count and line count therefore diverge, which is accepted.
+  This is decided here rather than left to `design.md`, because the alternative —
+  allocate and truncate — destroys content in a pane that has no horizontal scroll to
+  recover it. Truncation is right for a change row, where the grammar is fixed and the
+  name alone identifies the thing, which is why `change-rows` uses it; these tables are
+  where this repository puts its `SHALL`-exact contracts, and a table missing its
+  predicate is a decoration. `design.md` still owns the column-width *allocation* rule —
+  how the available columns are divided when the natural widths do not fit.
 - **Strikethrough renders struck.** `ENABLE_STRIKETHROUGH` plus one new `Face` flag. It is
   included at zero measured occurrences purely because it costs one flag and one face; the
   pane renders whatever repository it is pointed at, not only this one.
@@ -51,6 +58,12 @@ table-shaped.
 - **No task-list items.** Measured zero outside `tasks.md`, and the tracked-tasks tab
   already renders checkboxes through `ui::tasks`' own grammar. Adding a second checkbox
   renderer for a case that does not occur is how two renderers drift apart.
+- **No truncation of table content, at any width.** Recorded as a non-goal and not only as
+  a decision above, so a later width or performance argument cannot reintroduce it quietly.
+- **No change to any construct that already renders.** Headings, bullet and ordered lists,
+  nested lists, block quotes, fenced code, thematic breaks, images, HTML blocks, emphasis,
+  strong, links, and inline code are all already modelled and are measured present across
+  the corpus; this change touches none of their grammar.
 - **No syntax highlighting inside code blocks**, and no HTML rendering — HTML blocks keep
   rendering as literal source.
 - **No interaction.** A table is not sortable, scrollable on its own axis, or selectable;
