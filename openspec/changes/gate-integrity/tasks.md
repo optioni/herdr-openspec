@@ -69,54 +69,54 @@ Test Strategy). Written first, it is RED for exactly the five gates this change 
 ## 1. Production coverage floor (G1)
 <!-- kind: behavior -->
 
-- [ ] 1.1 RED: Write `tests/coverage_prod.rs` driving `scripts/coverage-prod.py` against
+- [x] 1.1 RED: Write `tests/coverage_prod.rs` driving `scripts/coverage-prod.py` against
   fixture reports under `tests/fixtures/coverage/`: a healthy report passes; a report with one
   module's production lines zeroed fails; empty, `src`-less, malformed, and absent reports each
   fail rather than reporting 100% of nothing. RED — the script does not exist.
-- [ ] 1.2 GREEN: Add `scripts/coverage-prod.py`. It reads `cargo llvm-cov`'s JSON export and
+- [x] 1.2 GREEN: Add `scripts/coverage-prod.py`. It reads `cargo llvm-cov`'s JSON export and
   classifies each instrumented line by whether it falls inside the **brace extent** of a
   `#[cfg(test)]` item — **not** the `prod()` first-occurrence cut, which misclassifies 6,281
   production lines (design.md → Decision 1a). Exit non-zero below `PROD_MIN`; print the
   figure, the counts, the floor, and the number of `#[cfg(test)]` extents found per file so a
   tracker defeated by a brace in a string literal shows as a count rather than a shifted floor.
-- [ ] 1.2b CHECK: Verify the classifier against the three files that break the naive cut —
+- [x] 1.2b CHECK: Verify the classifier against the three files that break the naive cut —
   `src/changes.rs` (3 attributes, first at line 77), `src/cli.rs` (10), `src/lib.rs` (2) —
   by asserting `src/changes.rs` contributes its real production body and not 76 lines.
   Negative control: move a production function into a `#[cfg(test)]` module in a scratch copy
   and require the production line count to fall.
-- [ ] 1.3 GREEN: Set `PROD_MIN` as the script's own default, taken from the checker's **own**
+- [x] 1.3 GREEN: Set `PROD_MIN` as the script's own default, taken from the checker's **own**
   output on the unmodified tree and rounded down to a whole point — not transcribed from this
   plan, because two line-counting rules give different denominators for the same report
   (design.md → Decision 1a). This design's estimate under the `hasCount` rule is **97.28%**
   production (6,623/6,808), 95.97% test slice, 96.37% total; record what the checker actually
   reports beside it.
-- [ ] 1.4 GREEN: Change the `Makefile`'s `coverage` recipe to
+- [x] 1.4 GREEN: Change the `Makefile`'s `coverage` recipe to
   `cargo llvm-cov --fail-under-lines 80 --json --output-path target/llvm-cov.json` followed by
   `python3 scripts/coverage-prod.py target/llvm-cov.json` — one coverage run, two verdicts.
   CHECK first, because it is unmeasured: confirm that combination still **enforces** the 80
   threshold and still **prints** a coverage figure. `--json` replaces the text report, and
   `ci-workflow`'s retained scenario requires the job to report a figure — add a `--summary-only`
   text leg if it does not.
-- [ ] 1.5 CHECK: Measure before widening — the naive widening is **red at HEAD**. Run
+- [x] 1.5 CHECK: Measure before widening — the naive widening is **red at HEAD**. Run
   `grep -rnE 'coverage\(off\)|--ignore-filename-regex|--exclude|fail-under-lines ([0-7][0-9]?|[0-9])\b' scripts/`
   → three hits: `nowaiver.sh:5` (its own pattern) and `openspec-untouched.sh:14,15`
   (`git ls-files --exclude-standard`). `tests/`, already scanned, will also hold the plant text
   in `tests/gate-controls.toml`.
-- [ ] 1.6 GREEN: Add `scripts/` to `nowaiver.sh`'s scan list, narrow the pattern to a coverage
+- [x] 1.6 GREEN: Add `scripts/` to `nowaiver.sh`'s scan list, narrow the pattern to a coverage
   flag in a **coverage context** (an argument to `llvm-cov`) so those three stay green, and add
   the production floor to its must-name set. Keep a positive control proving the narrowed
   pattern still fires on a real waiver. Do not exempt by path — a path exemption inside the
   gate that guards against exemptions is the vacuity this change removes.
-- [ ] 1.7 GREEN: Add its control to `tests/gate-controls.toml`: plant
+- [x] 1.7 GREEN: Add its control to `tests/gate-controls.toml`: plant
   `--ignore-filename-regex` as an argument to `cargo llvm-cov` in `scripts/coverage-prod.py`
   and expect `NOWAIVER FAIL`.
-- [ ] 1.8 CHECK: Confirm the total floor is unchanged and unwaived —
+- [x] 1.8 CHECK: Confirm the total floor is unchanged and unwaived —
   `grep -c -- '--fail-under-lines 80' Makefile` → must stay ≥ 1, and no `--exclude` or
   `--ignore-filename-regex` enters the tree (`make gates` runs `nowaiver.sh`).
-- [ ] 1.9 VERIFY: `make coverage` exits 0. Then re-run with `PROD_MIN` one point above the
+- [x] 1.9 VERIFY: `make coverage` exits 0. Then re-run with `PROD_MIN` one point above the
   measurement and confirm non-zero — the negative control this floor needs, since a floor that
   has never failed is the defect being repaired.
-- [ ] 1.10 Run the group tests — `cargo test --all-features coverage_prod` green, no regressions.
+- [x] 1.10 Run the group tests — `cargo test --all-features coverage_prod` green, no regressions.
 
 ## 2. Alias-resistant seam greps (G2)
 <!-- kind: behavior -->
