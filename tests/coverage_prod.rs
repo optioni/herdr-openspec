@@ -324,6 +324,133 @@ fn raising_the_floor_above_measurement_fails() {
     );
 }
 
+// --- gate-integrity Change Review, task 9.3 (CRITICAL 2): DEFAULT_PROD_MIN itself --------
+
+/// Reads `DEFAULT_PROD_MIN` straight out of `scripts/coverage-prod.py`'s own source, rather
+/// than transcribing a copy of the number here - a copy would drift from the real constant
+/// exactly the way `specs/quality-gates/spec.md`'s own transcribed figures drifted from the
+/// checker's real output (Change Review W-C).
+fn default_prod_min() -> u32 {
+    let text = fs::read_to_string(script_path()).expect("read scripts/coverage-prod.py");
+    for line in text.lines() {
+        if let Some(rest) = line.trim_start().strip_prefix("DEFAULT_PROD_MIN = ") {
+            return rest
+                .trim()
+                .parse()
+                .unwrap_or_else(|e| panic!("bad DEFAULT_PROD_MIN {rest:?}: {e}"));
+        }
+    }
+    panic!(
+        "DEFAULT_PROD_MIN not found in {}",
+        script_path().display()
+    );
+}
+
+/// Every real `.rs` file under `src/`, found by walking the directory rather than shelling
+/// out to `find` - this crate's own convention elsewhere in this file already reads real
+/// `src/*.rs` files directly (`synthetic_all_covered_report`), just one file at a time.
+fn all_src_rs_files() -> Vec<PathBuf> {
+    fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, out);
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                out.push(path);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(&manifest_dir().join("src"), &mut out);
+    out.sort();
+    out
+}
+
+/// The whole-tree extension of `synthetic_all_covered_report`: every real `.rs` file under
+/// `src/`, in one report, every line marked instrumented and covered. Run through the
+/// checker, this yields the HIGHEST production percentage any report can ever show under
+/// the checker's own classifier - not a hardcoded transcription of it, so a change to
+/// `classify_file`'s rule keeps this ceiling honest without anyone updating a copied number.
+fn synthetic_all_covered_report_for_tree() -> String {
+    let root = manifest_dir();
+    let mut files_json = Vec::new();
+    for path in all_src_rs_files() {
+        let rel = path
+            .strip_prefix(&root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        let text = fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+        let n = text.lines().count();
+        let mut segments = Vec::with_capacity(n);
+        for line in 1..=n {
+            segments.push(format!("[{line},1,1,true,true,false]"));
+        }
+        files_json.push(format!(
+            r#"{{"filename":"{rel}","segments":[{}]}}"#,
+            segments.join(",")
+        ));
+    }
+    format!(r#"{{"data":[{{"files":[{}]}}]}}"#, files_json.join(","))
+}
+
+/// Extracts the percentage following "COVERAGE-PROD OK: production " from the checker's own
+/// output line, e.g. "COVERAGE-PROD OK: production 100.00% (...)".
+fn extract_prod_pct(out: &str) -> f64 {
+    for line in out.lines() {
+        if let Some(rest) = line.strip_prefix("COVERAGE-PROD OK: production ") {
+            if let Some(pct_str) = rest.split('%').next() {
+                return pct_str.trim().parse().unwrap_or_else(|e| {
+                    panic!("bad production percentage {pct_str:?} in line {line:?}: {e}")
+                });
+            }
+        }
+    }
+    panic!("no \"COVERAGE-PROD OK: production\" line found in output:\n{out}");
+}
+
+/// CRITICAL 2: `DEFAULT_PROD_MIN` was bound to nothing - a typo or a deliberate edit could
+/// gut it to near-zero with every gate staying green (the covering `NOWAIVER` leg above
+/// only guards the Makefile's own override, not this constant). A degenerate low floor
+/// (well below anything this checker has ever measured) must fail this sanity test.
+#[test]
+fn default_prod_min_is_not_a_degenerate_floor() {
+    let min = default_prod_min();
+    assert!(
+        min >= 50,
+        "DEFAULT_PROD_MIN={min} is below a sane sentinel - a floor this low would let \
+         production coverage collapse by more than half before make check ever noticed"
+    );
+}
+
+/// CRITICAL 2's other half: `DEFAULT_PROD_MIN` must not exceed the checker's OWN
+/// measurement of what a report can ever show - not a hardcoded ceiling, but the real
+/// output of running `scripts/coverage-prod.py` against a synthetic report marking every
+/// real `src/*.rs` line covered. No real (execution-driven) report can ever score higher
+/// than this idealised one, so a `DEFAULT_PROD_MIN` above it could never be satisfied by
+/// any real run - exactly `specs/quality-gates/spec.md`'s "rounded down ... and SHALL NOT
+/// be lower" contract read from the other direction.
+#[test]
+fn default_prod_min_does_not_exceed_the_checkers_own_measurement() {
+    let report = synthetic_all_covered_report_for_tree();
+    let scratch = ScratchFile::new("whole-tree-all-covered", &report);
+    let (ok, out) = run_checker(scratch.path(), Some("0"));
+    assert!(ok, "synthetic all-covered whole-tree report should pass:\n{out}");
+
+    let ceiling = extract_prod_pct(&out);
+    let min = default_prod_min();
+    assert!(
+        f64::from(min) <= ceiling + 0.01,
+        "DEFAULT_PROD_MIN={min} exceeds {ceiling:.2}%, the checker's own maximum possible \
+         measurement (every real src/*.rs line marked covered) - no real report could ever \
+         satisfy a floor set above this"
+    );
+}
+
 // --- gate-integrity task 6.3b/6.4: the `covers`-range check -------------------------------
 
 /// Two rows' worth of `covers` ranges, both healthy in `healthy.json`, must pass.
