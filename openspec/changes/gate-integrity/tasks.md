@@ -121,30 +121,30 @@ Test Strategy). Written first, it is RED for exactly the five gates this change 
 ## 2. Alias-resistant seam greps (G2)
 <!-- kind: behavior -->
 
-- [ ] 2.1 CHECK: Re-measure before editing. Run
+- [x] 2.1 CHECK: Re-measure before editing. Run
   `find src -name '*.rs' ! -path 'src/cli.rs' -print0 | xargs -0 grep -nE 'process::\{|process::(Command|Child|Stdio|Output|ChildStd)' /dev/null`
   → **exit 1, no output** at HEAD. Run the bare-`std::process` form for contrast → **2 hits**
   (`src/lib.rs:33` `std::process::id()`, `src/main.rs:1` `use std::process::exit;`), which is
   why the pattern is the narrow one (design.md → Decision 3).
-- [ ] 2.2 RED: Confirm the group's controls in `tests/gate-controls.toml` fail — the aliased
+- [x] 2.2 RED: Confirm the group's controls in `tests/gate-controls.toml` fail — the aliased
   plant in each of `src/ui/mod.rs`, `src/agents.rs`, `src/launch.rs`, `src/open.rs`,
   `src/watch.rs`, driving `nospawn-grep.sh`, `agentseam.sh`, `launchseam.sh` (twice, the second
   with `LAUNCH=src/open.rs`), and `watchseam.sh`.
-- [ ] 2.3 GREEN: Add `process::\{` and `process::(Command|Child|Stdio|Output|ChildStd)` to the
+- [x] 2.3 GREEN: Add `process::\{` and `process::(Command|Child|Stdio|Output|ChildStd)` to the
   spawn pattern in all four scripts. Add a positive control per script anchored on
   `src/cli.rs:14` (`use std::process::{Command, Stdio};`), which matches both new alternatives.
-- [ ] 2.4 GREEN: Write both stated limits into each script's header: a brace group of only
+- [x] 2.4 GREEN: Write both stated limits into each script's header: a brace group of only
   safe items (`use std::process::{exit, id}`) is refused, workaround one `use` per item; and a
   crate-root alias (`use std as s;`) is not matched.
-- [ ] 2.5 Add the controls that isolate each **new** alternative, since `src/cli.rs:14`
+- [x] 2.5 Add the controls that isolate each **new** alternative, since `src/cli.rs:14`
   matches the pre-existing `process::Command` branch and so cannot prove either addition:
   the brace-group alias (caught by `process::\{` alone) and `use std::process::Child;`
   (rustfmt-stable, brace-free, caught by the item alternative alone). Verify by removing one
   alternative at a time and confirming its plant goes green.
-- [ ] 2.5b Add the two remaining controls: the bare `std::process::Command::new` plant in
+- [x] 2.5b Add the two remaining controls: the bare `std::process::Command::new` plant in
   `src/ui/driver.rs` still fails, and the `use std::process::{exit, id};` plant in
   `src/main.rs` fails — the accepted cost, pinned so it is a decision and not a surprise.
-- [ ] 2.6 VERIFY: `make gates` exits 0 at HEAD with no plant; all four scripts print their
+- [x] 2.6 VERIFY: `make gates` exits 0 at HEAD with no plant; all four scripts print their
   `OK` line. Run the group tests — no regressions.
 
 ## 3. Type-shaped write pattern (G3)
