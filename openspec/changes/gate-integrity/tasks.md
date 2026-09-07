@@ -254,16 +254,16 @@ Test Strategy). Written first, it is RED for exactly the five gates this change 
 ## 7. Acceptance Test — Outer Loop GREEN
 <!-- kind: behavior -->
 
-- [ ] 7.1 VERIFY: `cargo test --all-features gate_controls` — all 28+ controls green, every
+- [x] 7.1 VERIFY: `cargo test --all-features gate_controls` — all 28+ controls green, every
   one of the five previously-passing plants now failing its gate.
-- [ ] 7.2 VERIFY: Add and confirm the two suite-integrity cases — a script whose body is
+- [x] 7.2 VERIFY: Add and confirm the two suite-integrity cases — a script whose body is
   replaced with `exit 0` fails its control while `make gates` still exits 0, and a script added
   with no map entry fails the test.
-- [ ] 7.3 VERIFY: Confirm the copy set is unchanged after the run by comparing its own
+- [x] 7.3 VERIFY: Confirm the copy set is unchanged after the run by comparing its own
   before/after digest — **not** `git status --porcelain`, which is a false red on any dirty
   working tree and so would fail during ordinary implementation. The crate already carries
   `testutil::snapshot` for exactly this comparison.
-- [ ] 7.4 REFACTOR: If the per-plant tree copy dominates the suite's runtime, share one
+- [x] 7.4 REFACTOR: If the per-plant tree copy dominates the suite's runtime, share one
   scratch copy and revert between plants; the requirement is the real tree unmodified, not one
   copy per plant.
 
