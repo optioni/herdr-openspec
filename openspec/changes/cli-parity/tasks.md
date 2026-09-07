@@ -43,10 +43,10 @@
 ## 4. `parse_apply` refuses an illegal `schemaName`
 <!-- kind: behavior -->
 
-- [ ] 4.1 RED: Add `from_cli` tests for a payload carrying `"schemaName": "../../../../etc"` among two good changes, and a table-driven test over `"   "`, `"."`, `".."`, `"a/b"`, `"a\\b"`, an absolute path, the accepted `spec-driven` and `spec-driven.v2`, the trimmed `" tdd "`, and `""` through the existing missing-field branch. Assert the change drops, one problem names it and the value, no `schema which` invocation is recorded, and the string reaches no `Change::schema`.
+- [x] 4.1 RED: Add `from_cli` tests for a payload carrying `"schemaName": "../../../../etc"` among two good changes, and a table-driven test over `"   "`, `"."`, `".."`, `"a/b"`, `"a\\b"`, an absolute path, the accepted `spec-driven` and `spec-driven.v2`, the trimmed `" tdd "`, and `""` through the existing missing-field branch. Assert the change drops, one problem names it and the value, no `schema which` invocation is recorded, and the string reaches no `Change::schema`.
   - HEAD evidence: `grep -c 'is_legal_name' src/changes.rs` → `0` (exit 1) — no guard exists on this path.
-- [ ] 4.2 GREEN: Apply `schema::is_legal_name` in `parse_apply`'s `schemaName` read and store the trimmed value, returning the existing per-change parse failure with a message naming the rejected value.
-- [ ] 4.3 Run the group tests — `cargo test changes::tests::from_cli` — no regressions in the four existing per-change failure scenarios. No refactor was needed: the guard replaces one predicate inside an existing helper.
+- [x] 4.2 GREEN: Apply `schema::is_legal_name` in `parse_apply`'s `schemaName` read and store the trimmed value, returning the existing per-change parse failure with a message naming the rejected value.
+- [x] 4.3 Run the group tests — `cargo test changes::tests::from_cli` — no regressions in the four existing per-change failure scenarios. No refactor was needed: the guard replaces one predicate inside an existing helper.
 
 ## 5. Every diagnostic the seam carried reaches the problem row
 <!-- kind: behavior -->
