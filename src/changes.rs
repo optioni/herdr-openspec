@@ -3535,6 +3535,51 @@ mod tests {
         assert_eq!(proposal.paths.len(), 1);
     }
 
+    #[test]
+    fn a_wrong_typed_tracks_counts_tasks_md_the_same_pair_the_cli_reports() {
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        write(
+            &repo.join("openspec/schemas/tdd/schema.yaml"),
+            "\
+name: tdd
+artifacts:
+  - id: tasks
+    generates: tasks/**/*.md
+apply:
+  tracks: 42
+",
+        );
+        write_project_config(&repo, "tdd");
+        write(
+            &repo.join("openspec/changes/add-auth/tasks/a.md"),
+            "- [x] a\n- [x] b\n",
+        );
+        write(
+            &repo.join("openspec/changes/add-auth/tasks/b.md"),
+            "- [ ] a\n- [ ] b\n",
+        );
+
+        let set = from_files(&repo, 5);
+        assert_eq!(set.active.len(), 1);
+        let change = &set.active[0];
+        assert_eq!(
+            change.progress,
+            crate::tasks::Progress {
+                completed: 0,
+                total: 0,
+            }
+        );
+        assert_ne!(
+            change.progress,
+            crate::tasks::Progress {
+                completed: 2,
+                total: 4,
+            }
+        );
+        assert!(change.artifacts.iter().all(|a| !a.tracks_tasks));
+    }
+
     // --- group 2: `parse_list` — the list envelope (`mod list_json`) -------
 
     mod list_json {
