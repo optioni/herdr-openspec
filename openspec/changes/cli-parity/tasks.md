@@ -27,11 +27,11 @@
 ## 2. `schema::load` rejects a name it cannot legally join
 <!-- kind: behavior -->
 
-- [ ] 2.1 RED: Add three `schema::load` tests — a traversing name (`../../../../etc`) asserting the returned variant is the illegal-name one and **not** `NotVendored`, with a `testutil::snapshot` of the scratch tree before and after; the eight rejected shapes plus the accepted `spec-driven.v2`; and a load of this repository's vendored `tdd` asserting its artifacts in file order.
+- [x] 2.1 RED: Add three `schema::load` tests — a traversing name (`../../../../etc`) asserting the returned variant is the illegal-name one and **not** `NotVendored`, with a `testutil::snapshot` of the scratch tree before and after; the eight rejected shapes plus the accepted `spec-driven.v2`; and a load of this repository's vendored `tdd` asserting its artifacts in file order.
   - HEAD evidence: `grep -rn 'fn .*illegal_name' src/ tests/` → 0 matches (exit 1); `sed -n '428,430p' src/schema.rs` shows `load` joining `name` with no guard.
-- [ ] 2.2 GREEN: Add the `LoadError` variant for an illegal name (design.md → D3) and the `is_legal_name` guard at the top of `load`, before any join. Extend `load_error_problem` to render it.
-- [ ] 2.3 GREEN: Update the two compiler-enforced `LoadError` matches — `schema::load_error_problem` (`src/schema.rs:436`) and `changes::schema_load_problem` (`src/changes.rs:937`). These are the only two `cargo check` will flag; `resolve_cli_schema_uncached`'s catch-all is group 3's job.
-- [ ] 2.4 Run the group tests — `cargo test schema::tests::` — and confirm `cargo build` reports no non-exhaustive match. No refactor was needed: the guard is one early return and the variant is additive.
+- [x] 2.2 GREEN: Add the `LoadError` variant for an illegal name (design.md → D3) and the `is_legal_name` guard at the top of `load`, before any join. Extend `load_error_problem` to render it.
+- [x] 2.3 GREEN: Update the two compiler-enforced `LoadError` matches — `schema::load_error_problem` (`src/schema.rs:436`) and `changes::schema_load_problem` (`src/changes.rs:937`). These are the only two `cargo check` will flag; `resolve_cli_schema_uncached`'s catch-all is group 3's job.
+- [x] 2.4 Run the group tests — `cargo test schema::tests::` — and confirm `cargo build` reports no non-exhaustive match. No refactor was needed: the guard is one early return and the variant is additive.
 
 ## 3. The CLI fallback tier's illegal-name branch is made explicit
 <!-- kind: refactor -->
