@@ -47,8 +47,22 @@ rises in what it measures, not falls.
 
 ## Boundaries
 
-This change touches no module of the crate's production code. Its subjects are the
-verification machinery and the documents describing it:
+This change touches no module of the crate's production code, with **one measured
+deviation**: `src/watch.rs`'s `pub fn start` was split into a thin production delegation
+plus `start_with(root, new_watcher)`, the watcher constructor taken as an injected
+parameter. `pub fn start` has two `Err` arms that both report "filesystem watch
+unavailable" (task 6.5), and the degraded-coverage spec requires a test that actually
+drives each — a `covers` range that resolves textually still leaves open whether the arm
+ever RAN. The construction arm cannot be driven by any hermetic, portable test against the
+real `notify` crate: its macOS FSEvents backend returns `Ok` unconditionally, so no
+combination of a bad path or a starved process ever reaches it on this platform. The
+injected-constructor form follows the crate's own established convention for
+environment-dependent construction — `ui::read_artifact`, `config::env_lookup`, and
+`cli::npm_probe_hook` all take an injected lookup rather than being driven by starving the
+real environment (`AGENTS.md` → Conventions) — and preserves `start`'s own behaviour
+exactly: it is now `start_with(root, &|tx, cfg| notify::RecommendedWatcher::new(tx, cfg))`,
+nothing else. Every other subject below is verification machinery or the documents
+describing it, and no other file under `src/` changed:
 
 | Piece | Existing pattern it follows |
 |---|---|
