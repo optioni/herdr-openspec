@@ -230,6 +230,27 @@ fn changes_rs_contributes_its_real_production_body_not_76_lines() {
     );
 }
 
+/// gate-integrity Change Review (task 9.3), CRITICAL 5: what the REJECTED "first
+/// line-anchored `#[cfg(test)]`" cut (the one `READONLY-UI`, `NOBLOCK`, and `WIRED` use
+/// elsewhere in this repository - see `scripts/coverage-prod.py`'s own module doc,
+/// Decision 1a) would count as `rel_path`'s production line total: every line strictly
+/// above the file's first line-anchored `#[cfg(test)]`, or the whole file if it has none.
+/// Computed HERE, at test time, rather than transcribed as a hardcoded number - a
+/// transcribed threshold (`> 300`, `> 36`) drifts out of date as the file grows and the
+/// test keeps passing anyway under the very classifier it exists to reject, which is
+/// exactly what happened: `src/cli.rs`'s naive cut had drifted to 316, so `prod_instr > 300`
+/// passed even under the naive classifier this test means to discriminate against.
+fn naive_cut_prod_lines(rel_path: &str) -> usize {
+    let text = fs::read_to_string(manifest_dir().join(rel_path))
+        .unwrap_or_else(|e| panic!("read {rel_path}: {e}"));
+    for (i, line) in text.lines().enumerate() {
+        if line == "#[cfg(test)]" {
+            return i;
+        }
+    }
+    text.lines().count()
+}
+
 #[test]
 fn cli_rs_contributes_more_than_the_naive_cut() {
     let report = synthetic_all_covered_report("src/cli.rs");
@@ -244,12 +265,15 @@ fn cli_rs_contributes_more_than_the_naive_cut() {
         extents >= 10,
         "expected at least 10 #[cfg(test)] extents in src/cli.rs, found {extents}:\n{out}"
     );
-    // The naive cut takes everything before line 317 as production (~300 lines) and
-    // discards the rest; the real production body extends past the test modules too.
+    // The naive cut takes everything above the file's first line-anchored #[cfg(test)] as
+    // production and discards the rest; the real production body extends past the test
+    // modules too. The threshold is the naive cut's OWN measurement, not a transcribed
+    // number, so it cannot silently drift stale under the classifier it discriminates.
+    let naive_cut = naive_cut_prod_lines("src/cli.rs");
     assert!(
-        prod_instr > 300,
-        "expected src/cli.rs's production line count to exceed the naive cut's ~300 lines; \
-         got {prod_instr}:\n{out}"
+        prod_instr as usize > naive_cut,
+        "expected src/cli.rs's production line count to exceed the naive cut's {naive_cut} \
+         lines; got {prod_instr}:\n{out}"
     );
 }
 
@@ -267,15 +291,16 @@ fn lib_rs_contributes_more_than_the_naive_cut() {
         extents >= 2,
         "expected at least 2 #[cfg(test)] extents in src/lib.rs, found {extents}:\n{out}"
     );
-    // The naive cut takes everything before line 37 (`mod testutil`) as production; the
-    // real body includes every production module declared after it (`pub mod changes`,
-    // `pub mod cli`, ... at lines 9-20, all before line 37, plus `pid()` at line ~30).
-    // The point of this test is that the classifier does not stop at the naive cut's
-    // ~36 lines once a later, larger `#[cfg(test)]` module (line 987) is also present.
+    // The naive cut takes everything above the file's first line-anchored #[cfg(test)]
+    // (`mod testutil`) as production; the real body includes every production module
+    // declared after it too. The threshold is the naive cut's OWN measurement, not a
+    // transcribed number, so it cannot silently drift stale under the classifier it
+    // discriminates.
+    let naive_cut = naive_cut_prod_lines("src/lib.rs");
     assert!(
-        prod_instr > 36,
-        "expected src/lib.rs's production line count to exceed the naive cut's ~36 lines; \
-         got {prod_instr}:\n{out}"
+        prod_instr as usize > naive_cut,
+        "expected src/lib.rs's production line count to exceed the naive cut's {naive_cut} \
+         lines; got {prod_instr}:\n{out}"
     );
 }
 
@@ -461,6 +486,14 @@ fn covers_ranges_all_covered_pass() {
         &fixture("degraded-coverage-two-rows.toml"),
     );
     assert!(ok, "expected both healthy covers ranges to pass:\n{out}");
+    // gate-integrity Change Review (task 9.3), CRITICAL 6: `ok` alone survives replacing
+    // scripts/coverage-prod.py with `sys.exit(0)` - this was the only test in the suite
+    // that did. Assert the checker's own DEGRADED-COVERS line and counts, the way
+    // `healthy_report_passes` above already asserts its own "COVERAGE-PROD OK" line.
+    assert!(
+        out.contains("COVERAGE-PROD DEGRADED-COVERS OK: 2 row(s), 2 range(s)"),
+        "expected the degraded-covers OK line naming 2 rows and 2 ranges:\n{out}"
+    );
 }
 
 /// The scenario the requirement is written to force: a fixture report with one row's
