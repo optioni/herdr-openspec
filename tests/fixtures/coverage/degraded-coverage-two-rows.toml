@@ -1,0 +1,21 @@
+# A minimal, checked-in stand-in for tests/degraded-coverage.toml, used only by
+# tests/coverage_prod.rs to drive scripts/coverage-prod.py's covers-range check against
+# small, controlled fixtures rather than the real (large) map. Two rows, each with one
+# `covers` range into tests/fixtures/coverage/src/sample.rs — `add`'s body (lines 1-2) and
+# `sub`'s body (lines 5-6).
+
+[[row]]
+condition = "Fixture: add is exercised"
+tier = "unit"
+proof = ["fixture_proof"]
+verdict = "confirmed"
+why = "fixture row for coverage_prod.rs's covers-range tests"
+covers = ["tests/fixtures/coverage/src/sample.rs:1-2"]
+
+[[row]]
+condition = "Fixture: sub is exercised"
+tier = "unit"
+proof = ["fixture_proof"]
+verdict = "confirmed"
+why = "fixture row for coverage_prod.rs's covers-range tests"
+covers = ["tests/fixtures/coverage/src/sample.rs:5-6"]

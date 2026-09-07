@@ -1,0 +1,20 @@
+# A fixture map for coverage_prod.rs's "the range check cannot pass vacuously" scenario:
+# two rows, but only one contributes a `covers` range — the other's array is empty. Total
+# ranges (1) is fewer than total rows (2), which the checker SHALL refuse rather than
+# silently reporting the one range it does have as full coverage.
+
+[[row]]
+condition = "Fixture: add is exercised"
+tier = "unit"
+proof = ["fixture_proof"]
+verdict = "confirmed"
+why = "fixture row for coverage_prod.rs's covers-range tests"
+covers = ["tests/fixtures/coverage/src/sample.rs:1-2"]
+
+[[row]]
+condition = "Fixture: sub is exercised, but its covers array was dropped"
+tier = "unit"
+proof = ["fixture_proof"]
+verdict = "confirmed"
+why = "fixture row for coverage_prod.rs's covers-range tests"
+covers = []

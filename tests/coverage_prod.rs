@@ -26,14 +26,45 @@ fn fixtures_dir() -> PathBuf {
 
 /// Runs the checker against `report`, with an optional `PROD_MIN` override. Returns
 /// whether it exited 0 and the combined stdout+stderr text.
+///
+/// Always sets `SKIP_DEGRADED_COVERS=1` — gate-integrity task 6.4's addition, the
+/// `covers`-range check, reads `tests/degraded-coverage.toml` by default (there is no
+/// per-test fixture map otherwise), and every test above this comment drives the checker
+/// with a small, ad hoc report that names none of that real map's `src/*.rs` files. Without
+/// the skip, every one of them would fail on the covers check rather than on whatever the
+/// test itself means to exercise. `run_checker_with_covers_toml` below is the one function
+/// that does NOT set it, for exactly the tests that mean to exercise that check. The real
+/// `make coverage` invocation never sets this variable, so the covers check is unconditional
+/// there — the spec's own requirement.
 fn run_checker(report: &Path, prod_min: Option<&str>) -> (bool, String) {
     let mut cmd = Command::new("python3");
     cmd.arg(script_path())
         .arg(report)
+        .env("SKIP_DEGRADED_COVERS", "1")
         .current_dir(manifest_dir());
     if let Some(min) = prod_min {
         cmd.env("PROD_MIN", min);
     }
+    let output = cmd
+        .output()
+        .unwrap_or_else(|e| panic!("failed to spawn python3 {}: {e}", script_path().display()));
+    let mut combined = String::from_utf8_lossy(&output.stdout).into_owned();
+    combined.push_str(&String::from_utf8_lossy(&output.stderr));
+    (output.status.success(), combined)
+}
+
+/// Runs the checker against `report`, pointed at `toml_path` via `DEGRADED_COVERAGE_TOML`
+/// (task 6.4's override, on `PROD_MIN`'s own terms) rather than the real
+/// `tests/degraded-coverage.toml`, and with the production floor disabled (`PROD_MIN=0`) so
+/// only the covers-range check can fail these tests. Used by the covers-range scenarios
+/// below, never by the production-floor tests above.
+fn run_checker_with_covers_toml(report: &Path, toml_path: &Path) -> (bool, String) {
+    let mut cmd = Command::new("python3");
+    cmd.arg(script_path())
+        .arg(report)
+        .env("PROD_MIN", "0")
+        .env("DEGRADED_COVERAGE_TOML", toml_path)
+        .current_dir(manifest_dir());
     let output = cmd
         .output()
         .unwrap_or_else(|e| panic!("failed to spawn python3 {}: {e}", script_path().display()));
@@ -291,5 +322,90 @@ fn raising_the_floor_above_measurement_fails() {
     assert!(
         !ok,
         "expected a floor above the measured figure to fail:\n{out}"
+    );
+}
+
+// --- gate-integrity task 6.3b/6.4: the `covers`-range check -------------------------------
+
+/// Two rows' worth of `covers` ranges, both healthy in `healthy.json`, must pass.
+#[test]
+fn covers_ranges_all_covered_pass() {
+    let (ok, out) = run_checker_with_covers_toml(
+        &fixture("healthy.json"),
+        &fixture("degraded-coverage-two-rows.toml"),
+    );
+    assert!(ok, "expected both healthy covers ranges to pass:\n{out}");
+}
+
+/// The scenario the requirement is written to force: a fixture report with one row's
+/// `covers` range zeroed (here, `sub`'s lines 5-6 — `add`'s lines 1-2 stay covered) must
+/// fail, naming that row's own `condition` in the failure message.
+#[test]
+fn a_zeroed_covers_range_fails_naming_the_row_condition() {
+    let (ok, out) = run_checker_with_covers_toml(
+        &fixture("degraded_covers_one_zeroed.json"),
+        &fixture("degraded-coverage-two-rows.toml"),
+    );
+    assert!(
+        !ok,
+        "expected the zeroed range to fail the covers check:\n{out}"
+    );
+    assert!(
+        out.contains("Fixture: sub is exercised"),
+        "the failure must name the row whose range is cold:\n{out}"
+    );
+    assert!(
+        !out.contains("Fixture: add is exercised"),
+        "the still-covered row must not be named as a failure:\n{out}"
+    );
+}
+
+/// A row whose `covers` array is empty must fail rather than silently reporting the map's
+/// one remaining range as full coverage — the same reduction "fewer ranges than rows"
+/// below states as a floor.
+#[test]
+fn an_empty_covers_array_fails_vacuously() {
+    let (ok, out) = run_checker_with_covers_toml(
+        &fixture("healthy.json"),
+        &fixture("degraded-coverage-empty-covers.toml"),
+    );
+    assert!(
+        !ok,
+        "expected an empty covers array to fail rather than pass vacuously:\n{out}"
+    );
+}
+
+/// A report naming none of the map's `covers` paths at all must fail every row, not
+/// report 100% of nothing.
+#[test]
+fn a_report_naming_none_of_the_covers_paths_fails() {
+    let (ok, out) = run_checker_with_covers_toml(
+        &fixture("no_src.json"),
+        &fixture("degraded-coverage-two-rows.toml"),
+    );
+    assert!(
+        !ok,
+        "expected a report naming none of the ranges' paths to fail:\n{out}"
+    );
+    assert!(
+        out.contains("Fixture: add is exercised") || out.contains("no such file"),
+        "the failure must come from the covers check itself, not merely the unrelated \
+         \"no file under src/\" floor check that also fires on this report: {out:?}"
+    );
+}
+
+/// The map itself holding fewer `covers` ranges than `[[row]]` entries — dropping a range —
+/// is exactly what `degraded-coverage-empty-covers.toml` does (two rows, one range): this
+/// asserts the failure fires on the count mismatch, independent of the empty-array wording
+/// above.
+#[test]
+fn fewer_ranges_than_rows_fails() {
+    let (ok, out) = run_checker_with_covers_toml(
+        &fixture("healthy.json"),
+        &fixture("degraded-coverage-empty-covers.toml"),
+    );
+    assert!(
+        !ok,
+        "expected fewer covers ranges than rows to fail:\n{out}"
     );
 }
