@@ -5310,7 +5310,7 @@ apply:
                 Err(CliError::NotStarted {
                     program: "openspec".to_string(),
                     args: vec!["list".to_string(), "--json".to_string()],
-                    reason: "No such file or directory".to_string(),
+                    reason: "No such file or directory (os error 2)".to_string(),
                 }),
             );
             let result = from_cli(&fake, &repo);
@@ -5318,6 +5318,39 @@ apply:
             assert_eq!(result.problems.len(), 1);
             assert!(result.problems[0].contains("openspec"));
             assert!(result.problems[0].contains("list"));
+            assert!(result.problems[0].contains("No such file or directory (os error 2)"));
+        }
+
+        #[test]
+        fn two_different_spawn_failures_produce_two_different_problems() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+
+            let not_started = |reason: &str| {
+                Err(CliError::NotStarted {
+                    program: "openspec".to_string(),
+                    args: vec!["list".to_string(), "--json".to_string()],
+                    reason: reason.to_string(),
+                })
+            };
+
+            let fake_a = FakeCli::new();
+            fake_a.register_openspec(
+                &["list", "--json"],
+                not_started("No such file or directory (os error 2)"),
+            );
+            let result_a = from_cli(&fake_a, &repo);
+
+            let fake_b = FakeCli::new();
+            fake_b.register_openspec(
+                &["list", "--json"],
+                not_started("Exec format error (os error 8)"),
+            );
+            let result_b = from_cli(&fake_b, &repo);
+
+            assert_eq!(result_a.problems.len(), 1);
+            assert_eq!(result_b.problems.len(), 1);
+            assert_ne!(result_a.problems[0], result_b.problems[0]);
         }
 
         #[test]
