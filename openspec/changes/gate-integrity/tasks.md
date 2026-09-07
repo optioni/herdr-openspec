@@ -150,20 +150,20 @@ Test Strategy). Written first, it is RED for exactly the five gates this change 
 ## 3. Type-shaped write pattern (G3)
 <!-- kind: behavior -->
 
-- [ ] 3.1 CHECK: Confirm the widened pattern is green before widening. Run
+- [x] 3.1 CHECK: Confirm the widened pattern is green before widening. Run
   `for f in $(find src/ui -name '*.rs') src/watch.rs src/refresh.rs src/agents.rs src/launch.rs src/open.rs; do awk 'BEGIN{p=1} /^#\[cfg\(test\)\]$/{p=0} p{print}' "$f" | grep -nE 'File::options|DirBuilder|create_new'; done`
   → **no output** at HEAD, so the repair turns nothing red.
-- [ ] 3.2 RED: Confirm `readonly-ui.sh`'s control fails — the `File::options` and `DirBuilder`
+- [x] 3.2 RED: Confirm `readonly-ui.sh`'s control fails — the `File::options` and `DirBuilder`
   plants in `ui::read_artifact` and in `src/launch.rs` exit 0 today (recorded, task 0.3).
-- [ ] 3.3 GREEN: Add `File::options`, `DirBuilder`, and `create_new` to `WRITE_RE`.
-- [ ] 3.4 GREEN: Give each added alternative a positive control, since `READONLY-UI` already
+- [x] 3.3 GREEN: Add `File::options`, `DirBuilder`, and `create_new` to `WRITE_RE`.
+- [x] 3.4 GREEN: Give each added alternative a positive control, since `READONLY-UI` already
   treats an unmatched pattern as a gate failure and Guard B is one `grep -qE` over the whole
   alternation — which passes while any branch matches. Measured, `src/state.rs`'s production
   slice matches four existing branches (`241 fs::create_dir`, `260 fs::write`,
   `261 fs::rename`, `268 fs::remove_`) and **none** of `File::options`, `DirBuilder`, or
   `create_new`; no file in the tree contains them. Each added alternative therefore needs its
   own control fixture rather than a shared grep over `src/state.rs`.
-- [ ] 3.5 VERIFY: `make gates` exits 0 and `READONLY-UI`'s `OK` line reports both controls
+- [x] 3.5 VERIFY: `make gates` exits 0 and `READONLY-UI`'s `OK` line reports both controls
   matched. Run the group tests — no regressions.
 
 ## 4. Directory-wide non-blocking sweep (G4)
