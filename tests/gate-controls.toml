@@ -1,0 +1,378 @@
+# The executable positive-control map for every script under scripts/gates/.
+#
+# See openspec/changes/gate-integrity/design.md -> Test Strategy and -> Decision 6/6a, and
+# openspec/changes/gate-integrity/specs/quality-gates/spec.md -> "Every gate's positive
+# control is executed, not attested". tests/gate_controls.rs is what runs this table: for
+# every [[control]] it copies the repository tree to a scratch directory, asserts the named
+# gate script exits 0 UNPLANTED, applies the recorded plant, and asserts the gate now exits
+# non-zero and its own output names `expect`.
+#
+# This is the outer-loop acceptance test for the whole gate-integrity change. At the time
+# this file was first written (task group 0), five of these entries are known to FAIL —
+# the gate they name still reports success on the exact defect it exists to catch. That is
+# the change's own starting RED, and groups 2-5 repair the named scripts to turn each GREEN
+# without touching this file's plants. Nothing here should ever be loosened to make a
+# failure disappear; a script gets fixed, not a control.
+#
+# Field reference, one [[control]] per row:
+#   id             a short, unique label for this control (distinct even when several
+#                  entries share the same `script`, as scripts/gates/wired.sh does here)
+#   script         the file name under scripts/gates/ this control exercises
+#   interpreter    "sh" (default) or "python3" — how the script is invoked
+#   env            the invocation prefix the `gates:` recipe uses for this subject, written
+#                  exactly as it appears on that Makefile line (e.g. "env -u GRAPH_WRITE",
+#                  "SCAN_MIN=135"), or empty for a bare invocation
+#   needs_git      true when the scratch copy must be `git init && git add -A && git
+#                  commit`-ed before the baseline run — openspec-untouched.sh only
+#                  (design.md -> Decision 6a)
+#   cargo          true for the two gates that invoke cargo (deps.sh, build-graph.sh) — the
+#                  scratch run is pointed at the real target/ via CARGO_TARGET_DIR, measured
+#                  at implementation time to cost well under a second per run and therefore
+#                  NOT marked #[ignore] (design.md -> Decision 6a's contingency)
+#   plant_kind     "edit" (default; find/replace inside an existing file) or "create" (write
+#                  a brand-new file — openspec-untouched.sh's untracked-file plant only)
+#   plant_file     path, relative to the repository root, the plant is applied to
+#   plant_find     (edit only) the exact substring located and replaced — its absence is a
+#                  harness error, distinct from the gate not catching the plant
+#   plant_replace  (edit only) what replaces plant_find; empty for a pure deletion
+#   plant_content  (create only) the new file's contents
+#   expect         a fragment of the gate script's own FAIL: message — chosen from what the
+#                  script itself would print if it caught the plant, per design.md -> Risks
+#                  ("chosen from each script's own FAIL: message ... rather than from grep's
+#                  or awk's output")
+#   why            one line recording what the plant demonstrates
+
+[[control]]
+id = "agentseam-spawn"
+script = "agentseam.sh"
+plant_file = "src/agents.rs"
+plant_find = "//! The Herdr agent poller: the crate's second worker thread. Confined to this one"
+plant_replace = '''//! The Herdr agent poller: the crate's second worker thread. Confined to this one
+use std::process::Command as PlantedAgentSeamCommand;'''
+expect = "AGENTSEAM FAIL (leg 1)"
+why = "a spawn API named directly in src/agents.rs must fail leg 1's file-scoped restatement of NOSPAWN-GREP"
+
+[[control]]
+id = "build-graph-snapshot"
+script = "build-graph.sh"
+env = "env -u GRAPH_WRITE"
+cargo = true
+plant_file = "tests/fixtures/build-graph.txt"
+plant_find = "## aarch64-apple-darwin"
+plant_replace = "## aarch64-apple-darwin\nplanted-bogus-package v0.0.0"
+expect = "GRAPH-SNAP FAIL: graph differs from the snapshot"
+why = "a package the real resolution never produced must fail the snapshot diff"
+
+[[control]]
+id = "deps-features"
+script = "deps.sh"
+cargo = true
+plant_file = "Cargo.toml"
+plant_find = 'toml = { version = "1.1.5", default-features = false, features = ["std", "parse", "display", "serde"] }'
+plant_replace = 'toml = { version = "1.1.5", default-features = false, features = ["parse", "display", "serde"] }'
+expect = "DEPS FAIL: leg 2a"
+why = "dropping a declared feature from the manifest must fail leg 2a's exact-features assertion"
+
+[[control]]
+id = "detailwidths-missing"
+script = "detailwidths.sh"
+plant_file = "src/ui/detail.rs"
+plant_find = "//! The detail region's grammar: plain data, with no I/O API and no"
+plant_replace = '''//! The detail region's grammar: plain data, with no I/O API and no
+#[test]
+fn planted_missing_widths() {
+    let _ = 1;
+}'''
+expect = "DETAILWIDTHS FAIL: these detail tests do not name both 58 and 78"
+why = "a #[test] naming neither mandated width must fail the width floor"
+
+[[control]]
+id = "gate-mech1-default"
+script = "gate-mech1.py"
+interpreter = "python3"
+plant_file = "src/changes.rs"
+plant_find = "//! Turning `openspec/changes/` on disk into the `Change` values every"
+plant_replace = '''//! Turning `openspec/changes/` on disk into the `Change` values every
+impl Default for Change {
+    fn default() -> Self {
+        unreachable!()
+    }
+}'''
+expect = "GATE-MECH1 FAIL (half A): Default reachable for a Change type"
+why = "an impl Default for one of the four gated types must fail half A anywhere under src/"
+
+[[control]]
+id = "launchseam-spawn"
+script = "launchseam.sh"
+plant_file = "src/launch.rs"
+plant_find = "//! The launcher: the crate's third worker thread, and the only module besides `src/cli.rs`,"
+plant_replace = '''//! The launcher: the crate's third worker thread, and the only module besides `src/cli.rs`,
+use std::process::Command as PlantedLaunchSeamCommand;'''
+expect = "LAUNCHSEAM FAIL (leg 1)"
+why = "a spawn API named directly in src/launch.rs must fail leg 1's file-scoped restatement of NOSPAWN-GREP"
+
+[[control]]
+id = "listwidths-missing"
+script = "listwidths.sh"
+plant_file = "src/ui/list.rs"
+plant_find = "//! The row grammar: every function here is a pure total transformation,"
+plant_replace = '''//! The row grammar: every function here is a pure total transformation,
+#[test]
+fn planted_missing_widths() {
+    let _ = 1;
+}'''
+expect = "LISTWIDTHS FAIL: these row-grammar tests do not name both 38 and 58"
+why = "a #[test] naming neither mandated width must fail the width floor"
+
+[[control]]
+id = "mdseam-outside"
+script = "mdseam.sh"
+plant_file = "src/ui/list.rs"
+plant_find = "//! The row grammar: every function here is a pure total transformation,"
+plant_replace = '''//! The row grammar: every function here is a pure total transformation,
+// pulldown_cmark mentioned outside markdown.rs'''
+expect = "MDSEAM FAIL: the markdown parser is named outside"
+why = "naming pulldown_cmark outside src/ui/markdown.rs must fail the confinement sweep"
+
+[[control]]
+id = "mdwidths-missing"
+script = "mdwidths.sh"
+plant_file = "src/ui/markdown.rs"
+plant_find = "//! Markdown source to plain-data lines of faced segments, parameterised by"
+plant_replace = '''//! Markdown source to plain-data lines of faced segments, parameterised by
+#[test]
+fn planted_missing_widths() {
+    let _ = 1;
+}'''
+expect = "MDWIDTHS FAIL: these markdown tests do not name both 58 and 78"
+why = "a #[test] naming neither mandated width must fail the width floor"
+
+[[control]]
+id = "noblock-app-blocking"
+script = "noblock.sh"
+plant_file = "src/ui/app.rs"
+plant_find = "//! `Dashboard`, `Route`, and pure key handling. See"
+plant_replace = '''//! `Dashboard`, `Route`, and pure key handling. See
+fn planted_block(m: &std::sync::Mutex<()>, rx: &std::sync::mpsc::Receiver<()>) {
+    let _g = m.lock().unwrap();
+    rx.recv().unwrap();
+}'''
+expect = "NOBLOCK FAIL"
+why = "G4: leg 1 reads only src/ui/driver.rs, so a blocking recv-behind-a-lock in src/ui/app.rs is invisible to every leg; recorded as the ideal message this gate does not yet print"
+
+[[control]]
+id = "nocli-shell-hit"
+script = "nocli-shell.sh"
+plant_file = "src/ui/list.rs"
+plant_find = "//! The row grammar: every function here is a pure total transformation,"
+plant_replace = '''//! The row grammar: every function here is a pure total transformation,
+// HerdrCli mentioned here'''
+expect = "NOCLI-SHELL FAIL: the shell names the CLI seam"
+why = "naming the CLI seam under src/ui/ must fail the shell-shape check"
+
+[[control]]
+id = "nodefault-ui-dashboard"
+script = "nodefault-ui.sh"
+env = "SCAN_MIN=135"
+plant_file = "src/ui/app.rs"
+plant_find = "//! `Dashboard`, `Route`, and pure key handling. See"
+plant_replace = '''//! `Dashboard`, `Route`, and pure key handling. See
+impl Default for Dashboard {
+    fn default() -> Self {
+        unimplemented!()
+    }
+}'''
+expect = "NODEFAULT-UI FAIL: Dashboard has a Default"
+why = "an impl Default for Dashboard must fail half A"
+
+[[control]]
+id = "noio-view-hit"
+script = "noio-view.sh"
+plant_file = "src/ui/list.rs"
+plant_find = "//! The row grammar: every function here is a pure total transformation,"
+plant_replace = '''//! The row grammar: every function here is a pure total transformation,
+fn planted_io() {
+    let _ = std::fs::read_to_string("x");
+}'''
+expect = "NOIO-VIEW FAIL: I/O API in a pure view file"
+why = "an I/O API named in one of the eight pure files must fail the sweep"
+
+[[control]]
+id = "nojson-seam-hit"
+script = "nojson-seam.sh"
+plant_file = "src/cli.rs"
+plant_find = "//! The subprocess seam: `cli` is the only module in this crate permitted to"
+plant_replace = '''//! The subprocess seam: `cli` is the only module in this crate permitted to
+// serde_json mentioned here'''
+expect = "NOJSON-SEAM FAIL: serde_json in src/cli.rs"
+why = "naming serde_json in src/cli.rs must fail the seam's stdout-verbatim claim"
+
+[[control]]
+id = "nolit-change-hit"
+script = "nolit-change.sh"
+plant_file = "src/ui/list.rs"
+plant_find = "//! The row grammar: every function here is a pure total transformation,"
+plant_replace = '''//! The row grammar: every function here is a pure total transformation,
+fn planted_change() -> crate::changes::Change {
+    crate::changes::Change { }
+}'''
+expect = "NOLIT-CHANGE FAIL: a Change/ChangeSet literal outside src/changes.rs"
+why = "a Change{} literal outside src/changes.rs must fail the confinement sweep"
+
+[[control]]
+id = "noraw-grep-hit"
+script = "noraw-grep.sh"
+plant_file = "src/ui/list.rs"
+plant_find = "//! The row grammar: every function here is a pure total transformation,"
+plant_replace = '''//! The row grammar: every function here is a pure total transformation,
+// enable_raw_mode mentioned here'''
+expect = "NORAW FAIL: terminal-mode function outside src/ui/terminal.rs"
+why = "a terminal-mode function named outside src/ui/terminal.rs must fail the confinement sweep"
+
+[[control]]
+id = "nosleep-unguarded"
+script = "nosleep.sh"
+plant_file = "src/ui/list.rs"
+plant_find = "//! The row grammar: every function here is a pure total transformation,"
+plant_replace = '''//! The row grammar: every function here is a pure total transformation,
+fn planted_sleep() {
+    std::thread::sleep(std::time::Duration::from_millis(1));
+}'''
+expect = "NOSLEEP FAIL: sleep outside a deadline-bounded poll"
+why = "a sleep with no deadline-bounded loop around it must fail leg 1's repository-wide scan"
+
+[[control]]
+id = "nospawn-grep-alias"
+script = "nospawn-grep.sh"
+plant_file = "src/ui/mod.rs"
+plant_find = "//! The dashboard shell: composition root for the render seam. See"
+plant_replace = '''//! The dashboard shell: composition root for the render seam. See
+use std::process::{Child, Command as PlantedProc};
+fn planted_spawn() -> std::io::Result<Child> {
+    PlantedProc::new(concat!("her", "dr")).spawn()
+}'''
+expect = "NOSPAWN FAIL: spawn API outside"
+why = "G2: a brace-grouped aliased import matches none of process::Command, Command::new, Stdio; recorded as the ideal message this gate does not yet print"
+
+[[control]]
+id = "notabseam-hit"
+script = "notabseam.sh"
+plant_file = "src/ui/detail.rs"
+plant_find = "//! The detail region's grammar: plain data, with no I/O API and no"
+plant_replace = '''//! The detail region's grammar: plain data, with no I/O API and no
+// ratatui::Frame mentioned here'''
+expect = "NOTABSEAM FAIL: src/ui/detail.rs names a ratatui type"
+why = "a ratatui type named in src/ui/detail.rs must fail the plain-data-grammar check"
+
+[[control]]
+id = "nowaiver-hit"
+script = "nowaiver.sh"
+plant_file = "src/ui/list.rs"
+plant_find = "//! The row grammar: every function here is a pure total transformation,"
+# The forbidden phrase itself is written with the %%DASHDASH%% placeholder (expanded to
+# "--" only when the harness applies the plant) so that THIS FILE, swept by nowaiver.sh's
+# own extension-less "Makefile .github/workflows src tests" search, does not trip the very
+# gate it is testing before the plant is ever applied.
+plant_replace = '''//! The row grammar: every function here is a pure total transformation,
+// %%DASHDASH%%ignore-filename-regex used here'''
+expect = "NOWAIVER FAIL: a coverage waiver entered the tree"
+why = "a coverage-waiver phrase anywhere under src/ must fail the waiver sweep"
+
+[[control]]
+id = "openspec-untouched-stray"
+script = "openspec-untouched.sh"
+needs_git = true
+plant_kind = "create"
+plant_file = "openspec/PLANTED_STRAY_FILE.txt"
+plant_content = "planted stray file\n"
+expect = "OPENSPEC-UNTOUCHED FAIL: an untracked file exists inside openspec/"
+why = "an untracked file inside openspec/ must fail the untracked-file sweep; the scratch copy needs its own git history for the gate's own git rev-parse to succeed at all (design.md -> Decision 6a)"
+
+[[control]]
+id = "readonly-ui-write"
+script = "readonly-ui.sh"
+plant_file = "src/ui/mod.rs"
+plant_find = "//! The dashboard shell: composition root for the render seam. See"
+plant_replace = '''//! The dashboard shell: composition root for the render seam. See
+fn planted_write(path: &std::path::Path) {
+    let _ = std::fs::File::options().append(true).open(path);
+    let _ = std::fs::DirBuilder::new().recursive(true).create(path);
+}'''
+expect = "READONLY-UI FAIL: a write API in production code under src/ui"
+why = "G3: WRITE_RE matches neither File::options() nor DirBuilder::new().create(); recorded as the ideal message this gate does not yet print"
+
+[[control]]
+id = "readseam-hit"
+script = "readseam.sh"
+plant_file = "src/ui/list.rs"
+plant_find = "//! The row grammar: every function here is a pure total transformation,"
+plant_replace = '''//! The row grammar: every function here is a pure total transformation,
+// read_to_string mentioned here'''
+expect = "READSEAM FAIL: read_to_string outside src/ui/mod.rs"
+why = "read_to_string named outside src/ui/mod.rs must fail the single-binding check"
+
+[[control]]
+id = "taskseam-hit"
+script = "taskseam.sh"
+plant_file = "src/ui/tasks.rs"
+plant_find = "//! The tracked-tasks tab's grammar: plain data, on exactly the terms"
+plant_replace = '''//! The tracked-tasks tab's grammar: plain data, on exactly the terms
+// ratatui::Frame mentioned here'''
+expect = "TASKSEAM FAIL: src/ui/tasks.rs names a ratatui type"
+why = "a ratatui type named in src/ui/tasks.rs must fail the plain-data-grammar check"
+
+[[control]]
+id = "taskwidths-missing"
+script = "taskwidths.sh"
+plant_file = "src/ui/tasks.rs"
+plant_find = "//! The tracked-tasks tab's grammar: plain data, on exactly the terms"
+plant_replace = '''//! The tracked-tasks tab's grammar: plain data, on exactly the terms
+#[test]
+fn planted_missing_widths() {
+    let _ = 1;
+}'''
+expect = "TASKWIDTHS FAIL: these tasks tests do not name both 58 and 78"
+why = "a #[test] naming neither mandated width must fail the width floor"
+
+[[control]]
+id = "watchseam-hit"
+script = "watchseam.sh"
+plant_file = "src/ui/list.rs"
+plant_find = "//! The row grammar: every function here is a pure total transformation,"
+plant_replace = '''//! The row grammar: every function here is a pure total transformation,
+// notify::RecommendedWatcher mentioned here'''
+expect = "WATCHSEAM FAIL: the watch crate is named outside src/watch.rs"
+why = "the notify crate named outside src/watch.rs must fail the confinement sweep"
+
+[[control]]
+id = "widths-missing"
+script = "widths.sh"
+plant_file = "src/ui/view.rs"
+plant_find = "//! The render seam's pure side: `render(frame, &Dashboard)`. Performs no"
+plant_replace = '''//! The render seam's pure side: `render(frame, &Dashboard)`. Performs no
+#[test]
+fn planted_missing_widths() {
+    let _ = 1;
+}'''
+expect = "WIDTHS FAIL: these view tests do not name both 60 and 120"
+why = "a #[test] naming neither mandated width must fail the width floor"
+
+[[control]]
+id = "wired-panic-hook-deleted"
+script = "wired.sh"
+plant_file = "src/ui/mod.rs"
+plant_find = '''
+    terminal::install_panic_hook();
+'''
+plant_replace = ""
+expect = "WIRED FAIL"
+why = "G5: no leg of this gate names install_panic_hook at all, so deleting the call site changes nothing it checks; recorded as the ideal message this gate does not yet print"
+
+[[control]]
+id = "wired-launch-comment"
+script = "wired.sh"
+plant_file = "src/ui/mod.rs"
+plant_find = "crate::launch::start("
+plant_replace = "/* crate::launch::start( is gone */ crate::launch::begin("
+expect = "WIRED FAIL"
+why = "code() only strips // line comments, not /* */ block comments, so hiding the real name inside a block comment while renaming the actual call still satisfies leg 1's substring search; recorded as the ideal message this gate does not yet print"
