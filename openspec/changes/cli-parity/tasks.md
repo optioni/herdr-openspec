@@ -17,12 +17,12 @@
 ## 1. A wrong-typed `apply.tracks` selects no tasks artifact
 <!-- kind: behavior -->
 
-- [ ] 1.1 RED: Rewrite `src/schema.rs`'s `a_tracks_value_of_the_wrong_type_falls_back_to_the_id` as `a_tracks_value_of_the_wrong_type_yields_no_tasks_artifact`, driving a sequence, the integer `42`, and a mapping against a fixture declaring `{id: tasks, generates: tasks.md}`, and asserting no tasks artifact plus exactly one problem naming the key. Confirm it fails on the assertion, not on fixture setup.
+- [x] 1.1 RED: Rewrite `src/schema.rs`'s `a_tracks_value_of_the_wrong_type_falls_back_to_the_id` as `a_tracks_value_of_the_wrong_type_yields_no_tasks_artifact`, driving a sequence, the integer `42`, and a mapping against a fixture declaring `{id: tasks, generates: tasks.md}`, and asserting no tasks artifact plus exactly one problem naming the key. Confirm it fails on the assertion, not on fixture setup.
   - HEAD evidence: `grep -n 'apply.tracks is not a string' src/schema.rs` → `314:` (exit 0), the `id_fallback` call the new test must stop reaching.
-- [ ] 1.2 RED: Add `a_wrong_typed_tracks_counts_tasks_md_the_same_pair_the_cli_reports` in `src/changes.rs`'s tests — a scratch change with `apply.tracks: 42`, artifact `{id: tasks, generates: tasks/**/*.md}`, `tasks/a.md` at 2/2, `tasks/b.md` at 0/2, no `tasks.md` — asserting `Progress { completed: 0, total: 0 }` and that no `ArtifactRef` carries `tracks_tasks`.
-- [ ] 1.3 GREEN: In `tasks_artifact`, replace the `None => id_fallback(...)` arm with one that records the wrong-typed problem and returns no artifact, leaving the null/absent/non-mapping branches on `id_fallback`.
-- [ ] 1.4 REFACTOR: Collapse `id_fallback`'s now-unused `extra` parameter if no caller still passes `Some`, or state that a caller still does and it stays.
-- [ ] 1.5 Run the group tests — `cargo test -- schema::tests:: changes::tests::a_wrong_typed_tracks` — no regressions in the six unchanged `tracks` scenarios.
+- [x] 1.2 RED: Add `a_wrong_typed_tracks_counts_tasks_md_the_same_pair_the_cli_reports` in `src/changes.rs`'s tests — a scratch change with `apply.tracks: 42`, artifact `{id: tasks, generates: tasks/**/*.md}`, `tasks/a.md` at 2/2, `tasks/b.md` at 0/2, no `tasks.md` — asserting `Progress { completed: 0, total: 0 }` and that no `ArtifactRef` carries `tracks_tasks`.
+- [x] 1.3 GREEN: In `tasks_artifact`, replace the `None => id_fallback(...)` arm with one that records the wrong-typed problem and returns no artifact, leaving the null/absent/non-mapping branches on `id_fallback`.
+- [x] 1.4 REFACTOR: Collapse `id_fallback`'s now-unused `extra` parameter if no caller still passes `Some`, or state that a caller still does and it stays.
+- [x] 1.5 Run the group tests — `cargo test -- schema::tests:: changes::tests::a_wrong_typed_tracks` — no regressions in the six unchanged `tracks` scenarios.
 
 ## 2. `schema::load` rejects a name it cannot legally join
 <!-- kind: behavior -->
