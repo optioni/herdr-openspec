@@ -268,10 +268,11 @@ library code, with `src/main.rs` limited to argument reading, stream writing, bl
 on stdin, and setting the exit status.
 
 This total is retained and SHALL NOT be lowered, but it is no longer the whole floor: on this
-tree it tolerates production coverage down to 43.68%, and the requirement below is what makes
-coverage sensitive again. `NOWAIVER` SHALL guard both numbers, and SHALL extend its scan set
-to `scripts/`, so that a checker placed there cannot reintroduce `--ignore-filename-regex`
-through a directory the guard does not read.
+tree it tolerates production coverage falling all the way to 0% without ever firing (task
+9.3 re-measurement — see "The coverage floor is measured against production code" below),
+and the requirement below is what makes coverage sensitive again. `NOWAIVER` SHALL guard both
+numbers, and SHALL extend its scan set to `scripts/`, so that a checker placed there cannot
+reintroduce `--ignore-filename-regex` through a directory the guard does not read.
 
 Widening the scan naively turns `NOWAIVER` **red at HEAD**, on three legitimate lines, and the
 rule that resolves it SHALL be stated rather than left to whoever hits the failure:
@@ -320,20 +321,31 @@ vacuity this change exists to remove.
 
 ### Requirement: The coverage floor is measured against production code
 
-`cargo llvm-cov --fail-under-lines 80` is dominated by test-module lines. Measured at HEAD:
-`src/` holds 40,500 lines, of which **26,820** sit inside `#[cfg(test)]` items; of 22,285
-instrumented lines, 15,477 are test-module and 95.97% covered. The floor does not fire until
-production line coverage falls below **43.68%** — more than half the production body can go
-uncovered with `make check` green. `make coverage` SHALL therefore additionally enforce a
+`cargo llvm-cov --fail-under-lines 80` is dominated by test-module lines. Re-measured for
+gate-integrity's own Change Review (task 9.3), because the figures below had drifted from an
+earlier estimate as the tree grew — the corrected finding is what SHALL be recorded, per the
+rule this same paragraph states two paragraphs down: `src/` holds **40,561** lines across 25
+files, of which **31,684** sit inside `#[cfg(test)]` items and **8,877** are production
+(brace-extent rule). Of **22,305** `hasCount`-instrumented lines, **18,614** are test-module,
+covered at **96.42%** (17,947/18,614). At those figures the total floor cannot fire from a
+production regression AT ALL, not merely late: production coverage at **0%** still scores
+**80.46%** overall (17,947 covered of 22,305 instrumented lines), which is *above* the 80
+floor — there is no break-even percentage in `[0, 100]` below which `--fail-under-lines 80`
+fires on a production regression alone. `make coverage` SHALL therefore additionally enforce a
 floor computed over **production lines only**, and that floor SHALL be the one that can
 actually fail on a realistic regression.
 
 The audit that prompted this requirement reported the total floor as arithmetically
 *incapable* of failing — production at 0% still scoring 83.44%. That figure came from the
-first-occurrence cut rejected below; under correct extents production at 0% scores 66.65% and
-the floor does fire. The corrected finding is the 43.68% break-even, and it is recorded here
-because a requirement justified by a number that does not reproduce is the defect this change
-exists to remove.
+first-occurrence cut rejected below. This requirement's own first correction, under the
+rejected cut's correct replacement (brace extents), estimated 66.65% with the floor firing
+below a 43.68% break-even — and that correction does not reproduce either: re-measured
+directly from the checker's own report under the same `hasCount` rule (task 9.3), production
+at 0% scores **80.46%**, still *above* the floor. The audit's original finding was right in
+kind and wrong only in the size of the gap; the correction that followed it was wrong in
+kind, reporting a break-even that does not exist. Both are recorded here, because a
+requirement justified by a number that does not reproduce is the defect this change exists
+to remove — including this requirement's own prior correction of that same defect.
 
 A production line is one **not** inside the brace extent of any `#[cfg(test)]` item. It SHALL
 NOT be defined as "above the file's first line-anchored `#[cfg(test)]`" — the `prod()` cut
@@ -341,24 +353,24 @@ NOT be defined as "above the file's first line-anchored `#[cfg(test)]`" — the 
 guard asserting its own subject files hold exactly **one** such attribute; applied tree-wide
 the rule is wrong, because `src/changes.rs` holds three (the first at line 77, a
 `mod conformance`, with the real `mod tests` at 1818), `src/cli.rs` holds ten, and
-`src/lib.rs` holds two. Measured, that cut counts 7,399 production lines where the correct
-extents count 13,680 — **6,281 production lines classified as test**, including most of the
-module that produces every `Change` the dashboard renders. A floor over that population could
-not fail on any of them.
+`src/lib.rs` holds two. Re-measured (task 9.3): that cut counts **7,418** production lines
+where the correct extents count **8,877** — **1,459 production lines classified as test**,
+including most of the module that produces every `Change` the dashboard renders. A floor over
+that population could not fail on any of them.
 
 The floor SHALL be the production figure the checker itself reports on the unmodified tree,
 rounded down to the nearest whole percentage point, and SHALL NOT be lower. "At or below the
 measurement" is not sufficient: a floor of 80 satisfies that phrasing while gating nothing on
-a production slice measured at **97.28%**, which is the same defect one layer up. It is a
-floor and not an equality because the crate carries two argued, deliberately-uncovered
-one-line bindings — `ui::event::CrosstermEvents::next_event` and `ui::terminal`'s real
-`TerminalOps` — which `SPEC.md` already names.
+a production slice measured at **96.21%** (task 9.3 re-measurement), which is the same defect
+one layer up. It is a floor and not an equality because the crate carries two argued,
+deliberately-uncovered one-line bindings — `ui::event::CrosstermEvents::next_event` and
+`ui::terminal`'s real `TerminalOps` — which `SPEC.md` already names.
 
 The checker SHALL name the line-counting rule it implements, because two defensible rules
 exist and give different denominators for the same report: counting a line as instrumented
-when a segment carries `hasCount` yields 22,285 lines, while `cargo llvm-cov`'s own
-per-function `totals` yields 27,392. The floor is meaningless without saying which produced
-it.
+when a segment carries `hasCount` yields 22,305 lines (task 9.3 re-measurement), while `cargo
+llvm-cov`'s own per-function `totals` yields 27,420. The floor is meaningless without saying
+which produced it.
 
 The measurement SHALL be taken from `cargo llvm-cov`'s JSON export rather than by
 narrowing what is compiled: `--ignore-filename-regex` is forbidden by `NOWAIVER`, and it
@@ -389,8 +401,9 @@ nothing.
 - **THEN** the checker exits non-zero, naming the shortfall and the files that contributed
   most uncovered production lines
 - **AND** this is the sensitivity the total floor does not have: a production regression of
-  the same size leaves `--fail-under-lines 80` green, because 15,477 covered test-module
-  lines carry the total until production falls below 43.68%
+  the same size leaves `--fail-under-lines 80` green, because test-module coverage alone
+  (17,947 of 18,614 covered lines, task 9.3 re-measurement) carries the total above 80% even
+  if production coverage falls all the way to 0%
 
 #### Scenario: Deleting every production test still fails, where today it passes
 
