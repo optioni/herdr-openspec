@@ -109,3 +109,97 @@ message appears on whichever change happened to be enumerated first.
 - **AND** no invocation is recorded at all, so a name that cannot be a path segment costs
   no process start
 - **AND** nothing outside the scratch tree is read
+
+### Requirement: Every failure of the fallback tier degrades and names itself
+
+Each of the following SHALL produce no schema for the affected change — an empty
+`artifacts` list rather than a missing change — and SHALL record exactly one problem naming
+the schema name and what failed. None SHALL panic, and none SHALL abort the other changes.
+
+- `schema which` could not start the program (`CliError::NotStarted`).
+- `schema which` exited non-zero (`CliError::Failed`). The CLI writes `{"error": …,
+  "available": [ … ]}` to **stdout** and exits 1 for an unknown schema
+  (`dist/commands/schema.js:450-464`), and `subprocess-seam`'s `Failed` carries stderr
+  only, so for **that** failure the problem SHALL name the schema, the vector, and the exit
+  code and nothing more. This tier shares `cli_error_problem` with `cli-changes`, so it
+  inherits that capability's rule unchanged: a non-blank `stderr` contributes its first
+  non-blank line, and the empty stderr `openspec` produces alongside its own stdout
+  diagnostics contributes nothing. One rule seen from two callers, not two rules — which is
+  what makes an exec failure of the `openspec` shim (exit 127, `env: node: No such file or
+  directory` on stderr) self-diagnosing here too, and not only in `from_cli`.
+- The output is not JSON, is not an object, or has no `path`, or a `path` that is not a
+  string, or a `path` that is empty.
+- The directory the `path` names holds no `schema.yaml` — `load_dir` reports `NotVendored`
+  a second time. The tier SHALL stop there rather than asking again.
+- The `schema.yaml` in that directory is unreadable or is not a usable schema.
+
+The parser SHALL require the whole of stdout to be one JSON document, and SHALL NOT skip
+leading non-JSON lines. The CLI writes its `Note: Schema commands are experimental and may
+change.` line to **stderr** (`dist/commands/schema.js:388-391`), and `subprocess-seam`
+already guarantees stderr never reaches an `Ok` value, so no stripping is needed; a parser
+that tolerated a leading noise line would silently accept a future release that moved the
+note to stdout, hiding a real change in the contract instead of degrading visibly.
+
+#### Scenario: An unknown schema name degrades that change alone
+
+- **WHEN** three changes are reported, the middle one's apply payload names
+  `schemaName: "outside-in-tdd"`, the repository vendors no such schema, and
+  `["schema", "which", "outside-in-tdd", "--json"]` answers
+  `Err(CliError::Failed { code: Some(1), stderr: "" })`
+- **THEN** all three changes appear in `active`, and the middle one has `schema`
+  `outside-in-tdd`, an empty `artifacts` list, and one problem naming the schema, the
+  vector, and exit code `1`
+- **AND** the other two changes carry their full artifact lists and no problem
+
+#### Scenario: A `path` naming a directory with no `schema.yaml` stops the tier
+
+- **WHEN** `schema which` answers a well-formed object whose `path` names a scratch
+  directory that exists but holds no `schema.yaml`
+- **THEN** the change carries an empty `artifacts` list and exactly one problem naming the
+  joined `schema.yaml` path as not present
+- **AND** exactly one `schema which` invocation is recorded for that name, so the tier did
+  not retry
+
+#### Scenario: An unstartable `openspec` during the fallback degrades that change
+
+- **WHEN** a change's schema is not vendored and
+  `["schema", "which", <name>, "--json"]` answers `Err(CliError::NotStarted)`
+- **THEN** that change carries an empty `artifacts` list and exactly one problem naming the
+  schema and the program that could not be started
+- **AND** nothing panics and the remaining changes are unaffected
+
+#### Scenario: An unusable `schema.yaml` at the CLI-named path degrades that change
+
+- **WHEN** `schema which` answers a well-formed object whose `path` names a scratch
+  directory in which `schema.yaml` exists but holds bytes that are not a usable schema, and
+  again one in which `schema.yaml` exists as a **directory**
+- **THEN** each yields an empty `artifacts` list and exactly one problem naming the joined
+  `schema.yaml` path and the reason — invalid in the first case, unreadable in the second
+- **AND** exactly one `schema which` invocation is recorded in each case
+
+#### Scenario: A malformed `schema which` payload is a problem, not a panic
+
+- **WHEN** `schema which` answers, in turn, `Ok("")`, `Ok("null")`, `Ok("{\"path\": 7}")`,
+  and `Ok("{\"name\":\"x\"}")`
+- **THEN** each yields an empty `artifacts` list and exactly one problem naming the schema
+  and the unusable payload
+- **AND** nothing panics in any of the four cases
+
+#### Scenario: A leading non-JSON line is not tolerated
+
+- **WHEN** `schema which` answers
+  `Ok("Note: Schema commands are experimental and may change.\n{\"path\":\"<dir>\"}")`
+- **THEN** the payload is rejected as unusable and one problem is recorded
+- **AND** the schema is not loaded from `<dir>`, so a future release moving the note to
+  stdout degrades visibly rather than being silently absorbed
+
+#### Scenario: An exec failure during the fallback tier carries its stderr
+
+- **WHEN** the repository vendors no `spec-driven`, and the fake answers
+  `["schema", "which", "spec-driven", "--json"]` with
+  `Err(CliError::Failed { code: Some(127), stderr: "env: node: No such file or directory\n" })`
+- **THEN** the change carries `schema` `spec-driven`, an empty `artifacts` list, and exactly
+  one problem naming the schema, the vector, exit code `127`, and the text
+  `env: node: No such file or directory`
+- **AND** the same call with an empty `stderr` produces the same problem without that text,
+  so the two are distinguishable and neither is hard-coded

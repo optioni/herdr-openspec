@@ -125,3 +125,118 @@ conflated. `No tasks yet` and `No content yet` SHALL never both appear for the s
   `! /repo/openspec/changes/x/tasks.md:` and is exactly the interior width — 78 and 58
 - **AND** neither `No content yet` nor `No tasks yet` nor a progress-bar row appears, so
   the tab says one thing about itself rather than two
+
+### Requirement: The checklist's line grammar
+
+For a tracked-tasks tab whose source is `source` and whose change carries `progress`,
+`ui::tasks::lines(source, progress, width)` SHALL produce, in order:
+
+1. the progress-bar line — `tasks-progress-bar`'s single line, as one plain-faced segment
+   — followed by one blank line, both omitted entirely when the bar renders as the empty
+   string at that width;
+2. for each `tasks::Group` returned by `tasks::parse(source)`, in document order:
+   - when the group carries a `Heading`, one line whose text is that heading's `#` markers
+     reproduced from its `level`, a space, and its `text` verbatim, carrying
+     `Face { heading: Some(level), .. }` so `ui::view::style_for` bolds it with no new
+     `Face`-to-`Style` mapping;
+   - one or more lines per `tasks::Item`, as specified below;
+   - one blank line after every group but the last.
+
+An item's line SHALL be a prefix followed by its text. The prefix is `item.indent` spaces,
+then the three-character glyph `[x]` when `item.checked` and `[ ]` when it is not, then one
+space. Every line SHALL carry `Face::plain()` except a heading line.
+
+`item.indent` is `task-parsing`'s own count of the whitespace **characters** preceding the
+bullet, not a column count, and this capability reproduces it as that many spaces without
+reinterpreting it. The consequence, stated so it is a decision rather than a surprise: a
+tab-indented item renders with **one** space of indent, because a tab is one character. That
+matches the parse rather than second-guessing it, and re-deriving a column width here would
+be a second indentation rule beside the one `task-parsing` already publishes.
+
+The item's text SHALL be word-wrapped to `width - prefix_len` columns, with continuation
+lines indented by `prefix_len` spaces so they align under the first line's text — a hanging
+indent, the same shape `markdown-render` gives a list item. A single word longer than the
+available text column SHALL be hard-split at that column rather than overflowing the
+interior or being dropped, so a long path never silently loses its tail.
+
+The indent SHALL be **dropped whole** when the prefix would not leave at least one text
+column: `item.indent` spaces first, leaving `[x] ` alone; and when even that does not fit,
+the glyph alone truncated by `ui::list::pad_or_truncate_right` at `width`. No line's text
+SHALL exceed `width` characters, counted in `char`s.
+
+`width == 0` SHALL return an empty vector, matching `ui::markdown::lines`.
+
+`ui::tasks` SHALL name no `ratatui` type, on exactly the terms `ui::detail` and
+`ui::markdown` do not, and SHALL name no filesystem, process, environment, network, or
+standard-I/O API. It SHALL call `tasks::parse` and SHALL NOT reimplement it: this
+capability renders an existing parse and introduces no second checkbox rule.
+
+#### Scenario: Groups, headings, items, and separators at both mandated widths
+
+- **WHEN** `ui::tasks::lines` is called at width `78` and at width `58` over the source
+  `## 1. Setup\n\n- [x] 1.1 first\n- [ ] 1.2 second\n\n## 2. Build\n\n- [ ] 2.1 third\n`
+  with `Progress { completed: 1, total: 3 }`
+- **THEN** at each width the lines' texts are, in order: the progress bar, an empty line,
+  `## 1. Setup`, `[x] 1.1 first`, `[ ] 1.2 second`, an empty line, `## 2. Build`, and
+  `[ ] 2.1 third`
+- **AND** exactly one blank line separates the two groups and none follows the last
+- **AND** the two heading lines carry `Face { heading: Some(2), .. }` and every other line
+  carries `Face::plain()`
+
+#### Scenario: A nested item reproduces its own indent
+
+- **WHEN** `ui::tasks::lines` is called at width `78` and at width `58` over
+  `- [ ] parent\n  - [x] child\n    - [ ] grandchild\n` with
+  `Progress { completed: 1, total: 3 }`
+- **THEN** at each width the three item lines read `[ ] parent`, `  [x] child`, and
+  `    [ ] grandchild`, so the source's own two- and four-space indents are reproduced
+- **AND** the list is flat: no line is dropped, merged, or re-ordered, because
+  `tasks::parse` never nests
+
+#### Scenario: A long item wraps with a hanging indent at both widths
+
+- **WHEN** `ui::tasks::lines` is called at width `78` and at width `58` over a single
+  unchecked item whose text is 200 characters of space-separated words, with
+  `Progress { completed: 0, total: 1 }`
+- **THEN** at each width no line's text exceeds that width
+- **AND** the first item line begins `[ ] ` and every continuation line begins with exactly
+  four spaces, aligning under the first line's text
+- **AND** the 58-column call produces strictly more lines than the 78-column call, so the
+  width genuinely reaches the wrap
+
+#### Scenario: An unbreakable word is hard-split rather than lost
+
+- **WHEN** `ui::tasks::lines` is called at width `78` and at width `58` over a single
+  checked item whose text is one 300-character run with no spaces
+- **THEN** at each width the concatenation of the item's lines, with the glyph prefix and
+  the hanging indent removed, reproduces the 300 characters exactly
+- **AND** no line's text exceeds the width it was called with
+
+#### Scenario: The indent is dropped whole as the width collapses
+
+- **WHEN** `ui::tasks::lines` is called at widths `78`, `58`, `12`, `6`, `5`, `4`, `3`,
+  `2`, `1`, and `0` over the source `      - [x] alpha\n` (an indent of six) with
+  `Progress { completed: 1, total: 1 }`
+- **THEN** no call panics and no returned line's text exceeds its width
+- **AND** at `78` and `58` the item line begins with six spaces then `[x] alpha`
+- **AND** at a width where the six-space indent leaves no text column, the item line begins
+  `[x]` at column zero — the indent was dropped whole rather than partially
+- **AND** at `0` the returned vector is empty
+
+#### Scenario: A heading with no items still renders its heading
+
+- **WHEN** `ui::tasks::lines` is called at width `78` and at width `58` over
+  `## 1. Empty\n\nsome prose\n\n## 2. Full\n\n- [ ] only\n` with
+  `Progress { completed: 0, total: 1 }`
+- **THEN** at each width both headings appear, `## 1. Empty` carries no item line beneath
+  it, and `## 2. Full` carries `[ ] only`
+- **AND** the prose line does not appear, because `tasks::parse` discards it
+
+#### Scenario: A headingless leading group renders without a heading line
+
+- **WHEN** `ui::tasks::lines` is called at width `78` and at width `58` over
+  `- [x] loose\n\n## 1. Later\n\n- [ ] grouped\n` with
+  `Progress { completed: 1, total: 2 }`
+- **THEN** at each width `[x] loose` appears before `## 1. Later` with no heading line
+  above it
+- **AND** exactly one blank line separates the two groups

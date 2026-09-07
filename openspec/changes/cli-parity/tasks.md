@@ -48,13 +48,17 @@
 - [ ] 4.2 GREEN: Apply `schema::is_legal_name` in `parse_apply`'s `schemaName` read and store the trimmed value, returning the existing per-change parse failure with a message naming the rejected value.
 - [ ] 4.3 Run the group tests — `cargo test changes::tests::from_cli` — no regressions in the four existing per-change failure scenarios.
 
-## 5. A spawn failure carries the operating system's reason
+## 5. Every diagnostic the seam carried reaches the problem row
 <!-- kind: behavior -->
 
 - [ ] 5.1 RED: Add `two_different_spawn_failures_produce_two_different_problems`, running `from_cli` twice with `NotStarted` reasons `No such file or directory (os error 2)` and `Exec format error (os error 8)`, asserting the two problem strings differ. Widen the existing absent-binary test to assert the reason text.
   - HEAD evidence: `grep -n 'reason: _' src/changes.rs` → `1308:` (exit 0) — the binding that discards it.
-- [ ] 5.2 GREEN: Bind `reason` in `cli_error_problem`'s `NotStarted` arm and append it to the message; leave the `Failed` arm's `stderr: _` alone, for the reason `specs/cli-changes/spec.md`'s failure requirement gives.
-- [ ] 5.3 Run the group tests — `cargo test -- changes::tests:: schema::tests::` — and fix any `schema_fallback` assertion that pinned the old `NotStarted` string.
+- [ ] 5.2 RED: Add three `Failed`-arm tests — `an_exec_failure_of_the_openspec_shim_reports_its_own_stderr` (`code: Some(127)`, `stderr: "env: node: No such file or directory\n"`, asserting the code, the vector and that text with no trailing newline), `a_multi_line_stderr_contributes_only_its_first_non_blank_line`, and `a_whitespace_only_stderr_appends_nothing` (byte-identical to the empty-stderr problem).
+  - HEAD evidence: `grep -n 'stderr: _' src/changes.rs` → the `Failed` arm binding that discards it, inside `cli_error_problem` at `src/changes.rs:1302-1322`.
+  - Measured shape, reproduced on this machine: `env -i PATH=/usr/bin:/bin "$(readlink -f ~/.nvm/versions/node/v24.18.0/bin/openspec)" list --json` → `exit=127`, `stdout=[]`, `stderr=[env: node: No such file or directory]`.
+- [ ] 5.3 RED: Add `an_exec_failure_during_the_fallback_tier_carries_its_stderr` — the same `Failed` shape answered for `["schema", "which", …]`, plus the empty-stderr control asserting the two problems differ. `cli_error_problem` is shared by both callers (`src/changes.rs:1371`), so the fallback tier must be shown to inherit the rule rather than assumed to.
+- [ ] 5.4 GREEN: In `cli_error_problem`, bind `reason` in the `NotStarted` arm and append it; bind `stderr` in the `Failed` arm and append its first non-blank line, trimmed, only when one exists. Rewrite the function's doc comment, which currently states the rationale this change disproves.
+- [ ] 5.5 Run the group tests — `cargo test -- changes::tests:: schema::tests::` — and update any assertion that pinned the old `NotStarted` string. `Failed` assertions using `stderr: ""` must stay byte-identical; if one moves, the whitespace-only test is wrong.
 
 ## 6. The symlink divergence becomes a proven degraded-states row
 <!-- kind: operational -->
@@ -89,7 +93,7 @@
 ## 9. Change Review
 <!-- kind: operational -->
 
-- [ ] 9.1 CHECK: Dispatch an independent reviewer (not a fork of this session) against proposal.md, all five delta specs, design.md, and the diff. Concentration points: that each of the 48 scenarios names a test that would go red if its behavior were deleted; that no test reaches a real `openspec` binary or a Herdr socket; that every `cargo test` filter used reports a non-zero pass count; and that the two documented divergences are bound to proofs whose negative controls were actually run.
+- [ ] 9.1 CHECK: Dispatch an independent reviewer (not a fork of this session) against proposal.md, all five delta specs, design.md, and the diff. Concentration points: that each of the 52 scenarios names a test that would go red if its behavior were deleted; that no test reaches a real `openspec` binary or a Herdr socket; that every `cargo test` filter used reports a non-zero pass count; and that the two documented divergences are bound to proofs whose negative controls were actually run.
 - [ ] 9.2 CHANGE: Fix every CRITICAL, resolve or accept each WARNING with a one-line reason, note SUGGESTIONs, and re-run the affected tests.
 - [ ] 9.3 VERIFY: Confirm no blocking or unowned finding remains.
 
@@ -100,6 +104,8 @@
 - [ ] 10.2 Rewrite in `SPEC.md`: "Resolution chain" (audience: every future change) — state that a `tracks` value which is *present* and matches nothing yields no tasks artifact, so the wrong-typed case falls under the same clause. A few words, not a new paragraph.
 - [ ] 10.3 Rewrite in `SPEC.md`: "Degraded states" (audience: every future change) — widen the "Schema loads with no tasks artifact" row, whose condition cell says `apply.tracks` matches nothing **and no artifact has id `tasks`**, since after group 1 a wrong-typed `tracks` reaches that state with an id-`tasks` artifact present. Update the same row's `condition` in `tests/degraded-coverage.toml`, which keys on that cell verbatim.
 - [ ] 10.4 Rewrite in `SPEC.md`: "Degraded states" (audience: every future change) — amend the invalid-UTF-8 row's "the one case" claim, now that group 6 adds a second knowing file-vs-CLI divergence. Edit the **Behaviour** cell only: the condition cell is the coverage map's key and must stay byte-identical.
+- [ ] 10.5 Rewrite in `SPEC.md`: "Degraded states" (audience: every future change) — the row "An `openspec` command exits non-zero" (`SPEC.md:760`) says "The reason is unavailable to the plugin". Measured, that is false for an exec failure: stdout was empty and stderr carried the whole answer. Reword the **Behaviour** cell to "openspec's own diagnostic goes to stdout and is unavailable; a stderr line, when present, is carried" — condition cell byte-identical, since it is the coverage map's key.
+- [ ] 10.6 Update that row's entry in `tests/degraded-coverage.toml` (lines 237-242): its `proof` is `["a_failed_cli_cycle_keeps_the_file_numbers"]` with `verdict = "unproven"`, and that test shows the file numbers survive, not that a stderr line is carried. Add `an_exec_failure_of_the_openspec_shim_reports_its_own_stderr` to `proof`, set `verdict = "confirmed"`, and rewrite `why` to name both halves. Leave `tier = "outer"` and the checker itself alone — the sibling `gate-integrity` change owns the mechanism; this change owns only this row's content and proof.
 
 ## 11. Lint & Verify
 <!-- kind: operational -->

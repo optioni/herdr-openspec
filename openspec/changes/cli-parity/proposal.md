@@ -27,9 +27,15 @@ for building the dual-source model, not for auditing it once built.
   guarded once. And `parse_apply` rejects an illegal CLI `schemaName` outright, so the value
   never becomes `Change::schema` or a cache key either; the trimmed form is stored, matching
   what the file path already does.
-- **Close C3.** `CliError::NotStarted`'s `reason` — the operating system's own error text,
-  the one diagnostic an `openspec` failure does supply — is carried into the problem row
-  instead of being discarded.
+- **Close C3.** `cli_error_problem` stops discarding every diagnostic the seam carried.
+  `CliError::NotStarted`'s `reason` is appended always, and `CliError::Failed`'s `stderr`
+  contributes its first non-blank line whenever it is not blank. The `Failed` half is the
+  half that matters: the nvm-installed `openspec` is a `#!/usr/bin/env node` shim, and with
+  `node` off `PATH` it exits **127** with `env: node: No such file or directory` on stderr
+  (measured). That is a `Failed`, not a `NotStarted` — `env` did start — and the probe chain
+  lands on that shim precisely when the failure is possible, because `openspec`'s symlink
+  shares the nvm `bin` directory with `node`. Today it renders as an unactionable
+  `openspec list --json exited with code 127`.
 - **Close C5.** Delete the dead first branch of `join_artifacts`, which the next branch
   fully subsumes, and fold the corresponding rule 3 out of `change-merge`'s published
   six-rule list so code and spec still enumerate the same rules.
@@ -75,9 +81,11 @@ None.
   falling back to the id, reversing a stated divergence into parity (C1); and a new
   requirement makes `schema::load` reject a name it cannot legally join (C2).
 - `schema-cli-fallback`: a CLI-supplied schema name is subject to the same legality guard
-  as a file-declared one before any path is joined from it (C2).
+  as a file-declared one before any path is joined from it (C2); its failure requirement
+  inherits C3's stderr rule, since it shares `cli_error_problem` (C3).
 - `cli-changes`: `parse_apply` rejects an illegal `schemaName` rather than only an empty
-  one (C2); a spawn failure's reason is carried into its problem (C3).
+  one (C2); every diagnostic the seam carried — a `NotStarted` reason, and a non-blank
+  `Failed` stderr — reaches the problem row (C3).
 - `change-artifacts`: the symlinked-directory divergence is restated as a named, accepted
   divergence rather than an aside (C4).
 - `change-merge`: the published six-rule artifact join becomes five, folding the both-empty
@@ -90,9 +98,10 @@ None.
   `load_error_problem`, doc placement), `src/changes.rs` (`parse_apply`,
   `schema_load_problem`, `resolve_cli_schema_uncached`, `cli_error_problem`,
   `join_artifacts`).
-- Documents: `SPEC.md` (Resolution chain wording, two new degraded-states rows, and two
-  existing rows corrected — the no-tasks-artifact condition and the invalid-UTF-8
-  "one case" claim),
+- Documents: `SPEC.md` (Resolution chain wording, two new degraded-states rows, and three
+  existing rows corrected — the no-tasks-artifact condition, the invalid-UTF-8 "one case"
+  claim, and the non-zero-exit row, whose "the reason is unavailable to the plugin"
+  justification is measurably false for an exec failure),
   `AGENTS.md` (the merge sentence), `tests/degraded-coverage.toml` (a proof per new row) and
   `tests/degraded_coverage.rs`'s `MIN_ROWS` floor — both satisfying `degraded-coverage`'s
   existing requirement rather than changing it.

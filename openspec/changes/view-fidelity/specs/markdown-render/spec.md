@@ -130,3 +130,61 @@ consumes them rather than defining them.
   emitted as one over-wide line
 - **AND** the same calls at widths `1` and `2` also do not panic, and at width `1` a line
   holding only a two-column cluster is empty rather than two columns wide
+
+### Requirement: Code blocks and raw HTML are reproduced verbatim and hard-split
+
+Every line of a fenced or indented code block SHALL be reproduced **verbatim**, as a single
+segment with `code` true, with no word wrapping, no re-indenting, and no rendering of the
+fence lines or the info string. A code line longer than the width SHALL be **hard-split** at
+the last **grapheme-cluster boundary** whose prefix fits the width in **display columns**,
+and continued on the next line, rather than word-wrapped or clipped: losing the tail of a
+command in a spec-reading pane is worse than a ragged split.
+
+A split SHALL preserve every character, with exactly one exception, which is the carve-out
+this change adds and names rather than leaving implied: a single grapheme cluster wider in
+columns than the whole region has no prefix that fits, and SHALL be **dropped** rather than
+emitted, on exactly the rule the wrapping requirement above states for the same case. That
+costs one cluster of a code line at a region one column wide; the alternative is a code line
+that overruns its region and overwrites a border, which is the failure this capability's
+sibling requirement exists to prevent. At every width of 2 or more, and for every cluster of
+width 1, the verbatim promise is unchanged.
+
+A raw HTML block or inline HTML SHALL be rendered the same way — verbatim, with `code` true,
+hard-split — rather than dropped, so nothing in an artifact disappears from the pane.
+
+#### Scenario: A fenced code block's lines are reproduced verbatim
+
+- **WHEN** a document holding ```` ```sh ````, `cargo test --all-features`, `  indented`,
+  and ```` ``` ```` is rendered at 58 and at 78
+- **THEN** at both widths exactly two code lines are produced, whose `text()` values are
+  `cargo test --all-features` and `  indented` — the leading spaces preserved
+- **AND** at both widths every segment of those two lines carries `code` true and every
+  other flag false
+- **AND** at both widths no line's `text()` contains ```` ``` ```` or `sh`, so the fence
+  and the info string are not rendered
+
+#### Scenario: A code line longer than the interior is hard-split rather than word-wrapped
+
+- **WHEN** a fenced block holding one line of 130 `x` characters is rendered at 58 and at
+  78
+- **THEN** at 58 it produces three code lines of 58, 58, and 14 characters
+- **AND** at 78 it produces two code lines of 78 and 52 characters
+- **AND** at both widths every character of the original line is present, in order, when
+  the lines are concatenated
+
+#### Scenario: An indented code block renders the same as a fenced one
+
+- **WHEN** a document whose code block is written as four-space-indented lines rather than
+  fenced is rendered at 58 and at 78
+- **THEN** at both widths the produced code lines' `text()` values equal those the fenced
+  form produces for the same code
+- **AND** at both widths those lines carry `code` true
+
+#### Scenario: A raw HTML block renders verbatim rather than being dropped
+
+- **WHEN** a document holding `<details><summary>Notes</summary>` on its own line is
+  rendered at 58 and at 78
+- **THEN** at both widths a line whose `text()` is `<details><summary>Notes</summary>` is
+  present and carries `code` true
+- **AND** at both widths nothing in the document has been silently discarded: the
+  concatenation of every line's `text()` contains `<details>`

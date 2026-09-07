@@ -10,7 +10,8 @@ The measurements behind this change were retaken at HEAD rather than inherited:
 
 | Finding | Measured at HEAD |
 |---|---|
-| G1 | `src/` holds 40,500 lines; 33,101 inside `#[cfg(test)]`. Production slice **95.59%** (2,882/3,015), test slice **96.50%**, total **96.37%**. Production at **0%** would still report **83.44%** — above the 80 floor |
+| G1 | `src/` holds 40,500 lines; **26,820** inside `#[cfg(test)]` items, 13,680 production. Of 22,285 instrumented lines, 6,808 are production (**97.28%** covered) and 15,477 are test-module (95.97%); total **96.37%**. The 80 floor does not fire until production coverage falls below **43.68%** (2,974 of 6,808 covered) |
+| G1 (audit correction) | The brief's "33,101 test lines / production at 0% still reports 83.44%" came from cutting each file at its **first** line-anchored `#[cfg(test)]`. That rule misclassifies **6,281** production lines as test — see Decision 1. Under correct extents, production at 0% reports 66.65% and the floor *does* fire; the defect is that it tolerates 56% of production going uncovered, not that it is arithmetically inert |
 | G2 | `use std::process::{Child, Command as Proc};` matches none of `process::Command`, `Command::new`, `Stdio` |
 | G3 | `WRITE_RE` matches neither `File::options()` nor `DirBuilder::new().create()` |
 | G4 | `noblock.sh` leg 1 reads `$UIDIR/driver.rs`; leg 2 reads `find "$UIDIR" -name '*.rs'` |
@@ -193,15 +194,64 @@ at 60 and 120 columns has no subject here.
 ### Decision 1 — G1: a production-slice floor, computed from the JSON export
 
 **Chosen.** `make coverage` keeps `cargo llvm-cov --fail-under-lines 80` and adds a second
-command: export the per-line JSON report, classify every instrumented line by whether it
-lies above its file's first line-anchored `#[cfg(test)]`, and enforce a floor over the
-production class alone.
+command: export the per-line JSON report, classify every instrumented line as production or
+test-module, and enforce a floor over the production class alone.
 
 *Why.* It is the only option that measures the thing the floor was always supposed to
-measure. The production slice is 95.59% at HEAD, so the floor is set at a value the tree
-already clears and the repair costs no new tests. The number becomes falsifiable: a
-production regression moves it, where today production could go to zero and the reported
-total would still be 83.44%.
+measure. Production coverage is 97.28% at HEAD, so the floor is set at a value the tree
+already clears and the repair costs no new tests. The number becomes sensitive where the
+total is not: measured, the 80% total does not fire until production coverage falls below
+**43.68%**, so more than half the production body can go uncovered with `make check` green.
+
+*Correction to the audit's framing, and the reason it matters here.* The brief stated the
+total floor "cannot fail" — production at 0% still reporting 83.44%. That figure came from
+classifying each file by cutting at its **first** line-anchored `#[cfg(test)]`. Under
+correct module extents, production at 0% reports 66.65% and the floor does fire. The finding
+survives in weakened, still-serious form (43.68% break-even); the arithmetic claim does not,
+and this design does not repeat it.
+
+### Decision 1a — classify by `#[cfg(test)]` **module extent**, not by first occurrence
+
+The obvious implementation — reuse the `prod()` one-liner from `READONLY-UI`, `NOBLOCK`, and
+`WIRED` — is **wrong tree-wide**, and this change found it by planting the question rather
+than assuming the shared helper generalised. Measured at HEAD:
+
+| File | Line-anchored `#[cfg(test)]` | First at |
+|---|---|---|
+| `src/changes.rs` | 3 | 77 (`mod conformance`) — real `mod tests` at 1818 |
+| `src/cli.rs` | 10 | 317 |
+| `src/lib.rs` | 2 | 37 (`mod testutil`) |
+
+Cutting `src/changes.rs` at line 77 classifies ~1,700 lines of `from_files`,
+`resolve_artifact`, `change_artifacts`, and `change_progress` — the module that produces
+every `Change` the dashboard renders — as *test* code. Tree-wide the naive cut counts 7,399
+production lines where the correct extent counts 13,680: **6,281 production lines
+misclassified**, and a floor over that population could not fail on any of them. That is the
+audited defect reproduced inside its own repair, which is why it is written down here rather
+than fixed silently.
+
+`prod()` is sound where it is used because `READONLY-UI`, `NOBLOCK`, and `WIRED` each carry a
+Guard D asserting their **specific** subject files hold exactly one attribute. There is no
+such guard tree-wide, and three files break it.
+
+*Chosen:* `scripts/coverage-prod.py` tracks each `#[cfg(test)]` item's brace extent and
+classifies only those lines as test-module. It SHALL also report the count of extents it
+found per file, so an extent tracker defeated by a brace in a string literal shows up as a
+count rather than as a silently shifted floor, and its control plants a production function
+inside a `#[cfg(test)]` module and requires the production line count to fall.
+
+*Alternative — add a tree-wide "exactly one `#[cfg(test)]` per file" guard and keep the
+one-liner.* Rejected: it is false for three files today, and making it true would mean
+restructuring `src/changes.rs`, `src/cli.rs`, and `src/lib.rs` for a checker's convenience —
+production churn in a change whose whole claim is that it changes no production behaviour.
+
+*Line-counting rule, stated because two exist.* The figures above count a line as
+instrumented when at least one of its segments carries `hasCount`, and covered when the
+maximum such count exceeds zero. `cargo llvm-cov`'s own `totals` uses per-function line
+stats and reports a different denominator (27,392 rather than 22,285) for the same report.
+The checker SHALL implement one rule and name it, and `PROD_MIN` SHALL be the figure that
+rule produces at implementation time — not 97.28 transcribed from here. The load-bearing
+conclusion holds under both accountings.
 
 *Alternative — `--ignore-filename-regex`.* Rejected twice over. `NOWAIVER` forbids it by
 name, and it could not do the job anyway: the excluded region is a module **inside** a file
