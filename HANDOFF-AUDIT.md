@@ -26,7 +26,7 @@ reviewed or approved. None may be implemented until it is.**
 
 | Change | Findings | State |
 |---|---|---|
-| `gate-integrity` | G1–G8, D1–D3 | Drafting in progress — no `planning-review.md` yet |
+| `gate-integrity` | G1–G8, D1–D3 | **Complete**, `Change 'gate-integrity' is valid` |
 | `seam-resilience` | S1–S9, U3, S10 | **Complete**, `Change 'seam-resilience' is valid` |
 | `view-fidelity` | U1, U2, U4, U5 | Drafting in progress — no `planning-review.md` yet |
 | `cli-parity` | C1–C8 | **Complete**, `Change 'cli-parity' is valid` |
@@ -128,8 +128,17 @@ S7; both can be true, and it records which. 93 scenarios, up from 86.
   `ratatui/src/lib.rs:480` and `:517`. `set_stringn` itself calls `symbol.cell_width()`
   (`ratatui-core-0.1.2/src/buffer/buffer.rs:352`), so "measured the way the buffer
   measures" is literal. Dependency count stays at six.
-- The 80% coverage floor cannot fail: 33,101 of 40,500 lines in `src/` are inside
-  `#[cfg(test)]` modules and ~96% covered, so test code alone clears 83%.
+- **CORRECTED — the 80% coverage floor CAN fail.** The audit claimed production
+  coverage could reach zero with the gate still green. Wrong twice over: it cut each
+  file at its *first* line-anchored `#[cfg(test)]` (misclassifying ~6,281 production
+  lines as test — `src/changes.rs` has three such attributes, the first at line 77 on
+  a `mod conformance` test helper, the real `mod tests` at 1818), and it used raw file
+  lines as a proxy for `llvm-cov`'s counted lines, which are only executable regions.
+  Under correct brace extents, production-at-zero reports 66.65% and the floor fires.
+  **The real finding: the floor does not fire until production coverage falls below
+  43.68%**, tolerating 56% of production uncovered. Still serious, still justifies
+  `gate-integrity`; the headline claim did not survive. The published audit artifact
+  has been corrected in place at the same URL.
 
 ## Corrections the drafting agents made to the audit itself
 
