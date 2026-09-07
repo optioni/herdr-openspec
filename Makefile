@@ -24,7 +24,9 @@ coverage:
 		echo "error: cargo-llvm-cov not found. Install it with: cargo install cargo-llvm-cov" 1>&2; \
 		exit 1; \
 	fi
-	cargo llvm-cov --fail-under-lines 80
+	cargo llvm-cov --fail-under-lines 80 --json --output-path target/llvm-cov.json
+	cargo llvm-cov report --summary-only
+	python3 scripts/coverage-prod.py target/llvm-cov.json
 
 gates:
 	/bin/sh scripts/gates/deps.sh
