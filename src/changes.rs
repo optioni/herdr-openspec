@@ -4765,6 +4765,17 @@ apply:
         fn a_whitespace_only_stderr_appends_nothing() {
             let err = failed(Some(1), "   \n\t\n");
             let problem = cli_error_problem("openspec list --json", &["list", "--json"], &err);
+            // Pins the exact string, not merely byte-identity with the
+            // empty-stderr fixture below (both go through the `None` arm of
+            // `cli_error_problem`, so comparing them to each other alone
+            // would still pass if that arm appended a dangling separator to
+            // both). This is the assertion that proves "no trailing
+            // separator left dangling" from `cli-changes` -> "A
+            // whitespace-only stderr appends nothing".
+            assert_eq!(
+                problem,
+                "openspec list --json: openspec list --json exited with code 1"
+            );
             let empty = failed(Some(1), "");
             let empty_problem =
                 cli_error_problem("openspec list --json", &["list", "--json"], &empty);
