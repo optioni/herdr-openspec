@@ -532,3 +532,61 @@ plant_find = "python3 scripts/coverage-prod.py target/llvm-cov.json tests/degrad
 plant_replace = "python3 scripts/coverage-prod.py target/llvm-cov.json"
 expect = "NOWAIVER FAIL: Makefile's production-coverage floor no longer names its map argument"
 why = "scripts/coverage-prod.py treats its degraded-coverage map path as an OPTIONAL second argument - omitted, the covers-range check is skipped entirely. Dropping just that argument from the Makefile's coverage-prod.py line silently disables the whole covers check while make gates, make coverage, and make check all stay green, the same guard-that-cannot-fail defect this change exists to remove, one layer up"
+
+# The two entries below are gate-integrity's Change-Review correction (task 9.3): an
+# independent reviewer found that the ORIGINAL "(^|[[:space:]])(...)" prefix, shared across
+# every alternative, made two of the four forbidden spellings unreachable in practice. Real
+# usage never precedes `fail-under-lines` with whitespace (it always follows the SECOND dash
+# of a lowering flag, so the character immediately before it is `-`, never a space or line
+# start) and never precedes the coverage-off attribute with whitespace either (the real
+# attribute is written `#[coverage(...)]`, preceded by `[`). Both alternatives are now
+# anchored on their OWN correct context instead of sharing one prefix that fit neither: a
+# leading `-` or line start for `fail-under-lines`, and a bare `coverage\(off\)` with no
+# prefix requirement at all for the attribute - the escaped literal never collides with the
+# pattern's own source, since the source spells it `coverage\(off\)`, backslashes included,
+# never the contiguous unescaped bytes. `--ignore-filename-regex` and `--exclude` keep their
+# original `(^|[[:space:]])` anchor unchanged - the reviewer found no defect in either.
+#
+# Each of the two repaired alternatives gets its OWN control below, isolated from the other
+# and from the two pre-existing ones, on READONLY-UI's Guard F terms ("Each addition gets its
+# OWN positive control ... not a shared grep"): deleting exactly one alternative from the
+# fixed pattern must turn only its own control red, never the others. Both plants avoid
+# spelling their own forbidden text unescaped in THIS file, on the %%DASHDASH%% placeholder's
+# own terms - see each control's own comment.
+[[control]]
+id = "nowaiver-fail-under-lines-dash-prefix"
+script = "nowaiver.sh"
+plant_file = "src/ui/list.rs"
+plant_find = "//! The row grammar: every function here is a pure total transformation,"
+# %%DASHDASH%% is expanded to "--" only when the harness applies the plant (see the
+# "nowaiver-hit" control above), so this checked-in line never itself reads as the real
+# lowering flag under nowaiver.sh's own extension-less "tests" sweep.
+plant_replace = '''//! The row grammar: every function here is a pure total transformation,
+// cargo llvm-cov %%DASHDASH%%fail-under-lines 40 used here'''
+expect = "NOWAIVER FAIL: a coverage waiver entered the tree"
+why = "task 9.3: a lowered fail-under-lines flag is preceded by a dash (the second dash of the real double-dash flag), never whitespace or line-start - the ORIGINAL pattern's shared (^|[[:space:]]) prefix could never match it, so the floor guard could not catch its own defeat"
+
+[[control]]
+id = "nowaiver-coverage-off-attribute"
+script = "nowaiver.sh"
+plant_file = "src/ui/list.rs"
+plant_find = "//! The row grammar: every function here is a pure total transformation,"
+# The forbidden attribute's parentheses are written as TOML basic-string unicode escapes,
+# not as literal characters, so the checked-in bytes of THIS file never spell the offending
+# word run unescaped - nowaiver.sh's own extension-less "tests" sweep would otherwise catch
+# its own control fixture before the plant is ever applied, on exactly the terms the
+# %%DASHDASH%% placeholder protects the dash-bearing control above. The `toml` crate decodes
+# the escapes when this file is parsed, so the harness applies the real, unescaped attribute
+# to the scratch copy.
+plant_replace = "//! The row grammar: every function here is a pure total transformation,\n// #[coverage\u0028off\u0029] used here"
+expect = "NOWAIVER FAIL: a coverage waiver entered the tree"
+why = "task 9.3: the real attribute is preceded by a bracket, never whitespace or line-start - the ORIGINAL pattern's shared (^|[[:space:]]) prefix could never match it, so a coverage-disabling attribute could hide missing coverage undetected"
+
+[[control]]
+id = "nowaiver-prod-min-override"
+script = "nowaiver.sh"
+plant_file = "Makefile"
+plant_find = "python3 scripts/coverage-prod.py target/llvm-cov.json tests/degraded-coverage.toml"
+plant_replace = "PROD_MIN=0 python3 scripts/coverage-prod.py target/llvm-cov.json tests/degraded-coverage.toml"
+expect = "NOWAIVER FAIL: Makefile's production-coverage floor line carries a PROD_MIN= override"
+why = "task 9.3 (CRITICAL 2): scripts/coverage-prod.py reads a PROD_MIN environment override with no floor of its own - a PROD_MIN=0 prefix on the Makefile's coverage-prod.py line would silence the production floor entirely while make check, make gates, and every other control stayed green"
