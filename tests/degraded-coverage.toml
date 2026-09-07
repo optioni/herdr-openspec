@@ -44,7 +44,7 @@ why = "a real unparseable schema.yaml, read through changes::from_files, empties
 covers = ["src/changes.rs:941-946"]
 
 [[row]]
-condition = "Schema loads with no tasks artifact (`apply.tracks` matches nothing, and no artifact has id `tasks`)"
+condition = "Schema loads with no tasks artifact (`apply.tracks` matches nothing and no artifact has id `tasks`, or `apply.tracks` is present but wrong-typed even when an artifact has id `tasks`)"
 tier = "unit"
 proof = ["no_tasks_artifact_renders_every_tab_as_markdown"]
 verdict = "unproven"
