@@ -32,6 +32,15 @@ On `Err(LoadError::Unreadable)` or `Err(LoadError::Invalid)` it SHALL NOT invoke
 the file is present and broken, and the CLI's tier 1 would read the same bytes. It SHALL
 record one problem naming the path and the reason, and produce no schema.
 
+On the illegal-name variant `schema-artifacts` requires — the name could not be joined into
+a path at all — it SHALL also NOT invoke the CLI, and SHALL record one problem naming the
+rejected value. Asking `schema which` about a name that cannot be a directory segment is a
+spawn whose only possible answer is an error, and the plugin would then have to reject the
+`path` that answer named anyway. `cli-changes` already drops a change whose apply payload
+reports such a `schemaName`, so this branch is reached only by a direct caller of
+`resolve_cli_schema`; it is specified because the resolver is total over `LoadError` and
+must not silently treat an unreachable variant as repairable.
+
 The resolved `path` SHALL be used as given. The CLI reports the schema's directory, not the
 `schema.yaml` file (`dist/commands/schema.js:16-38` stores `path.join(<schemasDir>, name)`
 and only *tests* `<dir>/schema.yaml` for existence), which is why `schema::load_dir` — which
@@ -106,18 +115,42 @@ message appears on whichever change happened to be enumerated first.
   naming the path and the parse reason
 - **AND** no `schema which` invocation is recorded
 
+#### Scenario: An illegal schema name is not repaired by the CLI
+
+- **WHEN** `resolve_cli_schema` is called directly with the name `../../../../etc` against
+  a scratch repository, and the fake has no `schema which` registration
+- **THEN** it produces no schema and exactly one problem naming the rejected value
+- **AND** no invocation is recorded at all, so a name that cannot be a path segment costs
+  no process start
+- **AND** nothing outside the scratch tree is read
+
 ### Requirement: Every failure of the fallback tier degrades and names itself
 
 Each of the following SHALL produce no schema for the affected change — an empty
 `artifacts` list rather than a missing change — and SHALL record exactly one problem naming
 the schema name and what failed. None SHALL panic, and none SHALL abort the other changes.
 
-- `schema which` could not start the program (`CliError::NotStarted`).
+- `schema which` could not start the program (`CliError::NotStarted`). The problem SHALL also
+  carry the `reason` the seam captured, unconditionally, because this tier renders its
+  failures through the same `cli_error_problem` `cli-changes` specifies — the inheritance is
+  the shared function, not a restatement of the rule.
 - `schema which` exited non-zero (`CliError::Failed`). The CLI writes `{"error": …,
   "available": [ … ]}` to **stdout** and exits 1 for an unknown schema
   (`dist/commands/schema.js:450-464`), and `subprocess-seam`'s `Failed` carries stderr
-  only, so the problem SHALL name the schema, the vector, and the exit code and SHALL NOT
-  claim to report the CLI's own message.
+  only. This tier shares `cli_error_problem` with `cli-changes` and inherits that
+  capability's rule unchanged — one rule seen from three call sites, not two rules — which is
+  what makes an exec failure of the `openspec` shim (exit 127, `env: node: No such file or
+  directory` on stderr) self-diagnosing here too, and not only in `from_cli`.
+
+  **This tier is the reason that rule skips a `Note:` banner.** `openspec schema which` writes
+  `Note: Schema commands are experimental and may change.` to stderr on **every** invocation,
+  success and failure alike (`dist/commands/schema.js:388-391`; measured on 1.12.0 at both
+  exit 0 and exit 1) — so for an unknown schema, stderr holds the banner and *only* the
+  banner while the real answer, `{"error": …, "available": [ … ]}`, goes to **stdout**, which
+  the seam discards. Absent the skip, every failure this tier reports would end with a banner
+  that explains nothing. With it, the problem SHALL name the schema, the vector, and the exit
+  code and nothing more — which is what it named before this change, and is correct for this
+  command rather than merely unchanged.
 - The output is not JSON, is not an object, or has no `path`, or a `path` that is not a
   string, or a `path` that is empty.
 - The directory the `path` names holds no `schema.yaml` — `load_dir` reports `NotVendored`
@@ -158,6 +191,8 @@ note to stdout, hiding a real change in the contract instead of degrading visibl
 - **THEN** that change carries an empty `artifacts` list and exactly one problem naming the
   schema and the program that could not be started
 - **AND** nothing panics and the remaining changes are unaffected
+- **AND** the problem also carries the `reason` the seam captured, which this capability
+  inherits from `cli-changes` through the shared `cli_error_problem` rather than restating
 
 #### Scenario: An unusable `schema.yaml` at the CLI-named path degrades that change
 
@@ -183,6 +218,21 @@ note to stdout, hiding a real change in the contract instead of degrading visibl
 - **THEN** the payload is rejected as unusable and one problem is recorded
 - **AND** the schema is not loaded from `<dir>`, so a future release moving the note to
   stdout degrades visibly rather than being silently absorbed
+
+#### Scenario: An exec failure during the fallback tier carries its stderr
+
+- **WHEN** the repository vendors no `spec-driven`, and the fake answers
+  `["schema", "which", "spec-driven", "--json"]` with
+  `Err(CliError::Failed { code: Some(127), stderr: "env: node: No such file or directory\n" })`
+- **THEN** the change carries `schema` `spec-driven`, an empty `artifacts` list, and exactly
+  one problem naming the schema, the vector, exit code `127`, and the text
+  `env: node: No such file or directory`
+- **AND** the same call with an empty `stderr` produces the same problem without that text,
+  so the two are distinguishable and neither is hard-coded
+- **AND** a third run whose `stderr` is exactly
+  `"Note: Schema commands are experimental and may change.\n"` — the shape this command
+  really produces — yields a problem byte-identical to the empty-`stderr` one, so the tier
+  that motivated the banner skip is the tier that proves it
 
 ### Requirement: A schema is resolved at most once per name per call
 

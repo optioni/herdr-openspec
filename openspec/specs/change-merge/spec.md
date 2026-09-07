@@ -20,9 +20,13 @@ than dropped when a field is superseded. Producing either input is `change-enume
 no filesystem access, no CLI access — and SHALL be total: it returns a `ChangeSet`, never a
 `Result`, and never panics.
 
-Active changes SHALL be paired **by name**. Name is the only key either producer shares:
-`openspec list --json` reports a name and nothing else that identifies a change, and both
-producers enumerate the same directory, so a name is unique within each list.
+Active changes SHALL be paired **by name**, against the file set's **active** list only.
+Name is the only key either producer shares: `openspec list --json` reports a name and
+nothing else that identifies a change, and both producers enumerate the same directory, so
+a name is unique within each list. Pairing by name is the **change-level** join and is not
+the positional join the next requirement specifies; that one applies to the artifacts
+*within* a paired change. The two are different joins with different keys, and any prose
+describing the merge as joined by position is wrong.
 
 For a name present in both lists, the merged `Change` SHALL take:
 
@@ -42,11 +46,27 @@ file change unchanged, and no problem SHALL be recorded: the two reads are taken
 apart and a change created or removed between them is a normal race, not a fault.
 
 The merged `active` list SHALL be re-sorted by name in byte order after the union, so an
-appended CLI-only change lands in position rather than at the end.
+appended CLI-only change lands in position rather than at the end. The re-sort is also what
+keeps the merge deterministic: the CLI-only remainder is drained from a `HashMap`, whose
+iteration order is not stable, and sorting after the append is what prevents that order
+from reaching the rendered list.
 
 `archived` SHALL pass through byte-identical. `change-model` requires archived changes to be
 permanently file-sourced, and `openspec list --json` filters `archive` out of its walk
 (`dist/core/list.js:85-87`), so there is nothing to layer.
+
+The merge SHALL NOT consult `files.archived` when deciding whether a CLI change is
+CLI-only. A change archived **between** the worker's `list --json` call and its file walk —
+two different instants — therefore appears in **both lists of the merged `ChangeSet`**: in
+`active` from the CLI's stale answer, and in `archived` from the fresh file walk. This is
+accepted, not defended against, and SHALL be carried as its own row of `SPEC.md` →
+Degraded states, stated at the `ChangeSet` level the merge produces rather than at a
+rendered frame, because the merge is a pure function and the set is where the condition is
+observable. Suppressing the active row would require the merge to treat an archived
+name as authority over a CLI answer, which inverts the dual-source model's own rule that
+the CLI corrects the files; and the state lasts one refresh cycle, because the next
+`list --json` no longer reports the change. Two rows briefly is a truer picture of a
+repository mid-archive than one row silently chosen from the two producers' disagreement.
 
 `ChangeSet::problems` SHALL be the file set's problems followed by `CliChanges::problems`.
 
@@ -63,6 +83,16 @@ permanently file-sourced, and `openspec list --json` filters `archive` out of it
   deliberately given **different** schema names, since equal ones would leave the change's
   headline claim unverified
 - **AND** its `dir` is `<repo>/openspec/changes/alpha`, the file change's, unchanged
+
+#### Scenario: Changes are paired by name, not by position
+
+- **WHEN** the file set's `active` holds `alpha` and `zulu` in that order, and
+  `CliChanges::active` holds `zulu` and `alpha` in that order, with each CLI entry carrying
+  a schema naming itself (`zulu-schema`, `alpha-schema`)
+- **THEN** the merged `alpha` carries `alpha-schema` and the merged `zulu` carries
+  `zulu-schema`
+- **AND** an implementation pairing by index produces the swap and fails this scenario,
+  which is the assertion that makes the change-level key observable
 
 #### Scenario: A change only the CLI reported is inserted in name order
 
@@ -94,6 +124,17 @@ permanently file-sourced, and `openspec list --json` filters `archive` out of it
 - **AND** the merged `active` holds the CLI's `add-auth` as a separate value, so the two
   lists neither filter nor suppress one another
 
+#### Scenario: A change archived mid-cycle appears in both lists for one cycle
+
+- **WHEN** the file set's `active` is empty, its `archived` holds `add-auth` dated
+  `2026-08-14`, and `CliChanges::active` holds `add-auth` — the state produced by archiving
+  a change between the worker's `list --json` call and its file walk
+- **THEN** the merged `ChangeSet` holds `add-auth` in `active` **and** in `archived`
+- **AND** no problem is recorded, because neither producer is faulty
+- **AND** running the merge again with an empty `CliChanges::active`, the next cycle's
+  answer, leaves `add-auth` in `archived` alone, so the state is self-correcting rather
+  than sticky
+
 ### Requirement: Artifact lists are joined by position, never by path and never by id
 
 The two producers' `artifacts` vectors SHALL be joined by **index**. The join SHALL NOT
@@ -112,21 +153,22 @@ produces two `ArtifactRef`s carrying it and an id-keyed lookup would collapse th
 
 The join SHALL apply exactly these rules, in order:
 
-1. The CLI list is **empty** and the file list is not — take the **file** list, record no
-   problem. The CLI produced no schema for this change, which is already reported as its
-   own problem.
+1. The CLI list is **empty** — take the **file** list, record no problem. The CLI produced
+   no schema for this change, which is already reported as its own problem. Two empty lists
+   fall under this rule and yield the empty result, so there SHALL be no separate
+   both-empty branch: a branch returning exactly what the next rule returns is not a
+   distinct rule, and reads as one.
 2. The file list is **empty** and the CLI list is not — take the **CLI** list, record no
    problem. This is the repaired case: the repository did not vendor the schema and
    `schema-cli-fallback` found it.
-3. Both are empty — take either; the result is empty and no problem is recorded.
-4. Both are non-empty and their **lengths differ** — take the **file** list and record one
+3. Both are non-empty and their **lengths differ** — take the **file** list and record one
    problem naming both lengths, because two different schemas were resolved and position is
    meaningless across them.
-5. Both are non-empty and equal in length, and the ids at some index differ — take the
+4. Both are non-empty and equal in length, and the ids at some index differ — take the
    **file** list and record one problem naming the **first** differing index and both ids.
-6. Otherwise — take the **CLI** list.
+5. Otherwise — take the **CLI** list.
 
-Rules 4 and 5 prefer the file list because it is the one internally consistent with the
+Rules 3 and 4 prefer the file list because it is the one internally consistent with the
 merged change's `dir` and with the artifacts a reader can open on disk right now.
 
 #### Scenario: Equal-length lists with equal ids take the CLI's paths, positionally
