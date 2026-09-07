@@ -5894,7 +5894,11 @@ apply:
         let result = from_cli(&fake, &repo);
 
         let names: Vec<&str> = result.active.iter().map(|c| c.name.as_str()).collect();
-        assert_eq!(names, vec!["mike"], "alpha must be dropped, mike unaffected");
+        assert_eq!(
+            names,
+            vec!["mike"],
+            "alpha must be dropped, mike unaffected"
+        );
         assert_eq!(result.problems.len(), 1);
         assert!(result.problems[0].contains("alpha"));
         assert!(result.problems[0].contains("../../../../etc"));
@@ -5966,7 +5970,11 @@ apply:
 
             let result = from_cli(&fake, &repo);
             let names: Vec<&str> = result.active.iter().map(|c| c.name.as_str()).collect();
-            assert_eq!(names, vec!["alpha"], "schemaName {value:?} must be accepted");
+            assert_eq!(
+                names,
+                vec!["alpha"],
+                "schemaName {value:?} must be accepted"
+            );
         }
 
         // The trimmed `" tdd "` is accepted, and the produced `Change`
@@ -6009,7 +6017,10 @@ apply:
             );
             fake.register_openspec(
                 &["instructions", "apply", "--change", "alpha", "--json"],
-                Ok(schema_guard_apply_json("", &repo.join("openspec/changes/alpha"))),
+                Ok(schema_guard_apply_json(
+                    "",
+                    &repo.join("openspec/changes/alpha"),
+                )),
             );
 
             let result = from_cli(&fake, &repo);
