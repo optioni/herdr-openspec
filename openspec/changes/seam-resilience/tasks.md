@@ -47,10 +47,10 @@ apart by exit code.
 ## 4. The watch covers `openspec/`, not the repository
 <!-- kind: behavior -->
 
-- [ ] 4.1 RED: Write failing tests for: `The composition root watches openspec/, not the repository root` and `A write outside openspec/ produces no batch`. RED at HEAD: `grep -n 'watch::start(root)' src/ui/mod.rs` → line 169 passes the root itself.
-- [ ] 4.2 GREEN: Pass `root.join("openspec")` from `start_collaborators`. `watch::start` is unchanged (design.md -> Decision 8).
-- [ ] 4.3 CHECK: The three landed `watch::start` call sites — `grep -rn 'watch::start(' src/ | wc -l` → `3` — still pass a path that exists in their own fixture, so no landed watcher test starts watching a directory it did not create.
-- [ ] 4.4 Run `cargo test --all-features watch ui::mod` — no regressions.
+- [x] 4.1 RED: Write failing tests for: `The composition root watches openspec/, not the repository root` and `A write outside openspec/ produces no batch`. RED at HEAD: `grep -n 'watch::start(root)' src/ui/mod.rs` → line 169 passes the root itself.
+- [x] 4.2 GREEN: Pass `root.join("openspec")` from `start_collaborators`. `watch::start` is unchanged (design.md -> Decision 8).
+- [x] 4.3 CHECK: The three landed `watch::start` call sites — `grep -rn 'watch::start(' src/ | wc -l` → `3` — still pass a path that exists in their own fixture, so no landed watcher test starts watching a directory it did not create.
+- [x] 4.4 Run `cargo test --all-features watch ui::mod` — no regressions.
 
 ## 5. The poller reports a stall and compares canonical paths
 <!-- kind: behavior -->
@@ -76,14 +76,14 @@ apart by exit code.
 <!-- kind: behavior -->
 <!-- parallel-after: 2 -->
 
-- [ ] 7.1 RED: Write failing tests for: `A second press while a launch is in flight is refused, not queued`, `Focus still works while a launch is in flight`, `Every combination is total`, `A dead launcher worker is reported once and then stops being reported`, `The settle budget is a named constant and is asserted`, and the extended `The inert launcher answers nothing and starts nothing`. RED at HEAD: `grep -c 'in_flight' src/launch.rs` → `0` (exit 1) and `grep -c 'SETTLE_BUDGET\|pub fn settle' src/launch.rs` → `0` (exit 1).
-- [ ] 7.2 GREEN: Add `decide`'s sixth argument and the in-flight refusal, ordered before the live-name refusal.
-- [ ] 7.3 GREEN: Latch a `dead` flag on the first `SendError` or `Disconnected` and report it once as `Outcome { named: None, problems: [reason] }`, copying `agents::RealAgentPoll`'s shape.
-- [ ] 7.4 GREEN: Add `launch::SETTLE_BUDGET` and `launch::settle`, declared **below** the module's single `thread::spawn` so `NOBLOCK` leg 3's cut already excludes it (design.md -> Decision 6).
-- [ ] 7.5 CHECK: Contract gate — `decide` gains a parameter, so its four carried-over scenarios (`An unreachable socket makes every action key inert`, `No selected change means no launch, and no agent means no focus`, `Each launch intent carries its own change and derived name`, `A derived name already live in the session is refused before any Herdr call`) each gain the sixth argument. `grep -rn 'decide(' src/ | wc -l` → `13` sites at HEAD; confirm every caller passes a real value rather than a literal `false`.
-- [ ] 7.6 CHECK: `make gates` — `NOBLOCK` leg 3's `src/launch.rs` leg passes unchanged, and its negative control (a `recv_timeout` planted above the spawn) still fires. Record both halves.
-- [ ] 7.7 CHECK: `NOSLEEP` passes with `settle`'s deadline-bounded poll. `src/launch.rs` is named by neither leg 2 (`src/ui` only) nor leg 2b (`watch`/`refresh`/`agents` only), so leg 1's shape rule governs it; confirm the sleep sits inside `while Instant::now() < deadline`. Plant a bare `thread::sleep` outside the loop, show leg 1 fires, remove it, show it goes quiet.
-- [ ] 7.8 Run `cargo test --all-features launch` — no regressions.
+- [x] 7.1 RED: Write failing tests for: `A second press while a launch is in flight is refused, not queued`, `Focus still works while a launch is in flight`, `Every combination is total`, `A dead launcher worker is reported once and then stops being reported`, `The settle budget is a named constant and is asserted`, and the extended `The inert launcher answers nothing and starts nothing`. RED at HEAD: `grep -c 'in_flight' src/launch.rs` → `0` (exit 1) and `grep -c 'SETTLE_BUDGET\|pub fn settle' src/launch.rs` → `0` (exit 1).
+- [x] 7.2 GREEN: Add `decide`'s sixth argument and the in-flight refusal, ordered before the live-name refusal.
+- [x] 7.3 GREEN: Latch a `dead` flag on the first `SendError` or `Disconnected` and report it once as `Outcome { named: None, problems: [reason] }`, copying `agents::RealAgentPoll`'s shape.
+- [x] 7.4 GREEN: Add `launch::SETTLE_BUDGET` and `launch::settle`, declared **below** the module's single `thread::spawn` so `NOBLOCK` leg 3's cut already excludes it (design.md -> Decision 6).
+- [x] 7.5 CHECK: Contract gate — `decide` gains a parameter, so its four carried-over scenarios (`An unreachable socket makes every action key inert`, `No selected change means no launch, and no agent means no focus`, `Each launch intent carries its own change and derived name`, `A derived name already live in the session is refused before any Herdr call`) each gain the sixth argument. `grep -rn 'decide(' src/ | wc -l` → `13` sites at HEAD; confirm every caller passes a real value rather than a literal `false`.
+- [x] 7.6 CHECK: `make gates` — `NOBLOCK` leg 3's `src/launch.rs` leg passes unchanged, and its negative control (a `recv_timeout` planted above the spawn) still fires. Record both halves.
+- [x] 7.7 CHECK: `NOSLEEP` passes with `settle`'s deadline-bounded poll. `src/launch.rs` is named by neither leg 2 (`src/ui` only) nor leg 2b (`watch`/`refresh`/`agents` only), so leg 1's shape rule governs it; confirm the sleep sits inside `while Instant::now() < deadline`. Plant a bare `thread::sleep` outside the loop, show leg 1 fires, remove it, show it goes quiet.
+- [x] 7.8 Run `cargo test --all-features launch` — no regressions.
 
 ## 8. The dashboard and the loop: startup rows, in-flight, and the two new problem sources
 <!-- kind: behavior -->
