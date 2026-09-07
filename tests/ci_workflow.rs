@@ -876,7 +876,10 @@ fn spec_md_gates_section_names_every_check_prerequisite_by_name() {
     );
 
     let section = markdown_section(&spec, "### Gates");
-    assert!(!section.trim().is_empty(), "SPEC.md must have a `### Gates` section");
+    assert!(
+        !section.trim().is_empty(),
+        "SPEC.md must have a `### Gates` section"
+    );
 
     for target in &prereqs {
         assert!(
