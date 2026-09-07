@@ -299,14 +299,14 @@ Test Strategy). Written first, it is RED for exactly the five gates this change 
 ## 9. Change Review
 <!-- kind: operational -->
 
-- [ ] 9.1 CHECK: Dispatch an independent reviewer — not a fork of the implementing session —
+- [x] 9.1 CHECK: Dispatch an independent reviewer — not a fork of the implementing session —
   against proposal.md, every spec scenario, design.md, and tasks.md, given the diff only.
-- [ ] 9.2 CHECK: Direct the reviewer at this change's own failure mode first: for each of the
+- [x] 9.2 CHECK: Direct the reviewer at this change's own failure mode first: for each of the
   eleven findings, name the control that would go red if the repair were reverted, and confirm
   no control asserts on its own plant rather than on the gate's exit status.
-- [ ] 9.3 CHANGE: Fix every CRITICAL, resolve or accept each WARNING with a one-line reason,
+- [x] 9.3 CHANGE: Fix every CRITICAL, resolve or accept each WARNING with a one-line reason,
   note SUGGESTIONs, re-run affected tests.
-- [ ] 9.4 VERIFY: Confirm no blocking or unowned finding remains, and that no repair reached
+- [x] 9.4 VERIFY: Confirm no blocking or unowned finding remains, and that no repair reached
   outside `quality-gates`, `ci-workflow`, and `degraded-coverage` or into `src/ui/terminal.rs`.
 
 ## 10. Lint & Verify
