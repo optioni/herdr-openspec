@@ -201,8 +201,12 @@ pub fn start_collaborators(
     let file_mode = cli.is_none();
     problems.extend(bin_problems);
 
+    // `seam-resilience`'s addition (design.md -> Decision 8): the watch is narrowed to
+    // `<repo>/openspec`, never the repository root — `watch::start` itself is unchanged,
+    // and stays ignorant of the repository's own layout; the join happens here, at the
+    // composition root, exactly once.
     let (fs, watch_problems) = match repo {
-        Some(root) => crate::watch::start(root),
+        Some(root) => crate::watch::start(&root.join("openspec")),
         None => (crate::watch::none(), Vec::new()),
     };
     problems.extend(watch_problems);

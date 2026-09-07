@@ -836,8 +836,7 @@ mod tests {
     fn a_write_outside_openspec_produces_no_batch() {
         let scratch = crate::testutil::ScratchDir::new();
         let root = scratch.path();
-        std::fs::create_dir_all(root.join("openspec/changes/alpha"))
-            .expect("create fixture dir");
+        std::fs::create_dir_all(root.join("openspec/changes/alpha")).expect("create fixture dir");
         std::fs::create_dir_all(root.join("target")).expect("create sibling dir");
         let (mut fs, problems) = start(&root.join("openspec"));
         assert!(problems.is_empty(), "{problems:?}");
