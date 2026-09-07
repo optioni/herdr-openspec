@@ -285,6 +285,42 @@ mod tests {
         }
 
         #[test]
+        fn a_panic_on_a_worker_thread_restores_nothing() {
+            use crate::ui::terminal::restore_then_if;
+
+            let rec = Recorder::default();
+            let installed_on = std::thread::current().id();
+            let current = std::thread::spawn(|| std::thread::current().id())
+                .join()
+                .expect("spawned thread does not panic");
+            assert_ne!(
+                installed_on, current,
+                "a spawned thread must have a different id from the test's own"
+            );
+
+            restore_then_if(&rec, installed_on, current, &mut || {
+                rec.note("previous_hook")
+            });
+
+            assert_eq!(rec.calls(), vec!["previous_hook"]);
+        }
+
+        #[test]
+        fn a_panic_on_the_render_thread_still_restores() {
+            use crate::ui::terminal::restore_then_if;
+
+            let rec = Recorder::default();
+            let id = std::thread::current().id();
+
+            restore_then_if(&rec, id, id, &mut || rec.note("previous_hook"));
+
+            assert_eq!(
+                rec.calls(),
+                vec!["leave_alternate", "disable_raw", "previous_hook"]
+            );
+        }
+
+        #[test]
         fn terminal_error_names_the_failing_op_and_detail() {
             let err = TerminalError {
                 op: "enable_raw",
