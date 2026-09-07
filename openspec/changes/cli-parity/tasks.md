@@ -94,9 +94,9 @@
 ## 9. Change Review
 <!-- kind: operational -->
 
-- [ ] 9.1 CHECK: Dispatch an independent reviewer (not a fork of this session) against proposal.md, all five delta specs, design.md, and the diff. Concentration points: that each of the 59 scenarios names a test that would go red if its behavior were deleted; that no test reaches a real `openspec` binary or a Herdr socket; that every `cargo test` filter used reports a non-zero pass count; and that the two documented divergences are bound to proofs whose negative controls were actually run.
-- [ ] 9.2 CHANGE: Fix every CRITICAL, resolve or accept each WARNING with a one-line reason, note SUGGESTIONs, and re-run the affected tests.
-- [ ] 9.3 VERIFY: Confirm no blocking or unowned finding remains.
+- [x] 9.1 CHECK: Dispatch an independent reviewer (not a fork of this session) against proposal.md, all five delta specs, design.md, and the diff. Concentration points: that each of the 59 scenarios names a test that would go red if its behavior were deleted; that no test reaches a real `openspec` binary or a Herdr socket; that every `cargo test` filter used reports a non-zero pass count; and that the two documented divergences are bound to proofs whose negative controls were actually run.
+- [x] 9.2 CHANGE: Fix every CRITICAL, resolve or accept each WARNING with a one-line reason, note SUGGESTIONs, and re-run the affected tests.
+- [x] 9.3 VERIFY: Confirm no blocking or unowned finding remains.
 
 ## 10. Documentation
 <!-- kind: operational -->
