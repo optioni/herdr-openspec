@@ -65,20 +65,23 @@ pub struct Outcome {
     pub problems: Vec<String>,
 }
 
-/// The whole launch policy, a pure total function of its five arguments. Performs no
+/// The whole launch policy, a pure total function of its six arguments. Performs no
 /// filesystem, process, environment, network, or terminal I/O, reads no clock and no global
 /// state, spawns nothing, and never panics for any combination of arguments. The order is
 /// exactly: an unreachable socket makes every intent inert; `Focus` resolves against `pane`
-/// alone and returns without consulting `change`; no selected change means no launch; a
-/// derived name already live in the session is refused before any request is produced; and
-/// otherwise the request goes ahead. See `specs/agent-launch/spec.md` -> "The launch decision
-/// is a pure, total function that refuses before it reaches Herdr".
+/// alone and returns without consulting `change` or `in_flight` — a user waiting through a
+/// slow launch can still press `g`; no selected change means no launch; a launch already in
+/// flight is refused before any live-name check; a derived name already live in the session is
+/// refused before any request is produced; and otherwise the request goes ahead. See
+/// `specs/agent-launch/spec.md` -> "The launch decision is a pure, total function that refuses
+/// before it reaches Herdr".
 pub fn decide(
     intent: Intent,
     change: Option<&str>,
     pane: Option<&str>,
     reachable: bool,
     live_names: &[&str],
+    in_flight: bool,
 ) -> Decision {
     if !reachable {
         return Decision::Nothing;
@@ -94,6 +97,16 @@ pub fn decide(
     let Some(change) = change else {
         return Decision::Nothing;
     };
+    // `seam-resilience`: a launch already in flight is refused before the live-name check —
+    // it is the more specific and more recent fact, and it closes a window `live_names` alone
+    // cannot: between the press and the agent appearing in a poll, `live_names` does not yet
+    // contain the derived name. See specs/agent-launch/spec.md -> "A second press while a
+    // launch is in flight is refused, not queued".
+    if in_flight {
+        return Decision::Refuse(
+            "a launch is already running - wait for it to finish".to_string(),
+        );
+    }
     // The derived name is `state::agent_name`'s own output, named once here — see task 3.5.
     let agent = crate::state::agent_name(change);
     if live_names.contains(&agent.as_str()) {
@@ -362,15 +375,55 @@ pub fn none() -> Box<dyn Launcher> {
 struct RealLauncher {
     request_tx: std::sync::mpsc::Sender<Request>,
     result_rx: std::sync::mpsc::Receiver<Outcome>,
+    /// Set once the worker's death has been reported to a caller, on exactly
+    /// `agents::RealAgentPoll`'s `dead` model: every `request` after this point is discarded
+    /// and every `drain` answers `None`, so a dead launcher degrades to silence rather than to
+    /// a growing list. `seam-resilience`.
+    dead: bool,
+    /// Set the instant a `SendError` or a `Disconnected` `try_recv` is first observed, and
+    /// consumed by the very next `drain` — which reports it once and then sets `dead`. Kept
+    /// separate from `dead` because `request` can detect the death before any `drain` runs,
+    /// and the one report must still happen on a `drain` call, not a `request` call.
+    pending_death: bool,
 }
 
 impl Launcher for RealLauncher {
     fn request(&mut self, request: Request) {
-        let _ = self.request_tx.send(request);
+        if self.dead {
+            return;
+        }
+        if self.request_tx.send(request).is_err() {
+            self.pending_death = true;
+        }
     }
 
     fn drain(&mut self) -> Option<Outcome> {
-        self.result_rx.try_recv().ok()
+        if self.dead {
+            return None;
+        }
+        if self.pending_death {
+            self.dead = true;
+            self.pending_death = false;
+            return Some(dead_worker_outcome());
+        }
+        match self.result_rx.try_recv() {
+            Ok(outcome) => Some(outcome),
+            Err(std::sync::mpsc::TryRecvError::Empty) => None,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                self.dead = true;
+                Some(dead_worker_outcome())
+            }
+        }
+    }
+}
+
+/// The `Outcome` reported exactly once when the launcher's worker has stopped answering, on
+/// `agents::RealAgentPoll`'s "worker stopped" model. `named` is `None` — no agent was started
+/// by this non-event — and `problems` carries the one reason.
+fn dead_worker_outcome() -> Outcome {
+    Outcome {
+        named: None,
+        problems: vec!["the launcher's worker has stopped answering".to_string()],
     }
 }
 
@@ -391,7 +444,38 @@ pub fn start(
     Box::new(RealLauncher {
         request_tx,
         result_rx,
+        dead: false,
+        pending_death: false,
     })
+}
+
+/// How long [`settle`] waits for a launch already in flight to finish before giving up:
+/// strictly above the measured thirty seconds `herdr agent start` spends waiting for
+/// interactive readiness, and strictly below [`crate::cli::RUN_DEADLINE`] — both pinned by an
+/// assertion, on `watch::DEBOUNCE`'s and `agents::POLL_INTERVAL`'s named-constant-plus-assertion
+/// terms. `seam-resilience` -> design.md -> Decision 6.
+pub const SETTLE_BUDGET: std::time::Duration = std::time::Duration::from_secs(35);
+
+/// Poll `launcher.drain()` until it answers or `budget` elapses, returning whichever comes
+/// first. A launch in flight at exit is given a bounded chance to finish rather than being
+/// orphaned mid-sequence — `run_request` performs `pane split`, then `agent start`, then
+/// `state::record`, then `agent prompt`, and `main` calls `exit(0)` as soon as `ui::run`
+/// returns with the three workers detached and never joined.
+///
+/// A `while Instant::now() < deadline` poll, never a fixed sleep, on exactly `NOSLEEP` leg 1's
+/// terms; declared here, below `start`'s single `thread::spawn`, so `NOBLOCK` leg 3's cut of
+/// `src/launch.rs`'s production slice already excludes it — no gate is edited to admit it. The
+/// `Launcher` trait still carries exactly two non-blocking methods; this free function is the
+/// only place in the crate that waits on one. `seam-resilience` -> design.md -> Decision 6.
+pub fn settle(launcher: &mut dyn Launcher, budget: std::time::Duration) -> Option<Outcome> {
+    let deadline = std::time::Instant::now() + budget;
+    while std::time::Instant::now() < deadline {
+        if let Some(outcome) = launcher.drain() {
+            return Some(outcome);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    None
 }
 
 // Everything below this point is the worker's own body — reached only from inside a
@@ -434,7 +518,7 @@ mod tests {
                 Intent::Archive,
                 Intent::Focus,
             ] {
-                let result = decide(intent, Some("add-auth"), Some("w8:p3"), false, &[]);
+                let result = decide(intent, Some("add-auth"), Some("w8:p3"), false, &[], false);
                 assert_eq!(result, Decision::Nothing, "{intent:?}");
             }
         }
@@ -443,17 +527,17 @@ mod tests {
         fn no_change_means_no_launch_and_no_agent_means_no_focus() {
             for intent in [Intent::Apply, Intent::Continue, Intent::Archive] {
                 assert_eq!(
-                    decide(intent, None, None, true, &[]),
+                    decide(intent, None, None, true, &[], false),
                     Decision::Nothing,
                     "{intent:?}"
                 );
             }
             assert_eq!(
-                decide(Intent::Focus, None, None, true, &[]),
+                decide(Intent::Focus, None, None, true, &[], false),
                 Decision::Nothing
             );
             assert_eq!(
-                decide(Intent::Focus, None, Some("w8:p3"), true, &[]),
+                decide(Intent::Focus, None, Some("w8:p3"), true, &[], false),
                 Decision::Go(Request::Focus {
                     pane_id: "w8:p3".to_string()
                 })
@@ -464,7 +548,7 @@ mod tests {
         fn each_intent_carries_its_own_change_and_name() {
             let mut results = Vec::new();
             for intent in [Intent::Apply, Intent::Continue, Intent::Archive] {
-                let result = decide(intent, Some("2fa-support"), None, true, &[]);
+                let result = decide(intent, Some("2fa-support"), None, true, &[], false);
                 assert_eq!(
                     result,
                     Decision::Go(Request::Launch {
@@ -505,6 +589,7 @@ mod tests {
                 None,
                 true,
                 &["c-2fa-support", "other"],
+                false,
             );
             match result {
                 Decision::Refuse(reason) => {
@@ -520,6 +605,7 @@ mod tests {
                 None,
                 true,
                 &["c-2fa-support-x", "2fa-support"],
+                false,
             );
             assert!(matches!(go, Decision::Go(_)), "expected Go, got {go:?}");
         }
@@ -615,14 +701,14 @@ mod tests {
             // No filesystem, process, environment, network, terminal, or clock read: calling
             // it twice with identical arguments, with nothing else touched in between, must
             // yield identical results.
-            let a = decide(Intent::Apply, Some("add-auth"), Some("w8:p1"), true, &["x"]);
-            let b = decide(Intent::Apply, Some("add-auth"), Some("w8:p1"), true, &["x"]);
+            let a = decide(Intent::Apply, Some("add-auth"), Some("w8:p1"), true, &["x"], false);
+            let b = decide(Intent::Apply, Some("add-auth"), Some("w8:p1"), true, &["x"], false);
             assert_eq!(a, b);
         }
 
         #[test]
         fn the_derived_name_is_state_agent_name() {
-            let result = decide(Intent::Continue, Some("2FA_Support!"), None, true, &[]);
+            let result = decide(Intent::Continue, Some("2FA_Support!"), None, true, &[], false);
             assert_eq!(
                 result,
                 Decision::Go(Request::Launch {

@@ -363,6 +363,12 @@ impl Dashboard {
             pane.as_deref(),
             self.agents.reachable,
             &live_names,
+            // `seam-resilience`: `decide` gained an in-flight refusal (task 7), but
+            // `Dashboard::launch` has no `in_flight` field yet — that field and its
+            // hand-over/outcome/dead-worker lifecycle are `seam-resilience` task group 8's.
+            // Until it lands, this call site has no real signal to offer here honestly, so it
+            // passes `false` explicitly rather than inventing the field itself.
+            false,
         ) {
             crate::launch::Decision::Nothing => {}
             crate::launch::Decision::Refuse(reason) => {
