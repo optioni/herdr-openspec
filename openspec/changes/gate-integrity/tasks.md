@@ -169,21 +169,21 @@ Test Strategy). Written first, it is RED for exactly the five gates this change 
 ## 4. Directory-wide non-blocking sweep (G4)
 <!-- kind: behavior -->
 
-- [ ] 4.1 CHECK: Confirm the widening is free. Run
+- [x] 4.1 CHECK: Confirm the widening is free. Run
   `for f in $(find src/ui -name '*.rs'|sort); do awk 'BEGIN{p=1} /^#\[cfg\(test\)\]$/{p=0} p{print}' "$f" | grep -nE '\.recv\(|recv_timeout|try_recv|\.join\(\)|JoinHandle|thread::spawn|thread::sleep|mpsc|Mutex|RwLock|Condvar'; done`
   → **no output** at HEAD, so no production code changes.
-- [ ] 4.2 RED: Confirm `noblock.sh`'s control fails — the `recv()`-behind-`lock()` plant in
+- [x] 4.2 RED: Confirm `noblock.sh`'s control fails — the `recv()`-behind-`lock()` plant in
   `src/ui/app.rs` exits 0 today (recorded, task 0.3).
-- [ ] 4.3 GREEN: Change leg 1 from `prod "$UIDIR/driver.rs"` to the same
+- [x] 4.3 GREEN: Change leg 1 from `prod "$UIDIR/driver.rs"` to the same
   `find "$UIDIR" -name '*.rs'` set leg 2 uses, keeping `prod()` per file and keeping leg 1's
   existing positive controls.
-- [ ] 4.4 GREEN: Make leg 1's `OK` line report the file count it swept, so a sweep that
+- [x] 4.4 GREEN: Make leg 1's `OK` line report the file count it swept, so a sweep that
   silently narrowed back to one file is visible; add the `UIDIR`-points-at-an-empty-directory
   control asserting the count guard fires.
-- [ ] 4.5 GREEN: Write leg 1's production-only / leg 2's whole-file asymmetry and its reason
+- [x] 4.5 GREEN: Write leg 1's production-only / leg 2's whole-file asymmetry and its reason
   into the script header (per design.md → Decision 5), since the two legs now read the same
   file set and the difference would otherwise look accidental.
-- [ ] 4.6 VERIFY: `make gates` exits 0; add the `app.rs`, `view.rs`, `list.rs`, and `mod.rs`
+- [x] 4.6 VERIFY: `make gates` exits 0; add the `app.rs`, `view.rs`, `list.rs`, and `mod.rs`
   plants to the control map. Run the group tests — no regressions.
 
 ## 5. `WIRED` reads code, and requires the panic hook (G5, G8)
