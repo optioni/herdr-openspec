@@ -5831,6 +5831,194 @@ apply:
         }
     }
 
+    // --- cli-parity group 4: `parse_apply` refuses an illegal `schemaName` -
+    // Both tests below sit directly in `mod tests` (not nested in `mod
+    // from_cli`) so their full path matches design.md's Test Strategy
+    // filters `changes::tests::an_apply_payload_whose_schema_name` and
+    // `changes::tests::every_other_shape_is_legal_name`.
+
+    fn schema_guard_list_json(repo: &std::path::Path, names: &[&str]) -> String {
+        let changes: Vec<String> = names
+            .iter()
+            .map(|name| {
+                format!(
+                    r#"{{"name":{name:?},"completedTasks":0,"totalTasks":0,"lastModified":"x","status":"y"}}"#
+                )
+            })
+            .collect();
+        format!(
+            r#"{{"changes":[{}],"root":{{"path":{:?},"source":"nearest"}}}}"#,
+            changes.join(","),
+            repo.display().to_string()
+        )
+    }
+
+    fn schema_guard_apply_json(schema_name: &str, change_dir: &std::path::Path) -> String {
+        format!(
+            r#"{{"schemaName":{schema_name:?},"changeDir":{:?},"contextFiles":{{}}}}"#,
+            change_dir.display().to_string()
+        )
+    }
+
+    #[test]
+    fn an_apply_payload_whose_schema_name_would_escape_the_schema_directory_is_refused() {
+        use crate::cli::FakeCli;
+
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+        let fake = FakeCli::new();
+        fake.register_openspec(
+            &["list", "--json"],
+            Ok(schema_guard_list_json(&repo, &["alpha", "mike"])),
+        );
+        fake.register_openspec(
+            &["instructions", "apply", "--change", "alpha", "--json"],
+            Ok(schema_guard_apply_json(
+                "../../../../etc",
+                &repo.join("openspec/changes/alpha"),
+            )),
+        );
+        fake.register_openspec(
+            &["instructions", "apply", "--change", "mike", "--json"],
+            Ok(schema_guard_apply_json(
+                "tdd",
+                &repo.join("openspec/changes/mike"),
+            )),
+        );
+
+        let result = from_cli(&fake, &repo);
+
+        let names: Vec<&str> = result.active.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(names, vec!["mike"], "alpha must be dropped, mike unaffected");
+        assert_eq!(result.problems.len(), 1);
+        assert!(result.problems[0].contains("alpha"));
+        assert!(result.problems[0].contains("../../../../etc"));
+
+        assert!(
+            !fake
+                .calls()
+                .iter()
+                .any(|(_, args)| args.first().map(String::as_str) == Some("schema")),
+            "a rejected schemaName must never reach `schema which`: {:?}",
+            fake.calls()
+        );
+        assert!(
+            result.active.iter().all(|c| c.schema != "../../../../etc"),
+            "the rejected string must reach no produced Change::schema"
+        );
+    }
+
+    #[test]
+    fn every_other_shape_is_legal_name_rejects_is_refused_the_same_way() {
+        use crate::cli::FakeCli;
+
+        for value in ["   ", ".", "..", "a/b", "a\\b", "/etc/passwd"] {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(schema_guard_list_json(&repo, &["alpha"])),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "alpha", "--json"],
+                Ok(schema_guard_apply_json(
+                    value,
+                    &repo.join("openspec/changes/alpha"),
+                )),
+            );
+
+            let result = from_cli(&fake, &repo);
+            assert!(
+                result.active.is_empty(),
+                "schemaName {value:?} must drop the change"
+            );
+            assert_eq!(result.problems.len(), 1, "schemaName {value:?}");
+            assert!(result.problems[0].contains("alpha"), "schemaName {value:?}");
+            assert!(
+                result.problems[0].contains(value),
+                "schemaName {value:?}: problem was {:?}",
+                result.problems[0]
+            );
+        }
+
+        for value in ["spec-driven", "spec-driven.v2"] {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            vendor_schema(&repo, value, &[("proposal", "proposal.md")]);
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(schema_guard_list_json(&repo, &["alpha"])),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "alpha", "--json"],
+                Ok(schema_guard_apply_json(
+                    value,
+                    &repo.join("openspec/changes/alpha"),
+                )),
+            );
+
+            let result = from_cli(&fake, &repo);
+            let names: Vec<&str> = result.active.iter().map(|c| c.name.as_str()).collect();
+            assert_eq!(names, vec!["alpha"], "schemaName {value:?} must be accepted");
+        }
+
+        // The trimmed `" tdd "` is accepted, and the produced `Change`
+        // carries the trimmed `tdd`, never the padded value.
+        {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(schema_guard_list_json(&repo, &["alpha"])),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "alpha", "--json"],
+                Ok(schema_guard_apply_json(
+                    " tdd ",
+                    &repo.join("openspec/changes/alpha"),
+                )),
+            );
+
+            let result = from_cli(&fake, &repo);
+            assert_eq!(result.active.len(), 1);
+            assert_eq!(
+                result.active[0].schema, "tdd",
+                "the trimmed value must be stored, never the padded one"
+            );
+        }
+
+        // `""` also drops the change, but through the existing
+        // missing-field branch rather than the guard — asserted by message,
+        // not by outcome, since both outcomes drop the change.
+        {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            let fake = FakeCli::new();
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(schema_guard_list_json(&repo, &["alpha"])),
+            );
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "alpha", "--json"],
+                Ok(schema_guard_apply_json("", &repo.join("openspec/changes/alpha"))),
+            );
+
+            let result = from_cli(&fake, &repo);
+            assert!(result.active.is_empty());
+            assert_eq!(result.problems.len(), 1);
+            assert!(
+                result.problems[0].contains("no usable \"schemaName\""),
+                "empty schemaName must take the existing missing-field branch, not the guard: {:?}",
+                result.problems[0]
+            );
+        }
+    }
+
     // --- live-refresh group 3: per-change CLI invalidation ------------------
 
     mod from_cli_cached {
