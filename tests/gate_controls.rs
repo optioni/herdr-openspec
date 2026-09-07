@@ -364,27 +364,24 @@ fn apply_plant(control: &Control, root: &Path) -> Result<(), String> {
     }
 }
 
-/// Runs one control end to end: copy, baseline, plant, replant-run. `Ok(())` means the gate
-/// caught its own plant; `Err` names why it did not (or why the harness itself could not
-/// finish), with the two kept textually distinct so a reader never mistakes one for the other.
-fn run_one_control(control: &Control) -> Result<(), String> {
-    let scratch = ScratchDir::new(&control.id);
-    copy_tree(scratch.path());
-
-    if control.needs_git {
-        git_init_and_commit(scratch.path())?;
-    }
-
-    let (baseline_ok, baseline_out) = run_script(control, scratch.path());
+/// Runs `control`'s baseline-then-plant cycle inside an already-prepared `root` (already
+/// copied, and already `git init`-ed if the control needs it). Split out from
+/// `run_one_control` so a suite-integrity test can prepare its own scratch root (for example,
+/// one whose gate script has been neutered) and drive exactly this same baseline/plant/assert
+/// sequence over it. `Ok(())` means the gate caught its own plant; `Err` names why it did not
+/// (or why the harness itself could not finish), with the two kept textually distinct so a
+/// reader never mistakes one for the other.
+fn run_control_in(control: &Control, root: &Path) -> Result<(), String> {
+    let (baseline_ok, baseline_out) = run_script(control, root);
     if !baseline_ok {
         return Err(format!(
             "harness error: the UNPLANTED gate already exits non-zero:\n{baseline_out}"
         ));
     }
 
-    apply_plant(control, scratch.path())?;
+    apply_plant(control, root)?;
 
-    let (planted_ok, planted_out) = run_script(control, scratch.path());
+    let (planted_ok, planted_out) = run_script(control, root);
     if planted_ok {
         return Err(format!(
             "the gate still exits 0 after the plant (expected non-zero); output:\n{planted_out}"
@@ -397,6 +394,46 @@ fn run_one_control(control: &Control) -> Result<(), String> {
         ));
     }
     Ok(())
+}
+
+/// Runs one control end to end: copy, then `run_control_in`. `Ok(())` means the gate caught
+/// its own plant; `Err` names why it did not (or why the harness itself could not finish).
+fn run_one_control(control: &Control) -> Result<(), String> {
+    let scratch = ScratchDir::new(&control.id);
+    copy_tree(scratch.path());
+
+    if control.needs_git {
+        git_init_and_commit(scratch.path())?;
+    }
+
+    run_control_in(control, scratch.path())
+}
+
+/// The correspondence check itself, factored out of `gate_controls_every_script_has_a_control`
+/// so a suite-integrity test can drive it over a scratch script list without touching the real
+/// `scripts/gates/` directory. Returns (scripts with no `[[control]]` entry, `[[control]]`
+/// entries naming a script that does not exist), both sorted for a deterministic message.
+fn missing_and_orphan_controls(
+    scripts: &[String],
+    controls: &[Control],
+) -> (Vec<String>, Vec<String>) {
+    let controlled: BTreeSet<&str> = controls.iter().map(|c| c.script.as_str()).collect();
+    let mut missing: Vec<String> = scripts
+        .iter()
+        .filter(|s| !controlled.contains(s.as_str()))
+        .cloned()
+        .collect();
+    missing.sort();
+
+    let script_set: BTreeSet<&str> = scripts.iter().map(String::as_str).collect();
+    let mut orphans: Vec<String> = controls
+        .iter()
+        .map(|c| c.script.clone())
+        .filter(|s| !script_set.contains(s.as_str()))
+        .collect();
+    orphans.sort();
+
+    (missing, orphans)
 }
 
 /// Task 0.2's both-directions requirement, on `tests/ci_workflow.rs`'s own terms: a script
@@ -412,41 +449,150 @@ fn gate_controls_every_script_has_a_control() {
         scripts.len()
     );
 
-    let controlled: BTreeSet<&str> = controls.iter().map(|c| c.script.as_str()).collect();
-    let missing: Vec<&String> = scripts
-        .iter()
-        .filter(|s| !controlled.contains(s.as_str()))
-        .collect();
+    let (missing, orphans) = missing_and_orphan_controls(&scripts, &controls);
     assert!(
         missing.is_empty(),
         "scripts under scripts/gates/ with no [[control]] entry: {missing:?}"
     );
-
-    let script_set: BTreeSet<&str> = scripts.iter().map(String::as_str).collect();
-    let orphans: Vec<&String> = controls
-        .iter()
-        .map(|c| &c.script)
-        .filter(|s| !script_set.contains(s.as_str()))
-        .collect();
     assert!(
         orphans.is_empty(),
         "[[control]] entries naming a script that does not exist under scripts/gates/: {orphans:?}"
     );
 }
 
-/// A lightweight recursive snapshot of every file under `dir` — path, byte length, and
-/// modification time, skipping `.git` and `target` — used to prove the REAL working tree is
-/// byte-identical before and after this suite runs. Not `git status --porcelain`: the real
-/// tree is ordinarily dirty during implementation, which would make that a false red
-/// (design.md -> Decision 6a).
-fn tree_fingerprint(dir: &Path) -> Vec<(PathBuf, u64, std::time::SystemTime)> {
-    let mut out = Vec::new();
-    collect_fingerprint(dir, &mut out);
-    out.sort_by(|a, b| a.0.cmp(&b.0));
-    out
+/// Task 7.2's second suite-integrity case, on the spec's "A gate added without a control fails
+/// the test" scenario: a script added under `scripts/gates/` with no `[[control]]` entry must
+/// be reported missing, and — the other direction — a `[[control]]` entry naming a script that
+/// does not exist must be reported an orphan. Driven over an in-memory script list rather than
+/// a real file, so this test needs no scratch tree of its own: the property under test is the
+/// correspondence check's own behaviour, not the filesystem walk that feeds it, and that walk
+/// is already exercised for real by `gate_controls_every_script_has_a_control` above.
+#[test]
+fn gate_controls_script_added_without_a_control_fails_the_check() {
+    let controls = parsed_controls();
+    let mut scripts = gate_scripts();
+
+    // A script added to the directory and forgotten in the map.
+    scripts.push("planted-uncontrolled-gate.sh".to_string());
+    let (missing, orphans) = missing_and_orphan_controls(&scripts, &controls);
+    assert_eq!(
+        missing,
+        vec!["planted-uncontrolled-gate.sh".to_string()],
+        "a script with no [[control]] entry must be the only one reported missing"
+    );
+    assert!(
+        orphans.is_empty(),
+        "adding an uncontrolled script must not also report an orphan control: {orphans:?}"
+    );
+
+    // The other direction: a [[control]] entry naming a script nobody wrote.
+    let mut controls_with_orphan = controls;
+    let orphan_control = Control {
+        id: "planted-orphan-control".to_string(),
+        script: "planted-nonexistent-gate.sh".to_string(),
+        interpreter: "sh".to_string(),
+        env: String::new(),
+        needs_git: false,
+        cargo: false,
+        plant_kind: "edit".to_string(),
+        plant_file: String::new(),
+        plant_find: None,
+        plant_replace: None,
+        plant_content: None,
+        expect: String::new(),
+    };
+    controls_with_orphan.push(orphan_control);
+    let (missing2, orphans2) = missing_and_orphan_controls(&gate_scripts(), &controls_with_orphan);
+    assert!(
+        missing2.is_empty(),
+        "a [[control]] entry naming a nonexistent script must not also report a missing one: {missing2:?}"
+    );
+    assert_eq!(
+        orphans2,
+        vec!["planted-nonexistent-gate.sh".to_string()],
+        "a [[control]] entry naming a script nobody wrote must be reported an orphan"
+    );
 }
 
-fn collect_fingerprint(dir: &Path, out: &mut Vec<(PathBuf, u64, std::time::SystemTime)>) {
+/// Task 7.2's first suite-integrity case, on the spec's "A gate neutered to `exit 0` is
+/// caught" scenario: a script whose body is replaced with `exit 0` must fail its own
+/// `[[control]]` entry — the plant no longer produces a failure, so `run_control_in` reports
+/// that the gate stayed green — while `make gates` itself, run over that same neutered tree,
+/// still exits 0. That gap between "the control test catches it" and "`make gates` does not"
+/// is precisely what this requirement closes: nothing but the control test does.
+#[test]
+fn gate_controls_neutered_script_fails_its_control_while_make_gates_stays_green() {
+    let controls = parsed_controls();
+    // openspec-untouched-stray is chosen deliberately: its plant is a brand-new file under
+    // openspec/, which no OTHER gate script under scripts/gates/ scans (every other gate
+    // reads Makefile/.github/src/tests/scripts) and which does not touch anything cargo
+    // compiles. Picking a control whose plant collides with an unrelated grep sweep, or
+    // that inserts an item into a multi-line `//!` module doc comment and breaks
+    // `cargo build --locked`, would make the second assertion below fail for a reason that
+    // has nothing to do with neutering - a control artifact, not the property under test.
+    let control = controls
+        .iter()
+        .find(|c| c.id == "openspec-untouched-stray")
+        .expect("the openspec-untouched-stray control exists in tests/gate-controls.toml");
+
+    let scratch = ScratchDir::new("neuter-openspec-untouched");
+    copy_tree(scratch.path());
+    if control.needs_git {
+        git_init_and_commit(scratch.path()).expect("git init the scratch copy");
+    }
+
+    let script_path = scratch.path().join("scripts/gates").join(&control.script);
+    fs::write(&script_path, "#!/bin/sh\nexit 0\n").expect("neuter the gate script");
+
+    let result = run_control_in(control, scratch.path());
+    let message = result.expect_err(
+        "a gate script neutered to `exit 0` must fail to catch its own plant, \
+         but the control reported success",
+    );
+    assert!(
+        message.contains("still exits 0 after the plant"),
+        "expected the neutering to be reported as the gate staying green after the plant, got: {message}"
+    );
+
+    // The neutering test above proves the CONTROL catches this. Now prove `make gates` does
+    // not: it just runs the (now-neutered) script bare, unplanted, on an otherwise-untouched
+    // tree, so it stays green — the gap this requirement exists to close.
+    let status = Command::new("make")
+        .arg("gates")
+        .current_dir(scratch.path())
+        .env("CARGO_TARGET_DIR", manifest_dir().join("target"))
+        .status()
+        .expect("spawn make gates in the scratch copy");
+    assert!(
+        status.success(),
+        "make gates must still exit 0 on a tree where one gate script's body was replaced \
+         with `exit 0` - a neutered gate silently disables itself and nothing but the \
+         gate-control test notices"
+    );
+}
+
+/// A recursive, content-based digest of every entry under `dir` — path, bytes (empty for a
+/// directory entry), and modification time — skipping `.git` and `target`. This is a private
+/// reimplementation of `testutil::snapshot`'s own shape (`src/lib.rs`'s `pub(crate) mod
+/// testutil`), carried here rather than reached by name: it is `#[cfg(test)] pub(crate)` and
+/// therefore invisible to `tests/gate_controls.rs`, a separate integration-test crate — the
+/// same reason `tests/cli.rs` and `tests/spec_purposes.rs` each carry their own copy. Used to
+/// prove the REAL working tree is byte-identical before and after this suite runs. Not `git
+/// status --porcelain`: the real tree is ordinarily dirty during implementation, which would
+/// make that a false red (design.md -> Decision 6a). A directory entry is recorded (with empty
+/// bytes) as well as a file's, on `testutil::snapshot`'s own reasoning: an empty directory
+/// created or removed by a leaking plant would otherwise be invisible to the comparison.
+#[derive(Debug, PartialEq, Eq)]
+struct TreeDigest(Vec<(PathBuf, Vec<u8>, std::time::SystemTime)>);
+
+fn tree_digest(dir: &Path) -> TreeDigest {
+    let mut out = Vec::new();
+    collect_digest(dir, &mut out);
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    TreeDigest(out)
+}
+
+fn collect_digest(dir: &Path, out: &mut Vec<(PathBuf, Vec<u8>, std::time::SystemTime)>) {
     let Ok(entries) = fs::read_dir(dir) else {
         return;
     };
@@ -459,11 +605,13 @@ fn collect_fingerprint(dir: &Path, out: &mut Vec<(PathBuf, u64, std::time::Syste
         let Ok(metadata) = entry.metadata() else {
             continue;
         };
+        let mtime = metadata.modified().unwrap_or(std::time::UNIX_EPOCH);
         if metadata.is_dir() {
-            collect_fingerprint(&path, out);
+            out.push((path.clone(), Vec::new(), mtime));
+            collect_digest(&path, out);
         } else {
-            let mtime = metadata.modified().unwrap_or(std::time::UNIX_EPOCH);
-            out.push((path, metadata.len(), mtime));
+            let bytes = fs::read(&path).unwrap_or_default();
+            out.push((path, bytes, mtime));
         }
     }
 }
@@ -479,7 +627,7 @@ fn gate_controls_catch_their_plants() {
         "tests/gate-controls.toml has no [[control]] entries"
     );
 
-    let before = tree_fingerprint(&manifest_dir());
+    let before = tree_digest(&manifest_dir());
 
     let mut failures = Vec::new();
     let mut passed = Vec::new();
@@ -490,7 +638,7 @@ fn gate_controls_catch_their_plants() {
         }
     }
 
-    let after = tree_fingerprint(&manifest_dir());
+    let after = tree_digest(&manifest_dir());
     assert_eq!(
         before, after,
         "the real working tree changed while running the gate controls - a plant leaked \
