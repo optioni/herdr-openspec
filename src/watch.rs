@@ -767,6 +767,42 @@ mod tests {
         }
     }
 
+    /// Poll `fs.drain()` until `budget` elapses or `matches` accepts a drained batch,
+    /// sleeping 10ms between attempts — the one deadline-bounded poll `NOSLEEP` leg 2b
+    /// permits in this module (`AGENTS.md` -> Quality gates), shared by every real-watcher
+    /// test rather than duplicated, so the sleep site in this file stays singular. Never a
+    /// fixed sleep followed by an assertion: the condition is re-tested after every sleep,
+    /// so a cold or loaded machine cannot make either half of a scenario premature.
+    fn poll_for(
+        fs: &mut dyn FsEvents,
+        budget: Duration,
+        mut matches: impl FnMut(&[PathBuf]) -> bool,
+    ) -> Option<Vec<PathBuf>> {
+        let deadline = Instant::now() + budget;
+        while Instant::now() < deadline {
+            if let Ok(Some(paths)) = fs.drain()
+                && matches(&paths)
+            {
+                return Some(paths);
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        None
+    }
+
+    /// Whether a drained batch names a path whose final two components are `parent/leaf` —
+    /// compared by suffix, because macOS FSEvents returns canonicalized paths and
+    /// `/var/folders/…` arrives as `/private/var/folders/…`.
+    fn names(paths: &[PathBuf], parent: &str, leaf: &str) -> bool {
+        paths.iter().any(|p| {
+            let mut components: Vec<_> = p
+                .components()
+                .map(|c| c.as_os_str().to_string_lossy().into_owned())
+                .collect();
+            components.pop().as_deref() == Some(leaf) && components.pop().as_deref() == Some(parent)
+        })
+    }
+
     #[test]
     fn start_on_a_real_directory_yields_the_touched_path() {
         let scratch = crate::testutil::ScratchDir::new();
@@ -778,30 +814,52 @@ mod tests {
         let target = root.join("changes/alpha/tasks.md");
         std::fs::write(&target, "- [x] a\n").expect("write fixture file");
 
-        // Deadline-bounded poll, never a fixed sleep followed by an
-        // assertion: the condition is re-tested after every 10ms sleep, so
-        // a cold or loaded machine cannot make this assertion premature.
-        let deadline = Instant::now() + Duration::from_secs(10);
-        let mut found = false;
-        while Instant::now() < deadline {
-            if let Ok(Some(paths)) = fs.drain()
-                && paths.iter().any(|p| {
-                    let mut components: Vec<_> = p
-                        .components()
-                        .map(|c| c.as_os_str().to_string_lossy().into_owned())
-                        .collect();
-                    components.len() >= 2
-                        && components.pop().as_deref() == Some("tasks.md")
-                        && components.pop().as_deref() == Some("alpha")
-                })
-            {
-                found = true;
-                break;
-            }
-            std::thread::sleep(Duration::from_millis(10));
-        }
+        let found = poll_for(&mut *fs, Duration::from_secs(10), |paths| {
+            names(paths, "alpha", "tasks.md")
+        });
         assert!(
-            found,
+            found.is_some(),
+            "no event named .../alpha/tasks.md arrived within 10s; \
+             this filesystem may not support change notification"
+        );
+    }
+
+    /// `watch-invalidation` :: "A write outside `openspec/` produces no batch"
+    /// (`seam-resilience`). Started on `<scratch>/openspec` directly — this module's own
+    /// concern, decoupled from `ui::start_collaborators`'s choice of that root (see
+    /// `ui::tests::wiring::collaborators_watch_root_is_openspec_not_the_repository_root`
+    /// for that half). The negative half is bounded by the positive control within the
+    /// SAME deadline-polled loop, never by elapsed time alone: a batch naming the outside
+    /// write is caught by the very poll that later confirms the inside write arrives, so a
+    /// leaked event cannot slip through a gap between two separate windows.
+    #[test]
+    fn a_write_outside_openspec_produces_no_batch() {
+        let scratch = crate::testutil::ScratchDir::new();
+        let root = scratch.path();
+        std::fs::create_dir_all(root.join("openspec/changes/alpha"))
+            .expect("create fixture dir");
+        std::fs::create_dir_all(root.join("target")).expect("create sibling dir");
+        let (mut fs, problems) = start(&root.join("openspec"));
+        assert!(problems.is_empty(), "{problems:?}");
+
+        std::fs::write(root.join("target/x.o"), b"binary").expect("write outside openspec/");
+        std::fs::write(root.join("openspec/changes/alpha/tasks.md"), b"- [x] a\n")
+            .expect("write fixture file inside openspec/");
+
+        let mut saw_outside = false;
+        let found = poll_for(&mut *fs, Duration::from_secs(10), |paths| {
+            if names(paths, "target", "x.o") {
+                saw_outside = true;
+            }
+            names(paths, "alpha", "tasks.md")
+        });
+
+        assert!(
+            !saw_outside,
+            "a write outside openspec/ must never reach a batch"
+        );
+        assert!(
+            found.is_some(),
             "no event named .../alpha/tasks.md arrived within 10s; \
              this filesystem may not support change notification"
         );

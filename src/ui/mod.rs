@@ -3683,6 +3683,49 @@ esac
             );
         }
 
+        /// `watch-invalidation` :: "The composition root watches `openspec/`, not the
+        /// repository root" (`seam-resilience`). Driven directly through
+        /// `start_collaborators` with the real `watch::start` rather than a recording
+        /// double: `NOSLEEP` bans a real sleep anywhere under `src/ui`, so a live batch
+        /// cannot be proven from here (see
+        /// `watch::tests::a_write_outside_openspec_produces_no_batch` for that half
+        /// instead). The two roots are told apart synchronously instead, the same way
+        /// `watch::tests::start_on_a_missing_path_degrades_and_names_the_reason` already
+        /// proves `notify`'s own `.watch()` fails immediately for a path that does not
+        /// exist: a repository root that exists but holds no `openspec/` subdirectory
+        /// watches successfully today — no problem is ever reported — and starts failing,
+        /// naming `<repo>/openspec`, once the watch is rooted there instead.
+        #[test]
+        fn collaborators_watch_root_is_openspec_not_the_repository_root() {
+            let scratch = ScratchDir::new();
+            let root = scratch.path();
+            // Deliberately no `openspec/` subdirectory under `root`: the repository root
+            // itself exists and would watch successfully, so only a watch correctly rooted
+            // at `<root>/openspec` can fail here.
+            let config = Config::default();
+            let herdr = root.join("does-not-exist-herdr");
+
+            let collaborators = super::super::start_collaborators(
+                Some(root),
+                &config,
+                &herdr,
+                None,
+                &no_env,
+                &no_npm_hook,
+            );
+
+            let openspec_path = root.join("openspec").display().to_string();
+            assert!(
+                collaborators
+                    .problems
+                    .iter()
+                    .any(|p| p.contains(&openspec_path)),
+                "the watcher must be started on <repo>/openspec, not the repository root \
+                 itself, which exists and would watch successfully: {:?}",
+                collaborators.problems
+            );
+        }
+
         /// `openspec-binary` :: "A configured path that cannot be used reaches the list as a
         /// problem row" — rows 27/31's "true but unobservable" defect, made observable.
         #[test]
