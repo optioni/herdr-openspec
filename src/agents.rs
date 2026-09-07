@@ -890,6 +890,29 @@ mod tests {
             assert!(problem.contains("server_not_running"), "{problem}");
         }
 
+        /// `seam-resilience`: an `herdr` that answers with an error is reachable and
+        /// answering, which is a different fact from a socket that does not answer at
+        /// all — `stalled` SHALL be `false` here, never `true`.
+        #[test]
+        fn an_error_answer_is_not_a_stall() {
+            let fake = FakeCli::new();
+            fake.register_herdr(
+                &["agent", "list"],
+                Err(CliError::Failed {
+                    program: "herdr".to_string(),
+                    args: vec!["agent".to_string(), "list".to_string()],
+                    code: Some(1),
+                    stderr: "no herdr server is running".to_string(),
+                }),
+            );
+
+            let snapshot = super::super::poll_once(&fake);
+
+            assert!(!snapshot.reachable);
+            assert!(!snapshot.stalled, "an answering-but-failing socket is not a stall");
+            assert!(snapshot.problem.is_some());
+        }
+
         #[test]
         fn not_started_is_an_unreachable_snapshot() {
             let fake = FakeCli::new();
@@ -1022,6 +1045,158 @@ mod tests {
         }
     }
 
+    /// `seam-resilience`: `RealAgentPoll::drain`'s render-side schedule, exercised through
+    /// `drain_at` — the same decision `drain` makes, taking `now` as a parameter so the
+    /// stall threshold is provable without a real clock or a real waiting thread. Both
+    /// channel ends the worker would normally own are held here instead, so a test can
+    /// count sends and manufacture answers directly. See
+    /// `openspec/changes/seam-resilience/specs/agent-poller/spec.md`.
+    mod stall {
+        use crate::agents::{Agent, AgentSnapshot, AgentStatus, POLL_INTERVAL, STALL_AFTER};
+        use std::time::Instant;
+
+        fn poller() -> (
+            super::super::RealAgentPoll,
+            std::sync::mpsc::Receiver<()>,
+            std::sync::mpsc::Sender<AgentSnapshot>,
+        ) {
+            let (request_tx, request_rx) = std::sync::mpsc::channel::<()>();
+            let (result_tx, result_rx) = std::sync::mpsc::channel::<AgentSnapshot>();
+            (
+                super::super::RealAgentPoll {
+                    request_tx,
+                    result_rx,
+                    next_due: None,
+                    in_flight: false,
+                    in_flight_since: None,
+                    stall_reported: false,
+                    pending: None,
+                    dead: false,
+                },
+                request_rx,
+                result_tx,
+            )
+        }
+
+        fn test_agent() -> Agent {
+            Agent {
+                name: None,
+                kind: Some("claude".to_string()),
+                status: AgentStatus::Working,
+                cwd: None,
+                pane_id: "w8:p1".to_string(),
+                tab_id: "w8:t1".to_string(),
+                workspace_id: "w8".to_string(),
+                terminal_title: None,
+            }
+        }
+
+        #[test]
+        fn the_stall_threshold_is_a_named_constant_and_is_asserted() {
+            assert_eq!(STALL_AFTER, 5 * POLL_INTERVAL);
+            assert!(
+                STALL_AFTER < crate::cli::RUN_DEADLINE,
+                "the pane must tell the user about a hang before the seam gives up on it"
+            );
+        }
+
+        #[test]
+        fn a_poll_outstanding_past_the_stall_threshold_is_announced_once() {
+            let (mut poller, request_rx, _result_tx) = poller();
+            let mut now = Instant::now();
+
+            let mut stalls = 0;
+            for _ in 0..10 {
+                if let Some(snapshot) = poller.drain_at(now) {
+                    stalls += 1;
+                    assert!(snapshot.stalled);
+                    assert!(!snapshot.reachable);
+                    assert_eq!(snapshot.agents, Vec::new());
+                    let problem = snapshot.problem.expect("a reason must be present");
+                    assert!(problem.contains("herdr agent list"), "{problem}");
+                    assert!(problem.contains('5'), "{problem}");
+                }
+                now += STALL_AFTER;
+            }
+
+            assert_eq!(stalls, 1, "the stall must be announced exactly once");
+            assert_eq!(
+                request_rx.try_iter().count(),
+                1,
+                "no second agent list request reached the worker across all ten drains"
+            );
+        }
+
+        #[test]
+        fn a_poll_answering_normally_never_reports_a_stall() {
+            let (mut poller, _request_rx, result_tx) = poller();
+            let mut now = Instant::now();
+
+            for _ in 0..3 {
+                assert_eq!(poller.drain_at(now), None, "no synchronous answer yet");
+                let answer = AgentSnapshot {
+                    agents: vec![test_agent()],
+                    reachable: true,
+                    stalled: false,
+                    problem: None,
+                };
+                result_tx
+                    .send(answer.clone())
+                    .expect("the poller must still be listening");
+                let delivered = poller
+                    .drain_at(now)
+                    .expect("the answer must be delivered on the next drain");
+                assert_eq!(delivered, answer);
+                assert!(!delivered.stalled);
+                assert!(!delivered.agents.is_empty());
+                now += POLL_INTERVAL;
+            }
+        }
+
+        #[test]
+        fn a_stalled_socket_that_recovers_restores_the_badges() {
+            let (mut poller, _request_rx, result_tx) = poller();
+            let mut now = Instant::now();
+
+            assert_eq!(poller.drain_at(now), None, "the first drain fires the request");
+            now += STALL_AFTER;
+            let stalled = poller
+                .drain_at(now)
+                .expect("the stall must be reported once the threshold passes");
+            assert!(stalled.stalled);
+            assert!(!stalled.reachable);
+
+            let recovered = AgentSnapshot {
+                agents: vec![test_agent(), test_agent()],
+                reachable: true,
+                stalled: false,
+                problem: None,
+            };
+            result_tx.send(recovered.clone()).expect("still listening");
+            let delivered = poller
+                .drain_at(now)
+                .expect("the recovered answer must be delivered");
+            assert_eq!(delivered, recovered);
+            assert!(delivered.reachable);
+            assert!(!delivered.stalled);
+            assert_eq!(delivered.agents.len(), 2);
+
+            // A subsequent stall in a later episode is reported again — the marker is
+            // per-episode, not once per process.
+            now += POLL_INTERVAL;
+            assert_eq!(
+                poller.drain_at(now),
+                None,
+                "the next poll's own first drain fires its own request"
+            );
+            now += STALL_AFTER;
+            let stalled_again = poller
+                .drain_at(now)
+                .expect("a later stall must be reported too");
+            assert!(stalled_again.stalled);
+        }
+    }
+
     mod seam {
         use crate::agents::{Agent, AgentSnapshot, AgentStatus, Listed, POLL_INTERVAL};
 
@@ -1084,15 +1259,18 @@ mod tests {
             let snapshot = AgentSnapshot {
                 agents: Vec::new(),
                 reachable: false,
+                stalled: false,
                 problem: None,
             };
             let AgentSnapshot {
                 agents,
                 reachable,
+                stalled,
                 problem,
             } = snapshot;
             assert!(agents.is_empty());
             assert!(!reachable);
+            assert!(!stalled);
             assert_eq!(problem, None);
         }
     }
@@ -2096,6 +2274,77 @@ mod tests {
                 BTreeMap::from([("alpha".to_string(), "w:p2".to_string())]),
                 "the payload order is Herdr's own and is stable across polls"
             );
+        }
+
+        /// `seam-resilience`: `resolve::find_repo` canonicalizes the root it returns, but
+        /// Herdr reports `cwd` verbatim, so one symlink anywhere in the path makes every
+        /// agent fail containment. The fix is `canonicalize_cwds`, run on the poller's own
+        /// side of the seam before a snapshot ever reaches `attribute` — proved here by
+        /// feeding its output into `attribute` directly. See
+        /// `specs/agent-attribution/spec.md`.
+        #[test]
+        fn a_symlinked_repository_path_still_badges_its_agents() {
+            let canonicalize = |path: &std::path::Path| -> Option<PathBuf> {
+                if path == std::path::Path::new("/tmp/repo") {
+                    Some(PathBuf::from("/private/tmp/repo"))
+                } else {
+                    Some(path.to_path_buf())
+                }
+            };
+            let raw = agent(
+                Some("add-auth"),
+                None,
+                AgentStatus::Working,
+                Some("/tmp/repo"),
+                None,
+            );
+            let m = empty_mapping();
+
+            let canonicalized =
+                super::super::canonicalize_cwds(vec![raw.clone()], &canonicalize);
+            assert_eq!(
+                canonicalized[0].cwd,
+                Some(PathBuf::from("/private/tmp/repo"))
+            );
+            let result = attribute(
+                &canonicalized,
+                Some(std::path::Path::new("/private/tmp/repo")),
+                &["add-auth"],
+                &m,
+            );
+            assert_eq!(
+                result.badges,
+                BTreeMap::from([("add-auth".to_string(), AgentStatus::Working)])
+            );
+
+            // Without the canonicalizing step, the same fixture makes every agent fail
+            // containment — the whole-session disappearance this scenario exists to
+            // catch — so the test is discriminating in both directions.
+            let uncanonicalized = attribute(
+                &[raw],
+                Some(std::path::Path::new("/private/tmp/repo")),
+                &["add-auth"],
+                &m,
+            );
+            assert!(uncanonicalized.badges.is_empty());
+            assert_eq!(uncanonicalized.unattributed, 0);
+        }
+
+        /// `seam-resilience`: a path that cannot be canonicalized — the directory no
+        /// longer exists, or the process cannot resolve it — is kept verbatim rather than
+        /// dropped, so the agent is still reported as a number rather than silently
+        /// vanishing. See `specs/agent-attribution/spec.md`.
+        #[test]
+        fn an_unresolvable_working_directory_is_kept_verbatim_not_dropped() {
+            let canonicalize = |_: &std::path::Path| -> Option<PathBuf> { None };
+            let raw = agent(None, None, AgentStatus::Idle, Some("/repo/gone"), None);
+            let m = empty_mapping();
+
+            let canonicalized = super::super::canonicalize_cwds(vec![raw], &canonicalize);
+            assert_eq!(canonicalized[0].cwd, Some(PathBuf::from("/repo/gone")));
+
+            let result = attribute(&canonicalized, Some(std::path::Path::new("/repo")), &[], &m);
+            assert_eq!(result.unattributed, 1);
         }
     }
 }
