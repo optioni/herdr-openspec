@@ -1,0 +1,17 @@
+{
+  "type": "llvm.coverage.json.export",
+  "version": "2.0.1",
+  "data": [
+    {
+      "files": [
+        {
+          "filename": "tests/fixtures/coverage/src/sample_moved.rs",
+          "segments": [
+            [2, 5, 1, true, false, false],
+            [7, 5, 1, true, false, false]
+          ]
+        }
+      ]
+    }
+  ]
+}
