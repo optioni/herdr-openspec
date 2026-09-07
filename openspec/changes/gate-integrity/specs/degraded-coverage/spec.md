@@ -62,8 +62,12 @@ The check SHALL fail when any of the following is true, naming the offending row
    unsatisfiable for a proof that belongs in `src/ui/detail.rs` or `src/ui/markdown.rs`, which
    `NOTABSEAM` and `MDSEAM` forbid from naming a `ratatui` type — such a proof lives in
    `src/ui/view.rs`, and this rule says so by checking the body rather than the path;
-6. the table holds fewer than **44** rows, or the map fewer than **44** entries — a floor,
-   not an equality, so adding a degraded state is allowed and dropping the whole table is not.
+6. the table holds fewer rows than `MIN_ROWS`, or the map fewer entries — a floor, not an
+   equality, so adding a degraded state is allowed and dropping the whole table is not.
+   `MIN_ROWS` is **44** at the time of writing and rises to **46** when `cli-parity` lands its
+   two new degraded-states rows. This requirement states the floor as the constant rather than
+   as a literal precisely so the two changes cannot fight over the number: whichever lands
+   second adopts the higher count, and neither lowers it.
 
 `tier` SHALL record the tier at which the row's **own wording** is observable, not the
 cheapest tier that could be written. A row that names something rendered is `view`; a row
@@ -81,8 +85,8 @@ watches the wrong thing.
 #### Scenario: The map covers the table at HEAD
 
 - **WHEN** `cargo test --all-features` runs `degraded_coverage` on the repository at HEAD
-- **THEN** the test passes, having parsed **at least 44** rows out of `SPEC.md` and matched
-  every one to exactly one entry of `tests/degraded-coverage.toml`
+- **THEN** the test passes, having parsed **at least `MIN_ROWS`** rows out of `SPEC.md` and
+  matched every one to exactly one entry of `tests/degraded-coverage.toml`
 - **AND** every `proof` name it read resolves to a line-anchored `fn <name>(` under `src/` or
   `tests/`
 - **AND** every `tier = "view"` proof resolves to a file under `src/ui/` whose text names
@@ -116,14 +120,19 @@ watches the wrong thing.
 
 - **WHEN** the parser is run against a `SPEC.md` copy whose degraded-states table holds only
   its header and separator rows
-- **THEN** the test exits non-zero on the 44-row floor rather than reporting full coverage of
-  zero rows
+- **THEN** the test exits non-zero on the `MIN_ROWS` floor rather than reporting full coverage
+  of zero rows
 - **AND** the same holds when the `## Degraded states` heading is absent entirely
 
 #### Scenario: A `proof` that is not a test fails the binding
 
-- **WHEN** one `proof` entry is repointed at a production function — `fn start(` in
-  `src/watch.rs`, which resolves under the old rule and carries no `#[test]`
+- **WHEN** one `proof` entry is repointed at a production function that the existing
+  resolver does match. The obvious candidate does **not** work: every `start` in the crate is
+  written `pub fn start(` (`src/watch.rs:260`, `src/agents.rs:464`, `src/refresh.rs:78`,
+  `src/launch.rs:379`), and condition 4 matches a line-anchored `fn <name>(`, so that plant
+  would fail as "not defined" rather than as "not a test" — passing for the wrong reason. The
+  plant is `is_usable_binary` in `src/resolve.rs`, a production function declared `fn` without
+  `pub`, which the existing resolver does match and which carries no `#[test]`
 - **THEN** the test exits non-zero naming that identifier and that it is not a test
 - **AND** the same happens when the entry names a real test function whose `#[test]`
   attribute has been replaced with `#[ignore]`, since a test nothing runs proves nothing
@@ -139,11 +148,15 @@ watches the wrong thing.
   `last-first` pair, and for a range holding only blank lines and comments
 - **AND** an entry with no `covers` key at all fails on the six-key rule, so the twenty
   `unproven` rows cannot keep their verdict without saying where the behaviour lives
+- **AND** a `covers` range naming a trivially hot line (`src/changes.rs:1-1`) satisfies the
+  resolver, which is a **stated limit** rather than a hidden one: the machine checks that the
+  range resolves and ran, and the `why` sentence beside it is what a reviewer reads to catch a
+  range that resolves but proves nothing
 
 #### Scenario: `unproven` gains a consequence rather than a new verdict
 
-- **WHEN** the map is read at HEAD, where twenty of the forty-four entries carry
-  `verdict = "unproven"`
+- **WHEN** the map is read at HEAD, where twenty of its entries carry
+  `verdict = "unproven"` (forty-four entries now, forty-six once `cli-parity` lands)
 - **THEN** each of those twenty satisfies the same `proof`-is-a-test and `covers`-resolves
   rules as every other entry, so `unproven` records what the audit found at audit time and
   no longer names a row with weaker machinery behind it

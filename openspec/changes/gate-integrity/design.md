@@ -3,8 +3,9 @@
 Every guarantee in this repository is asserted by a gate. An audit ran the obvious
 experiment — plant the violation each gate exists to catch, then run `make check` — and
 found five gates that report green on a tree holding the exact defect they name, plus a
-coverage floor that is arithmetically incapable of failing and three design documents that
-describe machinery the repository no longer has.
+coverage floor so dominated by test-module lines that it tolerates more than half the
+production body going uncovered, and three design documents that describe machinery the
+repository no longer has.
 
 The measurements behind this change were retaken at HEAD rather than inherited:
 
@@ -56,13 +57,16 @@ verification machinery and the documents describing it:
 | `scripts/gates/noblock.sh` leg 1 | leg 2's own directory sweep, already in the same file |
 | `scripts/gates/wired.sh` | `code()` = `prod()` + comment strip, then required-name legs with definition-anchored controls |
 | `scripts/gates/nowaiver.sh` | must-name plus must-not-match, over an explicit path list |
-| `scripts/coverage-prod.py` (new) | `scripts/gates/gate-mech1.py` — a `python3` checker; placed **outside** `scripts/gates/` because it invokes `cargo`, which no gate may |
+| `scripts/coverage-prod.py` (new) | `scripts/gates/gate-mech1.py` — a `python3` checker; placed **outside** `scripts/gates/` because it reads a `cargo llvm-cov` report, which belongs to the `coverage` target rather than the gates tier |
 | `tests/gate_controls.rs` + `tests/gate-controls.toml` (new) | `tests/degraded_coverage.rs` + `tests/degraded-coverage.toml` — a checked-in table bound to executable proof, in `tests/` so archiving cannot move it |
 | `tests/degraded_coverage.rs` | its own existing parser and failure-condition list |
 
-`prod()` — "everything above the first line-anchored `#[cfg(test)]`" — is the crate's one
-definition of production code, already relied on by `READONLY-UI`, `NOBLOCK`, and `WIRED`.
-`scripts/coverage-prod.py` reuses it rather than inventing a second one.
+`prod()` — "everything above the first line-anchored `#[cfg(test)]`" — is what `READONLY-UI`,
+`NOBLOCK`, and `WIRED` use, and each is sound only because it carries a Guard D asserting its
+own subject files hold exactly one such attribute. `scripts/coverage-prod.py` deliberately
+does **not** reuse it: applied tree-wide the rule is wrong for three files and misclassifies
+6,281 production lines. See Decision 1a, which is the one place this change adds a second
+definition of "production code" on purpose, with the measurement that forced it.
 
 ## Contracts
 
@@ -71,15 +75,16 @@ format, the keybindings, the `Change` type, and both CLI seams are untouched. No
 is **BREAKING**.
 
 One internal contract does change shape: `tests/degraded-coverage.toml` gains a sixth key,
-`covers`, on all 44 rows. Its only consumers are `tests/degraded_coverage.rs` and the new
-`scripts/coverage-prod.py`, both in this repository and both updated in this change.
+`covers`, on **every** row — 44 at HEAD, 46 once `cli-parity` lands (Decision 10). Its only
+consumers are `tests/degraded_coverage.rs` and the new `scripts/coverage-prod.py`, both in
+this repository and both updated in this change.
 
 ## Persistence and Rollout
 
 - **migration** — none. No data, no schema, no stored state.
-- **backfill** — one, and it is real: 44 rows of `tests/degraded-coverage.toml` gain a
-  `covers` array. Derived per row by locating the production expression that implements it,
-  not generated.
+- **backfill** — one, and it is real: every row of `tests/degraded-coverage.toml` gains a
+  `covers` array (44 at HEAD, 46 after `cli-parity`). Derived per row by locating the
+  production expression that implements it, not generated.
 - **seeding** — none.
 - **cache invalidation** — none. `Swatinem/rust-cache` keys are unchanged; a cached build
   cannot change a gate's verdict.
@@ -95,14 +100,16 @@ One internal contract does change shape: `tests/degraded-coverage.toml` gains a 
 
 | Dependency | In acceptance test | In unit tests |
 |---|---|---|
-| The filesystem (repository tree) | real — a per-plant copy under `std::env::temp_dir()`, following `crate::testutil::ScratchDir` | real, same mechanism |
-| The gate scripts under `scripts/gates/` | real — executed unmodified, via `/bin/sh` or `python3`, from the scratch copy | real |
-| `/bin/sh`, `awk`, `sed`, `grep`, `find` | real (the platform's own, BSD on macOS and GNU on Linux) | real |
+| The filesystem (repository tree) | real — a per-plant copy under `std::env::temp_dir()`, made with `tar`/`cp`. **Not** `crate::testutil::ScratchDir`: it is `#[cfg(test)] pub(crate)` in `src/lib.rs:38` and therefore invisible to an integration test in `tests/`, which is why `tests/cli.rs` and `tests/spec_purposes.rs` each carry their own private copy. This suite carries a third, following that established pattern | real, same mechanism |
+| The gate scripts under `scripts/gates/` | real — executed unmodified, via `/bin/sh` or `python3`, from the scratch copy, with each entry's own environment prefix | real |
+| `/bin/sh`, `awk`, `sed`, `grep`, `find`, `tar` | real (the platform's own, BSD on macOS and GNU on Linux) | real |
 | `python3` | real | real |
 | `cargo llvm-cov` | real, once, under `make coverage` — never invoked from a test | replaced: `scripts/coverage-prod.py` is driven against checked-in JSON report fixtures |
 | The JSON coverage report | real under `make coverage`; fixture under `tests/fixtures/coverage/` for the checker's own failure cases | fixture |
-| `cargo`, `cargo fmt`, `cargo clippy` | real under `make check`; never invoked from a gate or a test | not used |
-| `git` | real — only to assert the working tree is unchanged after the control run | not used |
+| `cargo` (as `cargo metadata`, `cargo tree`, `cargo build --locked`) | **real, and unavoidably so** — `deps.sh` makes 14 `cargo` calls including a full `cargo build --locked`, and `build-graph.sh` runs `cargo tree`. Their controls therefore compile in the scratch copy. See Decision 6a | not used |
+| `cargo fmt`, `cargo clippy` | real under `make check`; never invoked from a gate or a test | not used |
+| The crates.io registry / a warm `target/` | real for the two `cargo`-invoking gates' controls, which is the cost Decision 6a bounds | not used |
+| `git` | real, two ways: to `git init` a scratch copy so `openspec-untouched.sh` has the repository it requires (Decision 6a), and to assert the real tree is unchanged after the run | not used |
 | The `openspec` binary | **not used**. No gate, no test, and no checker in this change invokes it | not used |
 | The Herdr socket / `herdr` binary | **not used**. `quality-gates` already forbids a gate depending on Herdr, and this change adds no exception | not used |
 | The terminal | **not used**. Nothing here renders; no `TestBackend`, no raw mode, no alternate screen | not used |
@@ -310,6 +317,21 @@ also refused, and the workaround is one `use` line per item. That is a deliberat
 restriction rather than an oversight, and it is written into each script's header so the
 next person to hit it reads the reason instead of deleting the pattern.
 
+*Two stated known limits, not one.* Beside the crate-root alias (`use std as s;
+s::process::Command::new`), the pattern also misses a **re-export through the exempted
+seam**: `pub use std::process::Command;` in `src/cli.rs` — the one file where that line is
+legal and invisible — then `use crate::cli::Command as Proc;` anywhere else. That is a
+shorter path than aliasing the crate root, and this change's own thesis is that an unstated
+limit is the defect. Both go in each script's header.
+
+*The positive control needs a plant, not just `src/cli.rs`.* A single `grep -qE` over the
+combined alternation passes as long as **any** branch matches, and `src/cli.rs:14` matches
+the pre-existing `process::Command` branch — so deleting both new alternatives leaves the
+control green. The alternatives are therefore proved by plants that only they catch: the
+brace-group alias (`use std::process::{Child, Command as Proc};`, caught only by
+`process::\{`) and a single-item `use std::process::Child;` (rustfmt-stable, no braces,
+caught only by the item alternative).
+
 *Alternative — parse the file's imports.* Rejected: it would make a `grep`/`awk` gate into
 a Rust-aware tool, breaking the hermetic, sub-second, `python3`-at-most rule
 `quality-gates` sets for the tier.
@@ -349,9 +371,9 @@ the second would leave the repository in the state the audit found — 28 gates 
 correctness rests on a comment in each script asserting that the author once planted a defect
 and watched it fail.
 
-*Why it is affordable.* Every gate is `grep`/`awk`/`sed`/`find`/`python3` over the source
-tree and completes in under a second. The cost is one tree copy per plant, which is
-filesystem work, not compilation. `ScratchDir` already exists for exactly this.
+*Why it is affordable — for 26 of the 28.* Those are `grep`/`awk`/`sed`/`find`/`python3` over
+the source tree and complete in under a second, so their cost is one tree copy per plant:
+filesystem work, not compilation. The other two are Decision 6a.
 
 *Why the map is a checked-in TOML rather than plants written in Rust.* It follows
 `tests/degraded-coverage.toml`: a table a reader can audit line by line, in `tests/`, where
@@ -367,6 +389,39 @@ what that test actually does.
 *Alternative — correct the claim only.* Rejected: cheaper by a day and leaves the
 `exit 0` hole open. The audit's own framing is that a gate that cannot fail is worse than no
 gate; the same is true of a control that is only attested.
+
+### Decision 6a — three gates whose controls cost more than a tree copy
+
+The "every gate is a sub-second grep" premise is **false at HEAD**, and `quality-gates`
+asserts it in a `SHALL` this change is already correcting. Measured:
+
+| Gate | Why its control is not a tree copy |
+|---|---|
+| `deps.sh` | 14 `cargo` invocations — `cargo metadata` ×4, `cargo tree` ×3, and `cargo build --locked` at leg 2c |
+| `build-graph.sh` | `cargo tree` against a committed snapshot |
+| `openspec-untouched.sh` | opens with `git rev-parse --show-toplevel` and fails "not a git repo" outside one; a `temp_dir()` copy is not one |
+
+Consequences, each with its resolution:
+
+- **`quality-gates`' "No extracted gate SHALL invoke `cargo`" is wrong and gets corrected**
+  alongside D1/D2/D3, rather than re-asserted. The true rule is the one the tier actually
+  keeps: no gate invokes `cargo` **except** the two dependency gates, which is exactly why
+  `gates-full` exists as a separate CI job.
+- **The two `cargo` gates' controls run against a copy that shares the real `target/`** via
+  `CARGO_TARGET_DIR`, so the control is a re-link rather than a cold build. If that still
+  dominates the suite's runtime, their controls carry `#[ignore]` and a `gates-full`-style CI
+  job runs them — the cost is bounded either way, and the decision is recorded rather than
+  discovered at implementation time.
+- **`openspec-untouched.sh`'s control runs `git init && git add -A && git commit`** in the
+  scratch copy, and the copy set therefore includes `openspec/` and `.git`-able content. Without
+  that, task 0.2's "assert the gate exits 0 unplanted" fails for this entry on every run, and
+  its planted failure would be satisfied by the missing repository rather than by the plant —
+  a control asserting on its own harness, which is the shape this change exists to remove.
+
+*And the tree-unchanged assertion is not `git status`.* The real tree is dirty during ordinary
+implementation, so `git status --porcelain` is a false red. The suite asserts the copy set's
+own before/after digest instead — the crate already has `testutil::snapshot` built for exactly
+this comparison.
 
 ### Decision 7 — G7: require a `#[test]`, and bind `covers` to the coverage run
 
@@ -390,7 +445,7 @@ records what the audit found at audit time; that is a useful historical fact, an
 never meant to be a live exemption.
 
 *Consequence accepted:* adding `covers` for `src/watch.rs:264-268` makes `make coverage` red
-until a test drives the inert-watcher arm. Writing that test is task 7.4, and it is the only
+until a test drives the inert-watcher arm. Writing that test is task 6.5, and it is the only
 new test this change adds for coverage's sake rather than for a gate's.
 
 ### Decision 8 — D1/D2/D3: correct the documents, and bind each correction to a check
@@ -398,12 +453,14 @@ new test this change adds for coverage's sake rather than for a gate's.
 Three prose defects, three checks, because a document corrected by hand drifts again:
 
 - **D1** — `SPEC.md` → Gates says "all four" and lists four rows; the `Makefile` composes
-  five. A test asserts `SPEC.md`'s gate table has at least as many rows as `check` has
-  prerequisites.
-- **D2** — the `SHALL`-exact table's `gates` row names two scripts where the recipe runs 30
-  lines over 28. It becomes a **rule** — one line per file under `scripts/gates/`, no other
-  path — which `tests/ci_workflow.rs` already enforces in both directions. A rule cannot go
-  stale the way a list did.
+  five. A test asserts `SPEC.md`'s gate table names **each** of `check`'s prerequisites, by
+  name — not merely that it holds as many rows, which five unrelated rows would satisfy and a
+  renamed row would survive.
+- **D2** — the `SHALL`-exact table's `gates` row names two scripts where the recipe runs
+  **33** invocation lines over 28 files (`awk '/^gates:/{f=1;next} /^[^\t]/{f=0} f && NF'
+  Makefile | wc -l`). It becomes a **rule** — one line per file under `scripts/gates/`, no
+  other path — which `tests/ci_workflow.rs` already enforces in both directions. A rule cannot
+  go stale the way a list did.
 - **D3** — the scenario requiring `AGENTS.md` to name three gates and `scripts/gates/` to
   hold no file for any of them is unmet in both halves. It is rewritten to the truth (two
   excluded, `OPENSPEC-UNTOUCHED` split) and `tests/ci_workflow.rs` gains the prose clause it
@@ -418,10 +475,38 @@ weaker than it should be, and that is a tooling constraint rather than a judgeme
 
 ### Decision 9 — order of work
 
-The gate repairs (groups 2–6) are independent of each other and of the coverage work
-(group 1). The control suite (group 7) must come **after** every gate repair, because each
-repair adds the plant that proves it. The document corrections (group 8) come last so they
-describe what landed rather than what was intended.
+The control suite is authored **first**, as group 0, because it is the outer loop and is RED
+for exactly the five gates this change repairs. The gate repairs are groups 2–5 and are
+mutually independent in subject: each edits its own scripts and no other group's. Group 1
+(the coverage floor) is independent of all four. Group 6 (degraded-coverage) is **not**
+independent — task 6.4 edits `scripts/coverage-prod.py`, which task 1.2 creates, so it is
+ordered after group 1. Group 7 closes the outer loop, and group 8's document corrections come
+last so they describe what landed rather than what was intended.
+
+Despite that independence, no group carries a `parallel-after` marker. Groups 1–5 each add or
+adjust entries in the single `tests/gate-controls.toml`, and every group shares one
+`cargo test` run, so a half-written script in one group surfaces as a failing control in
+another's — criterion 3, attributable failure, is what fails here, not criterion 1 or 2.
+
+### Decision 10 — coordination with the two sibling changes in flight
+
+`cli-parity` and `doc-conformance` are proposed but unimplemented; neither writes a delta for
+`quality-gates`, `ci-workflow`, or `degraded-coverage`, so there is no spec conflict. Two
+implementation-order couplings exist and are recorded here rather than discovered:
+
+- **`cli-parity` raises `MIN_ROWS` from 44 to 46** in `tests/degraded_coverage.rs` when it
+  lands, by adding degraded-states rows for its C4 and C6. This change's `covers` backfill
+  therefore covers *every* row rather than a fixed 44, and its spec states the floor as
+  `MIN_ROWS` rather than restating a number that is already scheduled to move. Whichever
+  change lands second adopts the other's row count; neither lowers it.
+- **`doc-conformance` adds `tests/doc_contract.rs`**, a Rust test target that is deliberately
+  *not* a `scripts/gates/` script. Nothing here narrows that: the gate-control map binds
+  scripts under `scripts/gates/` to plants, and the recipe/directory correspondence in
+  `tests/ci_workflow.rs` is unchanged in shape. A new test target is admitted by both,
+  because neither one enumerates test targets. This change's own document assertions stay in
+  `tests/ci_workflow.rs` and are scoped to the **gates tier** — the recipe, the excluded-gate
+  prose, `SPEC.md`'s gate table — so they neither duplicate nor contradict
+  `doc-conformance`'s module-map, thread-count, and prerequisite legs.
 
 ## Risks / Trade-offs
 
@@ -430,10 +515,18 @@ describe what landed rather than what was intended.
   `src/lib.rs`'s `std::process::id()` and `src/main.rs`'s `use std::process::exit;` both
   match. The pattern was narrowed to the spawn items plus `process::{` and re-measured to
   zero hits (Decision 3). Task 2.1 re-measures before editing any script.
-- **The control suite is slow enough to be resented** → Each plant is a tree copy plus one
-  sub-second script. If the suite exceeds a few seconds, share one scratch copy across
-  plants and revert between them rather than copying per entry; the spec requires the real
-  tree unchanged, not one copy per plant.
+- **The control suite is slow enough to be resented** → 26 of 28 plants are a tree copy plus
+  one sub-second script; the two `cargo` gates are bounded by Decision 6a. If the suite still
+  drags, share one scratch copy across plants and revert between them rather than copying per
+  entry; the requirement is the copy set unchanged, not one copy per plant.
+- **The production floor is pinned to a number this design measured rather than one the
+  checker produces** → `PROD_MIN` is set from the checker's own output at implementation time
+  (Decision 1a), because two defensible line-counting rules give different denominators for
+  the same report. 97.28% is this design's estimate, not the value to transcribe.
+- **`cargo llvm-cov --json` replaces the human-readable text report** → `ci-workflow`'s
+  retained scenario says the coverage job "reports a coverage figure". Task 1.4 measures
+  whether `--fail-under-lines 80 --json --output-path` still enforces *and* still prints, and
+  keeps a text leg if it does not.
 - **A plant's expected message fragment is platform-specific** → The suite runs on both
   runners with `fail-fast` off, which turns this from a silent macOS-only failure into a
   reported one. Fragments are chosen from each script's own `FAIL:` message, which the
@@ -442,7 +535,7 @@ describe what landed rather than what was intended.
   binding** → The floor is a floor, not an equality, and is set below the measurement. The
   two existing argued exemptions stay uncovered and stay argued; a third would be an
   argument to make in that change's own proposal, not a reason to lower this one.
-- **The `covers` backfill is 44 rows of judgement** → It is derived per row from the
+- **The `covers` backfill is 44 rows of judgement — 46 once `cli-parity` lands** → It is derived per row from the
   production expression that implements it, and every range is machine-checked to resolve
   and to be covered. A wrong-but-covered range is possible and would prove less than
   intended; the `why` sentence beside it is what a reviewer reads to catch that.
@@ -460,8 +553,8 @@ is `git revert`: every change is to a script, a test, a `Makefile` recipe, or a 
 and reverting restores the previous (weaker) gates without touching production code.
 
 The one ordering constraint that is not a rollback concern: `make coverage` is red between
-the moment `covers` is added for `src/watch.rs:264-268` and the moment the test driving that
-arm lands. Both are in group 7, committed together.
+the moment `covers` is added for `src/watch.rs:264-268` (task 6.3) and the moment the test
+driving that arm lands (task 6.5). Both are in group 6, committed together.
 
 ## Open Questions
 

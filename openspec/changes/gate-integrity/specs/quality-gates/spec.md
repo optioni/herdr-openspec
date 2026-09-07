@@ -23,8 +23,8 @@ exactly:
 | `fmt-check` | `cargo fmt --all -- --check` |
 | `lint` | `cargo clippy --all-targets --all-features -- -D warnings` |
 | `test` | `cargo test --all-features` |
-| `coverage` | `cargo llvm-cov --fail-under-lines 80` |
-| `gates` | one invocation line per file under `scripts/gates/`, in the order below |
+| `coverage` | `cargo llvm-cov --fail-under-lines 80` writing a JSON export, then the production-slice floor over it |
+| `gates` | one invocation line per file under `scripts/gates/`, per the rule below |
 | `gates-full` | `DEPS_FULL=1 /bin/sh scripts/gates/deps.sh` |
 | `build` | `/bin/sh scripts/build.sh` |
 
@@ -50,9 +50,11 @@ recipe and not a second definition of the first.
 
 - **WHEN** `make check` is run at HEAD with `clippy` and `cargo-llvm-cov` installed
 - **THEN** it runs `cargo fmt --all -- --check`, then
-  `cargo clippy --all-targets --all-features -- -D warnings`, then
-  `/bin/sh scripts/gates/deps.sh` and `/bin/sh scripts/gates/build-graph.sh`, then
-  `cargo test --all-features`, then `cargo llvm-cov --fail-under-lines 80`
+  `cargo clippy --all-targets --all-features -- -D warnings`, then **every** script under
+  `scripts/gates/` in the recipe's order — not `deps.sh` and `build-graph.sh` alone, which is
+  what this scenario said while twenty-six others ran beside them — then
+  `cargo test --all-features`, then `cargo llvm-cov --fail-under-lines 80` followed by the
+  production-slice floor
 - **AND** it exits 0
 - **AND** `make build`, `make gates`, and `make fmt` each also exit 0 and leave the working
   tree unchanged, so no declared target is unreachable
@@ -92,9 +94,10 @@ recipe and not a second definition of the first.
   format, lint, hygiene gates, test, coverage — in the `Makefile`'s own order
 - **AND** the `gates` row names no fixed pair of scripts, so extracting a twenty-ninth gate
   cannot make the table stale again
-- **AND** a test inside `cargo test` reads `SPEC.md` → Gates and fails when its gate table
-  holds fewer rows than `check`'s prerequisite list in the `Makefile`, which is what makes
-  this correspondence a check rather than a hand-audited claim
+- **AND** a test inside `cargo test` reads `SPEC.md` → Gates and fails unless its gate table
+  names **each** of `check`'s prerequisites in the `Makefile`, by name. A count comparison is
+  not sufficient: five unrelated rows would satisfy it, and renaming a row would leave it
+  green — the same weakness as the stale literal this requirement is replacing
 
 ### Requirement: The repository's hygiene gates are files in the repository
 
@@ -148,7 +151,7 @@ bare, and therefore run at a block default nobody chose. Where a gate has one su
 `Makefile` SHALL invoke it bare, and the floor SHALL NOT also appear on the recipe line.
 
 A gate with **more than one subject** — `LAUNCHSEAM` over `src/launch.rs` and `src/open.rs`,
-`NODEFAULT-UI` over its four type sets — SHALL carry its subject-selecting variables on the
+`NODEFAULT-UI` over its five type sets — SHALL carry its subject-selecting variables on the
 `Makefile` line. Where such a gate's floor is a **property of the subject** rather than of the
 gate, the floor SHALL accompany its subject there: `NODEFAULT-UI`'s span count differs by an
 order of magnitude between the `Dashboard` type set and the `Refresh` one, so a single default
@@ -164,9 +167,15 @@ saw its subject, and the floor is the second line of defence.
 Each script SHALL be hermetic and platform-portable: no network access beyond what `cargo`
 already needs to read `Cargo.lock`, no tool `make check` does not already require except
 `python3`, and no assertion whose truth depends on which of the two supported platforms it
-runs on. No extracted gate SHALL invoke `cargo`: measured, all twenty-eight are `grep`, `awk`,
-`sed`, `find`, and `python3` over the source tree and complete in under a second each, so
-composing them into `make gates` adds no meaningful time to `make check`. A check that
+runs on. No extracted gate SHALL invoke `cargo` **except the two dependency gates**: measured,
+twenty-six of the twenty-eight are `grep`, `awk`, `sed`, `find`, and `python3` over the source
+tree and complete in under a second each, so composing them into `make gates` adds no
+meaningful time to `make check`. `deps.sh` (fourteen `cargo` calls, including
+`cargo build --locked` at leg 2c) and `build-graph.sh` (`cargo tree`) are the stated
+exception, and always were — the blanket "all twenty-five are grep, awk, sed, find and
+python3" was false when it was written. Naming the exception is what lets
+`gates-full` exist as a separate job for the *rebuilding* legs without implying the
+remaining ones spawn no compiler. A check that
 **must** invoke `cargo` — the production-coverage floor below reads a report only
 `cargo llvm-cov` can produce — SHALL therefore live outside `scripts/gates/` and be invoked
 from the `coverage` target, so this rule stays absolute rather than gaining its first
@@ -203,8 +212,11 @@ than reporting one opaque failure.
   the floor it printed
 - **AND** running the same gate with its floor set one above the measured count exits
   non-zero, which is what proves the floor is load-bearing rather than decorative
-- **AND** no floor appears in both a script's default and the `Makefile`'s recipe line: the
-  `Makefile` names subjects for the two multi-subject gates and nothing else
+- **AND** no floor appears in both a script's default and the `Makefile`'s recipe line. The
+  `Makefile` carries only what a subject genuinely requires: `LAUNCH`/`ENTRY` for
+  `LAUNCHSEAM`'s second subject, `SCAN_MIN`/`HOMEFILE`/`TYPES` for each of `NODEFAULT-UI`'s
+  five, and `env -u GRAPH_WRITE` for `GRAPH-SNAP` — five `SCAN_MIN` values and one `env -u`,
+  which the earlier wording "and nothing else" wrongly denied
 
 #### Scenario: The three excluded gates are named, with reasons, where a reader will meet them
 
@@ -255,11 +267,25 @@ NOT be lowered or disabled. The crate SHALL therefore keep its logic in unit-tes
 library code, with `src/main.rs` limited to argument reading, stream writing, blocking
 on stdin, and setting the exit status.
 
-This total is retained and SHALL NOT be lowered, but it is no longer the whole floor: it
-is **unfalsifiable on this tree**, and the requirement below is what makes coverage a gate
-again. `NOWAIVER` SHALL guard both numbers, and SHALL extend its scan set to `scripts/`, so
-that a checker placed there cannot reintroduce `--ignore-filename-regex` through a directory
-the guard does not read.
+This total is retained and SHALL NOT be lowered, but it is no longer the whole floor: on this
+tree it tolerates production coverage down to 43.68%, and the requirement below is what makes
+coverage sensitive again. `NOWAIVER` SHALL guard both numbers, and SHALL extend its scan set
+to `scripts/`, so that a checker placed there cannot reintroduce `--ignore-filename-regex`
+through a directory the guard does not read.
+
+Widening the scan naively turns `NOWAIVER` **red at HEAD**, on three legitimate lines, and the
+rule that resolves it SHALL be stated rather than left to whoever hits the failure:
+`scripts/gates/nowaiver.sh:5` contains the forbidden strings because it *is* the pattern, and
+`scripts/gates/openspec-untouched.sh:14-15` pass `--exclude-standard` to `git ls-files`, which
+is not a coverage flag at all. The same collision reaches `tests/`, which `NOWAIVER` already
+scans: `tests/gate-controls.toml` must record `--ignore-filename-regex` as plant text.
+
+`NOWAIVER` SHALL therefore match a coverage **flag in a coverage context** — the forbidden
+spellings as arguments to `llvm-cov`, `fail-under-lines` below 80, and `coverage(off)` —
+rather than the bare substrings, and SHALL keep a positive control proving the narrowed
+pattern still fires on a real waiver. Exempting the three files by path is the alternative and
+is rejected: a path exemption in the gate that guards against exemptions is precisely the
+vacuity this change exists to remove.
 
 #### Scenario: Coverage passes at HEAD with the scaffold's only logic
 
@@ -277,40 +303,69 @@ the guard does not read.
 
 #### Scenario: `NOWAIVER` reads the directory the new checker lives in
 
-- **WHEN** `--ignore-filename-regex` is planted in the production-coverage checker under
-  `scripts/`, and `make gates` is run
+- **WHEN** `--ignore-filename-regex` is planted as an argument to `cargo llvm-cov` in the
+  production-coverage checker under `scripts/`, and `make gates` is run
 - **THEN** `scripts/gates/nowaiver.sh` exits non-zero naming the planted line
 - **AND** `NOWAIVER` also fails when the `Makefile` stops naming the production floor, so
   deleting the second command is caught the same way lowering the first one is
 - **AND** removing the plant returns `make gates` to exit 0
+- **AND** the same run is green on the three pre-existing occurrences the widened scan now
+  reaches — `nowaiver.sh`'s own pattern literal and `openspec-untouched.sh`'s two
+  `git ls-files --exclude-standard` calls — because the pattern matches a coverage flag in a
+  coverage context, not a bare substring; a run that went red on those would be a false
+  positive shipped into `make check`
 
 
 ## ADDED Requirements
 
 ### Requirement: The coverage floor is measured against production code
 
-`cargo llvm-cov --fail-under-lines 80` cannot fail on this crate. Measured at HEAD:
-`src/` holds 40,500 lines, of which **33,101** sit inside `#[cfg(test)]` modules; the
-test-module slice alone is 96.50% covered and, were every production line uncovered, the
-reported total would still be **83.44%** — above the floor. The gate reports a number
-nobody chose and cannot report a failure. `make coverage` SHALL therefore additionally
-enforce a floor computed over **production lines only**, and that floor SHALL be the
-gate that can actually fail.
+`cargo llvm-cov --fail-under-lines 80` is dominated by test-module lines. Measured at HEAD:
+`src/` holds 40,500 lines, of which **26,820** sit inside `#[cfg(test)]` items; of 22,285
+instrumented lines, 15,477 are test-module and 95.97% covered. The floor does not fire until
+production line coverage falls below **43.68%** — more than half the production body can go
+uncovered with `make check` green. `make coverage` SHALL therefore additionally enforce a
+floor computed over **production lines only**, and that floor SHALL be the one that can
+actually fail on a realistic regression.
 
-A production line is one lying **above** its file's first line-anchored `#[cfg(test)]` —
-the same `prod()` cut `READONLY-UI`, `NOBLOCK`, and `WIRED` already use, so the crate has
-one definition of "production code" rather than a second one invented here. The
-production-slice figure at HEAD is **95.59%** (2,882 of 3,015 instrumented lines), and the
-floor SHALL be set at or below that measurement so the repair adds no test-writing work;
-it is set as a floor and not an equality because the crate carries two argued,
-deliberately-uncovered one-line bindings — `ui::event::CrosstermEvents::next_event` and
-`ui::terminal`'s real `TerminalOps` — which `SPEC.md` already names.
+The audit that prompted this requirement reported the total floor as arithmetically
+*incapable* of failing — production at 0% still scoring 83.44%. That figure came from the
+first-occurrence cut rejected below; under correct extents production at 0% scores 66.65% and
+the floor does fire. The corrected finding is the 43.68% break-even, and it is recorded here
+because a requirement justified by a number that does not reproduce is the defect this change
+exists to remove.
+
+A production line is one **not** inside the brace extent of any `#[cfg(test)]` item. It SHALL
+NOT be defined as "above the file's first line-anchored `#[cfg(test)]`" — the `prod()` cut
+`READONLY-UI`, `NOBLOCK`, and `WIRED` use. Those three are sound only because each carries a
+guard asserting its own subject files hold exactly **one** such attribute; applied tree-wide
+the rule is wrong, because `src/changes.rs` holds three (the first at line 77, a
+`mod conformance`, with the real `mod tests` at 1818), `src/cli.rs` holds ten, and
+`src/lib.rs` holds two. Measured, that cut counts 7,399 production lines where the correct
+extents count 13,680 — **6,281 production lines classified as test**, including most of the
+module that produces every `Change` the dashboard renders. A floor over that population could
+not fail on any of them.
+
+The floor SHALL be the production figure the checker itself reports on the unmodified tree,
+rounded down to the nearest whole percentage point, and SHALL NOT be lower. "At or below the
+measurement" is not sufficient: a floor of 80 satisfies that phrasing while gating nothing on
+a production slice measured at **97.28%**, which is the same defect one layer up. It is a
+floor and not an equality because the crate carries two argued, deliberately-uncovered
+one-line bindings — `ui::event::CrosstermEvents::next_event` and `ui::terminal`'s real
+`TerminalOps` — which `SPEC.md` already names.
+
+The checker SHALL name the line-counting rule it implements, because two defensible rules
+exist and give different denominators for the same report: counting a line as instrumented
+when a segment carries `hasCount` yields 22,285 lines, while `cargo llvm-cov`'s own
+per-function `totals` yields 27,392. The floor is meaningless without saying which produced
+it.
 
 The measurement SHALL be taken from `cargo llvm-cov`'s JSON export rather than by
 narrowing what is compiled: `--ignore-filename-regex` is forbidden by `NOWAIVER`, and it
 could not do this job in any case, since the excluded region is a module **inside** a file
-that also holds production code. The checker SHALL live outside `scripts/gates/`, because
-it invokes `cargo` and no gate may.
+that also holds production code. The checker SHALL live outside `scripts/gates/`, because it
+belongs to the `coverage` target: the gates tier is composed into `make gates`, and a check
+that reads a coverage report has nothing to do there.
 
 `--fail-under-file-lines` SHALL NOT be used as the mechanism. Measured, it reads whole
 files, so it cannot separate a test module from the production code beside it, and the
@@ -333,9 +388,9 @@ nothing.
   production-slice figure and `make coverage` is run
 - **THEN** the checker exits non-zero, naming the shortfall and the files that contributed
   most uncovered production lines
-- **AND** this is the proof the total floor cannot give: raising
-  `--fail-under-lines` to the same relative degree still passes, because 33,101 test-module
-  lines carry it
+- **AND** this is the sensitivity the total floor does not have: a production regression of
+  the same size leaves `--fail-under-lines 80` green, because 15,477 covered test-module
+  lines carry the total until production falls below 43.68%
 
 #### Scenario: Deleting every production test still fails, where today it passes
 
@@ -359,7 +414,8 @@ nothing.
 spellings `process::Command`, `Command::new`, and `Stdio`. All four are defeated by an
 alias: `use std::process::{Child, Command as Proc};` produces neither
 `process::Command` nor `Command::new`, and `Proc::new(...).output()` spawns anyway. Measured
-— a full `herdr agent list` spawn injected into `src/ui/mod.rs` passed **all fifteen** gates.
+— a full `herdr agent list` spawn injected into `src/ui/mod.rs` was reported green by every
+one of the twenty-eight gate scripts.
 The two-item brace form is rustfmt-stable: `rustfmt` collapses a single-item
 `use std::process::{Command};` back to a catchable spelling, but keeps braces at two or more.
 
@@ -376,13 +432,31 @@ The pattern SHALL NOT be a bare `std::process`. Measured, `src/lib.rs` calls
 non-spawning uses a bare module-path pattern would turn red. Both alternatives above return
 **zero** hits across `src/` outside `src/cli.rs` and across every file the other three scripts
 read, while `src/cli.rs`'s own `use std::process::{Command, Stdio};` matches both — so the
-existing exemption keeps working and serves as each new alternative's positive control.
+existing exemption keeps working.
+
+That exemption SHALL NOT be the only proof the alternatives are live. A single `grep -qE`
+over the combined alternation passes while **any** branch matches, and `src/cli.rs:14` matches
+the pre-existing `process::Command` branch — so deleting both new alternatives would leave
+such a control green. Each new alternative SHALL therefore be bound to a plant only it
+catches: the brace-group alias `use std::process::{Child, Command as Proc};`, caught by
+`process::\{` alone, and the single-item `use std::process::Child;` — rustfmt-stable and
+brace-free — caught by the item alternative alone.
 
 Two consequences SHALL be stated in each script rather than left to be discovered:
 `use std::process::{exit, id}` — a brace group of only safe items — is refused too, and the
 workaround is one `use` line per item; and an alias of the crate root itself
 (`use std as s; s::process::Command::new`) is not matched. Both are recorded as known limits
 on the same terms `WIRED` leg 2 records its keyword-based one, not engineered around.
+
+#### Scenario: Each new alternative is proved by a plant only it catches
+
+- **WHEN** `use std::process::{Child, Command as Proc};` is planted in `src/ui/mod.rs` with
+  the `process::\{` alternative removed from `nospawn-grep.sh`
+- **THEN** the gate exits 0, showing that alternative is what catches the brace-group alias
+- **AND** `use std::process::Child;` planted with the item alternative removed likewise exits
+  0, while each plant with the full pattern in place exits non-zero
+- **AND** neither plant is caught by the pre-existing `process::Command|Command::new|Stdio`
+  spellings, which is what makes them controls for the additions rather than for the original
 
 #### Scenario: An aliased spawn import is caught in every file the seam protects
 
@@ -489,9 +563,14 @@ prevent.
 
 #### Scenario: Leg 1 still refuses a tree with no subject
 
-- **WHEN** `NOBLOCK` is run with `UIDIR` pointed at an empty directory
-- **THEN** it exits non-zero on its file-count guard rather than reporting that zero files
-  block
+- **WHEN** `NOBLOCK` is run with `UIDIR` pointed at a directory holding `driver.rs` and
+  nothing else, so the script's existing `[ -f "$UIDIR/driver.rs" ]` guard is satisfied and
+  cannot be what fails
+- **THEN** it exits non-zero on leg 1's **own** file-count floor, naming the count it swept,
+  rather than reporting that zero other files block
+- **AND** the distinction is load-bearing: pointing `UIDIR` at an empty directory fails on the
+  pre-existing `driver.rs missing` guard whether or not leg 1 was ever widened, so that
+  cheaper plant would be a control asserting on the harness rather than on the repair
 
 ### Requirement: `WIRED` reads code, and the panic hook is one of the names it requires
 
