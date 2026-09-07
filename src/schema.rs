@@ -291,12 +291,13 @@ pub fn parse(name: &str, text: &str) -> Result<ParsedSchema, String> {
 }
 
 /// The tasks-artifact rule the OpenSpec CLI's own `findTrackedTasksArtifact`
-/// applies: when `apply.tracks` is a non-null string, the artifact whose
-/// `generates` equals it exactly, with no id fallback on a miss; otherwise —
-/// `apply` absent, not a mapping, or `tracks` absent, null, or the wrong
-/// type — the artifact whose id is `tasks`. At most one problem: a `tracks`
-/// string that matched nothing, a `tracks` of the wrong type, or neither
-/// rule finding an artifact.
+/// applies: when `apply.tracks` is present and not null, whatever its type,
+/// it selects — a string looks up the artifact whose `generates` equals it
+/// exactly, and any other type matches nothing — with **no** id fallback on
+/// a miss; otherwise — `apply` absent, not a mapping, or `tracks` absent or
+/// explicitly `null` — the artifact whose id is `tasks`. At most one
+/// problem: a `tracks` string that matched nothing, a `tracks` of the wrong
+/// type, or neither rule finding an artifact.
 fn tasks_artifact(apply: &Yaml, artifacts: &[Artifact]) -> (Option<Artifact>, Option<String>) {
     if apply.is_hash() {
         let tracks = &apply["tracks"];
@@ -311,7 +312,13 @@ fn tasks_artifact(apply: &Yaml, artifacts: &[Artifact]) -> (Option<Artifact>, Op
                         )),
                     ),
                 },
-                None => id_fallback(artifacts, Some("apply.tracks is not a string")),
+                None => (
+                    None,
+                    Some(
+                        "apply.tracks is present but not a string, so no tasks artifact is selected"
+                            .to_string(),
+                    ),
+                ),
             };
         }
     }
