@@ -37,12 +37,12 @@ apart by exit code.
 ## 3. The CLI runs at all, and answers about the repository on screen
 <!-- kind: behavior -->
 
-- [ ] 3.1 RED: Write failing tests for: `The CLI is constructed with the resolved repository root`, `A CLI answering about the resolved repository is merged, not discarded`, `A CLI answering about another repository is still discarded, with its reason`, `The overlay prepends the resolved binary's own directory to PATH`, `An absent inherited PATH yields the directory alone`, `A binary already on PATH gets the same overlay, harmlessly`, `A shim whose interpreter is unreachable exits 127 and renders a problem row`. RED at HEAD — `worker_cli` takes one argument today (`grep -n 'pub fn worker_cli' -A 3 src/cli.rs`).
-- [ ] 3.2 GREEN: Add the working-directory and overlay parameters to `cli::worker_cli`, pass both to `RealOpenspecCli`, and have `ui::start_collaborators` supply the root it already resolved. `worker_cli_from_env` passes `None` and an empty overlay.
-- [ ] 3.2b GREEN: Build the one-entry overlay in `ui::start_collaborators` — `PATH` set to the resolved binary's `parent()` joined by the platform separator to the inherited `PATH`, read through the injected environment lookup; the parent alone when no `PATH` is inherited. Applied for every probe step (design.md -> Decision 2).
-- [ ] 3.3 CHECK: Confirm the root-disagreement guard in `changes::from_cli_cached` is unchanged — the fix stops the disagreement arising, it does not start trusting a CLI that reports another repository.
-- [ ] 3.3b CHECK: `ui::start_collaborators` names no `std::env::var` — `grep -c 'env::var' src/ui/mod.rs` → `0` (exit 1) at HEAD, and must stay `0`, since the inherited `PATH` comes through the injected lookup and `cargo test` runs in parallel threads of one process.
-- [ ] 3.4 Run `cargo test --all-features` for `cli`, `changes`, and `ui::mod` — no regressions.
+- [x] 3.1 RED: Write failing tests for: `The CLI is constructed with the resolved repository root`, `A CLI answering about the resolved repository is merged, not discarded`, `A CLI answering about another repository is still discarded, with its reason`, `The overlay prepends the resolved binary's own directory to PATH`, `An absent inherited PATH yields the directory alone`, `A binary already on PATH gets the same overlay, harmlessly`, `A shim whose interpreter is unreachable exits 127 and renders a problem row`. RED at HEAD — `worker_cli` takes one argument today (`grep -n 'pub fn worker_cli' -A 3 src/cli.rs`).
+- [x] 3.2 GREEN: Add the working-directory and overlay parameters to `cli::worker_cli`, pass both to `RealOpenspecCli`, and have `ui::start_collaborators` supply the root it already resolved. `worker_cli_from_env` passes `None` and an empty overlay.
+- [x] 3.2b GREEN: Build the one-entry overlay in `ui::start_collaborators` — `PATH` set to the resolved binary's `parent()` joined by the platform separator to the inherited `PATH`, read through the injected environment lookup; the parent alone when no `PATH` is inherited. Applied for every probe step (design.md -> Decision 2).
+- [x] 3.3 CHECK: Confirm the root-disagreement guard in `changes::from_cli_cached` is unchanged — the fix stops the disagreement arising, it does not start trusting a CLI that reports another repository.
+- [x] 3.3b CHECK: `ui::start_collaborators` names no `std::env::var` — `grep -c 'env::var' src/ui/mod.rs` → `0` (exit 1) at HEAD, and must stay `0`, since the inherited `PATH` comes through the injected lookup and `cargo test` runs in parallel threads of one process.
+- [x] 3.4 Run `cargo test --all-features` for `cli`, `changes`, and `ui::mod` — no regressions.
 
 ## 4. The watch covers `openspec/`, not the repository
 <!-- kind: behavior -->
