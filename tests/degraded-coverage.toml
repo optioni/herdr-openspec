@@ -25,7 +25,7 @@ tier = "unit"
 proof = ["a_cli_rejected_schema_names_its_reason_per_change"]
 verdict = "unproven"
 why = "a real FakeCli-driven from_cli merge falls back per change and content_lines renders the reason"
-covers = ["src/changes.rs:1335-1377"]
+covers = ["src/changes.rs:1372-1416"]
 
 [[row]]
 condition = "Schema not vendored (no `openspec/schemas/<name>/schema.yaml` locally)"
@@ -137,7 +137,7 @@ tier = "unit"
 proof = ["a_non_looping_directory_symlink_resolving_inside_the_change_is_skipped_too"]
 verdict = "confirmed"
 why = "a real non-looping symlink whose target canonicalizes inside the change directory, read through resolve_artifact, is not descended into and the file behind it is absent from the artifact's paths - this proves the plugin's own skip, not that the CLI actually follows such a link (that claim rests on the 1.12.0 measurement cited in the row itself and in design.md, not on a test that spawns the real CLI)"
-covers = ["src/changes.rs:636-637", "src/changes.rs:640-640", "src/changes.rs:644-648"]
+covers = ["src/changes.rs:636-637", "src/changes.rs:640-642", "src/changes.rs:644-648"]
 
 [[row]]
 condition = "A tasks file exists but cannot be read (a directory where a file was expected, a permission error, an I/O error, or invalid UTF-8)"
@@ -273,7 +273,7 @@ tier = "outer"
 proof = ["a_failed_cli_cycle_keeps_the_file_numbers"]
 verdict = "unproven"
 why = "a real run_wired run against a scratch openspec reporting a disagreeing root keeps the file-sourced numbers"
-covers = ["src/changes.rs:1543-1560"]
+covers = ["src/changes.rs:1582-1599"]
 
 [[row]]
 condition = "An `openspec` command exits non-zero"
@@ -281,7 +281,7 @@ tier = "outer"
 proof = ["a_failed_cli_cycle_keeps_the_file_numbers"]
 verdict = "unproven"
 why = "a real run_wired run against a scratch openspec exiting non-zero keeps the file-sourced numbers"
-covers = ["src/changes.rs:1521-1528"]
+covers = ["src/changes.rs:1560-1567"]
 
 [[row]]
 condition = "A `herdr agent list` call exits non-zero, or the program cannot be started at all"
