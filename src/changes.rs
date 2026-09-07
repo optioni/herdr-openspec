@@ -4803,6 +4803,64 @@ apply:
             assert_eq!(problems.len(), 1);
             assert!(problems[0].contains("spec-driven"));
             assert!(problems[0].contains("openspec"));
+            assert!(problems[0].contains("No such file or directory"));
+        }
+
+        #[test]
+        fn an_exec_failure_during_the_fallback_tier_carries_its_stderr() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+
+            let failed = |stderr: &str| {
+                Err(CliError::Failed {
+                    program: "openspec".to_string(),
+                    args: vec![
+                        "schema".to_string(),
+                        "which".to_string(),
+                        "spec-driven".to_string(),
+                        "--json".to_string(),
+                    ],
+                    code: Some(127),
+                    stderr: stderr.to_string(),
+                })
+            };
+
+            let fake = FakeCli::new();
+            // Measured on this machine: `env -i PATH=/usr/bin:/bin
+            // "$(readlink -f ~/.nvm/versions/node/v24.18.0/bin/openspec)"
+            // list --json` -> exit=127, stdout=[], stderr=[env: node: No
+            // such file or directory].
+            fake.register_openspec(
+                &["schema", "which", "spec-driven", "--json"],
+                failed("env: node: No such file or directory\n"),
+            );
+            let mut cache = HashMap::new();
+            let (schema, problems) = resolve_cli_schema(&fake, &repo, "spec-driven", &mut cache);
+            assert!(schema.is_none());
+            assert_eq!(problems.len(), 1);
+            assert!(problems[0].contains("spec-driven"));
+            assert!(problems[0].contains("127"));
+            assert!(problems[0].contains("env: node: No such file or directory"));
+
+            let fake_empty = FakeCli::new();
+            fake_empty.register_openspec(&["schema", "which", "spec-driven", "--json"], failed(""));
+            let mut cache_empty = HashMap::new();
+            let (_, empty_problems) =
+                resolve_cli_schema(&fake_empty, &repo, "spec-driven", &mut cache_empty);
+            assert_eq!(empty_problems.len(), 1);
+
+            // Measured: `openspec schema which nosuchschema --json` from
+            // `/tmp` -> exit=1, the real answer on stdout, stderr=[Note:
+            // Schema commands are experimental and may change.].
+            let fake_banner = FakeCli::new();
+            fake_banner.register_openspec(
+                &["schema", "which", "spec-driven", "--json"],
+                failed("Note: Schema commands are experimental and may change.\n"),
+            );
+            let mut cache_banner = HashMap::new();
+            let (_, banner_problems) =
+                resolve_cli_schema(&fake_banner, &repo, "spec-driven", &mut cache_banner);
+            assert_eq!(banner_problems, empty_problems);
         }
 
         #[test]
