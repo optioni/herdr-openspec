@@ -41,6 +41,16 @@ pub(crate) enum FileText {
     Unreadable(String),
 }
 
+/// Parse `text` as YAML and return its first document, or `None` when the
+/// text holds no document at all — an empty or comment-only input, which
+/// `yaml-rust2` reports as zero documents rather than an error. Shared by
+/// `schema_key` and group 4's `parse`: both need "first document or
+/// nothing, never a panic on an empty result."
+fn first_document(text: &str) -> Result<Option<Yaml>, String> {
+    let docs = YamlLoader::load_from_str(text).map_err(|e| e.to_string())?;
+    Ok(docs.into_iter().next())
+}
+
 /// `Ok(Some(name))` when the first document declares a non-blank string
 /// `schema:`.
 ///
@@ -57,16 +67,6 @@ pub(crate) enum FileText {
 /// `Err(reason)` when the text is not valid YAML, when its first document is
 /// not a mapping, or when `schema:` is present with a non-string value —
 /// including an explicit `null`.
-/// Parse `text` as YAML and return its first document, or `None` when the
-/// text holds no document at all — an empty or comment-only input, which
-/// `yaml-rust2` reports as zero documents rather than an error. Shared by
-/// `schema_key` and group 4's `parse`: both need "first document or
-/// nothing, never a panic on an empty result."
-fn first_document(text: &str) -> Result<Option<Yaml>, String> {
-    let docs = YamlLoader::load_from_str(text).map_err(|e| e.to_string())?;
-    Ok(docs.into_iter().next())
-}
-
 pub(crate) fn schema_key(text: &str) -> Result<Option<String>, String> {
     let Some(doc) = first_document(text)? else {
         return Ok(None);
