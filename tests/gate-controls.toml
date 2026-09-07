@@ -376,3 +376,13 @@ plant_find = "crate::launch::start("
 plant_replace = "/* crate::launch::start( is gone */ crate::launch::begin("
 expect = "WIRED FAIL"
 why = "code() only strips // line comments, not /* */ block comments, so hiding the real name inside a block comment while renaming the actual call still satisfies leg 1's substring search; recorded as the ideal message this gate does not yet print"
+
+[[control]]
+id = "nowaiver-coverage-prod-flag"
+script = "nowaiver.sh"
+plant_file = "scripts/coverage-prod.py"
+plant_find = 'SRC_COMPONENT = "src"'
+plant_replace = '''SRC_COMPONENT = "src"
+# cargo llvm-cov %%DASHDASH%%ignore-filename-regex "vendor/*"  # planted for gate-integrity's NOWAIVER control'''
+expect = "NOWAIVER FAIL: a coverage waiver entered the tree"
+why = "task 1.7: NOWAIVER's widened scan set (scripts/) must catch a coverage-narrowing flag planted inside scripts/coverage-prod.py itself, the one place a checker outside scripts/gates/ could otherwise reintroduce the waiver NOWAIVER exists to forbid"
