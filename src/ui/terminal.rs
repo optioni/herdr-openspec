@@ -120,17 +120,51 @@ impl TerminalOps for CrosstermOps {
     }
 }
 
+/// Restore the terminal and then run `next` only when `current` — the
+/// panicking thread's id — equals `installed_on` — the id captured when the
+/// hook was installed, always the render thread's. Off the render thread
+/// (a `refresh`, `agents`, or `launch` worker panicking beside a live
+/// render loop) nothing is restored: the loop still owns the terminal, and
+/// restoring out from under it would leave the alternate screen and raw
+/// mode disabled while `run_loop` keeps drawing, with the guard's own
+/// `Drop` then restoring a second time. `next` always runs, on the
+/// render-thread and worker-thread paths alike, so the panic message is
+/// never swallowed.
+///
+/// A thread id, not a thread name, is compared: a name is optional, is not
+/// unique, and none of the three workers sets one.
+pub fn restore_then_if(
+    ops: &dyn TerminalOps,
+    installed_on: std::thread::ThreadId,
+    current: std::thread::ThreadId,
+    next: &mut dyn FnMut(),
+) {
+    if current == installed_on {
+        restore_then(ops, next);
+    } else {
+        next();
+    }
+}
+
 /// Install a panic hook that restores the terminal before delegating to the
 /// hook already installed, so a panic message lands on a cooked terminal on
 /// the main screen rather than a raw alternate screen about to be torn
-/// down. Chains to, never discards, the previous hook. Not itself unit
-/// tested — installing a hook is process-global and `cargo test` runs
-/// tests in parallel threads of one process — its body is `restore_then`,
-/// which is.
+/// down. Chains to, never discards, the previous hook. Restores only when
+/// the panicking thread is the one that installed the hook — the render
+/// thread — via `restore_then_if`; a worker thread's panic delegates
+/// without restoring. Not itself unit tested — installing a hook is
+/// process-global and `cargo test` runs tests in parallel threads of one
+/// process — its body is `restore_then_if`, which is.
 pub fn install_panic_hook() {
+    let installed_on = std::thread::current().id();
     let previous = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
-        restore_then(&CrosstermOps, &mut || previous(info));
+        restore_then_if(
+            &CrosstermOps,
+            installed_on,
+            std::thread::current().id(),
+            &mut || previous(info),
+        );
     }));
 }
 
