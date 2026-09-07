@@ -75,13 +75,13 @@
 ## 7. The archive race becomes a proven degraded-states row
 <!-- kind: operational -->
 
-- [ ] 7.1 CHECK: Add `changes_are_paired_by_name_not_by_position` (two lists in opposite order, each CLI entry carrying a self-naming schema) and `a_change_archived_mid_cycle_appears_in_both_lists_for_one_cycle` (two merges, the second with an empty CLI list). Confirm both pass.
+- [x] 7.1 CHECK: Add `changes_are_paired_by_name_not_by_position` (two lists in opposite order, each CLI entry carrying a self-naming schema) and `a_change_archived_mid_cycle_appears_in_both_lists_for_one_cycle` (two merges, the second with an empty CLI list). Confirm both pass.
   - HEAD evidence: `grep -rn 'fn .*paired_by_name' src/ tests/` → 0 matches (exit 1); `grep -rn 'fn .*archived_mid_cycle' src/ tests/` → 0 matches (exit 1).
-- [ ] 7.2 CHECK: Run two negative controls, one per test — pair `merge` by `zip` index and confirm the by-name test fails; then make `merge` drop a CLI change whose name is in `files.archived` and confirm the archive-race test fails. Revert each, confirm green, and confirm `git diff --quiet src/changes.rs`.
-- [ ] 7.3 CHANGE: Add the `SPEC.md` degraded-states row for a change archived between the worker's `list --json` call and its file walk, stated at the merged-`ChangeSet` level (the name is in both `active` and `archived`), naming the one-cycle lifetime and the reason the merge does not defend against it (design.md → D6).
-- [ ] 7.4 CHANGE: Add the matching `[[row]]` to `tests/degraded-coverage.toml` with all five keys, `tier = "unit"`, `proof = ["a_change_archived_mid_cycle_appears_in_both_lists_for_one_cycle"]`, and `verdict = "confirmed"`.
-- [ ] 7.5 CHANGE: Raise `MIN_ROWS` in `tests/degraded_coverage.rs` from 45 to 46.
-- [ ] 7.6 VERIFY: `cargo test --test degraded_coverage` — green, with a non-zero pass count.
+- [x] 7.2 CHECK: Run two negative controls, one per test — pair `merge` by `zip` index and confirm the by-name test fails; then make `merge` drop a CLI change whose name is in `files.archived` and confirm the archive-race test fails. Revert each, confirm green, and confirm `git diff --quiet src/changes.rs`.
+- [x] 7.3 CHANGE: Add the `SPEC.md` degraded-states row for a change archived between the worker's `list --json` call and its file walk, stated at the merged-`ChangeSet` level (the name is in both `active` and `archived`), naming the one-cycle lifetime and the reason the merge does not defend against it (design.md → D6).
+- [x] 7.4 CHANGE: Add the matching `[[row]]` to `tests/degraded-coverage.toml` with all five keys, `tier = "unit"`, `proof = ["a_change_archived_mid_cycle_appears_in_both_lists_for_one_cycle"]`, and `verdict = "confirmed"`.
+- [x] 7.5 CHANGE: Raise `MIN_ROWS` in `tests/degraded_coverage.rs` from 45 to 46.
+- [x] 7.6 VERIFY: `cargo test --test degraded_coverage` — green, with a non-zero pass count.
 
 ## 8. Dead branch and misattached doc block
 <!-- kind: refactor -->
