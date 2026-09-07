@@ -2381,6 +2381,145 @@ mod tests {
         assert_eq!(problem, None);
     }
 
+    // --- cli-parity group 6: the symlink divergence, proven and bounded ---
+
+    #[test]
+    fn a_non_looping_directory_symlink_resolving_inside_the_change_is_skipped_too() {
+        // `specs/shared` is a link with no cycle whose target canonicalizes
+        // *inside* the change directory — the one case `@fission-ai/openspec`
+        // 1.12.0 follows and succeeds (`followSymbolicLinks: true`,
+        // `dist/core/artifact-graph/outputs.js:93`). The plugin skips it
+        // unconditionally rather than cycle-detecting, which is what makes
+        // this a divergence row and not a cycle-safety measure — see
+        // `SPEC.md` -> Degraded states.
+        let scratch = ScratchDir::new();
+        let dir = canonical(scratch.path());
+        write(&dir.join("specs/alpha/spec.md"), "# Alpha\n");
+        write(&dir.join("inner/one.md"), "# One\n");
+        symlink(&dir.join("inner"), &dir.join("specs/shared"));
+
+        let (paths, problem) = resolve_artifact(&dir, "specs/**/*.md");
+        assert_eq!(paths, vec![dir.join("specs/alpha/spec.md")]);
+        assert_eq!(problem, None);
+    }
+
+    #[test]
+    fn a_symlink_resolving_outside_the_change_is_skipped_without_failing_closed() {
+        // `specs/escape` targets a directory outside the change entirely.
+        // The CLI fails closed here (`assertPathWithin` throws "Path is
+        // outside the allowed directory", surfacing as `list --json`
+        // answering an empty `changes` array) — the plugin quietly skips
+        // instead and keeps producing the rest of the change, which is the
+        // never-fail-closed rule working as intended and deliberately *not*
+        // the divergence row's subject (`SPEC.md` -> Degraded states).
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+        write_project_config(&repo, "tdd");
+        write(&repo.join("openspec/changes/add-auth/proposal.md"), "# P\n");
+        write(&repo.join("openspec/changes/add-auth/design.md"), "# D\n");
+        write(
+            &repo.join("openspec/changes/add-auth/tasks.md"),
+            "- [x] a\n- [ ] b\n",
+        );
+        write(
+            &repo.join("openspec/changes/add-auth/specs/alpha/spec.md"),
+            "# Alpha\n",
+        );
+
+        let outside = ScratchDir::new();
+        let outside_dir = canonical(outside.path());
+        symlink(
+            &outside_dir,
+            &repo.join("openspec/changes/add-auth/specs/escape"),
+        );
+
+        let set = from_files(&repo, 5);
+        assert_eq!(set.active.len(), 1);
+        let change = &set.active[0];
+        assert!(change.problems.is_empty());
+        let specs = change
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.id == "specs")
+            .expect("schema declares a specs artifact");
+        assert_eq!(
+            specs.paths,
+            vec![repo.join("openspec/changes/add-auth/specs/alpha/spec.md")]
+        );
+        let proposal = change
+            .artifacts
+            .iter()
+            .find(|artifact| artifact.id == "proposal")
+            .expect("schema declares a proposal artifact");
+        assert_eq!(
+            proposal.paths,
+            vec![repo.join("openspec/changes/add-auth/proposal.md")]
+        );
+    }
+
+    #[test]
+    fn a_glob_shaped_tasks_artifact_behind_a_symlink_is_the_known_limit() {
+        // A schema whose tracked-tasks artifact is glob-shaped, with its task
+        // files sitting behind a directory symlink resolving inside the
+        // change directory, is the divergence's known limit on progress —
+        // no schema in current use (`tdd`, the CLI's own `spec-driven`)
+        // tracks tasks this way, both declaring a literal `tasks.md`.
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        write(
+            &repo.join("openspec/schemas/tdd/schema.yaml"),
+            "\
+name: tdd
+artifacts:
+  - id: tasks
+    generates: tasks/**/*.md
+apply:
+  tracks: tasks/**/*.md
+",
+        );
+        write_project_config(&repo, "tdd");
+        write(
+            &repo.join("openspec/changes/add-auth/tasks/real.md"),
+            "- [x] a\n- [ ] b\n",
+        );
+        write(
+            &repo.join("openspec/changes/add-auth/other/extra.md"),
+            "- [ ] a\n- [ ] b\n- [ ] c\n",
+        );
+        symlink(
+            &repo.join("openspec/changes/add-auth/other"),
+            &repo.join("openspec/changes/add-auth/tasks/linked"),
+        );
+
+        let set = from_files(&repo, 5);
+        assert_eq!(set.active.len(), 1);
+        let change = &set.active[0];
+        assert_eq!(
+            change.progress,
+            crate::tasks::Progress {
+                completed: 1,
+                total: 2,
+            }
+        );
+
+        // The CLI, which follows a directory symlink resolving inside the
+        // change directory (`followSymbolicLinks: true`,
+        // `dist/core/artifact-graph/outputs.js:93`), was measured reporting
+        // 1/5 on this exact tree — the extra 0/3 counted through
+        // `tasks/linked` — during planning for `cli-parity`. Documented
+        // constant, never re-measured by invoking the CLI (design.md ->
+        // Test Boundaries: `cargo test` must not depend on an
+        // nvm-installed `node`). The constant only holds while the link
+        // resolves *inside* the change directory — an outside-resolving
+        // link makes the CLI report no changes at all instead.
+        const CLI_MEASURED_1_12_0: crate::tasks::Progress = crate::tasks::Progress {
+            completed: 1,
+            total: 5,
+        };
+        assert_ne!(change.progress, CLI_MEASURED_1_12_0);
+    }
+
     #[test]
     fn a_prefix_and_suffix_file_pattern_is_supported() {
         let scratch = ScratchDir::new();
