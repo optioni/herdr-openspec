@@ -11,6 +11,7 @@
 //! in groups 4-6.
 
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 
 use notify::Watcher as _;
@@ -257,9 +258,28 @@ impl FsEvents for RealFsEvents {
 /// that will not start is a degraded state, not a failure to open the
 /// pane, so it returns the inert implementation and a one-line problem
 /// naming `root` and the reason instead.
+///
+/// A thin delegation to [`start_with`], on `ui::read_artifact`'s own terms: the crate's one
+/// binding from the injected watcher constructor to the real
+/// `notify::RecommendedWatcher::new`, alongside `cli::npm_probe_hook` and
+/// `config::env_lookup`.
 pub fn start(root: &Path) -> (Box<dyn FsEvents>, Vec<String>) {
+    start_with(root, &|tx, cfg| notify::RecommendedWatcher::new(tx, cfg))
+}
+
+/// [`start`]'s real body, taking the watcher constructor as a parameter so a test can drive
+/// its construction-failure arm without touching the real platform watcher or the real
+/// process environment — see `AGENTS.md` -> Conventions, "environment-dependent code takes
+/// an injected lookup".
+fn start_with(
+    root: &Path,
+    new_watcher: &dyn Fn(
+        Sender<notify::Result<notify::Event>>,
+        notify::Config,
+    ) -> notify::Result<notify::RecommendedWatcher>,
+) -> (Box<dyn FsEvents>, Vec<String>) {
     let (tx, rx) = std::sync::mpsc::channel::<notify::Result<notify::Event>>();
-    let watcher = match notify::Watcher::new(tx, notify::Config::default()) {
+    let mut watcher = match new_watcher(tx, notify::Config::default()) {
         Ok(w) => w,
         Err(e) => {
             return (
@@ -271,7 +291,6 @@ pub fn start(root: &Path) -> (Box<dyn FsEvents>, Vec<String>) {
             );
         }
     };
-    let mut watcher: notify::RecommendedWatcher = watcher;
     if let Err(e) = watcher.watch(root, notify::RecursiveMode::Recursive) {
         return (
             none(),
