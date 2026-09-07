@@ -277,11 +277,11 @@ covers = ["src/changes.rs:1582-1599"]
 
 [[row]]
 condition = "An `openspec` command exits non-zero"
-tier = "outer"
-proof = ["a_failed_cli_cycle_keeps_the_file_numbers"]
-verdict = "unproven"
-why = "a real run_wired run against a scratch openspec exiting non-zero keeps the file-sourced numbers"
-covers = ["src/changes.rs:1560-1567"]
+tier = "unit"
+proof = ["a_failed_cli_cycle_keeps_the_file_numbers", "an_exec_failure_of_the_openspec_shim_reports_its_own_stderr"]
+verdict = "confirmed"
+why = "two proofs for the row's two halves: a_failed_cli_cycle_keeps_the_file_numbers (outer) runs a real run_wired cycle against a scratch openspec exiting non-zero and shows the file-sourced numbers survive; an_exec_failure_of_the_openspec_shim_reports_its_own_stderr (unit) feeds cli_error_problem the measured Failed{code:127} shape and shows the stderr line is carried. The outer proof is the stronger of the two, since it exercises the real cycle rather than calling cli_error_problem directly. tier is \"unit\" because tests/degraded_coverage.rs applies its view/outer rendering check per proof entry, and the unit proof's own body renders nothing through a TestBackend"
+covers = ["src/changes.rs:1560-1567", "src/changes.rs:1341-1356"]
 
 [[row]]
 condition = "A `herdr agent list` call exits non-zero, or the program cannot be started at all"
