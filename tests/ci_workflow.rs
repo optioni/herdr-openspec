@@ -861,10 +861,42 @@ fn agents_md_names_the_two_excluded_gates_and_the_split_one() {
     );
 }
 
-/// `gate-integrity` :: D1. `SPEC.md` -> Gates names each of `check`'s prerequisites, in the
-/// `Makefile`, **by name** — not merely as many rows, which five unrelated rows would
-/// satisfy, and not the stale "all four" this test replaces, which a fifth prerequisite
-/// joining `check` left uncorrected.
+/// The markdown table embedded in `section` — its contiguous `|`-prefixed lines, joined.
+/// Scoping to just the table (rather than the whole section) is what makes
+/// `spec_md_gates_section_names_every_check_prerequisite_by_name` a real per-row check:
+/// this project's own prose happens to repeat every target name in a sentence beside the
+/// table (`` `make gates` ``, `` `make coverage` `` and so on in the CI-invocation
+/// paragraph), so a whole-section substring search would still pass with a row deleted
+/// from the table — the same vacuity the stale "all four" wording had, one layer down.
+fn markdown_table(section: &str) -> String {
+    section
+        .lines()
+        .filter(|l| l.trim_start().starts_with('|'))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The first cell of each `| cell | cell | ... |` row in `table`, trimmed and with
+/// surrounding backticks stripped — the row's own advertised name. Matching against this
+/// (rather than the table's raw text) is what makes a rename fail: the `gates` row's
+/// *second* cell reads `...scripts/gates/...`, so a table-wide substring search for
+/// `gates` stays green even after the first cell is renamed to something else — exactly
+/// the "renaming a row would leave it green" weakness the requirement calls out by name.
+fn table_row_first_cells(table: &str) -> Vec<String> {
+    table
+        .lines()
+        .filter_map(|l| {
+            let inner = l.trim().strip_prefix('|')?.strip_suffix('|')?;
+            let first = inner.split('|').next()?.trim().trim_matches('`').trim();
+            Some(first.to_string())
+        })
+        .collect()
+}
+
+/// `gate-integrity` :: D1. `SPEC.md` -> Gates' **table** names each of `check`'s
+/// prerequisites, in the `Makefile`, **by name** — not merely as many rows, which five
+/// unrelated rows would satisfy, and not the stale "all four" this test replaces, which a
+/// fifth prerequisite joining `check` left uncorrected.
 #[test]
 fn spec_md_gates_section_names_every_check_prerequisite_by_name() {
     let spec = read_spec_md();
@@ -881,12 +913,24 @@ fn spec_md_gates_section_names_every_check_prerequisite_by_name() {
         "SPEC.md must have a `### Gates` section"
     );
 
+    let table = markdown_table(&section);
+    assert!(
+        !table.trim().is_empty(),
+        "SPEC.md's Gates section must contain a markdown table"
+    );
+    assert!(
+        table.lines().count() >= prereqs.len() + 1,
+        "SPEC.md's Gates table must have at least one row per check prerequisite, plus its \
+         header row: table was {table:?}"
+    );
+
+    let first_cells = table_row_first_cells(&table);
     for target in &prereqs {
         assert!(
-            section.contains(target.as_str()),
-            "SPEC.md's Gates section must name check's prerequisite `{target}` by name — a \
-             count comparison is not sufficient, since renaming a row would leave it green: \
-             section was {section:?}"
+            first_cells.iter().any(|cell| cell == target),
+            "SPEC.md's Gates table must have a row whose own name is exactly \
+             `{target}` — check's prerequisite, by name, not merely mentioned somewhere in \
+             the table's text. Row names found: {first_cells:?}"
         );
     }
 
