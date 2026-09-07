@@ -285,16 +285,17 @@ covers = ["src/agents.rs:340-344"]
 
 [[row]]
 condition = "The filesystem watcher will not start (`notify` refuses the watch, or the repository root cannot be watched)"
-# tier corrected to "unit" (gate-integrity Change Review, task 9.3, W-B): this row's proof
-# set is now mixed - one entry renders through the real ui::run_wired loop, the other is a
-# hermetic unit test over start_with's injected constructor. Condition 5 requires EVERY
-# proof entry of a "view"/"outer" row to itself name TestBackend, so a row with any
-# non-rendering entry cannot legally carry either tier; "unit" is the tier this row's
-# combined proof set actually satisfies, per "why" below.
-tier = "unit"
-proof = ["a_watch_failure_keeps_the_loop_drawing", "notify_construction_failure_returns_the_inert_watcher"]
+# tier is "outer" (gate-integrity Change Review, second pass): the row's OWN WORDING
+# (SPEC.md:762) is about what renders - the reason named as a leading `!`-marked row, above
+# every change-set problem row - which is observable only at "outer" tier, through the real
+# run_loop with a TestBackend. `proof` names only the test that watches that wording;
+# `covers`'s second range (the constructor's own Err arm, never itself rendered) is bound by
+# execution alone, per the ADDED "code a row covers is executed" requirement, not by a
+# rendering proof. See "why" below for the full split.
+tier = "outer"
+proof = ["a_watch_failure_keeps_the_loop_drawing"]
 verdict = "spec-corrected"
-why = "a real unwatchable root's reason renders as a leading row and the loop keeps drawing, driven through run_loop with a real TestBackend (the .watch() Err arm); the constructor's OWN Err arm - notify::recommended_watcher itself refusing to build a platform watcher, before .watch() is ever called - is driven hermetically through start_with's injected constructor and asserted on the returned problem string directly, since no portable, hermetic test can force the real platform watcher's construction to fail"
+why = "a real unwatchable root's reason renders as a leading row and the loop keeps drawing, driven through run_loop with a real TestBackend (the .watch() Err arm) - this is the row's own wording, observable at outer tier, and the only entry proof legally carries; the constructor's OWN Err arm - notify::recommended_watcher itself refusing to build a platform watcher, before .watch() is ever called - is never separately rendered, so it is not a proof entry, but its execution is bound by the second covers range together with the coverage run, per the ADDED degraded-coverage requirement; notify_construction_failure_returns_the_inert_watcher is the hermetic unit test that drives that range"
 covers = ["src/watch.rs:284-288", "src/watch.rs:294-298"]
 
 [[row]]
