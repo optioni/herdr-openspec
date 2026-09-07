@@ -1232,19 +1232,43 @@ apply:
     }
 
     #[test]
-    fn a_tracks_value_of_the_wrong_type_falls_back_to_the_id() {
-        let text = "\
+    fn a_tracks_value_of_the_wrong_type_yields_no_tasks_artifact() {
+        let sequence = "\
 name: test
 artifacts:
   - id: tasks
-    generates: checklist.md
+    generates: tasks.md
 apply:
   tracks: [a, b]
 ";
-        let parsed = parse("test", text).expect("schema should parse");
-        assert_eq!(parsed.schema.tasks, Some(art("tasks", "checklist.md")));
-        assert_eq!(parsed.problems.len(), 1);
-        assert!(parsed.problems[0].contains("tracks"));
+        let integer = "\
+name: test
+artifacts:
+  - id: tasks
+    generates: tasks.md
+apply:
+  tracks: 42
+";
+        let mapping = "\
+name: test
+artifacts:
+  - id: tasks
+    generates: tasks.md
+apply:
+  tracks:
+    a: b
+";
+        for text in [sequence, integer, mapping] {
+            let parsed = parse("test", text).expect("schema should parse");
+            assert!(parsed.schema.tasks.is_none(), "text {text:?}");
+            assert_ne!(
+                parsed.schema.tasks,
+                Some(art("tasks", "tasks.md")),
+                "text {text:?}"
+            );
+            assert_eq!(parsed.problems.len(), 1, "text {text:?}");
+            assert!(parsed.problems[0].contains("tracks"), "text {text:?}");
+        }
     }
 
     // --- group 6: loading from disk, the three reasons, and the composition
