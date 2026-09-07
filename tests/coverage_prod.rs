@@ -28,7 +28,9 @@ fn fixtures_dir() -> PathBuf {
 /// whether it exited 0 and the combined stdout+stderr text.
 fn run_checker(report: &Path, prod_min: Option<&str>) -> (bool, String) {
     let mut cmd = Command::new("python3");
-    cmd.arg(script_path()).arg(report).current_dir(manifest_dir());
+    cmd.arg(script_path())
+        .arg(report)
+        .current_dir(manifest_dir());
     if let Some(min) = prod_min {
         cmd.env("PROD_MIN", min);
     }
@@ -270,7 +272,10 @@ fn moving_a_production_fn_into_cfg_test_lowers_the_count() {
         "prod_instrumented",
     );
 
-    assert_eq!(before, 2, "sanity: both candidate lines start out production:\n{before_out}");
+    assert_eq!(
+        before, 2,
+        "sanity: both candidate lines start out production:\n{before_out}"
+    );
     assert!(
         after < before,
         "moving a production fn into #[cfg(test)] must lower the production line count: \
