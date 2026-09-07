@@ -116,17 +116,27 @@ Each of the following SHALL produce no schema for the affected change — an emp
 `artifacts` list rather than a missing change — and SHALL record exactly one problem naming
 the schema name and what failed. None SHALL panic, and none SHALL abort the other changes.
 
-- `schema which` could not start the program (`CliError::NotStarted`).
+- `schema which` could not start the program (`CliError::NotStarted`). The problem SHALL also
+  carry the `reason` the seam captured, unconditionally, because this tier renders its
+  failures through the same `cli_error_problem` `cli-changes` specifies — the inheritance is
+  the shared function, not a restatement of the rule.
 - `schema which` exited non-zero (`CliError::Failed`). The CLI writes `{"error": …,
   "available": [ … ]}` to **stdout** and exits 1 for an unknown schema
   (`dist/commands/schema.js:450-464`), and `subprocess-seam`'s `Failed` carries stderr
-  only, so for **that** failure the problem SHALL name the schema, the vector, and the exit
-  code and nothing more. This tier shares `cli_error_problem` with `cli-changes`, so it
-  inherits that capability's rule unchanged: a non-blank `stderr` contributes its first
-  non-blank line, and the empty stderr `openspec` produces alongside its own stdout
-  diagnostics contributes nothing. One rule seen from two callers, not two rules — which is
+  only. This tier shares `cli_error_problem` with `cli-changes` and inherits that
+  capability's rule unchanged — one rule seen from three call sites, not two rules — which is
   what makes an exec failure of the `openspec` shim (exit 127, `env: node: No such file or
   directory` on stderr) self-diagnosing here too, and not only in `from_cli`.
+
+  **This tier is the reason that rule skips a `Note:` banner.** `openspec schema which` writes
+  `Note: Schema commands are experimental and may change.` to stderr on **every** invocation,
+  success and failure alike (`dist/commands/schema.js:388-391`; measured on 1.12.0 at both
+  exit 0 and exit 1) — so for an unknown schema, stderr holds the banner and *only* the
+  banner while the real answer, `{"error": …, "available": [ … ]}`, goes to **stdout**, which
+  the seam discards. Absent the skip, every failure this tier reports would end with a banner
+  that explains nothing. With it, the problem SHALL name the schema, the vector, and the exit
+  code and nothing more — which is what it named before this change, and is correct for this
+  command rather than merely unchanged.
 - The output is not JSON, is not an object, or has no `path`, or a `path` that is not a
   string, or a `path` that is empty.
 - The directory the `path` names holds no `schema.yaml` — `load_dir` reports `NotVendored`
@@ -167,6 +177,8 @@ note to stdout, hiding a real change in the contract instead of degrading visibl
 - **THEN** that change carries an empty `artifacts` list and exactly one problem naming the
   schema and the program that could not be started
 - **AND** nothing panics and the remaining changes are unaffected
+- **AND** the problem also carries the `reason` the seam captured, which this capability
+  inherits from `cli-changes` through the shared `cli_error_problem` rather than restating
 
 #### Scenario: An unusable `schema.yaml` at the CLI-named path degrades that change
 
@@ -203,3 +215,7 @@ note to stdout, hiding a real change in the contract instead of degrading visibl
   `env: node: No such file or directory`
 - **AND** the same call with an empty `stderr` produces the same problem without that text,
   so the two are distinguishable and neither is hard-coded
+- **AND** a third run whose `stderr` is exactly
+  `"Note: Schema commands are experimental and may change.\n"` — the shape this command
+  really produces — yields a problem byte-identical to the empty-`stderr` one, so the tier
+  that motivated the banner skip is the tier that proves it

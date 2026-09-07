@@ -9,16 +9,30 @@
 - `design.md`
 - `tasks.md`
 
-The finding pass was delegated to four independent reviewers, none of which wrote the
-package, sliced (A) capability coverage, scenario quality, and cross-artifact
-contradictions; (B) design completeness, test boundaries, and falsifiability; (C) task
-alignment, lifecycle, and ordering; (D) factual verification of every empirical claim by
-running the command or reading the source. This session merged their findings and repaired
-the owning artifacts; the reviewers edited nothing.
+The finding pass ran **twice**, both times delegated to independent reviewers that did not
+write the package; this session merged their findings and repaired the owning artifacts, and
+no reviewer edited anything.
+
+*Round 1*, over the whole package, sliced four ways: (A) capability coverage, scenario
+quality, and cross-artifact contradictions; (B) design completeness, test boundaries, and
+falsifiability; (C) task alignment, lifecycle, and ordering; (D) factual verification of
+every empirical claim by running the command or reading the source.
+
+*Round 2*, after finding **C3 was widened by a correction** that arrived once round 1 was
+already complete. C3 was briefed as `CliError::NotStarted`'s discarded `reason` and grew to
+cover `CliError::Failed`'s discarded `stderr`, which added a requirement clause, five
+scenarios, and two documentation tasks. Re-reviewing was not optional: the round-1 log would
+otherwise have claimed coverage of a package that had since grown. Round 2 was sliced two
+ways over the extension and its ripples only — (E) coherence, MODIFIED-block fidelity,
+falsifiability, and lifecycle; (F) fact-verification of the new empirical claims. It found
+one CRITICAL and six other defects, listed below the round-1 rows.
 
 ## Reviewed Against
 
-- This repository HEAD: `d1942bb909a38902ed321e399150cef0b5a0fbca`
+- This repository HEAD: `d5cc8b0` at the time of round 2 (round 1 reviewed
+  `d1942bb909a38902ed321e399150cef0b5a0fbca`; the intervening commit is this change's own
+  in-flight artifacts, salvaged at a session limit, plus sibling changes' artifacts — no
+  `src/` change landed between the two rounds)
 - `@fission-ai/openspec` (the external contract this change is parity with): **1.12.0**, at
   `~/.nvm/versions/node/v24.18.0/lib/node_modules/@fission-ai/openspec/`. The audit that
   produced these findings measured 1.11.0, so every CLI-side claim was re-measured.
@@ -55,6 +69,27 @@ the owning artifacts; the reviewers edited nothing.
 | SUGGESTION | tasks.md, specs | Five smaller repairs: the five-key TOML shape (`condition`/`tier`/`proof`/`verdict`/`why`) named explicitly; `5.2`'s citation of a non-existent "D-context" replaced with the owning requirement; `8.3`'s doc-block line reference corrected to `:44-59`; the two negative-control tasks split out of their test-writing tasks and each given a `git diff --quiet` revert check; `10.1`'s justification trimmed to an instruction | tasks.md 5.2, 6.1–6.2, 7.1–7.2, 6.4, 7.4, 8.3, 10.1 |
 | SUGGESTION | specs/change-artifacts/spec.md, specs/schema-artifacts/spec.md | Two over-claims: the `1/5` constant described as "an executable claim" when nothing re-measures it, and a cross-capability scenario asserting `change-artifacts`' fallback from inside `schema-artifacts` without saying so | Both softened to what they are — a documented constant with its measurement noted, and an explicit cross-reference note naming where it is verified | specs/change-artifacts/spec.md; specs/schema-artifacts/spec.md |
 
+### Round 2 — the C3 extension
+
+| Severity | Source Artifact | Problem | Repair | Updated Location |
+|---|---|---|---|---|
+| CRITICAL | tasks.md (10.6), specs | The new rule would have made the schema-fallback tier's rows **worse**. `openspec schema which` writes `Note: Schema commands are experimental and may change.` to stderr on **every** invocation, success and failure alike (`dist/commands/schema.js:388-391`, a `preAction` hook) while its real answer goes to stdout — and it is the only command that tier runs. Every fallback failure would have ended in a banner that looks like an explanation and is not | Reproduced independently (`openspec schema which nosuchschema --json` from `/tmp`: exit 1, answer on stdout, banner alone on stderr). The rule became "first non-blank line **whose trimmed form does not begin `Note: `**, trimmed", written in `cli-changes` with `schema-cli-fallback` recording that it is the tier that motivated it. Two new scenarios pin the skip, one of them the banner-only shape that command really produces | specs/cli-changes/spec.md (rule + 1 scenario); specs/schema-cli-fallback/spec.md (rule + 1 scenario clause); design.md D7; proposal.md; tasks.md 5.2-5.4 |
+| CRITICAL | tasks.md (10.6) | Adding a unit-tier proof to a row marked `tier = "outer"` fails `make check`: `tests/degraded_coverage.rs` applies its render check **per proof entry**, so an `outer` row whose second proof renders nothing panics. The task said to leave `tier` alone | Row moves to `tier = "unit"` keeping both proofs, with the reason recorded as a forced move rather than a preference. The underlying inexpressiveness — a row whose two halves are observable at two tiers — is a checker limitation the sibling `gate-integrity` change owns, so it is written down and handed over rather than worked around | tasks.md 10.6; design.md D8 |
+| WARNING | design.md (D7), specs/cli-changes | "`openspec`'s own failures write to stdout and produce a 0-byte stderr (measured)" was over-generalised from `list`/`instructions apply` to every subcommand. False for `schema` (above) and for `validate --strict` in a non-repository (stdout empty, stderr 184 bytes) | D7 now states which commands were measured doing what, and says explicitly that this is why the rule keys on the line's own content rather than on a belief about where a subcommand writes | design.md D7 |
+| WARNING | design.md (Risks), tasks.md | One existing test asserts the **opposite** of the new rule: `a_schema_the_cli_rejects_removes_one_change_and_keeps_the_others` (`src/changes.rs:5256`) supplies `stderr: "Unknown schema …"` at `:5294` and asserts at `:5303` that the problem does not contain it. The plan claimed all existing fakes pass `stderr: ""` | Named as its own task with both line numbers. The fixture is corrected to `stderr: ""` — which measurement says is what `instructions apply` really produces — so the `:5303` assertion survives as the proof that no reason is invented | tasks.md 5.5; design.md Risks |
+| WARNING | specs/schema-cli-fallback/spec.md | The delta inherited only the `stderr` half of the widened rule. Its `NotStarted` bullet and its "An unstartable `openspec` during the fallback" scenario were byte-identical to the live ones, while design.md's matrix already said that scenario's assertion widens with the reason text — a spec/design disagreement | Both now state the inheritance explicitly, and the scenario gained a clause asserting the carried reason | specs/schema-cli-fallback/spec.md; proposal.md |
+| WARNING | specs/cli-changes/spec.md | "Trimmed" was unfalsifiable across the whole scenario set: `.lines()` already drops the newline, and the one scenario with real padding asserted only `contains`, which an untrimmed implementation satisfies | The multi-line scenario now asserts exact whole-string equality and says in the scenario that it is the only place the trim is observable | specs/cli-changes/spec.md; tasks.md 5.2 |
+| WARNING | tasks.md | Behavior groups 2, 4 and 5 ended at a verification task with neither a REFACTOR task nor the schema-mandated statement that none was needed | Each verification task now states it, with the reason | tasks.md 2.4, 4.3, 5.6 |
+| SUGGESTION | tasks.md, design.md | Line-cite drift: `cli_error_problem` was cited as `1302-1322` when the function runs `1302-1324` and its `Failed` arm `1312-1322`; and it was described as having two callers when it has **three** call sites (`:1371`, `:1529`, `:1600`) | Both corrected | tasks.md 5.2, 5.3; design.md D7 |
+| SUGGESTION | design.md, proposal.md, specs | "The chain lands on the shim precisely in the condition that **guarantees** the child cannot exec" — nvm's bin being off `PATH` does not guarantee no `node` on `PATH` | Weakened to a strong correlation, with the corroborating measurement that this machine's other `node` is itself broken (`dyld: Library not loaded`, exit 134, 699 bytes of stderr) — a second real `Failed`-with-stderr shape | design.md Context |
+| SUGGESTION | design.md (Boundaries) | `seam-resilience` has since landed a `PATH` overlay that makes the shim find `node`, which could read as making this change redundant | The coordination note now covers both couplings and argues why it does not: the overlay cannot help when the winning probe step's directory holds no `node`, a present-but-broken `node` fails through the same arm, and this rule is general rather than aimed at one failure | design.md Boundaries |
+
+Both round-2 reviewers independently confirmed every load-bearing measurement about the shim
+(exit 127, 0-byte stdout, `env: node: No such file or directory` on stderr, and that this is
+`CliError::Failed` because `src/cli.rs:75-91` maps a spawned child to `Completed` and only a
+spawn error to `NotStarted`), the reachability argument through `resolve.rs:212`/`:221`, and
+that both MODIFIED blocks carry their full original requirement with every original scenario.
+
 Reviewer A reported `openspec/schemas/tdd/schema.yaml:36` as the `generates: specs/**/*.md`
 line against the artifacts' `:37`. Reviewer D and a direct `grep -n` both give `:37`; the
 citation stands unchanged.
@@ -67,7 +102,7 @@ attributed claims rather than being restated as measurements.
 
 ## No Remaining Implementation-Blocking Gaps
 
-None remain. Every CRITICAL is repaired in the artifact that owns it, every WARNING is
+None remain, and this statement now covers the C3 extension as well as the original package. Every CRITICAL is repaired in the artifact that owns it, every WARNING is
 either repaired or (in the two cases above) explicitly accepted with its reason recorded,
 and `openspec validate cli-parity --strict` reports `Change 'cli-parity' is valid`.
 
@@ -79,6 +114,12 @@ and `openspec validate cli-parity --strict` reports `Change 'cli-parity' is vali
   `parse_apply` list omits NUL, which cannot appear in the JSON payloads the fake serves),
   and forcing them into one constant would hide that difference. Resolution point is task
   9.1's review, which sees both lists side by side.
+- **The reworded degraded-states row can no longer claim its outer tier.** The row asserts
+  two things observable at two tiers and `tests/degraded-coverage.toml` can express one.
+  It takes `tier = "unit"`, keeps both proofs, and records the pair in `why`. The
+  inexpressiveness is a checker limitation; the sibling `gate-integrity` change owns the
+  checker, and this is written down for it rather than fixed here. Resolution point:
+  design.md → D8 and task 10.6.
 - **The `1/5` CLI constant will rot silently.** No test re-measures the CLI, by the
   deliberate boundary in design.md → Test Boundaries (`cargo test` must not require an
   nvm-installed `node`). The trade is stated there and the measurement is carried in the

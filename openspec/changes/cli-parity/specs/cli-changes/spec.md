@@ -54,9 +54,25 @@ the shim anyway.
 Dropping stderr therefore turns the one self-diagnosing failure in the crate into
 `openspec list --json exited with code 127` — a row naming a number the user cannot act on.
 
-The **first non-blank line, trimmed**, is what is carried, not the whole stream: a problem is
-rendered as one row of the list region, and a multi-line diagnostic would either be truncated
-by the view or break the row grammar. A blank or whitespace-only stderr appends nothing, so
+What is carried is the **first non-blank line that is not an informational `Note:` banner**,
+**trimmed**, and nothing else. Three clauses, each earning its place:
+
+- **First line, not the whole stream** — a problem renders as one row of the list region, so a
+  multi-line diagnostic would be truncated by the view or break the row grammar.
+- **Trimmed** — the line is joined onto an existing sentence, and padding from the child's own
+  formatting would show up inside it.
+- **Not a `Note:` banner** — a line whose trimmed form begins `Note: ` SHALL be skipped, and
+  the next non-blank line considered in its place. This is not a hypothetical: `openspec
+  schema which` writes `Note: Schema commands are experimental and may change.` to **stderr on
+  every invocation, success and failure alike** (`dist/commands/schema.js:388-391`, a
+  `preAction` hook; measured on 1.12.0 at exit 0 and exit 1). Without this clause, the one
+  command `schema-cli-fallback` runs would append that banner to every failure it reports,
+  replacing a row that says nothing with a row that appears to explain the failure and does
+  not. Skipping a genuine diagnostic that happened to begin `Note: ` costs nothing this rule
+  was ever going to deliver, because a line that announces itself as a note is not a
+  diagnosis.
+
+A stderr that is blank, or that holds nothing but `Note:` banners, appends nothing — so
 `openspec`'s own stdout-diagnostic failures read exactly as they did.
 
 A `NotStarted` reason is the **operating system's** message about the spawn itself — it
@@ -102,12 +118,28 @@ A per-change failure SHALL NOT abort the remaining changes.
 - **AND** the trailing newline is not in the recorded problem, because the first non-blank
   line is taken trimmed
 
-#### Scenario: A multi-line stderr contributes only its first non-blank line
+#### Scenario: A multi-line stderr contributes only its first non-blank line, trimmed
 
 - **WHEN** a `Failed` carries `stderr` `"\n\n  first line  \nsecond line\nthird line"`
-- **THEN** the recorded problem contains `first line` and contains neither `second line` nor
-  `third line`
+- **THEN** the recorded problem **ends with** `code 1: first line` — asserted as an exact
+  whole-string equality, not a `contains`
+- **AND** it holds neither `second line` nor `third line`, and no doubled space, so an
+  implementation that takes the first non-blank line **without** trimming it fails this
+  scenario. That is the only scenario in this capability where the trim is observable, so
+  dropping the assertion leaves the trim unproven
 - **AND** the problem is a single line, so it renders as one row of the list region
+
+#### Scenario: A `Note:` banner is skipped and the next line carried
+
+- **WHEN** a `Failed` carries `stderr`
+  `"Note: Schema commands are experimental and may change.\nreal diagnosis here"`
+- **THEN** the recorded problem ends with `real diagnosis here` and contains neither `Note:`
+  nor `experimental`
+- **AND** with the banner alone as the whole of `stderr` — the shape `openspec schema which`
+  actually produces — the problem is byte-identical to the empty-`stderr` one, so the banner
+  contributes nothing rather than an empty fragment
+- **AND** the skip is by the trimmed line's `Note: ` prefix, asserted by a third run whose
+  stderr is `"   Note: padded banner\nkept"`, which also carries `kept`
 
 #### Scenario: A whitespace-only stderr appends nothing
 

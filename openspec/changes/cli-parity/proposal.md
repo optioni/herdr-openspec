@@ -35,7 +35,10 @@ for building the dual-source model, not for auditing it once built.
   (measured). That is a `Failed`, not a `NotStarted` — `env` did start — and the probe chain
   lands on that shim precisely when the failure is possible, because `openspec`'s symlink
   shares the nvm `bin` directory with `node`. Today it renders as an unactionable
-  `openspec list --json exited with code 127`.
+  `openspec list --json exited with code 127`. The carried line skips an informational
+  `Note:` banner, because `openspec schema which` — the only command the schema fallback tier
+  runs — writes one to stderr on **every** invocation; without the skip this change would
+  improve one tier's rows and make the other's strictly worse.
 - **Close C5.** Delete the dead first branch of `join_artifacts`, which the next branch
   fully subsumes, and fold the corresponding rule 3 out of `change-merge`'s published
   six-rule list so code and spec still enumerate the same rules.

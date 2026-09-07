@@ -27,8 +27,12 @@ not `NotStarted` — `env` started and then exited 127, so `Command::output()` r
 with a non-zero status. It is reachable by construction rather than hypothetically:
 `openspec`'s symlink lives in the same nvm `bin` directory as `node`, so whenever that
 directory is off `PATH`, `resolve::step2_path` misses (`src/resolve.rs:212`) and
-`step3_nvm` finds the shim anyway (`:221`) — the chain lands on the shim precisely in the
-condition that guarantees the child cannot exec. AGENTS.md already notes nvm's bin is not
+`step3_nvm` finds the shim anyway (`:221`) — the chain reaches for the shim in exactly the
+condition that makes the shim unrunnable. It is a strong correlation rather than a guarantee:
+another `node` may still be on `PATH`. On this machine one is (`/opt/homebrew/bin/node`) and
+it is itself broken — `dyld: Library not loaded: libllhttp.9.3.dylib`, exit **134**, 699
+bytes on stderr — which is a second real `Failed`-carrying-stderr shape and strengthens the
+case rather than weakening it. AGENTS.md already notes nvm's bin is not
 always on the `PATH` a non-login shell inherits, which is the normal case for a
 GUI-launched Herdr.
 
@@ -65,12 +69,26 @@ This change is **unplanned**: `openspec/IMPLEMENTATION-ORDER.md` ends at Phase 6
 | `tests/degraded-coverage.toml` | one entry per new `SPEC.md` row, and the condition key of the row group 10 rewords | satisfies `degraded-coverage`'s existing requirement; **no delta on that capability** |
 | `tests/degraded_coverage.rs` | `MIN_ROWS` 44 → 46 (`tests/degraded_coverage.rs:17`) | a gate's floor is kept at its true measured floor, so adding two rows without raising it would leave the gate slack |
 
-**One cross-change collision is known and stated rather than discovered later.** The sibling
-`seam-resilience` change adds a third `CliError` variant (`TimedOut`) to the seam. This
-change's group 5 edits `cli_error_problem` (`src/changes.rs:1302`), which matches `CliError`
+**Two cross-change couplings with `seam-resilience` are known and stated rather than
+discovered later.** Neither blocks this change.
+
+*The `CliError` shape.* That change adds a third variant (`TimedOut`). This change's group 5
+edits `cli_error_problem` (`src/changes.rs:1302-1324`), which matches `CliError`
 exhaustively, and `cli-changes`' delta enumerates its failure list as closed. Whichever
-lands second updates that match and adds the corresponding bullet; the compiler forces the
-first half, and the delta's list is the reminder for the second. Nothing here blocks on it.
+lands second updates the match and adds the bullet; the compiler forces the first half and
+the delta's list is the reminder for the second.
+
+*The shim's exec failure.* `seam-resilience`'s S10 gives `RealOpenspecCli` a `PATH` overlay
+prepending the resolved binary's own parent, which makes the shim find `node` in the common
+case and so makes the 127 rarer. It does **not** make this change redundant, for three
+reasons: the overlay cannot help when the winning probe step is one whose directory holds no
+`node` (a configured `openspec_bin`, or step 4's npm prefix); a `node` that is present but
+broken still fails through the same arm — measured on this machine,
+`/opt/homebrew/bin/node` dies with `dyld: Library not loaded: libllhttp.9.3.dylib`, exit
+**134**, 699 bytes on stderr; and the rule here is general — report what the seam captured —
+rather than a fix aimed at one failure. The two changes are complements: one makes the
+failure less likely, the other makes it legible when it happens. `seam-resilience`
+deliberately left `cli_error_problem` alone, so there is no overlap to negotiate.
 
 **No process spawn is added anywhere.** `src/cli.rs` remains the crate's only spawner and
 gains nothing; the `NOSPAWN-GREP`, `LAUNCHSEAM`, `NOCLI-SHELL`, and `NOBLOCK` gates are
@@ -166,12 +184,19 @@ sit directly in `changes::tests`, and the CLI-fallback tests are in
 | A vendored schema never reaches the CLI | existing test, unchanged | unit | `OpenspecCli` fake (unregistered) | `cargo test changes::tests::schema_fallback` |
 | An unreadable vendored schema is not repaired by the CLI | existing test, unchanged | unit | `OpenspecCli` fake, real filesystem | `cargo test changes::tests::schema_fallback` |
 | An invalid vendored schema is not repaired by the CLI | existing test, unchanged | unit | `OpenspecCli` fake, real filesystem | `cargo test changes::tests::schema_fallback` |
+| An unknown schema name degrades that change alone | existing test, unchanged | unit | `OpenspecCli` fake | `cargo test changes::tests::schema_fallback` |
+| A `path` naming a directory with no `schema.yaml` stops the tier | existing test, unchanged | unit | `OpenspecCli` fake, real filesystem | `cargo test changes::tests::schema_fallback` |
+| An unstartable `openspec` during the fallback degrades that change | existing test; its `NotStarted` assertion widens with group 5's reason text | unit | `OpenspecCli` fake | `cargo test changes::tests::schema_fallback` |
+| An unusable `schema.yaml` at the CLI-named path degrades that change | existing test, unchanged | unit | `OpenspecCli` fake, real filesystem | `cargo test changes::tests::schema_fallback` |
+| A malformed `schema which` payload is a problem, not a panic | existing test, unchanged | unit | `OpenspecCli` fake | `cargo test changes::tests::schema_fallback` |
+| A leading non-JSON line is not tolerated | existing test, unchanged | unit | `OpenspecCli` fake | `cargo test changes::tests::schema_fallback` |
 | An exec failure during the fallback tier carries its stderr | new test; the same `Failed` shape through `schema which`, plus the empty-stderr control | unit | `OpenspecCli` fake | `cargo test changes::tests::an_exec_failure_during_the_fallback_tier` |
 | An illegal schema name is not repaired by the CLI | new characterization test: `resolve_cli_schema` called directly, asserts no schema, one problem, empty invocation list | unit (characterization) | `OpenspecCli` fake | `cargo test changes::tests::an_illegal_schema_name_is_not_repaired` |
 | An absent `openspec` binary yields an empty result and one problem | existing test, assertion widened to the reason text | unit | `OpenspecCli` fake | `cargo test changes::tests::from_cli` |
 | Two different spawn failures produce two different problems | new test, two runs, asserts the strings differ | unit | `OpenspecCli` fake | `cargo test changes::tests::two_different_spawn_failures` |
 | An exec failure of the `openspec` shim reports its own stderr | new test feeding the measured `Failed { code: 127, stderr: "env: node: No such file or directory\n" }` | unit | `OpenspecCli` fake | `cargo test changes::tests::an_exec_failure_of_the_openspec_shim` |
-| A multi-line stderr contributes only its first non-blank line | new test; asserts the later lines are absent and the problem is one line | unit | `OpenspecCli` fake | `cargo test changes::tests::a_multi_line_stderr` |
+| A multi-line stderr contributes only its first non-blank line, trimmed | new test; exact whole-string equality, which is the only place the trim is observable | unit | `OpenspecCli` fake | `cargo test changes::tests::a_multi_line_stderr` |
+| A `Note:` banner is skipped and the next line carried | new test, three runs: banner-then-diagnosis, banner alone, padded banner | unit | `OpenspecCli` fake | `cargo test changes::tests::a_note_banner_is_skipped` |
 | A whitespace-only stderr appends nothing | new test; asserts byte-identity with the empty-stderr problem | unit | `OpenspecCli` fake | `cargo test changes::tests::a_whitespace_only_stderr` |
 | A schema the CLI rejects removes one change and keeps the others | existing test, unchanged | unit | `OpenspecCli` fake | `cargo test changes::tests::from_cli` |
 | Malformed JSON from a single apply call is contained to that change | existing test, unchanged | unit | `OpenspecCli` fake | `cargo test changes::tests::from_cli` |
@@ -289,22 +314,49 @@ a scenario asserting it. Making the merge consult `files.archived` would invert 
 dual-source rule — the files would override a CLI answer — for a state that lasts exactly
 one refresh cycle. The row records it; the new scenario proves it self-corrects.
 
-**D7 — the `Failed` arm carries stderr's first non-blank line, trimmed, and only when it is
-not blank.** Three alternatives were rejected. *Carrying nothing* is the status quo and is
-what makes the shim's exit 127 unactionable. *Carrying the whole stream* breaks the list
-region's row grammar, since a problem renders as one row and a diagnostic can be many lines.
-*Carrying stderr unconditionally, blank or not*, would leave a dangling separator on the
-common case — `openspec`'s own failures write to stdout and produce a 0-byte stderr
-(measured) — so every existing problem string would change for no gain. First non-blank
-line, trimmed, when non-blank, keeps the domain-failure messages byte-identical and makes
-the exec-failure message self-diagnosing. The rule is written in `cli-changes` and inherited
-by `schema-cli-fallback`, because both callers share `cli_error_problem`.
+**D7 — the `Failed` arm carries stderr's first non-blank, non-`Note:` line, trimmed.**
+Alternatives rejected: *carrying nothing* is the status quo, which makes the shim's exit 127
+unactionable; *carrying the whole stream* breaks the list region's row grammar, since a
+problem renders as one row and a diagnostic can be many lines; *carrying it unconditionally,
+blank or not*, would leave a dangling separator wherever stderr is empty and change every
+existing problem string for no gain.
+
+The `Note:` clause was added during review, on a measurement that inverts the naive rule for
+one of the three call sites. `openspec`'s stdout-only-diagnostics habit is **not** universal:
+`list --json` and `instructions apply --json` do write their diagnostics to stdout with a
+0-byte stderr (measured), but `openspec schema which` writes `Note: Schema commands are
+experimental and may change.` to stderr on **every** invocation, at exit 0 and exit 1 alike
+(`dist/commands/schema.js:388-391`, a `preAction` hook), while its real answer goes to
+stdout. `schema which` is the only command `schema-cli-fallback` runs. So without the skip,
+this change would leave `from_cli`'s rows better and the fallback tier's rows strictly
+worse — every failure there ending in a banner that looks like an explanation and is not.
+`validate --strict` in a non-repository is a third shape again (stdout empty, stderr 184
+bytes), which is further reason the rule keys on the line's own content rather than on a
+belief about where a given subcommand writes.
+
+The rule lives in `cli-changes` and is inherited by `schema-cli-fallback`, because
+`cli_error_problem` has **three** call sites — `src/changes.rs:1371` (the `schema which`
+tier), `:1529` (`list --json`), and `:1600` (`instructions apply`) — and one function cannot
+hold two rules.
 
 The `SPEC.md` row that justifies the old behaviour ("The reason is unavailable to the
 plugin: the CLI writes its diagnostic to **stdout** …") is not merely incomplete, it is
-false for this failure, where stdout was empty and stderr carried the whole answer. It is
-reworded rather than deleted: `openspec`'s own diagnostic is still unavailable, and that
-part of the sentence is still the reason a domain failure names only its exit code.
+false for the shim failure, where stdout was empty and stderr carried the whole answer. It
+is reworded rather than deleted: `openspec`'s own diagnostic is still unavailable for
+`list`/`instructions`, and that is still why a domain failure names only its exit code.
+
+**D8 — the reworded degraded-states row moves to `tier = "unit"`, and the coverage map
+cannot say what is actually true.** After this change that row asserts two things at two
+tiers: that a failed cycle keeps the file numbers (outer, proved by
+`a_failed_cli_cycle_keeps_the_file_numbers` in `src/ui/mod.rs:3768`) and that a stderr line
+is carried when present (unit). `tests/degraded_coverage.rs` applies its render check **per
+proof entry** for a `view`/`outer` row, so a row cannot hold one proof of each tier — listing
+the new unit proof under `tier = "outer"` fails the gate outright. The row therefore takes
+`tier = "unit"`, keeps both proofs, and its `why` records that the outer proof is the
+stronger of the two and that the map cannot express the pair. That inexpressiveness is a
+limitation of the checker, which the sibling `gate-integrity` change owns; this change
+records it where it was met rather than working around it silently or reaching into the
+mechanism.
 
 ## Risks / Trade-offs
 
@@ -324,10 +376,16 @@ part of the sentence is still the reason a domain failure names only its exit co
   violation, check fires, revert, check quiet), recorded in the task. Without that a row
   would be bound to a proof nobody showed could fail, which `degraded-coverage` exists to
   prevent.
-- **Existing tests assert exact problem strings.** → `NotStarted` problems always change.
-  `Failed` problems change only where a fake supplies a non-blank `stderr`; the existing
-  fakes pass `stderr: ""`, so those assertions stay byte-identical, which is itself asserted
-  by the whitespace-only scenario. Affected assertions are updated in the same task group.
+- **Existing tests assert exact problem strings, and one asserts the opposite of the new
+  rule.** → `NotStarted` problems always change. Most `Failed` fakes pass `stderr: ""` and
+  stay byte-identical, which the whitespace-only scenario asserts. The exception is
+  `a_schema_the_cli_rejects_removes_one_change_and_keeps_the_others`
+  (`src/changes.rs:5256`), whose fake supplies `stderr: "Unknown schema \"outside-in-tdd\""`
+  at `:5294` and then asserts at `:5303` that the problem does **not** contain it — an
+  assertion this change inverts. The fake is also unrealistic: `instructions apply` was
+  measured writing its diagnostic to stdout with a 0-byte stderr, so the fixture is corrected
+  to `stderr: ""`, which keeps the assertion meaningful and makes it faithful. The task names
+  that line so the change is deliberate rather than a casualty.
 - **The exec-failure path is proved with a fake, not a real shim.** → `cargo test` must not
   require an nvm-installed `node` (design → Test Boundaries), so the scenario feeds the
   measured `Failed { code: 127, stderr: "env: node: No such file or directory\n" }` shape
