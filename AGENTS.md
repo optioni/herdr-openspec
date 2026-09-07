@@ -176,7 +176,7 @@ stay in sync.
 
 ## Quality gates
 
-Four are enforced in CI, invoking the same `make` targets individually — with
+Five are enforced in CI, invoking the same `make` targets individually — with
 coverage on Linux only — and are available locally behind one composite target:
 
 ```sh
@@ -190,6 +190,12 @@ make check
 | Hygiene gates | `make gates` |
 | Test | `cargo test --all-features` |
 | Coverage | `cargo llvm-cov --fail-under-lines 80` |
+
+Coverage is enforced at two floors from that one run: the total above, and a
+production-slice floor computed from the same `cargo llvm-cov` JSON export
+(`scripts/coverage-prod.py`). The production floor is the falsifiable one — the total
+does not fire until production coverage falls below roughly 44%, so a future change that
+lowers only the total would otherwise still look compliant.
 
 Coverage is a floor that catches drift, not the mechanism that produces tests — the
 `tdd` schema drives RED → GREEN → REFACTOR, so tests come first by construction.
@@ -212,10 +218,25 @@ type sets across the codebase (the view-layer dashboard types, `Refresh`, `Launc
 either pass vacuously for the smallest set or fail legitimately for the largest — so each
 of its five recipe lines carries its own explicit `SCAN_MIN`, the only floors that live on
 the `Makefile` line rather than the script default (`notes/gate-floors.md` in the
-`degraded-states` change records how each was measured). A test proves every gate can
-still fail: `tests/ci_workflow.rs` checks the recipe names every script under
-`scripts/gates/` and vice versa, so an extracted gate can never silently drop out of
-`make gates` again.
+`degraded-states` change records how each was measured). Every gate is executed against a
+recorded planted defect, not merely attested to catch one: `tests/gate-controls.toml`
+binds each script under `scripts/gates/` to a plant, and `tests/gate_controls.rs` copies
+the tree to a scratch directory, applies it, and requires that gate to exit non-zero — so
+a script neutered to `exit 0` fails `cargo test` even though `make gates` alone would not
+catch it. `tests/ci_workflow.rs` proves a narrower thing beside it: the recipe names every
+script under `scripts/gates/` and vice versa, so an extracted gate can never silently drop
+out of `make gates` — which says nothing on its own about whether the gate can still fail.
+
+Three gates guard no standing, repository-wide invariant and are excluded from this tier,
+or only partly so: `EXTENDED` is a per-change ratchet — a hardcoded list of test-name
+pairs belonging to one past change, several already stale — that would compose a
+permanently red step into `make check`; `TESTCOUNT` is a shell function other checks
+source, not a check with a subject of its own; and `OPENSPEC-UNTOUCHED` is **split** — its
+`git ls-files` legs need no `BASE` commit and are extracted as
+`scripts/gates/openspec-untouched.sh`, run in `make gates`, while its tracked-diff leg
+needs a `BASE` captured at the start of a change and stays a per-change invocation.
+`scripts/gates/` therefore holds no file for `EXTENDED` or `TESTCOUNT`, but does hold one
+for `OPENSPEC-UNTOUCHED`'s extracted half.
 
 Two things are deliberately **not** composed into `make gates`/`make check`, each with its
 own reason: `make gates-full` (`DEPS_FULL=1 /bin/sh scripts/gates/deps.sh`) runs the
