@@ -22,6 +22,24 @@ ALLOWED="${ALLOWED-src/cli.rs src/agents.rs src/ui/mod.rs src/launch.rs src/open
 MIN="${MIN:-25}"
 fail() { echo "AGENTSEAM FAIL: $1" >&2; exit 1; }
 
+# G2 — leg 1 resists an import alias (design.md -> Decision 3). Two alternatives join the
+# original process::Command|Command::new|Stdio: process::(Command|Child|Stdio|Output|
+# ChildStd) (the spawn items of std::process, matched at their import site as well as at a
+# fully-qualified call) and process::\{ (ANY brace-grouped import from std::process). Not
+# a bare `std::process`: measured, src/lib.rs:33 calls std::process::id() and
+# src/main.rs:1 reads `use std::process::exit;`, two legitimate non-spawning uses a bare
+# module-path pattern would turn red.
+#
+# COST ACCEPTED: `use std::process::{exit, id};` — a brace group of only safe items — is
+# refused too, by process::\{ alone. The workaround is one `use` line per item.
+#
+# TWO KNOWN LIMITS, stated rather than engineered around:
+#   (a) a crate-root alias is not matched: `use std as s; s::process::Command::new`.
+#   (b) a re-export through the exempted seam is not matched either: `pub use
+#       std::process::Command;` in src/cli.rs — the one file where that line is legal and
+#       invisible — then `use crate::cli::Command as Proc;` anywhere else.
+SPAWN_RE='process::Command|Command::new|Stdio|process::\{|process::(Command|Child|Stdio|Output|ChildStd)'
+
 [ -d src ] || fail "no src directory"
 [ -f "$AGENTS" ] || fail "$AGENTS missing - the subject is gone"
 case "$ALLOWED" in *[![:space:]]*) ;;
@@ -43,7 +61,7 @@ n=$(find src tests -name '*.rs' $pruned | wc -l | tr -d ' ')
 [ "$n" -ge "$MIN" ] || fail "searched only $n files (expected >= $MIN)"
 
 # Leg 1 — the module spawns no process.
-p=$(grep -nE 'process::Command|Command::new|Stdio' "$AGENTS" || true)
+p=$(grep -nE "$SPAWN_RE" "$AGENTS" || true)
 [ -z "$p" ] || { echo "AGENTSEAM FAIL (leg 1): $AGENTS spawns a process:" >&2
                  echo "$p" >&2; exit 1; }
 
@@ -68,5 +86,15 @@ hits=$(find src tests -name '*.rs' $pruned -print0 \
 # against exactly that rename.
 grep -qE 'trait[[:space:]]+HerdrCli[[:space:]]*:' src/cli.rs \
   || fail "positive control - src/cli.rs declares no 'trait HerdrCli:'"
+
+# Positive control for the widened pattern — anchored on src/cli.rs:14
+# (`use std::process::{Command, Stdio};`). This does NOT by itself prove either new
+# alternative is load-bearing: the pre-existing pattern already matches this line via the
+# bare `Stdio` alternative, so deleting both additions would leave this control green too
+# (see the isolating plants recorded in tests/gate-controls.toml for that proof).
+grep -qF 'use std::process::{Command, Stdio};' src/cli.rs \
+  || fail "positive control - src/cli.rs no longer names 'use std::process::{Command, Stdio};'"
+echo 'use std::process::{Command, Stdio};' | grep -qE "$SPAWN_RE" \
+  || fail "positive control - the widened pattern does not match src/cli.rs's own import line"
 
 echo "AGENTSEAM OK: $n files searched (>= $MIN); no spawn and no view type in $AGENTS; Herdr handle only in:$ALLOWED"

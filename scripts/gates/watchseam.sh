@@ -21,6 +21,24 @@ WATCH="${WATCH:-src/watch.rs}"
 MIN="${MIN:-29}"
 fail() { echo "WATCHSEAM FAIL: $1" >&2; exit 1; }
 
+# G2 — leg 3 resists an import alias (design.md -> Decision 3). Two alternatives join the
+# original process::Command|Command::new|Stdio: process::(Command|Child|Stdio|Output|
+# ChildStd) (the spawn items of std::process, matched at their import site as well as at a
+# fully-qualified call) and process::\{ (ANY brace-grouped import from std::process). Not
+# a bare `std::process`: measured, src/lib.rs:33 calls std::process::id() and
+# src/main.rs:1 reads `use std::process::exit;`, two legitimate non-spawning uses a bare
+# module-path pattern would turn red.
+#
+# COST ACCEPTED: `use std::process::{exit, id};` — a brace group of only safe items — is
+# refused too, by process::\{ alone. The workaround is one `use` line per item.
+#
+# TWO KNOWN LIMITS, stated rather than engineered around:
+#   (a) a crate-root alias is not matched: `use std as s; s::process::Command::new`.
+#   (b) a re-export through the exempted seam is not matched either: `pub use
+#       std::process::Command;` in src/cli.rs — the one file where that line is legal and
+#       invisible — then `use crate::cli::Command as Proc;` anywhere else.
+SPAWN_RE='process::Command|Command::new|Stdio|process::\{|process::(Command|Child|Stdio|Output|ChildStd)'
+
 [ -d src ] || fail "no src directory"
 [ -f "$WATCH" ] || fail "$WATCH missing - the exclusion has nothing to exclude"
 
@@ -50,7 +68,18 @@ r=$(grep -nE 'ratatui|Modifier|Style|Span|Rect|Frame|Buffer' "$WATCH" || true)
 # Leg 3 — the module spawns no process. NOSPAWN-GREP already forbids this tree-wide; this is
 # the file-scoped restatement, because src/watch.rs is the new file where reaching for an
 # `fswatch` subprocess would be plausible.
-p=$(grep -nE 'process::Command|Command::new|Stdio' "$WATCH" || true)
+p=$(grep -nE "$SPAWN_RE" "$WATCH" || true)
 [ -z "$p" ] || { echo "WATCHSEAM FAIL: $WATCH spawns a process:" >&2; echo "$p" >&2; exit 1; }
+
+# Positive control for the widened pattern — anchored on src/cli.rs:14
+# (`use std::process::{Command, Stdio};`). This does NOT by itself prove either new
+# alternative is load-bearing: the pre-existing pattern already matches this line via the
+# bare `Stdio` alternative, so deleting both additions would leave this control green too
+# (see the isolating plants recorded in tests/gate-controls.toml for that proof).
+[ -f src/cli.rs ] || fail "src/cli.rs missing - the widened-pattern control has nothing to match"
+grep -qF 'use std::process::{Command, Stdio};' src/cli.rs \
+  || fail "positive control - src/cli.rs no longer names 'use std::process::{Command, Stdio};'"
+echo 'use std::process::{Command, Stdio};' | grep -qE "$SPAWN_RE" \
+  || fail "positive control - the widened pattern does not match src/cli.rs's own import line"
 
 echo "WATCHSEAM OK: $n files searched (>= $MIN), notify only in $WATCH, no ratatui type there, no spawn"
