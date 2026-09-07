@@ -919,7 +919,7 @@ fn spec_md_gates_section_names_every_check_prerequisite_by_name() {
         "SPEC.md's Gates section must contain a markdown table"
     );
     assert!(
-        table.lines().count() >= prereqs.len() + 1,
+        table.lines().count() > prereqs.len(),
         "SPEC.md's Gates table must have at least one row per check prerequisite, plus its \
          header row: table was {table:?}"
     );
