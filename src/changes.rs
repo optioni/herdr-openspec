@@ -4615,11 +4615,13 @@ apply:
             let banner_only_problem =
                 cli_error_problem("openspec list --json", &["list", "--json"], &banner_only);
             let empty = failed(Some(1), "");
-            let empty_problem = cli_error_problem("openspec list --json", &["list", "--json"], &empty);
+            let empty_problem =
+                cli_error_problem("openspec list --json", &["list", "--json"], &empty);
             assert_eq!(banner_only_problem, empty_problem);
 
             let padded = failed(Some(1), "   Note: padded banner\nkept");
-            let padded_problem = cli_error_problem("openspec list --json", &["list", "--json"], &padded);
+            let padded_problem =
+                cli_error_problem("openspec list --json", &["list", "--json"], &padded);
             assert!(padded_problem.ends_with("kept"));
         }
 
@@ -4628,7 +4630,8 @@ apply:
             let err = failed(Some(1), "   \n\t\n");
             let problem = cli_error_problem("openspec list --json", &["list", "--json"], &err);
             let empty = failed(Some(1), "");
-            let empty_problem = cli_error_problem("openspec list --json", &["list", "--json"], &empty);
+            let empty_problem =
+                cli_error_problem("openspec list --json", &["list", "--json"], &empty);
             assert_eq!(problem, empty_problem);
         }
     }

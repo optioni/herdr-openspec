@@ -312,7 +312,7 @@ tier = "outer"
 proof = ["a_failed_cli_cycle_keeps_the_file_numbers"]
 verdict = "unproven"
 why = "a real run_wired run keeps the file-sourced result after a later failing CLI cycle"
-covers = ["src/changes.rs:1731-1732"]
+covers = ["src/changes.rs:1761-1762"]
 
 [[row]]
 condition = "A touched path is classified to the wrong change, or conservatively to every change"
