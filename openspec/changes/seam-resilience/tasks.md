@@ -24,15 +24,15 @@ apart by exit code.
 ## 2. The subprocess seam: a working directory, an environment overlay, and a deadline
 <!-- kind: behavior -->
 
-- [ ] 2.1 RED: Write failing tests for: `A constructed working directory is the child's working directory`, `A working directory that does not exist fails rather than falling back`, `A child that never exits times out with a named reason`, `A fast child is unaffected by the deadline`, `A child that writes a large payload and exits is read in full`, `The deadline is a named constant and is asserted`, `A given overlay sets exactly those variables and disturbs no others`, `No overlay leaves the child's environment byte-identical`, `An interpreter-shim program fails without an overlay and succeeds with one`, and rework `No argument is added and the working directory is inherited` to name the no-directory constructor. All nine new ones are RED at HEAD: `grep -c '\.current_dir(' src/cli.rs` → `0` (exit 1), `grep -c '\.env(' src/cli.rs` → `0` (exit 1), and `grep -c 'RUN_DEADLINE' src/cli.rs` → `0` (exit 1), so none of the three behaviors exists.
-- [ ] 2.2 GREEN: Give `RealOpenspecCli` an optional working directory and pass it to the spawn; leave `RealHerdrCli` without one (design.md -> Decision 2).
-- [ ] 2.2b GREEN: Give `RealOpenspecCli` an environment overlay and apply it with `Command::env` per entry — never `env_clear`, never `env_remove`. The seam derives nothing: it sets what it was handed (design.md -> Decision 2).
-- [ ] 2.3 GREEN: Replace `Command::output()` with spawn plus a bounded wait, add `cli::RUN_DEADLINE` and `CliError::TimedOut { args, after }`, and kill the child on expiry. Read stdout and stderr so a full pipe cannot deadlock against the deadline.
-- [ ] 2.4 CHECK: Contract gate — every `match` on `CliError` in the crate compiles with the new variant, and each renders a reason naming the command. `grep -rn 'CliError::' src/ | wc -l` → `42` sites at HEAD to review.
-- [ ] 2.5 CHECK: The seam still parses nothing and decides nothing — `grep -c 'serde_json' src/cli.rs` → `0` (exit 1) and `grep -cE 'env_clear|env_remove' src/cli.rs` → `0` (exit 1). Confirm no **production** line constructs a `PATH` value: `grep -n 'PATH' src/cli.rs` returns `8` hits at HEAD, six of them doc comments and two test literals (`:1056`, `:1087`), and the overlay must add no ninth outside a test — the seam applies what it is handed and joins nothing. `make gates` passes `NOSPAWN-GREP` unchanged.
-- [ ] 2.6 REFACTOR: Fold the two spawn paths into one helper if the bounded wait duplicated the outcome mapping; otherwise state that none was needed.
-- [ ] 2.7 CHECK: `NOSLEEP` passes with the seam's bounded wait — `src/cli.rs` is under neither leg 2 nor leg 2b, so leg 1's deadline-bounded-poll shape governs it. Confirm the wait polls to a deadline rather than sleeping a fixed interval.
-- [ ] 2.8 Run `cargo test --all-features cli` — no regressions.
+- [x] 2.1 RED: Write failing tests for: `A constructed working directory is the child's working directory`, `A working directory that does not exist fails rather than falling back`, `A child that never exits times out with a named reason`, `A fast child is unaffected by the deadline`, `A child that writes a large payload and exits is read in full`, `The deadline is a named constant and is asserted`, `A given overlay sets exactly those variables and disturbs no others`, `No overlay leaves the child's environment byte-identical`, `An interpreter-shim program fails without an overlay and succeeds with one`, and rework `No argument is added and the working directory is inherited` to name the no-directory constructor. All nine new ones are RED at HEAD: `grep -c '\.current_dir(' src/cli.rs` → `0` (exit 1), `grep -c '\.env(' src/cli.rs` → `0` (exit 1), and `grep -c 'RUN_DEADLINE' src/cli.rs` → `0` (exit 1), so none of the three behaviors exists.
+- [x] 2.2 GREEN: Give `RealOpenspecCli` an optional working directory and pass it to the spawn; leave `RealHerdrCli` without one (design.md -> Decision 2).
+- [x] 2.2b GREEN: Give `RealOpenspecCli` an environment overlay and apply it with `Command::env` per entry — never `env_clear`, never `env_remove`. The seam derives nothing: it sets what it was handed (design.md -> Decision 2).
+- [x] 2.3 GREEN: Replace `Command::output()` with spawn plus a bounded wait, add `cli::RUN_DEADLINE` and `CliError::TimedOut { args, after }`, and kill the child on expiry. Read stdout and stderr so a full pipe cannot deadlock against the deadline.
+- [x] 2.4 CHECK: Contract gate — every `match` on `CliError` in the crate compiles with the new variant, and each renders a reason naming the command. `grep -rn 'CliError::' src/ | wc -l` → `42` sites at HEAD to review.
+- [x] 2.5 CHECK: The seam still parses nothing and decides nothing — `grep -c 'serde_json' src/cli.rs` → `0` (exit 1) and `grep -cE 'env_clear|env_remove' src/cli.rs` → `0` (exit 1). Confirm no **production** line constructs a `PATH` value: `grep -n 'PATH' src/cli.rs` returns `8` hits at HEAD, six of them doc comments and two test literals (`:1056`, `:1087`), and the overlay must add no ninth outside a test — the seam applies what it is handed and joins nothing. `make gates` passes `NOSPAWN-GREP` unchanged.
+- [x] 2.6 REFACTOR: Fold the two spawn paths into one helper if the bounded wait duplicated the outcome mapping; otherwise state that none was needed.
+- [x] 2.7 CHECK: `NOSLEEP` passes with the seam's bounded wait — `src/cli.rs` is under neither leg 2 nor leg 2b, so leg 1's deadline-bounded-poll shape governs it. Confirm the wait polls to a deadline rather than sleeping a fixed interval.
+- [x] 2.8 Run `cargo test --all-features cli` — no regressions.
 
 ## 3. The CLI runs at all, and answers about the repository on screen
 <!-- kind: behavior -->
@@ -67,10 +67,10 @@ apart by exit code.
 <!-- kind: behavior -->
 <!-- parallel-after: 1 -->
 
-- [ ] 6.1 RED: Write failing tests for: `A panic on a worker thread restores nothing` and `A panic on the render thread still restores`. RED at HEAD: `grep -c 'thread::current' src/ui/terminal.rs` → `0` (exit 1), so the hook cannot tell the threads apart.
-- [ ] 6.2 GREEN: Capture the installing thread's `ThreadId` in `install_panic_hook` and extract the compare-then-restore-or-delegate decision into a pure function the tests drive, on `restore_then`'s existing terms.
-- [ ] 6.3 CHECK: `make gates` — the crossterm terminal-mode confinement check still names `src/ui/terminal.rs` alone, and its negative control still fires when a mode call is planted elsewhere.
-- [ ] 6.4 Run `cargo test --all-features ui::terminal` — no regressions.
+- [x] 6.1 RED: Write failing tests for: `A panic on a worker thread restores nothing` and `A panic on the render thread still restores`. RED at HEAD: `grep -c 'thread::current' src/ui/terminal.rs` → `0` (exit 1), so the hook cannot tell the threads apart.
+- [x] 6.2 GREEN: Capture the installing thread's `ThreadId` in `install_panic_hook` and extract the compare-then-restore-or-delegate decision into a pure function the tests drive, on `restore_then`'s existing terms.
+- [x] 6.3 CHECK: `make gates` — the crossterm terminal-mode confinement check still names `src/ui/terminal.rs` alone, and its negative control still fires when a mode call is planted elsewhere.
+- [x] 6.4 Run `cargo test --all-features ui::terminal` — no regressions.
 
 ## 7. The launcher reports its own death and can be settled
 <!-- kind: behavior -->
