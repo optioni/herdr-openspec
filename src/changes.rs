@@ -1161,11 +1161,15 @@ pub(crate) fn parse_apply(text: &str) -> Result<ApplyPayload, String> {
         "openspec instructions apply --json payload is not a JSON object".to_string()
     })?;
 
-    let schema_name = required_non_empty_str(obj, "schemaName")
-        .ok_or_else(|| {
-            "openspec instructions apply --json payload has no usable \"schemaName\"".to_string()
-        })?
-        .to_string();
+    let schema_name = required_non_empty_str(obj, "schemaName").ok_or_else(|| {
+        "openspec instructions apply --json payload has no usable \"schemaName\"".to_string()
+    })?;
+    if !crate::schema::is_legal_name(schema_name) {
+        return Err(format!(
+            "openspec instructions apply --json payload's \"schemaName\" is not a legal schema name: {schema_name}"
+        ));
+    }
+    let schema_name = schema_name.trim().to_string();
 
     let change_dir = required_non_empty_str(obj, "changeDir").ok_or_else(|| {
         "openspec instructions apply --json payload has no usable \"changeDir\"".to_string()
