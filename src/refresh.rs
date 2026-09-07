@@ -353,6 +353,69 @@ apply:
         }
     }
 
+    /// `refresh-worker` :: "A shim whose interpreter is unreachable exits 127 and renders a
+    /// problem row" — S10's shape (design.md -> Decision 1b): the child never execs, so
+    /// `openspec list --json` fails with a non-zero exit rather than answering. Nothing in
+    /// this crate's error mapping needs to change for this: `cli_error_problem` already
+    /// turns any `CliError::Failed` into a problem row naming the command and its exit
+    /// code, and the worker already keeps the file-sourced set on any CLI failure — this
+    /// pins that a 127 specifically degrades the pane rather than emptying it, panicking,
+    /// or surfacing a `LoopError`.
+    #[test]
+    fn a_shim_whose_interpreter_is_unreachable_exits_127_and_renders_a_problem_row() {
+        let scratch = crate::testutil::ScratchDir::new();
+        let root = crate::testutil::canonical(scratch.path());
+        vendor_tdd_schema(&root);
+        crate::testutil::write_with_mode(
+            &root.join("openspec/changes/alpha/tasks.md"),
+            b"- [x] a\n- [ ] b\n",
+            0o644,
+        );
+        let fake = crate::cli::FakeCli::new();
+        fake.register_openspec(
+            &["list", "--json"],
+            Err(crate::cli::CliError::Failed {
+                program: "openspec".to_string(),
+                args: vec!["list".to_string(), "--json".to_string()],
+                code: Some(127),
+                stderr: String::new(),
+            }),
+        );
+        let cli: Arc<dyn OpenspecCli> = Arc::new(fake);
+
+        let (mut refresher, results_rx, _exit_rx) = worker_for_test(root, cli, 5);
+        refresher.request(Selection::All);
+
+        let files = results_rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the worker did not send the file result within 10s");
+        match files {
+            RefreshResult::Files(set) => {
+                assert_eq!(set.active.len(), 1);
+                assert_eq!(set.active[0].name, "alpha");
+            }
+            other => panic!("expected Files, got {other:?}"),
+        }
+
+        let merged = results_rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the worker did not send the merged result within 10s");
+        match merged {
+            RefreshResult::Merged(set) => {
+                assert_eq!(
+                    set.active.len(),
+                    1,
+                    "the file-sourced change must survive a 127, not be emptied"
+                );
+                assert_eq!(set.active[0].name, "alpha");
+                assert_eq!(set.problems.len(), 1);
+                assert!(set.problems[0].contains("list --json"), "{:?}", set.problems);
+                assert!(set.problems[0].contains("127"), "{:?}", set.problems);
+            }
+            other => panic!("expected Merged, got {other:?}"),
+        }
+    }
+
     #[test]
     fn drain_and_fold_unions_queued_requests() {
         let (tx, rx) = mpsc::channel::<Selection>();

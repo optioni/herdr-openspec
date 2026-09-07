@@ -674,7 +674,7 @@ mod tests {
             found: None,
             problems: Vec::new(),
         };
-        let (cli, problems) = super::worker_cli(resolution);
+        let (cli, problems) = super::worker_cli(resolution, None, &[]);
         assert!(cli.is_none());
         assert!(problems.is_empty());
     }
@@ -690,10 +690,58 @@ mod tests {
             }),
             problems: Vec::new(),
         };
-        let (cli, problems) = super::worker_cli(resolution);
+        let (cli, problems) = super::worker_cli(resolution, None, &[]);
         let cli = cli.expect("a binary was found");
         assert_eq!(cli.run(&[]), Ok("ok".to_string()));
         assert!(problems.is_empty());
+    }
+
+    /// `seam-resilience` group 3: `worker_cli` gains a working directory and an
+    /// environment overlay, both threaded straight into the `RealOpenspecCli` it builds
+    /// (`with_dir`/`with_env`, landed in group 2). RED at HEAD: `worker_cli` takes one
+    /// argument, so this fails to compile until the signature changes.
+    #[test]
+    fn worker_cli_passes_the_working_directory_and_overlay_to_the_real_cli() {
+        let scratch = ScratchDir::new();
+        let workdir = ScratchDir::new();
+        let prog = script(&scratch, "prog", "pwd\nprintf 'PATH=%s\\n' \"$PATH\"\n");
+        let resolution = crate::resolve::BinResolution {
+            found: Some(crate::resolve::FoundBin {
+                path: prog,
+                source: crate::resolve::BinSource::Path,
+            }),
+            problems: Vec::new(),
+        };
+        let overlay = vec![("PATH".to_string(), "/scratch/only".to_string())];
+
+        let (cli, _) = super::worker_cli(resolution, Some(workdir.path()), &overlay);
+        let cli = cli.expect("a binary was found");
+        let result = cli.run(&[]).expect("the scratch program exits zero");
+
+        let printed_cwd = result.lines().next().expect("pwd printed a first line");
+        assert_eq!(
+            std::fs::canonicalize(printed_cwd).expect("canonicalize printed cwd"),
+            std::fs::canonicalize(workdir.path()).expect("canonicalize workdir")
+        );
+        assert!(result.contains("PATH=/scratch/only\n"), "{result}");
+    }
+
+    /// The companion negative: `None` and an empty overlay build a `RealOpenspecCli`
+    /// exactly as before this change — the shape `worker_cli_from_env` still relies on.
+    #[test]
+    fn worker_cli_with_no_directory_and_an_empty_overlay_is_unchanged() {
+        let scratch = ScratchDir::new();
+        let prog = script(&scratch, "prog", "printf 'ok'\n");
+        let resolution = crate::resolve::BinResolution {
+            found: Some(crate::resolve::FoundBin {
+                path: prog,
+                source: crate::resolve::BinSource::Path,
+            }),
+            problems: Vec::new(),
+        };
+        let (cli, _) = super::worker_cli(resolution, None, &[]);
+        let cli = cli.expect("a binary was found");
+        assert_eq!(cli.run(&[]), Ok("ok".to_string()));
     }
 
     /// `degraded-states`: `worker_cli` surrenders `BinResolution::problems` alongside the
@@ -705,7 +753,7 @@ mod tests {
             found: None,
             problems: vec!["configured openspec_bin is not usable: /bad/path".to_string()],
         };
-        let (cli, problems) = super::worker_cli(resolution);
+        let (cli, problems) = super::worker_cli(resolution, None, &[]);
         assert!(cli.is_none());
         assert_eq!(
             problems,
@@ -727,7 +775,7 @@ mod tests {
             }),
             problems: vec!["configured openspec_bin is not usable: /bad/path".to_string()],
         };
-        let (cli, problems) = super::worker_cli(resolution);
+        let (cli, problems) = super::worker_cli(resolution, None, &[]);
         let cli = cli.expect("a binary was found on a later step");
         assert_eq!(cli.run(&[]), Ok("ok".to_string()));
         assert_eq!(

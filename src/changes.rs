@@ -5873,6 +5873,36 @@ apply:
             assert_eq!(fake.calls().len(), 1);
         }
 
+        /// `seam-resilience` :: "A CLI answering about the resolved repository is merged,
+        /// not discarded" — the positive half of the guard above. Nothing in
+        /// `from_cli_cached` changes for this: the guard already compared the CLI's
+        /// reported root against the `repo` it was given, correctly. What changes
+        /// elsewhere (`cli::worker_cli`, `ui::start_collaborators`) is that the real seam
+        /// now runs `openspec` from that same `repo`, so its report agrees in the first
+        /// place — this pins the guard's own, unchanged, positive case.
+        #[test]
+        fn a_cli_answering_about_the_resolved_repository_is_merged_not_discarded() {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+
+            let fake = FakeCli::new();
+            fake.register_openspec(&["list", "--json"], Ok(list_json(&repo, &[("alpha", 3, 5)])));
+            fake.register_openspec(
+                &["instructions", "apply", "--change", "alpha", "--json"],
+                Ok(apply_json("tdd", &repo.join("openspec/changes/alpha"), &[])),
+            );
+
+            let result = from_cli(&fake, &repo);
+            assert!(result.problems.is_empty(), "{:?}", result.problems);
+            assert_eq!(result.active.len(), 1);
+            let alpha = &result.active[0];
+            assert_eq!(alpha.name, "alpha");
+            assert_eq!(alpha.progress.completed, 3);
+            assert_eq!(alpha.progress.total, 5);
+            assert_eq!(alpha.schema, "tdd");
+        }
+
         #[test]
         fn a_symlinked_repository_root_is_not_a_disagreement() {
             let scratch = ScratchDir::new();

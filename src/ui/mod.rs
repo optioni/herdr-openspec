@@ -3404,6 +3404,267 @@ esac
             assert!(!dashboard2.file_mode);
         }
 
+        // --- seam-resilience group 3: the composition root supplies the resolved root as
+        // --- the child's working directory, and a one-entry `PATH` overlay -----------------
+
+        /// A scratch `openspec` program like `openspec_script`, additionally appending its
+        /// own working directory (via `pwd`) to `cwd_log` on each invocation — S7's own
+        /// observation, made from outside the seam rather than by instrumenting it.
+        fn openspec_script_logging_cwd(dir: &Path, cwd_log: &Path, root: &Path) -> PathBuf {
+            write_script(
+                dir,
+                "openspec",
+                &format!(
+                    "pwd >> \"{cwd_log}\"\n\
+                     printf '%s' '{{\"changes\":[],\"root\":{{\"path\":\"{root}\",\"source\":\"nearest\"}}}}'\n",
+                    cwd_log = cwd_log.display(),
+                    root = root.display(),
+                ),
+            )
+        }
+
+        /// A scratch `openspec` program like `openspec_script`, additionally appending its
+        /// own inherited `PATH` to `path_log` on each invocation — S10's own observation.
+        fn openspec_script_logging_path(dir: &Path, path_log: &Path, root: &Path) -> PathBuf {
+            write_script(
+                dir,
+                "openspec",
+                &format!(
+                    "printf '%s\\n' \"$PATH\" >> \"{path_log}\"\n\
+                     printf '%s' '{{\"changes\":[],\"root\":{{\"path\":\"{root}\",\"source\":\"nearest\"}}}}'\n",
+                    path_log = path_log.display(),
+                    root = root.display(),
+                ),
+            )
+        }
+
+        /// An `openspec` script written directly at `dir.join("openspec")` — never under a
+        /// `bin/` subdirectory, unlike `write_script` — so a test can put it on a fabricated
+        /// `PATH` value exactly as `resolve::path_candidates` expects: `<entry>/openspec`.
+        /// Logs its own inherited `PATH` on each invocation, on `openspec_script_logging_path`'s
+        /// terms.
+        fn openspec_at_logging_path(dir: &Path, path_log: &Path, root: &Path) -> PathBuf {
+            let path = dir.join("openspec");
+            write_with_mode(
+                &path,
+                format!(
+                    "#!/bin/sh\nprintf '%s\\n' \"$PATH\" >> \"{path_log}\"\n\
+                     printf '%s' '{{\"changes\":[],\"root\":{{\"path\":\"{root}\",\"source\":\"nearest\"}}}}'\n",
+                    path_log = path_log.display(),
+                    root = root.display(),
+                )
+                .as_bytes(),
+                0o755,
+            );
+            path
+        }
+
+        /// An `openspec` script placed at the nvm layout `openspec_bin`'s own step 3 walks:
+        /// `<home>/.nvm/versions/node/<version>/bin/openspec`. Logs its own inherited `PATH`
+        /// on each invocation, on `openspec_script_logging_path`'s terms.
+        fn nvm_openspec_script_logging_path(
+            home: &Path,
+            version: &str,
+            path_log: &Path,
+            root: &Path,
+        ) -> PathBuf {
+            let path = home
+                .join(".nvm")
+                .join("versions")
+                .join("node")
+                .join(version)
+                .join("bin")
+                .join("openspec");
+            write_with_mode(
+                &path,
+                format!(
+                    "#!/bin/sh\nprintf '%s\\n' \"$PATH\" >> \"{path_log}\"\n\
+                     printf '%s' '{{\"changes\":[],\"root\":{{\"path\":\"{root}\",\"source\":\"nearest\"}}}}'\n",
+                    path_log = path_log.display(),
+                    root = root.display(),
+                )
+                .as_bytes(),
+                0o755,
+            );
+            path
+        }
+
+        /// Poll `path.exists()` to a 10-second deadline, then return its contents. Shared by
+        /// every collaborators-wiring test below, none of which can synchronise any other
+        /// way: the worker thread answers on its own schedule.
+        fn read_after_write(path: &Path) -> String {
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            while std::time::Instant::now() < deadline && !path.exists() {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            std::fs::read_to_string(path)
+                .unwrap_or_else(|e| panic!("{} was never written: {e}", path.display()))
+        }
+
+        /// `refresh-worker` :: "The CLI is constructed with the resolved repository root" —
+        /// driven over `start_collaborators` with a real scratch `openspec` program that
+        /// reports its own working directory. Before this change the child inherited the
+        /// *process's* working directory (`cargo test`'s own), not the resolved repository
+        /// root, which is exactly S7 (design.md -> S7/S10 measurement).
+        #[test]
+        fn collaborators_construct_the_cli_with_the_resolved_repository_root() {
+            let scratch = scratch_repo_with_alpha();
+            let root = canonical(scratch.path());
+            let cwd_log = root.join("cwd.log");
+            let openspec = openspec_script_logging_cwd(&root, &cwd_log, &root);
+            let config = Config {
+                openspec_bin: Some(openspec),
+                ..Config::default()
+            };
+            let herdr = root.join("does-not-exist-herdr");
+
+            let mut collaborators = super::super::start_collaborators(
+                Some(&root),
+                &config,
+                &herdr,
+                None,
+                &no_env,
+                &no_npm_hook,
+            );
+            collaborators
+                .refresher
+                .request(crate::changes::Selection::All);
+
+            let logged = read_after_write(&cwd_log);
+            let printed_cwd = logged.lines().next().expect("pwd printed a first line");
+            assert_eq!(
+                canonical(Path::new(printed_cwd)),
+                root,
+                "the openspec child must run with the resolved repository root as its cwd, \
+                 not the test process's own"
+            );
+        }
+
+        /// `refresh-worker` :: "The overlay prepends the resolved binary's own directory to
+        /// `PATH`" — the binary resolves via the nvm step (3), which is exactly the
+        /// structural condition design.md -> Decision 1b/S10 argues the overlay exists for.
+        #[test]
+        fn collaborators_overlay_prepends_the_resolved_binarys_own_directory_to_path() {
+            let scratch = scratch_repo_with_alpha();
+            let root = canonical(scratch.path());
+            let path_log = root.join("path.log");
+            let home = scratch.path().join("home");
+            let bin = nvm_openspec_script_logging_path(&home, "v24.18.0", &path_log, &root);
+            let bin_parent = bin.parent().expect("nvm bin has a parent").to_path_buf();
+
+            let home_str = home.display().to_string();
+            let inherited = "/usr/bin:/bin".to_string();
+            let inherited_for_env = inherited.clone();
+            let env = move |name: &str| match name {
+                "HOME" => Some(home_str.clone()),
+                "PATH" => Some(inherited_for_env.clone()),
+                _ => None,
+            };
+            let config = Config::default();
+            let herdr = root.join("does-not-exist-herdr");
+
+            let mut collaborators = super::super::start_collaborators(
+                Some(&root),
+                &config,
+                &herdr,
+                None,
+                &env,
+                &no_npm_hook,
+            );
+            collaborators
+                .refresher
+                .request(crate::changes::Selection::All);
+
+            let logged = read_after_write(&path_log);
+            let printed_path = logged.lines().next().expect("PATH printed a first line");
+            assert_eq!(
+                printed_path,
+                format!("{}:{inherited}", bin_parent.display())
+            );
+        }
+
+        /// `refresh-worker` :: "An absent inherited `PATH` yields the directory alone".
+        #[test]
+        fn collaborators_overlay_is_the_binarys_directory_alone_when_path_is_absent() {
+            let scratch = scratch_repo_with_alpha();
+            let root = canonical(scratch.path());
+            let path_log = root.join("path-absent.log");
+            let home = scratch.path().join("home");
+            let bin = nvm_openspec_script_logging_path(&home, "v24.18.0", &path_log, &root);
+            let bin_parent = bin.parent().expect("nvm bin has a parent").to_path_buf();
+
+            let home_str = home.display().to_string();
+            let env = move |name: &str| {
+                if name == "HOME" {
+                    Some(home_str.clone())
+                } else {
+                    None
+                }
+            };
+            let config = Config::default();
+            let herdr = root.join("does-not-exist-herdr");
+
+            let mut collaborators = super::super::start_collaborators(
+                Some(&root),
+                &config,
+                &herdr,
+                None,
+                &env,
+                &no_npm_hook,
+            );
+            collaborators
+                .refresher
+                .request(crate::changes::Selection::All);
+
+            let logged = read_after_write(&path_log);
+            let printed_path = logged.lines().next().expect("PATH printed a first line");
+            assert_eq!(printed_path, bin_parent.display().to_string());
+        }
+
+        /// `refresh-worker` :: "A binary already on `PATH` gets the same overlay,
+        /// harmlessly" — the probe resolves via step 2, and the overlay still prepends the
+        /// binary's own (already-present) directory rather than special-casing this step.
+        #[test]
+        fn collaborators_overlay_a_binary_already_on_path_harmlessly() {
+            let scratch = scratch_repo_with_alpha();
+            let root = canonical(scratch.path());
+            let path_log = root.join("path-dup.log");
+            let bindir = scratch.path().join("localbin");
+            let bin = openspec_at_logging_path(&bindir, &path_log, &root);
+            let bin_parent = bin.parent().expect("bin has a parent").to_path_buf();
+
+            let inherited = format!("{}:/usr/bin", bin_parent.display());
+            let inherited_for_env = inherited.clone();
+            let env = move |name: &str| {
+                if name == "PATH" {
+                    Some(inherited_for_env.clone())
+                } else {
+                    None
+                }
+            };
+            let config = Config::default();
+            let herdr = root.join("does-not-exist-herdr");
+
+            let mut collaborators = super::super::start_collaborators(
+                Some(&root),
+                &config,
+                &herdr,
+                None,
+                &env,
+                &no_npm_hook,
+            );
+            collaborators
+                .refresher
+                .request(crate::changes::Selection::All);
+
+            let logged = read_after_write(&path_log);
+            let printed_path = logged.lines().next().expect("PATH printed a first line");
+            assert_eq!(
+                printed_path,
+                format!("{}:{inherited}", bin_parent.display())
+            );
+        }
+
         /// `openspec-binary` :: "A configured path that cannot be used reaches the list as a
         /// problem row" — rows 27/31's "true but unobservable" defect, made observable.
         #[test]
