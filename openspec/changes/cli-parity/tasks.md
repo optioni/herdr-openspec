@@ -36,9 +36,9 @@
 ## 3. The CLI fallback tier's illegal-name branch is made explicit
 <!-- kind: refactor -->
 
-- [ ] 3.1 CHARACTERIZE: Add `an_illegal_schema_name_is_not_repaired_by_the_cli` — `resolve_cli_schema` called directly with `../../../../etc`, an `OpenspecCli` fake holding no registration, asserting no schema, exactly one problem naming the value, and an empty recorded-invocation list. It is green as soon as group 2 lands, because the catch-all at `src/changes.rs:1375` already produces this; record that it passes before the refactor.
-- [ ] 3.2 REFACTOR: Replace `resolve_cli_schema_uncached`'s catch-all `Err(err) =>` arm with explicit arms for `Unreadable`, `Invalid`, and the illegal-name variant, so a future `LoadError` variant cannot silently inherit this branch and the compiler flags it instead.
-- [ ] 3.3 VERIFY: Run the unchanged characterization tests — `cargo test changes::tests::schema_fallback` and `cargo test changes::tests::an_illegal_schema_name` — no regressions across the five existing fallback scenarios.
+- [x] 3.1 CHARACTERIZE: Add `an_illegal_schema_name_is_not_repaired_by_the_cli` — `resolve_cli_schema` called directly with `../../../../etc`, an `OpenspecCli` fake holding no registration, asserting no schema, exactly one problem naming the value, and an empty recorded-invocation list. It is green as soon as group 2 lands, because the catch-all at `src/changes.rs:1375` already produces this; record that it passes before the refactor.
+- [x] 3.2 REFACTOR: Replace `resolve_cli_schema_uncached`'s catch-all `Err(err) =>` arm with explicit arms for `Unreadable`, `Invalid`, and the illegal-name variant, so a future `LoadError` variant cannot silently inherit this branch and the compiler flags it instead.
+- [x] 3.3 VERIFY: Run the unchanged characterization tests — `cargo test changes::tests::schema_fallback` and `cargo test changes::tests::an_illegal_schema_name` — no regressions across the five existing fallback scenarios.
 
 ## 4. `parse_apply` refuses an illegal `schemaName`
 <!-- kind: behavior -->
