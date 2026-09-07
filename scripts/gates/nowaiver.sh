@@ -24,6 +24,14 @@ grep -q -- '--fail-under-lines 80' Makefile \
   || { echo "NOWAIVER FAIL: Makefile no longer names --fail-under-lines 80" >&2; exit 1; }
 grep -q -- 'scripts/coverage-prod.py' Makefile \
   || { echo "NOWAIVER FAIL: Makefile no longer names the production-coverage floor (scripts/coverage-prod.py)" >&2; exit 1; }
+# The map path is the checker's second positional argument, and it is optional: omitted, the
+# covers-range check (the whole point of naming a map at all) is skipped entirely. Dropping
+# just this argument from the Makefile's coverage-prod.py line would silently disable that
+# check while make gates, make coverage, and make check all stay green - the exact defect
+# this gate exists to remove, one layer up. So the line that names the checker must also name
+# its map argument, not merely the checker.
+grep -- 'scripts/coverage-prod.py' Makefile | grep -q -- 'tests/degraded-coverage.toml' \
+  || { echo "NOWAIVER FAIL: Makefile's production-coverage floor no longer names its map argument (tests/degraded-coverage.toml)" >&2; exit 1; }
 bad=$(grep -rnE '(^|[[:space:]])(coverage\(off\)|--ignore-filename-regex|--exclude([[:space:]]|$)|fail-under-lines ([0-7][0-9]?|[0-9])\b)' \
       Makefile .github/workflows src tests scripts 2>/dev/null || true)
 [ -z "$bad" ] || { echo "NOWAIVER FAIL: a coverage waiver entered the tree:" >&2

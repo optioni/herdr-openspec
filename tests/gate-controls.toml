@@ -523,3 +523,12 @@ plant_replace = '''SRC_COMPONENT = "src"
 # cargo llvm-cov %%DASHDASH%%ignore-filename-regex "vendor/*"  # planted for gate-integrity's NOWAIVER control'''
 expect = "NOWAIVER FAIL: a coverage waiver entered the tree"
 why = "task 1.7: NOWAIVER's widened scan set (scripts/) must catch a coverage-narrowing flag planted inside scripts/coverage-prod.py itself, the one place a checker outside scripts/gates/ could otherwise reintroduce the waiver NOWAIVER exists to forbid"
+
+[[control]]
+id = "nowaiver-coverage-map-dropped"
+script = "nowaiver.sh"
+plant_file = "Makefile"
+plant_find = "python3 scripts/coverage-prod.py target/llvm-cov.json tests/degraded-coverage.toml"
+plant_replace = "python3 scripts/coverage-prod.py target/llvm-cov.json"
+expect = "NOWAIVER FAIL: Makefile's production-coverage floor no longer names its map argument"
+why = "scripts/coverage-prod.py treats its degraded-coverage map path as an OPTIONAL second argument - omitted, the covers-range check is skipped entirely. Dropping just that argument from the Makefile's coverage-prod.py line silently disables the whole covers check while make gates, make coverage, and make check all stay green, the same guard-that-cannot-fail defect this change exists to remove, one layer up"
