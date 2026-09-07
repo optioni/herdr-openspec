@@ -1261,15 +1261,12 @@ pub(crate) fn cli_artifacts(
 
 /// Join the two producers' artifact lists by **index**, never by path and
 /// never by id. See `change-merge` -> "Artifact lists are joined by
-/// position, never by path and never by id" for the six rules, applied in
+/// position, never by path and never by id" for the five rules, applied in
 /// order.
 pub(crate) fn join_artifacts(
     file: &[ArtifactRef],
     cli: &[ArtifactRef],
 ) -> (Vec<ArtifactRef>, Option<String>) {
-    if file.is_empty() && cli.is_empty() {
-        return (Vec::new(), None);
-    }
     if cli.is_empty() {
         return (file.to_vec(), None);
     }
