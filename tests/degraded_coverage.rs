@@ -673,10 +673,16 @@ fn an_empty_table_fails_the_floor() {
 /// real test, resolvable by condition 4's "fn <name>(" search, `#[ignore]`d so nothing ever
 /// runs it. Its own `#[ignore]` is not a defect to fix — it exists so a `proof` entry can be
 /// repointed at it.
+///
+/// gate-integrity Change Review (task 9.3), CRITICAL 4: this attribute SHALL stay on ONE
+/// line. `is_directly_marked_test`'s upward walk stops at the first line above `fn` that
+/// does not start with `#[`; a line-wrapped `#[ignore = "..."]` puts a bare string-
+/// continuation line directly above `fn`, which breaks the walk before it ever reaches
+/// `#[test]` — `has_test` comes back `false` for the wrong reason, and `has_ignore` (and the
+/// `&& !has_ignore` it feeds) never gets exercised at all. Measured: deleting `has_ignore`
+/// and `&& !has_ignore` entirely left this fixture's own proving test green.
 #[test]
-#[ignore = "intentionally ignored: this crate's own fixture for the coverage binding's \
-            \"a proof naming an #[ignore]d test fails\" case (gate-integrity task 6.1), \
-            not a test anyone should un-ignore"]
+#[ignore = "intentionally ignored: gate-integrity's own fixture for the coverage binding's \"a proof naming an #[ignore]d test fails\" case (task 6.1) - not a test anyone should un-ignore"]
 fn ignored_fixture_for_coverage_binding_tests() {}
 
 /// The index of the first `unit`-tier row — used by the two tests immediately below so
@@ -719,6 +725,13 @@ fn a_proof_naming_a_non_test_function_fails() {
 
 /// The same rule catches a real test whose `#[test]` attribute was replaced with
 /// `#[ignore]` — a test nothing runs proves nothing.
+///
+/// gate-integrity Change Review (task 9.3), CRITICAL 4: asserts the DISTINGUISHING failure
+/// message ("is not a #[test]"), not merely that the proof name appears somewhere in the
+/// error — condition 4's own "not defined" message also names the proof, and (before the
+/// fixture's `#[ignore]` was put on one line, see the fixture's own comment) this test
+/// could not tell the two apart: it passed even with `has_ignore` deleted from
+/// `is_directly_marked_test` entirely, because `has_test` alone already came back `false`.
 #[test]
 fn a_proof_naming_an_ignored_test_fails() {
     let mut mutated = parse_coverage_toml(&coverage_toml()).expect("parse the coverage map");
@@ -731,6 +744,16 @@ fn a_proof_naming_an_ignored_test_fails() {
     assert!(
         err.contains("ignored_fixture_for_coverage_binding_tests"),
         "{err:?}"
+    );
+    assert!(
+        err.contains("is not a #[test]"),
+        "must fail on the \"not a #[test]\" rule (condition 4b), naming the #[ignore]d \
+         test as not directly marked, not on condition 4's \"not defined\" rule: {err:?}"
+    );
+    assert!(
+        !err.contains("is not defined as"),
+        "the function IS defined - failing as \"not defined\" would mean condition 4's own \
+         check masked condition 4b's, which is not the rule this test exercises: {err:?}"
     );
 }
 
