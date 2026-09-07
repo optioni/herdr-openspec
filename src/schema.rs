@@ -322,27 +322,25 @@ fn tasks_artifact(apply: &Yaml, artifacts: &[Artifact]) -> (Option<Artifact>, Op
             };
         }
     }
-    id_fallback(artifacts, None)
+    id_fallback(artifacts)
 }
 
-/// The id-`tasks` fallback shared by every branch of `tasks_artifact` that
-/// does not have a matched `tracks` value. `extra` is the problem to record
-/// alongside a hit (a wrong-typed `tracks`, say); on a miss it is folded
-/// into the "no tasks artifact" message so at most one problem is ever
-/// produced.
-fn id_fallback(artifacts: &[Artifact], extra: Option<&str>) -> (Option<Artifact>, Option<String>) {
+/// The id-`tasks` fallback used by every branch of `tasks_artifact` that has
+/// no matched `tracks` value: `apply` absent, not a mapping, or `tracks`
+/// absent or explicitly `null`. A wrong-typed `tracks` no longer reaches
+/// this function — it records its own problem and selects nothing — so
+/// there is exactly one caller and no extra problem to carry alongside a
+/// hit.
+fn id_fallback(artifacts: &[Artifact]) -> (Option<Artifact>, Option<String>) {
     match artifacts.iter().find(|a| a.id == "tasks") {
-        Some(artifact) => (Some(artifact.clone()), extra.map(str::to_string)),
-        None => {
-            let reason = match extra {
-                Some(extra) => {
-                    format!("no tasks artifact: {extra}, and no artifact has id \"tasks\"")
-                }
-                None => "no tasks artifact: no apply.tracks value and no artifact has id \"tasks\""
+        Some(artifact) => (Some(artifact.clone()), None),
+        None => (
+            None,
+            Some(
+                "no tasks artifact: no apply.tracks value and no artifact has id \"tasks\""
                     .to_string(),
-            };
-            (None, Some(reason))
-        }
+            ),
+        ),
     }
 }
 
