@@ -211,46 +211,44 @@ Test Strategy). Written first, it is RED for exactly the five gates this change 
 ## 6. Degraded-coverage proofs and `covers` ranges (G7)
 <!-- kind: behavior -->
 
-- [ ] 6.1 RED: Extend `tests/degraded_coverage.rs`'s own failure-case tests: a `proof`
+- [x] 6.1 RED: Extend `tests/degraded_coverage.rs`'s own failure-case tests: a `proof`
   repointed at `fn start(` in `src/watch.rs` must fail as "not a test"; an `#[ignore]`d test
   must fail; a `covers` range that is out of range, reversed, missing-path, comment-only, or
   absent must fail.
-- [ ] 6.2 GREEN: Implement conditions 4b and 4c in `tests/degraded_coverage.rs` — `#[test]` on
+- [x] 6.2 GREEN: Implement conditions 4b and 4c in `tests/degraded_coverage.rs` — `#[test]` on
   the line above the `fn`, or the name appearing in the body of a function that carries one;
   and `covers` ranges resolving within the named file.
-- [ ] 6.3 GREEN: Backfill `covers` on **every** row of `tests/degraded-coverage.toml`
+- [x] 6.3 GREEN: Backfill `covers` on **every** row of `tests/degraded-coverage.toml`
   (`grep -c '^\[\[row\]\]' tests/degraded-coverage.toml` → **44** at HEAD, **46** once
   `cli-parity` lands its two rows — design.md → Decision 10), deriving each range from the
   production expression that implements the row.
-- [ ] 6.3b RED: Extend `tests/coverage_prod.rs` with the two `covers`-range scenarios that
+- [x] 6.3b RED: Extend `tests/coverage_prod.rs` with the two `covers`-range scenarios that
   have no test yet — a fixture report with a covered range zeroed must fail naming the row's
   `condition`, and empty `covers` arrays, a report naming none of the ranges' paths, and fewer
   ranges than rows must each fail rather than reporting every range covered.
-- [ ] 6.4 GREEN: Add the `covers`-range check to `scripts/coverage-prod.py`: every line of
+- [x] 6.4 GREEN: Add the `covers`-range check to `scripts/coverage-prod.py`: every line of
   every range must be executed, and the failure message names the row's `condition`.
-- [ ] 6.5 GREEN: Add the test that drives `src/watch.rs`'s inert-watcher arm. Measured at HEAD
+- [x] 6.5 GREEN: Add the test that drives `src/watch.rs`'s inert-watcher arm. Measured at HEAD
   from `cargo llvm-cov --json`'s segments, lines **264–268** have execution count **0** while
   260–263 have 59 — the "filesystem watch unavailable" row is a table entry with a passing
   proof and a cold implementation. This is the one behavioural test this change adds.
-- [ ] 6.6 CHECK: Confirm the 20 `unproven` rows
+- [x] 6.6 CHECK: Confirm the 20 `unproven` rows
   (`grep -c 'verdict = "unproven"' tests/degraded-coverage.toml` → **20**) satisfy the new
   rules, and that `LEGAL_VERDICTS` still holds exactly five values — the verdict list is not
   extended (design.md → Decision 7).
-> **BLOCKED at 6.5 — awaiting a decision.** Measured on the current tree:
-> `pub fn start` in `src/watch.rs` has **two** `Err` arms producing the identical
-> "filesystem watch unavailable" problem, and the row's own condition text names both
-> ("`notify` refuses the watch, **or** the repository root cannot be watched"):
-> lines **264-268** are `notify::Watcher::new()`'s failure (execution count **0**), and
-> lines **275-279** are `watcher.watch(root)`'s failure (execution count **5** — already
-> driven by an existing test). The spec's scenario names 264-268 only. That arm cannot be
-> driven by any hermetic, portable test: `notify`'s macOS FSEvents backend returns `Ok`
-> unconditionally, and the only Linux route is starving the process of file descriptors,
-> which `cargo test` runs in parallel threads of one process — the same hazard
-> `AGENTS.md` records for `std::env::set_var`. The first attempt did exactly that and
-> left `make check` red on macOS (exit 2, failing on this range alone).
-> See the session report for the three options.
+> **6.5 resolved by injecting the watcher constructor.** `pub fn start` has **two** `Err`
+> arms producing the same "filesystem watch unavailable" problem, and the row's condition
+> text names both halves. The construction arm cannot be driven by any hermetic portable
+> test against the real `notify` — its macOS FSEvents backend returns `Ok` unconditionally.
+> `start` was therefore split into a thin production delegation plus
+> `start_with(root, new_watcher)`, following the crate's own injected-lookup convention
+> (`ui::read_artifact`, `config::env_lookup`, `cli::npm_probe_hook`). A test passing a
+> closure that returns `Err(notify::Error::new(ErrorKind::MaxFilesWatch))` now drives the
+> arm on every platform, so **both** ranges are covered and `make check` is green on macOS.
+> The first attempt's `RLIMIT_NOFILE` FFI test was deleted: it did not compile on darwin and
+> would have flaked CI, since `cargo test` runs tests in parallel threads of one process.
 
-- [ ] 6.7 VERIFY: `cargo test --all-features degraded_coverage` green; `make coverage` green,
+- [x] 6.7 VERIFY: `cargo test --all-features degraded_coverage` green; `make coverage` green,
   including every `covers` range. Run the group tests — no regressions.
 
 ## 7. Acceptance Test — Outer Loop GREEN
