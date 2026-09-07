@@ -1523,4 +1523,65 @@ apply:
         let after_miss = snapshot(repo);
         assert_eq!(before, after_miss);
     }
+
+    #[test]
+    fn a_traversing_name_is_rejected() {
+        let scratch = ScratchDir::new();
+        let repo = scratch.path();
+        write_schema(
+            repo,
+            "tdd",
+            "name: tdd\nartifacts:\n  - id: a\n    generates: a.md\n",
+        );
+
+        let before = snapshot(repo);
+        let result = load(repo, "../../../../etc");
+        match &result {
+            Err(LoadError::IllegalName { name }) => assert_eq!(name, "../../../../etc"),
+            other => panic!("expected IllegalName, got {other:?}"),
+        }
+        // The falsifier: an unguarded `load` would answer `NotVendored` for
+        // the same input, since the join would simply miss.
+        assert!(!matches!(result, Err(LoadError::NotVendored { .. })));
+        let after = snapshot(repo);
+        assert_eq!(before, after);
+    }
+
+    #[test]
+    fn every_shape_is_legal_name_rejects() {
+        let scratch = ScratchDir::new();
+        let repo = scratch.path();
+
+        let rejected: [&str; 8] = ["", "   ", ".", "..", "a/b", "a\\b", "/absolute/path", "a\0b"];
+        for name in rejected {
+            match load(repo, name) {
+                Err(LoadError::IllegalName { .. }) => {}
+                other => panic!("expected IllegalName for {name:?}, got {other:?}"),
+            }
+        }
+
+        // The accepted control: contains a dot but is not `.` or `..`, so it
+        // is not rejected and reaches the ordinary not-vendored answer.
+        match load(repo, "spec-driven.v2") {
+            Err(LoadError::NotVendored { .. }) => {}
+            other => panic!("expected NotVendored for the accepted name, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_legal_name_still_loads() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let parsed = load(repo, "tdd").expect("the vendored tdd schema should still load");
+
+        let ids: Vec<&str> = parsed
+            .schema
+            .artifacts
+            .iter()
+            .map(|a| a.id.as_str())
+            .collect();
+        assert_eq!(
+            ids,
+            ["proposal", "specs", "design", "tasks", "planning-review"]
+        );
+    }
 }
