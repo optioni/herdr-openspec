@@ -79,6 +79,15 @@ struct Control {
     plant_find: Option<String>,
     plant_replace: Option<String>,
     plant_content: Option<String>,
+    /// Extra env-prefix tokens (same grammar as `env`) applied ONLY on the post-plant run,
+    /// appended after `env`'s own tokens. Exists for a plant whose failure mode depends on
+    /// an environment variable pointing at what the plant just created (`noblock.sh`'s
+    /// `UIDIR`, for the "leg 1 still refuses a tree with no subject" control): the baseline
+    /// run must see the ordinary environment (the created path does not exist yet), so a
+    /// single `env` field shared by both runs cannot express this — `env` alone would either
+    /// fail the baseline (pointed at a not-yet-created path) or leave the planted run
+    /// unaffected (pointed at the default).
+    plant_env: String,
     expect: String,
 }
 
@@ -127,6 +136,7 @@ fn parse_controls(text: &str) -> Result<Vec<Control>, String> {
         let plant_find = get_str_opt(table, "plant_find");
         let plant_replace = get_str_opt(table, "plant_replace");
         let plant_content = get_str_opt(table, "plant_content");
+        let plant_env = get_str_opt(table, "plant_env").unwrap_or_default();
         let expect = get_str(table, "expect", &id)?;
 
         if plant_kind == "edit" && (plant_find.is_none() || plant_replace.is_none()) {
@@ -152,6 +162,7 @@ fn parse_controls(text: &str) -> Result<Vec<Control>, String> {
             plant_find,
             plant_replace,
             plant_content,
+            plant_env,
             expect,
         });
     }
@@ -282,6 +293,14 @@ fn git_init_and_commit(root: &Path) -> Result<(), String> {
 /// `root`, with the recorded env overrides applied. Returns whether it exited 0 and the
 /// combined stdout+stderr text `expect` is matched against.
 fn run_script(control: &Control, root: &Path) -> (bool, String) {
+    run_script_with_env(control, root, &control.env)
+}
+
+/// Same as `run_script`, but with `env` overriding `control.env` for this one invocation —
+/// used to give the post-plant run its own environment (`control.env` plus `plant_env`)
+/// without changing what the baseline run sees. See `Control::plant_env`'s doc comment for
+/// why the two runs cannot share a single env string.
+fn run_script_with_env(control: &Control, root: &Path, env: &str) -> (bool, String) {
     let interpreter = match control.interpreter.as_str() {
         "python3" => "python3",
         _ => "/bin/sh",
@@ -289,7 +308,7 @@ fn run_script(control: &Control, root: &Path) -> (bool, String) {
     let script_path = Path::new("scripts/gates").join(&control.script);
     let mut cmd = Command::new(interpreter);
     cmd.arg(&script_path).current_dir(root);
-    let (sets, unsets) = env_overrides(&control.env);
+    let (sets, unsets) = env_overrides(env);
     for (key, value) in sets {
         cmd.env(key, value);
     }
@@ -381,7 +400,14 @@ fn run_control_in(control: &Control, root: &Path) -> Result<(), String> {
 
     apply_plant(control, root)?;
 
-    let (planted_ok, planted_out) = run_script(control, root);
+    let planted_env = if control.plant_env.is_empty() {
+        control.env.clone()
+    } else if control.env.is_empty() {
+        control.plant_env.clone()
+    } else {
+        format!("{} {}", control.env, control.plant_env)
+    };
+    let (planted_ok, planted_out) = run_script_with_env(control, root, &planted_env);
     if planted_ok {
         return Err(format!(
             "the gate still exits 0 after the plant (expected non-zero); output:\n{planted_out}"
@@ -499,6 +525,7 @@ fn gate_controls_script_added_without_a_control_fails_the_check() {
         plant_find: None,
         plant_replace: None,
         plant_content: None,
+        plant_env: String::new(),
         expect: String::new(),
     };
     controls_with_orphan.push(orphan_control);

@@ -36,6 +36,11 @@
 #                  harness error, distinct from the gate not catching the plant
 #   plant_replace  (edit only) what replaces plant_find; empty for a pure deletion
 #   plant_content  (create only) the new file's contents
+#   plant_env      extra env-prefix tokens, same grammar as `env`, applied ONLY on the
+#                  post-plant run (appended after `env`'s own tokens) — for a plant whose
+#                  failure mode depends on an env var pointing at what the plant just
+#                  created, where the baseline run must NOT see that var (noblock.sh's
+#                  UIDIR, "noblock-solo-file-count-floor" only)
 #   expect         a fragment of the gate script's own FAIL: message — chosen from what the
 #                  script itself would print if it caught the plant, per design.md -> Risks
 #                  ("chosen from each script's own FAIL: message ... rather than from grep's
@@ -243,6 +248,16 @@ fn planted_block(m: &std::sync::Mutex<()>, rx: &std::sync::mpsc::Receiver<()>) {
 }'''
 expect = "NOBLOCK FAIL"
 why = "G4: the same recv-behind-a-lock plant, in src/ui/mod.rs (the one file under src/ui/ permitted to name HerdrCli and read_to_string), proves leg 1 sweeps every file including that one"
+
+[[control]]
+id = "noblock-solo-file-count-floor"
+script = "noblock.sh"
+plant_kind = "create"
+plant_file = "tests/fixtures/noblock-solo/driver.rs"
+plant_content = "// planted fixture: driver.rs alone, for NOBLOCK's own leg-1 file-count floor control\n"
+plant_env = "UIDIR=tests/fixtures/noblock-solo"
+expect = "NOBLOCK FAIL: only 1 files under"
+why = "quality-gates' \"Leg 1 still refuses a tree with no subject\" scenario: a directory holding driver.rs and nothing else satisfies the pre-existing driver.rs-missing guard, so the failure the plant proves is leg 1's own file-count floor (1 < UI_MIN), not the harness's driver.rs check - a vacuity guard on leg 1's sweep, distinct from pointing UIDIR at an empty directory"
 
 [[control]]
 id = "nocli-shell-hit"
