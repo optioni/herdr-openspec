@@ -506,6 +506,15 @@ expect = "WIRED FAIL"
 why = "code() only strips // line comments, not /* */ block comments, so hiding the real name inside a block comment while renaming the actual call still satisfies leg 1's substring search; recorded as the ideal message this gate does not yet print"
 
 [[control]]
+id = "wired-stripper-identity"
+script = "wired.sh"
+plant_file = "scripts/gates/wired.sh"
+plant_find = "code() { prod \"$1\" | sed 's://.*::' | strip_block_comments; }"
+plant_replace = "code() { prod \"$1\" | sed 's://.*::'; }"
+expect = "WIRED FAIL: block-comment guard"
+why = "spec.md's WIRED requirement: 'the stripper's own control fails when code() is edited to strip nothing, so a stripper reduced to the identity function cannot pass' - reverting ONLY the /* ... */ half of code() (the // strip untouched, and strip_block_comments itself still defined) must still fail Guard E, proving an identity-function-for-block-comments control alone proves nothing about the addition"
+
+[[control]]
 id = "nowaiver-coverage-prod-flag"
 script = "nowaiver.sh"
 plant_file = "scripts/coverage-prod.py"

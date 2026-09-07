@@ -22,6 +22,7 @@ MOD="${MOD:-src/ui/mod.rs}"
 CLI="${CLI:-src/cli.rs}"
 STATE="${STATE:-src/state.rs}"
 LAUNCH="${LAUNCH:-src/launch.rs}"
+TERMINAL="${TERMINAL:-src/ui/terminal.rs}"
 UIDIR="${UIDIR:-src/ui}"
 fail() { echo "WIRED FAIL: $1" >&2; exit 1; }
 
@@ -29,6 +30,7 @@ fail() { echo "WIRED FAIL: $1" >&2; exit 1; }
 [ -f "$CLI" ] || fail "$CLI missing - the positive controls have nothing to match"
 [ -f "$STATE" ] || fail "$STATE missing - the mapping-read control has nothing to match"
 [ -f "$LAUNCH" ] || fail "$LAUNCH missing - leg 1's ninth name would point at nothing"
+[ -f "$TERMINAL" ] || fail "$TERMINAL missing - the panic-hook positive control has nothing to match"
 [ -d "$UIDIR" ] || fail "$UIDIR missing - leg 4 has nothing to search"
 
 # Guard D — $MOD holds EXACTLY ONE line-anchored #[cfg(test)], since prod() truncates at the
@@ -48,7 +50,81 @@ prod() { awk 'BEGIN{p=1} /^#\[cfg\(test\)\]$/{p=0} p{print}' "$1"; }
 # exists to catch. Stripping `//` to end-of-line can also truncate a `//` inside a string
 # literal, which only makes a must-be-present leg stricter and a must-be-absent leg no
 # weaker, so it fails in the safe direction.
-code() { prod "$1" | sed 's://.*::'; }
+#
+# G5/G8: `//` alone left a name surviving inside a `/* ... */` block comment satisfying every
+# leg below - measured, replacing the real `crate::launch::start(` call with
+# `/* crate::launch::start( is gone */ crate::launch::begin(` reported `OK: twelve names
+# present` on a launcher that was unwired. strip_block_comments is a hand-rolled scanner
+# rather than a single sed/awk regex DELIBERATELY: a block comment can span lines, and a
+# regex-based multi-line strip is exactly where BSD sed/awk and GNU sed/awk diverge (this
+# gate runs on both ubuntu-latest and macos-latest). The scanner below uses only
+# index()/substr() with an `incomment` flag carried across awk's per-line NR loop - no RS
+# trick, no multi-line regex - so it behaves identically under BSD awk (macOS) and gawk/mawk
+# (Linux). Over-stripping (treating `/*` inside a string literal as a real comment opener) is
+# the same "fails in the safe direction" tradeoff the `//` strip above already accepts.
+strip_block_comments() {
+  awk '
+  {
+    line = $0
+    out = ""
+    while (length(line) > 0) {
+      if (incomment) {
+        idx = index(line, "*/")
+        if (idx > 0) {
+          line = substr(line, idx + 2)
+          incomment = 0
+        } else {
+          line = ""
+        }
+      } else {
+        idx = index(line, "/*")
+        if (idx > 0) {
+          out = out substr(line, 1, idx - 1)
+          line = substr(line, idx + 2)
+          incomment = 1
+        } else {
+          out = out line
+          line = ""
+        }
+      }
+    }
+    print out
+  }
+  '
+}
+code() { prod "$1" | sed 's://.*::' | strip_block_comments; }
+
+# Guard E — code() ACTUALLY STRIPS block comments, and is not line-scoped, isolated from leg
+# 1's real search over $MOD. Two inline fixtures, in the shape leg 1's own
+# wired-launch-comment control plants into $MOD (`/* crate::launch::start( is gone */
+# crate::launch::begin(`), written to a SCRATCH FILE and read through code() itself (not
+# strip_block_comments called directly) - so a plant that reverts only code()'s composition
+# (drops "| strip_block_comments" and leaves the function that scanner defines untouched) is
+# still caught here rather than only in a unit that no longer runs. A single-line block
+# comment hides `launch::start`, and the same shape spans three lines. This is what makes
+# "reverting only the /* ... */ half of code(), leaving the // strip in place" fail on its
+# own: an identity-function control alone proves nothing about the addition (planning
+# review), but a control anchored on the // strip's own fixed point - text with no `//` in it
+# at all - fails the moment the block-comment half is missing, whatever else code() still does.
+guard_e_tmp=$(mktemp "${TMPDIR:-/tmp}/wired-guard-XXXXXX")
+trap 'rm -f "$guard_e_tmp"' EXIT
+
+printf '%s\n' '/* crate::launch::start( is gone */ crate::launch::begin(' > "$guard_e_tmp"
+s=$(code "$guard_e_tmp")
+printf '%s\n' "$s" | grep -q 'launch::start' \
+  && fail "block-comment guard: code() leaves 'launch::start' intact inside a single-line /* ... */ comment - a stripper reduced to the // strip alone cannot pass"
+printf '%s\n' "$s" | grep -q 'launch::begin' \
+  || fail "block-comment guard: code() deleted text outside the single-line comment too - it is not a targeted strip"
+
+printf '%s\n' '/* crate::launch::start(' 'is gone, spanning' 'three lines */ crate::launch::begin(' > "$guard_e_tmp"
+m=$(code "$guard_e_tmp")
+printf '%s\n' "$m" | grep -q 'launch::start' \
+  && fail "block-comment guard: code() leaves 'launch::start' intact inside a comment spanning three lines - the stripper is line-scoped"
+printf '%s\n' "$m" | grep -q 'launch::begin' \
+  || fail "block-comment guard: code() deleted text outside the multi-line comment too - it is not a targeted strip"
+
+rm -f "$guard_e_tmp"
+trap - EXIT
 
 # Guard A — positive controls live in the OTHER file, so a renamed binding fails HERE rather
 # than leaving leg 1 searching for a name that is no longer defined anywhere. Each is anchored
@@ -66,16 +142,22 @@ grep -qE '^pub const HERDR_PROGRAM' "$CLI" \
   || fail "positive control - $CLI defines no 'pub const HERDR_PROGRAM'"
 grep -qE '^pub fn read\(' "$STATE" || fail "positive control - $STATE defines no 'pub fn read('"
 grep -qE '^pub fn start\(' "$LAUNCH" || fail "positive control - $LAUNCH defines no 'pub fn start('"
+# G5: anchored on the DEFINING file rather than left to leg 1 alone, so a rename fails HERE,
+# naming $TERMINAL, rather than leg 1 hunting a name nobody defines any more.
+grep -qE '^pub fn install_panic_hook\(' "$TERMINAL" \
+  || fail "positive control - $TERMINAL defines no 'pub fn install_panic_hook('"
 
 # Leg 1 — every collaborator the loop needs is started BY NAME in the production slice.
 # degraded-states: worker_cli_from_env dropped out of this list (start_collaborators reaches
 # the probe through resolve::openspec_bin and worker_cli directly, injecting env/npm_hook
 # rather than hardcoding the real bindings inside worker_cli_from_env - design.md ->
 # Decision 14); config::env_lookup( and npm_probe_hook joined it, naming the two real
-# bindings the composition root itself supplies.
+# bindings the composition root itself supplies. gate-integrity (G5): install_panic_hook
+# joined it too - the call was named nowhere on this list, so deleting the single
+# `terminal::install_panic_hook();` line in `run` left every gate and every test green.
 for n in run_wired start_collaborators 'watch::start' 'refresh::start' 'agents::start' \
          'resolve::openspec_bin' 'cli::worker_cli' agent_cli_via 'state::read' 'launch::start' \
-         'config::env_lookup(' npm_probe_hook; do
+         'config::env_lookup(' npm_probe_hook install_panic_hook; do
   code "$MOD" | grep -q -- "$n" \
     || fail "leg 1: $MOD's production slice does not name $n - the name is gone; leg 1 sees names, not values, so a call whose result is dropped still passes here and is the acceptance test's job"
 done
@@ -161,4 +243,4 @@ h=$(find "$UIDIR" -name '*.rs' -print0 \
                  exit 1; }
 
 lines=$(printf '%s\n' "$body" | wc -l | tr -d ' ')
-echo "WIRED OK: twelve names present in $MOD; run resolves state::state_dir; run names startup_dir(; $MOD names config.agent_kind; 'pub fn run()' is $lines lines with no branch and no loop; no \"herdr\" and no \"claude\" literal under $UIDIR"
+echo "WIRED OK: thirteen names present in $MOD; run resolves state::state_dir; run names startup_dir(; $MOD names config.agent_kind; 'pub fn run()' is $lines lines with no branch and no loop; no \"herdr\" and no \"claude\" literal under $UIDIR"
