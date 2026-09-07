@@ -86,10 +86,10 @@
 ## 8. Dead branch and misattached doc block
 <!-- kind: refactor -->
 
-- [ ] 8.1 CHARACTERIZE: Confirm "Two empty lists join to an empty list" and "A declaration of the wrong type is not a declaration" are green and untouched — `cargo test -- changes::tests::join_artifacts schema::tests::`.
-- [ ] 8.2 REFACTOR: Delete `join_artifacts`' `if file.is_empty() && cli.is_empty()` branch (`src/changes.rs:1263`), which the next branch subsumes. `change-merge`'s delta already renumbers the published rule list from six rules to five to match.
-- [ ] 8.3 REFACTOR: Move the `Ok(Some(name))`/`Ok(None)`/`Err(reason)` and `!is_badvalue()` doc block (`src/schema.rs:44-59`) from `first_document` onto `schema_key` (`:70`), leaving `first_document` the two-line doc at `:60-64` that is already its own.
-- [ ] 8.4 VERIFY: Run the unchanged characterization tests — no regressions — and confirm `cargo clippy --all-targets --all-features -- -D warnings` reports nothing new.
+- [x] 8.1 CHARACTERIZE: Confirm "Two empty lists join to an empty list" and "A declaration of the wrong type is not a declaration" are green and untouched — `cargo test -- changes::tests::join_artifacts schema::tests::`.
+- [x] 8.2 REFACTOR: Delete `join_artifacts`' `if file.is_empty() && cli.is_empty()` branch (`src/changes.rs:1263`), which the next branch subsumes. `change-merge`'s delta already renumbers the published rule list from six rules to five to match.
+- [x] 8.3 REFACTOR: Move the `Ok(Some(name))`/`Ok(None)`/`Err(reason)` and `!is_badvalue()` doc block (`src/schema.rs:44-59`) from `first_document` onto `schema_key` (`:70`), leaving `first_document` the two-line doc at `:60-64` that is already its own.
+- [x] 8.4 VERIFY: Run the unchanged characterization tests — no regressions — and confirm `cargo clippy --all-targets --all-features -- -D warnings` reports nothing new.
 
 ## 9. Change Review
 <!-- kind: operational -->
