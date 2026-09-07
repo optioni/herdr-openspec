@@ -289,7 +289,7 @@ tier = "outer"
 proof = ["a_watch_failure_keeps_the_loop_drawing"]
 verdict = "spec-corrected"
 why = "a real unwatchable root's reason renders as a leading row and the loop keeps drawing, driven through run_loop with a real TestBackend"
-covers = ["src/watch.rs:264-268", "src/watch.rs:275-282"]
+covers = ["src/watch.rs:284-288", "src/watch.rs:294-298"]
 
 [[row]]
 condition = "`openspec/` is removed while the watcher runs"
@@ -297,7 +297,7 @@ tier = "outer"
 proof = ["a_watch_failure_keeps_the_loop_drawing"]
 verdict = "spec-corrected"
 why = "a real run_wired run with openspec/ removed mid-run keeps the loop drawing"
-covers = ["src/watch.rs:242-249"]
+covers = ["src/watch.rs:243-250"]
 
 [[row]]
 condition = "A CLI cycle fails after the worker already sent its file-sourced result"
