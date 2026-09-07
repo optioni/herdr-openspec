@@ -53,8 +53,8 @@ with every artifact resolved and every change's task progress counted by
 the CLI's own fallback rule, file-sourced when no `openspec` binary is
 present at all, and corrected by `changes::from_cli`/`changes::merge` when
 it is: the CLI's schema, progress, and artifacts replace the file's for
-every change it reports, joined by position, archived changes staying
-permanently file-sourced. `herdr-openspec ui` now opens a real dashboard:
+every change it reports, paired by name, with artifacts within a change
+joined by position, archived changes staying permanently file-sourced. `herdr-openspec ui` now opens a real dashboard:
 raw mode and the alternate screen entered and left in a fixed, mirrored
 order (restored on normal return, error return, and panic alike), a
 draw-then-wait event loop — `q`/`Ctrl-C` to quit, `j`/`k`/arrows to move the
