@@ -111,10 +111,10 @@
 ## 11. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 11.1 CHECK: Confirm the affected tiers are the unit tier plus `tests/degraded_coverage.rs`, that no view test or manifest test needed changing, and that no manifest, config format, or keybinding changed. `make check` is the single gate; name the failing sub-command if it fails.
-- [ ] 11.2 VERIFY: `cargo fmt --all -- --check` — clean.
-- [ ] 11.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
-- [ ] 11.4 VERIFY: `make gates` — every hygiene gate green, each script run bare with no `MIN`/`SCAN_MIN` override except `NODEFAULT-UI`'s five.
-- [ ] 11.5 VERIFY: `cargo test --all-features` — green. It was green at HEAD before this change (exit code 0).
-- [ ] 11.6 VERIFY: `cargo llvm-cov --fail-under-lines 80` — the coverage floor holds; add tests rather than lowering it.
-- [ ] 11.7 VERIFY: `openspec validate cli-parity --strict` — valid.
+- [x] 11.1 CHECK: Confirm the affected tiers are the unit tier plus `tests/degraded_coverage.rs`, that no view test or manifest test needed changing, and that no manifest, config format, or keybinding changed. `make check` is the single gate; name the failing sub-command if it fails.
+- [x] 11.2 VERIFY: `cargo fmt --all -- --check` — clean.
+- [x] 11.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
+- [x] 11.4 VERIFY: `make gates` — every hygiene gate green, each script run bare with no `MIN`/`SCAN_MIN` override except `NODEFAULT-UI`'s five.
+- [x] 11.5 VERIFY: `cargo test --all-features` — green. It was green at HEAD before this change (exit code 0).
+- [x] 11.6 VERIFY: `cargo llvm-cov --fail-under-lines 80` — the coverage floor holds; add tests rather than lowering it.
+- [x] 11.7 VERIFY: `openspec validate cli-parity --strict` — valid.
