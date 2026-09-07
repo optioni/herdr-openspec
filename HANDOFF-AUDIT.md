@@ -28,13 +28,36 @@ reviewed or approved. None may be implemented until it is.**
 |---|---|---|
 | `gate-integrity` | G1–G8, D1–D3 | **Complete**, `Change 'gate-integrity' is valid` |
 | `seam-resilience` | S1–S9, U3, S10 | **Complete**, `Change 'seam-resilience' is valid` |
-| `view-fidelity` | U1, U2, U4, U5 | Drafting in progress — no `planning-review.md` yet |
+| `view-fidelity` | U1, U2, U4, U5 | **Complete**, `Change 'view-fidelity' is valid` |
 | `cli-parity` | C1–C8 | **Complete**, `Change 'cli-parity' is valid` |
 | `doc-conformance` | D4–D10 | **Complete**, `Change 'doc-conformance' is valid` |
 
-Run `openspec validate --strict` on each before treating any as ready.
-`seam-resilience`, `cli-parity` and `doc-conformance` are confirmed passing.
-Two remain unfinished: **`gate-integrity`** and **`view-fidelity`**.
+**All five are complete and pass `openspec validate --strict`.** Nothing is
+outstanding in the drafting phase. The next step is review, then implementation —
+`gate-integrity` first, because every other finding is one the gates were supposed
+to catch.
+
+## One deferred item, deliberately not fixed
+
+`view-fidelity`'s display-width primitives (`columns`, `truncate_columns`) live in
+`src/ui/layout.rs` under `responsive-layout`. They *should* be their own capability
+with their own module — they are a crate-wide primitive consumed by `ui::list`,
+`ui::markdown`, `ui::tasks`, `ui::detail` and `ui::view`, and `ui::layout` holds
+`Rect` geometry. They are there because a ninth file under `src/ui/` would move the
+pure-view-set count asserted in two places that must agree: `scripts/gates/noio-view.sh:20`
+(the `PURE` list, plus its prose header) and `openspec/specs/dashboard-loop/spec.md`,
+which says "eight" at seven separate lines including two scenario assertions.
+
+**This is untidy, not a blocker.** `ui::layout` is already in the eight and already
+swept by `NOIO-VIEW`, so the primitives are covered by every existing guard the moment
+they land and `make check` stays green. Nothing trips at apply time. Deliberately not
+opened as a sixth proposal: it would put a second change into a `dashboard-loop`
+requirement `gate-integrity` may already touch (two changes editing one requirement in
+prose is a worse problem), and it would widen the blast radius of the one change that
+touches every view file. The resolution point is recorded in `view-fidelity`'s
+`design.md` → Decision 2 and `planning-review.md` → Deferred Non-Blocking Notes, so a
+later change that genuinely needs to touch `dashboard-loop`'s pure set can carry the
+move as a rider.
 
 ### What the two finished ones decided
 
