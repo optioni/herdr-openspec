@@ -64,13 +64,13 @@
 ## 6. The symlink divergence becomes a proven degraded-states row
 <!-- kind: operational -->
 
-- [ ] 6.1 CHECK: Add `a_non_looping_directory_symlink_resolving_inside_the_change_is_skipped_too` (link to `../inner`, target inside the change directory), `a_symlink_resolving_outside_the_change_is_skipped_without_failing_closed`, and `a_glob_shaped_tasks_artifact_behind_a_symlink_is_the_known_limit` (asserting `1/2`, with the CLI's measured `1/5` as a documented constant citing `dist/core/artifact-graph/outputs.js:93`). Confirm all three pass.
+- [x] 6.1 CHECK: Add `a_non_looping_directory_symlink_resolving_inside_the_change_is_skipped_too` (link to `../inner`, target inside the change directory), `a_symlink_resolving_outside_the_change_is_skipped_without_failing_closed`, and `a_glob_shaped_tasks_artifact_behind_a_symlink_is_the_known_limit` (asserting `1/2`, with the CLI's measured `1/5` as a documented constant citing `dist/core/artifact-graph/outputs.js:93`). Confirm all three pass.
   - HEAD evidence: `grep -rn 'fn .*symlink' src/ tests/` → 3 matches, none of these three.
-- [ ] 6.2 CHECK: Run the negative control — swap `collect_glob_matches`' `entry.file_type()` for `std::fs::metadata`, confirm the two inside-resolving tests fail (record which, and that the pre-existing `a_directory_symbolic_link_is_not_descended_into` also fires), revert, confirm green, and confirm `git diff --quiet src/changes.rs`.
-- [ ] 6.3 CHANGE: Add the `SPEC.md` degraded-states row for a `generates` glob crossing a symlinked directory **whose target resolves inside the change directory**, stating the artifact-list scope, the `followSymbolicLinks: true` reference, and that the CLI tier corrects it. Say in the row that an outside-resolving link is a different case where the CLI fails closed.
-- [ ] 6.4 CHANGE: Add the matching `[[row]]` to `tests/degraded-coverage.toml` with all five keys — `condition` byte-identical to the new table cell, `tier = "unit"`, `proof = ["a_non_looping_directory_symlink_resolving_inside_the_change_is_skipped_too"]`, `verdict = "confirmed"`, and a `why` naming what the proof does and does not show (it proves the plugin skips, not that the CLI follows).
-- [ ] 6.5 CHANGE: Raise `MIN_ROWS` in `tests/degraded_coverage.rs:17` from 44 to 45, keeping the floor at its true measured value.
-- [ ] 6.6 VERIFY: `cargo test --test degraded_coverage` — green, with a non-zero pass count.
+- [x] 6.2 CHECK: Run the negative control — swap `collect_glob_matches`' `entry.file_type()` for `std::fs::metadata`, confirm the two inside-resolving tests fail (record which, and that the pre-existing `a_directory_symbolic_link_is_not_descended_into` also fires), revert, confirm green, and confirm `git diff --quiet src/changes.rs`.
+- [x] 6.3 CHANGE: Add the `SPEC.md` degraded-states row for a `generates` glob crossing a symlinked directory **whose target resolves inside the change directory**, stating the artifact-list scope, the `followSymbolicLinks: true` reference, and that the CLI tier corrects it. Say in the row that an outside-resolving link is a different case where the CLI fails closed.
+- [x] 6.4 CHANGE: Add the matching `[[row]]` to `tests/degraded-coverage.toml` with all five keys — `condition` byte-identical to the new table cell, `tier = "unit"`, `proof = ["a_non_looping_directory_symlink_resolving_inside_the_change_is_skipped_too"]`, `verdict = "confirmed"`, and a `why` naming what the proof does and does not show (it proves the plugin skips, not that the CLI follows).
+- [x] 6.5 CHANGE: Raise `MIN_ROWS` in `tests/degraded_coverage.rs:17` from 44 to 45, keeping the floor at its true measured value.
+- [x] 6.6 VERIFY: `cargo test --test degraded_coverage` — green, with a non-zero pass count.
 
 ## 7. The archive race becomes a proven degraded-states row
 <!-- kind: operational -->
