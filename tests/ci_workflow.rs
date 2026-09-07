@@ -25,6 +25,16 @@ fn makefile_path() -> PathBuf {
     manifest_dir().join("Makefile")
 }
 
+/// `AGENTS.md` is the real file; `CLAUDE.md` is a symlink to it (verified on disk, not
+/// assumed) — reading this path is reading the same bytes either name would resolve to.
+fn agents_md_path() -> PathBuf {
+    manifest_dir().join("AGENTS.md")
+}
+
+fn spec_md_path() -> PathBuf {
+    manifest_dir().join("SPEC.md")
+}
+
 fn read_workflow() -> String {
     let path = workflow_path();
     fs::read_to_string(&path).unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()))
@@ -33,6 +43,38 @@ fn read_workflow() -> String {
 fn read_makefile() -> String {
     let path = makefile_path();
     fs::read_to_string(&path).unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()))
+}
+
+fn read_agents_md() -> String {
+    let path = agents_md_path();
+    fs::read_to_string(&path).unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()))
+}
+
+fn read_spec_md() -> String {
+    let path = spec_md_path();
+    fs::read_to_string(&path).unwrap_or_else(|e| panic!("failed to read {}: {e}", path.display()))
+}
+
+/// The body of a Markdown heading line — every line strictly between a line that equals
+/// `heading` (after trimming trailing whitespace) and the next heading line of any level,
+/// or EOF. Shared by the `AGENTS.md` and `SPEC.md` document tests below: both read a
+/// scoped section rather than the whole file, so a coincidental substring match elsewhere
+/// in the document cannot pass either test vacuously.
+fn markdown_section(markdown: &str, heading: &str) -> String {
+    let mut body = String::new();
+    let mut in_section = false;
+    for line in markdown.lines() {
+        let trimmed = line.trim_end();
+        if trimmed.starts_with('#') {
+            in_section = trimmed == heading;
+            continue;
+        }
+        if in_section {
+            body.push_str(line);
+            body.push('\n');
+        }
+    }
+    body
 }
 
 /// A line with no leading whitespace and not a comment — a candidate top-level YAML key.
@@ -779,4 +821,104 @@ fn gates_full_is_in_the_aggregate_needs() {
         needs_set.contains("gates-full"),
         "ci job's needs must list gates-full, found {needs_set:?}"
     );
+}
+
+/// `gate-integrity` :: D3. `AGENTS.md`'s Quality gates section names `EXTENDED` and
+/// `TESTCOUNT` as deliberately not extracted, and `OPENSPEC-UNTOUCHED` as split, one line
+/// of reason each. This is the prose clause the D3 scenario requires beside the
+/// file-absence clause `every_gate_script_the_recipe_names_exists_and_every_script_is_named`
+/// already checks: at the time this test was added, all three names returned zero hits
+/// across `AGENTS.md`, `README.md`, and `SPEC.md` while that other test reported green,
+/// because it only ever checked the directory and the recipe, never the document a reader
+/// actually meets the exclusion in.
+#[test]
+fn agents_md_names_the_two_excluded_gates_and_the_split_one() {
+    let agents = read_agents_md();
+    let section = markdown_section(&agents, "## Quality gates");
+    assert!(
+        !section.trim().is_empty(),
+        "AGENTS.md must have a `## Quality gates` section"
+    );
+    for name in ["EXTENDED", "TESTCOUNT", "OPENSPEC-UNTOUCHED"] {
+        assert!(
+            section.contains(name),
+            "AGENTS.md's Quality gates section must name {name}"
+        );
+    }
+
+    let dir = manifest_dir().join("scripts/gates");
+    for excluded in ["extended.sh", "testcount.sh", "EXTENDED.sh", "TESTCOUNT.sh"] {
+        assert!(
+            !dir.join(excluded).exists(),
+            "scripts/gates/{excluded} must not exist — EXTENDED and TESTCOUNT are \
+             deliberately not extracted"
+        );
+    }
+    assert!(
+        dir.join("openspec-untouched.sh").is_file(),
+        "scripts/gates/openspec-untouched.sh must exist — OPENSPEC-UNTOUCHED is split, not \
+         wholly excluded, and the document must not describe it as excluded outright"
+    );
+}
+
+/// `gate-integrity` :: D1. `SPEC.md` -> Gates names each of `check`'s prerequisites, in the
+/// `Makefile`, **by name** — not merely as many rows, which five unrelated rows would
+/// satisfy, and not the stale "all four" this test replaces, which a fifth prerequisite
+/// joining `check` left uncorrected.
+#[test]
+fn spec_md_gates_section_names_every_check_prerequisite_by_name() {
+    let spec = read_spec_md();
+    let makefile = read_makefile();
+    let prereqs = parse_check_prereqs(&makefile);
+    assert!(
+        !prereqs.is_empty(),
+        "check: rule names no prerequisites — the Makefile is unparseable"
+    );
+
+    let section = markdown_section(&spec, "### Gates");
+    assert!(!section.trim().is_empty(), "SPEC.md must have a `### Gates` section");
+
+    for target in &prereqs {
+        assert!(
+            section.contains(target.as_str()),
+            "SPEC.md's Gates section must name check's prerequisite `{target}` by name — a \
+             count comparison is not sufficient, since renaming a row would leave it green: \
+             section was {section:?}"
+        );
+    }
+
+    assert!(
+        !section.contains("all four"),
+        "SPEC.md's Gates section must not describe the tier as \"all four\" — `check` \
+         composes {} gates",
+        prereqs.len()
+    );
+    assert!(
+        section.contains("gates-full"),
+        "SPEC.md's Gates section must name `gates-full` and that it runs in its own CI job \
+         rather than inside `check`"
+    );
+}
+
+/// `gate-integrity` :: ci-workflow, "The production floor reaches CI without a workflow
+/// edit". The production-slice floor and the JSON report path it reads both live in the
+/// `Makefile` alone, so either can change with no workflow edit — asserted here rather than
+/// left to `coverage_threshold_is_not_restated_in_ci`, which only ever checked the total
+/// floor's own flag.
+#[test]
+fn ci_yml_names_no_production_floor_or_report_path() {
+    let content = read_workflow();
+    for forbidden in [
+        "PROD_MIN",
+        "coverage-prod.py",
+        "llvm-cov.json",
+        "--output-path",
+    ] {
+        assert!(
+            !content.contains(forbidden),
+            "workflow must not name `{forbidden}` — the production floor and its JSON \
+             report path live in the Makefile alone, so a floor change there changes CI \
+             with no workflow edit"
+        );
+    }
 }
