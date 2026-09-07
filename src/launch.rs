@@ -1715,6 +1715,68 @@ mod tests {
             assert_eq!(launcher.drain(), None);
         }
 
+        /// The other route to the same latch: `request` never fails here (the request
+        /// channel is held open), so `drain`'s own `try_recv` is what first observes
+        /// `Disconnected` - the sibling branch to the one above, which detects the death
+        /// through a failed `send` instead. Both must latch identically.
+        #[test]
+        fn a_disconnected_result_channel_is_reported_once_and_then_stops_being_reported() {
+            let (request_tx, _request_rx) = std::sync::mpsc::channel::<Request>();
+            let (result_tx, result_rx) = std::sync::mpsc::channel::<Outcome>();
+            drop(result_tx);
+            let mut launcher: Box<dyn Launcher> = Box::new(super::super::RealLauncher {
+                request_tx,
+                result_rx,
+                dead: false,
+                pending_death: false,
+            });
+
+            match launcher.drain() {
+                Some(Outcome { named, problems }) => {
+                    assert_eq!(named, None);
+                    assert_eq!(problems.len(), 1, "a reason must be present: {problems:?}");
+                    assert!(problems[0].contains("launch"), "{}", problems[0]);
+                }
+                None => panic!(
+                    "the first drain after the result channel disconnects must report it"
+                ),
+            }
+            assert_eq!(
+                launcher.drain(),
+                None,
+                "a dead launcher degrades to silence, not a growing list"
+            );
+        }
+
+        /// `seam-resilience`: `settle`'s happy path — a launch that answers before the budget
+        /// elapses is returned from `settle` itself, not merely from a raw `drain` loop the
+        /// test drives by hand. Uses a real worker thread, on this file's own "real thread,
+        /// recording fake" terms.
+        #[test]
+        fn settle_returns_the_outcome_once_the_worker_answers() {
+            let fake = FakeCli::new();
+            fake.register_herdr(
+                &["agent", "focus", "wD:pJ"],
+                Ok(r#"{"id":"cli:agent:focus","result":{}}"#.to_string()),
+            );
+            let cli: std::sync::Arc<dyn crate::cli::HerdrCli> = std::sync::Arc::new(fake);
+            let mut launcher =
+                super::super::start(cli, PathBuf::from("/repo"), "codex".to_string(), None);
+            launcher.request(Request::Focus {
+                pane_id: "wD:pJ".to_string(),
+            });
+
+            let outcome = super::super::settle(launcher.as_mut(), Duration::from_secs(10))
+                .expect("settle must return the outcome once the worker answers");
+            assert_eq!(
+                outcome,
+                Outcome {
+                    named: None,
+                    problems: Vec::new(),
+                }
+            );
+        }
+
         #[test]
         fn the_launcher_writes_only_the_state_directory() {
             let fake = FakeCli::new();
