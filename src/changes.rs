@@ -944,6 +944,9 @@ fn schema_load_problem(err: &crate::schema::LoadError) -> String {
         crate::schema::LoadError::Invalid { path, reason } => {
             format!("{} is not a usable schema: {reason}", path.display())
         }
+        crate::schema::LoadError::IllegalName { name } => {
+            format!("{name:?} is not a legal schema name")
+        }
     }
 }
 

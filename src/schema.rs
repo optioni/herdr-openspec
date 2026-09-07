@@ -400,6 +400,11 @@ pub enum LoadError {
     Unreadable { path: PathBuf, reason: String },
     /// The bytes were read and are not a usable schema.
     Invalid { path: PathBuf, reason: String },
+    /// `name` failed `is_legal_name` and was rejected before it was joined
+    /// into a filesystem path — no directory read, no file opened. Distinct
+    /// from `NotVendored` so `schema-cli-fallback` never asks the CLI about
+    /// a name that cannot be a directory segment.
+    IllegalName { name: String },
 }
 
 /// The composition, for the common case: which name applies, which source
@@ -430,7 +435,15 @@ pub fn load_dir(dir: &Path, name: &str) -> Result<ParsedSchema, LoadError> {
 }
 
 /// The repository tier: `load_dir(&repo/openspec/schemas/<name>, name)`.
+/// `name` is checked with `is_legal_name` before it is joined into that
+/// path — the join is the one thing the guard exists to protect, so it
+/// lives here rather than only at each caller (design.md -> D2).
 pub fn load(repo: &Path, name: &str) -> Result<ParsedSchema, LoadError> {
+    if !is_legal_name(name) {
+        return Err(LoadError::IllegalName {
+            name: name.to_string(),
+        });
+    }
     load_dir(&repo.join("openspec").join("schemas").join(name), name)
 }
 
@@ -445,6 +458,9 @@ fn load_error_problem(err: &LoadError) -> String {
         }
         LoadError::Invalid { path, reason } => {
             format!("{} is not a usable schema: {reason}", path.display())
+        }
+        LoadError::IllegalName { name } => {
+            format!("{name:?} is not a legal schema name")
         }
     }
 }
