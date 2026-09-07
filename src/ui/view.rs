@@ -411,6 +411,7 @@ mod tests {
             agents: crate::agents::AgentSnapshot {
                 agents: Vec::new(),
                 reachable: false,
+                stalled: false,
                 problem: None,
             },
             agent_names: crate::state::Mapping::default(),
@@ -449,6 +450,7 @@ mod tests {
             agents: crate::agents::AgentSnapshot {
                 agents: Vec::new(),
                 reachable: false,
+                stalled: false,
                 problem: None,
             },
             agent_names: crate::state::Mapping::default(),
@@ -492,6 +494,7 @@ mod tests {
             agents: crate::agents::AgentSnapshot {
                 agents: Vec::new(),
                 reachable: false,
+                stalled: false,
                 problem: None,
             },
             agent_names: crate::state::Mapping::default(),
@@ -527,6 +530,7 @@ mod tests {
             agents: crate::agents::AgentSnapshot {
                 agents: Vec::new(),
                 reachable: false,
+                stalled: false,
                 problem: None,
             },
             agent_names: crate::state::Mapping::default(),
@@ -1011,6 +1015,7 @@ mod tests {
         with_problem.agents = crate::agents::AgentSnapshot {
             agents: Vec::new(),
             reachable: false,
+            stalled: false,
             problem: Some("herdr agent list: could not start herdr".to_string()),
         };
         let mut without_problem = with_problem.clone();
@@ -1525,6 +1530,7 @@ mod tests {
             agents: crate::agents::AgentSnapshot {
                 agents: Vec::new(),
                 reachable: false,
+                stalled: false,
                 problem: None,
             },
             agent_names: crate::state::Mapping::default(),
@@ -2317,6 +2323,7 @@ mod tests {
             agents: crate::agents::AgentSnapshot {
                 agents: Vec::new(),
                 reachable: false,
+                stalled: false,
                 problem: None,
             },
             agent_names: crate::state::Mapping::default(),
@@ -2363,6 +2370,7 @@ mod tests {
             agents: crate::agents::AgentSnapshot {
                 agents: Vec::new(),
                 reachable: false,
+                stalled: false,
                 problem: None,
             },
             agent_names: crate::state::Mapping::default(),
@@ -2508,6 +2516,7 @@ mod tests {
             agents: crate::agents::AgentSnapshot {
                 agents: Vec::new(),
                 reachable: false,
+                stalled: false,
                 problem: None,
             },
             agent_names: crate::state::Mapping::default(),
@@ -2832,6 +2841,7 @@ mod tests {
             agents: crate::agents::AgentSnapshot {
                 agents: Vec::new(),
                 reachable: false,
+                stalled: false,
                 problem: None,
             },
             agent_names: crate::state::Mapping::default(),
@@ -3699,6 +3709,7 @@ mod tests {
                 ],
                 // `agent-launch`: held at `false` here, like every fixture in this test —
                 // `reachable` now moves the footer, so comparing a reachable buffer against
+                stalled: false,
                 // an unreachable one would say nothing about scope.
                 reachable: false,
                 problem: None,
@@ -3708,6 +3719,7 @@ mod tests {
             unreachable.agents = crate::agents::AgentSnapshot {
                 agents: Vec::new(),
                 reachable: false,
+                stalled: false,
                 problem: Some(
                     "herdr agent list: could not start herdr: No such file or directory \
                      (os error 2) — a deliberately long reason, long enough to overflow \
@@ -3745,6 +3757,7 @@ mod tests {
                     terminal_title: None,
                 }],
                 reachable: false,
+                stalled: false,
                 problem: None,
             };
             let buf_absent_cwd = render_at(width, 20, &absent_cwd);

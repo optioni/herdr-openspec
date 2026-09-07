@@ -289,7 +289,7 @@ tier = "unit"
 proof = ["every_unreachable_path_yields_no_agents"]
 verdict = "confirmed"
 why = "poll_once maps every failing HerdrCli path to an empty, unreachable snapshot"
-covers = ["src/agents.rs:340-344"]
+covers = ["src/agents.rs:371-376"]
 
 [[row]]
 condition = "The filesystem watcher will not start (`notify` refuses the watch, or the repository root cannot be watched)"

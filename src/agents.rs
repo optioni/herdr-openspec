@@ -8,7 +8,7 @@
 //! a worker that answers nothing. The real parse arrives in group 3, the real poll mapping
 //! in group 4, and the real schedule and worker body in group 7.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use crate::cli::HerdrCli;
@@ -16,6 +16,16 @@ use crate::cli::HerdrCli;
 /// The poll cadence: `SPEC.md` -> Agent status by polling's "roughly one-second
 /// intervals" has one place it is written down.
 pub const POLL_INTERVAL: Duration = Duration::from_secs(1);
+
+/// The stall threshold: five [`POLL_INTERVAL`]s, written as that product — never a bare
+/// `Duration::from_secs` — so moving the poll interval moves the threshold with it.
+/// Chosen against the measured 8-millisecond median for `herdr agent list`: three orders
+/// of magnitude above the normal answer and comfortably inside a human's patience, and
+/// strictly less than [`crate::cli::RUN_DEADLINE`] (asserted below), the seam's own
+/// eventual resolution of the same hang — so the pane always tells the user about a hang
+/// before the seam gives up on it. See
+/// `openspec/changes/seam-resilience/specs/agent-poller/spec.md`.
+pub const STALL_AFTER: Duration = POLL_INTERVAL.saturating_mul(5);
 
 /// An agent's status, decoded from Herdr's own `agent_status` field. `Unknown` is what
 /// any unrecognised string, and an absent field, decode to — a forward-compatible fact
@@ -72,6 +82,13 @@ pub struct Listed {
 pub struct AgentSnapshot {
     pub agents: Vec<Agent>,
     pub reachable: bool,
+    /// Set when the outstanding poll has not answered for at least [`STALL_AFTER`]: the
+    /// badges are withdrawn along with the action keys `agent-launch` offers only while
+    /// reachable, and `problem` names the stall itself. `false` on every other snapshot,
+    /// a failed one included: an `herdr` that answers with an error is reachable and
+    /// answering, which is a different fact from one that does not answer at all. See
+    /// `specs/agent-poller/spec.md`.
+    pub stalled: bool,
     pub problem: Option<String>,
 }
 
@@ -327,25 +344,81 @@ fn herdr_error_problem(err: &crate::cli::CliError) -> String {
 /// still `reachable: true`. See `specs/agent-list/spec.md` -> "A failed run is an
 /// unreachable socket carrying the program's own reason".
 pub fn poll_once(cli: &dyn HerdrCli) -> AgentSnapshot {
+    poll_once_canonicalized(cli, &canonicalize_lookup())
+}
+
+/// [`poll_once`]'s real body, taking the canonicalizing hook as a parameter so a test can
+/// drive it with a closure and never a real symlink. See design.md -> Decision 5.
+fn poll_once_canonicalized(
+    cli: &dyn HerdrCli,
+    canonicalize: &dyn Fn(&Path) -> Option<PathBuf>,
+) -> AgentSnapshot {
     match cli.run(&["agent", "list"]) {
         Ok(text) => match parse_list(&text) {
             Ok(listed) => AgentSnapshot {
-                agents: listed.agents,
+                agents: canonicalize_cwds(listed.agents, canonicalize),
                 reachable: true,
+                stalled: false,
                 problem: (!listed.problems.is_empty()).then(|| listed.problems.join("; ")),
             },
             Err(reason) => AgentSnapshot {
                 agents: Vec::new(),
                 reachable: false,
+                stalled: false,
                 problem: Some(reason),
             },
         },
         Err(err) => AgentSnapshot {
             agents: Vec::new(),
             reachable: false,
+            stalled: false,
             problem: Some(herdr_error_problem(&err)),
         },
     }
+}
+
+/// The crate's one production binding to real path canonicalization, on exactly
+/// `config::env_lookup`'s injected-lookup shape — confined to this module, alongside the
+/// poller, per design.md -> Decision 5.
+pub fn canonicalize_lookup() -> impl Fn(&Path) -> Option<PathBuf> {
+    |path: &Path| std::fs::canonicalize(path).ok()
+}
+
+/// Canonicalize each agent's `cwd` before a snapshot reaches [`attribute`], keeping a
+/// path that cannot be canonicalized verbatim rather than dropping it: a stale directory
+/// is still better evidence than none, and dropping it would reintroduce the same silent
+/// disappearance from the other direction. `attribute` itself performs no filesystem I/O
+/// and stays untouched — see `specs/agent-attribution/spec.md`.
+fn canonicalize_cwds(
+    agents: Vec<Agent>,
+    canonicalize: &dyn Fn(&Path) -> Option<PathBuf>,
+) -> Vec<Agent> {
+    agents
+        .into_iter()
+        .map(|agent| {
+            let Agent {
+                name,
+                kind,
+                status,
+                cwd,
+                pane_id,
+                tab_id,
+                workspace_id,
+                terminal_title,
+            } = agent;
+            let cwd = cwd.map(|path| canonicalize(&path).unwrap_or(path));
+            Agent {
+                name,
+                kind,
+                status,
+                cwd,
+                pane_id,
+                tab_id,
+                workspace_id,
+                terminal_title,
+            }
+        })
+        .collect()
 }
 
 /// A non-blocking source of agent snapshots. Every method SHALL be non-blocking, on
@@ -396,6 +469,14 @@ struct RealAgentPoll {
     /// At most one poll in flight at a time: set when a request is sent, cleared when
     /// its answer arrives.
     in_flight: bool,
+    /// The instant the currently outstanding poll was sent; `None` when no poll is in
+    /// flight. Compared against [`STALL_AFTER`] on the same `now` reading `drain` already
+    /// takes, so a stall costs no extra clock read.
+    in_flight_since: Option<Instant>,
+    /// Set once the outstanding poll's stall has been reported, so it is announced
+    /// exactly once per episode rather than on every frame; cleared when the poll
+    /// finally answers.
+    stall_reported: bool,
     /// The `Duration` `pending_in` returns until the next call — left behind by `drain`
     /// each time, so `pending_in` reads a clock never.
     pending: Option<Duration>,
@@ -405,22 +486,19 @@ struct RealAgentPoll {
     dead: bool,
 }
 
-impl AgentPoll for RealAgentPoll {
-    /// The schedule lives here, on the render side (design.md -> Decisions 2): read the
-    /// clock once; take the worker's answer with `try_recv`, and on an answer set the
-    /// next due instant to that same `now` plus `POLL_INTERVAL`; then, when no poll is
-    /// in flight and the next due instant has arrived or was never set, send one request
-    /// to the worker; then leave behind the `Duration` `pending_in` returns.
-    fn drain(&mut self) -> Option<AgentSnapshot> {
-        if self.dead {
-            return None;
-        }
-        let now = Instant::now();
+impl RealAgentPoll {
+    /// The scheduling decision, taking `now` as a parameter so the render-side schedule
+    /// and the stall threshold are both provable without a real clock or a real waiting
+    /// thread: `drain` is the one production caller, and its single `Instant::now()`
+    /// reading is what it passes in here. design.md -> Decisions 2 and Decision 4.
+    fn drain_at(&mut self, now: Instant) -> Option<AgentSnapshot> {
         let mut result = None;
         match self.result_rx.try_recv() {
             Ok(snapshot) => {
                 self.next_due = Some(now + POLL_INTERVAL);
                 self.in_flight = false;
+                self.in_flight_since = None;
+                self.stall_reported = false;
                 result = Some(snapshot);
             }
             Err(std::sync::mpsc::TryRecvError::Empty) => {}
@@ -430,9 +508,27 @@ impl AgentPoll for RealAgentPoll {
                 return Some(AgentSnapshot {
                     agents: Vec::new(),
                     reachable: false,
+                    stalled: false,
                     problem: Some("the agent poller's worker has stopped answering".to_string()),
                 });
             }
+        }
+
+        if result.is_none()
+            && self.in_flight
+            && !self.stall_reported
+            && let Some(since) = self.in_flight_since
+            && now.saturating_duration_since(since) >= STALL_AFTER
+        {
+            self.stall_reported = true;
+            result = Some(AgentSnapshot {
+                agents: Vec::new(),
+                reachable: false,
+                stalled: true,
+                problem: Some(format!(
+                    "herdr agent list has not answered in over {STALL_AFTER:?}"
+                )),
+            });
         }
 
         let due = match self.next_due {
@@ -445,6 +541,7 @@ impl AgentPoll for RealAgentPoll {
             // next drain's `try_recv` observes `Disconnected` and reports it once.
             let _ = self.request_tx.send(());
             self.in_flight = true;
+            self.in_flight_since = Some(now);
         }
 
         self.pending = if self.in_flight {
@@ -454,6 +551,21 @@ impl AgentPoll for RealAgentPoll {
                 .map(|next| next.saturating_duration_since(now))
         };
         result
+    }
+}
+
+impl AgentPoll for RealAgentPoll {
+    /// The schedule lives here, on the render side (design.md -> Decisions 2): read the
+    /// clock once and hand it to [`RealAgentPoll::drain_at`], which takes the worker's
+    /// answer with `try_recv`, reports a stall past [`STALL_AFTER`] at most once per
+    /// episode, and, when no poll is in flight and the next due instant has arrived or
+    /// was never set, sends one request to the worker.
+    fn drain(&mut self) -> Option<AgentSnapshot> {
+        if self.dead {
+            return None;
+        }
+        let now = Instant::now();
+        self.drain_at(now)
     }
 
     fn pending_in(&self) -> Option<Duration> {
@@ -473,6 +585,8 @@ pub fn start(cli: std::sync::Arc<dyn HerdrCli>) -> Box<dyn AgentPoll> {
         result_rx,
         next_due: None,
         in_flight: false,
+        in_flight_since: None,
+        stall_reported: false,
         pending: None,
         dead: false,
     })
@@ -909,7 +1023,10 @@ mod tests {
             let snapshot = super::super::poll_once(&fake);
 
             assert!(!snapshot.reachable);
-            assert!(!snapshot.stalled, "an answering-but-failing socket is not a stall");
+            assert!(
+                !snapshot.stalled,
+                "an answering-but-failing socket is not a stall"
+            );
             assert!(snapshot.problem.is_some());
         }
 
@@ -1158,7 +1275,11 @@ mod tests {
             let (mut poller, _request_rx, result_tx) = poller();
             let mut now = Instant::now();
 
-            assert_eq!(poller.drain_at(now), None, "the first drain fires the request");
+            assert_eq!(
+                poller.drain_at(now),
+                None,
+                "the first drain fires the request"
+            );
             now += STALL_AFTER;
             let stalled = poller
                 .drain_at(now)
@@ -2300,8 +2421,7 @@ mod tests {
             );
             let m = empty_mapping();
 
-            let canonicalized =
-                super::super::canonicalize_cwds(vec![raw.clone()], &canonicalize);
+            let canonicalized = super::super::canonicalize_cwds(vec![raw.clone()], &canonicalize);
             assert_eq!(
                 canonicalized[0].cwd,
                 Some(PathBuf::from("/private/tmp/repo"))

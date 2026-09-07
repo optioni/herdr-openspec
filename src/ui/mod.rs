@@ -398,6 +398,7 @@ pub fn load(start: &Path, config: &Config, state_dir: Option<&Path>) -> Dashboar
                 agents: crate::agents::AgentSnapshot {
                     agents: Vec::new(),
                     reachable: false,
+                    stalled: false,
                     problem: None,
                 },
                 agent_names,
@@ -434,6 +435,7 @@ pub fn load(start: &Path, config: &Config, state_dir: Option<&Path>) -> Dashboar
             agents: crate::agents::AgentSnapshot {
                 agents: Vec::new(),
                 reachable: false,
+                stalled: false,
                 problem: None,
             },
             agent_names,
@@ -621,6 +623,7 @@ mod tests {
                 agents: crate::agents::AgentSnapshot {
                     agents: Vec::new(),
                     reachable: false,
+                    stalled: false,
                     problem: None,
                 },
                 agent_names: crate::state::Mapping::default(),
@@ -763,6 +766,7 @@ mod tests {
                     agents: crate::agents::AgentSnapshot {
                         agents: Vec::new(),
                         reachable: false,
+                        stalled: false,
                         problem: None,
                     },
                     agent_names: crate::state::Mapping::default(),
@@ -904,6 +908,7 @@ mod tests {
                     agents: crate::agents::AgentSnapshot {
                         agents: Vec::new(),
                         reachable: false,
+                        stalled: false,
                         problem: None,
                     },
                     agent_names: crate::state::Mapping::default(),

@@ -464,6 +464,7 @@ mod tests {
             agents: crate::agents::AgentSnapshot {
                 agents: Vec::new(),
                 reachable: false,
+                stalled: false,
                 problem: None,
             },
             agent_names: crate::state::Mapping::default(),
@@ -551,6 +552,7 @@ mod tests {
                 agents: crate::agents::AgentSnapshot {
                     agents: Vec::new(),
                     reachable: false,
+                    stalled: false,
                     problem: None,
                 },
                 agent_names: crate::state::Mapping::default(),
@@ -616,18 +618,21 @@ mod tests {
         unreachable.agents = crate::agents::AgentSnapshot {
             agents: Vec::new(),
             reachable: false,
+            stalled: false,
             problem: None,
         };
         let mut reachable_empty = three_active();
         reachable_empty.agents = crate::agents::AgentSnapshot {
             agents: Vec::new(),
             reachable: true,
+            stalled: false,
             problem: None,
         };
         let mut reachable_matched = three_active();
         reachable_matched.agents = crate::agents::AgentSnapshot {
             agents: vec![agent_at("add-token-refresh", AgentStatus::Working)],
             reachable: true,
+            stalled: false,
             problem: None,
         };
 
@@ -680,12 +685,14 @@ mod tests {
         control.agents = crate::agents::AgentSnapshot {
             agents: vec![in_scope.clone()],
             reachable: true,
+            stalled: false,
             problem: None,
         };
         let mut with_invisible_agents = three_active();
         with_invisible_agents.agents = crate::agents::AgentSnapshot {
             agents: vec![in_scope, no_cwd, foreign_cwd, worktree_cwd],
             reachable: true,
+            stalled: false,
             problem: None,
         };
 
@@ -1222,6 +1229,7 @@ mod tests {
             agents: crate::agents::AgentSnapshot {
                 agents: Vec::new(),
                 reachable: false,
+                stalled: false,
                 problem: None,
             },
             agent_names: crate::state::Mapping::default(),
@@ -1283,6 +1291,7 @@ mod tests {
             agents: crate::agents::AgentSnapshot {
                 agents: Vec::new(),
                 reachable: false,
+                stalled: false,
                 problem: None,
             },
             agent_names: crate::state::Mapping::default(),

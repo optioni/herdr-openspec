@@ -794,6 +794,7 @@ pub(crate) mod testutil {
                 agents: crate::agents::AgentSnapshot {
                     agents: Vec::new(),
                     reachable: false,
+                    stalled: false,
                     problem: None,
                 },
                 agent_names: crate::state::Mapping::default(),
@@ -862,6 +863,7 @@ pub(crate) mod testutil {
                 vec![Some(AgentSnapshot {
                     agents: Vec::new(),
                     reachable: true,
+                    stalled: false,
                     problem: None,
                 })],
                 vec![Some(std::time::Duration::from_millis(40))],
@@ -871,6 +873,7 @@ pub(crate) mod testutil {
                 Some(AgentSnapshot {
                     agents: Vec::new(),
                     reachable: true,
+                    stalled: false,
                     problem: None,
                 })
             );

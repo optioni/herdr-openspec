@@ -234,6 +234,7 @@ mod tests {
             agents: crate::agents::AgentSnapshot {
                 agents: Vec::new(),
                 reachable: false,
+                stalled: false,
                 problem: None,
             },
             agent_names: crate::state::Mapping::default(),
@@ -272,6 +273,7 @@ mod tests {
             agents: crate::agents::AgentSnapshot {
                 agents: Vec::new(),
                 reachable: false,
+                stalled: false,
                 problem: None,
             },
             agent_names: crate::state::Mapping::default(),
@@ -651,6 +653,7 @@ mod tests {
             agents: crate::agents::AgentSnapshot {
                 agents: Vec::new(),
                 reachable: false,
+                stalled: false,
                 problem: None,
             },
             agent_names: crate::state::Mapping::default(),
@@ -778,6 +781,7 @@ mod tests {
             agents: crate::agents::AgentSnapshot {
                 agents: Vec::new(),
                 reachable: false,
+                stalled: false,
                 problem: None,
             },
             agent_names: crate::state::Mapping::default(),
@@ -997,6 +1001,7 @@ mod tests {
             agents: crate::agents::AgentSnapshot {
                 agents: Vec::new(),
                 reachable: false,
+                stalled: false,
                 problem: None,
             },
             agent_names: crate::state::Mapping::default(),
@@ -1100,6 +1105,7 @@ mod tests {
             agents: crate::agents::AgentSnapshot {
                 agents: Vec::new(),
                 reachable: false,
+                stalled: false,
                 problem: None,
             },
             agent_names: crate::state::Mapping::default(),
@@ -1708,6 +1714,7 @@ mod tests {
                     Some(crate::agents::AgentSnapshot {
                         agents: vec![agent],
                         reachable: true,
+                        stalled: false,
                         problem: None,
                     }),
                     None,
@@ -1808,6 +1815,7 @@ mod tests {
                 vec![Some(crate::agents::AgentSnapshot {
                     agents: Vec::new(),
                     reachable: false,
+                    stalled: false,
                     problem: Some("herdr agent list exited 1: server_not_running".to_string()),
                 })],
                 Vec::new(),
@@ -1949,6 +1957,7 @@ mod tests {
             vec![Some(crate::agents::AgentSnapshot {
                 agents: vec![agent],
                 reachable: true,
+                stalled: false,
                 problem: None,
             })],
             Vec::new(),
@@ -2007,11 +2016,13 @@ mod tests {
                 Some(crate::agents::AgentSnapshot {
                     agents: vec![first_agent],
                     reachable: true,
+                    stalled: false,
                     problem: None,
                 }),
                 Some(crate::agents::AgentSnapshot {
                     agents: Vec::new(),
                     reachable: true,
+                    stalled: false,
                     problem: None,
                 }),
             ],
@@ -2153,6 +2164,7 @@ mod tests {
             crate::agents::AgentSnapshot {
                 agents: Vec::new(),
                 reachable: false,
+                stalled: false,
                 problem: None,
             }
         );
