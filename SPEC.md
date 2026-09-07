@@ -157,10 +157,10 @@ the first tier misses, ask `openspec schema which <name> --json`, which returns
 `schema.yaml` from that directory. The `artifacts` list becomes the tab order. The
 tasks artifact is the one whose `generates` equals the schema's top-level
 `apply.tracks`, falling back to the artifact with id `tasks` when no `apply` block
-declares what it tracks; a `tracks` value matching nothing yields no tasks artifact
-rather than falling back, because that is what the OpenSpec CLI does and the
-dual-source model depends on the two agreeing. There is no `role` key anywhere in
-the schema format.
+declares what it tracks; a *present* `tracks` value matching nothing — a wrong-typed
+one included — yields no tasks artifact rather than falling back, because that is
+what the OpenSpec CLI does and the dual-source model depends on the two agreeing.
+There is no `role` key anywhere in the schema format.
 
 **Changes.** `openspec list --json` yields the envelope
 `{"changes": [ … ], "root": {"path", "source"}}` — **not** a bare array. Each
