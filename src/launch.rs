@@ -524,32 +524,88 @@ mod tests {
             assert!(matches!(go, Decision::Go(_)), "expected Go, got {go:?}");
         }
 
+        /// `seam-resilience`: a second press while a launch is already in flight must be
+        /// refused rather than run a second `pane split` + `agent start` + `agent prompt`
+        /// sequence behind the first. `live_names` is deliberately empty — the poller has not
+        /// yet seen the agent, which is the whole point of the window this closes. See
+        /// specs/agent-launch/spec.md -> "A second press while a launch is in flight is
+        /// refused, not queued".
+        #[test]
+        fn a_second_press_while_a_launch_is_in_flight_is_refused_not_queued() {
+            for intent in [Intent::Apply, Intent::Continue, Intent::Archive] {
+                let result = decide(intent, Some("2fa-support"), None, true, &[], true);
+                match result {
+                    Decision::Refuse(reason) => {
+                        assert!(
+                            reason.to_lowercase().contains("already running"),
+                            "{intent:?}: {reason}"
+                        );
+                        assert!(reason.to_lowercase().contains("wait"), "{intent:?}: {reason}");
+                    }
+                    other => panic!("expected Refuse for {intent:?}, got {other:?}"),
+                }
+                // The same three calls with `in_flight` false return `Go`, so the refusal is
+                // caused by the flag and by nothing else in the fixture.
+                let go = decide(intent, Some("2fa-support"), None, true, &[], false);
+                assert!(
+                    matches!(go, Decision::Go(_)),
+                    "{intent:?} expected Go with in_flight=false, got {go:?}"
+                );
+            }
+        }
+
+        /// `seam-resilience`: `Focus` is exempt from the in-flight guard — it splits no pane
+        /// and starts no agent, so a user waiting through a slow launch can still press `g`.
+        /// See specs/agent-launch/spec.md -> "Focus still works while a launch is in flight".
+        #[test]
+        fn focus_still_works_while_a_launch_is_in_flight() {
+            let result = decide(Intent::Focus, None, Some("w8:p3"), true, &[], true);
+            assert_eq!(
+                result,
+                Decision::Go(Request::Focus {
+                    pane_id: "w8:p3".to_string()
+                })
+            );
+        }
+
         #[test]
         fn every_combination_is_total() {
-            for intent in [
-                Intent::Apply,
-                Intent::Continue,
-                Intent::Archive,
-                Intent::Focus,
-            ] {
-                let result = decide(intent, Some(""), Some(""), true, &[""]);
-                if intent == Intent::Focus {
-                    assert_eq!(
-                        result,
-                        Decision::Go(Request::Focus {
-                            pane_id: String::new()
-                        })
-                    );
-                } else {
-                    assert_eq!(
-                        result,
-                        Decision::Go(Request::Launch {
-                            change: String::new(),
-                            agent: "change".to_string(),
-                            intent,
-                        }),
-                        "{intent:?}"
-                    );
+            for in_flight in [false, true] {
+                for intent in [
+                    Intent::Apply,
+                    Intent::Continue,
+                    Intent::Archive,
+                    Intent::Focus,
+                ] {
+                    let result = decide(intent, Some(""), Some(""), true, &[""], in_flight);
+                    match (intent, in_flight) {
+                        (Intent::Focus, _) => {
+                            assert_eq!(
+                                result,
+                                Decision::Go(Request::Focus {
+                                    pane_id: String::new()
+                                }),
+                                "{intent:?} in_flight={in_flight}"
+                            );
+                        }
+                        (_, true) => {
+                            assert!(
+                                matches!(result, Decision::Refuse(_)),
+                                "{intent:?} expected Refuse, got {result:?}"
+                            );
+                        }
+                        (_, false) => {
+                            assert_eq!(
+                                result,
+                                Decision::Go(Request::Launch {
+                                    change: String::new(),
+                                    agent: "change".to_string(),
+                                    intent,
+                                }),
+                                "{intent:?}"
+                            );
+                        }
+                    }
                 }
             }
         }
@@ -1287,6 +1343,24 @@ mod tests {
         }
     }
 
+    /// `seam-resilience`: the settle budget, pinned on `watch::DEBOUNCE`'s and
+    /// `agents::POLL_INTERVAL`'s named-constant-plus-assertion terms. See
+    /// specs/agent-launch/spec.md -> "The settle budget is a named constant and is asserted".
+    mod budget {
+        #[test]
+        fn settle_budget_is_thirty_five_seconds_and_sits_between_the_two_deadlines() {
+            assert_eq!(
+                super::super::SETTLE_BUDGET,
+                std::time::Duration::from_secs(35)
+            );
+            // Above the measured thirty seconds `herdr agent start` spends waiting for
+            // interactive readiness, and below `cli::RUN_DEADLINE`, so the budget cannot
+            // silently drift below the wait it exists to cover.
+            assert!(super::super::SETTLE_BUDGET > std::time::Duration::from_secs(30));
+            assert!(super::super::SETTLE_BUDGET < crate::cli::RUN_DEADLINE);
+        }
+    }
+
     mod focus {
         use crate::cli::FakeCli;
         use crate::launch::{Outcome, Request, run_request};
@@ -1423,6 +1497,21 @@ mod tests {
             for _ in 0..10 {
                 assert_eq!(launcher.drain(), None);
             }
+
+            // `seam-resilience`: `settle` is a deadline-bounded poll of `drain`, never a fixed
+            // sleep, so it returns as soon as its own budget elapses rather than blocking past
+            // it - which is what keeps a no-repository pane from paying `SETTLE_BUDGET` on
+            // quit if it were ever called there. A short budget stands in for the real
+            // constant so the test itself stays fast.
+            let budget = Duration::from_millis(50);
+            let started = Instant::now();
+            let outcome = super::super::settle(launcher.as_mut(), budget);
+            assert_eq!(outcome, None);
+            assert!(
+                started.elapsed() < Duration::from_secs(5),
+                "settle over the inert launcher must return once its budget elapses, took {:?}",
+                started.elapsed()
+            );
         }
 
         /// A `HerdrCli` whose first call blocks until the test releases it, on a channel it
@@ -1490,6 +1579,54 @@ mod tests {
                     "the worker did not return within 10s after the launcher was dropped: {other:?}"
                 ),
             }
+        }
+
+        /// `seam-resilience`: on exactly `agents::RealAgentPoll`'s model. Constructed directly
+        /// with the worker's result `Sender` and request `Receiver` already dropped, standing
+        /// in for a worker that has exited, with no thread involved - the same "real channels,
+        /// no thread" shape `refresh::a_dead_refresh_worker_is_reported_once...` uses. Before
+        /// this fix, a dead worker was indistinguishable from a working one for the rest of the
+        /// session: `request` silently discarded the `SendError` and `drain`'s `try_recv`
+        /// collapsed `Disconnected` into `None`. See specs/agent-launch/spec.md -> "A dead
+        /// launcher worker is reported once and then stops being reported".
+        #[test]
+        fn a_dead_launcher_worker_is_reported_once_and_then_stops_being_reported() {
+            let (request_tx, request_rx) = std::sync::mpsc::channel::<Request>();
+            let (result_tx, result_rx) = std::sync::mpsc::channel::<Outcome>();
+            drop(request_rx);
+            drop(result_tx);
+            let mut launcher: Box<dyn Launcher> = Box::new(super::super::RealLauncher {
+                request_tx,
+                result_rx,
+                dead: false,
+                pending_death: false,
+            });
+
+            let request = || Request::Launch {
+                change: "add-auth".to_string(),
+                agent: "add-auth".to_string(),
+                intent: Intent::Apply,
+            };
+
+            launcher.request(request());
+            match launcher.drain() {
+                Some(Outcome { named, problems }) => {
+                    assert_eq!(named, None);
+                    assert_eq!(problems.len(), 1, "a reason must be present: {problems:?}");
+                    assert!(problems[0].contains("launch"), "{}", problems[0]);
+                }
+                None => panic!("the first drain after the worker died must report it"),
+            }
+
+            launcher.request(request());
+            assert_eq!(
+                launcher.drain(),
+                None,
+                "a dead launcher degrades to silence, not a growing list"
+            );
+
+            launcher.request(request());
+            assert_eq!(launcher.drain(), None);
         }
 
         #[test]
