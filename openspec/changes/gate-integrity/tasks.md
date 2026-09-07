@@ -270,28 +270,28 @@ Test Strategy). Written first, it is RED for exactly the five gates this change 
 ## 8. Documentation and the checks that bind it (D1, D2, D3)
 <!-- kind: operational -->
 
-- [ ] 8.1 CHECK: Record the drift before correcting it.
+- [x] 8.1 CHECK: Record the drift before correcting it.
   `grep -c "EXTENDED\|OPENSPEC-UNTOUCHED\|TESTCOUNT" AGENTS.md README.md SPEC.md` → **0, 0, 0**
   at HEAD, while `ls scripts/gates/openspec-untouched.sh` resolves — both halves of the D3
   scenario unmet. `grep -n 'all four' SPEC.md` → the Gates section, against
   `check: fmt-check lint gates test coverage` in the `Makefile` — four described, five run.
-- [ ] 8.2 Rewrite in `SPEC.md`: **Gates** (audience: anyone reading the design contract) —
+- [x] 8.2 Rewrite in `SPEC.md`: **Gates** (audience: anyone reading the design contract) —
   replace "all four" and the four-row table with five rows including the hygiene tier, and name
   `make gates-full` and its separate CI job. Replaces a table that, by this project's
   "SPEC.md wins" rule, currently mandates deleting the gates tier.
-- [ ] 8.3 Rewrite in `AGENTS.md`: **Quality gates** (audience: every agent session) — correct
+- [x] 8.3 Rewrite in `AGENTS.md`: **Quality gates** (audience: every agent session) — correct
   "a test proves every gate can still fail" to name `tests/gate-controls.toml` and what the
   control suite does, and name `EXTENDED` and `TESTCOUNT` as not extracted plus
   `OPENSPEC-UNTOUCHED` as split, one line of reason each. Net addition is small: the
   gates-tier paragraph already there is rewritten, not appended to.
-- [ ] 8.4 Add to `AGENTS.md`: **Quality gates** — one line that coverage is enforced at two
+- [x] 8.4 Add to `AGENTS.md`: **Quality gates** — one line that coverage is enforced at two
   floors, total and production-slice, and that the production one is the falsifiable one.
   Durable because a future change that lowers only the total will otherwise look compliant.
-- [ ] 8.5 CHANGE: Extend `tests/ci_workflow.rs` — assert `AGENTS.md` names all three gates
+- [x] 8.5 CHANGE: Extend `tests/ci_workflow.rs` — assert `AGENTS.md` names all three gates
   (the prose clause it never checked, beside the file-absence clause it did), assert `SPEC.md`'s
   gate table has at least as many rows as `check` has prerequisites, and assert `ci.yml` names
   no coverage threshold and no report path.
-- [ ] 8.6 VERIFY: `cargo test --all-features ci_workflow` green. Then plant each correction's
+- [x] 8.6 VERIFY: `cargo test --all-features ci_workflow` green. Then plant each correction's
   inverse — remove one gate name from `AGENTS.md`, delete one row from `SPEC.md`'s table — and
   confirm the new assertions fire, since a document check that has never failed is the same
   defect one layer up.
