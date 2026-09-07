@@ -893,20 +893,27 @@ own such test lives in `ui::tests::load::`, never in a view module.
 
 ### Gates
 
-Every gate command is written once, in the `Makefile`. Locally, `make check` runs all
-four in order and stops at the first failure:
+Every gate command is written once, in the `Makefile`. Locally, `make check` composes
+five gates, in this order, and stops at the first failure:
 
-| Gate | Command |
+| Target | Command |
 |---|---|
-| Format | `cargo fmt --all -- --check` |
-| Lint | `cargo clippy --all-targets --all-features -- -D warnings` |
-| Test | `cargo test --all-features` |
-| Coverage | `cargo llvm-cov --fail-under-lines 80` |
+| `fmt-check` | `cargo fmt --all -- --check` |
+| `lint` | `cargo clippy --all-targets --all-features -- -D warnings` |
+| `gates` | one invocation line per file under `scripts/gates/` |
+| `test` | `cargo test --all-features` |
+| `coverage` | `cargo llvm-cov --fail-under-lines 80`, plus a production-slice floor computed from its JSON export |
+
+`gates-full` (`DEPS_FULL=1 /bin/sh scripts/gates/deps.sh`) is deliberately **not**
+composed into `check`: it rebuilds the crate several times over — once for the release
+binary, once per dependency removed — so it runs instead in its own CI job on every push,
+and that cost never lands on a local `make check` or on the per-platform `check` runs.
 
 `cargo-llvm-cov` is chosen over `tarpaulin`, which is Linux-first and unreliable on
 Apple Silicon. CI invokes the same targets individually rather than the composite —
-`make fmt-check`, `make lint`, and `make test` on both `ubuntu-latest` and
-`macos-latest` with `Swatinem/rust-cache`, and `make coverage` once, on Linux.
+`make fmt-check`, `make lint`, and `make gates` and `make test` on both `ubuntu-latest`
+and `macos-latest` with `Swatinem/rust-cache`, `make coverage` once on Linux, and
+`make gates-full` in its own Linux-only job.
 
 Two one-time setup steps are required for local development — `rustup component add
 clippy` and `cargo install cargo-llvm-cov` — since CI obtains `clippy` from the
