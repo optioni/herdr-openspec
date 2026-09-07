@@ -312,14 +312,14 @@ Test Strategy). Written first, it is RED for exactly the five gates this change 
 ## 10. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 10.1 CHECK: Inspect the intended verification commands and affected tiers — gate control,
+- [x] 10.1 CHECK: Inspect the intended verification commands and affected tiers — gate control,
   gate green, unit, coverage, and document (design.md → Test Strategy). No view tier applies:
   nothing in this change renders.
-- [ ] 10.2 VERIFY: `cargo fmt --all -- --check` — clean
-- [ ] 10.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors
-- [ ] 10.4 VERIFY: `make gates` — every script exits 0 with its `OK` line
-- [ ] 10.5 VERIFY: `cargo test --all-features` — green
-- [ ] 10.6 VERIFY: `make coverage` — both floors pass, and every `covers` range is covered
-- [ ] 10.7 VERIFY: `make check` — green end to end, which is the single gate this repository
+- [x] 10.2 VERIFY: `cargo fmt --all -- --check` — clean
+- [x] 10.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors
+- [x] 10.4 VERIFY: `make gates` — every script exits 0 with its `OK` line
+- [x] 10.5 VERIFY: `cargo test --all-features` — green
+- [x] 10.6 VERIFY: `make coverage` — both floors pass, and every `covers` range is covered
+- [x] 10.7 VERIFY: `make check` — green end to end, which is the single gate this repository
   reports against. If it fails, report the failing sub-command by name rather than a summary.
-- [ ] 10.8 VERIFY: `openspec validate gate-integrity --strict`
+- [x] 10.8 VERIFY: `openspec validate gate-integrity --strict`
