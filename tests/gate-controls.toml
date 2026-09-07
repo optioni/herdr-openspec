@@ -53,6 +53,19 @@ expect = "AGENTSEAM FAIL (leg 1)"
 why = "a spawn API named directly in src/agents.rs must fail leg 1's file-scoped restatement of NOSPAWN-GREP"
 
 [[control]]
+id = "agentseam-alias"
+script = "agentseam.sh"
+plant_file = "src/agents.rs"
+plant_find = "//! The Herdr agent poller: the crate's second worker thread. Confined to this one"
+plant_replace = '''//! The Herdr agent poller: the crate's second worker thread. Confined to this one
+use std::process::{Child, Command as PlantedAgentsAliasProc};
+fn planted_alias_spawn() -> std::io::Result<Child> {
+    PlantedAgentsAliasProc::new("herdr").spawn()
+}'''
+expect = "AGENTSEAM FAIL (leg 1)"
+why = "G2: a brace-grouped aliased import in src/agents.rs matches none of process::Command, Command::new, Stdio - the aliased-import scenario proved in every seam-protected file"
+
+[[control]]
 id = "build-graph-snapshot"
 script = "build-graph.sh"
 env = "env -u GRAPH_WRITE"
@@ -110,6 +123,38 @@ plant_replace = '''//! The launcher: the crate's third worker thread, and the on
 use std::process::Command as PlantedLaunchSeamCommand;'''
 expect = "LAUNCHSEAM FAIL (leg 1)"
 why = "a spawn API named directly in src/launch.rs must fail leg 1's file-scoped restatement of NOSPAWN-GREP"
+
+[[control]]
+id = "launchseam-alias"
+script = "launchseam.sh"
+plant_file = "src/launch.rs"
+plant_find = "//! The launcher: the crate's third worker thread, and the only module besides `src/cli.rs`,"
+plant_replace = '''//! The launcher: the crate's third worker thread, and the only module besides `src/cli.rs`,
+use std::process::{Child, Command as PlantedLaunchAliasProc};
+fn planted_alias_spawn() -> std::io::Result<Child> {
+    PlantedLaunchAliasProc::new("herdr").spawn()
+}'''
+expect = "LAUNCHSEAM FAIL (leg 1)"
+why = "G2: a brace-grouped aliased import in src/launch.rs matches none of process::Command, Command::new, Stdio"
+
+[[control]]
+id = "launchseam-alias-open"
+script = "launchseam.sh"
+# LAUNCH points leg 1 at src/open.rs, the second LAUNCHSEAM invocation the Makefile's
+# `gates:` recipe runs. ENTRY is spelled with [[:space:]] instead of a literal space so it
+# survives tests/gate_controls.rs's whitespace-split env parser as a single token; it is the
+# same anchor regex the Makefile passes as 'pub fn run_from_env\(', just written to avoid an
+# embedded space.
+env = 'LAUNCH=src/open.rs ENTRY=pub[[:space:]]fn[[:space:]]run_from_env\('
+plant_file = "src/open.rs"
+plant_find = "//! The `open` and `open-tab` subcommands: open or focus the OpenSpec dashboard for the"
+plant_replace = '''//! The `open` and `open-tab` subcommands: open or focus the OpenSpec dashboard for the
+use std::process::{Child, Command as PlantedOpenAliasProc};
+fn planted_alias_spawn() -> std::io::Result<Child> {
+    PlantedOpenAliasProc::new("herdr").spawn()
+}'''
+expect = "LAUNCHSEAM FAIL (leg 1)"
+why = "G2: the same aliased import in src/open.rs must fail LAUNCHSEAM's second invocation, over the second subject it protects"
 
 [[control]]
 id = "listwidths-missing"
@@ -255,6 +300,37 @@ expect = "NOSPAWN FAIL: spawn API outside"
 why = "G2: a brace-grouped aliased import matches none of process::Command, Command::new, Stdio; recorded as the ideal message this gate does not yet print"
 
 [[control]]
+id = "nospawn-grep-item-only"
+script = "nospawn-grep.sh"
+plant_file = "src/ui/mod.rs"
+plant_find = "//! The dashboard shell: composition root for the render seam. See"
+plant_replace = '''//! The dashboard shell: composition root for the render seam. See
+use std::process::Child;'''
+expect = "NOSPAWN FAIL: spawn API outside"
+why = "task 2.5: an unbraced 'use std::process::Child;' is rustfmt-stable and brace-free, so it is caught only by the item alternative - isolated from process::\\{ and from src/cli.rs:14's own match, which is satisfied regardless by the pre-existing bare 'Stdio' alternative"
+
+[[control]]
+id = "nospawn-grep-driver-bare"
+script = "nospawn-grep.sh"
+plant_file = "src/ui/driver.rs"
+plant_find = "//! The event loop: draw first, then wait. See"
+plant_replace = '''//! The event loop: draw first, then wait. See
+fn planted_bare_spawn() -> std::io::Result<std::process::Child> {
+    std::process::Command::new(concat!("her", "dr")).spawn()
+}'''
+expect = "NOSPAWN FAIL: spawn API outside"
+why = "task 2.5b: the widened pattern must still catch the original bare std::process::Command::new spelling, not only the two new alternatives"
+
+[[control]]
+id = "nospawn-grep-safe-brace-cost"
+script = "nospawn-grep.sh"
+plant_file = "src/main.rs"
+plant_find = "use std::process::exit;"
+plant_replace = "use std::process::{exit, id};"
+expect = "NOSPAWN FAIL: spawn API outside"
+why = "task 2.5b: the accepted cost - a brace group of only safe items is refused too, caught by process::\\{ alone; the workaround is one use line per item, pinned here so it is a decision and not a surprise"
+
+[[control]]
 id = "notabseam-hit"
 script = "notabseam.sh"
 plant_file = "src/ui/detail.rs"
@@ -343,6 +419,19 @@ plant_replace = '''//! The row grammar: every function here is a pure total tran
 // notify::RecommendedWatcher mentioned here'''
 expect = "WATCHSEAM FAIL: the watch crate is named outside src/watch.rs"
 why = "the notify crate named outside src/watch.rs must fail the confinement sweep"
+
+[[control]]
+id = "watchseam-alias"
+script = "watchseam.sh"
+plant_file = "src/watch.rs"
+plant_find = "//! The filesystem watch: the only module in the crate naming `notify`. See"
+plant_replace = '''//! The filesystem watch: the only module in the crate naming `notify`. See
+use std::process::{Child, Command as PlantedWatchAliasProc};
+fn planted_alias_spawn() -> std::io::Result<Child> {
+    PlantedWatchAliasProc::new("herdr").spawn()
+}'''
+expect = "WATCHSEAM FAIL: src/watch.rs spawns a process"
+why = "G2: a brace-grouped aliased import in src/watch.rs matches none of process::Command, Command::new, Stdio"
 
 [[control]]
 id = "widths-missing"
