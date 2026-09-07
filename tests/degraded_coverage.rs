@@ -14,7 +14,7 @@ fn manifest_dir() -> PathBuf {
 
 /// The floor `SPEC.md`'s table and the coverage map must each meet — a lower bound, not an
 /// equality, so a later change may add a degraded state without touching this number.
-const MIN_ROWS: usize = 45;
+const MIN_ROWS: usize = 46;
 
 /// Parse the table between `## Degraded states` and `### No terminal is not a degraded
 /// state`, skipping the header and separator rows, taking each remaining line's first

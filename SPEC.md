@@ -769,6 +769,7 @@ Every condition renders usable content rather than an error screen:
 | `open`/`open-tab`'s `plugin pane focus` call fails with a usage error (code 2) | Warns and falls through to opening once — refusing would fail closed on a Herdr the manifest's `min_herdr_version` still declares supported |
 | `open`/`open-tab`'s `plugin pane focus` call fails with a domain error, or `plugin pane open` itself fails | The command stops; the reason — `herdr exited with code <n>: <stderr>`, `herdr_reason`'s own formatted prefix, never Herdr's raw message byte-for-byte — goes to stderr and the process exits 1 |
 | The dashboard process opened by `open`/`open-tab` finds no workspace cwd in its own injected Herdr context (`ui::startup_cwd` returns `None`) | Falls back to `std::env::current_dir()` — the plugin root — and renders whatever `openspec/` (if any) is found there, exactly as a `--cwd`-less direct `herdr plugin pane open` always has; not a refusal |
+| A change is archived between the worker's `list --json` call and its file walk | The merged `ChangeSet` holds it in both `active` (the CLI's stale answer) and `archived` (the fresh file walk) for exactly one refresh cycle, with no problem recorded — `merge` does not consult `files.archived` when deciding whether a CLI change is CLI-only, because doing so would invert the dual-source model's rule that the CLI corrects the files, for a state that self-corrects once the next `list --json` no longer names the change (design.md → Decision D6) |
 
 ### No terminal is not a degraded state
 
