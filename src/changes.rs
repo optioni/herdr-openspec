@@ -4520,6 +4520,89 @@ apply:
         }
     }
 
+    // --- group 6a: `cli_error_problem` — every diagnostic the seam carried -
+    // (`mod cli_error_problem`)
+
+    mod cli_error_problem {
+        // Explicit import first: the module and the function under test
+        // share a name, and an explicit `use` shadows the same name a glob
+        // import would otherwise bind to the enclosing `mod cli_error_problem`
+        // declaration itself.
+        use super::super::cli_error_problem;
+        use crate::cli::CliError;
+
+        fn failed(code: Option<i32>, stderr: &str) -> CliError {
+            CliError::Failed {
+                program: "openspec".to_string(),
+                args: vec!["list".to_string(), "--json".to_string()],
+                code,
+                stderr: stderr.to_string(),
+            }
+        }
+
+        #[test]
+        fn an_exec_failure_of_the_openspec_shim_reports_its_own_stderr() {
+            // Measured on this machine: `env -i PATH=/usr/bin:/bin
+            // "$(readlink -f ~/.nvm/versions/node/v24.18.0/bin/openspec)"
+            // list --json` -> exit=127, stdout=[], stderr=[env: node: No
+            // such file or directory].
+            let err = failed(Some(127), "env: node: No such file or directory\n");
+            let problem = cli_error_problem("openspec list --json", &["list", "--json"], &err);
+            assert!(problem.contains("127"));
+            assert!(problem.contains("list"));
+            assert!(problem.contains("env: node: No such file or directory"));
+            assert!(!problem.contains("env: node: No such file or directory\n"));
+        }
+
+        #[test]
+        fn a_multi_line_stderr_contributes_only_its_first_non_blank_line_trimmed() {
+            let err = failed(Some(1), "\n\n  first line  \nsecond line\nthird line");
+            let problem = cli_error_problem("openspec list --json", &["list", "--json"], &err);
+            assert_eq!(
+                problem,
+                "openspec list --json: openspec list --json exited with code 1: first line"
+            );
+        }
+
+        #[test]
+        fn a_note_banner_is_skipped_and_the_next_line_carried() {
+            // Measured: `openspec schema which nosuchschema --json` from
+            // `/tmp` -> exit=1, the real answer on stdout, stderr=[Note:
+            // Schema commands are experimental and may change.].
+            let err = failed(
+                Some(1),
+                "Note: Schema commands are experimental and may change.\nreal diagnosis here",
+            );
+            let problem = cli_error_problem("openspec list --json", &["list", "--json"], &err);
+            assert!(problem.ends_with("real diagnosis here"));
+            assert!(!problem.contains("Note:"));
+            assert!(!problem.contains("experimental"));
+
+            let banner_only = failed(
+                Some(1),
+                "Note: Schema commands are experimental and may change.",
+            );
+            let banner_only_problem =
+                cli_error_problem("openspec list --json", &["list", "--json"], &banner_only);
+            let empty = failed(Some(1), "");
+            let empty_problem = cli_error_problem("openspec list --json", &["list", "--json"], &empty);
+            assert_eq!(banner_only_problem, empty_problem);
+
+            let padded = failed(Some(1), "   Note: padded banner\nkept");
+            let padded_problem = cli_error_problem("openspec list --json", &["list", "--json"], &padded);
+            assert!(padded_problem.ends_with("kept"));
+        }
+
+        #[test]
+        fn a_whitespace_only_stderr_appends_nothing() {
+            let err = failed(Some(1), "   \n\t\n");
+            let problem = cli_error_problem("openspec list --json", &["list", "--json"], &err);
+            let empty = failed(Some(1), "");
+            let empty_problem = cli_error_problem("openspec list --json", &["list", "--json"], &empty);
+            assert_eq!(problem, empty_problem);
+        }
+    }
+
     // --- group 7: schema resolution through the CLI fallback tier ----------
     // (`mod schema_fallback`)
 
