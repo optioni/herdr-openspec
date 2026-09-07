@@ -12,14 +12,14 @@ which one is true. S10's own facts are already measured (design.md -> Decision 1
 group adds is confirming they hold **inside a pane process**, and telling the two defects
 apart by exit code.
 
-- [ ] 1.1 CHECK: Confirm the claim is currently unmeasured — `grep -rn 'current_dir' src/open.rs src/ui/mod.rs | grep -v '^.*tests'` and confirm no production line reads the pane process's own directory for this purpose. At HEAD, `grep -c '\.current_dir(' src/cli.rs` → `0` (exit 1), so no spawn sets one either.
-- [ ] 1.2 CHANGE: Add two temporary first statements to `ui::run` — `eprintln!("PANE CWD: {:?}", std::env::current_dir());` and an `eprintln!` of `startup_cwd`'s result — then `make build` and `herdr plugin link .`.
-- [ ] 1.3 CHANGE: Add a third temporary statement printing `resolve::openspec_bin`'s resolved path, and a fourth that spawns that path with `["list","--json"]` through the seam and prints its exit code, stdout, and stderr. This is the half that separates S10 from S7.
-- [ ] 1.4 CHECK: Open a Herdr workspace rooted at a **different** OpenSpec repository and open the dashboard from the plugin's action menu (`open` / `open-tab`, not a hand-run binary). Read all four printed values from the pane's stderr.
-- [ ] 1.5 CHECK: Record what the pane rendered — whether the change list was entirely file-sourced, and the exact text of any root-disagreement problem row.
-- [ ] 1.6 CHECK: Classify the result. Exit `127` with `env: node: No such file or directory` is S10 and not S7 — the child never ran, so no working directory would have helped. A payload plus a root-disagreement row is S7. Both can be true at once; record which.
-- [ ] 1.7 CHANGE: Write every observation verbatim into design.md -> **S7/S10 measurement (recorded)**, then remove the temporary lines and rebuild.
-- [ ] 1.8 VERIFY: `git diff --stat` shows no `src/` change remaining from this group, and `make check` is green.
+- [x] 1.1 CHECK: Confirm the claim is currently unmeasured — `grep -rn 'current_dir' src/open.rs src/ui/mod.rs | grep -v '^.*tests'` and confirm no production line reads the pane process's own directory for this purpose. At HEAD, `grep -c '\.current_dir(' src/cli.rs` → `0` (exit 1), so no spawn sets one either.
+- [x] 1.2 CHANGE: Add two temporary first statements to `ui::run` — `eprintln!("PANE CWD: {:?}", std::env::current_dir());` and an `eprintln!` of `startup_cwd`'s result — then `make build` and `herdr plugin link .`.
+- [x] 1.3 CHANGE: Add a third temporary statement printing `resolve::openspec_bin`'s resolved path, and a fourth that spawns that path with `["list","--json"]` through the seam and prints its exit code, stdout, and stderr. This is the half that separates S10 from S7.
+- [x] 1.4 CHECK: Open a Herdr workspace rooted at a **different** OpenSpec repository and open the dashboard from the plugin's action menu (`open` / `open-tab`, not a hand-run binary). Read all four printed values from the pane's stderr.
+- [x] 1.5 CHECK: Record what the pane rendered — whether the change list was entirely file-sourced, and the exact text of any root-disagreement problem row.
+- [x] 1.6 CHECK: Classify the result. Exit `127` with `env: node: No such file or directory` is S10 and not S7 — the child never ran, so no working directory would have helped. A payload plus a root-disagreement row is S7. Both can be true at once; record which.
+- [x] 1.7 CHANGE: Write every observation verbatim into design.md -> **S7/S10 measurement (recorded)**, then remove the temporary lines and rebuild.
+- [x] 1.8 VERIFY: `git diff --stat` shows no `src/` change remaining from this group, and `make check` is green.
 
 ## 2. The subprocess seam: a working directory, an environment overlay, and a deadline
 <!-- kind: behavior -->

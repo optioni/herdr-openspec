@@ -602,14 +602,116 @@ rebuild — there is no state written by this change that an older binary would 
 
 ## S7/S10 measurement (recorded)
 
-*To be filled in by task 1 before any code changes are made. Record verbatim: the pane
-process's `std::env::current_dir()`, `ui::startup_cwd`'s value, whether the rendered change
-list was file-sourced, any root-disagreement problem row's exact text, the resolved
-`openspec` path with the probe step that produced it, and the exit code, stdout, and stderr
-of a real spawn of that binary from inside the pane process.*
+**Performed 2026-09-08**, exactly as Decision 1 specifies: a temporary four-value probe was
+added as the first statement of `ui::run`, `make build` and `herdr plugin link .` were run, a
+Herdr workspace was created rooted at **another** OpenSpec repository
+(`/Users/juusopiikkila/Code/openspec-tui`, seven active changes), and the dashboard was opened
+from the plugin's **action menu** — `herdr plugin action invoke open --plugin herdr-openspec`,
+the non-interactive equivalent, so Herdr and not the operator built the child's environment and
+working directory. The temporary lines were removed and the binary rebuilt afterwards
+(task 1.7); the workspace and its panes were closed.
 
-Already measured on this machine, outside a pane, and recorded here so task 1 need only
-confirm it holds inside one (commands in Decision 1b): the nvm-installed `openspec` is a
-symlink to `openspec.js` with an `#!/usr/bin/env node` first line; spawned with a `PATH` that
-does not name its own directory it exits **127**, empty stdout, `env: node: No such file or
-directory`; spawned with that directory prepended it exits **0** and prints `1.12.0`.
+### The four printed values, verbatim
+
+```
+PANE CWD: Ok("/Users/juusopiikkila/Code/herdr-openspec")
+STARTUP CWD: Some("/Users/juusopiikkila/Code/openspec-tui")
+OPENSPEC BIN: Some(FoundBin { path: "/Users/juusopiikkila/.nvm/versions/node/v24.20.0/bin/openspec", source: Nvm })
+PROBE PROBLEMS: []
+INHERITED PATH: Some("/Users/juusopiikkila/.local/bin:/opt/homebrew/opt/ruby@3.3/bin:/Users/juusopiikkila/.local/bin:/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/System/Cryptexes/App/usr/bin:/usr/bin:/bin:/usr/sbin:/sbin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/local/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/bin:/var/run/com.apple.security.cryptexd/codex.system/bootstrap/usr/appleinternal/bin:/pkg/env/global/bin:/Library/Apple/usr/bin:/Users/juusopiikkila/.cargo/bin:/Applications/Ghostty.app/Contents/MacOS:/Users/juusopiikkila/.orbstack/bin:/Users/juusopiikkila/.yarn/bin")
+SPAWN err=Failed { program: "/Users/juusopiikkila/.nvm/versions/node/v24.20.0/bin/openspec", args: ["list", "--json"], code: None, stderr: "dyld[4617]: Library not loaded: /opt/homebrew/opt/llhttp/lib/libllhttp.9.3.dylib\n  Referenced from: <4EC815EE-775A-3897-BA9A-A5C28EB9D16D> /opt/homebrew/Cellar/node/25.6.0/bin/node\n  Reason: tried: '/opt/homebrew/opt/llhttp/lib/libllhttp.9.3.dylib' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/opt/homebrew/opt/llhttp/lib/libllhttp.9.3.dylib' (no such file), '/opt/homebrew/opt/llhttp/lib/libllhttp.9.3.dylib' (no such file), '/opt/homebrew/Cellar/llhttp/9.4.3/lib/libllhttp.9.3.dylib' (no such file), '/System/Volumes/Preboot/Cryptexes/OS/opt/homebrew/Cellar/llhttp/9.4.3/lib/libllhttp.9.3.dylib' (no such file), '/opt/homebrew/Cellar/llhttp/9.4.3/lib/libllhttp.9.3.dylib' (no such file)\n" }
+```
+
+### What the pane rendered (task 1.5), verbatim
+
+```
+OpenSpec                                       /Users/juusopiikkila/Code/openspec-tui
+┌Changes────────────────────────────────────────────────────────────────────────────┐
+│! openspec list --json: openspec list --json exited with code unknown: dyld[4628]:…│
+│> ai-chat-modal                                                             [32/35]│
+│  apply-flow                                                                    [-]│
+│  archive-flow                                                                  [-]│
+│  error-states                                                                  [-]│
+│  new-change-flow                                                               [-]│
+│  npm-distribution                                                              [-]│
+│  -- archived ---------------------------------------------------------------------│
+│  2026-05-16 tasks-tab                                                      [36/36]│
+│  2026-05-16 ai-cli-adapter                                                 [28/28]│
+│  2026-05-14 screen-layout-and-navigation                                   [27/27]│
+│  2026-05-14 detail-panel-and-tabs                                          [39/39]│
+│  2026-05-14 changes-list-panel                                             [62/62]│
+```
+
+The change list was **entirely file-sourced**: the header names the workspace repository, every
+row's progress is the file walk's own, and no change carries a CLI correction. There is **no
+root-disagreement problem row** — see the classification below for why not.
+
+### Classification (task 1.6): both defects are real, and S10 masked S7
+
+**S7 is confirmed, directly rather than through its symptom.** `PANE CWD` and `STARTUP CWD`
+**differ**: Herdr gives the pane process the **plugin root**
+(`/Users/juusopiikkila/Code/herdr-openspec`) while the workspace — and therefore the repository
+the dashboard resolved and displays — is `/Users/juusopiikkila/Code/openspec-tui`. This is
+Decision 1's "**They differ** (expected)" branch: the `openspec` child, which resolves its root
+by walking up from its own process's working directory, would have answered about
+`herdr-openspec` while the pane displays `openspec-tui`, and `changes::from_cli_cached`'s root
+guard would have discarded the whole payload. The three places in this repository asserting the
+pane cwd is the plugin root were right about the *value* and wrong about the *consequence*. The
+fix is exactly as specified and every `refresh-worker` scenario is a behaviour change with a
+real defect behind it.
+
+**S10 is confirmed too, and it fired first — which is why no root-disagreement row appears.**
+The child never produced a payload for the guard to reject, so S7 was invisible from the pane's
+appearance. Exactly the failure Decision 1b predicted, though with a **different exit signature**
+than the reference case:
+
+- The probe resolved via **step 3 (`Nvm`)**, not step 2, which is the structural condition the
+  spec argues for: `/Users/juusopiikkila/.nvm/versions/node/v24.20.0/bin` appears **nowhere** in
+  the inherited `PATH` above. The probe reaches step 3 precisely when the binary's own directory
+  is off `PATH` — precisely when its interpreter is unreachable from it.
+- The observed failure is **not** `exit 127` with `env: node: No such file or directory`. It is
+  worse and quieter: `/usr/bin/env node` **did** find a `node` on the inherited `PATH` — Homebrew's
+  `/opt/homebrew/Cellar/node/25.6.0/bin/node`, reached through `/opt/homebrew/bin` — and that
+  node is itself broken, aborting in `dyld` on a missing `libllhttp.9.3.dylib`. The child dies on
+  a signal, so `code` is `None` ("exited with code unknown" on the rendered row) rather than 127.
+  Re-run outside the pane with the same `PATH` shape the child inherited, the shell reports
+  **exit 134** (SIGABRT).
+- **The overlay fixes it, measured on this machine, in the workspace repository:**
+
+  ```
+  $ cd /Users/juusopiikkila/Code/openspec-tui
+  $ env PATH="/opt/homebrew/bin:/usr/bin:/bin" \
+      ~/.nvm/versions/node/v24.20.0/bin/openspec list --json
+  exit=134  stdout=[]  stderr=[dyld[5680]: Library not loaded: /opt/homebrew/opt/llhttp/lib/libllhttp.9.3.dylib
+                              Referenced from: /opt/homebrew/Cellar/node/25.6.0/bin/node …]
+  $ env PATH="$HOME/.nvm/versions/node/v24.20.0/bin:/opt/homebrew/bin:/usr/bin:/bin" \
+      ~/.nvm/versions/node/v24.20.0/bin/openspec list --json
+  exit=0  stdout=[{"changes":[{"name":"ai-chat-modal","completedTasks":32,"totalTasks":35,…
+  ```
+
+  The two halves differ **only** in the overlay, and the second is the payload the pane above
+  never received.
+
+**Consequences for the change, recorded rather than assumed:**
+
+1. Both fixes ship, and **neither alone is sufficient**. The working directory alone would still
+   produce the `dyld` abort; the overlay alone would produce a payload about the *plugin's* own
+   repository, which the root guard would then correctly discard — turning a silent file-mode
+   pane into a visible root-disagreement row, which is a different wrong answer.
+2. The exit-signature generalisation in `refresh-worker`'s spec — "exits 127" — is the reference
+   machine's case, not the only one. The requirement's substance is unaffected: a shim whose
+   interpreter does not work degrades the pane to file mode with a problem row naming the
+   command and its exit status. The scenario asserting `127` stays as written (it drives a
+   `FakeCli`, so 127 is the fixture's choice); this measurement records that `code: None` from a
+   signal death is the same class of failure and already renders correctly, which
+   `cli-parity`'s landed stderr-on-`Failed` is what made legible here at all.
+3. `PROBE PROBLEMS` is empty and the probe *succeeded*: nothing in the resolution chain is
+   broken. The defect is entirely in how the resolved binary is spawned, which is exactly where
+   Decision 2 puts the two constructor-supplied properties.
+
+### The reference facts from Decision 1b, re-confirmed
+
+The nvm-installed `openspec` is a symlink to `openspec.js` with an `#!/usr/bin/env node` first
+line; spawned with a `PATH` that does not name its own directory it fails to run the CLI at all
+(exit 127 on a machine with no other `node`, exit 134 on this one, which has a broken one
+earlier on `PATH`); spawned with that directory prepended it exits **0** and answers.
