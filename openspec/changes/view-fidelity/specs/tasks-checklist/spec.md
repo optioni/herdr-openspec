@@ -57,10 +57,13 @@ line even where the source carries headings.
 That `No tasks yet` line SHALL be passed through `ui::list::pad_or_truncate_right` at
 `width`, on exactly the terms every task item, heading line, and problem row already is. It
 was pushed as a bare `String` while every neighbouring line went through the padding, so at
-any width below 13 it overran the region: at a 13-column narrow frame in the detail route the
-rendered row read `│No tasks yet` and ate the region's right border. The literal is now
-truncated with the same `…` rule as everything else — at width 12 it reads `No tasks ye…`,
-at width 0 it is the empty string — and measures exactly `width` columns in the fitting case.
+any `width` below 12 it overran the region: at a 13-column narrow **frame** in the detail
+route, whose content area is 11 columns, the rendered row read `│No tasks yet` and ate the
+region's right border. The literal is now truncated with the same `…` rule as everything
+else — at `width` 11 it reads `No tasks y…`, at 0 it is the empty string — and measures
+exactly `width` columns in the fitting case, `width` 12 included, where the twelve-column
+literal fits whole and is padded by nothing. Every `width` here is the **content area's**,
+the frame's less the region's two border columns.
 The line SHALL remain a single `Segment` carrying `Face::plain()`.
 
 The trigger is items, not groups, and that distinction is load-bearing rather than pedantic:
@@ -95,11 +98,17 @@ conflated. `No tasks yet` and `No content yet` SHALL never both appear for the s
 
 - **WHEN** the same prose-only `Dashboard` is rendered at 15x20, at 14x20, at 13x20, at
   2x20, and at 1x20
-- **THEN** at 13x20 the content area's third row reads `No tasks y…` or shorter and the
-  frame's right border column is a box-drawing character, not the letter `t` — the audit's
-  `│No tasks yet` row is gone
-- **AND** at every one of the five widths the row's `layout::columns` is at most the interior
-  width, no buffer writes a cell past its last column, and none of the five renders panics
+- **THEN** at 13x20 — a frame of 13, so a content area of 11 — the content area's third row
+  reads `No tasks y…` and the frame's right border column is a box-drawing character, not the
+  letter `t`: the audit's `│No tasks yet` row is gone
+- **AND** at 14x20 the content area is 12 columns and the row reads `No tasks yet` **whole**,
+  with no ellipsis, because the literal is exactly twelve columns — the boundary at which
+  truncation begins, sampled on both sides
+- **AND** at 15x20 the row reads `No tasks yet` followed by one padding space, so the padded
+  arm is exercised too
+- **AND** at every one of the five widths the row's `layout::columns` is at most the content
+  area's width, no buffer writes a cell past its last column, and none of the five renders
+  panics
 - **AND** at 1x20 and 2x20 the interior is one or zero columns wide and nothing is drawn in
   it, exactly as `detail-scroll`'s degenerate-width scenarios already require
 
@@ -162,7 +171,11 @@ interior or being dropped, so a long path never silently loses its tail.
 The indent SHALL be **dropped whole** when the prefix would not leave at least one text
 column: `item.indent` spaces first, leaving `[x] ` alone; and when even that does not fit,
 the glyph alone truncated by `ui::list::pad_or_truncate_right` at `width`. No line's text
-SHALL exceed `width` characters, counted in `char`s.
+SHALL exceed `width` **display columns**, as `responsive-layout` defines them — the unit
+this change makes uniform across the crate, replacing the `char` count this requirement
+carried. The `[x]`/`[ ]` glyph and `item.indent`'s spaces are ASCII and measure exactly
+their character counts, so the drop-whole indent rule above is unchanged; only an item's
+own text can differ between the two measures.
 
 `width == 0` SHALL return an empty vector, matching `ui::markdown::lines`.
 

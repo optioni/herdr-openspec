@@ -14,15 +14,17 @@ border and into the neighbouring region's content. In the detail pane the guard 
 to stop this — `if x >= last_col { break }` in the per-segment loop — advances `x` by
 `chars().count()`, so it under-counts by exactly the amount that would have made it fire.
 
-This repository cannot see it. All 269 files under `openspec/changes/` and `openspec/specs/`
-use only width-1 codepoints — the whole distinct non-ASCII set is
-`— → … – ─ ░ █ │ ┌ − × ↔ ┐ ✳ └ ┘ ∪ ¶ ⁴ ✓ ≤ ≥ ⇒ ☑ ☐ ● ○ ∈ ∅ §`, every one measured at 1 — and
-every change directory name is ASCII. The pane renders whatever repository it is pointed at.
+This repository cannot see it. The distinct non-ASCII set over every tracked file under
+`openspec/` is exactly thirty codepoints —
+`— → … – ─ ░ █ │ ┌ − × ↔ ┐ ✳ └ ┘ ∪ ¶ ⁴ ✓ ≤ ≥ ⇒ ☑ ☐ ● ○ ∈ ∅ §` — every one measured at width 1
+under `unicode-width 0.2.2`, and every change directory name is ASCII. (An earlier draft put a
+file count on that claim; the count was stale within a day of being written, and the set is the
+part that carries the argument.) The pane renders whatever repository it is pointed at.
 
 Three smaller findings sit in the same family. Two literals, `No content yet` and
 `No tasks yet`, are pushed as bare `String`s while every neighbouring line goes through
-`pad_or_truncate_right`, so at frames narrower than 15 and 13 they eat the region's right
-border — a range the `DETAILWIDTHS` gate's mandated 58 and 78 cannot reach. `Action::OpenDetail`
+`pad_or_truncate_right`, so at frames of 15 and 13 and narrower — content areas of 13 and 11,
+the frame less the region's two border columns — they eat the region's right border — a range the `DETAILWIDTHS` gate's mandated 58 and 78 cannot reach. `Action::OpenDetail`
 resets `detail.scroll` unconditionally, so at any width above the 100-column breakpoint —
 where both regions are always drawn — `Enter` moves no route and its only effect is to throw
 away the reader's scroll position. And `ui::app::matches` folds case with
@@ -63,7 +65,7 @@ does not touch.
 | Module | What changes | Pattern it follows |
 |---|---|---|
 | `src/ui/layout.rs` | Gains `columns` and `truncate_columns`, the crate's only display-width measure. | The module already holds the crate's pure geometry (`split_frame`, `interior`, `scroll_offset`) and already names a `ratatui` type. |
-| `src/ui/list.rs` | `pad_or_truncate_right`, `truncate_left`, `row` assembly, the problem and message rows, and the no-repository block measure in columns. `pad_or_truncate_right` gains a trailing pad after truncation. | Unchanged shape: still returns plain `String`s, still the crate's one right-truncation implementation shared with `ui::detail`. |
+| `src/ui/list.rs` | `pad_or_truncate_right`, `shorten_left`, `shorten_left_row`, `row` assembly, the problem and message rows, and the no-repository block measure in columns. `pad_or_truncate_right` gains a trailing pad after truncation. | Unchanged shape: still returns plain `String`s, still the crate's one right-truncation implementation shared with `ui::detail`. |
 | `src/ui/markdown.rs` | Wrap, hard-split, prefix budget, and hanging indent measure in columns through `layout::`. | Still names no `ratatui` type and no `char` count; `layout::` is the seam, exactly as `ui::list::pad_or_truncate_right` already is for `ui::detail`. |
 | `src/ui/tasks.rs` | Item wrap, heading line, and `No tasks yet` measure and truncate in columns; `No tasks yet` goes through `pad_or_truncate_right`. | Same plain-data return, same `Face::plain()` single segment. |
 | `src/ui/detail.rs` | `header_row`'s three cells and their band boundaries in columns; `content_lines`' `No content yet` goes through `pad_or_truncate_right`. | The literal now takes the path every neighbouring line already takes. |
@@ -80,7 +82,7 @@ Not touched: `src/cli.rs`, `src/agents.rs`, `src/launch.rs`, `src/open.rs`, `src
 
 Every signature this change touches is `pub(crate)` or private. `ui::layout::columns` and
 `ui::layout::truncate_columns` are new `pub(crate)` functions. `pad_or_truncate_right`,
-`truncate_left`, `header_row`, `content_lines`, `progress_bar`, `ui::tasks::lines`,
+`shorten_left`, `shorten_left_row`, `header_row`, `content_lines`, `progress_bar`, `ui::tasks::lines`,
 `ui::markdown::lines`, `ui::list::rows`, and `Dashboard::apply` keep their signatures exactly.
 
 The binary's own contract — `herdr-openspec ui`, `open`, `open-tab`, the manifest, the config
@@ -117,8 +119,21 @@ edited.
 | Process environment | **replaced** — the injected `&dyn Fn(&str) -> Option<String>` lookup; no test reads or writes the real environment | replaced |
 | Clock | **not used** — nothing here reads one, and `NOBLOCK` keeps it that way | not used |
 | Filesystem watcher (`notify`) | **replaced** — `FsEvents` trait object; no scenario drives one | replaced |
+| Refresh worker (`refresh::Refresher`) | **replaced** — trait object in `run_loop`'s `Live`; the loop-tier `Enter` scenario supplies one that answers nothing | replaced |
+| Agent poller (`agents::AgentPoll`) | **replaced** — trait object in `Live`; badged-row scenarios supply an in-memory `AgentSnapshot` rather than reaching `HerdrCli` | replaced |
+| Launcher (`launch::Launcher`) | **replaced** — trait object in `Live`. Named explicitly because it is the one collaborator that blocks up to thirty seconds (`herdr agent start`); no scenario here presses `a`, `c`, `s`, or `g`, and none may | replaced |
+| Event source (`EventSource`) | **replaced** — the scripted press sequence the loop-tier row's Collaborators column names; the real crossterm source is never constructed | replaced |
 | Rust source tree (gate scans) | **real** — `colwidth.sh` and `tests/ci_workflow.rs` read the checked-in files, which is the point of a source sweep | real |
 | `Makefile` / `scripts/gates/` | **real** — read by `tests/ci_workflow.rs` | real |
+
+**One thing no tier in this plan can observe, stated rather than left implicit.** Every render
+assertion reads a `TestBackend` buffer filled by the same `Buffer::set_string` the measure is
+defined against, and `columns` agrees with that function by construction. So the plan can
+prove the pane never exceeds a region *as ratatui measures it*, and cannot prove anything
+about a terminal that shapes a cluster differently from ratatui — the accepted limit
+`responsive-layout`'s Unicode promise now names, and the reason Decision 7 stops where it
+does. There is no tier that would buy that evidence: it would need a real terminal emulator
+with a real font, which is neither testable in `cargo test` nor stable across machines.
 
 **This change takes no outer-loop acceptance test that spawns a process or touches a real
 terminal.** Every behaviour it specifies is observable in a `TestBackend` buffer or in a pure
@@ -193,8 +208,33 @@ Tiers, per the project's own: **unit** = `cargo test --lib` over a pure function
 | Matching ignores case outside ASCII | four renders at 60 and 120, plus direct `matches` calls | view | `TestBackend` | `cargo test --lib ui::app::tests::matches_unicode` |
 | A query matching only an archived change | full-frame render at 60 and 120 | view | `TestBackend` | `cargo test --lib ui::app::tests::matches` |
 | A query matching nothing names itself | full-frame render at 60 and 120 | view | `TestBackend` | `cargo test --lib ui::app::tests::matches` |
-| The fold is total and allocates no surprise | seven direct `matches` calls | unit | none | `cargo test --lib ui::app::tests::matches_total` |
+| The fold is total and its documented edge cases hold | seven direct `matches` calls | unit | none | `cargo test --lib ui::app::tests::matches_total` |
 | Shrinking the visible list clamps the selection | `apply` sequence + render at 60 and 120 | view | `TestBackend` | `cargo test --lib ui::app::tests::matches` |
+| The separator and archived rows render at both mandated widths | carried-forward render at 38 and 58, assertions restated in columns | view | `TestBackend` | `cargo test --lib ui::list::tests` |
+| An archived change carries a badge in the same column as an active one | carried-forward render at 38 and 58 | view | `TestBackend` | `cargo test --lib ui::list::tests` |
+| An archived row drops the progress cell, then the date, as the width falls | carried-forward drop-order sweep, restated in columns | unit | none | `cargo test --lib ui::list::tests` |
+| No archived changes means no separator | carried-forward render at 38 and 58 | view | `TestBackend` | `cargo test --lib ui::list::tests` |
+| No repository names the directory searched, at both widths | carried-forward render at 38 and 58 | view | `TestBackend` | `cargo test --lib ui::list::tests` |
+| A repository with no changes at all | carried-forward render at 38 and 58 | view | `TestBackend` | `cargo test --lib ui::list::tests` |
+| No active changes with archived ones still browsable | carried-forward render at 38 and 58 | view | `TestBackend` | `cargo test --lib ui::list::tests` |
+| Repository-level problems are named above the rows | carried-forward render at 38 and 58 | view | `TestBackend` | `cargo test --lib ui::list::tests` |
+| The full header grammar at both mandated interior widths | carried-forward `header_row` at 58 and 78, assertions restated in columns | unit | none | `cargo test --lib ui::detail::tests::header` |
+| A change with no tasks still ends its row in the same column | carried-forward `header_row` at 58 and 78 | unit | none | `cargo test --lib ui::detail::tests::header` |
+| A long name is truncated with an ellipsis, never overflowing the row | carried-forward `header_row` at 58 and 78 | unit | none | `cargo test --lib ui::detail::tests::header` |
+| The cells are dropped whole in order as the row narrows | carried-forward band sweep at nine widths | unit | none | `cargo test --lib ui::detail::tests::header` |
+| An empty schema name is a cell of two characters, not an absent one | carried-forward `header_row` at 58 and 78 | unit | none | `cargo test --lib ui::detail::tests::header` |
+| A fenced code block's lines are reproduced verbatim | carried-forward `markdown::lines` at 58 and 78 | unit | none | `cargo test --lib ui::markdown::tests` |
+| A code line longer than the interior is hard-split rather than word-wrapped | carried-forward hard-split, now cut at a cluster boundary in columns | unit | none | `cargo test --lib ui::markdown::tests` |
+| An indented code block renders the same as a fenced one | carried-forward `markdown::lines` at 58 and 78 | unit | none | `cargo test --lib ui::markdown::tests` |
+| A raw HTML block renders verbatim rather than being dropped | carried-forward `markdown::lines` at 58 and 78 | unit | none | `cargo test --lib ui::markdown::tests` |
+| Groups, headings, items, and separators at both mandated widths | carried-forward `ui::tasks::lines` at 58 and 78, assertions restated in columns | unit | none | `cargo test --lib ui::tasks::tests` |
+| A nested item reproduces its own indent | carried-forward `ui::tasks::lines` at 58 and 78 | unit | none | `cargo test --lib ui::tasks::tests` |
+| A long item wraps with a hanging indent at both widths | carried-forward wrap, now measured in columns | unit | none | `cargo test --lib ui::tasks::tests` |
+| An unbreakable word is hard-split rather than lost | carried-forward hard-split, now cut at a cluster boundary | unit | none | `cargo test --lib ui::tasks::tests` |
+| The indent is dropped whole as the width collapses | carried-forward drop-order sweep | unit | none | `cargo test --lib ui::tasks::tests` |
+| A heading with no items still renders its heading | carried-forward `ui::tasks::lines` at 58 and 78 | unit | none | `cargo test --lib ui::tasks::tests` |
+| A headingless leading group renders without a heading line | carried-forward `ui::tasks::lines` at 58 and 78 | unit | none | `cargo test --lib ui::tasks::tests` |
+
 
 Every landed test in the touched modules is re-run unchanged except for the unit its width
 assertions are stated in: `assert_eq!(row.text.chars().count(), width)` becomes
@@ -262,8 +302,10 @@ function returns exactly `width`, and `change-rows`, `detail-header`, and `artif
 all rely on it. Without a trailing pad a row whose name ends in a wide cluster would be one
 column short of the interior and leave whatever the previous frame drew in that cell. So the
 truncating arm is `truncate_columns(text, width - 1)` + `…` + pad-to-exactly-`width`.
-`truncate_left` deliberately does **not** pad, exactly as it does not today: its two callers
-right-align and pad themselves.
+`shorten_left` deliberately does **not** pad, exactly as it does not today — the header
+right-aligns it inside its own remaining space — and `shorten_left_row` is the padded form
+the no-repository block's third row uses. Both measure and cut in columns; the pair is named
+here because the padded sibling is a third measuring site that reads like a wrapper.
 
 ### 4. The mandated widths do not change. All-widths sweeps close the narrow gap instead.
 
@@ -273,8 +315,28 @@ test; adding a third mandated width would ripple through all of them, and a per-
 list is how a width check rots into a rubber stamp. The bug it would have caught is better
 caught by a **property**: every line `content_lines` and `ui::tasks::lines` produce measures at
 most `width` at every width from 0 to 130. That subsumes the 13-, 14-, and 15-column cases,
-subsumes the next literal someone adds, and needs no gate edit at all. `tasks-progress-bar`
-already carries a sweep of exactly this shape, so the pattern is the repository's own.
+subsumes the next literal someone adds, and needs no change to any gate's mandated pair.
+`tasks-progress-bar` already carries a sweep of exactly this shape, so the pattern is the
+repository's own.
+
+**What this does cost, corrected from an earlier draft that claimed it cost nothing.**
+`LISTWIDTHS`, `MDWIDTHS`, `TASKWIDTHS`, `DETAILWIDTHS`, and `WIDTHS` require **every**
+`#[test]` in their file to name both mandated widths as bare, unsuffixed literals, and each
+script states in its own header that it has **no exemption list**. A sweep test over
+`0..=130` names neither literal, so roughly eight of the new tests would fail their gate on
+arrival. The remedy is the one `taskwidths.sh`'s own header already records for the existing
+`0..=120` sweep: the sweep's spec scenario names the mandated pair explicitly among its swept
+values, and the test names them as bare literals in the assertion it makes at those widths.
+That is why each RED task below says every new test names its module's mandated pair, and why
+groups 2, 3, and 4 now run their own width gate rather than discovering the collision at
+`make gates` three to six groups later. No gate's floor is lowered, no exemption is added,
+and the mandated pair is untouched.
+
+**Gate floors move up, because they are floors.** `LIST_MIN` 32, `MD_MIN` 25, `TASK_MIN` 16,
+`DETAIL_MIN` 32, and `WIDTHS_MIN` 98 are the current true measured counts. This change only
+adds tests, so nothing goes red — but AGENTS.md's rule is that a gate's default *is* its true
+measured floor, not a value that happens to pass, so each is re-measured and re-defaulted once
+the tests land (task 8.6).
 
 ### 5. `Enter` at the detail route is a **no-op**. This is a behaviour decision, and it is stated.
 
@@ -302,13 +364,30 @@ That one derives a Herdr agent name, which `plugin-state` requires to match
 `[a-z][a-z0-9_-]{0,31}` — an ASCII-only target where a Unicode fold would produce a name
 Herdr rejects. Two call sites, two different jobs; only the filter's changes.
 
-### 7. The pane over-reserves when a terminal disagrees with ratatui.
+### 7. The promise is scoped to ratatui's measure, and the residual divergence is named, not compensated.
 
-For a zero-width-joiner emoji sequence, ratatui budgets the sum of its clusters' widths while
-many terminals compose the whole sequence into two columns. Because `columns` is ratatui's
-measure, the pane may reserve more columns than the terminal paints. That direction is chosen
-deliberately: over-reserving ends a row in trailing blanks, under-reserving overwrites a
-border. The promise is written into `responsive-layout` rather than left to be discovered.
+An earlier draft of this decision had the ZWJ case backwards, and the correction matters
+because it changes what the pane can promise. Measured against ratatui 0.30.2:
+`unicode_segmentation::graphemes(true)` treats a zero-width-joiner emoji sequence as **one**
+cluster, and ratatui measures it at **2** columns — `🏳️‍🌈`, `👨‍👩‍👧‍👦`, and `🧑‍🚀` all
+return 2. So ratatui already agrees with a terminal that composes the sequence. There is no
+over-reservation to trade on.
+
+The real divergence runs the other way: a terminal that does **not** compose the sequence
+paints each constituent emoji, six columns for a three-person family, and the row overruns.
+That is not detectable from a process writing bytes to a pty — it is a property of the
+terminal's font and shaping — and any compensation would be a guess that breaks the composing
+case. So the pane does not compensate. What it does instead is **state the boundary**:
+`responsive-layout`'s Unicode promise now reads "never exceeds — as ratatui measures it — the
+region it is drawn into", and names the non-composing terminal, along with the same limit's
+other instance (East Asian **Ambiguous** characters, which a CJK-locale terminal paints at 2
+where `unicode-width`'s default says 1 — and which includes several box-drawing and arrow
+characters this repository's own artifacts already use).
+
+This does not weaken the change. Before it, the pane overran its region for *every* wide
+character in *every* terminal; after it, only for a cluster whose terminal disagrees with
+ratatui's shaping. And the alternative — measure with something other than ratatui's own
+function — makes the common case wrong to improve an uncommon one.
 
 ### 8. The draw loop keeps its guard **and** gains a per-segment clamp.
 
@@ -321,14 +400,31 @@ the border. Two mechanisms for one property, on the same terms the crate already
 ### 9. One new gate, `COLWIDTH`, built the way every other gate here is built.
 
 A tree-wide grep of the seven non-`layout` pure files' **production** lines for
-`.chars().count()`, `.chars().take(`, and a `Vec<char>` `.chars().collect()`, with
-`src/ui/layout.rs` as a positive control (it must name `cell_width` and `styled_graphemes`, so
-a misspelled pattern fails rather than passes). Its floor is its own script default and the
-`Makefile` runs it bare, per this repository's stated rule. `tests/ci_workflow.rs` already
-asserts the recipe names every script and vice versa, so it cannot silently drop out. It
-deliberately does **not** forbid `chars()` outright: `ui::markdown`'s per-character scanner
+`.chars().count()`, `.chars().take(`, and a `Vec<char>` `.chars().collect()`. The `Makefile`
+runs it bare, per this repository's stated rule, and `tests/ci_workflow.rs` already asserts
+the recipe names every script and vice versa, so it cannot silently drop out.
+
+**The positive control runs the sweep's own pattern**, corrected from an earlier draft. That
+draft controlled on `grep -q cell_width src/ui/layout.rs` — a *different* pattern from the
+sweep's, which proves only that `cell_width` is spelled right and would let a corrupted sweep
+regex print `COLWIDTH OK` over a tree full of violations. `NOSPAWN-GREP`, which AGENTS.md
+names as the model, runs the *same* pattern against the file it excludes. Here there is no
+file that must match once the change lands, so the control synthesises one: the script feeds a
+line holding all three forms to its own pattern and fails if the pattern does not match all
+three. The `layout.rs` check is kept beside it, demoted to what it actually proves — that the
+measure being protected exists and the exemption is not vacuous.
+
+It deliberately does **not** forbid `chars()` outright: `ui::markdown`'s per-character scanner
 iterates characters for a purpose that is not measurement, and a gate that cannot tell those
 apart would need an exemption list.
+
+**Two measuring sites the pattern cannot see, recorded as a limit rather than papered over.**
+`ui::markdown`'s `split_at_char` cuts a run at a `char_indices` offset — a column budget
+expressed in characters that no `.chars()` pattern matches — and so would any future
+`char_indices` cut. Widening the pattern to `char_indices` would catch legitimate
+non-measuring uses and force the exemption list this gate exists without. What proves those
+sites were rewritten is `markdown-render`'s wide-character and 500-column-CJK scenarios, named
+in the verification matrix; the gate is a second line, not the only one.
 
 ## Risks / Trade-offs
 

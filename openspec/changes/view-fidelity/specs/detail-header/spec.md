@@ -68,7 +68,8 @@ zero-width-joiner sequence — for any schema name, and for any `Progress`.
 ### Requirement: The detail region's first row names the selected change
 
 `ui::detail::header_row(name: &str, schema: &str, progress: &tasks::Progress, width: u16)
--> String` SHALL return a string of exactly `width` characters — a fixed-field, right-aligned
+-> String` SHALL return a string of exactly `width` **display columns**, as
+`responsive-layout` defines them — a fixed-field, right-aligned
 grammar in the same shape `change-rows` uses for a list row, and returning a plain `String`
 with no `ratatui` type, on the same terms `ui::list` and `ui::markdown` return plain data and
 let `ui::view` style it.
@@ -79,7 +80,7 @@ The full form is `[name field][space][schema cell][space][progress cell]`, where
   `total` is zero, produced by the same `ui::list::progress_cell` the list rows use — one
   implementation, so the header and the row can never disagree about a change's progress;
 - the **schema cell** is the schema name in parentheses, e.g. `(tdd)`;
-- the **name field** is `width - 2 - schema_len - progress_len` columns, padded with trailing
+- the **name field** is `width - 2 - schema_columns - progress_columns` display columns, padded with trailing
   spaces when the name is shorter and truncated with a trailing `…` when it is longer, by the
   same `ui::list::pad_or_truncate_right` the row grammar uses — which this change raises from
   private to `pub(crate)` rather than copying, so the crate keeps exactly one
@@ -113,8 +114,8 @@ one and one longer than the row, for any schema name including an empty one, and
   called, and again at width `58`
 - **THEN** the 78-column result is `detail-view` followed by spaces out to column 64, then
   ` (tdd) [4/42]`, so its final character sits in column 77 and the whole string is 78
-  characters long
-- **AND** the 58-column result is the same grammar with a 45-column name field, 58 characters
+  display columns wide
+- **AND** the 58-column result is the same grammar with a 45-column name field, 58 display columns
   long, ending in the same `[4/42]`
 - **AND** both results end in the progress cell's `]`, so the cell is right-aligned to the
   interior's last column at either width
@@ -125,13 +126,13 @@ one and one longer than the row, for any schema name including an empty one, and
   is called, and again at `58`
 - **THEN** each result ends with the three characters `[-]` in the row's final three columns,
   exactly where a `[4/42]` would have ended
-- **AND** each result is exactly `width` characters long
+- **AND** each result is exactly `width` display columns wide
 
 #### Scenario: A long name is truncated with an ellipsis, never overflowing the row
 
 - **WHEN** `header_row` is called with a 200-character name, schema `tdd`, progress `[4/42]`,
   at width `78` and again at width `58`
-- **THEN** each result is exactly `width` characters long
+- **THEN** each result is exactly `width` display columns wide
 - **AND** each result's name field ends with `…` and its schema and progress cells are still
   present and intact, so the name yields before either cell does
 
@@ -141,7 +142,7 @@ one and one longer than the row, for any schema name including an empty one, and
   is called for `w` in `78`, `58`, `13`, `12`, `7`, `6`, `5`, `1`, and `0` — the two mandated
   interiors plus **both** boundaries of **all three** bands, so every branch of the
   degradation is entered and no band is sampled twice while another goes untouched
-- **THEN** at every width the result is exactly `w` characters long
+- **THEN** at every width the result is exactly `w` display columns wide
 - **AND** at `78`, `58`, and `13` the result carries both `(tdd)` and `[4/9]` whole
 - **AND** at `12` and `7` — the schema-dropped band — `(tdd)` does not appear at all while
   `[4/9]` is still present and intact
@@ -158,5 +159,5 @@ one and one longer than the row, for any schema name including an empty one, and
   again at `58`
 - **THEN** each result carries the two characters `()` where the schema cell sits, followed
   by a space and `[1/2]`
-- **AND** each result is exactly `width` characters long, so an empty schema shortens the
+- **AND** each result is exactly `width` display columns wide, so an empty schema shortens the
   cell rather than removing it and the row's arithmetic still balances

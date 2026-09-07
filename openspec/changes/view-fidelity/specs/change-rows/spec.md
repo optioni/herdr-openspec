@@ -23,11 +23,13 @@ return a string measuring **exactly `width` display columns** in both of its arm
   stale cell behind it;
 - when `width` is `0`, the empty string.
 
-`ui::list::truncate_left` — the keep-the-tail rule the no-repository block and
+`ui::list::shorten_left` — the keep-the-tail rule the no-repository block and
 `responsive-layout`'s header share — SHALL likewise keep the longest **suffix ending on a
 grapheme-cluster boundary** that measures at most `width - 1` columns, prefixed with `…`. It
-SHALL NOT pad, exactly as it does not today; the two callers that owe a full-width row pad
-the result themselves.
+SHALL NOT pad, exactly as it does not today; the header right-aligns it within its own
+remaining space. `ui::list::shorten_left_row`, the padded form the no-repository block's
+third row uses, SHALL pad the result back to exactly `width` display columns — a third
+measuring site, named here because it is easy to miss beside its un-padded sibling.
 
 The cell-drop order is unchanged and is now evaluated in columns: the badge cell and its
 space go first, then the progress cell and its space, then an archived row's date field and
@@ -104,9 +106,18 @@ zero-width-joiner sequence.
 #### Scenario: The no-repository block shortens its search path by columns
 
 - **WHEN** a `Dashboard` with no repository root whose `searched_from` is
-  `/home/dev/日本語のディレクトリ名前です/deeper` is rendered at 120x20 and at 60x20
+  `/home/dev/workspaces/日本語のディレクトリ名前がとても長い場合の例` — forty-three
+  characters and **sixty-five display columns**, chosen so that it exceeds the wider of the
+  two interiors (58) and therefore shortens at both, which a shorter wide-character path
+  would not — is rendered at 120x20 and at 60x20
 - **THEN** in each buffer the three-row no-repository block is drawn, its shortened path row
-  measures at most the interior width in columns — 38 and 58 — and begins with `…`
+  measures **exactly** the interior width in columns — 38 and 58 — and begins with `…`
+- **AND** at each width the drawn suffix's own `layout::columns` is at most the interior less
+  the ellipsis's one column, and slicing it back out of `searched_from` succeeds, so the
+  keep-the-tail cut landed on a cluster boundary
+- **AND** a `char`-counted shortening would have kept the last 37 and 57 **characters** —
+  70 and 110 columns — so the two measures are distinguishable at both widths and the
+  scenario discriminates between them
 - **AND** neither buffer writes a cell past the list region's interior, and the block is
   still exactly three rows with no badge and no marker
 
@@ -131,17 +142,19 @@ otherwise fall below one column; then the progress cell and its following space,
 name field would **still** fall below one column; then the ten-column date field and its
 following space, on the same condition again; and only then does the row degenerate to the
 active grammar's `[marker][space][name field]`, with no progress cell ever offered. Below two columns
-the row is the first `width` characters of `> `. Concretely, for an **unbadged** change named
+the row is `> ` truncated to the first `width` **display columns**. Concretely, for an **unbadged** change named
 `add-auth` at 7 of 7 dated `2026-08-14`: at width 20 the row is `> 2026-08-14 … [7/7]`; at 19
 it is `> 2026-08-14 add-a…`, the progress cell dropped; at 14 it is `> 2026-08-14 …`; at 13
 it is `> add-auth   `, the date dropped; at 3 it is `> …`; at 1 it is `>`; at 0 it is empty.
-Every one of those rows SHALL be exactly its width in characters. The **badged** form of the
+Every one of those rows SHALL be exactly its width in **display columns**, which for this
+all-ASCII worked example is the same row it has always been. The **badged** form of the
 same change needs two further columns: at width 22 the row is `> 2026-08-14 … b [7/7]`, and
 at width 21 and below the badge is gone and every row above is reproduced unchanged.
 
 The separator row SHALL be two spaces, then the literal `-- archived `, then `-`
-characters filling the interior to its full width; when the interior is narrower than the
-fourteen characters of `  -- archived ` it SHALL be that prefix truncated to the width.
+characters filling the interior to its full width in **display columns**; when the interior
+is narrower than the fourteen columns of `  -- archived ` it SHALL be that prefix truncated
+to the width by `layout::truncate_columns` and padded back to exactly `width` columns.
 The separator SHALL be emitted only when at least one archived row follows it, so a
 repository with no archived changes — or a filter that matches none — shows no dangling
 rule. A separator row is never badged.
@@ -207,9 +220,15 @@ rule. A separator row is never badged.
 When `dashboard.repo` is `None` the list region's interior SHALL hold exactly three rows
 and no change rows: `No OpenSpec repository found`, then `searched from:`, then
 `dashboard.searched_from`'s display path shortened to the interior width by the same
-keep-the-tail rule the header uses — whole when it fits, otherwise `…` followed by its last
-*width − 1* characters. This is `SPEC.md` → Degraded states, row "No `openspec/` found
-while walking up".
+keep-the-tail rule the header uses — whole when it fits, otherwise `…` followed by the
+longest suffix ending on a grapheme-cluster boundary that measures at most *width − 1*
+**display columns**, then padded back to exactly `width` columns. This is `SPEC.md` →
+Degraded states, row "No `openspec/` found while walking up".
+
+The two functions that implement that rule are `ui::list::shorten_left` — un-padded, shared
+with `responsive-layout`'s header, which right-aligns it within its own remaining space — and
+`ui::list::shorten_left_row`, which is `shorten_left` padded to the full row. Both SHALL
+measure and shorten in display columns.
 
 When `dashboard.repo` is `Some`, the interior SHALL hold:
 
@@ -232,9 +251,16 @@ A `Problem` row's text field is the interior width less its two-column `! ` pref
 `Message` row has no prefix and its field is the whole width. Both SHALL be padded with
 spaces when short and truncated from the right with `…` when long, by the same rule the
 name field uses, and both SHALL follow the same drop-whole rule the change rows do: below
-three columns a `Problem` row is the first `width` characters of `! `, and at every width
-— including `0`, `1`, and `2` — every row of every kind SHALL be **exactly** `width`
-characters, so a caller may index them without a bounds check.
+three columns a `Problem` row is `! ` truncated to the first `width` **display columns**, and
+at every width — including `0`, `1`, and `2` — every row of every kind, `Separator`,
+`Problem`, and `Message` included, SHALL be **exactly** `width` **display columns**.
+
+The indexing guarantee that sentence used to carry is narrowed here, deliberately, because
+display columns are the honest unit and a `char` index is not one: a caller may take the
+first `n` **columns** of a row with `layout::truncate_columns` for any `n <= width` and get a
+whole prefix back, but SHALL NOT index a row by `char` or by byte and assume `width` of them
+exist. For an all-ASCII row — every row this repository produces today — the two are the same
+count, which is why no landed assertion moves.
 
 The no-repository block SHALL replace **every** other row, problem rows included. That is
 not a conflict to resolve at render time: `ui::load` produces `changes::empty_set()`

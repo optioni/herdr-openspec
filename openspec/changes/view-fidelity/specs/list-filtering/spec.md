@@ -89,7 +89,7 @@ active rows when none matches while at least one archived one does.
 - **AND** neither buffer contains `-- archived`, any change name, or a `>` marker in the
   interior's first column
 
-#### Scenario: The fold is total and allocates no surprise
+#### Scenario: The fold is total and its documented edge cases hold
 
 - **WHEN** `matches` is called with each of the empty string, a 200-character name, a name
   holding a NUL, a name of only combining marks, the name `ΟΔΟΣ` against a query of

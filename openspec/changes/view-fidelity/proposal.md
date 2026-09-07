@@ -9,17 +9,27 @@ What it did find is that **every width computation under `src/ui/` counts `char`
 terminal, and ratatui's own `Buffer::set_string`, count display columns.** `set_string`
 truncates at the *buffer's* right edge, never at the region's, so a character wider than one
 column renders past its budget and escapes the region it was drawn into. At 120x10 an active
-change named `日本語の変更名前です` runs a list row from column 1 to about column 48: it
-erases the list's right border at 39, the detail region's left border at 40, and overwrites
-the detail header row, while its own `[4/9]` progress cell is pushed off-screen. At 60
-columns an `emoji-🎉-change` row writes `[4/9]` over the right border. In the detail pane —
-where the source is arbitrary user content — `ui::view::render`'s `x += chars().count()`
-under-counts, so the `x >= last_col` guard that is supposed to stop the row never fires.
+change named `日本語の変更名前です` — ten characters, twenty columns, budgeted at ten — runs
+its list row from column 1 to column 48 when the region ends at 38. It **erases the list
+block's right border at column 39**, which is drawn before the rows and stays erased for the
+frame, and it writes its `[4/9]` cell at roughly columns 44 through 48, inside the detail
+region rather than at the end of its own row. Two of those overwrites are repaired later in
+the same frame by the detail block's own border and by `header_row`'s padding, so the visible
+corruption lands wherever a detail line is shorter than the overflow — the tab bar and short
+markdown lines. The precise wording matters because a reviewer who reproduces this at 120x10
+and sees a mostly-intact detail region should not conclude the bug is cosmetic: a border is
+permanently gone, and the row that lost it is the one the reader is selecting from.
 
-This is latent in *this* repository and live in any other. All 269 files under
-`openspec/changes/` and `openspec/specs/` use only width-1 codepoints and every change
-directory name is ASCII — but the pane renders whatever repository it is pointed at, so one
-emoji in someone else's `proposal.md`, or a CJK change name, makes it real immediately.
+At 60 columns an `emoji-🎉-change` row writes `[4/9]` over the right border. In the detail
+pane — where the source is arbitrary user content — `ui::view::render`'s
+`x += chars().count()` under-counts, so the `x >= last_col` guard that is supposed to stop the
+row never fires.
+
+This is latent in *this* repository and live in any other. Every non-ASCII codepoint appearing
+anywhere under `openspec/` is one of exactly thirty — `— → … – ─ ░ █ │ ┌ − × ↔ ┐ ✳ └ ┘ ∪ ¶ ⁴
+✓ ≤ ≥ ⇒ ☑ ☐ ● ○ ∈ ∅ §` — every one of which measures 1, and every change directory name is
+ASCII. But the pane renders whatever repository it is pointed at, so one emoji in someone
+else's `proposal.md`, or a CJK change name, makes it real immediately.
 
 Three smaller findings ride along, all in the same "characters the arithmetic does not model"
 family: two literals that bypass the padding every neighbouring line goes through and eat a
@@ -35,7 +45,7 @@ itself rather than with the terminal.
 ## What Changes
 
 - **Display columns replace `char` counts at every measuring and truncating site under
-  `src/ui/`** — roughly twenty-five production sites across `list.rs`, `markdown.rs`,
+  `src/ui/`** — **29** production measurement sites (measured, not estimated) across `list.rs`, `markdown.rs`,
   `tasks.rs`, `detail.rs`, and `view.rs`. Two new pure primitives in `ui::layout`,
   `columns(&str) -> usize` and `truncate_columns(&str, usize) -> &str`, become the crate's
   only measurement, checked by a source sweep the way `pulldown_cmark`'s confinement already
@@ -44,9 +54,11 @@ itself rather than with the terminal.
   `Span::styled_graphemes` for the grapheme split and control-character filter, and the
   `CellWidth` trait for each cluster's width. This is byte-for-byte what `Buffer::set_string`
   consumes. **No dependency is added** (design.md → Decision 1).
-- **The pane's Unicode promise is stated**: a grapheme cluster occupies the columns ratatui
-  gives it, no line ever exceeds its region, and a terminal that renders a ZWJ sequence
-  narrower than ratatui measures it leaves trailing blanks rather than overflowing.
+- **The pane's Unicode promise is stated, with its limit**: a grapheme cluster occupies the
+  columns ratatui gives it, and no line ever exceeds its region *as ratatui measures it*. The
+  one residual case — a terminal that does not compose a zero-width-joiner sequence and paints
+  it wider than ratatui budgeted — is named as an accepted limit rather than compensated for,
+  because it is invisible to a process writing to a pty (design.md → Decision 7).
 - **`No content yet` and `No tasks yet` go through the same padding every neighbouring line
   uses**, and both bodies gain a width sweep proving no produced line exceeds its width at
   *any* width, not only at the two mandated ones.
@@ -101,7 +113,9 @@ land.
 `src/ui/layout.rs` (two new pure functions), `src/ui/list.rs`, `src/ui/markdown.rs`,
 `src/ui/tasks.rs`, `src/ui/detail.rs`, `src/ui/view.rs`, `src/ui/app.rs`, and a new
 `scripts/gates/colwidth.sh` composed into `make gates` alongside `tests/ci_workflow.rs`'s
-recipe-vs-directory check. `SPEC.md` and `AGENTS.md` gain the Unicode promise. No manifest,
+recipe-vs-directory check, plus a re-measured default floor for each of `LISTWIDTHS`,
+`MDWIDTHS`, `TASKWIDTHS`, `DETAILWIDTHS`, and `WIDTHS`, whose counts this change raises.
+`SPEC.md` and `AGENTS.md` gain the Unicode promise. No manifest,
 no config format, no keybinding, no dependency, no data model, no external service, no
 sibling repository.
 

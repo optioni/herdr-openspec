@@ -59,8 +59,10 @@ change on the same frame.
   `[4/9]`, a space, and `44%`
 - **AND** the 68-column gauge holds exactly 30 `█` and 38 `░`, and the 48-column
   gauge exactly 21 `█` and 27 `░`, so the fill is `g * completed / total` truncated
-- **AND** both results' `layout::columns` equals their `chars().count()`, which is what
-  proves the gauge glyphs measure one column each and the restatement changed no output
+- **AND** the two results are **byte-identical** to the ones this requirement produced before
+  display-column measurement, which is the discriminating claim: it fails if the gauge run's
+  length was recomputed against a different measure, whereas comparing `layout::columns` to
+  `chars().count()` for an all-width-1 fixture is a tautology and could not
 
 #### Scenario: The bar reaches the buffer at both mandated frame widths
 

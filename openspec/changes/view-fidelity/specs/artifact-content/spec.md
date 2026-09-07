@@ -23,11 +23,14 @@ clamp can never disagree. It SHALL return:
 
 That last clause is the repair, not a restatement. `No content yet` was pushed as a bare
 `String` while every neighbouring line went through the padding, and this requirement's own
-promise — that no returned line exceeds `width` — was therefore false at every width below
-14: at a 15-column narrow frame in the detail route with an empty source, the rendered row
-read `│No content yet` and ate the region's right border. The literal is now truncated with
-the same `…` rule as everything else, so at width 13 it reads `No content y…` and at width 0
-it is the empty string. The line SHALL still be a single `Segment` carrying `Face::plain()`.
+promise — that no returned line exceeds `width` — was therefore false at every `width` below
+14: at a 15-column narrow **frame** in the detail route, whose content area is 13 columns,
+the rendered row read `│No content yet` and ate the region's right border. The literal is now
+truncated with the same `…` rule as everything else, so at `width` 13 it reads
+`No content y…`, at 12 `No content …`, at 11 `No content…`, and at 0 it is the empty string.
+Every `width` in this paragraph is the **content area's**, which is the frame's less the
+region's two border columns; the scenario below gives frame widths and says so.
+The line SHALL still be a single `Segment` carrying `Face::plain()`.
 
 The `change` argument is the **only** reason the tracked-tasks decision is made once rather
 than at each of the two call sites; both callers SHALL pass `Dashboard::selected_change()`
@@ -86,11 +89,17 @@ loop's exit condition.
 
 - **WHEN** the same empty-source `Dashboard` at `Route::Detail` is rendered at 15x20, at
   14x20, at 13x20, at 2x20, and at 1x20
-- **THEN** at 15x20 the content area's first row reads `No content…` or shorter and the
-  frame's right border column is a box-drawing character, not the letter `t` — the audit's
-  `│No content yet` row is gone
-- **AND** at 14x20 the row reads `No content y…`, at 13x20 `No content …`, and at every one
-  of the five widths the row's `layout::columns` is at most the interior width
+- **THEN** at 15x20 — a frame of 15, so a content area of 13 — the content area's first row
+  reads `No content y…` and the frame's right border column is a box-drawing character, not
+  the letter `t`: the audit's `│No content yet` row is gone
+- **AND** at 14x20 the row reads `No content …` (a content area of 12) and at 13x20
+  `No content…` (a content area of 11), each exactly its content area's width in columns —
+  the frame is two columns wider than the region it holds, which is why the frame widths and
+  the truncation points differ by two
+- **AND** at every one of the five widths the row's `layout::columns` is at most the content
+  area's width
+- **AND** at 2x20 and 1x20 the content area is zero or one column wide and the row is empty
+  or a single `…`
 - **AND** no buffer writes a cell past its last column and none of the five renders panics
 
 #### Scenario: A read failure is named above the content at both widths
