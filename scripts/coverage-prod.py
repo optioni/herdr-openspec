@@ -42,7 +42,15 @@ from pathlib import Path
 # Task 1.3: this SHALL be the checker's own output on the unmodified tree, rounded
 # down to a whole point. See openspec/changes/gate-integrity/design.md -> Decision 1a
 # and Risks ("PROD_MIN is set from the checker's own output at implementation time").
-DEFAULT_PROD_MIN = 97
+#
+# Measured at implementation time (task 1.3), from this checker's own hasCount rule
+# against a real `cargo llvm-cov --json` export of the unmodified tree (25 files under
+# src/, 22,285 hasCount-instrumented lines total, matching design.md's own total under
+# the same rule): production 96.07% (3544/3689 lines), test-module 96.43%
+# (17933/18596). This differs from design.md's own 97.28% estimate (6623/6808) because
+# the tree has grown since that estimate was written; per Decision 1a, the figure
+# actually produced here - not the design document's - is what SHALL be recorded.
+DEFAULT_PROD_MIN = 96
 
 SRC_COMPONENT = "src"
 
