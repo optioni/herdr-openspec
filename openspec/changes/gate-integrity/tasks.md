@@ -189,23 +189,23 @@ Test Strategy). Written first, it is RED for exactly the five gates this change 
 ## 5. `WIRED` reads code, and requires the panic hook (G5, G8)
 <!-- kind: behavior -->
 
-- [ ] 5.1 RED: Confirm both controls fail — the deleted `install_panic_hook();` line and the
+- [x] 5.1 RED: Confirm both controls fail — the deleted `install_panic_hook();` line and the
   `/* … */`-hidden `launch::start(` both exit 0 today, the latter printing
   `WIRED OK: twelve names present` (recorded, task 0.3).
-- [ ] 5.2 GREEN: Extend `code()` to strip `/* … */` block comments, including multi-line ones,
+- [x] 5.2 GREEN: Extend `code()` to strip `/* … */` block comments, including multi-line ones,
   before the name search. Keep the existing `//` strip.
-- [ ] 5.3 GREEN: Add a stripper control that isolates the **block-comment** half: reverting
+- [x] 5.3 GREEN: Add a stripper control that isolates the **block-comment** half: reverting
   only the `/* … */` strip leaves the `//` strip in place, so an identity-function control
   still passes and proves nothing about the addition. Anchor it on a block comment placed in
   `src/ui/mod.rs`'s production slice.
-- [ ] 5.4 GREEN: Add `install_panic_hook` to leg 1's required-name list — thirteen names, not
+- [x] 5.4 GREEN: Add `install_panic_hook` to leg 1's required-name list — thirteen names, not
   twelve — and update the `OK` line's count. Add a positive control anchored on
   `^pub fn install_panic_hook\(` in `src/ui/terminal.rs`
   (`grep -n '^pub fn install_panic_hook(' src/ui/terminal.rs` → line **130**).
-- [ ] 5.5 CHECK: Confirm the hook's *behaviour* is left alone — this group changes only
+- [x] 5.5 CHECK: Confirm the hook's *behaviour* is left alone — this group changes only
   `scripts/gates/wired.sh` and the control map. `src/ui/terminal.rs` is `seam-resilience`'s
   (proposal.md → Non-Goals); verify with `git diff --stat` that it is untouched.
-- [ ] 5.6 VERIFY: `make gates` exits 0 and `WIRED` reports thirteen names. Run the group
+- [x] 5.6 VERIFY: `make gates` exits 0 and `WIRED` reports thirteen names. Run the group
   tests — no regressions.
 
 ## 6. Degraded-coverage proofs and `covers` ranges (G7)
