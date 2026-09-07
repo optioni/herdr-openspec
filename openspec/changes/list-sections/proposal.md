@@ -80,7 +80,15 @@ landed.
 - **No mouse.** Clicking a section header belongs to `mouse-input`, which depends on this
   change for the target.
 - **No new grouping, sorting, or filtering dimension.** Active and archived are the two
-  sections OpenSpec itself defines; this change adds no third.
+  sections OpenSpec itself defines; this change adds no third. In particular it does not
+  group the archived tier by date, which was considered and deferred: every archived row
+  already carries a ten-column date field, no archived name yet exceeds the narrow
+  layout's 19-column name field (longest is 18), and a date grouping's value depends
+  entirely on how the archive happens to cluster in time. The section model SHALL
+  nonetheless leave the door open — a section is identified by a key and carries a nesting
+  depth, rather than the two booleans this change's own behaviour would need — so a later
+  change can nest date groups under `archived` without reworking the collapse state,
+  the selection index, or the filter's force-open rule.
 - **No empty-state rewording.** `No changes yet`, `No active changes`, and the two-row
   `No changes match` state are unchanged.
 - Crosses no PRD non-goal: nothing is written inside `openspec/`, no change is authored,
