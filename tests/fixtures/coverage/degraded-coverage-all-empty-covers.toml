@@ -1,0 +1,24 @@
+# A fixture map for coverage_prod.rs's "the range check cannot pass vacuously" scenario:
+# gate-integrity Change Review (task 9.3), CRITICAL 7. Two rows, BOTH `covers` arrays
+# empty, so total_ranges is 0 - the ONLY fixture that reaches
+# scripts/coverage-prod.py's `total_ranges == 0` guard directly, distinct from
+# degraded-coverage-empty-covers.toml (one row populated, one empty), which instead fires
+# the "fewer ranges than rows" count-mismatch branch. Before this fixture existed, the
+# `total_ranges == 0` guard was unreachable from the test suite - deleting it left every
+# test green.
+
+[[row]]
+condition = "Fixture: add is exercised, but its covers array was dropped"
+tier = "unit"
+proof = ["fixture_proof"]
+verdict = "confirmed"
+why = "fixture row for coverage_prod.rs's covers-range tests"
+covers = []
+
+[[row]]
+condition = "Fixture: sub is exercised, but its covers array was dropped"
+tier = "unit"
+proof = ["fixture_proof"]
+verdict = "confirmed"
+why = "fixture row for coverage_prod.rs's covers-range tests"
+covers = []

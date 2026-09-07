@@ -2,6 +2,12 @@
 # two rows, but only one contributes a `covers` range — the other's array is empty. Total
 # ranges (1) is fewer than total rows (2), which the checker SHALL refuse rather than
 # silently reporting the one range it does have as full coverage.
+#
+# gate-integrity Change Review (task 9.3), CRITICAL 7: this fixture exercises ONLY the
+# "fewer ranges than rows" count-mismatch branch (1 range < 2 rows) - it does NOT reach
+# scripts/coverage-prod.py's `total_ranges == 0` guard, because one row's `covers` array is
+# still populated. degraded-coverage-all-empty-covers.toml (both arrays empty) is the
+# fixture for that other, genuinely vacuous case.
 
 [[row]]
 condition = "Fixture: add is exercised"

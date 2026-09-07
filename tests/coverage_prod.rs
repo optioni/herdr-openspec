@@ -519,18 +519,31 @@ fn a_zeroed_covers_range_fails_naming_the_row_condition() {
     );
 }
 
-/// A row whose `covers` array is empty must fail rather than silently reporting the map's
-/// one remaining range as full coverage — the same reduction "fewer ranges than rows"
-/// below states as a floor.
+/// EVERY row's `covers` array empty must fail rather than silently reporting 100% of
+/// nothing (`total_ranges == 0`).
+///
+/// gate-integrity Change Review (task 9.3), CRITICAL 7: this used to share
+/// `degraded-coverage-empty-covers.toml` with `fewer_ranges_than_rows_fails` below - that
+/// fixture has only ONE empty array (the other row still contributes a range), so it fires
+/// the "fewer ranges than rows" count-mismatch branch, never `total_ranges == 0`. The two
+/// tests were the same test presented as proof of two different spec bullets; deleting the
+/// `total_ranges == 0` guard from `scripts/coverage-prod.py` left the suite green.
+/// `degraded-coverage-all-empty-covers.toml` (BOTH arrays empty) is the fixture that
+/// actually reaches it, and this test now asserts that guard's own distinct message.
 #[test]
 fn an_empty_covers_array_fails_vacuously() {
     let (ok, out) = run_checker_with_covers_toml(
         &fixture("healthy.json"),
-        &fixture("degraded-coverage-empty-covers.toml"),
+        &fixture("degraded-coverage-all-empty-covers.toml"),
     );
     assert!(
         !ok,
-        "expected an empty covers array to fail rather than pass vacuously:\n{out}"
+        "expected every empty covers array to fail rather than pass vacuously:\n{out}"
+    );
+    assert!(
+        out.contains("every row's \"covers\" array is empty"),
+        "must fail on the total_ranges == 0 guard specifically, not the count-mismatch \
+         branch fewer_ranges_than_rows_fails already covers: {out:?}"
     );
 }
 
@@ -556,7 +569,8 @@ fn a_report_naming_none_of_the_covers_paths_fails() {
 /// The map itself holding fewer `covers` ranges than `[[row]]` entries — dropping a range —
 /// is exactly what `degraded-coverage-empty-covers.toml` does (two rows, one range): this
 /// asserts the failure fires on the count mismatch, independent of the empty-array wording
-/// above.
+/// above, and now asserts that branch's own distinct message so it cannot be confused with
+/// `an_empty_covers_array_fails_vacuously`'s `total_ranges == 0` branch above.
 #[test]
 fn fewer_ranges_than_rows_fails() {
     let (ok, out) = run_checker_with_covers_toml(
@@ -566,5 +580,10 @@ fn fewer_ranges_than_rows_fails() {
     assert!(
         !ok,
         "expected fewer covers ranges than rows to fail:\n{out}"
+    );
+    assert!(
+        out.contains("holds 2 row(s) but only 1 covers range(s)"),
+        "must fail on the count-mismatch branch specifically, not the total_ranges == 0 \
+         branch an_empty_covers_array_fails_vacuously already covers: {out:?}"
     );
 }
