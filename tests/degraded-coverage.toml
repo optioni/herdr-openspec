@@ -161,7 +161,7 @@ tier = "outer"
 proof = ["every_launch_failure_renders_as_a_leading_row"]
 verdict = "unproven"
 why = "a real run_wired run against a scratch herdr failing at pane split, both widths"
-covers = ["src/launch.rs:271-279"]
+covers = ["src/launch.rs:284-290"]
 
 [[row]]
 condition = "A launch's `agent start` call fails"
@@ -169,7 +169,7 @@ tier = "outer"
 proof = ["every_launch_failure_renders_as_a_leading_row"]
 verdict = "unproven"
 why = "a real run_wired run against a scratch herdr failing at agent start, both widths"
-covers = ["src/launch.rs:292-300"]
+covers = ["src/launch.rs:305-313"]
 
 [[row]]
 condition = "A launch's `agent prompt` call fails"
@@ -177,7 +177,7 @@ tier = "outer"
 proof = ["every_launch_failure_renders_as_a_leading_row"]
 verdict = "unproven"
 why = "a real run_wired run against a scratch herdr failing at agent prompt, both widths"
-covers = ["src/launch.rs:315-317"]
+covers = ["src/launch.rs:328-330"]
 
 [[row]]
 condition = "A launch's derived agent name is already live in the session"
@@ -185,7 +185,7 @@ tier = "outer"
 proof = ["every_launch_failure_renders_as_a_leading_row"]
 verdict = "unproven"
 why = "a real run_wired run refused before any Herdr call, the sentence asserted in full at 120 columns"
-covers = ["src/launch.rs:99-103"]
+covers = ["src/launch.rs:112-116"]
 
 [[row]]
 condition = "`state::record` fails after a successful `agent start`"
@@ -193,7 +193,7 @@ tier = "outer"
 proof = ["a_success_clears_both_entries", "every_launch_failure_renders_as_a_leading_row"]
 verdict = "repaired"
 why = "openspec/changes/archive/2026-09-06-agent-launch should have shipped this: Outcome::problems now accumulates both the record and prompt failures, proved through run_wired and run_loop"
-covers = ["src/launch.rs:307-310"]
+covers = ["src/launch.rs:320-323"]
 
 [[row]]
 condition = "`g` on a change with no attributed agent"
@@ -201,7 +201,7 @@ tier = "outer"
 proof = ["g_with_no_agent_renders_the_same_buffer"]
 verdict = "unproven"
 why = "a real run_wired run pressing g on an unattributed change renders the identical buffer, with an empty argv log"
-covers = ["src/launch.rs:86-93"]
+covers = ["src/launch.rs:89-96"]
 
 [[row]]
 condition = "A `pane split` payload is not the measured envelope (a Herdr older than the manifest's `min_herdr_version` floor, `0.7.0`, might return one)"
@@ -209,7 +209,7 @@ tier = "outer"
 proof = ["every_launch_failure_renders_as_a_leading_row"]
 verdict = "unproven"
 why = "a real run_wired run against a scratch herdr returning a malformed pane-split payload"
-covers = ["src/launch.rs:142-150"]
+covers = ["src/launch.rs:155-163"]
 
 [[row]]
 condition = "Pane narrower than 100 columns"
