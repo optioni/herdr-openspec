@@ -908,6 +908,29 @@ mod tests {
             assert!(problem.contains("No such file or directory"), "{problem}");
         }
 
+        /// `seam-resilience`: `herdr_error_problem`'s third `CliError` arm names the
+        /// command and the deadline rather than failing to compile.
+        #[test]
+        fn timed_out_is_an_unreachable_snapshot() {
+            let fake = FakeCli::new();
+            fake.register_herdr(
+                &["agent", "list"],
+                Err(CliError::TimedOut {
+                    args: vec!["agent".to_string(), "list".to_string()],
+                    after: std::time::Duration::from_secs(60),
+                }),
+            );
+
+            let snapshot = super::super::poll_once(&fake);
+
+            assert!(!snapshot.reachable);
+            assert_eq!(snapshot.agents, Vec::new());
+            let problem = snapshot.problem.expect("a reason must be present");
+            assert!(problem.contains("herdr agent list"), "{problem}");
+            assert!(problem.contains("timed out"), "{problem}");
+            assert!(problem.contains("60s"), "{problem}");
+        }
+
         #[test]
         fn an_unparsable_success_is_an_unreachable_snapshot() {
             let fake = FakeCli::new();

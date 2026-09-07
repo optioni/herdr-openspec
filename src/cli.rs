@@ -672,6 +672,10 @@ mod tests {
         assert_eq!(super::OpenspecCli::run(&cli_b, &[]), Ok("B".to_string()));
     }
 
+    /// Named for the no-directory constructor: `RealOpenspecCli::new` alone, with neither
+    /// `with_dir` nor `with_env` called, so the pre-`seam-resilience` behaviour — no
+    /// argument added, the working directory inherited — is proved rather than assumed for
+    /// the default the two new builder methods now sit beside.
     #[test]
     fn no_argument_is_added_and_the_working_directory_is_inherited() {
         let scratch = ScratchDir::new();
@@ -1246,5 +1250,274 @@ mod tests {
             }
             other => panic!("expected two Failed results, got {other:?}"),
         }
+    }
+
+    // --- seam-resilience group 2: a working directory, an environment overlay, and a
+    // deadline ------------------------------------------------------------------------
+
+    #[test]
+    fn a_constructed_working_directory_is_the_childs_working_directory() {
+        let scratch = ScratchDir::new();
+        let workdir = ScratchDir::new();
+        let prog = script(&scratch, "prog", "pwd\n");
+
+        let before_cwd = std::env::current_dir().expect("current dir");
+
+        let cli = super::RealOpenspecCli::new(prog).with_dir(workdir.path());
+        let result = super::OpenspecCli::run(&cli, &[]).expect("should succeed");
+        let printed = result.trim();
+
+        assert_eq!(
+            std::fs::canonicalize(printed).expect("canonicalize printed cwd"),
+            std::fs::canonicalize(workdir.path()).expect("canonicalize workdir")
+        );
+
+        // The calling process's own directory is unchanged: the seam set the CHILD's
+        // directory rather than mutating its own.
+        let after_cwd = std::env::current_dir().expect("current dir");
+        assert_eq!(before_cwd, after_cwd);
+    }
+
+    #[test]
+    fn a_working_directory_that_does_not_exist_fails_rather_than_falling_back() {
+        let scratch = ScratchDir::new();
+        let prog = script(&scratch, "prog", "printf 'ok'\n");
+        let missing_dir = scratch.path().join("does-not-exist-dir");
+        assert!(!missing_dir.exists());
+
+        let cli = super::RealOpenspecCli::new(prog).with_dir(missing_dir);
+        let result = super::OpenspecCli::run(&cli, &[]);
+
+        match result {
+            Err(super::CliError::NotStarted { reason, .. }) => {
+                assert!(!reason.is_empty());
+            }
+            other => panic!("expected NotStarted rather than a silent fallback, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_given_overlay_sets_exactly_those_variables_and_disturbs_no_others() {
+        let scratch = ScratchDir::new();
+        let prog = script(
+            &scratch,
+            "prog",
+            "printf 'PATH=%s\\n' \"$PATH\"; printf 'HOME=%s\\n' \"$HOME\"; \
+             printf 'SEAM_PROBE=%s\\n' \"$SEAM_PROBE\"\n",
+        );
+
+        let before_path = std::env::var("PATH");
+        let before_seam_probe = std::env::var("SEAM_PROBE");
+
+        let overlay = vec![
+            ("SEAM_PROBE".to_string(), "set-by-overlay".to_string()),
+            ("PATH".to_string(), "/scratch/only".to_string()),
+        ];
+        let cli = super::RealOpenspecCli::new(prog).with_env(overlay);
+        let result = super::OpenspecCli::run(&cli, &[]).expect("should succeed");
+
+        assert!(result.contains("PATH=/scratch/only\n"), "{result}");
+        assert!(result.contains("SEAM_PROBE=set-by-overlay\n"), "{result}");
+        let expected_home = std::env::var("HOME").unwrap_or_default();
+        assert!(
+            result.contains(&format!("HOME={expected_home}\n")),
+            "{result}"
+        );
+
+        // The calling process's own environment is unchanged: the seam set the CHILD's
+        // environment rather than mutating its own, which matters because cargo test
+        // runs tests in parallel threads of one process.
+        assert_eq!(std::env::var("PATH"), before_path);
+        assert_eq!(std::env::var("SEAM_PROBE"), before_seam_probe);
+    }
+
+    #[test]
+    fn no_overlay_leaves_the_childs_environment_byte_identical() {
+        let scratch = ScratchDir::new();
+        let prog = script(
+            &scratch,
+            "prog",
+            "printf 'PATH=%s\\n' \"$PATH\"; printf 'HOME=%s\\n' \"$HOME\"; \
+             printf 'SEAM_PROBE=%s\\n' \"$SEAM_PROBE\"\n",
+        );
+
+        let cli = super::RealOpenspecCli::new(prog);
+        let result = super::OpenspecCli::run(&cli, &[]).expect("should succeed");
+
+        let expected_path = std::env::var("PATH").unwrap_or_default();
+        let expected_home = std::env::var("HOME").unwrap_or_default();
+        assert!(
+            result.contains(&format!("PATH={expected_path}\n")),
+            "{result}"
+        );
+        assert!(
+            result.contains(&format!("HOME={expected_home}\n")),
+            "{result}"
+        );
+        assert!(result.contains("SEAM_PROBE=\n"), "{result}");
+    }
+
+    /// `#!/usr/bin/env scratch-interp` is exactly the shape `openspec` itself ships as
+    /// (`#!/usr/bin/env node`) — see design.md -> Decision 1b. Without the overlay `env`
+    /// cannot find the interpreter on the test's own `PATH` and exits 127; with the
+    /// overlay prepending the interpreter's own directory it runs. The two halves differ
+    /// only in the overlay.
+    #[test]
+    fn an_interpreter_shim_program_fails_without_an_overlay_and_succeeds_with_one() {
+        let scratch = ScratchDir::new();
+
+        let shim = scratch.path().join("shim");
+        write_with_mode(&shim, b"#!/usr/bin/env scratch-interp\n", 0o755);
+
+        // The interpreter lives in a SECOND directory, not on the test's own PATH.
+        let interp_dir = scratch.path().join("interp-dir");
+        let interp = interp_dir.join("scratch-interp");
+        write_with_mode(
+            &interp,
+            b"#!/bin/sh\nprintf 'ran via scratch-interp\\n'\n",
+            0o755,
+        );
+
+        let cli = super::RealOpenspecCli::new(shim.clone());
+        let result = super::OpenspecCli::run(&cli, &[]);
+        match result {
+            Err(super::CliError::Failed { code, .. }) => {
+                assert_eq!(code, Some(127));
+            }
+            other => panic!("expected a Failed exit of 127, got {other:?}"),
+        }
+
+        let inherited_path = std::env::var("PATH").unwrap_or_default();
+        let overlay_path = format!("{}:{inherited_path}", interp_dir.display());
+        let overlaid_cli =
+            super::RealOpenspecCli::new(shim).with_env(vec![("PATH".to_string(), overlay_path)]);
+        let result = super::OpenspecCli::run(&overlaid_cli, &[]);
+        assert_eq!(result, Ok("ran via scratch-interp\n".to_string()));
+    }
+
+    #[test]
+    fn a_child_that_never_exits_times_out_with_a_named_reason() {
+        let scratch = ScratchDir::new();
+        let pidfile = scratch.path().join("pid");
+        // `exec` replaces the shell's own process image with `sleep`, so killing this
+        // script's child PID kills the sleep directly rather than leaving it as an
+        // orphaned grandchild.
+        let prog = script(
+            &scratch,
+            "prog",
+            &format!("echo $$ > {:?}\nexec sleep 999\n", pidfile.display()),
+        );
+        let cli =
+            super::RealOpenspecCli::new(prog).with_deadline(std::time::Duration::from_secs(1));
+
+        let start = std::time::Instant::now();
+        let result = super::OpenspecCli::run(&cli, &["list", "--json"]);
+        let elapsed = start.elapsed();
+
+        match result {
+            Err(super::CliError::TimedOut { args, after }) => {
+                assert_eq!(args, vec!["list".to_string(), "--json".to_string()]);
+                assert_eq!(after, std::time::Duration::from_secs(1));
+            }
+            other => panic!("expected TimedOut, got {other:?}"),
+        }
+        assert!(
+            elapsed < std::time::Duration::from_secs(10),
+            "took too long: {elapsed:?}"
+        );
+
+        // Poll to a deadline (never a fixed sleep-then-assert) that the scratch program's
+        // own process is no longer running, proving the seam killed the child rather than
+        // leaking it. Checked by process STATE rather than mere PID existence: the spec
+        // requires the seam not block waiting for the kill to be reaped, so the killed
+        // child sits as a zombie (state `Z`) — still occupying its PID, but no longer
+        // running — until this test process (its parent) exits. `kill -0` alone cannot
+        // tell a zombie from a live process, since both answer a signal probe; `ps`'s own
+        // process-state column can.
+        // The 1-second deadline above bounds how long the seam WAITS, not how soon the
+        // freshly forked child is actually scheduled to run its first line — under a
+        // heavily parallel `cargo test` run every core may be contended, so poll for the
+        // pid file's appearance too, rather than assuming it is already there.
+        let pidfile_deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while !pidfile.exists() && std::time::Instant::now() < pidfile_deadline {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let pid = std::fs::read_to_string(&pidfile)
+            .expect("read pid file")
+            .trim()
+            .to_string();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let mut dead = false;
+        while std::time::Instant::now() < deadline {
+            let output = std::process::Command::new("ps")
+                .args(["-o", "stat=", "-p", &pid])
+                .output();
+            let stopped_running = match output {
+                Ok(out) => {
+                    let stat = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                    stat.is_empty() || stat.starts_with('Z')
+                }
+                Err(_) => true,
+            };
+            if stopped_running {
+                dead = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(dead, "scratch program pid {pid} still running (not killed)");
+    }
+
+    #[test]
+    fn a_fast_child_is_unaffected_by_the_deadline() {
+        let scratch = ScratchDir::new();
+        let prog = script(&scratch, "prog", "printf 'ok'\n");
+        let cli = super::RealOpenspecCli::new(prog);
+
+        let start = std::time::Instant::now();
+        let result = super::OpenspecCli::run(&cli, &[]);
+        let elapsed = start.elapsed();
+
+        assert_eq!(result, Ok("ok".to_string()));
+        assert!(
+            elapsed < std::time::Duration::from_secs(10),
+            "a fast child must return promptly, not after the deadline: {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn a_child_that_writes_a_large_stdout_payload_and_exits_is_read_in_full() {
+        let scratch = ScratchDir::new();
+        // Comfortably more than one pipe buffer's worth on every platform this crate
+        // targets (64KiB on Linux, 16KiB on macOS).
+        let prog = script(&scratch, "prog", "yes A | head -c 200000\n");
+        let cli = super::RealOpenspecCli::new(prog);
+
+        let result = super::OpenspecCli::run(&cli, &[]).expect("should succeed");
+        // "A\n" is exactly two bytes, so 200_000 is exactly 100_000 whole repetitions
+        // with no partial line — an exact comparison rather than a length check plus a
+        // uniform-character check, which `yes`'s own newlines would fail.
+        assert_eq!(result, "A\n".repeat(100_000));
+    }
+
+    #[test]
+    fn a_child_that_writes_a_large_stderr_payload_and_fails_is_read_in_full() {
+        let scratch = ScratchDir::new();
+        let prog = script(&scratch, "prog", "yes B | head -c 200000 >&2; exit 1\n");
+        let cli = super::RealOpenspecCli::new(prog);
+
+        let result = super::OpenspecCli::run(&cli, &[]);
+        match result {
+            Err(super::CliError::Failed { code, stderr, .. }) => {
+                assert_eq!(code, Some(1));
+                assert_eq!(stderr, "B\n".repeat(100_000));
+            }
+            other => panic!("expected Failed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_deadline_is_a_named_constant_and_is_asserted() {
+        assert_eq!(super::RUN_DEADLINE, std::time::Duration::from_secs(60));
     }
 }

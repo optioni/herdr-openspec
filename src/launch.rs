@@ -1266,6 +1266,24 @@ mod tests {
         }
     }
 
+    /// `seam-resilience`: `herdr_reason`'s third `CliError` arm names the command and the
+    /// deadline rather than failing to compile.
+    mod herdr_reason {
+        use crate::cli::CliError;
+
+        #[test]
+        fn a_timed_out_call_names_the_deadline() {
+            let err = CliError::TimedOut {
+                args: vec!["agent".to_string(), "list".to_string()],
+                after: std::time::Duration::from_secs(60),
+            };
+            let reason = super::super::herdr_reason(&err);
+            assert!(reason.contains("herdr"), "{reason}");
+            assert!(reason.contains("timed out"), "{reason}");
+            assert!(reason.contains("60s"), "{reason}");
+        }
+    }
+
     mod focus {
         use crate::cli::FakeCli;
         use crate::launch::{Outcome, Request, run_request};

@@ -4781,6 +4781,21 @@ apply:
                 cli_error_problem("openspec list --json", &["list", "--json"], &empty);
             assert_eq!(problem, empty_problem);
         }
+
+        /// `seam-resilience`: the seam's third `CliError` variant renders a reason naming
+        /// the command and the deadline, rather than failing to compile or falling through
+        /// to a generic message.
+        #[test]
+        fn a_timed_out_call_names_the_command_and_the_deadline() {
+            let err = CliError::TimedOut {
+                args: vec!["list".to_string(), "--json".to_string()],
+                after: std::time::Duration::from_secs(60),
+            };
+            let problem = cli_error_problem("openspec list --json", &["list", "--json"], &err);
+            assert!(problem.contains("openspec list --json"), "{problem}");
+            assert!(problem.contains("timed out"), "{problem}");
+            assert!(problem.contains("60s"), "{problem}");
+        }
     }
 
     // --- group 7: schema resolution through the CLI fallback tier ----------

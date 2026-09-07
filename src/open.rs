@@ -785,6 +785,33 @@ mod tests {
         }
     }
 
+    /// `seam-resilience`: `herdr_reason`'s third `CliError` arm names the command and the
+    /// deadline rather than failing to compile.
+    #[test]
+    fn herdr_timed_out_names_the_deadline() {
+        let ctx = full_context();
+        let fake = FakeCli::new();
+        fake.register_herdr(&["pane", "list"], Ok(empty_listing()));
+        let argv = open_refs(Placement::Split, &ctx);
+        let refs: Vec<&str> = argv.iter().map(String::as_str).collect();
+        fake.register_herdr(
+            &refs,
+            Err(CliError::TimedOut {
+                args: argv.clone(),
+                after: std::time::Duration::from_secs(60),
+            }),
+        );
+        let report = run(&fake, &ctx, Placement::Split);
+        match report.outcome {
+            Err(reason) => {
+                assert!(reason.to_lowercase().contains("herdr"), "{reason}");
+                assert!(reason.contains("timed out"), "{reason}");
+                assert!(reason.contains("60s"), "{reason}");
+            }
+            Ok(()) => panic!("expected Err"),
+        }
+    }
+
     #[test]
     fn focus_domain_error_stops_and_opens_nothing() {
         let ctx = full_context();
