@@ -132,6 +132,14 @@ why = "a real unsupported glob, read through changes::from_files, empties one ar
 covers = ["src/changes.rs:691-694"]
 
 [[row]]
+condition = "A `generates` glob crosses a symlinked directory whose target resolves inside the change directory"
+tier = "unit"
+proof = ["a_non_looping_directory_symlink_resolving_inside_the_change_is_skipped_too"]
+verdict = "confirmed"
+why = "a real non-looping symlink whose target canonicalizes inside the change directory, read through resolve_artifact, is not descended into and the file behind it is absent from the artifact's paths - this proves the plugin's own skip, not that the CLI actually follows such a link (that claim rests on the 1.12.0 measurement cited in the row itself and in design.md, not on a test that spawns the real CLI)"
+covers = ["src/changes.rs:636-637", "src/changes.rs:640-640", "src/changes.rs:644-648"]
+
+[[row]]
 condition = "A tasks file exists but cannot be read (a directory where a file was expected, a permission error, an I/O error, or invalid UTF-8)"
 tier = "unit"
 proof = ["an_unreadable_tasks_file_is_zero_with_a_named_reason"]
