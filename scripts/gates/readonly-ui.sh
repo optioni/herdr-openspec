@@ -29,11 +29,27 @@
 # a planted `std::fs::write` in ui::read_artifact that it caught — so task 0.3 runs it for
 # real rather than recording a guard failure. With EXTRA set it fails with "EXTRA file
 # src/watch.rs missing" until group 1 creates the modules.
+#
+# EDITED by gate-integrity (G3): WRITE_RE matched neither `File::options()` — the inherent
+# alias for `OpenOptions::new()` — nor `DirBuilder::new().create(...)`, nor `create_new`, the
+# OpenOptions builder method and (since Rust 1.77) File's own associated function. Measured, an
+# appending write through File::options() and a directory creation through DirBuilder both
+# passed every gate in the tree, including this one. The three join WRITE_RE below.
+#
+# Each addition gets its OWN positive control (Guard F), not a shared grep over $CONTROL:
+# Guard B's `grep -qE "$WRITE_RE"` passes while ANY branch of the alternation matches, and
+# $CONTROL's ($state.rs's) production slice already matches four PRE-EXISTING branches
+# (fs::create_dir, fs::write, fs::rename, fs::remove_) and none of the three added here —
+# measured, and no file in the tree names any of them either. A shared check would therefore
+# stay green even if all three new alternatives were silently deleted. Each fixture below is
+# inline text, never read from a file this sweep scans, and is worded so it names ONLY its own
+# alternative and no other branch old or new — so deleting exactly that one alternative from
+# WRITE_RE, and no other, is what turns its own control red.
 UIDIR="${UIDIR:-src/ui}"
 CONTROL="${CONTROL:-src/state.rs}"
 UI_MIN="${UI_MIN:-11}"
 EXTRA="${EXTRA-src/watch.rs src/refresh.rs src/agents.rs src/launch.rs src/open.rs}"
-WRITE_RE='fs::write|File::create|OpenOptions|fs::remove_|fs::create_dir|fs::rename|fs::copy|set_permissions|fs::hard_link|fs::soft_link'
+WRITE_RE='fs::write|File::create|OpenOptions|fs::remove_|fs::create_dir|fs::rename|fs::copy|set_permissions|fs::hard_link|fs::soft_link|File::options|DirBuilder|create_new'
 fail() { echo "READONLY-UI FAIL: $1" >&2; exit 1; }
 
 [ -d "$UIDIR" ] || fail "no such directory: $UIDIR"
@@ -67,6 +83,21 @@ prod "$CONTROL" | grep -qE "$WRITE_RE" \
 awk 'BEGIN{p=0} /^#\[cfg\(test\)\]$/{p=1} p{print}' "$UIDIR/mod.rs" | grep -qE "$WRITE_RE" \
   || fail "the stripper is vacuous - $UIDIR/mod.rs's test slice names no write API"
 
+# Guard F — a dedicated positive control per alternative ADDED for G3, isolated from Guard B
+# and from each other. See the header note above for why a shared grep over $CONTROL cannot
+# prove any one of these three is live.
+check_added_alt() {
+  # $1 = human label for the fail message, $2 = inline fixture text, $3 = the one alternative
+  # this fixture exists to prove.
+  printf '%s\n' "$2" | grep -qE "$3" \
+    || fail "positive control - the $1 fixture names no $3 - the fixture itself is broken"
+  printf '%s\n' "$2" | grep -qE "$WRITE_RE" \
+    || fail "positive control - $1 ($3) is missing from WRITE_RE"
+}
+check_added_alt "File::options" 'let f = std::fs::File::options().append(true).open(p);' 'File::options'
+check_added_alt "DirBuilder" 'std::fs::DirBuilder::new().recursive(true).create(p);' 'DirBuilder'
+check_added_alt "create_new" 'opts.create_new(true);' 'create_new'
+
 hits=""
 for f in $(find "$UIDIR" -name '*.rs' | sort) $EXTRA; do
   h=$(prod "$f" | grep -nE "$WRITE_RE" | sed "s|^|$f:|" || true)
@@ -74,4 +105,4 @@ for f in $(find "$UIDIR" -name '*.rs' | sort) $EXTRA; do
 done
 [ -z "$hits" ] || { echo "READONLY-UI FAIL: a write API in production code under $UIDIR:" >&2
                     echo "$hits" >&2; exit 1; }
-echo "READONLY-UI OK: $n files under $UIDIR plus [$EXTRA], no write API in production code; both controls matched"
+echo "READONLY-UI OK: $n files under $UIDIR plus [$EXTRA], no write API in production code; both controls matched; File::options, DirBuilder, and create_new controls matched"
