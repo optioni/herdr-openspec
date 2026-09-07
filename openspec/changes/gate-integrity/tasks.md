@@ -236,6 +236,20 @@ Test Strategy). Written first, it is RED for exactly the five gates this change 
   (`grep -c 'verdict = "unproven"' tests/degraded-coverage.toml` → **20**) satisfy the new
   rules, and that `LEGAL_VERDICTS` still holds exactly five values — the verdict list is not
   extended (design.md → Decision 7).
+> **BLOCKED at 6.5 — awaiting a decision.** Measured on the current tree:
+> `pub fn start` in `src/watch.rs` has **two** `Err` arms producing the identical
+> "filesystem watch unavailable" problem, and the row's own condition text names both
+> ("`notify` refuses the watch, **or** the repository root cannot be watched"):
+> lines **264-268** are `notify::Watcher::new()`'s failure (execution count **0**), and
+> lines **275-279** are `watcher.watch(root)`'s failure (execution count **5** — already
+> driven by an existing test). The spec's scenario names 264-268 only. That arm cannot be
+> driven by any hermetic, portable test: `notify`'s macOS FSEvents backend returns `Ok`
+> unconditionally, and the only Linux route is starving the process of file descriptors,
+> which `cargo test` runs in parallel threads of one process — the same hazard
+> `AGENTS.md` records for `std::env::set_var`. The first attempt did exactly that and
+> left `make check` red on macOS (exit 2, failing on this range alone).
+> See the session report for the three options.
+
 - [ ] 6.7 VERIFY: `cargo test --all-features degraded_coverage` green; `make coverage` green,
   including every `covers` range. Run the group tests — no regressions.
 
