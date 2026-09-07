@@ -1354,6 +1354,9 @@ fn cli_error_problem(subject: &str, args: &[&str], err: &crate::cli::CliError) -
                 None => format!("{subject}: openspec {vector} exited with code {code}"),
             }
         }
+        crate::cli::CliError::TimedOut { args: _, after } => {
+            format!("{subject}: openspec {vector} timed out after {after:?}")
+        }
     }
 }
 

@@ -252,6 +252,9 @@ fn herdr_reason(err: &crate::cli::CliError) -> String {
         crate::cli::CliError::NotStarted { reason, .. } => {
             format!("could not start herdr: {reason}")
         }
+        crate::cli::CliError::TimedOut { after, .. } => {
+            format!("herdr timed out after {after:?}")
+        }
     }
 }
 

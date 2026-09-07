@@ -314,6 +314,9 @@ fn herdr_error_problem(err: &crate::cli::CliError) -> String {
         crate::cli::CliError::NotStarted { reason, .. } => {
             format!("herdr agent list: could not start herdr: {reason}")
         }
+        crate::cli::CliError::TimedOut { after, .. } => {
+            format!("herdr agent list timed out after {after:?}")
+        }
     }
 }
 

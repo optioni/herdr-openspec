@@ -25,7 +25,7 @@ tier = "unit"
 proof = ["a_cli_rejected_schema_names_its_reason_per_change"]
 verdict = "unproven"
 why = "a real FakeCli-driven from_cli merge falls back per change and content_lines renders the reason"
-covers = ["src/changes.rs:1372-1416"]
+covers = ["src/changes.rs:1375-1419"]
 
 [[row]]
 condition = "Schema not vendored (no `openspec/schemas/<name>/schema.yaml` locally)"
@@ -273,7 +273,7 @@ tier = "outer"
 proof = ["a_failed_cli_cycle_keeps_the_file_numbers"]
 verdict = "unproven"
 why = "a real run_wired run against a scratch openspec reporting a disagreeing root keeps the file-sourced numbers"
-covers = ["src/changes.rs:1582-1599"]
+covers = ["src/changes.rs:1585-1602"]
 
 [[row]]
 condition = "An `openspec` command exits non-zero"
@@ -281,7 +281,7 @@ tier = "unit"
 proof = ["a_failed_cli_cycle_keeps_the_file_numbers", "an_exec_failure_of_the_openspec_shim_reports_its_own_stderr"]
 verdict = "confirmed"
 why = "two proofs for the row's two halves: a_failed_cli_cycle_keeps_the_file_numbers (outer) runs a real run_wired cycle against a scratch openspec exiting non-zero and shows the file-sourced numbers survive; an_exec_failure_of_the_openspec_shim_reports_its_own_stderr (unit) feeds cli_error_problem the measured Failed{code:127} shape and shows the stderr line is carried. The outer proof is the stronger of the two, since it exercises the real cycle rather than calling cli_error_problem directly. tier is \"unit\" because tests/degraded_coverage.rs applies its view/outer rendering check per proof entry, and the unit proof's own body renders nothing through a TestBackend"
-covers = ["src/changes.rs:1560-1567", "src/changes.rs:1341-1356"]
+covers = ["src/changes.rs:1563-1570", "src/changes.rs:1341-1356"]
 
 [[row]]
 condition = "A `herdr agent list` call exits non-zero, or the program cannot be started at all"
@@ -320,7 +320,7 @@ tier = "outer"
 proof = ["a_failed_cli_cycle_keeps_the_file_numbers"]
 verdict = "unproven"
 why = "a real run_wired run keeps the file-sourced result after a later failing CLI cycle"
-covers = ["src/changes.rs:1758-1759"]
+covers = ["src/changes.rs:1761-1762"]
 
 [[row]]
 condition = "A touched path is classified to the wrong change, or conservatively to every change"
@@ -376,4 +376,4 @@ tier = "unit"
 proof = ["a_change_archived_mid_cycle_appears_in_both_lists_for_one_cycle"]
 verdict = "confirmed"
 why = "changes::merge's own unit proof: two merges, the second with an empty CLI list, showing add-auth appears in both active and archived for one cycle and then self-corrects rather than sticking (design.md -> Decision D6)"
-covers = ["src/changes.rs:1733-1733", "src/changes.rs:1772-1773", "src/changes.rs:1780-1784"]
+covers = ["src/changes.rs:1736-1736", "src/changes.rs:1775-1776", "src/changes.rs:1783-1787"]

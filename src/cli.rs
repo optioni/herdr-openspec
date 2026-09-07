@@ -10,11 +10,23 @@
 //! module is the seam through which the crate calls the external `openspec`
 //! and `herdr` programs.
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
-/// Everything that can go wrong running a program through this seam. Both
-/// variants carry the **argument vector** alongside the program name:
+/// How long the seam waits for a child before abandoning it. Named and pinned exactly like
+/// `watch::DEBOUNCE`, `agents::POLL_INTERVAL`, and `ui::driver::TICK` — see
+/// `openspec/changes/seam-resilience/design.md` -> Decision 4 and
+/// `openspec/changes/seam-resilience/specs/subprocess-seam/spec.md` -> "A child that never
+/// exits is abandoned...". 60 seconds sits comfortably above the 30-second worst case
+/// `herdr agent start` is measured to spend waiting for interactive readiness — the longest
+/// legitimate call this crate makes.
+pub const RUN_DEADLINE: Duration = Duration::from_secs(60);
+
+/// Everything that can go wrong running a program through this seam. Every
+/// variant carries the **argument vector** alongside the program name (or,
+/// for `TimedOut`, alongside the deadline that expired):
 /// `changes-from-cli` drives four distinct invocations through one
 /// `RealOpenspecCli` and one `RealHerdrCli` drives **five** — `agent list`
 /// (`agent-polling`), and `pane split`, `agent start`, `agent prompt`, and
@@ -46,12 +58,19 @@ pub enum CliError {
         code: Option<i32>,
         stderr: String,
     },
+    /// It started but never exited within [`RUN_DEADLINE`] (or, in a test, an
+    /// overridden deadline). The seam kills the child before returning this and does not
+    /// wait for the kill to be reaped. See
+    /// `openspec/changes/seam-resilience/specs/subprocess-seam/spec.md` -> "A child that
+    /// never exits is abandoned with a named reason rather than waited on forever".
+    TimedOut { args: Vec<String>, after: Duration },
 }
 
 /// The outcome of actually starting a program: either it ran to completion
 /// (carrying its exit success, stdout, and stderr, all as raw bytes — this
-/// helper decides nothing about them), or it could not be started at all
-/// (carrying the operating system's error text).
+/// helper decides nothing about them), it could not be started at all
+/// (carrying the operating system's error text), or it never exited before
+/// the deadline passed to [`spawn`] and was killed.
 enum RunOutcome {
     Completed {
         success: bool,
@@ -62,6 +81,7 @@ enum RunOutcome {
     NotStarted {
         reason: String,
     },
+    TimedOut,
 }
 
 /// The crate's single spawn site. Nothing else in the crate may call
@@ -69,24 +89,101 @@ enum RunOutcome {
 /// `openspec/changes/subprocess-seam/design.md` -> Test Strategy, which
 /// checks exactly that. Attaches an empty stdin, so a program that reads
 /// stdin fails fast instead of blocking a pane that never types. Adds no
-/// argument of its own, never sets `current_dir`, never mutates the
-/// environment: everything a caller can observe comes from the program and
-/// the arguments it was given.
-fn spawn(program: &Path, args: &[&str]) -> RunOutcome {
-    match Command::new(program)
+/// argument of its own and never mutates the calling process's own
+/// directory or environment: everything a caller can observe comes from the
+/// program, the arguments, and the two optional child-only properties below.
+///
+/// `dir` and `env` are applied only when given — see
+/// `openspec/changes/seam-resilience/design.md` -> Decision 2 for why the
+/// seam's previous blanket prohibition on both is narrowed to exactly this:
+/// both are constructor-supplied, so the seam itself derives, extends,
+/// canonicalizes, and validates neither.
+///
+/// Never `Command::output()`, which cannot be interrupted: `spawn` starts
+/// the child with piped stdout and stderr, drains both on their own threads
+/// so a full pipe cannot deadlock the wait below, then polls
+/// `Child::try_wait` to `deadline` rather than blocking on `Child::wait`. On
+/// expiry the child is killed and `TimedOut` is returned without waiting for
+/// the kill to be reaped.
+fn spawn(
+    program: &Path,
+    args: &[&str],
+    dir: Option<&Path>,
+    env: Option<&[(String, String)]>,
+    deadline: Duration,
+) -> RunOutcome {
+    let mut command = Command::new(program);
+    command
         .args(args)
         .stdin(Stdio::null())
-        .output()
-    {
-        Ok(output) => RunOutcome::Completed {
-            success: output.status.success(),
-            code: output.status.code(),
-            stdout: output.stdout,
-            stderr: output.stderr,
-        },
-        Err(err) => RunOutcome::NotStarted {
-            reason: err.to_string(),
-        },
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(dir) = dir {
+        command.current_dir(dir);
+    }
+    if let Some(overlay) = env {
+        for (key, value) in overlay {
+            command.env(key, value);
+        }
+    }
+
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(err) => {
+            return RunOutcome::NotStarted {
+                reason: err.to_string(),
+            };
+        }
+    };
+
+    // Drain stdout and stderr on their own threads: a sequential
+    // read-then-wait would deadlock against a child that fills a pipe and
+    // never exits, because nothing would be reading the other stream while
+    // this one blocks.
+    let mut stdout_pipe = child.stdout.take().expect("stdout was piped at spawn");
+    let mut stderr_pipe = child.stderr.take().expect("stderr was piped at spawn");
+    let stdout_thread = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = stdout_pipe.read_to_end(&mut buf);
+        buf
+    });
+    let stderr_thread = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = stderr_pipe.read_to_end(&mut buf);
+        buf
+    });
+
+    // Poll to the deadline rather than blocking on `Child::wait` — the shape
+    // `NOSLEEP`'s leg 1 requires, and the one `src/cli.rs` is held to since it
+    // sits under neither leg 2 (`src/ui/`) nor leg 2b's three named modules.
+    let start = Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break Some(status),
+            Ok(None) | Err(_) => {
+                if start.elapsed() >= deadline {
+                    break None;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+    };
+
+    match status {
+        Some(status) => {
+            let stdout = stdout_thread.join().unwrap_or_default();
+            let stderr = stderr_thread.join().unwrap_or_default();
+            RunOutcome::Completed {
+                success: status.success(),
+                code: status.code(),
+                stdout,
+                stderr,
+            }
+        }
+        None => {
+            let _ = child.kill();
+            RunOutcome::TimedOut
+        }
     }
 }
 
@@ -101,10 +198,16 @@ fn spawn(program: &Path, args: &[&str]) -> RunOutcome {
 /// argument vector and the operating system's error text; it never panics,
 /// because an absent `openspec` and an unreachable `herdr` are both
 /// documented degraded states.
-fn run_and_map(program: &Path, args: &[&str]) -> Result<String, CliError> {
+fn run_and_map(
+    program: &Path,
+    args: &[&str],
+    dir: Option<&Path>,
+    env: Option<&[(String, String)]>,
+    deadline: Duration,
+) -> Result<String, CliError> {
     let program_name = program.display().to_string();
     let arg_vec: Vec<String> = args.iter().map(|a| a.to_string()).collect();
-    match spawn(program, args) {
+    match spawn(program, args, dir, env, deadline) {
         RunOutcome::Completed {
             success: true,
             stdout,
@@ -125,6 +228,10 @@ fn run_and_map(program: &Path, args: &[&str]) -> Result<String, CliError> {
             program: program_name,
             args: arg_vec,
             reason,
+        }),
+        RunOutcome::TimedOut => Err(CliError::TimedOut {
+            args: arg_vec,
+            after: deadline,
         }),
     }
 }
@@ -149,17 +256,55 @@ pub trait HerdrCli: Send + Sync {
 /// never its canonicalized target, since that is the stable,
 /// upgrade-surviving name a caller should keep spawning. Does nothing but
 /// delegate to the crate's one spawn helper: no added argument, no
-/// `current_dir`, no environment mutation, no retry, no timeout, no
+/// environment mutation beyond an explicitly supplied overlay, no retry, no
 /// caching, no inspection of the output.
+///
+/// Two more child-only properties are constructor-supplied, per
+/// `openspec/changes/seam-resilience/design.md` -> Decision 2: a working
+/// directory (`with_dir`) and an environment overlay (`with_env`). Neither
+/// is set by `new` alone — the pre-change behaviour, byte-identical, is
+/// what a plain `RealOpenspecCli::new(program)` still produces.
 pub struct RealOpenspecCli {
     program: PathBuf,
+    dir: Option<PathBuf>,
+    env: Option<Vec<(String, String)>>,
+    deadline: Duration,
 }
 
 impl RealOpenspecCli {
     pub fn new(program: impl Into<PathBuf>) -> Self {
         Self {
             program: program.into(),
+            dir: None,
+            env: None,
+            deadline: RUN_DEADLINE,
         }
+    }
+
+    /// Set the child's working directory. Never called, the child inherits the
+    /// calling process's own — see `specs/subprocess-seam/spec.md` -> "No argument is
+    /// added and the working directory is inherited".
+    pub fn with_dir(mut self, dir: impl Into<PathBuf>) -> Self {
+        self.dir = Some(dir.into());
+        self
+    }
+
+    /// Set exactly the environment variables named in `overlay`, to exactly the values
+    /// named, disturbing nothing else — never clearing, never removing, never adding one
+    /// the overlay does not name. Never called, the child inherits the calling process's
+    /// environment byte-identically — see `specs/subprocess-seam/spec.md` -> "No overlay
+    /// leaves the child's environment byte-identical".
+    pub fn with_env(mut self, overlay: Vec<(String, String)>) -> Self {
+        self.env = Some(overlay);
+        self
+    }
+
+    /// Override [`RUN_DEADLINE`] for a test. Never called in production, where the real
+    /// deadline is always the named constant.
+    #[cfg(test)]
+    pub(crate) fn with_deadline(mut self, deadline: Duration) -> Self {
+        self.deadline = deadline;
+        self
     }
 
     pub fn program(&self) -> &Path {
@@ -169,7 +314,13 @@ impl RealOpenspecCli {
 
 impl OpenspecCli for RealOpenspecCli {
     fn run(&self, args: &[&str]) -> Result<String, CliError> {
-        run_and_map(&self.program, args)
+        run_and_map(
+            &self.program,
+            args,
+            self.dir.as_deref(),
+            self.env.as_deref(),
+            self.deadline,
+        )
     }
 }
 
@@ -202,7 +353,7 @@ impl Default for RealHerdrCli {
 
 impl HerdrCli for RealHerdrCli {
     fn run(&self, args: &[&str]) -> Result<String, CliError> {
-        run_and_map(&self.program, args)
+        run_and_map(&self.program, args, None, None, RUN_DEADLINE)
     }
 }
 
@@ -234,11 +385,11 @@ fn npm_prefix_from(success: bool, stdout: &[u8]) -> Option<PathBuf> {
 /// without touching `PATH` — `std::env::set_var` is `unsafe` in edition
 /// 2024 and races parallel tests, which `AGENTS.md` forbids outright.
 pub fn npm_prefix_via(program: &Path) -> Option<PathBuf> {
-    match spawn(program, &["prefix", "-g"]) {
+    match spawn(program, &["prefix", "-g"], None, None, RUN_DEADLINE) {
         RunOutcome::Completed {
             success, stdout, ..
         } => npm_prefix_from(success, &stdout),
-        RunOutcome::NotStarted { .. } => None,
+        RunOutcome::NotStarted { .. } | RunOutcome::TimedOut => None,
     }
 }
 
