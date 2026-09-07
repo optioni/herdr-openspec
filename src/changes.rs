@@ -1300,11 +1300,36 @@ pub(crate) fn join_artifacts(
     (cli.to_vec(), None)
 }
 
+/// The first non-blank line of `stderr` whose trimmed form does not begin
+/// `Note: `, trimmed — or `None` when no such line exists (a blank
+/// `stderr`, or one holding nothing but `Note:` banners). `openspec schema
+/// which` writes `Note: Schema commands are experimental and may change.`
+/// to stderr on every invocation, success and failure alike, so skipping
+/// it is not optional: without the skip, every failure the fallback tier
+/// reports would end with a banner that looks like an explanation and is
+/// not. See `cli-changes` -> "Every CLI failure degrades to the file
+/// result and names itself".
+fn first_diagnostic_line(stderr: &str) -> Option<&str> {
+    stderr
+        .lines()
+        .map(str::trim)
+        .find(|line| !line.is_empty() && !line.starts_with("Note: "))
+}
+
 /// Render a CLI invocation failure as one problem naming `subject` (what was
-/// being resolved), the argument vector, and — for a non-zero exit — the
-/// exit code. Never the CLI's own diagnostic text: it writes that to
-/// stdout, and `subprocess-seam`'s `CliError::Failed` carries stderr only.
-/// See `cli-changes` -> "Every CLI failure degrades to the file result and
+/// being resolved), the argument vector, and, for the two shapes
+/// `subprocess-seam`'s `CliError` carries: for `NotStarted`, the operating
+/// system's own message about the spawn itself, appended unconditionally —
+/// it distinguishes a binary deleted between probe and run from one with an
+/// unusable interpreter line; for `Failed`, the exit code and (whenever one
+/// exists) `first_diagnostic_line` of stderr, appended after the code.
+/// `openspec`'s own diagnostics still go to stdout, which `Failed` never
+/// carries, so a domain failure (an unknown schema, say) still names only
+/// its exit code — but a failure of the interpreter running `openspec`
+/// itself (an unrunnable shim, `code: Some(127)`) is self-diagnosing on
+/// stderr, and dropping that stderr unconditionally left the one failure in
+/// the crate that explains itself rendering as an unexplained number. See
+/// `cli-changes` -> "Every CLI failure degrades to the file result and
 /// names itself".
 fn cli_error_problem(subject: &str, args: &[&str], err: &crate::cli::CliError) -> String {
     let vector = args.join(" ");
@@ -1312,20 +1337,25 @@ fn cli_error_problem(subject: &str, args: &[&str], err: &crate::cli::CliError) -
         crate::cli::CliError::NotStarted {
             program,
             args: _,
-            reason: _,
+            reason,
         } => {
-            format!("{subject}: could not start {program} for openspec {vector}")
+            format!("{subject}: could not start {program} for openspec {vector}: {reason}")
         }
         crate::cli::CliError::Failed {
             program: _,
             args: _,
             code,
-            stderr: _,
+            stderr,
         } => {
             let code = code
                 .map(|c| c.to_string())
                 .unwrap_or_else(|| "unknown".to_string());
-            format!("{subject}: openspec {vector} exited with code {code}")
+            match first_diagnostic_line(stderr) {
+                Some(line) => {
+                    format!("{subject}: openspec {vector} exited with code {code}: {line}")
+                }
+                None => format!("{subject}: openspec {vector} exited with code {code}"),
+            }
         }
     }
 }
