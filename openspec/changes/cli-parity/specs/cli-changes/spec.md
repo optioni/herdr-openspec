@@ -31,8 +31,10 @@ one human-readable problem naming what failed.
 `is_legal_name` trims before validating, so `parse_apply` SHALL store the **trimmed** value
 and never the padded one. `schema_key` already trims a file-declared name for exactly this
 reason — accept and use must agree on one form, or a padded segment reaches the schema path
-join. An empty or whitespace-only `schemaName` remains covered by the existing missing-field
-branch, whose message differs; both outcomes drop the change, and the two messages are not
+join. An empty `schemaName` remains covered by the existing missing-field branch — the
+`required_non_empty_str` filter that branch relies on does not trim, so a whitespace-only
+value such as `"   "` is not empty and instead reaches the new guard, which rejects it — the
+two branches' messages differ; both outcomes drop the change, and the two messages are not
 required to be equal.
 
 **Both** carried diagnostics SHALL reach the problem text: a `NotStarted` reason always, and

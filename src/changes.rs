@@ -5712,9 +5712,13 @@ apply:
                 // Empty stderr: `instructions apply` was measured writing
                 // its diagnostic ("Unknown schema \"outside-in-tdd\"") to
                 // stdout with a 0-byte stderr, which `CliError::Failed`
-                // never carries. The assertion below is the proof that no
-                // reason is invented when the seam carried none — not that
-                // a carried one is dropped.
+                // never carries. With `stderr` forced empty here, the
+                // assertion below cannot fail — `cli_error_problem` has no
+                // path from an empty stderr to that string — so it is not a
+                // discriminating test of this fixture. It stays as a
+                // documentary pin: the spec's own proof that the code never
+                // fabricates a reason the CLI did not actually report,
+                // recorded here rather than left to be taken on faith.
                 Err(CliError::Failed {
                     program: "openspec".to_string(),
                     args: vec![
