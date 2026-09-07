@@ -1375,7 +1375,9 @@ fn resolve_cli_schema_uncached(
                 },
             }
         }
-        Err(err) => CachedCliSchema {
+        Err(err @ crate::schema::LoadError::Unreadable { path: _, reason: _ })
+        | Err(err @ crate::schema::LoadError::Invalid { path: _, reason: _ })
+        | Err(err @ crate::schema::LoadError::IllegalName { name: _ }) => CachedCliSchema {
             schema: None,
             problems: vec![schema_load_problem(&err)],
         },
@@ -4613,28 +4615,6 @@ apply:
             assert_eq!(problems.len(), 1);
         }
 
-        /// CHARACTERIZATION (`cli-parity` group 3): pins the illegal-name
-        /// outcome `resolve_cli_schema_uncached`'s catch-all `Err(err) =>`
-        /// arm already produces, before that arm is replaced with explicit
-        /// `LoadError` arms. See `schema-cli-fallback` -> "An illegal
-        /// schema name is not repaired by the CLI".
-        #[test]
-        fn an_illegal_schema_name_is_not_repaired_by_the_cli() {
-            let scratch = ScratchDir::new();
-            let repo = canonical(scratch.path());
-
-            let fake = FakeCli::new();
-            // No "schema which" registration — the fake panics on an
-            // unregistered pair, so a passing test proves no call was made.
-            let mut cache = HashMap::new();
-            let (schema, problems) =
-                resolve_cli_schema(&fake, &repo, "../../../../etc", &mut cache);
-            assert!(schema.is_none());
-            assert_eq!(problems.len(), 1);
-            assert!(problems[0].contains("../../../../etc"));
-            assert!(fake.calls().is_empty());
-        }
-
         #[test]
         fn an_unknown_schema_name_degrades_that_change_alone() {
             let scratch = ScratchDir::new();
@@ -4997,6 +4977,32 @@ apply:
                 .count();
             assert_eq!(schema_which_calls, 2);
         }
+    }
+
+    /// CHARACTERIZATION (`cli-parity` group 3): pins the illegal-name
+    /// outcome `resolve_cli_schema_uncached`'s catch-all `Err(err) =>` arm
+    /// already produces, before that arm is replaced with explicit
+    /// `LoadError` arms. Placed directly in `changes::tests` rather than in
+    /// `mod schema_fallback` to match the design's own filter,
+    /// `changes::tests::an_illegal_schema_name_is_not_repaired`. See
+    /// `schema-cli-fallback` -> "An illegal schema name is not repaired by
+    /// the CLI".
+    #[test]
+    fn an_illegal_schema_name_is_not_repaired_by_the_cli() {
+        use crate::testutil::{ScratchDir, canonical};
+
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+
+        let fake = crate::cli::FakeCli::new();
+        // No "schema which" registration — the fake panics on an
+        // unregistered pair, so a passing test proves no call was made.
+        let mut cache = std::collections::HashMap::new();
+        let (schema, problems) = resolve_cli_schema(&fake, &repo, "../../../../etc", &mut cache);
+        assert!(schema.is_none());
+        assert_eq!(problems.len(), 1);
+        assert!(problems[0].contains("../../../../etc"));
+        assert!(fake.calls().is_empty());
     }
 
     // --- group 8: `from_cli` — the composition (`mod from_cli`) ------------
