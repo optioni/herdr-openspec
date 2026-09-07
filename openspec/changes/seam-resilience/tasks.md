@@ -29,7 +29,7 @@ apart by exit code.
 - [ ] 2.2b GREEN: Give `RealOpenspecCli` an environment overlay and apply it with `Command::env` per entry — never `env_clear`, never `env_remove`. The seam derives nothing: it sets what it was handed (design.md -> Decision 2).
 - [ ] 2.3 GREEN: Replace `Command::output()` with spawn plus a bounded wait, add `cli::RUN_DEADLINE` and `CliError::TimedOut { args, after }`, and kill the child on expiry. Read stdout and stderr so a full pipe cannot deadlock against the deadline.
 - [ ] 2.4 CHECK: Contract gate — every `match` on `CliError` in the crate compiles with the new variant, and each renders a reason naming the command. `grep -rn 'CliError::' src/ | wc -l` → `42` sites at HEAD to review.
-- [ ] 2.5 CHECK: The seam still parses nothing and decides nothing — `grep -c 'serde_json' src/cli.rs` → `0` (exit 1); `grep -cE 'env_clear|env_remove' src/cli.rs` → `0`; the seam names no `PATH` literal and no path-separator logic (`grep -c 'PATH' src/cli.rs` → `0` outside test bodies); and `make gates` passes `NOSPAWN-GREP` unchanged.
+- [ ] 2.5 CHECK: The seam still parses nothing and decides nothing — `grep -c 'serde_json' src/cli.rs` → `0` (exit 1) and `grep -cE 'env_clear|env_remove' src/cli.rs` → `0` (exit 1). Confirm no **production** line constructs a `PATH` value: `grep -n 'PATH' src/cli.rs` returns `8` hits at HEAD, six of them doc comments and two test literals (`:1056`, `:1087`), and the overlay must add no ninth outside a test — the seam applies what it is handed and joins nothing. `make gates` passes `NOSPAWN-GREP` unchanged.
 - [ ] 2.6 REFACTOR: Fold the two spawn paths into one helper if the bounded wait duplicated the outcome mapping; otherwise state that none was needed.
 - [ ] 2.7 CHECK: `NOSLEEP` passes with the seam's bounded wait — `src/cli.rs` is under neither leg 2 nor leg 2b, so leg 1's deadline-bounded-poll shape governs it. Confirm the wait polls to a deadline rather than sleeping a fixed interval.
 - [ ] 2.8 Run `cargo test --all-features cli` — no regressions.
@@ -41,7 +41,7 @@ apart by exit code.
 - [ ] 3.2 GREEN: Add the working-directory and overlay parameters to `cli::worker_cli`, pass both to `RealOpenspecCli`, and have `ui::start_collaborators` supply the root it already resolved. `worker_cli_from_env` passes `None` and an empty overlay.
 - [ ] 3.2b GREEN: Build the one-entry overlay in `ui::start_collaborators` — `PATH` set to the resolved binary's `parent()` joined by the platform separator to the inherited `PATH`, read through the injected environment lookup; the parent alone when no `PATH` is inherited. Applied for every probe step (design.md -> Decision 2).
 - [ ] 3.3 CHECK: Confirm the root-disagreement guard in `changes::from_cli_cached` is unchanged — the fix stops the disagreement arising, it does not start trusting a CLI that reports another repository.
-- [ ] 3.3b CHECK: `ui::start_collaborators` names no `std::env::var` — `grep -c 'env::var' src/ui/mod.rs` → confirm it stays at its HEAD value, since the inherited `PATH` must come through the injected lookup.
+- [ ] 3.3b CHECK: `ui::start_collaborators` names no `std::env::var` — `grep -c 'env::var' src/ui/mod.rs` → `0` (exit 1) at HEAD, and must stay `0`, since the inherited `PATH` comes through the injected lookup and `cargo test` runs in parallel threads of one process.
 - [ ] 3.4 Run `cargo test --all-features` for `cli`, `changes`, and `ui::mod` — no regressions.
 
 ## 4. The watch covers `openspec/`, not the repository
