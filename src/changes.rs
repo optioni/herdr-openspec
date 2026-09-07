@@ -5887,7 +5887,10 @@ apply:
             vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
 
             let fake = FakeCli::new();
-            fake.register_openspec(&["list", "--json"], Ok(list_json(&repo, &[("alpha", 3, 5)])));
+            fake.register_openspec(
+                &["list", "--json"],
+                Ok(list_json(&repo, &[("alpha", 3, 5)])),
+            );
             fake.register_openspec(
                 &["instructions", "apply", "--change", "alpha", "--json"],
                 Ok(apply_json("tdd", &repo.join("openspec/changes/alpha"), &[])),

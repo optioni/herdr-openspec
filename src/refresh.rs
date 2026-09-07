@@ -409,7 +409,11 @@ apply:
                 );
                 assert_eq!(set.active[0].name, "alpha");
                 assert_eq!(set.problems.len(), 1);
-                assert!(set.problems[0].contains("list --json"), "{:?}", set.problems);
+                assert!(
+                    set.problems[0].contains("list --json"),
+                    "{:?}",
+                    set.problems
+                );
                 assert!(set.problems[0].contains("127"), "{:?}", set.problems);
             }
             other => panic!("expected Merged, got {other:?}"),

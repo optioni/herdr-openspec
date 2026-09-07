@@ -438,11 +438,27 @@ pub fn agent_cli_via(program: &Path) -> std::sync::Arc<dyn HerdrCli> {
 /// instead of dropping it — rows 27 and 31 of `SPEC.md` -> Degraded states name a reason on
 /// `BinResolution::problems` that, before this change, reached no reader once `worker_cli`
 /// consumed the resolution. `ui::start_collaborators` is the one production caller.
+///
+/// `seam-resilience`'s addition (design.md -> Decision 2): `cwd` and `env_overlay` are
+/// threaded straight into the `RealOpenspecCli` this builds, via `with_dir`/`with_env`,
+/// applied only when non-empty so the pre-change behaviour — no directory, no overlay —
+/// stays byte-identical when both are absent. `ui::start_collaborators` supplies the
+/// resolved repository root and the one-entry `PATH` overlay it built from the resolved
+/// binary's own parent directory; `worker_cli_from_env` supplies neither.
 pub fn worker_cli(
     resolution: crate::resolve::BinResolution,
+    cwd: Option<&Path>,
+    env_overlay: &[(String, String)],
 ) -> (Option<std::sync::Arc<dyn OpenspecCli>>, Vec<String>) {
     let cli = resolution.found.map(|found| {
-        std::sync::Arc::new(RealOpenspecCli::new(found.path)) as std::sync::Arc<dyn OpenspecCli>
+        let mut real = RealOpenspecCli::new(found.path);
+        if let Some(dir) = cwd {
+            real = real.with_dir(dir);
+        }
+        if !env_overlay.is_empty() {
+            real = real.with_env(env_overlay.to_vec());
+        }
+        std::sync::Arc::new(real) as std::sync::Arc<dyn OpenspecCli>
     });
     (cli, resolution.problems)
 }
@@ -456,7 +472,7 @@ pub fn worker_cli(
 pub fn worker_cli_from_env(
     config: &crate::config::Config,
 ) -> Option<std::sync::Arc<dyn OpenspecCli>> {
-    worker_cli(crate::resolve::openspec_bin_from_env(config)).0
+    worker_cli(crate::resolve::openspec_bin_from_env(config), None, &[]).0
 }
 
 /// Which program a fake invocation addressed. Recorded and keyed alongside
