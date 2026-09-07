@@ -248,6 +248,155 @@ fn function_bodies(files: &[PathBuf], name: &str) -> Vec<String> {
     bodies
 }
 
+/// Condition 4b: is the occurrence of a bare `fn <name>(` at line index `fn_line` of
+/// `lines` directly marked `#[test]` and not `#[ignore]`d? Walks upward through the
+/// contiguous block of attribute lines immediately above the `fn` line — an ordinary
+/// Rust test's `#[test]` may sit above or below a sibling attribute such as
+/// `#[should_panic(...)]` (this crate writes it `#[test]` first, `src/changes.rs`'s
+/// `an_empty_name_panics` among others), so this looks for `#[test]` anywhere in that
+/// block rather than requiring it to be the single line immediately above — the spec's
+/// own "`#[test]` attribute on the line above" phrasing covers the ordinary one-attribute
+/// case; a stacked `#[should_panic]` is the one shape here that needs the wider walk.
+/// `#[ignore` anywhere in the same block always wins: a test nothing runs proves nothing,
+/// on exactly the same terms whether it once was `#[test]` alone or `#[test]` stacked with
+/// another attribute.
+fn is_directly_marked_test(lines: &[&str], fn_line: usize) -> bool {
+    let mut has_test = false;
+    let mut has_ignore = false;
+    let mut i = fn_line;
+    while i > 0 {
+        let prev = lines[i - 1].trim();
+        if !prev.starts_with("#[") {
+            break;
+        }
+        if prev.starts_with("#[test]") {
+            has_test = true;
+        }
+        if prev.starts_with("#[ignore") {
+            has_ignore = true;
+        }
+        i -= 1;
+    }
+    has_test && !has_ignore
+}
+
+/// Every directly-`#[test]`-marked function's own body, across `files` — computed once per
+/// `check_coverage` call, since condition 4b's "or... be named in the body of at least one
+/// function that does [carry `#[test]`]" clause (for a shared helper several tests call) is
+/// independent of any one `proof` name. Matches only a bare `fn name(` — never a `pub fn` —
+/// on `function_bodies`' own established terms: no `#[test]` function in this crate is
+/// declared `pub`.
+fn all_directly_tested_bodies(files: &[PathBuf]) -> Vec<String> {
+    let mut bodies = Vec::new();
+    for path in files {
+        let Ok(text) = fs::read_to_string(path) else {
+            continue;
+        };
+        let lines: Vec<&str> = text.lines().collect();
+        let mut i = 0;
+        while i < lines.len() {
+            let line = lines[i];
+            let trimmed_start = line.trim_start();
+            if trimmed_start.starts_with("fn ") && is_directly_marked_test(&lines, i) {
+                let indent = line.len() - trimmed_start.len();
+                let close = format!("{}}}", " ".repeat(indent));
+                let mut body = String::new();
+                let mut j = i;
+                while j < lines.len() {
+                    body.push_str(lines[j]);
+                    body.push('\n');
+                    if j > i && lines[j] == close {
+                        break;
+                    }
+                    j += 1;
+                }
+                bodies.push(body);
+            }
+            i += 1;
+        }
+    }
+    bodies
+}
+
+/// Condition 4b, the whole rule: `name` is a proof precisely when at least one of its own
+/// `fn <name>(` occurrences is directly `#[test]`-marked (and not `#[ignore]`d), or `name`
+/// is called (`name(`) in the body of at least one function that is. `all_tested_bodies` is
+/// `all_directly_tested_bodies`'s output, built once per `check_coverage` call and shared
+/// across every `proof` name it checks.
+fn is_proof_a_test(files: &[PathBuf], name: &str, all_tested_bodies: &[String]) -> bool {
+    let needle = format!("fn {name}(");
+    for path in files {
+        let Ok(text) = fs::read_to_string(path) else {
+            continue;
+        };
+        let lines: Vec<&str> = text.lines().collect();
+        for (i, line) in lines.iter().enumerate() {
+            if line.trim_start().starts_with(&needle) && is_directly_marked_test(&lines, i) {
+                return true;
+            }
+        }
+    }
+    let call_needle = format!("{name}(");
+    all_tested_bodies
+        .iter()
+        .any(|body| body.contains(&call_needle))
+}
+
+/// Condition 4c and the six-key rule's `covers` half: `covers` SHALL be non-empty, and
+/// every `path:first-last` entry SHALL resolve — `path` a file under `src/`, `first <=
+/// last`, both within the file's own line count, and the range holding at least one line
+/// of code (a line, once trimmed, that is non-empty and does not open with `//`). This is
+/// a stated limit on the same terms `coverage-prod.py`'s own comment/string masking is:
+/// it does not parse Rust, so a block comment (`/* ... */`) spanning into the range from
+/// outside it is not detected — recorded here rather than silently assumed complete.
+fn validate_covers(condition: &str, covers: &[(String, usize, usize)]) -> Result<(), String> {
+    if covers.is_empty() {
+        return Err(format!(
+            "row {condition:?}: missing or empty \"covers\" — every row must name the \
+             production code its proof covers"
+        ));
+    }
+    for (path, first, last) in covers {
+        if !path.starts_with("src/") {
+            return Err(format!(
+                "row {condition:?}: covers entry {path:?} does not name a path under src/"
+            ));
+        }
+        let full = manifest_dir().join(path);
+        let Ok(text) = fs::read_to_string(&full) else {
+            return Err(format!(
+                "row {condition:?}: covers entry {path}:{first}-{last} names a path that \
+                 does not exist under src/"
+            ));
+        };
+        if first > last {
+            return Err(format!(
+                "row {condition:?}: covers entry {path}:{first}-{last} is a reversed range \
+                 (first > last)"
+            ));
+        }
+        let lines: Vec<&str> = text.lines().collect();
+        if *first == 0 || *last > lines.len() {
+            return Err(format!(
+                "row {condition:?}: covers entry {path}:{first}-{last} is out of range \
+                 ({path} has {} lines)",
+                lines.len()
+            ));
+        }
+        let holds_code = lines[(first - 1)..*last].iter().any(|line| {
+            let t = line.trim();
+            !t.is_empty() && !t.starts_with("//")
+        });
+        if !holds_code {
+            return Err(format!(
+                "row {condition:?}: covers entry {path}:{first}-{last} holds no line of \
+                 code (blank or comment-only)"
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Condition 5's own rendering-proof rule, applied to one already-found function body:
 /// literally naming `TestBackend`, or calling one of this codebase's established
 /// TestBackend-driving helpers (`render_at(`, `run_wired(`, `run_wired_at(`,
@@ -333,6 +482,9 @@ fn check_coverage(spec_md: &str, toml_text: &str, files: &[PathBuf]) -> Result<u
         }
     }
 
+    // Built once, shared across every row's condition 4b check below.
+    let all_tested_bodies = all_directly_tested_bodies(files);
+
     for row in &rows {
         // Verdict check (both the general legality and the `repaired`-names-a-change rule).
         if !LEGAL_VERDICTS.contains(&row.verdict.as_str()) {
@@ -367,13 +519,20 @@ fn check_coverage(spec_md: &str, toml_text: &str, files: &[PathBuf]) -> Result<u
             ));
         }
 
-        // Condition 4 and 5.
+        // Condition 4, 4b, and 5.
         for name in &row.proof {
             let bodies = function_bodies(files, name);
             if bodies.is_empty() {
                 return Err(format!(
                     "row {:?}: proof {name:?} is not defined as \"fn {name}(\" anywhere under \
                      src/ or tests/",
+                    row.condition
+                ));
+            }
+            if !is_proof_a_test(files, name, &all_tested_bodies) {
+                return Err(format!(
+                    "row {:?}: proof {name:?} is not a #[test] (and is not named in the \
+                     body of one that is) — a test nothing runs proves nothing",
                     row.condition
                 ));
             }
@@ -387,6 +546,9 @@ fn check_coverage(spec_md: &str, toml_text: &str, files: &[PathBuf]) -> Result<u
                 ));
             }
         }
+
+        // Condition 4c and the six-key rule's `covers` half.
+        validate_covers(&row.condition, &row.covers)?;
     }
 
     Ok(conditions.len())
@@ -517,15 +679,6 @@ fn an_empty_table_fails_the_floor() {
             not a test anyone should un-ignore"]
 fn ignored_fixture_for_coverage_binding_tests() {}
 
-/// Task 6.1 RED / 6.2 GREEN, condition 4b: a `proof` naming a real, non-test production
-/// function must fail as "not a test" — not as "not defined" (condition 4 already resolves
-/// it) and not silently pass. `fn start(` does not work as the plant: every `start` in the
-/// crate is `pub fn start(` (`src/watch.rs:260`, `src/agents.rs:464`, `src/refresh.rs:78`,
-/// `src/launch.rs:379`), and condition 4 matches only a bare, non-`pub` `fn <name>(`, so that
-/// plant fails as "not defined" — passing for the wrong reason. `is_usable_binary` in
-/// `src/resolve.rs` is the plant `specs/degraded-coverage/spec.md`'s own scenario names:
-/// declared `fn` without `pub`, resolved by condition 4, carrying no `#[test]` anywhere it is
-/// defined, and never named in the body of a test either.
 /// The index of the first `unit`-tier row — used by the two tests immediately below so
 /// condition 5's own "a view/outer proof must render" rule (which also names the offending
 /// proof in its own failure message) cannot mask condition 4b's, on a tier where condition
@@ -536,6 +689,15 @@ fn first_unit_row_index(rows: &[Row]) -> usize {
         .expect("the coverage map names at least one unit-tier row")
 }
 
+/// Task 6.1 RED / 6.2 GREEN, condition 4b: a `proof` naming a real, non-test production
+/// function must fail as "not a test" — not as "not defined" (condition 4 already resolves
+/// it) and not silently pass. `fn start(` does not work as the plant: every `start` in the
+/// crate is `pub fn start(` (`src/watch.rs:260`, `src/agents.rs:464`, `src/refresh.rs:78`,
+/// `src/launch.rs:379`), and condition 4 matches only a bare, non-`pub` `fn <name>(`, so that
+/// plant fails as "not defined" — passing for the wrong reason. `is_usable_binary` in
+/// `src/resolve.rs` is the plant `specs/degraded-coverage/spec.md`'s own scenario names:
+/// declared `fn` without `pub`, resolved by condition 4, carrying no `#[test]` anywhere it is
+/// defined, and never named in the body of a test either.
 #[test]
 fn a_proof_naming_a_non_test_function_fails() {
     let mut mutated = parse_coverage_toml(&coverage_toml()).expect("parse the coverage map");
