@@ -16,11 +16,22 @@ use crate::cli::OpenspecCli;
 /// later. Neither variant names `CliChanges`, `OpenspecCli`, or `from_cli`,
 /// so `src/ui/driver.rs` can hold a `&mut dyn Refresher` while `NOCLI-SHELL`
 /// stays green unweakened.
+///
+/// `seam-resilience`'s addition: `Stopped(reason)`, synthesised by the
+/// `Refresher` itself — never sent by the worker — once its result channel
+/// disconnects. It carries no `ChangeSet`: the change set already on screen
+/// is the last true one, and replacing it with an empty one on worker death
+/// would make a degraded pane look like an empty repository. See
+/// `specs/refresh-worker/spec.md`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RefreshResult {
     Files(ChangeSet),
     Merged(ChangeSet),
+    Stopped(String),
 }
+
+/// The reason a latched dead worker's one `Stopped` result carries.
+const WORKER_STOPPED_REASON: &str = "the refresh worker has stopped answering";
 
 /// The non-blocking seam between the render path and the worker thread.
 /// Neither method may block, sleep, join a thread, or wait on a channel. See
@@ -57,18 +68,83 @@ pub fn none() -> Box<dyn Refresher> {
 /// the worker's own result channel with `try_recv`, never a blocking
 /// receive. Dropping it drops the request `Sender`, which is what makes
 /// the worker return on its next `recv`.
+///
+/// `seam-resilience`'s addition, on `agents::RealAgentPoll`'s and
+/// `launch::RealLauncher`'s model: `dead` and `pending_death` latch a
+/// worker's death so it is reported exactly once and then degrades to
+/// silence; `outstanding` and `pending_all` implement "at most one refresh
+/// cycle outstanding", with a `Selection::All` arriving behind a narrower
+/// one remembered rather than discarded. See `specs/refresh-worker/spec.md`.
 struct RealRefresher {
     request_tx: mpsc::Sender<Selection>,
     result_rx: mpsc::Receiver<RefreshResult>,
+    /// Set once the worker's result channel disconnects, so the standing
+    /// "worker stopped" result is reported exactly once and every `request`
+    /// after that is discarded.
+    dead: bool,
+    /// Set the instant a `SendError` is first observed from `request`, and
+    /// consumed by the very next `take_result` — which reports it once and
+    /// then sets `dead`. Kept separate from `dead` because `request` can
+    /// detect the death before any `take_result` runs, and the one report
+    /// must still happen on a `take_result` call.
+    pending_death: bool,
+    /// Whether a request sent to the worker has not yet been answered by a
+    /// `Merged` result (or a latched `Stopped`). While set, `request`
+    /// discards further narrower selections and only remembers a
+    /// `Selection::All` in `pending_all`.
+    outstanding: bool,
+    /// A `Selection::All` that arrived while a narrower selection was
+    /// outstanding, sent as its own cycle once the outstanding one answers.
+    pending_all: bool,
 }
 
 impl Refresher for RealRefresher {
     fn request(&mut self, selection: Selection) {
-        let _ = self.request_tx.send(selection);
+        if self.dead {
+            return;
+        }
+        if self.outstanding {
+            if matches!(selection, Selection::All) {
+                self.pending_all = true;
+            }
+            return;
+        }
+        if self.request_tx.send(selection).is_err() {
+            self.pending_death = true;
+            return;
+        }
+        self.outstanding = true;
     }
 
     fn take_result(&mut self) -> Option<RefreshResult> {
-        self.result_rx.try_recv().ok()
+        if self.dead {
+            return None;
+        }
+        if self.pending_death {
+            self.dead = true;
+            self.pending_death = false;
+            return Some(RefreshResult::Stopped(WORKER_STOPPED_REASON.to_string()));
+        }
+        match self.result_rx.try_recv() {
+            Ok(RefreshResult::Merged(set)) => {
+                self.outstanding = false;
+                if self.pending_all {
+                    self.pending_all = false;
+                    if self.request_tx.send(Selection::All).is_err() {
+                        self.pending_death = true;
+                    } else {
+                        self.outstanding = true;
+                    }
+                }
+                Some(RefreshResult::Merged(set))
+            }
+            Ok(result) => Some(result),
+            Err(mpsc::TryRecvError::Empty) => None,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                self.dead = true;
+                Some(RefreshResult::Stopped(WORKER_STOPPED_REASON.to_string()))
+            }
+        }
     }
 }
 
@@ -90,6 +166,10 @@ pub fn start(
     Box::new(RealRefresher {
         request_tx,
         result_rx,
+        dead: false,
+        pending_death: false,
+        outstanding: false,
+        pending_all: false,
     })
 }
 
