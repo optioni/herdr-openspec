@@ -489,6 +489,7 @@ binding rather than merely descriptive; this group carries only the agent-facing
   `ui::tests::wiring::g_focuses_the_agent_the_launch_started` failed once in a full run —
   it read the scratch `herdr` log before the launcher's `agent focus` had landed, seeing
   three calls where it asserts four. It passed on four consecutive re-runs and in both
-  `make check` runs. It is a pre-existing threaded wiring test this change touches no part
-  of; recorded here rather than repaired, because repairing it is a different change's
-  scope.
+  `make check` runs, and the Change Review session hit it once on its own independent run —
+  so it is not local to one session's machine state. It is a pre-existing threaded wiring
+  test this change touches no part of; recorded here rather than repaired, because
+  repairing it is a different change's scope.
