@@ -4,6 +4,15 @@
 //! function here takes an interior width, which is what makes
 //! `DETAILWIDTHS` possible with no exemption list. See
 //! `openspec/changes/detail-view/design.md` -> Boundaries and Contracts.
+//!
+//! Every measurement and truncation here reaches the crate's one display-
+//! width measure, `crate::ui::layout::columns`, and nowhere counts
+//! `char`s. See
+//! `openspec/changes/view-fidelity/specs/responsive-layout/spec.md` ->
+//! "Display width is measured in terminal columns by one pair of
+//! primitives".
+
+use crate::ui::layout::columns;
 
 /// The change header's fixed-field grammar:
 /// `[name field][space][schema cell][space][progress cell]`, exactly
@@ -23,9 +32,9 @@ pub fn header_row(
     }
     let w = i64::from(width);
     let progress_cell = crate::ui::list::progress_cell(progress);
-    let progress_len = progress_cell.chars().count() as i64;
+    let progress_len = columns(&progress_cell) as i64;
     let schema_cell = format!("({schema})");
-    let schema_len = schema_cell.chars().count() as i64;
+    let schema_len = columns(&schema_cell) as i64;
 
     // Full form: name + space + schema cell + space + progress cell.
     let name_field_full = w - 2 - schema_len - progress_len;
@@ -65,7 +74,7 @@ pub struct Tab {
 /// `pad_or_truncate_right` itself, this never pads: a tab cell's width is
 /// its own label's length, not the whole interior's.
 fn cell_text(text: &str, width: usize) -> String {
-    if text.chars().count() <= width {
+    if columns(text) <= width {
         text.to_string()
     } else {
         crate::ui::list::pad_or_truncate_right(text, width)
@@ -115,7 +124,7 @@ pub fn tab_bar(artifacts: &[crate::changes::ArtifactRef], selected: usize, width
             }
         })
         .collect();
-    let cell_lens: Vec<usize> = cells.iter().map(|c| c.chars().count()).collect();
+    let cell_lens: Vec<usize> = cells.iter().map(|c| columns(c)).collect();
 
     let selected_valid = selected < n;
     let anchor = if selected_valid { selected } else { 0 };
@@ -222,7 +231,7 @@ pub fn content_lines(
     if out.is_empty() {
         out.push(crate::ui::markdown::Line {
             segments: vec![crate::ui::markdown::Segment {
-                text: "No content yet".to_string(),
+                text: crate::ui::list::pad_or_truncate_right("No content yet", width as usize),
                 face: crate::ui::markdown::Face::plain(),
             }],
         });
@@ -616,7 +625,11 @@ mod tests {
         for width in [78, 58] {
             let lines = content_lines(&detail("", Vec::new()), None, width);
             assert_eq!(lines.len(), 1, "width {width}");
-            assert_eq!(lines[0].text(), "No content yet", "width {width}");
+            // Padded to the full width, on the same terms every neighbouring line already
+            // is (`view-fidelity`'s repair) — see the narrow-frame and total-width tests
+            // below for the range in which the literal itself is longer than the region.
+            let want = format!("No content yet{}", " ".repeat(width as usize - 14));
+            assert_eq!(lines[0].text(), want, "width {width}");
         }
     }
 
@@ -1422,8 +1435,16 @@ mod tests {
             "│",
             "no content drawn past the detail block's own right border"
         );
-        assert_eq!(cell(&buf120, 39, 2).symbol(), "│", "list block's right border");
-        assert_eq!(cell(&buf120, 40, 2).symbol(), "│", "detail block's left border");
+        assert_eq!(
+            cell(&buf120, 39, 2).symbol(),
+            "│",
+            "list block's right border"
+        );
+        assert_eq!(
+            cell(&buf120, 40, 2).symbol(),
+            "│",
+            "detail block's left border"
+        );
 
         let buf60 = render_at(60, 20, &d);
         assert_eq!(cols(&row_text(&buf60, 2), 47..47 + tail.len()), tail);
@@ -1464,15 +1485,30 @@ mod tests {
                 }
                 match width {
                     78 | 58 | 13 => {
-                        assert!(got.contains("(tdd)"), "name {name:?} width {width}: {got:?}");
-                        assert!(got.contains("[4/9]"), "name {name:?} width {width}: {got:?}");
+                        assert!(
+                            got.contains("(tdd)"),
+                            "name {name:?} width {width}: {got:?}"
+                        );
+                        assert!(
+                            got.contains("[4/9]"),
+                            "name {name:?} width {width}: {got:?}"
+                        );
                     }
                     12 | 7 => {
-                        assert!(!got.contains("(tdd"), "name {name:?} width {width}: {got:?}");
-                        assert!(got.contains("[4/9]"), "name {name:?} width {width}: {got:?}");
+                        assert!(
+                            !got.contains("(tdd"),
+                            "name {name:?} width {width}: {got:?}"
+                        );
+                        assert!(
+                            got.contains("[4/9]"),
+                            "name {name:?} width {width}: {got:?}"
+                        );
                     }
                     6 | 1 => {
-                        assert!(!got.contains("(tdd"), "name {name:?} width {width}: {got:?}");
+                        assert!(
+                            !got.contains("(tdd"),
+                            "name {name:?} width {width}: {got:?}"
+                        );
                         assert!(!got.contains("[4/"), "name {name:?} width {width}: {got:?}");
                     }
                     _ => {}
