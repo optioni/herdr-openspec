@@ -874,3 +874,134 @@ gates:
         "an extraction yielding no external program must fail loudly, not pass vacuously"
     );
 }
+
+/// Locate the fenced ` ```toml ` block in `spec_md` that contains `id = "herdr-openspec"` —
+/// the plugin manifest transcription — and return its inner text (the lines between the
+/// fences). Anchored to that marker rather than to "the first ` ```toml ` fence", which would
+/// silently pick up an unrelated fenced example. `Err` when no such fence exists: "the
+/// transcription could not be located" is a distinct failure from "the transcription
+/// disagrees", per `specs/doc-conformance/spec.md` -> "The transcription is absent".
+fn manifest_block(spec_md: &str) -> Result<&str, String> {
+    const OPEN_FENCE: &str = "```toml";
+    const CLOSE_FENCE: &str = "\n```";
+    const MARKER: &str = "id = \"herdr-openspec\"";
+
+    let mut search_from = 0;
+    while let Some(rel_open) = spec_md[search_from..].find(OPEN_FENCE) {
+        let fence_start = search_from + rel_open;
+        let after_fence_line = spec_md[fence_start..]
+            .find('\n')
+            .map(|i| fence_start + i + 1)
+            .unwrap_or(spec_md.len());
+
+        let Some(rel_close) = spec_md[after_fence_line..].find(CLOSE_FENCE) else {
+            // Unterminated fence: nothing more to find from here.
+            break;
+        };
+        let body_end = after_fence_line + rel_close;
+        let body = &spec_md[after_fence_line..body_end];
+
+        if body.contains(MARKER) {
+            return Ok(body);
+        }
+        search_from = body_end + CLOSE_FENCE.len();
+    }
+    Err(format!(
+        "no fenced ```toml block in the document contains {MARKER:?} (the plugin manifest \
+         transcription)"
+    ))
+}
+
+/// The ordered sequence of `[[header]]` lines in `source`, as text — e.g. `["[[build]]",
+/// "[[panes]]", "[[panes]]", "[[actions]]", "[[actions]]"]`. A parsed TOML `Value` is keyed,
+/// so nothing in a value comparison can see this ordering; it is why table order needs its
+/// own, purely textual, comparison.
+fn table_header_order(source: &str) -> Vec<String> {
+    source
+        .lines()
+        .map(str::trim)
+        .filter(|line| line.starts_with("[[") && line.ends_with("]]"))
+        .map(str::to_string)
+        .collect()
+}
+
+#[test]
+fn manifest_block_absent() {
+    let spec_md = "Some prose.\n\n```toml\nid = \"some-other-plugin\"\n```\n\nMore prose.\n";
+    let result = manifest_block(spec_md);
+    assert!(
+        result.is_err(),
+        "a fenced toml block that does not carry id = \"herdr-openspec\" must not be mistaken \
+         for the transcription: {result:?}"
+    );
+}
+
+#[test]
+fn manifest_block_order() {
+    let a = "\
+[[build]]
+command = [\"x\"]
+
+[[actions]]
+id = \"open\"
+";
+    let b = "\
+[[actions]]
+id = \"open\"
+
+[[build]]
+command = [\"x\"]
+";
+    let value_a: toml::Table = a.parse().expect("parse synthetic source a");
+    let value_b: toml::Table = b.parse().expect("parse synthetic source b");
+    assert_eq!(
+        value_a, value_b,
+        "these two synthetic sources must parse equal for this test to prove anything about \
+         order alone"
+    );
+
+    let order_a = table_header_order(a);
+    let order_b = table_header_order(b);
+    assert_ne!(
+        order_a, order_b,
+        "two sources presenting [[…]] tables in a different order must be distinguishable: \
+         {order_a:?} vs {order_b:?}"
+    );
+}
+
+#[test]
+fn spec_manifest_block_matches() {
+    let spec_md = read_doc(&manifest_dir().join("SPEC.md")).expect("read SPEC.md");
+    let manifest_text =
+        read_doc(&manifest_dir().join("herdr-plugin.toml")).expect("read herdr-plugin.toml");
+
+    let block = manifest_block(&spec_md).expect("locate SPEC.md's manifest transcription");
+    let spec_value: toml::Table = block
+        .parse()
+        .expect("parse SPEC.md's transcription as TOML");
+    let manifest_value: toml::Table = manifest_text
+        .parse()
+        .expect("parse herdr-plugin.toml as TOML");
+
+    assert_eq!(
+        spec_value, manifest_value,
+        "SPEC.md's transcription of the plugin manifest does not match herdr-plugin.toml"
+    );
+}
+
+#[test]
+fn spec_manifest_block_order_matches() {
+    let spec_md = read_doc(&manifest_dir().join("SPEC.md")).expect("read SPEC.md");
+    let manifest_text =
+        read_doc(&manifest_dir().join("herdr-plugin.toml")).expect("read herdr-plugin.toml");
+
+    let block = manifest_block(&spec_md).expect("locate SPEC.md's manifest transcription");
+    let spec_order = table_header_order(block);
+    let manifest_order = table_header_order(&manifest_text);
+
+    assert_eq!(
+        spec_order, manifest_order,
+        "SPEC.md's block orders [[…]] tables as {spec_order:?}, herdr-plugin.toml as \
+         {manifest_order:?}"
+    );
+}
