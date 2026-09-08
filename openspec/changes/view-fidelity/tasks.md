@@ -160,11 +160,11 @@
 ## 10. Documentation
 <!-- kind: operational -->
 
-- [ ] 10.1 CHECK: Read `AGENTS.md` → Architecture rules and "Current repo state", and `SPEC.md`'s view-layer section, and list every sentence there that states a rendered length in characters or enumerates the `make gates` inventory. That list is what 10.2–10.4 rewrite.
-- [ ] 10.2 CHANGE: Rewrite in `AGENTS.md` → Architecture rules (audience: agents working in this crate) — every width computation under `src/ui/` is in display columns through `ui::layout::columns`/`truncate_columns`, which measure what `Buffer::set_string` consumes, enforced by `COLWIDTH`. Four lines; replaces nothing existing, and the durable reason is that a `chars().count()` written later is silently correct against ASCII fixtures.
-- [ ] 10.3 CHANGE: Rewrite in `SPEC.md`'s view-layer section (audience: this project's maintainers) — the Unicode promise and its stated limit, correcting the sentences 10.1 listed. This replaces prose that is now false rather than only adding.
-- [ ] 10.4 CHANGE: Rewrite `AGENTS.md`'s "Current repo state" gate inventory in place so `COLWIDTH` sits with the rest rather than being appended as a second list.
-- [ ] 10.5 VERIFY: `cargo test --test spec_purposes` and `cargo test --test degraded_coverage` — green, so the `SPEC.md` edit did not break either file's binding to it.
+- [x] 10.1 CHECK: Read `AGENTS.md` → Architecture rules and "Current repo state", and `SPEC.md`'s view-layer section, and list every sentence there that states a rendered length in characters or enumerates the `make gates` inventory. That list is what 10.2–10.4 rewrite.
+- [x] 10.2 CHANGE: Rewrite in `AGENTS.md` → Architecture rules (audience: agents working in this crate) — every width computation under `src/ui/` is in display columns through `ui::layout::columns`/`truncate_columns`, which measure what `Buffer::set_string` consumes, enforced by `COLWIDTH`. Four lines; replaces nothing existing, and the durable reason is that a `chars().count()` written later is silently correct against ASCII fixtures.
+- [x] 10.3 CHANGE: Rewrite in `SPEC.md`'s view-layer section (audience: this project's maintainers) — the Unicode promise and its stated limit, correcting the sentences 10.1 listed. This replaces prose that is now false rather than only adding.
+- [x] 10.4 CHANGE: Rewrite `AGENTS.md`'s "Current repo state" gate inventory in place so `COLWIDTH` sits with the rest rather than being appended as a second list.
+- [x] 10.5 VERIFY: `cargo test --test spec_purposes` and `cargo test --test degraded_coverage` — green, so the `SPEC.md` edit did not break either file's binding to it.
 
 ## 11. Lint & Verify
 <!-- kind: operational -->
