@@ -330,26 +330,12 @@ fn missing_document() {
 /// Whether `version` appears in `text` delimited by a non-version character (anything but an
 /// ASCII digit or `.`) on both sides, so a match inside an unrelated number (`11.887`,
 /// `1.881`) does not satisfy it. A version occurring at the very start or end of `text`
-/// counts as delimited on that side.
+/// counts as delimited on that side. Shares its boundary-scanning core, `bounded_mention`
+/// (defined below, alongside the gate-programs leg that also needs a boundary-checked
+/// document match), with `program_mentioned` — the two differ only in which characters count
+/// as part of the token being searched for.
 fn msrv_mentions(text: &str, version: &str) -> bool {
-    if version.is_empty() {
-        return false;
-    }
-    let is_version_char = |c: u8| c.is_ascii_digit() || c == b'.';
-    let bytes = text.as_bytes();
-    let vbytes = version.as_bytes();
-    let mut search_start = 0;
-    while let Some(rel) = text[search_start..].find(version) {
-        let idx = search_start + rel;
-        let left_ok = idx == 0 || !is_version_char(bytes[idx - 1]);
-        let end = idx + vbytes.len();
-        let right_ok = end == bytes.len() || !is_version_char(bytes[end]);
-        if left_ok && right_ok {
-            return true;
-        }
-        search_start = idx + 1;
-    }
-    false
+    bounded_mention(text, version, |c| c.is_ascii_digit() || c == b'.')
 }
 
 /// Read `rust-version` from a `Cargo.toml`-shaped TOML document's `[package]` table, via the
@@ -707,8 +693,7 @@ fn gate_scripts_require(gate_scripts: &[String], word: &str) -> bool {
 #[test]
 fn gate_programs_are_documented() {
     let makefile = read_doc(&manifest_dir().join("Makefile")).expect("read Makefile");
-    let programs =
-        check_programs(&makefile).expect("extract programs from Makefile's check: path");
+    let programs = check_programs(&makefile).expect("extract programs from Makefile's check: path");
 
     let readme_md = read_doc(&manifest_dir().join("README.md")).expect("read README.md");
     let agents_md = read_doc(&manifest_dir().join("AGENTS.md")).expect("read AGENTS.md");
@@ -814,8 +799,7 @@ lint:
 \tfalse
 \tpython3 scripts/gates/gate-mech1.py
 ";
-    let programs =
-        check_programs(makefile).expect("extract from synthetic guard-block Makefile");
+    let programs = check_programs(makefile).expect("extract from synthetic guard-block Makefile");
     let expected: BTreeSet<String> = ["python3".to_string()].into_iter().collect();
     assert_eq!(
         programs, expected,
@@ -868,8 +852,7 @@ gates:
 \tjq -r '.foo' target/out.json
 \tpython3 scripts/gates/gate-mech1.py
 ";
-    let programs =
-        check_programs(makefile).expect("extract from synthetic new-tool Makefile");
+    let programs = check_programs(makefile).expect("extract from synthetic new-tool Makefile");
     assert!(
         programs.contains("jq"),
         "a future recipe line invoking an undocumented program must be caught: {programs:?}"
