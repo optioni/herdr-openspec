@@ -339,6 +339,10 @@ unreachable and the tests become integration tests by accident.
   gate also fails when its exclusion goes **vacuous** — `src/ui/palette.rs` missing, or
   present but naming no `Color` — and when that file drops out of `noio-view.sh`'s or
   `colwidth.sh`'s `PURE` list, so the new module cannot silently stop being swept.
+  The parser's option set is exactly `ENABLE_TABLES | ENABLE_STRIKETHROUGH`: turning on a
+  further flag without also writing that construct's rendering path makes it **vanish**
+  into `fold`'s `_ => {}` wildcards rather than degrade to literal text, and no gate can
+  see a wrongly-added flag.
 - **The detail region's two mandated interior widths are 78 and 58 columns** — the
   wide layout's `Min(0)` detail column at the mandated 120-column frame and the
   narrow layout's 60-column frame in the detail route, each less two border

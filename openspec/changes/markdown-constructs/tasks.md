@@ -411,7 +411,7 @@ multi-subject exception whose floors live on the `Makefile` line.
 `SPEC.md`'s own edits are group 7's, because they are load-bearing for the degraded-states
 binding rather than merely descriptive; this group carries only the agent-facing rule.
 
-- [ ] 10.1 CHECK: Confirm `AGENTS.md` carries no existing sentence about the parser's option
+- [x] 10.1 CHECK: Confirm `AGENTS.md` carries no existing sentence about the parser's option
   set, so this is an add rather than a rewrite. Command, run at HEAD:
 
   ```sh
@@ -420,7 +420,7 @@ binding rather than merely descriptive; this group carries only the agent-facing
 
   HEAD: no output, `exit=1` — the subset prose lives only in `SPEC.md`, which group 7 owns.
 
-- [ ] 10.2 CHANGE: Add one sentence to `AGENTS.md`'s existing `pulldown_cmark`/`Color`
+- [x] 10.2 CHANGE: Add one sentence to `AGENTS.md`'s existing `pulldown_cmark`/`Color`
   confinement rule under Architecture rules (audience: every agent session, which loads this
   file whole): the option set is exactly `ENABLE_TABLES | ENABLE_STRIKETHROUGH`, and turning on
   a further flag without a rendering path makes that construct **vanish** into `fold`'s `_ =>
@@ -428,7 +428,7 @@ binding rather than merely descriptive; this group carries only the agent-facing
   no gate can see a wrongly-added flag. Edit `AGENTS.md` itself — `CLAUDE.md` is a symlink to
   it, so editing both would be editing one file twice.
 
-- [ ] 10.3 VERIFY: `cargo test --all-features --test doc_contract` — the module map, gate-path
+- [x] 10.3 VERIFY: `cargo test --all-features --test doc_contract` — the module map, gate-path
   and manifest claims are unaffected, and this confirms the edit broke none of them.
 
 ---
