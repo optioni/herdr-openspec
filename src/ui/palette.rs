@@ -59,6 +59,7 @@ pub enum Role {
     Code,
     Link,
     Quoted,
+    Strikethrough,
 }
 
 /// The role table, transcribed from `specs/view-palette/spec.md`'s modifier table
@@ -120,6 +121,12 @@ pub fn style(role: Role) -> Style {
             .add_modifier(Modifier::UNDERLINED)
             .fg(Color::Blue),
         Role::Quoted => Style::default().add_modifier(Modifier::DIM),
+        // `CROSSED_OUT` rather than a colour: it is the terminal's own
+        // rendering of exactly this meaning, it costs no columns, and a
+        // terminal that does not support it drops the attribute and still
+        // shows the text — the right failure for a construct whose whole point
+        // is that the text is still there (design.md -> Decision 9).
+        Role::Strikethrough => Style::default().add_modifier(Modifier::CROSSED_OUT),
     }
 }
 
@@ -156,8 +163,8 @@ mod tests {
     }
 
     /// Every `Role` variant, the five `AgentStatus` values, and heading levels 1
-    /// through 6 — thirty rows, so no arm of `style` is asserted by a hand-listed
-    /// subset of the enum.
+    /// through 6 — thirty-one rows, so no arm of `style` is asserted by a
+    /// hand-listed subset of the enum.
     fn table() -> Vec<Expect> {
         vec![
             row(Role::HeaderTitle, Modifier::BOLD, None, None),
@@ -225,6 +232,7 @@ mod tests {
             row(Role::Code, Modifier::DIM, Some(Color::Yellow), None),
             row(Role::Link, Modifier::UNDERLINED, Some(Color::Blue), None),
             row(Role::Quoted, Modifier::DIM, None, None),
+            row(Role::Strikethrough, Modifier::CROSSED_OUT, None, None),
         ]
     }
 
@@ -256,6 +264,7 @@ mod tests {
             Role::Code => "Code".to_string(),
             Role::Link => "Link".to_string(),
             Role::Quoted => "Quoted".to_string(),
+            Role::Strikethrough => "Strikethrough".to_string(),
         }
     }
 
@@ -337,6 +346,21 @@ mod tests {
             style(Role::ListSeparator),
             "DarkGray is this palette's one 'no information' grey"
         );
+
+        // `markdown-constructs`: `Strikethrough` joins neither of those pairs by
+        // accident — it is a third style equal to no other role's, so the shared
+        // set stays exactly the two pairs above.
+        for expect in table() {
+            if expect.role == Role::Strikethrough {
+                continue;
+            }
+            assert_ne!(
+                style(Role::Strikethrough),
+                style(expect.role),
+                "Strikethrough must not share a style with {}",
+                label(expect.role)
+            );
+        }
     }
 
     /// `view-palette` :: "Each role's modifier set is exactly the table above".
@@ -378,6 +402,16 @@ mod tests {
                 .contains(Modifier::ITALIC)
         );
         assert!(!style(Role::Emphasis).add_modifier.contains(Modifier::BOLD));
+        assert!(
+            style(Role::Strikethrough)
+                .add_modifier
+                .contains(Modifier::CROSSED_OUT)
+        );
+        assert!(
+            !style(Role::Strikethrough)
+                .add_modifier
+                .contains(Modifier::DIM)
+        );
     }
 
     /// `view-palette` :: "The coloured set is exactly the table above", and
@@ -407,6 +441,12 @@ mod tests {
                 );
             }
         }
+
+        // `markdown-constructs`: `CROSSED_OUT` already says the whole of what the
+        // face means, and the obvious candidate colour — `DarkGray` — is this
+        // palette's one "no information" grey, which struck text is not.
+        assert_eq!(style(Role::Strikethrough).fg, None);
+        assert_eq!(style(Role::Strikethrough).bg, None);
 
         // Every role the table leaves uncoloured reports neither, so the coloured
         // set is exactly the table rather than merely a subset of it.

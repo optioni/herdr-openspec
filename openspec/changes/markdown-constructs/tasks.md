@@ -219,7 +219,7 @@ test on `Vec<Line>` can see the last three steps. Per design.md → Test Strateg
 ## 4. The palette role
 <!-- kind: behavior -->
 
-- [ ] 4.1 RED: Extend `src/ui/palette.rs`'s tests for view-palette's three role scenarios —
+- [x] 4.1 RED: Extend `src/ui/palette.rs`'s tests for view-palette's three role scenarios —
   `every_role_is_answered_and_the_distinctions_are_real` gains `Strikethrough` in its
   exhaustive `match` and an assertion that its style equals no other role's;
   `each_roles_modifier_set_is_exactly_the_table` gains the `CROSSED_OUT` row and the "not
@@ -232,12 +232,12 @@ test on `Vec<Line>` can see the last three steps. Per design.md → Test Strateg
 
   HEAD: no output, `exit=1`.
 
-- [ ] 4.2 GREEN: Add `Role::Strikethrough` and its entry,
+- [x] 4.2 GREEN: Add `Role::Strikethrough` and its entry,
   `Style::default().add_modifier(Modifier::CROSSED_OUT)`, with no colour (design.md →
   Decision 9). Verification: 4.1's tests pass; the exhaustive `match` and the test module's
   own `label()` match both compile.
 
-- [ ] 4.3 CHECK: Contract gate for `ui::palette::Role` — confirm the variant is additive and
+- [x] 4.3 CHECK: Contract gate for `ui::palette::Role` — confirm the variant is additive and
   that its one named consumer, `ui::view::style_for`, still compiles:
 
   ```sh
@@ -247,7 +247,7 @@ test on `Vec<Line>` can see the last three steps. Per design.md → Test Strateg
   The grep is expected to find nothing until group 5 lands; record that, because it is what
   says the consumer has not yet been updated rather than that the gate passed.
 
-- [ ] 4.4 Run the group tests — no regressions:
+- [x] 4.4 Run the group tests — no regressions:
 
   ```sh
   cargo test --all-features --lib ui::palette
