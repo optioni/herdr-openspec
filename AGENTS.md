@@ -254,12 +254,14 @@ unreachable and the tests become integration tests by accident.
 
 - **Nothing spawns a process outside `cli`.** `src/cli.rs` is the one module in the
   crate permitted to name a process-spawn API (`process::Command`, `Command::new`,
-  `Stdio`) — `OpenspecCli` and `HerdrCli` are traits whose real implementations do
-  nothing but spawn and return stdout. Parsing, merging, and decisions live on the
-  testable side of that seam. `src/agents.rs`, `src/launch.rs`, and `src/open.rs`
-  are the crate's **three** `HerdrCli` consumers, reaching it only through the
-  trait object; none names a spawn API itself. This is checked, not aspirational: a
-  tree-wide grep (`NOSPAWN-GREP`) excludes exactly `src/cli.rs` by path (never by
+  `Stdio`) — `OpenspecCli` and `HerdrCli` are traits whose real implementations spawn
+  and return stdout, and `RealOpenspecCli` alone also accepts a caller-supplied
+  working directory, the one lever that works because `openspec` resolves its own
+  root from the process's cwd and has no flag naming one. Parsing, merging, and
+  decisions live on the testable side of that seam. `src/agents.rs`, `src/launch.rs`,
+  and `src/open.rs` are the crate's **three** `HerdrCli` consumers, reaching it only
+  through the trait object; none names a spawn API itself. This is checked, not
+  aspirational: a tree-wide grep (`NOSPAWN-GREP`) excludes exactly `src/cli.rs` by path (never by
   base name, so a future `src/ui/cli.rs` is still caught) and fails if that
   exclusion is vacuous — if `src/cli.rs` is missing, or itself names no spawn API.
   `LAUNCHSEAM` checks the same property from `src/launch.rs`'s and `src/open.rs`'s
@@ -330,7 +332,11 @@ unreachable and the tests become integration tests by accident.
   code blocks before the point each hands off to its background thread — a
   check inside the four files themselves, because a sweep scoped to
   `src/ui/` alone cannot see a `drain` or a `take_result` that blocks in its
-  own module.
+  own module. The one accepted exception is the per-frame artifact read —
+  `Dashboard::sync_detail(read)`'s `std::fs::read_to_string` before every
+  draw — bounded by the `artifact-content` cache keyed on `(change
+  directory, tab)`, so it fires only on a tab switch, a selection change, or
+  an adopted refresh, never on a held key (`seam-resilience` -> Decision 10).
 - **The write boundary is the process, not the tree.** `herdr agent start`
   launches a process that will itself write inside `openspec/` — an agent
   editing `tasks.md` is the point of launching it, and that write is not

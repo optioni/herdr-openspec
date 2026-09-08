@@ -262,9 +262,11 @@ not be started, exited non-zero, or produced empty output.
 
 One recursive `notify` watch on `<repo>/openspec` — `<repo>` the same resolved
 repository root `start_collaborators` also hands the `openspec` child as its own
-working directory (`seam-resilience` → Decisions 2 and 8) — opened once at startup
-and held for the pane's lifetime; `watch::start` itself takes the already-joined
-path as a plain argument and stays ignorant of the repository's own layout. Every
+working directory, alongside a one-entry `PATH` overlay prepending the resolved
+binary's own parent directory (`seam-resilience` → Decisions 2 and 8) — opened
+once at startup and held for the pane's lifetime; `watch::start` itself takes
+the already-joined path as a plain argument and stays ignorant of the
+repository's own layout. Every
 touched path it reports is folded into a **debounce**: a pure
 state machine (`watch::Debounce`) that takes `now` as a parameter rather than reading
 the clock itself, so its window-boundary behaviour is asserted directly

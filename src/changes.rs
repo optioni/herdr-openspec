@@ -1486,9 +1486,12 @@ impl Selection {
 /// to comparing the paths as given otherwise — so a symbolic link in either
 /// path is not read as a disagreement. Used by the repository-root guard:
 /// `resolve::find_repo` walks up from the invocation context's workspace
-/// working directory, while the CLI resolves its own root by walking up
-/// from the **process** working directory, and `subprocess-seam` forbids
-/// the real implementation from setting `current_dir`.
+/// working directory, and `ui::start_collaborators` gives the `openspec`
+/// child that same resolved root as its own working directory
+/// (`seam-resilience` -> Decision 2), so the CLI's own upward walk from it
+/// ordinarily agrees. The guard stays in place as a safety net for when it
+/// does not — a misconfigured `openspec_bin` answering for a different
+/// tree, among other causes — not because the two are expected to disagree.
 pub(crate) fn same_directory(a: &std::path::Path, b: &std::path::Path) -> bool {
     match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
         (Ok(ca), Ok(cb)) => ca == cb,
