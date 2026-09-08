@@ -9,7 +9,7 @@
 # so does an unrelated `60` literal. It is a FLOOR. What proves the tests exist and run is
 # `testcount --lib 'ui::view::tests::' 101`, not this.
 [ -f src/ui/view.rs ] || { echo "WIDTHS FAIL: src/ui/view.rs missing" >&2; exit 1; }
-WIDTHS_MIN="${WIDTHS_MIN:-101}" python3 - <<'PY'
+WIDTHS_MIN="${WIDTHS_MIN:-113}" python3 - <<'PY'
 import re, sys, os
 raw = open("src/ui/view.rs").read()
 # Drop doc-comment and inner-doc lines before splitting: a `#[test]` inside a doc example

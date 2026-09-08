@@ -254,12 +254,12 @@ with more slack than today. The x offsets come from a second command,
 ## 5. Acceptance Test — Outer Loop GREEN
 <!-- kind: behavior -->
 
-- [ ] 5.1 VERIFY: `cargo test --test gate_controls` passes end to end — for control
+- [x] 5.1 VERIFY: `cargo test --test gate_controls` passes end to end — for control
       `palette-outside`, the unplanted baseline exits 0 and the planted `Color` in
       `src/ui/view.rs` exits non-zero naming that file. Confirm the control ran rather than
       being filtered out: `gate_controls_every_script_has_a_control` fails if
       `scripts/gates/palette.sh` has no row.
-- [ ] 5.2 REFACTOR: Clean up the control's plant text if it drifted from
+- [x] 5.2 REFACTOR: Clean up the control's plant text if it drifted from
       `src/ui/view.rs`'s current first doc-comment line; otherwise state that none was needed.
 
 ## 6. Gate floors
@@ -267,26 +267,26 @@ with more slack than today. The x offsets come from a second command,
 
 A gate's floor is its own script default, kept at the gate's true measured floor.
 
-- [ ] 6.1 CHECK: Re-measure the three **test-count** floors this change raises, with the
+- [x] 6.1 CHECK: Re-measure the three **test-count** floors this change raises, with the
       commands that produced the current defaults:
       `awk '/^#\[cfg\(test\)\]/{t=1} t&&/#\[test\]/{c++} END{print c}' src/ui/list.rs` → **39**
       at HEAD (`LIST_MIN` default 39); the same over `src/ui/detail.rs` → **38**
       (`DETAIL_MIN` 38) and over `src/ui/view.rs` → **101** (`WIDTHS_MIN` 101).
-- [ ] 6.2 CHECK: Re-measure the seven **file-count** floors that `src/ui/palette.rs` moves.
+- [x] 6.2 CHECK: Re-measure the seven **file-count** floors that `src/ui/palette.rs` moves.
       Each is at its exact measured value today and would be one short after the file lands:
       `find src -name '*.rs' | wc -l` → **25** and `find src/ui -name '*.rs' | wc -l` → **11**
       at HEAD, giving `mdseam.sh MIN=24`, `nospawn-grep.sh MIN=24`, `nolit-change.sh MIN=24`
       (each `25 − 1` excluded file), `noblock.sh`, `nocli-shell.sh`, `readonly-ui.sh`
       `UI_MIN=11`, and `readseam.sh UI_MIN=10`. Each rises by one.
-- [ ] 6.3 CHANGE: Raise all ten **script defaults** to the newly measured counts. Do not pass
+- [x] 6.3 CHANGE: Raise all ten **script defaults** to the newly measured counts. Do not pass
       an override on a `Makefile` line. `scripts/gates/palette.sh`'s own `MIN=25` already
       accounts for the new file and does not move.
-- [ ] 6.4 CHECK: Re-run `make coverage` and read `scripts/coverage-prod.py`'s reported
+- [x] 6.4 CHECK: Re-run `make coverage` and read `scripts/coverage-prod.py`'s reported
       production-slice percentage against its `DEFAULT_PROD_MIN = 96`
       (`grep -n DEFAULT_PROD_MIN scripts/coverage-prod.py` → line 84). Raise the default to
       the newly measured floor if the fully-covered palette module lifts it past 97; leave it
       alone otherwise. Never lower it.
-- [ ] 6.5 VERIFY: `make gates` — every gate reports OK and each floor equals its measured
+- [x] 6.5 VERIFY: `make gates` — every gate reports OK and each floor equals its measured
       count, so a deleted test or a deleted file fails the next run.
 
 ## 7. Change Review

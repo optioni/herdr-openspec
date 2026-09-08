@@ -47,7 +47,7 @@
 # WRITE_RE, and no other, is what turns its own control red.
 UIDIR="${UIDIR:-src/ui}"
 CONTROL="${CONTROL:-src/state.rs}"
-UI_MIN="${UI_MIN:-11}"
+UI_MIN="${UI_MIN:-12}"
 EXTRA="${EXTRA-src/watch.rs src/refresh.rs src/agents.rs src/launch.rs src/open.rs}"
 WRITE_RE='fs::write|File::create|OpenOptions|fs::remove_|fs::create_dir|fs::rename|fs::copy|set_permissions|fs::hard_link|fs::soft_link|File::options|DirBuilder|create_new'
 fail() { echo "READONLY-UI FAIL: $1" >&2; exit 1; }

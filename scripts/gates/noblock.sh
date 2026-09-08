@@ -73,7 +73,7 @@
 # is a check; a placement rule is a convention, so Guard D counts.
 set -u
 UIDIR="${UIDIR:-src/ui}"
-UI_MIN="${UI_MIN:-11}"
+UI_MIN="${UI_MIN:-12}"
 fail() { echo "NOBLOCK FAIL: $1" >&2; exit 1; }
 
 [ -d "$UIDIR" ] || fail "no such directory: $UIDIR"

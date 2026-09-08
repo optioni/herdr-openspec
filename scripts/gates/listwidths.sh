@@ -9,7 +9,7 @@
 # closed — a test using only suffixed literals is reported as missing a width — so write the
 # widths unsuffixed, or as a `const` the test also names bare.
 [ -f src/ui/list.rs ] || { echo "LISTWIDTHS FAIL: src/ui/list.rs missing" >&2; exit 1; }
-LIST_MIN="${LIST_MIN:-39}" python3 - <<'PY'
+LIST_MIN="${LIST_MIN:-43}" python3 - <<'PY'
 import re, sys, os
 raw = open("src/ui/list.rs").read()
 src = "\n".join(l for l in raw.splitlines()

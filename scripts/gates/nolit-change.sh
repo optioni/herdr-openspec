@@ -12,7 +12,7 @@
 # `C { … }` — a FALSE NEGATIVE, and the reason `GATE-MECH1`'s compile-time companion in
 # `changes::conformance` remains the primary mechanism rather than this grep.
 LIT_RE='(^|[^A-Za-z0-9_])Change(Set)?[[:space:]]*\{'
-MIN="${MIN:-24}"
+MIN="${MIN:-25}"
 
 [ -f src/changes.rs ] || { echo "NOLIT-CHANGE FAIL: src/changes.rs missing" >&2; exit 1; }
 

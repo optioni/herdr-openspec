@@ -7,7 +7,7 @@
 # implementer reaches for the parser directly from ui::detail, this is the check that stops
 # them.
 MD="${MD:-src/ui/markdown.rs}"
-MIN="${MIN:-24}"
+MIN="${MIN:-25}"
 fail() { echo "MDSEAM FAIL: $1" >&2; exit 1; }
 
 [ -d src ] || fail "no src directory"

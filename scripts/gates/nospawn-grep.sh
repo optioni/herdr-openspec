@@ -3,7 +3,7 @@
 # MIN argument moves, from 17 to 18, and MIN is a parameter precisely so that is a change to
 # a task's invocation rather than to the check.
 SRC="${SRC:-src}"
-MIN="${MIN:-24}"
+MIN="${MIN:-25}"
 fail() { echo "NOSPAWN FAIL: $1" >&2; exit 1; }
 
 # G2 — the seam grep resists an import alias (design.md -> Decision 3). Two alternatives

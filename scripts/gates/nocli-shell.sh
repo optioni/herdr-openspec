@@ -4,7 +4,7 @@
 # Carried forward from markdown-viewer with its executable logic BYTE-IDENTICAL; only
 # UI_MIN's invocation moves, 9 -> 10.
 CLI_RE='from_cli|OpenspecCli|HerdrCli|CliChanges|npm_prefix'
-UI_MIN="${UI_MIN:-11}"
+UI_MIN="${UI_MIN:-12}"
 
 # Guard A — src/ui/ exists and holds Rust files. A count of zero would make the search
 # vacuous. Parameterised for the same reason NOSPAWN-GREP's MIN is: a later change that

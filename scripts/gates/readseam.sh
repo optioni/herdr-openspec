@@ -11,7 +11,7 @@
 # confinement check rots into a rubber stamp.
 UIDIR="${UIDIR:-src/ui}"
 BINDING="${BINDING:-src/ui/mod.rs}"
-UI_MIN="${UI_MIN:-10}"
+UI_MIN="${UI_MIN:-11}"
 fail() { echo "READSEAM FAIL: $1" >&2; exit 1; }
 
 [ -d "$UIDIR" ] || fail "no such directory: $UIDIR"
