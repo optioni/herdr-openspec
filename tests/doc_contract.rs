@@ -80,9 +80,15 @@ fn pub_mod_names(lib_rs: &str) -> BTreeSet<String> {
     for line in lib_rs.lines() {
         let trimmed = line.trim_start();
         if let Some(rest) = trimmed.strip_prefix("pub mod ")
-            && let Some(name) = rest.trim_end().strip_suffix(';')
+            && rest.contains(';')
         {
-            names.insert(name.trim().to_string());
+            // Cut at the FIRST `;` rather than requiring it to be the trimmed line's last
+            // character — a trailing line comment (`pub mod a; // note`) puts characters
+            // after the semicolon, and a suffix-only check silently drops the module.
+            let name = rest.split(';').next().unwrap_or("").trim();
+            if !name.is_empty() {
+                names.insert(name.to_string());
+            }
         }
     }
     names
