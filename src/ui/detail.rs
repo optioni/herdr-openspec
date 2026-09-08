@@ -1687,7 +1687,11 @@ mod tests {
             },
         ];
 
-        let start = std::time::Instant::now();
+        // No clock read here: `src/ui/` — tests included — names no clock API (`NOBLOCK`).
+        // Runtime is a verification-run concern, not an in-test assertion: this sweep (131
+        // widths x 7 `Detail` x 4 `change`, the widest matrix in the plan) measured well
+        // under a second — `cargo test --lib ui::detail::tests::no_content_lines_line_exceeds_its_width_at_any_width`
+        // alone reported "finished in 0.61s" — so it is not narrowed by input.
         for width in 0u16..=130 {
             for change in [None, Some(&marked), Some(&unmarked), Some(&no_artifacts)] {
                 for d in &details {
@@ -1703,11 +1707,6 @@ mod tests {
                 }
             }
         }
-        let elapsed = start.elapsed();
-        assert!(
-            elapsed.as_secs() < 2,
-            "the sweep took {elapsed:?} — narrow it by input, never by width"
-        );
 
         // The mandated pair, asserted explicitly by this sweep too.
         let mandated: [u16; 2] = [78, 58];
