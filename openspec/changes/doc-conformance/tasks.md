@@ -53,10 +53,10 @@ done
 → `MISSING: config`, `MISSING: state`, `MISSING: launch`, `MISSING: open` — **four**, not the
 two the audit named (design.md → Findings). `grep -c "launch::" SPEC.md` returns `0`.
 
-- [ ] 2.1 RED: Write `tested_modules_names_every_module` over the real files, plus `tested_modules_missing` and `tested_modules_scoped_to_section` over in-test `&str` inputs (the second feeds a source naming `open::` before the heading and not inside the section). Confirm the real-file test fails listing all four modules.
-- [ ] 2.2 GREEN: Add a bullet to `SPEC.md` → § Unit-tested modules for `launch`, `open`, `config`, and `state`, each naming what is tested and against which collaborator, in the voice of the bullets already there. `launch` names the pane-split/agent-start/prompt sequence and its `Outcome`; `open` names `open::context` and the subcommand's pane resolution; `config` and `state` name their injected-environment lookups.
-- [ ] 2.3 REFACTOR: State that no refactor was needed, or lift the section-slicing shared with group 1 if a duplicate appeared.
-- [ ] 2.4 Run `cargo test --test doc_contract` — green, no regressions. Commit.
+- [x] 2.1 RED: Write `tested_modules_names_every_module` over the real files, plus `tested_modules_missing` and `tested_modules_scoped_to_section` over in-test `&str` inputs (the second feeds a source naming `open::` before the heading and not inside the section). Confirm the real-file test fails listing all four modules.
+- [x] 2.2 GREEN: Add a bullet to `SPEC.md` → § Unit-tested modules for `launch`, `open`, `config`, and `state`, each naming what is tested and against which collaborator, in the voice of the bullets already there. `launch` names the pane-split/agent-start/prompt sequence and its `Outcome`; `open` names `open::context` and the subcommand's pane resolution; `config` and `state` name their injected-environment lookups.
+- [x] 2.3 REFACTOR: State that no refactor was needed, or lift the section-slicing shared with group 1 if a duplicate appeared.
+- [x] 2.4 Run `cargo test --test doc_contract` — green, no regressions. Commit.
 
 ## 3. The worker-thread count is bound to the production thread sites
 <!-- kind: behavior -->
