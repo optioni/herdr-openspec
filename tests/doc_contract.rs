@@ -19,9 +19,41 @@
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 fn manifest_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+}
+
+/// A scratch directory under `std::env::temp_dir()`, removed recursively on drop —
+/// `testutil::ScratchDir`'s shape reimplemented here for the same reason `tests/cli.rs`,
+/// `tests/gate_controls.rs`, and `tests/spec_purposes.rs` each carry their own copy: this is
+/// a separate integration-test crate and cannot reach the library's `pub(crate)` items.
+struct ScratchDir {
+    path: PathBuf,
+}
+
+impl ScratchDir {
+    fn new(label: &str) -> Self {
+        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+        let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "herdr-openspec-doc-contract-{}-{counter}-{label}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&path).expect("create scratch dir");
+        Self { path }
+    }
+
+    fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+}
+
+impl Drop for ScratchDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
 }
 
 /// Read a document's full text. `Err` names the path when the file does not exist (or is
@@ -1631,25 +1663,33 @@ fn worker_count_grows() {
 }
 
 #[test]
+fn collect_rs_files_walks_recursively() {
+    let scratch = ScratchDir::new("collect-rs-files");
+    let root = scratch.path();
+    std::fs::write(root.join("top.rs"), "fn a() {}\n").expect("write top.rs");
+    std::fs::create_dir_all(root.join("sub")).expect("create sub/");
+    std::fs::write(root.join("sub/nested.rs"), "fn b() {}\n").expect("write sub/nested.rs");
+    std::fs::write(root.join("notes.txt"), "not rust\n").expect("write notes.txt");
+
+    let files = collect_rs_files(root);
+    let names: BTreeSet<String> = files.iter().map(|(name, _)| name.clone()).collect();
+    let expected: BTreeSet<String> = ["top.rs".to_string(), "sub/nested.rs".to_string()]
+        .into_iter()
+        .collect();
+    assert_eq!(
+        names, expected,
+        "the walk must find both the top-level and the nested .rs file, using `/` as the \
+         separator, and skip the non-.rs file: {names:?}"
+    );
+}
+
+#[test]
 fn worker_threads_match_sources() {
     let src_dir = manifest_dir().join("src");
-    let mut sources: Vec<(String, String)> = Vec::new();
-    for entry in std::fs::read_dir(&src_dir).expect("read src directory") {
-        let entry = entry.expect("read src directory entry");
-        let path = entry.path();
-        if path.is_file() && path.extension().is_some_and(|ext| ext == "rs") {
-            let name = path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .expect("utf8 file name")
-                .to_string();
-            let content = read_doc(&path).unwrap_or_else(|e| panic!("{e}"));
-            sources.push((name, content));
-        }
-    }
+    let sources = collect_rs_files(&src_dir);
     assert!(
         !sources.is_empty(),
-        "src/ must contain at least one top-level .rs file to scan"
+        "src/ must contain at least one .rs file to scan"
     );
 
     let borrowed: Vec<(&str, &str)> = sources
