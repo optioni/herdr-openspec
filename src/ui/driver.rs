@@ -166,7 +166,17 @@ fn drive_live_tier(dashboard: &mut Dashboard, live: &mut Live<'_>) {
         live.launcher.request(request);
     }
     if dashboard.refresh.requested {
-        live.refresher.request(crate::changes::Selection::All);
+        // `list-sections` group 2 note: the real scope is
+        // `dashboard.archived_scope()`, which does not exist until group 3
+        // gives `Dashboard` its section state and group 6 wires it in here
+        // (design.md -> Decision 13, tasks.md -> 6.3). Until then this
+        // passes `ArchivedScope::Full` unconditionally, which is exactly
+        // the archive-resolution behaviour this call site already had
+        // before `Refresher::request` gained a second parameter.
+        live.refresher.request(
+            crate::changes::Selection::All,
+            crate::changes::ArchivedScope::Full,
+        );
         dashboard.refresh.requested = false;
     }
     match live.fs.drain() {
@@ -180,7 +190,12 @@ fn drive_live_tier(dashboard: &mut Dashboard, live: &mut Live<'_>) {
                 let invalidates_nothing =
                     matches!(&selection, crate::changes::Selection::Only(s) if s.is_empty());
                 if !invalidates_nothing {
-                    live.refresher.request(selection);
+                    // `list-sections` group 2 note: see the interim scope
+                    // comment on the other `request` call site above —
+                    // `ArchivedScope::Full` stands in for
+                    // `dashboard.archived_scope()` until group 6.
+                    live.refresher
+                        .request(selection, crate::changes::ArchivedScope::Full);
                 }
             }
         }

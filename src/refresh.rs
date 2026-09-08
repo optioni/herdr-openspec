@@ -8,8 +8,21 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc;
 
-use crate::changes::{ChangeSet, Selection};
+use crate::changes::{ArchivedScope, ChangeSet, Selection};
 use crate::cli::OpenspecCli;
+
+/// One refresh cycle's two inputs, folded together: `list-sections`'
+/// addition, replacing the bare `Selection` the channel used to carry. The
+/// two fields fold by different rules — `selection` unions, `archived`
+/// takes the last value — so carrying them as one named value gives
+/// `drain_and_fold` one thing to fold rather than two parallel channels
+/// that could drift out of step. See
+/// `openspec/changes/list-sections/design.md` -> Decision 9.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Request {
+    pub selection: Selection,
+    pub archived: ArchivedScope,
+}
 
 /// One request's two answers, in the order the worker sends them: the
 /// file-sourced set first, sub-millisecond; the CLI-merged one 200-400ms
@@ -37,9 +50,12 @@ const WORKER_STOPPED_REASON: &str = "the refresh worker has stopped answering";
 /// Neither method may block, sleep, join a thread, or wait on a channel. See
 /// `specs/refresh-worker/spec.md`.
 pub trait Refresher {
-    /// Ask for a refresh over `selection`. Records the request; does not
-    /// wait for an answer.
-    fn request(&mut self, selection: Selection);
+    /// Ask for a refresh over `selection`, resolving the archived tier
+    /// under `archived`. Records the request; does not wait for an answer.
+    /// `archived` is `list-sections`' addition: the archived section can be
+    /// folded and unfolded at any moment, so the scope is a property of the
+    /// cycle rather than of the worker.
+    fn request(&mut self, selection: Selection, archived: ArchivedScope);
     /// The next result the worker produced, if one is ready. Never blocks
     /// and never waits on the channel — implemented with a non-blocking
     /// poll, not a loop over the receiver.
@@ -52,7 +68,7 @@ pub trait Refresher {
 struct NoRefresher;
 
 impl Refresher for NoRefresher {
-    fn request(&mut self, _selection: Selection) {}
+    fn request(&mut self, _selection: Selection, _archived: ArchivedScope) {}
 
     fn take_result(&mut self) -> Option<RefreshResult> {
         None
@@ -76,7 +92,7 @@ pub fn none() -> Box<dyn Refresher> {
 /// cycle outstanding", with a `Selection::All` arriving behind a narrower
 /// one remembered rather than discarded. See `specs/refresh-worker/spec.md`.
 struct RealRefresher {
-    request_tx: mpsc::Sender<Selection>,
+    request_tx: mpsc::Sender<Request>,
     result_rx: mpsc::Receiver<RefreshResult>,
     /// Set once the worker's result channel disconnects, so the standing
     /// "worker stopped" result is reported exactly once and every `request`
@@ -95,21 +111,32 @@ struct RealRefresher {
     outstanding: bool,
     /// A `Selection::All` that arrived while a narrower selection was
     /// outstanding, sent as its own cycle once the outstanding one answers.
-    pending_all: bool,
+    /// `list-sections`' addition: carries the `ArchivedScope` of the
+    /// **most recent** suppressed request, not the scope of the request
+    /// that first set it, so the archive the reader has since folded or
+    /// opened is the one the next cycle resolves (design.md -> Decision 9).
+    pending_all: Option<ArchivedScope>,
 }
 
 impl Refresher for RealRefresher {
-    fn request(&mut self, selection: Selection) {
+    fn request(&mut self, selection: Selection, archived: ArchivedScope) {
         if self.dead {
             return;
         }
         if self.outstanding {
             if matches!(selection, Selection::All) {
-                self.pending_all = true;
+                self.pending_all = Some(archived);
             }
             return;
         }
-        if self.request_tx.send(selection).is_err() {
+        if self
+            .request_tx
+            .send(Request {
+                selection,
+                archived,
+            })
+            .is_err()
+        {
             self.pending_death = true;
             return;
         }
@@ -128,9 +155,15 @@ impl Refresher for RealRefresher {
         match self.result_rx.try_recv() {
             Ok(RefreshResult::Merged(set)) => {
                 self.outstanding = false;
-                if self.pending_all {
-                    self.pending_all = false;
-                    if self.request_tx.send(Selection::All).is_err() {
+                if let Some(archived) = self.pending_all.take() {
+                    if self
+                        .request_tx
+                        .send(Request {
+                            selection: Selection::All,
+                            archived,
+                        })
+                        .is_err()
+                    {
                         self.pending_death = true;
                     } else {
                         self.outstanding = true;
@@ -154,7 +187,6 @@ impl Refresher for RealRefresher {
 pub fn start(
     repo: Option<&std::path::Path>,
     cli: Option<Arc<dyn OpenspecCli>>,
-    archived_count: usize,
 ) -> Box<dyn Refresher> {
     let (Some(repo), Some(cli)) = (repo, cli) else {
         return none();
@@ -162,14 +194,14 @@ pub fn start(
     let repo = repo.to_path_buf();
     let (request_tx, request_rx) = mpsc::channel();
     let (result_tx, result_rx) = mpsc::channel();
-    std::thread::spawn(move || worker_body(repo, cli, archived_count, request_rx, result_tx));
+    std::thread::spawn(move || worker_body(repo, cli, request_rx, result_tx));
     Box::new(RealRefresher {
         request_tx,
         result_rx,
         dead: false,
         pending_death: false,
         outstanding: false,
-        pending_all: false,
+        pending_all: None,
     })
 }
 
@@ -179,35 +211,38 @@ pub fn start(
 // `src/refresh.rs`'s production slice at its single `thread::spawn` and
 // only searches the half before it.
 
-/// Fold `first` with every further `Selection` already queued on `rx`,
+/// Fold `first` with every further `Request` already queued on `rx`,
 /// non-blocking: drains with `try_recv` until the channel is empty (or
-/// disconnected) and unions each into the accumulator. Named and exposed
+/// disconnected) and folds each into the accumulator. Named and exposed
 /// so the folding rule is provable single-threaded, by handing it a
 /// receiver whose sender has already queued values and been dropped — a
 /// rule proved only through a live worker is a rule proved by whichever
 /// interleaving happened to occur.
-fn drain_and_fold(first: Selection, rx: &mpsc::Receiver<Selection>) -> Selection {
+///
+/// The two fields fold by different rules (design.md -> Decision 9):
+/// `selection` unions, because a cycle that answers about too many changes
+/// is merely wasteful; `archived` takes the **last** queued value, because
+/// it describes the pane's current fold and an older value is simply
+/// wrong.
+fn drain_and_fold(first: Request, rx: &mpsc::Receiver<Request>) -> Request {
     let mut acc = first;
     while let Ok(next) = rx.try_recv() {
-        acc = acc.union(next);
+        acc = Request {
+            selection: acc.selection.union(next.selection),
+            archived: next.archived,
+        };
     }
     acc
 }
 
-/// The worker's whole body: fold any queued requests into one selection,
-/// send the file-sourced result, then the CLI-merged one, and repeat until
-/// either channel disconnects. Owns one `CliCache` for its whole lifetime.
-///
-/// `list-sections` group 1 note: `archived_count` is threaded through
-/// unused, kept only so `start`'s and `worker_for_test`'s signatures stay
-/// unchanged for this group — `from_files` now takes an `ArchivedScope`
-/// instead of a count, and this worker always resolves the full archive
-/// until group 2 gives `Refresher::request` a scope of its own to carry.
+/// The worker's whole body: fold any queued requests into one, send the
+/// file-sourced result under the folded request's `archived` scope, then
+/// the CLI-merged one, and repeat until either channel disconnects. Owns
+/// one `CliCache` for its whole lifetime.
 fn worker_body(
     repo: PathBuf,
     cli: Arc<dyn OpenspecCli>,
-    _archived_count: usize,
-    request_rx: mpsc::Receiver<Selection>,
+    request_rx: mpsc::Receiver<Request>,
     result_tx: mpsc::Sender<RefreshResult>,
 ) {
     let mut cache = crate::changes::CliCache::default();
@@ -215,15 +250,15 @@ fn worker_body(
         let Ok(first) = request_rx.recv() else {
             return; // the Refresher was dropped
         };
-        let selection = drain_and_fold(first, &request_rx);
+        let request = drain_and_fold(first, &request_rx);
 
-        let files = crate::changes::from_files(&repo, crate::changes::ArchivedScope::Full);
+        let files = crate::changes::from_files(&repo, request.archived);
         if result_tx.send(RefreshResult::Files(files.clone())).is_err() {
             return; // nobody reads the result any more
         }
 
         let cli_changes =
-            crate::changes::from_cli_cached(cli.as_ref(), &repo, &selection, &mut cache);
+            crate::changes::from_cli_cached(cli.as_ref(), &repo, &request.selection, &mut cache);
         let merged = crate::changes::merge(files, cli_changes);
         if result_tx.send(RefreshResult::Merged(merged)).is_err() {
             return;
@@ -268,12 +303,15 @@ apply:
     /// reads results directly off the second element `worker_for_test`
     /// hands back instead. `request` forwards to the worker unchanged.
     struct TestRefresher {
-        request_tx: mpsc::Sender<Selection>,
+        request_tx: mpsc::Sender<Request>,
     }
 
     impl Refresher for TestRefresher {
-        fn request(&mut self, selection: Selection) {
-            let _ = self.request_tx.send(selection);
+        fn request(&mut self, selection: Selection, archived: ArchivedScope) {
+            let _ = self.request_tx.send(Request {
+                selection,
+                archived,
+            });
         }
 
         fn take_result(&mut self) -> Option<RefreshResult> {
@@ -291,7 +329,6 @@ apply:
     pub(crate) fn worker_for_test(
         repo: PathBuf,
         cli: Arc<dyn OpenspecCli>,
-        archived_count: usize,
     ) -> (
         Box<dyn Refresher>,
         mpsc::Receiver<RefreshResult>,
@@ -306,7 +343,7 @@ apply:
         let (exit_tx, exit_rx) = mpsc::channel::<()>();
         std::thread::spawn(move || {
             let _exit_tx = exit_tx;
-            worker_body(repo, cli, archived_count, request_rx, result_tx);
+            worker_body(repo, cli, request_rx, result_tx);
         });
         (Box::new(TestRefresher { request_tx }), result_rx, exit_rx)
     }
@@ -315,7 +352,7 @@ apply:
     fn no_refresher_never_yields() {
         let mut r = none();
         for _ in 0..10 {
-            r.request(Selection::All);
+            r.request(Selection::All, ArchivedScope::Names);
             let result = r.take_result();
             assert_eq!(result, None);
             // `seam-resilience`: the inert refresher has no worker to lose, so it never
@@ -331,7 +368,7 @@ apply:
     /// both `result_rx` and `request_tx` are disconnected from the very first call.
     #[test]
     fn a_dead_refresh_worker_is_reported_once_and_then_stops_being_reported() {
-        let (request_tx, request_rx) = mpsc::channel::<Selection>();
+        let (request_tx, request_rx) = mpsc::channel::<Request>();
         let (result_tx, result_rx) = mpsc::channel::<RefreshResult>();
         drop(result_tx);
         drop(request_rx);
@@ -341,7 +378,7 @@ apply:
             dead: false,
             pending_death: false,
             outstanding: false,
-            pending_all: false,
+            pending_all: None,
         };
 
         match r.take_result() {
@@ -351,9 +388,9 @@ apply:
             other => panic!("expected Stopped, got {other:?}"),
         }
 
-        r.request(Selection::All);
+        r.request(Selection::All, ArchivedScope::Names);
         assert_eq!(r.take_result(), None, "reported once, then silence");
-        r.request(Selection::All);
+        r.request(Selection::All, ArchivedScope::Names);
         assert_eq!(r.take_result(), None);
     }
 
@@ -369,7 +406,7 @@ apply:
     /// `SendError` from `request`".
     #[test]
     fn a_send_error_from_request_is_reported_once_and_then_stops_being_reported() {
-        let (request_tx, request_rx) = mpsc::channel::<Selection>();
+        let (request_tx, request_rx) = mpsc::channel::<Request>();
         let (result_tx, result_rx) = mpsc::channel::<RefreshResult>();
         drop(request_rx);
         let mut r = RealRefresher {
@@ -378,10 +415,10 @@ apply:
             dead: false,
             pending_death: false,
             outstanding: false,
-            pending_all: false,
+            pending_all: None,
         };
 
-        r.request(Selection::All);
+        r.request(Selection::All, ArchivedScope::Names);
         match r.take_result() {
             Some(RefreshResult::Stopped(reason)) => {
                 assert!(reason.to_lowercase().contains("refresh worker"), "{reason}");
@@ -389,9 +426,9 @@ apply:
             other => panic!("expected Stopped, got {other:?}"),
         }
 
-        r.request(Selection::All);
+        r.request(Selection::All, ArchivedScope::Names);
         assert_eq!(r.take_result(), None, "reported once, then silence");
-        r.request(Selection::All);
+        r.request(Selection::All, ArchivedScope::Names);
         assert_eq!(r.take_result(), None);
 
         // `result_tx` is kept alive for the whole test: proves the `SendError` branch
@@ -405,7 +442,7 @@ apply:
     /// channel's own contents.
     #[test]
     fn a_refresh_outstanding_does_not_queue_further_selections() {
-        let (request_tx, request_rx) = mpsc::channel::<Selection>();
+        let (request_tx, request_rx) = mpsc::channel::<Request>();
         let (result_tx, result_rx) = mpsc::channel::<RefreshResult>();
         let mut r = RealRefresher {
             request_tx,
@@ -413,26 +450,30 @@ apply:
             dead: false,
             pending_death: false,
             outstanding: false,
-            pending_all: false,
+            pending_all: None,
         };
 
-        r.request(Selection::Only(std::collections::BTreeSet::from([
-            "alpha".to_string()
-        ])));
-        r.request(Selection::Only(std::collections::BTreeSet::from([
-            "beta".to_string()
-        ])));
-        r.request(Selection::Only(std::collections::BTreeSet::from([
-            "gamma".to_string()
-        ])));
+        r.request(
+            Selection::Only(std::collections::BTreeSet::from(["alpha".to_string()])),
+            ArchivedScope::Names,
+        );
+        r.request(
+            Selection::Only(std::collections::BTreeSet::from(["beta".to_string()])),
+            ArchivedScope::Names,
+        );
+        r.request(
+            Selection::Only(std::collections::BTreeSet::from(["gamma".to_string()])),
+            ArchivedScope::Names,
+        );
 
-        let received: Vec<Selection> = request_rx.try_iter().collect();
+        let received: Vec<Request> = request_rx.try_iter().collect();
         assert_eq!(
             received,
-            vec![Selection::Only(std::collections::BTreeSet::from([
-                "alpha".to_string()
-            ]))],
-            "exactly one selection reached the worker's request channel"
+            vec![Request {
+                selection: Selection::Only(std::collections::BTreeSet::from(["alpha".to_string()])),
+                archived: ArchivedScope::Names,
+            }],
+            "exactly one request reached the worker's request channel"
         );
 
         result_tx
@@ -440,15 +481,17 @@ apply:
             .expect("channel still connected");
         assert!(matches!(r.take_result(), Some(RefreshResult::Merged(_))));
 
-        r.request(Selection::Only(std::collections::BTreeSet::from([
-            "delta".to_string()
-        ])));
-        let received2: Vec<Selection> = request_rx.try_iter().collect();
+        r.request(
+            Selection::Only(std::collections::BTreeSet::from(["delta".to_string()])),
+            ArchivedScope::Names,
+        );
+        let received2: Vec<Request> = request_rx.try_iter().collect();
         assert_eq!(
             received2,
-            vec![Selection::Only(std::collections::BTreeSet::from([
-                "delta".to_string()
-            ]))],
+            vec![Request {
+                selection: Selection::Only(std::collections::BTreeSet::from(["delta".to_string()])),
+                archived: ArchivedScope::Names,
+            }],
             "the suppression is per-cycle, not permanent"
         );
     }
@@ -457,7 +500,7 @@ apply:
     /// narrower one is not lost".
     #[test]
     fn a_forced_refresh_outstanding_behind_a_narrower_one_is_not_lost() {
-        let (request_tx, request_rx) = mpsc::channel::<Selection>();
+        let (request_tx, request_rx) = mpsc::channel::<Request>();
         let (result_tx, result_rx) = mpsc::channel::<RefreshResult>();
         let mut r = RealRefresher {
             request_tx,
@@ -465,27 +508,33 @@ apply:
             dead: false,
             pending_death: false,
             outstanding: false,
-            pending_all: false,
+            pending_all: None,
         };
 
-        r.request(Selection::Only(std::collections::BTreeSet::from([
-            "alpha".to_string()
-        ])));
-        r.request(Selection::All);
+        r.request(
+            Selection::Only(std::collections::BTreeSet::from(["alpha".to_string()])),
+            ArchivedScope::Names,
+        );
+        r.request(Selection::All, ArchivedScope::Names);
+        // A second suppressed `All`, carrying a different scope: the
+        // remembered request must carry *this* scope, not the first
+        // suppressed one's (design.md -> Decision 9).
+        r.request(Selection::All, ArchivedScope::Full);
 
-        let first_batch: Vec<Selection> = request_rx.try_iter().collect();
+        let first_batch: Vec<Request> = request_rx.try_iter().collect();
         assert_eq!(
             first_batch,
-            vec![Selection::Only(std::collections::BTreeSet::from([
-                "alpha".to_string()
-            ]))]
+            vec![Request {
+                selection: Selection::Only(std::collections::BTreeSet::from(["alpha".to_string()])),
+                archived: ArchivedScope::Names,
+            }]
         );
 
         result_tx
             .send(RefreshResult::Files(crate::changes::empty_set()))
             .expect("channel still connected");
         assert!(matches!(r.take_result(), Some(RefreshResult::Files(_))));
-        let mid_batch: Vec<Selection> = request_rx.try_iter().collect();
+        let mid_batch: Vec<Request> = request_rx.try_iter().collect();
         assert!(
             mid_batch.is_empty(),
             "a Files result does not answer the cycle"
@@ -496,27 +545,31 @@ apply:
             .expect("channel still connected");
         assert!(matches!(r.take_result(), Some(RefreshResult::Merged(_))));
 
-        let second_batch: Vec<Selection> = request_rx.try_iter().collect();
+        let second_batch: Vec<Request> = request_rx.try_iter().collect();
         assert_eq!(
             second_batch,
-            vec![Selection::All],
-            "the remembered All is sent once the outstanding cycle answers"
+            vec![Request {
+                selection: Selection::All,
+                archived: ArchivedScope::Full,
+            }],
+            "the remembered All is sent once the outstanding cycle answers, carrying the \
+             most recent scope rather than the first suppressed one's"
         );
     }
 
     #[test]
     fn start_without_a_binary_is_inert() {
         let scratch = crate::testutil::ScratchDir::new();
-        let mut r = start(Some(scratch.path()), None, 5);
-        r.request(Selection::All);
+        let mut r = start(Some(scratch.path()), None);
+        r.request(Selection::All, ArchivedScope::Names);
         assert_eq!(r.take_result(), None);
     }
 
     #[test]
     fn start_without_a_repo_is_inert() {
         let fake: Arc<dyn OpenspecCli> = Arc::new(crate::cli::FakeCli::new());
-        let mut r = start(None, Some(fake), 5);
-        r.request(Selection::All);
+        let mut r = start(None, Some(fake));
+        r.request(Selection::All, ArchivedScope::Names);
         assert_eq!(r.take_result(), None);
     }
 
@@ -547,8 +600,8 @@ apply:
         );
         let cli: Arc<dyn OpenspecCli> = Arc::new(fake);
 
-        let (mut refresher, results_rx, _exit_rx) = worker_for_test(root, cli, 5);
-        refresher.request(Selection::All);
+        let (mut refresher, results_rx, _exit_rx) = worker_for_test(root, cli);
+        refresher.request(Selection::All, ArchivedScope::Names);
 
         let files = results_rx
             .recv_timeout(std::time::Duration::from_secs(10))
@@ -597,8 +650,8 @@ apply:
         );
         let cli: Arc<dyn OpenspecCli> = Arc::new(fake);
 
-        let (mut refresher, results_rx, _exit_rx) = worker_for_test(root, cli, 5);
-        refresher.request(Selection::All);
+        let (mut refresher, results_rx, _exit_rx) = worker_for_test(root, cli);
+        refresher.request(Selection::All, ArchivedScope::Names);
 
         let files = results_rx
             .recv_timeout(std::time::Duration::from_secs(10))
@@ -653,8 +706,8 @@ apply:
         );
         let cli: Arc<dyn OpenspecCli> = Arc::new(fake);
 
-        let (mut refresher, results_rx, _exit_rx) = worker_for_test(root, cli, 5);
-        refresher.request(Selection::All);
+        let (mut refresher, results_rx, _exit_rx) = worker_for_test(root, cli);
+        refresher.request(Selection::All, ArchivedScope::Names);
 
         let files = results_rx
             .recv_timeout(std::time::Duration::from_secs(10))
@@ -690,46 +743,170 @@ apply:
         }
     }
 
+    /// `refresh-worker` -> "The scope on the request is the scope the file
+    /// tier runs under": `worker_body` no longer resolves a fixed scope —
+    /// it runs `from_files` under the folded request's own `archived`
+    /// field, so a `Names` cycle counts the archive without opening a
+    /// single archived change and a `Full` cycle over the same tree resolves
+    /// every one, with the active list and the problem set unaffected
+    /// either way.
     #[test]
-    fn drain_and_fold_unions_queued_requests() {
-        let (tx, rx) = mpsc::channel::<Selection>();
-        tx.send(Selection::Only(std::collections::BTreeSet::from([
-            "b".to_string()
-        ])))
+    fn the_scope_on_the_request_is_the_scope_the_file_tier_runs_under() {
+        let scratch = crate::testutil::ScratchDir::new();
+        let root = crate::testutil::canonical(scratch.path());
+        vendor_tdd_schema(&root);
+        for (day, name) in [
+            ("01", "one"),
+            ("02", "two"),
+            ("03", "three"),
+            ("04", "four"),
+        ] {
+            std::fs::create_dir_all(
+                root.join("openspec/changes/archive")
+                    .join(format!("2026-01-{day}-{name}")),
+            )
+            .expect("create archived directory");
+        }
+        let fake = crate::cli::FakeCli::new();
+        fake.register_openspec(
+            &["list", "--json"],
+            Ok(format!(
+                r#"{{"changes":[],"root":{{"path":{:?},"source":"nearest"}}}}"#,
+                root.display().to_string()
+            )),
+        );
+        let cli: Arc<dyn OpenspecCli> = Arc::new(fake);
+
+        let (mut refresher, results_rx, _exit_rx) = worker_for_test(root, cli);
+
+        refresher.request(Selection::All, ArchivedScope::Names);
+        let names_files = results_rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the worker did not send the Names file result within 10s");
+        let names_merged = results_rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the worker did not send the Names merged result within 10s");
+        for (label, result) in [("Files", &names_files), ("Merged", &names_merged)] {
+            match result {
+                RefreshResult::Files(set) | RefreshResult::Merged(set) => {
+                    assert!(
+                        set.archived.is_empty(),
+                        "{label}: Names must build no archived Change"
+                    );
+                    assert_eq!(set.archived_total, 4, "{label}");
+                    assert!(set.problems.is_empty(), "{label}: {:?}", set.problems);
+                }
+                other => panic!("{label}: expected Files/Merged, got {other:?}"),
+            }
+        }
+
+        refresher.request(Selection::All, ArchivedScope::Full);
+        let full_files = results_rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the worker did not send the Full file result within 10s");
+        let full_merged = results_rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("the worker did not send the Full merged result within 10s");
+        for (label, result) in [("Files", &full_files), ("Merged", &full_merged)] {
+            match result {
+                RefreshResult::Files(set) | RefreshResult::Merged(set) => {
+                    assert_eq!(set.archived.len(), 4, "{label}");
+                    assert_eq!(set.archived_total, 4, "{label}");
+                    assert!(set.problems.is_empty(), "{label}: {:?}", set.problems);
+                }
+                other => panic!("{label}: expected Files/Merged, got {other:?}"),
+            }
+        }
+
+        fn active(r: &RefreshResult) -> Vec<crate::changes::Change> {
+            match r {
+                RefreshResult::Files(set) | RefreshResult::Merged(set) => set.active.clone(),
+                RefreshResult::Stopped(_) => unreachable!("no Stopped result in this test"),
+            }
+        }
+        assert_eq!(
+            active(&names_files),
+            active(&full_files),
+            "the scope reached from_files and changed nothing else"
+        );
+        assert_eq!(active(&names_merged), active(&full_merged));
+    }
+
+    /// `refresh-worker` -> "`drain_and_fold` unions selections and takes the
+    /// last scope". Driven single-threaded, on the scenario's own terms: a
+    /// threaded version cannot fail (design.md -> spec's own reasoning for
+    /// why this is not a worker-driven test), so `drain_and_fold` is called
+    /// directly against a receiver whose sender queued values and was
+    /// dropped.
+    #[test]
+    fn drain_and_fold_unions_selections_and_takes_the_last_scope() {
+        let (tx, rx) = mpsc::channel::<Request>();
+        tx.send(Request {
+            selection: Selection::Only(std::collections::BTreeSet::from(["b".to_string()])),
+            archived: ArchivedScope::Names,
+        })
         .unwrap();
-        tx.send(Selection::Only(std::collections::BTreeSet::from([
-            "c".to_string()
-        ])))
+        tx.send(Request {
+            selection: Selection::Only(std::collections::BTreeSet::from(["c".to_string()])),
+            archived: ArchivedScope::Names,
+        })
         .unwrap();
         drop(tx);
 
         let result = drain_and_fold(
-            Selection::Only(std::collections::BTreeSet::from(["a".to_string()])),
+            Request {
+                selection: Selection::Only(std::collections::BTreeSet::from(["a".to_string()])),
+                archived: ArchivedScope::Full,
+            },
             &rx,
         );
         assert_eq!(
             result,
-            Selection::Only(std::collections::BTreeSet::from([
-                "a".to_string(),
-                "b".to_string(),
-                "c".to_string()
-            ]))
+            Request {
+                selection: Selection::Only(std::collections::BTreeSet::from([
+                    "a".to_string(),
+                    "b".to_string(),
+                    "c".to_string()
+                ])),
+                archived: ArchivedScope::Names,
+            },
+            "selection unions; archived takes the last queued value"
         );
 
-        let (tx2, rx2) = mpsc::channel::<Selection>();
-        tx2.send(Selection::All).unwrap();
+        // The same call with the two queued requests carrying `Names` then `Full` returns
+        // `Full`, so the rule is "last wins" and not "widest wins".
+        let (tx2, rx2) = mpsc::channel::<Request>();
+        tx2.send(Request {
+            selection: Selection::Only(std::collections::BTreeSet::new()),
+            archived: ArchivedScope::Names,
+        })
+        .unwrap();
+        tx2.send(Request {
+            selection: Selection::Only(std::collections::BTreeSet::new()),
+            archived: ArchivedScope::Full,
+        })
+        .unwrap();
         drop(tx2);
         assert_eq!(
-            drain_and_fold(Selection::Only(std::collections::BTreeSet::new()), &rx2),
-            Selection::All
+            drain_and_fold(
+                Request {
+                    selection: Selection::Only(std::collections::BTreeSet::new()),
+                    archived: ArchivedScope::Names,
+                },
+                &rx2,
+            )
+            .archived,
+            ArchivedScope::Full
         );
 
-        let (tx3, rx3) = mpsc::channel::<Selection>();
+        // An empty, dropped receiver returns `first` unchanged, both fields included.
+        let (tx3, rx3) = mpsc::channel::<Request>();
         drop(tx3);
-        assert_eq!(
-            drain_and_fold(Selection::Only(std::collections::BTreeSet::new()), &rx3),
-            Selection::Only(std::collections::BTreeSet::new())
-        );
+        let first = Request {
+            selection: Selection::Only(std::collections::BTreeSet::new()),
+            archived: ArchivedScope::Full,
+        };
+        assert_eq!(drain_and_fold(first.clone(), &rx3), first);
     }
 
     #[test]
@@ -738,7 +915,7 @@ apply:
         let root = crate::testutil::canonical(scratch.path());
         let fake: Arc<dyn OpenspecCli> = Arc::new(crate::cli::FakeCli::new());
 
-        let (refresher, _results_rx, exit_rx) = worker_for_test(root, fake, 5);
+        let (refresher, _results_rx, exit_rx) = worker_for_test(root, fake);
         drop(refresher);
 
         match exit_rx.recv_timeout(std::time::Duration::from_secs(10)) {
@@ -770,8 +947,8 @@ apply:
         let cli: Arc<dyn OpenspecCli> = Arc::new(fake);
 
         let before = crate::testutil::snapshot(&root);
-        let (mut refresher, results_rx, exit_rx) = worker_for_test(root.clone(), cli, 5);
-        refresher.request(Selection::All);
+        let (mut refresher, results_rx, exit_rx) = worker_for_test(root.clone(), cli);
+        refresher.request(Selection::All, ArchivedScope::Names);
         results_rx
             .recv_timeout(std::time::Duration::from_secs(10))
             .expect("files result");

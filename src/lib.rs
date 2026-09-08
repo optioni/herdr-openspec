@@ -419,7 +419,18 @@ pub(crate) mod testutil {
     }
 
     impl crate::refresh::Refresher for RecordingRefresher {
-        fn request(&mut self, selection: crate::changes::Selection) {
+        // `list-sections` group 2 note: `Refresher::request` gained a second
+        // parameter, `archived: ArchivedScope`, but every `src/ui/driver.rs`
+        // assertion against `requests()` predates the archived section and
+        // checks `Selection` alone — so `archived` is recorded nowhere and
+        // `requests()` keeps its pre-`list-sections` signature. Nothing in
+        // this crate reads this double's archived scope until a later group
+        // gives `ui::driver`'s own tests a reason to.
+        fn request(
+            &mut self,
+            selection: crate::changes::Selection,
+            _archived: crate::changes::ArchivedScope,
+        ) {
             self.requests.borrow_mut().push(selection);
         }
 
@@ -728,7 +739,10 @@ pub(crate) mod testutil {
         #[test]
         fn recording_refresher_records_requests_and_takes() {
             let mut refresher = RecordingRefresher::new(vec![None]);
-            refresher.request(crate::changes::Selection::All);
+            refresher.request(
+                crate::changes::Selection::All,
+                crate::changes::ArchivedScope::Names,
+            );
             assert_eq!(refresher.take_result(), None);
             // The queue is now exhausted: falls back to `None` rather than
             // panicking.

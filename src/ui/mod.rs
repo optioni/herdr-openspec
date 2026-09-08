@@ -212,7 +212,10 @@ pub fn start_collaborators(
     };
     problems.extend(watch_problems);
 
-    let refresher = crate::refresh::start(repo, cli, config.archived_count);
+    // `list-sections` group 2 note: `refresh::start` no longer takes
+    // `archived_count` — the archived scope is now a property of each
+    // request (`refresh::Request`), not of the worker itself.
+    let refresher = crate::refresh::start(repo, cli);
     let agents = crate::agents::start(crate::cli::agent_cli_via(herdr));
     // `agent-launch`: the launcher, on the watcher's and the worker's terms rather than the
     // poller's — every launch argument vector carries the repository root as `--cwd`, and a
