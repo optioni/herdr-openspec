@@ -59,6 +59,10 @@ below.
 | SUGGESTION | `tasks.md` 1.3 | Gate configuration inside a behavior group reads as mixed kind | One clause saying why it cannot wait for group 6, and `noio-view.sh`'s now-stale header comment folded into the same edit | `tasks.md` 1.3 |
 | SUGGESTION | `tasks.md` group 8 | `tests/degraded-coverage.toml`'s nine `covers` ranges into the three edited files rot silently — `validate_covers` checks only path, bounds, and one non-comment line | A task re-points them | `tasks.md` 8.6 |
 | SUGGESTION | `tasks.md` 2.1 | Renaming either of the two tests `tests/degraded-coverage.toml:18` names as its proof fails `cargo test --test degraded_coverage` | Both named in the task | `tasks.md` 2.1 |
+| WARNING | `design.md` → Decision 1 | The rationale rejecting a `const` table was factually wrong: `Style::new`, `fg`, `bg`, and `add_modifier` **are** `const fn` (`ratatui-core-0.1.2/src/style.rs:300`, `:335`, `:352`, `:408`), so no `LazyLock` would have been needed | The false sentence is replaced with the real reason — a struct needs one field per `(status, level)` pair and answers `Heading(255)` with a lookup miss | `design.md` → Decision 1 |
+| SUGGESTION | `specs/view-palette/spec.md` | The confinement was written as "the only file in the crate — `tests/` included —", but the gate searches `src/` only, so the clause read as enforced when it was not | Scoped to `src/`, with the reason the wider claim is not made | `specs/view-palette/spec.md` → req 1 |
+| SUGGESTION | `specs/view-palette/spec.md` | Two role pairs share a style (`FileMode`/`Code`, `AgentBadge(Unknown)`/`ListSeparator`) and the distinctness scenario excluded both partners, so it passed while the proposal's own `DIM`-overloading complaint quietly recurred | Both pairs are stated as decisions with their reasons, and the scenario now asserts them **equal** rather than stepping around them | `specs/view-palette/spec.md` |
+| SUGGESTION | `specs/view-palette/spec.md`; `tasks.md` 1.1 | "Every `Role` variant" was hand-enumerated, so a role added later would escape all three table-driven tests | The list is built from an exhaustive `match`, which fails to compile until a new role is covered | `specs/view-palette/spec.md`; `tasks.md` 1.1 |
 | SUGGESTION | `design.md`; `tasks.md` 8.2, 9.6 | Three cross-artifact drifts: "the RED of group 5" (it is group 4); both stale `AGENTS.md` sentences are in § Architecture rules; a bare `cargo llvm-cov` produces no JSON for `scripts/coverage-prod.py` | All three corrected; 9.6 names `make coverage` | `design.md` → Risks; `tasks.md` 8.2, 9.6 |
 
 Reviewer D verified fourteen empirical claims: thirteen CONFIRMED, one FALSE (the plant line
@@ -77,8 +81,8 @@ change valid. No unresolved decision requires user input.
 - **`SPEC.md:757`'s degraded-states row still describes the badge as "dim" only.** That
   remains true after this change — the badge is dim *and* yellow — and the row's text is the
   `condition` key `tests/degraded-coverage.toml` binds it by, so rewording it means editing
-  both sides for no new fact. Resolution point: `tasks.md` 8.0's CHECK reads the row and
-  records the decision either way.
+  both sides for no new fact. Resolution point: `tasks.md` 8.0's CHECK, which now names the
+  row and requires the decision to be recorded either way.
 - **`openspec/specs/artifact-tabs/spec.md`'s `## Purpose` and the new
   `openspec/specs/view-palette/spec.md`'s missing one** are archive-time work, not apply
   work: the tracked-diff leg of `OPENSPEC-UNTOUCHED` fails any apply session that edits

@@ -35,8 +35,11 @@ pub enum Role {
 pub fn style(role: Role) -> Style;
 ```
 
-`src/ui/palette.rs` SHALL be the **only file in the crate** — `tests/` included — that names
-`ratatui::style::Color` or a `Color::` variant. Every other file styles by asking the palette
+`src/ui/palette.rs` SHALL be the **only file under `src/`** that names
+`ratatui::style::Color` or a `Color::` variant. The scope is `src/` and not the whole crate
+because that is what the gate searches; `grep -rn 'Color::' tests` returns nothing today and
+the integration tier renders no frame, so a `tests/` leg would guard nothing and read as
+enforced when it is not. Every other file styles by asking the palette
 for a role. This is the same confinement `pulldown_cmark` has to `src/ui/markdown.rs` and a
 process-spawn API has to `src/cli.rs`, and it SHALL be enforced the same way: a tree-wide
 grep with a positive control, extracted as `scripts/gates/palette.sh`, composed into the
@@ -77,9 +80,14 @@ against, never a literal that test writes.
   `AgentBadge` for each of the five `agents::AgentStatus` values and `Heading` for levels
   `1` through `6`
 - **THEN** every call returns a `Style` and none panics
+- **AND** the role list the test iterates is built from an **exhaustive** `match role { … }`
+  rather than hand-enumerated, so a `Role` added later fails to compile until it is added here
 - **AND** no two of `ListProblem`, `FileMode`, `TabActive`, `TabInactive`, and the five
   `AgentBadge` styles are equal to one another, so each carries a distinction rather than
   repeating its neighbour
+- **AND** the two deliberately shared pairs are asserted **equal** — `FileMode` with `Code`,
+  and `AgentBadge(Unknown)` with `ListSeparator` — so the sharing is a recorded decision
+  rather than a gap the distinctness assertion happens to step around
 
 #### Scenario: The confinement gate catches a `Color` named outside the palette
 
@@ -224,6 +232,14 @@ carry **no** colour: each already carries a modifier that distinguishes it, and 
 there would be decoration rather than information. `Quoted` in particular stays `DIM` and
 uncoloured — a strikethrough face has no entry at all, because `markdown-render` has no
 parser support for one yet.
+
+Two pairs of roles SHALL share a style, deliberately rather than by oversight. `FileMode` and
+`Code` are both `DIM` + `Yellow`, and they cannot meet: one is drawn in the frame header, the
+other only inside the detail region's content area. `AgentBadge(Unknown)` and `ListSeparator`
+are both `DarkGray`, and they do share the list region — that is the point, because `DarkGray`
+is this palette's one "no information" grey and an unknown agent status and a divider rule are
+both exactly that. Neither pair is a distinction the reader must draw, so neither is a
+`DIM`-style overload.
 
 `Heading(l)` for an `l` outside `1..=6` SHALL return the same `Style` as `Heading(6)`:
 `markdown-render` produces only `1..=6`, and the function is total rather than panicking on a

@@ -98,7 +98,9 @@ collaborator is replaced — the test copies the real tree.
 ## 1. `ui::palette` — the role table
 <!-- kind: behavior -->
 
-- [ ] 1.1 RED: Write failing tests in `src/ui/palette.rs` for: *The palette answers every role
+- [ ] 1.1 RED: Write failing tests in `src/ui/palette.rs`, iterating a role list built from an
+      **exhaustive** `match role { … }` so a `Role` added later fails to compile until it is
+      covered, for: *The palette answers every role
       with a `Style`*, *Each role's modifier set is exactly the table above*, *The coloured set
       is exactly the table above*, and *An out-of-range heading level does not panic*. Each
       enumerates every `Role` variant, the five `AgentStatus` values, and heading levels 1
@@ -306,7 +308,10 @@ A gate's floor is its own script default, kept at the gate's true measured floor
 - [ ] 8.0 CHECK: Read every sentence this change makes false against the tree it produces —
       `AGENTS.md:305` and `:340`, `SPEC.md:434-437`, `SPEC.md`'s `ui` module-map row, and the
       `covers` ranges in `tests/degraded-coverage.toml` — and confirm which are bound by a test
-      and which only by a reader.
+      and which only by a reader. Decide `SPEC.md:757` explicitly: its degraded-states row calls
+      the badge "dim", which stays true, and the row's text is the `condition` key
+      `tests/degraded-coverage.toml` binds it by — so reword it only together with that file, or
+      record that it is deliberately left as it is.
 - [ ] 8.1 CHANGE — rewrite in `AGENTS.md`: § Architecture rules, the `pulldown_cmark` bullet (audience:
       every future session). Extend it in place to name `ratatui::style::Color`'s confinement
       to `src/ui/palette.rs` beside the parser's to `src/ui/markdown.rs` — one bullet stating

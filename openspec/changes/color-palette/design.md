@@ -222,10 +222,12 @@ Whole-suite verification is `make check`, which runs format, lint, `make gates`,
 `const` table.**
 A function keeps `Role::AgentBadge(AgentStatus)` and `Role::Heading(u8)` expressible as
 parameterised roles rather than as twelve separate fields, and it makes `Heading(255)`
-answerable without a lookup miss. *Alternatives:* a `pub const PALETTE: Palette` struct —
-rejected because `Style`'s constructors are not `const fn` in ratatui, so the table would have
-to be a `LazyLock`, which is global state a pure view file should not hold; a `HashMap` —
-rejected as a runtime allocation for a fixed, tiny, total mapping.
+answerable without a lookup miss. *Alternatives:* a `pub const PALETTE: Palette` struct
+— a genuine option, since `Style::new`, `fg`, `bg`, and `add_modifier` **are** `const fn`
+(`ratatui-core-0.1.2/src/style.rs:300`, `:335`, `:352`, `:408`; only `patch` at `:471` is not),
+so no `LazyLock` would be needed — rejected because it would need one field per
+`(status, level)` pair and would answer `Heading(255)` with a lookup miss rather than a value;
+a `HashMap` — rejected as a runtime allocation for a fixed, tiny, total mapping.
 
 **Decision 2 — the confinement gate is on `Color`, not on `Style` or `Modifier`.**
 `Style` and `Modifier` are named all over `src/ui/view.rs` and in every view test that asserts
