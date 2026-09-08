@@ -12,6 +12,12 @@ the change rows around it, and an agent's status badge is styled exactly like a 
 a pane sitting beside working agents, "something is wrong" and "an agent is working here"
 are the signals worth a colour, and neither has one.
 
+The artifact tab bar is where the shortage shows most, because it is the one row the pane
+draws as a set of peers and asks the reader to pick the current one out of. Today it is
+`1 proposal  2 specs  3 design  4 tasks  5 planning-review` — five labels two spaces apart,
+the current one `BOLD`, which is also what the detail header directly above it is. A row of
+bare labels distinguished by weight alone reads as a sentence, not as tabs.
+
 This is **unplanned work**. The roadmap ends at Phase 6 (`degraded-states`). Every view
 change was specified against a `TestBackend` buffer, where asserting a modifier is
 straightforward and asserting an intent is not, so the plan never asked what the pane
@@ -32,6 +38,17 @@ should look like — only that it be correct.
 - **Named ANSI indices, never RGB.** The reader's own terminal theme decides what "red" is,
   a 16-colour terminal renders correctly, and the pane does not fight the theme of the
   panes beside it.
+- **The artifact tab bar becomes a row of chips.** Every tab is padded one column per side
+  and painted a palette background — one for an inactive tab, a brighter one for the active
+  tab — with a single unpainted spacer column between chips, so two inactive chips have a
+  visible edge rather than one continuous field. The leading `1 `–`9 ` digits are dropped
+  from the labels. Measured against this repository's five-artifact `tdd` schema the bar
+  goes from **57 columns to 53**: the padding adds 10, the dropped digits save 10, and the
+  separator halves from 8 columns to 4. It therefore fits both mandated interior widths (78
+  and 58) with more slack than it has today, not less. `1`–`9` still select a tab —
+  `ui::app::action_for` is untouched — but the bar no longer advertises them; `mouse-input`
+  restores a direct affordance by making the chip clickable, and the chip's painted span is
+  exactly the span that change will hit-test.
 - **Every role keeps its modifier.** Colour is added beside the existing modifier, never
   in place of it, so a monochrome terminal, a `NO_COLOR` environment, and a copy-pasted
   screenshot lose nothing that was there before this change. This is the "never fail
@@ -45,8 +62,11 @@ should look like — only that it be correct.
   theme key is wanted it is a later change with its own argument.
 - **No terminal capability probing.** The pane does not ask the terminal what it supports;
   it declares an ANSI index and lets the terminal answer.
-- **No measurement, layout, or row-grammar change.** `view-fidelity` owns display-column
-  arithmetic; this change adds no measuring site and moves no cell.
+- **No measurement, layout, or row-grammar change outside the tab bar.** `view-fidelity`
+  owns display-column arithmetic and this change adds no measuring site. The one cell that
+  moves is the artifact tab, whose padding and dropped digit are inseparable from giving it
+  a background: an unpadded chip paints tight against its glyphs and a numbered chip is
+  wider than the bar needs to be. No list row, header, or content line moves.
 - **No new markdown construct.** A strikethrough face has no colour here because it has no
   parser support yet — `markdown-constructs` owns that, and adds its own role to this
   table when it lands.
@@ -66,20 +86,26 @@ should look like — only that it be correct.
   `emphasis` → `ITALIC`, `code` → `DIM`, `link` → `UNDERLINED`, `quoted` → `DIM`) is
   restated as a palette lookup that still yields those modifiers.
 - `list-selection`: the selected row's style comes from the palette.
-- `artifact-tabs`: the active tab's style comes from the palette.
+- `artifact-tabs`: the cell grammar becomes a padded chip with a one-column spacer and no
+  leading digit, the active and inactive chip styles come from the palette, and the
+  mandated 78- and 58-column width assertions are restated against the new grammar.
 - `detail-header`: the header row's style comes from the palette.
 - `responsive-layout`: the `OpenSpec` label and the `file mode` badge take palette roles,
   the badge's colour being the one new distinction.
 
 ## Impact
 
-- **Code:** `src/ui/view.rs` (`style_for` and every render function's style source), one
-  new palette module under `src/ui/`, one new `scripts/gates/` confinement script composed
-  into `make gates` — which `tests/ci_workflow.rs` already requires to correspond
-  one-to-one with the recipe.
+- **Code:** `src/ui/view.rs` (`style_for` and every render function's style source),
+  `src/ui/detail.rs` (`tab_bar`'s cell construction and separator width — the numbering
+  branch that treats the tenth artifact differently from the first nine goes away with the
+  digits), one new palette module under `src/ui/`, one new `scripts/gates/` confinement
+  script composed into `make gates` — which `tests/ci_workflow.rs` already requires to
+  correspond one-to-one with the recipe.
 - **Docs:** `SPEC.md` → User interface gains the palette table; `AGENTS.md` → Architecture
   rules gains the confinement rule beside `pulldown_cmark`'s.
 - **Depends on `view-fidelity`** (rewrites the same render functions) and is best written
   **after `gate-integrity`**, whose repairs decide what a new gate script must look like to
-  be provably able to fail.
+  be provably able to fail. **`mouse-input` depends on this one** if both land: its
+  click-to-switch hit target is the chip's painted span, so the padding must be settled
+  first or that change hit-tests a rectangle this one then moves.
 - No manifest, no config format, no dependency, no data model, no external service.
