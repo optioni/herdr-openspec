@@ -66,7 +66,7 @@ test on `Vec<Line>` can see the last three steps. Per design.md → Test Strateg
 ## 1. The table block: parse, fold, and lay out
 <!-- kind: behavior -->
 
-- [ ] 1.1 RED: Write the failing unit tests in `src/ui/markdown.rs` for markdown-render's six
+- [x] 1.1 RED: Write the failing unit tests in `src/ui/markdown.rs` for markdown-render's six
   table scenarios: `a_table_that_fits_renders_as_aligned_columns`,
   `a_wide_cell_wraps_within_its_column`, `a_wide_table_allocates_max_min_fairly`,
   `alignment_markers_pad_the_side_they_name`, `a_ragged_table_keeps_its_declared_columns`, and
@@ -79,7 +79,7 @@ test on `Vec<Line>` can see the last three steps. Per design.md → Test Strateg
 
   HEAD: `0 passed; ... 1112 filtered out` — absent, as a RED check for new behaviour must be.
 
-- [ ] 1.2 CHANGE: Delete `a_table_renders_as_literal_source_rows` and drop the `"GFM table
+- [x] 1.2 CHANGE: Delete `a_table_renders_as_literal_source_rows` and drop the `"GFM table
   row"` entry from `unmodelled_constructs_render_as_source`'s `sources` array. Both pin the
   behaviour this group replaces and both go red the moment 1.3 lands, so they are removed
   before it rather than after. Check, run at HEAD:
@@ -91,39 +91,39 @@ test on `Vec<Line>` can see the last three steps. Per design.md → Test Strateg
   HEAD: `test ui::markdown::tests::a_table_renders_as_literal_source_rows ... ok` — green at
   HEAD, which is why it must be deleted rather than repaired.
 
-- [ ] 1.3 GREEN: Turn on `Options::ENABLE_TABLES` in `fold`'s `Parser::new_ext` call and add
+- [x] 1.3 GREEN: Turn on `Options::ENABLE_TABLES` in `fold`'s `Parser::new_ext` call and add
   the `Tag::Table`/`TableHead`/`TableRow`/`TableCell` and matching `TagEnd` arms, accumulating
   alignments and cells into a `Table` value. Update **both** wildcard comments — the
   `Event::Start`/`End` one and the bare-`Event` one — to say which variants the new options
   can now produce (design.md → Decision 1). Verification: the fold-level assertions in 1.1's
   tests see the cells; the layout assertions still fail.
 
-- [ ] 1.4 GREEN: Replace `Block`'s `is_rule: bool` with `kind: BlockKind { Flow, Rule,
+- [x] 1.4 GREEN: Replace `Block`'s `is_rule: bool` with `kind: BlockKind { Flow, Rule,
   Table(Table) }` and dispatch in `emit_block` (design.md → Decision 2). Verification:
   `cargo test --all-features --lib ui::markdown` — every markdown test **other than the two
   removed in 1.2** still passes, since `Flow` and `Rule` reproduce the previous two paths
   exactly.
 
-- [ ] 1.5 GREEN: Implement the column allocator: natural widths via `layout::columns`,
+- [x] 1.5 GREEN: Implement the column allocator: natural widths via `layout::columns`,
   `avail = width - (3n + 1)`, max-min fair capping, remainder by ascending index (design.md →
   Decision 4). Verification: `a_wide_table_allocates_max_min_fairly` passes at both widths.
 
-- [ ] 1.6 GREEN: Implement `emit_table`'s line grammar — a leading `|`, then per column
+- [x] 1.6 GREEN: Implement `emit_table`'s line grammar — a leading `|`, then per column
   ` ` + aligned cell + ` ` + `|` so a row line holds `n + 1` pipes, the delimiter line of `-`
   repeated `w[j] + 2`, header cells carrying `strong`, cell wrapping through the existing
   `wrap_prose` at `w[j]` columns, and a container's prefix on every line when the table is
   nested in a quote or list item (design.md → Decisions 3, 5, 6). Verification: 1.1's first
   five tests pass at both widths.
 
-- [ ] 1.7 GREEN: Implement the narrow fallback — one cell per line, wrapped to the full width,
+- [x] 1.7 GREEN: Implement the narrow fallback — one cell per line, wrapped to the full width,
   when `avail < n` (design.md → Decision 7), plus the zero-column guard that keeps
   `emit_table` total. Verification: `a_narrow_region_renders_one_cell_per_line` passes.
 
-- [ ] 1.8 REFACTOR: Fold the padding-and-pipe assembly through the existing `append` helper so
+- [x] 1.8 REFACTOR: Fold the padding-and-pipe assembly through the existing `append` helper so
   adjacent plain segments merge, keeping segment counts in line with every other line kind.
   Verification: tests stay green; `Line::text()` assertions are unchanged.
 
-- [ ] 1.9 Run the group tests — no regressions beyond the two deletions 1.2 records:
+- [x] 1.9 Run the group tests — no regressions beyond the two deletions 1.2 records:
 
   ```sh
   cargo test --all-features --lib ui::markdown

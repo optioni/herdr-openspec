@@ -2928,7 +2928,6 @@ mod tests {
         }
     }
 
-
     /// The character offsets of every `|` in `row`, counted in characters and
     /// never in bytes.
     fn pipe_offsets(row: &str) -> Vec<usize> {

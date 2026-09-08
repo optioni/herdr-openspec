@@ -75,6 +75,55 @@ struct Run {
     face: Face,
 }
 
+/// A table column's alignment, read from the delimiter row's own markers.
+/// `pulldown_cmark::Alignment::None` — an unmarked column — is `Left`,
+/// which is what "a column the delimiter row leaves unmarked SHALL be
+/// padded on the right" means.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Align {
+    Left,
+    Center,
+    Right,
+}
+
+/// One table cell's inline runs, before wrapping — the same `Run` every
+/// other block accumulates, so a cell's content wraps and faces by exactly
+/// the rules a paragraph's does.
+type Cell = Vec<Run>;
+
+/// One table row. `header` marks the row `Tag::TableHead` opened: the row
+/// whose cells carry `strong`, and the row the delimiter line follows.
+#[derive(Debug, Clone)]
+struct Row {
+    cells: Vec<Cell>,
+    header: bool,
+}
+
+/// A parsed table. `alignments` comes from the delimiter row and is what
+/// **declares** the column count `n`; the rows are in source order, header
+/// first. Width-independent, like every other `Block` field: the column
+/// allocation happens in [`emit_table`], at a width.
+#[derive(Debug, Clone)]
+struct Table {
+    alignments: Vec<Align>,
+    rows: Vec<Row>,
+}
+
+/// What a [`Block`] is. An enum rather than a pair of mutually exclusive
+/// fields, so a block that is both a rule and a table is unrepresentable
+/// (design.md -> Decision 2).
+#[derive(Debug, Clone)]
+enum BlockKind {
+    /// Ordinary content: `groups`, laid out at the block's own width.
+    Flow,
+    /// A thematic break: a single line of `width` dashes, ignoring every
+    /// other field.
+    Rule,
+    /// A GFM pipe table, laid out by [`emit_table`] from its own cells;
+    /// `groups` stays empty.
+    Table(Table),
+}
+
 /// One block-level unit to lay out. `groups` holds one `Vec<Run>` per
 /// rendered "hard line" — a paragraph's soft-break-delimited segment, or
 /// one verbatim source line of a code or HTML block — and every group
@@ -82,9 +131,7 @@ struct Run {
 /// verbatim-line rules require.
 #[derive(Debug, Clone)]
 struct Block {
-    /// A thematic break: laid out as a single line of `width` dashes,
-    /// ignoring every other field below.
-    is_rule: bool,
+    kind: BlockKind,
     hard_split: bool,
     first_prefix: String,
     cont_prefix: String,
@@ -142,6 +189,23 @@ struct Folder {
     // last), each carrying its own numbering and nesting depth.
     quote_depth: usize,
     list_stack: Vec<ListFrame>,
+
+    // `Some` between `Start(Table)` and `End(Table)`: the rows accumulated
+    // so far, the current row's cells, and whether that row is the header.
+    // The current *cell*'s runs accumulate in `group`, exactly as a
+    // paragraph's do, which is what lets a cell carry inline faces without
+    // a second accumulation path.
+    table: Option<TableBuilder>,
+}
+
+/// A table under construction. Separate from [`Table`] because a fold needs
+/// the two cursors — the current row and whether it is the header row —
+/// that the finished value has no use for.
+struct TableBuilder {
+    alignments: Vec<Align>,
+    rows: Vec<Row>,
+    cells: Vec<Cell>,
+    header: bool,
 }
 
 impl Folder {
@@ -160,6 +224,7 @@ impl Folder {
             image_face: Face::plain(),
             quote_depth: 0,
             list_stack: Vec::new(),
+            table: None,
         }
     }
 
@@ -192,7 +257,7 @@ impl Folder {
         }
         let groups = std::mem::take(&mut self.groups);
         self.blocks.push(Block {
-            is_rule: false,
+            kind: BlockKind::Flow,
             hard_split: self.hard_split,
             first_prefix: std::mem::take(&mut self.first_prefix),
             cont_prefix: std::mem::take(&mut self.cont_prefix),
@@ -210,7 +275,7 @@ impl Folder {
     fn push_rule(&mut self) {
         self.finish();
         self.blocks.push(Block {
-            is_rule: true,
+            kind: BlockKind::Rule,
             hard_split: false,
             first_prefix: String::new(),
             cont_prefix: String::new(),
@@ -325,6 +390,100 @@ impl Folder {
         self.hard_split = false;
         let base = self.quoted_base();
         self.faces = vec![base];
+    }
+
+    /// `Tag::Table(alignments)`. Keeps a list item's own marker for exactly
+    /// the reason [`start_paragraph`](Self::start_paragraph) does — `finish`
+    /// leaves `category` alone when nothing was accumulated — so a table
+    /// nested in an item or a quote lays out in the columns its container
+    /// leaves and carries the container's prefix on every line.
+    fn start_table(&mut self, alignments: Vec<pulldown_cmark::Alignment>) {
+        self.finish();
+        if self.category != Category::Item {
+            let qp = quote_prefix(self.quote_depth);
+            self.first_prefix = qp.clone();
+            self.cont_prefix = qp;
+            self.prefix_face = self.quoted_base();
+            self.category = Category::Other;
+        }
+        self.hard_split = false;
+        self.groups.clear();
+        self.group.clear();
+        self.faces = vec![self.quoted_base()];
+        self.table = Some(TableBuilder {
+            alignments: alignments
+                .into_iter()
+                .map(|a| match a {
+                    pulldown_cmark::Alignment::Right => Align::Right,
+                    pulldown_cmark::Alignment::Center => Align::Center,
+                    // `Left` and `None` — an unmarked column is padded on
+                    // the right, which is what left alignment is.
+                    _ => Align::Left,
+                })
+                .collect(),
+            rows: Vec::new(),
+            cells: Vec::new(),
+            header: false,
+        });
+    }
+
+    /// `Tag::TableHead` and `Tag::TableRow`: open a row, `header` set for
+    /// the first of the two.
+    fn start_table_row(&mut self, header: bool) {
+        if let Some(t) = self.table.as_mut() {
+            t.header = header;
+            t.cells.clear();
+        }
+    }
+
+    fn end_table_row(&mut self) {
+        let base = self.quoted_base();
+        if let Some(t) = self.table.as_mut() {
+            let cells = std::mem::take(&mut t.cells);
+            let header = t.header;
+            t.rows.push(Row { cells, header });
+            t.header = false;
+        }
+        self.faces = vec![base];
+    }
+
+    /// `Tag::TableCell`: the cell's runs accumulate in `group`. A header
+    /// cell's base face carries `strong`, which is how the header row reads
+    /// bold through the existing `Strong` role rather than through a face of
+    /// its own (design.md -> Decision 6).
+    fn start_table_cell(&mut self) {
+        let mut face = self.quoted_base();
+        if self.table.as_ref().is_some_and(|t| t.header) {
+            face.strong = true;
+        }
+        self.group.clear();
+        self.faces = vec![face];
+    }
+
+    fn end_table_cell(&mut self) {
+        let cell = std::mem::take(&mut self.group);
+        if let Some(t) = self.table.as_mut() {
+            t.cells.push(cell);
+        }
+    }
+
+    fn end_table(&mut self) {
+        let Some(t) = self.table.take() else {
+            return;
+        };
+        self.blocks.push(Block {
+            kind: BlockKind::Table(Table {
+                alignments: t.alignments,
+                rows: t.rows,
+            }),
+            hard_split: false,
+            first_prefix: std::mem::take(&mut self.first_prefix),
+            cont_prefix: std::mem::take(&mut self.cont_prefix),
+            prefix_face: self.prefix_face,
+            category: self.category,
+            groups: Vec::new(),
+        });
+        self.reset_ambient();
     }
 
     fn start_quote(&mut self) {
@@ -450,6 +609,12 @@ impl Folder {
     }
 
     fn end(mut self) -> Vec<Block> {
+        // A source truncated inside a table leaves the builder open; close
+        // it rather than dropping the rows, on the same totality terms
+        // `finish` closes a truncated paragraph.
+        if self.table.is_some() {
+            self.end_table();
+        }
         self.finish();
         self.blocks
     }
@@ -460,14 +625,18 @@ impl Folder {
 /// Every block-level construct `Options::empty()` can produce is handled:
 /// paragraphs, headings, lists (nested, ordered from their own start
 /// value), code blocks (fenced or indented, verbatim), block quotes
-/// (nested), thematic breaks, and raw HTML (block and inline), each
-/// verbatim. A table, footnote, strikethrough, or task-list source is not
-/// modelled by `Options::empty()` at all — it arrives as ordinary
-/// paragraph text, which is the literal-text degraded state
-/// `markdown-render` states.
+/// (nested), thematic breaks, raw HTML (block and inline), and — with
+/// `ENABLE_TABLES` on — GFM pipe tables. A footnote or task-list source is
+/// not modelled by this option set at all: it arrives as ordinary paragraph
+/// text, which is the literal-text degraded state `markdown-render` states.
+///
+/// The option set is exactly `ENABLE_TABLES | ENABLE_STRIKETHROUGH` and
+/// nothing else (design.md -> Decision 1): a further flag turned on here
+/// starts emitting events into the wildcards below, where a construct
+/// **vanishes** rather than degrading to its literal text.
 fn fold(source: &str) -> Vec<Block> {
     let mut f = Folder::new();
-    for event in Parser::new_ext(source, Options::empty()) {
+    for event in Parser::new_ext(source, Options::ENABLE_TABLES) {
         match event {
             Event::Start(tag) => match tag {
                 Tag::Paragraph => f.start_paragraph(),
@@ -480,13 +649,17 @@ fn fold(source: &str) -> Vec<Block> {
                 Tag::Strong => f.push_faced(|face| face.strong = true),
                 Tag::Link { .. } => f.push_faced(|face| face.link = true),
                 Tag::Image { .. } => f.start_image(),
-                // `FootnoteDefinition`, the definition-list tags, the
-                // table tags, `Superscript`, `Subscript`, `Strikethrough`,
-                // and `MetadataBlock` cannot be produced by
-                // `Options::empty()`. The wildcard is the stated default:
-                // total over the enum, and a future pulldown-cmark variant
-                // reaches it rather than a missing-arm compile error
-                // changing this module's shape.
+                Tag::Table(alignments) => f.start_table(alignments),
+                Tag::TableHead => f.start_table_row(true),
+                Tag::TableRow => f.start_table_row(false),
+                Tag::TableCell => f.start_table_cell(),
+                // `FootnoteDefinition`, the definition-list tags,
+                // `Superscript`, `Subscript`, and `MetadataBlock` cannot be
+                // produced by this option set. `Strikethrough` can, and is
+                // handled above. The wildcard is the stated default: total
+                // over the enum, and a future pulldown-cmark variant reaches
+                // it rather than a missing-arm compile error changing this
+                // module's shape.
                 _ => {}
             },
             Event::End(tag_end) => match tag_end {
@@ -496,6 +669,9 @@ fn fold(source: &str) -> Vec<Block> {
                 TagEnd::BlockQuote(_) => f.end_quote(),
                 TagEnd::Emphasis | TagEnd::Strong | TagEnd::Link => f.pop_faced(),
                 TagEnd::Image => f.end_image(),
+                TagEnd::Table => f.end_table(),
+                TagEnd::TableHead | TagEnd::TableRow => f.end_table_row(),
+                TagEnd::TableCell => f.end_table_cell(),
                 _ => {}
             },
             Event::Text(text) => f.push_text(&text),
@@ -512,7 +688,9 @@ fn fold(source: &str) -> Vec<Block> {
             Event::SoftBreak | Event::HardBreak => f.group_break(),
             Event::Rule => f.push_rule(),
             // `FootnoteReference`, `TaskListMarker`, `InlineMath`, and
-            // `DisplayMath` cannot be produced by `Options::empty()`. The
+            // `DisplayMath` cannot be produced by this option set —
+            // `ENABLE_FOOTNOTES` and `ENABLE_TASKLISTS` stay off precisely
+            // so the first two keep arriving as literal text instead. The
             // wildcard is the stated default: total over the enum, and a
             // future pulldown-cmark variant reaches it rather than a
             // missing-arm compile error changing this module's shape.
@@ -540,7 +718,7 @@ fn layout(blocks: &[Block], width: u16) -> Vec<Line> {
 }
 
 fn emit_block(block: &Block, width: u16, out: &mut Vec<Line>) {
-    if block.is_rule {
+    if matches!(block.kind, BlockKind::Rule) {
         out.push(Line {
             segments: vec![Segment {
                 text: "-".repeat(width as usize),
@@ -563,6 +741,11 @@ fn emit_block(block: &Block, width: u16, out: &mut Vec<Line>) {
         } else {
             out.push(Line::blank());
         }
+        return;
+    }
+
+    if let BlockKind::Table(table) = &block.kind {
+        emit_table(block, table, content_width, out);
         return;
     }
 
@@ -591,6 +774,197 @@ fn emit_block(block: &Block, width: u16, out: &mut Vec<Line>) {
             first_line_of_block = false;
         }
     }
+}
+
+/// The natural width of every declared column: the greatest [`columns`] of
+/// any cell in it, at least `1` so a column of only empty cells still
+/// carries a position the reader can see.
+fn natural_widths(table: &Table, n: usize) -> Vec<usize> {
+    let mut nat = vec![1usize; n];
+    for row in &table.rows {
+        for (j, cell) in row.cells.iter().enumerate().take(n) {
+            let text: String = cell.iter().map(|r| r.text.as_str()).collect();
+            nat[j] = nat[j].max(columns(&text));
+        }
+    }
+    nat
+}
+
+/// Max-min fair allocation of `avail` content columns over the natural
+/// widths `nat` (design.md -> Decision 4): every column keeps its natural
+/// width while the budget lasts, then only the greedy ones are capped —
+/// `w[j] = min(nat[j], c)` for the largest `c` that fits — and the columns
+/// left over are handed out one at a time, by ascending index, to columns
+/// still short of their natural width.
+///
+/// A proportional shrink is the alternative, and it squeezes a four-column
+/// `Gate` label to one to feed a sixty-column prose column, which is the
+/// opposite of useful: the short columns are what a reader scans by.
+///
+/// Every returned width is at least `1`, because the caller only reaches
+/// here when `avail >= nat.len()`, so `c = 1` always fits.
+fn allocate(nat: &[usize], avail: usize) -> Vec<usize> {
+    if nat.iter().sum::<usize>() <= avail {
+        return nat.to_vec();
+    }
+    let cap = nat.iter().copied().max().unwrap_or(1);
+    let mut c = 1usize;
+    for candidate in 1..=cap {
+        if nat.iter().map(|x| (*x).min(candidate)).sum::<usize>() <= avail {
+            c = candidate;
+        } else {
+            break;
+        }
+    }
+    let mut w: Vec<usize> = nat.iter().map(|x| (*x).min(c)).collect();
+    let mut left = avail - w.iter().sum::<usize>();
+    for (j, width) in w.iter_mut().enumerate() {
+        if left == 0 {
+            break;
+        }
+        if *width < nat[j] {
+            *width += 1;
+            left -= 1;
+        }
+    }
+    w
+}
+
+/// Lay `table` out at `width` columns and push the result into `out`,
+/// carrying `block`'s own prefix on every line — its first prefix on the
+/// first line and its continuation prefix on the rest, exactly as a flow
+/// block's lines do, so a table nested in a quote or a list item stays
+/// inside the columns its container leaves.
+///
+/// Total: a table declaring no column, and a zero width, each produce no
+/// line rather than dividing by zero. No `&str` source yields
+/// `Tag::Table([])` — `||` and `|-|` both declare one column — so that
+/// guard is an invariant rather than an observable rendering.
+fn emit_table(block: &Block, table: &Table, width: u16, out: &mut Vec<Line>) {
+    let n = table.alignments.len();
+    if n == 0 || width == 0 {
+        return;
+    }
+    let width = width as usize;
+    let avail = width.saturating_sub(3 * n + 1);
+    // Below `4n + 1` columns the pipe grammar cannot carry even one content
+    // column per column (design.md -> Decision 7).
+    let rendered = if avail < n {
+        narrow_rows(table, width)
+    } else {
+        pipe_rows(table, &allocate(&natural_widths(table, n), avail))
+    };
+    let mut first_line_of_block = true;
+    for segs in rendered {
+        let prefix = if first_line_of_block {
+            &block.first_prefix
+        } else {
+            &block.cont_prefix
+        };
+        let mut segments = Vec::new();
+        if !prefix.is_empty() {
+            segments.push(Segment {
+                text: prefix.clone(),
+                face: block.prefix_face,
+            });
+        }
+        segments.extend(segs);
+        out.push(Line { segments });
+        first_line_of_block = false;
+    }
+}
+
+/// The pipe grammar: a row line is a leading `|`, then for each column a
+/// padding space, the cell's content for that line laid out in exactly
+/// `w[j]` columns, a padding space, and the `|` that closes it — so a row
+/// line holds `n + 1` pipes and measures exactly `3n + 1 + sum(w)`. The
+/// delimiter line, emitted once immediately after the header row's last
+/// line, is `-` repeated `w[j] + 2` per column between the same pipes, so
+/// its pipes fall exactly under the row lines' (design.md -> Decision 3).
+///
+/// A cell too wide for its column **wraps** inside it, by the same
+/// [`wrap_prose`] every paragraph uses, and is never truncated: the detail
+/// region has no horizontal scroll to recover what a cut would discard
+/// (design.md -> Decision 5). A row is therefore as tall as its tallest
+/// cell, and the rendered line count and the source row count legitimately
+/// diverge.
+fn pipe_rows(table: &Table, w: &[usize]) -> Vec<Vec<Segment>> {
+    let n = w.len();
+    let mut out: Vec<Vec<Segment>> = Vec::new();
+    for row in &table.rows {
+        let empty: Cell = Vec::new();
+        let wrapped: Vec<Vec<Vec<Segment>>> = (0..n)
+            .map(|j| {
+                let cell = row.cells.get(j).unwrap_or(&empty);
+                let lines = wrap_prose(cell, w[j]);
+                if lines.is_empty() {
+                    vec![Vec::new()]
+                } else {
+                    lines
+                }
+            })
+            .collect();
+        let height = wrapped.iter().map(Vec::len).max().unwrap_or(1).max(1);
+        for k in 0..height {
+            let mut segs: Vec<Segment> = Vec::new();
+            append(&mut segs, "|", Face::plain());
+            for (j, cell_lines) in wrapped.iter().enumerate() {
+                append(&mut segs, " ", Face::plain());
+                let line: &[Segment] = cell_lines.get(k).map_or(&[], Vec::as_slice);
+                let used: usize = line.iter().map(|s| columns(&s.text)).sum();
+                let pad = w[j].saturating_sub(used);
+                // The alignment applies to every line of a wrapped cell,
+                // not to its first alone; a centred cell's odd column goes
+                // to the right.
+                let (lead, trail) = match table.alignments[j] {
+                    Align::Left => (0, pad),
+                    Align::Right => (pad, 0),
+                    Align::Center => (pad / 2, pad - pad / 2),
+                };
+                if lead > 0 {
+                    append(&mut segs, &" ".repeat(lead), Face::plain());
+                }
+                for s in line {
+                    append(&mut segs, &s.text, s.face);
+                }
+                if trail > 0 {
+                    append(&mut segs, &" ".repeat(trail), Face::plain());
+                }
+                append(&mut segs, " ", Face::plain());
+                append(&mut segs, "|", Face::plain());
+            }
+            out.push(segs);
+        }
+        if row.header {
+            let mut segs: Vec<Segment> = Vec::new();
+            append(&mut segs, "|", Face::plain());
+            for cell_width in w {
+                append(&mut segs, &"-".repeat(cell_width + 2), Face::plain());
+                append(&mut segs, "|", Face::plain());
+            }
+            out.push(segs);
+        }
+    }
+    out
+}
+
+/// The narrow fallback (design.md -> Decision 7): one cell per line, in
+/// row-major order, each wrapped to the full `width` by the prose rule,
+/// header cells still carrying `strong`, and an empty cell emitting
+/// nothing. No pipe, no padding, and no delimiter line. It preserves every
+/// character and never exceeds the region, which is what a table in a
+/// three-column region can still be asked for.
+fn narrow_rows(table: &Table, width: usize) -> Vec<Vec<Segment>> {
+    let mut out = Vec::new();
+    for row in &table.rows {
+        for cell in &row.cells {
+            if cell.iter().all(|r| r.text.trim().is_empty()) {
+                continue;
+            }
+            out.extend(wrap_prose(cell, width));
+        }
+    }
+    out
 }
 
 /// Split `s` at a grapheme-cluster boundary into a prefix whose
@@ -1509,10 +1883,6 @@ mod tests {
                 "See it here[^1].\n\n[^1]: The note.\n",
             ),
             ("strikethrough", "~~gone~~ text.\n"),
-            (
-                "GFM table row",
-                "| Gate | Runner |\n|---|---|\n| Format | cargo fmt |\n",
-            ),
             ("task-list item", "- [ ] an item\n- [x] a done item\n"),
         ];
         for width in [58, 78] {
@@ -1589,27 +1959,395 @@ mod tests {
         }
     }
 
+    /// The non-blank rendered lines' `text()` values — a table block emits no
+    /// blank line of its own, so for a table-only source this is the whole
+    /// rendering.
+    fn non_blank(rendered: &[Line]) -> Vec<String> {
+        text_of(rendered)
+            .into_iter()
+            .filter(|t| !t.is_empty())
+            .collect()
+    }
+
+    /// The column widths a rendered table's delimiter line reports: each run of
+    /// `-` between two `|` measures `w[j] + 2`. Read back out of the output
+    /// rather than recomputed by the test, so an assertion on it is an assertion
+    /// on what the reader is shown.
+    fn allocated_widths(delimiter: &str) -> Vec<usize> {
+        delimiter
+            .trim_matches('|')
+            .split('|')
+            .map(|run| columns(run) - 2)
+            .collect()
+    }
+
+    /// Column `j`'s own field of a rendered row line: the `w[j]` columns between
+    /// that column's two padding spaces. The leading `|` costs one column and
+    /// every earlier column costs `w[i] + 3` — a padding space, its content, a
+    /// padding space, and the `|` that closes it.
+    fn field(row: &str, w: &[usize], j: usize) -> String {
+        let start: usize = 1 + w[..j].iter().map(|x| x + 3).sum::<usize>() + 1;
+        row.chars().skip(start).take(w[j]).collect()
+    }
+
+    /// `markdown-render` :: "A table that fits renders as aligned columns at both
+    /// mandated widths". The literals below are the allocation rule's own output
+    /// and are derived, not chosen: `nat = [6, 12]` (`Format` and `cargo clippy`
+    /// are the widest cells), the table fits at both 58 and 78, so `w = nat` and
+    /// `total = 3n + 1 + sum(w) = 7 + 18 = 25`.
     #[test]
-    fn a_table_renders_as_literal_source_rows() {
-        let source = "| Gate | Runner |\n|---|---|\n| Format | cargo fmt |\n";
-        for width in [58, 78] {
-            let texts: Vec<String> = text_of(&lines(source, width))
-                .into_iter()
-                .filter(|s| !s.is_empty())
-                .collect();
+    fn a_table_that_fits_renders_as_aligned_columns() {
+        let source =
+            "| Gate | Runner |\n|---|---|\n| Format | cargo fmt |\n| Lint | cargo clippy |\n";
+        for width in [58u16, 78u16] {
+            let rendered = lines(source, width);
+            let texts = non_blank(&rendered);
             assert_eq!(
                 texts,
-                vec!["| Gate | Runner |", "|---|---|", "| Format | cargo fmt |"],
+                vec![
+                    "| Gate   | Runner       |".to_string(),
+                    "|--------|--------------|".to_string(),
+                    "| Format | cargo fmt    |".to_string(),
+                    "| Lint   | cargo clippy |".to_string(),
+                ],
                 "width {width}"
             );
-            for line in lines(source, width)
+            for text in &texts {
+                assert_eq!(columns(text), 25, "width {width}: {text:?}");
+                assert!(
+                    columns(text) < width as usize,
+                    "width {width}: the table is stretched to the region rather than sized \
+                     to its content"
+                );
+            }
+            assert_eq!(allocated_widths(&texts[1]), vec![6, 12], "width {width}");
+
+            // The header cells read bold through the existing `Strong` role;
+            // every pipe, padding space, and delimiter-line segment is plain.
+            let header = &rendered[0];
+            let labels: Vec<&str> = header
+                .segments
                 .iter()
-                .filter(|l| !l.segments.is_empty())
-            {
-                for seg in &line.segments {
-                    assert_eq!(seg.face, Face::plain());
+                .filter(|s| s.face.strong)
+                .map(|s| s.text.as_str())
+                .collect();
+            assert_eq!(labels, vec!["Gate", "Runner"], "width {width}");
+            for seg in &header.segments {
+                if seg.face.strong {
+                    assert_eq!(
+                        seg.face,
+                        Face {
+                            strong: true,
+                            ..Face::plain()
+                        },
+                        "width {width}: a header cell carries a face beyond `strong`"
+                    );
+                } else {
+                    assert_eq!(seg.face, Face::plain(), "width {width}");
                 }
             }
+            for line in &rendered[1..] {
+                for seg in &line.segments {
+                    assert_eq!(
+                        seg.face,
+                        Face::plain(),
+                        "width {width}: a non-header line carries a face"
+                    );
+                }
+            }
+
+            // The columns are aligned: the delimiter line's `|` offsets are every
+            // row line's.
+            let expected: Vec<usize> = texts[1]
+                .chars()
+                .enumerate()
+                .filter(|(_, c)| *c == '|')
+                .map(|(i, _)| i)
+                .collect();
+            assert_eq!(expected.len(), 3, "width {width}: n + 1 pipes");
+            for text in &texts {
+                let got: Vec<usize> = text
+                    .chars()
+                    .enumerate()
+                    .filter(|(_, c)| *c == '|')
+                    .map(|(i, _)| i)
+                    .collect();
+                assert_eq!(got, expected, "width {width}: {text:?} is not aligned");
+            }
+        }
+    }
+
+    /// `markdown-render` :: "A cell wider than its column wraps rather than being
+    /// truncated". `nat = [3, 98]` and the table fits at neither width, so the
+    /// max-min rule caps the wide column: `w = [3, 48]` at 58 and `[3, 68]` at
+    /// 78, and the 96-column cell wraps at both.
+    #[test]
+    fn a_wide_cell_wraps_within_its_column() {
+        let cell_text = "alpha bravo charlie delta echo foxtrot golf hotel india juliett kilo \
+                         lima mike november oscar papa";
+        assert_eq!(columns(cell_text), 98);
+        let source = format!("| key | value |\n|---|---|\n| k | {cell_text} |\n");
+        for (width, expect_w) in [(58u16, vec![3usize, 48]), (78u16, vec![3, 68])] {
+            let rendered = lines(&source, width);
+            let texts = non_blank(&rendered);
+            let w = allocated_widths(&texts[1]);
+            assert_eq!(w, expect_w, "width {width}");
+            let total = 3 * w.len() + 1 + w.iter().sum::<usize>();
+            assert_eq!(total, width as usize, "width {width}");
+
+            let body = &texts[2..];
+            assert!(
+                body.len() > 1,
+                "width {width}: the row must occupy more than one line"
+            );
+            for text in &texts {
+                assert_eq!(columns(text), total, "width {width}: {text:?}");
+                assert!(columns(text) <= width as usize, "width {width}");
+            }
+
+            // Every word of the cell is present, in order, with the single
+            // spaces the wrap consumed restored.
+            let rejoined = body
+                .iter()
+                .map(|l| field(l, &w, 1).trim_end().to_string())
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+                .join(" ");
+            assert_eq!(rejoined, cell_text, "width {width}: the cell was truncated");
+
+            // The first column's cell sits on the row's first line; its
+            // continuation lines carry `w[0]` spaces in that column instead, so
+            // the wrapped cell's lines align under it rather than under the row.
+            assert_eq!(field(&body[0], &w, 0), "k  ", "width {width}");
+            for text in &body[1..] {
+                assert_eq!(
+                    field(text, &w, 0),
+                    " ".repeat(w[0]),
+                    "width {width}: a continuation line repeats the first column"
+                );
+            }
+        }
+    }
+
+    /// `markdown-render` :: "A table too wide for the region spends its columns on
+    /// the narrow ones". `nat = [4, 4, 4, 60]`, `n = 4`, overhead `3n + 1 = 13`.
+    /// At 58 `avail = 45` and the largest cap that fits is 33, so `w =
+    /// [4, 4, 4, 33]`; at 78 `avail = 65` and the cap is 53. A proportional
+    /// shrink would squeeze the three four-column labels instead, which is the
+    /// alternative this rule exists to reject.
+    #[test]
+    fn a_wide_table_allocates_max_min_fairly() {
+        let wide = "alpha bravo charlie delta echo foxtrot golf hotel india kilo";
+        assert_eq!(columns(wide), 60);
+        let source = format!(
+            "| aaaa | bbbb | cccc | dddd |\n|---|---|---|---|\n| aaaa | bbbb | cccc | {wide} |\n"
+        );
+        for (width, expect_w) in [(58u16, vec![4usize, 4, 4, 33]), (78u16, vec![4, 4, 4, 53])] {
+            let rendered = lines(&source, width);
+            let texts = non_blank(&rendered);
+            let w = allocated_widths(&texts[1]);
+            assert_eq!(
+                w, expect_w,
+                "width {width}: the short columns must keep their natural width"
+            );
+            assert!(w.iter().all(|x| *x >= 1), "width {width}");
+            let total = 3 * w.len() + 1 + w.iter().sum::<usize>();
+            assert_eq!(total, width as usize, "width {width}");
+            for text in &texts {
+                assert_eq!(columns(text), total, "width {width}: {text:?}");
+            }
+
+            // Nothing was truncated to make it fit: every word of the wide cell
+            // is somewhere in the rendering.
+            let joined = texts.join("\n");
+            for word in wide.split(' ') {
+                assert!(
+                    joined.contains(word),
+                    "width {width}: {word:?} was truncated away"
+                );
+            }
+        }
+    }
+
+    /// `markdown-render` :: "Alignment markers pad the cell on the side they
+    /// name". The header cells are four columns wide precisely so `nat[j] = 4`
+    /// and the padding is observable at all: a one-column-wide fixture renders
+    /// left, centre, and right byte-identically and would pass against an
+    /// implementation that ignores `Alignment` entirely.
+    #[test]
+    fn alignment_markers_pad_the_side_they_name() {
+        let source = "| left | cent | rght |\n|:---|:--:|---:|\n| x | x | x |\n";
+        for width in [58u16, 78u16] {
+            let texts = non_blank(&lines(source, width));
+            let w = allocated_widths(&texts[1]);
+            assert_eq!(w, vec![4, 4, 4], "width {width}");
+            let body = &texts[2];
+            let left = field(body, &w, 0);
+            let centre = field(body, &w, 1);
+            let right = field(body, &w, 2);
+            assert_eq!(left, "x   ", "width {width}");
+            assert_eq!(
+                centre, " x  ",
+                "width {width}: the odd column goes to the right"
+            );
+            assert_eq!(right, "   x", "width {width}");
+            // The assertion discriminates: an implementation ignoring
+            // `Alignment` renders all three the same way.
+            assert_ne!(left, centre, "width {width}");
+            assert_ne!(centre, right, "width {width}");
+            assert_ne!(left, right, "width {width}");
+        }
+
+        // A wrapped cell in each column is padded on the same side on EVERY one
+        // of its lines, not on its first alone. Thirty-column cells against a
+        // 68- and a 48-column budget wrap at both mandated widths.
+        let long = "alpha bravo charlie delta echo";
+        assert_eq!(columns(long), 30);
+        let wrapped_source =
+            format!("| left | cent | rght |\n|:---|:--:|---:|\n| {long} | {long} | {long} |\n");
+        for width in [58u16, 78u16] {
+            let texts = non_blank(&lines(&wrapped_source, width));
+            let w = allocated_widths(&texts[1]);
+            let body = &texts[2..];
+            assert!(body.len() > 1, "width {width}: the cells must wrap");
+            for text in body {
+                for (j, cell_width) in w.iter().enumerate() {
+                    let f = field(text, &w, j);
+                    assert_eq!(columns(&f), *cell_width, "width {width}, column {j}");
+                    if f.trim().is_empty() {
+                        continue;
+                    }
+                    let lead = f.len() - f.trim_start().len();
+                    let trail = f.len() - f.trim_end().len();
+                    match j {
+                        0 => assert_eq!(lead, 0, "width {width}: left column {f:?}"),
+                        1 => assert!(
+                            trail >= lead && trail - lead <= 1,
+                            "width {width}: centred column {f:?}"
+                        ),
+                        _ => assert_eq!(trail, 0, "width {width}: right column {f:?}"),
+                    }
+                }
+            }
+        }
+    }
+
+    /// `markdown-render` :: "A ragged table renders every declared column and
+    /// drops no header column".
+    ///
+    /// A regression guard on **pulldown-cmark's own normalisation**, not on logic
+    /// this module adds: measured against 0.13.4, a body row with fewer cells
+    /// than the delimiter row declares arrives already padded with empty cells
+    /// and one with more arrives already truncated, so `fold` never observes a
+    /// ragged row. The event-stream leg below is what says which component holds
+    /// the property; it fails if a future parser version stops doing that.
+    #[test]
+    fn a_ragged_table_keeps_its_declared_columns() {
+        let source = "| a | b | c |\n|---|---|---|\n| p | q |\n| r | s | t | u | v |\n";
+
+        let mut cells_per_body_row: Vec<usize> = Vec::new();
+        let mut count = 0usize;
+        let mut in_row = false;
+        for event in Parser::new_ext(source, Options::ENABLE_TABLES) {
+            match event {
+                Event::Start(Tag::TableRow) => {
+                    in_row = true;
+                    count = 0;
+                }
+                Event::Start(Tag::TableCell) if in_row => count += 1,
+                Event::End(TagEnd::TableRow) => {
+                    in_row = false;
+                    cells_per_body_row.push(count);
+                }
+                _ => {}
+            }
+        }
+        assert_eq!(
+            cells_per_body_row,
+            vec![3, 3],
+            "pulldown-cmark no longer normalises a ragged row to the declared column count"
+        );
+
+        for width in [58u16, 78u16] {
+            let texts = non_blank(&lines(source, width));
+            let w = allocated_widths(&texts[1]);
+            assert_eq!(w, vec![1, 1, 1], "width {width}");
+            let total = 3 * w.len() + 1 + w.iter().sum::<usize>();
+            for text in &texts {
+                assert_eq!(columns(text), total, "width {width}: {text:?}");
+                assert_eq!(
+                    text.chars().filter(|c| *c == '|').count(),
+                    4,
+                    "width {width}: {text:?} does not hold n + 1 pipes"
+                );
+            }
+            assert_eq!(
+                field(&texts[2], &w, 2),
+                " ".repeat(w[2]),
+                "width {width}: the short row's third column"
+            );
+            let joined = texts.join("\n");
+            for surplus in ['u', 'v'] {
+                assert!(
+                    !joined.contains(surplus),
+                    "width {width}: the long row's surplus cell {surplus:?} was rendered"
+                );
+            }
+        }
+    }
+
+    /// `markdown-render` :: "A region too narrow for the pipe grammar renders one
+    /// cell per line". `4n + 1` is 9 for this two-column table, so the threshold
+    /// falls inside the 0-through-10 sweep and is exercised rather than assumed.
+    #[test]
+    fn a_narrow_region_renders_one_cell_per_line() {
+        let source = "| Gate | Runner |\n|---|---|\n| Format | cargo fmt |\n";
+
+        assert!(lines(source, 0).is_empty());
+        for width in 1..=8u16 {
+            let texts = non_blank(&lines(source, width));
+            for text in &texts {
+                assert!(
+                    !text.contains('|'),
+                    "width {width}: the pipe grammar cannot fit here: {text:?}"
+                );
+                assert!(columns(text) <= width as usize, "width {width}: {text:?}");
+            }
+        }
+        // At the widest width the fallback still covers, every cell is whole and
+        // on its own line, in row-major order — the property the sweep above can
+        // only bound.
+        assert_eq!(
+            non_blank(&lines(source, 8)),
+            vec![
+                "Gate".to_string(),
+                "Runner".to_string(),
+                "Format".to_string(),
+                "cargo".to_string(),
+                "fmt".to_string(),
+            ]
+        );
+        for width in 9..=10u16 {
+            let texts = non_blank(&lines(source, width));
+            assert!(
+                texts.iter().any(|t| t.contains('|')),
+                "width {width}: the pipe grammar fits from 4n + 1 = 9 onward"
+            );
+            for text in &texts {
+                assert!(columns(text) <= width as usize, "width {width}: {text:?}");
+            }
+        }
+        for width in [58u16, 78u16] {
+            let texts = non_blank(&lines(source, width));
+            assert_eq!(
+                texts,
+                vec![
+                    "| Gate   | Runner    |".to_string(),
+                    "|--------|-----------|".to_string(),
+                    "| Format | cargo fmt |".to_string(),
+                ],
+                "width {width}: the aligned form"
+            );
         }
     }
 
