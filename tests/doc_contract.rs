@@ -384,15 +384,22 @@ fn missing_document() {
     );
 }
 
-/// Whether `version` appears in `text` delimited by a non-version character (anything but an
-/// ASCII digit or `.`) on both sides, so a match inside an unrelated number (`11.887`,
-/// `1.881`) does not satisfy it. A version occurring at the very start or end of `text`
-/// counts as delimited on that side. Shares its boundary-scanning core, `bounded_mention`
+/// Whether `version` appears in `text` delimited by a non-version character on the LEFT (an
+/// ASCII digit or `.`, so `2.1.88` does not satisfy a search for `1.88`) and by a non-digit
+/// character on the RIGHT ONLY. The two boundaries are deliberately asymmetric: `.` is not
+/// rejected on the right, so `1.88.0` (a patch-version suffix) and `the floor is 1.88.` (a
+/// sentence-ending period) both satisfy a search for `1.88`, while `1.889` still does not (a
+/// digit immediately to the right). A version occurring at the very start or end of `text`
+/// counts as delimited on that side. Shares its boundary-scanning core, `bounded_mention_asym`
 /// (defined below, alongside the gate-programs leg that also needs a boundary-checked
-/// document match), with `program_mentioned` — the two differ only in which characters count
-/// as part of the token being searched for.
+/// document match), with `program_mentioned`'s symmetric `bounded_mention`.
 fn msrv_mentions(text: &str, version: &str) -> bool {
-    bounded_mention(text, version, |c| c.is_ascii_digit() || c == b'.')
+    bounded_mention_asym(
+        text,
+        version,
+        |c| c.is_ascii_digit() || c == b'.',
+        |c: u8| c.is_ascii_digit(),
+    )
 }
 
 /// Read `rust-version` from a `Cargo.toml`-shaped TOML document's `[package]` table, via the
@@ -523,12 +530,18 @@ fn manifest_rust_version_missing_key() {
 // below is stated against the two real recipe shapes the `Makefile` contains (a shell guard
 // block, and a quoted assignment value) rather than a naive "first token per line" rule.
 
-/// Whether `word` occurs in `text` delimited by a non-word character (anything but an ASCII
-/// alphanumeric or `_`) on both sides, so a program name occurring as part of a longer
-/// identifier does not satisfy a search for it. Shared with `msrv_mentions`, which is the same
-/// shape parameterised on a different boundary-character set (digits and `.` rather than
-/// alphanumerics and `_`), since a version number's own characters are not word characters.
-fn bounded_mention(text: &str, needle: &str, is_boundary_char: impl Fn(u8) -> bool) -> bool {
+/// Whether `needle` occurs in `text` delimited by a character the corresponding side's
+/// predicate rejects — the LEFT and RIGHT boundary character sets need not agree. A version
+/// number's boundaries are asymmetric: `2.1.88` must still reject `1.88` on its dotted LEFT
+/// side, but `1.88.0` (a patch-version suffix) and `1.88.` (a sentence-ending period) must
+/// both satisfy a search for `1.88` on the RIGHT. `bounded_mention` below is the symmetric
+/// case, used everywhere the two sides agree.
+fn bounded_mention_asym(
+    text: &str,
+    needle: &str,
+    is_left_boundary_char: impl Fn(u8) -> bool,
+    is_right_boundary_char: impl Fn(u8) -> bool,
+) -> bool {
     if needle.is_empty() {
         return false;
     }
@@ -537,15 +550,23 @@ fn bounded_mention(text: &str, needle: &str, is_boundary_char: impl Fn(u8) -> bo
     let mut search_start = 0;
     while let Some(rel) = text[search_start..].find(needle) {
         let idx = search_start + rel;
-        let left_ok = idx == 0 || !is_boundary_char(bytes[idx - 1]);
+        let left_ok = idx == 0 || !is_left_boundary_char(bytes[idx - 1]);
         let end = idx + nbytes.len();
-        let right_ok = end == bytes.len() || !is_boundary_char(bytes[end]);
+        let right_ok = end == bytes.len() || !is_right_boundary_char(bytes[end]);
         if left_ok && right_ok {
             return true;
         }
         search_start = idx + 1;
     }
     false
+}
+
+/// Whether `word` occurs in `text` delimited by a non-word character (anything but an ASCII
+/// alphanumeric or `_`) on both sides, so a program name occurring as part of a longer
+/// identifier does not satisfy a search for it. Shared with `msrv_mentions`, which uses the
+/// asymmetric core directly since its two boundary sides differ.
+fn bounded_mention(text: &str, needle: &str, is_boundary_char: impl Fn(u8) -> bool) -> bool {
+    bounded_mention_asym(text, needle, &is_boundary_char, &is_boundary_char)
 }
 
 /// Whether `program` occurs in `text` as a whole word: not immediately adjacent to another
