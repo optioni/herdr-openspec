@@ -4,6 +4,7 @@
 //! Decisions ("The row grammar is fixed-field and right-aligned").
 
 use crate::ui::app::{Dashboard, matches};
+use crate::ui::layout::{columns, truncate_columns};
 
 /// What kind of thing a `Row` represents, so a caller can tell a change row
 /// from a separator, a message, or a repository-level problem without
@@ -423,6 +424,7 @@ mod tests {
     use crate::agents::{Agent, AgentStatus};
     use crate::changes::fixture;
     use crate::ui::app::{Dashboard, Detail, Filter, Route};
+    use crate::ui::layout::columns;
     use crate::ui::list::{Row, RowKind, problem_row_text, rows};
 
     /// An in-scope `Agent` named `name` at `/tmp/demo-repo` — this module's fixture
@@ -1788,5 +1790,285 @@ mod tests {
         // back to the first `width` characters of `"! "` itself.
         assert_eq!(rows(&d, 1)[0].text, "!");
         assert_eq!(rows(&d, 0)[0].text, "");
+    }
+
+    // `view-fidelity` -> `change-rows`: "Every cell of the row grammar is measured in
+    // display columns". See `openspec/changes/view-fidelity/specs/change-rows/spec.md`.
+
+    /// `change-rows`: "A CJK change name stays inside the list region at both mandated
+    /// widths" — the row's own `columns()` is exact, and rendered into a real buffer the
+    /// list block's own right border is unmoved from an all-ASCII control render, which is
+    /// the overwrite the audit measured.
+    #[test]
+    fn a_cjk_change_name_stays_inside_the_list_region_at_both_mandated_widths() {
+        let name = "日本語の変更名前です";
+        assert_eq!(name.chars().count(), 10);
+        assert_eq!(columns(name), 20);
+
+        let cjk = dashboard_with(vec![fixture::active(name, 4, 9)], Vec::new(), Vec::new(), 0);
+        let ascii = dashboard_with(
+            vec![fixture::active("add-token-refresh", 4, 9)],
+            Vec::new(),
+            Vec::new(),
+            0,
+        );
+
+        for width in [38, 58] {
+            let text = rows(&cjk, width)[0].text.clone();
+            assert_eq!(columns(&text), width as usize, "width {width}: {text:?}");
+            assert!(text.ends_with("[4/9]"), "width {width}: {text:?}");
+            assert!(text.contains(name), "width {width}: {text:?}");
+        }
+
+        for (width, border_x) in [(120u16, 39u16), (60u16, 59u16)] {
+            let buf = crate::testutil::render_at(width, 20, &cjk);
+            let control = crate::testutil::render_at(width, 20, &ascii);
+            assert_eq!(
+                crate::testutil::cell(&buf, border_x, 2).symbol(),
+                "│",
+                "width {width}: the list block's own right border must be intact"
+            );
+            assert_eq!(
+                crate::testutil::cell(&buf, border_x, 2).symbol(),
+                crate::testutil::cell(&control, border_x, 2).symbol(),
+                "width {width}: the border must be unmoved from the ASCII-named control"
+            );
+            assert_eq!(
+                crate::testutil::cell(&buf, border_x - 1, 2).symbol(),
+                "]",
+                "width {width}: the progress cell ends in the interior's last column"
+            );
+        }
+    }
+
+    /// `change-rows`: "An emoji change name at 58 columns does not overwrite the border" —
+    /// checked badged and not, at both mandated widths.
+    #[test]
+    fn an_emoji_change_name_at_58_columns_does_not_overwrite_the_border() {
+        let name = "emoji-🎉-change";
+        let plain = dashboard_with(vec![fixture::active(name, 4, 9)], Vec::new(), Vec::new(), 0);
+        let mut badged = plain.clone();
+        badged.agents.agents = vec![agent_at(name, AgentStatus::Working)];
+
+        let ascii_name = "emoji-plain-change";
+        let ascii_plain = dashboard_with(
+            vec![fixture::active(ascii_name, 4, 9)],
+            Vec::new(),
+            Vec::new(),
+            0,
+        );
+        let mut ascii_badged = ascii_plain.clone();
+        ascii_badged.agents.agents = vec![agent_at(ascii_name, AgentStatus::Working)];
+
+        for width in [38, 58] {
+            for (d, expect_badge) in [(&plain, false), (&badged, true)] {
+                let text = rows(d, width)[0].text.clone();
+                assert_eq!(
+                    columns(&text),
+                    width as usize,
+                    "width {width} badge {expect_badge}: {text:?}"
+                );
+                assert!(text.ends_with(']'), "width {width} badge {expect_badge}: {text:?}");
+                if expect_badge {
+                    assert!(text.contains(" w ["), "width {width}: {text:?}");
+                }
+            }
+        }
+
+        for (width, border_x) in [(120u16, 39u16), (60u16, 59u16)] {
+            for (subject, control) in [(&plain, &ascii_plain), (&badged, &ascii_badged)] {
+                let buf = crate::testutil::render_at(width, 20, subject);
+                let ctl = crate::testutil::render_at(width, 20, control);
+                assert_eq!(
+                    crate::testutil::cell(&buf, border_x, 2).symbol(),
+                    "│",
+                    "width {width}"
+                );
+                assert_eq!(
+                    crate::testutil::cell(&buf, border_x, 2).symbol(),
+                    crate::testutil::cell(&ctl, border_x, 2).symbol(),
+                    "width {width}"
+                );
+            }
+        }
+    }
+
+    /// `change-rows`: "A wide name is truncated whole and padded back to the full width" —
+    /// the ellipsis lands on a whole CJK character and the shortfall is a trailing space
+    /// rather than a missing cell.
+    #[test]
+    fn a_wide_name_is_truncated_whole_and_padded_back_to_the_full_width() {
+        let name = "日本語の変更名前です日本語の変更名前です日本語の変更名前です";
+        assert_eq!(name.chars().count(), 30);
+        assert_eq!(columns(name), 60);
+        let d = dashboard_with(vec![fixture::active(name, 4, 9)], Vec::new(), Vec::new(), 0);
+
+        for width in [38, 58] {
+            let text = rows(&d, width)[0].text.clone();
+            assert_eq!(columns(&text), width as usize, "width {width}: {text:?}");
+            assert!(text.ends_with("…  [4/9]"), "width {width}: {text:?}");
+
+            let start = "> ".len();
+            let ellipsis_idx = text.find('…').expect("an ellipsis");
+            let prefix = &text[start..ellipsis_idx];
+            assert!(
+                name.starts_with(prefix),
+                "width {width}: {prefix:?} is not a prefix of the change's own name"
+            );
+            let before = text[..ellipsis_idx]
+                .chars()
+                .last()
+                .expect("a character before the ellipsis");
+            assert!(
+                name.contains(before),
+                "width {width}: the character before the ellipsis, {before:?}, must be a whole \
+                 character, not a cut one"
+            );
+        }
+    }
+
+    /// `change-rows`: "Rows are total over adversarial names at every width" — sweeps
+    /// `0..=130`, the mandated pair named explicitly among the swept values per
+    /// `view-fidelity`'s design.md -> Decision 4.
+    #[test]
+    fn rows_are_total_over_adversarial_names_at_every_width() {
+        let wide_cjk = "日".repeat(100);
+        let family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466}".to_string();
+        let combining = format!("e{}", "\u{0301}".repeat(5));
+        let katakana = "\u{FF9E}".to_string();
+        let with_nul = format!("a{}b", '\u{0}');
+        let empty = String::new();
+
+        let names = [
+            wide_cjk.as_str(),
+            family.as_str(),
+            combining.as_str(),
+            katakana.as_str(),
+            with_nul.as_str(),
+            empty.as_str(),
+        ];
+        let active: Vec<crate::changes::Change> =
+            names.iter().map(|n| fixture::active(n, 4, 9)).collect();
+        let archived = vec![fixture::archived(Some("2026-08-14"), "add-auth", 7, 7)];
+        let mut d = dashboard_with(active, archived, Vec::new(), 0);
+        d.agents.agents = vec![agent_at(names[0], AgentStatus::Working)];
+
+        for width in 0u16..=130 {
+            let all = rows(&d, width);
+            for row in &all {
+                assert!(
+                    columns(&row.text) <= width as usize,
+                    "width {width}: {:?} measures more than {width}",
+                    row.text
+                );
+                assert_eq!(
+                    columns(&row.text),
+                    width as usize,
+                    "width {width}: {:?}",
+                    row.text
+                );
+            }
+            if width <= 2 {
+                for row in &all {
+                    assert!(row.text.chars().count() <= 3, "width {width}: {:?}", row.text);
+                }
+            }
+        }
+
+        for row in rows(&d, 38) {
+            assert!(columns(&row.text) <= 38);
+        }
+        for row in rows(&d, 58) {
+            assert!(columns(&row.text) <= 58);
+        }
+    }
+
+    /// `change-rows`: "The no-repository block shortens its search path by columns" —
+    /// distinguished from a char-counted shortening, which for this path would measure
+    /// more columns than either interior.
+    #[test]
+    fn the_no_repository_block_shortens_its_search_path_by_columns() {
+        let path = "/home/dev/workspaces/日本語のディレクトリ名前がとても長い場合の例";
+        assert_eq!(path.chars().count(), 43);
+        assert_eq!(columns(path), 65);
+
+        let d = Dashboard {
+            repo: None,
+            searched_from: std::path::PathBuf::from(path),
+            changes: fixture::set(Vec::new(), Vec::new(), Vec::new()),
+            route: Route::List,
+            quit: false,
+            selected: 0,
+            filter: empty_filter(),
+            detail: empty_detail(),
+            refresh: crate::ui::app::Refresh {
+                requested: false,
+                reload: false,
+                startup: Vec::new(),
+                problems: Vec::new(),
+            },
+            agents: crate::agents::AgentSnapshot {
+                agents: Vec::new(),
+                reachable: false,
+                stalled: false,
+                problem: None,
+            },
+            agent_names: crate::state::Mapping::default(),
+            launch: crate::ui::app::Launch {
+                pending: None,
+                in_flight: false,
+                problems: Vec::new(),
+            },
+            file_mode: false,
+        };
+
+        for width in [38, 58] {
+            let all = rows(&d, width);
+            assert_eq!(all.len(), 3, "width {width}");
+            assert!(
+                all.iter().all(|r| r.kind == RowKind::Message),
+                "width {width}"
+            );
+            let text = all[2].text.clone();
+            assert_eq!(columns(&text), width as usize, "width {width}: {text:?}");
+            assert!(text.starts_with('…'), "width {width}: {text:?}");
+
+            let suffix = &text['…'.len_utf8()..];
+            let budget = width as usize - 1;
+            assert!(columns(suffix) <= budget, "width {width}");
+            assert!(
+                path.ends_with(suffix.trim_end()),
+                "width {width}: {suffix:?} does not slice back out of the searched path"
+            );
+
+            // A `char`-counted shortening would have kept the last `width - 1`
+            // characters instead of columns — for this path that measures more
+            // columns than the budget it was meant to fit, so the two measures
+            // are distinguishable.
+            let old_kept: String = path
+                .chars()
+                .rev()
+                .take(budget)
+                .collect::<Vec<char>>()
+                .into_iter()
+                .rev()
+                .collect();
+            assert!(
+                columns(&old_kept) > budget,
+                "width {width}: the char-counted suffix must measure more than the columns \
+                 budget, or the scenario does not discriminate"
+            );
+        }
+
+        for (width, border_x) in [(120u16, 39u16), (60u16, 59u16)] {
+            let buf = crate::testutil::render_at(width, 20, &d);
+            for y in [2u16, 3, 4] {
+                assert_eq!(
+                    crate::testutil::cell(&buf, border_x, y).symbol(),
+                    "│",
+                    "width {width} row {y}"
+                );
+            }
+        }
     }
 }
