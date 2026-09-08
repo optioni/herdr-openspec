@@ -94,10 +94,10 @@ echo "msrv=$v"; grep -c -- "$v" AGENTS.md README.md
 → `msrv=1.88`, `AGENTS.md:0`, `README.md:0`. **RED** — the crate's actual minimum appears in
 no prose anywhere.
 
-- [ ] 4.1 RED: Write `msrv_is_documented` over the real files (parsing `rust-version` from `Cargo.toml` with the `toml` crate, never `cargo metadata`) and `msrv_bump_is_caught` over synthetic doc text. The search is scoped to `AGENTS.md` → Environment and `README.md` → Development and requires a non-version character on each side of the match, so `11.887` does not satisfy it. Confirm the real-file test fails naming both documents.
-- [ ] 4.2 GREEN: Rewrite `AGENTS.md` → Environment's Rust bullet to state the supported floor (`Cargo.toml`'s `rust-version = "1.88"`) and, separately, the version the reference machine runs, so `1.91` stops reading as a requirement. Add the floor to `README.md` → Development.
-- [ ] 4.3 REFACTOR: State that no refactor was needed.
-- [ ] 4.4 Run `cargo test --test doc_contract` — green, no regressions. Commit.
+- [x] 4.1 RED: Write `msrv_is_documented` over the real files (parsing `rust-version` from `Cargo.toml` with the `toml` crate, never `cargo metadata`) and `msrv_bump_is_caught` over synthetic doc text. The search is scoped to `AGENTS.md` → Environment and `README.md` → Development and requires a non-version character on each side of the match, so `11.887` does not satisfy it. Confirm the real-file test fails naming both documents.
+- [x] 4.2 GREEN: Rewrite `AGENTS.md` → Environment's Rust bullet to state the supported floor (`Cargo.toml`'s `rust-version = "1.88"`) and, separately, the version the reference machine runs, so `1.91` stops reading as a requirement. Add the floor to `README.md` → Development.
+- [x] 4.3 REFACTOR: State that no refactor was needed.
+- [x] 4.4 Run `cargo test --test doc_contract` — green, no regressions. Commit.
 
 ## 5. Every program the gate path invokes is documented
 <!-- kind: behavior -->
