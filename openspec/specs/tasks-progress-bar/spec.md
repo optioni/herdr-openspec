@@ -40,8 +40,18 @@ draws it left to right and leaves the rest of its row untouched, exactly as
   SHALL carry no surrounding brackets: the count cell already carries a bracket pair and a
   second one beside it reads as noise.
 
-The returned string SHALL be at most `width` characters, counted in `char`s, and SHALL be
-exactly `width` characters in the full form.
+The returned string SHALL be at most `width` **display columns**, measured by
+`layout::columns` as `responsive-layout` defines it, and SHALL be exactly `width` columns in
+the full form. Every character the bar can hold is one column wide — `█` and `░` are
+East Asian Width **Ambiguous**, which `unicode-width`'s default, and therefore ratatui's,
+resolves to 1, and the count and percent cells are ASCII — so this restatement changes no
+rendered output at any width. It is made because the crate now has exactly one unit for a
+rendered length, and a requirement still counting `char`s would be the one place a reader
+could not tell which measure was meant. The cell-dropping order below is likewise unchanged
+and now evaluated in columns.
+
+`ui::tasks` SHALL reach the measure only through `layout::columns` and
+`layout::truncate_columns`; `progress_bar` SHALL name no `char` count of its own.
 
 The line SHALL be rendered as one segment carrying `Face::plain()`, so `ui::view::style_for`
 needs no new `Face`-to-`Style` mapping and `ui::tasks` needs no `ratatui` type.
@@ -56,21 +66,25 @@ change on the same frame.
 
 - **WHEN** `progress_bar` is called with `Progress { completed: 4, total: 9 }` at width
   `78` and at width `58`
-- **THEN** the 78-column result is exactly 78 characters: a 68-character gauge, a space,
+- **THEN** the 78-column result is exactly 78 display columns: a 68-column gauge, a space,
   `[4/9]`, a space, and `44%`
-- **AND** the 58-column result is exactly 58 characters: a 48-character gauge, a space,
+- **AND** the 58-column result is exactly 58 display columns: a 48-column gauge, a space,
   `[4/9]`, a space, and `44%`
-- **AND** the 68-character gauge holds exactly 30 `█` and 38 `░`, and the 48-character
+- **AND** the 68-column gauge holds exactly 30 `█` and 38 `░`, and the 48-column
   gauge exactly 21 `█` and 27 `░`, so the fill is `g * completed / total` truncated
+- **AND** the two results are **byte-identical** to the ones this requirement produced before
+  display-column measurement, which is the discriminating claim: it fails if the gauge run's
+  length was recomputed against a different measure, whereas comparing `layout::columns` to
+  `chars().count()` for an all-width-1 fixture is a tautology and could not
 
 #### Scenario: The bar reaches the buffer at both mandated frame widths
 
 - **WHEN** a `Dashboard` at `Route::Detail`, whose selected change's tracked-tasks tab is
   selected, whose `progress` is `Progress { completed: 4, total: 9 }`, and whose
   `detail.source` holds nine task lines, is rendered at 120x20 and at 60x20
-- **THEN** in the 120-column buffer row 4 columns 41 through 118 hold the 78-character bar,
+- **THEN** in the 120-column buffer row 4 columns 41 through 118 hold the 78-column bar,
   ending `[4/9] 44%`
-- **AND** in the 60-column buffer row 4 columns 1 through 58 hold the 58-character bar,
+- **AND** in the 60-column buffer row 4 columns 1 through 58 hold the 58-column bar,
   ending `[4/9] 44%`
 - **AND** in each buffer row 5 is blank in the content area and row 6 holds the first
   checklist line, so the bar and its separator took two rows from the checklist rather than
@@ -83,7 +97,16 @@ change on the same frame.
   `{ completed: 0, total: 7 }`, then `{ completed: 7, total: 7 }`
 - **THEN** the percent cells read `66%`, `33%`, `0%`, and `100%` respectively at both widths
 - **AND** `66%` rather than `67%` proves the truncation, and the full form is still exactly
-  `width` characters at every one of them
+  `width` display columns at every one of them
+
+#### Scenario: The bar measures at most its width at every width
+
+- **WHEN** `progress_bar` is called at every width from `0` through `130` with
+  `Progress { completed: 4, total: 9 }`, `{ completed: 0, total: 0 }`,
+  `{ completed: 0, total: usize::MAX }`, and `{ completed: usize::MAX, total: usize::MAX }`
+- **THEN** no call panics at any width for any of the four
+- **AND** at every width every result's `layout::columns` is at most that width, and equals
+  it whenever the full form was returned
 
 ### Requirement: The gauge is full exactly when the change is complete
 

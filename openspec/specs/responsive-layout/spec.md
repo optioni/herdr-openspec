@@ -416,7 +416,7 @@ nothing may write there.
   one drawn
 ### Requirement: The header names the repository root, shortened from the left when narrow
 
-The header row SHALL render, right-aligned so that its last character sits in the final
+The header row SHALL render, right-aligned so that its last column sits in the final
 column, the repository root's display path when one was found, and the literal
 `no repository` when none was. Exactly one blank column SHALL separate the `OpenSpec`
 label from the shortened text at minimum.
@@ -442,13 +442,20 @@ Let `A` be the header width minus 9 — the eight columns of `OpenSpec` plus one
 blank — **floored at zero**, so widths below 9 do not underflow the unsigned subtraction.
 When the badge is drawn, `A` SHALL instead be the header width minus **19** — the same nine,
 plus the badge's nine and one further separating blank — floored at zero by the same rule.
-When the text's character count is at most `A` it SHALL be rendered whole. When it is
-longer and `A` is at least 8, it SHALL be rendered as `…` followed by its last `A - 1`
-characters. When `A` is below 8 the text SHALL be omitted entirely and only `OpenSpec`
-SHALL be drawn; when the width is below 8 the label itself SHALL be truncated to the
-columns available. Shortening SHALL count characters, not bytes, and SHALL keep the tail —
-the repository's own directory name is what identifies it, and the leading path components
-are what a reader can spare.
+When the text's `layout::columns` is at most `A` it SHALL be rendered whole. When it is
+longer and `A` is at least 8, it SHALL be rendered as `…` followed by the **last `A - 1`
+columns** of the text — the longest suffix ending on a grapheme-cluster boundary that
+measures at most `A - 1`. When `A` is below 8 the text SHALL be omitted entirely and only
+`OpenSpec` SHALL be drawn; when the width is below 8 the label itself SHALL be truncated to
+the columns available. Shortening SHALL count **display columns**, not characters and not
+bytes, and SHALL keep the tail — the repository's own directory name is what identifies it,
+and the leading path components are what a reader can spare.
+
+Because a cluster is dropped whole, the shortened text MAY measure one column less than the
+space allotted to it. The row SHALL still be right-aligned against its own measured width,
+so the last drawn column is the final column and any slack falls to the **left** of the
+ellipsis, where the `OpenSpec` label's trailing blanks already are. The header SHALL never
+draw past its last column at any width for any path.
 
 The badge SHALL be drawn on the **frame** header, not on the detail region's change header.
 The two are different claims: a missing binary is a fact about the process, true of every
@@ -554,6 +561,29 @@ region's interior width rather than the header's.
   17-column omission is a width branch and not the feature being absent
 - **AND** no ellipsis appears anywhere in the 17-column buffer's header row
 
+#### Scenario: A wide-character path is shortened by columns and stays inside the header
+
+- **WHEN** a `Dashboard` whose repository root is
+  `/home/dev/workspaces/日本語のリポジトリ名前がとても長いディレクトリ` — forty-four
+  characters and **sixty-seven display columns** — is rendered at 60x20 and at 120x20, and
+  again with `file_mode` true. The fixture is chosen to exceed `A` at the narrow width both
+  with the badge (41) and without it (51), so both branches actually shorten; a
+  wide-character path short enough to fit would leave every assertion below unreachable
+- **THEN** in every one of the four buffers the header row's last drawn column is the frame's
+  final column and no cell beyond it is written
+- **AND** in the 60-column, non-badged buffer the shortened text begins with `…` at a column
+  no earlier than 9 and ends in the final column, and its `columns` is at most `A` — 51
+- **AND** a `char`-counted shortening of the same path would have kept its last 50
+  **characters**, which measure far more than 51 columns and would have run past the frame —
+  so the scenario distinguishes the two measures rather than merely exercising one
+- **AND** in the 60-column, badged buffer the badge occupies columns 9 through 17, column 18
+  is blank, and the shortened path's `columns` is at most `A` — 41 — so the badge took its
+  columns from the path exactly as the unbadged rule says
+- **AND** in the 120-column buffer the whole sixty-seven-column path is drawn, its first
+  column no earlier than column 50, and no ellipsis appears in that row
+- **AND** rendering the same dashboard at 16x20, 18x20, 19x20, and 1x20 draws only the
+  label or a truncation of it, writes nothing past the last column, and does not panic
+
 ### Requirement: The detail region's two mandated interior widths are 78 and 58
 
 The detail region's interior width SHALL be **78** at a 120-column frame — the wide layout's
@@ -592,3 +622,148 @@ region. Nothing SHALL depend on 78 other than the expectations of tests rendered
   nothing
 - **AND** the number scan does not see a suffixed literal such as `78u16`, so it fails
   closed and the widths are written unsuffixed
+
+### Requirement: Display width is measured in terminal columns by one pair of primitives
+
+Every measurement and every truncation under `src/ui/` SHALL be expressed in **terminal
+display columns**, never in `char`s and never in bytes. Two pure total functions in
+`ui::layout` SHALL be the crate's only implementation of that measure:
+
+```rust
+pub(crate) fn columns(text: &str) -> usize;
+pub(crate) fn truncate_columns(text: &str, max: usize) -> &str;
+```
+
+`columns` SHALL return the number of terminal cells `ratatui::buffer::Buffer::set_string`
+consumes for `text`, computed the way `set_string` itself computes it and not by an
+independent table: it SHALL split `text` into grapheme clusters and sum each cluster's
+width through ratatui's own public API — `ratatui::text::Span::styled_graphemes`, which
+performs the split and drops clusters containing a control character, and the
+`ratatui::buffer::CellWidth` trait, which yields each remaining cluster's cell width. This
+is the whole of the argument for the choice: agreement with the buffer is the property being
+bought, and any second measure — a hand-rolled table, or `unicode-width` called directly —
+would agree with `set_string` only by coincidence of version and would miss ratatui's own
+halfwidth-katakana adjustment and its control-character filter.
+
+`truncate_columns(text, max)` SHALL return the longest **prefix of `text` ending on a
+grapheme-cluster boundary** whose `columns` is at most `max`. It SHALL never split a
+cluster, SHALL return `""` for `max == 0`, and SHALL return `text` whole when
+`columns(text) <= max`. Because a cluster is dropped whole, the returned prefix MAY measure
+`max - 1` columns where a two-column cluster would not fit; a caller that owes an exact
+width SHALL pad the difference rather than assume the prefix filled it.
+
+Both functions SHALL be pure and total: no filesystem, process, environment, network, or
+standard-I/O work, no clock, no global state, and no panic for any `&str` and any `usize`.
+Both live in `ui::layout` — the module `responsive-layout` already owns, and which already
+names a `ratatui` type — so the crate's pure view set stays at the **eight** files
+`dashboard-loop` enumerates and no ninth file is added to it. This placement is a
+consequence of that count, not a claim that text measurement is `Rect` geometry.
+
+**The Unicode promise the pane makes, stated rather than left to be discovered, and stated
+with its limit.** A grapheme cluster occupies the columns ratatui gives it, and no line the
+view produces ever exceeds — **as ratatui measures it** — the region it is drawn into. That
+qualification is the promise's boundary and is deliberate: the pane's arithmetic and
+`Buffer::set_string` are the same measure by construction, so within the buffer the bound is
+exact, but a terminal is free to paint a cluster in a different number of cells than ratatui
+budgeted and the pane has no way to know.
+
+The known divergence runs in one direction, and it is the opposite of the intuitive one. A
+zero-width-joiner emoji sequence is **one** grapheme cluster to `graphemes(true)`, and
+ratatui measures it at 2 columns — the same as a terminal that composes it. A terminal that
+does **not** compose it paints each constituent emoji instead, six columns for a
+three-person family, and the row overruns. The pane SHALL NOT attempt to detect or
+compensate for this: it is a property of the terminal's font and shaping, invisible to a
+process writing bytes to a pty, and any compensation would have to guess. It is recorded
+here as an accepted limit of the promise rather than a defect, and it is the one case in
+which a line can exceed its region after this change.
+
+Correspondingly, the pane SHALL NOT reorder bidirectional text, SHALL NOT probe the terminal
+for its capabilities, and SHALL NOT tailor any measurement to a locale — which carries its
+own instance of the same limit, since several of the box-drawing and arrow characters the
+artifacts already use are East Asian **Ambiguous** and a CJK-locale terminal renders them at
+2 columns where `unicode-width`'s default, and therefore ratatui's, says 1.
+
+No file under `src/ui/` other than `src/ui/layout.rs` SHALL measure a rendered string with a
+`char` count. Concretely, no **production** line of `src/ui/app.rs`, `src/ui/detail.rs`,
+`src/ui/list.rs`, `src/ui/markdown.rs`, `src/ui/tasks.rs`, `src/ui/view.rs`, or
+`src/ui/driver.rs` SHALL name `.chars().count()`, `.chars().take(`, or a
+`Vec<char>`-producing `.chars().collect()`. Those seven are the whole of the rule's reach,
+not a sample of it: `src/ui/mod.rs` and `src/ui/terminal.rs` are the only other files under
+`src/ui/`, neither renders, and neither holds such a measurement in production code today.
+Iterating characters for a purpose that is not measurement — `ui::markdown`'s per-character
+scanner, for one — is untouched by this rule.
+
+**Two measuring sites the pattern above cannot see, named so they are not missed.**
+`ui::markdown`'s `split_at_char`, which cuts a run at a `char_indices` offset for the
+hard-split, and any future `char_indices`-based cut, are column budgets expressed in
+characters that no `.chars()` pattern matches. They SHALL be rewritten to cut in columns
+along with the rest; what proves it is `markdown-render`'s wide-character and 500-column-CJK
+scenarios, not the sweep. A source check that cannot see a violation is recorded as a limit
+rather than relied on.
+
+**The footer is inside this rule.** `responsive-layout`'s own footer requirement and
+`list-filtering`'s both state their hint budgets and their keep-the-tail truncation of the
+filter prompt in characters, against all-ASCII hint literals whose stated counts stay exactly
+true. The **query** in that footer is the reader's own typed text and is not ASCII-bound, so
+the footer's budget arithmetic and its tail truncation SHALL be measured with `layout::columns`
+and cut with `layout::truncate_columns` like every other field. No hint literal's length
+changes and no landed footer assertion moves.
+
+#### Scenario: `columns` agrees with what the buffer consumed
+
+- **WHEN** for each of `abc`, `日本語`, `🎉`, `e` followed by U+0301 COMBINING ACUTE ACCENT,
+  a family emoji joined by two zero-width joiners, `ｶ` followed by U+FF9E HALFWIDTH KATAKANA
+  VOICED SOUND MARK, a string holding only U+0007 BEL, and the empty string, the string is
+  written into a fresh 40x1 `Buffer` with
+  `Buffer::set_stringn(0, 0, s, usize::MAX, Style::default())` and the `x` of the `(u16, u16)`
+  that call **returns** is taken — the cursor position `set_stringn` advanced to, which is by
+  definition the number of cells it consumed
+- **THEN** that `x` equals `layout::columns` of the same string for every one of the eight
+- **AND** the oracle is `set_stringn`'s **return value** and SHALL NOT be "the index of the
+  first blank cell": `set_stringn` calls `Cell::reset()` on the trailing cells of every
+  multi-column cluster, and a reset cell is byte-identical to an untouched one, so a
+  first-blank scan reports `1` for `日本語`, for `🎉`, and for the family emoji, and a
+  measurement built to satisfy it would be wrong in exactly the direction this change exists
+  to fix. `set_string` itself returns `()` and cannot serve as the oracle
+- **AND** `columns("")` is `0` and `columns` of the BEL string is `0`, because
+  `styled_graphemes` drops control clusters exactly as `set_stringn` does
+
+#### Scenario: `truncate_columns` never splits a cluster and never overruns
+
+- **WHEN** `truncate_columns` is called with `日本語の変更` at every `max` from `0` through
+  `14`, with `abc🎉def` at every `max` from `0` through `10`, and with
+  `ab` + U+0007 BEL + `日本語` at every `max` from `0` through `10`
+- **THEN** at every `max` the result's `columns` is at most `max`, the result is a **prefix of
+  the input as bytes**, and re-slicing the input at the result's own length succeeds — so no
+  call ever cut a cluster and none panicked
+- **AND** at `max` `3` for `日本語の変更` the result is `日` and measures `2`, one short of
+  `max`, because the second cluster would have overrun
+- **AND** at `max` `0` every result is `""`, and at a `max` at or above the input's own
+  `columns` every result is the whole input
+- **AND** the BEL case does not panic at any `max`, which is what pins the byte-offset rule
+  below: `styled_graphemes` **drops** the control cluster, so an implementation that derives
+  its cut point by summing the yielded symbols' `len()` computes an offset shifted by the
+  dropped byte and slices mid-character. `truncate_columns` SHALL derive its cut point from
+  each symbol's own position within the original `&str` — its byte offset, not a running sum
+  of returned lengths — so a dropped cluster shifts nothing
+
+#### Scenario: Nothing under `src/ui/` measures in characters except the primitives
+
+- **WHEN** the production lines of `src/ui/app.rs`, `src/ui/detail.rs`, `src/ui/list.rs`,
+  `src/ui/markdown.rs`, `src/ui/tasks.rs`, `src/ui/view.rs`, and `src/ui/driver.rs` — every
+  line up to each file's `#[cfg(test)]` module — are searched for `.chars().count()`,
+  `.chars().take(`, and a `Vec<char>` `.chars().collect()`
+- **THEN** there is no match in any of the seven
+- **AND** the check first runs **its own sweep pattern** against a line it synthesises
+  holding each of the three forms, and fails when that self-test does not match all three.
+  This is the positive control, and it is the sweep's pattern rather than a second one: a
+  control that greps `layout.rs` for `cell_width` proves only that `cell_width` is spelled
+  right, and would let a corrupted sweep regex print `COLWIDTH OK` over a tree full of
+  violations. `NOSPAWN-GREP`'s shape — run the same pattern against something that must
+  match — is the model
+- **AND** the check additionally requires `src/ui/layout.rs` to name `cell_width` and
+  `styled_graphemes`, so the measure it is protecting is present and the exemption is not
+  vacuous
+- **AND** the check is a repository file under `scripts/gates/` named in the `Makefile`'s
+  `gates:` recipe, so `tests/ci_workflow.rs`'s recipe-versus-directory assertion covers it
+  and it cannot silently drop out of `make gates`
