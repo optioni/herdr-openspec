@@ -94,6 +94,31 @@ expect = "COLWIDTH FAIL: src/ui/app.rs has"
 why = "a .chars().count() reintroduced into src/ui/app.rs's production code must fail the sweep over the seven pure view files"
 
 [[control]]
+id = "colwidth-sweep-take"
+script = "colwidth.sh"
+plant_file = "src/ui/list.rs"
+plant_find = "//! The row grammar: every function here is a pure total transformation,"
+plant_replace = '''//! The row grammar: every function here is a pure total transformation,
+fn planted_colwidth_take_violation(s: &str) -> Vec<char> {
+    s.chars().take(3).collect()
+}'''
+expect = "COLWIDTH FAIL: src/ui/list.rs has"
+why = "the sweep's `.chars().take(` alternative is a distinct alternation branch from `.chars().count()`, and this plant fails only if that branch still matches on its own"
+
+[[control]]
+id = "colwidth-sweep-vec-char"
+script = "colwidth.sh"
+plant_file = "src/ui/tasks.rs"
+plant_find = "//! The tracked-tasks tab's grammar: plain data, on exactly the terms"
+plant_replace = '''//! The tracked-tasks tab's grammar: plain data, on exactly the terms
+fn planted_colwidth_vec_char_violation(s: &str) -> usize {
+    let v: Vec<char> = s.chars().collect();
+    v.len()
+}'''
+expect = "COLWIDTH FAIL: src/ui/tasks.rs has"
+why = "the sweep's `Vec<char>` alternative is a distinct alternation branch from the other two, and this plant fails only if that branch still matches on its own"
+
+[[control]]
 id = "deps-features"
 script = "deps.sh"
 cargo = true
