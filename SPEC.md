@@ -948,6 +948,17 @@ own such test lives in `ui::tests::load::`, never in a view module.
   `ScratchDir` tree nor an `include_str!` corpus: it pins what `cargo`, not this
   crate, produces.
 
+### Doc-conformance checks
+
+- Module map ↔ `src/lib.rs`'s declared `pub mod` set.
+- § Unit-tested modules ↔ every declared module named as a `<name>::` token.
+- The worker-thread count ↔ `src/` files whose production slice names both `thread::spawn` and `mpsc`.
+- The documented MSRV ↔ `Cargo.toml`'s `rust-version`.
+- Every non-`cargo` program `make check`'s path invokes ↔ `README.md` and `AGENTS.md` (the `Makefile` walk and the `scripts/gates/` interpreter scan).
+- `SPEC.md`'s fenced manifest transcription ↔ `herdr-plugin.toml` (values and `[[…]]` order).
+- `openspec/config.yaml`'s injected `context` ↔ the repository (the fixture claim and every `check:` prerequisite target).
+- A claim with no second site is argued in review, not checked.
+
 ### Gates
 
 Every gate command is written once, in the `Makefile`. Locally, `make check` composes

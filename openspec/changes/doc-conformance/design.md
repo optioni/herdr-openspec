@@ -452,9 +452,12 @@ document": a bare substring search over a whole file is how `if` would have pass
 
 ### 8. Which claims get a check, and which get an argument
 
-Bound (six legs): the module map, the tested-modules list, the worker-thread count, the MSRV,
-the gate-path programs, the manifest transcription, and the two context claims. Each has a
-value or set the repository determines.
+Bound (seven legs): the module map, the tested-modules list, the worker-thread count, the
+MSRV, the gate-path programs, the manifest transcription, and the two context claims. Each has
+a value or set the repository determines. (Measured against `tests/doc_contract.rs` as built,
+task 11 — this decision originally miscounted its own list as "six" while naming seven items;
+corrected here rather than left to compound the point this change is making about documents
+disagreeing with their second site.)
 
 Not bound, deliberately: `HANDOFF.md`'s disposition (Decision 5), `openspec/config.yaml`'s
 nvm node path (a machine fact, not a repository fact — the path it names,
