@@ -191,9 +191,9 @@ files.
 ## 10. Change Review
 <!-- kind: operational -->
 
-- [ ] 10.1 CHECK: Dispatch an independent reviewer — not a fork of the implementing session — against proposal.md, every spec scenario, design.md, and tasks.md, with the diff. Point it first at concentration point 1 (a leg that cannot fail) and at whether any leg asserts on prose with no second site.
-- [ ] 10.2 CHANGE: Fix every CRITICAL, resolve or accept each WARNING with a one-line reason, note SUGGESTIONs, re-run affected tests.
-- [ ] 10.3 VERIFY: Confirm no blocking or unowned finding remains, and that no sibling-owned passage (design.md → Boundaries) was edited: `git diff --stat <base>..HEAD`, with `<base>` from task 1.1, names only `SPEC.md`, `README.md`, `AGENTS.md`, `HANDOFF.md`, `openspec/config.yaml`, `openspec/IMPLEMENTATION-ORDER.md`, `tests/doc_contract.rs`, and this change's own directory. Commit any fixes.
+- [x] 10.1 CHECK: Dispatch an independent reviewer — not a fork of the implementing session — against proposal.md, every spec scenario, design.md, and tasks.md, with the diff. Point it first at concentration point 1 (a leg that cannot fail) and at whether any leg asserts on prose with no second site.
+- [x] 10.2 CHANGE: Fix every CRITICAL, resolve or accept each WARNING with a one-line reason, note SUGGESTIONs, re-run affected tests.
+- [x] 10.3 VERIFY: Confirm no blocking or unowned finding remains, and that no sibling-owned passage (design.md → Boundaries) was edited: `git diff --stat <base>..HEAD`, with `<base>` from task 1.1, names only `SPEC.md`, `README.md`, `AGENTS.md`, `HANDOFF.md`, `openspec/config.yaml`, `openspec/IMPLEMENTATION-ORDER.md`, `tests/doc_contract.rs`, and this change's own directory. Commit any fixes.
 
 ## 11. Documentation
 <!-- kind: operational -->
