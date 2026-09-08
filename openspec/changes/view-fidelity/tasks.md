@@ -169,10 +169,10 @@
 ## 11. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 11.1 CHECK: Inspect the intended verification commands and affected tiers — `ui::layout`, `ui::list`, `ui::markdown`, `ui::tasks`, `ui::detail`, `ui::view`, `ui::app`, `ui::driver`, plus `make gates` and `tests/ci_workflow.rs`. Time the 0..=130 sweeps; if any exceeds one second, narrow it by input and never by width (design.md → Risks).
-- [ ] 11.2 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
-- [ ] 11.3 VERIFY: `cargo fmt --all -- --check` — clean.
-- [ ] 11.4 VERIFY: `make gates` — green, `COLWIDTH` included.
-- [ ] 11.5 VERIFY: `cargo test --all-features` — green.
-- [ ] 11.6 VERIFY: `cargo llvm-cov --fail-under-lines 80` — at or above the floor. Never lower it; if it falls short, add tests.
-- [ ] 11.7 VERIFY: `openspec validate view-fidelity --strict` — valid.
+- [x] 11.1 CHECK: Inspect the intended verification commands and affected tiers — `ui::layout`, `ui::list`, `ui::markdown`, `ui::tasks`, `ui::detail`, `ui::view`, `ui::app`, `ui::driver`, plus `make gates` and `tests/ci_workflow.rs`. Time the 0..=130 sweeps; if any exceeds one second, narrow it by input and never by width (design.md → Risks).
+- [x] 11.2 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
+- [x] 11.3 VERIFY: `cargo fmt --all -- --check` — clean.
+- [x] 11.4 VERIFY: `make gates` — green, `COLWIDTH` included.
+- [x] 11.5 VERIFY: `cargo test --all-features` — green.
+- [x] 11.6 VERIFY: `cargo llvm-cov --fail-under-lines 80` — at or above the floor. Never lower it; if it falls short, add tests.
+- [x] 11.7 VERIFY: `openspec validate view-fidelity --strict` — valid.
