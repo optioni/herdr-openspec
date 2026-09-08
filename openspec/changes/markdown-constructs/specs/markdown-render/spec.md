@@ -118,9 +118,9 @@ consumes them rather than defining them.
 - **AND** the rendering at 58 and at 78 both hold at least one line of each block kind, the
   table's and the struck run's included, so the assertion is made against real content
   rather than an empty result
-- **AND** the two widths at which the table cannot hold its pipe grammar — where the
-  region is narrower than `4n + 1` columns for the table's `n` columns — are among those
-  swept, so the degenerate path is measured rather than assumed
+- **AND** the swept widths include several below `4n + 1` for the fixture's three-column
+  table — 1, 2, 3, and 10 all are — so the degenerate one-cell-per-line path is measured
+  rather than assumed
 
 #### Scenario: A wide-character document wraps by columns at both mandated widths
 
@@ -177,11 +177,13 @@ whose row this change rewords from "a table, a footnote, strikethrough, a task-l
 "a footnote, a task-list item" and whose `tests/degraded-coverage.toml` proof this change
 re-points at the narrowed claim.
 
-The reason the row narrows rather than closing is measured, not stylistic: across the 238
-`.md` files this pane renders, footnote definitions appear zero times and task-list items
-outside `tasks.md` appear zero times, while pipe tables appear in 89 of them. A second
-checkbox renderer beside `ui::tasks`' own, for a case that does not occur, is how two
-renderers drift apart.
+The reason the row narrows rather than closing is measured, not stylistic: pipe tables are
+pervasive in the corpus this pane renders, while footnote definitions and task-list items
+outside `tasks.md` do not occur in it at all. `design.md` → Context carries the counts and the
+command that produced them; they are deliberately not restated here, because a snapshot
+measured mid-change becomes a false claim the moment this spec is archived. A second checkbox
+renderer beside `ui::tasks`' own, for a case that does not occur, is how two renderers drift
+apart.
 
 #### Scenario: A block quote prefixes every one of its lines
 
@@ -201,11 +203,13 @@ renderers drift apart.
 - **AND** at both widths that line carries `Face::plain()`, and a blank line separates it
   from the paragraph above and the paragraph below
 
-#### Scenario: A footnote and a task-list item still render as their literal source text
+#### Scenario: A table renders as its literal source text, one row per line
 
-The scenario replaces `markdown-viewer`'s "A table renders as its literal source text, one
-row per line", whose subject has left the unmodelled set; its own subject is the two
-constructs that remain in it.
+The scenario's name is kept verbatim from `markdown-viewer` because a delta's scenario
+headers are its merge key and OpenSpec has no scenario-level rename — the same reason
+`detail-scroll` keeps two names whose subjects moved. Its subject is now the two constructs
+that remain unmodelled, and the table it is named for appears in it as the **discriminating
+control**: the scenario fails if a table still renders literally.
 
 - **WHEN** the two sources `See it here[^1].` / `` / `[^1]: The note.` and `- [ ] an item` /
   `- [x] a done item` are each rendered at 58 and at 78
@@ -220,6 +224,9 @@ constructs that remain in it.
   `ui::detail::content_lines` reaches for a tracked-tasks tab — renders the checklist grammar
   instead, so the row's own "on a tab **other** than the tracked-tasks one" carve-out is
   observed rather than asserted
+- **AND** a GFM table and a `~~struck~~` span in the same fixture render as aligned columns
+  and as a struck face rather than as literal text, which is what makes this scenario fail if
+  the narrowing is not real
 
 ## ADDED Requirements
 
@@ -235,15 +242,17 @@ allocated to column `j`, and `total = 3n + 1 + sum(w)` — one `|` per column bo
 leading and trailing one, and one padding space on each side of every cell. The **line
 grammar** is:
 
-- a **row line** is `|`, then for each column ` `, the cell's content for that line laid out
-  in exactly `w[j]` columns, ` `, and a closing `|`;
+- a **row line** is a leading `|`, then **for each column** the four parts ` `, the cell's
+  content for that line laid out in exactly `w[j]` columns, ` `, and a `|` — so a row line
+  holds `n + 1` pipes in total and `| a | b |` is the two-column form;
 - a **delimiter line**, emitted once, immediately after the header row's last line, is `|`,
   then for each column `-` repeated `w[j] + 2` times, then `|` — so it is exactly `total`
   columns and its pipes fall under the row lines' pipes;
 - no other line kind exists: there is no top rule, no bottom rule, and no per-row rule.
 
-Every line a table emits SHALL measure exactly `total` display columns, and `total` SHALL be
-at most `width`. The pipes, the padding spaces, the alignment padding, and the delimiter line
+Every line the **pipe grammar** emits SHALL measure exactly `total` display columns, and
+`total` SHALL be at most `width`. The narrow fallback below emits no pipe line at all and is
+bound by `width` rather than by `total`; the two forms are stated separately for that reason. The pipes, the padding spaces, the alignment padding, and the delimiter line
 SHALL carry `Face::plain()`. A **header** cell's content SHALL carry `strong` true in
 addition to whatever inline faces it contains, so the header row reads bold through the
 existing `Strong` role and no new face or role is introduced for it.
@@ -274,11 +283,25 @@ here, where the detail region has no horizontal scroll to recover what a cut dis
 the right, `---:` on the left, and `:--:` on both with the odd column going to the right. The
 alignment applies to every line of a wrapped cell, not to its first alone.
 
-**Ragged rows.** A body row with fewer cells than the header SHALL render its missing columns
-as `w[j]` spaces. A body row with more cells than the header SHALL drop the surplus cells:
-`n` is the header's, the delimiter line's shape is fixed by it, and a row wider than the
-table has no column to be drawn in. A table whose header declares no columns at all SHALL
-emit nothing.
+**Ragged rows are the parser's to normalise, not this module's.** Measured against
+pulldown-cmark 0.13.4 with `ENABLE_TABLES`, a body row with fewer cells than the delimiter row
+declares arrives already padded with empty cells, and one with more arrives already truncated
+— `fold` never observes a ragged row. This module SHALL therefore add no padding or dropping
+logic of its own, and the requirement states the property as a **regression guard on the
+parser**: every emitted row line holds `n + 1` pipes whatever the source row's cell count.
+Should a future parser version stop normalising, that guard is what fails.
+
+`emit_table` SHALL nonetheless be **total** for a table carrying no columns, returning no line
+rather than dividing by zero. That is a `fold`-level invariant rather than an observable
+rendering: no `&str` source produces `Tag::Table([])` — `||` and `|-|` both yield one column —
+so it is stated as a guard and deliberately given no scenario of its own.
+
+**A table inside a container.** A table nested in a block quote or a list item SHALL lay its
+own columns out in the columns its container leaves — `width` less the container's prefix, on
+exactly the rule every other block follows — and every emitted line SHALL carry that prefix,
+continuation lines included. `total` is then measured against the reduced width, not the
+region's, so the "at most `width`" promise holds through a container. When the prefix leaves
+too few columns for the pipe grammar, the fallback below applies inside the container.
 
 **When the pipe grammar does not fit.** When `avail < n` — equivalently when
 `width < 4n + 1`, one content column per column being the least the grammar can carry — the
@@ -292,10 +315,19 @@ three-column region can still be asked for.
 
 - **WHEN** the table `| Gate | Runner |` / `|---|---|` / `| Format | cargo fmt |` /
   `| Lint | cargo clippy |` is rendered at 58 and at 78
-- **THEN** at both widths exactly four non-blank lines are produced, whose `text()` values
-  are `| Gate | Runner        |`, `|------|---------------|`, `| Format | cargo fmt |`
-  shaped to the same column widths, and the lint row likewise — every line measuring the same
-  `total`, and `total` being the natural widths plus `3n + 1` rather than the region width
+- **THEN** at both widths exactly four non-blank lines are produced, whose `text()` values are
+  exactly
+
+  ```text
+  | Gate   | Runner       |
+  |--------|--------------|
+  | Format | cargo fmt    |
+  | Lint   | cargo clippy |
+  ```
+
+  each measuring 25 columns. The literals are the allocation rule's own output and are
+  derived, not chosen: `nat = [6, 12]` (`Format` and `cargo clippy` are the widest cells),
+  the table fits at both widths so `w = nat`, and `total = 3n + 1 + sum(w) = 7 + 18 = 25`
 - **AND** at both widths every line's `layout::columns` is equal to every other's, and each
   is strictly less than the region width, so the table is sized to its content and not
   stretched
@@ -306,7 +338,8 @@ three-column region can still be asked for.
 
 #### Scenario: A cell wider than its column wraps rather than being truncated
 
-- **WHEN** a two-column table whose second column holds
+- **WHEN** a two-column table whose header is `| key | value |`, whose delimiter row is
+  `|---|---|`, and whose one body row holds `k` and
   `alpha bravo charlie delta echo foxtrot golf hotel india juliett kilo lima mike november
   oscar papa` is rendered at 58 and at 78
 - **THEN** at both widths that row occupies more than one line, and the concatenation of that
@@ -334,14 +367,24 @@ three-column region can still be asked for.
 #### Scenario: Alignment markers pad the cell on the side they name
 
 - **WHEN** a three-column table whose delimiter row is `|:---|:--:|---:|`, whose header cells
-  are `l`, `c`, and `r`, and whose one body row holds `x`, `x`, and `x` in columns four
-  columns wide is rendered at 58 and at 78
-- **THEN** at both widths the left-aligned cell renders `x   `, the centred one ` x  `, and
-  the right-aligned one `   x`, between their padding spaces
+  are `left`, `cent`, and `rght` — four columns each, which is what makes `nat[j] = 4` and so
+  what makes the padding observable at all — and whose one body row holds `x`, `x`, and `x`
+  is rendered at 58 and at 78
+- **THEN** at both widths `w = [4, 4, 4]`, and the body row's left-aligned cell renders
+  `x   `, the centred one ` x  ` (the odd column going to the right), and the right-aligned
+  one `   x`, between their padding spaces
+- **AND** the assertion discriminates: the three cells' rendered text differs from one
+  another, which a one-column-wide fixture could not show and which fails against an
+  implementation that ignores `Alignment` entirely
 - **AND** at both widths a wrapped cell in each column is padded on the same side on **every**
   one of its lines, not on its first alone
 
 #### Scenario: A ragged table renders every declared column and drops no header column
+
+The scenario is a **regression guard on pulldown-cmark's own normalisation**, not on logic
+this module adds: measured against 0.13.4, a short row arrives already padded with empty cells
+and a long one already truncated, so `fold` never sees a ragged row. It is written to fail if
+a future parser version stops doing that.
 
 - **WHEN** a three-column table with one body row of two cells and one body row of five cells
   is rendered at 58 and at 78
@@ -349,13 +392,15 @@ three-column region can still be asked for.
   `|` characters, so neither short nor long row deformed the table
 - **AND** at both widths the short row's third column is `w[2]` spaces and the long row's
   fourth and fifth cells appear nowhere in the rendering
-- **AND** a table whose header declares no columns emits no line at all at either width, and
-  neither case panics
+- **AND** the event stream the parser produced for that source is asserted directly — three
+  `TableCell` events per body row — so the scenario says which component holds the property
+  rather than crediting it to `emit_table`
 
 #### Scenario: A region too narrow for the pipe grammar renders one cell per line
 
-- **WHEN** the two-column `| Gate | Runner |` table is rendered at widths 0, 1, 2, 3, 4, 8,
-  and 9 — `4n + 1` being 9 for this table — and, for contrast, at 58 and at 78
+- **WHEN** the two-column `| Gate | Runner |` table is rendered at every width from 0 through
+  10 — `4n + 1` being 9 for this table, so the threshold falls inside the sweep — and, for
+  contrast, at 58 and at 78
 - **THEN** at widths 1 through 8 no line holds a `|` character, each non-empty cell's text
   appears on its own line or wrapped across its own lines, and every line measures at most the
   width

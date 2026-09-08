@@ -5,17 +5,23 @@
 text rather than being dropped or mangled. That was the right call for `markdown-viewer`,
 which had to ship a parser subset and needed the subset's edge to be honest.
 
-It is not the right call permanently, because this project writes tables constantly.
-Measured across the change artifacts this pane exists to display: **89 of 238 `.md` files
-contain a pipe table, totalling 3,764 table rows.** A reader who opens `quality-gates`'
-spec, or any degraded-states delta, or an implementation-order artifact, is shown raw
-pipe-and-dash syntax in the one region of the pane meant for reading prose. The tables are
-not incidental decoration either — they are where this repository puts its `SHALL`-exact
-contracts.
+It is not the right call permanently, because this project writes tables constantly. A
+reader who opens `quality-gates`' spec, or any degraded-states delta, or an
+implementation-order artifact, is shown raw pipe-and-dash syntax in the one region of the pane
+meant for reading prose. The tables are not incidental decoration either — they are where this
+repository puts its `SHALL`-exact contracts.
 
-The same measurement bounds the change in the other direction: **strikethrough appears
-zero times, real footnotes zero times** (all twelve `[^` matches are regex character
-classes in spec prose), **and task-list items outside `tasks.md` zero times.** Tables are
+*(This paragraph originally carried "89 of 238 `.md` files … 3,764 table rows". Planning
+review could not reproduce that pair under any detection variant at any commit in this
+repository's history — the one commit with 238 such files measures 94 files and 3,525 rows —
+so the figure is withdrawn rather than restated. The qualitative claim is not in doubt: well
+over a third of the corpus holds a pipe table, and `design.md` → Context carries the command
+to check it on any tree.)*
+
+The measurement that **is** stable bounds the change in the other direction, and it is the
+load-bearing one because it is a zero: parsing every tracked `.md` file with the two new
+option flags yields **exactly one strikethrough span repository-wide** — in this change's own
+spec file — **no footnote definitions, and no task-list items outside `tasks.md`.** Tables are
 the finding; the rest of the row is theoretical.
 
 This is **unplanned work**. The roadmap ends at Phase 6 (`degraded-states`), and
@@ -111,8 +117,13 @@ belongs to whichever capability owns styling.
   `Face` fields rather than writing `..Face::plain()`, so the seventh field is a **compile
   error** there until it is named. That forcing site is the reason the flag lives on `Face`
   rather than beside it.
-- **Docs:** `SPEC.md` → the degraded-states row is narrowed;
-  `tests/degraded-coverage.toml` → its proof is re-pointed.
+- **Docs:** `SPEC.md` → the degraded-states row and the rendering-grammar prose are narrowed
+  and gain the table grammar; `tests/degraded-coverage.toml` → its `condition` and `why` are
+  re-pointed; `openspec/specs/markdown-render/spec.md` → its `## Purpose` names tables and
+  strikethrough as unmodelled and must be narrowed on sync, which no delta block and no
+  existing test would otherwise catch; `AGENTS.md` → one sentence added to the parser-seam
+  rule naming the exact option set, because `fold`'s `_ => {}` wildcards make a wrongly-added
+  flag silent and no gate can see it.
 - **Depends on `view-fidelity`** for the column primitives a table's allocation is built
   on, and on **`gate-integrity`**, which tightens what a `degraded-coverage` proof must be
   — this change edits such a proof. Best written **after `color-palette`**, so the

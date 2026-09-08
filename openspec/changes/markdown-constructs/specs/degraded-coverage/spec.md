@@ -147,12 +147,13 @@ not a proof of a degraded state.
 - **AND** the parse is driven from **YAML bytes**, not from a hand-built `Schema` value, so the
   claim is about the parser the CLI disagrees with
 
-#### Scenario: A footnote and a task-list item each render as literal source
+#### Scenario: A footnote, strikethrough, and a table each render as literal source
 
-The scenario is renamed rather than kept verbatim, because its subject is exactly the set
-`SPEC.md`'s row names and that set has shrunk: `markdown-constructs` renders tables and
-strikethrough, so a scenario still claiming they are literal would assert the opposite of the
-behaviour.
+The scenario's name is kept verbatim because a delta's scenario headers are its merge key and
+OpenSpec has no scenario-level rename — `openspec validate --strict` refuses a MODIFIED block
+that drops one. Its subject narrows to the two constructs that stay literal, and the two that
+left the set appear below as the **discriminating control**, so the scenario fails if the
+narrowing did not actually happen.
 
 - **WHEN** a non-tracked tab whose source holds, on separate lines, a footnote reference and
   definition and a task-list item is rendered at 78 and at 58 columns

@@ -5,13 +5,24 @@ for the detail region. It was built by `markdown-viewer` with
 `pulldown_cmark::Options::empty()` — a deliberate scope bound, recorded honestly as a
 degraded state: a construct the parser does not model renders as its literal source text.
 
-The corpus this pane exists to display has since been measured. The proposal recorded 89 of
-238 `.md` files holding a pipe table, totalling 3,764 table rows; re-measured at this
-change's HEAD it is **118 of 309** —
-`grep -lE '^\s*\|.*\|\s*$' $(git ls-files 'openspec/*.md' 'openspec/**/*.md') | wc -l`
-against `git ls-files 'openspec/*.md' 'openspec/**/*.md' | wc -l`, both run on the tree this
-plan was written against. Strikethrough appears zero times, real footnotes zero times, and
-task-list items outside `tasks.md` zero times. The tables are where
+The corpus this pane exists to display is **table-shaped**, which is the whole motivation.
+Deliberately no count is recorded here, and the proposal's own "89 of 238 files, 3,764 rows"
+is not carried forward: that pair reproduces under no detection variant at any commit in this
+repository's history — the only commit with 238 such files measures 94 files and 3,525 rows —
+and every honest count moves with each artifact this change itself adds, so a number written
+into a document that will be archived is a claim that decays. What a reader can run instead,
+today, is
+
+```sh
+git ls-files 'openspec/*.md' 'openspec/**/*.md' | wc -l
+grep -lE '^[[:space:]]*\|.*\|[[:space:]]*$' $(git ls-files 'openspec/*.md' 'openspec/**/*.md') | wc -l
+```
+
+which on any recent tree reports that well over a third of the corpus holds a pipe table.
+The load-bearing measurements are the **zero** ones, and those are stable: parsing every
+tracked `.md` file with `ENABLE_TABLES | ENABLE_STRIKETHROUGH` yields exactly one
+strikethrough span repository-wide (in this change's own spec file), no footnote definitions,
+and no task-list items outside `tasks.md`. The tables are where
 this repository writes its `SHALL`-exact contracts — the degraded-states table, the gate
 tables, the keys table, the palette's own role tables — so the one region meant for reading
 prose currently shows pipe-and-dash syntax for the artifacts most worth reading.
@@ -136,7 +147,10 @@ via `content_lines`, so neither needs a loop change.
 | `ratatui` `Buffer` / `Style` / `Modifier` | **real**, through `TestBackend` | **real** for `palette::style` and `style_for` assertions; `ui::markdown` names no `ratatui` type and asserts on `Face` alone |
 | `ui::palette` | **real** — a render test compares a cell's style against `palette::style(role)` rather than a literal | **real** |
 | Clock, threads, channels, watcher, refresh worker | not reached — this change adds nothing to the render loop | not reached |
-| `scripts/gates/*.sh` (`MDSEAM`, `PALETTE`, `MDWIDTHS`, `COLWIDTH`, `NOIO-VIEW`, `NODEFAULT-UI`) | **real**, run by `make gates` and by `tests/gate_controls.rs` against a planted defect in a scratch copy of the tree | n/a |
+| `ui::tasks::lines` (the checklist body, reached by the carve-out leg) | not reached | **real** — called directly to discriminate the tracked tab from the markdown one |
+| `ui::layout::columns` / `truncate_columns` (the crate's only width measure) | **real** | **real** — the allocator and every width assertion go through them; no second measure is introduced |
+| `ui::detail::content_lines` (what the draw and the clamp both derive from) | **real** | not reached |
+| `scripts/gates/*.sh` (`MDSEAM`, `PALETTE`, `MDWIDTHS`, **`WIDTHS`**, `COLWIDTH`, `NOIO-VIEW`, `NODEFAULT-UI`) | **real**, run by `make gates` and by `tests/gate_controls.rs` against a planted defect in a scratch copy of the tree | n/a |
 | `tests/degraded-coverage.toml` ↔ `SPEC.md` binding | **real**, run by `tests/degraded_coverage.rs` inside `cargo test` | n/a |
 
 ## Test Strategy
@@ -168,8 +182,20 @@ real buffer without touching a border. Every unit test below sits inside it.
 | markdown-render :: Rendering is total over arbitrary input | `lines_is_total_over_arbitrary_input`, its `pathological` array extended with the six new adversarial sources | unit | pulldown_cmark real | `cargo test --all-features ui::markdown::tests::lines_is_total` |
 | markdown-render :: A block quote prefixes every one of its lines | `a_block_quote_prefixes_every_line` (unchanged) | unit | pulldown_cmark real | `cargo test --all-features ui::markdown::tests::a_block_quote` |
 | markdown-render :: A thematic break fills the interior at both widths | `a_thematic_break_fills_the_width` (unchanged) | unit | pulldown_cmark real | `cargo test --all-features ui::markdown::tests::a_thematic_break` |
-| degraded-coverage :: A footnote and a task-list item each render as literal source | the same `unmodelled_constructs_render_as_source`, plus `tests/degraded_coverage.rs` proving `SPEC.md`'s narrowed row and the map's `condition` still match byte-for-byte | unit + contract | pulldown_cmark real, `SPEC.md` real | `cargo test --all-features degraded_coverage` |
-| markdown-render :: A footnote and a task-list item still render as their literal source text | `unmodelled_constructs_render_as_source`, narrowed to two sources; its `ui::tasks::lines` carve-out leg kept | unit | pulldown_cmark real, `ui::tasks` real | `cargo test --all-features ui::markdown::tests::unmodelled_constructs` |
+| degraded-coverage :: A footnote, strikethrough, and a table each render as literal source | the same `unmodelled_constructs_render_as_source`, plus `tests/degraded_coverage.rs` proving `SPEC.md`'s narrowed row and the map's `condition` still match byte-for-byte | unit + contract | pulldown_cmark real, `SPEC.md` real | `cargo test --all-features degraded_coverage` |
+| degraded-coverage :: A schema the CLI rejects falls back per change and names the reason | unchanged — its existing proof named in `tests/degraded-coverage.toml`, carried as a regression row because a MODIFIED requirement reproduces every scenario it does not change | contract | per the map's own entry | `cargo test --all-features --test degraded_coverage` |
+| degraded-coverage :: A schema that is not vendored and one that will not parse both empty the tab bar | unchanged — its existing proof named in `tests/degraded-coverage.toml`, carried as a regression row because a MODIFIED requirement reproduces every scenario it does not change | contract | per the map's own entry | `cargo test --all-features --test degraded_coverage` |
+| degraded-coverage :: A schema with no tasks artifact renders every tab as markdown and still counts | unchanged — its existing proof named in `tests/degraded-coverage.toml`, carried as a regression row because a MODIFIED requirement reproduces every scenario it does not change | contract | per the map's own entry | `cargo test --all-features --test degraded_coverage` |
+| degraded-coverage :: An unsupported `generates` glob empties one artifact and names why | unchanged — its existing proof named in `tests/degraded-coverage.toml`, carried as a regression row because a MODIFIED requirement reproduces every scenario it does not change | contract | per the map's own entry | `cargo test --all-features --test degraded_coverage` |
+| degraded-coverage :: A tasks file that cannot be read is zero tasks with a named reason | unchanged — its existing proof named in `tests/degraded-coverage.toml`, carried as a regression row because a MODIFIED requirement reproduces every scenario it does not change | contract | per the map's own entry | `cargo test --all-features --test degraded_coverage` |
+| degraded-coverage :: Each of the six launch failures renders as a leading problem row | unchanged — its existing proof named in `tests/degraded-coverage.toml`, carried as a regression row because a MODIFIED requirement reproduces every scenario it does not change | contract | per the map's own entry | `cargo test --all-features --test degraded_coverage` |
+| degraded-coverage :: `g` with no attributed agent changes nothing the pane shows | unchanged — its existing proof named in `tests/degraded-coverage.toml`, carried as a regression row because a MODIFIED requirement reproduces every scenario it does not change | contract | per the map's own entry | `cargo test --all-features --test degraded_coverage` |
+| degraded-coverage :: A CLI root disagreement and a non-zero exit both leave the file numbers standing | unchanged — its existing proof named in `tests/degraded-coverage.toml`, carried as a regression row because a MODIFIED requirement reproduces every scenario it does not change | contract | per the map's own entry | `cargo test --all-features --test degraded_coverage` |
+| degraded-coverage :: A watcher failure and a mid-run removal both keep the loop drawing | unchanged — its existing proof named in `tests/degraded-coverage.toml`, carried as a regression row because a MODIFIED requirement reproduces every scenario it does not change | contract | per the map's own entry | `cargo test --all-features --test degraded_coverage` |
+| degraded-coverage :: An out-of-scope agent and a worktree agent are both invisible | unchanged — its existing proof named in `tests/degraded-coverage.toml`, carried as a regression row because a MODIFIED requirement reproduces every scenario it does not change | contract | per the map's own entry | `cargo test --all-features --test degraded_coverage` |
+| degraded-coverage :: A duplicate artifact id is accepted by this crate and stays file-mode | unchanged — its existing proof named in `tests/degraded-coverage.toml`, carried as a regression row because a MODIFIED requirement reproduces every scenario it does not change | contract | per the map's own entry | `cargo test --all-features --test degraded_coverage` |
+| degraded-coverage :: The one-shot commands' degrades are proved by exit status and stderr | unchanged — its existing proof named in `tests/degraded-coverage.toml`, carried as a regression row because a MODIFIED requirement reproduces every scenario it does not change | contract | per the map's own entry | `cargo test --all-features --test degraded_coverage` |
+| markdown-render :: A table renders as its literal source text, one row per line | `unmodelled_constructs_render_as_source`, narrowed to two sources; its `ui::tasks::lines` carve-out leg kept | unit | pulldown_cmark real, `ui::tasks` real | `cargo test --all-features ui::markdown::tests::unmodelled_constructs` |
 | markdown-render :: A table that fits renders as aligned columns at both mandated widths | `a_table_that_fits_renders_as_aligned_columns` (replaces `a_table_renders_as_literal_source_rows`) | unit | pulldown_cmark real | `cargo test --all-features ui::markdown::tests::a_table_that_fits` |
 | markdown-render :: A cell wider than its column wraps rather than being truncated | `a_wide_cell_wraps_within_its_column` | unit | pulldown_cmark real | `cargo test --all-features ui::markdown::tests::a_wide_cell_wraps` |
 | markdown-render :: A table too wide for the region spends its columns on the narrow ones | `a_wide_table_allocates_max_min_fairly` | unit | pulldown_cmark real | `cargo test --all-features ui::markdown::tests::a_wide_table_allocates` |
@@ -178,21 +204,21 @@ real buffer without touching a border. Every unit test below sits inside it.
 | markdown-render :: A region too narrow for the pipe grammar renders one cell per line | `a_narrow_region_renders_one_cell_per_line` | unit | pulldown_cmark real | `cargo test --all-features ui::markdown::tests::a_narrow_region` |
 | markdown-render :: A struck run carries the face and composes with the others | `a_struck_run_carries_the_face_and_composes` | unit | pulldown_cmark real | `cargo test --all-features ui::markdown::tests::a_struck_run_carries` |
 | markdown-render :: A struck run split across a wrap keeps its face on both lines | `a_struck_run_split_across_a_wrap_keeps_its_face` | unit | pulldown_cmark real | `cargo test --all-features ui::markdown::tests::a_struck_run_split` |
-| view-palette :: The palette answers every role with a `Style` | `the_palette_answers_every_role`, its exhaustive `match` extended; `Strikethrough` asserted unequal to every other style | unit | ratatui `Style` real | `cargo test --all-features ui::palette::tests::the_palette_answers` |
+| view-palette :: The palette answers every role with a `Style` | `every_role_is_answered_and_the_distinctions_are_real`, its exhaustive `match` extended; `Strikethrough` asserted unequal to every other style | unit | ratatui `Style` real | `cargo test --all-features ui::palette::tests::the_palette_answers` |
 | view-palette :: The confinement gate catches a `Color` named outside the palette | `scripts/gates/palette.sh` plus its three recorded controls in `tests/gate-controls.toml` (unchanged; re-run to prove the new role adds no `Color` outside the palette) | gates | real scripts, scratch tree copy | `make gates && cargo test --all-features gate_controls` |
 | view-palette :: The palette module reaches no I/O and measures no width | `scripts/gates/noio-view.sh` and `scripts/gates/colwidth.sh` (unchanged; both counts unmoved) | gates | real scripts | `make gates` |
 | view-palette :: Each role's modifier set is exactly the table above | `each_roles_modifier_set_is_exactly_the_table`, gaining the `Strikethrough`/`CROSSED_OUT` row and the `not DIM` discrimination | unit | ratatui `Modifier` real | `cargo test --all-features ui::palette::tests::each_roles_modifier` |
 | view-palette :: A monochrome reading of the frame is unchanged | `a_monochrome_reading_of_the_frame_is_unchanged`, gaining the appended `~~struck~~` leg | view | TestBackend real, palette real | `cargo test --all-features ui::view::tests::a_monochrome_reading` |
-| view-palette :: The coloured set is exactly the table above | `the_coloured_set_is_exactly_the_table`, `Strikethrough` asserted `fg: None, bg: None` | unit | ratatui `Style` real | `cargo test --all-features ui::palette::tests::the_coloured_set` |
-| view-palette :: An out-of-range heading level does not panic | `an_out_of_range_heading_level_does_not_panic` (unchanged) | unit | ratatui `Style` real | `cargo test --all-features ui::palette::tests::an_out_of_range` |
+| view-palette :: The coloured set is exactly the table above | `the_coloured_set_is_exactly_the_table_and_every_colour_is_a_named_ansi_index`, `Strikethrough` asserted `fg: None, bg: None` | unit | ratatui `Style` real | `cargo test --all-features ui::palette::tests::the_coloured_set` |
+| view-palette :: An out-of-range heading level does not panic | `an_out_of_range_heading_level_falls_back_to_level_six` (unchanged) | unit | ratatui `Style` real | `cargo test --all-features ui::palette::tests::an_out_of_range` |
 | view-palette :: Faces reach the buffer as coloured styles at both mandated widths | `faces_reach_the_buffer_as_coloured_styles`, its source gaining ` and ~~struck~~` | view | TestBackend real, palette real | `cargo test --all-features ui::view::tests::faces_reach_the_buffer_as_coloured` |
-| view-palette :: Heading foreground wins over a code span inside it | `heading_foreground_wins_over_a_code_span`, gaining the struck-bold-link face | unit | palette real | `cargo test --all-features ui::view::tests::heading_foreground_wins` |
+| view-palette :: Heading foreground wins over a code span inside it | `heading_foreground_wins_over_a_code_span_inside_it`, gaining the struck-bold-link face | unit | palette real | `cargo test --all-features ui::view::tests::heading_foreground_wins` |
 | view-palette :: A plain face is the default style | `a_plain_face_is_the_default_style`, gaining the `strikethrough == false` assertion | unit + view | palette real, TestBackend real | `cargo test --all-features ui::view::tests::a_plain_face` |
-| detail-scroll :: The document fills the detail interior at both mandated widths | `the_document_fills_the_detail_interior` (unchanged regression guard) | view | TestBackend real | `cargo test --all-features ui::view::tests::the_document_fills` |
+| detail-scroll :: The document fills the detail interior at both mandated widths | `the_detail_document_fills_the_interior_at_60_and_120` (unchanged regression guard) | view | TestBackend real | `cargo test --all-features ui::view::tests::the_document_fills` |
 | detail-scroll :: Faces reach the buffer as styles at both widths | `faces_reach_the_buffer_as_styles`, its source gaining ` and ~~struck~~` and a `CROSSED_OUT` assertion | view | TestBackend real, palette real | `cargo test --all-features ui::view::tests::faces_reach_the_buffer_as_styles` |
 | detail-scroll :: A table reaches the buffer aligned and inside the region | `a_table_reaches_the_buffer_aligned` — **the outer-loop acceptance test, written first** | view | TestBackend real, palette real, pulldown_cmark real | `cargo test --all-features ui::view::tests::a_table_reaches_the_buffer` |
-| detail-scroll :: An empty source leaves the detail interior blank at both widths | `an_empty_source_leaves_the_detail_interior_blank` (unchanged) | view | TestBackend real | `cargo test --all-features ui::view::tests::an_empty_source_leaves` |
-| detail-scroll :: Content never overwrites the detail region's border | `content_never_overwrites_the_detail_border`, gaining the twelve-column 200-character-cell table leg | view | TestBackend real | `cargo test --all-features ui::view::tests::content_never_overwrites` |
+| detail-scroll :: An empty source leaves the detail interior blank at both widths | `an_empty_detail_source_leaves_the_interior_blank` (unchanged) | view | TestBackend real | `cargo test --all-features ui::view::tests::an_empty_source_leaves` |
+| detail-scroll :: Content never overwrites the detail region's border | `detail_content_never_overwrites_the_border`, gaining the twelve-column 200-character-cell table leg | view | TestBackend real | `cargo test --all-features ui::view::tests::content_never_overwrites` |
 | detail-scroll :: A degenerate detail interior draws nothing and does not panic | `a_degenerate_detail_interior_draws_nothing`, gaining the table-source repetition | view | TestBackend real | `cargo test --all-features ui::view::tests::a_degenerate_detail_interior` |
 
 The whole gate set runs as one command: `make check`.
@@ -259,13 +285,20 @@ available at layout time — `fold` has already consumed the events — so it wo
 re-synthesised, at which point it has the same width problem). One cell per line preserves
 every character, needs no header lookup, reuses `wrap_prose` unchanged, and is four lines.
 
-**Decision 8 — ragged rows: pad short, drop surplus.**
-`n` comes from the delimiter row's alignment list, which is what fixes the delimiter line's
-shape. A short row's missing columns render as `w[j]` spaces; a long row's surplus cells have
-no column to be drawn in and are dropped. Alternative: widen the table to the longest row,
-which would leave the header and delimiter lines shorter than the body and destroy the
-alignment the grammar exists for. GitHub itself drops the surplus, so the pane agrees with the
-renderer the author was writing for.
+**Decision 8 — ragged rows need no code: pulldown-cmark already normalises them.**
+The first draft of this decision specified "pad short, drop surplus" as work this module does.
+Planning review measured it against pulldown-cmark 0.13.4 and the premise is false: a body row
+with fewer cells than the delimiter row declares arrives **already padded** with empty cells,
+and one with more arrives **already truncated**, so `fold` never observes a ragged row. Code
+written for it would be unreachable, and — the reason this matters beyond tidiness — the
+scenario built on it would pass against an implementation that does nothing, which is this
+project's own recorded defect class.
+
+The decision is therefore to add no such logic and to keep the scenario as a **regression
+guard on the parser**, asserting the event stream directly so it names the component that
+actually holds the property. `n` still comes from the delimiter row's alignment list, which is
+what fixes the delimiter line's shape. `emit_table` still guards a zero-column table so it is
+total, but that guard gets no scenario: no `&str` source yields `Tag::Table([])`.
 
 **Decision 9 — `strikethrough` is a `Face` field and `Role::Strikethrough` is `CROSSED_OUT`
 and uncoloured, folded second.**
@@ -284,11 +317,20 @@ Four sites move together, because the binding `degraded-states` and `gate-integr
 makes any three of them a red build: `SPEC.md`'s row and its rendering-grammar prose both drop
 "a table" and "strikethrough" and keep "a footnote, a task-list item";
 `tests/degraded-coverage.toml`'s `condition` is edited to match byte-for-byte (the checker
-compares them), its `why` is reworded, and its `covers` range is re-pointed at the new
-`Options` line; the `degraded-coverage` capability's own scenario is renamed from "A footnote,
-strikethrough, and a table each render as literal source" to name only what stays literal; and
+compares them) and its `why` is reworded; the `degraded-coverage` capability's own scenario
+and `markdown-render`'s keep their **headers verbatim** while their bodies narrow; and
 `unmodelled_constructs_render_as_source` drops its two departed sources while keeping its
-`ui::tasks` carve-out leg. The `verdict` stays `unproven` rather than moving to
+`ui::tasks` carve-out leg and gaining a table-and-strikethrough discriminating control.
+
+Two of those four sites deserve their own sentence, because both were got wrong in the first
+draft of this plan and caught in planning review. **The scenario headers are merge keys.**
+OpenSpec's `RENAMED` is requirement-level only, and `openspec validate --strict` refuses a
+MODIFIED block that drops a scenario the live spec still has — so a scenario whose subject
+narrows keeps its name and explains why, exactly as `detail-scroll` already does twice. And
+**`covers` stays on the literal-text line**, not the `Options` line: the row that remains is
+about footnotes and task-list items rendering literally, which `Event::Text` is what produces;
+the `Options` line is what makes the *departed* constructs leave the row. Either passes the
+executed-range check, so only the semantics distinguish them. The `verdict` stays `unproven` rather than moving to
 `spec-corrected` or `implemented`: those two mean, respectively, that the audit found the row
 itself wrong and that the row described behaviour that did not exist. Neither is true of what
 **remains** in this row — footnotes and task-list items rendered as literal source before this
@@ -350,8 +392,8 @@ None. Every question this change raised — the grammar, the allocation rule, th
 fallback, the ragged-row rule, the strikethrough style, the verdict on the narrowed degraded
 row — is answered above as a decision with its alternatives recorded.
 
-One **sequencing constraint** rather than a question: this change modifies `view-palette`,
-which `color-palette` introduces and has not yet archived. Its delta is written against
-`color-palette`'s spec text, so `color-palette` must be archived before this change is
-archived. `openspec validate --specs --strict` on the merged tree is what will catch it if
-that ordering is broken.
+One **sequencing constraint**, now satisfied rather than outstanding: this change modifies
+`view-palette`, which `color-palette` introduced. `color-palette` was archived in `6ba1480`
+— the parent of the commit that added this file — so `openspec/specs/view-palette/spec.md`
+is live, and the delta here is written against that live text rather than against a pending
+change's. Nothing about the ordering remains to be managed.

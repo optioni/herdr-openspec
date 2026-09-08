@@ -109,8 +109,14 @@ headers are its merge key; its subject is the same document, drawn two rows lowe
 - **AND** in each buffer the header cells' cells report `Modifier::BOLD` while the pipe and
   padding cells report no modifier at all
 - **AND** in the 60-column buffer the wrapping row occupies more rows than in the
-  120-column buffer, and in neither does any table cell reach column 0, column 39, column 40,
-  or the last column, so nothing was drawn over a border
+  120-column buffer
+- **AND** no table cell is drawn on a border column, stated **per buffer** because the two
+  layouts have different ones: in the 120-column buffer none reaches column 0, 39, 40, or
+  119; in the 60-column buffer none reaches column 0 or 59. Columns 39 and 40 are ordinary
+  interior content at 60 columns — below the breakpoint `layout::split_body` gives the detail
+  region the whole body — and a table wrapping at 58 necessarily covers them, so asserting
+  the wide layout's divider columns against the narrow buffer would leave this test
+  permanently red against a correct implementation
 
 #### Scenario: An empty source leaves the detail interior blank at both widths
 
