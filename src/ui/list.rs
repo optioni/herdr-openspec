@@ -18,7 +18,7 @@ pub enum RowKind {
     Message,
 }
 
-/// One drawn row: its text, exactly `width` characters; its kind; and
+/// One drawn row: its text, exactly `width` display columns; its kind; and
 /// whether it carries the selection marker. `list.rs` never styles a row —
 /// `ui::view` applies `Modifier::BOLD` to the selected one.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -41,52 +41,78 @@ pub(crate) fn progress_cell(progress: &crate::tasks::Progress) -> String {
     }
 }
 
-/// Pad `text` with trailing spaces to `width` when it fits; otherwise
-/// truncate to `width - 1` characters and append `…` — the crate's one
-/// right-truncation implementation, shared by the name field, the problem
-/// row, and the message rows. `width == 0` truncates to the empty string:
-/// there is no room even for the ellipsis. `pub(crate)` rather than
-/// private: `ui::detail`'s header, tab bar, and problem-line grammar calls
-/// this rather than copying it.
+/// Pad `text` with trailing spaces to `width` **display columns** when it
+/// fits; otherwise [`truncate_columns`] to `width - 1` columns and append
+/// `…`, then pad the result back to exactly `width` columns — the crate's
+/// one right-truncation implementation, shared by the name field, the
+/// problem row, and the message rows. The trailing pad in the truncating
+/// arm is load-bearing: `truncate_columns` drops a grapheme cluster whole,
+/// so the prefix can measure `width - 2` when the dropped cluster was two
+/// columns wide, and without the pad the row would be one column short of
+/// the interior and leave a stale cell behind it. See design.md ->
+/// Decision 3. `width == 0` truncates to the empty string: there is no room
+/// even for the ellipsis. `pub(crate)` rather than private: `ui::detail`'s
+/// header, tab bar, and problem-line grammar calls this rather than
+/// copying it.
 pub(crate) fn pad_or_truncate_right(text: &str, width: usize) -> String {
-    let chars: Vec<char> = text.chars().collect();
-    if chars.len() <= width {
-        let mut s: String = chars.into_iter().collect();
-        s.push_str(&" ".repeat(width - s.chars().count()));
+    let measured = columns(text);
+    if measured <= width {
+        let mut s = text.to_string();
+        s.push_str(&" ".repeat(width - measured));
         return s;
     }
     if width == 0 {
         return String::new();
     }
-    let mut s: String = chars[..width - 1].iter().collect();
-    s.push('…');
+    let mut s = format!("{}…", truncate_columns(text, width - 1));
+    let drawn = columns(&s);
+    if drawn < width {
+        s.push_str(&" ".repeat(width - drawn));
+    }
     s
 }
 
 /// The keep-the-tail truncation `change-rows`' no-repository block and
 /// `responsive-layout`'s header share: whole when `text` fits in `width`
-/// characters, else `…` followed by its last `width - 1` characters, empty
-/// at `width == 0`. Does **not** pad — callers that need a full-width row
-/// pad the result themselves, since the header uses this un-padded (it
-/// right-aligns within its own remaining space).
+/// display columns, else `…` followed by the longest suffix — ending on a
+/// grapheme-cluster boundary — whose columns are at most `width - 1`,
+/// empty at `width == 0`. Does **not** pad — callers that need a
+/// full-width row pad the result themselves, since the header uses this
+/// un-padded (it right-aligns within its own remaining space).
+///
+/// Reaches the crate's one display-width measure only through [`columns`]
+/// and [`truncate_columns`], never through a grapheme split of its own: the
+/// suffix's own boundary is found by growing a `truncate_columns` prefix
+/// budget one column at a time until the dropped prefix's columns reach the
+/// amount that must be dropped, so the cut this returns always lands on the
+/// same cluster boundary `truncate_columns` itself would have chosen.
 pub(crate) fn shorten_left(text: &str, width: usize) -> String {
-    let chars: Vec<char> = text.chars().collect();
-    if chars.len() <= width {
-        return chars.into_iter().collect();
+    let total = columns(text);
+    if total <= width {
+        return text.to_string();
     }
     if width == 0 {
         return String::new();
     }
-    let tail: String = chars[chars.len() - (width - 1)..].iter().collect();
-    format!("…{tail}")
+    let must_drop = total - (width - 1);
+    let mut probe = must_drop;
+    loop {
+        let prefix = truncate_columns(text, probe);
+        if columns(prefix) >= must_drop || prefix.len() == text.len() {
+            return format!("…{}", &text[prefix.len()..]);
+        }
+        probe += 1;
+    }
 }
 
-/// `shorten_left`, then padded with trailing spaces to `width` — the
-/// no-repository block's third row needs a full-width row like every other
-/// kind, unlike the header's un-padded, right-aligned use of the same rule.
+/// `shorten_left`, then padded with trailing spaces to `width` display
+/// columns — the no-repository block's third row needs a full-width row
+/// like every other kind, unlike the header's un-padded, right-aligned use
+/// of the same rule. A third measuring site, named here because it is easy
+/// to miss beside its un-padded sibling.
 fn shorten_left_row(text: &str, width: usize) -> String {
     let shortened = shorten_left(text, width);
-    let len = shortened.chars().count();
+    let len = columns(&shortened);
     if len >= width {
         shortened
     } else {
@@ -99,8 +125,8 @@ fn shorten_left_row(text: &str, width: usize) -> String {
 /// progress cell and dropped whole first (reclaiming its own separating
 /// space) as soon as the name field would fall below one column with it;
 /// the progress cell (and its separating space) drops next on the same
-/// condition; and the row degenerates to the first `width` characters of
-/// `"{marker} "` below two columns. `badge` `None` reproduces exactly
+/// condition; and the row degenerates to the first `width` display columns
+/// of `"{marker} "` below two columns. `badge` `None` reproduces exactly
 /// today's `[marker][space][name field][space][progress]` grammar, byte
 /// for byte — see `agent-attribution` -> Decisions 3. Shared,
 /// unparameterised by date, by both the active row and the final
@@ -115,10 +141,10 @@ fn active_style_row(
     let w = i64::from(width);
     if w < 2 {
         let head = format!("{marker} ");
-        return head.chars().take(w.max(0) as usize).collect();
+        return truncate_columns(&head, w.max(0) as usize).to_string();
     }
     if let Some(progress) = progress {
-        let progress_len = progress.chars().count() as i64;
+        let progress_len = columns(progress) as i64;
         if let Some(badge) = badge {
             let name_field_w = w - 2 - 1 - 1 - 1 - progress_len;
             if name_field_w >= 1 {
@@ -155,7 +181,7 @@ fn archived_row_text(
 ) -> String {
     let w = i64::from(width);
     let date_field = date.map_or_else(|| " ".repeat(10), str::to_string);
-    let progress_len = progress.chars().count() as i64;
+    let progress_len = columns(progress) as i64;
 
     // Full form with the badge: marker + space + date(10) + space + name +
     // space + badge + space + progress.
@@ -189,12 +215,12 @@ fn archived_row_text(
 }
 
 /// A `Problem` row: `! `, then the text, truncated with `…` when the width
-/// falls below three columns to the first `width` characters of `"! "`
-/// itself, exactly as `change-rows`' empty-state requirement states.
+/// falls below three columns to the first `width` display columns of
+/// `"! "` itself, exactly as `change-rows`' empty-state requirement states.
 fn problem_row_text(text: &str, width: u16) -> String {
     let w = width as usize;
     if w < 3 {
-        return "! ".chars().take(w).collect();
+        return truncate_columns("! ", w).to_string();
     }
     format!("! {}", pad_or_truncate_right(text, w - 2))
 }
@@ -205,12 +231,23 @@ fn message_row_text(text: &str, width: u16) -> String {
     pad_or_truncate_right(text, width as usize)
 }
 
+/// The separator row: `  -- archived ` then `-` filling the interior to its
+/// full width in display columns; when the interior is narrower than the
+/// prefix's own fourteen columns it is that prefix truncated to the width
+/// by [`truncate_columns`] and padded back to exactly `width` columns —
+/// `PREFIX` is ASCII, so the pad is a no-op today, but the rule is stated
+/// the same way every other field's is.
 fn separator_row_text(width: u16) -> String {
     const PREFIX: &str = "  -- archived ";
     let w = width as usize;
-    let prefix_len = PREFIX.chars().count();
+    let prefix_len = columns(PREFIX);
     if w <= prefix_len {
-        return PREFIX.chars().take(w).collect();
+        let mut s = truncate_columns(PREFIX, w).to_string();
+        let drawn = columns(&s);
+        if drawn < w {
+            s.push_str(&" ".repeat(w - drawn));
+        }
+        return s;
     }
     format!("{PREFIX}{}", "-".repeat(w - prefix_len))
 }
@@ -1868,7 +1905,10 @@ mod tests {
                     width as usize,
                     "width {width} badge {expect_badge}: {text:?}"
                 );
-                assert!(text.ends_with(']'), "width {width} badge {expect_badge}: {text:?}");
+                assert!(
+                    text.ends_with(']'),
+                    "width {width} badge {expect_badge}: {text:?}"
+                );
                 if expect_badge {
                     assert!(text.contains(" w ["), "width {width}: {text:?}");
                 }
@@ -1970,7 +2010,11 @@ mod tests {
             }
             if width <= 2 {
                 for row in &all {
-                    assert!(row.text.chars().count() <= 3, "width {width}: {:?}", row.text);
+                    assert!(
+                        row.text.chars().count() <= 3,
+                        "width {width}: {:?}",
+                        row.text
+                    );
                 }
             }
         }
