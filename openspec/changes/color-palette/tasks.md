@@ -367,17 +367,28 @@ Both SUGGESTIONs are noted, not actioned, per this task's own rule:
 ## 9. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 9.1 CHECK: Inspect the intended verification commands and affected tiers — `make check`
+- [x] 9.1 CHECK: Inspect the intended verification commands and affected tiers — `make check`
       runs format, lint, `make gates`, `cargo test --all-features`, and coverage at both
       floors; every tier this change touches is inside it.
-- [ ] 9.2 VERIFY: `cargo fmt --all -- --check` — clean.
-- [ ] 9.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
-- [ ] 9.4 VERIFY: `make gates` — every gate OK, `PALETTE` among them.
-- [ ] 9.5 VERIFY: `cargo test --all-features` — green.
-- [ ] 9.6 VERIFY: `make coverage` — it is what exports the JSON `scripts/coverage-prod.py`
+- [x] 9.2 VERIFY: `cargo fmt --all -- --check` — clean.
+- [x] 9.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
+- [x] 9.4 VERIFY: `make gates` — every gate OK, `PALETTE` among them.
+- [x] 9.5 VERIFY: `cargo test --all-features` — green.
+- [x] 9.6 VERIFY: `make coverage` — it is what exports the JSON `scripts/coverage-prod.py`
       reads, which a bare `cargo llvm-cov --fail-under-lines 80` does not. Both floors pass; `src/ui/palette.rs` is fully covered by its table-driven tests.
-- [ ] 9.7 VERIFY: `make check` as the single gate; name the failing sub-command if it fails.
-- [ ] 9.8 VERIFY: `openspec validate color-palette --strict` — valid.
+- [x] 9.7 VERIFY: `make check` as the single gate; name the failing sub-command if it fails.
+- [x] 9.8 VERIFY: `openspec validate color-palette --strict` — valid.
+
+**Group 9 outcome.** `make check` exit 0 on the second run. The first run failed
+`ui::tests::wiring::an_unreachable_scratch_herdr_is_a_standalone_tui` at `src/ui/mod.rs:2942`
+("the reason must be recorded"). Not this change: its only edits to that file are
+`pub mod palette;` and one tab-row string assertion, neither of which touches
+`dashboard.agents.problem`, the agent poller, or the socket path. The test passed 5/5 in
+isolation and the whole suite passed clean on re-run. It is the third distinct
+`ui::tests::wiring` test to flake this way during this change — all racing on poll timing —
+which is the ticket the Change Review's second SUGGESTION asks for.
+
+Total coverage 96.19%; production slice 96.16% against its floor of 96.
 
 **After `openspec archive` — not apply work, and deliberately not a checkbox.** Archiving
 writes `openspec/specs/view-palette/spec.md`, and `tests/spec_purposes.rs` requires every
