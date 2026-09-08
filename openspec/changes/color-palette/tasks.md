@@ -292,57 +292,76 @@ A gate's floor is its own script default, kept at the gate's true measured floor
 ## 7. Change Review
 <!-- kind: operational -->
 
-- [ ] 7.1 CHECK: Dispatch `outside-in-tdd-reviewer` against proposal.md, all seven spec files,
+- [x] 7.1 CHECK: Dispatch `outside-in-tdd-reviewer` against proposal.md, all seven spec files,
       design.md, and the diff — not this session's reasoning. Concentration points, in
       addition to the standing ones: whether any colour assertion could pass with the palette
       deleted; whether `Row::text` is genuinely byte-identical at every width rather than
       merely at the two mandated ones; whether the chip window rule changed anywhere beyond
       the separator constant; and whether `make gates`' new line is reached in CI.
-- [ ] 7.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a
+- [x] 7.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a
       one-line reason, note SUGGESTIONs, and re-run affected tests.
-- [ ] 7.3 VERIFY: Confirm no blocking or unowned finding remains.
+- [x] 7.3 VERIFY: Confirm no blocking or unowned finding remains.
+
+**Outcome.** One CRITICAL, zero WARNINGs, two SUGGESTIONs.
+
+The CRITICAL was a missing planted control: `specs/view-palette/spec.md`'s confinement-gate
+scenario has four THENs and only three landed, leaving `palette.sh`'s guard B — the grep
+refusing a palette that names no `Color` — attested rather than executed. Fixed by
+`palette-vacuous` (`6ce0ed4`) and falsified against a neutered guard, where it is the only
+one of 53 controls that fails to catch its plant.
+
+Both SUGGESTIONs are noted, not actioned, per this task's own rule:
+
+1. `palette.sh:19-20` sweeps for `Color::|ratatui::style::Color`, which a brace import plus a
+   bare type mention evades — `use ratatui::style::{Color, Style}; pub fn tint(c: Color) -> Style`
+   leaves the gate at exit 0. `nospawn-grep.sh`'s G2 is the established idiom for closing this.
+   Not absorbed here: it is new scope rather than a deviation, because `mdseam.sh`, the gate
+   `palette.sh` was modelled on, sweeps a crate name that no alias can hide. Worth its own change.
+2. `ui::tests::wiring::g_focuses_the_agent_the_launch_started` is flaky under CPU load
+   (3 failures in 8 full-suite runs, green in isolation), reproduced on a tree this change
+   does not touch at that point. Pre-existing; worth its own ticket.
 
 ## 8. Documentation
 <!-- kind: operational -->
 
-- [ ] 8.0 CHECK: Read every sentence this change makes false against the tree it produces —
+- [x] 8.0 CHECK: Read every sentence this change makes false against the tree it produces —
       `AGENTS.md:305` and `:340`, `SPEC.md:434-437`, `SPEC.md`'s `ui` module-map row, and the
       `covers` ranges in `tests/degraded-coverage.toml` — and confirm which are bound by a test
       and which only by a reader. Decide `SPEC.md:757` explicitly: its degraded-states row calls
       the badge "dim", which stays true, and the row's text is the `condition` key
       `tests/degraded-coverage.toml` binds it by — so reword it only together with that file, or
       record that it is deliberately left as it is.
-- [ ] 8.1 CHANGE — rewrite in `AGENTS.md`: § Architecture rules, the `pulldown_cmark` bullet (audience:
+- [x] 8.1 CHANGE — rewrite in `AGENTS.md`: § Architecture rules, the `pulldown_cmark` bullet (audience:
       every future session). Extend it in place to name `ratatui::style::Color`'s confinement
       to `src/ui/palette.rs` beside the parser's to `src/ui/markdown.rs` — one bullet stating
       one rule about two replaceable-by-editing-one-file seams, rather than a second bullet
       repeating the argument. Durable because the next change adding a colour will otherwise
       add it at the render call site.
-- [ ] 8.2 CHANGE — rewrite in `AGENTS.md`: § Architecture rules, the two sentences at `:305`
+- [x] 8.2 CHANGE — rewrite in `AGENTS.md`: § Architecture rules, the two sentences at `:305`
       and `:340` giving the pure view set as **eight** files and `COLWIDTH`'s sweep as the
       **other seven** (audience: every future session). Both are false once `palette.rs`
       lands, and `tests/doc_contract.rs` does not bind either number.
-- [ ] 8.3 CHANGE — add in `SPEC.md`: § User interface, the semantic-role table — role, modifier,
+- [x] 8.3 CHANGE — add in `SPEC.md`: § User interface, the semantic-role table — role, modifier,
       colour — and one sentence naming `src/ui/palette.rs` as its only home (audience: anyone
       implementing a view). This is net-new, ~25 lines; it replaces nothing because `SPEC.md`
       has no styling section today, and it is what makes a future "which colour means what"
       question answerable without reading the match arm.
-- [ ] 8.4 CHANGE — rewrite in `SPEC.md`: § User interface, the sentence at `SPEC.md:434-437` reading
+- [x] 8.4 CHANGE — rewrite in `SPEC.md`: § User interface, the sentence at `SPEC.md:434-437` reading
       "`1`-`9` select the first nine positions directly; a tenth position and beyond carry no
       digit in their label" (audience: anyone implementing a view). Its contrast is false once
       no label carries a digit. Nothing binds it — `tests/doc_contract.rs`'s legs are the
       module map, § Unit-tested modules, the worker-thread count, the MSRV, the gate-path
       programs, the manifest transcription, and the injected context — so a human must.
-- [ ] 8.5 CHANGE — rewrite in `SPEC.md`: the `ui` row of the module map (audience: same) — name the
+- [x] 8.5 CHANGE — rewrite in `SPEC.md`: the `ui` row of the module map (audience: same) — name the
       palette among that module's responsibilities. `tests/doc_contract.rs` binds the module
       map to `src/lib.rs`'s `pub mod` set, which `ui::palette` does not join, so this row is
       the only place the new module is discoverable.
-- [ ] 8.6 CHANGE: Re-point the `covers` line ranges in `tests/degraded-coverage.toml` that
+- [x] 8.6 CHANGE: Re-point the `covers` line ranges in `tests/degraded-coverage.toml` that
       name `src/ui/view.rs`, `src/ui/list.rs`, or `src/ui/detail.rs` (nine entries;
       `grep -n 'covers' tests/degraded-coverage.toml`). `validate_covers` checks only path
       existence, in-bounds range, and one non-comment line, so groups 2 to 4 shifting those
       lines fails nothing while the map stops pointing at the code it names.
-- [ ] 8.7 VERIFY: `cargo test --test doc_contract` and `cargo test --test degraded_coverage` —
+- [x] 8.7 VERIFY: `cargo test --test doc_contract` and `cargo test --test degraded_coverage` —
       both green.
 
 ## 9. Lint & Verify

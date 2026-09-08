@@ -93,7 +93,7 @@ binding, not its only one — `NOBLOCK` leg 2 covers it identically.
 | `watch` | The recursive `notify` watch, the debounce, and classifying a touched path to a per-change `Selection` |
 | `refresh` | The worker thread and the non-blocking `Refresher` seam it answers through |
 | `open` | The `open` and `open-tab` subcommands that open or focus the dashboard pane through `herdr plugin pane`; the crate's third `HerdrCli` consumer |
-| `ui` | Views (the change-row grammar, the detail region's header/tab-bar/content grammar, markdown rendering, and `ui::tasks`' checklist-and-progress-bar grammar for the tracked-tasks tab), layout, the dashboard's own state (selection, the `/` filter, the detail scroll offset, the selected artifact tab, the live tier's refresh flag and standing problems, and the injected artifact-read binding), key handling, terminal lifecycle, and the event loop |
+| `ui` | Views (the change-row grammar, the detail region's header/tab-bar/content grammar, markdown rendering, and `ui::tasks`' checklist-and-progress-bar grammar for the tracked-tasks tab), the semantic-role colour palette (`ui::palette`, the one table from a role to a `Style` and the crate's only `ratatui::style::Color` — see Colour and style), layout, the dashboard's own state (selection, the `/` filter, the detail scroll offset, the selected artifact tab, the live tier's refresh flag and standing problems, and the injected artifact-read binding), key handling, terminal lifecycle, and the event loop |
 | `cli` | The two subprocess traits and their real implementations |
 
 ## Data layer
@@ -432,8 +432,10 @@ content below, in the remaining rows, resolved for whichever artifact the
 selected tab names.
 
 The tab bar addresses artifacts by **position**, never by id, in the
-schema's declared order: `1`–`9` select the first nine positions directly; a
-tenth position and beyond carry no digit in their label and are reached only
+schema's declared order: `1`–`9` select the first nine positions directly, but
+**no label carries a digit** — a chip is its bare artifact id padded with one
+space on each side and nothing more, so the bar no longer advertises the keys
+that select it (`artifact-tabs`). A tenth position and beyond are reached only
 with `[` and `]`, which step one tab at a time and clamp at both ends. An
 artifact list with no entries renders a single `no artifacts` cell rather
 than an empty bar. The detail region's interior is blank — no header, no tab
@@ -495,6 +497,60 @@ whether there is a layer left to dismiss. Only `q` (outside filter mode) and
 
 Action keys, and their footer hints (`a/c/s launch  g focus`), are hidden when
 the Herdr socket is unreachable.
+
+### Colour and style
+
+Every styled span in the pane takes its `Style` from one place: `src/ui/palette.rs`,
+the only file in `src/` permitted to name a `ratatui::style::Color` (`color-palette`,
+enforced by `PALETTE`). A view asks `palette::style(Role::…)` for a **semantic role** —
+what the span means — and the palette alone decides what that looks like, so "which
+colour means what" is answerable from one table rather than from a render call site.
+
+Colour sits **beside** the modifier a role already carried, never in place of it: a
+monochrome reading of the frame loses nothing. Every colour is a **named** ANSI index,
+so the reader's own terminal theme decides what `Red` is, a 16-colour terminal renders
+the pane correctly, and the pane does not fight the theme of the Herdr panes beside it.
+`Color::Rgb`, `Color::Indexed`, and `Color::Reset` appear nowhere, the terminal is never
+probed for colour support, and `NO_COLOR` is never read — an environment read from a
+view file is forbidden by `NOIO-VIEW` in any case.
+
+| Role | Modifier | Colour |
+|---|---|---|
+| `HeaderTitle` | `BOLD` | none |
+| `HeaderPath` | none | none |
+| `FileMode` | `DIM` | fg `Yellow` |
+| `Footer` | none | none |
+| `RegionBorder` | none | none |
+| `RegionBorderFocused` | `BOLD` | none |
+| `ListRow` | none | none |
+| `ListRowSelected` | `BOLD` | none |
+| `ListProblem` | none | fg `Red` |
+| `ListSeparator` | none | fg `DarkGray` |
+| `ListMessage` | none | none |
+| `AgentBadge(status)` | none | fg `Green`, `Cyan`, `LightRed`, `Blue`, `DarkGray` for `Working`, `Idle`, `Blocked`, `Done`, `Unknown` |
+| `DetailHeader` | `BOLD` | none |
+| `TabActive` | `BOLD` | fg `Black`, bg `Cyan` |
+| `TabInactive` | none | bg `DarkGray` |
+| `Heading(level)` | `BOLD` | fg `Magenta`, `Cyan`, `Blue`, `Green`, `Yellow`, `DarkGray` for levels 1 to 6; a level outside `1..=6` answers with level 6's style rather than panicking |
+| `Strong` | `BOLD` | none |
+| `Emphasis` | `ITALIC` | none |
+| `Code` | `DIM` | fg `Yellow` |
+| `Link` | `UNDERLINED` | fg `Blue` |
+| `Quoted` | `DIM` | none |
+
+Two pairs share a style deliberately rather than by oversight: `FileMode` with `Code`
+(both `DIM` + `Yellow`, and they cannot meet — one is drawn in the frame header, the
+other only inside the detail region's content area), and `AgentBadge(Unknown)` with
+`ListSeparator` (both `DarkGray`, this palette's one "no information" grey, which an
+unknown status and a divider rule both are).
+
+A markdown segment carrying several faces is styled by folding the face roles onto
+`Style::default()` with `Style::patch` in the fixed order `Quoted`, `Link`, `Code`,
+`Emphasis`, `Strong`, `Heading` (`ui::view::style_for`). Modifiers therefore accumulate —
+a bold link carries `BOLD` and `UNDERLINED` together — while the **foreground** of a span
+carrying several coloured faces is decided by the last one in that order: heading over
+code over link, so a heading line reads as one colour even where it contains a code span
+or a link.
 
 ## Herdr integration
 

@@ -302,8 +302,9 @@ unreachable and the tests become integration tests by accident.
   `serde_json` must never appear in `src/cli.rs`, checked the same way.
 - **Views do no I/O.** They are pure functions from state to a ratatui frame, tested
   by rendering into a `TestBackend` buffer at 60 and 120 columns. The pure set is
-  **eight** files — `src/ui/app.rs`, `src/ui/detail.rs`, `src/ui/layout.rs`,
-  `src/ui/list.rs`, `src/ui/markdown.rs`, `src/ui/tasks.rs`, `src/ui/view.rs`, and
+  **nine** files — `src/ui/app.rs`, `src/ui/detail.rs`, `src/ui/layout.rs`,
+  `src/ui/list.rs`, `src/ui/markdown.rs`, `src/ui/palette.rs`, `src/ui/tasks.rs`,
+  `src/ui/view.rs`, and
   `src/ui/driver.rs` — none of which names a filesystem, process, environment,
   network, or standard-I/O API (`src/ui/tasks.rs` calls `tasks::parse`, a pure
   function over `&str`, and never `tasks::read`, the filesystem edge, which the
@@ -324,10 +325,20 @@ unreachable and the tests become integration tests by accident.
 - **The list region's two mandated interior widths are 38 and 58 columns** — the
   wide layout's `Length(40)` list column and the narrow layout's 60-column frame,
   each less two border columns. Every row-grammar test in `ui::list` asserts both.
-- **`pulldown_cmark` is named only in `src/ui/markdown.rs`, and that module names
-  no `ratatui` type.** The markdown parser stays replaceable by editing one file,
-  on the same terms `src/cli.rs` is the crate's only process spawner; styling a
-  segment is `ui::view`'s job, never `ui::markdown`'s.
+- **`pulldown_cmark` is named only in `src/ui/markdown.rs`, and `ratatui::style::Color`
+  only in `src/ui/palette.rs`.** One rule, two seams: the markdown parser and the colour
+  table each stay replaceable by editing one file, on the same terms `src/cli.rs` is the
+  crate's only process spawner. `ui::markdown` names no `ratatui` type, and styling a
+  segment is `ui::view`'s job, never `ui::markdown`'s; deciding what a span *looks* like
+  is `ui::palette`'s, never a render call site's — every other file asks
+  `palette::style(Role::…)` for a semantic role instead of naming a colour. `MDSEAM` and
+  `PALETTE` enforce these the same tree-wide-grep-with-a-positive-control way, and
+  `PALETTE` searches the whole of `src/`, inline `#[cfg(test)]` modules included: a render
+  test asserts a cell's colour by comparing it against `palette::style(role)`, and the
+  colour literals are written down exactly once, in `src/ui/palette.rs`'s own tests. The
+  gate also fails when its exclusion goes **vacuous** — `src/ui/palette.rs` missing, or
+  present but naming no `Color` — and when that file drops out of `noio-view.sh`'s or
+  `colwidth.sh`'s `PURE` list, so the new module cannot silently stop being swept.
 - **The detail region's two mandated interior widths are 78 and 58 columns** — the
   wide layout's `Min(0)` detail column at the mandated 120-column frame and the
   narrow layout's 60-column frame in the detail route, each less two border
@@ -337,7 +348,7 @@ unreachable and the tests become integration tests by accident.
 - **Every width computation under `src/ui/` is measured in terminal display columns, never
   a `char` count.** `ui::layout::columns`/`truncate_columns` are the crate's only measure,
   agreeing by construction with what `Buffer::set_string` itself consumes; `COLWIDTH` sweeps
-  the other seven pure view files for `.chars().count()`/`.chars().take(`/a `Vec<char>`
+  the other eight pure view files for `.chars().count()`/`.chars().take(`/a `Vec<char>`
   collect, because a `chars().count()` written later is silently correct against this
   project's own ASCII fixtures and wrong against anything else.
 - **The render path blocks on nothing but the terminal, and reads no clock.**
