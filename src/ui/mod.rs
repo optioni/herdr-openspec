@@ -1024,7 +1024,7 @@ mod tests {
 
                 let tab_row = row_cols(interior.y + 1, 20);
                 assert!(
-                    tab_row.starts_with("1 proposal  2 specs"),
+                    tab_row.starts_with(" proposal   specs "),
                     "width {width}: tab row does not begin with the first two tabs: {tab_row:?}"
                 );
 

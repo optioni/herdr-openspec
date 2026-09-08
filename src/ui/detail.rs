@@ -426,19 +426,34 @@ mod tests {
             assert_eq!(
                 texts,
                 vec![
-                    "1 proposal",
-                    "2 specs",
-                    "3 design",
-                    "4 tasks",
-                    "5 planning-review"
+                    " proposal ",
+                    " specs ",
+                    " design ",
+                    " tasks ",
+                    " planning-review "
                 ],
                 "width {width}"
             );
+            // Every chip begins and ends in a space: the padding is part of
+            // `text`, so the reported cell and the painted cell are one object.
+            assert!(
+                texts.iter().all(|t| t.starts_with(' ') && t.ends_with(' ')),
+                "width {width}: {texts:?}"
+            );
             let xs: Vec<u16> = tabs.iter().map(|t| t.x).collect();
-            assert_eq!(xs, vec![0, 12, 21, 31, 40], "width {width}");
+            assert_eq!(xs, vec![0, 11, 19, 28, 36], "width {width}");
+            // Each chip starts exactly one column after the previous chip's
+            // last column — one separating column, never two.
+            for pair in tabs.windows(2) {
+                assert_eq!(
+                    pair[1].x as usize,
+                    pair[0].x as usize + columns(&pair[0].text) + 1,
+                    "width {width}"
+                );
+            }
             let last = tabs.last().unwrap();
             let last_end = last.x as usize + columns(&last.text) - 1;
-            assert_eq!(last_end, 56, "width {width}");
+            assert_eq!(last_end, 52, "width {width}");
             let indices: Vec<Option<usize>> = tabs.iter().map(|t| t.index).collect();
             assert_eq!(
                 indices,
@@ -456,7 +471,7 @@ mod tests {
         for width in [78, 58] {
             let tabs = tab_bar(&a, 1, width);
             let texts: Vec<&str> = tabs.iter().map(|t| t.text.as_str()).collect();
-            assert_eq!(texts, vec!["1 spec", "2 spec", "3 notes"], "width {width}");
+            assert_eq!(texts, vec![" spec ", " spec ", " notes "], "width {width}");
             assert_eq!(tabs[1].index, Some(1), "width {width}");
             assert!(tabs[1].selected, "width {width}");
             assert_eq!(tabs[0].index, Some(0), "width {width}");
@@ -471,16 +486,23 @@ mod tests {
         let a = artifacts(&ids_ref);
         for width in [78, 58] {
             let tabs = tab_bar(&a, 0, width);
+            // Nine five-column chips and eight separators are 53 columns; a
+            // tenth would be 59. So the wide bar holds all twelve and the
+            // narrow one holds nine — the two widths differ, and the narrower
+            // is not silently vacuous.
+            let expected_len = if width == 78 { 12 } else { 9 };
+            assert_eq!(tabs.len(), expected_len, "width {width}");
             for (i, tab) in tabs.iter().enumerate() {
-                if i < 9 {
-                    assert_eq!(
-                        tab.text,
-                        format!("{} a{:02}", i + 1, i + 1),
-                        "width {width}"
-                    );
-                } else {
-                    assert_eq!(tab.text, format!("a{:02}", i + 1), "width {width}");
-                }
+                assert_eq!(tab.text, format!(" a{:02} ", i + 1), "width {width}");
+                assert_eq!(columns(&tab.text), 5, "width {width}");
+                assert!(
+                    !tab.text
+                        .trim_start()
+                        .starts_with(|c: char| c.is_ascii_digit()),
+                    "width {width}: {:?} carries a leading digit",
+                    tab.text
+                );
+                assert!(!tab.text.starts_with("1 "), "width {width}");
             }
         }
     }
@@ -491,7 +513,10 @@ mod tests {
         for width in [78, 58] {
             let tabs = tab_bar(&a, 0, width);
             assert_eq!(tabs.len(), 1, "width {width}");
-            assert_eq!(tabs[0].text, "no artifacts", "width {width}");
+            // Drawn on the bar's own terms: a chip, padding included, so the
+            // placeholder occupies fourteen columns and nothing else.
+            assert_eq!(tabs[0].text, " no artifacts ", "width {width}");
+            assert_eq!(columns(&tabs[0].text), 14, "width {width}");
             assert_eq!(tabs[0].x, 0, "width {width}");
             assert_eq!(tabs[0].index, None, "width {width}");
             assert!(!tabs[0].selected, "width {width}");
@@ -526,6 +551,13 @@ mod tests {
             for selected in [0usize, 3, 11] {
                 let tabs = tab_bar(&a, selected, width);
                 assert!(!tabs.is_empty(), "width {width} selected {selected}");
+                // A 13-column chip each: four fit in 58 columns (52 + 3
+                // separators = 55) and five in 78 (65 + 4 = 69).
+                assert_eq!(
+                    tabs.len(),
+                    if width == 78 { 5 } else { 4 },
+                    "width {width} selected {selected}"
+                );
                 let indices: Vec<usize> = tabs.iter().map(|t| t.index.unwrap()).collect();
                 for w in indices.windows(2) {
                     assert_eq!(
@@ -601,6 +633,9 @@ mod tests {
             assert_eq!(tabs[0].index, Some(0), "width {width}");
             assert_eq!(columns(&tabs[0].text), width as usize, "width {width}");
             assert!(tabs[0].text.ends_with('…'), "width {width}");
+            // What is truncated is the padded chip, not a bare id: the
+            // padding is what the view paints, so it is what is measured.
+            assert!(tabs[0].text.starts_with(' '), "width {width}");
         }
     }
 
@@ -613,6 +648,10 @@ mod tests {
             assert!(!tabs.iter().any(|t| t.selected), "width {width}");
             assert_eq!(tabs.len(), 3, "width {width}");
             assert_eq!(tabs[0].index, Some(0), "width {width}");
+            // The window is the one `selected: 0` would have produced: all
+            // three three-column chips from column 0, one column apart.
+            let xs: Vec<u16> = tabs.iter().map(|t| t.x).collect();
+            assert_eq!(xs, vec![0, 4, 8], "width {width}");
         }
     }
 
@@ -821,7 +860,7 @@ mod tests {
             for change in [change, change2] {
                 let tabs = tab_bar(&change.artifacts, 0, width as u16);
                 assert_eq!(tabs.len(), 1, "width {width}: {tabs:?}");
-                assert_eq!(tabs[0].text, "no artifacts", "width {width}");
+                assert_eq!(tabs[0].text, " no artifacts ", "width {width}");
                 assert_eq!(tabs[0].index, None, "width {width}");
             }
         }
@@ -1046,7 +1085,7 @@ mod tests {
             let tabs = tab_bar(&change.artifacts, 1, width);
             let texts: Vec<&str> = tabs.iter().map(|t| t.text.as_str()).collect();
             assert!(
-                texts.iter().filter(|t| t.ends_with("spec")).count() == 2,
+                texts.iter().filter(|t| t.trim() == "spec").count() == 2,
                 "width {width}: {texts:?}"
             );
             assert_eq!(tabs[1].index, Some(1), "width {width}");

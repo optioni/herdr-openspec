@@ -3127,7 +3127,7 @@ mod tests {
         for width in [120u16, 60] {
             let buf = render_at(width, 4, &d);
             assert!(!buffer_contains(&buf, "detail-view"), "width {width}");
-            assert!(!buffer_contains(&buf, "1 proposal"), "width {width}");
+            assert!(!buffer_contains(&buf, " proposal "), "width {width}");
             assert!(!buffer_contains(&buf, "line-00"), "width {width}");
         }
 
@@ -3136,7 +3136,7 @@ mod tests {
         for width in [120u16, 60] {
             let buf = render_at(width, 5, &d);
             assert!(buffer_contains(&buf, "detail-view"), "width {width}");
-            assert!(!buffer_contains(&buf, "1 proposal"), "width {width}");
+            assert!(!buffer_contains(&buf, " proposal "), "width {width}");
             assert!(!buffer_contains(&buf, "line-00"), "width {width}");
         }
 
@@ -3145,7 +3145,7 @@ mod tests {
         for width in [120u16, 60] {
             let buf = render_at(width, 6, &d);
             assert!(buffer_contains(&buf, "detail-view"), "width {width}");
-            assert!(buffer_contains(&buf, "1 proposal"), "width {width}");
+            assert!(buffer_contains(&buf, " proposal "), "width {width}");
             assert!(!buffer_contains(&buf, "line-00"), "width {width}");
         }
 
@@ -3154,7 +3154,7 @@ mod tests {
         for width in [120u16, 60] {
             let buf = render_at(width, 7, &d);
             assert!(buffer_contains(&buf, "detail-view"), "width {width}");
-            assert!(buffer_contains(&buf, "1 proposal"), "width {width}");
+            assert!(buffer_contains(&buf, " proposal "), "width {width}");
             assert!(buffer_contains(&buf, "line-00"), "width {width}");
             assert!(!buffer_contains(&buf, "line-01"), "width {width}");
         }
@@ -3192,28 +3192,28 @@ mod tests {
                 !buffer_contains(&buf, "detail-view"),
                 "marked width {width}"
             );
-            assert!(!buffer_contains(&buf, "1 proposal"), "marked width {width}");
+            assert!(!buffer_contains(&buf, " proposal "), "marked width {width}");
             assert!(!buffer_contains(&buf, "line-00"), "marked width {width}");
         }
 
         for width in [120u16, 60] {
             let buf = render_at(width, 5, &md);
             assert!(buffer_contains(&buf, "detail-view"), "marked width {width}");
-            assert!(!buffer_contains(&buf, "1 proposal"), "marked width {width}");
+            assert!(!buffer_contains(&buf, " proposal "), "marked width {width}");
             assert!(!buffer_contains(&buf, "line-00"), "marked width {width}");
         }
 
         for width in [120u16, 60] {
             let buf = render_at(width, 6, &md);
             assert!(buffer_contains(&buf, "detail-view"), "marked width {width}");
-            assert!(buffer_contains(&buf, "1 proposal"), "marked width {width}");
+            assert!(buffer_contains(&buf, " proposal "), "marked width {width}");
             assert!(!buffer_contains(&buf, "line-00"), "marked width {width}");
         }
 
         for width in [120u16, 60] {
             let buf = render_at(width, 7, &md);
             assert!(buffer_contains(&buf, "detail-view"), "marked width {width}");
-            assert!(buffer_contains(&buf, "1 proposal"), "marked width {width}");
+            assert!(buffer_contains(&buf, " proposal "), "marked width {width}");
             assert!(
                 !buffer_contains(&buf, "line-00"),
                 "marked width {width}: bar, not an item"
@@ -3466,7 +3466,7 @@ mod tests {
     }
 
     #[test]
-    fn the_five_tab_bars_exact_string_with_the_selected_tab_bold() {
+    fn the_tab_bar_reaches_the_buffer_at_both_mandated_widths() {
         let change = fixture::with_artifacts(
             fixture::active("detail-view", 4, 9),
             &[
@@ -3484,34 +3484,101 @@ mod tests {
             Route::Detail,
             empty_detail_with_tab("", Vec::new(), 2),
         );
-        for (width, w) in [(120, 78), (60, 58)] {
+        // Five chips — 10, 7, 8, 7 and 17 columns — separated by one unpainted
+        // column each: 53 columns, inside both the 78- and the 58-column
+        // interior. Three spaces read between two chips: each chip's own
+        // trailing and leading padding plus that one separator.
+        let expected = " proposal   specs   design   tasks   planning-review ";
+        assert_eq!(columns(expected), 53);
+        for width in [120, 60] {
             let buf = render_at(width, 20, &d);
-            let expected = "1 proposal  2 specs  3 design  4 tasks  5 planning-review";
-            assert_eq!(
-                detail_interior_cols(&buf, 3, w.min(columns(expected))),
-                &expected[..columns(expected).min(w)],
+            assert_eq!(detail_interior_cols(&buf, 3, 53), expected, "width {width}");
+            let from = if width == 60 { 1u16 } else { 41 };
+
+            // The selected chip: every one of its eight columns, its two
+            // padding columns included, carries `TabActive` — bold and
+            // coloured together, so neither reading alone identifies it.
+            let active = palette::style(Role::TabActive);
+            for x in (from + 19)..(from + 27) {
+                let style = cell(&buf, x, 3).style();
+                assert!(
+                    style.add_modifier.contains(Modifier::BOLD),
+                    "width {width} x {x}: ` design ` should be bold"
+                );
+                assert_eq!(style.fg, active.fg, "width {width} x {x}");
+                assert_eq!(style.bg, active.bg, "width {width} x {x}");
+            }
+
+            // An inactive chip: all ten of its columns carry `TabInactive`'s
+            // background and none is bold.
+            let inactive = palette::style(Role::TabInactive);
+            for x in from..(from + 10) {
+                let style = cell(&buf, x, 3).style();
+                assert!(
+                    !style.add_modifier.contains(Modifier::BOLD),
+                    "width {width} x {x}: ` proposal ` should not be bold"
+                );
+                assert_eq!(style.bg, inactive.bg, "width {width} x {x}");
+            }
+
+            // The four separating columns are painted by nothing, so two
+            // adjacent chips show an edge rather than one continuous field.
+            for offset in [10u16, 18, 27, 35] {
+                assert_eq!(
+                    cell(&buf, from + offset, 3).style().bg,
+                    uncoloured().bg,
+                    "width {width} offset {offset}: a separator carries a background"
+                );
+            }
+        }
+    }
+
+    /// `artifact-tabs` :: "The tab bar never overwrites a border or the rows
+    /// around it" — the painted span stops inside the interior, in both
+    /// directions: no border column carries a chip background, and the header
+    /// row above the bar is untouched.
+    #[test]
+    fn the_tab_bar_never_overwrites_a_border_or_the_rows_around_it() {
+        let ids: Vec<String> = (0..12)
+            .map(|i| format!("{}{i}", "x".repeat(40 - i.to_string().len())))
+            .collect();
+        let pairs: Vec<(&str, &[&str])> = ids.iter().map(|id| (id.as_str(), &[][..])).collect();
+        let change = fixture::with_artifacts(fixture::active("detail-view", 4, 9), &pairs);
+        let d = dashboard_with_detail(
+            vec![change],
+            Vec::new(),
+            0,
+            Route::Detail,
+            empty_detail_with_tab("", Vec::new(), 0),
+        );
+
+        let active = palette::style(Role::TabActive);
+        let inactive = palette::style(Role::TabInactive);
+        for width in [120, 60] {
+            let buf = render_at(width, 20, &d);
+            let border_cols: Vec<u16> = if width == 60 {
+                vec![0, 59]
+            } else {
+                vec![0, 39, 40, 119]
+            };
+            for y in 1..=18u16 {
+                for x in &border_cols {
+                    let c = cell(&buf, *x, y);
+                    let s = c.symbol();
+                    assert!(
+                        matches!(s, "│" | "┌" | "└" | "┐" | "┘"),
+                        "width {width} x={x} y={y}: {s:?}"
+                    );
+                    assert_ne!(c.style().bg, active.bg, "width {width} x={x} y={y}");
+                    assert_ne!(c.style().bg, inactive.bg, "width {width} x={x} y={y}");
+                }
+            }
+            // The row above the tab bar still holds the change's own name, so
+            // no chip wrapped upward into it.
+            assert!(
+                detail_interior_cols(&buf, 2, 11).starts_with("detail-view"),
                 "width {width}"
             );
-            let from = if width == 60 { 1u16 } else { 41 };
-            // "3 design" is bold; "1 proposal" is not.
-            for x in (from + 21)..(from + 21 + 8) {
-                assert!(
-                    cell(&buf, x, 3)
-                        .style()
-                        .add_modifier
-                        .contains(Modifier::BOLD),
-                    "width {width} x {x}: `3 design` should be bold"
-                );
-            }
-            for x in from..(from + 10) {
-                assert!(
-                    !cell(&buf, x, 3)
-                        .style()
-                        .add_modifier
-                        .contains(Modifier::BOLD),
-                    "width {width} x {x}: `1 proposal` should not be bold"
-                );
-            }
         }
     }
 
@@ -3530,20 +3597,23 @@ mod tests {
         );
         d.apply(Action::SelectTab(2));
         let buf = render_at(120, 20, &d);
-        assert!(row_text(&buf, 3).contains("3 design"));
-        for x in 41 + 21..41 + 21 + 8 {
-            assert!(
-                cell(&buf, x, 3)
-                    .style()
-                    .add_modifier
-                    .contains(Modifier::BOLD)
-            );
+        assert!(row_text(&buf, 3).contains(" design "));
+        // The third chip — ` design `, eight columns from interior offset 19,
+        // after ` proposal ` (10) and ` specs ` (7) and their two separators —
+        // carries the active style, which is what makes the list-route press
+        // visible at the wide layout.
+        let active = palette::style(Role::TabActive);
+        for x in 41 + 19..41 + 19 + 8 {
+            let style = cell(&buf, x, 3).style();
+            assert!(style.add_modifier.contains(Modifier::BOLD), "x {x}");
+            assert_eq!(style.fg, active.fg, "x {x}");
+            assert_eq!(style.bg, active.bg, "x {x}");
         }
         // Discriminating companion, naming the check's other mandated
         // width: at 60, Route::List, the narrow layout draws only the list
         // region — no detail region, and so no tab row at all.
         let buf60 = render_at(60, 20, &d);
-        assert!(!row_text(&buf60, 3).contains("3 design"));
+        assert!(!row_text(&buf60, 3).contains(" design "));
     }
 
     #[test]
@@ -3605,7 +3675,7 @@ mod tests {
                 "width {width}"
             );
             assert!(
-                row_text(&buf, 3).contains("2 specs"),
+                row_text(&buf, 3).contains(" specs "),
                 "width {width}: tab bar still intact"
             );
             // `artifact-content` :: "in both buffers that row measures exactly the
@@ -3858,8 +3928,8 @@ mod tests {
                 "width {width}"
             );
 
-            assert!(row_text(&buf0, 3).contains("1 checklist"), "width {width}");
-            assert!(row_text(&buf0, 3).contains("2 tasks"), "width {width}");
+            assert!(row_text(&buf0, 3).contains(" checklist "), "width {width}");
+            assert!(row_text(&buf0, 3).contains(" tasks "), "width {width}");
         }
     }
 
@@ -3886,9 +3956,9 @@ mod tests {
                     "width {width} tab {tab}"
                 );
                 assert!(
-                    row_text(&buf, 3).contains("1 alpha")
-                        && row_text(&buf, 3).contains("2 beta")
-                        && row_text(&buf, 3).contains("3 gamma"),
+                    row_text(&buf, 3).contains(" alpha ")
+                        && row_text(&buf, 3).contains(" beta ")
+                        && row_text(&buf, 3).contains(" gamma "),
                     "width {width} tab {tab}: no tab removed"
                 );
             }
