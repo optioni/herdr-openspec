@@ -3310,6 +3310,51 @@ mod tests {
                 "width {label}: no table line was drawn"
             );
         }
+
+        // Added during Change Review: the twelve-column fixture never reaches
+        // the one-cell-per-line fallback — `3n + 1` is 37, so `avail` is 41 and
+        // 21, both at least `n`, and the pipe grammar is used at both widths. A
+        // fifteen-column one is what measures the other half of the scenario's
+        // claim: its `4n + 1` of 61 the 78-column interior clears and the
+        // 58-column one does not, so the fallback is what draws at 60.
+        let cells15 = format!(" {wide_cell} |").repeat(15);
+        let fallback_source = format!("|{cells15}\n|{}\n|{cells15}\n", "---|".repeat(15));
+        let fallback_d = detail_dashboard(fallback_source, 0, Route::Detail);
+
+        let fbuf120 = render_at(120, 20, &fallback_d);
+        for y in 1..=18u16 {
+            for x in [39u16, 40, 119] {
+                let s = cell(&fbuf120, x, y).symbol();
+                assert!(
+                    matches!(s, "│" | "┌" | "└" | "┐" | "┘"),
+                    "fallback x={x} y={y}: {s:?}"
+                );
+            }
+        }
+        let fbuf60 = render_at(60, 20, &fallback_d);
+        for y in 1..=18u16 {
+            for x in [0u16, 59] {
+                let s = cell(&fbuf60, x, y).symbol();
+                assert!(
+                    matches!(s, "│" | "┌" | "└" | "┐" | "┘"),
+                    "fallback x={x} y={y}: {s:?}"
+                );
+            }
+        }
+        // The two widths take the two different paths, which is the whole point
+        // of this fixture: pipes at 120, none at 60.
+        assert!(
+            (4..=17u16).any(|y| row_text(&fbuf120, y).contains('|')),
+            "at 120 the fifteen-column table still fits the pipe grammar"
+        );
+        assert!(
+            (4..=17u16).all(|y| !row_text(&fbuf60, y).contains('|')),
+            "at 60 the fifteen-column table must degrade to one cell per line"
+        );
+        assert!(
+            (4..=17u16).any(|y| row_text(&fbuf60, y).contains('x')),
+            "at 60 the fallback must still draw the cells"
+        );
     }
 
     #[test]

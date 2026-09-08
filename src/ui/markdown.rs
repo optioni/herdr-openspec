@@ -965,7 +965,7 @@ fn narrow_rows(table: &Table, width: usize) -> Vec<Vec<Segment>> {
     let mut out = Vec::new();
     for row in &table.rows {
         for cell in &row.cells {
-            if cell.iter().all(|r| r.text.trim().is_empty()) {
+            if cell.iter().all(|r| r.text.is_empty()) {
                 continue;
             }
             out.extend(wrap_prose(cell, width));
@@ -2306,7 +2306,10 @@ mod tests {
         let mut cells_per_body_row: Vec<usize> = Vec::new();
         let mut count = 0usize;
         let mut in_row = false;
-        for event in Parser::new_ext(source, Options::ENABLE_TABLES) {
+        for event in Parser::new_ext(
+            source,
+            Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH,
+        ) {
             match event {
                 Event::Start(Tag::TableRow) => {
                     in_row = true;
@@ -2375,15 +2378,24 @@ mod tests {
         // At the widest width the fallback still covers, every cell is whole and
         // on its own line, in row-major order — the property the sweep above can
         // only bound.
+        // Added during Change Review: the fallback's header cells "still
+        // carrying `strong`" had no assertion at all, so emitting every segment
+        // plain left the suite green.
+        let at8: Vec<(String, bool)> = lines(source, 8)
+            .iter()
+            .map(|l| (l.text(), l.segments.iter().all(|s| s.face.strong)))
+            .filter(|(text, _)| !text.is_empty())
+            .collect();
         assert_eq!(
-            non_blank(&lines(source, 8)),
+            at8,
             vec![
-                "Gate".to_string(),
-                "Runner".to_string(),
-                "Format".to_string(),
-                "cargo".to_string(),
-                "fmt".to_string(),
-            ]
+                ("Gate".to_string(), true),
+                ("Runner".to_string(), true),
+                ("Format".to_string(), false),
+                ("cargo".to_string(), false),
+                ("fmt".to_string(), false),
+            ],
+            "the fallback keeps the header row's `strong` and gives no body cell one"
         );
         for width in 9..=10u16 {
             let texts = non_blank(&lines(source, width));
@@ -2497,6 +2509,87 @@ mod tests {
                         seg.text
                     );
                 }
+            }
+        }
+    }
+
+    /// `markdown-render` :: "A table renders as aligned columns sized to the
+    /// region" -> "A table inside a container".
+    ///
+    /// **Added during Change Review.** The container-prefix branch of
+    /// `emit_table` was implemented and normatively specified — "every emitted
+    /// line SHALL carry that prefix, continuation lines included", and "`total`
+    /// is then measured against the reduced width" — but no fixture in the tree
+    /// put a table inside a quote or an item, so replacing the prefix push with
+    /// a discard left every test green.
+    #[test]
+    fn a_table_inside_a_container_carries_the_prefix_on_every_line() {
+        let fits = "| Gate | Runner |\n|---|---|\n| Format | cargo fmt |\n";
+        let quoted: String = fits.lines().map(|l| format!("> {l}\n")).collect();
+        let item: String = fits
+            .lines()
+            .enumerate()
+            .map(|(i, l)| {
+                if i == 0 {
+                    format!("- {l}\n")
+                } else {
+                    format!("  {l}\n")
+                }
+            })
+            .collect();
+
+        for width in [58, 78] {
+            // A block quote: every line, continuations included, carries `> `.
+            let quoted_lines = non_blank(&lines(&quoted, width));
+            assert_eq!(quoted_lines.len(), 3, "width {width}");
+            for text in &quoted_lines {
+                assert!(text.starts_with("> "), "width {width}: {text:?}");
+                assert_eq!(columns(text), 2 + 22, "width {width}: {text:?}");
+                assert!(columns(text) <= width as usize, "width {width}");
+            }
+
+            // A list item: the item's own marker on the first line and its
+            // hanging indent on the rest, exactly as a flow block's lines carry
+            // them.
+            let item_lines = non_blank(&lines(&item, width));
+            assert_eq!(item_lines.len(), 3, "width {width}");
+            assert!(item_lines[0].starts_with("- "), "width {width}");
+            for text in &item_lines[1..] {
+                assert!(
+                    text.starts_with("  ") && !text.starts_with("- "),
+                    "width {width}: {text:?}"
+                );
+            }
+            for text in &item_lines {
+                assert_eq!(columns(text), 2 + 22, "width {width}: {text:?}");
+            }
+        }
+
+        // `total` is measured against the **reduced** width, not the region's:
+        // the same table nested in a quote allocates two fewer columns than it
+        // does at the top level, which is what makes the "at most `width`"
+        // promise hold through a container. This is the leg that fails if the
+        // prefix is carried but the width is not reduced for it.
+        let cell_text = "alpha bravo charlie delta echo foxtrot golf hotel india juliett kilo \
+                         lima mike november oscar papa";
+        let wide = format!("| key | value |\n|---|---|\n| k | {cell_text} |\n");
+        let wide_quoted: String = wide.lines().map(|l| format!("> {l}\n")).collect();
+        for width in [58, 78] {
+            let plain = non_blank(&lines(&wide, width));
+            let nested = non_blank(&lines(&wide_quoted, width));
+            assert_eq!(
+                allocated_widths(&plain[1]),
+                vec![3, width as usize - 10],
+                "width {width}: the top-level allocation"
+            );
+            assert_eq!(
+                allocated_widths(&nested[1][2..]),
+                vec![3, width as usize - 12],
+                "width {width}: the nested allocation must lose the prefix's columns"
+            );
+            for text in &nested {
+                assert!(text.starts_with("> "), "width {width}: {text:?}");
+                assert_eq!(columns(text), width as usize, "width {width}: {text:?}");
             }
         }
     }

@@ -151,8 +151,16 @@ degraded-states row.
   turned into thirty 200-character task lines, so neither the checklist's wrap nor the
   progress bar's gauge can reach the border
 - **AND** the same holds again with the source replaced by a twelve-column table whose every
-  cell is 200 characters long, so neither the pipe grammar nor the one-cell-per-line
-  fallback it degrades to can reach the border
+  cell is 200 characters long — which the pipe grammar fits at both interiors, spending each
+  exactly — and once more with a fifteen-column one, whose `4n + 1` of 61 the 78-column
+  interior clears and the 58-column one does not, so **both** the pipe grammar and the
+  one-cell-per-line fallback it degrades to are measured against the border
+
+  Corrected during Change Review: the first draft claimed the twelve-column fixture
+  exercised the fallback. It does not — `3n + 1` is 37, so `avail` is 41 and 21, both at
+  least `n`, and the pipe grammar is used at both widths. The fifteen-column table is what
+  makes the sentence true, and the two are kept side by side because the twelve-column one
+  is the tightest pipe-grammar case there is.
 
 #### Scenario: A degenerate detail interior draws nothing and does not panic
 

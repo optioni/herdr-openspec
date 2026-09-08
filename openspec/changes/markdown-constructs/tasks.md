@@ -387,7 +387,7 @@ multi-subject exception whose floors live on the `Makefile` line.
 ## 9. Change Review
 <!-- kind: operational -->
 
-- [ ] 9.1 CHECK: Dispatch an independent reviewer — not a fork of the implementing session —
+- [x] 9.1 CHECK: Dispatch an independent reviewer — not a fork of the implementing session —
   with only `proposal.md`, the four spec deltas, `design.md`, `tasks.md`, and the diff.
   Concentration points for this change, beyond the standing ones: (a) every table scenario has
   a test that would go red if `emit_table` were deleted, not one that passes on an empty
@@ -398,10 +398,29 @@ multi-subject exception whose floors live on the `Makefile` line.
   names a `Color` literal; (d) the narrow fallback fires at a width where it actually fires;
   (e) every test name cited in an artifact resolves to a real `fn` in the tree.
 
-- [ ] 9.2 CHANGE: Fix every CRITICAL, resolve or accept each WARNING with a one-line reason,
+- [x] 9.2 CHANGE: Fix every CRITICAL, resolve or accept each WARNING with a one-line reason,
   note SUGGESTIONs, and re-run the affected tests.
 
-- [ ] 9.3 VERIFY: Confirm no blocking or unowned finding remains.
+  **Outcome: 0 CRITICAL, 3 WARNINGs (all fixed), 3 SUGGESTIONs (two applied, one recorded).**
+  Every WARNING was a test that could not fail, each demonstrated by the reviewer with its
+  own mutation — this project's own recorded defect class, and the reason the review is
+  dispatched to a session that did not write the code.
+
+  | Severity | Finding | Resolution |
+  |---|---|---|
+  | WARNING | `emit_table`'s container-prefix branch was specified and implemented but exercised by no fixture: replacing the prefix push with a discard left all 1120 tests green | Added `a_table_inside_a_container_carries_the_prefix_on_every_line`, covering a quote and a list item at both widths, with the leg that fails if the prefix is carried but the width is not reduced for it. Re-ran the reviewer's mutation: it now fails. |
+  | WARNING | the narrow fallback's "header cells still carrying `strong`" had no face assertion: emitting every segment plain left all 1120 tests green | Added the face column to `a_narrow_region_renders_one_cell_per_line`'s width-8 leg. Re-ran the mutation: it now fails. |
+  | WARNING | `detail-scroll`'s border scenario claimed its twelve-column table exercised the one-cell-per-line fallback; it does not — `3n + 1` is 37, so `avail` is 41 and 21, both at least `n` | Added a fifteen-column leg, whose `4n + 1` of 61 the 78-column interior clears and the 58-column one does not, asserting pipes at 120 and none at 60; the spec bullet is corrected with a `Corrected during Change Review` note, on the convention `degraded-coverage` already uses. |
+  | SUGGESTION | the ragged-table guard drove the parser with `ENABLE_TABLES` alone, not the set `fold` passes | Applied: it now passes `ENABLE_TABLES \| ENABLE_STRIKETHROUGH`. |
+  | SUGGESTION | `narrow_rows` skipped a whitespace-only cell while the spec says "an empty cell emitting nothing" | Applied: the guard is now `r.text.is_empty()`. Output is identical either way — `wrap_prose` emits no line for a whitespace-only cell — so this closes a wording gap, not a behaviour one. |
+  | SUGGESTION | group 10's work landed before the review's diff was cut | Recorded: group 10 ran ahead of group 9 because its `AGENTS.md` sentence is independent of every finding, and the reviewer confirmed the landed sentence matches 10.2. |
+
+  `MDWIDTHS`' floor is re-measured once more for the added test: `MD_MIN` 33 -> 34.
+
+- [x] 9.3 VERIFY: Confirm no blocking or unowned finding remains.
+
+  No CRITICAL was raised, every WARNING is fixed rather than accepted, and both applicable
+  SUGGESTIONs are applied. Nothing is deferred to a later change.
 
 ---
 
