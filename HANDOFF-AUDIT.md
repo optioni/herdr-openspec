@@ -42,7 +42,12 @@ and archived in the order below.
 
 All five were implemented and archived, `make check` green at each boundary.
 
-## One deferred item, deliberately not fixed
+## Three deferred items, deliberately not fixed
+
+None belongs to any of the five changes. The first was a scoping decision inside
+`view-fidelity`; the second and third are unowned and surfaced during the batch.
+
+### The first — display-width primitives' placement
 
 `view-fidelity`'s display-width primitives (`columns`, `truncate_columns`) live in
 `src/ui/layout.rs` under `responsive-layout`. They *should* be their own capability
@@ -64,7 +69,7 @@ touches every view file. The resolution point is recorded in `view-fidelity`'s
 later change that genuinely needs to touch `dashboard-loop`'s pure set can carry the
 move as a rider.
 
-### A second deferred item — `nosleep.sh`, unowned
+### The second — `nosleep.sh` gaps, unowned
 
 Found during `doc-conformance` and deliberately **not** absorbed, because it is not
 covered by any of the five changes' specs. It belongs to `quality-gates`:
@@ -78,7 +83,7 @@ covered by any of the five changes' specs. It belongs to `quality-gates`:
 Note for whoever picks this up: `openspec` is not on a non-login `PATH` here — it is
 at `~/.nvm/versions/node/v24.18.0/bin/openspec` (v1.12.0). Source nvm first.
 
-### A third deferred item — three load-sensitive tests, unowned
+### The third — three load-sensitive tests, unowned
 
 Three acceptance tests in `src/ui/mod.rs`'s `ui::tests::wiring` module fail under CPU
 contention. **Attribution is settled and it is not this batch:** `git log -L` on the
