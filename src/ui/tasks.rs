@@ -2,9 +2,18 @@
 //! `ui::detail` and `ui::markdown` use — no styling type, no I/O API, every
 //! public function parameterised by an interior width. See
 //! `openspec/changes/tasks-tab/design.md` -> Boundaries and Contracts.
+//!
+//! Every measurement and truncation here reaches the crate's one display-
+//! width measure, `crate::ui::layout::columns`/`truncate_columns`, and
+//! nowhere counts `char`s. See
+//! `openspec/changes/view-fidelity/specs/responsive-layout/spec.md` ->
+//! "Display width is measured in terminal columns by one pair of
+//! primitives".
 
-/// `<gauge> <count cell> <percent cell>`, at most `width` chars, dropping
-/// whole fields as it narrows. Empty string at width 0.
+use crate::ui::layout::{columns, truncate_columns};
+
+/// `<gauge> <count cell> <percent cell>`, at most `width` display columns,
+/// dropping whole fields as it narrows. Empty string at width 0.
 ///
 /// The count cell is [`crate::ui::list::progress_cell`] — not a second
 /// `format!` of the same pair — so the bar, the detail header, and the
@@ -23,7 +32,7 @@ pub fn progress_bar(progress: &crate::tasks::Progress, width: u16) -> String {
     }
     let w = i64::from(width);
     let count_cell = crate::ui::list::progress_cell(progress);
-    let count_len = count_cell.chars().count() as i64;
+    let count_len = columns(&count_cell) as i64;
 
     if progress.total == 0 {
         return if w >= count_len {
@@ -35,7 +44,7 @@ pub fn progress_bar(progress: &crate::tasks::Progress, width: u16) -> String {
 
     let percent = percent_of(progress);
     let percent_cell = format!("{percent}%");
-    let percent_len = percent_cell.chars().count() as i64;
+    let percent_len = columns(&percent_cell) as i64;
 
     // Full form: gauge + ' ' + count cell + ' ' + percent cell.
     let full_gauge_len = w - count_len - percent_len - 2;
@@ -122,7 +131,7 @@ fn heading_line(heading: &crate::tasks::Heading, width: u16) -> crate::ui::markd
     // against. Only reached when the text is already too long, so this
     // never pads a heading that already fits.
     let w = width as usize;
-    let text = if text.chars().count() > w {
+    let text = if columns(&text) > w {
         crate::ui::list::pad_or_truncate_right(&text, w)
     } else {
         text
@@ -142,43 +151,87 @@ fn heading_line(heading: &crate::tasks::Heading, width: u16) -> crate::ui::markd
     }
 }
 
-/// Word-wrap `text` to `col` columns: wrap at spaces, hard-split a word
-/// longer than `col`, and never lose a tail. Private to this module —
-/// reusing `ui::markdown::wrap_prose` would mean making its internal
-/// `Run` and folder shapes public for a caller that carries no faces at
-/// all, widening `MDSEAM`'s confined module for no reason. `col == 0` is
-/// never reached: every caller in this module has already fallen back to
-/// the truncated-glyph line before wrapping would be attempted with no
-/// column to wrap into.
+/// Split `s` at a grapheme-cluster boundary into a prefix whose [`columns`]
+/// is at most `width`, and the remainder — never splitting a cluster and
+/// never panicking. Mirrors `ui::markdown::split_at_columns` exactly, field
+/// for field; duplicated rather than shared for the same reason
+/// [`wrap_plain`]'s own doc comment gives for the whole wrap: a caller here
+/// carries no faces at all, and importing `ui::markdown`'s private helper
+/// would widen `MDSEAM`'s confined module for no reason.
+///
+/// When even the first cluster does not fit — it alone measures more than
+/// `width` columns — it is **dropped** rather than emitted, per
+/// `tasks-checklist`'s carve-out for an over-wide token: the returned
+/// prefix is empty and the remainder skips the dropped cluster, so the
+/// caller always makes progress rather than looping on it forever.
+fn split_at_columns(s: &str, width: usize) -> (&str, &str) {
+    let prefix = truncate_columns(s, width);
+    if !prefix.is_empty() || s.is_empty() {
+        return (prefix, &s[prefix.len()..]);
+    }
+    // `truncate_columns` returned empty on non-empty `s`: the first
+    // grapheme cluster alone is wider than `width`. Find its byte length by
+    // growing the budget one column at a time until something fits —
+    // bounded by `s`'s own total columns, at which point `truncate_columns`
+    // returns `s` whole, so this always terminates.
+    let total = columns(s);
+    let mut probe = width + 1;
+    loop {
+        let candidate = truncate_columns(s, probe);
+        if !candidate.is_empty() {
+            return ("", &s[candidate.len()..]);
+        }
+        if probe >= total {
+            return ("", "");
+        }
+        probe += 1;
+    }
+}
+
+/// Word-wrap `text` to `col` display columns: wrap at spaces, hard-split a
+/// word longer than `col` at a grapheme-cluster boundary, and never lose a
+/// tail. Private to this module — reusing `ui::markdown::wrap_prose` would
+/// mean making its internal `Run` and folder shapes public for a caller
+/// that carries no faces at all, widening `MDSEAM`'s confined module for no
+/// reason. `col == 0` is never reached: every caller in this module has
+/// already fallen back to the truncated-glyph line before wrapping would
+/// be attempted with no column to wrap into.
 fn wrap_plain(text: &str, col: usize) -> Vec<String> {
     if col == 0 {
         return vec![String::new()];
     }
     let mut lines: Vec<String> = Vec::new();
-    let mut current: Vec<char> = Vec::new();
+    let mut current = String::new();
+    let mut current_cols = 0usize;
     for word in text.split(' ').filter(|w| !w.is_empty()) {
-        let mut remaining: Vec<char> = word.chars().collect();
+        let mut remaining = word;
         loop {
+            let word_cols = columns(remaining);
             if current.is_empty() {
-                if remaining.len() <= col {
-                    current = remaining;
+                if word_cols <= col {
+                    current = remaining.to_string();
+                    current_cols = word_cols;
                     break;
                 }
-                let (head, tail) = remaining.split_at(col);
-                lines.push(head.iter().collect());
-                remaining = tail.to_vec();
+                let (chunk, rest) = split_at_columns(remaining, col);
+                lines.push(chunk.to_string());
+                remaining = rest;
+                if remaining.is_empty() {
+                    break;
+                }
                 continue;
             }
-            if current.len() + 1 + remaining.len() <= col {
+            if current_cols + 1 + word_cols <= col {
                 current.push(' ');
-                current.extend(remaining);
+                current.push_str(remaining);
+                current_cols += 1 + word_cols;
                 break;
             }
-            lines.push(current.iter().collect());
-            current = Vec::new();
+            lines.push(std::mem::take(&mut current));
+            current_cols = 0;
         }
     }
-    lines.push(current.iter().collect());
+    lines.push(current);
     lines
 }
 
@@ -263,7 +316,10 @@ pub fn lines(
     // at all, because a heading with nothing under it anywhere is not a
     // section.
     if tasks.progress().total == 0 {
-        out.push(plain_line("No tasks yet".to_string()));
+        out.push(plain_line(crate::ui::list::pad_or_truncate_right(
+            "No tasks yet",
+            width as usize,
+        )));
         return out;
     }
 
@@ -1057,7 +1113,7 @@ mod tests {
             "content area 13: {texts:?}"
         );
 
-        // Frames 1 and 2 both produce a content area of 0.
+        // A frame of 1 or 2 columns both produce a content area of 0.
         let out = lines(source, &progress, 0);
         assert!(out.is_empty(), "content area 0: {out:?}");
 
