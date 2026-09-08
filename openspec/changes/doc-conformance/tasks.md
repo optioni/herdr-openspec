@@ -153,12 +153,12 @@ grep -c 'make gates' openspec/config.yaml
 → `1` occurrence of the phrase, `0` fixture repositories on disk, `0` mentions of `make gates`.
 **RED on both legs.**
 
-- [ ] 7.1 RED: Write `context_fixture_claim` and `context_names_every_gate_tier` over the real files, plus `fixture_repo_makes_claim_true` over a synthetic listing. The context block is sliced as the text between `context: |` and the next top-level key, failing loudly if that boundary is not found (design.md → Decision 6); `check:`'s prerequisites are parsed from the `Makefile`, and a target whose recipe has more than one command line is satisfied only by `make <target>`. Confirm both real-file tests fail.
-- [ ] 7.2 GREEN: In `openspec/config.yaml`'s `context`, replace "fixture repositories under `tests/fixtures/`" with the three mechanisms `SPEC.md` § Fixtures actually names, and add `make gates` to the command list so all five `check:` prerequisites are represented.
-- [ ] 7.3 CHECK: Contract gate — this block is injected into every OpenSpec agent's prompt. Confirm `rules:` and `operations:` are byte-unchanged: `git diff -U0 openspec/config.yaml | grep -c '^[+-]' ` counts only lines inside the `context` block.
-- [ ] 7.4 VERIFY: `/bin/sh scripts/gates/openspec-untouched.sh` — exit 0, confirming the edit left no untracked file under `openspec/`.
-- [ ] 7.5 REFACTOR: State that no refactor was needed.
-- [ ] 7.6 Run `cargo test --test doc_contract` — green, no regressions. Commit.
+- [x] 7.1 RED: Write `context_fixture_claim` and `context_names_every_gate_tier` over the real files, plus `fixture_repo_makes_claim_true` over a synthetic listing. The context block is sliced as the text between `context: |` and the next top-level key, failing loudly if that boundary is not found (design.md → Decision 6); `check:`'s prerequisites are parsed from the `Makefile`, and a target whose recipe has more than one command line is satisfied only by `make <target>`. Confirm both real-file tests fail.
+- [x] 7.2 GREEN: In `openspec/config.yaml`'s `context`, replace "fixture repositories under `tests/fixtures/`" with the three mechanisms `SPEC.md` § Fixtures actually names, and add `make gates` to the command list so all five `check:` prerequisites are represented.
+- [x] 7.3 CHECK: Contract gate — this block is injected into every OpenSpec agent's prompt. Confirm `rules:` and `operations:` are byte-unchanged: `git diff -U0 openspec/config.yaml | grep -c '^[+-]' ` counts only lines inside the `context` block.
+- [x] 7.4 VERIFY: `/bin/sh scripts/gates/openspec-untouched.sh` — exit 0, confirming the edit left no untracked file under `openspec/`.
+- [x] 7.5 REFACTOR: State that no refactor was needed.
+- [x] 7.6 Run `cargo test --test doc_contract` — green, no regressions. Commit.
 
 ## 8. `HANDOFF.md` becomes a closed historical record
 <!-- kind: operational -->
