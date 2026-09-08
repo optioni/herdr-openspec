@@ -456,6 +456,38 @@ expect = "OPENSPEC-UNTOUCHED FAIL: an untracked file exists inside openspec/"
 why = "an untracked file inside openspec/ must fail the untracked-file sweep; the scratch copy needs its own git history for the gate's own git rev-parse to succeed at all (design.md -> Decision 6a)"
 
 [[control]]
+id = "palette-outside"
+script = "palette.sh"
+env = ""
+plant_file = "src/ui/view.rs"
+plant_find = "//! The render seam's pure side: `render(frame, &Dashboard)`. Performs no"
+plant_replace = '''//! The render seam's pure side: `render(frame, &Dashboard)`. Performs no
+// use ratatui::style::Color;'''
+expect = "PALETTE FAIL: a ratatui Color is named outside"
+why = "a ratatui Color named outside src/ui/palette.rs must fail the confinement sweep - the change's outer-loop acceptance test"
+
+[[control]]
+id = "palette-rgb"
+script = "palette.sh"
+env = ""
+plant_file = "src/ui/palette.rs"
+plant_find = "pub fn style("
+plant_replace = '''// Color::Rgb(1,2,3)
+pub fn style('''
+expect = "names a non-ANSI colour"
+why = "an RGB triple inside the palette itself must fail the second leg - the named-ANSI-index requirement has its own failure mode and therefore its own control"
+
+[[control]]
+id = "palette-unswept"
+script = "palette.sh"
+env = ""
+plant_file = "scripts/gates/noio-view.sh"
+plant_find = "src/ui/markdown.rs src/ui/palette.rs"
+plant_replace = "src/ui/markdown.rs"
+expect = "does not list src/ui/palette.rs in its PURE set"
+why = "the two standing view gates hard-code their PURE lists and only check that the files they name exist, so a forgotten edit would leave the new module unswept while both still print OK - nothing else in the tree can see that gap"
+
+[[control]]
 id = "readonly-ui-write"
 script = "readonly-ui.sh"
 plant_file = "src/ui/mod.rs"

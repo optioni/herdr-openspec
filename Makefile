@@ -56,6 +56,7 @@ gates:
 	/bin/sh scripts/gates/notabseam.sh
 	/bin/sh scripts/gates/nowaiver.sh
 	/bin/sh scripts/gates/openspec-untouched.sh
+	/bin/sh scripts/gates/palette.sh
 	/bin/sh scripts/gates/readonly-ui.sh
 	/bin/sh scripts/gates/readseam.sh
 	/bin/sh scripts/gates/taskseam.sh

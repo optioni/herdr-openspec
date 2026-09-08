@@ -15,7 +15,7 @@ exist yet: that a `Color` named anywhere but the palette fails the build. Its ha
 existing planted-defect tier (`tests/gate-controls.toml` + `tests/gate_controls.rs`), and no
 collaborator is replaced — the test copies the real tree.
 
-- [ ] 0.1 Add `scripts/gates/palette.sh` with exactly this content, and add
+- [x] 0.1 Add `scripts/gates/palette.sh` with exactly this content, and add
       `/bin/sh scripts/gates/palette.sh` to the `Makefile`'s `gates:` recipe in alphabetical
       position (after `openspec-untouched.sh`, before `readonly-ui.sh`):
 
@@ -74,7 +74,7 @@ collaborator is replaced — the test copies the real tree.
       | third leg, `PURE` lists not yet edited | 1 | `PALETTE FAIL: scripts/gates/noio-view.sh does not list src/ui/palette.rs in its PURE set` |
       | third leg, both `PURE` lists edited | 0 | `PALETTE OK: … swept by NOIO-VIEW and COLWIDTH` |
 
-- [ ] 0.2 RED: Add **three** `[[control]]` rows to `tests/gate-controls.toml`, one per failure
+- [x] 0.2 RED: Add **three** `[[control]]` rows to `tests/gate-controls.toml`, one per failure
       mode the gate has — several controls per script is supported, as `scripts/gates/wired.sh`
       already shows. `palette-outside`: `plant_file = "src/ui/view.rs"`, a `plant_find` of that
       file's first doc-comment line, a `plant_replace` appending `// use ratatui::style::Color;`,
@@ -90,7 +90,7 @@ collaborator is replaced — the test copies the real tree.
       `cargo test --test gate_controls palette`: controls are table rows iterated by one
       `#[test]`, so no test name contains `palette` and that filter runs zero tests
       (`cargo test --test gate_controls palette -- --list` at HEAD → `0 tests`, exit 0).
-- [ ] 0.3 Confirm the failure is the missing module and not a misconfigured harness: the
+- [x] 0.3 Confirm the failure is the missing module and not a misconfigured harness: the
       baseline-run assertion names `the exclusion has nothing to exclude`, and
       `cargo test --test ci_workflow` is **green**, so the recipe/script correspondence is
       already satisfied.
