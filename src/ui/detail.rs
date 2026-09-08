@@ -235,7 +235,9 @@ mod tests {
     use super::{Tab, content_lines, header_row, tab_bar};
     use crate::changes::fixture;
     use crate::tasks::Progress;
-    use crate::ui::app::Detail;
+    use crate::testutil::{cell, render_at, row_text};
+    use crate::ui::app::{Dashboard, Detail, Filter, Route};
+    use crate::ui::layout::columns;
 
     fn detail(source: &str, problems: Vec<String>) -> Detail {
         Detail {
@@ -254,6 +256,60 @@ mod tests {
     fn artifacts(ids: &[&str]) -> Vec<crate::changes::ArtifactRef> {
         let pairs: Vec<(&str, &[&str])> = ids.iter().map(|id| (*id, &[][..])).collect();
         fixture::with_artifacts(fixture::active("x", 0, 0), &pairs).artifacts
+    }
+
+    fn empty_filter() -> Filter {
+        Filter {
+            query: String::new(),
+            active: false,
+        }
+    }
+
+    /// A `Dashboard` at `Route::Detail` with exactly one active change
+    /// selected — the shape every full-frame render test in this module's
+    /// "measuring in columns" section needs. Mirrors `ui::view`'s own
+    /// private `dashboard_with_detail` test helper field for field;
+    /// duplicated rather than shared because that helper is private to
+    /// `ui::view`'s own test module and this module builds no `Dashboard`
+    /// anywhere else.
+    fn dashboard_at_detail(change: crate::changes::Change, detail: Detail) -> Dashboard {
+        Dashboard {
+            repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
+            searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
+            changes: fixture::set(vec![change], Vec::new(), Vec::new()),
+            route: Route::Detail,
+            quit: false,
+            selected: 0,
+            filter: empty_filter(),
+            detail,
+            refresh: crate::ui::app::Refresh {
+                requested: false,
+                reload: false,
+                startup: Vec::new(),
+                problems: Vec::new(),
+            },
+            agents: crate::agents::AgentSnapshot {
+                agents: Vec::new(),
+                reachable: false,
+                stalled: false,
+                problem: None,
+            },
+            agent_names: crate::state::Mapping::default(),
+            launch: crate::ui::app::Launch {
+                pending: None,
+                in_flight: false,
+                problems: Vec::new(),
+            },
+            file_mode: false,
+        }
+    }
+
+    /// Columns `range` of `text`, by character index — never by byte
+    /// offset. Mirrors `ui::view`'s own private test-only helper of the
+    /// same name and the same reason: a box-drawing border or a header's
+    /// `…` is multi-byte.
+    fn cols(text: &str, range: std::ops::Range<usize>) -> String {
+        text.chars().skip(range.start).take(range.len()).collect()
     }
 
     #[test]
@@ -1300,16 +1356,319 @@ mod tests {
     }
 
     /// `artifact-content` :: total function, no panic — `change: None`, an empty `Detail`,
-    /// and width `0`, per task 5.3. Also driven at 78 and 58, both of which behave
-    /// identically to width `0` here (an empty source and no problems is always "No content
-    /// yet", regardless of width).
+    /// and width `0`, per task 5.3. Also driven at 78 and 58 — `No content yet` is now
+    /// padded like every neighbouring line (`view-fidelity`'s repair): at width `0` there is
+    /// no room even for the literal, so the line is empty; at 78 and 58 it is padded with
+    /// trailing spaces out to the full width.
     #[test]
     fn content_lines_never_panics_with_no_change_an_empty_detail_and_zero_width() {
         let d = detail("", Vec::new());
-        for width in [0, 78, 58] {
+        let lines = content_lines(&d, None, 0);
+        assert_eq!(lines.len(), 1);
+        assert_eq!(lines[0].text(), "");
+        for width in [78, 58] {
             let lines = content_lines(&d, None, width);
             assert_eq!(lines.len(), 1, "width {width}");
-            assert_eq!(lines[0].text(), "No content yet", "width {width}");
+            let want = format!("No content yet{}", " ".repeat(width as usize - 14));
+            assert_eq!(lines[0].text(), want, "width {width}");
+        }
+    }
+
+    // --- view-fidelity group 5: the header and content measure in columns ---------------
+
+    /// `detail-header` :: "A CJK change name keeps the header inside its region at both
+    /// mandated widths" — a ten-character, twenty-display-column name.
+    #[test]
+    fn a_cjk_change_name_keeps_the_header_inside_its_region_at_both_mandated_widths() {
+        let name = "日本語の変更名前です";
+        let progress = Progress {
+            completed: 4,
+            total: 9,
+        };
+        for width in [78, 58] {
+            let got = header_row(name, "tdd", &progress, width);
+            assert_eq!(columns(&got), width as usize, "width {width}: {got:?}");
+            assert!(got.ends_with("[4/9]"), "width {width}: {got:?}");
+            assert!(got.contains("(tdd)"), "width {width}: {got:?}");
+            // Discriminating: proves the padding was computed in columns rather than in
+            // characters — a `chars().count()`-based budget would have produced a header
+            // whose `chars().count()` also equalled `width`, dropping the schema and
+            // progress cells off the row instead.
+            assert!(
+                got.chars().count() < columns(&got),
+                "width {width}: {got:?} was not measured in columns"
+            );
+        }
+    }
+
+    /// `detail-header` :: "The header reaches the buffer without crossing the region
+    /// border". The tail `" (tdd) [4/9]"` is checked by exact column-indexed slicing (it is
+    /// pure ASCII, one buffer cell per character); the CJK name field itself is not
+    /// reconstructed by slicing `row_text`'s per-column output, because a two-column
+    /// grapheme cluster's own trailing cell is reset to a single blank space, which would
+    /// otherwise be misread as a character the name never had.
+    #[test]
+    fn the_header_reaches_the_buffer_without_crossing_the_region_border() {
+        let name = "日本語の変更名前です";
+        let tail = " (tdd) [4/9]";
+        let change = fixture::active(name, 4, 9);
+        let d = dashboard_at_detail(change, detail("", Vec::new()));
+
+        let buf120 = render_at(120, 20, &d);
+        assert_eq!(cols(&row_text(&buf120, 2), 107..107 + tail.len()), tail);
+        assert_eq!(cell(&buf120, 118, 2).symbol(), "]");
+        assert_eq!(
+            cell(&buf120, 119, 2).symbol(),
+            "│",
+            "no content drawn past the detail block's own right border"
+        );
+        assert_eq!(cell(&buf120, 39, 2).symbol(), "│", "list block's right border");
+        assert_eq!(cell(&buf120, 40, 2).symbol(), "│", "detail block's left border");
+
+        let buf60 = render_at(60, 20, &d);
+        assert_eq!(cols(&row_text(&buf60, 2), 47..47 + tail.len()), tail);
+        assert_eq!(cell(&buf60, 58, 2).symbol(), "]");
+        assert_eq!(
+            cell(&buf60, 59, 2).symbol(),
+            "│",
+            "no content drawn past the detail block's own right border"
+        );
+    }
+
+    /// `detail-header` :: "The header is total over adversarial names at every width".
+    #[test]
+    fn header_row_is_total_over_adversarial_names_at_every_width() {
+        let family_emoji = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466}";
+        let names = [
+            "日".repeat(200),
+            family_emoji.to_string(),
+            "e\u{0301}\u{0301}\u{0301}\u{0301}\u{0301}".to_string(),
+            "a\u{0}b".to_string(),
+            String::new(),
+        ];
+        let progress = Progress {
+            completed: 4,
+            total: 9,
+        };
+        for name in &names {
+            for width in 0u16..=130 {
+                let got = header_row(name, "tdd", &progress, width);
+                if width == 0 {
+                    assert_eq!(got, "", "name {name:?} width {width}");
+                } else {
+                    assert_eq!(
+                        columns(&got),
+                        width as usize,
+                        "name {name:?} width {width}: {got:?}"
+                    );
+                }
+                match width {
+                    78 | 58 | 13 => {
+                        assert!(got.contains("(tdd)"), "name {name:?} width {width}: {got:?}");
+                        assert!(got.contains("[4/9]"), "name {name:?} width {width}: {got:?}");
+                    }
+                    12 | 7 => {
+                        assert!(!got.contains("(tdd"), "name {name:?} width {width}: {got:?}");
+                        assert!(got.contains("[4/9]"), "name {name:?} width {width}: {got:?}");
+                    }
+                    6 | 1 => {
+                        assert!(!got.contains("(tdd"), "name {name:?} width {width}: {got:?}");
+                        assert!(!got.contains("[4/"), "name {name:?} width {width}: {got:?}");
+                    }
+                    _ => {}
+                }
+            }
+            // The mandated pair, asserted explicitly by this sweep too.
+            for width in [78, 58] {
+                let got = header_row(name, "tdd", &progress, width);
+                assert_eq!(columns(&got), width as usize, "name {name:?} width {width}");
+            }
+        }
+    }
+
+    /// `artifact-content` :: "`No content yet` does not eat the border at a narrow frame".
+    #[test]
+    fn no_content_yet_does_not_eat_the_border_at_a_narrow_frame() {
+        let change = fixture::with_artifacts(fixture::active("x", 0, 0), &[("proposal", &[])]);
+        let d = dashboard_at_detail(change, detail("", Vec::new()));
+
+        let cases: [(u16, usize, &str); 3] = [
+            (15, 13, "No content y…"),
+            (14, 12, "No content …"),
+            (13, 11, "No content…"),
+        ];
+        for (frame, area_width, want) in cases {
+            let buf = render_at(frame, 20, &d);
+            let row = cols(&row_text(&buf, 4), 1..1 + area_width);
+            assert_eq!(row, want, "frame {frame}");
+            assert_eq!(columns(&row), area_width, "frame {frame}");
+            assert_eq!(
+                cell(&buf, frame - 1, 4).symbol(),
+                "│",
+                "frame {frame}: the region's right border was overwritten"
+            );
+        }
+
+        // The mandated pair: the literal fits whole and is padded to the full interior.
+        for (frame, width) in [(120u16, 78usize), (60u16, 58usize)] {
+            let buf = render_at(frame, 20, &d);
+            let content_x = if frame == 120 { 41 } else { 1 };
+            let row = cols(&row_text(&buf, 4), content_x..content_x + width);
+            let want = format!("No content yet{}", " ".repeat(width - 14));
+            assert_eq!(row, want, "width {width}");
+        }
+
+        // At 2x20 and 1x20 the content area collapses to zero columns: no panic, and the
+        // literal — which cannot fit — is drawn nowhere.
+        for frame in [2u16, 1] {
+            let buf = render_at(frame, 20, &d);
+            assert!(
+                !row_text(&buf, 4).contains("No content"),
+                "frame {frame}: a zero-width content area must draw nothing"
+            );
+        }
+    }
+
+    /// `artifact-content` :: "A wide-character document stays inside the detail region".
+    #[test]
+    fn a_wide_character_document_stays_inside_the_detail_region() {
+        let family_emoji = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466}";
+        let paragraph = "日本語".repeat(40);
+        let source = format!("{paragraph}\n\n# 🎉 見出し\n\n- {family_emoji} family\n");
+        let change = fixture::with_artifacts(fixture::active("x", 0, 0), &[("proposal", &[])]);
+        let d = dashboard_at_detail(change, detail(&source, Vec::new()));
+
+        let buf60 = render_at(60, 20, &d);
+        for y in 1..=18u16 {
+            assert!(
+                matches!(cell(&buf60, 0, y).symbol(), "│" | "┌" | "└"),
+                "y={y}"
+            );
+            assert!(
+                matches!(cell(&buf60, 59, y).symbol(), "│" | "┐" | "┘"),
+                "y={y}"
+            );
+        }
+
+        let buf120 = render_at(120, 20, &d);
+        for y in 1..=18u16 {
+            for x in [0u16, 39, 40, 119] {
+                let s = cell(&buf120, x, y).symbol();
+                assert!(
+                    matches!(s, "│" | "┌" | "└" | "┐" | "┘"),
+                    "x={x} y={y} symbol={s:?}"
+                );
+            }
+        }
+
+        for width in [78u16, 58] {
+            let lines = content_lines(&d.detail, d.selected_change(), width);
+            for line in &lines {
+                assert!(
+                    columns(&line.text()) <= width as usize,
+                    "width {width}: {:?} exceeds its width",
+                    line.text()
+                );
+            }
+        }
+    }
+
+    /// `artifact-content` :: "No `content_lines` line exceeds its width at any width" —
+    /// a sweep of `0..=130` over seven `Detail` values (the six `content_lines_total`
+    /// already carries, plus a 200-column CJK paragraph) crossed with the four `change`
+    /// shapes, and the `No content yet` case for `width` `0` through `13`.
+    #[test]
+    fn no_content_lines_line_exceeds_its_width_at_any_width() {
+        let marked = fixture::with_marked_artifacts(
+            &paths_free(&["a", "b"]),
+            Some(0),
+            Progress {
+                completed: 1,
+                total: 2,
+            },
+        );
+        let unmarked = fixture::with_marked_artifacts(
+            &paths_free(&["a", "b"]),
+            None,
+            Progress {
+                completed: 1,
+                total: 2,
+            },
+        );
+        let no_artifacts = fixture::with_marked_artifacts(
+            &paths_free(&[]),
+            None,
+            Progress {
+                completed: 0,
+                total: 0,
+            },
+        );
+        let paragraph = format!("{}\n", "word ".repeat(40).trim());
+        let cjk_paragraph = format!("{}\n", "日本語".repeat(70));
+        let details = [
+            detail("", Vec::new()),
+            detail("", vec!["/repo/a.md: boom".to_string()]),
+            detail("- [ ] only\n", Vec::new()),
+            detail("- [ ] only\n", vec!["/repo/a.md: boom".to_string()]),
+            {
+                let mut d = detail(&paragraph, Vec::new());
+                d.tab = 0;
+                d
+            },
+            {
+                let mut d = detail(&cjk_paragraph, Vec::new());
+                d.tab = 0;
+                d
+            },
+            {
+                let mut d = detail("- [ ] a\n", Vec::new());
+                d.tab = 9;
+                d
+            },
+        ];
+
+        let start = std::time::Instant::now();
+        for width in 0u16..=130 {
+            for change in [None, Some(&marked), Some(&unmarked), Some(&no_artifacts)] {
+                for d in &details {
+                    let lines = content_lines(d, change, width);
+                    for line in &lines {
+                        assert!(
+                            columns(&line.text()) <= width as usize,
+                            "width {width}, source {:?}: {:?} exceeds its width",
+                            d.source,
+                            line.text()
+                        );
+                    }
+                }
+            }
+        }
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed.as_secs() < 2,
+            "the sweep took {elapsed:?} — narrow it by input, never by width"
+        );
+
+        // The mandated pair, asserted explicitly by this sweep too.
+        for width in [78u16, 58] {
+            for change in [None, Some(&marked), Some(&unmarked), Some(&no_artifacts)] {
+                for d in &details {
+                    let lines = content_lines(d, change, width);
+                    for line in &lines {
+                        assert!(columns(&line.text()) <= width as usize, "width {width}");
+                    }
+                }
+            }
+        }
+
+        // The `No content yet` case at every width in the range where the literal is
+        // longer than the region — the range no mandated-width test can reach.
+        let empty = detail("", Vec::new());
+        for width in 0u16..=13 {
+            let lines = content_lines(&empty, None, width);
+            for line in &lines {
+                assert!(columns(&line.text()) <= width as usize, "width {width}");
+            }
         }
     }
 }
