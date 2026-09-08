@@ -292,6 +292,14 @@ why = "poll_once maps every failing HerdrCli path to an empty, unreachable snaps
 covers = ["src/agents.rs:371-376"]
 
 [[row]]
+condition = "The Herdr agent poller's outstanding `agent list` call passes the stall threshold (`agents::STALL_AFTER`, five poll intervals) with no answer"
+tier = "unit"
+proof = ["a_poll_outstanding_past_the_stall_threshold_is_announced_once"]
+verdict = "confirmed"
+why = "RealAgentPoll::drain_at reports the stall exactly once, empties the agents, and clears reachable, proven directly against drain_at with an injected clock"
+covers = ["src/agents.rs:517-532"]
+
+[[row]]
 condition = "The filesystem watcher will not start (`notify` refuses the watch, or the repository root cannot be watched)"
 # tier is "outer" (gate-integrity Change Review, second pass): the row's OWN WORDING
 # (SPEC.md:762) is about what renders - the reason named as a leading `!`-marked row, above
@@ -313,6 +321,14 @@ proof = ["a_watch_failure_keeps_the_loop_drawing"]
 verdict = "spec-corrected"
 why = "a real run_wired run with openspec/ removed mid-run keeps the loop drawing"
 covers = ["src/watch.rs:243-250"]
+
+[[row]]
+condition = "The refresh worker stops answering (its worker thread has exited)"
+tier = "unit"
+proof = ["a_dead_refresh_worker_is_reported_once_and_then_stops_being_reported"]
+verdict = "confirmed"
+why = "RealRefresher::take_result latches dead on the worker channel disconnecting and reports RefreshResult::Stopped exactly once, then silence, proven directly against the struct"
+covers = ["src/refresh.rs:120-121", "src/refresh.rs:143-146"]
 
 [[row]]
 condition = "A CLI cycle fails after the worker already sent its file-sourced result"
