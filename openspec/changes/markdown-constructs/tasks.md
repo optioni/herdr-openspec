@@ -455,25 +455,40 @@ binding rather than merely descriptive; this group carries only the agent-facing
 ## 11. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 11.1 CHECK: Inspect the intended verification commands and affected tiers. The affected
+- [x] 11.1 CHECK: Inspect the intended verification commands and affected tiers. The affected
   tiers are unit (`ui::markdown`, `ui::palette`), view (`ui::view`), gates (`MDWIDTHS`,
   `WIDTHS`, `MDSEAM`, `PALETTE`, `COLWIDTH`, `NOIO-VIEW`, `NODEFAULT-UI`), and contract
   (`tests/degraded_coverage.rs`, `tests/gate_controls.rs`, `tests/doc_contract.rs`). All are
   inside `make check`.
 
-- [ ] 11.2 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
+- [x] 11.2 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
 
-- [ ] 11.3 VERIFY: `cargo fmt --all -- --check` — clean.
+- [x] 11.3 VERIFY: `cargo fmt --all -- --check` — clean.
 
-- [ ] 11.4 VERIFY: `cargo build --all-features` — 0 errors. (Rust's compiler is the type
+- [x] 11.4 VERIFY: `cargo build --all-features` — 0 errors. (Rust's compiler is the type
   checker; there is no separate one.)
 
-- [ ] 11.5 VERIFY: `cargo test --all-features` — green.
+- [x] 11.5 VERIFY: `cargo test --all-features` — green.
 
-- [ ] 11.6 VERIFY: `cargo llvm-cov --fail-under-lines 80` plus the production-slice floor from
+- [x] 11.6 VERIFY: `cargo llvm-cov --fail-under-lines 80` plus the production-slice floor from
   `scripts/coverage-prod.py`. Never lower, waive, or exclude — add tests if it falls short.
 
-- [ ] 11.7 VERIFY: `make check` — the single gate, green, with the change artifacts committed
+- [x] 11.7 VERIFY: `make check` — the single gate, green, with the change artifacts committed
   so `OPENSPEC-UNTOUCHED` passes. Name the failing sub-command if it fails.
 
-- [ ] 11.8 VERIFY: `openspec validate markdown-constructs --strict`.
+- [x] 11.8 VERIFY: `openspec validate markdown-constructs --strict`.
+
+  **Result, on the finished tree:** `make check` exit 0 — every gate in the recipe green,
+  `OPENSPEC-UNTOUCHED` included, with the change artifacts committed. Coverage: total
+  96.09% against the 80% floor, production slice **96.19%** (4120/4283) against its floor
+  of 96. `cargo test --all-features` 1121 lib tests plus every contract-tier suite green;
+  `gate_controls` 4 passed, so every gate is still executed against its recorded plant.
+  `openspec validate markdown-constructs --strict`: valid.
+
+  One flake observed and not attributable to this change:
+  `ui::tests::wiring::g_focuses_the_agent_the_launch_started` failed once in a full run —
+  it read the scratch `herdr` log before the launcher's `agent focus` had landed, seeing
+  three calls where it asserts four. It passed on four consecutive re-runs and in both
+  `make check` runs. It is a pre-existing threaded wiring test this change touches no part
+  of; recorded here rather than repaired, because repairing it is a different change's
+  scope.
