@@ -82,6 +82,12 @@ should look like — only that it be correct.
 
 ### Modified Capabilities
 
+- `change-rows`: `Row` gains a `badge: Option<BadgeCell>` field naming the column its agent
+  badge occupies and the status it carries — no cell moves and every row's `text` stays
+  byte-identical — so the view can paint that one column; and the problem and separator rows
+  take their colour from the palette. Added to this list during planning: colouring the five
+  agent statuses is impossible without telling the view where the badge sits, and that column
+  is `change-rows`' grammar, not `list-selection`'s.
 - `detail-scroll`: the `Face`-to-`Style` mapping stated there (`heading`/`strong` → `BOLD`,
   `emphasis` → `ITALIC`, `code` → `DIM`, `link` → `UNDERLINED`, `quoted` → `DIM`) is
   restated as a palette lookup that still yields those modifiers.
