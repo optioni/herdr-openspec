@@ -10,7 +10,10 @@ use ratatui::widgets::Block;
 
 use crate::ui::app::{Dashboard, Route};
 use crate::ui::detail;
-use crate::ui::layout::{interior, scroll_offset, split_body, split_detail, split_frame, viewport};
+use crate::ui::layout::{
+    columns, interior, scroll_offset, split_body, split_detail, split_frame, truncate_columns,
+    viewport,
+};
 use crate::ui::list;
 use crate::ui::markdown::Face;
 
@@ -126,9 +129,17 @@ fn render_detail_content(frame: &mut Frame, content: Rect, dashboard: &Dashboard
             if x >= last_col {
                 break;
             }
+            // `view-fidelity` -> Decision 8: the guard above is now correct, since `x`
+            // advances by consumed columns rather than characters — but it fires only
+            // *between* segments, so a single segment wider than the space remaining
+            // would still cross the border. The clamp below is kept alongside it, on the
+            // same terms the markdown parser's own defaults are asserted three ways
+            // elsewhere in this crate: each mechanism alone is dodgeable.
+            let remaining = (last_col - x) as usize;
+            let text = truncate_columns(&segment.text, remaining);
             let style = style_for(&segment.face);
-            buf.set_string(x, y, &segment.text, style);
-            x += segment.text.chars().count() as u16;
+            buf.set_string(x, y, text, style);
+            x += columns(text) as u16;
         }
     }
 }
@@ -248,22 +259,22 @@ fn render_header(frame: &mut Frame, header: Rect, dashboard: &Dashboard) {
         header.width.saturating_sub(9)
     };
     if let Some(shown) = shorten_for_header(&text, a) {
-        let shown_len = shown.chars().count() as u16;
+        let shown_len = columns(&shown) as u16;
         let x = header.x + header.width.saturating_sub(shown_len);
         buf.set_string(x, header.y, &shown, Style::default());
     }
 }
 
 /// The header-shortening rule, isolated so it is readable independently of
-/// the frame: `text` fitting in `a` characters is shown whole; longer text
-/// is shown as `…` plus its last `a - 1` characters when `a >= 8`; otherwise
+/// the frame: `text` fitting in `a` **columns** is shown whole; longer text
+/// is shown as `…` plus its last `a - 1` columns when `a >= 8`; otherwise
 /// nothing is shown at all, and only the (possibly itself truncated)
 /// `OpenSpec` label — and the badge, when [`render_header`] drew one — is
 /// shown.
 fn shorten_for_header(text: &str, a: u16) -> Option<String> {
     let a = a as usize;
-    let char_count = text.chars().count();
-    if char_count <= a {
+    let text_cols = columns(text);
+    if text_cols <= a {
         Some(text.to_string())
     } else if a >= 8 {
         Some(list::shorten_left(text, a))
@@ -321,16 +332,28 @@ fn render_footer(frame: &mut Frame, footer: Rect, dashboard: &Dashboard) {
 }
 
 /// The filter prompt: `/` + `query` + `_`, whole when it fits `width`,
-/// otherwise its **tail** — the last `width` characters — so the cursor
-/// (the trailing `_`) and the characters just typed stay visible.
+/// otherwise its **tail** — its last `width` **columns** — so the cursor
+/// (the trailing `_`) and the characters just typed stay visible. The
+/// query is the reader's own typed text and is not ASCII-bound, so the tail
+/// is found the same way `ui::list::shorten_left` finds its own kept
+/// suffix: growing the dropped-prefix budget until enough columns are
+/// actually gone, since a boundary-respecting drop MAY fall short of an
+/// exact column target.
 fn footer_prompt(query: &str, width: u16) -> String {
     let text = format!("/{query}_");
-    let chars: Vec<char> = text.chars().collect();
     let w = width as usize;
-    if chars.len() <= w {
-        text
-    } else {
-        chars[chars.len() - w..].iter().collect()
+    let total = columns(&text);
+    if total <= w {
+        return text;
+    }
+    let must_drop = total - w;
+    let mut probe = must_drop;
+    loop {
+        let prefix = truncate_columns(&text, probe);
+        if columns(prefix) >= must_drop || prefix.len() == text.len() {
+            return text[prefix.len()..].to_string();
+        }
+        probe += 1;
     }
 }
 
@@ -343,7 +366,7 @@ fn fit_hints(hints: &[String], width: u16) -> String {
     let mut used = 0u16;
     for (i, hint) in hints.iter().enumerate() {
         let separator = if i == 0 { 0 } else { 2 };
-        let needed = hint.chars().count() as u16 + separator;
+        let needed = columns(hint) as u16 + separator;
         let Some(next_used) = used.checked_add(needed) else {
             break;
         };
