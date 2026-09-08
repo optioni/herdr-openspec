@@ -89,12 +89,28 @@ belongs to whichever capability owns styling.
 - `markdown-render`: tables and strikethrough leave the unmodelled set; the table block's
   line grammar, its column allocation, its alignment handling, and its
   wider-than-the-region rule are specified; `Face` gains a `strikethrough` flag.
-- `detail-scroll`: the `Face`-to-`Style` mapping gains the strikethrough face.
+- `view-palette`: `Role` gains a `Strikethrough` variant, `CROSSED_OUT` and uncoloured, and
+  `style_for`'s fold order gains one step. Named here after the fact: this proposal was
+  written before `color-palette` landed the palette module, and its "the styling of a new
+  face belongs to whichever capability owns styling" is now answerable — `view-palette` owns
+  it, and its live text says in as many words that "a strikethrough face has no entry at
+  all", which this change is what corrects.
+- `detail-scroll`: the `Face`-to-`Style` mapping gains the strikethrough face, and the
+  region's draw is stated over a table's padded row lines.
+- `degraded-coverage`: its scenario "A footnote, strikethrough, and a table each render as
+  literal source" is renamed and narrowed to the two constructs that stay literal. Named here
+  after the fact for the same reason as `view-palette`: this capability binds `SPEC.md`'s
+  degraded-states table to executable proof, so a row this change narrows is a scenario it
+  must narrow too, or `tests/degraded_coverage.rs` and the spec disagree.
 
 ## Impact
 
 - **Code:** `src/ui/markdown.rs` (parser options, table block layout, the new face),
-  `src/ui/view.rs` (one style arm).
+  `src/ui/palette.rs` (one `Role` variant and its table entry), `src/ui/view.rs` (one
+  `style_for` fold step), and `src/ui/tasks.rs` — whose `heading_line` spells out all six
+  `Face` fields rather than writing `..Face::plain()`, so the seventh field is a **compile
+  error** there until it is named. That forcing site is the reason the flag lives on `Face`
+  rather than beside it.
 - **Docs:** `SPEC.md` → the degraded-states row is narrowed;
   `tests/degraded-coverage.toml` → its proof is re-pointed.
 - **Depends on `view-fidelity`** for the column primitives a table's allocation is built
