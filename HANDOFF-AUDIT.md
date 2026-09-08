@@ -78,6 +78,47 @@ covered by any of the five changes' specs. It belongs to `quality-gates`:
 Note for whoever picks this up: `openspec` is not on a non-login `PATH` here — it is
 at `~/.nvm/versions/node/v24.18.0/bin/openspec` (v1.12.0). Source nvm first.
 
+### A third deferred item — three load-sensitive tests, unowned
+
+Three acceptance tests in `src/ui/mod.rs`'s `ui::tests::wiring` module fail under CPU
+contention. **Attribution is settled and it is not this batch:** `git log -L` on the
+failing assertion region returns exactly one commit, `8617e35`
+(`test(agent-launch): group 2 — acceptance test RED, driving the real ui::run_wired`),
+and `git merge-base --is-ancestor 8617e35 41cf2b8` confirms it predates the audit
+remediation entirely. None of the five changes caused it.
+
+- `ui::tests::wiring::g_focuses_the_agent_the_launch_started` — `assertion left == right
+  failed: the launch's three calls plus one focus`, `left: 3, right: 4`.
+- `ui::tests::wiring::a_failed_cli_cycle_keeps_the_file_numbers` — `kind wrong_root,
+  width 120: the CLI failure must be recorded`.
+- `ui::tests::wiring::the_real_wiring_polls_a_scratch_herdr` — `the openspec log must
+  reach a second run, proving watch::start was wired rather than watch::none()`.
+
+**Measured rate: 1 failure in 4 consecutive runs** of `cargo test --all-features --lib
+ui::tests::wiring` — that is *in isolation*, with the rest of the suite filtered out,
+on a machine also running a second Claude session. Isolation lowers the rate but does
+not remove it: a separate 12/12 pass in isolation was partly luck. The failure shape
+tracks contention severity — `left: 0` (nothing arrived) under heavy load, `left: 3`
+(three of four arrived) under lighter load.
+
+The mechanism is `run_wired_staged`: it drives the real `ui::run_wired` against
+shell-script fakes on real threads, advancing when a stage predicate goes true and
+otherwise timing out on a deadline budget. Under contention the last stage's call does
+not land before the deadline and the assertion reads a short log.
+
+`seam-resilience` **worsened** this by adding a production sleep site to
+`src/launch.rs`, but did not create it.
+
+**Why it has gone unnoticed, and will keep going unnoticed:** it is invisible in CI,
+where nothing competes for the CPU. It surfaces here only because two Claude sessions
+share one machine. A loaded CI runner could hit it, and a test believed over the code
+is how a suite rots — so this is a real fragility, not merely noise. The fix is a
+deadline a loaded machine can still meet, or an explicit wait-for-quiescence rather
+than a fixed budget.
+
+**Not opened as a proposal.** It is pre-existing work adjacent to what the user asked
+for, so opening it is their call, not an implementer's.
+
 ## S10 — RESOLVED, recorded for review
 
 `seam-resilience`'s S10 revision **was applied and validates**. Nothing is owed here;
