@@ -119,17 +119,32 @@ pub struct Detail {
 /// re-read of an unchanged `(change directory, tab)` key, which is what
 /// makes an edit to the artifact currently on screen visible — the cache
 /// key `sync_detail` compares does not change when a file's *content* does.
-/// `problems` holds a watcher that would not start; everything the CLI or
-/// the file walk reports rides on `ChangeSet::problems` instead, which is
-/// why a watcher failure cannot live there. Deliberately implements no
-/// `Default`, anywhere in the crate, on the same terms as `Dashboard`,
-/// `Filter`, and `Detail`: every construction and destructuring names all
-/// three fields, with no `..` rest. See `specs/live-updates/spec.md` and the
+/// `problems` holds the **live** tier's own standing conditions: a
+/// `FsEvents::drain` error, and a refresh worker reported stopped. Replaced
+/// wholesale by each new one, never grown.
+///
+/// `seam-resilience`'s addition: `startup` — the standing conditions the
+/// pane learns **once**, at startup, in causal order (the configuration's
+/// own fallbacks, then the `openspec` binary probe's, then the watcher's
+/// failure to start). Written exactly once, by `run_wired` from
+/// `Collaborators::problems`, and never written again by anything — not by
+/// `r`, not by a refresh, not by a watcher error. Splitting it from
+/// `problems` is this change's correction of a real, reachable defect:
+/// `degraded-states` seeded all three startup sources into `problems`, and
+/// the loop's wholesale replacement on the first `FsEvents::drain` error
+/// erased the rows naming a missing `openspec` binary and every
+/// configuration fallback, for the rest of the session. See
+/// `specs/live-updates/spec.md`.
+///
+/// Deliberately implements no `Default`, anywhere in the crate, on the same
+/// terms as `Dashboard`, `Filter`, and `Detail`: every construction and
+/// destructuring names all four fields, with no `..` rest. See the
 /// `NODEFAULT-UI` check, whose type list covers this type too.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Refresh {
     pub requested: bool,
     pub reload: bool,
+    pub startup: Vec<String>,
     pub problems: Vec<String>,
 }
 
@@ -140,14 +155,27 @@ pub struct Refresh {
 /// put anywhere `adopt` or a watcher error can replace wholesale would vanish before the reader
 /// saw it. `pending` carries plain data — a `launch::Request` names no trait, no handle, and no
 /// thread — so the state value stays `Clone`, `PartialEq`, and constructible in a test.
+/// `seam-resilience`'s addition: `in_flight`, the single source of `launch::decide`'s
+/// sixth argument. Set to `true` at the moment the loop hands `pending`'s `Request::Launch`
+/// to `Launcher::request` — never when `Dashboard::apply` sets `pending`, so the flag
+/// describes work actually handed over rather than work merely intended; left `false` for a
+/// `Request::Focus`, which starts no agent and splits no pane and therefore cannot leak one;
+/// cleared to `false` when `Launcher::drain` yields an `Outcome`, in the same step that folds
+/// the outcome's `named` pair and problems into the dashboard — including when that
+/// `Outcome` reports the launcher's own worker dead, since no answer will ever come. Never
+/// derived from `pending` (a one-shot slot emptied on the very next iteration) or from
+/// `agents.agents` (which lags the launch by up to a poll interval plus the launch's own
+/// duration) — the two sources whose gap is exactly the window this flag closes.
+///
 /// Deliberately implements no `Default`, anywhere in the crate, on the same terms as
 /// `Dashboard`, `Filter`, `Detail`, and `Refresh`: every construction and destructuring names
-/// both fields, with no `..` rest. See `specs/agent-launch/spec.md` and the `NODEFAULT-UI`
-/// check, whose type list covers this type too.
+/// all three fields, with no `..` rest. See `specs/agent-launch/spec.md` and the
+/// `NODEFAULT-UI` check, whose type list covers this type too.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Launch {
     pub pending: Option<crate::launch::Request>,
     pub problems: Vec<String>,
+    pub in_flight: bool,
 }
 
 /// The dashboard's whole state. Carries no width, no layout mode, no column
@@ -363,12 +391,7 @@ impl Dashboard {
             pane.as_deref(),
             self.agents.reachable,
             &live_names,
-            // `seam-resilience`: `decide` gained an in-flight refusal (task 7), but
-            // `Dashboard::launch` has no `in_flight` field yet — that field and its
-            // hand-over/outcome/dead-worker lifecycle are `seam-resilience` task group 8's.
-            // Until it lands, this call site has no real signal to offer here honestly, so it
-            // passes `false` explicitly rather than inventing the field itself.
-            false,
+            self.launch.in_flight,
         ) {
             crate::launch::Decision::Nothing => {}
             crate::launch::Decision::Refuse(reason) => {
@@ -693,6 +716,7 @@ mod tests {
             refresh: Refresh {
                 requested: false,
                 reload: false,
+                startup: Vec::new(),
                 problems: Vec::new(),
             },
             agents: crate::agents::AgentSnapshot {
@@ -707,6 +731,7 @@ mod tests {
             },
             launch: crate::ui::app::Launch {
                 pending: None,
+                in_flight: false,
                 problems: Vec::new(),
             },
             file_mode: false,
@@ -761,6 +786,7 @@ mod tests {
         );
         assert!(!refresh.requested);
         assert!(!refresh.reload);
+        assert!(refresh.startup.is_empty());
         assert!(refresh.problems.is_empty());
         assert!(agents.agents.is_empty());
         assert!(agents.reachable);
@@ -768,6 +794,7 @@ mod tests {
         assert!(agent_names.names.is_empty());
         assert_eq!(launch.pending, None);
         assert!(launch.problems.is_empty());
+        assert!(!launch.in_flight);
     }
 
     /// Drives all three tiers through `Dashboard::attribution()` rather than through
@@ -1083,6 +1110,7 @@ mod tests {
         } = &d;
         assert_eq!(launch.pending, None);
         assert!(launch.problems.is_empty());
+        assert!(!launch.in_flight);
     }
 
     /// `agent-launch`: "`g` focuses an agent attributed through the mapping" and "`g` focuses
@@ -1243,6 +1271,7 @@ mod tests {
                 refresh: crate::ui::app::Refresh {
                     requested: false,
                     reload: false,
+                    startup: Vec::new(),
                     problems: Vec::new(),
                 },
                 agents: crate::agents::AgentSnapshot {
@@ -1254,6 +1283,7 @@ mod tests {
                 agent_names: crate::state::Mapping::default(),
                 launch: crate::ui::app::Launch {
                     pending: None,
+                    in_flight: false,
                     problems: Vec::new(),
                 },
                 file_mode: false,
@@ -1286,6 +1316,7 @@ mod tests {
                 refresh: crate::ui::app::Refresh {
                     requested: false,
                     reload: false,
+                    startup: Vec::new(),
                     problems: Vec::new(),
                 },
                 agents: crate::agents::AgentSnapshot {
@@ -1297,6 +1328,7 @@ mod tests {
                 agent_names: crate::state::Mapping::default(),
                 launch: crate::ui::app::Launch {
                     pending: None,
+                    in_flight: false,
                     problems: Vec::new(),
                 },
                 file_mode: false,
@@ -1332,6 +1364,7 @@ mod tests {
                 refresh: crate::ui::app::Refresh {
                     requested: false,
                     reload: false,
+                    startup: Vec::new(),
                     problems: Vec::new(),
                 },
                 agents: crate::agents::AgentSnapshot {
@@ -1343,6 +1376,7 @@ mod tests {
                 agent_names: crate::state::Mapping::default(),
                 launch: crate::ui::app::Launch {
                     pending: None,
+                    in_flight: false,
                     problems: Vec::new(),
                 },
                 file_mode: false,
@@ -1749,6 +1783,7 @@ mod tests {
                 refresh: crate::ui::app::Refresh {
                     requested: false,
                     reload: false,
+                    startup: Vec::new(),
                     problems: Vec::new(),
                 },
                 agents: crate::agents::AgentSnapshot {
@@ -1769,6 +1804,7 @@ mod tests {
                 agent_names: crate::state::Mapping::default(),
                 launch: crate::ui::app::Launch {
                     pending: None,
+                    in_flight: false,
                     problems: Vec::new(),
                 },
                 file_mode: false,
@@ -2016,6 +2052,7 @@ mod tests {
                 refresh: crate::ui::app::Refresh {
                     requested: false,
                     reload: false,
+                    startup: Vec::new(),
                     problems: Vec::new(),
                 },
                 agents: crate::agents::AgentSnapshot {
@@ -2027,6 +2064,7 @@ mod tests {
                 agent_names: crate::state::Mapping::default(),
                 launch: crate::ui::app::Launch {
                     pending: None,
+                    in_flight: false,
                     problems: Vec::new(),
                 },
                 file_mode: false,
@@ -2065,6 +2103,7 @@ mod tests {
                 refresh: crate::ui::app::Refresh {
                     requested: false,
                     reload: false,
+                    startup: Vec::new(),
                     problems: Vec::new(),
                 },
                 agents: crate::agents::AgentSnapshot {
@@ -2076,6 +2115,7 @@ mod tests {
                 agent_names: crate::state::Mapping::default(),
                 launch: crate::ui::app::Launch {
                     pending: None,
+                    in_flight: false,
                     problems: Vec::new(),
                 },
                 file_mode: false,
@@ -2120,6 +2160,7 @@ mod tests {
                 refresh: crate::ui::app::Refresh {
                     requested: false,
                     reload: false,
+                    startup: Vec::new(),
                     problems: Vec::new(),
                 },
                 agents: crate::agents::AgentSnapshot {
@@ -2131,6 +2172,7 @@ mod tests {
                 agent_names: crate::state::Mapping::default(),
                 launch: crate::ui::app::Launch {
                     pending: None,
+                    in_flight: false,
                     problems: Vec::new(),
                 },
                 file_mode: false,
@@ -2163,6 +2205,7 @@ mod tests {
                 refresh: crate::ui::app::Refresh {
                     requested: false,
                     reload: false,
+                    startup: Vec::new(),
                     problems: Vec::new(),
                 },
                 agents: crate::agents::AgentSnapshot {
@@ -2174,6 +2217,7 @@ mod tests {
                 agent_names: crate::state::Mapping::default(),
                 launch: crate::ui::app::Launch {
                     pending: None,
+                    in_flight: false,
                     problems: Vec::new(),
                 },
                 file_mode: false,
@@ -2201,6 +2245,7 @@ mod tests {
                 refresh: crate::ui::app::Refresh {
                     requested: false,
                     reload: false,
+                    startup: Vec::new(),
                     problems: Vec::new(),
                 },
                 agents: crate::agents::AgentSnapshot {
@@ -2212,6 +2257,7 @@ mod tests {
                 agent_names: crate::state::Mapping::default(),
                 launch: crate::ui::app::Launch {
                     pending: None,
+                    in_flight: false,
                     problems: Vec::new(),
                 },
                 file_mode: false,
@@ -2241,6 +2287,7 @@ mod tests {
                 refresh: crate::ui::app::Refresh {
                     requested: false,
                     reload: false,
+                    startup: Vec::new(),
                     problems: Vec::new(),
                 },
                 agents: crate::agents::AgentSnapshot {
@@ -2252,6 +2299,7 @@ mod tests {
                 agent_names: crate::state::Mapping::default(),
                 launch: crate::ui::app::Launch {
                     pending: None,
+                    in_flight: false,
                     problems: Vec::new(),
                 },
                 file_mode: false,
@@ -2285,6 +2333,7 @@ mod tests {
                 refresh: crate::ui::app::Refresh {
                     requested: false,
                     reload: false,
+                    startup: Vec::new(),
                     problems: Vec::new(),
                 },
                 agents: crate::agents::AgentSnapshot {
@@ -2296,6 +2345,7 @@ mod tests {
                 agent_names: crate::state::Mapping::default(),
                 launch: crate::ui::app::Launch {
                     pending: None,
+                    in_flight: false,
                     problems: Vec::new(),
                 },
                 file_mode: false,
@@ -2321,6 +2371,7 @@ mod tests {
                 refresh: crate::ui::app::Refresh {
                     requested: false,
                     reload: false,
+                    startup: Vec::new(),
                     problems: Vec::new(),
                 },
                 agents: crate::agents::AgentSnapshot {
@@ -2332,6 +2383,7 @@ mod tests {
                 agent_names: crate::state::Mapping::default(),
                 launch: crate::ui::app::Launch {
                     pending: None,
+                    in_flight: false,
                     problems: Vec::new(),
                 },
                 file_mode: false,
@@ -2357,6 +2409,7 @@ mod tests {
                 refresh: crate::ui::app::Refresh {
                     requested: false,
                     reload: false,
+                    startup: Vec::new(),
                     problems: Vec::new(),
                 },
                 agents: crate::agents::AgentSnapshot {
@@ -2368,6 +2421,7 @@ mod tests {
                 agent_names: crate::state::Mapping::default(),
                 launch: crate::ui::app::Launch {
                     pending: None,
+                    in_flight: false,
                     problems: Vec::new(),
                 },
                 file_mode: false,
@@ -2411,6 +2465,7 @@ mod tests {
                     refresh: crate::ui::app::Refresh {
                         requested: false,
                         reload: false,
+                        startup: Vec::new(),
                         problems: Vec::new(),
                     },
                     agents: crate::agents::AgentSnapshot {
@@ -2422,6 +2477,7 @@ mod tests {
                     agent_names: crate::state::Mapping::default(),
                     launch: crate::ui::app::Launch {
                         pending: None,
+                        in_flight: false,
                         problems: Vec::new(),
                     },
                     file_mode: false,
@@ -2471,6 +2527,7 @@ mod tests {
                 refresh: crate::ui::app::Refresh {
                     requested: false,
                     reload: false,
+                    startup: Vec::new(),
                     problems: Vec::new(),
                 },
                 agents: crate::agents::AgentSnapshot {
@@ -2482,6 +2539,7 @@ mod tests {
                 agent_names: crate::state::Mapping::default(),
                 launch: crate::ui::app::Launch {
                     pending: None,
+                    in_flight: false,
                     problems: Vec::new(),
                 },
                 file_mode: false,
@@ -2588,6 +2646,7 @@ mod tests {
                 refresh: crate::ui::app::Refresh {
                     requested: false,
                     reload: false,
+                    startup: Vec::new(),
                     problems: Vec::new(),
                 },
                 agents: crate::agents::AgentSnapshot {
@@ -2599,6 +2658,7 @@ mod tests {
                 agent_names: crate::state::Mapping::default(),
                 launch: crate::ui::app::Launch {
                     pending: None,
+                    in_flight: false,
                     problems: Vec::new(),
                 },
                 file_mode: false,
@@ -2659,6 +2719,7 @@ mod tests {
                 refresh: crate::ui::app::Refresh {
                     requested: false,
                     reload: false,
+                    startup: Vec::new(),
                     problems: Vec::new(),
                 },
                 agents: crate::agents::AgentSnapshot {
@@ -2670,6 +2731,7 @@ mod tests {
                 agent_names: crate::state::Mapping::default(),
                 launch: crate::ui::app::Launch {
                     pending: None,
+                    in_flight: false,
                     problems: Vec::new(),
                 },
                 file_mode: false,
@@ -2831,6 +2893,7 @@ mod tests {
             assert_eq!(detail, &empty_detail());
             assert!(!refresh.requested);
             assert!(!refresh.reload);
+            assert!(refresh.startup.is_empty());
             assert!(refresh.problems.is_empty());
             assert!(agents.agents.is_empty());
             assert!(!agents.reachable);
@@ -2838,6 +2901,7 @@ mod tests {
             assert!(agent_names.names.is_empty());
             assert_eq!(launch.pending, None);
             assert!(launch.problems.is_empty());
+            assert!(!launch.in_flight);
         }
 
         #[test]
@@ -2851,22 +2915,43 @@ mod tests {
             assert!(*active);
 
             // The fourth compile-time companion `design.md` -> Contracts
-            // names: a `Refresh` destructured naming all three fields and no
-            // `..`, folded into this test rather than a fifth top-level one,
-            // since group 1 adds no test to `ui::app::tests::`.
+            // names: a `Refresh` destructured naming all four fields (three at
+            // `live-refresh`, `startup` added by `seam-resilience`) and no `..`,
+            // folded into this test rather than a fifth top-level one, since
+            // group 1 adds no test to `ui::app::tests::`.
             let r = crate::ui::app::Refresh {
                 requested: true,
                 reload: false,
+                startup: vec!["openspec binary not found".to_string()],
                 problems: vec!["watch failed".to_string()],
             };
             let crate::ui::app::Refresh {
                 requested,
                 reload,
+                startup,
                 problems,
             } = &r;
             assert!(*requested);
             assert!(!*reload);
+            assert_eq!(startup, &vec!["openspec binary not found".to_string()]);
             assert_eq!(problems, &vec!["watch failed".to_string()]);
+
+            // `seam-resilience`'s own companion, on the same terms: a `Launch`
+            // destructured naming all three fields (two at `agent-launch`,
+            // `in_flight` added here) and no `..`.
+            let l = crate::ui::app::Launch {
+                pending: None,
+                problems: vec!["launch failed".to_string()],
+                in_flight: true,
+            };
+            let crate::ui::app::Launch {
+                pending,
+                problems,
+                in_flight,
+            } = &l;
+            assert_eq!(*pending, None);
+            assert_eq!(problems, &vec!["launch failed".to_string()]);
+            assert!(*in_flight);
         }
 
         /// `agent-polling`'s three compile-time companions `design.md` -> Contracts
@@ -3150,6 +3235,7 @@ mod tests {
                 refresh: crate::ui::app::Refresh {
                     requested: false,
                     reload: false,
+                    startup: Vec::new(),
                     problems: Vec::new(),
                 },
                 agents: crate::agents::AgentSnapshot {
@@ -3161,6 +3247,7 @@ mod tests {
                 agent_names: crate::state::Mapping::default(),
                 launch: crate::ui::app::Launch {
                     pending: None,
+                    in_flight: false,
                     problems: Vec::new(),
                 },
                 file_mode: false,
@@ -3196,6 +3283,7 @@ mod tests {
                 refresh: crate::ui::app::Refresh {
                     requested: false,
                     reload: false,
+                    startup: Vec::new(),
                     problems: Vec::new(),
                 },
                 agents: crate::agents::AgentSnapshot {
@@ -3207,6 +3295,7 @@ mod tests {
                 agent_names: crate::state::Mapping::default(),
                 launch: crate::ui::app::Launch {
                     pending: None,
+                    in_flight: false,
                     problems: Vec::new(),
                 },
                 file_mode: false,
@@ -3253,6 +3342,7 @@ mod tests {
                 refresh: crate::ui::app::Refresh {
                     requested: false,
                     reload: false,
+                    startup: Vec::new(),
                     problems: Vec::new(),
                 },
                 agents: crate::agents::AgentSnapshot {
@@ -3264,6 +3354,7 @@ mod tests {
                 agent_names: crate::state::Mapping::default(),
                 launch: crate::ui::app::Launch {
                     pending: None,
+                    in_flight: false,
                     problems: Vec::new(),
                 },
                 file_mode: false,
@@ -3397,6 +3488,7 @@ mod tests {
                 refresh: crate::ui::app::Refresh {
                     requested: false,
                     reload: false,
+                    startup: Vec::new(),
                     problems: Vec::new(),
                 },
                 agents: crate::agents::AgentSnapshot {
@@ -3408,6 +3500,7 @@ mod tests {
                 agent_names: crate::state::Mapping::default(),
                 launch: crate::ui::app::Launch {
                     pending: None,
+                    in_flight: false,
                     problems: Vec::new(),
                 },
                 file_mode: false,
@@ -3464,6 +3557,7 @@ mod tests {
                 refresh: crate::ui::app::Refresh {
                     requested: false,
                     reload: false,
+                    startup: Vec::new(),
                     problems: Vec::new(),
                 },
                 agents: crate::agents::AgentSnapshot {
@@ -3475,6 +3569,7 @@ mod tests {
                 agent_names: crate::state::Mapping::default(),
                 launch: crate::ui::app::Launch {
                     pending: None,
+                    in_flight: false,
                     problems: Vec::new(),
                 },
                 file_mode: false,
@@ -3640,6 +3735,7 @@ mod tests {
                 refresh: crate::ui::app::Refresh {
                     requested: false,
                     reload: false,
+                    startup: Vec::new(),
                     problems: Vec::new(),
                 },
                 agents: crate::agents::AgentSnapshot {
@@ -3651,6 +3747,7 @@ mod tests {
                 agent_names: crate::state::Mapping::default(),
                 launch: crate::ui::app::Launch {
                     pending: None,
+                    in_flight: false,
                     problems: Vec::new(),
                 },
                 file_mode: false,
@@ -3711,6 +3808,7 @@ mod tests {
                 refresh: crate::ui::app::Refresh {
                     requested: false,
                     reload: true,
+                    startup: Vec::new(),
                     problems: Vec::new(),
                 },
                 agents: crate::agents::AgentSnapshot {
@@ -3722,6 +3820,7 @@ mod tests {
                 agent_names: crate::state::Mapping::default(),
                 launch: crate::ui::app::Launch {
                     pending: None,
+                    in_flight: false,
                     problems: Vec::new(),
                 },
                 file_mode: false,

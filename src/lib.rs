@@ -789,6 +789,7 @@ pub(crate) mod testutil {
                 refresh: crate::ui::app::Refresh {
                     requested: false,
                     reload: false,
+                    startup: Vec::new(),
                     problems: Vec::new(),
                 },
                 agents: crate::agents::AgentSnapshot {
@@ -800,6 +801,7 @@ pub(crate) mod testutil {
                 agent_names: crate::state::Mapping::default(),
                 launch: crate::ui::app::Launch {
                     pending: None,
+                    in_flight: false,
                     problems: Vec::new(),
                 },
                 file_mode: false,

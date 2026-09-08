@@ -257,15 +257,38 @@ pub fn run_wired<B: Backend, E: EventSource>(
         startup.env,
         startup.npm_hook,
     );
-    dashboard.refresh.problems = collaborators.problems;
+    // `seam-resilience`: the standing startup conditions — configuration fallbacks, the
+    // binary probe's own reasons, then the watcher's failure to start, in that causal order —
+    // are seeded into `refresh.startup`, never `refresh.problems`, and exactly once: nothing
+    // downstream of this call ever writes `startup` again.
+    dashboard.refresh.startup = collaborators.problems;
     dashboard.file_mode = collaborators.file_mode;
-    let mut live = crate::ui::driver::Live {
-        fs: &mut *collaborators.fs,
-        refresher: &mut *collaborators.refresher,
-        agents: &mut *collaborators.agents,
-        launcher: &mut *collaborators.launcher,
+    let result = {
+        let mut live = crate::ui::driver::Live {
+            fs: &mut *collaborators.fs,
+            refresher: &mut *collaborators.refresher,
+            agents: &mut *collaborators.agents,
+            launcher: &mut *collaborators.launcher,
+        };
+        driver::run_loop(terminal, &mut dashboard, events, &mut live, read, tick)
     };
-    driver::run_loop(terminal, &mut dashboard, events, &mut live, read, tick)?;
+    // `seam-resilience`: a launch left in flight is given a bounded chance to finish before
+    // this function returns, whatever the loop's own outcome — a draw or event-source error
+    // must not skip the settle any more than an ordinary `q` does. Named here only as the
+    // constant and the function, never a clock or a join, so `NOBLOCK` leg 2 stays green
+    // unweakened: the wait lives inside `launch::settle`, in `src/launch.rs`. Skipped
+    // entirely when nothing is in flight, so the ordinary quit pays nothing.
+    if dashboard.launch.in_flight
+        && let Some(outcome) =
+            crate::launch::settle(&mut *collaborators.launcher, crate::launch::SETTLE_BUDGET)
+    {
+        dashboard.launch.in_flight = false;
+        if let Some((agent, change)) = outcome.named {
+            dashboard.agent_names.names.insert(agent, change);
+        }
+        dashboard.launch.problems = outcome.problems;
+    }
+    result?;
     Ok(dashboard)
 }
 
@@ -397,6 +420,7 @@ pub fn load(start: &Path, config: &Config, state_dir: Option<&Path>) -> Dashboar
                 refresh: crate::ui::app::Refresh {
                     requested: true,
                     reload: false,
+                    startup: Vec::new(),
                     problems: Vec::new(),
                 },
                 agents: crate::agents::AgentSnapshot {
@@ -408,6 +432,7 @@ pub fn load(start: &Path, config: &Config, state_dir: Option<&Path>) -> Dashboar
                 agent_names,
                 launch: crate::ui::app::Launch {
                     pending: None,
+                    in_flight: false,
                     problems: Vec::new(),
                 },
                 file_mode: false,
@@ -434,6 +459,7 @@ pub fn load(start: &Path, config: &Config, state_dir: Option<&Path>) -> Dashboar
             refresh: crate::ui::app::Refresh {
                 requested: true,
                 reload: false,
+                startup: Vec::new(),
                 problems: Vec::new(),
             },
             agents: crate::agents::AgentSnapshot {
@@ -445,6 +471,7 @@ pub fn load(start: &Path, config: &Config, state_dir: Option<&Path>) -> Dashboar
             agent_names,
             launch: crate::ui::app::Launch {
                 pending: None,
+                in_flight: false,
                 problems: Vec::new(),
             },
             file_mode: false,
@@ -622,6 +649,7 @@ mod tests {
                 refresh: crate::ui::app::Refresh {
                     requested: false,
                     reload: false,
+                    startup: Vec::new(),
                     problems: Vec::new(),
                 },
                 agents: crate::agents::AgentSnapshot {
@@ -633,6 +661,7 @@ mod tests {
                 agent_names: crate::state::Mapping::default(),
                 launch: crate::ui::app::Launch {
                     pending: None,
+                    in_flight: false,
                     problems: Vec::new(),
                 },
                 file_mode: false,
@@ -765,6 +794,7 @@ mod tests {
                     refresh: crate::ui::app::Refresh {
                         requested: false,
                         reload: false,
+                        startup: Vec::new(),
                         problems: Vec::new(),
                     },
                     agents: crate::agents::AgentSnapshot {
@@ -776,6 +806,7 @@ mod tests {
                     agent_names: crate::state::Mapping::default(),
                     launch: crate::ui::app::Launch {
                         pending: None,
+                        in_flight: false,
                         problems: Vec::new(),
                     },
                     file_mode: false,
@@ -907,6 +938,7 @@ mod tests {
                     refresh: crate::ui::app::Refresh {
                         requested: false,
                         reload: false,
+                        startup: Vec::new(),
                         problems: Vec::new(),
                     },
                     agents: crate::agents::AgentSnapshot {
@@ -918,6 +950,7 @@ mod tests {
                     agent_names: crate::state::Mapping::default(),
                     launch: crate::ui::app::Launch {
                         pending: None,
+                        in_flight: false,
                         problems: Vec::new(),
                     },
                     file_mode: false,
@@ -1421,6 +1454,7 @@ apply:
                 found.launch,
                 crate::ui::app::Launch {
                     pending: None,
+                    in_flight: false,
                     problems: Vec::new(),
                 }
             );
@@ -1431,6 +1465,7 @@ apply:
                 not_found.launch,
                 crate::ui::app::Launch {
                     pending: None,
+                    in_flight: false,
                     problems: Vec::new(),
                 }
             );
@@ -3885,12 +3920,12 @@ esac
                 assert!(
                     dashboard
                         .refresh
-                        .problems
+                        .startup
                         .iter()
                         .any(|p| p.contains("openspec_bin")
                             && p.contains(&bad_bin.display().to_string())),
                     "width {width}: {:?}",
-                    dashboard.refresh.problems
+                    dashboard.refresh.startup
                 );
                 assert!(
                     buf.iter()
@@ -3986,7 +4021,7 @@ esac
                 let (result, buf) = run_wired_at(width, root, &config, &herdr, None, &|| true);
                 let dashboard = result.expect("a configuration fallback is a supported state");
                 assert_eq!(
-                    dashboard.refresh.problems.first().map(String::as_str),
+                    dashboard.refresh.startup.first().map(String::as_str),
                     Some("config.toml is not valid TOML: bad"),
                     "width {width}: the configuration's own problem must lead"
                 );
@@ -4101,7 +4136,7 @@ esac
                     collaborators.problems
                 );
 
-                dashboard.refresh.problems = collaborators.problems;
+                dashboard.refresh.startup = collaborators.problems;
                 dashboard.file_mode = collaborators.file_mode;
 
                 let buf = render_at(width, 20, &dashboard);
@@ -4286,7 +4321,7 @@ esac
                     !watch_problems.is_empty(),
                     "width {width}: the watcher must genuinely fail here"
                 );
-                dashboard.refresh.problems = watch_problems;
+                dashboard.refresh.startup = watch_problems;
 
                 let mut refresher = crate::testutil::RecordingRefresher::new(Vec::new());
                 let mut agents = crate::agents::none();

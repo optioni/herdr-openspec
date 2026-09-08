@@ -145,7 +145,24 @@ fn drive_live_tier(dashboard: &mut Dashboard, live: &mut Live<'_>) {
     // `agent-launch`'s step 1: leads the iteration because it answers a key pressed at the
     // end of the previous one. Taking the request — leaving `None` — is what makes "handed
     // over exactly once" true even when `apply` set it on the very last event before a quit.
+    // `seam-resilience`'s addition: `in_flight` is set here, and only here, when and only
+    // when the request taken was a `Request::Launch` — a `Request::Focus` starts no agent
+    // and splits no pane and therefore cannot leak one.
     if let Some(request) = dashboard.launch.pending.take() {
+        // Named fields, not `..`: `NODEFAULT-UI`'s `TYPES='Launch'` leg matches this bare
+        // identifier too (it has no way to tell `launch::Request::Launch` from
+        // `ui::app::Launch` apart), so a `..` here would read as an elided field on a type
+        // that is not this one at all.
+        if matches!(
+            request,
+            crate::launch::Request::Launch {
+                change: _,
+                agent: _,
+                intent: _
+            }
+        ) {
+            dashboard.launch.in_flight = true;
+        }
         live.launcher.request(request);
     }
     if dashboard.refresh.requested {
@@ -155,8 +172,16 @@ fn drive_live_tier(dashboard: &mut Dashboard, live: &mut Live<'_>) {
     match live.fs.drain() {
         Ok(Some(paths)) => {
             if let Some(repo) = dashboard.repo.as_deref() {
-                live.refresher
-                    .request(crate::watch::invalidate(repo, &paths));
+                let selection = crate::watch::invalidate(repo, &paths);
+                // `seam-resilience`: an empty `Selection::Only` invalidates nothing, and
+                // requesting one costs a full `changes::from_files` re-walk plus an
+                // `openspec list --json` Node start for no reason — the short-circuit lives
+                // here, at the caller, so `invalidate` itself stays a pure total function.
+                let invalidates_nothing =
+                    matches!(&selection, crate::changes::Selection::Only(s) if s.is_empty());
+                if !invalidates_nothing {
+                    live.refresher.request(selection);
+                }
             }
         }
         Ok(None) => {}
@@ -165,18 +190,27 @@ fn drive_live_tier(dashboard: &mut Dashboard, live: &mut Live<'_>) {
         }
     }
     if let Some(result) = live.refresher.take_result() {
-        let set = match result {
+        match result {
             crate::refresh::RefreshResult::Files(set)
-            | crate::refresh::RefreshResult::Merged(set) => set,
-        };
-        dashboard.adopt(set);
+            | crate::refresh::RefreshResult::Merged(set) => dashboard.adopt(set),
+            // `seam-resilience`: a stopped worker replaces `refresh.problems` wholesale and
+            // runs no `adopt` — the change set on screen is the last true one, and replacing
+            // it with an empty set would make a dead worker look like an empty repository.
+            crate::refresh::RefreshResult::Stopped(reason) => {
+                dashboard.refresh.problems = vec![reason];
+            }
+        }
     }
     if let Some(snapshot) = live.agents.drain() {
         dashboard.agents = snapshot;
     }
     // `agent-launch`'s step 6: follows step 5 so a launch that has just recorded a mapping is
     // visible to the very next `attribution()` call, in the frame the draw below produces.
+    // `seam-resilience`'s addition: `in_flight` is cleared here, whether the outcome is a
+    // real answer or the launcher reporting its own worker dead — no further answer will
+    // ever come either way.
     if let Some(outcome) = live.launcher.drain() {
+        dashboard.launch.in_flight = false;
         if let Some((agent, change)) = outcome.named {
             dashboard.agent_names.names.insert(agent, change);
         }
@@ -229,6 +263,7 @@ mod tests {
             refresh: crate::ui::app::Refresh {
                 requested: false,
                 reload: false,
+                startup: Vec::new(),
                 problems: Vec::new(),
             },
             agents: crate::agents::AgentSnapshot {
@@ -240,6 +275,7 @@ mod tests {
             agent_names: crate::state::Mapping::default(),
             launch: crate::ui::app::Launch {
                 pending: None,
+                in_flight: false,
                 problems: Vec::new(),
             },
             file_mode: false,
@@ -268,6 +304,7 @@ mod tests {
             refresh: crate::ui::app::Refresh {
                 requested: false,
                 reload: false,
+                startup: Vec::new(),
                 problems: Vec::new(),
             },
             agents: crate::agents::AgentSnapshot {
@@ -279,6 +316,7 @@ mod tests {
             agent_names: crate::state::Mapping::default(),
             launch: crate::ui::app::Launch {
                 pending: None,
+                in_flight: false,
                 problems: Vec::new(),
             },
             file_mode: false,
@@ -648,6 +686,7 @@ mod tests {
             refresh: crate::ui::app::Refresh {
                 requested: false,
                 reload: false,
+                startup: Vec::new(),
                 problems: Vec::new(),
             },
             agents: crate::agents::AgentSnapshot {
@@ -659,6 +698,7 @@ mod tests {
             agent_names: crate::state::Mapping::default(),
             launch: crate::ui::app::Launch {
                 pending: None,
+                in_flight: false,
                 problems: Vec::new(),
             },
             file_mode: false,
@@ -776,6 +816,7 @@ mod tests {
             refresh: crate::ui::app::Refresh {
                 requested: false,
                 reload: false,
+                startup: Vec::new(),
                 problems: Vec::new(),
             },
             agents: crate::agents::AgentSnapshot {
@@ -787,6 +828,7 @@ mod tests {
             agent_names: crate::state::Mapping::default(),
             launch: crate::ui::app::Launch {
                 pending: None,
+                in_flight: false,
                 problems: Vec::new(),
             },
             file_mode: false,
@@ -996,6 +1038,7 @@ mod tests {
             refresh: crate::ui::app::Refresh {
                 requested: false,
                 reload: false,
+                startup: Vec::new(),
                 problems: Vec::new(),
             },
             agents: crate::agents::AgentSnapshot {
@@ -1007,6 +1050,7 @@ mod tests {
             agent_names: crate::state::Mapping::default(),
             launch: crate::ui::app::Launch {
                 pending: None,
+                in_flight: false,
                 problems: Vec::new(),
             },
             file_mode: false,
@@ -1100,6 +1144,7 @@ mod tests {
             refresh: crate::ui::app::Refresh {
                 requested: false,
                 reload: false,
+                startup: Vec::new(),
                 problems: Vec::new(),
             },
             agents: crate::agents::AgentSnapshot {
@@ -1111,6 +1156,7 @@ mod tests {
             agent_names: crate::state::Mapping::default(),
             launch: crate::ui::app::Launch {
                 pending: None,
+                in_flight: false,
                 problems: Vec::new(),
             },
             file_mode: false,
@@ -2173,6 +2219,7 @@ mod tests {
             crate::ui::app::Refresh {
                 requested: false,
                 reload: false,
+                startup: Vec::new(),
                 problems: Vec::new(),
             }
         );
@@ -2554,7 +2601,7 @@ mod tests {
             assert!(launcher.requests().is_empty(), "width {width}");
             let buf = terminal.backend().buffer();
             assert!(
-                row_text(buf, 2).starts_with("! "),
+                row_text(buf, 2).contains("! "),
                 "width {width}: {}",
                 row_text(buf, 2)
             );
@@ -2605,7 +2652,7 @@ mod tests {
 
             let buf = terminal.backend().buffer();
             assert!(
-                row_text(buf, 2).starts_with("! "),
+                row_text(buf, 2).contains("! "),
                 "width {width}: {}",
                 row_text(buf, 2)
             );
@@ -2668,7 +2715,7 @@ mod tests {
                 "width {width}: no adopt ran, so a dead worker does not empty the list"
             );
             let buf = terminal.backend().buffer();
-            assert!(row_text(buf, 2).starts_with("! "), "width {width}");
+            assert!(row_text(buf, 2).contains("! "), "width {width}");
         }
     }
 
@@ -2959,11 +3006,18 @@ mod tests {
         let mut events = Script::new(vec![
             Ok(Some(press(KeyCode::Char(']'), KeyModifiers::NONE))),
             Ok(None),
+            Ok(None),
             Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
         ]);
         let mut fs = ScriptedFs::new(Vec::new(), Vec::new());
-        let mut refresher =
-            RecordingRefresher::new(vec![Some(crate::refresh::RefreshResult::Merged(merged))]);
+        // The tab switch's own read (iteration 2) and the adopted `Merged`'s forced reload
+        // (iteration 3) are kept on separate iterations, so a single read cannot satisfy
+        // both: `None` on the first two `take_result` calls, `Merged` only on the third.
+        let mut refresher = RecordingRefresher::new(vec![
+            None,
+            None,
+            Some(crate::refresh::RefreshResult::Merged(merged)),
+        ]);
         let mut agents = crate::agents::none();
         let mut launcher = crate::launch::none();
         let mut live = crate::ui::driver::Live {

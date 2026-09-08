@@ -263,6 +263,18 @@ pub fn rows(dashboard: &Dashboard, width: u16) -> Vec<Row> {
         .collect();
 
     let mut out = Vec::new();
+    // The one problem-row constructor every source below shares: `! `-prefixed, padded or
+    // truncated to the interior width, never addressable by `selected`. Collapsing the five
+    // call sites into this closure is `seam-resilience`'s own REFACTOR step — each source
+    // still gets its own doc comment explaining *why* it sits where it does, since that
+    // reasoning differs source to source even though the row it produces does not.
+    let push_problem = |out: &mut Vec<Row>, text: &str| {
+        out.push(Row {
+            text: problem_row_text(text, width),
+            kind: RowKind::Problem,
+            selected: false,
+        });
+    };
     // `agent-launch`: launch problems lead the whole list, ahead of even refresh problems —
     // they are the only rows that answer a key the reader has just pressed, and burying the
     // reply under a standing condition is how a reader concludes the key did nothing.
@@ -270,11 +282,25 @@ pub fn rows(dashboard: &Dashboard, width: u16) -> Vec<Row> {
     // recording failure and a prompt failure can co-occur) and is replaced wholesale, so this
     // costs at most two rows.
     for problem in &dashboard.launch.problems {
-        out.push(Row {
-            text: problem_row_text(problem, width),
-            kind: RowKind::Problem,
-            selected: false,
-        });
+        push_problem(&mut out, problem);
+    }
+    // `seam-resilience`: a **stalled** agent snapshot's reason sits directly below the
+    // launch problems, because — like them — it explains why a key the reader just pressed
+    // did nothing: the action keys are offered only while reachable, and a socket that has
+    // stopped answering entirely withdraws them along with the badges. A non-stalled
+    // snapshot's `problem` (an unreachable or erroring socket) stays silent, on the
+    // documented standalone-TUI terms.
+    if dashboard.agents.stalled
+        && let Some(reason) = dashboard.agents.problem.as_deref()
+    {
+        push_problem(&mut out, reason);
+    }
+    // `seam-resilience`: `refresh.startup` precedes `refresh.problems` because it is the
+    // older and more general fact — a missing `openspec` binary explains the whole session,
+    // a watcher error explains this moment. Written once by `run_wired` and never replaced,
+    // so it cannot be erased by the first watcher error the way `refresh.problems` is.
+    for problem in &dashboard.refresh.startup {
+        push_problem(&mut out, problem);
     }
     // `live-refresh`: refresh problems (a watcher that would not start, or a
     // drain error) lead the list, ahead of change-set problems — they are
@@ -283,18 +309,10 @@ pub fn rows(dashboard: &Dashboard, width: u16) -> Vec<Row> {
     // same row kind: `change-rows` requires exactly one problem kind, so
     // neither is addressable by `selected` and `ui::view` styles both alike.
     for problem in &dashboard.refresh.problems {
-        out.push(Row {
-            text: problem_row_text(problem, width),
-            kind: RowKind::Problem,
-            selected: false,
-        });
+        push_problem(&mut out, problem);
     }
     for problem in &dashboard.changes.problems {
-        out.push(Row {
-            text: problem_row_text(problem, width),
-            kind: RowKind::Problem,
-            selected: false,
-        });
+        push_problem(&mut out, problem);
     }
 
     if active.is_empty() && archived.is_empty() {
@@ -459,6 +477,7 @@ mod tests {
             refresh: crate::ui::app::Refresh {
                 requested: false,
                 reload: false,
+                startup: Vec::new(),
                 problems: Vec::new(),
             },
             agents: crate::agents::AgentSnapshot {
@@ -470,6 +489,7 @@ mod tests {
             agent_names: crate::state::Mapping::default(),
             launch: crate::ui::app::Launch {
                 pending: None,
+                in_flight: false,
                 problems: Vec::new(),
             },
             file_mode: false,
@@ -547,6 +567,7 @@ mod tests {
                 refresh: crate::ui::app::Refresh {
                     requested: false,
                     reload: false,
+                    startup: Vec::new(),
                     problems: Vec::new(),
                 },
                 agents: crate::agents::AgentSnapshot {
@@ -558,6 +579,7 @@ mod tests {
                 agent_names: crate::state::Mapping::default(),
                 launch: crate::ui::app::Launch {
                     pending: None,
+                    in_flight: false,
                     problems: Vec::new(),
                 },
                 file_mode: false,
@@ -1224,6 +1246,7 @@ mod tests {
             refresh: crate::ui::app::Refresh {
                 requested: false,
                 reload: false,
+                startup: Vec::new(),
                 problems: Vec::new(),
             },
             agents: crate::agents::AgentSnapshot {
@@ -1235,6 +1258,7 @@ mod tests {
             agent_names: crate::state::Mapping::default(),
             launch: crate::ui::app::Launch {
                 pending: None,
+                in_flight: false,
                 problems: Vec::new(),
             },
             file_mode: false,
@@ -1286,6 +1310,7 @@ mod tests {
             refresh: crate::ui::app::Refresh {
                 requested: false,
                 reload: false,
+                startup: Vec::new(),
                 problems: Vec::new(),
             },
             agents: crate::agents::AgentSnapshot {
@@ -1297,6 +1322,7 @@ mod tests {
             agent_names: crate::state::Mapping::default(),
             launch: crate::ui::app::Launch {
                 pending: None,
+                in_flight: false,
                 problems: Vec::new(),
             },
             file_mode: false,
