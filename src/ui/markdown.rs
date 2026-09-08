@@ -807,7 +807,7 @@ mod tests {
         let at78 = lines(source, 78);
         let first78 =
             "alpha bravo charlie delta echo foxtrot golf hotel india juliett kilo lima mike";
-        assert_eq!(first78.chars().count(), 78);
+        assert_eq!(columns(first78), 78);
         assert_eq!(
             text_of(&at78),
             vec![first78.to_string(), "november oscar papa".to_string()]
@@ -1291,14 +1291,14 @@ mod tests {
             first58,
             "- alpha bravo charlie delta echo foxtrot golf hotel india"
         );
-        assert_eq!(first58.chars().count(), 57);
+        assert_eq!(columns(&first58), 57);
         let at78 = lines(source, 78);
         let first78 = at78[0].text();
         assert_eq!(
             first78,
             "- alpha bravo charlie delta echo foxtrot golf hotel india juliett kilo lima"
         );
-        assert_eq!(first78.chars().count(), 75);
+        assert_eq!(columns(&first78), 75);
     }
 
     #[test]
@@ -1390,7 +1390,7 @@ mod tests {
             .filter(|s| !s.is_empty())
             .collect();
         assert_eq!(
-            at58.iter().map(|s| s.chars().count()).collect::<Vec<_>>(),
+            at58.iter().map(|s| columns(s)).collect::<Vec<_>>(),
             vec![58, 58, 14]
         );
         assert_eq!(at58.concat(), "x".repeat(130));
@@ -1400,7 +1400,7 @@ mod tests {
             .filter(|s| !s.is_empty())
             .collect();
         assert_eq!(
-            at78.iter().map(|s| s.chars().count()).collect::<Vec<_>>(),
+            at78.iter().map(|s| columns(s)).collect::<Vec<_>>(),
             vec![78, 52]
         );
         assert_eq!(at78.concat(), "x".repeat(130));
@@ -1468,7 +1468,7 @@ mod tests {
             first58,
             "> alpha bravo charlie delta echo foxtrot golf hotel india"
         );
-        assert_eq!(first58.chars().count(), 57);
+        assert_eq!(columns(&first58), 57);
 
         let nested = "> > nested alpha bravo\n";
         for width in [58, 78] {
@@ -1488,7 +1488,7 @@ mod tests {
                 .position(|l| l.segments.len() == 1 && l.segments[0].text.chars().all(|c| c == '-'))
                 .unwrap_or_else(|| panic!("width {width}: no rule line found"));
             let rule = &out[idx];
-            assert_eq!(rule.text().chars().count(), width as usize);
+            assert_eq!(columns(&rule.text()), width as usize);
             assert_eq!(rule.segments[0].face, Face::plain());
             assert!(out[idx - 1].segments.is_empty(), "width {width}");
             assert!(out[idx + 1].segments.is_empty(), "width {width}");
