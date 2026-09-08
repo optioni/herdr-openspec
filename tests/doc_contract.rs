@@ -300,7 +300,19 @@ fn absent_heading() {
 fn missing_tested_modules(section_text: &str, declared: &BTreeSet<String>) -> BTreeSet<String> {
     declared
         .iter()
-        .filter(|name| !section_text.contains(&format!("{name}::")))
+        .filter(|name| {
+            let token = format!("{name}::");
+            // Left-boundary-only: a `<name>::` token must not be preceded by an identifier
+            // character (`reopen::` must not satisfy a search for `open::`), but nothing
+            // needs to be true of the character AFTER the token — `open::context` is exactly
+            // the shape every real mention takes, and a right-boundary check would reject it.
+            !bounded_mention_asym(
+                section_text,
+                &token,
+                |c| c.is_ascii_alphanumeric() || c == b'_',
+                |_| false,
+            )
+        })
         .cloned()
         .collect()
 }
