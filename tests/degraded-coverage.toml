@@ -9,7 +9,7 @@ tier = "view"
 proof = ["no_repository_names_the_directory_searched"]
 verdict = "confirmed"
 why = "the list region renders the empty state naming the directory searched, via render_at"
-covers = ["src/ui/list.rs:217-226"]
+covers = ["src/ui/list.rs:255-274"]
 
 [[row]]
 condition = "`openspec` binary not found"
@@ -17,7 +17,7 @@ tier = "view"
 proof = ["file_mode_badge_is_dim_after_the_label", "badge_drops_whole_below_eighteen_columns"]
 verdict = "implemented"
 why = "the header renders a dim file mode badge, driven through render_at at both widths"
-covers = ["src/ui/view.rs:227-234"]
+covers = ["src/ui/view.rs:238-246"]
 
 [[row]]
 condition = "Schema unknown to the CLI"
@@ -57,7 +57,7 @@ tier = "view"
 proof = ["a_repository_with_no_changes_says_so"]
 verdict = "confirmed"
 why = "the list region's empty state, rendered through render_at"
-covers = ["src/ui/list.rs:300-306"]
+covers = ["src/ui/list.rs:356-362"]
 
 [[row]]
 condition = "A `/` filter matches no change"
@@ -65,7 +65,7 @@ tier = "view"
 proof = ["a_query_matching_nothing_names_itself"]
 verdict = "confirmed"
 why = "the filter's no-match rows, rendered through render_at"
-covers = ["src/ui/list.rs:307-318"]
+covers = ["src/ui/list.rs:363-374"]
 
 [[row]]
 condition = "Artifact file missing"
@@ -73,7 +73,7 @@ tier = "view"
 proof = ["a_missing_artifact_still_shows_its_tab_and_reads_no_content_yet"]
 verdict = "confirmed"
 why = "the detail region's No content yet state, rendered through render_at"
-covers = ["src/ui/detail.rs:222-229"]
+covers = ["src/ui/detail.rs:231-238"]
 
 [[row]]
 condition = "An artifact file exists and cannot be read (permission error, I/O error)"
@@ -81,7 +81,7 @@ tier = "view"
 proof = ["a_read_failure_is_named_above_the_content_at_both_widths"]
 verdict = "confirmed"
 why = "the detail region's leading problem line, rendered through render_at"
-covers = ["src/ui/detail.rs:202-208"]
+covers = ["src/ui/detail.rs:211-217"]
 
 [[row]]
 condition = "No change is selected (an empty visible list, or a `/` filter matching none)"
@@ -89,7 +89,7 @@ tier = "view"
 proof = ["an_empty_visible_list_leaves_the_whole_detail_interior_blank"]
 verdict = "confirmed"
 why = "the whole detail interior stays blank, rendered through render_at"
-covers = ["src/ui/view.rs:51-54"]
+covers = ["src/ui/view.rs:55-57"]
 
 [[row]]
 condition = "Markdown source holds a construct the parser does not model (a table, a footnote, strikethrough, a task-list item), on a tab **other** than the tracked-tasks one"
@@ -97,7 +97,7 @@ tier = "unit"
 proof = ["unmodelled_constructs_render_as_source"]
 verdict = "unproven"
 why = "ui::markdown::lines renders each unmodelled construct as literal source, one line per source line"
-covers = ["src/ui/markdown.rs:470-471"]
+covers = ["src/ui/markdown.rs:500-500"]
 
 [[row]]
 condition = "A tasks file exists and yields no task **items**"
@@ -105,7 +105,7 @@ tier = "view"
 proof = ["prose_only_reads_no_tasks_yet"]
 verdict = "confirmed"
 why = "the tracked-tasks tab's No tasks yet state, rendered through render_at"
-covers = ["src/ui/tasks.rs:265-267"]
+covers = ["src/ui/tasks.rs:318-324"]
 
 [[row]]
 condition = "A marked tab's artifact resolves to no file while the change's `progress` is non-zero (the `tasks.md` fallback above counted a file the artifact itself did not)"
@@ -113,7 +113,7 @@ tier = "view"
 proof = ["missing_tasks_artifact_no_content_yet"]
 verdict = "confirmed"
 why = "the header's counted pair beside the tab's own No content yet, rendered through render_at"
-covers = ["src/ui/detail.rs:15-26", "src/ui/detail.rs:222-229"]
+covers = ["src/ui/detail.rs:219-224", "src/ui/detail.rs:231-238"]
 
 [[row]]
 condition = "`openspec/changes/` or its `archive/` exists and cannot be read"
@@ -121,7 +121,7 @@ tier = "view"
 proof = ["repository_problems_are_named_above_the_rows"]
 verdict = "confirmed"
 why = "the list's leading problem row naming the unreadable directory, rendered through render_at"
-covers = ["src/ui/list.rs:292-298"]
+covers = ["src/ui/list.rs:352-354"]
 
 [[row]]
 condition = "An artifact's `generates` pattern falls outside the file path's supported glob subset"
@@ -217,7 +217,7 @@ tier = "view"
 proof = ["wide_draws_two_regions_divided_at_40"]
 verdict = "confirmed"
 why = "the single-column/two-region layout switch, rendered through render_at"
-covers = ["src/ui/layout.rs:23-28"]
+covers = ["src/ui/layout.rs:27-30"]
 
 [[row]]
 condition = "`config.toml` malformed, unreadable, or a key of the wrong type"
