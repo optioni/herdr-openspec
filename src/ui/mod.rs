@@ -3357,6 +3357,142 @@ esac
             assert_eq!(state_before, state_after);
         }
 
+        /// `agent-launch`'s `launch_herdr_script`, with `pane split` slowed down by a real
+        /// 300ms sleep — the crate's own worker thread is what makes this deterministic
+        /// rather than a race: a `Script`/`Stages` event is delivered with no real wait, so
+        /// two key presses land within microseconds of each other, comfortably inside the
+        /// 300ms window a real `pane split` invocation now takes. `seam-resilience`.
+        fn launch_herdr_script_slow_split(
+            dir: &Path,
+            log: &Path,
+            marker: &Path,
+            root: &Path,
+        ) -> PathBuf {
+            let root = root.display().to_string();
+            write_script(
+                dir,
+                "herdr",
+                &format!(
+                    r#"printf '%s\n' "$*" >> "{log}"
+case "$1 $2" in
+  "pane split")
+    sleep 0.3
+    printf '%s' '{{"id":"cli:pane:split","result":{{"pane":{{"agent_status":"unknown","cwd":"{root}","pane_id":"wD:pJ","tab_id":"wD:t2","workspace_id":"wD"}},"type":"pane_info"}}}}'
+    ;;
+  "agent start")
+    name="$3"
+    printf 'name=%s\n' "$name" > "{marker}"
+    printf '%s' '{{"id":"cli:agent:start","result":{{"agent":{{"name":"'"$name"'","pane_id":"wD:pJ"}},"argv":["claude"],"type":"agent_started"}}}}'
+    ;;
+  "agent prompt")
+    printf '%s' '{{"id":"cli:agent:prompt","result":{{"agent":{{}},"type":"agent_prompted"}}}}'
+    ;;
+  "agent focus")
+    printf '%s' '{{"id":"cli:agent:focus","result":{{"agent":{{}},"type":"agent_focused"}}}}'
+    ;;
+  "agent list")
+    if [ -f "{marker}" ]; then
+      name=$(sed -n 's/^name=//p' "{marker}")
+      printf '%s' '{{"id":"cli:agent:list","result":{{"agents":[{{"agent":"claude","agent_status":"working","cwd":"{root}","name":"'"$name"'","pane_id":"wD:pJ","tab_id":"wD:t2","workspace_id":"wD"}}],"type":"agent_list"}}}}'
+    else
+      printf '%s' '{{"id":"cli:agent:list","result":{{"agents":[],"type":"agent_list"}}}}'
+    fi
+    ;;
+esac
+"#,
+                    log = log.display(),
+                    marker = marker.display(),
+                    root = root,
+                ),
+            )
+        }
+
+        /// `agent-launch`: "A launch in flight at quit is settled rather than orphaned" —
+        /// `run_wired` must not return until `launch::settle` has taken the outcome or the
+        /// budget elapsed, so the prompt that makes the started agent useful is not lost to
+        /// an exit that races the launcher's worker.
+        #[test]
+        fn a_launch_in_flight_at_quit_is_settled_rather_than_orphaned() {
+            let scratch = scratch_repo_with_2fa_support();
+            let root = scratch.path();
+            let canon_root = canonical(root);
+            let herdr_log = root.join("herdr.log");
+            let marker = root.join("marker");
+            let herdr = launch_herdr_script_slow_split(root, &herdr_log, &marker, &canon_root);
+            let openspec_log = root.join("openspec.log");
+            let openspec = openspec_script(root, &openspec_log, root);
+            let state = ScratchDir::new();
+
+            let config = Config {
+                openspec_bin: Some(openspec),
+                agent_kind: "codex".to_string(),
+                ..Config::default()
+            };
+
+            let stage1 = || log_lines(&herdr_log) >= 1;
+            let immediately = || true;
+            let stages: Vec<(&dyn Fn() -> bool, ratatui::crossterm::event::Event)> =
+                vec![(&stage1, key('a')), (&immediately, key('q'))];
+
+            let (result, _buf) =
+                run_wired_staged(120, root, &config, &herdr, Some(state.path()), stages);
+            let dashboard = result.expect("run_wired must return Ok even when settling a launch");
+
+            let calls = non_agent_list_lines(&herdr_log);
+            assert_eq!(
+                calls,
+                vec![
+                    format!(
+                        "pane split --cwd {} --direction right --no-focus",
+                        canon_root.display()
+                    ),
+                    "agent start c-2fa-support --kind codex --pane wD:pJ".to_string(),
+                    "agent prompt c-2fa-support /opsx:apply 2fa-support".to_string(),
+                ],
+                "the prompt that makes the agent useful must not be lost to the exit"
+            );
+            assert_eq!(
+                dashboard.agent_names.names.get("c-2fa-support"),
+                Some(&"2fa-support".to_string()),
+                "the recorded mapping lets a later dashboard attribute the agent this one started"
+            );
+            assert!(!dashboard.launch.in_flight);
+        }
+
+        /// `agent-launch`: "Quitting with nothing in flight pays no budget" — an unreachable
+        /// socket never launches anything, so `launch::settle` must never be reached and `q`
+        /// must return promptly. `NOBLOCK` leg 2 forbids a clock under `src/ui/`, tests
+        /// included, so this asserts the resulting state rather than elapsed time — a real
+        /// 35-second stall here would itself be caught by an ordinary test run being slow.
+        #[test]
+        fn quitting_with_nothing_in_flight_pays_no_budget() {
+            let scratch = scratch_repo_with_alpha();
+            let root = scratch.path();
+            let herdr = root.join("does-not-exist-herdr");
+            let config = Config::default();
+            let mut events = crate::testutil::Script::new(vec![Ok(Some(key('q')))]);
+            let backend = ratatui::backend::TestBackend::new(60, 20);
+            let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+            let startup = Startup {
+                cwd: root,
+                config: &config,
+                herdr: &herdr,
+                state_dir: None,
+                env: &no_env,
+                npm_hook: &no_npm_hook,
+            };
+            let result = super::super::run_wired(
+                &mut terminal,
+                &mut events,
+                &startup,
+                &crate::ui::read_artifact,
+                Duration::from_millis(1),
+            );
+            let dashboard = result.expect("quitting immediately is a supported state");
+            assert!(!dashboard.launch.in_flight, "nothing was ever launched");
+            assert!(dashboard.launch.problems.is_empty());
+        }
+
         // --- degraded-states: the probe seam, file_mode, and the startup problems that
         // --- reach the pane (task group 3) -------------------------------------------------
 

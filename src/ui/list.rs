@@ -1662,6 +1662,90 @@ mod tests {
         }
     }
 
+    /// `seam-resilience`: `live-updates` -> "All five problem sources render in their
+    /// specified order" — launch, stall, startup, live, change-set.
+    #[test]
+    fn all_five_problem_sources_render_in_their_specified_order() {
+        let mut d = dashboard_with(
+            vec![fixture::active("alpha", 1, 2)],
+            Vec::new(),
+            vec!["openspec/changes unreadable".to_string()],
+            0,
+        );
+        d.launch.problems = vec!["launch failed".to_string()];
+        d.agents = crate::agents::AgentSnapshot {
+            agents: Vec::new(),
+            reachable: false,
+            stalled: true,
+            problem: Some("herdr agent list has not answered in 5s".to_string()),
+        };
+        d.refresh.startup = vec![
+            "openspec binary not found".to_string(),
+            "config.toml: archived_count not set".to_string(),
+        ];
+        d.refresh.problems = vec!["watch failed".to_string()];
+        for width in [38, 58] {
+            let all = rows(&d, width);
+            let kinds: Vec<RowKind> = all.iter().map(|r| r.kind).collect();
+            assert_eq!(
+                kinds[0..6],
+                [
+                    RowKind::Problem,
+                    RowKind::Problem,
+                    RowKind::Problem,
+                    RowKind::Problem,
+                    RowKind::Problem,
+                    RowKind::Problem,
+                ],
+                "width {width}"
+            );
+            assert_eq!(all[6].kind, RowKind::Item { index: 0 }, "width {width}");
+            assert!(all[0].text.contains("launch failed"), "width {width}");
+            assert!(all[1].text.contains("has not answered"), "width {width}");
+            assert!(
+                all[2].text.contains("openspec binary not found"),
+                "width {width}"
+            );
+            assert!(all[3].text.contains("archived_count"), "width {width}");
+            assert!(all[4].text.contains("watch failed"), "width {width}");
+            assert!(
+                all[5].text.contains("openspec/changes unreadable"),
+                "width {width}"
+            );
+            for row in &all[0..6] {
+                assert_eq!(row.text.chars().count(), width as usize, "width {width}");
+                assert!(!row.selected, "width {width}");
+            }
+        }
+    }
+
+    /// `seam-resilience`: "A non-stalled agent problem draws no row" — the documented
+    /// silent standalone-TUI state, unchanged by this addition.
+    #[test]
+    fn a_non_stalled_agent_problem_draws_no_row() {
+        let mut with_problem = three_active();
+        with_problem.agents = crate::agents::AgentSnapshot {
+            agents: Vec::new(),
+            reachable: false,
+            stalled: false,
+            problem: Some("herdr agent list exited 1: server_not_running".to_string()),
+        };
+        let mut without = three_active();
+        without.agents = crate::agents::AgentSnapshot {
+            agents: Vec::new(),
+            reachable: false,
+            stalled: false,
+            problem: None,
+        };
+        for width in [38, 58] {
+            assert_eq!(
+                rows(&with_problem, width),
+                rows(&without, width),
+                "width {width}"
+            );
+        }
+    }
+
     #[test]
     fn a_refresh_problem_row_degrades_at_narrow_widths() {
         let mut d = dashboard_with(Vec::new(), Vec::new(), Vec::new(), 0);

@@ -2367,6 +2367,630 @@ mod tests {
         // actually renders `launch.problems`; this test's job is the loop's own bookkeeping.
     }
 
+    // --- seam-resilience: in-flight lifecycle, startup problems, the empty-selection
+    // --- short-circuit, Stopped, the stall row, and the artifact-read cache ----------------
+
+    #[test]
+    fn the_flag_is_set_on_hand_over_and_cleared_on_outcome() {
+        let backend = TestBackend::new(60, 20);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        let mut dashboard = dashboard();
+        dashboard.launch.pending = Some(crate::launch::Request::Launch {
+            change: "add-auth".to_string(),
+            agent: "add-auth".to_string(),
+            intent: crate::launch::Intent::Apply,
+        });
+
+        // Stage 1: hand-over, no answer yet — the flag must already be set.
+        let mut events1 = Script::new(vec![Ok(Some(press(
+            KeyCode::Char('q'),
+            KeyModifiers::NONE,
+        )))]);
+        let mut fs = crate::watch::none();
+        let mut refresher = crate::refresh::none();
+        let mut agents = crate::agents::none();
+        let mut launcher1 = crate::testutil::ScriptedLauncher::new(vec![None]);
+        let mut live1 = crate::ui::driver::Live {
+            fs: &mut *fs,
+            refresher: &mut *refresher,
+            agents: &mut *agents,
+            launcher: &mut launcher1,
+        };
+        run_loop(
+            &mut terminal,
+            &mut dashboard,
+            &mut events1,
+            &mut live1,
+            &|_: &std::path::Path| Ok(String::new()),
+            Duration::from_millis(1),
+        )
+        .expect("stage 1 ends");
+        assert!(dashboard.launch.in_flight, "set on hand-over");
+
+        // Stage 2: the same dashboard, driven again — the launcher now answers.
+        dashboard.quit = false;
+        let mut events2 = Script::new(vec![Ok(Some(press(
+            KeyCode::Char('q'),
+            KeyModifiers::NONE,
+        )))]);
+        let mut launcher2 =
+            crate::testutil::ScriptedLauncher::new(vec![Some(crate::launch::Outcome {
+                named: Some(("add-auth".to_string(), "add-auth".to_string())),
+                problems: Vec::new(),
+            })]);
+        let mut live2 = crate::ui::driver::Live {
+            fs: &mut *fs,
+            refresher: &mut *refresher,
+            agents: &mut *agents,
+            launcher: &mut launcher2,
+        };
+        run_loop(
+            &mut terminal,
+            &mut dashboard,
+            &mut events2,
+            &mut live2,
+            &|_: &std::path::Path| Ok(String::new()),
+            Duration::from_millis(1),
+        )
+        .expect("stage 2 ends");
+        assert!(!dashboard.launch.in_flight, "cleared on outcome");
+        assert_eq!(
+            dashboard.agent_names.names.get("add-auth"),
+            Some(&"add-auth".to_string())
+        );
+    }
+
+    #[test]
+    fn a_focus_request_never_sets_the_flag() {
+        let backend = TestBackend::new(60, 20);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        let mut dashboard = dashboard();
+        dashboard.launch.pending = Some(crate::launch::Request::Focus {
+            pane_id: "w8:p1".to_string(),
+        });
+        let mut events = Script::new(vec![Ok(Some(press(
+            KeyCode::Char('q'),
+            KeyModifiers::NONE,
+        )))]);
+        let mut fs = crate::watch::none();
+        let mut refresher = crate::refresh::none();
+        let mut agents = crate::agents::none();
+        let mut launcher = crate::testutil::RecordingLauncher::new();
+        let mut live = crate::ui::driver::Live {
+            fs: &mut *fs,
+            refresher: &mut *refresher,
+            agents: &mut *agents,
+            launcher: &mut launcher,
+        };
+        run_loop(
+            &mut terminal,
+            &mut dashboard,
+            &mut events,
+            &mut live,
+            &|_: &std::path::Path| Ok(String::new()),
+            Duration::from_millis(1),
+        )
+        .expect("loop ends");
+        assert!(!dashboard.launch.in_flight);
+    }
+
+    #[test]
+    fn a_dead_launcher_clears_the_flag() {
+        let backend = TestBackend::new(60, 20);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        let mut dashboard = dashboard();
+        dashboard.launch.in_flight = true;
+        let mut events = Script::new(vec![Ok(Some(press(
+            KeyCode::Char('q'),
+            KeyModifiers::NONE,
+        )))]);
+        let mut fs = crate::watch::none();
+        let mut refresher = crate::refresh::none();
+        let mut agents = crate::agents::none();
+        let mut launcher =
+            crate::testutil::ScriptedLauncher::new(vec![Some(crate::launch::Outcome {
+                named: None,
+                problems: vec!["the launcher's worker has stopped answering".to_string()],
+            })]);
+        let mut live = crate::ui::driver::Live {
+            fs: &mut *fs,
+            refresher: &mut *refresher,
+            agents: &mut *agents,
+            launcher: &mut launcher,
+        };
+        run_loop(
+            &mut terminal,
+            &mut dashboard,
+            &mut events,
+            &mut live,
+            &|_: &std::path::Path| Ok(String::new()),
+            Duration::from_millis(1),
+        )
+        .expect("loop ends");
+        assert!(!dashboard.launch.in_flight);
+        assert_eq!(
+            dashboard.launch.problems,
+            vec!["the launcher's worker has stopped answering".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_second_launch_key_while_in_flight_renders_a_problem_row_and_issues_nothing() {
+        for width in [120u16, 60u16] {
+            let backend = TestBackend::new(width, 20);
+            let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+            let mut dashboard = dashboard();
+            dashboard.agents.reachable = true;
+            dashboard.launch.in_flight = true;
+            dashboard.changes = crate::changes::fixture::set(
+                vec![crate::changes::fixture::active("add-auth", 1, 2)],
+                Vec::new(),
+                Vec::new(),
+            );
+            let mut events = Script::new(vec![
+                Ok(Some(press(KeyCode::Char('a'), KeyModifiers::NONE))),
+                Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
+            ]);
+            let mut fs = crate::watch::none();
+            let mut refresher = crate::refresh::none();
+            let mut agents = crate::agents::none();
+            let mut launcher = crate::testutil::RecordingLauncher::new();
+            let mut live = crate::ui::driver::Live {
+                fs: &mut *fs,
+                refresher: &mut *refresher,
+                agents: &mut *agents,
+                launcher: &mut launcher,
+            };
+            run_loop(
+                &mut terminal,
+                &mut dashboard,
+                &mut events,
+                &mut live,
+                &|_: &std::path::Path| Ok(String::new()),
+                Duration::from_millis(1),
+            )
+            .expect("loop ends");
+
+            assert!(launcher.requests().is_empty(), "width {width}");
+            let buf = terminal.backend().buffer();
+            assert!(
+                row_text(buf, 2).starts_with("! "),
+                "width {width}: {}",
+                row_text(buf, 2)
+            );
+            assert!(
+                row_text(buf, 2).contains("already running"),
+                "width {width}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_stalled_poller_becomes_a_problem_row_and_withdraws_the_badges() {
+        for width in [120u16, 60u16] {
+            let backend = TestBackend::new(width, 20);
+            let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+            let mut dashboard = dashboard_with_change("/tmp/demo-repo", "2fa-support", 1, 2);
+            let mut events = Script::new(vec![Ok(Some(press(
+                KeyCode::Char('q'),
+                KeyModifiers::NONE,
+            )))]);
+            let mut fs = crate::watch::none();
+            let mut refresher = crate::refresh::none();
+            let mut agents = crate::testutil::ScriptedAgents::new(
+                vec![Some(crate::agents::AgentSnapshot {
+                    agents: Vec::new(),
+                    reachable: false,
+                    stalled: true,
+                    problem: Some("herdr agent list has not answered in over 5s".to_string()),
+                })],
+                Vec::new(),
+            );
+            let mut launcher = crate::launch::none();
+            let mut live = crate::ui::driver::Live {
+                fs: &mut *fs,
+                refresher: &mut *refresher,
+                agents: &mut agents,
+                launcher: &mut *launcher,
+            };
+            run_loop(
+                &mut terminal,
+                &mut dashboard,
+                &mut events,
+                &mut live,
+                &|_: &std::path::Path| Ok(String::new()),
+                Duration::from_millis(1),
+            )
+            .expect("loop ends");
+
+            let buf = terminal.backend().buffer();
+            assert!(
+                row_text(buf, 2).starts_with("! "),
+                "width {width}: {}",
+                row_text(buf, 2)
+            );
+            assert!(
+                row_text(buf, 2).contains("has not answered"),
+                "width {width}"
+            );
+            assert!(dashboard.agents.stalled, "width {width}");
+        }
+    }
+
+    #[test]
+    fn a_stopped_refresh_worker_becomes_a_problem_row_and_keeps_the_list() {
+        for width in [120u16, 60u16] {
+            let backend = TestBackend::new(width, 20);
+            let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+            let mut dashboard = dashboard();
+            dashboard.changes = crate::changes::fixture::set(
+                vec![
+                    crate::changes::fixture::active("alpha", 1, 2),
+                    crate::changes::fixture::active("beta", 1, 2),
+                ],
+                Vec::new(),
+                Vec::new(),
+            );
+            let mut events = Script::new(vec![
+                Ok(None),
+                Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
+            ]);
+            let mut fs = crate::watch::none();
+            let mut refresher = RecordingRefresher::new(vec![Some(
+                crate::refresh::RefreshResult::Stopped("refresh worker stopped".to_string()),
+            )]);
+            let mut agents = crate::agents::none();
+            let mut launcher = crate::launch::none();
+            let mut live = crate::ui::driver::Live {
+                fs: &mut *fs,
+                refresher: &mut refresher,
+                agents: &mut *agents,
+                launcher: &mut *launcher,
+            };
+            run_loop(
+                &mut terminal,
+                &mut dashboard,
+                &mut events,
+                &mut live,
+                &|_: &std::path::Path| Ok(String::new()),
+                Duration::from_millis(1),
+            )
+            .expect("loop ends");
+
+            assert_eq!(
+                dashboard.refresh.problems,
+                vec!["refresh worker stopped".to_string()],
+                "width {width}"
+            );
+            assert_eq!(
+                dashboard.changes.active.len(),
+                2,
+                "width {width}: no adopt ran, so a dead worker does not empty the list"
+            );
+            let buf = terminal.backend().buffer();
+            assert!(row_text(buf, 2).starts_with("! "), "width {width}");
+        }
+    }
+
+    #[test]
+    fn a_watcher_error_does_not_erase_the_startup_problems() {
+        for width in [120u16, 60u16] {
+            let backend = TestBackend::new(width, 20);
+            let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+            let mut dashboard = dashboard();
+            dashboard.refresh.startup = vec![
+                "openspec binary not found on PATH".to_string(),
+                "config.toml: archived_count not set, using 5".to_string(),
+            ];
+            let mut events = Script::new(vec![
+                Ok(None),
+                Ok(None),
+                Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
+            ]);
+            let mut fs = ScriptedFs::new(
+                vec![
+                    Err(crate::watch::WatchError("watch failed".to_string())),
+                    Ok(None),
+                ],
+                Vec::new(),
+            );
+            let mut refresher = RecordingRefresher::new(Vec::new());
+            let mut agents = crate::agents::none();
+            let mut launcher = crate::launch::none();
+            let mut live = crate::ui::driver::Live {
+                fs: &mut fs,
+                refresher: &mut refresher,
+                agents: &mut *agents,
+                launcher: &mut *launcher,
+            };
+            run_loop(
+                &mut terminal,
+                &mut dashboard,
+                &mut events,
+                &mut live,
+                &|_: &std::path::Path| Ok(String::new()),
+                Duration::from_millis(1),
+            )
+            .expect("loop ends");
+
+            assert_eq!(
+                dashboard.refresh.startup,
+                vec![
+                    "openspec binary not found on PATH".to_string(),
+                    "config.toml: archived_count not set, using 5".to_string(),
+                ],
+                "width {width}"
+            );
+            assert_eq!(
+                dashboard.refresh.problems,
+                vec!["watch failed".to_string()],
+                "width {width}"
+            );
+            let buf = terminal.backend().buffer();
+            assert!(
+                row_text(buf, 2).contains("openspec binary not found"),
+                "width {width}: {}",
+                row_text(buf, 2)
+            );
+            assert!(
+                row_text(buf, 3).contains("archived_count"),
+                "width {width}: {}",
+                row_text(buf, 3)
+            );
+            assert!(
+                row_text(buf, 4).contains("watch failed"),
+                "width {width}: {}",
+                row_text(buf, 4)
+            );
+        }
+    }
+
+    #[test]
+    fn a_forced_refresh_does_not_repopulate_or_duplicate_the_startup_problems() {
+        let backend = TestBackend::new(60, 20);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        let mut dashboard = dashboard();
+        dashboard.refresh.startup = vec!["openspec binary not found".to_string()];
+        dashboard.refresh.requested = true;
+
+        let merged = crate::changes::fixture::set(Vec::new(), Vec::new(), Vec::new());
+        let mut events1 = Script::new(vec![Ok(Some(press(
+            KeyCode::Char('q'),
+            KeyModifiers::NONE,
+        )))]);
+        let mut fs1 = ScriptedFs::new(Vec::new(), Vec::new());
+        let mut refresher1 =
+            RecordingRefresher::new(vec![Some(crate::refresh::RefreshResult::Merged(merged))]);
+        let mut agents1 = crate::agents::none();
+        let mut launcher1 = crate::launch::none();
+        let mut live1 = crate::ui::driver::Live {
+            fs: &mut fs1,
+            refresher: &mut refresher1,
+            agents: &mut *agents1,
+            launcher: &mut *launcher1,
+        };
+        run_loop(
+            &mut terminal,
+            &mut dashboard,
+            &mut events1,
+            &mut live1,
+            &|_: &std::path::Path| Ok(String::new()),
+            Duration::from_millis(1),
+        )
+        .expect("stage 1 ends");
+
+        dashboard.quit = false;
+        let mut events2 = Script::new(vec![Ok(Some(press(
+            KeyCode::Char('q'),
+            KeyModifiers::NONE,
+        )))]);
+        let mut fs2 = ScriptedFs::new(
+            vec![Err(crate::watch::WatchError(
+                "watch failed again".to_string(),
+            ))],
+            Vec::new(),
+        );
+        let mut refresher2 = RecordingRefresher::new(Vec::new());
+        let mut agents2 = crate::agents::none();
+        let mut launcher2 = crate::launch::none();
+        let mut live2 = crate::ui::driver::Live {
+            fs: &mut fs2,
+            refresher: &mut refresher2,
+            agents: &mut *agents2,
+            launcher: &mut *launcher2,
+        };
+        run_loop(
+            &mut terminal,
+            &mut dashboard,
+            &mut events2,
+            &mut live2,
+            &|_: &std::path::Path| Ok(String::new()),
+            Duration::from_millis(1),
+        )
+        .expect("stage 2 ends");
+
+        assert_eq!(
+            dashboard.refresh.startup,
+            vec!["openspec binary not found".to_string()]
+        );
+        assert_eq!(
+            dashboard.refresh.problems,
+            vec!["watch failed again".to_string()]
+        );
+    }
+
+    #[test]
+    fn a_batch_that_invalidates_nothing_issues_no_refresh() {
+        let backend = TestBackend::new(60, 20);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        let mut dashboard = dashboard();
+        dashboard.repo = Some(std::path::PathBuf::from("/r"));
+        let mut events = Script::new(vec![
+            Ok(None),
+            Ok(None),
+            Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
+        ]);
+        let mut fs = ScriptedFs::new(
+            vec![Ok(Some(vec![
+                std::path::PathBuf::from("/r/target/debug/build.log"),
+                std::path::PathBuf::from("/r/.git/index"),
+            ]))],
+            Vec::new(),
+        );
+        let mut refresher = RecordingRefresher::new(Vec::new());
+        let mut agents = crate::agents::none();
+        let mut launcher = crate::launch::none();
+        let mut live = crate::ui::driver::Live {
+            fs: &mut fs,
+            refresher: &mut refresher,
+            agents: &mut *agents,
+            launcher: &mut *launcher,
+        };
+        run_loop(
+            &mut terminal,
+            &mut dashboard,
+            &mut events,
+            &mut live,
+            &|_: &std::path::Path| Ok(String::new()),
+            Duration::from_millis(1),
+        )
+        .expect("loop ends");
+
+        assert!(
+            refresher.requests().is_empty(),
+            "an all-Outside batch invalidates nothing"
+        );
+        assert!(dashboard.refresh.problems.is_empty());
+    }
+
+    #[test]
+    fn a_held_key_causes_no_read() {
+        for width in [120u16, 60u16] {
+            let backend = TestBackend::new(width, 20);
+            let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+            let mut dashboard = dashboard_with_one_artifact_path();
+            dashboard.route = Route::Detail;
+            let mut presses: Vec<_> = (0..10)
+                .map(|_| Ok(Some(press(KeyCode::Char('j'), KeyModifiers::NONE))))
+                .collect();
+            presses.push(Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))));
+            let mut events = Script::new(presses);
+            let recorder = crate::testutil::RecordingReader::always(Ok("# proposal\n".to_string()));
+            let read = |p: &std::path::Path| recorder.read(p);
+
+            let mut fs = crate::watch::none();
+            let mut refresher = crate::refresh::none();
+            let mut agents = crate::agents::none();
+            let mut launcher = crate::launch::none();
+            let mut live = crate::ui::driver::Live {
+                fs: &mut *fs,
+                refresher: &mut *refresher,
+                agents: &mut *agents,
+                launcher: &mut *launcher,
+            };
+            run_loop(
+                &mut terminal,
+                &mut dashboard,
+                &mut events,
+                &mut live,
+                &read,
+                Duration::from_millis(1),
+            )
+            .expect("loop ends");
+
+            assert_eq!(recorder.calls(), 1, "width {width}");
+        }
+    }
+
+    #[test]
+    fn a_tab_switch_and_an_adopted_refresh_each_cause_exactly_one_read() {
+        let backend = TestBackend::new(120, 20);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        let change = crate::changes::fixture::with_artifacts(
+            crate::changes::fixture::active("detail-view", 4, 9),
+            &[("proposal", &["/repo/p.md"]), ("design", &["/repo/d.md"])],
+        );
+        let mut dashboard = Dashboard {
+            repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
+            searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
+            changes: crate::changes::fixture::set(vec![change], Vec::new(), Vec::new()),
+            route: Route::Detail,
+            quit: false,
+            selected: 0,
+            filter: crate::ui::app::Filter {
+                query: String::new(),
+                active: false,
+            },
+            detail: crate::ui::app::Detail {
+                source: String::new(),
+                scroll: 0,
+                tab: 0,
+                problems: Vec::new(),
+                loaded: None,
+            },
+            refresh: crate::ui::app::Refresh {
+                requested: false,
+                reload: false,
+                startup: Vec::new(),
+                problems: Vec::new(),
+            },
+            agents: crate::agents::AgentSnapshot {
+                agents: Vec::new(),
+                reachable: false,
+                stalled: false,
+                problem: None,
+            },
+            agent_names: crate::state::Mapping::default(),
+            launch: crate::ui::app::Launch {
+                pending: None,
+                problems: Vec::new(),
+                in_flight: false,
+            },
+            file_mode: false,
+        };
+        let merged = crate::changes::fixture::set(
+            vec![crate::changes::fixture::with_artifacts(
+                crate::changes::fixture::active("detail-view", 7, 9),
+                &[("proposal", &["/repo/p.md"]), ("design", &["/repo/d.md"])],
+            )],
+            Vec::new(),
+            Vec::new(),
+        );
+        let mut events = Script::new(vec![
+            Ok(Some(press(KeyCode::Char(']'), KeyModifiers::NONE))),
+            Ok(None),
+            Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
+        ]);
+        let mut fs = ScriptedFs::new(Vec::new(), Vec::new());
+        let mut refresher =
+            RecordingRefresher::new(vec![Some(crate::refresh::RefreshResult::Merged(merged))]);
+        let mut agents = crate::agents::none();
+        let mut launcher = crate::launch::none();
+        let mut live = crate::ui::driver::Live {
+            fs: &mut fs,
+            refresher: &mut refresher,
+            agents: &mut *agents,
+            launcher: &mut *launcher,
+        };
+        let recorder = crate::testutil::RecordingReader::always(Ok("content".to_string()));
+        let read = |p: &std::path::Path| recorder.read(p);
+        run_loop(
+            &mut terminal,
+            &mut dashboard,
+            &mut events,
+            &mut live,
+            &read,
+            Duration::from_millis(1),
+        )
+        .expect("loop ends");
+
+        assert_eq!(
+            recorder.calls(),
+            3,
+            "one for the first frame, one for the new tab, one for the adopted reload"
+        );
+    }
+
     #[test]
     fn live_cannot_be_built_without_naming_the_launcher() {
         let mut fs = crate::watch::none();
