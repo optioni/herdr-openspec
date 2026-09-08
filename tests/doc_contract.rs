@@ -345,6 +345,24 @@ fn tested_modules_missing() {
 }
 
 #[test]
+fn tested_modules_rejects_identifier_prefixed_token() {
+    let declared: BTreeSet<String> = ["open"].iter().map(|s| s.to_string()).collect();
+    // The section names `reopen::`, whose trailing "open::" is a substring of a longer
+    // identifier — an unbounded `contains` would wrongly treat this as satisfying `open`.
+    let section_text = "\
+### Unit-tested modules
+
+- `reopen::run` reopens a change
+";
+    let missing = missing_tested_modules(section_text, &declared);
+    let expected: BTreeSet<String> = ["open".to_string()].into_iter().collect();
+    assert_eq!(
+        missing, expected,
+        "`reopen::` must not satisfy a search for `open::`: {missing:?}"
+    );
+}
+
+#[test]
 fn tested_modules_scoped_to_section() {
     let declared: BTreeSet<String> = ["open"].iter().map(|s| s.to_string()).collect();
     // `open::` is named above the heading and again after the next heading, but never
