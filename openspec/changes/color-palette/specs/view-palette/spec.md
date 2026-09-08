@@ -46,6 +46,16 @@ The gate SHALL fail when its own exclusion is **vacuous** — when `src/ui/palet
 missing, or exists but names no `Color` — before it reports a clean tree, so a gutted palette
 is reported as a broken control rather than as a pass.
 
+**How a test asserts a colour.** The gate searches `src/`, and this crate's view tests live
+in `#[cfg(test)]` modules **inside** `src/ui/view.rs`, `src/ui/list.rs`, and
+`src/ui/detail.rs`. No test outside `src/ui/palette.rs` may therefore name a `Color` literal.
+A render test SHALL assert a cell's colour by comparing it against the palette —
+`assert_eq!(cell.style().fg, palette::style(Role::AgentBadge(AgentStatus::Working)).fg)` — and
+the literal table SHALL be asserted once, in `src/ui/palette.rs`'s own tests, where "The
+coloured set is exactly the table above" already lives and is the falsifiable half. Every
+scenario in this change that names a colour is naming the palette entry a test compares
+against, never a literal that test writes.
+
 `ui::palette` SHALL be added to the pure view set both standing view gates already carry:
 `NOIO-VIEW`'s `PURE` list (eight files becoming **nine**) and `COLWIDTH`'s (seven becoming
 **eight**).
@@ -93,7 +103,7 @@ and lets the terminal answer. Reading the environment from a view file is forbid
 
 #### Scenario: No RGB, indexed, or reset colour is named
 
-- **WHEN** the production slice of `src/ui/palette.rs` is searched for `Color::Rgb`,
+- **WHEN** `src/ui/palette.rs` is searched for `Color::Rgb`,
   `Color::Indexed`, and `Color::Reset`
 - **THEN** none of the three appears
 - **AND** `palette::style` returns, for every role that carries one, a foreground or
@@ -108,9 +118,15 @@ and lets the terminal answer. Reading the environment from a view file is forbid
 
 Colour SHALL be added **beside** the modifier a role already carried, never in place of it,
 and this change SHALL add, remove, or alter **no modifier anywhere**. The consequence is
-falsifiable rather than aspirational: on a monochrome terminal, in a captured `TestBackend`
-buffer compared by modifier alone, and in a copy-pasted screenshot, the pane after this
-change is indistinguishable from the pane before it.
+falsifiable rather than aspirational: in a captured `TestBackend` buffer compared by modifier
+alone, every cell **outside the artifact tab-bar row** after this change carries exactly the
+modifier it carried before it.
+
+The tab-bar row is the stated exception, because `artifact-tabs` moves and relabels every
+chip in it. Its own guarantee is narrower and is stated here rather than left out: the
+selected chip's span remains that row's only `BOLD` span, so a monochrome reader still learns
+which tab is current — what that reader loses is the `1`–`9` digits, which the chip grammar
+drops deliberately and `action_for` still answers.
 
 The modifier each role SHALL carry:
 
@@ -152,12 +168,14 @@ The modifier each role SHALL carry:
   changes of which one is badged `Working`, and a selected change whose `detail.source` is
   `## Heading\n\n**bold** and *italic* and `code` and [link](u)\n` is rendered at 120x20 and
   at 60x20
-- **THEN** in both buffers the modifier of every cell is exactly what the same dashboard
-  produced before this change: `OpenSpec` and the detail header `BOLD`, the `file mode` badge
+- **THEN** in both buffers the modifier of every cell **outside row 3, the tab bar** is
+  exactly what the same dashboard produced before this change: `OpenSpec` and the detail header `BOLD`, the `file mode` badge
   `DIM`, the selected row's cells `BOLD`, the heading and `bold` `BOLD`, `italic` `ITALIC`,
   `code` `DIM`, and `link` `UNDERLINED`
 - **AND** the problem row, the separator row, and the agent badge cell carry no modifier at
   all, exactly as before
+- **AND** in the tab-bar row the selected chip's span is the only `BOLD` span, so the one
+  excepted row still discriminates the current tab without colour
 
 ### Requirement: Colour is added only where it carries a distinction a modifier cannot
 
@@ -255,10 +273,12 @@ point of colouring the heading at all.
   marked `tracks_tasks` and whose `detail.source` is
   `# Title\n\n## Heading\n\n**bold** and *italic* and `code` and [link](u)\n` is rendered at
   120x20 and at 60x20
-- **THEN** in each buffer the cells of `# Title` report `BOLD` set and foreground `Magenta`,
-  and the cells of `## Heading` report `BOLD` set and foreground `Cyan`
-- **AND** the cells of `code` report `DIM` and foreground `Yellow`, and the cells of `link`
-  report `UNDERLINED` and foreground `Blue`
+- **THEN** in each buffer the cells of `# Title` report `BOLD` set and the foreground
+  `Role::Heading(1)` carries (`Magenta`), and the cells of `## Heading` report `BOLD` set and
+  the foreground `Role::Heading(2)` carries (`Cyan`)
+- **AND** the cells of `code` report `DIM` and the foreground `Role::Code` carries (`Yellow`),
+  and the cells of `link` report `UNDERLINED` and the foreground `Role::Link` carries
+  (`Blue`)
 - **AND** the cells of `bold` report `BOLD` with no foreground, and of `italic` `ITALIC` with
   no foreground, so the uncoloured roles are discriminated from the coloured ones
 
@@ -266,10 +286,12 @@ point of colouring the heading at all.
 
 - **WHEN** `style_for` is called on a `Face` with `heading: Some(2)` and `code: true`, and on
   one with `code: true` and `link: true`
-- **THEN** the first reports foreground `Cyan` — the heading's — with `BOLD` and `DIM` both
-  set, so no modifier was lost to the precedence rule
-- **AND** the second reports foreground `Yellow` — the code's, which follows the link in the
-  fold order — with `DIM` and `UNDERLINED` both set
+- **THEN** the first reports the foreground `Role::Heading(2)` carries — the heading's — with
+  `BOLD` and `DIM` both set, so no modifier was lost to the precedence rule
+- **AND** the second reports the foreground `Role::Code` carries — which follows the link in
+  the fold order — with `DIM` and `UNDERLINED` both set
+- **AND** neither assertion names a `Color` literal: both compare against `palette::style`,
+  because `style_for` lives in `src/ui/view.rs`, which the confinement gate searches
 
 #### Scenario: A plain face is the default style
 

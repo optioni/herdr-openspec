@@ -31,6 +31,6 @@ colour, and the badge role carries no modifier, so the patch cannot clear the ro
 
 - **WHEN** a `Dashboard` with three active changes, the selected first one badged `Working`,
   is rendered at 120x20 and at 60x20
-- **THEN** in both buffers the badge cell reports `Modifier::BOLD` set **and** foreground
-  `Color::Green`
+- **THEN** in both buffers the badge cell reports `Modifier::BOLD` set **and** the foreground
+  `Role::AgentBadge(Working)` carries (`Color::Green`)
 - **AND** every other cell of that row reports `BOLD` and no foreground

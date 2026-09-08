@@ -68,8 +68,12 @@ position carries a digit, so the tenth is labelled exactly as the first.
   `selected: 0`, at width `78` and again at width `58`
 - **THEN** every returned `text` is its artifact's bare id with one space on each side —
   `" a01 "`, `" a02 "`, and so on — and none begins with a digit or with `1 `
-- **AND** every returned cell is exactly five columns wide, so the tenth, eleventh, and
-  twelfth cells are the same width as the first, which the numbered grammar could not do
+- **AND** at width `78` all twelve cells are returned, so the tenth, eleventh, and twelfth are
+  present and are each exactly five columns wide, the same as the first — which the numbered
+  grammar could not do
+- **AND** at width `58` the window holds nine cells, because nine five-column chips and eight
+  separators are 53 columns and a tenth would be 59, so the two widths differ and the
+  narrower one is not silently vacuous
 
 #### Scenario: Duplicate artifact ids remain two separately addressable tabs
 
@@ -128,8 +132,9 @@ list row's cells, and the window SHALL start at column `0` regardless of `start`
 overflow marker and no ellipsis cell: `list-selection`'s viewport shows no scroll indicator
 either, and inventing one here would be a second, undeclared grammar.
 
-The one exception, stated rather than discovered: when the **selected** chip alone is wider
-than `width`, no whole-cell window exists. `tab_bar` SHALL then return that single chip —
+The one exception, stated rather than discovered: when the anchor chip alone — the selected
+one, or the `no artifacts` placeholder, which is drawn on the bar's own terms per the
+requirement above — is wider than `width`, no whole-cell window exists. `tab_bar` SHALL then return that single chip —
 padding included, since the padding is what the view paints — truncated to `width` columns
 with a trailing `…` by the same `ui::list::pad_or_truncate_right` the header and the row
 grammar use, with `x: 0` and `selected` true.
@@ -208,9 +213,10 @@ the header and the tab bar each take one row and the content area is zero-height
 - **AND** in the 60-column buffer row 3, columns 1 through 53, spell the same 53-column
   string
 - **AND** in both buffers the eight cells spelling `" design "` report `Modifier::BOLD` set
-  and background `Color::Cyan`, and the ten cells spelling `" proposal "` report background
-  `Color::DarkGray` and no `BOLD`, so the selected chip is discriminated by colour and by
-  weight together
+  and the background and foreground `Role::TabActive` carries (`Color::Cyan` on
+  `Color::Black`), and the ten cells spelling `" proposal "` report the background
+  `Role::TabInactive` carries (`Color::DarkGray`) and no `BOLD`, so the selected chip is
+  discriminated by colour and by weight together
 - **AND** in both buffers the single column between two chips has no background set, so the
   chips do not merge into one field
 
@@ -239,3 +245,98 @@ the header and the tab bar each take one row and the content area is zero-height
 - **AND** at heights `3` and `16` the content area is `height - 2` rows starting two rows
   below the interior's `y`
 - **AND** at every height all three rects carry the interior's own `x` and `width`
+
+### Requirement: `1`–`9`, `[`, and `]` switch the artifact tab
+
+`ui::app::action_for` SHALL, while `filtering` is **false**, map a Press of `KeyCode::Char`
+`'1'` through `'9'` with no modifiers to `Action::SelectTab(n - 1)`, a Press of `Char(']')`
+with no modifiers to `Action::NextTab`, and a Press of `Char('[')` with no modifiers to
+`Action::PrevTab`. `Char('0')` SHALL map to `Ignore`: tab addressing is 1-based, so there is
+no zeroth tab.
+
+While `filtering` is **true** these keys SHALL continue to type themselves into the query as
+`FilterPush`, because `list-filtering` makes every printable character a query character and
+this change does not carve exceptions out of it.
+
+`Dashboard::apply` SHALL:
+
+- on `SelectTab(i)`, set `detail.tab` to `i` when `i` is a valid index into the selected
+  change's `artifacts`, and change nothing at all otherwise — a `7` pressed on a change with
+  five artifacts is inert, not clamped, because clamping would move the tab to a position the
+  user did not ask for;
+- on `NextTab`, raise `detail.tab` by one, clamped to the last artifact's index, and change
+  nothing when the selected change has no artifacts or none is selected;
+- on `PrevTab`, lower `detail.tab` by one, clamped at zero;
+- reset `detail.scroll` to `0` exactly when `detail.tab` changed value, so switching tabs
+  starts the new document at its top while a `]` at the last tab leaves the reading position
+  alone;
+- on `Next` and `Prev` at `Route::List`, reset both `detail.tab` and `detail.scroll` to `0`
+  exactly when `selected` changed value, so moving to another change opens its first tab and
+  a clamped no-op at either end of the list does not.
+
+The keys SHALL work at **both** routes. At the wide layout the detail region is drawn at the
+list route too, so a tab press there is immediately visible; at the narrow layout the state
+still moves and is visible as soon as `Enter` opens the detail.
+
+#### Scenario: The digit keys select tabs and near misses do not
+
+- **WHEN** `action_for` is called with `filtering` false and Presses of `Char('1')`,
+  `Char('5')`, `Char('9')`, `Char('0')`, `Char('1')` with `CONTROL`, and `Char('!')` with
+  `SHIFT`
+- **THEN** the first three return `SelectTab(0)`, `SelectTab(4)`, and `SelectTab(8)`, and the
+  last three return `Ignore`
+- **AND** with `filtering` true the same six events return `FilterPush('1')`,
+  `FilterPush('5')`, `FilterPush('9')`, `FilterPush('0')`, `Ignore`, and `FilterPush('!')`
+
+#### Scenario: The bracket keys step one tab and near misses do not
+
+- **WHEN** `action_for` is called with `filtering` false and Presses of `Char(']')`,
+  `Char('[')`, `Char(']')` with `CONTROL`, and `Char('}')` with `SHIFT`
+- **THEN** the first two return `NextTab` and `PrevTab` and the last two return `Ignore`
+- **AND** with `filtering` true `Char(']')` and `Char('[')` return `FilterPush(']')` and
+  `FilterPush('[')`
+
+#### Scenario: Stepping is clamped at both ends and does not wrap
+
+- **WHEN** a `Dashboard` whose selected change carries three artifacts and whose `detail.tab`
+  is `0` is given `PrevTab`, then `NextTab` four times, then `PrevTab` four times
+- **THEN** `detail.tab` is `0` after the first, `1`, `2`, `2`, `2` after the next four, and
+  `1`, `0`, `0`, `0` after the last four
+- **AND** it never becomes `3` and never wraps to `2` from `0`
+
+#### Scenario: An out-of-range digit is inert
+
+- **WHEN** a `Dashboard` whose selected change carries three artifacts and whose `detail.tab`
+  is `1` and `detail.scroll` is `5` is given `SelectTab(6)`, and then `SelectTab(2)`
+- **THEN** after the first, `detail.tab` is still `1` and `detail.scroll` is still `5`
+- **AND** after the second, `detail.tab` is `2` and `detail.scroll` is `0`
+
+#### Scenario: Switching tabs resets the scroll and staying put does not
+
+- **WHEN** a `Dashboard` whose selected change carries three artifacts, whose `detail.tab` is
+  `2` and whose `detail.scroll` is `7`, is given `NextTab`, and a second identical dashboard
+  is given `PrevTab`
+- **THEN** the first still has `detail.tab` `2` and `detail.scroll` `7`, because the clamped
+  step changed nothing
+- **AND** the second has `detail.tab` `1` and `detail.scroll` `0`
+
+#### Scenario: Moving the selection resets the tab and the scroll, and a clamped move does not
+
+- **WHEN** a `Dashboard` at `Route::List` holding three visible changes, with `selected: 0`,
+  `detail.tab: 2`, and `detail.scroll: 9`, is given `Next`, and a second dashboard identical
+  but for `selected: 0` at the top of the list is given `Prev`
+- **THEN** the first has `selected: 1`, `detail.tab: 0`, and `detail.scroll: 0`
+- **AND** the second still has `selected: 0`, `detail.tab: 2`, and `detail.scroll: 9`,
+  because the clamped move changed no change
+
+#### Scenario: Tab keys act at both routes
+
+- **WHEN** a `Dashboard` at `Route::List` whose selected change carries three artifacts and
+  whose `detail.tab` is `0` is given `SelectTab(2)`, and a second at `Route::Detail` is given
+  the same
+- **THEN** both have `detail.tab` `2` and neither has changed `route`
+- **AND** rendering the first at 120x20 shows the third artifact's chip — `" <id> "`, padded,
+  with no leading digit — carrying the active chip's style in the detail region's tab row, so
+  the wide layout makes the list-route press immediately visible. The digit keys still select
+  a tab; the bar no longer advertises them, which is `artifact-tabs`' chip grammar and changes
+  nothing about `action_for`

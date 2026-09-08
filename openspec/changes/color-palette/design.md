@@ -173,6 +173,14 @@ unit test can make, because it is a claim about *every file that does not exist 
 | The tab bar reaches the buffer at both mandated widths | render at 120x20 and 60x20, assert text and `bg` | view | TestBackend | `cargo test --lib ui::view::` |
 | The tab bar never overwrites a border or the rows around it | render, assert border cells and absent `bg` | view | TestBackend | `cargo test --lib ui::view::` |
 | `split_detail` is exact at its degenerate heights | existing `ui::layout` unit test, re-run unchanged | unit | none | `cargo test --lib ui::layout::` |
+| The digit keys select tabs and near misses do not | existing `ui::app::action_for` unit test, re-run unchanged | unit | none | `cargo test --lib ui::app::` |
+| The bracket keys step one tab and near misses do not | existing `ui::app::action_for` unit test, re-run unchanged | unit | none | `cargo test --lib ui::app::` |
+| Stepping is clamped at both ends and does not wrap | existing `Dashboard::apply` unit test, re-run unchanged | unit | none | `cargo test --lib ui::app::` |
+| An out-of-range digit is inert | existing `Dashboard::apply` unit test, re-run unchanged | unit | none | `cargo test --lib ui::app::` |
+| Switching tabs resets the scroll and staying put does not | existing `Dashboard::apply` unit test, re-run unchanged | unit | none | `cargo test --lib ui::app::` |
+| Moving the selection resets the tab and the scroll, and a clamped move does not | existing `Dashboard::apply` unit test, re-run unchanged | unit | none | `cargo test --lib ui::app::` |
+| Tab keys act at both routes | render at 120x20, assert the third chip carries the active style | view | TestBackend | `cargo test --lib ui::view::` |
+| The routed region's border takes its style from the palette at both widths | render at 120x20 both routes and 60x20 | view | TestBackend | `cargo test --lib ui::view::` |
 | A badged active row reports the column its badge occupies, at both mandated widths | `ui::list::rows` unit test at 38 and 58 | unit | none | `cargo test --lib ui::list::` |
 | A badged archived row reports the column its badge occupies | `ui::list::rows` unit test at 38 and 58 | unit | none | `cargo test --lib ui::list::` |
 | A dropped badge cell reports no badge | `ui::list::rows` unit test at six widths | unit | none | `cargo test --lib ui::list::` |
@@ -222,10 +230,21 @@ first plant. *Alternative:* gate `Modifier` too, scoped to production slices onl
 the awk production-slice split is exactly the kind of exemption the previous sentence warns
 about, and the modifiers are already frozen by Decision 3's assertion.
 
+The consequence, which is a constraint on **tests** and not only on production code: this
+crate's view tests are inline `#[cfg(test)]` modules inside `src/ui/`, so the gate searches
+them too. No test outside `src/ui/palette.rs` may name a `Color` literal; a render test
+asserts a cell's colour by comparing it against `palette::style(role)`, and the literal table
+is asserted once, in the palette's own tests. That is not a weakness of the confinement — it
+is the same discipline applied one level up: a test naming `Color::Green` beside a palette
+saying `Green` is two declarations of one fact, and the comparison form has only one.
+
 **Decision 3 — this change adds, removes, and alters no modifier anywhere.**
 Colour is added strictly beside the existing modifier. The payoff is a falsifiable claim
 rather than a hope: every landed `Modifier::` assertion in the crate stays unedited and green,
 so "a monochrome terminal loses nothing" is proved by the suite rather than argued in review.
+The one stated exception is the tab-bar row, which `artifact-tabs` moves and relabels
+wholesale; its narrower guarantee — the selected chip stays that row's only `BOLD` span — is
+in `specs/view-palette/spec.md`.
 *Alternative:* rebalance modifiers now that colour carries some of the load — for example
 dropping `DIM` from inline code since it is yellow anyway — rejected, because it would make
 the monochrome regression untestable and it is a separate argument with its own trade-off.

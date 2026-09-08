@@ -79,11 +79,13 @@ headers are its merge key; its subject is the same document, drawn two rows lowe
   `## Heading\n\n**bold** and *italic* and `code` and [link](u)\n` is rendered at 120x20 and
   at 60x20
 - **THEN** in each buffer the cells of `## Heading` in the content area's first row report
-  `Modifier::BOLD` set, and additionally foreground `Color::Cyan`, the level-2 heading colour
+  `Modifier::BOLD` set, and additionally the foreground `Role::Heading(2)` carries
+  (`Color::Cyan`)
 - **AND** the cells of `bold` report `BOLD`, of `italic` report `ITALIC`, of `code` report
   `DIM`, and of `link` report `UNDERLINED` — every modifier exactly as before this change
-- **AND** the cells of `code` additionally report foreground `Color::Yellow` and those of
-  `link` foreground `Color::Blue`, while those of `bold` and `italic` report no foreground at
+- **AND** the cells of `code` additionally report the foreground `Role::Code` carries
+  (`Color::Yellow`) and those of `link` the foreground `Role::Link` carries (`Color::Blue`),
+  while those of `bold` and `italic` report no foreground at
   all
 - **AND** the assertion discriminates: a cell of the surrounding plain text reports none of
   those modifiers and no foreground

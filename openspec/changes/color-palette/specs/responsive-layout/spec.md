@@ -116,8 +116,9 @@ region's interior width rather than the header's.
   **true** is rendered at 60x20 and at 120x20
 - **THEN** the header row's columns 9 through 17 spell `file mode` at both widths, and column
   8 is a space
-- **AND** every one of those nine cells carries ratatui's `DIM` modifier **and** foreground
-  `Color::Yellow`, and the `OpenSpec` label's eight cells carry `Modifier::BOLD` and no
+- **AND** every one of those nine cells carries ratatui's `DIM` modifier **and** the
+  foreground `Role::FileMode` carries (`Color::Yellow`), and the `OpenSpec` label's eight
+  cells carry `Modifier::BOLD` and no
   foreground at all, so the badge is distinguishable from the label by colour as well as by
   weight and position
 - **AND** the drawn path's cells carry neither a modifier nor a foreground, so the yellow is
@@ -182,3 +183,31 @@ region's interior width rather than the header's.
 - **AND** rendering the same dashboard at 16x20, 18x20, 19x20, and 1x20 draws only the
   label or a truncation of it, writes nothing past the last column, and does not panic
 
+## ADDED Requirements
+
+### Requirement: A region's border style is a palette role
+
+`ui::view::render_region` SHALL take the border's style from the palette:
+`palette::style(Role::RegionBorderFocused)` for the region the dashboard's route names, and
+`palette::style(Role::RegionBorder)` for the other region when it is drawn. It SHALL
+construct no `Style` of its own.
+
+`Role::RegionBorderFocused` SHALL carry `Modifier::BOLD` and **no colour**, and
+`Role::RegionBorder` SHALL carry neither, so the rendered result is exactly what "The routed
+region is emphasised and region interiors are left empty" already requires. The border frames
+the pane rather than saying anything about it; colouring it would tint every frame for no
+distinction. The style SHALL reach `Block::border_style` and not `Block::style`, so a blank
+interior's cells still equal `ratatui::buffer::Cell::default().style()`.
+
+#### Scenario: The routed region's border takes its style from the palette at both widths
+
+- **WHEN** a `Dashboard` at `Route::List` is rendered at 120x20, and a second at
+  `Route::Detail` is rendered at 120x20 and at 60x20
+- **THEN** in the first buffer every border cell of the `Changes` region reports
+  `Modifier::BOLD` set and the `Detail` region's border cells do not, and in the second the
+  two are swapped, so the assertion discriminates rather than asserting a constant
+- **AND** no border cell in any buffer reports a foreground or a background, so the palette
+  gave the border a role and not a colour
+- **AND** every cell of a blank region interior still equals
+  `ratatui::buffer::Cell::default().style()`, so the style reached `border_style` rather than
+  `style`

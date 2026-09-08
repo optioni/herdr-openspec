@@ -63,8 +63,10 @@ cell SHALL be skipped rather than clamped, so no badge is ever drawn over a bord
   again at width `58`
 - **THEN** the row's `badge` is `Some(BadgeCell { x, status: Blocked })` and the character at
   `x` is `b` at both widths
-- **AND** `x` is fourteen columns further right than the name field's first column, so the
-  date field is accounted for
+- **AND** `x` is one column further right than the name field's **last** column — that is,
+  `name_field_width + 14` from the interior's first column — and equals the badge column an
+  **active** row of the same width reports, so the ten-column date field is accounted for
+  without the two grammars disagreeing
 
 #### Scenario: A dropped badge cell reports no badge
 
@@ -90,9 +92,11 @@ cell SHALL be skipped rather than clamped, so no badge is ever drawn over a bord
 
 - **WHEN** a `Dashboard` with three active changes — the selected first one badged `Working`,
   the second badged `Blocked`, the third unbadged — is rendered at 120x20 and at 60x20
-- **THEN** in both buffers the cell holding `w` reports foreground `Color::Green` **and**
+- **THEN** in both buffers the cell holding `w` reports the foreground
+  `Role::AgentBadge(Working)` carries (`Color::Green`) **and**
   `Modifier::BOLD`, because it sits on the selected row
-- **AND** the cell holding `b` reports foreground `Color::LightRed` and no `BOLD`
+- **AND** the cell holding `b` reports the foreground `Role::AgentBadge(Blocked)` carries
+  (`Color::LightRed`) and no `BOLD`
 - **AND** the cells on either side of each badge — the two separating spaces — report no
   foreground at all, so exactly one column was painted
 
@@ -116,10 +120,10 @@ colour is added beside a style that carried none.
 
 - **WHEN** a `Dashboard` carrying one launch problem, one refresh problem, one change-set
   problem, three active changes, and one archived change is rendered at 120x20 and at 60x20
-- **THEN** in both buffers every cell of the three `!`-prefixed rows reports foreground
-  `Color::Red` and no modifier
-- **AND** every cell of the separator row reports foreground `Color::DarkGray` and no
-  modifier
+- **THEN** in both buffers every cell of the three `!`-prefixed rows reports the foreground
+  `Role::ListProblem` carries (`Color::Red`) and no modifier
+- **AND** every cell of the separator row reports the foreground `Role::ListSeparator`
+  carries (`Color::DarkGray`) and no modifier
 - **AND** the change rows below report no foreground at all, and the selected one still
   reports `Modifier::BOLD`, so the colour discriminates the problem rows rather than tinting
   the region

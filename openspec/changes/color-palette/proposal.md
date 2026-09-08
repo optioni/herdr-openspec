@@ -94,10 +94,14 @@ should look like — only that it be correct.
 - `list-selection`: the selected row's style comes from the palette.
 - `artifact-tabs`: the cell grammar becomes a padded chip with a one-column spacer and no
   leading digit, the active and inactive chip styles come from the palette, and the
-  mandated 78- and 58-column width assertions are restated against the new grammar.
+  mandated 78- and 58-column width assertions are restated against the new grammar. The
+  `1`-`9`/`[`/`]` requirement is restated unchanged apart from its final scenario, which
+  asserted a `3 ` label the chip grammar removes.
 - `detail-header`: the header row's style comes from the palette.
 - `responsive-layout`: the `OpenSpec` label and the `file mode` badge take palette roles,
-  the badge's colour being the one new distinction.
+  the badge's colour being the one new distinction; and a region's border takes a palette role
+  too, added during planning because `ui::view::render_region` is rewritten and the
+  requirement that owns border styling lives here.
 
 ## Impact
 

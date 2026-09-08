@@ -108,11 +108,17 @@ Scope: `src/ui/view.rs` only. `Color::` is named **nowhere** in the crate at HEA
 (`grep -rnE 'Color::|ratatui::style::Color' src tests` → exit 1, no output), so every colour
 assertion written here is RED by construction.
 
+- [ ] 2.0 CHECK: Every colour assertion outside `src/ui/palette.rs` compares against
+      `palette::style(role)`, never a `Color` literal — the gate from group 0 searches `src/`
+      and this crate's view tests are inline `#[cfg(test)]` modules there. Verify by running
+      `/bin/sh scripts/gates/palette.sh` after each RED task in groups 2, 3, and 4; it must
+      stay at exit 0.
 - [ ] 2.1 RED: Write failing tests for: *Faces reach the buffer as coloured styles at both
       mandated widths*, *Heading foreground wins over a code span inside it*, *A plain face is
       the default style*, *Faces reach the buffer as styles at both widths*, *The badge is
       drawn dim after the label at both widths*, *A false flag renders the header that landed
       before this change*, *The detail header is bold and uncoloured at both mandated widths*,
+      *The routed region's border takes its style from the palette at both widths*,
       *The selected row is bold and uncoloured at both mandated widths*, and *A monochrome
       reading of the frame is unchanged*. Every render test runs at 120x20 **and** 60x20.
 - [ ] 2.2 GREEN: Rewrite `style_for` as a `Style::patch` fold over the palette in the order
@@ -120,7 +126,9 @@ assertion written here is RED by construction.
 - [ ] 2.3 GREEN: Replace every `Style::default().add_modifier(…)` in `render_header`,
       `render_region`, `render_list`, `render_detail_header`, and `render_detail_tabs` with
       `palette::style(role)` for the role `specs/view-palette/spec.md` names for that span.
-      `ui::view` constructs no `Style` of its own afterwards except by `patch`.
+      `ui::view` constructs no `Style` of its own afterwards except by `patch`. `render_region`
+      passes the role's style to `Block::border_style`, never `Block::style`, so a blank
+      interior's cells still equal `Cell::default().style()`.
 - [ ] 2.4 CHECK: Contract gate — re-inspect `palette::style`'s signature and its consumers.
       `ui::view` is the only one; confirm `grep -rn 'palette::' src | grep -v '^src/ui/view.rs'`
       returns only the `pub mod palette;` declaration.
@@ -164,7 +172,12 @@ Measured with
 with more slack than today. The same command's x offsets are `[0, 11, 19, 28, 36]` and its
 last drawn column is **52**.
 
-- [ ] 4.1 RED: Rewrite the tab-bar tests in `src/ui/detail.rs` for the chip grammar: *The five
+- [ ] 4.1 RED: Rewrite the tab-bar tests in `src/ui/detail.rs` for the chip grammar, **and**
+      every landed assertion in `src/ui/view.rs` that spells a numbered label:
+      `grep -c '1 proposal\|3 gamma' src/ui/view.rs` at HEAD → **12** lines, at `:2981`,
+      `:2990`, `:2999`, `:3008`, `:3046`, `:3053`, `:3060`, `:3067`, `:3340`, `:3347`,
+      `:3363`, and `:3742`, across `a_degenerate_detail_interior_draws_nothing`, the tab-bar
+      render test, and `no_marked_artifact_renders_markdown`. The `ui::detail` names are: *The five
       tdd artifacts become five numbered tabs at both mandated widths*, *A tenth artifact is
       labelled without a digit*, *Duplicate artifact ids remain two separately addressable
       tabs*, *No artifacts is a single placeholder cell, not an empty bar*, *A zero-width bar
@@ -181,10 +194,14 @@ last drawn column is **52**.
       branch. The `start`/`end` window loops stay byte-identical apart from that constant.
 - [ ] 4.4 GREEN: In `render_detail_tabs`, style each cell `TabActive` when `cell.selected` and
       `TabInactive` otherwise, so every column of the chip including its padding is painted.
-- [ ] 4.5 VERIFY: `cargo test --lib ui::layout::` — *`split_detail` is exact at its degenerate
+- [ ] 4.5 VERIFY: `cargo test --lib ui::app::` — the seven `1`-`9`/`[`/`]` scenarios still
+      pass unedited; `action_for` and `Dashboard::apply` are untouched by the chip grammar.
+      Then add the one render assertion *Tab keys act at both routes* needs: the third chip
+      carries the active style at 120x20.
+- [ ] 4.6 VERIFY: `cargo test --lib ui::layout::` — *`split_detail` is exact at its degenerate
       heights* still passes unedited; the split is untouched by the chip grammar.
-- [ ] 4.6 Run the group tests — `cargo test --lib ui::detail:: ui::view::` and `make gates` —
-      no regressions.
+- [ ] 4.7 Run the group tests — `cargo test --lib ui::detail:: ui::view:: ui::app::` and
+      `make gates` — no regressions.
 
 ## 5. Acceptance Test — Outer Loop GREEN
 <!-- kind: behavior -->
