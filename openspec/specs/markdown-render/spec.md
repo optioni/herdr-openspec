@@ -9,9 +9,11 @@ headings that keep their `#` markers and wrap under their own text column, compo
 faces with link destinations dropped and images shown as alt text, list markers with a hanging
 indent, code and raw HTML reproduced verbatim and split rather than reflowed, quotes and
 thematic breaks, soft breaks that preserve the author's line structure, and one blank line
-between blocks. Constructs the parser is deliberately not configured for — tables, footnotes,
-strikethrough — render as their literal source rather than vanishing, and `pulldown_cmark` is
-confined to this one module.
+between blocks. GFM pipe tables are laid out as aligned columns sized to the region — max-min
+fair, a cell too wide for its column wrapped inside it rather than truncated — and
+`~~struck~~` sets a face on its text. Constructs the parser is deliberately not configured for
+— footnotes, task-list items — render as their literal source rather than vanishing, and
+`pulldown_cmark` is confined to this one module.
 
 ## Requirements
 

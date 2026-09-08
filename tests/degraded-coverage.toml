@@ -92,12 +92,12 @@ why = "the whole detail interior stays blank, rendered through render_at"
 covers = ["src/ui/view.rs:56-58"]
 
 [[row]]
-condition = "Markdown source holds a construct the parser does not model (a table, a footnote, strikethrough, a task-list item), on a tab **other** than the tracked-tasks one"
+condition = "Markdown source holds a construct the parser does not model (a footnote, a task-list item), on a tab **other** than the tracked-tasks one"
 tier = "unit"
 proof = ["unmodelled_constructs_render_as_source"]
 verdict = "unproven"
-why = "ui::markdown::lines renders each unmodelled construct as literal source, one line per source line"
-covers = ["src/ui/markdown.rs:501-501"]
+why = "ui::markdown::lines renders a footnote and a task-list item as literal source, one line per source line, and the same fixture's table and struck run render as aligned columns and as a face — the control that says the narrowing is real"
+covers = ["src/ui/markdown.rs:684-684"]
 
 [[row]]
 condition = "A tasks file exists and yields no task **items**"

@@ -462,10 +462,18 @@ silently loses its tail; a block quote prefixes every one of its lines,
 continuations included, with `> `; a thematic break fills the interior width;
 emphasis, strong, inline code, and links become faces on the affected text,
 with a link's destination never printed and an image rendering its alt text
-in its place; and a construct the parser does not model — a table, a
-footnote, strikethrough, a task-list item — renders as its literal source
+in its place; a GFM pipe table is laid out as aligned columns sized to the
+interior — a leading `|`, then a padding space, the cell laid out in exactly
+its column's allocated width, a padding space, and the `|` that closes it,
+with the column widths allocated max-min fairly so a table that does not fit
+spends its columns on the narrow ones, a cell too wide for its column wrapped
+inside it rather than truncated, and one cell per line below the width the
+pipe grammar needs; `~~struck~~` sets a face on its text, crossed out and
+uncoloured; and a construct the parser does not model — a footnote, a
+task-list item — renders as its literal source
 text rather than being dropped or mangled (see Degraded states). The content
-scrolls with `j` / `k` and the arrows at the detail route (`markdown-viewer`).
+scrolls with `j` / `k` and the arrows at the detail route (`markdown-viewer`,
+tables and strikethrough by `markdown-constructs`).
 
 Tasks are **read-only by design**. Writing a checkbox from the pane would race the
 agent editing `tasks.md` in another pane.
@@ -820,7 +828,7 @@ Every condition renders usable content rather than an error screen:
 | Artifact file missing | Tab is still shown and renders "No content yet" (`detail-view`) |
 | An artifact file exists and cannot be read (permission error, I/O error) | Tab is still shown; a `!`-marked problem line naming the path and the reason is rendered above the content, and "No content yet" is not also shown — the reason is known, and showing both would say two contradictory things about the same tab (`detail-view`) |
 | No change is selected (an empty visible list, or a `/` filter matching none) | The whole detail region is blank; the list region already names the empty state, and duplicating it in the detail region would say the same thing twice (`detail-view`) |
-| Markdown source holds a construct the parser does not model (a table, a footnote, strikethrough, a task-list item), on a tab **other** than the tracked-tasks one | Renders as its literal source text, one line per source line, rather than being dropped or mangled (`markdown-viewer`) |
+| Markdown source holds a construct the parser does not model (a footnote, a task-list item), on a tab **other** than the tracked-tasks one | Renders as its literal source text, one line per source line, rather than being dropped or mangled (`markdown-viewer`) |
 | A tasks file exists and yields no task **items** | The tracked-tasks tab renders `No tasks yet`, distinct from `No content yet`, with no heading line even where the source carries headings (`tasks-tab`) |
 | A marked tab's artifact resolves to no file while the change's `progress` is non-zero (the `tasks.md` fallback above counted a file the artifact itself did not) | The tab reads `No content yet` and shows no progress bar, while the header one row up still shows the counted pair — the one place the tab's content and the header legitimately disagree (`tasks-tab`) |
 | `openspec/changes/` or its `archive/` exists and cannot be read | Empty list for the affected tier, with the reason named on `ChangeSet::problems` and rendered as a leading `!`-marked row of the list, above the change rows; the archive walk is not attempted when the parent read already failed, so a permission error is never reported twice for the same fault |

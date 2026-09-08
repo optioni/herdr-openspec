@@ -304,7 +304,7 @@ test on `Vec<Line>` can see the last three steps. Per design.md → Test Strateg
 Four sites must agree or `make check` goes red; design.md → Decision 10 gives the reasoning,
 including why the scenario headers keep their names and why `covers` stays where it is.
 
-- [ ] 7.1 CHECK: Confirm the binding is green before touching it, so a later failure is
+- [x] 7.1 CHECK: Confirm the binding is green before touching it, so a later failure is
   attributable to this change:
 
   ```sh
@@ -315,12 +315,12 @@ including why the scenario headers keep their names and why `covers` stays where
   ignored test is the coverage-map execution checker, which needs a coverage run — so this
   command does **not** prove a `covers` range is executed; `make coverage` is what does.
 
-- [ ] 7.2 CHANGE: Narrow `SPEC.md`'s degraded-states row from "(a table, a footnote,
+- [x] 7.2 CHANGE: Narrow `SPEC.md`'s degraded-states row from "(a table, a footnote,
   strikethrough, a task-list item)" to "(a footnote, a task-list item)", narrow the
   rendering-grammar prose in `SPEC.md` → User interface → Detail view the same way, and add one
   sentence there for the table grammar and one for the struck face.
 
-- [ ] 7.3 CHANGE: Edit `tests/degraded-coverage.toml`'s matching entry: `condition` to match
+- [x] 7.3 CHANGE: Edit `tests/degraded-coverage.toml`'s matching entry: `condition` to match
   `SPEC.md`'s new row byte-for-byte, and `why` reworded to name what the narrowed proof
   observes. Leave `verdict` at `unproven` and leave `covers` on the literal-text line
   (`Event::Text`), re-measured for the line shift — that line is what still makes footnotes and
@@ -334,13 +334,13 @@ including why the scenario headers keep their names and why `covers` stays where
   It fails on a condition mismatch, a proof that is not a passing `#[test]`, or a `covers`
   range that does not resolve.
 
-- [ ] 7.4 CHANGE: Narrow the live `openspec/specs/markdown-render/spec.md` `## Purpose`, whose
+- [x] 7.4 CHANGE: Narrow the live `openspec/specs/markdown-render/spec.md` `## Purpose`, whose
   sentence "Constructs the parser is deliberately not configured for — tables, footnotes,
   strikethrough — render as their literal source" this change makes false. A delta carries only
   `## ADDED`/`## MODIFIED` blocks and never a `## Purpose`, and `tests/spec_purposes.rs` checks
   only non-emptiness, so nothing else would catch it.
 
-- [ ] 7.5 VERIFY: Confirm the binding is green and the narrowing is not vacuous:
+- [x] 7.5 VERIFY: Confirm the binding is green and the narrowing is not vacuous:
 
   ```sh
   git diff --stat SPEC.md tests/degraded-coverage.toml openspec/specs/markdown-render/spec.md
