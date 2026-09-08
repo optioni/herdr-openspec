@@ -323,8 +323,9 @@ asks to leave open: a later date grouping under `archived` adds a `SectionKey` v
 renders at `depth: 1`, with the collapse state, the cursor index, and the force-open rule all
 unchanged. `Sections` implements no `Default` and names its field at every construction, on
 `Filter`'s terms, which puts it in `NODEFAULT-UI`'s view-layer type set — one more type in
-that set, so that leg's `SCAN_MIN` moves and `notes/gate-floors.md` records the new
-measurement.
+that set, so that leg's `SCAN_MIN` is re-measured and this change's own
+`notes/gate-floors.md` records it. Measured at planning time on `main`,
+`SCAN_MIN=135 /bin/sh scripts/gates/nodefault-ui.sh` reports 150 spans and exits 0.
 
 **9. `drain_and_fold` unions the selection and takes the *last* scope.**
 The two fields fold by different rules and the difference is load-bearing: a selection that is
@@ -372,8 +373,8 @@ list, because a key that is documented to do something and does nothing is the a
   exclusion is added; each task group carries its own tests, and `make check` runs the
   production-slice floor as well as the total.
 - **`NODEFAULT-UI` has five per-set `SCAN_MIN` floors on `Makefile` lines, and one of them
-  moves.** → The floor is re-measured, the `Makefile` line updated, and
-  `notes/gate-floors.md` amended in the same task group, so a future reader finds the
+  moves.** → The floor is re-measured, the `Makefile` line updated, and this change's
+  `notes/gate-floors.md` written in the same task group, so a future reader finds the
   measurement rather than a bare number.
 
 ## Migration Plan

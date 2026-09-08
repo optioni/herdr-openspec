@@ -134,8 +134,9 @@ already have owners.
   confined to `src/ui/`, which is worth stating plainly: it now crosses into the data layer,
   and the "views do no I/O" boundary is what keeps that crossing honest.
 - **Gate floors:** `NODEFAULT-UI`'s view-layer type set gains `Sections`, so that leg's
-  `SCAN_MIN` on the `Makefile` line moves with it, and `notes/gate-floors.md` records the
-  new measurement beside the five it already holds.
+  `SCAN_MIN` on the `Makefile` line is re-measured, and this change's own
+  `notes/gate-floors.md` records the measurement the way `degraded-states` recorded the
+  five it set.
 - **Docs:** `SPEC.md` → List view, → Keys, and → Resolution chain's `config.toml`
   description; `README.md`'s configuration table; `AGENTS.md`'s list-region description.
 - **Depends on `view-fidelity`.** Its `columns`/`truncate_columns` primitives and its
