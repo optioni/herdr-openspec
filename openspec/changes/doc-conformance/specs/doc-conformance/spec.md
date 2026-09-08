@@ -103,12 +103,36 @@ change adds a bullet for each of the four.
 ### Requirement: The documented worker-thread count equals the crate's production thread sites
 
 `SPEC.md` states the count of the crate's worker threads inline. That count SHALL equal the
-number of files under `src/` whose **production slice** names `std::thread::spawn`.
+number of files under `src/` whose **production slice** names both `std::thread::spawn` and
+`mpsc`.
+
+**Corrected during this change's own implementation, superseding the rule as originally
+planned.** The rule was first stated as "names `std::thread::spawn`" alone, with
+`src/cli.rs` carved out by a separate sentence ("`src/cli.rs` names `thread::spawn` only in
+its test slice and so SHALL NOT be counted"). `seam-resilience` (commit `137d21b`) landed
+after that text was written and added two per-invocation stdout/stderr pipe-drain threads to
+`src/cli.rs`'s production slice, above its first `#[cfg(test)]`. Measurement, not the plan,
+won: the two clauses could no longer both be true, because `src/cli.rs` now names
+`thread::spawn` in production too. Re-stating the carve-out as "`src/cli.rs` is an
+exception" would have made the rule ad hoc; instead the rule itself is corrected to the
+discriminator that was true all along for the files that matter — a worker thread answers
+over a channel, a fire-and-forget pipe pump does not.
 
 The production slice of a source file is the text before its first line equal to
 `#[cfg(test)]` — the same cut `NOBLOCK`'s leg 3 already uses, so this leg and that gate agree
-on what "production" means. `src/cli.rs` names `thread::spawn` only in its test slice and so
-SHALL NOT be counted.
+on what "production" means. `thread::spawn` is matched anchored per line (no `/` character
+before it on that line), excluding a comment or doc-comment mention. `mpsc` is matched as a
+plain, unanchored substring of the production slice — deliberately: this is not a new
+discriminator invented for this check, it is `scripts/gates/noblock.sh`'s own Guard A, its
+positive control for leg 1 (`prod src/refresh.rs | grep -qE 'mpsc'` alongside `grep -qE
+'thread::spawn'`), reused on the same reasoning that a worker thread answers over a channel.
+
+`src/cli.rs`'s production slice spawns two threads (a stdout-drain and a stderr-drain, each
+joined via `JoinHandle::join()` before the invocation returns) but names no `mpsc` — they are
+per-invocation pipe pumps, not workers that answer the render loop over a channel — and is
+correctly excluded. `src/watch.rs` names `mpsc` (the type the debounce classifier's caller
+receives from) but spawns no thread of its own — `notify` spawns its background thread — and
+is correctly excluded from the other direction.
 
 The count SHALL be written in `SPEC.md` in a form the check can find: `crate's <number-word>
 worker threads`, where the number word may optionally be wrapped in `**` emphasis. The
@@ -119,8 +143,8 @@ check SHALL fail when the number disagrees, when no occurrence of the phrase exi
 two occurrences state different numbers.
 
 Today the production slice of `src/refresh.rs`, `src/agents.rs`, and `src/launch.rs` each
-names `thread::spawn` — **three** — while `SPEC.md` says two. `AGENTS.md` and
-`openspec/IMPLEMENTATION-ORDER.md` already say three.
+names both `thread::spawn` and `mpsc` — **three** — while `SPEC.md` said two before this
+change fixed it. `AGENTS.md` and `openspec/IMPLEMENTATION-ORDER.md` already said three.
 
 #### Scenario: The documented count is stale
 - **WHEN** three production files name `thread::spawn` and `SPEC.md` says "two worker threads"

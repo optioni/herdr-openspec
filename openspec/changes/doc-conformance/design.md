@@ -310,9 +310,53 @@ contract a future author can see in the file and keep.
 
 **"Production" is defined as the text before a file's first `#[cfg(test)]` line** — the same
 cut `NOBLOCK` leg 3 uses to slice `src/refresh.rs`, `src/agents.rs`, and `src/launch.rs`.
-Reusing it means this leg and that gate can never disagree about which `thread::spawn` counts;
-`src/cli.rs`'s four occurrences are all below its `#[cfg(test)]` at line 317 and are correctly
-excluded.
+Reusing it means this leg and that gate can never disagree about what counts as production.
+
+**Corrected during implementation, after this decision was first written: a file counts only
+when its production slice names BOTH `thread::spawn` and `mpsc`, not `thread::spawn` alone.**
+This decision originally proposed the single-predicate rule above, with `src/cli.rs` carved
+out as an exception because, at the time this was written, its four `thread::spawn`
+occurrences were "all below its `#[cfg(test)]` at line 317". `seam-resilience` (commit
+`137d21b`) landed afterward and moved the goalposts: it added two per-invocation
+stdout/stderr pipe-drain threads to `src/cli.rs`'s production slice (now cut at line 484,
+not 317), each joined via `JoinHandle::join()` before the invocation returns. The
+single-predicate rule and the `src/cli.rs`-is-excluded sentence could no longer both hold —
+measured directly, `src/cli.rs`'s production slice now names `thread::spawn` twice, which
+the original rule would have to count.
+
+The fix is not a carve-out grafted onto the old rule; it is the discriminator that was true
+of the real worker modules all along, made explicit. It is also not invented for this check:
+it is `scripts/gates/noblock.sh`'s own Guard A, that gate's positive control for its leg 1
+(`prod src/refresh.rs | grep -qE 'mpsc'` alongside `grep -qE 'thread::spawn'`), reused on the
+same reasoning — a worker thread answers the render loop over a channel; a thread that is
+merely spawned and joined within one invocation is not a worker. Measured at HEAD:
+
+```text
+src/agents.rs   prod_cut=620   thread::spawn present   mpsc present    -> counted
+src/cli.rs      prod_cut=304   thread::spawn present   mpsc absent     -> excluded
+src/launch.rs   prod_cut=506   thread::spawn present   mpsc present    -> counted
+src/refresh.rs  prod_cut=228   thread::spawn present   mpsc present    -> counted
+src/watch.rs    prod_cut=342   thread::spawn absent    mpsc present    -> excluded
+```
+
+`src/cli.rs`'s two threads are excluded because they name no `mpsc` — they are per-invocation
+pipe pumps, not workers. `src/watch.rs` is excluded from the other direction: it names `mpsc`
+(the channel type its caller receives a classified event from) but spawns no thread of its
+own, because `notify` spawns the background thread. The count this yields — `agents.rs`,
+`launch.rs`, `refresh.rs` = three — is unchanged from what this decision originally intended;
+only the rule that reaches it changed. `thread::spawn` stays matched anchored per line (no
+`/` before it on that line, excluding a comment); `mpsc` is matched as a plain, unanchored
+substring — deliberately asymmetric, because that is exactly Guard A's own shape, and
+reusing it unmodified is the point.
+
+**This discriminator has a known limit, stated here rather than left implicit:** a future
+worker thread that answers over something other than `mpsc` — a `Mutex`/`Condvar` pair, or a
+channel type from a crate not currently a dependency — would not be counted by this rule.
+That is acceptable today because the crate has six dependencies and none of them provides
+another channel type, and because `NOBLOCK` leg 3 already enumerates the four seam modules
+(`watch`, `refresh`, `agents`, `launch`) independently of this leg, so this is not the only
+guard against a hidden worker thread. A future author adding such a thread needs to find this
+paragraph, not rediscover the gap.
 
 ### 4. `SPEC.md`'s manifest block is reordered rather than declared a non-issue (D10)
 
