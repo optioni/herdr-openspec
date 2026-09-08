@@ -365,6 +365,7 @@ mod tests {
     use crate::changes::{Change, empty_set, fixture};
     use crate::testutil::{cell, render_at, row_text};
     use crate::ui::app::{Action, Dashboard, Detail, Filter, Route};
+    use crate::ui::layout::columns;
 
     fn empty_filter() -> Filter {
         Filter {
@@ -1371,6 +1372,129 @@ mod tests {
         }
     }
 
+    /// Column range `range` of buffer row `y`, read **cell by cell** rather than through
+    /// `row_text`/`cols`: a CJK cluster occupies two buffer columns but the row-text
+    /// reconstruction folds its trailing (shadow) cell to an empty string, so a `char`-index
+    /// slice of that reconstruction no longer lines up with real buffer columns once any
+    /// cell is more than one column wide. `view-fidelity`'s own wide-character scenarios use
+    /// this instead of `cols(&row_text(...), ..)` for exactly that reason.
+    fn cell_range(buf: &Buffer, y: u16, range: std::ops::Range<u16>) -> String {
+        range
+            .map(|x| cell(buf, x, y).symbol().to_string())
+            .collect()
+    }
+
+    /// `cell_range`, with every wide cluster's trailing shadow cell — reset to a plain
+    /// space by ratatui itself — dropped. Safe whenever the expected text is known to
+    /// contain no real space of its own, which every fixture this helper is used against
+    /// does not.
+    fn cell_range_no_shadow(buf: &Buffer, y: u16, range: std::ops::Range<u16>) -> String {
+        cell_range(buf, y, range)
+            .chars()
+            .filter(|c| *c != ' ')
+            .collect()
+    }
+
+    /// `responsive-layout` :: "A wide-character path is shortened by columns and stays
+    /// inside the header" — the fixture (44 characters, 67 display columns) is chosen to
+    /// exceed `A` at 60 columns both badged (41) and unbadged (51), so both branches
+    /// actually shorten. Every check reads the buffer cell-by-cell (`cell_range`), never by
+    /// `chars()`-indexed string slicing, because the fixture is exactly the content that
+    /// slicing gets wrong.
+    #[test]
+    fn header_wide_character_path_shortens_by_columns_and_stays_inside_the_header() {
+        let repo = "/home/dev/workspaces/日本語のリポジトリ名前がとても長いディレクトリ";
+        assert_eq!(repo.chars().count(), 44, "fixture must be 44 characters");
+        assert_eq!(columns(repo), 67, "fixture must be 67 display columns");
+
+        let plain = dashboard(Some(repo), Route::List);
+        let badged = dashboard_in_file_mode(Some(repo), Route::List);
+
+        // The 60-column, non-badged buffer: A is 51. The shortened text begins with `…`
+        // no earlier than column 9, ends in the final column, and its `columns` is at
+        // most 51.
+        let a_unbadged = 51usize;
+        let expected_unbadged = crate::ui::list::shorten_left(repo, a_unbadged);
+        assert!(expected_unbadged.starts_with('…'));
+        assert!(columns(&expected_unbadged) <= a_unbadged);
+        let buf = render_at(60, 20, &plain);
+        let start = 60u16 - columns(&expected_unbadged) as u16;
+        assert!(
+            start >= 9,
+            "ellipsis must start no earlier than column 9: {start}"
+        );
+        assert_eq!(
+            cell_range_no_shadow(&buf, 0, start..60),
+            expected_unbadged,
+            "the shortened text must be right-aligned against the final column"
+        );
+
+        // Discriminating clause: a `char`-counted shortening would keep the last `A - 1`
+        // **characters** of the path rather than the last `A - 1` **columns**. Since the
+        // path is only 44 characters long — fewer than the 50 characters such a rule would
+        // try to keep — a char-counted rule keeps the WHOLE path, which measures 67
+        // columns: far more than the 51-column budget, and it would have run past the
+        // frame.
+        let char_based_keep = a_unbadged - 1;
+        let total_chars = repo.chars().count();
+        let start_char = total_chars.saturating_sub(char_based_keep);
+        let char_based_shown: String = repo.chars().skip(start_char).collect();
+        assert!(
+            columns(&char_based_shown) > a_unbadged,
+            "a char-counted shortening keeps {char_based_shown:?} at {} columns, which must \
+             exceed the {a_unbadged}-column budget for this fixture to discriminate",
+            columns(&char_based_shown)
+        );
+
+        // The 60-column, badged buffer: the badge takes columns 9..18, column 18 is a
+        // blank separator, and A is 41.
+        let a_badged = 41usize;
+        let expected_badged = crate::ui::list::shorten_left(repo, a_badged);
+        assert!(columns(&expected_badged) <= a_badged);
+        let buf = render_at(60, 20, &badged);
+        assert_eq!(cell_range(&buf, 0, 9..18), "file mode");
+        assert_eq!(cell_range(&buf, 0, 18..19), " ");
+        let start = 60u16 - columns(&expected_badged) as u16;
+        assert_eq!(cell_range_no_shadow(&buf, 0, start..60), expected_badged);
+
+        // The 120-column buffer: A (111 unbadged, 101 badged) comfortably holds the whole
+        // 67-column path, so it is drawn whole with no ellipsis, starting no earlier than
+        // column 50.
+        for d in [&plain, &badged] {
+            let buf = render_at(120, 20, d);
+            let start = 120u16 - columns(repo) as u16;
+            assert!(
+                start >= 50,
+                "path must start no earlier than column 50: {start}"
+            );
+            assert_eq!(cell_range_no_shadow(&buf, 0, start..120), repo);
+            assert!(
+                !row_text(&buf, 0).contains('…'),
+                "no ellipsis at 120 columns"
+            );
+        }
+
+        // 16, 18, 19, and 1 columns: rendering never panics, and the row never exceeds
+        // the frame — `row_text` itself is exactly `width` cells wide by construction, so
+        // the real assertion here is simply that render_at returns without panicking.
+        // Below A=8 (widths 16 and 1, where A is 7 and 0) the label alone is drawn and no
+        // ellipsis appears at all; at 18 and 19 (A 9 and 10) the path is shortened same as
+        // at 60, so an ellipsis is expected there too.
+        for width in [16u16, 1] {
+            let buf = render_at(width, 20, &plain);
+            assert!(
+                !row_text(&buf, 0).contains('…'),
+                "width {width}: below A=8, no ellipsis is drawn at all"
+            );
+        }
+        for width in [18u16, 19] {
+            let buf = render_at(width, 20, &plain);
+            assert!(
+                row_text(&buf, 0).contains('…'),
+                "width {width}: A is 9 or 10, so the path is shortened with an ellipsis"
+            );
+        }
+    }
     fn three_active() -> Dashboard {
         dashboard_with(
             vec![
@@ -1444,6 +1568,58 @@ mod tests {
         let row2_60 = interior_cols(&buf60, 2);
         assert!(row2_60.contains("a-very-long-change-name-that-will-not-fit-here"));
         assert!(!buffer_contains(&buf60, "…"));
+    }
+
+    /// `change-rows` :: "A CJK change name stays inside the list region at both mandated
+    /// widths" — driven through a full `ui::view::render` rather than through
+    /// `ui::list::rows` directly, since the whole point is that the render path (not just
+    /// the row-text primitive) never lets the name cross into the neighbouring region.
+    /// `list.rs`'s own test already carries this exact fixture at its own tier; this one is
+    /// the view-tier instance the manifest asks for. `render_list` draws each row with a
+    /// single `set_string` call rather than the per-segment loop this group's fix touches,
+    /// so this scenario is not expected to discriminate the segment-loop bug specifically —
+    /// see this group's own report for that observation.
+    #[test]
+    fn view_render_keeps_a_cjk_change_name_inside_the_list_region() {
+        let name = "日本語の変更名前です";
+        assert_eq!(columns(name), 20);
+        let cjk = dashboard_with(
+            vec![fixture::active(name, 4, 9)],
+            Vec::new(),
+            0,
+            Route::List,
+        );
+        let ascii = dashboard_with(
+            vec![fixture::active("add-token-refresh", 4, 9)],
+            Vec::new(),
+            0,
+            Route::List,
+        );
+
+        let buf120 = render_at(120, 20, &cjk);
+        let control120 = render_at(120, 20, &ascii);
+        let buf60 = render_at(60, 20, &cjk);
+        let control60 = render_at(60, 20, &ascii);
+        for (width, border_x, buf, control) in [
+            (120u16, 39u16, &buf120, &control120),
+            (60u16, 59u16, &buf60, &control60),
+        ] {
+            assert_eq!(
+                cell(buf, border_x, 2).symbol(),
+                "│",
+                "width {width}: the list block's own right border must be intact"
+            );
+            assert_eq!(
+                cell(buf, border_x, 2).symbol(),
+                cell(control, border_x, 2).symbol(),
+                "width {width}: the border must be unmoved from the ASCII-named control"
+            );
+            assert_eq!(
+                cell(buf, border_x - 1, 2).symbol(),
+                "]",
+                "width {width}: the progress cell ends in the interior's last column"
+            );
+        }
     }
 
     #[test]
@@ -2345,6 +2521,77 @@ mod tests {
             },
             file_mode: false,
         }
+    }
+
+    /// `artifact-content` :: "A wide-character document stays inside the detail region" —
+    /// a discriminating instance of the scenario `detail.rs`'s own test already carries.
+    /// That landed fixture (a CJK paragraph, a heading, and a family-emoji bullet) passes
+    /// today "by construction": every one of its lines is a **single** segment, so the
+    /// per-segment loop never consults its own (buggy) cursor before drawing it — the
+    /// segment is already bounded to the line's width by `content_lines` itself, and
+    /// `Buffer::set_string` draws it correctly regardless of how `x` was tracked.
+    ///
+    /// This fixture instead builds a line with **two** segments so the cursor is actually
+    /// consulted between them. The first (plain) segment is a run of `a`s with seven
+    /// trailing zero-width combining marks — `columns` does not count them, `chars().count()`
+    /// does, so the old cursor **over**-counts what it consumed. Over-counting, not
+    /// under-counting, is the direction that actually crosses a border: it leaves the
+    /// second (bold) segment's start too far **right**, so that segment's own — entirely
+    /// correct — width carries it past `last_col`. (A pure CJK run under-counts instead,
+    /// which shifts a following segment left into an overlap, never past the border; that
+    /// is the accident the landed fixture relies on.) The two segments are sized so the
+    /// line's total is exactly the interior width — `content_lines`' own width contract —
+    /// so the fix's clamp is provably a no-op here: the discriminator is the corrected
+    /// advance in `render_detail_content`, not the clamp. See this group's own report for
+    /// why no test here exercises the clamp.
+    fn combining_mark_overrun_source(interior: usize) -> String {
+        let plain_cols = interior - 8;
+        format!(
+            "{}{}**OVERRUN!**",
+            "a".repeat(plain_cols),
+            "\u{301}".repeat(7)
+        )
+    }
+
+    #[test]
+    fn a_combining_mark_inflated_segment_stays_inside_the_detail_region() {
+        // 60-column frame: the detail interior is 58 columns, content starts at row 4,
+        // column 1, and the frame's own right border sits at column 59.
+        let d58 = detail_dashboard(combining_mark_overrun_source(58), 0, Route::Detail);
+        let buf58 = render_at(60, 20, &d58);
+        for x in 1..50u16 {
+            assert_eq!(cell(&buf58, x, 4).symbol(), "a", "x={x}");
+        }
+        assert!(
+            cell(&buf58, 50, 4).symbol().starts_with('a'),
+            "the last cluster of the plain run carries the combining marks: {:?}",
+            cell(&buf58, 50, 4).symbol()
+        );
+        assert!(
+            row_text(&buf58, 4).contains("OVERRUN!"),
+            "the bold segment must still be drawn, just inside the border: {:?}",
+            row_text(&buf58, 4)
+        );
+        assert_eq!(
+            cell(&buf58, 59, 4).symbol(),
+            "│",
+            "the frame's right border must survive the over-counted segment"
+        );
+
+        // 120-column frame: the detail interior is 78 columns, content starts at column
+        // 41, and the frame's own right border sits at column 119.
+        let d78 = detail_dashboard(combining_mark_overrun_source(78), 0, Route::Detail);
+        let buf78 = render_at(120, 20, &d78);
+        for x in 41..110u16 {
+            assert_eq!(cell(&buf78, x, 4).symbol(), "a", "x={x}");
+        }
+        assert!(cell(&buf78, 110, 4).symbol().starts_with('a'));
+        assert!(row_text(&buf78, 4).contains("OVERRUN!"));
+        assert_eq!(
+            cell(&buf78, 119, 4).symbol(),
+            "│",
+            "the frame's right border must survive the over-counted segment"
+        );
     }
 
     /// Column range `1..=9` at 60, `41..=49` at 120 — the first nine
