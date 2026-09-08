@@ -800,7 +800,7 @@ mod tests {
         for d in every_fixture() {
             for width in [38, 58] {
                 for row in rows(&d, width) {
-                    assert_eq!(row.text.chars().count(), width as usize);
+                    assert_eq!(columns(&row.text), width as usize);
                 }
             }
         }
@@ -810,7 +810,7 @@ mod tests {
         badged.agents.agents = vec![agent_at("add-token-refresh", AgentStatus::Working)];
         for width in [38, 58] {
             for row in rows(&badged, width) {
-                assert_eq!(row.text.chars().count(), width as usize, "badged row");
+                assert_eq!(columns(&row.text), width as usize, "badged row");
             }
         }
     }
@@ -891,7 +891,7 @@ mod tests {
         for (width, expected) in cases {
             let row = &rows(&d, width)[2];
             assert_eq!(row.text, expected, "width {width}");
-            assert_eq!(row.text.chars().count(), width as usize);
+            assert_eq!(columns(&row.text), width as usize);
         }
         assert!(rows(&d, 38)[2].text.contains("2026-08-14"));
         assert!(rows(&d, 38)[2].text.contains("[7/7]"));
@@ -917,7 +917,7 @@ mod tests {
 
         let rows58 = rows(&d, 58);
         for row in &rows58 {
-            assert_eq!(row.text.chars().count(), 58);
+            assert_eq!(columns(&row.text), 58);
         }
         assert_eq!(rows58[0].text.chars().nth(51), Some('w'));
         assert_eq!(rows58[1].text.chars().nth(51), Some('b'));
@@ -962,7 +962,7 @@ mod tests {
 
         let rows58 = rows(&d, 58);
         for row in &rows58 {
-            assert_eq!(row.text.chars().count(), 58);
+            assert_eq!(columns(&row.text), 58);
         }
         assert_eq!(rows58[2].text.chars().nth(51), Some('b'));
         assert_eq!(rows58[2].text.chars().nth(50), Some(' '));
@@ -1451,7 +1451,7 @@ mod tests {
         for d in every_fixture() {
             for width in [0u16, 1, 2, 8, 9, 10, 13, 14, 38, 58, 120, u16::MAX] {
                 for row in rows(&d, width) {
-                    assert_eq!(row.text.chars().count(), width as usize, "width {width}");
+                    assert_eq!(columns(&row.text), width as usize, "width {width}");
                 }
             }
         }
@@ -1611,7 +1611,7 @@ mod tests {
             assert!(all[0].text.contains("c-2fa-support"), "width {width}");
             assert!(all[0].text.contains('g'), "width {width}");
             assert_eq!(
-                all[0].text.chars().count(),
+                columns(&all[0].text),
                 width as usize,
                 "width {width}: padded or truncated to the interior width exactly"
             );
@@ -1778,7 +1778,7 @@ mod tests {
                 "width {width}"
             );
             for row in &all[0..6] {
-                assert_eq!(row.text.chars().count(), width as usize, "width {width}");
+                assert_eq!(columns(&row.text), width as usize, "width {width}");
                 assert!(!row.selected, "width {width}");
             }
         }
@@ -1818,7 +1818,7 @@ mod tests {
         for width in [38, 58] {
             assert_eq!(rows(&d, width)[0].kind, RowKind::Problem, "width {width}");
             assert_eq!(
-                rows(&d, width)[0].text.chars().count(),
+                columns(&rows(&d, width)[0].text),
                 width as usize,
                 "width {width}"
             );
@@ -2009,12 +2009,11 @@ mod tests {
                 );
             }
             if width <= 2 {
+                // At widths `0`, `1`, and `2` every row is empty or a bare marker — already
+                // proven exactly by the columns equality above, restated here as the
+                // scenario's own named claim.
                 for row in &all {
-                    assert!(
-                        row.text.chars().count() <= 3,
-                        "width {width}: {:?}",
-                        row.text
-                    );
+                    assert!(columns(&row.text) <= 2, "width {width}: {:?}", row.text);
                 }
             }
         }
