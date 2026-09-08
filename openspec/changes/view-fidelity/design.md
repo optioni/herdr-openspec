@@ -173,22 +173,22 @@ Tiers, per the project's own: **unit** = `cargo test --lib` over a pure function
 | No line exceeds the width it was given | sweep over eight widths | unit | none | `cargo test --lib ui::markdown::tests` |
 | A wide-character document wraps by columns at both mandated widths | `markdown::lines` at 58 and 78, byte-offset re-slice | unit | none | `cargo test --lib ui::markdown::tests::wide` |
 | Rendering is total over arbitrary input | ten sources at widths 1, 2, 58, 78 | unit | none | `cargo test --lib ui::markdown::tests::total` |
-| A missing artifact still shows its tab and reads `No content yet` | full-frame render at 60 and 120 | view | `TestBackend`, injected reader | `cargo test --lib ui::detail::tests` |
+| A missing artifact still shows its tab and reads `No content yet` | full-frame render at 60 and 120 | view | `TestBackend`, injected reader | `cargo test --lib ui::view::tests::a_missing_artifact_still_shows_its_tab_and_reads_no_content_yet` |
 | `No content yet` does not eat the border at a narrow frame | full-frame render at 1, 2, 13, 14, 15 | view | `TestBackend`, injected reader | `cargo test --lib ui::detail::tests::narrow` |
-| A read failure is named above the content at both widths | full-frame render at 60 and 120 | view | `TestBackend`, injected reader | `cargo test --lib ui::detail::tests` |
-| The rendered markdown fills the content area, not the whole interior | full-frame render at 60 and 120 | view | `TestBackend`, injected reader | `cargo test --lib ui::detail::tests` |
-| The tracked-tasks tab renders the checklist body instead | full-frame render at 60 and 120 | view | `TestBackend`, injected reader | `cargo test --lib ui::detail::tests` |
+| A read failure is named above the content at both widths | full-frame render at 60 and 120 | view | `TestBackend`, injected reader | `cargo test --lib ui::view::tests::a_read_failure_is_named_above_the_content_at_both_widths` |
+| The rendered markdown fills the content area, not the whole interior | full-frame render at 60 and 120 | view | `TestBackend`, injected reader | `cargo test --lib ui::view::tests::the_twenty_item_list_fills_the_content_area_rows_4_through_17` |
+| The tracked-tasks tab renders the checklist body instead | full-frame render at 60 and 120 | view | `TestBackend`, injected reader | `cargo test --lib ui::view::tests::marked_tab_renders_checklist_body` |
 | A wide-character document stays inside the detail region | full-frame render at 60 and 120, border cells asserted | view | `TestBackend`, injected reader | `cargo test --lib ui::detail::tests::wide` |
 | `content_lines` is total and width-parameterised | matrix of seven `Detail` x four `change` at 58 and 78 | unit | none | `cargo test --lib ui::detail::tests::total` |
 | No `content_lines` line exceeds its width at any width | sweep 0..=130 over the same matrix | unit | none | `cargo test --lib ui::detail::tests::sweep` |
 | A checklist of wide-character items fits at both mandated widths | `ui::tasks::lines` at 58 and 78, byte-offset re-slice | unit | none | `cargo test --lib ui::tasks::tests::wide` |
 | No checklist line exceeds its width at any width | sweep 0..=130 over five sources x two `Progress` | unit | none | `cargo test --lib ui::tasks::tests::sweep` |
-| A prose-only tasks file reads `No tasks yet` | full-frame render at 60 and 120 | view | `TestBackend`, injected reader | `cargo test --lib ui::tasks::tests` |
+| A prose-only tasks file reads `No tasks yet` | full-frame render at 60 and 120 | view | `TestBackend`, injected reader | `cargo test --lib ui::view::tests::prose_only_reads_no_tasks_yet` |
 | `No tasks yet` does not eat the border at a narrow frame | full-frame render at 1, 2, 13, 14, 15 | view | `TestBackend`, injected reader | `cargo test --lib ui::tasks::tests::narrow` |
-| A missing tasks artifact still reads `No content yet` | full-frame render at 60 and 120 | view | `TestBackend`, injected reader | `cargo test --lib ui::tasks::tests` |
-| A read failure on the tasks tab names its reason and renders no checklist | full-frame render at 60 and 120 | view | `TestBackend`, injected reader | `cargo test --lib ui::tasks::tests` |
+| A missing tasks artifact still reads `No content yet` | full-frame render at 60 and 120 | view | `TestBackend`, injected reader | `cargo test --lib ui::view::tests::missing_tasks_artifact_no_content_yet` |
+| A read failure on the tasks tab names its reason and renders no checklist | full-frame render at 60 and 120 | view | `TestBackend`, injected reader | `cargo test --lib ui::view::tests::tasks_tab_read_failure` |
 | The full grammar at both mandated interior widths | `progress_bar` at 58 and 78 | unit | none | `cargo test --lib ui::tasks::tests::bar` |
-| The bar reaches the buffer at both mandated frame widths | full-frame render at 60 and 120 | view | `TestBackend`, injected reader | `cargo test --lib ui::tasks::tests::bar` |
+| The bar reaches the buffer at both mandated frame widths | full-frame render at 60 and 120 | view | `TestBackend`, injected reader | `cargo test --lib ui::view::tests::progress_bar_in_the_buffer` |
 | The percentage truncates rather than rounds | `progress_bar` at 58 and 78, four `Progress` | unit | none | `cargo test --lib ui::tasks::tests::bar` |
 | The bar measures at most its width at every width | sweep 0..=130 over four `Progress` | unit | none | `cargo test --lib ui::tasks::tests::bar_sweep` |
 | A CJK change name keeps the header inside its region at both mandated widths | `header_row` at 58 and 78 | unit | none | `cargo test --lib ui::detail::tests::header` |
@@ -392,10 +392,20 @@ function — makes the common case wrong to improve an uncommon one.
 ### 8. The draw loop keeps its guard **and** gains a per-segment clamp.
 
 `x >= last_col { break }` is now correct, because `x` advances by consumed columns. The clamp
-— drawing `truncate_columns(&segment.text, last_col - x)` — is added anyway, because the guard
-fires *between* segments and a single segment wider than the space remaining would still cross
-the border. Two mechanisms for one property, on the same terms the crate already asserts
-`pulldown-cmark`'s defaults three ways: each alone is dodgeable.
+— drawing `truncate_columns(&segment.text, last_col - x)` — is added anyway.
+
+**Corrected from an earlier draft, which claimed the clamp was independently dodgeable on the
+same terms as `pulldown-cmark`'s defaults.** That is false: with the guard using the corrected
+column-based advance, `content_lines` never returns a line whose `columns` exceeds the width it
+was given (`artifact-content`'s own "total and width-parameterised" and "no line exceeds its
+width" scenarios pin this), so `last_col - x` can never be exceeded and the clamp is provably
+**unreachable** — removing it while keeping the corrected advance leaves every test green. The
+real justification is weaker and different: the invariant the clamp would enforce lives in
+`ui::markdown`/`ui::detail`, a different module from `ui::view`, so a future change to either
+could break it without touching this draw loop at all. The clamp is retained as a defence
+against that module boundary, not because it independently earns its keep today — a gate that
+cannot fail is itself a failure, and the comment at the call site says so rather than repeating
+the false claim.
 
 ### 9. One new gate, `COLWIDTH`, built the way every other gate here is built.
 

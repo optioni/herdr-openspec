@@ -129,12 +129,16 @@ fn render_detail_content(frame: &mut Frame, content: Rect, dashboard: &Dashboard
             if x >= last_col {
                 break;
             }
-            // `view-fidelity` -> Decision 8: the guard above is now correct, since `x`
-            // advances by consumed columns rather than characters — but it fires only
-            // *between* segments, so a single segment wider than the space remaining
-            // would still cross the border. The clamp below is kept alongside it, on the
-            // same terms the markdown parser's own defaults are asserted three ways
-            // elsewhere in this crate: each mechanism alone is dodgeable.
+            // `view-fidelity` -> Decision 8 (corrected): the guard above is now correct,
+            // since `x` advances by consumed columns rather than characters, and
+            // `content_lines` never hands this loop a line whose `columns` exceeds
+            // `content.width` — so `truncate_columns(&segment.text, last_col - x)` below
+            // can never actually truncate anything; it is provably unreachable under that
+            // contract, not independently dodgeable (an earlier draft of this comment
+            // claimed the latter, which the crate's own tests disprove: removing this
+            // clamp leaves every test green). It stays because the invariant it would
+            // enforce lives in a *different* module — `ui::markdown`/`ui::detail` — and a
+            // later change there could break it without ever touching this loop.
             let remaining = (last_col - x) as usize;
             let text = truncate_columns(&segment.text, remaining);
             let style = style_for(&segment.face);
@@ -3455,6 +3459,16 @@ mod tests {
                 row_text(&buf, 3).contains("2 specs"),
                 "width {width}: tab bar still intact"
             );
+            // `artifact-content` :: "in both buffers that row measures exactly the
+            // interior width ... because the literal is now padded like every line
+            // around it" — pinned at the view tier, alongside the unit-tier assertion
+            // in `ui::detail`'s own tests.
+            let interior = interior_width(width) as usize;
+            assert_eq!(
+                columns(&detail_interior_cols(&buf, 4, interior)),
+                interior,
+                "width {width}: the No content yet row is padded to the interior width"
+            );
         }
 
         // The same holds at the tracked-tasks position (3): a missing
@@ -3489,6 +3503,15 @@ mod tests {
             assert!(
                 !row_text(&buf, 4).contains('█') && !row_text(&buf, 4).contains('░'),
                 "width {width}: no progress bar for a marked tab with no file"
+            );
+            // `artifact-content` :: the same "measures exactly the interior width"
+            // clause, for the tracked-tasks position.
+            let interior = interior_width(width) as usize;
+            assert_eq!(
+                columns(&detail_interior_cols(&buf, 4, interior)),
+                interior,
+                "width {width}: marked tab: the No content yet row is padded to the \
+                 interior width"
             );
         }
     }
