@@ -1,28 +1,36 @@
-# Handoff — audit remediation proposals
+# Audit remediation — closed record
 
-**Written:** 2026-09-07, at the 5h session limit (11% left, reset 12:59pm).
-**Commit:** `994a6d1` — five proposals, WIP. No `src/` changes. Nothing implemented.
+**Status: complete.** All five changes are implemented, verified and archived
+(`openspec/changes/archive/2026-09-07-gate-integrity`, `-cli-parity`,
+`2026-09-08-seam-resilience`, `-view-fidelity`, `-doc-conformance`).
+`make check` green. **Nothing here is outstanding work.**
 
-This is a *separate* file from `HANDOFF.md` on purpose: that one is a historical
-record of the original build, it is stale (audit finding D8), and the
-`doc-conformance` change owns the decision about its fate. Do not merge these.
+This file is kept, rather than deleted, for three sections that exist nowhere else:
+the corrections made to the audit itself, the facts verified so they need not be
+re-derived, and the one deliberately-deferred item plus its follow-up. The audit
+artifact it links to is the only index of the 40 findings.
+
+`HANDOFF.md` is a separate, likewise-closed record of the original build. Do not
+merge them. (Its fate was decided by the `doc-conformance` change: kept, closed,
+open-work framing removed.)
 
 ---
 
 ## Where things stand
 
 A five-track parallel audit of the plugin produced **40 findings**, published at
-https://claude.ai/code/artifact/beec2a4f-da5e-4723-8af7-64003f601727 — read that
-first, it is the source for every proposal below and carries the full evidence.
+https://claude.ai/code/artifact/beec2a4f-da5e-4723-8af7-64003f601727 — that page is
+the only index of the findings and carries the full evidence. It has been corrected
+once in place; see the corrections section below.
 
 `make check` was green at audit time (all five gates, 96.71% reported coverage).
 The defects cluster in what was never exercised: other people's repositories,
 non-ASCII input, and the gates that guard the gates.
 
-Five change proposals were drafted in parallel, one per domain. **None has been
-reviewed or approved. None may be implemented until it is.**
+Five change proposals were drafted in parallel, one per domain, then implemented
+and archived in the order below.
 
-## Per-change state
+## Per-change outcome (all archived)
 
 | Change | Findings | State |
 |---|---|---|
@@ -32,10 +40,7 @@ reviewed or approved. None may be implemented until it is.**
 | `cli-parity` | C1–C8 | **Complete**, `Change 'cli-parity' is valid` |
 | `doc-conformance` | D4–D10 | **Complete**, `Change 'doc-conformance' is valid` |
 
-**All five are complete and pass `openspec validate --strict`.** Nothing is
-outstanding in the drafting phase. The next step is review, then implementation —
-`gate-integrity` first, because every other finding is one the gates were supposed
-to catch.
+All five were implemented and archived, `make check` green at each boundary.
 
 ## One deferred item, deliberately not fixed
 
@@ -59,18 +64,19 @@ touches every view file. The resolution point is recorded in `view-fidelity`'s
 later change that genuinely needs to touch `dashboard-loop`'s pure set can carry the
 move as a rider.
 
-### What the two finished ones decided
+### A second deferred item — `nosleep.sh`, unowned
 
-`cli-parity` closes C1, C2, C3, C5, C7, C8 and documents C4 and C6 as
-degraded-states rows (`MIN_ROWS` 44 → 46). `doc-conformance` adds one new
-capability of the same name, whose anti-drift mechanism is `tests/doc_contract.rs`
-— an ordinary `cargo test` target (so it runs inside `make check`) with six legs,
-each binding a documented claim to a computable second site. It recommends keeping
-`HANDOFF.md`, deleting its open-work sections and marking it closed, because it holds
-the only copy of several transferable findings.
+Found during `doc-conformance` and deliberately **not** absorbed, because it is not
+covered by any of the five changes' specs. It belongs to `quality-gates`:
 
-`openspec` is not on a non-login `PATH` here — it is at
-`~/.nvm/versions/node/v24.18.0/bin/openspec` (v1.12.0). Source nvm first.
+- Leg 1 splits spans only at `#[test]` boundaries and matches `deadline`/`while` as
+  raw text anywhere in a span, so a bad sleep in a file's production prelude can hide
+  behind a correct one elsewhere in the same file.
+- Leg 2b caps `watch`/`refresh`/`agents` at one sleep each but never gained
+  `src/launch.rs`, which `seam-resilience` made a production sleep site.
+
+Note for whoever picks this up: `openspec` is not on a non-login `PATH` here — it is
+at `~/.nvm/versions/node/v24.18.0/bin/openspec` (v1.12.0). Source nvm first.
 
 ## S10 — RESOLVED, recorded for review
 
@@ -95,7 +101,7 @@ this section is kept because the reviewer should understand what changed and why
 assumes the child *runs*. Where the probe reached step 3 or 4 there is no payload
 at all, and setting `current_dir` fixes nothing. Same symptom, earlier layer.
 
-**Three things the revision must do:**
+**What the revision had to do (all three done):**
 
 - (a) Add the exec failure as its **own** requirement, not folded into S7.
 - (b) Extend task group 1's measurement to record a **real spawn's exit code and
@@ -187,23 +193,19 @@ That argument ignored the count — the fallback selects a possibly-glob `genera
 and sums files the CLI never counts, which is what the dual-source model forbids.
 Worth a second opinion at review time, since it overrides a recorded decision.
 
-## Recommended order
+## Implementation order used
 
 **`gate-integrity` first.** Every other finding is one the gates were supposed to
 catch, so the rest should land on gates that work.
 
-## Coordination — a peer session is active
+## Coordination — peer session (resolved)
 
-A second Claude session (`herdr-openspec-ea`) is scoping post-audit refinements:
-mouse support, colour, collapsible list sections, markdown constructs, and demoting
-the CLI-failure problem row into the header badge slot. It has agreed to **hold until
-these five land**. It contributed S10 and the C3 `Failed`-arm correction. It has made
-no edits; the tree is otherwise clean.
+A second Claude session (`herdr-openspec-ea`) scoped post-audit refinements — mouse
+support, colour, collapsible list sections, markdown constructs, and demoting the
+CLI-failure problem row into the header badge slot — and held them until these five
+landed. Its proposals are now unblocked and sit in `openspec/changes/`:
+`mouse-input`, `color-palette`, `list-sections`, `markdown-constructs`.
 
-## Resume prompt
-
-> Read `HANDOFF-AUDIT.md` in this repo and continue from there. First check whether
-> `seam-resilience`'s outstanding S10 revision was applied; if not, apply it. Then
-> finish and validate the remaining proposals (`gate-integrity`, `view-fidelity`,
-> `cli-parity`, `doc-conformance`) with `openspec validate --strict`, and report
-> which are ready for review. Do not implement anything.
+It contributed two corrections to this batch: S10 (the `env node` shim exec failure)
+and the C3 `Failed`-arm scoping, both of which were measured and confirmed here
+before being folded in.
