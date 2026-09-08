@@ -110,9 +110,9 @@ apart by exit code.
 ## 10. Change Review
 <!-- kind: operational -->
 
-- [ ] 10.1 CHECK: Dispatch an independent reviewer — not a fork of this session — against proposal.md, all eight spec deltas, design.md, and the diff. Ask specifically about: whether every new test would go red if its behavior were deleted; whether the S7 measurement's recorded outcome matches what group 3 actually implemented; whether any task invented a boundary design.md -> Test Boundaries does not name; and whether the seam's relaxed `current_dir` prohibition leaked beyond `RealOpenspecCli`.
-- [ ] 10.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a one-line reason, note SUGGESTIONs, and re-run affected tests.
-- [ ] 10.3 VERIFY: Confirm no blocking or unowned finding remains, and that no spec delta outside this change's eight capabilities was touched.
+- [x] 10.1 CHECK: Dispatch an independent reviewer — not a fork of this session — against proposal.md, all eight spec deltas, design.md, and the diff. Ask specifically about: whether every new test would go red if its behavior were deleted; whether the S7 measurement's recorded outcome matches what group 3 actually implemented; whether any task invented a boundary design.md -> Test Boundaries does not name; and whether the seam's relaxed `current_dir` prohibition leaked beyond `RealOpenspecCli`.
+- [x] 10.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a one-line reason, note SUGGESTIONs, and re-run affected tests.
+- [x] 10.3 VERIFY: Confirm no blocking or unowned finding remains, and that no spec delta outside this change's eight capabilities was touched.
 
 ## 11. Documentation
 <!-- kind: operational -->
