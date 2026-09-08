@@ -95,13 +95,22 @@ included — a view test reading a clock is precisely the timing flake this desi
 
 #### Scenario: The composition root watches `openspec/`, not the repository root
 
-- **WHEN** `ui::start_collaborators` is driven over a scratch repository containing both
-  `openspec/changes/alpha/` and a sibling `target/` directory, with the watcher construction
-  captured by a recording double standing in for `watch::start`
-- **THEN** the path it was given is exactly `<repo>/openspec`, asserted as an equality
-  against `repo.join("openspec")` rather than as a `starts_with`
-- **AND** it is **not** the repository root, so a build artefact written under `target/`
-  cannot reach the debounce at all
+- **WHEN** `ui::start_collaborators` is driven over a scratch repository root that exists but
+  deliberately holds **no** `openspec/` subdirectory, with the real `watch::start` — not a
+  recording double: `NOCLI-SHELL`'s sibling mechanical check for this task (`grep -rn
+  'watch::start(' src/ | wc -l` staying at exactly 3) would break the moment a double needed a
+  seventh `start_collaborators` parameter to receive it, and `NOSLEEP` bans a real sleep
+  anywhere under `src/ui`, so a live batch cannot be proven from this composition-root test
+  either way
+- **THEN** the returned `problems` name `<repo>/openspec` — proof that the watch was rooted
+  there rather than at the repository root, since a root that exists but holds no `openspec/`
+  subdirectory watches successfully and reports nothing, while `<repo>/openspec` itself does
+  not exist and so fails immediately, on exactly `watch::start_on_a_missing_path_degrades_and_
+  names_the_reason`'s already-proven terms
+- **AND** the live half — that a write under a sibling `target/` never reaches the debounce
+  while one under `openspec/` does — is proven separately, deterministically, and with no
+  wall-clock-bounded negative assertion, by the next scenario below
+  (`watch::a_write_outside_openspec_produces_no_batch`)
 
 #### Scenario: A write outside `openspec/` produces no batch
 
