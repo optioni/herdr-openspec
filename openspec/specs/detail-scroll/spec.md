@@ -41,12 +41,24 @@ change to both callers is what keeps the clamp honest across a tab switch.
 `artifact-content` states what `content_lines` returns, including the `No content yet` line,
 the `!`-prefixed problem lines, and which of the two bodies applies.
 
-The `Face`-to-`Style` mapping SHALL live in `ui::view` and nowhere else, and SHALL be
-**unchanged** by the checklist body: `heading` present or `strong` → `Modifier::BOLD`;
-`emphasis` → `Modifier::ITALIC`; `code` → `Modifier::DIM`; `link` → `Modifier::UNDERLINED`;
-`quoted` → `Modifier::DIM`. Flags compose, so a bold link's cells carry `BOLD` and
-`UNDERLINED` together. A checklist heading line reaches the buffer bold through the same
-`heading` mapping, and every other checklist line is plain, so no new mapping is added.
+The `Face`-to-`Style` mapping SHALL be `ui::view::style_for`, and its **source** SHALL be
+`ui::palette` — the crate's one semantic-role table — rather than modifiers written out at
+this call site. `style_for` SHALL remain the crate's only `Face`-to-`Style` function, and it
+SHALL be **unchanged** by the checklist body.
+
+Its modifiers SHALL be exactly the ones this requirement already stated: `heading` present or
+`strong` → `Modifier::BOLD`; `emphasis` → `Modifier::ITALIC`; `code` → `Modifier::DIM`;
+`link` → `Modifier::UNDERLINED`; `quoted` → `Modifier::DIM`. Flags compose, so a bold link's
+cells carry `BOLD` and `UNDERLINED` together. A checklist heading line reaches the buffer bold
+through the same `heading` mapping, and every other checklist line is plain, so no new mapping
+is added.
+
+Three of those faces SHALL additionally carry a **foreground colour**, which is the whole of
+what this change adds here: `heading` its level's colour, `code` `Color::Yellow`, and `link`
+`Color::Blue`. `strong`, `emphasis`, and `quoted` SHALL carry none — each already carries a
+modifier that distinguishes it. `view-palette` states the fold order that composes several
+faces onto one span and the foreground precedence — heading over code over link — that
+decides the colour when a span carries more than one; this requirement adds no second rule.
 
 The region SHALL draw nothing at all — no header, no tab bar, no content — when `visible()`
 is empty, leaving every interior cell a space whose `Style` equals
@@ -81,11 +93,16 @@ headers are its merge key; its subject is the same document, drawn two rows lowe
   `## Heading\n\n**bold** and *italic* and `code` and [link](u)\n` is rendered at 120x20 and
   at 60x20
 - **THEN** in each buffer the cells of `## Heading` in the content area's first row report
-  `Modifier::BOLD` set
+  `Modifier::BOLD` set, and additionally the foreground `Role::Heading(2)` carries
+  (`Color::Cyan`)
 - **AND** the cells of `bold` report `BOLD`, of `italic` report `ITALIC`, of `code` report
-  `DIM`, and of `link` report `UNDERLINED`
+  `DIM`, and of `link` report `UNDERLINED` — every modifier exactly as before this change
+- **AND** the cells of `code` additionally report the foreground `Role::Code` carries
+  (`Color::Yellow`) and those of `link` the foreground `Role::Link` carries (`Color::Blue`),
+  while those of `bold` and `italic` report no foreground at
+  all
 - **AND** the assertion discriminates: a cell of the surrounding plain text reports none of
-  those modifiers
+  those modifiers and no foreground
 
 #### Scenario: An empty source leaves the detail interior blank at both widths
 

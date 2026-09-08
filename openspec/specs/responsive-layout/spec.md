@@ -414,6 +414,7 @@ nothing may write there.
   78-column markdown line ran into the divider or past the frame
 - **AND** the same holds at `Route::Detail` at 60x20, where the detail region is the only
   one drawn
+
 ### Requirement: The header names the repository root, shortened from the left when narrow
 
 The header row SHALL render, right-aligned so that its last column sits in the final
@@ -424,10 +425,18 @@ label from the shortened text at minimum.
 **The `file mode` badge.** When `Dashboard::file_mode` is true — the `openspec` binary probe
 resolved no usable binary, so the change list is file-sourced for the whole session — the
 header SHALL draw the literal `file mode`, nine columns, immediately after the `OpenSpec`
-label and one separating blank, in columns 9 through 17, styled with ratatui's `DIM`
-modifier and no other. The badge is dim because it names a *mode*, not a fault: file mode is
-a supported way to run, and a badge competing with the repository path for attention would
-say otherwise.
+label and one separating blank, in columns 9 through 17, styled with
+`palette::style(Role::FileMode)`: ratatui's `DIM` modifier — and no other modifier — together
+with foreground `Color::Yellow`. The badge stays dim because it names a *mode*, not a fault:
+file mode is a supported way to run, and a badge competing with the repository path for
+attention would say otherwise. It is coloured because `DIM` alone is what an archived row's
+date, an inline code span, a block quote, and an agent badge already are, and a badge that
+shares its whole style with four other things names nothing.
+
+The `OpenSpec` label SHALL be drawn with `palette::style(Role::HeaderTitle)` and the
+right-aligned path — or `no repository` — with `palette::style(Role::HeaderPath)`. Neither
+carries a colour: the label already carries `BOLD` and the path is the row's only other
+content, so the badge's yellow is the one new distinction this row gains.
 
 The badge SHALL be dropped **whole**, never cut short, when the header width is below 18 —
 the eight columns of `OpenSpec`, one blank, and the badge's nine — on exactly `change-rows`'
@@ -522,9 +531,13 @@ region's interior width rather than the header's.
   **true** is rendered at 60x20 and at 120x20
 - **THEN** the header row's columns 9 through 17 spell `file mode` at both widths, and column
   8 is a space
-- **AND** every one of those nine cells carries ratatui's `DIM` modifier, and the `OpenSpec`
-  label's eight cells do not, so the badge is distinguishable from the label by style as well
-  as by position
+- **AND** every one of those nine cells carries ratatui's `DIM` modifier **and** the
+  foreground `Role::FileMode` carries (`Color::Yellow`), and the `OpenSpec` label's eight
+  cells carry `Modifier::BOLD` and no
+  foreground at all, so the badge is distinguishable from the label by colour as well as by
+  weight and position
+- **AND** the drawn path's cells carry neither a modifier nor a foreground, so the yellow is
+  confined to the badge's own nine columns
 - **AND** the 60-column header spells `/tmp/demo-repo` in columns 46 through 59 and the
   120-column header in columns 106 through 119 — unchanged, because a fourteen-character path
   fits inside `A` at both widths either way
@@ -533,8 +546,9 @@ region's interior width rather than the header's.
 
 - **WHEN** the same `Dashboard` is rendered with `file_mode` **false** at 60x20 and at 120x20
 - **THEN** neither buffer contains the substring `file mode` anywhere, in any row
-- **AND** both buffers are byte-identical, cell for cell and style for style, to the ones the
-  same dashboard produced before this change existed
+- **AND** both **header rows** are identical, cell for cell and style for style, to the ones
+  the same dashboard produced before this change existed — no cell of row 0 carries a
+  foreground, so the palette added colour to the badge and to nothing else on this row
 
 #### Scenario: The badge takes its columns from the path, not from the label
 
@@ -767,3 +781,30 @@ changes and no landed footer assertion moves.
 - **AND** the check is a repository file under `scripts/gates/` named in the `Makefile`'s
   `gates:` recipe, so `tests/ci_workflow.rs`'s recipe-versus-directory assertion covers it
   and it cannot silently drop out of `make gates`
+
+### Requirement: A region's border style is a palette role
+
+`ui::view::render_region` SHALL take the border's style from the palette:
+`palette::style(Role::RegionBorderFocused)` for the region the dashboard's route names, and
+`palette::style(Role::RegionBorder)` for the other region when it is drawn. It SHALL
+construct no `Style` of its own.
+
+`Role::RegionBorderFocused` SHALL carry `Modifier::BOLD` and **no colour**, and
+`Role::RegionBorder` SHALL carry neither, so the rendered result is exactly what "The routed
+region is emphasised and region interiors are left empty" already requires. The border frames
+the pane rather than saying anything about it; colouring it would tint every frame for no
+distinction. The style SHALL reach `Block::border_style` and not `Block::style`, so a blank
+interior's cells still equal `ratatui::buffer::Cell::default().style()`.
+
+#### Scenario: The routed region's border takes its style from the palette at both widths
+
+- **WHEN** a `Dashboard` at `Route::List` is rendered at 120x20, and a second at
+  `Route::Detail` is rendered at 120x20 and at 60x20
+- **THEN** in the first buffer every border cell of the `Changes` region reports
+  `Modifier::BOLD` set and the `Detail` region's border cells do not, and in the second the
+  two are swapped, so the assertion discriminates rather than asserting a constant
+- **AND** no border cell in any buffer reports a foreground or a background, so the palette
+  gave the border a role and not a colour
+- **AND** every cell of a blank region interior still equals
+  `ratatui::buffer::Cell::default().style()`, so the style reached `border_style` rather than
+  `style`

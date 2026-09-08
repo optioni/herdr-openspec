@@ -3,8 +3,9 @@
 ## Purpose
 Owns the row of tabs across the top of the detail region: one cell per entry of
 `Change::artifacts` in the schema's declared order, addressed strictly by position so
-duplicate artifact ids stay two separately selectable tabs, labelled `"<n> <id>"` for the nine
-positions a digit key can reach and by bare id beyond that, windowed to whole cells that always
+duplicate artifact ids stay two separately selectable tabs, drawn as chips — each label the
+bare `<id>` padded one space on each side, carrying no digit at any position, though `1`-`9`
+still select the first nine — windowed to whole cells that always
 keep the selected tab on screen, and reduced to a single `no artifacts` placeholder when a
 change declares none. It also defines where the bar sits — the second interior row of the
 detail region, via `split_detail`'s header/tab-bar/content split — and the keys that move it:
@@ -38,54 +39,77 @@ pub struct Tab {
 
 `text` is the cell's label, `x` its column offset from the interior's first column, `index`
 its position in `artifacts` (`None` for the zero-artifact placeholder below), and `selected`
-whether it is the selected tab. `Tab` carries no `ratatui` type: `ui::view` maps `selected`
-to `Modifier::BOLD`, exactly as it does for `ui::list::Row`.
+whether it is the selected tab. `Tab` carries no `ratatui` type — `NOTABSEAM` forbids one in
+`src/ui/detail.rs` — so `ui::view` is what maps `selected` to a style, exactly as it does for
+`ui::list::Row`.
 
-A tab's label SHALL be `"<n> <id>"` where `n` is its **1-based** position, for positions 1
-through 9; positions 10 and beyond SHALL be labelled with the bare `<id>`, because `1`–`9`
-is the whole of the digit addressing and a tenth digit would be a key that does not exist.
-Cells SHALL be separated by exactly two spaces.
+**The cell is a chip.** A tab's label SHALL be its bare `<id>` padded with exactly one space
+on each side, so a cell `columns(id) + 2` wide is drawn and `ui::view` paints every one of
+those columns a background. Consecutive chips SHALL be separated by exactly **one** column,
+which no chip occupies and nothing paints, so two adjacent inactive chips show a visible edge
+rather than one continuous field.
+
+No label SHALL carry a leading digit. `1`–`9` still select a tab — `action_for` is unchanged
+— but the bar no longer advertises them: a numbered chip is wider than the bar needs to be,
+and a row of bare numbered labels two spaces apart reads as a sentence rather than as tabs.
+
+Measured against this repository's five-artifact `tdd` schema the bar is **53 columns**: the
+five chips are 10, 7, 8, 7, and 17 columns and four one-column spacers separate them. It
+therefore fits both mandated interior widths, 78 and 58, with more slack than the
+57-column numbered bar it replaces.
 
 #### Scenario: The five tdd artifacts become five numbered tabs at both mandated widths
 
+The scenario's name is kept verbatim because a delta's scenario headers are its merge key;
+its subject is the same five artifacts, now drawn as unnumbered chips.
+
 - **WHEN** `tab_bar` is called with artifact ids `proposal`, `specs`, `design`, `tasks`,
   `planning-review`, `selected: 0`, at width `78`, and again at width `58`
-- **THEN** at both widths five tabs are returned, with texts `1 proposal`, `2 specs`,
-  `3 design`, `4 tasks`, `5 planning-review`
-- **AND** their `x` values are `0`, `12`, `21`, `31`, `40`, so consecutive cells are
-  separated by exactly two spaces
-- **AND** the last cell ends at column 56, so the whole bar occupies 57 of the 58 available
-  columns at the narrow interior and 57 of the 78 at the wide one
+- **THEN** at both widths five tabs are returned, with texts `" proposal "`, `" specs "`,
+  `" design "`, `" tasks "`, and `" planning-review "`, each beginning and ending in a space
+- **AND** their `x` values are `0`, `11`, `19`, `28`, and `36`, so each chip starts exactly
+  one column after the previous chip's last column
+- **AND** the last chip's final column is 52, so the whole bar occupies 53 of the 58
+  available columns at the narrow interior and 53 of the 78 at the wide one
 - **AND** `index` is `Some(0)` through `Some(4)` in order, and only the first `Tab` has
   `selected` true
+
+#### Scenario: A tenth artifact is labelled without a digit
+
+The name is kept verbatim as the merge key. Its subject is now the stronger claim: **no**
+position carries a digit, so the tenth is labelled exactly as the first.
+
+- **WHEN** `tab_bar` is called with twelve artifacts whose ids are `a01` through `a12`,
+  `selected: 0`, at width `78` and again at width `58`
+- **THEN** every returned `text` is its artifact's bare id with one space on each side —
+  `" a01 "`, `" a02 "`, and so on — and none begins with a digit or with `1 `
+- **AND** at width `78` all twelve cells are returned, so the tenth, eleventh, and twelfth are
+  present and are each exactly five columns wide, the same as the first — which the numbered
+  grammar could not do
+- **AND** at width `58` the window holds nine cells, because nine five-column chips and eight
+  separators are 53 columns and a tenth would be 59, so the two widths differ and the
+  narrower one is not silently vacuous
 
 #### Scenario: Duplicate artifact ids remain two separately addressable tabs
 
 - **WHEN** `tab_bar` is called with artifact ids `spec`, `spec`, `notes`, `selected: 1`, at
   width `78` and again at width `58`
-- **THEN** three tabs are returned at both widths, with texts `1 spec`, `2 spec`, `3 notes`
+- **THEN** three tabs are returned at both widths, with texts `" spec "`, `" spec "`, and
+  `" notes "`
 - **AND** the second has `index: Some(1)` and `selected` true while the first has
-  `index: Some(0)` and `selected` false, so the two identically-labelled tabs are
+  `index: Some(0)` and `selected` false, so the two identically-labelled chips are
   distinguished by position rather than collapsed
-
-#### Scenario: A tenth artifact is labelled without a digit
-
-- **WHEN** `tab_bar` is called with twelve artifacts whose ids are `a01` through `a12`,
-  `selected: 0`, at width `78` and again at width `58`
-- **THEN** the first nine returned cells carry the labels `1 a01` through `9 a09`
-- **AND** any cell for `a10`, `a11`, or `a12` that the window shows carries the bare label
-  `a10`, `a11`, or `a12`, with no leading digit and no leading space
 
 #### Scenario: No artifacts is a single placeholder cell, not an empty bar
 
 - **WHEN** `tab_bar` is called with an empty artifact slice, `selected: 0`, at width `78` and
   again at width `58`
-- **THEN** exactly one `Tab` is returned at each width, with `text` `no artifacts`,
+- **THEN** exactly one `Tab` is returned at each width, with `text` `" no artifacts "`,
   `x: 0`, `index: None`, and `selected` false
-- **AND** rendering it does not panic and writes only those twelve columns
-- **AND** at width `8` the same call returns one `Tab` whose `text` is exactly eight
-  characters ending in `…`, because the placeholder is right-truncated by the same shared
-  rule every other cell is, rather than overflowing a bar narrower than it
+- **AND** rendering it does not panic and writes only those fourteen columns
+- **AND** at width `8` the same call returns one `Tab` whose `text` is exactly eight columns
+  ending in `…`, because the placeholder is right-truncated by the same shared rule every
+  other chip is, rather than overflowing a bar narrower than it
 
 #### Scenario: A zero-width bar is empty and does not panic
 
@@ -102,29 +126,33 @@ When `selected` is **not** a valid index into `artifacts`, the window SHALL be c
 state `Dashboard::sync_detail` clamps away before the next draw; it is defined here so the
 function is total rather than "does not panic".
 
+The **joined width** of the chips `start..=end` SHALL be the sum of their own widths plus
+`end - start` separating columns — one per gap, not two. This is the one arithmetic the chip
+grammar changes; every rule below is stated against it.
+
 When the joined cells fit within `width`, `tab_bar` SHALL return every cell, starting at
 column `0`.
 
 When they do not, it SHALL return a **contiguous window** `start..=end` of whole cells,
 chosen so that:
 
-- `start` is the **smallest** index not greater than `selected` for which the cells
-  `start..=selected`, joined by two spaces, fit within `width` — so the window slides right
-  only as far as keeping the selected tab visible requires, and a leftward move of the
-  selection slides it back;
-- `end` is the **largest** index not less than `selected` for which the cells `start..=end`,
-  joined by two spaces, fit within `width`.
+- `start` is the **smallest** index not greater than `selected` for which the chips
+  `start..=selected` fit within `width` — so the window slides right only as far as keeping
+  the selected tab visible requires, and a leftward move of the selection slides it back;
+- `end` is the **largest** index not less than `selected` for which the chips `start..=end`
+  fit within `width`.
 
 Cells SHALL be dropped **whole**, never cut short, on the same terms `change-rows` drops a
 list row's cells, and the window SHALL start at column `0` regardless of `start`. There is no
 overflow marker and no ellipsis cell: `list-selection`'s viewport shows no scroll indicator
 either, and inventing one here would be a second, undeclared grammar.
 
-The one exception, stated rather than discovered: when the **selected** cell alone is wider
-than `width`, no whole-cell window exists. `tab_bar` SHALL then return that single cell,
-truncated to `width` characters with a trailing `…` by the same
-`ui::list::pad_or_truncate_right` the header and the row grammar use, with `x: 0` and
-`selected` true.
+The one exception, stated rather than discovered: when the anchor chip alone — the selected
+one, or the `no artifacts` placeholder, which is drawn on the bar's own terms per the
+requirement above — is wider than `width`, no whole-cell window exists. `tab_bar` SHALL then return that single chip —
+padding included, since the padding is what the view paints — truncated to `width` columns
+with a trailing `…` by the same `ui::list::pad_or_truncate_right` the header and the row
+grammar use, with `x: 0` and `selected` true.
 
 `tab_bar` SHALL be total: it SHALL NOT panic for any artifact list, any `selected` including
 one past the end of the list, or any width.
@@ -132,17 +160,16 @@ one past the end of the list, or any width.
 #### Scenario: A twelve-artifact bar windows to keep the selected tab visible
 
 - **WHEN** `tab_bar` is called with twelve artifacts whose ids are `artifact-01` through
-  `artifact-12` — each cell 13 columns wide for the first nine and 11 for the rest — at width
-  `58` with `selected: 0`, then `selected: 3`, then `selected: 11`, and the same three at
-  width `78`
+  `artifact-12` — a 13-column chip each — at width `58` with `selected: 0`, then
+  `selected: 3`, then `selected: 11`, and the same three at width `78`
 - **THEN** at every call the returned cells are contiguous in position, the first has `x: 0`,
   and the last cell's final column is less than `width`
 - **AND** at every call exactly one returned cell has `selected` true and its `index` equals
   the `selected` argument, so the selected tab is never scrolled off
 - **AND** at `selected: 0` the window begins at index `0`; at `selected: 11` it ends at index
-  `11`; and the 78-column windows hold strictly more cells than the 58-column ones for the
-  same selection, so the width is genuinely load-bearing
-- **AND** no returned `text` ends in `…`, so every shown cell was shown whole
+  `11`; and every 58-column window holds four chips while every 78-column window holds five,
+  so the width is genuinely load-bearing
+- **AND** no returned `text` ends in `…`, so every shown chip was shown whole
 
 #### Scenario: The window slides back when the selection moves left again
 
@@ -156,7 +183,9 @@ one past the end of the list, or any width.
 - **WHEN** `tab_bar` is called with one artifact whose id is 200 characters long,
   `selected: 0`, at width `58` and again at width `78`
 - **THEN** exactly one `Tab` is returned at each width, with `x: 0`, `selected` true,
-  `index: Some(0)`, and `text` exactly `width` characters long ending in `…`
+  `index: Some(0)`, and `text` exactly `width` columns long ending in `…`
+- **AND** each `text` begins with the chip's own leading space, so what is truncated is the
+  padded chip and not a bare id
 - **AND** neither call panics
 
 #### Scenario: A selected index past the end of the list does not panic
@@ -167,15 +196,19 @@ one past the end of the list, or any width.
   `0..3`
 - **AND** no returned cell has `selected` true, since no cell holds that position
 - **AND** the window is the one `selected: 0` would have produced — at these widths, all
-  three cells starting at column `0` — so the out-of-range case has a defined result rather
+  three chips starting at column `0` — so the out-of-range case has a defined result rather
   than merely an absence of panic
 
 ### Requirement: The tab bar is drawn into the detail region's second interior row
 
 `ui::view::render` SHALL draw each `Tab` into the second row of the detail region's interior
-at `interior.x + tab.x`, applying `Modifier::BOLD` to the selected tab's cells and
-`Style::default()` to every other. Columns no cell occupies SHALL be left untouched, on the
-same terms `detail-scroll` leaves the tail of a short markdown line untouched.
+at `interior.x + tab.x`, applying `palette::style(Role::TabActive)` to the selected chip's
+cells and `palette::style(Role::TabInactive)` to every other chip's — including the
+zero-artifact placeholder, which occupies the bar's position and is drawn on the bar's own
+terms. Every column of a chip, its two padding columns included, SHALL carry that style, so
+the painted span is exactly the chip's own span. The separating column between two chips
+SHALL be left untouched, as SHALL every column no chip occupies, on the same terms
+`detail-scroll` leaves the tail of a short markdown line untouched.
 
 `ui::layout::split_detail(interior: Rect) -> (Rect, Rect, Rect)` SHALL split the detail
 region's interior into a one-row header, a one-row tab bar, and the content area below,
@@ -189,12 +222,18 @@ the header and the tab bar each take one row and the content area is zero-height
 
 - **WHEN** a `Dashboard` at `Route::Detail` whose selected change carries the five tdd
   artifacts, with `detail.tab: 2`, is rendered at 120x20 and at 60x20
-- **THEN** in the 120-column buffer row 3, columns 41 through 118, begins
-  `1 proposal  2 specs  3 design  4 tasks  5 planning-review`
-- **AND** in the 60-column buffer row 3, columns 1 through 58, begins the same 57-character
+- **THEN** in the 120-column buffer row 3, columns 41 through 93, spell
+  `" proposal   specs   design   tasks   planning-review "` — three spaces between chips,
+  being each chip's own padding and the one unpainted separator column
+- **AND** in the 60-column buffer row 3, columns 1 through 53, spell the same 53-column
   string
-- **AND** in both buffers the eight cells spelling `3 design` report `Modifier::BOLD` set and
-  the cells spelling `1 proposal` do not, so the selected tab is discriminated
+- **AND** in both buffers the eight cells spelling `" design "` report `Modifier::BOLD` set
+  and the background and foreground `Role::TabActive` carries (`Color::Cyan` on
+  `Color::Black`), and the ten cells spelling `" proposal "` report the background
+  `Role::TabInactive` carries (`Color::DarkGray`) and no `BOLD`, so the selected chip is
+  discriminated by colour and by weight together
+- **AND** in both buffers the single column between two chips has no background set, so the
+  chips do not merge into one field
 
 #### Scenario: The tab bar never overwrites a border or the rows around it
 
@@ -204,8 +243,10 @@ the header and the tab bar each take one row and the content area is zero-height
   is a box-drawing character
 - **AND** in the 120-column buffer every cell of columns 0, 39, 40, and 119 in rows 1
   through 18 is a box-drawing character
+- **AND** in both buffers no cell of a border column carries a chip background, so the
+  painted span stopped inside the interior
 - **AND** in both buffers the header row above the tab bar still holds the change's name, so
-  no tab cell wrapped upward
+  no chip wrapped upward
 
 #### Scenario: `split_detail` is exact at its degenerate heights
 
@@ -309,5 +350,8 @@ still moves and is visible as soon as `Enter` opens the detail.
   whose `detail.tab` is `0` is given `SelectTab(2)`, and a second at `Route::Detail` is given
   the same
 - **THEN** both have `detail.tab` `2` and neither has changed `route`
-- **AND** rendering the first at 120x20 shows `3 …` bold in the detail region's tab row, so
-  the wide layout makes the list-route press immediately visible
+- **AND** rendering the first at 120x20 shows the third artifact's chip — `" <id> "`, padded,
+  with no leading digit — carrying the active chip's style in the detail region's tab row, so
+  the wide layout makes the list-route press immediately visible. The digit keys still select
+  a tab; the bar no longer advertises them, which is `artifact-tabs`' chip grammar and changes
+  nothing about `action_for`
