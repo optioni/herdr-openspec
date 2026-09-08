@@ -387,12 +387,15 @@ fn fit_hints(hints: &[String], width: u16) -> String {
 mod tests {
     use ratatui::backend::TestBackend;
     use ratatui::buffer::{Buffer, Cell};
-    use ratatui::style::Modifier;
+    use ratatui::style::{Modifier, Style};
 
+    use super::style_for;
     use crate::changes::{Change, empty_set, fixture};
     use crate::testutil::{cell, render_at, row_text};
     use crate::ui::app::{Action, Dashboard, Detail, Filter, Route};
     use crate::ui::layout::columns;
+    use crate::ui::markdown::Face;
+    use crate::ui::palette::{self, Role};
 
     fn empty_filter() -> Filter {
         Filter {
@@ -618,6 +621,14 @@ mod tests {
 
     fn buffer_contains(buf: &Buffer, needle: &str) -> bool {
         (0..buf.area.height).any(|y| row_text(buf, y).contains(needle))
+    }
+
+    /// The style an untouched cell carries. Ratatui fills a cell it has not coloured
+    /// with its own reset colour rather than leaving the field empty, so "carries no
+    /// colour" is equality with this — read from `Cell::default()` because this file may
+    /// not name a colour at all (design.md -> Decision 2).
+    fn uncoloured() -> Style {
+        Cell::default().style()
     }
 
     fn is_bold(cell: &Cell) -> bool {
@@ -1298,6 +1309,41 @@ mod tests {
                     .contains(Modifier::DIM),
                 "width {width}: the OpenSpec label must not be dim"
             );
+
+            // `color-palette`: the badge is now coloured as well as dim. The colour is
+            // asserted against the palette entry rather than a literal — this file is
+            // inside the confinement gate's search set (design.md -> Decision 2).
+            for x in 9..18u16 {
+                assert_eq!(
+                    cell(&buf, x, 0).style().fg,
+                    palette::style(Role::FileMode).fg,
+                    "width {width}: column {x} of the badge does not carry FileMode's foreground"
+                );
+            }
+            // The label is bold and uncoloured, so the badge is distinguishable from it by
+            // colour as well as by weight and position.
+            for x in 0..8u16 {
+                assert!(is_bold(cell(&buf, x, 0)), "width {width}: label column {x}");
+                assert_eq!(
+                    cell(&buf, x, 0).style().fg,
+                    uncoloured().fg,
+                    "width {width}: label column {x} carries a foreground"
+                );
+            }
+            // The drawn path carries neither a modifier nor a foreground, so the yellow is
+            // confined to the badge's own nine columns.
+            for x in (width - 14)..width {
+                let style = cell(&buf, x, 0).style();
+                assert!(
+                    style.add_modifier.is_empty(),
+                    "width {width}: path column {x} carries a modifier"
+                );
+                assert_eq!(
+                    style.fg,
+                    uncoloured().fg,
+                    "width {width}: path column {x} carries a foreground"
+                );
+            }
         }
     }
 
@@ -1319,12 +1365,32 @@ mod tests {
                 "width {width}: the landed header must be unchanged"
             );
 
+            // `color-palette`: no cell of row 0 carries a foreground, so the palette added
+            // colour to the badge and to nothing else on this row.
+            for x in 0..width {
+                assert_eq!(
+                    cell(&buf, x, 0).style().fg,
+                    uncoloured().fg,
+                    "width {width}: column {x} of the unbadged header carries a foreground"
+                );
+                assert_eq!(
+                    cell(&buf, x, 0).style().bg,
+                    uncoloured().bg,
+                    "width {width}: column {x} of the unbadged header carries a background"
+                );
+            }
+
             let badged = dashboard_in_file_mode(Some("/tmp/demo-repo"), Route::List);
             let badged_buf = render_at(width, 20, &badged);
             assert_ne!(
                 row_text(&buf, 0),
                 row_text(&badged_buf, 0),
                 "width {width}: the control must render differently"
+            );
+            // The control discriminates on colour too: the badged header does carry one.
+            assert!(
+                (0..width).any(|x| cell(&badged_buf, x, 0).style().fg != uncoloured().fg),
+                "width {width}: the badged control must carry a foreground somewhere"
             );
         }
     }
@@ -2702,19 +2768,22 @@ mod tests {
 
     #[test]
     fn faces_reach_the_buffer_as_styles() {
+        // `color-palette`: the heading fixture becomes the `## Heading` this scenario has
+        // named since `markdown-viewer` — the delta's colour claim is about `Heading(2)`,
+        // and the level-1 form is exercised by `faces_reach_the_buffer_as_coloured_styles`.
         let source =
-            "# Title\n\nA **bold** and *italic* line with `code` and [a link](x).\n\n> quoted\n";
+            "## Heading\n\nA **bold** and *italic* line with `code` and [a link](x).\n\n> quoted\n";
         let d = detail_dashboard(source.to_string(), 0, Route::Detail);
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
 
             let title_row: Vec<char> = row_text(&buf, 4).chars().collect();
-            let needle: Vec<char> = "# Title".chars().collect();
+            let needle: Vec<char> = "## Heading".chars().collect();
             let title_start = title_row
                 .windows(needle.len())
                 .position(|w| w == needle.as_slice())
                 .expect("heading present");
-            for i in 0..7 {
+            for i in 0..needle.len() {
                 let x = (title_start + i) as u16;
                 assert!(
                     cell(&buf, x, 4)
@@ -2722,6 +2791,11 @@ mod tests {
                         .add_modifier
                         .contains(Modifier::BOLD),
                     "width {width}: heading cell {i} not bold"
+                );
+                assert_eq!(
+                    cell(&buf, x, 4).style().fg,
+                    palette::style(Role::Heading(2)).fg,
+                    "width {width}: heading cell {i} does not carry Heading(2)'s foreground"
                 );
             }
 
@@ -2773,6 +2847,35 @@ mod tests {
                 !and_style.add_modifier.contains(Modifier::UNDERLINED),
                 "width {width}"
             );
+
+            // `color-palette`: three of these faces now carry a foreground as well, and
+            // three still carry none. The plain control carries none either.
+            assert_eq!(
+                find_cell_style(&buf, "code").fg,
+                palette::style(Role::Code).fg,
+                "width {width}"
+            );
+            assert_eq!(
+                find_cell_style(&buf, "a link").fg,
+                palette::style(Role::Link).fg,
+                "width {width}"
+            );
+            assert_eq!(
+                find_cell_style(&buf, "bold").fg,
+                uncoloured().fg,
+                "width {width}"
+            );
+            assert_eq!(
+                find_cell_style(&buf, "italic").fg,
+                uncoloured().fg,
+                "width {width}"
+            );
+            assert_eq!(
+                find_cell_style(&buf, "quoted").fg,
+                uncoloured().fg,
+                "width {width}"
+            );
+            assert_eq!(and_style.fg, uncoloured().fg, "width {width}");
         }
     }
 
@@ -4278,6 +4381,509 @@ mod tests {
             assert!(
                 interior_cols(&buf, 3).contains("watch failed"),
                 "width {width}"
+            );
+        }
+    }
+
+    // `color-palette` — every colour below is asserted against `palette::style(role)`
+    // rather than a literal: this file is inside the confinement gate's search set, and
+    // the literal table is asserted once, in `ui::palette`'s own tests (design.md ->
+    // Decision 2).
+
+    /// `view-palette` :: "Faces reach the buffer as coloured styles at both mandated
+    /// widths".
+    #[test]
+    fn faces_reach_the_buffer_as_coloured_styles() {
+        let source = "# Title\n\n## Heading\n\n**bold** and *italic* and `code` and [link](u)\n";
+        let d = detail_dashboard(source.to_string(), 0, Route::Detail);
+        for width in [120u16, 60] {
+            let buf = render_at(width, 20, &d);
+
+            let title = find_cell_style(&buf, "# Title");
+            assert!(
+                title.add_modifier.contains(Modifier::BOLD),
+                "width {width}: the level-1 heading is not bold"
+            );
+            assert_eq!(
+                title.fg,
+                palette::style(Role::Heading(1)).fg,
+                "width {width}: the level-1 heading does not carry Heading(1)'s foreground"
+            );
+
+            let heading = find_cell_style(&buf, "## Heading");
+            assert!(
+                heading.add_modifier.contains(Modifier::BOLD),
+                "width {width}: the level-2 heading is not bold"
+            );
+            assert_eq!(
+                heading.fg,
+                palette::style(Role::Heading(2)).fg,
+                "width {width}: the level-2 heading does not carry Heading(2)'s foreground"
+            );
+
+            let code = find_cell_style(&buf, "code");
+            assert!(
+                code.add_modifier.contains(Modifier::DIM),
+                "width {width}: the code span is not dim"
+            );
+            assert_eq!(
+                code.fg,
+                palette::style(Role::Code).fg,
+                "width {width}: the code span does not carry Code's foreground"
+            );
+
+            let link = find_cell_style(&buf, "link");
+            assert!(
+                link.add_modifier.contains(Modifier::UNDERLINED),
+                "width {width}: the link is not underlined"
+            );
+            assert_eq!(
+                link.fg,
+                palette::style(Role::Link).fg,
+                "width {width}: the link does not carry Link's foreground"
+            );
+
+            // The uncoloured faces are discriminated from the coloured ones.
+            let bold = find_cell_style(&buf, "bold");
+            assert!(bold.add_modifier.contains(Modifier::BOLD), "width {width}");
+            assert_eq!(
+                bold.fg,
+                uncoloured().fg,
+                "width {width}: bold must carry no foreground"
+            );
+            let italic = find_cell_style(&buf, "italic");
+            assert!(
+                italic.add_modifier.contains(Modifier::ITALIC),
+                "width {width}"
+            );
+            assert_eq!(
+                italic.fg,
+                uncoloured().fg,
+                "width {width}: italic must carry no foreground"
+            );
+
+            // The heading assertions discriminate: the two levels are different colours.
+            assert_ne!(title.fg, heading.fg, "width {width}");
+        }
+    }
+
+    /// `view-palette` :: "Heading foreground wins over a code span inside it".
+    #[test]
+    fn heading_foreground_wins_over_a_code_span_inside_it() {
+        // A pure `style_for` test: no frame is drawn here, so the two mandated widths are
+        // named rather than exercised — the 60- and 120-column render half of this same
+        // rule is `faces_reach_the_buffer_as_coloured_styles`.
+        let heading_code = Face {
+            heading: Some(2),
+            code: true,
+            ..Face::plain()
+        };
+        let style = style_for(&heading_code);
+        assert_eq!(
+            style.fg,
+            palette::style(Role::Heading(2)).fg,
+            "the heading's foreground must win over the code span's"
+        );
+        assert!(
+            style.add_modifier.contains(Modifier::BOLD),
+            "the heading's BOLD must survive the fold"
+        );
+        assert!(
+            style.add_modifier.contains(Modifier::DIM),
+            "the code span's DIM must survive the fold"
+        );
+
+        let code_link = Face {
+            code: true,
+            link: true,
+            ..Face::plain()
+        };
+        let style = style_for(&code_link);
+        assert_eq!(
+            style.fg,
+            palette::style(Role::Code).fg,
+            "code follows link in the fold order, so its foreground wins"
+        );
+        assert!(style.add_modifier.contains(Modifier::DIM));
+        assert!(style.add_modifier.contains(Modifier::UNDERLINED));
+
+        // The two assertions discriminate rather than comparing one colour with itself.
+        assert_ne!(
+            palette::style(Role::Heading(2)).fg,
+            palette::style(Role::Code).fg
+        );
+        assert_ne!(palette::style(Role::Code).fg, palette::style(Role::Link).fg);
+    }
+
+    /// `view-palette` :: "A plain face is the default style".
+    #[test]
+    fn a_plain_face_is_the_default_style() {
+        assert_eq!(style_for(&Face::plain()), Style::default());
+
+        let d = detail_dashboard("plain text only\n".to_string(), 0, Route::Detail);
+        let default_style = Cell::default().style();
+        for (width, first, last) in [(120u16, 41u16, 118u16), (60, 1, 58)] {
+            let buf = render_at(width, 20, &d);
+            assert!(
+                row_text(&buf, 4).contains("plain text only"),
+                "width {width}: the document was not drawn"
+            );
+            for y in 4..=17u16 {
+                for x in first..=last {
+                    assert_eq!(
+                        cell(&buf, x, y).style(),
+                        default_style,
+                        "width {width}: content cell {x},{y} is not the default style"
+                    );
+                }
+            }
+        }
+    }
+
+    /// `detail-header` :: "The detail header is bold and uncoloured at both mandated
+    /// widths".
+    #[test]
+    fn the_detail_header_is_bold_and_uncoloured() {
+        let d = dashboard_with(
+            vec![
+                fixture::active("add-token-refresh", 4, 9),
+                fixture::active("fix-empty-basket", 7, 7),
+            ],
+            Vec::new(),
+            0,
+            Route::Detail,
+        );
+        let progress = crate::tasks::Progress {
+            completed: 4,
+            total: 9,
+        };
+        for (width, first, last, w) in [(120u16, 41u16, 118u16, 78u16), (60, 1, 58, 58)] {
+            let buf = render_at(width, 20, &d);
+            assert_eq!(
+                detail_interior_cols(&buf, 2, w as usize),
+                crate::ui::detail::header_row("add-token-refresh", "tdd", &progress, w),
+                "width {width}"
+            );
+            for x in first..=last {
+                let style = cell(&buf, x, 2).style();
+                assert!(
+                    style.add_modifier.contains(Modifier::BOLD),
+                    "width {width}: header cell {x} is not bold"
+                );
+                assert_eq!(
+                    style.fg,
+                    uncoloured().fg,
+                    "width {width}: header cell {x} carries a foreground"
+                );
+                assert_eq!(
+                    style.bg,
+                    uncoloured().bg,
+                    "width {width}: header cell {x} carries a background"
+                );
+            }
+            // The tab-bar row directly below does carry a background, so the two rows are
+            // distinguishable and the header was not left unstyled by accident.
+            assert!(
+                (first..=last).any(|x| cell(&buf, x, 3).style().bg != uncoloured().bg),
+                "width {width}: the tab bar carries no background at all"
+            );
+        }
+    }
+
+    /// The border cells of a region spanning columns `x0` through `x1` of a 20-row frame:
+    /// its top and bottom rows whole, and its two side columns between them.
+    fn border_cells(x0: u16, x1: u16) -> Vec<(u16, u16)> {
+        let mut out = Vec::new();
+        for x in x0..=x1 {
+            out.push((x, 1));
+            out.push((x, 18));
+        }
+        for y in 2..=17u16 {
+            out.push((x0, y));
+            out.push((x1, y));
+        }
+        out
+    }
+
+    /// `responsive-layout` :: "The routed region's border takes its style from the palette
+    /// at both widths".
+    #[test]
+    fn the_routed_regions_border_takes_its_style_from_the_palette() {
+        let default_style = Cell::default().style();
+        let list = dashboard(Some("/tmp/demo-repo"), Route::List);
+        let detail = dashboard(Some("/tmp/demo-repo"), Route::Detail);
+
+        let buf = render_at(120, 20, &list);
+        for (x, y) in border_cells(0, 39) {
+            assert!(is_bold(cell(&buf, x, y)), "routed list border at {x},{y}");
+        }
+        for (x, y) in border_cells(40, 119) {
+            assert!(
+                !is_bold(cell(&buf, x, y)),
+                "unrouted detail border at {x},{y}"
+            );
+        }
+        for (x, y) in border_cells(0, 39).into_iter().chain(border_cells(40, 119)) {
+            let style = cell(&buf, x, y).style();
+            assert_eq!(
+                style.fg,
+                uncoloured().fg,
+                "border {x},{y} carries a foreground"
+            );
+            assert_eq!(
+                style.bg,
+                uncoloured().bg,
+                "border {x},{y} carries a background"
+            );
+        }
+        // A blank region interior still equals the default cell style, so the role's style
+        // reached `border_style` rather than the block's own `style`.
+        for y in 2..=17u16 {
+            for x in 41..=118u16 {
+                assert_eq!(
+                    cell(&buf, x, y).style(),
+                    default_style,
+                    "blank interior cell {x},{y}"
+                );
+            }
+        }
+
+        // The same frame at the same width with the route moved: the two are swapped, so
+        // the assertion discriminates rather than asserting a constant.
+        let buf = render_at(120, 20, &detail);
+        for (x, y) in border_cells(40, 119) {
+            assert!(is_bold(cell(&buf, x, y)), "routed detail border at {x},{y}");
+        }
+        for (x, y) in border_cells(0, 39) {
+            assert!(
+                !is_bold(cell(&buf, x, y)),
+                "unrouted list border at {x},{y}"
+            );
+        }
+        for (x, y) in border_cells(0, 39).into_iter().chain(border_cells(40, 119)) {
+            let style = cell(&buf, x, y).style();
+            assert_eq!(
+                style.fg,
+                uncoloured().fg,
+                "border {x},{y} carries a foreground"
+            );
+            assert_eq!(
+                style.bg,
+                uncoloured().bg,
+                "border {x},{y} carries a background"
+            );
+        }
+
+        let buf = render_at(60, 20, &detail);
+        for (x, y) in border_cells(0, 59) {
+            assert!(is_bold(cell(&buf, x, y)), "narrow routed border at {x},{y}");
+            let style = cell(&buf, x, y).style();
+            assert_eq!(
+                style.fg,
+                uncoloured().fg,
+                "border {x},{y} carries a foreground"
+            );
+            assert_eq!(
+                style.bg,
+                uncoloured().bg,
+                "border {x},{y} carries a background"
+            );
+        }
+    }
+
+    /// `list-selection` :: "The selected row is bold and uncoloured at both mandated
+    /// widths".
+    #[test]
+    fn the_selected_row_is_bold_and_uncoloured() {
+        let d = three_active();
+        for width in [120u16, 60] {
+            let buf = render_at(width, 20, &d);
+            let last = if width == 60 { 58u16 } else { 38 };
+            assert_eq!(cell(&buf, 1, 2).symbol(), ">", "width {width}");
+            assert_eq!(cell(&buf, 1, 3).symbol(), " ", "width {width}");
+            for x in 1..=last {
+                let selected = cell(&buf, x, 2).style();
+                assert!(
+                    selected.add_modifier.contains(Modifier::BOLD),
+                    "width {width}: selected cell {x} is not bold"
+                );
+                assert_eq!(
+                    selected.fg,
+                    uncoloured().fg,
+                    "width {width}: selected cell {x} carries a foreground"
+                );
+                let next = cell(&buf, x, 3).style();
+                assert!(
+                    !next.add_modifier.contains(Modifier::BOLD),
+                    "width {width}: unselected cell {x} is bold"
+                );
+                assert_eq!(
+                    next.fg,
+                    uncoloured().fg,
+                    "width {width}: unselected cell {x} carries a foreground"
+                );
+            }
+        }
+    }
+
+    /// A frame carrying every span this change touches at once: file mode, a repository
+    /// problem row, three active changes with the second badged `Working`, an archived
+    /// change (so a separator row is drawn), and a selected change whose detail source
+    /// carries a heading and the four inline faces.
+    fn monochrome_dashboard(route: Route) -> Dashboard {
+        let selected = fixture::with_artifacts(
+            fixture::active("add-token-refresh", 4, 9),
+            &[("proposal", &[])],
+        );
+        let mut d = dashboard_with_detail(
+            vec![
+                selected,
+                fixture::active("fix-empty-basket", 7, 7),
+                fixture::active("migrate-ai-sdk-v7", 0, 0),
+            ],
+            vec![fixture::archived(Some("2026-01-01"), "old-change", 3, 3)],
+            0,
+            route,
+            Detail {
+                source: "## Heading\n\n**bold** and *italic* and `code` and [link](u)\n"
+                    .to_string(),
+                scroll: 0,
+                tab: 0,
+                problems: Vec::new(),
+                loaded: None,
+            },
+        );
+        d.file_mode = true;
+        d.changes.problems = vec!["openspec/changes: unreadable".to_string()];
+        let mut working = unattributed_agent("fix-empty-basket");
+        working.status = crate::agents::AgentStatus::Working;
+        d.agents.agents = vec![working];
+        d
+    }
+
+    /// `view-palette` :: "A monochrome reading of the frame is unchanged" — the modifier
+    /// of every cell outside the tab-bar row is exactly what it was before this change.
+    #[test]
+    fn a_monochrome_reading_of_the_frame_is_unchanged() {
+        // The list half. Rows: 2 the problem, 3 the selected change, 4 the badged one, 5
+        // the third, 6 the separator, 7 the archived change.
+        for width in [120u16, 60] {
+            let d = monochrome_dashboard(Route::List);
+            let buf = render_at(width, 20, &d);
+            let last = if width == 60 { 58u16 } else { 38 };
+
+            for x in 0..8u16 {
+                assert!(
+                    is_bold(cell(&buf, x, 0)),
+                    "width {width}: OpenSpec cell {x}"
+                );
+            }
+            for x in 9..18u16 {
+                assert!(
+                    cell(&buf, x, 0)
+                        .style()
+                        .add_modifier
+                        .contains(Modifier::DIM),
+                    "width {width}: badge cell {x} is not dim"
+                );
+            }
+
+            assert!(
+                interior_cols(&buf, 2).starts_with("! openspec/changes"),
+                "width {width}: row 2 is not the problem row"
+            );
+            assert!(
+                interior_cols(&buf, 6).contains("archived"),
+                "width {width}: row 6 is not the separator row"
+            );
+            let badge = interior_cols(&buf, 4);
+            assert!(
+                badge.contains("fix-empty-basket") && badge.contains('w'),
+                "width {width}: row 4 does not carry the working badge: {badge:?}"
+            );
+
+            for x in 1..=last {
+                assert!(
+                    is_bold(cell(&buf, x, 3)),
+                    "width {width}: the selected row's cell {x} is not bold"
+                );
+                for y in [2u16, 4, 6] {
+                    assert!(
+                        cell(&buf, x, y).style().add_modifier.is_empty(),
+                        "width {width}: cell {x},{y} carries a modifier it did not before"
+                    );
+                }
+            }
+            // The footer carries no modifier either.
+            for x in 0..width {
+                assert!(
+                    cell(&buf, x, 19).style().add_modifier.is_empty(),
+                    "width {width}: footer cell {x} carries a modifier"
+                );
+            }
+        }
+
+        // The detail half, at the same two widths.
+        for width in [120u16, 60] {
+            let d = monochrome_dashboard(Route::Detail);
+            let buf = render_at(width, 20, &d);
+            let (first, last) = if width == 60 {
+                (1u16, 58u16)
+            } else {
+                (41, 118)
+            };
+
+            for x in first..=last {
+                assert!(
+                    is_bold(cell(&buf, x, 2)),
+                    "width {width}: detail header cell {x} is not bold"
+                );
+            }
+            assert!(
+                find_cell_style(&buf, "## Heading")
+                    .add_modifier
+                    .contains(Modifier::BOLD),
+                "width {width}"
+            );
+            assert!(
+                find_cell_style(&buf, "bold")
+                    .add_modifier
+                    .contains(Modifier::BOLD),
+                "width {width}"
+            );
+            assert!(
+                find_cell_style(&buf, "italic")
+                    .add_modifier
+                    .contains(Modifier::ITALIC),
+                "width {width}"
+            );
+            assert!(
+                find_cell_style(&buf, "code")
+                    .add_modifier
+                    .contains(Modifier::DIM),
+                "width {width}"
+            );
+            assert!(
+                find_cell_style(&buf, "link")
+                    .add_modifier
+                    .contains(Modifier::UNDERLINED),
+                "width {width}"
+            );
+
+            // The one excepted row: in the tab bar the selected chip's span is the only
+            // BOLD one, so a monochrome reader still learns which tab is current.
+            let change = d.selected_change().expect("a change is selected");
+            let tabs = crate::ui::detail::tab_bar(&change.artifacts, 0, last - first + 1);
+            let selected_tab = tabs.iter().find(|t| t.selected).expect("a selected chip");
+            let expected: Vec<u16> = (0..columns(&selected_tab.text) as u16)
+                .map(|i| first + selected_tab.x + i)
+                .collect();
+            let bold: Vec<u16> = (first..=last)
+                .filter(|x| is_bold(cell(&buf, *x, 3)))
+                .collect();
+            assert_eq!(
+                bold, expected,
+                "width {width}: the selected chip must be the tab bar's only bold span"
             );
         }
     }
