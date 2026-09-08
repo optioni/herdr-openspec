@@ -22,6 +22,7 @@ pub struct Face {
     pub code: bool,
     pub link: bool,
     pub quoted: bool,
+    pub strikethrough: bool,
 }
 
 impl Face {
@@ -636,7 +637,10 @@ impl Folder {
 /// **vanishes** rather than degrading to its literal text.
 fn fold(source: &str) -> Vec<Block> {
     let mut f = Folder::new();
-    for event in Parser::new_ext(source, Options::ENABLE_TABLES) {
+    for event in Parser::new_ext(
+        source,
+        Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH,
+    ) {
         match event {
             Event::Start(tag) => match tag {
                 Tag::Paragraph => f.start_paragraph(),
@@ -648,6 +652,7 @@ fn fold(source: &str) -> Vec<Block> {
                 Tag::Emphasis => f.push_faced(|face| face.emphasis = true),
                 Tag::Strong => f.push_faced(|face| face.strong = true),
                 Tag::Link { .. } => f.push_faced(|face| face.link = true),
+                Tag::Strikethrough => f.push_faced(|face| face.strikethrough = true),
                 Tag::Image { .. } => f.start_image(),
                 Tag::Table(alignments) => f.start_table(alignments),
                 Tag::TableHead => f.start_table_row(true),
@@ -667,7 +672,9 @@ fn fold(source: &str) -> Vec<Block> {
                 TagEnd::List(_) => f.end_list(),
                 TagEnd::Item | TagEnd::CodeBlock | TagEnd::HtmlBlock => f.finish(),
                 TagEnd::BlockQuote(_) => f.end_quote(),
-                TagEnd::Emphasis | TagEnd::Strong | TagEnd::Link => f.pop_faced(),
+                TagEnd::Emphasis | TagEnd::Strong | TagEnd::Link | TagEnd::Strikethrough => {
+                    f.pop_faced()
+                }
                 TagEnd::Image => f.end_image(),
                 TagEnd::Table => f.end_table(),
                 TagEnd::TableHead | TagEnd::TableRow => f.end_table_row(),
@@ -1215,7 +1222,7 @@ mod tests {
         // path is measured by this sweep rather than assumed.
         "# headingword marker\n\
          \n\
-         paragraphword marker text padded out with extra words so the line wraps at both widths under test here today\n\
+         paragraphword marker text padded out with extra words so the line wraps at both widths under test here today and ~~struckword~~ too\n\
          \n\
          - bulletword marker text padded with extra words so the item wraps under both widths under test\n  - nestedword marker text padded with extra words so the item wraps under both widths under test\n\
          \n\
@@ -1285,6 +1292,7 @@ mod tests {
             assert!(text.contains("quoteword"), "quote missing at {width}");
             assert!(text.contains("linkword"), "link text missing at {width}");
             assert!(text.contains("tableword"), "table missing at {width}");
+            assert!(text.contains("struckword"), "struck run missing at {width}");
             assert!(
                 !text.contains("design.md"),
                 "link destination leaked at {width}"
@@ -1891,11 +1899,14 @@ mod tests {
     }
 
     /// `degraded-coverage` :: "A footnote, strikethrough, and a table each render as literal
-    /// source" — row 12. Four constructs the parser does not model — a footnote reference
-    /// and its definition, strikethrough, a GFM table row, and a task-list item — each on a
-    /// tab this test never marks tracked, so `ui::markdown::lines` (not `ui::tasks::lines`)
-    /// is what renders them: rendered line count equals source line count, one line per
-    /// source line, at both mandated markdown widths.
+    /// source" — row 12. The scenario's name is kept verbatim because a delta's scenario
+    /// headers are its merge key and OpenSpec has no scenario-level rename; its subject is
+    /// now the **two** constructs that remain unmodelled — a footnote reference and its
+    /// definition, and a task-list item — each on a tab this test never marks tracked, so
+    /// `ui::markdown::lines` (not `ui::tasks::lines`) is what renders them: rendered line
+    /// count equals source line count, one line per source line, at both mandated markdown
+    /// widths. The two that left the set, a table and a struck run, appear at the end as the
+    /// **discriminating control**, so this test fails if the narrowing is not real.
     #[test]
     fn unmodelled_constructs_render_as_source() {
         let sources = [
@@ -1903,7 +1914,6 @@ mod tests {
                 "footnote reference and definition",
                 "See it here[^1].\n\n[^1]: The note.\n",
             ),
-            ("strikethrough", "~~gone~~ text.\n"),
             ("task-list item", "- [ ] an item\n- [x] a done item\n"),
         ];
         for width in [58, 78] {
@@ -1976,6 +1986,33 @@ mod tests {
                 text_of(&lines(task_list_source, width)),
                 "width {width}: the tracked tab must differ from the markdown rendering, or \
                  the carve-out proves nothing"
+            );
+        }
+
+        // The discriminating control: the two constructs that LEFT this row. A
+        // GFM table and a `~~struck~~` span in the same fixture render as
+        // aligned columns and as a struck face rather than as literal text, so
+        // this test fails if the narrowing is a reword that changed nothing.
+        let departed =
+            "| Gate | Runner |\n|---|---|\n| Format | cargo fmt |\n\nA ~~struck~~ word.\n";
+        for width in [58u16, 78u16] {
+            let rendered = lines(departed, width);
+            let texts = text_of(&rendered);
+            assert!(
+                texts.iter().any(|t| t == "| Gate   | Runner    |"),
+                "width {width}: the table must render as aligned columns, not literal \
+                 source: {texts:?}"
+            );
+            assert!(
+                rendered
+                    .iter()
+                    .flat_map(|l| &l.segments)
+                    .any(|s| s.text == "struck" && s.face.strikethrough),
+                "width {width}: the struck run must carry the face, not render literally"
+            );
+            assert!(
+                !texts.iter().any(|t| t.contains("~~")),
+                "width {width}: the strikethrough markers must be consumed: {texts:?}"
             );
         }
     }
@@ -2369,6 +2406,98 @@ mod tests {
                 ],
                 "width {width}: the aligned form"
             );
+        }
+    }
+
+    /// `markdown-render` :: "A struck run carries the face and composes with the
+    /// others". The paragraph is short enough to fit on one line at 58 and at
+    /// 78, so a wrap cannot split the phrases and the composition is what is
+    /// under test.
+    #[test]
+    fn a_struck_run_carries_the_face_and_composes() {
+        let source = "A ~~struck~~ word, ~~**struck bold**~~, and `~~x~~` in code.\n";
+        for width in [58u16, 78u16] {
+            let rendered = lines(source, width);
+            let segments: Vec<&Segment> = rendered.iter().flat_map(|l| &l.segments).collect();
+
+            let struck = segments
+                .iter()
+                .find(|s| s.text == "struck")
+                .unwrap_or_else(|| panic!("width {width}: no `struck` segment"));
+            assert_eq!(
+                struck.face,
+                Face {
+                    strikethrough: true,
+                    ..Face::plain()
+                },
+                "width {width}: a struck run carries that flag and no other"
+            );
+
+            let bold = segments
+                .iter()
+                .find(|s| s.text == "struck bold")
+                .unwrap_or_else(|| panic!("width {width}: no `struck bold` segment"));
+            assert!(bold.face.strikethrough && bold.face.strong, "width {width}");
+
+            // A code span's content is verbatim: the `~` characters are present
+            // in its text and the face is `code`, never `strikethrough`.
+            let code = segments
+                .iter()
+                .find(|s| s.face.code)
+                .unwrap_or_else(|| panic!("width {width}: no code segment"));
+            assert_eq!(code.text, "~~x~~", "width {width}");
+            assert!(!code.face.strikethrough, "width {width}");
+
+            // The markers are consumed rather than rendered everywhere else.
+            for seg in &segments {
+                if seg.face.code {
+                    continue;
+                }
+                assert!(
+                    !seg.text.contains('~'),
+                    "width {width}: {:?} still holds a marker",
+                    seg.text
+                );
+            }
+        }
+    }
+
+    /// `markdown-render` :: "A struck run split across a wrap keeps its face on
+    /// both lines". The two expected strings are the ones
+    /// `paragraph_wraps_at_58_and_78` names, which is what says the face costs
+    /// no columns.
+    #[test]
+    fn a_struck_run_split_across_a_wrap_keeps_its_face() {
+        let source = "~~alpha bravo charlie delta echo foxtrot golf hotel india juliett kilo \
+                      lima mike november oscar papa~~";
+        let at58 = lines(source, 58);
+        assert_eq!(
+            text_of(&at58),
+            vec![
+                "alpha bravo charlie delta echo foxtrot golf hotel india".to_string(),
+                "juliett kilo lima mike november oscar papa".to_string(),
+            ]
+        );
+        let at78 = lines(source, 78);
+        assert_eq!(
+            text_of(&at78),
+            vec![
+                "alpha bravo charlie delta echo foxtrot golf hotel india juliett kilo lima mike"
+                    .to_string(),
+                "november oscar papa".to_string(),
+            ]
+        );
+        for (width, out) in [(58, &at58), (78, &at78)] {
+            assert_eq!(out.len(), 2, "width {width}");
+            for line in out.iter() {
+                for seg in &line.segments {
+                    assert!(
+                        seg.face.strikethrough,
+                        "width {width}: {:?} lost the face across the wrap",
+                        seg.text
+                    );
+                }
+            }
         }
     }
 

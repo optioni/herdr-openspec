@@ -146,6 +146,7 @@ fn heading_line(heading: &crate::tasks::Heading, width: u16) -> crate::ui::markd
                 code: false,
                 link: false,
                 quoted: false,
+                strikethrough: false,
             },
         }],
     }

@@ -155,7 +155,7 @@ test on `Vec<Line>` can see the last three steps. Per design.md → Test Strateg
 ## 3. The strikethrough face
 <!-- kind: behavior -->
 
-- [ ] 3.1 RED: Write `a_struck_run_carries_the_face_and_composes` and
+- [x] 3.1 RED: Write `a_struck_run_carries_the_face_and_composes` and
   `a_struck_run_split_across_a_wrap_keeps_its_face` in `src/ui/markdown.rs`, both naming 58 and
   78, and add the struck-run legs to `composite_fixture` and to
   `unmodelled_constructs_render_as_source`'s discriminating control. Check, run at HEAD:
@@ -166,15 +166,15 @@ test on `Vec<Line>` can see the last three steps. Per design.md → Test Strateg
 
   HEAD: no output, `exit=1` — the field does not exist, so the tests cannot compile.
 
-- [ ] 3.2 GREEN: Add `pub strikethrough: bool` to `Face`, turn on
+- [x] 3.2 GREEN: Add `pub strikethrough: bool` to `Face`, turn on
   `Options::ENABLE_STRIKETHROUGH`, and add the `Tag::Strikethrough` / `TagEnd::Strikethrough`
   arms through the existing `push_faced` / `pop_faced` pair. Verification: 3.1's tests pass.
 
-- [ ] 3.3 GREEN: Add `strikethrough: false` to `src/ui/tasks.rs`'s `heading_line`.
+- [x] 3.3 GREEN: Add `strikethrough: false` to `src/ui/tasks.rs`'s `heading_line`.
   Verification: `cargo build --all-features` fails until this lands — the compiler is the
   forcing mechanism design.md → Contracts relies on.
 
-- [ ] 3.4 CHECK: Contract gate for `ui::markdown::Face` — confirm the added field is additive
+- [x] 3.4 CHECK: Contract gate for `ui::markdown::Face` — confirm the added field is additive
   and that every literal either spreads a default or names the new field. `Role` is group 4's
   and is gated there. A line-wise grep cannot answer this: the `..` spread sits on a later
   line of a multi-line literal, so `grep -v '\.\.'` reports every literal as unspread. The
@@ -208,7 +208,7 @@ test on `Vec<Line>` can see the last three steps. Per design.md → Test Strateg
   literal to `src/ui/view.rs` makes it report `count=2` and name the planted line; removing
   the plant returns it to `count=1`, with `git status --porcelain src/` clean.
 
-- [ ] 3.5 Run the group tests — no regressions:
+- [x] 3.5 Run the group tests — no regressions:
 
   ```sh
   cargo test --all-features --lib ui::markdown && cargo test --all-features --lib ui::tasks
