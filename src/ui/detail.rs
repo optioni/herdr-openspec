@@ -287,7 +287,8 @@ mod tests {
             changes: fixture::set(vec![change], Vec::new(), Vec::new()),
             route: Route::Detail,
             quit: false,
-            selected: 0,
+            // `list-sections`: 1, not 0 — target 0 is the active header.
+            selected: 1,
             filter: empty_filter(),
             detail,
             refresh: crate::ui::app::Refresh {
@@ -307,6 +308,9 @@ mod tests {
                 pending: None,
                 in_flight: false,
                 problems: Vec::new(),
+            },
+            sections: crate::ui::app::Sections {
+                collapsed: std::collections::BTreeSet::new(),
             },
             file_mode: false,
         }

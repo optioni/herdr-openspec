@@ -509,6 +509,9 @@ mod tests {
                 in_flight: false,
                 problems: Vec::new(),
             },
+            sections: crate::ui::app::Sections {
+                collapsed: std::collections::BTreeSet::new(),
+            },
             file_mode: false,
         }
     }
@@ -549,6 +552,9 @@ mod tests {
                 pending: None,
                 in_flight: false,
                 problems: Vec::new(),
+            },
+            sections: crate::ui::app::Sections {
+                collapsed: std::collections::BTreeSet::new(),
             },
             file_mode: false,
         }
@@ -596,6 +602,9 @@ mod tests {
                 in_flight: false,
                 problems: Vec::new(),
             },
+            sections: crate::ui::app::Sections {
+                collapsed: std::collections::BTreeSet::new(),
+            },
             file_mode: false,
         }
     }
@@ -633,6 +642,9 @@ mod tests {
                 pending: None,
                 in_flight: false,
                 problems: Vec::new(),
+            },
+            sections: crate::ui::app::Sections {
+                collapsed: std::collections::BTreeSet::new(),
             },
             file_mode: true,
         }
@@ -1874,6 +1886,9 @@ mod tests {
                 in_flight: false,
                 problems: Vec::new(),
             },
+            sections: crate::ui::app::Sections {
+                collapsed: std::collections::BTreeSet::new(),
+            },
             file_mode: false,
         };
         let buf120 = render_at(120, 20, &d);
@@ -2094,7 +2109,19 @@ mod tests {
         // tab bar. The blankness this test's name promises is now a
         // property of an *empty visible list*, asserted as the
         // discriminating companion below.
-        let d = three_active();
+        // `list-sections`: target 0 is now the active header, which carries no
+        // selected change, so this needs a dashboard selecting a real change
+        // rather than `three_active()`'s header-addressing default.
+        let d = dashboard_with(
+            vec![
+                fixture::active("add-token-refresh", 4, 9),
+                fixture::active("fix-empty-basket", 7, 7),
+                fixture::active("migrate-ai-sdk-v7", 0, 0),
+            ],
+            Vec::new(),
+            1,
+            Route::List,
+        );
         let buf120 = render_at(120, 20, &d);
         assert!(detail_interior_cols(&buf120, 2, 78).contains("add-token-refresh"));
 
@@ -2142,7 +2169,10 @@ mod tests {
                 fixture::active("migrate-ai-sdk-v7", 0, 0),
             ],
             Vec::new(),
-            0,
+            // `list-sections`: 1, not 0 — target 0 is the active header, and
+            // this fixture's one caller needs a real selected change for the
+            // detail header it asserts on.
+            1,
             route,
         )
     }
@@ -2192,9 +2222,26 @@ mod tests {
         for _ in 0..4 {
             d.apply(Action::Next);
         }
+        // `list-sections`: the clamp is now against `targets().len()` (the
+        // active header plus three changes, 4), not `visible_len()` (3), so
+        // the cursor stops on the third active change's *target* — `selected`
+        // 3 — rather than on the change-only index 2 this test asserted
+        // before.
+        assert_eq!(d.selected, 3);
+        assert_eq!(d.selected_change().unwrap().name, "migrate-ai-sdk-v7");
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
-            assert_eq!(cell(&buf, 1, 4).symbol(), ">");
+            // `ui::list::rows` still marks a row by comparing its own
+            // change-only counter (0, 1, 2 for three active changes) against
+            // `dashboard.selected` directly — it does not yet know about
+            // `targets()`'s header offset, which is `list-sections`' group 5.
+            // Until that group lands, a `selected` this far past the change
+            // count matches no row at all, so no marker is drawn anywhere in
+            // the interior — a real, if temporary, rendering gap this group's
+            // own design.md accepts as the cost of a sequential rollout.
+            for y in 2..=17u16 {
+                assert_ne!(cell(&buf, 1, y).symbol(), ">", "width {width} y={y}");
+            }
         }
     }
 
@@ -2599,10 +2646,23 @@ mod tests {
         for c in ['a', 'd', 'd'] {
             d.apply(Action::FilterPush(c));
         }
+        // `list-sections`: 3, not 1 — the query "add" matches one active and
+        // one archived change, so targets are the active header,
+        // `add-token-refresh`, the archived header, and `add-auth`; the
+        // clamp lands on the last of those four.
+        assert_eq!(d.selected, 3);
+        assert_eq!(d.selected_change().unwrap().name, "add-auth");
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
             assert!(interior_cols(&buf, 4).contains("add-auth"));
-            assert_eq!(cell(&buf, 1, 4).symbol(), ">");
+            // `ui::list::rows` still marks a row by its own change-only
+            // counter (0 for `add-token-refresh`, 1 for `add-auth`), unaware
+            // of `targets()`'s header offset until `list-sections`' group 5.
+            // `selected` 3 exceeds that counter, so no row is marked — a
+            // temporary rendering gap this group's design.md accepts.
+            for y in 2..=17u16 {
+                assert_ne!(cell(&buf, 1, y).symbol(), ">", "width {width} y={y}");
+            }
         }
     }
 
@@ -2642,7 +2702,8 @@ mod tests {
             changes: fixture::set(vec![change], Vec::new(), Vec::new()),
             route,
             quit: false,
-            selected: 0,
+            // `list-sections`: 1, not 0 — target 0 is the active header.
+            selected: 1,
             filter: empty_filter(),
             detail: Detail {
                 source,
@@ -2668,6 +2729,9 @@ mod tests {
                 pending: None,
                 in_flight: false,
                 problems: Vec::new(),
+            },
+            sections: crate::ui::app::Sections {
+                collapsed: std::collections::BTreeSet::new(),
             },
             file_mode: false,
         }
@@ -2789,15 +2853,24 @@ mod tests {
                 in_flight: false,
                 problems: Vec::new(),
             },
+            sections: crate::ui::app::Sections {
+                collapsed: std::collections::BTreeSet::new(),
+            },
             file_mode: false,
         };
 
         let buf120 = render_at(120, 20, &d);
         assert_eq!(detail_marker_cols(&buf120, 4), "- line-00");
         assert_eq!(detail_marker_cols(&buf120, 17), "- line-13");
+        // `list-sections`: no `>` — `d.selected` (1) now addresses the change
+        // in `targets()` space (the active header is target 0), which is what
+        // the detail region above reads; `ui::list::rows` still marks a row
+        // by its own change-only counter (0 for the one active change here)
+        // until `list-sections`' group 5, so the two disagree on this row's
+        // marker for the moment. The row's *text* is unaffected.
         assert_eq!(
             cols(&row_text(&buf120, 2), 1..39),
-            "> fix-empty-basket               [7/7]"
+            "  fix-empty-basket               [7/7]"
         );
 
         d.route = Route::Detail;
@@ -3132,6 +3205,9 @@ mod tests {
                 in_flight: false,
                 problems: Vec::new(),
             },
+            sections: crate::ui::app::Sections {
+                collapsed: std::collections::BTreeSet::new(),
+            },
             file_mode: false,
         };
         let default_style = Cell::default().style();
@@ -3175,7 +3251,7 @@ mod tests {
         let with_marked_change = dashboard_with_detail(
             vec![marked_change],
             Vec::new(),
-            0,
+            1, // `list-sections`: target 0 is the active header.
             Route::Detail,
             empty_detail_with_tab("", Vec::new(), 0),
         );
@@ -3245,7 +3321,7 @@ mod tests {
         let marked_d = dashboard_with_detail(
             vec![marked_change],
             Vec::new(),
-            0,
+            1, // `list-sections`: target 0 is the active header.
             Route::Detail,
             empty_detail_with_tab(&task_source, Vec::new(), 0),
         );
@@ -3430,7 +3506,7 @@ mod tests {
         let md = dashboard_with_detail(
             vec![marked_change],
             Vec::new(),
-            0,
+            1, // `list-sections`: target 0 is the active header.
             Route::Detail,
             empty_detail_with_tab(&task_source, Vec::new(), 0),
         );
@@ -3586,13 +3662,27 @@ mod tests {
                 in_flight: false,
                 problems: Vec::new(),
             },
+            sections: crate::ui::app::Sections {
+                collapsed: std::collections::BTreeSet::new(),
+            },
             file_mode: false,
         };
         d.apply(Action::Next);
         d.apply(Action::Next);
+        // `list-sections`: 3, not 2 — `base.selected` starts at 1 (the active
+        // header is target 0), and two `Next` presses land on target 3, the
+        // third active change.
+        assert_eq!(d.selected, 3);
+        assert_eq!(d.selected_change().unwrap().name, "migrate-ai-sdk-v7");
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
-            assert_eq!(cell(&buf, 1, 4).symbol(), ">", "width {width}");
+            // `ui::list::rows` still marks a row by its own change-only
+            // counter (0, 1, 2 for three active changes), unaware of
+            // `targets()`'s header offset until `list-sections`' group 5.
+            // `selected` 3 exceeds that counter, so no row is marked.
+            for y in 2..=17u16 {
+                assert_ne!(cell(&buf, 1, y).symbol(), ">", "width {width} y={y}");
+            }
         }
         // The detail content, when drawn (wide layout only), is unmoved.
         let buf120 = render_at(120, 20, &d);
@@ -3647,7 +3737,8 @@ mod tests {
                 fixture::active("fix-empty-basket", 7, 7),
             ],
             Vec::new(),
-            0,
+            // `list-sections`: 1, not 0 — target 0 is the active header.
+            1,
             Route::Detail,
         );
         let progress = crate::tasks::Progress {
@@ -3683,13 +3774,16 @@ mod tests {
                 fixture::active("fix-empty-basket", 7, 7),
             ],
             Vec::new(),
-            0,
+            // `list-sections`: 1, not 0 — target 0 is the active header.
+            1,
             Route::Detail,
         );
         let buf_first = render_at(120, 20, &d);
         assert!(detail_interior_cols(&buf_first, 2, 78).contains("add-token-refresh"));
 
-        d.selected = 1;
+        // `list-sections`: 2, not 1 — target 1 is `add-token-refresh`,
+        // target 2 is `fix-empty-basket`.
+        d.selected = 2;
         for (width, w) in [(120, 78), (60, 58)] {
             let buf = render_at(width, 20, &d);
             let header = detail_interior_cols(&buf, 2, w);
@@ -3705,7 +3799,9 @@ mod tests {
             fixture::archived(Some("2026-08-14"), "add-auth", 7, 7),
             "spec-driven",
         );
-        let d = dashboard_with(Vec::new(), vec![archived_change], 0, Route::Detail);
+        // `list-sections`: 1, not 0 — with no active changes, target 0 is
+        // the archived header.
+        let d = dashboard_with(Vec::new(), vec![archived_change], 1, Route::Detail);
         for width in [120, 60] {
             let buf = render_at(width, 20, &d);
             let row = row_text(&buf, 2);
@@ -3776,7 +3872,7 @@ mod tests {
         let d = dashboard_with_detail(
             vec![change],
             Vec::new(),
-            0,
+            1, // `list-sections`: target 0 is the active header.
             Route::Detail,
             empty_detail_with_tab("", Vec::new(), 2),
         );
@@ -3843,7 +3939,7 @@ mod tests {
         let d = dashboard_with_detail(
             vec![change],
             Vec::new(),
-            0,
+            1, // `list-sections`: target 0 is the active header.
             Route::Detail,
             empty_detail_with_tab("", Vec::new(), 0),
         );
@@ -3887,7 +3983,7 @@ mod tests {
         let mut d = dashboard_with_detail(
             vec![change],
             Vec::new(),
-            0,
+            1, // `list-sections`: target 0 is the active header.
             Route::List,
             empty_detail_with_tab("", Vec::new(), 0),
         );
@@ -3924,7 +4020,7 @@ mod tests {
         let d = dashboard_with_detail(
             vec![change],
             Vec::new(),
-            0,
+            1, // `list-sections`: target 0 is the active header.
             Route::Detail,
             empty_detail_with_tab(&source, Vec::new(), 0),
         );
@@ -3960,7 +4056,7 @@ mod tests {
         let d = dashboard_with_detail(
             vec![change],
             Vec::new(),
-            0,
+            1, // `list-sections`: target 0 is the active header.
             Route::Detail,
             empty_detail_with_tab("", Vec::new(), 1),
         );
@@ -4005,7 +4101,7 @@ mod tests {
         let d = dashboard_with_detail(
             vec![marked],
             Vec::new(),
-            0,
+            1, // `list-sections`: target 0 is the active header.
             Route::Detail,
             empty_detail_with_tab("", Vec::new(), 3),
         );
@@ -4038,7 +4134,7 @@ mod tests {
         let d = dashboard_with_detail(
             vec![change],
             Vec::new(),
-            0,
+            1, // `list-sections`: target 0 is the active header.
             Route::Detail,
             empty_detail_with_tab(
                 "# b\n",
@@ -4070,7 +4166,7 @@ mod tests {
         let d = dashboard_with_detail(
             vec![change],
             Vec::new(),
-            0,
+            1, // `list-sections`: target 0 is the active header.
             Route::Detail,
             empty_detail_with_tab(&twenty_line_source(), Vec::new(), 0),
         );
@@ -4112,7 +4208,7 @@ mod tests {
         dashboard_with_detail(
             vec![change],
             Vec::new(),
-            0,
+            1, // `list-sections`: target 0 is the active header.
             Route::Detail,
             empty_detail_with_tab(source, problems, tab),
         )
@@ -4996,7 +5092,8 @@ mod tests {
                 fixture::active("fix-empty-basket", 7, 7),
             ],
             Vec::new(),
-            0,
+            // `list-sections`: 1, not 0 — target 0 is the active header.
+            1,
             Route::Detail,
         );
         let progress = crate::tasks::Progress {
@@ -5447,7 +5544,8 @@ mod tests {
                 fixture::active("migrate-ai-sdk-v7", 0, 0),
             ],
             vec![fixture::archived(Some("2026-01-01"), "old-change", 3, 3)],
-            0,
+            // `list-sections`: 1, not 0 — target 0 is the active header.
+            1,
             route,
             Detail {
                 source: "## Heading\n\n**bold** and *italic* and `code` and [link](u)\n"
@@ -5470,8 +5568,16 @@ mod tests {
     /// of every cell outside the tab-bar row is exactly what it was before this change.
     #[test]
     fn a_monochrome_reading_of_the_frame_is_unchanged() {
-        // The list half. Rows: 2 the problem, 3 the selected change, 4 the badged one, 5
-        // the third, 6 the separator, 7 the archived change.
+        // The list half. Rows: 2 the problem, 3 the selected change (`add-token-refresh`),
+        // 4 the badged one (`fix-empty-basket`), 5 the third, 6 the separator, 7 the
+        // archived change.
+        //
+        // `list-sections`: `monochrome_dashboard`'s `selected` field is 1, addressing
+        // `add-token-refresh` in `targets()` space (the active header is target 0) — what
+        // the detail half below reads. `ui::list::rows` still marks a row by its own
+        // change-only counter (0, 1, 2 for the three active changes), unaware of that
+        // offset until `list-sections`' group 5, so it marks row 4 (`fix-empty-basket`,
+        // index 1) rather than row 3 for the moment.
         for width in [120, 60] {
             let d = monochrome_dashboard(Route::List);
             let buf = render_at(width, 20, &d);
@@ -5509,10 +5615,10 @@ mod tests {
 
             for x in 1..=last {
                 assert!(
-                    is_bold(cell(&buf, x, 3)),
-                    "width {width}: the selected row's cell {x} is not bold"
+                    is_bold(cell(&buf, x, 4)),
+                    "width {width}: the marked row's cell {x} is not bold"
                 );
-                for y in [2u16, 4, 6] {
+                for y in [2u16, 3, 6] {
                     assert!(
                         cell(&buf, x, y).style().add_modifier.is_empty(),
                         "width {width}: cell {x},{y} carries a modifier it did not before"

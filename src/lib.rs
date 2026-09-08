@@ -818,6 +818,9 @@ pub(crate) mod testutil {
                     in_flight: false,
                     problems: Vec::new(),
                 },
+                sections: crate::ui::app::Sections {
+                    collapsed: std::collections::BTreeSet::new(),
+                },
                 file_mode: false,
             }
         }

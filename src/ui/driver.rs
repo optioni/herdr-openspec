@@ -263,7 +263,8 @@ mod tests {
             ),
             route: Route::List,
             quit: false,
-            selected: 0,
+            // `list-sections`: 1, not 0 — target 0 is the active header.
+            selected: 1,
             filter: crate::ui::app::Filter {
                 query: String::new(),
                 active: false,
@@ -292,6 +293,9 @@ mod tests {
                 pending: None,
                 in_flight: false,
                 problems: Vec::new(),
+            },
+            sections: crate::ui::app::Sections {
+                collapsed: std::collections::BTreeSet::new(),
             },
             file_mode: false,
         }
@@ -333,6 +337,9 @@ mod tests {
                 pending: None,
                 in_flight: false,
                 problems: Vec::new(),
+            },
+            sections: crate::ui::app::Sections {
+                collapsed: std::collections::BTreeSet::new(),
             },
             file_mode: false,
         }
@@ -686,7 +693,8 @@ mod tests {
             changes: crate::changes::fixture::set(vec![change], Vec::new(), Vec::new()),
             route: Route::Detail,
             quit: false,
-            selected: 0,
+            // `list-sections`: 1, not 0 — target 0 is the active header.
+            selected: 1,
             filter: crate::ui::app::Filter {
                 query: String::new(),
                 active: false,
@@ -715,6 +723,9 @@ mod tests {
                 pending: None,
                 in_flight: false,
                 problems: Vec::new(),
+            },
+            sections: crate::ui::app::Sections {
+                collapsed: std::collections::BTreeSet::new(),
             },
             file_mode: false,
         }
@@ -816,7 +827,8 @@ mod tests {
             changes: crate::changes::fixture::set(vec![change], Vec::new(), Vec::new()),
             route: Route::Detail,
             quit: false,
-            selected: 0,
+            // `list-sections`: 1, not 0 — target 0 is the active header.
+            selected: 1,
             filter: crate::ui::app::Filter {
                 query: String::new(),
                 active: false,
@@ -845,6 +857,9 @@ mod tests {
                 pending: None,
                 in_flight: false,
                 problems: Vec::new(),
+            },
+            sections: crate::ui::app::Sections {
+                collapsed: std::collections::BTreeSet::new(),
             },
             file_mode: false,
         }
@@ -1068,6 +1083,9 @@ mod tests {
                 in_flight: false,
                 problems: Vec::new(),
             },
+            sections: crate::ui::app::Sections {
+                collapsed: std::collections::BTreeSet::new(),
+            },
             file_mode: false,
         };
         let backend = TestBackend::new(120, 20);
@@ -1121,7 +1139,8 @@ mod tests {
             changes: crate::changes::fixture::set(vec![change], Vec::new(), Vec::new()),
             route: Route::Detail,
             quit: false,
-            selected: 0,
+            // `list-sections`: 1, not 0 — target 0 is the active header.
+            selected: 1,
             filter: crate::ui::app::Filter {
                 query: String::new(),
                 active: false,
@@ -1150,6 +1169,9 @@ mod tests {
                 pending: None,
                 in_flight: false,
                 problems: Vec::new(),
+            },
+            sections: crate::ui::app::Sections {
+                collapsed: std::collections::BTreeSet::new(),
             },
             file_mode: false,
         };
@@ -1258,7 +1280,8 @@ mod tests {
             changes: crate::changes::fixture::set(vec![change], Vec::new(), Vec::new()),
             route: Route::List,
             quit: false,
-            selected: 0,
+            // `list-sections`: 1, not 0 — target 0 is the active header.
+            selected: 1,
             filter: crate::ui::app::Filter {
                 query: String::new(),
                 active: false,
@@ -1287,6 +1310,9 @@ mod tests {
                 pending: None,
                 in_flight: false,
                 problems: Vec::new(),
+            },
+            sections: crate::ui::app::Sections {
+                collapsed: std::collections::BTreeSet::new(),
             },
             file_mode: false,
         }
@@ -2426,6 +2452,9 @@ mod tests {
             Vec::new(),
             Vec::new(),
         );
+        // `list-sections`: target 0 is now the active header; `add-auth` is
+        // target 1.
+        first_dashboard.selected = 1;
         let mut events = Script::new(vec![
             Ok(Some(press(KeyCode::Char('a'), KeyModifiers::NONE))),
             Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
@@ -2703,6 +2732,9 @@ mod tests {
                 Vec::new(),
                 Vec::new(),
             );
+            // `list-sections`: target 0 is now the active header; `add-auth`
+            // is target 1.
+            dashboard.selected = 1;
             let mut events = Script::new(vec![
                 Ok(Some(press(KeyCode::Char('a'), KeyModifiers::NONE))),
                 Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
@@ -3132,7 +3164,8 @@ mod tests {
             changes: crate::changes::fixture::set(vec![change], Vec::new(), Vec::new()),
             route: Route::Detail,
             quit: false,
-            selected: 0,
+            // `list-sections`: 1, not 0 — target 0 is the active header.
+            selected: 1,
             filter: crate::ui::app::Filter {
                 query: String::new(),
                 active: false,
@@ -3161,6 +3194,9 @@ mod tests {
                 pending: None,
                 problems: Vec::new(),
                 in_flight: false,
+            },
+            sections: crate::ui::app::Sections {
+                collapsed: std::collections::BTreeSet::new(),
             },
             file_mode: false,
         };

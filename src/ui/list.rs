@@ -585,6 +585,11 @@ mod tests {
                 in_flight: false,
                 problems: Vec::new(),
             },
+            // `list-sections`: compile-forced by `Dashboard`'s new field; group 5 owns
+            // this file's real work.
+            sections: crate::ui::app::Sections {
+                collapsed: std::collections::BTreeSet::new(),
+            },
             file_mode: false,
         }
     }
@@ -674,6 +679,11 @@ mod tests {
                     pending: None,
                     in_flight: false,
                     problems: Vec::new(),
+                },
+                // `list-sections`: compile-forced by `Dashboard`'s new field; group 5 owns
+                // this file's real work.
+                sections: crate::ui::app::Sections {
+                    collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
             },
@@ -1537,6 +1547,11 @@ mod tests {
                 in_flight: false,
                 problems: Vec::new(),
             },
+            // `list-sections`: compile-forced by `Dashboard`'s new field; group 5 owns
+            // this file's real work.
+            sections: crate::ui::app::Sections {
+                collapsed: std::collections::BTreeSet::new(),
+            },
             file_mode: false,
         };
         let rows38 = rows(&d, 38);
@@ -1600,6 +1615,11 @@ mod tests {
                 pending: None,
                 in_flight: false,
                 problems: Vec::new(),
+            },
+            // `list-sections`: compile-forced by `Dashboard`'s new field; group 5 owns
+            // this file's real work.
+            sections: crate::ui::app::Sections {
+                collapsed: std::collections::BTreeSet::new(),
             },
             file_mode: false,
         };
@@ -2298,6 +2318,11 @@ mod tests {
                 pending: None,
                 in_flight: false,
                 problems: Vec::new(),
+            },
+            // `list-sections`: compile-forced by `Dashboard`'s new field; group 5 owns
+            // this file's real work.
+            sections: crate::ui::app::Sections {
+                collapsed: std::collections::BTreeSet::new(),
             },
             file_mode: false,
         };

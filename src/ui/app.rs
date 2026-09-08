@@ -178,11 +178,48 @@ pub struct Launch {
     pub in_flight: bool,
 }
 
+/// `list-sections`' addition: the two sections the list is split into. A
+/// section is identified by a key rather than by a bare boolean so a later
+/// change can nest a date grouping under `Archived` without reworking the
+/// collapse state, the cursor index, or the `/` force-open rule — see
+/// design.md -> Decision 8 and -> Non-Goals.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum SectionKey {
+    Active,
+    Archived,
+}
+
+/// `list-sections`' addition: the reader's own collapse state, one entry per
+/// folded section. A section is collapsed exactly when its key is in this
+/// set, so a key added later — a nested date group, say — defaults to open
+/// with no migration. Deliberately implements no `Default`, anywhere in the
+/// crate, on the same terms as `Filter` and `Detail`: every construction and
+/// destructuring names its one field, with no `..` rest. See
+/// `specs/list-selection/spec.md` and the `NODEFAULT-UI` check, whose type
+/// list now covers this type too.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Sections {
+    pub collapsed: std::collections::BTreeSet<SectionKey>,
+}
+
+/// `list-sections`' addition: one addressable row the cursor can land on —
+/// either a section header or a change, the latter as an index into
+/// `Dashboard::visible()`. `Dashboard::targets()` returns them in emission
+/// order, and `Dashboard::selected` indexes into that vector rather than
+/// into `visible()` directly, because a collapsed section's header is its
+/// only row and must stay reachable. See design.md -> Decision 2.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Target {
+    Section(SectionKey),
+    /// An index into `Dashboard::visible()`.
+    Change(usize),
+}
+
 /// The dashboard's whole state. Carries no width, no layout mode, no column
 /// count, no terminal handle, and no frame — those are derived from the
 /// frame area on every draw, never stored here. Deliberately implements no
 /// `Default`, anywhere in the crate: every construction and every
-/// destructuring names all thirteen fields, so a field added later fails to
+/// destructuring names all fourteen fields, so a field added later fails to
 /// compile at each site rather than defaulting silently. See
 /// `specs/dashboard-loop/spec.md` and the `NODEFAULT-UI` check.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -194,9 +231,10 @@ pub struct Dashboard {
     pub changes: ChangeSet,
     pub route: Route,
     pub quit: bool,
-    /// The index into the *visible* list — `visible()`'s output, active
-    /// changes then archived, with the filter query applied. See
-    /// `specs/list-selection/spec.md`.
+    /// The index into the **visible targets** — `targets()`'s output,
+    /// section headers and visible changes in emission order — not into
+    /// `visible()` directly. `list-sections`' change to what this index
+    /// addresses: see `specs/list-selection/spec.md`.
     pub selected: usize,
     /// The `/` filter's mode and query. See `specs/list-filtering/spec.md`.
     pub filter: Filter,
@@ -220,6 +258,9 @@ pub struct Dashboard {
     /// `agent-launch`'s addition: the launch tier's one-shot request and last reported
     /// problem. See `specs/agent-launch/spec.md`.
     pub launch: Launch,
+    /// `list-sections`' addition: the reader's own per-session fold state. Survives every
+    /// `adopt`, which never touches it. See `specs/list-selection/spec.md`.
+    pub sections: Sections,
     /// `degraded-states`' addition: whether the binary probe resolved nothing. Set only by
     /// the composition root (`run_wired`, via `start_collaborators`'s real probe) -- `ui::load`
     /// sets `false` on both branches, since it never probes for a binary. Read only by the
@@ -233,10 +274,17 @@ impl Dashboard {
     pub fn apply(&mut self, action: Action) {
         match action {
             Action::Quit => self.quit = true,
+            // `list-sections`: inert while the cursor addresses a section header —
+            // `selected_change()` is `None` there, so there is nothing for the detail
+            // region to show, and moving to an empty one would be a worse answer to
+            // `Enter` than doing nothing. Accepting an open filter is not opening a
+            // detail, so that arm is unconditional on the target.
             Action::OpenDetail => {
                 if self.filter.active {
                     self.filter.active = false;
-                } else if self.route != Route::Detail {
+                } else if self.route != Route::Detail
+                    && !matches!(self.targets().get(self.selected), Some(Target::Section(_)))
+                {
                     self.route = Route::Detail;
                     self.detail.scroll = 0;
                 }
@@ -434,22 +482,128 @@ impl Dashboard {
             crate::ui::layout::scroll_offset(total, self.detail.scroll, content.height);
     }
 
-    /// Active-then-archived, in `ChangeSet`'s own order, with `list-filtering`'s
-    /// case-insensitive substring query applied to `Change::name`. What
-    /// `change-rows`' `rows` also emits, and what `selected` indexes into.
+    /// Whether `key`'s rows are shown: a non-empty `/` query forces every section
+    /// open for as long as it is non-empty, regardless of the reader's own fold —
+    /// a filter that silently hid a match behind a fold would be worse than the
+    /// long list it replaces. Otherwise a section is open exactly when its key is
+    /// **not** in `sections.collapsed`. Nothing is ever written to `sections`
+    /// because of a query, so "restoring the reader's own collapse state when the
+    /// query clears" needs no save and no restore. See design.md -> Decision 5.
+    pub fn section_open(&self, key: SectionKey) -> bool {
+        !self.filter.query.is_empty() || !self.sections.collapsed.contains(&key)
+    }
+
+    /// The number of matched entries `key`'s header reports: the matched count
+    /// when the tier is actually resolved, and `changes.archived_total` when the
+    /// archived tier is open but not yet resolved (`changes.archived` empty with
+    /// `archived_total` greater than zero) — with no query the two coincide. See
+    /// design.md -> Decision 10.
+    fn section_count(&self, key: SectionKey) -> usize {
+        match key {
+            SectionKey::Active => self
+                .changes
+                .active
+                .iter()
+                .filter(|c| matches(&c.name, &self.filter.query))
+                .count(),
+            SectionKey::Archived => {
+                if self.changes.archived.is_empty() && self.changes.archived_total > 0 {
+                    self.changes.archived_total
+                } else {
+                    self.changes
+                        .archived
+                        .iter()
+                        .filter(|c| matches(&c.name, &self.filter.query))
+                        .count()
+                }
+            }
+        }
+    }
+
+    /// The addressable targets, in exactly the order `change-rows` emits their
+    /// rows: the active section header when its count is greater than zero, then
+    /// the visible active changes when that section is open, then the archived
+    /// header on the same condition, then the visible archived changes when it is
+    /// open. Pure and total over `&self`, stored nowhere. See
+    /// `specs/list-selection/spec.md` and design.md -> Decision 2.
+    pub fn targets(&self) -> Vec<Target> {
+        let mut targets = Vec::new();
+        if self.section_count(SectionKey::Active) > 0 {
+            targets.push(Target::Section(SectionKey::Active));
+        }
+        let mut index = 0usize;
+        if self.section_open(SectionKey::Active) {
+            for _ in self
+                .changes
+                .active
+                .iter()
+                .filter(|c| matches(&c.name, &self.filter.query))
+            {
+                targets.push(Target::Change(index));
+                index += 1;
+            }
+        }
+        if self.section_count(SectionKey::Archived) > 0 {
+            targets.push(Target::Section(SectionKey::Archived));
+        }
+        if self.section_open(SectionKey::Archived) {
+            for _ in self
+                .changes
+                .archived
+                .iter()
+                .filter(|c| matches(&c.name, &self.filter.query))
+            {
+                targets.push(Target::Change(index));
+                index += 1;
+            }
+        }
+        targets
+    }
+
+    /// The changes actually **shown**: the query-matching entries of
+    /// `changes.active` when the active section is open, followed by the
+    /// query-matching entries of `changes.archived` when the archived section is
+    /// open. A closed section's changes are absent, so folding a section that is
+    /// already resolved removes its entries from this list on the same frame
+    /// rather than waiting for a refresh. What `change-rows`' `rows` also emits,
+    /// and what `Target::Change`'s index addresses.
     pub fn visible(&self) -> Vec<&Change> {
-        self.changes
-            .active
-            .iter()
-            .chain(self.changes.archived.iter())
-            .filter(|c| matches(&c.name, &self.filter.query))
-            .collect()
+        let mut visible = Vec::new();
+        if self.section_open(SectionKey::Active) {
+            visible.extend(
+                self.changes
+                    .active
+                    .iter()
+                    .filter(|c| matches(&c.name, &self.filter.query)),
+            );
+        }
+        if self.section_open(SectionKey::Archived) {
+            visible.extend(
+                self.changes
+                    .archived
+                    .iter()
+                    .filter(|c| matches(&c.name, &self.filter.query)),
+            );
+        }
+        visible
     }
 
     /// `visible().len()`, without building the intermediate `Vec` twice at
     /// call sites that only need the count.
     pub fn visible_len(&self) -> usize {
         self.visible().len()
+    }
+
+    /// The scope a refresh should resolve the archived tier under: `Full` when
+    /// the archived section is open, `Names` when it is collapsed. Cheap either
+    /// way — this reads only `sections` and `filter.query`, never `changes`. See
+    /// design.md -> Decision 1 and -> Decision 13.
+    pub fn archived_scope(&self) -> crate::changes::ArchivedScope {
+        if self.section_open(SectionKey::Archived) {
+            crate::changes::ArchivedScope::Full
+        } else {
+            crate::changes::ArchivedScope::Names
+        }
     }
 
     /// Derive the current attribution from state this dashboard already
@@ -474,12 +628,16 @@ impl Dashboard {
         )
     }
 
-    /// The change `selected` addresses in `visible()`, or `None` when the
-    /// visible list is empty or `selected` is somehow out of range. What
-    /// `sync_detail`, `SelectTab`, and `NextTab` all resolve their target
-    /// change through.
+    /// The change `selected` addresses, or `None` when it addresses a section
+    /// header, the target list is empty, or `selected` is somehow out of range.
+    /// What `sync_detail`, `SelectTab`, `NextTab`, and `agent-launch`'s four
+    /// action keys all resolve their target change through, so a header cursor
+    /// makes every one of them inert with no rule of its own.
     pub fn selected_change(&self) -> Option<&Change> {
-        self.visible().get(self.selected).copied()
+        match self.targets().get(self.selected)? {
+            Target::Change(i) => self.visible().get(*i).copied(),
+            Target::Section(_) => None,
+        }
     }
 
     /// Replace `changes` with a freshly produced set, preserving the
@@ -489,19 +647,27 @@ impl Dashboard {
     /// silently move the reader to a different change mid-read. The name is
     /// resolved against the **new** `visible()` list, not `changes.active`,
     /// because `selected` indexes the visible list and a `/` filter may be
-    /// active. Pure: no I/O, no clock. Sets `refresh.reload`, which is what
-    /// makes `sync_detail` re-read the (possibly unchanged) selection on
-    /// the very next call. Does **not** reset `detail.tab` or
-    /// `detail.scroll`: a refresh is not a selection move. See
-    /// `specs/live-updates/spec.md` -> "Adopting a change set preserves the
-    /// selection by name".
+    /// active — and then resolved a second time through `targets()`, because
+    /// `selected` indexes *targets*, not `visible()`, and a `visible()`
+    /// position found here is one or two short of the `targets()` index that
+    /// actually addresses it whenever a section header precedes it (design.md
+    /// -> Decision 14). Pure: no I/O, no clock. Sets `refresh.reload`, which is
+    /// what makes `sync_detail` re-read the (possibly unchanged) selection on
+    /// the very next call. Does **not** reset `detail.tab` or `detail.scroll`,
+    /// and does **not** touch `sections`: a refresh is neither a selection move
+    /// nor a fold. See `specs/live-updates/spec.md` -> "Adopting a change set
+    /// preserves the selection by name" and `specs/list-selection/spec.md`.
     pub fn adopt(&mut self, changes: ChangeSet) {
         let previous_name = self.selected_change().map(|c| c.name.clone());
         self.changes = changes;
         if let Some(name) = previous_name
             && let Some(pos) = self.visible().iter().position(|c| c.name == name)
+            && let Some(target_index) = self
+                .targets()
+                .iter()
+                .position(|t| *t == Target::Change(pos))
         {
-            self.selected = pos;
+            self.selected = target_index;
         }
         self.clamp_selection();
         self.refresh.reload = true;
@@ -582,12 +748,15 @@ impl Dashboard {
         self.detail.loaded = Some(key);
     }
 
-    /// Keep `selected` addressing a change that is actually shown: `0` when
-    /// the visible list is empty, otherwise clamped to its last index. Never
-    /// *raises* `selected` — clamping shrinks the index and never restores
-    /// it once the list grows back.
+    /// Keep `selected` addressing a target that actually exists: `0` when the
+    /// target list is empty, otherwise clamped to its last index. Never *raises*
+    /// `selected` — clamping shrinks the index and never restores it once the
+    /// list grows back. Clamps against `targets().len()`, not `visible_len()`:
+    /// `selected` indexes targets, and a change-count clamp would leave it
+    /// addressing the wrong row by one or two targets whenever a section header
+    /// precedes the last valid position. See design.md -> Decision 14.
     fn clamp_selection(&mut self) {
-        let len = self.visible_len();
+        let len = self.targets().len();
         if len == 0 {
             self.selected = 0;
         } else if self.selected >= len {
@@ -671,7 +840,7 @@ mod tests {
     // submodule — actually match their full test paths.
     use crate::agents::{Agent, AgentStatus};
     use crate::changes::fixture;
-    use crate::ui::app::{Action, Dashboard, Detail, Filter, Refresh, Route, action_for};
+    use crate::ui::app::{Action, Dashboard, Detail, Filter, Refresh, Route, Sections, action_for};
     use std::collections::BTreeMap;
 
     fn agent(name: Option<&str>, status: AgentStatus, cwd: Option<&str>) -> Agent {
@@ -736,6 +905,9 @@ mod tests {
                 in_flight: false,
                 problems: Vec::new(),
             },
+            sections: Sections {
+                collapsed: std::collections::BTreeSet::new(),
+            },
             file_mode: false,
         }
     }
@@ -761,6 +933,7 @@ mod tests {
             agents,
             agent_names,
             launch,
+            sections: _,
             file_mode: _,
         } = &d;
         assert_eq!(*repo, Some(std::path::PathBuf::from("/repo")));
@@ -842,7 +1015,9 @@ mod tests {
                 fixture::active("gamma", 0, 1),
             ],
             Vec::new(),
-            1,
+            // `list-sections`: 2, not 1 — the active header is target 0, so
+            // `gamma` (`visible()` position 1) sits at target 2.
+            2,
             vec![agent(Some("gamma"), AgentStatus::Working, Some("/repo"))],
             BTreeMap::new(),
         );
@@ -1012,7 +1187,8 @@ mod tests {
         let mut d = dashboard_for_attribution(
             vec![fixture::active("add-auth", 1, 2)],
             Vec::new(),
-            0,
+            // `list-sections`: 1, not 0 — target 0 is the active header.
+            1,
             Vec::new(),
             BTreeMap::new(),
         );
@@ -1045,7 +1221,8 @@ mod tests {
         let mut d = dashboard_for_attribution(
             vec![fixture::active("2fa-support", 1, 2)],
             Vec::new(),
-            0,
+            // `list-sections`: 1, not 0 — target 0 is the active header.
+            1,
             vec![agent(
                 Some("c-2fa-support"),
                 AgentStatus::Working,
@@ -1108,6 +1285,7 @@ mod tests {
             agents: _,
             agent_names: _,
             launch,
+            sections: _,
             file_mode: _,
         } = &d;
         assert_eq!(launch.pending, None);
@@ -1123,7 +1301,8 @@ mod tests {
         let mut mapped = dashboard_for_attribution(
             vec![fixture::active("2fa-support", 1, 2)],
             Vec::new(),
-            0,
+            // `list-sections`: 1, not 0 — target 0 is the active header.
+            1,
             vec![agent(
                 Some("c-2fa-support"),
                 AgentStatus::Working,
@@ -1142,7 +1321,8 @@ mod tests {
         let mut named = dashboard_for_attribution(
             vec![fixture::active("add-auth", 1, 2)],
             Vec::new(),
-            0,
+            // `list-sections`: 1, not 0 — target 0 is the active header.
+            1,
             vec![agent(Some("add-auth"), AgentStatus::Idle, Some("/repo"))],
             BTreeMap::new(),
         );
@@ -1189,7 +1369,9 @@ mod tests {
         let mut d = dashboard_for_attribution(
             Vec::new(),
             vec![fixture::archived(Some("2026-08-14"), "add-auth", 1, 2)],
-            0,
+            // `list-sections`: 1, not 0 — with no active changes, target 0 is
+            // the archived header.
+            1,
             Vec::new(),
             BTreeMap::new(),
         );
@@ -1215,7 +1397,8 @@ mod tests {
             let mut d = dashboard_for_attribution(
                 vec![fixture::active("add-auth", 1, 2)],
                 Vec::new(),
-                0,
+                // `list-sections`: 1, not 0 — target 0 is the active header.
+                1,
                 Vec::new(),
                 BTreeMap::new(),
             );
@@ -1241,7 +1424,9 @@ mod tests {
         use crate::changes::empty_set;
         use crate::changes::fixture;
         use crate::testutil::RecordingReader;
-        use crate::ui::app::{Action, Dashboard, Detail, Filter, Route, action_for};
+        use crate::ui::app::{
+            Action, Dashboard, Detail, Filter, Route, SectionKey, Sections, Target, action_for,
+        };
 
         fn empty_filter() -> Filter {
             Filter {
@@ -1288,6 +1473,9 @@ mod tests {
                     in_flight: false,
                     problems: Vec::new(),
                 },
+                sections: Sections {
+                    collapsed: std::collections::BTreeSet::new(),
+                },
                 file_mode: false,
             }
         }
@@ -1333,6 +1521,9 @@ mod tests {
                     in_flight: false,
                     problems: Vec::new(),
                 },
+                sections: Sections {
+                    collapsed: std::collections::BTreeSet::new(),
+                },
                 file_mode: false,
             }
         }
@@ -1354,7 +1545,8 @@ mod tests {
                 changes: fixture::set(vec![change], Vec::new(), Vec::new()),
                 route: Route::Detail,
                 quit: false,
-                selected: 0,
+                // `list-sections`: 1, not 0 — target 0 is the active header.
+                selected: 1,
                 filter: empty_filter(),
                 detail: Detail {
                     source: String::new(),
@@ -1380,6 +1572,9 @@ mod tests {
                     pending: None,
                     in_flight: false,
                     problems: Vec::new(),
+                },
+                sections: Sections {
+                    collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
             }
@@ -1780,7 +1975,8 @@ mod tests {
                 changes: crate::changes::fixture::set(vec![change], Vec::new(), Vec::new()),
                 route: Route::Detail,
                 quit: false,
-                selected: 0,
+                // `list-sections`: 1, not 0 — target 0 is the active header.
+                selected: 1,
                 filter: empty_filter(),
                 refresh: crate::ui::app::Refresh {
                     requested: false,
@@ -1808,6 +2004,9 @@ mod tests {
                     pending: None,
                     in_flight: false,
                     problems: Vec::new(),
+                },
+                sections: Sections {
+                    collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
             };
@@ -2002,15 +2201,384 @@ mod tests {
         #[test]
         fn next_and_prev_clamp() {
             let mut d = five_change_dashboard();
+            // `list-sections`: clear the total too, or the archived tier reads as
+            // unresolved-but-nonempty and keeps its header — this test wants a
+            // dashboard with no archived section at all.
             d.changes.archived.clear();
+            d.changes.archived_total = 0;
             for _ in 0..4 {
                 d.apply(Action::Next);
             }
-            assert_eq!(d.selected, 2);
+            // `list-sections`: re-indexed — targets are the active header (0)
+            // then the three active changes (1..=3), so the clamp lands on 3,
+            // not the change-only index 2 this test asserted before.
+            assert_eq!(d.selected, 3);
             for _ in 0..4 {
                 d.apply(Action::Prev);
             }
             assert_eq!(d.selected, 0);
+        }
+
+        /// A `Route::List` dashboard over `active` and `archived`, both sections
+        /// open, `selected` given explicitly — `list-sections`' own fixture for
+        /// the scenarios that need control over both tiers at once, which
+        /// neither `dashboard_at` nor `five_change_dashboard` gives.
+        fn dashboard_with_archive(
+            active: Vec<crate::changes::Change>,
+            archived: Vec<crate::changes::Change>,
+            selected: usize,
+        ) -> Dashboard {
+            Dashboard {
+                repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
+                searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
+                changes: fixture::set(active, archived, Vec::new()),
+                route: Route::List,
+                quit: false,
+                selected,
+                filter: empty_filter(),
+                detail: empty_detail(),
+                refresh: crate::ui::app::Refresh {
+                    requested: false,
+                    reload: false,
+                    startup: Vec::new(),
+                    problems: Vec::new(),
+                },
+                agents: crate::agents::AgentSnapshot {
+                    agents: Vec::new(),
+                    reachable: false,
+                    stalled: false,
+                    problem: None,
+                },
+                agent_names: crate::state::Mapping::default(),
+                launch: crate::ui::app::Launch {
+                    pending: None,
+                    in_flight: false,
+                    problems: Vec::new(),
+                },
+                sections: Sections {
+                    collapsed: std::collections::BTreeSet::new(),
+                },
+                file_mode: false,
+            }
+        }
+
+        /// `list-selection` -> "The first target is selected on startup" — a
+        /// dashboard with three active changes and no archive starts with
+        /// `selected` 0 addressing the active header, not the first change.
+        #[test]
+        fn first_target_is_selected_on_startup() {
+            let mut d = five_change_dashboard();
+            d.changes.archived.clear();
+            d.changes.archived_total = 0;
+            assert_eq!(d.selected, 0);
+            assert_eq!(d.selected_change(), None);
+            assert_eq!(
+                d.targets(),
+                vec![
+                    Target::Section(SectionKey::Active),
+                    Target::Change(0),
+                    Target::Change(1),
+                    Target::Change(2),
+                ]
+            );
+        }
+
+        /// `list-selection` -> "`j`, `k`, and the arrows move the cursor over
+        /// headers and changes".
+        #[test]
+        fn j_k_and_the_arrows_move_the_cursor_over_headers_and_changes() {
+            let mut d = five_change_dashboard();
+            d.changes.archived.clear();
+            d.changes.archived_total = 0;
+            d.route = Route::List;
+            assert_eq!(d.selected, 0);
+
+            d.apply(action_for(
+                &press(KeyCode::Char('j'), KeyModifiers::NONE),
+                false,
+            ));
+            assert_eq!(d.selected, 1);
+            assert_eq!(
+                d.selected_change().unwrap().name,
+                "add-token-refresh",
+                "the cursor stepped off the header onto the first change"
+            );
+
+            d.apply(action_for(&press(KeyCode::Down, KeyModifiers::NONE), false));
+            assert_eq!(d.selected, 2);
+
+            d.apply(action_for(
+                &press(KeyCode::Char('k'), KeyModifiers::NONE),
+                false,
+            ));
+            assert_eq!(d.selected, 1);
+
+            d.apply(action_for(&press(KeyCode::Up, KeyModifiers::NONE), false));
+            assert_eq!(d.selected, 0);
+            assert_eq!(d.selected_change(), None);
+            assert_eq!(
+                d.detail.scroll, 0,
+                "the list route's keys never touch the detail offset"
+            );
+        }
+
+        /// `list-selection` -> "The cursor clamps at both ends rather than
+        /// wrapping".
+        #[test]
+        fn the_cursor_clamps_at_both_ends_rather_than_wrapping() {
+            let mut d = five_change_dashboard();
+            d.changes.archived.clear();
+            d.changes.archived_total = 0;
+            d.route = Route::List;
+            for _ in 0..5 {
+                d.apply(Action::Next);
+            }
+            assert_eq!(d.selected, 3, "four targets: the header and three changes");
+            for _ in 0..5 {
+                d.apply(Action::Prev);
+            }
+            assert_eq!(d.selected, 0);
+        }
+
+        /// `list-selection` -> "The cursor crosses the archived header into the
+        /// archived rows".
+        #[test]
+        fn the_cursor_crosses_the_archived_header_into_the_archived_rows() {
+            let mut d = dashboard_with_archive(
+                vec![fixture::active("fix-empty-basket", 7, 7)],
+                vec![
+                    fixture::archived(Some("2026-08-14"), "add-auth", 7, 7),
+                    fixture::archived(None, "legacy-cleanup", 3, 3),
+                ],
+                0,
+            );
+            for _ in 0..4 {
+                d.apply(Action::Next);
+            }
+            assert_eq!(d.selected, 4);
+            assert_eq!(d.targets()[4], Target::Change(2));
+            assert_eq!(d.selected_change().unwrap().name, "legacy-cleanup");
+
+            // The archived header is a stop, not a row stepped over.
+            let on_header = dashboard_with_archive(
+                vec![fixture::active("fix-empty-basket", 7, 7)],
+                vec![
+                    fixture::archived(Some("2026-08-14"), "add-auth", 7, 7),
+                    fixture::archived(None, "legacy-cleanup", 3, 3),
+                ],
+                2,
+            );
+            assert_eq!(
+                on_header.targets()[2],
+                Target::Section(SectionKey::Archived)
+            );
+            assert_eq!(on_header.selected_change(), None);
+        }
+
+        /// `list-selection` -> "A collapsed section's changes are neither
+        /// visible nor addressable".
+        #[test]
+        fn a_collapsed_sections_changes_are_neither_visible_nor_addressable() {
+            let mut d = dashboard_with_archive(
+                vec![fixture::active("fix-empty-basket", 7, 7)],
+                vec![
+                    fixture::archived(Some("2026-08-14"), "add-auth", 7, 7),
+                    fixture::archived(None, "legacy-cleanup", 3, 3),
+                ],
+                4,
+            );
+            d.sections.collapsed.insert(SectionKey::Archived);
+            d.clamp_selection();
+
+            assert_eq!(
+                d.visible()
+                    .iter()
+                    .map(|c| c.name.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["fix-empty-basket"]
+            );
+            assert_eq!(
+                d.targets(),
+                vec![
+                    Target::Section(SectionKey::Active),
+                    Target::Change(0),
+                    Target::Section(SectionKey::Archived),
+                ]
+            );
+            assert!(d.selected <= 2);
+            assert_eq!(
+                d.targets()[d.selected],
+                Target::Section(SectionKey::Archived)
+            );
+            assert_eq!(d.selected_change(), None);
+        }
+
+        /// `list-selection` -> "Navigation over an empty visible list is inert".
+        #[test]
+        fn navigation_over_an_empty_visible_list_is_inert() {
+            let mut d = dashboard_at(Route::List);
+            d.apply(Action::Next);
+            assert_eq!(d.selected, 0);
+            d.apply(Action::Prev);
+            assert_eq!(d.selected, 0);
+            assert!(d.targets().is_empty());
+            assert_eq!(d.selected_change(), None);
+        }
+
+        /// `list-selection` -> "`Enter` on a section header does nothing".
+        #[test]
+        fn enter_on_a_section_header_does_nothing() {
+            let mut d = five_change_dashboard();
+            d.changes.archived.clear();
+            d.changes.archived_total = 0;
+            d.route = Route::List;
+            assert_eq!(d.selected, 0);
+
+            d.apply(Action::OpenDetail);
+            assert_eq!(d.route, Route::List);
+            assert_eq!(d.detail.tab, 0);
+            assert_eq!(d.detail.scroll, 0);
+            assert!(!d.quit);
+
+            // The same dashboard at `selected` 1 — a real change — opens
+            // normally, so the inertness above is the header, not the key
+            // being unbound.
+            let mut on_change = five_change_dashboard();
+            on_change.changes.archived.clear();
+            on_change.changes.archived_total = 0;
+            on_change.route = Route::List;
+            on_change.selected = 1;
+            on_change.apply(Action::OpenDetail);
+            assert_eq!(on_change.route, Route::Detail);
+
+            // The four launch keys are already inert at the header:
+            // `selected_change()` is `None` there, and `launch::decide`
+            // answers `Decision::Nothing` with no new rule.
+            d.agents.reachable = true;
+            for action in [
+                Action::LaunchApply,
+                Action::LaunchContinue,
+                Action::LaunchArchive,
+                Action::FocusAgent,
+            ] {
+                d.apply(action);
+            }
+            assert_eq!(d.launch.pending, None);
+            assert!(d.launch.problems.is_empty());
+        }
+
+        /// `list-selection` -> "A refresh keeps the cursor on the same change" —
+        /// design.md -> Decision 14's proving assertion: `adopt` must resolve
+        /// the reselected change through `targets()`, not leave it at the
+        /// `visible()` position it found. Goes red against the off-by-headers
+        /// form of `adopt`.
+        #[test]
+        fn a_refresh_keeps_the_cursor_on_the_same_change() {
+            // `list-sections`: inlined rather than a shared local helper, on
+            // `NOLIT-CHANGE`'s own terms — a helper whose return type names
+            // `ChangeSet` trips that gate on its signature alone, the exact
+            // defect Change Review found three of in a past change.
+            let mut d = dashboard_with_archive(
+                vec![
+                    fixture::active("alpha", 1, 4),
+                    fixture::active("beta", 2, 4),
+                ],
+                vec![
+                    fixture::archived(Some("2026-08-14"), "add-auth", 7, 7),
+                    fixture::archived(None, "legacy-cleanup", 3, 3),
+                ],
+                4,
+            );
+            assert_eq!(
+                d.selected_change().unwrap().name,
+                "add-auth",
+                "selected 4 must already address add-auth"
+            );
+
+            // `RefreshResult::Files`, then `RefreshResult::Merged` — both are
+            // just an `adopt` call from `Dashboard`'s own point of view.
+            d.adopt(fixture::set(
+                vec![
+                    fixture::active("aardvark", 0, 4),
+                    fixture::active("alpha", 1, 4),
+                    fixture::active("beta", 2, 4),
+                ],
+                vec![
+                    fixture::archived(Some("2026-08-14"), "add-auth", 7, 7),
+                    fixture::archived(None, "legacy-cleanup", 3, 3),
+                ],
+                Vec::new(),
+            ));
+            assert_eq!(d.selected_change().unwrap().name, "add-auth");
+            assert_eq!(
+                d.selected, 5,
+                "the targets() index of add-auth, not its visible() position of 3"
+            );
+            assert_eq!(
+                d.visible().iter().position(|c| c.name == "add-auth"),
+                Some(3)
+            );
+
+            d.adopt(fixture::set(
+                vec![
+                    fixture::active("aardvark", 0, 4),
+                    fixture::active("alpha", 1, 4),
+                    fixture::active("beta", 2, 4),
+                ],
+                vec![
+                    fixture::archived(Some("2026-08-14"), "add-auth", 7, 7),
+                    fixture::archived(None, "legacy-cleanup", 3, 3),
+                ],
+                Vec::new(),
+            ));
+            assert_eq!(d.selected_change().unwrap().name, "add-auth");
+            assert_eq!(d.selected, 5);
+
+            // A selected change that has disappeared from the adopted set
+            // leaves `selected` within `targets().len()`, with
+            // `selected_change()` either `None` or a change actually shown.
+            let mut gone = dashboard_with_archive(
+                vec![fixture::active("alpha", 1, 4)],
+                vec![fixture::archived(Some("2026-08-14"), "add-auth", 7, 7)],
+                3,
+            );
+            assert_eq!(gone.selected_change().unwrap().name, "add-auth");
+            gone.adopt(fixture::set(
+                vec![fixture::active("alpha", 1, 4)],
+                Vec::new(),
+                Vec::new(),
+            ));
+            let gone_len = gone.targets().len();
+            assert!(gone_len == 0 || gone.selected < gone_len);
+
+            // Adopting with the archived section collapsed still leaves
+            // `selected` addressing a target that exists.
+            let mut collapsed = dashboard_with_archive(
+                vec![
+                    fixture::active("alpha", 1, 4),
+                    fixture::active("beta", 2, 4),
+                ],
+                vec![
+                    fixture::archived(Some("2026-08-14"), "add-auth", 7, 7),
+                    fixture::archived(None, "legacy-cleanup", 3, 3),
+                ],
+                4,
+            );
+            collapsed.sections.collapsed.insert(SectionKey::Archived);
+            collapsed.clamp_selection();
+            collapsed.adopt(fixture::set(
+                vec![
+                    fixture::active("aardvark", 0, 4),
+                    fixture::active("alpha", 1, 4),
+                    fixture::active("beta", 2, 4),
+                ],
+                vec![
+                    fixture::archived(Some("2026-08-14"), "add-auth", 7, 7),
+                    fixture::archived(None, "legacy-cleanup", 3, 3),
+                ],
+                Vec::new(),
+            ));
+            assert!(collapsed.selected < collapsed.targets().len());
         }
 
         fn twenty_line_detail() -> Detail {
@@ -2069,6 +2637,9 @@ mod tests {
                     in_flight: false,
                     problems: Vec::new(),
                 },
+                sections: Sections {
+                    collapsed: std::collections::BTreeSet::new(),
+                },
                 file_mode: false,
             };
             d.apply(Action::Next);
@@ -2083,10 +2654,15 @@ mod tests {
         fn next_and_prev_select_at_the_list_route() {
             let mut d = five_change_dashboard();
             d.changes.archived.clear();
+            d.changes.archived_total = 0;
             d.detail = twenty_line_detail();
             d.route = Route::List;
             d.apply(Action::Next);
             d.apply(Action::Next);
+            // `list-sections`: still 2 — the active header shifts every target by
+            // one, but starting from 0 and stepping twice lands on the same raw
+            // index either way; it now addresses the second active change
+            // (`fix-empty-basket`) rather than the third.
             assert_eq!(d.selected, 2);
             assert_eq!(d.detail.scroll, 0);
         }
@@ -2119,6 +2695,9 @@ mod tests {
                     pending: None,
                     in_flight: false,
                     problems: Vec::new(),
+                },
+                sections: Sections {
+                    collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
             };
@@ -2177,6 +2756,9 @@ mod tests {
                     in_flight: false,
                     problems: Vec::new(),
                 },
+                sections: Sections {
+                    collapsed: std::collections::BTreeSet::new(),
+                },
                 file_mode: false,
             };
             d.apply(Action::FilterPush('j'));
@@ -2222,6 +2804,9 @@ mod tests {
                     in_flight: false,
                     problems: Vec::new(),
                 },
+                sections: Sections {
+                    collapsed: std::collections::BTreeSet::new(),
+                },
                 file_mode: false,
             };
             d.apply(Action::Back);
@@ -2261,6 +2846,9 @@ mod tests {
                     pending: None,
                     in_flight: false,
                     problems: Vec::new(),
+                },
+                sections: Sections {
+                    collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
             };
@@ -2304,6 +2892,9 @@ mod tests {
                     in_flight: false,
                     problems: Vec::new(),
                 },
+                sections: Sections {
+                    collapsed: std::collections::BTreeSet::new(),
+                },
                 file_mode: false,
             };
             d3.apply(Action::Back);
@@ -2336,7 +2927,8 @@ mod tests {
                 ),
                 route,
                 quit: false,
-                selected: 0,
+                // `list-sections`: 1, not 0 — target 0 is the active header.
+                selected: 1,
                 filter,
                 refresh: crate::ui::app::Refresh {
                     requested: false,
@@ -2355,6 +2947,9 @@ mod tests {
                     pending: None,
                     in_flight: false,
                     problems: Vec::new(),
+                },
+                sections: Sections {
+                    collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
             }
@@ -2617,6 +3212,9 @@ mod tests {
                     in_flight: false,
                     problems: Vec::new(),
                 },
+                sections: Sections {
+                    collapsed: std::collections::BTreeSet::new(),
+                },
                 file_mode: false,
             };
             d.normalise_scroll(ratatui::layout::Rect::new(0, 0, 120, 20));
@@ -2654,6 +3252,9 @@ mod tests {
                     pending: None,
                     in_flight: false,
                     problems: Vec::new(),
+                },
+                sections: Sections {
+                    collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
             };
@@ -2693,6 +3294,9 @@ mod tests {
                     in_flight: false,
                     problems: Vec::new(),
                 },
+                sections: Sections {
+                    collapsed: std::collections::BTreeSet::new(),
+                },
                 file_mode: false,
             };
             d3.normalise_scroll(ratatui::layout::Rect::new(0, 0, 120, 40));
@@ -2729,7 +3333,8 @@ mod tests {
                     changes: crate::changes::fixture::set(vec![change], Vec::new(), Vec::new()),
                     route: Route::Detail,
                     quit: false,
-                    selected: 0,
+                    // `list-sections`: 1, not 0 — target 0 is the active header.
+                    selected: 1,
                     filter: empty_filter(),
                     refresh: crate::ui::app::Refresh {
                         requested: false,
@@ -2748,6 +3353,9 @@ mod tests {
                         pending: None,
                         in_flight: false,
                         problems: Vec::new(),
+                    },
+                    sections: Sections {
+                        collapsed: std::collections::BTreeSet::new(),
                     },
                     file_mode: false,
                 }
@@ -2811,6 +3419,9 @@ mod tests {
                     in_flight: false,
                     problems: Vec::new(),
                 },
+                sections: Sections {
+                    collapsed: std::collections::BTreeSet::new(),
+                },
                 file_mode: false,
             };
             d.normalise_scroll(ratatui::layout::Rect::new(0, 0, 60, 20));
@@ -2833,12 +3444,16 @@ mod tests {
             for c in ['a', 'd', 'd'] {
                 d.apply(Action::FilterPush(c));
             }
-            assert_eq!(d.selected, 1);
+            // `list-sections`: 3, not 1 — the query "add" matches one active
+            // change and one archived change, so targets are the active
+            // header, `add-token-refresh`, the archived header, and
+            // `add-auth`; the clamp lands on the last of those four.
+            assert_eq!(d.selected, 3);
             for _ in 0..3 {
                 d.apply(Action::FilterPop);
             }
             assert_eq!(d.visible_len(), 5);
-            assert_eq!(d.selected, 1);
+            assert_eq!(d.selected, 3);
         }
 
         #[test]
@@ -2930,6 +3545,9 @@ mod tests {
                     in_flight: false,
                     problems: Vec::new(),
                 },
+                sections: Sections {
+                    collapsed: std::collections::BTreeSet::new(),
+                },
                 file_mode: false,
             };
             let before = dashboard.clone();
@@ -3003,6 +3621,9 @@ mod tests {
                     in_flight: false,
                     problems: Vec::new(),
                 },
+                sections: Sections {
+                    collapsed: std::collections::BTreeSet::new(),
+                },
                 file_mode: false,
             }
         }
@@ -3017,7 +3638,8 @@ mod tests {
                     fixture::active("beta", 1, 4),
                     fixture::active("gamma", 2, 4),
                 ],
-                1,
+                // `list-sections`: 2, not 1 — target 0 is the active header.
+                2,
                 "",
             );
             assert_eq!(d.selected_change().unwrap().name, "gamma");
@@ -3032,7 +3654,8 @@ mod tests {
                 Vec::new(),
             ));
 
-            assert_eq!(d.selected, 2, "selected must still address gamma");
+            // `list-sections`: 3, not 2 — the header shifts every target by one.
+            assert_eq!(d.selected, 3, "selected must still address gamma");
             assert_eq!(d.selected_change().unwrap().name, "gamma");
             assert_eq!(d.detail.tab, 2, "adopt must not touch detail.tab");
             assert_eq!(d.detail.scroll, 6, "adopt must not touch detail.scroll");
@@ -3049,7 +3672,8 @@ mod tests {
                     fixture::active("beta", 1, 4),
                     fixture::active("gamma", 2, 4),
                 ],
-                2,
+                // `list-sections`: 3, not 2 — target 0 is the active header.
+                3,
                 "",
             );
             assert_eq!(d.selected_change().unwrap().name, "gamma");
@@ -3059,7 +3683,9 @@ mod tests {
                 Vec::new(),
                 Vec::new(),
             ));
-            assert_eq!(d.selected, 0, "the last visible index, not past the end");
+            // `list-sections`: 1, not 0 — the last target is the header (0)
+            // then `alpha` (1), the last valid index.
+            assert_eq!(d.selected, 1, "the last visible index, not past the end");
             assert_eq!(d.selected_change().unwrap().name, "alpha");
 
             // Adopting an empty set from there must not panic, and leaves
@@ -3081,7 +3707,9 @@ mod tests {
                     fixture::active("bcd", 1, 4),
                     fixture::active("xyz", 2, 4),
                 ],
-                1,
+                // `list-sections`: 2, not 1 — target 0 is the active header,
+                // and `xyz` is excluded by the query, so `bcd` is target 2.
+                2,
                 "b",
             );
             assert_eq!(
@@ -3112,8 +3740,10 @@ mod tests {
                 vec!["abc", "bxx", "bcd"],
                 "xyz must stay excluded by the untouched filter"
             );
+            // `list-sections`: 3, not 2 — the header shifts every target by
+            // one.
             assert_eq!(
-                d.selected, 2,
+                d.selected, 3,
                 "still addressing bcd in the new visible list"
             );
             assert_eq!(d.selected_change().unwrap().name, "bcd");
@@ -3132,7 +3762,7 @@ mod tests {
         }
 
         #[test]
-        fn dashboard_destructures_into_exactly_thirteen_fields() {
+        fn dashboard_destructures_into_exactly_fourteen_fields() {
             let d = dashboard_at(Route::List);
             let Dashboard {
                 repo,
@@ -3147,6 +3777,7 @@ mod tests {
                 agents,
                 agent_names,
                 launch,
+                sections,
                 file_mode: _,
             } = &d;
             assert_eq!(*repo, None);
@@ -3171,6 +3802,7 @@ mod tests {
             assert_eq!(launch.pending, None);
             assert!(launch.problems.is_empty());
             assert!(!launch.in_flight);
+            assert!(sections.collapsed.is_empty());
         }
 
         #[test]
@@ -3519,6 +4151,9 @@ mod tests {
                     in_flight: false,
                     problems: Vec::new(),
                 },
+                sections: Sections {
+                    collapsed: std::collections::BTreeSet::new(),
+                },
                 file_mode: false,
             };
             d.apply(Action::Next);
@@ -3567,6 +4202,9 @@ mod tests {
                     in_flight: false,
                     problems: Vec::new(),
                 },
+                sections: Sections {
+                    collapsed: std::collections::BTreeSet::new(),
+                },
                 file_mode: false,
             };
             d2.apply(Action::Prev);
@@ -3599,7 +4237,8 @@ mod tests {
                 changes: fixture::set(vec![change], Vec::new(), Vec::new()),
                 route: Route::Detail,
                 quit: false,
-                selected: 0,
+                // `list-sections`: 1, not 0 — target 0 is the active header.
+                selected: 1,
                 filter: empty_filter(),
                 detail: Detail {
                     source: String::new(),
@@ -3625,6 +4264,9 @@ mod tests {
                     pending: None,
                     in_flight: false,
                     problems: Vec::new(),
+                },
+                sections: Sections {
+                    collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
             }
@@ -3745,7 +4387,9 @@ mod tests {
                 changes: fixture::set(vec![a, b], Vec::new(), Vec::new()),
                 route: Route::Detail,
                 quit: false,
-                selected: 0,
+                // `list-sections`: 1, not 0 — target 0 is the active header,
+                // so `a` is target 1.
+                selected: 1,
                 filter: empty_filter(),
                 detail: Detail {
                     source: String::new(),
@@ -3772,6 +4416,9 @@ mod tests {
                     in_flight: false,
                     problems: Vec::new(),
                 },
+                sections: Sections {
+                    collapsed: std::collections::BTreeSet::new(),
+                },
                 file_mode: false,
             };
             let recorder = RecordingReader::always(Ok("text".to_string()));
@@ -3780,7 +4427,8 @@ mod tests {
             d.sync_detail(&read);
             d.apply(Action::NextTab);
             d.sync_detail(&read);
-            d.selected = 1;
+            // `list-sections`: 2, not 1 — target 1 is `a`, target 2 is `b`.
+            d.selected = 2;
             d.sync_detail(&read);
 
             assert_eq!(
@@ -3814,7 +4462,9 @@ mod tests {
                 changes: fixture::set(vec![active], vec![archived], Vec::new()),
                 route: Route::Detail,
                 quit: false,
-                selected: 0,
+                // `list-sections`: 1, not 0 — target 0 is the active header,
+                // so the active `add-auth` is target 1.
+                selected: 1,
                 filter: empty_filter(),
                 detail: Detail {
                     source: String::new(),
@@ -3841,6 +4491,9 @@ mod tests {
                     in_flight: false,
                     problems: Vec::new(),
                 },
+                sections: Sections {
+                    collapsed: std::collections::BTreeSet::new(),
+                },
                 file_mode: false,
             };
             let recorder = RecordingReader::new(
@@ -3861,7 +4514,10 @@ mod tests {
             let read = |p: &std::path::Path| recorder.read(p);
 
             d.sync_detail(&read);
-            d.selected = 1;
+            // `list-sections`: 3, not 1 — targets are the active header (0),
+            // the active `add-auth` (1), the archived header (2), and the
+            // archived `add-auth` (3).
+            d.selected = 3;
             d.sync_detail(&read);
 
             assert_eq!(recorder.calls(), 2);
@@ -3992,7 +4648,10 @@ mod tests {
                 changes: fixture::set(vec![five, two], Vec::new(), Vec::new()),
                 route: Route::Detail,
                 quit: false,
-                selected: 0,
+                // `list-sections`: 1, not 0 — target 0 is the active header;
+                // the query below narrows `visible()` to `two` alone, whose
+                // only remaining target is index 1.
+                selected: 1,
                 filter: empty_filter(),
                 detail: Detail {
                     source: String::new(),
@@ -4018,6 +4677,9 @@ mod tests {
                     pending: None,
                     in_flight: false,
                     problems: Vec::new(),
+                },
+                sections: Sections {
+                    collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
             };
@@ -4091,6 +4753,9 @@ mod tests {
                     pending: None,
                     in_flight: false,
                     problems: Vec::new(),
+                },
+                sections: Sections {
+                    collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
             };

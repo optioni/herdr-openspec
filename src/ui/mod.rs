@@ -454,6 +454,9 @@ pub fn load(start: &Path, _config: &Config, state_dir: Option<&Path>) -> Dashboa
                     in_flight: false,
                     problems: Vec::new(),
                 },
+                sections: crate::ui::app::Sections {
+                    collapsed: std::collections::BTreeSet::new(),
+                },
                 file_mode: false,
             }
         }
@@ -492,6 +495,9 @@ pub fn load(start: &Path, _config: &Config, state_dir: Option<&Path>) -> Dashboa
                 pending: None,
                 in_flight: false,
                 problems: Vec::new(),
+            },
+            sections: crate::ui::app::Sections {
+                collapsed: std::collections::BTreeSet::new(),
             },
             file_mode: false,
         },
@@ -653,7 +659,8 @@ mod tests {
                 changes: crate::changes::fixture::set(vec![change], Vec::new(), Vec::new()),
                 route: Route::Detail,
                 quit: false,
-                selected: 0,
+                // `list-sections`: 1, not 0 — target 0 is the active header.
+                selected: 1,
                 filter: Filter {
                     query: String::new(),
                     active: false,
@@ -682,6 +689,9 @@ mod tests {
                     pending: None,
                     in_flight: false,
                     problems: Vec::new(),
+                },
+                sections: crate::ui::app::Sections {
+                    collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
             }
@@ -798,7 +808,8 @@ mod tests {
                     changes: crate::changes::fixture::set(vec![change], Vec::new(), Vec::new()),
                     route: Route::Detail,
                     quit: false,
-                    selected: 0,
+                    // `list-sections`: 1, not 0 — target 0 is the active header.
+                    selected: 1,
                     filter: Filter {
                         query: String::new(),
                         active: false,
@@ -827,6 +838,9 @@ mod tests {
                         pending: None,
                         in_flight: false,
                         problems: Vec::new(),
+                    },
+                    sections: crate::ui::app::Sections {
+                        collapsed: std::collections::BTreeSet::new(),
                     },
                     file_mode: false,
                 };
@@ -942,7 +956,8 @@ mod tests {
                     ),
                     route: Route::Detail,
                     quit: false,
-                    selected: 0,
+                    // `list-sections`: 1, not 0 — target 0 is the active header.
+                    selected: 1,
                     filter: Filter {
                         query: String::new(),
                         active: false,
@@ -971,6 +986,9 @@ mod tests {
                         pending: None,
                         in_flight: false,
                         problems: Vec::new(),
+                    },
+                    sections: crate::ui::app::Sections {
+                        collapsed: std::collections::BTreeSet::new(),
                     },
                     file_mode: false,
                 }
@@ -1149,7 +1167,15 @@ apply:
                 // tracked-tasks tab (position 3 of the `tdd` schema), then
                 // quit cleanly — a run untouched by `/`, so its final
                 // buffer is the one the checklist grammar actually drew.
+                // `list-sections`: `load` still starts `selected` at 0, which
+                // now addresses the active section header rather than the
+                // change — a leading `j` moves the cursor onto the one
+                // active change before `Enter` opens it.
                 let mut stage1 = Script::new(vec![
+                    Ok(Some(press(
+                        ratatui::crossterm::event::KeyCode::Char('j'),
+                        ratatui::crossterm::event::KeyModifiers::NONE,
+                    ))),
                     Ok(Some(press(
                         ratatui::crossterm::event::KeyCode::Enter,
                         ratatui::crossterm::event::KeyModifiers::NONE,
@@ -1290,6 +1316,12 @@ apply:
                 let mut launch_dashboard = super::super::load(root, &config, None);
                 launch_dashboard.agents.reachable = true;
                 let mut launch_events = Script::new(vec![
+                    // `list-sections`: `load` starts `selected` on the active
+                    // section header; move onto the one active change first.
+                    Ok(Some(press(
+                        ratatui::crossterm::event::KeyCode::Char('j'),
+                        ratatui::crossterm::event::KeyModifiers::NONE,
+                    ))),
                     Ok(Some(press(
                         ratatui::crossterm::event::KeyCode::Char('a'),
                         ratatui::crossterm::event::KeyModifiers::NONE,
@@ -1719,23 +1751,13 @@ apply:
                 let _ = render_at(60, 20, dashboard);
             }
 
-            // A change **is** selected and nothing has been read yet — the
-            // header and tab bar are drawn (a change is selected) and the
-            // content area reads `No content yet` (`sync_detail` has not
-            // run), which is exactly the state `run_loop`'s first
-            // `sync_detail` replaces.
-            fn assert_detail_shows_header_and_no_content_yet_at_120(
-                dashboard: &crate::ui::app::Dashboard,
-                name: &str,
-            ) {
-                let buf = render_at(120, 20, dashboard);
-                assert!(row_text(&buf, 2).contains(name));
-                assert!(
-                    row_text(&buf, 4).trim_end().starts_with("No content yet")
-                        || row_text(&buf, 4).contains("No content yet")
-                );
-                let _ = render_at(60, 20, dashboard);
-            }
+            // `list-sections`: `ui::load` still starts `selected` at 0, which now
+            // addresses the active section header rather than a change (the header
+            // is target 0 whenever the section is non-empty), so `selected_change()`
+            // is `None` on a fresh load and the detail region is blank — the same
+            // state the not-found branch already produces, and the one
+            // `assert_detail_blank_at_120` above already checks. The reader reaches
+            // "No content yet" for a real change by moving the cursor there first.
 
             let scratch = ScratchDir::new();
             let root = scratch.path();
@@ -1762,7 +1784,7 @@ apply:
                 !found.refresh.reload,
                 "live-refresh: startup must not force a reload"
             );
-            assert_detail_shows_header_and_no_content_yet_at_120(&found, "alpha");
+            assert_detail_blank_at_120(&found);
 
             // The RepoSearch::NotFound arm is a second Dashboard
             // construction site and therefore a second place the field
@@ -3232,10 +3254,16 @@ esac
 
                 let before = snapshot(&root.join("openspec"));
 
+                // `list-sections`: `load` starts `selected` on the active section
+                // header; move onto the one active change before the launch key.
+                let stage0 = || true;
                 let stage1 = || log_lines(&herdr_log) >= 1;
                 let stage2 = || non_agent_list_lines(&herdr_log).len() >= 3;
-                let stages: Vec<(&dyn Fn() -> bool, ratatui::crossterm::event::Event)> =
-                    vec![(&stage1, key('a')), (&stage2, key('q'))];
+                let stages: Vec<(&dyn Fn() -> bool, ratatui::crossterm::event::Event)> = vec![
+                    (&stage0, key('j')),
+                    (&stage1, key('a')),
+                    (&stage2, key('q')),
+                ];
 
                 let (result, buf) =
                     run_wired_staged(width, root, &config, &herdr, Some(state.path()), stages);
@@ -3323,10 +3351,14 @@ esac
                     ..Config::default()
                 };
 
+                // `list-sections`: `load` starts `selected` on the active section
+                // header; move onto the one active change before the launch key.
+                let stage0 = || true;
                 let stage1 = || log_lines(&herdr_log) >= 1;
                 let stage2 = || agent_seen_in_a_later_poll(&herdr_log);
                 let stage3 = || non_agent_list_lines(&herdr_log).len() >= 4;
                 let stages: Vec<(&dyn Fn() -> bool, ratatui::crossterm::event::Event)> = vec![
+                    (&stage0, key('j')),
                     (&stage1, key('a')),
                     (&stage2, key('g')),
                     (&stage3, key('q')),
@@ -3493,10 +3525,16 @@ esac
                 ..Config::default()
             };
 
+            // `list-sections`: `load` starts `selected` on the active section
+            // header; move onto the one active change before the launch key.
+            let stage0 = || true;
             let stage1 = || log_lines(&herdr_log) >= 1;
             let immediately = || true;
-            let stages: Vec<(&dyn Fn() -> bool, ratatui::crossterm::event::Event)> =
-                vec![(&stage1, key('a')), (&immediately, key('q'))];
+            let stages: Vec<(&dyn Fn() -> bool, ratatui::crossterm::event::Event)> = vec![
+                (&stage0, key('j')),
+                (&stage1, key('a')),
+                (&immediately, key('q')),
+            ];
 
             let (result, _buf) =
                 run_wired_staged(120, root, &config, &herdr, Some(state.path()), stages);
@@ -4463,6 +4501,9 @@ esac
                         Some(state.path())
                     };
 
+                    // `list-sections`: `load` starts `selected` on the active
+                    // section header; move onto the one active change first.
+                    let stage0 = || true;
                     let stage1 = || log_lines(&herdr_log) >= 1;
                     let expected_calls = match case {
                         "refusal" => 0,
@@ -4475,9 +4516,17 @@ esac
                     let stage2 = || non_agent_list_lines(&herdr_log).len() >= expected_calls.max(1);
                     let stages: Vec<(&dyn Fn() -> bool, ratatui::crossterm::event::Event)> =
                         if expected_calls == 0 {
-                            vec![(&stage1, key('a')), (&stage1, key('q'))]
+                            vec![
+                                (&stage0, key('j')),
+                                (&stage1, key('a')),
+                                (&stage1, key('q')),
+                            ]
                         } else {
-                            vec![(&stage1, key('a')), (&stage2, key('q'))]
+                            vec![
+                                (&stage0, key('j')),
+                                (&stage1, key('a')),
+                                (&stage2, key('q')),
+                            ]
                         };
 
                     let (result, buf) =
