@@ -97,7 +97,7 @@ tier = "unit"
 proof = ["unmodelled_constructs_render_as_source"]
 verdict = "unproven"
 why = "ui::markdown::lines renders each unmodelled construct as literal source, one line per source line"
-covers = ["src/ui/markdown.rs:500-500"]
+covers = ["src/ui/markdown.rs:501-501"]
 
 [[row]]
 condition = "A tasks file exists and yields no task **items**"
