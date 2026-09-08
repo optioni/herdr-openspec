@@ -117,10 +117,10 @@
 ## 5. The detail header and content measure in columns
 <!-- kind: behavior -->
 
-- [ ] 5.1 RED: Write failing tests for A CJK change name keeps the header inside its region at both mandated widths, The header reaches the buffer without crossing the region border, The header is total over adversarial names at every width, `No content yet` does not eat the border at a narrow frame, A wide-character document stays inside the detail region, and No `content_lines` line exceeds its width at any width. Every new test names 58 and 78 bare.
-- [ ] 5.2 GREEN: Route `No content yet` through `ui::list::pad_or_truncate_right` at `width` in `src/ui/detail.rs:225`, and rewrite `header_row`'s cell widths, name-field budget, and band boundaries to measure in columns. The `awk | grep -c` reports 0, down from 4.
-- [ ] 5.3 REFACTOR: Restate the 13 existing `.chars().count()` width assertions in `src/ui/detail.rs`'s test module in columns; no pass/fail may move.
-- [ ] 5.4 Run `cargo test --lib ui::detail` and `sh scripts/gates/detailwidths.sh` — green, its mandated 58/78 pair unchanged.
+- [x] 5.1 RED: Write failing tests for A CJK change name keeps the header inside its region at both mandated widths, The header reaches the buffer without crossing the region border, The header is total over adversarial names at every width, `No content yet` does not eat the border at a narrow frame, A wide-character document stays inside the detail region, and No `content_lines` line exceeds its width at any width. Every new test names 58 and 78 bare.
+- [x] 5.2 GREEN: Route `No content yet` through `ui::list::pad_or_truncate_right` at `width` in `src/ui/detail.rs:225`, and rewrite `header_row`'s cell widths, name-field budget, and band boundaries to measure in columns. The `awk | grep -c` reports 0, down from 4.
+- [x] 5.3 REFACTOR: Restate the 13 existing `.chars().count()` width assertions in `src/ui/detail.rs`'s test module in columns; no pass/fail may move.
+- [x] 5.4 Run `cargo test --lib ui::detail` and `sh scripts/gates/detailwidths.sh` — green, its mandated 58/78 pair unchanged.
 
 ## 6. The draw loop advances by consumed columns
 <!-- kind: behavior -->
