@@ -32,11 +32,11 @@ echo "map=$rows lib=$mods"; [ "$rows" = "$mods" ]
 
 → `map=12 lib=13`, **exit 1 (RED)**. The unmapped module is `open`.
 
-- [ ] 1.1 CHECK: Capture the base SHA this change starts from into `openspec/changes/doc-conformance/notes/baseline.md` — `git rev-parse HEAD` — so tasks 10.3 and 12.9 have a defined `<base>`.
-- [ ] 1.2 RED: In a new `tests/doc_contract.rs`, write `module_map_matches_lib_rs` plus the pure-parser unit tests `map_missing_row`, `map_orphan_row`, `absent_heading`, and `missing_document` — the parser is `module_map_names(&str) -> Result<BTreeSet<String>, String>`, the module set comes from `pub_mod_names(&str)` over `src/lib.rs`, and `read_doc(path) -> Result<String, String>` returns `Err` naming the path when the file does not exist (`missing_document` drives it with a path that does not exist). Confirm `module_map_matches_lib_rs` fails naming `open` as declared but unmapped.
-- [ ] 1.3 GREEN: Add the `open` row to `SPEC.md`'s Module map, between `refresh` and `ui`, describing it as the `open` and `open-tab` subcommands that open or focus the dashboard pane through `herdr plugin pane`, and the crate's third `HerdrCli` consumer. Re-run 1.2's tests — green.
-- [ ] 1.4 REFACTOR: Lift `read_doc` and `section(&str, heading) -> Result<&str, String>` into the shared helpers the later groups reuse, keeping the tests green.
-- [ ] 1.5 Run `cargo test --test doc_contract` — green, no regressions. Commit.
+- [x] 1.1 CHECK: Capture the base SHA this change starts from into `openspec/changes/doc-conformance/notes/baseline.md` — `git rev-parse HEAD` — so tasks 10.3 and 12.9 have a defined `<base>`.
+- [x] 1.2 RED: In a new `tests/doc_contract.rs`, write `module_map_matches_lib_rs` plus the pure-parser unit tests `map_missing_row`, `map_orphan_row`, `absent_heading`, and `missing_document` — the parser is `module_map_names(&str) -> Result<BTreeSet<String>, String>`, the module set comes from `pub_mod_names(&str)` over `src/lib.rs`, and `read_doc(path) -> Result<String, String>` returns `Err` naming the path when the file does not exist (`missing_document` drives it with a path that does not exist). Confirm `module_map_matches_lib_rs` fails naming `open` as declared but unmapped.
+- [x] 1.3 GREEN: Add the `open` row to `SPEC.md`'s Module map, between `refresh` and `ui`, describing it as the `open` and `open-tab` subcommands that open or focus the dashboard pane through `herdr plugin pane`, and the crate's third `HerdrCli` consumer. Re-run 1.2's tests — green.
+- [x] 1.4 REFACTOR: Lift `read_doc` and `section(&str, heading) -> Result<&str, String>` into the shared helpers the later groups reuse, keeping the tests green.
+- [x] 1.5 Run `cargo test --test doc_contract` — green, no regressions. Commit.
 
 ## 2. Every module is named in the tested-modules section
 <!-- kind: behavior -->
@@ -168,12 +168,12 @@ No test: "does this file read as a live to-do list" has no second site, and this
 not invent a check for it (design.md → Decision 5, which also records why the file is
 corrected rather than deleted).
 
-- [ ] 8.1 CHECK: Confirm all three items in § "Known-deferred doc fixes" have landed — `grep -c 'Cargo.toml' AGENTS.md` is non-zero and no "no Cargo.toml" claim remains; `grep -c '^\[\[actions\]\]' herdr-plugin.toml` is `2`; `grep -c 'not here' openspec/IMPLEMENTATION-ORDER.md` is non-zero. Record each result.
-- [ ] 8.2 CHECK: Confirm the Environment section's claim is false — `cargo clippy --version` and `cargo llvm-cov --version` both exit 0.
-- [ ] 8.3 CHANGE: Delete § "Known-deferred doc fixes" and fold § "Deferred: sync README's keymap at the end of Phase 4" into the historical record, since Phase 4 closed and the keymap was synced.
-- [ ] 8.4 CHANGE: Correct § Environment so the clippy and `cargo-llvm-cov` line reads as fresh-machine setup rather than as current state.
-- [ ] 8.5 CHANGE: Add one line under the title stating the file is a closed record of a completed project, that open work lives in OpenSpec changes and is reported by `openspec list`, and that a section describing something as deferred is describing the past.
-- [ ] 8.6 VERIFY: `grep -n '^## ' HANDOFF.md` lists no heading that promises outstanding work, and the transferable findings (fork-is-not-a-sandbox, the per-subject `SCAN_MIN` floors, the outer-test finding, the `%G?` signing trap, the `gh` push procedure) are all still present. Commit.
+- [x] 8.1 CHECK: Confirm all three items in § "Known-deferred doc fixes" have landed — `grep -c 'Cargo.toml' AGENTS.md` is non-zero and no "no Cargo.toml" claim remains; `grep -c '^\[\[actions\]\]' herdr-plugin.toml` is `2`; `grep -c 'not here' openspec/IMPLEMENTATION-ORDER.md` is non-zero. Record each result.
+- [x] 8.2 CHECK: Confirm the Environment section's claim is false — `cargo clippy --version` and `cargo llvm-cov --version` both exit 0.
+- [x] 8.3 CHANGE: Delete § "Known-deferred doc fixes" and fold § "Deferred: sync README's keymap at the end of Phase 4" into the historical record, since Phase 4 closed and the keymap was synced.
+- [x] 8.4 CHANGE: Correct § Environment so the clippy and `cargo-llvm-cov` line reads as fresh-machine setup rather than as current state.
+- [x] 8.5 CHANGE: Add one line under the title stating the file is a closed record of a completed project, that open work lives in OpenSpec changes and is reported by `openspec list`, and that a section describing something as deferred is describing the past.
+- [x] 8.6 VERIFY: `grep -n '^## ' HANDOFF.md` lists no heading that promises outstanding work, and the transferable findings (fork-is-not-a-sandbox, the per-subject `SCAN_MIN` floors, the outer-test finding, the `%G?` signing trap, the `gh` push procedure) are all still present. Commit.
 
 ## 9. Negative controls for the legs that were green at HEAD
 <!-- kind: operational -->
