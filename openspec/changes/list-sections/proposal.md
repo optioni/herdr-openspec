@@ -103,9 +103,15 @@ already have owners.
 
 ### Modified Capabilities
 
+- `change-model`: `ChangeSet` gains `archived_total`, the archive's true size, because
+  `archived` is no longer always populated and a collapsed section's header still has to say
+  how many changes are behind it. Not predicted when this proposal was first written — it is
+  the field the "a collapsed section costs no work" rule above forces — and added here rather
+  than left for `design.md` to smuggle in.
 - `change-rows`: the separator becomes two section-header rows carrying a glyph, a label,
   and a count; a collapsed section suppresses its change rows; the emitted order is
-  restated with sections in it.
+  restated with sections in it. `RowKind::Separator` is replaced by
+  `RowKind::Section { key, depth, collapsed }`, which keeps the separator's palette role.
 - `list-selection`: a section header is addressable, and `Space` toggles the section the
   cursor is on or in.
 - `list-filtering`: a non-empty query forces both sections open and the reader's own
@@ -123,10 +129,13 @@ already have owners.
 
 - **Code:** `src/ui/list.rs` (row emission), `src/ui/app.rs` (collapse state, key mapping),
   `src/ui/driver.rs`, `src/ui/view.rs` (section-header styling), and — new since the cap
-  decision — `src/changes.rs` (the truncation and the carried total) and `src/refresh.rs`
-  (the signature and the conditional resolution). This change is no longer confined to
-  `src/ui/`, which is worth stating plainly: it now crosses into the data layer, and the
-  "views do no I/O" boundary is what keeps that crossing honest.
+  decision — `src/changes.rs` (the truncation, the carried total, and `ArchivedScope`) and
+  `src/refresh.rs` (the signature and the conditional resolution). This change is no longer
+  confined to `src/ui/`, which is worth stating plainly: it now crosses into the data layer,
+  and the "views do no I/O" boundary is what keeps that crossing honest.
+- **Gate floors:** `NODEFAULT-UI`'s view-layer type set gains `Sections`, so that leg's
+  `SCAN_MIN` on the `Makefile` line moves with it, and `notes/gate-floors.md` records the
+  new measurement beside the five it already holds.
 - **Docs:** `SPEC.md` → List view, → Keys, and → Resolution chain's `config.toml`
   description; `README.md`'s configuration table; `AGENTS.md`'s list-region description.
 - **Depends on `view-fidelity`.** Its `columns`/`truncate_columns` primitives and its
