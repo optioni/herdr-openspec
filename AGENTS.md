@@ -255,10 +255,15 @@ unreachable and the tests become integration tests by accident.
 - **Nothing spawns a process outside `cli`.** `src/cli.rs` is the one module in the
   crate permitted to name a process-spawn API (`process::Command`, `Command::new`,
   `Stdio`) — `OpenspecCli` and `HerdrCli` are traits whose real implementations spawn
-  and return stdout, and `RealOpenspecCli` alone also accepts a caller-supplied
-  working directory, the one lever that works because `openspec` resolves its own
-  root from the process's cwd and has no flag naming one. Parsing, merging, and
-  decisions live on the testable side of that seam. `src/agents.rs`, `src/launch.rs`,
+  and return stdout, and `RealOpenspecCli` alone also accepts two constructor
+  arguments neither trait decides for itself: a caller-supplied working directory,
+  the one lever that works because `openspec` resolves its own root from the
+  process's cwd and has no flag naming one, and a caller-supplied one-entry `PATH`
+  overlay, because `openspec` is an `#!/usr/bin/env node` shim installed beside the
+  very `node` it needs, so the probe chain reaches steps 3 and 4 exactly when the
+  child's inherited `PATH` cannot exec it — `RealHerdrCli` keeps both prohibitions.
+  Parsing, merging, and decisions live on the testable side of that seam.
+  `src/agents.rs`, `src/launch.rs`,
   and `src/open.rs` are the crate's **three** `HerdrCli` consumers, reaching it only
   through the trait object; none names a spawn API itself. This is checked, not
   aspirational: a tree-wide grep (`NOSPAWN-GREP`) excludes exactly `src/cli.rs` by path (never by
