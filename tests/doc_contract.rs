@@ -1087,9 +1087,10 @@ fn phrase_present(text: &str, phrase: &str) -> bool {
     while let Some(pos) = text[search_from..].find(phrase) {
         let abs = search_from + pos;
         let end = abs + phrase.len();
-        let boundary_ok = text.as_bytes().get(end).is_none_or(|&b| {
-            !(b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
-        });
+        let boundary_ok = text
+            .as_bytes()
+            .get(end)
+            .is_none_or(|&b| !(b.is_ascii_alphanumeric() || b == b'-' || b == b'_'));
         if boundary_ok {
             return true;
         }
@@ -1119,10 +1120,7 @@ fn fixture_claim_violation(context_text: &str, fixture_repo_exists: bool) -> Opt
 /// Returns the prerequisite targets left unrepresented, in `check:`'s own order. `Err` when the
 /// `Makefile` cannot be followed at all (reusing the same extraction rule as
 /// `check_programs` above: continuation-joining, then per-target recipe lines).
-fn unrepresented_check_targets(
-    context_text: &str,
-    makefile: &str,
-) -> Result<Vec<String>, String> {
+fn unrepresented_check_targets(context_text: &str, makefile: &str) -> Result<Vec<String>, String> {
     let logical_lines = join_continuations(makefile);
     let prerequisites = check_prerequisites(&logical_lines)?;
     if prerequisites.is_empty() {

@@ -44,11 +44,11 @@ context: |
   80% line coverage floor; if coverage falls short, add tests.
 
   Verification tiers: unit tests over the pure modules; view tests rendering into a
-  ratatui `TestBackend` at 60 and 120 columns; fixture repositories under
-  `tests/fixtures/`. Coverage is enforced at 80% of lines. Commands: `make check`, or
-  individually `cargo fmt --all -- --check`, `cargo clippy --all-targets
-  --all-features -- -D warnings`, `cargo test --all-features`, and `cargo llvm-cov
-  --fail-under-lines 80`.
+  ratatui `TestBackend` at 60 and 120 columns; run-time `crate::testutil::ScratchDir`
+  trees, `include_str!` corpora, and the committed `tests/fixtures/build-graph.txt`
+  tool-output snapshot. Coverage is enforced at 80% of lines. Commands: `make check`,
+  or individually `make fmt-check`, `make lint`, `make gates`, `make test`, and
+  `make coverage`.
 
 rules:
   proposal:
