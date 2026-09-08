@@ -156,11 +156,90 @@ pub fn split_detail(interior: Rect) -> (Rect, Rect, Rect) {
 mod tests {
     use crate::ui::app::Route;
     use crate::ui::layout::{
-        LayoutMode, WIDE_MIN_WIDTH, interior, mode, scroll_offset, split_body, split_detail,
-        split_frame, viewport,
+        LayoutMode, WIDE_MIN_WIDTH, columns, interior, mode, scroll_offset, split_body,
+        split_detail, split_frame, truncate_columns, viewport,
     };
+    use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;
+    use ratatui::style::Style;
     use ratatui::widgets::Block;
+
+    /// `responsive-layout` :: "`columns` agrees with what the buffer consumed" — the oracle
+    /// is `Buffer::set_stringn`'s own **return value**, never a first-blank-cell scan: a
+    /// reset cell is byte-identical to an untouched one, so a first-blank scan reports `1`
+    /// for `日本語`, for `🎉`, and for the family emoji, and a measurement built to satisfy
+    /// it would be wrong in exactly the direction this change exists to fix.
+    #[test]
+    fn columns_agrees_with_what_the_buffer_consumed() {
+        let family_emoji = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466}";
+        let cases: [&str; 8] = [
+            "abc",
+            "日本語",
+            "🎉",
+            "e\u{0301}",
+            family_emoji,
+            "\u{FF76}\u{FF9E}",
+            "\u{0007}",
+            "",
+        ];
+        for s in cases {
+            let mut buf = Buffer::empty(Rect::new(0, 0, 40, 1));
+            let (x, _y) = buf.set_stringn(0, 0, s, usize::MAX, Style::default());
+            assert_eq!(
+                columns(s) as u16,
+                x,
+                "columns({s:?}) must equal set_stringn's own returned x, the number of \
+                 cells it consumed"
+            );
+        }
+
+        assert_eq!(columns(""), 0);
+        assert_eq!(columns("\u{0007}"), 0);
+    }
+
+    /// `responsive-layout` :: "`truncate_columns` never splits a cluster and never
+    /// overruns" — the BEL fixture is what pins the byte-offset rule: `styled_graphemes`
+    /// drops the control cluster, so an implementation deriving its cut point from a
+    /// running sum of *returned* symbol lengths computes an offset shifted by the dropped
+    /// byte and slices mid-character.
+    #[test]
+    fn truncate_columns_never_splits_a_cluster_and_never_overruns() {
+        let sources: [(&str, usize); 3] = [
+            ("日本語の変更", 14),
+            ("abc🎉def", 10),
+            ("ab\u{0007}日本語", 10),
+        ];
+        for (source, max_max) in sources {
+            for max in 0..=max_max {
+                let got = truncate_columns(source, max);
+                assert!(
+                    columns(got) <= max,
+                    "truncate_columns({source:?}, {max}) = {got:?} measures more than {max}"
+                );
+                assert!(
+                    source.as_bytes().starts_with(got.as_bytes()),
+                    "truncate_columns({source:?}, {max}) = {got:?} is not a byte prefix of the \
+                     input"
+                );
+                // Re-slicing the input at the result's own length must not panic — the cut
+                // landed on a character boundary.
+                let _ = &source[..got.len()];
+            }
+        }
+
+        assert_eq!(truncate_columns("日本語の変更", 3), "日");
+        assert_eq!(columns(truncate_columns("日本語の変更", 3)), 2);
+
+        for (source, _) in sources {
+            assert_eq!(truncate_columns(source, 0), "");
+        }
+
+        for (source, _) in sources {
+            let whole = columns(source);
+            assert_eq!(truncate_columns(source, whole), source);
+            assert_eq!(truncate_columns(source, whole + 5), source);
+        }
+    }
 
     #[test]
     fn scroll_offset_is_exact_at_its_boundaries() {
