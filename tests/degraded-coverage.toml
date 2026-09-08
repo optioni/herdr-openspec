@@ -9,7 +9,7 @@ tier = "view"
 proof = ["no_repository_names_the_directory_searched"]
 verdict = "confirmed"
 why = "the list region renders the empty state naming the directory searched, via render_at"
-covers = ["src/ui/list.rs:255-274"]
+covers = ["src/ui/list.rs:300-322"]
 
 [[row]]
 condition = "`openspec` binary not found"
@@ -17,7 +17,7 @@ tier = "view"
 proof = ["file_mode_badge_is_dim_after_the_label", "badge_drops_whole_below_eighteen_columns"]
 verdict = "implemented"
 why = "the header renders a dim file mode badge, driven through render_at at both widths"
-covers = ["src/ui/view.rs:238-246"]
+covers = ["src/ui/view.rs:284-292"]
 
 [[row]]
 condition = "Schema unknown to the CLI"
@@ -57,7 +57,7 @@ tier = "view"
 proof = ["a_repository_with_no_changes_says_so"]
 verdict = "confirmed"
 why = "the list region's empty state, rendered through render_at"
-covers = ["src/ui/list.rs:356-362"]
+covers = ["src/ui/list.rs:405-412"]
 
 [[row]]
 condition = "A `/` filter matches no change"
@@ -65,7 +65,7 @@ tier = "view"
 proof = ["a_query_matching_nothing_names_itself"]
 verdict = "confirmed"
 why = "the filter's no-match rows, rendered through render_at"
-covers = ["src/ui/list.rs:363-374"]
+covers = ["src/ui/list.rs:413-426"]
 
 [[row]]
 condition = "Artifact file missing"
@@ -89,7 +89,7 @@ tier = "view"
 proof = ["an_empty_visible_list_leaves_the_whole_detail_interior_blank"]
 verdict = "confirmed"
 why = "the whole detail interior stays blank, rendered through render_at"
-covers = ["src/ui/view.rs:55-57"]
+covers = ["src/ui/view.rs:56-58"]
 
 [[row]]
 condition = "Markdown source holds a construct the parser does not model (a table, a footnote, strikethrough, a task-list item), on a tab **other** than the tracked-tasks one"
@@ -121,7 +121,7 @@ tier = "view"
 proof = ["repository_problems_are_named_above_the_rows"]
 verdict = "confirmed"
 why = "the list's leading problem row naming the unreadable directory, rendered through render_at"
-covers = ["src/ui/list.rs:352-354"]
+covers = ["src/ui/list.rs:401-403"]
 
 [[row]]
 condition = "An artifact's `generates` pattern falls outside the file path's supported glob subset"

@@ -200,9 +200,9 @@ assertion written here is RED by construction.
 - [x] 3.5 CHECK: Contract gate — `Row` gained a field. Confirm every construction and
       exhaustive pattern is inside `src/ui/list.rs`:
       `grep -rn 'Row *{' src | grep -v '^src/ui/list.rs'` returns nothing.
-- [ ] 3.6 REFACTOR: Collapse the two badge-column computations into one helper if they read
+- [x] 3.6 REFACTOR: Collapse the two badge-column computations into one helper if they read
       as duplication; otherwise state that no refactor was needed.
-- [ ] 3.7 Run the group tests — `cargo test --lib ui::list:: ui::view::` and `make gates` — no
+- [x] 3.7 Run the group tests — `cargo test --lib ui::list:: ui::view::` and `make gates` — no
       regressions.
 
 ## 4. The artifact tab bar becomes a row of chips

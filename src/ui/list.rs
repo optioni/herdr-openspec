@@ -172,7 +172,7 @@ fn active_style_row(
                 let name_field = pad_or_truncate_right(name, name_field_w as usize);
                 return (
                     format!("{marker} {name_field} {badge} {progress}"),
-                    Some((2 + name_field_w + 1) as u16),
+                    Some(badge_column(2, name_field_w)),
                 );
             }
         }
@@ -218,7 +218,7 @@ fn archived_row_text(
             let name_field = pad_or_truncate_right(name, name_field_w as usize);
             return (
                 format!("{marker} {date_field} {name_field} {badge} {progress}"),
-                Some((13 + name_field_w + 1) as u16),
+                Some(badge_column(13, name_field_w)),
             );
         }
     }
@@ -245,6 +245,18 @@ fn archived_row_text(
     // Drop the date field too: degenerate to the active grammar, with
     // neither a badge nor a progress cell ever offered.
     active_style_row(marker, name, None, None, width)
+}
+
+/// The badge's display column: the columns preceding the name field —
+/// `2` on an active row (the marker and its space), `13` on an archived one
+/// (those two plus the ten-column date field and its space) — then the name
+/// field itself, then its one separating space. One helper rather than two
+/// expressions, because the two grammars must agree: both put the badge two
+/// columns left of the progress cell, which is exactly what
+/// `a_badged_archived_row_reports_the_column_its_badge_occupies` asserts by
+/// comparing the two.
+fn badge_column(prefix: i64, name_field_w: i64) -> u16 {
+    (prefix + name_field_w + 1) as u16
 }
 
 /// A `Problem` row: `! `, then the text, truncated with `…` when the width
