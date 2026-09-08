@@ -63,10 +63,11 @@ cell SHALL be skipped rather than clamped, so no badge is ever drawn over a bord
   again at width `58`
 - **THEN** the row's `badge` is `Some(BadgeCell { x, status: Blocked })` and the character at
   `x` is `b` at both widths
-- **AND** `x` is one column further right than the name field's **last** column — that is,
-  `name_field_width + 14` from the interior's first column — and equals the badge column an
-  **active** row of the same width reports, so the ten-column date field is accounted for
-  without the two grammars disagreeing
+- **AND** `x` is `name_field_width + 14` from the interior's first column — the marker, its
+  space, the ten-column date field, its space, the name field, and the badge's own separating
+  space — and equals the badge column an **active** row of the same width reports, since both
+  grammars put the badge two columns left of the progress cell. The equality is what
+  discriminates: a date field forgotten on one side moves one of the two.
 
 #### Scenario: A dropped badge cell reports no badge
 

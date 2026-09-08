@@ -69,9 +69,12 @@ collaborator is replaced — the test copies the real tree.
       that file's first doc-comment line, a `plant_replace` appending
       `// use ratatui::style::Color;`, and
       `expect = "PALETTE FAIL: a ratatui Color is named outside"`. Verify with
-      `cargo test --test gate_controls palette` — RED at HEAD, because
-      `tests/gate_controls.rs` requires the unplanted baseline run to exit 0 and it exits 1
-      with `src/ui/palette.rs missing`.
+      `cargo test --test gate_controls catch_their_plants` — RED at HEAD, because
+      `gate_controls_catch_their_plants` requires each control's unplanted baseline run to
+      exit 0 and this one exits 1 with `src/ui/palette.rs missing`. **Not**
+      `cargo test --test gate_controls palette`: controls are table rows iterated by one
+      `#[test]`, so no test name contains `palette` and that filter runs zero tests
+      (`cargo test --test gate_controls palette -- --list` at HEAD → `0 tests`, exit 0).
 - [ ] 0.3 Confirm the failure is the missing module and not a misconfigured harness: the
       baseline-run assertion names `the exclusion has nothing to exclude`, and
       `cargo test --test ci_workflow` is **green**, so the recipe/script correspondence is
@@ -94,7 +97,8 @@ collaborator is replaced — the test copies the real tree.
       (its closing message becomes `eight pure view files`). Verify with `make gates` — both
       lines report the new counts.
 - [ ] 1.4 VERIFY: `/bin/sh scripts/gates/palette.sh` now exits 0, and
-      `cargo test --test gate_controls palette` is green — the outer-loop RED from group 0 is
+      `cargo test --test gate_controls` is green — all four of its tests, the
+      `gate_controls_catch_their_plants` loop included. The outer-loop RED from group 0 is
       closed by the module existing, which is what makes it an outer loop.
 - [ ] 1.5 REFACTOR: None expected — the module is one `match`. State so explicitly if nothing
       is extracted.
@@ -132,9 +136,14 @@ assertion written here is RED by construction.
 - [ ] 2.4 CHECK: Contract gate — re-inspect `palette::style`'s signature and its consumers.
       `ui::view` is the only one; confirm `grep -rn 'palette::' src | grep -v '^src/ui/view.rs'`
       returns only the `pub mod palette;` declaration.
-- [ ] 2.5 VERIFY: Every landed `Modifier::` assertion still passes **unedited** —
-      `grep -rn 'Modifier::' src tests | wc -l` → **32** at HEAD; the count may only grow, and
-      no existing line may change. This is design.md → Decision 3's falsifiable half.
+- [ ] 2.5 VERIFY: Every landed `Modifier::` **assertion** still passes unedited. The 32 lines
+      `grep -rn 'Modifier::' src tests | wc -l` reports at HEAD split into 13 production lines
+      and 19 inside `src/`'s test modules, with `tests/` contributing none:
+      `for f in $(find src -name '*.rs'); do awk '/^#\[cfg\(test\)\]/{exit} /Modifier::/{print}' $f; done | wc -l`
+      → **13**. Twelve of those 13 are the `add_modifier` call sites in `src/ui/view.rs` that
+      task 2.3 replaces by construction; the invariant is over the **19 test-module lines**,
+      which may grow but of which none may change. This is design.md → Decision 3's
+      falsifiable half.
 - [ ] 2.6 Run the group tests — `cargo test --lib ui::view::` — no regressions.
 
 ## 3. The agent badge cell and the problem row
@@ -206,9 +215,11 @@ last drawn column is **52**.
 ## 5. Acceptance Test — Outer Loop GREEN
 <!-- kind: behavior -->
 
-- [ ] 5.1 VERIFY: `cargo test --test gate_controls palette` passes end to end — the unplanted
-      baseline exits 0 and the planted `Color` in `src/ui/view.rs` exits non-zero naming that
-      file.
+- [ ] 5.1 VERIFY: `cargo test --test gate_controls` passes end to end — for control
+      `palette-outside`, the unplanted baseline exits 0 and the planted `Color` in
+      `src/ui/view.rs` exits non-zero naming that file. Confirm the control ran rather than
+      being filtered out: `gate_controls_every_script_has_a_control` fails if
+      `scripts/gates/palette.sh` has no row.
 - [ ] 5.2 REFACTOR: Clean up the control's plant text if it drifted from
       `src/ui/view.rs`'s current first doc-comment line; otherwise state that none was needed.
 
@@ -217,16 +228,27 @@ last drawn column is **52**.
 
 A gate's floor is its own script default, kept at the gate's true measured floor.
 
-- [ ] 6.1 CHECK: Re-measure the three test-count floors this change raises, with the commands
-      that produced the current defaults:
+- [ ] 6.1 CHECK: Re-measure the three **test-count** floors this change raises, with the
+      commands that produced the current defaults:
       `awk '/^#\[cfg\(test\)\]/{t=1} t&&/#\[test\]/{c++} END{print c}' src/ui/list.rs` → **39**
       at HEAD (`LIST_MIN` default 39); the same over `src/ui/detail.rs` → **38**
       (`DETAIL_MIN` 38) and over `src/ui/view.rs` → **101** (`WIDTHS_MIN` 101).
-- [ ] 6.2 CHANGE: Raise `LIST_MIN`, `DETAIL_MIN`, and `WIDTHS_MIN`'s **script defaults** to
-      the newly measured counts, and add a `MIN` default line to `scripts/gates/palette.sh`
-      only if the file count moved. Do not pass an override on a `Makefile` line.
-- [ ] 6.3 VERIFY: `make gates` — every gate reports OK and each floor equals its measured
-      count, so a deleted test fails the next run.
+- [ ] 6.2 CHECK: Re-measure the seven **file-count** floors that `src/ui/palette.rs` moves.
+      Each is at its exact measured value today and would be one short after the file lands:
+      `find src -name '*.rs' | wc -l` → **25** and `find src/ui -name '*.rs' | wc -l` → **11**
+      at HEAD, giving `mdseam.sh MIN=24`, `nospawn-grep.sh MIN=24`, `nolit-change.sh MIN=24`
+      (each `25 − 1` excluded file), `noblock.sh`, `nocli-shell.sh`, `readonly-ui.sh`
+      `UI_MIN=11`, and `readseam.sh UI_MIN=10`. Each rises by one.
+- [ ] 6.3 CHANGE: Raise all ten **script defaults** to the newly measured counts. Do not pass
+      an override on a `Makefile` line. `scripts/gates/palette.sh`'s own `MIN=25` already
+      accounts for the new file and does not move.
+- [ ] 6.4 CHECK: Re-run `make coverage` and read `scripts/coverage-prod.py`'s reported
+      production-slice percentage against its `DEFAULT_PROD_MIN = 96`
+      (`grep -n DEFAULT_PROD_MIN scripts/coverage-prod.py` → line 84). Raise the default to
+      the newly measured floor if the fully-covered palette module lifts it past 97; leave it
+      alone otherwise. Never lower it.
+- [ ] 6.5 VERIFY: `make gates` — every gate reports OK and each floor equals its measured
+      count, so a deleted test or a deleted file fails the next run.
 
 ## 7. Change Review
 <!-- kind: operational -->
@@ -259,11 +281,17 @@ A gate's floor is its own script default, kept at the gate's true measured floor
       implementing a view). This is net-new, ~25 lines; it replaces nothing because `SPEC.md`
       has no styling section today, and it is what makes a future "which colour means what"
       question answerable without reading the match arm.
-- [ ] 8.4 Rewrite in `SPEC.md`: the `ui` row of the module map (audience: same) — name the
+- [ ] 8.4 Rewrite in `SPEC.md`: § User interface, the sentence at `SPEC.md:434-437` reading
+      "`1`-`9` select the first nine positions directly; a tenth position and beyond carry no
+      digit in their label" (audience: anyone implementing a view). Its contrast is false once
+      no label carries a digit. Nothing binds it — `tests/doc_contract.rs`'s legs are the
+      module map, § Unit-tested modules, the worker-thread count, the MSRV, the gate-path
+      programs, the manifest transcription, and the injected context — so a human must.
+- [ ] 8.5 Rewrite in `SPEC.md`: the `ui` row of the module map (audience: same) — name the
       palette among that module's responsibilities. `tests/doc_contract.rs` binds the module
       map to `src/lib.rs`'s `pub mod` set, which `ui::palette` does not join, so this row is
       the only place the new module is discoverable.
-- [ ] 8.5 VERIFY: `cargo test --test doc_contract` — green.
+- [ ] 8.6 VERIFY: `cargo test --test doc_contract` — green.
 
 ## 9. Lint & Verify
 <!-- kind: operational -->

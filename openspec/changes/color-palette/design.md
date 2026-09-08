@@ -143,9 +143,16 @@ Four tiers, all inside `cargo test` except the gate recipe:
   content but re-run because the gate list grows.
 
 **This change takes the outer-loop acceptance test.** It is
-`tests/gate_controls.rs::palette_confinement` — the planted `use ratatui::style::Color;` in
-`src/ui/view.rs` that the new gate must reject. That is the one claim of this change that no
-unit test can make, because it is a claim about *every file that does not exist yet*.
+`tests/gate_controls.rs::gate_controls_catch_their_plants` running the new `palette-outside`
+control — the planted `use ratatui::style::Color;` in `src/ui/view.rs` that the new gate must
+reject. That is the one claim of this change that no unit test can make, because it is a claim
+about *every file that does not exist yet*.
+
+The test **name** matters, because controls are table rows in `tests/gate-controls.toml`
+iterated by a single `#[test]` rather than one test function each. No test name will ever
+contain `palette`, so `cargo test --test gate_controls palette` runs **zero** tests and exits
+0 — a filter that vouches for nothing. Every task below names
+`cargo test --test gate_controls` or `... catch_their_plants` instead.
 
 | Spec Scenario | Verification | Tier | Collaborators | Command |
 |---|---|---|---|---|
@@ -237,6 +244,15 @@ asserts a cell's colour by comparing it against `palette::style(role)`, and the 
 is asserted once, in the palette's own tests. That is not a weakness of the confinement — it
 is the same discipline applied one level up: a test naming `Color::Green` beside a palette
 saying `Green` is two declarations of one fact, and the comparison form has only one.
+
+The obvious objection is that `assert_eq!(cell.style().fg, palette::style(Role::X).fg)` is
+tautological. It is not, because it is half a pair. It falsifies "the view applied the role"
+— a view that forgot the role gives `None` against a `Some` — while the palette's own
+table-driven test falsifies "the role carries the right colour", against literals, in the one
+file allowed to write them. Neither half alone is sufficient and the spec requires both. The
+rejected alternative is a production-slice `awk` cut in `palette.sh` (`colwidth.sh`'s
+precedent), which would let a view test name `Color::Green` directly: cheaper, but it puts a
+second copy of the colour table in the test module, where it goes stale silently.
 
 **Decision 3 — this change adds, removes, and alters no modifier anywhere.**
 Colour is added strictly beside the existing modifier. The payoff is a falsifiable claim
