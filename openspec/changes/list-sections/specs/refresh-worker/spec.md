@@ -16,7 +16,10 @@ pub trait Refresher {
 fold state to the worker on every request, because the section can be folded and unfolded at
 any moment and the scope is therefore a property of the cycle rather than of the worker. It
 is `Dashboard::archived_scope()` — `Full` when the archived section is effectively open,
-`Names` when it is not — and `dashboard-loop`'s step 3 is what reads it. The two internal
+`Names` when it is not. `dashboard-loop`'s loop requirement is what reads it, at **both** of
+its `request` call sites — step 2, the `refresh.requested` path, and step 3, the
+`fs.drain()` → `watch::invalidate` path — since a watch event that arrives while the archive
+is open must resolve it too. The two internal
 values a request carries SHALL be one named value, `refresh::Request { selection,
 archived }`, so the folding rule below has one thing to fold.
 

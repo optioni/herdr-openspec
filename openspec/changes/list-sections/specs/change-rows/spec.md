@@ -83,8 +83,8 @@ through the same `pad_or_truncate_right` every other row uses, so it measures ex
 display columns at every width including `0`. The `glyph` is `v` when the section is open and
 `>` when it is collapsed; the `label` is the literal `active` or `archived`; the count is the
 decimal count in parentheses. A section header at 38 columns therefore reads
-`  v active (9)` followed by twenty-five spaces, and `  > archived (22)` followed by
-twenty-one. No cell is dropped whole and no field is right-aligned: unlike a change row the
+`  v active (9)` followed by twenty-four spaces — the header is fourteen display columns —
+and `  > archived (22)`, seventeen columns, followed by twenty-one. No cell is dropped whole and no field is right-aligned: unlike a change row the
 header is one label, and truncating it with `…` is the whole of its degradation.
 
 The `>` glyph and the `>` selection marker are the same character in different columns —
@@ -165,33 +165,41 @@ row — including a launch problem, the `No changes yet`, `No active changes`,
 `No changes match`, and no-repository rows — carries no badge cell and no reserved column, at
 any width and whatever `badges` holds.
 
+**Row numbering in this capability's scenarios** is the rendered **buffer** row, 0-based, so
+row 1 is the region's top border and row 2 is the interior's first row at the mandated
+frames. Every scenario below that asserts a row index uses that one convention, and every
+scenario that asserts a selection marker states `selected` in its WHEN, because the marker
+now follows a cursor that can rest on a section header.
+
 #### Scenario: Active rows render at both mandated widths
 
 - **WHEN** a `Dashboard` whose repository root is `/tmp/demo-repo` and whose
   `changes.active` is, in order, `add-token-refresh` at 4 of 9 tasks, `fix-empty-basket`
   at 7 of 7, and `migrate-ai-sdk-v7` at 0 of 0, with no archived changes, no problems of
-  either kind, an empty filter query, `selected` 0, and **no agents**, is rendered into a
-  `TestBackend` at 120x20 and again at 60x20
-- **THEN** in the 120-column buffer the 38 cells of row 2, columns 1 through 38, spell
-  exactly `> add-token-refresh              [4/9]`; row 3 spells
-  `  fix-empty-basket               [7/7]`; and row 4 spells
+  either kind, an empty filter query, `selected` **1** — the first change, since target 0 is
+  now the active section header — and **no agents**, is rendered into a `TestBackend` at
+  120x20 and again at 60x20
+- **THEN** in both buffers row 2 is the active section header, exactly `  v active (3)`
+  padded to the interior width
+- **AND** in the 120-column buffer the 38 cells of row 3, columns 1 through 38, spell
+  exactly `> add-token-refresh              [4/9]`; row 4 spells
+  `  fix-empty-basket               [7/7]`; and row 5 spells
   `  migrate-ai-sdk-v7                [-]`
-- **AND** in the 60-column buffer the 58 cells of row 2, columns 1 through 58, spell
-  exactly `> add-token-refresh                                  [4/9]`; row 3 spells
-  `  fix-empty-basket                                   [7/7]`; and row 4 spells
+- **AND** in the 60-column buffer the 58 cells of row 3, columns 1 through 58, spell
+  exactly `> add-token-refresh                                  [4/9]`; row 4 spells
+  `  fix-empty-basket                                   [7/7]`; and row 5 spells
   `  migrate-ai-sdk-v7                                    [-]`
-- **AND** in both buffers interior row 1 is the active section header — exactly
-  `  v active (3)` padded to the interior width — so the three change rows begin at interior
-  row 2
-- **AND** in both buffers every cell of interior rows 5 through 17 is a space, so exactly
-  four rows were drawn and nothing was repeated into the remaining height
+- **AND** in both buffers every cell of rows 6 through 17 is a space, so exactly four rows
+  were drawn and nothing was repeated into the remaining height
 - **AND** the three change rows are byte-identical to the ones the same dashboard produced
-  before `list-sections` existed, and byte-identical to the ones it produced before
-  `agent-attribution` added the badge cell: an empty `refresh.problems` costs no row, an
-  empty `badges` costs no column, and the section header is the one row this change adds
-- **AND** the same dashboard with the active section **collapsed** renders interior row 1 as
-  exactly `  > active (3)` padded to the interior width, with no change name anywhere in
-  either buffer, so the header's count is the tier's size and not the number of rows drawn
+  before `list-sections` existed at `selected` 0, and byte-identical to the ones it produced
+  before `agent-attribution` added the badge cell: an empty `refresh.problems` costs no row,
+  an empty `badges` costs no column, and the section header is the one row this change adds
+- **AND** the same dashboard at `selected` **0** puts the `>` marker on the header row and a
+  space in column 0 of all three change rows, so the marker follows the cursor onto a section
+- **AND** the same dashboard with the active section **collapsed** renders row 2 as exactly
+  `  > active (3)` padded to the interior width, with no change name anywhere in either
+  buffer, so the header's count is the tier's size and not the number of rows drawn
 
 #### Scenario: A badged row carries its status between the name and the progress cell
 
@@ -200,15 +208,15 @@ any width and whatever `badges` holds.
   agent named `fix-empty-basket`, and an in-scope agent named `migrate-ai-sdk-v7` whose status
   is `AgentStatus::Unknown` — what `agent-list` decodes an unrecognised or absent
   `agent_status` string to
-- **THEN** in the 120-column buffer the 38 cells of row 2 spell exactly
-  `> add-token-refresh            w [4/9]`; row 3 spells
-  `  fix-empty-basket             b [7/7]`; and row 4 spells
+- **THEN** in the 120-column buffer the 38 cells of row 3 spell exactly
+  `> add-token-refresh            w [4/9]`; row 4 spells
+  `  fix-empty-basket             b [7/7]`; and row 5 spells
   `  migrate-ai-sdk-v7              ? [-]`
 - **AND** in the 60-column buffer each of the three rows is exactly 58 characters, the
   progress cell still ends in the interior's last column, and the badge sits two columns to
   the left of the progress cell's first column: interior column **51** (0-based, the 52nd cell
-  of the interior) holds `w` in row 2 and `b` in row 3, whose progress cells are five columns
-  wide, and interior column **53** holds `?` in row 4, whose `[-]` cell is three — the badge
+  of the interior) holds `w` in row 3 and `b` in row 4, whose progress cells are five columns
+  wide, and interior column **53** holds `?` in row 5, whose `[-]` cell is three — the badge
   tracks the progress cell rather than occupying a fixed column, exactly as the name field
   already does
 - **AND** in each of those three rows the column on either side of the badge is a space
@@ -241,7 +249,9 @@ any width and whatever `badges` holds.
   120x20 and at 60x20
 - **THEN** the list interior's row 0 begins `! herdr pane split exited` at both widths, its
   row 1 begins `! filesystem watch unavailable`, its row 2 begins
-  `! openspec/changes unreadable`, and its row 3 is the change row
+  `! openspec/changes unreadable`, its row 3 is the active section header `  v active (1)`,
+  and its row 4 is the change row — the one place this scenario counts from the interior's
+  own first row rather than from the buffer's, as it always has
 - **AND** the same dashboard with `launch.problems` emptied renders rows 0, 1, and 2
   byte-identically to the two-problem list this scenario specified before `agent-launch`
   existed, so a pane that has launched nothing gains no row
@@ -261,7 +271,8 @@ any width and whatever `badges` holds.
 #### Scenario: The row grammar places the marker, the name, and the progress cell
 
 - **WHEN** `ui::list::rows` is called at widths 38 and 58 for the same three-change
-  dashboard
+  dashboard at `selected` 1, and the three `RowKind::Item` rows it returns are asserted —
+  `rows()[1]`, `[2]` and `[3]`, below the active section header at `[0]`
 - **THEN** every returned `Row`'s text is exactly the requested width in characters — 38
   and 58 respectively — so a row is padded rather than short
 - **AND** each row is column 0 a selection marker (`>` for the selected change, a space
@@ -279,10 +290,10 @@ any width and whatever `badges` holds.
 - **WHEN** a `Dashboard` whose only active change is
   `a-very-long-change-name-that-will-not-fit-here` — 46 characters — at 2 of 5 tasks is
   rendered at 120x20 and at 60x20, with no agents
-- **THEN** the 120-column buffer's row 2, columns 1 through 38, spells exactly
+- **THEN** the 120-column buffer's row 3, columns 1 through 38, spells exactly
   `  a-very-long-change-name-that-… [2/5]`, so the name was cut to the field width less
   one and an `…` appended, and the progress cell was **not** truncated
-- **AND** the 60-column buffer's row 2, columns 1 through 58, spells exactly
+- **AND** the 60-column buffer's row 3, columns 1 through 58, spells exactly
   `  a-very-long-change-name-that-will-not-fit-here     [2/5]`, with no `…` anywhere in
   that row, so the truncation at 38 columns is a width branch rather than unconditional
 - **AND** rendering the same dashboard again with an in-scope `Working` agent carrying that
@@ -293,9 +304,11 @@ any width and whatever `badges` holds.
 
 #### Scenario: A field too narrow for both drops the progress cell whole
 
-- **WHEN** `ui::list::rows` is called for a single selected active change named `alpha` at
-  4 of 9 tasks carrying a `Working` badge, at widths 12, 11, 10, 9, 8, 1, and 0, and — as the
-  contrasting controls at the mandated interiors — at 38 and 58
+- **WHEN** `ui::list::rows` is called for a dashboard holding one active change named `alpha`
+  at 4 of 9 tasks carrying a `Working` badge, with `selected` **1** so the cursor is on the
+  change rather than on the active section header above it, at widths 12, 11, 10, 9, 8, 1,
+  and 0, and — as the contrasting controls at the mandated interiors — at 38 and 58; every
+  assertion below is about the **change** row, `rows()[1]`
 - **THEN** at width 12 the row is exactly `> a… w [4/9]` — the name field is
   two columns and the badge still fits; at width 11 it is exactly `> … w [4/9]`
 - **AND** at width 10 the badge and its separating space are dropped **whole** and the row is
@@ -310,6 +323,411 @@ any width and whatever `badges` holds.
 - **AND** the same holds with a `refresh.problems` entry present: its row degrades by the
   same `pad_or_truncate_right` rule at widths 1 and 0, and neither panics
 
+
+### Requirement: The list region names every empty and degraded body state
+
+When `dashboard.repo` is `None` the list region's interior SHALL hold exactly three rows
+and no change rows: `No OpenSpec repository found`, then `searched from:`, then
+`dashboard.searched_from`'s display path shortened to the interior width by the same
+keep-the-tail rule the header uses — whole when it fits, otherwise `…` followed by the
+longest suffix ending on a grapheme-cluster boundary that measures at most *width − 1*
+**display columns**, then padded back to exactly `width` columns. This is `SPEC.md` →
+Degraded states, row "No `openspec/` found while walking up".
+
+The two functions that implement that rule are `ui::list::shorten_left` — un-padded, shared
+with `responsive-layout`'s header, which right-aligns it within its own remaining space — and
+`ui::list::shorten_left_row`, which is `shorten_left` padded to the full row. Both SHALL
+measure and shorten in display columns.
+
+When `dashboard.repo` is `Some`, the interior SHALL hold:
+
+- exactly one `Message` row reading `No changes yet` when **both section counts are zero**
+  and the filter query is empty;
+- exactly one `Message` row reading `No changes match` followed by one row holding `/` and
+  the query when both section counts are zero and the query is non-empty;
+- one `Message` row reading `No active changes` in place of the active rows when the
+  **active** section's count is zero and the archived section's is greater than zero,
+  followed by the archived section header and — when that section is open — its rows;
+  `SPEC.md` → Degraded states, row "No active changes: empty state; archived changes remain
+  browsable".
+
+Each state is keyed on the section **counts** `change-rows`' emission requirement defines,
+never on how many rows are drawn. That distinction is `list-sections`' correction and it is
+load-bearing in both directions. A **collapsed but populated** section contributes no visible
+changes, so a visibility-keyed rule would render `  > active (9)` immediately followed by
+`No active changes`, and would render `No changes yet` above `  > archived (28)` in a
+repository whose only changes are archived — the same dishonesty the cap this change removes
+was condemned for. A section whose count is zero emits no header, so no state can show a
+header and its own contradiction together.
+
+Every entry of `dashboard.changes.problems` SHALL be rendered as a leading row: `!`, a
+space, then the problem text, truncated with `…` to the interior width. This is where the
+degraded-states rows that record a reason on `ChangeSet::problems` — an unreadable
+`openspec/changes/` or `archive/` — become visible; nothing else in the plugin renders
+them.
+
+A `Problem` row's text field is the interior width less its two-column `! ` prefix; a
+`Message` row has no prefix and its field is the whole width. Both SHALL be padded with
+spaces when short and truncated from the right with `…` when long, by the same rule the
+name field uses, and both SHALL follow the same drop-whole rule the change rows do: below
+three columns a `Problem` row is `! ` truncated to the first `width` **display columns**, and
+at every width — including `0`, `1`, and `2` — every row of every kind, `Section`,
+`Problem`, `Section`, and `Message` included, SHALL be **exactly** `width` **display
+columns**.
+
+The indexing guarantee that sentence used to carry is narrowed here, deliberately, because
+display columns are the honest unit and a `char` index is not one: a caller may take the
+first `n` **columns** of a row with `layout::truncate_columns` for any `n <= width` and get a
+whole prefix back, but SHALL NOT index a row by `char` or by byte and assume `width` of them
+exist. For an all-ASCII row — every row this repository produces today — the two are the same
+count, which is why no landed assertion moves.
+
+The no-repository block SHALL replace **every** other row, problem rows included. That is
+not a conflict to resolve at render time: `ui::load` produces `changes::empty_set()`
+whenever `find_repo` reports `NotFound`, so a `Dashboard` with `repo: None` and a
+non-empty `changes.problems` is not a value the composition root can build. Stating the
+precedence anyway keeps `rows` total over every `Dashboard` value a test can construct.
+
+`ui::view::render` SHALL still draw a bordered `Changes` region in every one of these
+states. No state SHALL replace the frame with an error screen.
+
+#### Scenario: No repository names the directory searched, at both widths
+
+- **WHEN** a `Dashboard` whose `repo` is `None`, whose `searched_from` is
+  `/home/dev/workspaces/openspec-demos/a-rather-long-repository-name-here` — seventy
+  characters — and whose `changes` is `changes::empty_set()`, is rendered at 120x20 and at
+  60x20
+- **THEN** the 120-column buffer's interior rows 2, 3, and 4 at columns 1 through 38 begin
+  `No OpenSpec repository found`, `searched from:`, and
+  `…os/a-rather-long-repository-name-here` respectively
+- **AND** the 60-column buffer's interior rows 2, 3, and 4 at columns 1 through 58 begin
+  `No OpenSpec repository found`, `searched from:`, and
+  `…kspaces/openspec-demos/a-rather-long-repository-name-here`
+- **AND** in both buffers row 1 still holds `┌` at the region's first column and the title
+  `Changes`, so the empty state renders inside the frame rather than replacing it
+
+#### Scenario: A repository with no changes at all
+
+- **WHEN** a `Dashboard` whose `repo` is `Some("/tmp/demo-repo")`, whose `changes` is
+  `changes::empty_set()`, and whose filter query is empty is rendered at 120x20 and at
+  60x20
+- **THEN** in both buffers the first interior row begins `No changes yet`
+- **AND** neither buffer contains `-- archived`, `No active changes`, or `No changes match`
+
+#### Scenario: No active changes with archived ones still browsable
+
+- **WHEN** a `Dashboard` whose `changes.active` is empty, whose `changes.archived` holds
+  `add-auth` dated `2026-08-14` at 7 of 7, whose `archived_total` is 1, and whose archived
+  section is **open**, is rendered at 120x20 and at 60x20
+- **THEN** in both buffers the first interior row begins `No active changes`, the second is
+  exactly `  v archived (1)` padded to the interior width, and the third is the `add-auth` row
+- **AND** neither buffer contains `No changes yet`, so the two empty states are
+  distinguished rather than sharing one message
+- **AND** no active section header is emitted, because that section's count is zero
+
+#### Scenario: A collapsed but non-empty archive is not "no changes yet"
+
+- **WHEN** a `Dashboard` whose `changes.active` is empty, whose `changes.archived` is empty,
+  whose `archived_total` is 28, and whose archived section is **collapsed**, is rendered at
+  120x20 and at 60x20
+- **THEN** in both buffers the first interior row begins `No active changes` and the second is
+  exactly `  > archived (28)` padded to the interior width
+- **AND** neither buffer contains `No changes yet`: the archived section's count is 28, not
+  zero, even though it contributes no visible change and no row
+- **AND** neither buffer contains `No changes match`, because the query is empty
+
+#### Scenario: A collapsed active section shows its header and no message row
+
+- **WHEN** a `Dashboard` with nine active changes, no archive, and the **active** section
+  collapsed is rendered at 120x20 and at 60x20
+- **THEN** in both buffers the first interior row is exactly `  > active (9)` padded to the
+  interior width
+- **AND** neither buffer contains `No active changes`, `No changes yet`, or any change name:
+  the message rows are keyed on the section's count of nine, not on its zero visible rows
+- **AND** expanding the same section renders `  v active (9)` followed by the nine rows, so
+  the absence of a message row is the fold rather than the changes being gone
+
+#### Scenario: Repository-level problems are named above the rows
+
+- **WHEN** a `Dashboard` whose `changes.problems` holds the single entry
+  `openspec/changes: Permission denied (os error 13)` and whose `changes.active` holds
+  `fix-empty-basket` at 7 of 7 is rendered at 120x20 and at 60x20
+- **THEN** in the 120-column buffer interior row 2 at columns 1 through 38 spells exactly
+  `! openspec/changes: Permission denied…` — the two-character `! ` prefix, then the
+  problem text's first thirty-five characters, then `…` — and interior row 3 is the
+  `fix-empty-basket` row
+- **AND** in the 60-column buffer interior row 2 at columns 1 through 58 spells
+  `! openspec/changes: Permission denied (os error 13)` followed by spaces, with no `…`, so
+  the truncation at 38 columns is a width branch
+- **AND** in both buffers the region is still the bordered `Changes` block, not an error
+  screen
+
+
+### Requirement: Every cell of the row grammar is measured in display columns
+
+Every field of every row this capability defines — the name field, an archived row's date
+field, the badge cell, the progress cell, the `! `-prefixed problem row, the `Message` rows,
+and the no-repository block's shortened `searched_from` — SHALL be laid out, padded, and
+truncated in **display columns** as `responsive-layout` defines them, never in `char`s and
+never in bytes. `ui::list` SHALL reach that measure only through `layout::columns` and
+`layout::truncate_columns`.
+
+`ui::list::pad_or_truncate_right(text, width)` — the crate's one right-truncation
+implementation, shared with `ui::detail`'s header, tab bar, and problem-line grammar — SHALL
+return a string measuring **exactly `width` display columns** in both of its arms:
+
+- when `layout::columns(text) <= width`, `text` followed by `width - layout::columns(text)`
+  spaces;
+- when it is longer and `width` is at least 1, `layout::truncate_columns(text, width - 1)`,
+  then `…`, then **as many further spaces as are needed to reach exactly `width`
+  columns**. That trailing pad is new and load-bearing: `truncate_columns` drops a grapheme
+  cluster whole, so the prefix measures `width - 1` or `width - 2`, and without the pad a row
+  whose name ends in a wide cluster would be one column short of the interior and leave a
+  stale cell behind it;
+- when `width` is `0`, the empty string.
+
+`ui::list::shorten_left` — the keep-the-tail rule the no-repository block and
+`responsive-layout`'s header share — SHALL likewise keep the longest **suffix ending on a
+grapheme-cluster boundary** that measures at most `width - 1` columns, prefixed with `…`. It
+SHALL NOT pad, exactly as it does not today; the header right-aligns it within its own
+remaining space. `ui::list::shorten_left_row`, the padded form the no-repository block's
+third row uses, SHALL pad the result back to exactly `width` display columns — a third
+measuring site, named here because it is easy to miss beside its un-padded sibling.
+
+The cell-drop order is unchanged and is now evaluated in columns: the badge cell and its
+space go first, then the progress cell and its space, then an archived row's date field and
+its space, each when the name field would otherwise fall below **one column**. The progress
+cell (`[<completed>/<total>]` or `[-]`) and the badge (one ASCII column) are ASCII by
+construction and measure exactly their character counts; the date field is ten ASCII columns.
+Only the name field and the message rows can carry non-ASCII content, and only they can
+change width under this rule.
+
+The two mandated interior widths SHALL remain **38** and **58**, and every row-grammar test
+SHALL continue to assert both. What changes is the unit each assertion is stated in: a row's
+length SHALL be asserted as `layout::columns(row.text) == width`, not as
+`row.text.chars().count() == width`.
+
+No row SHALL write past the interior's last column at any width, for any change name, in any
+repository — including a name holding wide characters, emoji, combining marks, or a
+zero-width-joiner sequence.
+
+#### Scenario: A CJK change name stays inside the list region at both mandated widths
+
+- **WHEN** a `Dashboard` whose repository root is `/tmp/demo-repo` and whose
+  `changes.active` is the single change `日本語の変更名前です` — ten characters, twenty
+  display columns — at 4 of 9 tasks, with no archived changes, no problems, an empty query,
+  `selected` 0 and no agents, is rendered at 120x20 and at 60x20
+- **THEN** in the 120-column buffer interior row 2 measures exactly 38 columns, spells the
+  ten-character name from interior column 2, and ends with `[4/9]` in the interior's last
+  five columns
+- **AND** in the 120-column buffer the list block's right border at column 39, the detail
+  block's left border at column 40, and every cell of the detail region's header row are
+  exactly what the same dashboard renders with the ASCII name `add-token-refresh` — the
+  overwrite the audit measured is gone
+- **AND** in the 60-column buffer interior row 2 measures exactly 58 columns and its `[4/9]`
+  cell ends in the interior's last column, with the frame's right border at column 59
+  intact
+
+#### Scenario: An emoji change name at 58 columns does not overwrite the border
+
+- **WHEN** a `Dashboard` whose single active change is named `emoji-🎉-change` at 4 of 9 is
+  rendered at 60x20 and at 120x20, once with no agent and once carrying an in-scope
+  `Working` agent for it
+- **THEN** in all four buffers the row measures exactly its interior width — 58 and 38 — the
+  progress cell ends in the interior's last column, and the frame's border column is
+  unchanged from the ASCII-named render
+- **AND** in the badged renders the badge sits two columns left of the progress cell's first
+  column, on exactly the landed rule, because the badge and progress cells are ASCII and
+  their column budgets did not move
+
+#### Scenario: A wide name is truncated whole and padded back to the full width
+
+- **WHEN** `ui::list::rows` is called at widths 38 and 58 for a change named
+  `日本語の変更名前です日本語の変更名前です日本語の変更名前です` — thirty characters, sixty
+  display columns — at 4 of 9
+- **THEN** at each width the row's `layout::columns` is exactly that width
+- **AND** the name field ends with `…`, the character before the ellipsis is a whole CJK
+  character rather than a cut one, and slicing the drawn name back out of the change's own
+  name succeeds
+- **AND** where the truncation landed one column short, the shortfall appears as a space
+  between the ellipsis and the following separator rather than as a missing cell at the end
+  of the row
+
+#### Scenario: Rows are total over adversarial names at every width
+
+- **WHEN** `ui::list::rows` is called at every width from `0` through `130` for a dashboard
+  whose active changes are named, in order: a 200-column CJK string; a family emoji joined
+  by two zero-width joiners; `e` followed by five combining accents; a lone U+FF9E halfwidth
+  katakana sound mark; a name holding a NUL; and the empty string — each at 4 of 9, with an
+  archived change carrying a date, and with one badged
+- **THEN** no call panics at any width
+- **AND** at every width every returned row's `layout::columns` is at most that width, and
+  every non-`Section` change row's is exactly that width
+- **AND** at widths `0`, `1`, and `2` the rows are empty or a bare marker, and no row's text
+  is longer than the width in columns
+
+#### Scenario: The no-repository block shortens its search path by columns
+
+- **WHEN** a `Dashboard` with no repository root whose `searched_from` is
+  `/home/dev/workspaces/日本語のディレクトリ名前がとても長い場合の例` — forty-three
+  characters and **sixty-five display columns**, chosen so that it exceeds the wider of the
+  two interiors (58) and therefore shortens at both, which a shorter wide-character path
+  would not — is rendered at 120x20 and at 60x20
+- **THEN** in each buffer the three-row no-repository block is drawn, its shortened path row
+  measures **exactly** the interior width in columns — 38 and 58 — and begins with `…`
+- **AND** at each width the drawn suffix's own `layout::columns` is at most the interior less
+  the ellipsis's one column, and slicing it back out of `searched_from` succeeds, so the
+  keep-the-tail cut landed on a cluster boundary
+- **AND** a `char`-counted shortening would have kept the last 37 and 57 **characters** —
+  70 and 110 columns — so the two measures are distinguishable at both widths and the
+  scenario discriminates between them
+- **AND** neither buffer writes a cell past the list region's interior, and the block is
+  still exactly three rows with no badge and no marker
+
+
+### Requirement: A `Row` carries its badge cell's column, and the view colours that one cell
+
+`ui::list::Row` SHALL gain one field naming where its agent badge sits, so `ui::view` can
+paint that single column without re-deriving the row grammar's arithmetic:
+
+```rust
+pub struct BadgeCell {
+    pub x: u16,
+    pub status: crate::agents::AgentStatus,
+}
+
+pub struct Row {
+    pub text: String,
+    pub kind: RowKind,
+    pub selected: bool,
+    pub badge: Option<BadgeCell>,
+}
+```
+
+`badge` SHALL be `Some` exactly when the row's `text` carries a badge cell — a change row
+whose name is in `Dashboard::attribution().badges` and whose width was wide enough that the
+badge cell was not dropped — and `None` in every other case, including every `Problem`,
+`Section`, and `Message` row, at any width and whatever `badges` holds.
+
+`BadgeCell::x` SHALL be the badge character's **column offset from the interior's first
+column**, so `text[x]` is that character: `name_field_width + 3` on an active row
+(`[marker][space][name field][space][badge]`) and `name_field_width + 14` on an archived one
+(`[marker][space][date field: 10][space][name field][space][badge]`). `BadgeCell::status`
+SHALL be the `agents::AgentStatus` the badge character was derived from, carried rather than
+re-parsed from the glyph.
+
+Adding this field SHALL move **no cell**. The `text` of every row, badged or not, at every
+width, SHALL be byte-identical to the `text` the same `Dashboard` produced before this
+change: `BadgeCell` reports where the grammar already put the badge and never decides where
+it goes. `Row` SHALL carry no `ratatui` type, so the row grammar stays plain data on exactly
+`change-rows`' landed terms.
+
+`ui::view::render` SHALL draw a badged row by writing the whole row with the row's own style
+first, then re-writing the single character at `interior.x + badge.x` with that same style
+**patched** by `palette::style(Role::AgentBadge(badge.status))`. The badge cell therefore
+keeps every modifier its row carries — a badge on the selected row is bold **and** coloured —
+and gains only the status colour. When `badge.x` is not less than the interior's width the
+cell SHALL be skipped rather than clamped, so no badge is ever drawn over a border.
+
+#### Scenario: A badged active row reports the column its badge occupies, at both mandated widths
+
+- **WHEN** `ui::list::rows` is called for a `Dashboard` whose repository root is
+  `/tmp/demo-repo`, whose `changes.active` holds `add-token-refresh` at 4 of 9 tasks with a
+  `Working` badge and `fix-empty-basket` at 7 of 7 with no badge, at width `38` and again at
+  width `58`
+- **THEN** the first row's `badge` is `Some(BadgeCell { x, status: Working })` and
+  the character occupying display column `x` of `row.text` is `w` at both widths
+- **AND** the second row's `badge` is `None`
+- **AND** both rows' `text` values are byte-identical to the values the same dashboard
+  produced before this change
+
+#### Scenario: A badged archived row reports the column its badge occupies
+
+- **WHEN** `ui::list::rows` is called for a `Dashboard` whose only change is the archived
+  `add-auth`, dated `2026-08-14`, at 7 of 7 tasks with a `Blocked` badge, at width `38` and
+  again at width `58`
+- **THEN** the row's `badge` is `Some(BadgeCell { x, status: Blocked })` and the character at
+  `x` is `b` at both widths
+- **AND** `x` is `name_field_width + 14` from the interior's first column — the marker, its
+  space, the ten-column date field, its space, the name field, and the badge's own separating
+  space — and equals the badge column an **active** row of the same width reports, since both
+  grammars put the badge two columns left of the progress cell. The equality is what
+  discriminates: a date field forgotten on one side moves one of the two.
+
+#### Scenario: A dropped badge cell reports no badge
+
+- **WHEN** `ui::list::rows` is called for a `Dashboard` holding one active change named
+  `demo` at 4 of 9 tasks carrying a `Working` badge, at widths `12`, `11`, `10`, `9`, `1`,
+  and `0`
+- **THEN** at widths `12` and `11`, where the badge cell still fits, `badge` is `Some` and
+  the character at its `x` is `w`
+- **AND** at widths `10`, `9`, `1`, and `0`, where the badge cell is dropped whole, `badge`
+  is `None`, so the field never points at a column the row does not have
+
+#### Scenario: No non-change row carries a badge
+
+- **WHEN** `ui::list::rows` is called for a `Dashboard` carrying one launch problem, one
+  refresh problem, one archived change producing an archived section header, and a filter query matching
+  nothing — and separately for a `Dashboard` with no repository — at widths `38` and `58`
+- **THEN** every returned row whose `kind` is `Problem`, `Section`, or `Message` has
+  `badge: None`
+- **AND** no `Message` row of the no-repository block carries a badge, whatever
+  `attribution().badges` holds
+
+#### Scenario: The badge cell reaches the buffer coloured and the rest of the row does not
+
+- **WHEN** a `Dashboard` with three active changes — the selected first one badged `Working`,
+  the second badged `Blocked`, the third unbadged — is rendered at 120x20 and at 60x20
+- **THEN** in both buffers the cell holding `w` reports the foreground
+  `Role::AgentBadge(Working)` carries (`Color::Green`) **and**
+  `Modifier::BOLD`, because it sits on the selected row
+- **AND** the cell holding `b` reports the foreground `Role::AgentBadge(Blocked)` carries
+  (`Color::LightRed`) and no `BOLD`
+- **AND** the cells on either side of each badge — the two separating spaces — report no
+  foreground at all, so exactly one column was painted
+
+
+### Requirement: A problem row is drawn in the palette's problem colour
+
+`ui::view::render` SHALL draw every row whose `kind` is `RowKind::Problem` with
+`palette::style(Role::ListProblem)` — foreground `Color::Red`, no modifier — and every row
+whose `kind` is `RowKind::Section` with `palette::style(Role::ListSeparator)` — foreground
+`Color::DarkGray`, no modifier.
+
+This is the one distinction the landed styling could not draw: a `!`-marked problem row is
+styled exactly like the change rows around it, and "something is wrong" is the signal in this
+pane most worth picking out of a frame. All three problem sources — launch, refresh, and
+change-set — SHALL be drawn identically, exactly as `change-rows` already requires of their
+grammar and their `RowKind`.
+
+No problem row SHALL become selectable, and it SHALL NOT gain a modifier. A **section** row
+is selectable as of `list-sections` and carries `Modifier::BOLD` when the cursor is on it,
+exactly as a selected change row does; its colour is unchanged. The
+colour is added beside a style that carried none.
+
+#### Scenario: Problem rows are red and change rows are not, at both mandated widths
+
+- **WHEN** a `Dashboard` carrying one launch problem, one refresh problem, one change-set
+  problem, three active changes, and one archived change is rendered at 120x20 and at 60x20
+- **THEN** in both buffers every cell of the three `!`-prefixed rows reports the foreground
+  `Role::ListProblem` carries (`Color::Red`) and no modifier
+- **AND** every cell of the unselected section-header row reports the foreground
+  `Role::ListSeparator` and no `Modifier::BOLD`, and every cell of a **selected** one reports
+  the same foreground **with** `Modifier::BOLD`
+  carries (`Color::DarkGray`) and no modifier
+- **AND** the change rows below report no foreground at all, and the selected one still
+  reports `Modifier::BOLD`, so the colour discriminates the problem rows rather than tinting
+  the region
+
+#### Scenario: An empty-state message row is not a problem row
+
+- **WHEN** a `Dashboard` over `changes::empty_set()` with a repository root is rendered at
+  120x20 and at 60x20, and a second whose filter query matches nothing is rendered at the
+  same two sizes
+- **THEN** the `No changes yet`, `No changes match`, and `/`-query rows report no foreground
+  at all in any buffer
+- **AND** the three rows of the no-repository block likewise report none, so an empty pane is
+  not painted as a broken one
 
 ## REMOVED Requirements
 
@@ -373,8 +791,9 @@ badged and is never a change.
 
 - **WHEN** a `Dashboard` with one active change `fix-empty-basket` at 7 of 7, archived
   changes `add-auth` dated `2026-08-14` at 7 of 7 followed by `legacy-cleanup` with
-  `date: None` at 3 of 3, `archived_total` 2, **both** sections open, and no agents, is
-  rendered at 120x20 and at 60x20
+  `date: None` at 3 of 3, `archived_total` 2, **both** sections open, `selected` **1** — the
+  active change, since target 0 is the active section header — and no agents, is rendered at
+  120x20 and at 60x20
 - **THEN** the 120-column buffer's interior rows read, in order at columns 1 through 38:
   `  v active (1)`, then
   `> fix-empty-basket               [7/7]`, then
@@ -388,6 +807,33 @@ badged and is never a change.
 - **AND** in both buffers the undated row's name begins in the same interior column as the
   dated row's, so the absent date is ten spaces rather than a shift
 - **AND** neither buffer contains the string `-- archived`
+
+#### Scenario: An archived change carries a badge in the same column as an active one
+
+- **WHEN** the same five-row dashboard is rendered at 120x20 and at 60x20 carrying one
+  in-scope `Blocked` agent named `add-auth`
+- **THEN** the 120-column buffer's archived `add-auth` row spells exactly
+  `  2026-08-14 add-auth          b [7/7]`, and the `legacy-cleanup` row and the active
+  `fix-empty-basket` row are byte-identical to the agentless rendering
+- **AND** the 60-column buffer's `add-auth` row is exactly 58 characters with interior
+  column 51 (0-based) holding `b` and interior columns 50 and 52 holding spaces — the same
+  three columns a badged active row uses at that width
+- **AND** both section-header rows are byte-identical at both widths to the agentless
+  rendering, so no badge column was reserved on a row that cannot carry one
+
+#### Scenario: A query against an unresolved archive counts from `archived_total`
+
+- **WHEN** a `Dashboard` whose `changes.archived` is empty, whose `archived_total` is 28,
+  whose archived section is collapsed, and whose active tier holds two changes matching
+  nothing, is given a non-empty query of `zzz` and rendered at 120x20 and at 60x20 **before**
+  the refresh that query requests has answered
+- **THEN** in both buffers the first interior row begins `No changes match`, the second holds
+  `/zzz`, and the third is exactly `  v archived (28)` padded to the interior width
+- **AND** no row below the header is drawn, and no `! `-prefixed problem row appears
+- **AND** rendering the same dashboard once the twenty-eight archived changes have arrived,
+  none of which matches `zzz`, emits **no** archived header at all — that section's count is
+  then zero — leaving the two message rows alone, so the `(28)` above is the one-cycle
+  unresolved window rather than a lasting count
 
 #### Scenario: A collapsed archived section shows its count and no rows
 
@@ -416,9 +862,12 @@ badged and is never a change.
 
 #### Scenario: An archived row drops the progress cell, then the date, as the width falls
 
-- **WHEN** `ui::list::rows` is called for a single selected archived change `add-auth` at
-  7 of 7 dated `2026-08-14` carrying a `Blocked` badge, at widths 22, 21, 20, 19, 14, 13, 3,
-  1, and 0, and — as the contrasting controls at the mandated interiors — at 38 and 58
+- **WHEN** `ui::list::rows` is called for a dashboard holding one archived change `add-auth`
+  at 7 of 7 dated `2026-08-14` carrying a `Blocked` badge, with no active changes, the
+  archived section open, and `selected` **1** so the cursor is on the change rather than on
+  the archived section header above it, at widths 22, 21, 20, 19, 14, 13, 3, 1, and 0, and —
+  as the contrasting controls at the mandated interiors — at 38 and 58; every assertion below
+  is about the **change** row, `rows()[1]`
 - **THEN** the rows are exactly `> 2026-08-14 … b [7/7]`, `> 2026-08-14 a… [7/7]`,
   `> 2026-08-14 … [7/7]`, `> 2026-08-14 add-a…`, `> 2026-08-14 …`, `> add-auth   `, `> …`,
   `>`, and the empty string, in that order

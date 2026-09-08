@@ -2,8 +2,9 @@
 
 The pane hides most of the archive and does not say so. `Config::archived_count` defaults
 to `5`, and `changes::from_files` truncates the archived tier to it before anything is
-rendered. Measured in this repository today: **22 archived changes on disk, five in the
-pane, seventeen invisible with no row, badge, or count anywhere admitting it.** A reader
+rendered. Measured in this repository today (`ls openspec/changes/archive | wc -l`):
+**28 archived changes on disk, five in the pane, 23 invisible with no row, badge, or count
+anywhere admitting it.** A reader
 who knows `agent-polling` was archived and cannot find it has no way to tell whether it is
 missing because of a cap, a filter, or a bug.
 
@@ -35,23 +36,26 @@ landed.
   the plugin configuration format's semantics, which is why it is marked here.
   Marked as an interface change, not as a loss: the reader who set `archived_count = 25`
   wanted the archive visible, and gets it.
-- **Two section-header rows replace the single separator**: `v active (9)` and
-  `> archived (21)`, a new `RowKind::Section`. **Archived starts collapsed; active starts
-  expanded.**
+- **Two section-header rows replace the single separator**: `v active (2)` and
+  `> archived (28)` in this repository today, a new `RowKind::Section`. **Archived starts
+  collapsed; active starts expanded.**
 - **Collapse state lives on `Dashboard`**, not derived per frame like `LayoutMode` and the
   scroll offset. It is a user decision, and a decision the next frame must not discard.
 - **A collapsed section emits its header alone.** Its changes are not rows, are not
   addressable, and do not count toward `RowKind::Item { index }` — which `change-rows`
   already documents as an index into the *visible* list, never into `ChangeSet`. This
   change relies on that promise rather than weakening it.
-- **The archived header carries the true total**, not the rendered count: `> archived (22)`
-  where twenty-two exist. The count is what makes the fold honest — a reader can see how
+- **The archived header carries the true total**, not the rendered count: `> archived (28)`
+  where twenty-eight exist. The count is what makes the fold honest — a reader can see how
   much is behind it before deciding to open it, which is exactly what the cap never told
-  them.
+  them. Under a `/` query the count is instead the number of matches, because the query
+  forces the section open and a header reading `(28)` above three rows would be a worse lie
+  than the cap this change removes; `design.md` → Decision 10 states the rule.
 - **A collapsed section costs no work, not just no rows.** `changes::from_files` truncates
   the archived tier *before* resolving schemas, artifacts, and task counts, so lifting the
-  cap outright would make every refresh cycle resolve every archived change — four times
-  the archived-tier file work in this repository, and unbounded in a larger one. A
+  cap outright would make every refresh cycle resolve every archived change — 5.6 times
+  the archived-tier file work in this repository (28 archived against a cap of five), and
+  unbounded in a larger one. A
   collapsed section needs names and a count only. The change SHALL NOT make a collapsed
   pane pay for an expanded one; `design.md` chooses the mechanism.
 - **A non-empty `/` query forces both sections open** for as long as it is non-empty, and
@@ -82,8 +86,9 @@ landed.
 - **No new grouping, sorting, or filtering dimension.** Active and archived are the two
   sections OpenSpec itself defines; this change adds no third. In particular it does not
   group the archived tier by date, which was considered and deferred: every archived row
-  already carries a ten-column date field, no archived name yet exceeds the narrow
-  layout's 19-column name field (longest is 18), and a date grouping's value depends
+  already carries a ten-column date field, no archived name yet exceeds the **wide**
+  layout's 19-column name field — the longest, `markdown-constructs`, is exactly 19, and
+  the narrow layout's field is 39 — and a date grouping's value depends
   entirely on how the archive happens to cluster in time. The section model SHALL
   nonetheless leave the door open — a section is identified by a key and carries a nesting
   depth, rather than the two booleans this change's own behaviour would need — so a later
@@ -127,12 +132,17 @@ already have owners.
 
 ## Impact
 
-- **Code:** `src/ui/list.rs` (row emission), `src/ui/app.rs` (collapse state, key mapping),
-  `src/ui/driver.rs`, `src/ui/view.rs` (section-header styling), and — new since the cap
-  decision — `src/changes.rs` (the truncation, the carried total, and `ArchivedScope`) and
-  `src/refresh.rs` (the signature and the conditional resolution). This change is no longer
-  confined to `src/ui/`, which is worth stating plainly: it now crosses into the data layer,
-  and the "views do no I/O" boundary is what keeps that crossing honest.
+- **Code:** `src/ui/list.rs` (row emission), `src/ui/app.rs` (collapse state, key mapping,
+  and the cursor's index space), `src/ui/driver.rs`, `src/ui/view.rs` (section-header
+  styling), `src/ui/mod.rs` (`ui::load`'s scope argument and seeded fold, and `ui::run`'s
+  `refresh::start` call), and — new since the cap decision — `src/changes.rs` (the
+  truncation, the carried total, and `ArchivedScope`) and `src/refresh.rs` (the signature
+  and the conditional resolution). `src/ui/detail.rs` is touched only mechanically: its
+  tests hold seven `changes::from_files(root, 5)` call sites
+  (`grep -c "from_files(" src/ui/detail.rs`) that the signature change turns into compile
+  errors. This change is no longer confined to `src/ui/`, which is worth stating plainly:
+  it now crosses into the data layer, and the "views do no I/O" boundary is what keeps that
+  crossing honest.
 - **Gate floors:** `NODEFAULT-UI`'s view-layer type set gains `Sections`, so that leg's
   `SCAN_MIN` on the `Makefile` line is re-measured, and this change's own
   `notes/gate-floors.md` records the measurement the way `degraded-states` recorded the

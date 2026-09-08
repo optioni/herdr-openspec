@@ -22,9 +22,18 @@ always populated: `change-enumeration` resolves the archived tier only when the 
 section is shown, and a collapsed section's header still has to say how many changes are
 behind it. It SHALL be the count the archive **enumeration** produced, before any change was
 built, so it is the same number under either scope. Two invariants therefore hold on every
-`ChangeSet` either producer returns, and `conformance::assert_invariants` SHALL check both:
-`archived.len()` is either `0` or exactly `archived_total`, and `archived_total` is never
-less than `archived.len()`. `changes::merge` SHALL carry the file result's `archived_total`
+`ChangeSet` either producer returns, and a **new** `#[cfg(test)]` function
+`conformance::assert_set_invariants(set: &ChangeSet)` SHALL check both: `archived.len()` is
+either `0` or exactly `archived_total`, and `archived_total` is never less than
+`archived.len()`.
+
+It SHALL be a new function beside `assert_invariants`, never a widening of it.
+`assert_invariants` takes a `&Change` and destructures it exhaustively with no rest pattern,
+which is this capability's **mechanism 2** — the `E0027` guard that makes adding a `Change`
+field a compile error inside the shared conformance function. Changing its parameter to a
+`ChangeSet` would destroy that guarantee for every landed call site.
+`assert_set_invariants` SHALL destructure `ChangeSet` exhaustively for the same reason, so a
+sixth `ChangeSet` field is a compile error there too. `changes::merge` SHALL carry the file result's `archived_total`
 through untouched, on exactly the terms `archived` itself passes through, and
 `changes::empty_set()` SHALL set it to `0`.
 
@@ -57,11 +66,13 @@ at one of them.
 
 #### Scenario: The two `archived_total` invariants hold under either scope
 
-- **WHEN** a repository whose archive holds twenty-two dated directories is enumerated once
-  with the archived tier resolved and once with it unresolved, and
-  `conformance::assert_invariants` is called on both results
+- **WHEN** a scratch repository whose archive holds twenty-two dated directories is
+  enumerated once with the archived tier resolved and once with it unresolved, and
+  `conformance::assert_set_invariants` is called on both results
 - **THEN** the resolved set has `archived.len()` 22 and `archived_total` 22, and the
   unresolved set has `archived.len()` 0 and `archived_total` 22
-- **AND** `assert_invariants` accepts both and rejects a hand-built `ChangeSet` whose
+- **AND** `assert_set_invariants` accepts both and rejects a hand-built `ChangeSet` whose
   `archived` holds three changes while `archived_total` is 22, so the invariant is a check
   rather than a comment
+- **AND** `assert_invariants` still takes a `&Change` and every landed call site compiles
+  unchanged, so mechanism 2's `E0027` guard is intact
