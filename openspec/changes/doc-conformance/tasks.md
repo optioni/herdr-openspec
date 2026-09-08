@@ -133,11 +133,11 @@ awk '/^```toml$/{f=1;next} f&&/^```$/{exit} f' SPEC.md | grep -o '^\[\[[a-z]*\]\
 `[[build]] [[actions]] [[actions]] [[panes]] [[panes]]`. Order **RED**; parsed values already
 agree, so value equality is green at HEAD and takes a planted defect in group 9.
 
-- [ ] 6.1 RED: Write `spec_manifest_block_matches` (parse both with `toml`, compare values) and `spec_manifest_block_order_matches` as **separate** named tests, so a failure says which half fired, plus `manifest_block_order` and `manifest_block_absent` over synthetic sources. Confirm the order test fails naming the two orderings and the value test passes.
-- [ ] 6.2 GREEN: Reorder `SPEC.md`'s fenced manifest block to `[[build]]`, both `[[panes]]`, then both `[[actions]]`, matching the file. **Do not edit `herdr-plugin.toml`** — the correction direction is file → document.
-- [ ] 6.3 CHECK: Contract gate — `git diff --name-only | grep -q herdr-plugin.toml` returns non-zero, and `cargo test --test manifest` stays green, confirming no consumer-facing manifest value moved.
-- [ ] 6.4 REFACTOR: State that no refactor was needed.
-- [ ] 6.5 Run `cargo test --test doc_contract` — green, no regressions. Commit.
+- [x] 6.1 RED: Write `spec_manifest_block_matches` (parse both with `toml`, compare values) and `spec_manifest_block_order_matches` as **separate** named tests, so a failure says which half fired, plus `manifest_block_order` and `manifest_block_absent` over synthetic sources. Confirm the order test fails naming the two orderings and the value test passes.
+- [x] 6.2 GREEN: Reorder `SPEC.md`'s fenced manifest block to `[[build]]`, both `[[panes]]`, then both `[[actions]]`, matching the file. **Do not edit `herdr-plugin.toml`** — the correction direction is file → document.
+- [x] 6.3 CHECK: Contract gate — `git diff --name-only | grep -q herdr-plugin.toml` returns non-zero, and `cargo test --test manifest` stays green, confirming no consumer-facing manifest value moved.
+- [x] 6.4 REFACTOR: State that no refactor was needed.
+- [x] 6.5 Run `cargo test --test doc_contract` — green, no regressions. Commit.
 
 ## 7. The injected project context is bound to the repository
 <!-- kind: behavior -->
