@@ -92,6 +92,7 @@ binding, not its only one — `NOBLOCK` leg 2 covers it identically.
 | `launch` | Split a pane, start an agent, send the `/opsx:*` prompt |
 | `watch` | The recursive `notify` watch, the debounce, and classifying a touched path to a per-change `Selection` |
 | `refresh` | The worker thread and the non-blocking `Refresher` seam it answers through |
+| `open` | The `open` and `open-tab` subcommands that open or focus the dashboard pane through `herdr plugin pane`; the crate's third `HerdrCli` consumer |
 | `ui` | Views (the change-row grammar, the detail region's header/tab-bar/content grammar, markdown rendering, and `ui::tasks`' checklist-and-progress-bar grammar for the tracked-tasks tab), layout, the dashboard's own state (selection, the `/` filter, the detail scroll offset, the selected artifact tab, the live tier's refresh flag and standing problems, and the injected artifact-read binding), key handling, terminal lifecycle, and the event loop |
 | `cli` | The two subprocess traits and their real implementations |
 
