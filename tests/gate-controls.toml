@@ -82,6 +82,18 @@ expect = "GRAPH-SNAP FAIL: graph differs from the snapshot"
 why = "a package the real resolution never produced must fail the snapshot diff"
 
 [[control]]
+id = "colwidth-sweep-hit"
+script = "colwidth.sh"
+plant_file = "src/ui/app.rs"
+plant_find = "//! `Dashboard`, `Route`, and pure key handling. See"
+plant_replace = '''//! `Dashboard`, `Route`, and pure key handling. See
+fn planted_colwidth_violation(s: &str) -> usize {
+    s.chars().count()
+}'''
+expect = "COLWIDTH FAIL: src/ui/app.rs has"
+why = "a .chars().count() reintroduced into src/ui/app.rs's production code must fail the sweep over the seven pure view files"
+
+[[control]]
 id = "deps-features"
 script = "deps.sh"
 cargo = true

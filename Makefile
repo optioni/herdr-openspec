@@ -35,6 +35,7 @@ gates:
 	/bin/sh scripts/gates/agentseam.sh
 	/bin/sh scripts/gates/launchseam.sh
 	LAUNCH=src/open.rs ENTRY='pub fn run_from_env\(' /bin/sh scripts/gates/launchseam.sh
+	/bin/sh scripts/gates/colwidth.sh
 	/bin/sh scripts/gates/detailwidths.sh
 	/bin/sh scripts/gates/listwidths.sh
 	/bin/sh scripts/gates/mdseam.sh
