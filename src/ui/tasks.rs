@@ -341,7 +341,7 @@ pub fn lines(
 
 #[cfg(test)]
 mod tests {
-    use super::{lines, progress_bar};
+    use super::{columns, lines, progress_bar};
     use crate::tasks::Progress;
 
     #[test]
@@ -352,11 +352,11 @@ mod tests {
         };
         for width in [78, 58] {
             let bar = progress_bar(&progress, width);
-            assert_eq!(bar.chars().count(), width as usize, "width {width}");
+            assert_eq!(columns(&bar), width as usize, "width {width}");
             assert!(bar.ends_with("[4/9] 44%"), "width {width}: {bar:?}");
             let gauge: String = bar
                 .chars()
-                .take(bar.chars().count() - " [4/9] 44%".len())
+                .take(columns(&bar) - " [4/9] 44%".len())
                 .collect();
             assert!(
                 gauge.chars().all(|c| c == '█' || c == '░'),
@@ -412,7 +412,7 @@ mod tests {
                     bar.ends_with(want),
                     "width {width}: {progress:?} -> {bar:?}, want ending {want:?}"
                 );
-                assert_eq!(bar.chars().count(), width as usize, "width {width}");
+                assert_eq!(columns(&bar), width as usize, "width {width}");
             }
         }
     }
@@ -481,11 +481,11 @@ mod tests {
         ];
         for progress in cases {
             let cell = crate::ui::list::progress_cell(&progress);
-            let cell_len = cell.chars().count();
+            let cell_len = columns(&cell);
             for width in 0..=120 {
                 let bar = progress_bar(&progress, width);
                 assert!(
-                    bar.chars().count() <= width as usize,
+                    columns(&bar) <= width as usize,
                     "{progress:?} width {width}: {bar:?} exceeds its width"
                 );
                 if bar.chars().any(|c| c == '█' || c == '░') {
@@ -508,7 +508,7 @@ mod tests {
             // The mandated pair, asserted explicitly by this scenario too.
             for width in [58, 78] {
                 let bar = progress_bar(&progress, width);
-                assert!(bar.chars().count() <= width as usize, "width {width}");
+                assert!(columns(&bar) <= width as usize, "width {width}");
                 assert!(bar.contains(cell.as_str()), "width {width}: {bar:?}");
             }
         }
@@ -597,7 +597,7 @@ mod tests {
     fn long_paragraph(target_chars: usize) -> String {
         let mut s = String::new();
         let mut i = 0usize;
-        while s.chars().count() < target_chars {
+        while columns(&s) < target_chars {
             if !s.is_empty() {
                 s.push(' ');
             }
@@ -702,7 +702,7 @@ mod tests {
             for (i, line) in item_lines.iter().enumerate() {
                 let t = line.text();
                 assert!(
-                    t.chars().count() <= width as usize,
+                    columns(&t) <= width as usize,
                     "width {width} line {i}: {t:?}"
                 );
                 if i == 0 {
@@ -737,7 +737,7 @@ mod tests {
             for (i, line) in item_lines.iter().enumerate() {
                 let t = line.text();
                 assert!(
-                    t.chars().count() <= width as usize,
+                    columns(&t) <= width as usize,
                     "width {width} line {i}: {t:?}"
                 );
                 let stripped = if i == 0 {
@@ -761,11 +761,8 @@ mod tests {
         for width in [78, 58, 12, 6, 5, 4, 3, 2, 1, 0] {
             let out = lines(source, &progress, width);
             for line in &out {
-                assert!(
-                    line.text().chars().count() <= width as usize,
-                    "width {width}: {:?}",
-                    line.text()
-                );
+                let t = line.text();
+                assert!(columns(&t) <= width as usize, "width {width}: {t:?}");
             }
         }
         for width in [78, 58, 12] {
@@ -886,10 +883,10 @@ mod tests {
         for width in [78, 58] {
             let out = lines(&source, &progress, width);
             for line in &out {
+                let t = line.text();
                 assert!(
-                    line.text().chars().count() <= width as usize,
-                    "width {width}: {:?} exceeds its width",
-                    line.text()
+                    columns(&t) <= width as usize,
+                    "width {width}: {t:?} exceeds its width"
                 );
             }
             let heading_line = out
@@ -935,7 +932,7 @@ mod tests {
             for (i, line) in item_lines.iter().enumerate() {
                 let t = line.text();
                 assert!(
-                    crate::ui::layout::columns(&t) <= width as usize,
+                    columns(&t) <= width as usize,
                     "width {width} line {i}: {t:?} exceeds its width"
                 );
                 let stripped = if i == 0 {
@@ -948,7 +945,7 @@ mod tests {
             assert_eq!(reassembled, text, "width {width}");
             assert!(
                 item_lines.iter().any(|l| {
-                    let c = crate::ui::layout::columns(&l.text());
+                    let c = columns(&l.text());
                     c == width as usize || c + 1 == width as usize
                 }),
                 "width {width}: no wrapped line reaches near the region width"
@@ -976,7 +973,7 @@ mod tests {
             for line in &out {
                 let t = line.text();
                 assert!(
-                    crate::ui::layout::columns(&t) <= width as usize,
+                    columns(&t) <= width as usize,
                     "width {width}: {t:?} exceeds its width"
                 );
             }
@@ -1038,7 +1035,7 @@ mod tests {
                     let out = lines(source, progress, width);
                     for line in &out {
                         assert!(
-                            crate::ui::layout::columns(&line.text()) <= width as usize,
+                            columns(&line.text()) <= width as usize,
                             "source {source:?} progress {progress:?} width {width}: {:?} \
                              exceeds its width",
                             line.text()
@@ -1050,7 +1047,7 @@ mod tests {
                     let out = lines(source, progress, width);
                     for line in &out {
                         assert!(
-                            crate::ui::layout::columns(&line.text()) <= width as usize,
+                            columns(&line.text()) <= width as usize,
                             "source {source:?} progress {progress:?} width {width}"
                         );
                     }
@@ -1067,10 +1064,7 @@ mod tests {
         for width in 0u16..=12 {
             let out = lines(&heading_only, &zero, width);
             for line in &out {
-                assert!(
-                    crate::ui::layout::columns(&line.text()) <= width as usize,
-                    "width {width}"
-                );
+                assert!(columns(&line.text()) <= width as usize, "width {width}");
             }
         }
     }
@@ -1096,7 +1090,7 @@ mod tests {
             "content area 11: {texts:?}"
         );
         for t in &texts {
-            assert!(crate::ui::layout::columns(t) <= 11, "{t:?}");
+            assert!(columns(t) <= 11, "{t:?}");
         }
 
         let out = lines(source, &progress, 12);
@@ -1153,7 +1147,7 @@ mod tests {
         for progress in cases {
             for width in 0u16..=130 {
                 let bar = progress_bar(&progress, width);
-                let cols = crate::ui::layout::columns(&bar);
+                let cols = columns(&bar);
                 assert!(
                     cols <= width as usize,
                     "{progress:?} width {width}: {bar:?} measures {cols}, exceeds its width"
@@ -1161,10 +1155,7 @@ mod tests {
             }
             for width in [78, 58] {
                 let bar = progress_bar(&progress, width);
-                assert!(
-                    crate::ui::layout::columns(&bar) <= width as usize,
-                    "width {width}"
-                );
+                assert!(columns(&bar) <= width as usize, "width {width}");
             }
         }
     }
