@@ -442,3 +442,452 @@ fn manifest_rust_version_missing_key() {
          return an empty string"
     );
 }
+
+// --- Gate-path programs leg -------------------------------------------------------------
+//
+// See `specs/doc-conformance/spec.md` -> "Every non-cargo program `make check` invokes is
+// documented as a prerequisite", and `design.md` -> Decision 7 for why the extraction rule
+// below is stated against the two real recipe shapes the `Makefile` contains (a shell guard
+// block, and a quoted assignment value) rather than a naive "first token per line" rule.
+
+/// Whether `word` occurs in `text` delimited by a non-word character (anything but an ASCII
+/// alphanumeric or `_`) on both sides, so a program name occurring as part of a longer
+/// identifier does not satisfy a search for it. Shared with `msrv_mentions`, which is the same
+/// shape parameterised on a different boundary-character set (digits and `.` rather than
+/// alphanumerics and `_`), since a version number's own characters are not word characters.
+fn bounded_mention(text: &str, needle: &str, is_boundary_char: impl Fn(u8) -> bool) -> bool {
+    if needle.is_empty() {
+        return false;
+    }
+    let bytes = text.as_bytes();
+    let nbytes = needle.as_bytes();
+    let mut search_start = 0;
+    while let Some(rel) = text[search_start..].find(needle) {
+        let idx = search_start + rel;
+        let left_ok = idx == 0 || !is_boundary_char(bytes[idx - 1]);
+        let end = idx + nbytes.len();
+        let right_ok = end == bytes.len() || !is_boundary_char(bytes[end]);
+        if left_ok && right_ok {
+            return true;
+        }
+        search_start = idx + 1;
+    }
+    false
+}
+
+/// Whether `program` occurs in `text` as a whole word: not immediately adjacent to another
+/// alphanumeric character or `_` on either side.
+fn program_mentioned(text: &str, program: &str) -> bool {
+    bounded_mention(text, program, |c| c.is_ascii_alphanumeric() || c == b'_')
+}
+
+/// The shell control-flow keywords and builtins step 6 of the extraction rule discards. A
+/// recipe line whose first remaining token is one of these names no external program.
+const SHELL_KEYWORDS: &[&str] = &[
+    "if", "then", "else", "elif", "fi", "for", "do", "done", "while", "case", "esac", "echo",
+    "exit", "test", "[", ":", "cd", "set", "true", "false",
+];
+
+/// Whether `token` is a `NAME=value` assignment: a leading run of ASCII letters/digits/`_`
+/// starting with a letter or `_`, followed by `=`.
+fn is_assignment_token(token: &str) -> bool {
+    let Some(eq_idx) = token.find('=') else {
+        return false;
+    };
+    let name = &token[..eq_idx];
+    let mut chars = name.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() || c == '_' => {
+            chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+        }
+        _ => false,
+    }
+}
+
+/// Split a recipe line into tokens, quote-aware: a single- or double-quoted run becomes part
+/// of the token it occurs in (quote characters themselves are dropped), so a value such as
+/// `ENTRY='pub fn run_from_env\('` never splits into several tokens because of the spaces its
+/// quotes protect. This is step 3 of the extraction rule.
+fn tokenize_quote_aware(line: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    let mut in_token = false;
+    let mut quote: Option<char> = None;
+    for c in line.chars() {
+        if let Some(q) = quote {
+            if c == q {
+                quote = None;
+            } else {
+                current.push(c);
+            }
+            continue;
+        }
+        match c {
+            '\'' | '"' => {
+                quote = Some(c);
+                in_token = true;
+            }
+            c if c.is_whitespace() => {
+                if in_token {
+                    tokens.push(std::mem::take(&mut current));
+                    in_token = false;
+                }
+            }
+            c => {
+                current.push(c);
+                in_token = true;
+            }
+        }
+    }
+    if in_token {
+        tokens.push(current);
+    }
+    tokens
+}
+
+/// Join Make recipe continuation lines (a line ending in `\`) with the line that follows, so a
+/// multi-line shell construct becomes one logical line. This is step 1 of the extraction rule.
+/// Every other line (including target-definition lines) passes through unchanged.
+fn join_continuations(makefile: &str) -> Vec<String> {
+    let mut logical = Vec::new();
+    let mut current = String::new();
+    let mut joining = false;
+    for line in makefile.lines() {
+        if let Some(stripped) = line.strip_suffix('\\') {
+            current.push_str(stripped);
+            current.push(' ');
+            joining = true;
+        } else {
+            current.push_str(line);
+            logical.push(std::mem::take(&mut current));
+            joining = false;
+        }
+    }
+    if joining {
+        logical.push(current);
+    }
+    logical
+}
+
+/// Find the `check:` target's own logical line among `logical_lines` and return its
+/// prerequisite target names, in order. `Err` when no such line exists — a `Makefile` with no
+/// `check:` target cannot yield a program set at all.
+fn check_prerequisites(logical_lines: &[String]) -> Result<Vec<String>, String> {
+    for line in logical_lines {
+        if !line.starts_with('\t')
+            && let Some(rest) = line.strip_prefix("check:")
+        {
+            return Ok(rest.split_whitespace().map(str::to_string).collect());
+        }
+    }
+    Err("no `check:` target found in Makefile".to_string())
+}
+
+/// Collect `target`'s own recipe lines (the tab-indented lines immediately following its
+/// `target:` definition line) from `logical_lines`.
+fn target_recipe_lines<'a>(logical_lines: &'a [String], target: &str) -> Vec<&'a str> {
+    let target_prefix = format!("{target}:");
+    let mut lines = Vec::new();
+    let mut found = false;
+    for line in logical_lines {
+        if !found {
+            if !line.starts_with('\t') && line.starts_with(&target_prefix) {
+                found = true;
+            }
+            continue;
+        }
+        if line.starts_with('\t') {
+            lines.push(line.as_str());
+        } else if line.trim().is_empty() {
+            continue;
+        } else {
+            break;
+        }
+    }
+    lines
+}
+
+/// Apply steps 2-6 of the extraction rule to one already-continuation-joined recipe line,
+/// returning the external program it names, or `None` when the line names no external
+/// program (a shell guard keyword, `cargo`, or a `/bin/sh <scripts/ path>` invocation).
+fn program_from_recipe_line(line: &str) -> Option<String> {
+    let stripped = line.trim_start_matches('\t');
+    let stripped = stripped.trim_start_matches(['@', '-']);
+    let tokens = tokenize_quote_aware(stripped);
+
+    let mut i = 0;
+    loop {
+        if i >= tokens.len() {
+            return None;
+        }
+        if is_assignment_token(&tokens[i]) {
+            i += 1;
+            continue;
+        }
+        if tokens[i] == "env" {
+            i += 1;
+            loop {
+                if i >= tokens.len() {
+                    break;
+                }
+                if is_assignment_token(&tokens[i]) {
+                    i += 1;
+                } else if let Some(flag) = tokens[i].strip_prefix('-') {
+                    let takes_arg = matches!(flag, "u" | "C" | "S" | "P");
+                    i += 1;
+                    if takes_arg {
+                        i += 1;
+                    }
+                } else {
+                    break;
+                }
+            }
+            continue;
+        }
+        break;
+    }
+
+    let candidate = tokens.get(i)?;
+    if candidate == "cargo" {
+        return None;
+    }
+    if candidate == "/bin/sh" || candidate == "sh" {
+        let next_is_script = tokens
+            .get(i + 1)
+            .is_some_and(|next| next.starts_with("scripts/"));
+        if next_is_script {
+            return None;
+        }
+    }
+    if SHELL_KEYWORDS.contains(&candidate.as_str()) {
+        return None;
+    }
+    Some(candidate.clone())
+}
+
+/// Extract the set of external programs `make check`'s path invokes, by following `check:`'s
+/// prerequisite targets' own recipes and applying the six-step extraction rule to each recipe
+/// line. `Err` both when the `Makefile` cannot be followed at all (no `check:` target, or no
+/// prerequisites) and when the extraction runs to completion but yields an empty set — a
+/// broken extractor must fail loudly, never pass because it found nothing to check.
+fn check_programs(makefile: &str) -> Result<BTreeSet<String>, String> {
+    let logical_lines = join_continuations(makefile);
+    let prerequisites = check_prerequisites(&logical_lines)?;
+    if prerequisites.is_empty() {
+        return Err("check:'s target names no prerequisites".to_string());
+    }
+
+    let mut programs = BTreeSet::new();
+    for target in &prerequisites {
+        for recipe_line in target_recipe_lines(&logical_lines, target) {
+            if let Some(program) = program_from_recipe_line(recipe_line) {
+                programs.insert(program);
+            }
+        }
+    }
+
+    if programs.is_empty() {
+        return Err(
+            "the extraction rule found no external program in check:'s prerequisite recipes"
+                .to_string(),
+        );
+    }
+    Ok(programs)
+}
+
+/// Whether any of `gate_scripts`' contents names `word` as a whole word — the second sub-leg,
+/// which requires a program named anywhere under `scripts/gates/` to be documented on the same
+/// terms as one the `Makefile` itself names, even when no `Makefile` line names it.
+fn gate_scripts_require(gate_scripts: &[String], word: &str) -> bool {
+    gate_scripts
+        .iter()
+        .any(|content| program_mentioned(content, word))
+}
+
+#[test]
+fn gate_programs_are_documented() {
+    let makefile = read_doc(&manifest_dir().join("Makefile")).expect("read Makefile");
+    let programs =
+        check_programs(&makefile).expect("extract programs from Makefile's check: path");
+
+    let readme_md = read_doc(&manifest_dir().join("README.md")).expect("read README.md");
+    let agents_md = read_doc(&manifest_dir().join("AGENTS.md")).expect("read AGENTS.md");
+    let readme_section =
+        section(&readme_md, "## Development").expect("find README.md's Development section");
+    let agents_section =
+        section(&agents_md, "## Environment").expect("find AGENTS.md's Environment section");
+
+    let mut undocumented = Vec::new();
+    for program in &programs {
+        let mut missing = Vec::new();
+        if !program_mentioned(readme_section, program) {
+            missing.push("README.md's Development section");
+        }
+        if !program_mentioned(agents_section, program) {
+            missing.push("AGENTS.md's Environment section");
+        }
+        if !missing.is_empty() {
+            undocumented.push(format!("{program} missing from {missing:?}"));
+        }
+    }
+    assert!(
+        undocumented.is_empty(),
+        "programs invoked by make check's path are undocumented: {undocumented:?}"
+    );
+}
+
+#[test]
+fn gate_script_interpreters_are_documented() {
+    let gates_dir = manifest_dir().join("scripts/gates");
+    let mut gate_scripts = Vec::new();
+    for entry in std::fs::read_dir(&gates_dir).expect("read scripts/gates directory") {
+        let entry = entry.expect("read scripts/gates directory entry");
+        let path = entry.path();
+        if path.is_file() {
+            gate_scripts.push(read_doc(&path).unwrap_or_else(|e| panic!("{e}")));
+        }
+    }
+    assert!(
+        !gate_scripts.is_empty(),
+        "scripts/gates must contain at least one file to scan"
+    );
+
+    if !gate_scripts_require(&gate_scripts, "python3") {
+        return;
+    }
+
+    let readme_md = read_doc(&manifest_dir().join("README.md")).expect("read README.md");
+    let agents_md = read_doc(&manifest_dir().join("AGENTS.md")).expect("read AGENTS.md");
+    let readme_section =
+        section(&readme_md, "## Development").expect("find README.md's Development section");
+    let agents_section =
+        section(&agents_md, "## Environment").expect("find AGENTS.md's Environment section");
+
+    let mut missing = Vec::new();
+    if !program_mentioned(readme_section, "python3") {
+        missing.push("README.md's Development section");
+    }
+    if !program_mentioned(agents_section, "python3") {
+        missing.push("AGENTS.md's Environment section");
+    }
+    assert!(
+        missing.is_empty(),
+        "python3 is invoked under scripts/gates/ but not documented in: {missing:?}"
+    );
+}
+
+#[test]
+fn guard_block_yields_no_program() {
+    // The real `lint:`/`coverage:` guard joins into one logical line whose only examined
+    // token is `if`, so it alone proves the real shape. The lines after it individually drive
+    // every other step-6 keyword as the first token of its own line, so no single alternative
+    // in that list goes unchecked by an actual assertion (a `grep -c` over several keywords at
+    // once would hide exactly this).
+    let makefile = "\
+check: lint
+
+lint:
+\t@if ! cargo clippy --version >/dev/null 2>&1; then \\
+\t\techo \"error: clippy not found\" 1>&2; \\
+\t\texit 1; \\
+\tfi
+\tcargo clippy --all-targets --all-features -- -D warnings
+\tif something
+\tthen something
+\telse something
+\telif something
+\tfi something
+\tfor something
+\tdo something
+\tdone
+\twhile something
+\tcase something
+\tesac
+\techo something
+\texit 1
+\ttest -f foo
+\t[ -f foo ]
+\t: noop
+\tcd /tmp
+\tset -e
+\ttrue
+\tfalse
+\tpython3 scripts/gates/gate-mech1.py
+";
+    let programs =
+        check_programs(makefile).expect("extract from synthetic guard-block Makefile");
+    let expected: BTreeSet<String> = ["python3".to_string()].into_iter().collect();
+    assert_eq!(
+        programs, expected,
+        "a shell guard block's own keywords and `cargo` must never be reported as programs"
+    );
+    for keyword in [
+        "if", "then", "else", "elif", "fi", "for", "do", "done", "while", "case", "esac", "echo",
+        "exit", "test", "[", ":", "cd", "set", "true", "false", "cargo",
+    ] {
+        assert!(
+            !programs.contains(keyword),
+            "`{keyword}` must never be reported as a program: {programs:?}"
+        );
+    }
+}
+
+#[test]
+fn quoted_assignment_is_one_token() {
+    let makefile = "\
+check: gates
+
+gates:
+\tenv -u GRAPH_WRITE /bin/sh scripts/gates/build-graph.sh
+\tLAUNCH=src/open.rs ENTRY='pub fn run_from_env\\(' /bin/sh scripts/gates/launchseam.sh
+\tpython3 scripts/gates/gate-mech1.py
+";
+    let programs =
+        check_programs(makefile).expect("extract from synthetic quoted-assignment Makefile");
+    let expected: BTreeSet<String> = ["python3".to_string()].into_iter().collect();
+    assert_eq!(
+        programs, expected,
+        "a whitespace-split tokenizer would report `fn`, and a naive env-stripper would report \
+         `GRAPH_WRITE`; the quote-aware, env-option-aware extractor must report neither"
+    );
+    for stray in ["fn", "GRAPH_WRITE", "env", "-u", "/bin/sh", "sh"] {
+        assert!(
+            !programs.contains(stray),
+            "`{stray}` must never be reported as a program: {programs:?}"
+        );
+    }
+}
+
+#[test]
+fn new_gate_program_is_caught() {
+    let makefile = "\
+check: gates
+
+gates:
+\t/bin/sh scripts/gates/deps.sh
+\tjq -r '.foo' target/out.json
+\tpython3 scripts/gates/gate-mech1.py
+";
+    let programs =
+        check_programs(makefile).expect("extract from synthetic new-tool Makefile");
+    assert!(
+        programs.contains("jq"),
+        "a future recipe line invoking an undocumented program must be caught: {programs:?}"
+    );
+}
+
+#[test]
+fn empty_program_set_fails() {
+    let makefile = "\
+check: gates
+
+gates:
+\t/bin/sh scripts/gates/deps.sh
+\tcargo build
+";
+    let result = check_programs(makefile);
+    assert!(
+        result.is_err(),
+        "an extraction yielding no external program must fail loudly, not pass vacuously"
+    );
+}
