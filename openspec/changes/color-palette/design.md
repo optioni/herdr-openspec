@@ -54,7 +54,7 @@ too.
 | `ui::view` render functions | `src/ui/view.rs` | unchanged; each `Style::default().add_modifier(…)` becomes `palette::style(role)` |
 | `ui::detail::tab_bar` | `src/ui/detail.rs` | unchanged signature and return type; the cell text and the separator width change |
 | `ui::list::Row` | `src/ui/list.rs` | plain data, no `ratatui` type; gains one field the same way `Row::kind` is carried |
-| `PALETTE` gate (new) | `scripts/gates/palette.sh` | `scripts/gates/mdseam.sh`, structurally: exclusion by path, positive control first, file-count guard |
+| `PALETTE` gate (new) | `scripts/gates/palette.sh` | `scripts/gates/mdseam.sh`, structurally: exclusion by path, positive control first, file-count guard; plus a third leg asserting the new module is in `NOIO-VIEW`'s and `COLWIDTH`'s hard-coded `PURE` lists |
 | Gate control (new) | `tests/gate-controls.toml` | one `[[control]]` row per script, executed by `tests/gate_controls.rs` |
 
 Modules **not** touched: `cli`, `changes`, `schema`, `tasks`, `agents`, `launch`, `watch`,
@@ -119,7 +119,7 @@ keybinding are untouched.
 | Dependency | In acceptance test | In unit tests |
 |---|---|---|
 | Terminal (raw mode, alternate screen) | replaced — `ratatui::backend::TestBackend`, never a real terminal | replaced — same |
-| Filesystem (`openspec/` tree) | real, under `crate::testutil::ScratchDir`, for the `ui::load` scenarios only | replaced — `Dashboard` values built in-memory |
+| Filesystem (`openspec/` tree) | replaced — no scenario in this change reaches it; `NOIO-VIEW` sweeps `src/ui/view.rs` whole-file, so a view test there cannot open a directory | replaced — `Dashboard` values built in-memory |
 | Artifact reader (`&dyn Fn(&Path) -> Result<String, String>`) | replaced — closure over an in-memory string | replaced — same |
 | `openspec` binary (`OpenspecCli`) | replaced — not reached; no scenario in this change runs the CLI path | replaced — same |
 | Herdr socket (`HerdrCli`, agent poll) | replaced — `Dashboard::agents` set directly to an `AgentSnapshot` value | replaced — same |
@@ -195,7 +195,7 @@ contain `palette`, so `cargo test --test gate_controls palette` runs **zero** te
 | The badge cell reaches the buffer coloured and the rest of the row does not | render at 120x20 and 60x20 | view | TestBackend | `cargo test --lib ui::view::` |
 | Problem rows are red and change rows are not, at both mandated widths | render at 120x20 and 60x20 | view | TestBackend | `cargo test --lib ui::view::` |
 | An empty-state message row is not a problem row | render at 120x20 and 60x20, two dashboards | view | TestBackend | `cargo test --lib ui::view::` |
-| The selected row is bold and uncoloured at both mandated widths | render over a `ScratchDir` repo via `ui::load` | view | real filesystem | `cargo test --lib ui::view::` |
+| The selected row is bold and uncoloured at both mandated widths | render an in-memory `Dashboard` at 120x20 and 60x20 | view | TestBackend | `cargo test --lib ui::view::` |
 | A badged selected row keeps its bold under the badge colour | render at 120x20 and 60x20 | view | TestBackend | `cargo test --lib ui::view::` |
 | The detail header is bold and uncoloured at both mandated widths | render at 120x20 and 60x20 | view | TestBackend | `cargo test --lib ui::view::` |
 | The document fills the detail interior at both mandated widths | existing `ui::view` render test, re-run unchanged | view | TestBackend | `cargo test --lib ui::view::` |
@@ -261,6 +261,11 @@ so "a monochrome terminal loses nothing" is proved by the suite rather than argu
 The one stated exception is the tab-bar row, which `artifact-tabs` moves and relabels
 wholesale; its narrower guarantee — the selected chip stays that row's only `BOLD` span — is
 in `specs/view-palette/spec.md`.
+The exception is the tab-bar row, and it is a change to *where* a modifier lands rather than
+to the mapping: `artifact-tabs` relabels and moves every chip, so the two landed tests that
+assert `BOLD` at fixed tab-bar columns (`the_five_tab_bars_exact_string_with_the_selected_tab_bold`
+at `src/ui/view.rs:3320` and `a_select_tab_at_route_list_is_visible_in_the_tab_row_at_120` at
+`:3370`) are rewritten by group 4. Everywhere else, no modifier expectation moves.
 *Alternative:* rebalance modifiers now that colour carries some of the load — for example
 dropping `DIM` from inline code since it is yellow anyway — rejected, because it would make
 the monochrome regression untestable and it is a separate argument with its own trade-off.

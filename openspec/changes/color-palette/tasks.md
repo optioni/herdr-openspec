@@ -17,7 +17,7 @@ collaborator is replaced — the test copies the real tree.
 
 - [ ] 0.1 Add `scripts/gates/palette.sh` with exactly this content, and add
       `/bin/sh scripts/gates/palette.sh` to the `Makefile`'s `gates:` recipe in alphabetical
-      position (after `nosleep.sh`, before `nospawn-grep.sh`):
+      position (after `openspec-untouched.sh`, before `readonly-ui.sh`):
 
       ```sh
       # PALETTE — the colour table is confined to ONE module. src/ui/palette.rs is the only
@@ -47,7 +47,15 @@ collaborator is replaced — the test copies the real tree.
       r=$(grep -nE 'Color::Rgb|Color::Indexed|Color::Reset' "$PAL" || true)
       [ -z "$r" ] || { echo "PALETTE FAIL: $PAL names a non-ANSI colour:" >&2
                        echo "$r" >&2; exit 1; }
-      echo "PALETTE OK: $n files searched (>= $MIN), Color only in $PAL, named ANSI indices only"
+
+      # Third leg - the two standing view gates actually sweep the new module. Both
+      # hard-code their PURE lists and check only that the files they name exist, so
+      # without this a forgotten edit leaves palette.rs unswept while both print OK.
+      for g in scripts/gates/noio-view.sh scripts/gates/colwidth.sh; do
+        [ -f "$g" ] || fail "$g missing"
+        grep -q "$PAL" "$g" || fail "$g does not list $PAL in its PURE set"
+      done
+      echo "PALETTE OK: $n files searched (>= $MIN), Color only in $PAL, named ANSI indices only, swept by NOIO-VIEW and COLWIDTH"
       ```
 
       `MIN=25` is the measured floor:
@@ -59,16 +67,23 @@ collaborator is replaced — the test copies the real tree.
       |---|---|---|
       | HEAD, no `palette.rs` | 1 | `PALETTE FAIL: src/ui/palette.rs missing - the exclusion has nothing to exclude` |
       | stub `palette.rs`, nothing planted | 0 | `PALETTE OK: 25 files searched (>= 25), …` |
-      | `use ratatui::style::Color;` planted in `src/ui/view.rs` | 1 | `PALETTE FAIL: a ratatui Color is named outside src/ui/palette.rs: src/ui/view.rs:4286:…` |
+      | `use ratatui::style::Color;` planted in `src/ui/view.rs` | 1 | `PALETTE FAIL: a ratatui Color is named outside src/ui/palette.rs: src/ui/view.rs:4285:…` (`wc -l src/ui/view.rs` → 4284, so the appended line is 4285) |
       | plant removed | 0 | `PALETTE OK: 25 files searched (>= 25), …` |
       | `Color::Rgb(1,2,3)` planted in `palette.rs` | 1 | `PALETTE FAIL: src/ui/palette.rs names a non-ANSI colour:` |
       | `palette.rs` gutted of every `Color` | 1 | `PALETTE FAIL: src/ui/palette.rs names no Color - exclusion is vacuous` |
+      | third leg, `PURE` lists not yet edited | 1 | `PALETTE FAIL: scripts/gates/noio-view.sh does not list src/ui/palette.rs in its PURE set` |
+      | third leg, both `PURE` lists edited | 0 | `PALETTE OK: … swept by NOIO-VIEW and COLWIDTH` |
 
-- [ ] 0.2 RED: Add one `[[control]]` to `tests/gate-controls.toml` with `id = "palette-outside"`,
-      `script = "palette.sh"`, empty `env`, `plant_file = "src/ui/view.rs"`, a `plant_find` of
-      that file's first doc-comment line, a `plant_replace` appending
-      `// use ratatui::style::Color;`, and
-      `expect = "PALETTE FAIL: a ratatui Color is named outside"`. Verify with
+- [ ] 0.2 RED: Add **three** `[[control]]` rows to `tests/gate-controls.toml`, one per failure
+      mode the gate has — several controls per script is supported, as `scripts/gates/wired.sh`
+      already shows. `palette-outside`: `plant_file = "src/ui/view.rs"`, a `plant_find` of that
+      file's first doc-comment line, a `plant_replace` appending `// use ratatui::style::Color;`,
+      `expect = "PALETTE FAIL: a ratatui Color is named outside"`. `palette-rgb`:
+      `plant_file = "src/ui/palette.rs"`, appending `// Color::Rgb(1,2,3)`,
+      `expect = "names a non-ANSI colour"`. `palette-unswept`:
+      `plant_file = "scripts/gates/noio-view.sh"`, removing `src/ui/palette.rs` from its `PURE`
+      line, `expect = "does not list src/ui/palette.rs in its PURE set"`. All three take
+      `script = "palette.sh"` and an empty `env`. Verify with
       `cargo test --test gate_controls catch_their_plants` — RED at HEAD, because
       `gate_controls_catch_their_plants` requires each control's unplanted baseline run to
       exit 0 and this one exits 1 with `src/ui/palette.rs missing`. **Not**
@@ -93,9 +108,12 @@ collaborator is replaced — the test copies the real tree.
       declare `pub mod palette;` in `src/ui/mod.rs`. `Heading(l)` for `l` outside `1..=6`
       returns `Heading(6)`'s style.
 - [ ] 1.3 CHANGE: Add `src/ui/palette.rs` to `PURE` in `scripts/gates/noio-view.sh` (its
-      closing message becomes `9 pure files`) and to `PURE` in `scripts/gates/colwidth.sh`
-      (its closing message becomes `eight pure view files`). Verify with `make gates` — both
-      lines report the new counts.
+      closing message becomes `9 pure files`, and its header comment saying "the set is EIGHT
+      files rather than seven" is rewritten) and to `PURE` in `scripts/gates/colwidth.sh` (its
+      closing message becomes `eight pure view files`). This gate edit sits here rather than in
+      group 6 because `palette.sh`'s third leg fails until it lands, which would leave
+      `make gates` red across groups 2 to 5. Verify with `make gates` — both lines report the
+      new counts.
 - [ ] 1.4 VERIFY: `/bin/sh scripts/gates/palette.sh` now exits 0, and
       `cargo test --test gate_controls` is green — all four of its tests, the
       `gate_controls_catch_their_plants` loop included. The outer-loop RED from group 0 is
@@ -124,11 +142,18 @@ assertion written here is RED by construction.
       before this change*, *The detail header is bold and uncoloured at both mandated widths*,
       *The routed region's border takes its style from the palette at both widths*,
       *The selected row is bold and uncoloured at both mandated widths*, and *A monochrome
-      reading of the frame is unchanged*. Every render test runs at 120x20 **and** 60x20.
+      reading of the frame is unchanged*. Every render test runs at 120x20 **and** 60x20, and
+      the two pure `style_for` tests must **also** name 60 and 120 — `WIDTHS` requires it of
+      every `#[test]` in `src/ui/view.rs` with no exemption, and a comment satisfies its scan.
+      Do not rename `file_mode_badge_is_dim_after_the_label` or
+      `badge_drops_whole_below_eighteen_columns`: `tests/degraded-coverage.toml:18` names both
+      as its proof, and a rename fails `cargo test --test degraded_coverage`.
 - [ ] 2.2 GREEN: Rewrite `style_for` as a `Style::patch` fold over the palette in the order
       `Quoted, Link, Code, Emphasis, Strong, Heading` (per design.md → Decision 8).
-- [ ] 2.3 GREEN: Replace every `Style::default().add_modifier(…)` in `render_header`,
-      `render_region`, `render_list`, `render_detail_header`, and `render_detail_tabs` with
+- [ ] 2.3 GREEN: Replace every `Style` constructed in `render_header`, `render_region`,
+      `render_list`, `render_detail_header`, `render_detail_tabs`, and `render_footer` — the
+      last writes a bare `Style::default()` at `src/ui/view.rs:334` and takes `Role::Footer` —
+      with
       `palette::style(role)` for the role `specs/view-palette/spec.md` names for that span.
       `ui::view` constructs no `Style` of its own afterwards except by `patch`. `render_region`
       passes the role's style to `Block::border_style`, never `Block::style`, so a blank
@@ -142,9 +167,13 @@ assertion written here is RED by construction.
       `for f in $(find src -name '*.rs'); do awk '/^#\[cfg\(test\)\]/{exit} /Modifier::/{print}' $f; done | wc -l`
       → **13**. Twelve of those 13 are the `add_modifier` call sites in `src/ui/view.rs` that
       task 2.3 replaces by construction; the invariant is over the **19 test-module lines**,
-      which may grow but of which none may change. This is design.md → Decision 3's
-      falsifiable half.
-- [ ] 2.6 Run the group tests — `cargo test --lib ui::view::` — no regressions.
+      which may grow but of which none may change. A line count cannot see an *edited* line, so
+      the check is a diff: `git diff -U0 <BASE> -- src tests | grep '^[-+].*Modifier::'` must
+      show only additions, plus the group-4 rewrites design.md → Decision 3 names. This is that
+      decision's falsifiable half.
+- [ ] 2.6 REFACTOR: Fold the six render functions' repeated role lookups if a shape emerges;
+      otherwise state that no refactor was needed.
+- [ ] 2.7 Run the group tests — `cargo test --lib ui::view::` — no regressions.
 
 ## 3. The agent badge cell and the problem row
 <!-- kind: behavior -->
@@ -169,7 +198,9 @@ assertion written here is RED by construction.
 - [ ] 3.5 CHECK: Contract gate — `Row` gained a field. Confirm every construction and
       exhaustive pattern is inside `src/ui/list.rs`:
       `grep -rn 'Row *{' src | grep -v '^src/ui/list.rs'` returns nothing.
-- [ ] 3.6 Run the group tests — `cargo test --lib ui::list:: ui::view::` and `make gates` — no
+- [ ] 3.6 REFACTOR: Collapse the two badge-column computations into one helper if they read
+      as duplication; otherwise state that no refactor was needed.
+- [ ] 3.7 Run the group tests — `cargo test --lib ui::list:: ui::view::` and `make gates` — no
       regressions.
 
 ## 4. The artifact tab bar becomes a row of chips
@@ -178,8 +209,9 @@ assertion written here is RED by construction.
 Measured with
 `python3 -c "ids=['proposal','specs','design','tasks','planning-review']; w=[len(i)+2 for i in ids]; print(sum(w)+2*4, sum(w)+1*4)"`
 → **57 53**: the bar falls from 57 columns to 53, so it fits the 78- and 58-column interiors
-with more slack than today. The same command's x offsets are `[0, 11, 19, 28, 36]` and its
-last drawn column is **52**.
+with more slack than today. The x offsets come from a second command,
+`python3 -c "ids=['proposal','specs','design','tasks','planning-review']; x=0; out=[]\nfor i in ids:\n out.append(x); x+=len(i)+3\nprint(out, out[-1]+len(ids[-1])+1)"`
+→ `[0, 11, 19, 28, 36] 52`.
 
 - [ ] 4.1 RED: Rewrite the tab-bar tests in `src/ui/detail.rs` for the chip grammar, **and**
       every landed assertion in `src/ui/view.rs` that spells a numbered label:
@@ -195,7 +227,10 @@ last drawn column is **52**.
       wider than the whole bar is truncated rather than dropped*, and *A selected index past
       the end of the list does not panic*. Every one names both **78** and **58**
       (`DETAILWIDTHS`).
-- [ ] 4.2 RED: Write failing tests in `src/ui/view.rs` for *The tab bar reaches the buffer at
+- [ ] 4.2 RED: Rewrite the two landed tab-bar tests that assert `Modifier::BOLD` at fixed
+      columns — `the_five_tab_bars_exact_string_with_the_selected_tab_bold` (`:3320`, assertion
+      at `:3353`) and `a_select_tab_at_route_list_is_visible_in_the_tab_row_at_120` (`:3370`,
+      assertion at `:3390`) — for the chip grammar, and write *The tab bar reaches the buffer at
       both mandated widths* and *The tab bar never overwrites a border or the rows around it*,
       asserting the chip **backgrounds** and that the separating column carries none.
 - [ ] 4.3 GREEN: In `tab_bar`, build each cell as `" {id} "`, change `joined_width`'s
@@ -209,7 +244,9 @@ last drawn column is **52**.
       carries the active style at 120x20.
 - [ ] 4.6 VERIFY: `cargo test --lib ui::layout::` — *`split_detail` is exact at its degenerate
       heights* still passes unedited; the split is untouched by the chip grammar.
-- [ ] 4.7 Run the group tests — `cargo test --lib ui::detail:: ui::view:: ui::app::` and
+- [ ] 4.7 REFACTOR: Remove the now-dead numbering branch and any helper it alone needed;
+      otherwise state that no refactor was needed.
+- [ ] 4.8 Run the group tests — `cargo test --lib ui::detail:: ui::view:: ui::app::` and
       `make gates` — no regressions.
 
 ## 5. Acceptance Test — Outer Loop GREEN
@@ -266,32 +303,42 @@ A gate's floor is its own script default, kept at the gate's true measured floor
 ## 8. Documentation
 <!-- kind: operational -->
 
-- [ ] 8.1 Rewrite in `AGENTS.md`: § Architecture rules, the `pulldown_cmark` bullet (audience:
+- [ ] 8.0 CHECK: Read every sentence this change makes false against the tree it produces —
+      `AGENTS.md:305` and `:340`, `SPEC.md:434-437`, `SPEC.md`'s `ui` module-map row, and the
+      `covers` ranges in `tests/degraded-coverage.toml` — and confirm which are bound by a test
+      and which only by a reader.
+- [ ] 8.1 CHANGE — rewrite in `AGENTS.md`: § Architecture rules, the `pulldown_cmark` bullet (audience:
       every future session). Extend it in place to name `ratatui::style::Color`'s confinement
       to `src/ui/palette.rs` beside the parser's to `src/ui/markdown.rs` — one bullet stating
       one rule about two replaceable-by-editing-one-file seams, rather than a second bullet
       repeating the argument. Durable because the next change adding a colour will otherwise
       add it at the render call site.
-- [ ] 8.2 Rewrite in `AGENTS.md`: § Current repo state and § Architecture rules, the two
-      sentences giving the pure view set as **eight** files and `COLWIDTH`'s sweep as the
+- [ ] 8.2 CHANGE — rewrite in `AGENTS.md`: § Architecture rules, the two sentences at `:305`
+      and `:340` giving the pure view set as **eight** files and `COLWIDTH`'s sweep as the
       **other seven** (audience: every future session). Both are false once `palette.rs`
       lands, and `tests/doc_contract.rs` does not bind either number.
-- [ ] 8.3 Add in `SPEC.md`: § User interface, the semantic-role table — role, modifier,
+- [ ] 8.3 CHANGE — add in `SPEC.md`: § User interface, the semantic-role table — role, modifier,
       colour — and one sentence naming `src/ui/palette.rs` as its only home (audience: anyone
       implementing a view). This is net-new, ~25 lines; it replaces nothing because `SPEC.md`
       has no styling section today, and it is what makes a future "which colour means what"
       question answerable without reading the match arm.
-- [ ] 8.4 Rewrite in `SPEC.md`: § User interface, the sentence at `SPEC.md:434-437` reading
+- [ ] 8.4 CHANGE — rewrite in `SPEC.md`: § User interface, the sentence at `SPEC.md:434-437` reading
       "`1`-`9` select the first nine positions directly; a tenth position and beyond carry no
       digit in their label" (audience: anyone implementing a view). Its contrast is false once
       no label carries a digit. Nothing binds it — `tests/doc_contract.rs`'s legs are the
       module map, § Unit-tested modules, the worker-thread count, the MSRV, the gate-path
       programs, the manifest transcription, and the injected context — so a human must.
-- [ ] 8.5 Rewrite in `SPEC.md`: the `ui` row of the module map (audience: same) — name the
+- [ ] 8.5 CHANGE — rewrite in `SPEC.md`: the `ui` row of the module map (audience: same) — name the
       palette among that module's responsibilities. `tests/doc_contract.rs` binds the module
       map to `src/lib.rs`'s `pub mod` set, which `ui::palette` does not join, so this row is
       the only place the new module is discoverable.
-- [ ] 8.6 VERIFY: `cargo test --test doc_contract` — green.
+- [ ] 8.6 CHANGE: Re-point the `covers` line ranges in `tests/degraded-coverage.toml` that
+      name `src/ui/view.rs`, `src/ui/list.rs`, or `src/ui/detail.rs` (nine entries;
+      `grep -n 'covers' tests/degraded-coverage.toml`). `validate_covers` checks only path
+      existence, in-bounds range, and one non-comment line, so groups 2 to 4 shifting those
+      lines fails nothing while the map stops pointing at the code it names.
+- [ ] 8.7 VERIFY: `cargo test --test doc_contract` and `cargo test --test degraded_coverage` —
+      both green.
 
 ## 9. Lint & Verify
 <!-- kind: operational -->
@@ -303,8 +350,8 @@ A gate's floor is its own script default, kept at the gate's true measured floor
 - [ ] 9.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
 - [ ] 9.4 VERIFY: `make gates` — every gate OK, `PALETTE` among them.
 - [ ] 9.5 VERIFY: `cargo test --all-features` — green.
-- [ ] 9.6 VERIFY: `cargo llvm-cov --fail-under-lines 80` and the production-slice floor —
-      both pass; `src/ui/palette.rs` is fully covered by its table-driven tests.
+- [ ] 9.6 VERIFY: `make coverage` — it is what exports the JSON `scripts/coverage-prod.py`
+      reads, which a bare `cargo llvm-cov --fail-under-lines 80` does not. Both floors pass; `src/ui/palette.rs` is fully covered by its table-driven tests.
 - [ ] 9.7 VERIFY: `make check` as the single gate; name the failing sub-command if it fails.
 - [ ] 9.8 VERIFY: `openspec validate color-palette --strict` — valid.
 

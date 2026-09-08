@@ -12,6 +12,7 @@ pub enum Role {
     HeaderTitle,
     HeaderPath,
     FileMode,
+    Footer,
     RegionBorder,
     RegionBorderFocused,
     ListRow,
@@ -46,6 +47,16 @@ The gate SHALL fail when its own exclusion is **vacuous** — when `src/ui/palet
 missing, or exists but names no `Color` — before it reports a clean tree, so a gutted palette
 is reported as a broken control rather than as a pass.
 
+The gate SHALL also fail when `src/ui/palette.rs` is absent from `scripts/gates/noio-view.sh`'s
+or `scripts/gates/colwidth.sh`'s `PURE` list. Both hard-code that list and check only that the
+files they name exist, so a forgotten edit would leave the new module unswept while both
+scripts still print `OK` — a gap no other check in the tree can see.
+
+Each of the gate's three failure modes — a `Color` outside the palette, a non-ANSI colour
+inside it, and a vacuous exclusion — SHALL have its **own** planted control in
+`tests/gate-controls.toml`, on `gate-integrity`'s "executed, not attested" standard. One
+script may carry several controls; `scripts/gates/wired.sh` already does.
+
 **How a test asserts a colour.** The gate searches `src/`, and this crate's view tests live
 in `#[cfg(test)]` modules **inside** `src/ui/view.rs`, `src/ui/list.rs`, and
 `src/ui/detail.rs`. No test outside `src/ui/palette.rs` may therefore name a `Color` literal.
@@ -78,6 +89,9 @@ against, never a literal that test writes.
   non-zero with a message naming `src/ui/view.rs`
 - **AND** when `src/ui/palette.rs` is emptied of every `Color` mention it exits non-zero
   reporting the exclusion as vacuous rather than reporting a clean tree
+- **AND** when `src/ui/palette.rs` is removed from `scripts/gates/noio-view.sh`'s `PURE` list
+  it exits non-zero naming that script, so the two standing view gates cannot silently stop
+  sweeping the new module
 
 #### Scenario: The palette module reaches no I/O and measures no width
 
@@ -135,6 +149,7 @@ The modifier each role SHALL carry:
 | `HeaderTitle` | `BOLD` |
 | `HeaderPath` | none |
 | `FileMode` | `DIM` |
+| `Footer` | none |
 | `RegionBorder` | none |
 | `RegionBorderFocused` | `BOLD` |
 | `ListRow` | none |
@@ -157,9 +172,9 @@ The modifier each role SHALL carry:
 
 - **WHEN** `palette::style` is called for every `Role` variant and its `add_modifier` set is
   compared against the table
-- **THEN** every role matches, and the eight roles that carry no modifier —
-  `HeaderPath`, `RegionBorder`, `ListRow`, `ListProblem`, `ListSeparator`, `ListMessage`,
-  `AgentBadge`, and `TabInactive` — carry none
+- **THEN** every role matches, and the nine roles that carry no modifier —
+  `HeaderPath`, `Footer`, `RegionBorder`, `ListRow`, `ListProblem`, `ListSeparator`,
+  `ListMessage`, `AgentBadge`, and `TabInactive` — carry none
 - **AND** the assertion discriminates: `Emphasis` reports `ITALIC` and not `BOLD`
 
 #### Scenario: A monochrome reading of the frame is unchanged
@@ -203,7 +218,7 @@ other:
 | `Code` | foreground `Yellow` |
 | `Link` | foreground `Blue` |
 
-`HeaderTitle`, `HeaderPath`, `RegionBorder`, `RegionBorderFocused`, `ListRow`,
+`HeaderTitle`, `HeaderPath`, `Footer`, `RegionBorder`, `RegionBorderFocused`, `ListRow`,
 `ListRowSelected`, `ListMessage`, `DetailHeader`, `Strong`, `Emphasis`, and `Quoted` SHALL
 carry **no** colour: each already carries a modifier that distinguishes it, and a colour
 there would be decoration rather than information. `Quoted` in particular stays `DIM` and
@@ -237,6 +252,10 @@ The mapping from a drawn span to its role SHALL be:
 - the frame header's `OpenSpec` label → `HeaderTitle`;
 - the `file mode` badge → `FileMode`;
 - the right-aligned repository path or `no repository` → `HeaderPath`;
+- the footer row, in all three of its forms → `Footer`. It is named rather than left as a
+  bare `Style::default()` so the requirement below — that `ui::view` constructs no `Style` of
+  its own — is true of the whole file rather than of the functions this change happened to
+  visit;
 - a region's border → `RegionBorderFocused` when that region is the routed one, else
   `RegionBorder`;
 - a list row → `ListRowSelected` when `Row::selected`, else `ListProblem`, `ListSeparator`,
