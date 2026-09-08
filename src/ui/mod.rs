@@ -388,7 +388,15 @@ pub fn read_artifact(path: &Path) -> Result<String, String> {
 /// process, and consults no `openspec` binary, so the dashboard opens with
 /// a complete change list on a machine where `openspec` is not installed.
 /// Always returns a `Dashboard`, never a `Result`, and never panics.
-pub fn load(start: &Path, config: &Config, state_dir: Option<&Path>) -> Dashboard {
+// `list-sections` group 1 note: `config.archived_count` was this
+// function's one use of `config` (`plugin-config` -> "`archived_count` is
+// kept, parsed, and inert" means it stays that way permanently, not just
+// for this group), so the parameter goes unread now that the call below no
+// longer consults it — kept in the signature and named `_config`, rather
+// than dropped, because group 6 (design.md -> Decision 13) gives `load` a
+// fourth `ArchivedScope` parameter and `config` a caller-visible reason to
+// exist again even though it will still name no field of its own.
+pub fn load(start: &Path, _config: &Config, state_dir: Option<&Path>) -> Dashboard {
     // The one further file `load` reads, on both branches below: Herdr agents exist
     // independently of an OpenSpec repository. `state::read` is infallible by
     // construction — every unusable input degrades to an empty mapping, with
@@ -397,7 +405,14 @@ pub fn load(start: &Path, config: &Config, state_dir: Option<&Path>) -> Dashboar
     let agent_names = crate::state::read(state_dir);
     match crate::resolve::find_repo(start) {
         crate::resolve::RepoSearch::Found { root } => {
-            let changes = crate::changes::from_files(&root, config.archived_count);
+            // `list-sections` group 1 note: `archived_count` no longer
+            // truncates the archived tier and `from_files` now takes an
+            // `ArchivedScope` instead. `ui::load` does not yet decide that
+            // scope itself — group 6 gives it a fourth parameter and the
+            // file-mode rule of design.md -> Decision 13 — so this call
+            // keeps the pre-`list-sections` behaviour (the whole archive,
+            // unconditionally resolved) as a minimal, compile-forced fix.
+            let changes = crate::changes::from_files(&root, crate::changes::ArchivedScope::Full);
             let searched_from =
                 std::fs::canonicalize(start).unwrap_or_else(|_| start.to_path_buf());
             Dashboard {
@@ -1516,8 +1531,18 @@ apply:
             assert!(dashboard.refresh.problems.is_empty());
         }
 
+        /// `list-sections` removed `archived_count`'s truncation of the
+        /// archived tier (`plugin-config` -> "`archived_count` is kept,
+        /// parsed, and inert"), which replaces the landed
+        /// `archived_count_from_config_is_honoured`'s assertion with its
+        /// opposite: the loaded `Dashboard` no longer varies with the
+        /// key's value. Interim, group-1 form — `load` does not yet take
+        /// an `ArchivedScope` argument of its own (design.md -> Decision
+        /// 13), so this only proves the key stopped mattering; group 6
+        /// gives the key's inertness its full test once `load` decides the
+        /// scope itself.
         #[test]
-        fn archived_count_from_config_is_honoured() {
+        fn archived_count_no_longer_limits_what_load_resolves() {
             let scratch = ScratchDir::new();
             let root = scratch.path();
             for (i, day) in (1..=7).enumerate() {
@@ -1532,10 +1557,10 @@ apply:
             }
 
             let three = super::super::load(root, &config_with_archived_count(3), None);
-            assert_eq!(three.changes.archived.len(), 3);
-
             let seven = super::super::load(root, &config_with_archived_count(7), None);
+            assert_eq!(three.changes.archived.len(), 7);
             assert_eq!(seven.changes.archived.len(), 7);
+            assert_eq!(three.changes, seven.changes);
         }
 
         /// The outer-loop acceptance test: `ui::load` -> `changes::from_files` ->

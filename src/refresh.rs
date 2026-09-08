@@ -197,10 +197,16 @@ fn drain_and_fold(first: Selection, rx: &mpsc::Receiver<Selection>) -> Selection
 /// The worker's whole body: fold any queued requests into one selection,
 /// send the file-sourced result, then the CLI-merged one, and repeat until
 /// either channel disconnects. Owns one `CliCache` for its whole lifetime.
+///
+/// `list-sections` group 1 note: `archived_count` is threaded through
+/// unused, kept only so `start`'s and `worker_for_test`'s signatures stay
+/// unchanged for this group — `from_files` now takes an `ArchivedScope`
+/// instead of a count, and this worker always resolves the full archive
+/// until group 2 gives `Refresher::request` a scope of its own to carry.
 fn worker_body(
     repo: PathBuf,
     cli: Arc<dyn OpenspecCli>,
-    archived_count: usize,
+    _archived_count: usize,
     request_rx: mpsc::Receiver<Selection>,
     result_tx: mpsc::Sender<RefreshResult>,
 ) {
@@ -211,7 +217,7 @@ fn worker_body(
         };
         let selection = drain_and_fold(first, &request_rx);
 
-        let files = crate::changes::from_files(&repo, archived_count);
+        let files = crate::changes::from_files(&repo, crate::changes::ArchivedScope::Full);
         if result_tx.send(RefreshResult::Files(files.clone())).is_err() {
             return; // nobody reads the result any more
         }

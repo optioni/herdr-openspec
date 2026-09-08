@@ -819,7 +819,7 @@ mod tests {
             b"# x\n",
             0o644,
         );
-        let files = crate::changes::from_files(root, 5);
+        let files = crate::changes::from_files(root, crate::changes::ArchivedScope::Full);
         let change = files
             .active
             .iter()
@@ -846,7 +846,7 @@ mod tests {
             b"# y\n",
             0o644,
         );
-        let files2 = crate::changes::from_files(root2, 5);
+        let files2 = crate::changes::from_files(root2, crate::changes::ArchivedScope::Full);
         let change2 = files2
             .active
             .iter()
@@ -905,7 +905,7 @@ mod tests {
             0o644,
         );
 
-        let files = crate::changes::from_files(root, 5);
+        let files = crate::changes::from_files(root, crate::changes::ArchivedScope::Full);
         let change = files
             .active
             .iter()
@@ -989,7 +989,7 @@ mod tests {
             0o644,
         );
 
-        let files = crate::changes::from_files(root, 5);
+        let files = crate::changes::from_files(root, crate::changes::ArchivedScope::Full);
         let change = files
             .active
             .iter()
@@ -1061,7 +1061,7 @@ mod tests {
             0o644,
         );
 
-        let files = crate::changes::from_files(root, 5);
+        let files = crate::changes::from_files(root, crate::changes::ArchivedScope::Full);
         let change = files
             .active
             .iter()
@@ -1124,7 +1124,7 @@ mod tests {
             0o644,
         );
 
-        let files = crate::changes::from_files(root, 5);
+        let files = crate::changes::from_files(root, crate::changes::ArchivedScope::Full);
         let change = files
             .active
             .iter()
@@ -1167,7 +1167,7 @@ mod tests {
             0o644,
         );
 
-        let files2 = crate::changes::from_files(root2, 5);
+        let files2 = crate::changes::from_files(root2, crate::changes::ArchivedScope::Full);
         let change2 = files2
             .active
             .iter()
