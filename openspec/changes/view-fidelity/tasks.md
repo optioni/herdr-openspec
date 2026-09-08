@@ -100,19 +100,19 @@
 ## 3. Markdown wrapping measures in columns
 <!-- kind: behavior -->
 
-- [ ] 3.1 RED: Write failing tests for A wide-character document wraps by columns at both mandated widths, and extend No line exceeds the width it was given and Rendering is total over arbitrary input with the CJK and ZWJ sources and widths 1 and 2 the specs name. Every new test names 58 and 78 bare.
-- [ ] 3.2 GREEN: Rewrite the wrap, the hard-split, `split_at_char`'s `char_indices` cut, the prefix budget, and the hanging indent in `src/ui/markdown.rs` to measure through `layout::` and cut at grapheme boundaries. The same `awk | grep -c` reports 0, down from 5.
-- [ ] 3.3 GREEN: Drop a single cluster wider than the whole region rather than emitting an over-wide line, per `markdown-render`'s carve-out for code blocks. The width-1 case in 3.1 passes.
-- [ ] 3.4 REFACTOR: Restate the 11 existing `.chars().count()` width assertions in `src/ui/markdown.rs`'s test module in columns; no pass/fail may move.
-- [ ] 3.5 Run `cargo test --lib ui::markdown`, `sh scripts/gates/mdwidths.sh`, and `sh scripts/gates/mdseam.sh` — all green, and `grep -c ratatui src/ui/markdown.rs` reports 0.
+- [x] 3.1 RED: Write failing tests for A wide-character document wraps by columns at both mandated widths, and extend No line exceeds the width it was given and Rendering is total over arbitrary input with the CJK and ZWJ sources and widths 1 and 2 the specs name. Every new test names 58 and 78 bare.
+- [x] 3.2 GREEN: Rewrite the wrap, the hard-split, `split_at_char`'s `char_indices` cut, the prefix budget, and the hanging indent in `src/ui/markdown.rs` to measure through `layout::` and cut at grapheme boundaries. The same `awk | grep -c` reports 0, down from 5.
+- [x] 3.3 GREEN: Drop a single cluster wider than the whole region rather than emitting an over-wide line, per `markdown-render`'s carve-out for code blocks. The width-1 case in 3.1 passes.
+- [x] 3.4 REFACTOR: Restate the 11 existing `.chars().count()` width assertions in `src/ui/markdown.rs`'s test module in columns; no pass/fail may move.
+- [x] 3.5 Run `cargo test --lib ui::markdown`, `sh scripts/gates/mdwidths.sh`, and `sh scripts/gates/mdseam.sh` — all green, and `grep -c ratatui src/ui/markdown.rs` reports 0.
 
 ## 4. The checklist and the progress bar measure in columns
 <!-- kind: behavior -->
 
-- [ ] 4.1 RED: Write failing tests for A checklist of wide-character items fits at both mandated widths, No checklist line exceeds its width at any width, `No tasks yet` does not eat the border at a narrow frame, and The bar measures at most its width at every width. Every new test names 58 and 78 bare.
-- [ ] 4.2 GREEN: Route `No tasks yet` through `ui::list::pad_or_truncate_right` at `width` in `src/ui/tasks.rs:266`, and rewrite the item wrap, heading line, and bar arithmetic to measure in columns. The `awk | grep -c` reports 0, down from 5.
-- [ ] 4.3 REFACTOR: Restate the 11 existing `.chars().count()` width assertions in `src/ui/tasks.rs`'s test module in columns; no pass/fail may move.
-- [ ] 4.4 Run `cargo test --lib ui::tasks` and `sh scripts/gates/taskwidths.sh` — green, and A prose-only tasks file reads `No tasks yet`, A missing tasks artifact still reads `No content yet`, and A read failure on the tasks tab still pass unchanged.
+- [x] 4.1 RED: Write failing tests for A checklist of wide-character items fits at both mandated widths, No checklist line exceeds its width at any width, `No tasks yet` does not eat the border at a narrow frame, and The bar measures at most its width at every width. Every new test names 58 and 78 bare.
+- [x] 4.2 GREEN: Route `No tasks yet` through `ui::list::pad_or_truncate_right` at `width` in `src/ui/tasks.rs:266`, and rewrite the item wrap, heading line, and bar arithmetic to measure in columns. The `awk | grep -c` reports 0, down from 5.
+- [x] 4.3 REFACTOR: Restate the 11 existing `.chars().count()` width assertions in `src/ui/tasks.rs`'s test module in columns; no pass/fail may move.
+- [x] 4.4 Run `cargo test --lib ui::tasks` and `sh scripts/gates/taskwidths.sh` — green, and A prose-only tasks file reads `No tasks yet`, A missing tasks artifact still reads `No content yet`, and A read failure on the tasks tab still pass unchanged.
 
 ## 5. The detail header and content measure in columns
 <!-- kind: behavior -->
