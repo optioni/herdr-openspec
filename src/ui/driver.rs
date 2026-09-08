@@ -2618,6 +2618,26 @@ mod tests {
             let backend = TestBackend::new(width, 20);
             let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
             let mut dashboard = dashboard_with_change("/tmp/demo-repo", "2fa-support", 1, 2);
+            // `seam-resilience`: seed a `Working` badge attributed to the visible row
+            // *before* the stall drain — the scenario's own words are "whose visible row
+            // carries a `working` badge from an earlier snapshot". Without this, the
+            // fixture's badge-less starting point makes the assertion below pass
+            // vacuously even for an implementation that never withdraws a stale badge.
+            dashboard.agents = crate::agents::AgentSnapshot {
+                agents: vec![crate::agents::Agent {
+                    name: Some("2fa-support".to_string()),
+                    kind: None,
+                    status: crate::agents::AgentStatus::Working,
+                    cwd: Some(std::path::PathBuf::from("/tmp/demo-repo")),
+                    pane_id: "w8:p1".to_string(),
+                    tab_id: "w8:t1".to_string(),
+                    workspace_id: "w8".to_string(),
+                    terminal_title: None,
+                }],
+                reachable: true,
+                stalled: false,
+                problem: None,
+            };
             let mut events = Script::new(vec![Ok(Some(press(
                 KeyCode::Char('q'),
                 KeyModifiers::NONE,
@@ -2660,7 +2680,27 @@ mod tests {
                 row_text(buf, 2).contains("has not answered"),
                 "width {width}"
             );
+            // The badge withdrawal itself: the stall problem row above occupies row 2, so
+            // the change's own row — which still carries its progress cell — is row 3. The
+            // "w " badge that would otherwise sit just before the progress cell is gone.
+            assert!(
+                !row_text(buf, 3).contains("w [1/2]"),
+                "width {width}: badge should be withdrawn: {}",
+                row_text(buf, 3)
+            );
             assert!(dashboard.agents.stalled, "width {width}");
+            assert!(
+                dashboard.agents.agents.is_empty(),
+                "width {width}: the stalled snapshot carries no agents"
+            );
+            assert!(
+                dashboard.refresh.problems.is_empty(),
+                "width {width}: an agent stall must not touch refresh.problems"
+            );
+            assert!(
+                dashboard.refresh.startup.is_empty(),
+                "width {width}: an agent stall must not touch refresh.startup"
+            );
         }
     }
 
