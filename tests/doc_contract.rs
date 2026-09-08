@@ -1005,3 +1005,277 @@ fn spec_manifest_block_order_matches() {
          {manifest_order:?}"
     );
 }
+
+// --- Injected project context: fixture claim + gate-tier coverage ---------------------------
+//
+// `openspec/config.yaml`'s `context` block is injected verbatim into every OpenSpec agent's
+// prompt in this repository (design.md -> Decision 6). It is read as text, never parsed as
+// YAML: the block is sliced between the `context: |` marker and the next top-level key (a
+// line matching `^[a-z_]+:` at column 0), failing loudly when that boundary cannot be found so
+// this leg never silently searches `rules:` or `operations:` too.
+
+/// Whether `line` opens a new top-level YAML key: no leading whitespace, and its text before
+/// the first `:` is one or more lowercase ASCII letters or underscores.
+fn is_top_level_key_line(line: &str) -> bool {
+    if line.starts_with(' ') || line.starts_with('\t') || line.is_empty() {
+        return false;
+    }
+    match line.split_once(':') {
+        Some((key, _)) => {
+            !key.is_empty() && key.chars().all(|c| c.is_ascii_lowercase() || c == '_')
+        }
+        None => false,
+    }
+}
+
+/// Slice the `context: |` block scalar out of `config_yaml`'s text: everything between the
+/// `context: |` marker and the next top-level key. `Err` names the missing marker rather than
+/// falling back to searching the whole file.
+fn context_block(config_yaml: &str) -> Result<&str, String> {
+    let marker = "context: |";
+    let marker_at = config_yaml
+        .find(marker)
+        .ok_or_else(|| "no `context: |` block found in openspec/config.yaml".to_string())?;
+    let after_marker = marker_at + marker.len();
+
+    let mut offset = after_marker;
+    for line in config_yaml[after_marker..].lines() {
+        if is_top_level_key_line(line) {
+            return Ok(&config_yaml[after_marker..offset]);
+        }
+        offset += line.len() + 1;
+    }
+    Ok(&config_yaml[after_marker..])
+}
+
+/// Recursively collect the basenames of every directory under `root`. Real-filesystem edge
+/// for the fixture-repository check below; absent or unreadable directories yield an empty
+/// list rather than a panic.
+fn collect_dir_basenames(root: &std::path::Path) -> Vec<String> {
+    let mut names = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    names.push(name.to_string());
+                }
+                stack.push(path);
+            }
+        }
+    }
+    names
+}
+
+/// A fixture repository is a directory under `tests/fixtures/` containing an `openspec/`
+/// subdirectory — i.e. some directory named `openspec` appears anywhere in the recursive
+/// listing of basenames under `tests/fixtures/`.
+fn has_fixture_repository(dir_basenames: &[String]) -> bool {
+    dir_basenames.iter().any(|name| name == "openspec")
+}
+
+/// Whether `phrase` occurs in `text` as a whole phrase — the character immediately following a
+/// match is not alphanumeric, `-`, or `_` — so `fixture repositories` does not fire on some
+/// future `fixture repositories-ish` coinage, and `make gates` does not fire on `make
+/// gates-full`.
+fn phrase_present(text: &str, phrase: &str) -> bool {
+    let mut search_from = 0;
+    while let Some(pos) = text[search_from..].find(phrase) {
+        let abs = search_from + pos;
+        let end = abs + phrase.len();
+        let boundary_ok = text.as_bytes().get(end).is_none_or(|&b| {
+            !(b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+        });
+        if boundary_ok {
+            return true;
+        }
+        search_from = abs + 1;
+    }
+    false
+}
+
+/// Clause 1: the block SHALL NOT claim checked-in fixture repositories while none exist.
+/// Returns a failure message naming the phrase when the claim is false, `None` when the claim
+/// is either true or not made at all.
+fn fixture_claim_violation(context_text: &str, fixture_repo_exists: bool) -> Option<String> {
+    if phrase_present(context_text, "fixture repositories") && !fixture_repo_exists {
+        Some(
+            "openspec/config.yaml's context block claims \"fixture repositories\" but no \
+             directory under tests/fixtures/ contains an openspec/ subdirectory"
+                .to_string(),
+        )
+    } else {
+        None
+    }
+}
+
+/// Clause 2: for every prerequisite target of the `Makefile`'s `check:` target, the context
+/// block SHALL name either `make <target>` or that target's own recipe command — and a target
+/// whose recipe is more than one command line SHALL be satisfied only by `make <target>`.
+/// Returns the prerequisite targets left unrepresented, in `check:`'s own order. `Err` when the
+/// `Makefile` cannot be followed at all (reusing the same extraction rule as
+/// `check_programs` above: continuation-joining, then per-target recipe lines).
+fn unrepresented_check_targets(
+    context_text: &str,
+    makefile: &str,
+) -> Result<Vec<String>, String> {
+    let logical_lines = join_continuations(makefile);
+    let prerequisites = check_prerequisites(&logical_lines)?;
+    if prerequisites.is_empty() {
+        return Err("check:'s target names no prerequisites".to_string());
+    }
+
+    let mut missing = Vec::new();
+    for target in &prerequisites {
+        let make_mention = format!("make {target}");
+        let named_by_make = phrase_present(context_text, &make_mention);
+
+        let recipe_lines = target_recipe_lines(&logical_lines, target);
+        let named_by_own_command = recipe_lines.len() == 1
+            && recipe_lines.first().is_some_and(|line| {
+                let command = line.trim_start_matches('\t').trim();
+                !command.is_empty() && context_text.contains(command)
+            });
+
+        if !(named_by_make || named_by_own_command) {
+            missing.push(target.clone());
+        }
+    }
+    Ok(missing)
+}
+
+#[test]
+fn context_block_absent() {
+    let config_yaml = "schema: tdd\n\nrules:\n  proposal:\n    - a\n";
+    assert!(
+        context_block(config_yaml).is_err(),
+        "a config with no `context: |` marker must fail loudly rather than pretend an empty \
+         block"
+    );
+}
+
+#[test]
+fn context_slice_excludes_content_below_the_block() {
+    // The only occurrence of `make gates` sits inside `rules:`, below the block. If the
+    // slicer's boundary is wrong (e.g. it returns the whole file), clause 2 would wrongly
+    // see it and pass — proving the slice is non-vacuous requires this to still fail.
+    let config_yaml = "schema: tdd\n\ncontext: |\n  Some context text naming no gate tier.\n\n\
+rules:\n  note: 'run make gates before anything else'\n";
+
+    let context_text = context_block(config_yaml).expect("slice context block");
+    assert!(
+        !context_text.contains("make gates"),
+        "the slice leaked past the block boundary into `rules:`: {context_text:?}"
+    );
+
+    let makefile = "check: gates\n\ngates:\n\tstep one\n\tstep two\n";
+    let missing =
+        unrepresented_check_targets(context_text, makefile).expect("extract check: targets");
+    assert_eq!(
+        missing,
+        vec!["gates".to_string()],
+        "clause 2 must still fail naming `gates` when `make gates` sits only below the block"
+    );
+}
+
+#[test]
+fn fixture_claim_flags_when_no_repo_exists() {
+    let context_text = "fixture repositories under `tests/fixtures/`.";
+    assert!(
+        fixture_claim_violation(context_text, false).is_some(),
+        "the phrase is present and no fixture repository exists — must be flagged"
+    );
+}
+
+#[test]
+fn fixture_repo_makes_claim_true() {
+    let context_text = "fixture repositories under `tests/fixtures/`.";
+    assert!(
+        fixture_claim_violation(context_text, true).is_none(),
+        "once a fixture repository exists, the same phrase is no longer a false claim"
+    );
+}
+
+#[test]
+fn fixture_claim_absent_is_not_a_violation() {
+    let context_text = "run-time ScratchDir trees and include_str! corpora.";
+    assert!(
+        fixture_claim_violation(context_text, false).is_none(),
+        "a block that never makes the claim has nothing to be false"
+    );
+}
+
+#[test]
+fn missing_multiline_target_is_named() {
+    let makefile = "check: fmt-check gates\n\nfmt-check:\n\tcargo fmt --all -- --check\n\n\
+gates:\n\tstep one\n\tstep two\n";
+    let context_text = "commands: `cargo fmt --all -- --check`.";
+    let missing =
+        unrepresented_check_targets(context_text, makefile).expect("extract check: targets");
+    assert_eq!(
+        missing,
+        vec!["gates".to_string()],
+        "a multi-command-line target with no `make gates` mention must be named, even though \
+         `fmt-check` is satisfied by its own recipe command"
+    );
+}
+
+#[test]
+fn single_line_recipe_satisfied_by_own_command_text() {
+    let makefile = "check: fmt-check\n\nfmt-check:\n\tcargo fmt --all -- --check\n";
+    let context_text = "run `cargo fmt --all -- --check` first";
+    let missing =
+        unrepresented_check_targets(context_text, makefile).expect("extract check: targets");
+    assert!(
+        missing.is_empty(),
+        "a single-command-line target's own recipe command must satisfy clause 2: {missing:?}"
+    );
+}
+
+#[test]
+fn single_line_recipe_not_satisfied_by_partial_mention() {
+    let makefile = "check: fmt-check\n\nfmt-check:\n\tcargo fmt --all -- --check\n";
+    let context_text = "run cargo fmt sometimes";
+    let missing =
+        unrepresented_check_targets(context_text, makefile).expect("extract check: targets");
+    assert_eq!(
+        missing,
+        vec!["fmt-check".to_string()],
+        "a partial mention of the recipe command must not satisfy clause 2"
+    );
+}
+
+#[test]
+fn context_fixture_claim() {
+    let config_yaml =
+        read_doc(&manifest_dir().join("openspec/config.yaml")).expect("read config.yaml");
+    let context_text = context_block(&config_yaml).expect("slice context block");
+
+    let basenames = collect_dir_basenames(&manifest_dir().join("tests/fixtures"));
+    let fixture_repo_exists = has_fixture_repository(&basenames);
+
+    if let Some(message) = fixture_claim_violation(context_text, fixture_repo_exists) {
+        panic!("{message}");
+    }
+}
+
+#[test]
+fn context_names_every_gate_tier() {
+    let config_yaml =
+        read_doc(&manifest_dir().join("openspec/config.yaml")).expect("read config.yaml");
+    let context_text = context_block(&config_yaml).expect("slice context block");
+    let makefile = read_doc(&manifest_dir().join("Makefile")).expect("read Makefile");
+
+    let missing = unrepresented_check_targets(context_text, &makefile)
+        .expect("extract check:'s prerequisite targets from the Makefile");
+    assert!(
+        missing.is_empty(),
+        "openspec/config.yaml's context block does not represent check: prerequisite \
+         target(s) {missing:?} — each needs `make <target>`, or (for a single-command-line \
+         recipe only) that command verbatim"
+    );
+}
