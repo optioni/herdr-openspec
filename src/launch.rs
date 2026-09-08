@@ -641,6 +641,38 @@ mod tests {
             }
         }
 
+        /// `seam-resilience`: proves the decision *order* between the two refusal clauses,
+        /// which no existing test does — the in-flight scenario above uses an empty
+        /// `live_names`, and `every_combination_is_total` uses `live_names = [""]` against a
+        /// derived name that never matches. Here both conditions hold at once: `in_flight` is
+        /// true *and* the derived name is already live. Step 4 (in-flight) must win, so the
+        /// reason names an in-progress launch, never the live-name message pointing at `g`.
+        /// See specs/agent-launch/spec.md -> steps 4 and 5 of the decision order.
+        #[test]
+        fn in_flight_is_checked_before_the_live_name_when_both_conditions_hold() {
+            let result = decide(
+                Intent::Apply,
+                Some("2fa-support"),
+                None,
+                true,
+                &["c-2fa-support"],
+                true,
+            );
+            match result {
+                Decision::Refuse(reason) => {
+                    assert!(
+                        reason.to_lowercase().contains("wait"),
+                        "expected the in-flight reason (\"wait for it to finish\"), got: {reason}"
+                    );
+                    assert!(
+                        !reason.to_lowercase().contains("press g"),
+                        "must not be the live-name reason pointing at g: {reason}"
+                    );
+                }
+                other => panic!("expected Refuse, got {other:?}"),
+            }
+        }
+
         /// `seam-resilience`: `Focus` is exempt from the in-flight guard — it splits no pane
         /// and starts no agent, so a user waiting through a slow launch can still press `g`.
         /// See specs/agent-launch/spec.md -> "Focus still works while a launch is in flight".
