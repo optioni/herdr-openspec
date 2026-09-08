@@ -76,10 +76,10 @@ production slices naming `thread::spawn` are `src/agents.rs`, `src/launch.rs`,
 `src/refresh.rs` — **three**. **RED**, failing on the count. `src/cli.rs`'s four occurrences
 are all below its `#[cfg(test)]` at line 317 and are correctly excluded.
 
-- [ ] 3.1 RED: Write `worker_threads_match_sources` over the real files, plus `worker_count_stale`, `worker_count_grows`, and `worker_claim_absent` over synthetic sources. The claim parser matches `crate's <word> worker threads` for `one`–`six` with the word's `**` emphasis **optional** (design.md → Decision 3); the production slice is the text before the first `#[cfg(test)]` line, matching `NOBLOCK` leg 3. Confirm the real-file test fails reporting documented 2 against computed 3 — not "claim not located", which would mean the emphasis was made mandatory.
-- [ ] 3.2 GREEN: Correct `SPEC.md:820-821` to `one of the crate's **three** worker threads`, adding the emphasis as well as the number so the phrase reads in the house style. Re-run — green.
-- [ ] 3.3 REFACTOR: State that no refactor was needed, or lift the number-word mapping if a second leg needs it.
-- [ ] 3.4 Run `cargo test --test doc_contract` — green, no regressions. Commit.
+- [x] 3.1 RED: Write `worker_threads_match_sources` over the real files, plus `worker_count_stale`, `worker_count_grows`, and `worker_claim_absent` over synthetic sources. The claim parser matches `crate's <word> worker threads` for `one`–`six` with the word's `**` emphasis **optional** (design.md → Decision 3); the production slice is the text before the first `#[cfg(test)]` line, matching `NOBLOCK` leg 3. Confirm the real-file test fails reporting documented 2 against computed 3 — not "claim not located", which would mean the emphasis was made mandatory.
+- [x] 3.2 GREEN: Correct `SPEC.md:820-821` to `one of the crate's **three** worker threads`, adding the emphasis as well as the number so the phrase reads in the house style. Re-run — green.
+- [x] 3.3 REFACTOR: State that no refactor was needed, or lift the number-word mapping if a second leg needs it.
+- [x] 3.4 Run `cargo test --test doc_contract` — green, no regressions. Commit.
 
 ## 4. The documented Rust version is bound to `Cargo.toml`
 <!-- kind: behavior -->
