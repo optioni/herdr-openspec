@@ -1322,6 +1322,12 @@ mod tests {
             },
         );
         let paragraph = format!("{}\n", "word ".repeat(40).trim());
+        // A 200-column CJK paragraph — `artifact-content`'s own seventh `Detail` value for
+        // this scenario, distinct from the 200-character ASCII one above: `columns` of this
+        // source is roughly twice its `chars().count()`, which is exactly the gap a
+        // `chars()`-based wrap would get wrong.
+        let cjk_paragraph = format!("{}\n", "日本語".repeat(34));
+        assert!(columns(&cjk_paragraph) >= 200);
         let details = [
             detail("", Vec::new()),
             detail("", vec!["/repo/a.md: boom".to_string()]),
@@ -1329,6 +1335,11 @@ mod tests {
             detail("- [ ] only\n", vec!["/repo/a.md: boom".to_string()]),
             {
                 let mut d = detail(&paragraph, Vec::new());
+                d.tab = 0;
+                d
+            },
+            {
+                let mut d = detail(&cjk_paragraph, Vec::new());
                 d.tab = 0;
                 d
             },
@@ -1361,6 +1372,17 @@ mod tests {
         assert!(
             at_58 > at_78,
             "58: {at_58}, 78: {at_78} — the width must genuinely reach the wrap"
+        );
+
+        // The CJK paragraph (details[5]) wraps by columns too, so it also produces
+        // strictly more lines at 58 than at 78 — a `chars()`-based wrap would pack
+        // roughly twice as many CJK characters per line as the region can hold and
+        // would not necessarily show this gap the same way.
+        let cjk_at_78 = content_lines(&details[5], None, 78).len();
+        let cjk_at_58 = content_lines(&details[5], None, 58).len();
+        assert!(
+            cjk_at_58 > cjk_at_78,
+            "CJK: 58: {cjk_at_58}, 78: {cjk_at_78} — the width must genuinely reach the wrap"
         );
     }
 
