@@ -1160,6 +1160,36 @@ mod tests {
             assert!(snapshot.reachable);
             assert!(!snapshot.agents.is_empty());
         }
+
+        /// `seam-resilience`: proves the wiring `poll_once` itself does not exercise —
+        /// that `poll_once_canonicalized` actually runs the canonicalizing hook over the
+        /// agents a real `herdr agent list` payload carries, rather than that wiring being
+        /// provable only by calling `canonicalize_cwds` directly (as
+        /// `a_symlinked_repository_path_still_badges_its_agents` does, one layer down).
+        /// See `specs/agent-attribution/spec.md` -> "the poller's canonicalizing hook".
+        #[test]
+        fn poll_once_canonicalized_runs_the_hook_over_the_polled_snapshot() {
+            let fake = FakeCli::new();
+            let text = r#"{"id":"cli:agent:list","result":{"agents":[{"agent":"claude","agent_status":"working","cwd":"/tmp/repo","pane_id":"w8:p1","tab_id":"w8:t1","workspace_id":"w8"}],"type":"agent_list"}}"#;
+            fake.register_herdr(&["agent", "list"], Ok(text.to_string()));
+            let canonicalize = |path: &std::path::Path| -> Option<std::path::PathBuf> {
+                if path == std::path::Path::new("/tmp/repo") {
+                    Some(std::path::PathBuf::from("/private/tmp/repo"))
+                } else {
+                    Some(path.to_path_buf())
+                }
+            };
+
+            let snapshot = super::super::poll_once_canonicalized(&fake, &canonicalize);
+
+            assert!(snapshot.reachable);
+            assert_eq!(snapshot.agents.len(), 1);
+            assert_eq!(
+                snapshot.agents[0].cwd,
+                Some(std::path::PathBuf::from("/private/tmp/repo")),
+                "the snapshot reaching attribute must carry the canonical path"
+            );
+        }
     }
 
     /// `seam-resilience`: `RealAgentPoll::drain`'s render-side schedule, exercised through
