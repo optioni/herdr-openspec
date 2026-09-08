@@ -285,7 +285,7 @@ map would be indirection with nothing to hold. Each leg is code.
 
 **Alternative considered:** `tests/doc-claims.toml` listing `{document, claim, second site}`
 rows for symmetry with the degraded-coverage tier. Rejected: it would encode in data what the
-six legs already say in code, and a row whose "second site" is a free-text pointer is not
+seven legs already say in code, and a row whose "second site" is a free-text pointer is not
 mechanically checked at all — it would look like the degraded-coverage mechanism while
 providing none of its force.
 
