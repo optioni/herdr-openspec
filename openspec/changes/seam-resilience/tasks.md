@@ -102,10 +102,10 @@ apart by exit code.
 ## 9. SPEC.md and the degraded-states coverage map
 <!-- kind: operational -->
 
-- [ ] 9.1 CHECK: Determine whether the `degraded-coverage` sibling change has landed — `git log --oneline -20 -- tests/degraded-coverage.toml SPEC.md`. The answer decides between 9.2 and 9.3 (design.md -> Coordination).
-- [ ] 9.2 CHANGE (only if it has landed): Correct the three now-wrong rows of `SPEC.md`'s degraded-states table — the root-disagreement row, the recursive-watch sentence under Refresh, and the watcher-error row's problem ordering — and add two rows for a stopped worker and a stalled poller, with a proving test named for each in `tests/degraded-coverage.toml`.
-- [ ] 9.3 CHANGE (otherwise): Write the same five edits verbatim into planning-review.md as a hand-off, naming for each the row's current text, its replacement, and the test that proves it. Touch neither file.
-- [ ] 9.4 VERIFY: `make check` green either way, and `cargo test --test degraded_coverage` green.
+- [x] 9.1 CHECK: Determine whether the `degraded-coverage` sibling change has landed — `git log --oneline -20 -- tests/degraded-coverage.toml SPEC.md`. The answer decides between 9.2 and 9.3 (design.md -> Coordination).
+- [x] 9.2 CHANGE (only if it has landed): Correct the three now-wrong rows of `SPEC.md`'s degraded-states table — the root-disagreement row, the recursive-watch sentence under Refresh, and the watcher-error row's problem ordering — and add two rows for a stopped worker and a stalled poller, with a proving test named for each in `tests/degraded-coverage.toml`.
+- [x] 9.3 CHANGE (otherwise): *(not taken — 9.1 resolved to the has-landed branch, so 9.2 applies.)* Write the same five edits verbatim into planning-review.md as a hand-off, naming for each the row's current text, its replacement, and the test that proves it. Touch neither file.
+- [x] 9.4 VERIFY: `make check` green either way, and `cargo test --test degraded_coverage` green.
 
 ## 10. Change Review
 <!-- kind: operational -->
