@@ -326,3 +326,119 @@ fn missing_document() {
         "error should name the missing path: {err}"
     );
 }
+
+/// Whether `version` appears in `text` delimited by a non-version character (anything but an
+/// ASCII digit or `.`) on both sides, so a match inside an unrelated number (`11.887`,
+/// `1.881`) does not satisfy it. A version occurring at the very start or end of `text`
+/// counts as delimited on that side.
+fn msrv_mentions(text: &str, version: &str) -> bool {
+    if version.is_empty() {
+        return false;
+    }
+    let is_version_char = |c: u8| c.is_ascii_digit() || c == b'.';
+    let bytes = text.as_bytes();
+    let vbytes = version.as_bytes();
+    let mut search_start = 0;
+    while let Some(rel) = text[search_start..].find(version) {
+        let idx = search_start + rel;
+        let left_ok = idx == 0 || !is_version_char(bytes[idx - 1]);
+        let end = idx + vbytes.len();
+        let right_ok = end == bytes.len() || !is_version_char(bytes[end]);
+        if left_ok && right_ok {
+            return true;
+        }
+        search_start = idx + 1;
+    }
+    false
+}
+
+/// Read `rust-version` from a `Cargo.toml`-shaped TOML document's `[package]` table, via the
+/// `toml` crate — never by spawning `cargo metadata`. `Err` names what is wrong: unparseable
+/// TOML, or a missing/non-string `rust-version` key.
+fn manifest_rust_version(cargo_toml: &str) -> Result<String, String> {
+    let table: toml::Table = cargo_toml
+        .parse()
+        .map_err(|e| format!("Cargo.toml is not valid TOML: {e}"))?;
+    table
+        .get("package")
+        .and_then(|pkg| pkg.get("rust-version"))
+        .and_then(|v| v.as_str())
+        .map(str::to_string)
+        .ok_or_else(|| "Cargo.toml's [package] has no string rust-version key".to_string())
+}
+
+#[test]
+fn msrv_is_documented() {
+    let cargo_toml = read_doc(&manifest_dir().join("Cargo.toml")).expect("read Cargo.toml");
+    let version = manifest_rust_version(&cargo_toml).expect("parse Cargo.toml's rust-version");
+
+    let agents_md = read_doc(&manifest_dir().join("AGENTS.md")).expect("read AGENTS.md");
+    let readme_md = read_doc(&manifest_dir().join("README.md")).expect("read README.md");
+
+    let agents_section =
+        section(&agents_md, "## Environment").expect("find AGENTS.md's Environment section");
+    let readme_section =
+        section(&readme_md, "## Development").expect("find README.md's Development section");
+
+    let mut missing = Vec::new();
+    if !msrv_mentions(agents_section, &version) {
+        missing.push("AGENTS.md's Environment section");
+    }
+    if !msrv_mentions(readme_section, &version) {
+        missing.push("README.md's Development section");
+    }
+    assert!(
+        missing.is_empty(),
+        "Cargo.toml's rust-version ({version:?}) is not documented in: {missing:?}"
+    );
+}
+
+#[test]
+fn msrv_bump_is_caught() {
+    let bumped_cargo_toml = "[package]\nname = \"x\"\nrust-version = \"1.92\"\n";
+    let version = manifest_rust_version(bumped_cargo_toml).expect("parse synthetic Cargo.toml");
+
+    // Doc text unchanged from before the bump: still names the old floor, not the new one.
+    let doc_section = "## Environment\n\n- **Rust** stable, floor 1.88.\n";
+    assert!(
+        !msrv_mentions(doc_section, &version),
+        "a bumped rust-version ({version:?}) must not be satisfied by unchanged doc text"
+    );
+}
+
+#[test]
+fn msrv_mentions_left_boundary_control() {
+    // "11.88" contains "1.88" as a substring, but with the digit `1` immediately to its
+    // left — must not count as a delimited mention.
+    assert!(
+        !msrv_mentions("supports Rust 11.88 and later", "1.88"),
+        "a digit immediately to the left of the match must not satisfy the leg"
+    );
+}
+
+#[test]
+fn msrv_mentions_right_boundary_control() {
+    // "1.889" contains "1.88" as a substring, but with the digit `9` immediately to its
+    // right — must not count as a delimited mention.
+    assert!(
+        !msrv_mentions("supports Rust 1.889 and later", "1.88"),
+        "a digit immediately to the right of the match must not satisfy the leg"
+    );
+}
+
+#[test]
+fn msrv_mentions_delimited_match() {
+    assert!(msrv_mentions("rust-version = \"1.88\"", "1.88"));
+    assert!(msrv_mentions("the floor is 1.88 for now", "1.88"));
+}
+
+#[test]
+fn manifest_rust_version_missing_key() {
+    let cargo_toml = "[package]\nname = \"x\"\n";
+    let result = manifest_rust_version(cargo_toml);
+    assert!(
+        result.is_err(),
+        "manifest_rust_version must fail loudly when rust-version is absent, not panic or \
+         return an empty string"
+    );
+}
