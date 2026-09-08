@@ -155,7 +155,7 @@
 
 - [ ] 9.1 CHECK: Dispatch an independent reviewer — not a fork of this session — against proposal.md, all nine delta specs, design.md, and the diff.
 - [ ] 9.2 CHANGE: Fix every CRITICAL, resolve or accept each WARNING with a one-line reason, note SUGGESTIONs, and re-run affected tests.
-- [ ] 9.3 VERIFY: Confirm every one of the 82 spec scenarios in design.md → Test Strategy has a named test that would go red if its behaviour were deleted, and that no finding is left unowned. The 51 scenarios carried forward from landed specs are covered by their group's REFACTOR task; check that the clauses **reworded** in the deltas — `tasks-progress-bar`'s byte-identical assertion and `artifact-content`'s "measures exactly the interior width" — have assertions of their own.
+- [ ] 9.3 VERIFY: Confirm every one of the 82 spec scenarios in design.md → Test Strategy has a named test that would go red if its behaviour were deleted, and that no finding is left unowned. An exact-title diff of the nine deltas against `openspec/specs/` gives 25 new scenarios and 57 carried forward from landed specs (25 + 57 = 82); the 57 carried-forward scenarios are covered by their group's REFACTOR task. (Corrected from an earlier draft's "51 scenarios carried forward": the 6-scenario gap is scenarios whose title is unchanged but whose body was reworded, which the earlier count missed.) Check that the clauses **reworded** in the deltas — `tasks-progress-bar`'s byte-identical assertion and `artifact-content`'s "measures exactly the interior width" — have assertions of their own.
 
 ## 10. Documentation
 <!-- kind: operational -->

@@ -2561,6 +2561,9 @@ mod tests {
             // matches, and so does the plain suffix that follows it.
             assert!(matches("İstanbul", "i\u{0307}"));
             assert!(matches("İstanbul", "stanbul"));
+            // The combined query: both halves of the expansion in one query, not just
+            // each half separately.
+            assert!(matches("İstanbul", "i\u{0307}stanbul"));
 
             // No normalisation, either side: precomposed ä (U+00E4) and
             // decomposed a + combining diaeresis (U+0308) are different

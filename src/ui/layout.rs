@@ -188,6 +188,13 @@ pub(crate) fn columns(text: &str) -> usize {
 /// running sum of what it yields is shifted by every dropped byte and would slice `text`
 /// mid-character. See the same requirement's second scenario. The grapheme split is
 /// duplicated from [`columns`] rather than shared; see that function's doc comment for why.
+///
+/// The bare `as usize` pointer subtraction below is sound, not merely convenient: it never
+/// underflows because `grapheme.symbol` is always a sub-slice of `text` itself —
+/// `Span::raw(text)` borrows rather than copies, so `styled_graphemes` yields symbols whose
+/// pointers fall inside `text`'s own allocation, never before it. A `checked_sub` fallback
+/// was deliberately not added: it would be an uncovered production branch this crate's own
+/// coverage floor has no headroom for, defending against a case that provably cannot occur.
 pub(crate) fn truncate_columns(text: &str, max: usize) -> &str {
     if max == 0 {
         return "";
