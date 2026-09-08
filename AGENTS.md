@@ -26,7 +26,10 @@ spec is wrong, update the spec as part of that change rather than letting the tw
 `agent-attribution`, `agent-launch`, and `plugin-actions` have landed: the crate builds with six third-party dependencies (`toml`,
 `yaml-rust2`, `serde_json`, `ratatui` — reached through `ratatui::crossterm`'s
 re-export, not a direct dependency — `pulldown-cmark`, and `notify`), `make check` runs
-every quality gate locally and in CI, the
+every quality gate locally and in CI — `COLWIDTH` among them, sweeping every pure view
+file other than `src/ui/layout.rs` for a `.chars()`-based width measurement now that
+`ui::layout::columns`/`truncate_columns` are the crate's only one, agreeing by
+construction with what `ratatui::buffer::Buffer::set_string` itself consumes — the
 crate reads `config.toml` and derives and records agent-name mappings under
 `HERDR_PLUGIN_STATE_DIR`, it can locate the OpenSpec repository root and the
 `openspec` binary — the binary chain's fourth probe step and the environment
@@ -320,6 +323,12 @@ unreachable and the tests become integration tests by accident.
   columns. Every test in `ui::markdown`, `ui::detail`, and `ui::tasks` asserts
   both — all three because every public function there is parameterised by
   width, which is what makes an exemption-free width check possible.
+- **Every width computation under `src/ui/` is measured in terminal display columns, never
+  a `char` count.** `ui::layout::columns`/`truncate_columns` are the crate's only measure,
+  agreeing by construction with what `Buffer::set_string` itself consumes; `COLWIDTH` sweeps
+  the other seven pure view files for `.chars().count()`/`.chars().take(`/a `Vec<char>`
+  collect, because a `chars().count()` written later is silently correct against this
+  project's own ASCII fixtures and wrong against anything else.
 - **The render path blocks on nothing but the terminal, and reads no clock.**
   `src/watch.rs`, `src/refresh.rs`, `src/agents.rs`, and `src/launch.rs` — all
   four outside `src/ui/` — hold the filesystem watcher, the refresh worker

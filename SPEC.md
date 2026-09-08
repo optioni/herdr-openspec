@@ -341,6 +341,28 @@ artifact tab bar, and the remaining **fourteen** rows the content area, whose
 own height — not the interior's — is what the scroll clamp is computed
 against.
 
+**The Unicode promise, and its limit.** Every width and truncation in this section — the
+mandated interiors above, the list row grammar and the detail region's header, tab bar,
+and content below — is exact **as ratatui measures it**, not an independent guarantee of
+what a terminal paints. `ui::layout::columns`/`truncate_columns` are the crate's one
+measure of a rendered length: they split into grapheme clusters and sum each cluster's
+cell width through the same public ratatui API `Buffer::set_string` itself calls, so the
+pane's arithmetic and the buffer it writes into agree by construction, not by coincidence.
+No line the view produces ever exceeds — as ratatui measures it — the region it is drawn
+into.
+
+That qualifier is the promise's edge, not a hedge, and it is crossed in exactly two named,
+accepted cases, neither detectable from a process writing bytes to a pty and neither
+compensated for. A terminal that does **not** compose a zero-width-joiner emoji sequence
+paints each constituent emoji separately — six columns for a three-person family — and the
+row overruns; a terminal that **does** compose it already agrees with ratatui, which
+measures the whole sequence at two columns, so there is no over-reservation to spend
+against the non-composing case. And East Asian **Ambiguous** characters — a class that
+includes several box-drawing and arrow characters this repository's own artifacts already
+use — are painted at two columns by a CJK-locale terminal, where `unicode-width`'s default,
+and therefore ratatui's own, says one. Any compensation for either case would be a guess
+that breaks the terminal it did not guess wrong for, so the pane makes none.
+
 ### List view
 
 One row per active change, then a separator, then the archived changes
