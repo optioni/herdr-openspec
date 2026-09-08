@@ -26,18 +26,24 @@ most `content.height` lines, one rendered line per terminal row, starting at the
 area's first row and first column, drawing each segment left to right with the
 `ratatui::style::Style` its `Face` maps to and never writing past the interior's last column.
 A rendered line shorter than the content area leaves the rest of its row untouched, because
-neither `markdown-render` nor `tasks-checklist` pads.
+neither `markdown-render` nor `tasks-checklist` pads. A **table row line** is padded to its
+own table's total width, which `markdown-render` requires to be at most the content area's
+width; the region draws it like any other line and the sentence above is unaffected.
 
 The content area's **width** equals the interior's, so the two mandated interior widths, 78
-and 58, are also the two mandated wrapping widths and `markdown-render` is unaffected. Only
-the **height** changes: a 16-row interior gives the content area 14 rows.
+and 58, are also the two mandated wrapping widths and the widths every table in a rendered
+artifact is allocated against. Only the **height** changes: a 16-row interior gives the
+content area 14 rows.
 
 `content_lines` — not `markdown::lines` and not `ui::tasks::lines` directly — is what both
 this draw and `Dashboard::normalise_scroll` derive their line list from, so the drawn slice
 and the clamp can never disagree about how many lines there are, **including when the two
 bodies produce different line counts for the same source**: a tracked-tasks tab's checklist
 is a different length from the same file's markdown rendering, and passing the selected
-change to both callers is what keeps the clamp honest across a tab switch.
+change to both callers is what keeps the clamp honest across a tab switch. A table is a third
+reason the two counts differ from the source's own line count — a wrapped cell makes one
+source row several rendered lines — and it needs no new machinery, because the clamp already
+counts rendered lines rather than source lines.
 `artifact-content` states what `content_lines` returns, including the `No content yet` line,
 the `!`-prefixed problem lines, and which of the two bodies applies.
 
@@ -46,19 +52,20 @@ The `Face`-to-`Style` mapping SHALL be `ui::view::style_for`, and its **source**
 this call site. `style_for` SHALL remain the crate's only `Face`-to-`Style` function, and it
 SHALL be **unchanged** by the checklist body.
 
-Its modifiers SHALL be exactly the ones this requirement already stated: `heading` present or
-`strong` → `Modifier::BOLD`; `emphasis` → `Modifier::ITALIC`; `code` → `Modifier::DIM`;
-`link` → `Modifier::UNDERLINED`; `quoted` → `Modifier::DIM`. Flags compose, so a bold link's
-cells carry `BOLD` and `UNDERLINED` together. A checklist heading line reaches the buffer bold
-through the same `heading` mapping, and every other checklist line is plain, so no new mapping
-is added.
+Its modifiers SHALL be: `heading` present or `strong` → `Modifier::BOLD`; `emphasis` →
+`Modifier::ITALIC`; `code` → `Modifier::DIM`; `link` → `Modifier::UNDERLINED`; `quoted` →
+`Modifier::DIM`; and `strikethrough` → `Modifier::CROSSED_OUT`, which is the whole of what
+this change adds here. Flags compose, so a bold link's cells carry `BOLD` and `UNDERLINED`
+together and a struck bold link's carry `CROSSED_OUT` as well. A checklist heading line
+reaches the buffer bold through the same `heading` mapping, and every other checklist line is
+plain, so no new mapping is added for it and `ui::tasks` never sets `strikethrough`.
 
-Three of those faces SHALL additionally carry a **foreground colour**, which is the whole of
-what this change adds here: `heading` its level's colour, `code` `Color::Yellow`, and `link`
-`Color::Blue`. `strong`, `emphasis`, and `quoted` SHALL carry none — each already carries a
-modifier that distinguishes it. `view-palette` states the fold order that composes several
-faces onto one span and the foreground precedence — heading over code over link — that
-decides the colour when a span carries more than one; this requirement adds no second rule.
+Three of those faces SHALL additionally carry a **foreground colour**: `heading` its level's
+colour, `code` `Color::Yellow`, and `link` `Color::Blue`. `strong`, `emphasis`, `quoted`, and
+`strikethrough` SHALL carry none — each already carries a modifier that distinguishes it.
+`view-palette` states the fold order that composes several faces onto one span and the
+foreground precedence — heading over code over link — that decides the colour when a span
+carries more than one; this requirement adds no second rule.
 
 The region SHALL draw nothing at all — no header, no tab bar, no content — when `visible()`
 is empty, leaving every interior cell a space whose `Style` equals
@@ -90,19 +97,40 @@ headers are its merge key; its subject is the same document, drawn two rows lowe
 
 - **WHEN** a `Dashboard` at `Route::Detail` whose selected change carries one artifact not
   marked `tracks_tasks` and whose `detail.source` is
-  `## Heading\n\n**bold** and *italic* and `code` and [link](u)\n` is rendered at 120x20 and
-  at 60x20
+  `## Heading\n\n**bold** and *italic* and `code` and [link](u) and ~~struck~~\n` is rendered
+  at 120x20 and at 60x20
 - **THEN** in each buffer the cells of `## Heading` in the content area's first row report
   `Modifier::BOLD` set, and additionally the foreground `Role::Heading(2)` carries
   (`Color::Cyan`)
 - **AND** the cells of `bold` report `BOLD`, of `italic` report `ITALIC`, of `code` report
-  `DIM`, and of `link` report `UNDERLINED` — every modifier exactly as before this change
+  `DIM`, of `link` report `UNDERLINED`, and of `struck` report `CROSSED_OUT` — every modifier
+  that existed before this change exactly as before it
 - **AND** the cells of `code` additionally report the foreground `Role::Code` carries
   (`Color::Yellow`) and those of `link` the foreground `Role::Link` carries (`Color::Blue`),
-  while those of `bold` and `italic` report no foreground at
-  all
+  while those of `bold`, `italic`, and `struck` report no foreground at all
 - **AND** the assertion discriminates: a cell of the surrounding plain text reports none of
   those modifiers and no foreground
+
+#### Scenario: A table reaches the buffer aligned and inside the region
+
+- **WHEN** a `Dashboard` at `Route::Detail` whose selected change carries one artifact not
+  marked `tracks_tasks` and whose `detail.source` is a three-column table with a header row,
+  a delimiter row, and three body rows — one of whose cells is long enough to wrap at 58 and
+  not at 78 — is rendered at 120x20 and at 60x20
+- **THEN** in each buffer the `|` characters of the delimiter row fall at exactly the same
+  columns as those of every drawn row line, so the alignment survives the draw and is not a
+  property of the line list alone
+- **AND** in each buffer the header cells' cells report `Modifier::BOLD` while the pipe and
+  padding cells report no modifier at all
+- **AND** in the 60-column buffer the wrapping row occupies more rows than in the
+  120-column buffer
+- **AND** no table cell is drawn on a border column, stated **per buffer** because the two
+  layouts have different ones: in the 120-column buffer none reaches column 0, 39, 40, or
+  119; in the 60-column buffer none reaches column 0 or 59. Columns 39 and 40 are ordinary
+  interior content at 60 columns — below the breakpoint `layout::split_body` gives the detail
+  region the whole body — and a table wrapping at 58 necessarily covers them, so asserting
+  the wide layout's divider columns against the narrow buffer would leave this test
+  permanently red against a correct implementation
 
 #### Scenario: An empty source leaves the detail interior blank at both widths
 
@@ -136,6 +164,17 @@ degraded-states row.
 - **AND** the same holds with the selected tab marked `tracks_tasks` and the same source
   turned into thirty 200-character task lines, so neither the checklist's wrap nor the
   progress bar's gauge can reach the border
+- **AND** the same holds again with the source replaced by a twelve-column table whose every
+  cell is 200 characters long — which the pipe grammar fits at both interiors, spending each
+  exactly — and once more with a fifteen-column one, whose `4n + 1` of 61 the 78-column
+  interior clears and the 58-column one does not, so **both** the pipe grammar and the
+  one-cell-per-line fallback it degrades to are measured against the border
+
+  Corrected during Change Review: the first draft claimed the twelve-column fixture
+  exercised the fallback. It does not — `3n + 1` is 37, so `avail` is 41 and 21, both at
+  least `n`, and the pipe grammar is used at both widths. The fifteen-column table is what
+  makes the sentence true, and the two are kept side by side because the twelve-column one
+  is the tightest pipe-grammar case there is.
 
 #### Scenario: A degenerate detail interior draws nothing and does not panic
 
@@ -159,6 +198,8 @@ give an interior of zero rows and would exercise only the earliest guard.
   `tracks_tasks`, where the one content row at 120x7 and 60x7 holds the progress bar rather
   than a task item, and 1x20 and 2x20 — where the interior is one or zero columns wide —
   still draw nothing and still do not panic
+- **AND** every one of those renders is repeated once more with a table as the
+  `detail.source`, where 1x20 and 2x20 still draw nothing and still do not panic
 
 ### Requirement: Switching to and from the tracked-tasks tab renormalises the scroll
 

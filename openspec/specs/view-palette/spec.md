@@ -51,10 +51,17 @@ pub enum Role {
     Code,
     Link,
     Quoted,
+    Strikethrough,
 }
 
 pub fn style(role: Role) -> Style;
 ```
+
+`Strikethrough` is this change's one new variant, and it is the reason the enum is
+reproduced here: `markdown-render` gains a `strikethrough` face, and the face's `Style` is
+this module's to decide, not a render call site's. The exhaustive-`match` role list the
+totality scenario iterates is what makes the addition a **compile error** until the table
+answers it, which is the property that keeps the enum and the table from drifting.
 
 `src/ui/palette.rs` SHALL be the **only file under `src/`** that names
 `ratatui::style::Color` or a `Color::` variant. The scope is `src/` and not the whole crate
@@ -93,22 +100,24 @@ against, never a literal that test writes.
 
 `ui::palette` SHALL be added to the pure view set both standing view gates already carry:
 `NOIO-VIEW`'s `PURE` list (eight files becoming **nine**) and `COLWIDTH`'s (seven becoming
-**eight**).
+**eight**). This change adds no module and moves neither count.
 
 #### Scenario: The palette answers every role with a `Style`
 
 - **WHEN** `palette::style` is called once for every `Role` variant, including
-  `AgentBadge` for each of the five `agents::AgentStatus` values and `Heading` for levels
-  `1` through `6`
+  `AgentBadge` for each of the five `agents::AgentStatus` values, `Heading` for levels
+  `1` through `6`, and `Strikethrough`
 - **THEN** every call returns a `Style` and none panics
 - **AND** the role list the test iterates is built from an **exhaustive** `match role { … }`
   rather than hand-enumerated, so a `Role` added later fails to compile until it is added here
+  — which is exactly how `Strikethrough` was forced into this table rather than remembered
 - **AND** no two of `ListProblem`, `FileMode`, `TabActive`, `TabInactive`, and the five
   `AgentBadge` styles are equal to one another, so each carries a distinction rather than
   repeating its neighbour
 - **AND** the two deliberately shared pairs are asserted **equal** — `FileMode` with `Code`,
   and `AgentBadge(Unknown)` with `ListSeparator` — so the sharing is a recorded decision
-  rather than a gap the distinctness assertion happens to step around
+  rather than a gap the distinctness assertion happens to step around, and `Strikethrough` is
+  asserted **unequal** to every other role's style, so it joins neither pair by accident
 
 #### Scenario: The confinement gate catches a `Color` named outside the palette
 
@@ -160,9 +169,9 @@ and lets the terminal answer. Reading the environment from a view file is forbid
 ### Requirement: Every role keeps the modifier the crate applied before this change
 
 Colour SHALL be added **beside** the modifier a role already carried, never in place of it,
-and this change SHALL add, remove, or alter **no modifier anywhere**. The consequence is
+and `color-palette` added, removed, or altered **no modifier anywhere**. The consequence is
 falsifiable rather than aspirational: in a captured `TestBackend` buffer compared by modifier
-alone, every cell **outside the artifact tab-bar row** after this change carries exactly the
+alone, every cell **outside the artifact tab-bar row** after that change carries exactly the
 modifier it carried before it.
 
 The tab-bar row is the stated exception, because `artifact-tabs` moves and relabels every
@@ -170,6 +179,11 @@ chip in it. Its own guarantee is narrower and is stated here rather than left ou
 selected chip's span remains that row's only `BOLD` span, so a monochrome reader still learns
 which tab is current — what that reader loses is the `1`–`9` digits, which the chip grammar
 drops deliberately and `action_for` still answers.
+
+`markdown-constructs` adds one row to the table below and alters none of the others, so the
+invariant holds through it too: no cell that carried a modifier before it carries a different
+one after, and the only cells that gain `CROSSED_OUT` are those a `~~struck~~` source
+produces — a construct the parser could not emit at all before.
 
 The modifier each role SHALL carry:
 
@@ -196,6 +210,13 @@ The modifier each role SHALL carry:
 | `Code` | `DIM` |
 | `Link` | `UNDERLINED` |
 | `Quoted` | `DIM` |
+| `Strikethrough` | `CROSSED_OUT` |
+
+`CROSSED_OUT` is chosen over a colour or a bracketing glyph for the same reason every other
+row of this table carries a modifier: it is the terminal's own rendering of exactly this
+meaning, it costs no columns, and a terminal that does not support it drops the attribute and
+still shows the text — which is the right failure for a construct whose whole point is that
+the text is still there.
 
 #### Scenario: Each role's modifier set is exactly the table above
 
@@ -204,7 +225,8 @@ The modifier each role SHALL carry:
 - **THEN** every role matches, and the nine roles that carry no modifier —
   `HeaderPath`, `Footer`, `RegionBorder`, `ListRow`, `ListProblem`, `ListSeparator`,
   `ListMessage`, `AgentBadge`, and `TabInactive` — carry none
-- **AND** the assertion discriminates: `Emphasis` reports `ITALIC` and not `BOLD`
+- **AND** the assertion discriminates: `Emphasis` reports `ITALIC` and not `BOLD`, and
+  `Strikethrough` reports `CROSSED_OUT` and not `DIM`
 
 #### Scenario: A monochrome reading of the frame is unchanged
 
@@ -213,13 +235,16 @@ The modifier each role SHALL carry:
   `## Heading\n\n**bold** and *italic* and `code` and [link](u)\n` is rendered at 120x20 and
   at 60x20
 - **THEN** in both buffers the modifier of every cell **outside row 3, the tab bar** is
-  exactly what the same dashboard produced before this change: `OpenSpec` and the detail header `BOLD`, the `file mode` badge
+  exactly what the same dashboard produced before `color-palette`: `OpenSpec` and the detail header `BOLD`, the `file mode` badge
   `DIM`, the selected row's cells `BOLD`, the heading and `bold` `BOLD`, `italic` `ITALIC`,
   `code` `DIM`, and `link` `UNDERLINED`
 - **AND** the problem row, the separator row, and the agent badge cell carry no modifier at
   all, exactly as before
 - **AND** in the tab-bar row the selected chip's span is the only `BOLD` span, so the one
   excepted row still discriminates the current tab without colour
+- **AND** the same source with `~~struck~~` appended renders that word's cells with
+  `CROSSED_OUT` and leaves every other cell's modifier unchanged, so the new role adds a
+  modifier only where the new construct appears
 
 ### Requirement: Colour is added only where it carries a distinction a modifier cannot
 
@@ -248,11 +273,14 @@ other:
 | `Link` | foreground `Blue` |
 
 `HeaderTitle`, `HeaderPath`, `Footer`, `RegionBorder`, `RegionBorderFocused`, `ListRow`,
-`ListRowSelected`, `ListMessage`, `DetailHeader`, `Strong`, `Emphasis`, and `Quoted` SHALL
-carry **no** colour: each already carries a modifier that distinguishes it, and a colour
-there would be decoration rather than information. `Quoted` in particular stays `DIM` and
-uncoloured — a strikethrough face has no entry at all, because `markdown-render` has no
-parser support for one yet.
+`ListRowSelected`, `ListMessage`, `DetailHeader`, `Strong`, `Emphasis`, `Quoted`, and
+`Strikethrough` SHALL carry **no** colour: each already carries a modifier that distinguishes
+it, and a colour there would be decoration rather than information. `Quoted` in particular
+stays `DIM` and uncoloured. `Strikethrough` joins that list rather than gaining an entry of its
+own: `CROSSED_OUT` already says the whole of what the face means, and the obvious candidate
+colour — `DarkGray` — is this palette's one "no information" grey, which struck text
+emphatically is not, since the reader is being shown what it says as well as that it is
+struck.
 
 Two pairs of roles SHALL share a style, deliberately rather than by oversight. `FileMode` and
 `Code` are both `DIM` + `Yellow`, and they cannot meet: one is drawn in the frame header, the
@@ -260,7 +288,8 @@ other only inside the detail region's content area. `AgentBadge(Unknown)` and `L
 are both `DarkGray`, and they do share the list region — that is the point, because `DarkGray`
 is this palette's one "no information" grey and an unknown agent status and a divider rule are
 both exactly that. Neither pair is a distinction the reader must draw, so neither is a
-`DIM`-style overload.
+`DIM`-style overload. `Strikethrough` SHALL be a **third** style equal to no other role's, so
+the shared set stays exactly those two pairs.
 
 `Heading(l)` for an `l` outside `1..=6` SHALL return the same `Style` as `Heading(6)`:
 `markdown-render` produces only `1..=6`, and the function is total rather than panicking on a
@@ -272,7 +301,7 @@ value the parser cannot emit.
   are inspected
 - **THEN** exactly the roles in the table above report a `Some` foreground or background, with
   the named variant the table gives
-- **AND** every other role reports `fg: None` and `bg: None`
+- **AND** every other role reports `fg: None` and `bg: None`, `Strikethrough` among them
 
 #### Scenario: An out-of-range heading level does not panic
 
@@ -307,18 +336,23 @@ The mapping from a drawn span to its role SHALL be:
 by folding them onto `Style::default()` with `Style::patch` in this fixed order:
 
 1. `Quoted`, when `face.quoted`;
-2. `Link`, when `face.link`;
-3. `Code`, when `face.code`;
-4. `Emphasis`, when `face.emphasis`;
-5. `Strong`, when `face.strong`;
-6. `Heading(level)`, when `face.heading` is `Some(level)`.
+2. `Strikethrough`, when `face.strikethrough`;
+3. `Link`, when `face.link`;
+4. `Code`, when `face.code`;
+5. `Emphasis`, when `face.emphasis`;
+6. `Strong`, when `face.strong`;
+7. `Heading(level)`, when `face.heading` is `Some(level)`.
+
+`Strikethrough` is inserted at position 2 — this change's only edit to the order — precisely
+because it carries **no** foreground: wherever it sits it cannot take a colour away from a
+role that has one, so it is placed early, beside the other uncoloured, always-composing face.
 
 Because `patch` lets the later value win, modifiers accumulate — a bold link's cells carry
-`BOLD` and `UNDERLINED` together, exactly as before — while the **foreground** of a span
-carrying several coloured faces is decided by the last one in that order. The precedence is
-therefore heading over code over link, stated here rather than left to be discovered: a
-heading line reads as one colour even where it contains a code span or a link, which is the
-point of colouring the heading at all.
+`BOLD` and `UNDERLINED` together, and a struck bold link's carry `CROSSED_OUT` as well —
+while the **foreground** of a span carrying several coloured faces is decided by the last one
+in that order. The precedence is therefore heading over code over link, stated here rather
+than left to be discovered: a heading line reads as one colour even where it contains a code
+span or a link, which is the point of colouring the heading at all.
 
 `style_for` SHALL be total: no `Face` value panics, and `Face::plain()` SHALL map to
 `Style::default()`.
@@ -327,31 +361,38 @@ point of colouring the heading at all.
 
 - **WHEN** a `Dashboard` at `Route::Detail` whose selected change carries one artifact not
   marked `tracks_tasks` and whose `detail.source` is
-  `# Title\n\n## Heading\n\n**bold** and *italic* and `code` and [link](u)\n` is rendered at
-  120x20 and at 60x20
+  `# Title\n\n## Heading\n\n**bold** and *italic* and `code` and [link](u) and ~~struck~~\n`
+  is rendered at 120x20 and at 60x20
 - **THEN** in each buffer the cells of `# Title` report `BOLD` set and the foreground
   `Role::Heading(1)` carries (`Magenta`), and the cells of `## Heading` report `BOLD` set and
   the foreground `Role::Heading(2)` carries (`Cyan`)
 - **AND** the cells of `code` report `DIM` and the foreground `Role::Code` carries (`Yellow`),
   and the cells of `link` report `UNDERLINED` and the foreground `Role::Link` carries
   (`Blue`)
-- **AND** the cells of `bold` report `BOLD` with no foreground, and of `italic` `ITALIC` with
-  no foreground, so the uncoloured roles are discriminated from the coloured ones
+- **AND** the cells of `bold` report `BOLD` with no foreground, of `italic` `ITALIC` with
+  no foreground, and of `struck` `CROSSED_OUT` with no foreground, so the uncoloured roles are
+  discriminated from the coloured ones
 
 #### Scenario: Heading foreground wins over a code span inside it
 
-- **WHEN** `style_for` is called on a `Face` with `heading: Some(2)` and `code: true`, and on
-  one with `code: true` and `link: true`
+- **WHEN** `style_for` is called on a `Face` with `heading: Some(2)` and `code: true`, on
+  one with `code: true` and `link: true`, and on one with `strikethrough: true`,
+  `strong: true`, and `link: true`
 - **THEN** the first reports the foreground `Role::Heading(2)` carries — the heading's — with
   `BOLD` and `DIM` both set, so no modifier was lost to the precedence rule
 - **AND** the second reports the foreground `Role::Code` carries — which follows the link in
   the fold order — with `DIM` and `UNDERLINED` both set
-- **AND** neither assertion names a `Color` literal: both compare against `palette::style`,
+- **AND** the third reports `CROSSED_OUT`, `BOLD`, and `UNDERLINED` all set and the foreground
+  `Role::Link` carries, so an uncoloured strikethrough neither loses its own modifier nor
+  displaces the link's colour
+- **AND** no assertion names a `Color` literal: all compare against `palette::style`,
   because `style_for` lives in `src/ui/view.rs`, which the confinement gate searches
 
 #### Scenario: A plain face is the default style
 
 - **WHEN** `style_for(&Face::plain())` is called
 - **THEN** it returns `Style::default()`, with no modifier, no foreground, and no background
+- **AND** `Face::plain()`'s `strikethrough` is `false`, so the new field does not change what
+  a plain face maps to
 - **AND** rendering a plain-text document at 120x20 and 60x20 leaves every content cell's
   style equal to `ratatui::buffer::Cell::default().style()`

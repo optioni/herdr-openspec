@@ -347,14 +347,22 @@ not a proof of a degraded state.
 
 #### Scenario: A footnote, strikethrough, and a table each render as literal source
 
+The scenario's name is kept verbatim because a delta's scenario headers are its merge key and
+OpenSpec has no scenario-level rename — `openspec validate --strict` refuses a MODIFIED block
+that drops one. Its subject narrows to the two constructs that stay literal, and the two that
+left the set appear below as the **discriminating control**, so the scenario fails if the
+narrowing did not actually happen.
+
 - **WHEN** a non-tracked tab whose source holds, on separate lines, a footnote reference and
-  definition, a strikethrough span, a GFM table row, and a task-list item is rendered at 78 and
-  at 58 columns
+  definition and a task-list item is rendered at 78 and at 58 columns
 - **THEN** each construct appears as its own literal source text, one rendered line per source
   line, with no character dropped and none reinterpreted
 - **AND** the rendered line count equals the source line count for that region
 - **AND** the same source on the **tracked-tasks** tab renders the checklist grammar instead,
   which is the row's own "on a tab other than the tracked-tasks one" carve-out
+- **AND** a strikethrough span and a GFM table in the same fixture render as a struck face and
+  as aligned columns rather than as literal text, which discriminates the narrowing from a
+  reword that changed nothing
 
 #### Scenario: The one-shot commands' degrades are proved by exit status and stderr
 
