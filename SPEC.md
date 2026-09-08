@@ -879,6 +879,30 @@ is tested against scratch `#!/bin/sh` programs rather than the real `openspec`,
   `ratatui::backend::TestBackend` stands in for the rendering surface and
   a recording `TerminalOps` double stands in for the terminal; no test
   constructs the real terminal implementation
+- `launch::decide`, `launch::pane_id`, `launch::run_request`, and `launch::settle` — the pure
+  launch policy (no `Dashboard`, no `ChangeSet`, no fixture), the `pane split` envelope parse,
+  the three-call `pane split` → `agent start` → `agent prompt` sequence (with `state::record`
+  run between the last two) driven against a `FakeCli`, and the bounded wait for a launch
+  still in flight when the loop exits; and the worker — the crate's third worker thread,
+  confined to this module and reached only through `cli::HerdrCli` — tested through the
+  `Launcher` trait's `RealLauncher`/`NoLauncher` implementations. `launch::Outcome` carries at
+  most two problems (a `state::record` failure and an `agent prompt` failure), never silently
+  dropping either
+- `open::context`, `open::existing_pane`, `open::open_args`/`open::focus_args`, `open::run`,
+  and `open::placement_for`/`open::report_output` — the invocation context read through one
+  injected environment lookup, the pane-list match against `DASHBOARD_LABEL` and the
+  workspace id, the exact `plugin pane open`/`plugin pane focus` argument vectors, the
+  list-then-focus-or-open driver run against a `FakeCli`, and the two pure decisions
+  `src/main.rs` would otherwise make itself
+- `config::config_dir` and `config::load` — the configuration directory resolved from an
+  injected environment lookup (`&dyn Fn(&str) -> Option<String>`, never `std::env::var`
+  directly), and `config.toml` read into a `Config` with a documented default for every key,
+  so a missing, empty, or malformed file never fails the caller
+- `state::state_dir`, `state::agent_name`, and `state::read`/`state::record` — the state
+  directory resolved from the same kind of injected environment lookup as `config::config_dir`,
+  the six-step derivation of a Herdr-legal agent name from a change name, and the
+  read-then-rewrite of `agent-names.toml` that never fails, panics, or loses a well-formed
+  neighbour when one entry is malformed
 
 ### View tests
 
