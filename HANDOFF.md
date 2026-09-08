@@ -1,5 +1,10 @@
 # Handoff
 
+**Closed record.** This file documents a completed project; it is not a live to-do
+list. Open work in this repository lives in OpenSpec changes and is reported by
+`openspec list` — a section below describing something as "deferred" is describing
+the past, not naming outstanding work.
+
 **Written:** 2026-09-06 ~04:00 EEST · **Branch:** `main` · **Remote:** `optioni/herdr-openspec`
 
 ## Where things stand
@@ -56,9 +61,9 @@ final archive, not inside the last change.** Either sequence a closing commit ou
 change, or have the archive step re-read and correct the completion claims. Fixed here in
 `a0336ec`, after the fact.
 
-## Next action
+## No next action — roadmap and archive complete
 
-**None.** The roadmap is finished and the archive is done. Nothing is planned,
+The roadmap is finished and the archive is done. Nothing is planned,
 scheduled, or deferred. The three findings below (paired forks, `NODEFAULT-UI`'s
 per-subject floors, and unsound outer tests) are what should transfer to whatever
 project reads this file next — they are lessons, not open work items here.
@@ -397,20 +402,21 @@ key, or switch `origin` to HTTPS (`git remote set-url origin https://github.com/
 plus `gh auth setup-git`). The remote has deliberately not been changed, because `gh
 auth status` reports the user's git protocol preference as `ssh`.
 
-## Deferred: sync README's keymap at the end of Phase 4
+## Resolved: README's keymap was synced when Phase 4 closed
 
 `markdown-viewer` made a **BREAKING** keybinding change — `j`/`k` and the arrows now
 scroll detail content at the detail route while still moving selection at the list
-route. SPEC.md → Keys was updated properly and is now the accurate reference.
+route. SPEC.md → Keys was updated properly and was the accurate reference throughout.
 
-`README.md`'s keymap table is stale against it: it says `Esc` is "Back to list" when
-SPEC now specifies layered dismissal, omits `Ctrl-C` entirely, and describes `j`/`k` as
-plain "Navigate" without the route split.
+`README.md`'s keymap table went stale against it for a time: it said `Esc` was "Back
+to list" when SPEC specified layered dismissal, omitted `Ctrl-C` entirely, and
+described `j`/`k` as plain "Navigate" without the route split.
 
-**Left stale on purpose.** `detail-view`, `tasks-tab`, and `live-refresh` are all
-likely to touch keys again, so syncing now means three rounds of churn. **Do one
-accurate pass over README's Keys table when Phase 4 closes**, taking SPEC.md → Keys as
-the source. Do not let this deferral outlive the phase.
+**Left stale on purpose, deliberately, until Phase 4 closed.** `detail-view`,
+`tasks-tab`, and `live-refresh` all touched keys again, so syncing after each would
+have meant three rounds of churn. One accurate pass over README's Keys table was made
+when Phase 4 closed, taking SPEC.md → Keys as the source; README now correctly shows
+layered `Esc` dismissal, `Ctrl-C`, and the `j`/`k` route split.
 
 ## Measured cost — Phase 5 figures supersede Phase 4's
 
@@ -496,22 +502,12 @@ other teammates`), so a phase orchestrator's own subagents are unnamed.
 
 - `openspec` is nvm-installed and **not on the default PATH**:
   `export PATH="$HOME/.nvm/versions/node/v24.20.0/bin:$PATH"`
-- `clippy` and `cargo-llvm-cov` are **not installed**. `repo-foundation` task 4.1
-  installs them: `rustup component add clippy`, `cargo install cargo-llvm-cov`.
+- `clippy` and `cargo-llvm-cov` are one-time components a fresh machine needs:
+  `rustup component add clippy`, `cargo install cargo-llvm-cov` (`repo-foundation`
+  task 4.1). Both are installed on the machine this project was built on.
 - Rust 1.91.1 is installed. `make` is present; `just` is not.
 - `openspec/schemas/tdd/` and `.claude/agents/` are graft-vendored — never edit in
   place; edit `optioni/openspec-schemas` and re-sync.
-
-## Known-deferred doc fixes
-
-Scheduled as tasks inside `repo-foundation/tasks.md`, not yet done:
-
-1. `AGENTS.md` → "Current repo state" still claims no `Cargo.toml` exists.
-2. `README.md` → Install advertises action-menu entries that only arrive with
-   Phase 6's `plugin-actions`.
-3. `IMPLEMENTATION-ORDER.md` → Phase 6 credits `plugin-actions` with
-   `min_herdr_version`/`platforms` that `repo-foundation` actually ships. Deferred
-   to archive time per `openspec/config.yaml` → `operations.archive`.
 
 ## Decisions taken while the user was away
 
