@@ -1423,14 +1423,27 @@ mod tests {
         let change = fixture::active(name, 4, 9);
         let d = dashboard_at_detail(change, detail("", Vec::new()));
 
+        // (frame width, the detail region's own interior width, the interior's first
+        // column) — the two mandated pairs, named as bare literals for `DETAILWIDTHS`.
+        let cases: [(u16, usize, usize); 2] = [(120, 78, 41), (60, 58, 1)];
+        for (frame, interior, first_col) in cases {
+            let buf = render_at(frame, 20, &d);
+            let tail_start = first_col + interior - tail.len();
+            assert_eq!(
+                cols(&row_text(&buf, 2), tail_start..tail_start + tail.len()),
+                tail,
+                "frame {frame}"
+            );
+            let last_col = (first_col + interior - 1) as u16;
+            assert_eq!(cell(&buf, last_col, 2).symbol(), "]", "frame {frame}");
+            assert_eq!(
+                cell(&buf, last_col + 1, 2).symbol(),
+                "│",
+                "frame {frame}: no content drawn past the detail block's own right border"
+            );
+        }
+
         let buf120 = render_at(120, 20, &d);
-        assert_eq!(cols(&row_text(&buf120, 2), 107..107 + tail.len()), tail);
-        assert_eq!(cell(&buf120, 118, 2).symbol(), "]");
-        assert_eq!(
-            cell(&buf120, 119, 2).symbol(),
-            "│",
-            "no content drawn past the detail block's own right border"
-        );
         assert_eq!(
             cell(&buf120, 39, 2).symbol(),
             "│",
@@ -1440,15 +1453,6 @@ mod tests {
             cell(&buf120, 40, 2).symbol(),
             "│",
             "detail block's left border"
-        );
-
-        let buf60 = render_at(60, 20, &d);
-        assert_eq!(cols(&row_text(&buf60, 2), 47..47 + tail.len()), tail);
-        assert_eq!(cell(&buf60, 58, 2).symbol(), "]");
-        assert_eq!(
-            cell(&buf60, 59, 2).symbol(),
-            "│",
-            "no content drawn past the detail block's own right border"
         );
     }
 
@@ -1542,7 +1546,8 @@ mod tests {
         }
 
         // The mandated pair: the literal fits whole and is padded to the full interior.
-        for (frame, width) in [(120u16, 78usize), (60u16, 58usize)] {
+        let mandated: [(u16, usize); 2] = [(120, 78), (60, 58)];
+        for (frame, width) in mandated {
             let buf = render_at(frame, 20, &d);
             let content_x = if frame == 120 { 41 } else { 1 };
             let row = cols(&row_text(&buf, 4), content_x..content_x + width);
@@ -1593,7 +1598,8 @@ mod tests {
             }
         }
 
-        for width in [78u16, 58] {
+        let mandated: [u16; 2] = [78, 58];
+        for width in mandated {
             let lines = content_lines(&d.detail, d.selected_change(), width);
             for line in &lines {
                 assert!(
@@ -1682,7 +1688,8 @@ mod tests {
         );
 
         // The mandated pair, asserted explicitly by this sweep too.
-        for width in [78u16, 58] {
+        let mandated: [u16; 2] = [78, 58];
+        for width in mandated {
             for change in [None, Some(&marked), Some(&unmarked), Some(&no_artifacts)] {
                 for d in &details {
                     let lines = content_lines(d, change, width);
