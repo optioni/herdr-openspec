@@ -134,11 +134,11 @@
 ## 7. `Enter` guards its reset, and the filter folds all of Unicode
 <!-- kind: behavior -->
 
-- [ ] 7.1 RED: Write failing tests for `Enter` at the detail route moves nothing and keeps the scroll (both the `apply` and the scripted `run_loop` rows of the matrix), `Enter` from the list route still opens at the top, `Enter` while filtering still dismisses the filter and resets nothing, Matching ignores case outside ASCII, and The fold is total and its documented edge cases hold.
-- [ ] 7.2 GREEN: Guard `Action::OpenDetail`'s `self.route = Route::Detail; self.detail.scroll = 0;` on `self.route != Route::Detail` in `src/ui/app.rs:212`, per design.md → Decision 5.
-- [ ] 7.3 GREEN: Change `matches` at `src/ui/app.rs:575` to fold both sides with `str::to_lowercase`, and update its doc comment. `src/state.rs:84` stays `to_ascii_lowercase` (design.md → Decision 6).
-- [ ] 7.4 REFACTOR: Fold the three `Enter` scenarios' shared `Dashboard` setup into one helper if it removes duplication; otherwise record that none was needed.
-- [ ] 7.5 Run `cargo test --lib ui::app` and `cargo test --lib ui::driver` — green, and Every route move resets the scroll still passes unchanged.
+- [x] 7.1 RED: Write failing tests for `Enter` at the detail route moves nothing and keeps the scroll (both the `apply` and the scripted `run_loop` rows of the matrix), `Enter` from the list route still opens at the top, `Enter` while filtering still dismisses the filter and resets nothing, Matching ignores case outside ASCII, and The fold is total and its documented edge cases hold.
+- [x] 7.2 GREEN: Guard `Action::OpenDetail`'s `self.route = Route::Detail; self.detail.scroll = 0;` on `self.route != Route::Detail` in `src/ui/app.rs:212`, per design.md → Decision 5.
+- [x] 7.3 GREEN: Change `matches` at `src/ui/app.rs:575` to fold both sides with `str::to_lowercase`, and update its doc comment. `src/state.rs:84` stays `to_ascii_lowercase` (design.md → Decision 6).
+- [x] 7.4 REFACTOR: Fold the three `Enter` scenarios' shared `Dashboard` setup into one helper if it removes duplication; otherwise record that none was needed.
+- [x] 7.5 Run `cargo test --lib ui::app` and `cargo test --lib ui::driver` — green, and Every route move resets the scroll still passes unchanged.
 
 ## 8. The `COLWIDTH` gate and the re-measured width floors
 <!-- kind: operational -->
