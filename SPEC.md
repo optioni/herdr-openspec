@@ -652,18 +652,6 @@ platforms = ["macos", "linux"]
 [[build]]
 command = ["/bin/sh", "scripts/build.sh"]
 
-[[actions]]
-id = "open"
-title = "OpenSpec: dashboard"
-contexts = ["workspace"]
-command = ["./target/release/herdr-openspec", "open"]
-
-[[actions]]
-id = "open-tab"
-title = "OpenSpec: dashboard (tab)"
-contexts = ["workspace"]
-command = ["./target/release/herdr-openspec", "open-tab"]
-
 [[panes]]
 id = "dashboard"
 title = "OpenSpec"
@@ -675,6 +663,18 @@ id = "dashboard-tab"
 title = "OpenSpec"
 placement = "tab"
 command = ["./target/release/herdr-openspec", "ui"]
+
+[[actions]]
+id = "open"
+title = "OpenSpec: dashboard"
+contexts = ["workspace"]
+command = ["./target/release/herdr-openspec", "open"]
+
+[[actions]]
+id = "open-tab"
+title = "OpenSpec: dashboard (tab)"
+contexts = ["workspace"]
+command = ["./target/release/herdr-openspec", "open-tab"]
 ```
 
 The tab action's command is the flat `open-tab` subcommand, not `["open", "--tab"]`: `parse`
