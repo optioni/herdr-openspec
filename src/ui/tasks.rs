@@ -853,4 +853,282 @@ mod tests {
             );
         }
     }
+
+    // --- group 4: measuring in columns -------------------------------
+
+    /// `tasks-checklist` :: "A checklist of wide-character items fits at both
+    /// mandated widths" — the hard-split half. Mirrors
+    /// `unbreakable_word_hard_split` above but with a wide-character word, so
+    /// a wrap that measures in `chars` instead of columns would pack roughly
+    /// twice as many characters per line as the region can hold and this
+    /// test's `columns(t) <= width` assertion goes red.
+    #[test]
+    fn wide_character_item_hard_split_at_mandated_widths() {
+        let text: String = "日本語のタスク".repeat(30);
+        let source = format!("- [x] {text}\n");
+        let progress = Progress {
+            completed: 1,
+            total: 1,
+        };
+        for width in [78, 58] {
+            let out = lines(&source, &progress, width);
+            let start = first_content_index(&progress, width);
+            let item_lines = &out[start..];
+            assert!(!item_lines.is_empty(), "width {width}");
+            let mut reassembled = String::new();
+            for (i, line) in item_lines.iter().enumerate() {
+                let t = line.text();
+                assert!(
+                    crate::ui::layout::columns(&t) <= width as usize,
+                    "width {width} line {i}: {t:?} exceeds its width"
+                );
+                let stripped = if i == 0 {
+                    t.strip_prefix("[x] ").unwrap_or(&t).to_string()
+                } else {
+                    t.trim_start_matches(' ').to_string()
+                };
+                reassembled.push_str(&stripped);
+            }
+            assert_eq!(reassembled, text, "width {width}");
+            assert!(
+                item_lines.iter().any(|l| {
+                    let c = crate::ui::layout::columns(&l.text());
+                    c == width as usize || c + 1 == width as usize
+                }),
+                "width {width}: no wrapped line reaches near the region width"
+            );
+        }
+    }
+
+    /// `tasks-checklist` :: "A checklist of wide-character items fits at both
+    /// mandated widths" — a heading and several wide items (a repeated CJK
+    /// word, an emoji, and a family emoji joined by two zero-width joiners)
+    /// together, none of them producing a line wider than the region.
+    #[test]
+    fn wide_character_checklist_lines_stay_within_width() {
+        let family_emoji = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466}";
+        let source = format!(
+            "## 日本語の見出し\n\n- [x] 日本語のタスク\n- [ ] 🎉 celebrate\n\
+             - [ ] {family_emoji} family\n"
+        );
+        let progress = Progress {
+            completed: 1,
+            total: 3,
+        };
+        for width in [78, 58] {
+            let out = lines(&source, &progress, width);
+            for line in &out {
+                let t = line.text();
+                assert!(
+                    crate::ui::layout::columns(&t) <= width as usize,
+                    "width {width}: {t:?} exceeds its width"
+                );
+            }
+            assert!(
+                out.iter().any(|l| l.text() == "## 日本語の見出し"),
+                "width {width}: heading missing: {:?}",
+                out.iter().map(|l| l.text()).collect::<Vec<_>>()
+            );
+            assert!(
+                out.iter().any(|l| l.text().contains('🎉')),
+                "width {width}: emoji item missing"
+            );
+            assert!(
+                out.iter().any(|l| l.text().contains(family_emoji)),
+                "width {width}: family-emoji item missing"
+            );
+        }
+    }
+
+    /// `tasks-checklist` :: "No checklist line exceeds its width at any
+    /// width" — a sweep of `0..=130` over five sources (the wide-character
+    /// source above, a twenty-item ASCII checklist, a heading with no items,
+    /// the empty string, and a source holding a NUL character) against two
+    /// `Progress` values, plus the mandated pair named explicitly.
+    #[test]
+    fn no_checklist_line_exceeds_its_width_at_any_width() {
+        let family_emoji = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466}";
+        let wide_source = format!(
+            "## 日本語の見出し\n\n- [x] 日本語のタスク\n- [ ] 🎉 celebrate\n\
+             - [ ] {family_emoji} family\n"
+        );
+        let ascii_source: String = (0..20)
+            .map(|i| format!("- [ ] item {i} with some words in it here\n"))
+            .collect();
+        let heading_only = "## 1. Setup\n\nno items here\n".to_string();
+        let empty = String::new();
+        let nul_source = "- [ ] a\u{0}b\n".to_string();
+        let sources = [
+            &wide_source,
+            &ascii_source,
+            &heading_only,
+            &empty,
+            &nul_source,
+        ];
+        let progresses = [
+            Progress {
+                completed: 4,
+                total: 9,
+            },
+            Progress {
+                completed: 0,
+                total: 0,
+            },
+        ];
+
+        for source in sources {
+            for progress in &progresses {
+                for width in 0u16..=130 {
+                    let out = lines(source, progress, width);
+                    for line in &out {
+                        assert!(
+                            crate::ui::layout::columns(&line.text()) <= width as usize,
+                            "source {source:?} progress {progress:?} width {width}: {:?} \
+                             exceeds its width",
+                            line.text()
+                        );
+                    }
+                }
+                // The mandated pair, asserted explicitly by this scenario too.
+                for width in [78, 58] {
+                    let out = lines(source, progress, width);
+                    for line in &out {
+                        assert!(
+                            crate::ui::layout::columns(&line.text()) <= width as usize,
+                            "source {source:?} progress {progress:?} width {width}"
+                        );
+                    }
+                }
+            }
+        }
+
+        // The zero-progress runs include widths 0 through 12, the range in
+        // which "No tasks yet" is longer than the region.
+        let zero = Progress {
+            completed: 0,
+            total: 0,
+        };
+        for width in 0u16..=12 {
+            let out = lines(&heading_only, &zero, width);
+            for line in &out {
+                assert!(
+                    crate::ui::layout::columns(&line.text()) <= width as usize,
+                    "width {width}"
+                );
+            }
+        }
+    }
+
+    /// `tasks-checklist` :: "`No tasks yet` does not eat the border at a
+    /// narrow frame" — exercised directly on `ui::tasks::lines`, at the
+    /// **content-area** widths a narrow frame produces: a frame of 13 has a
+    /// content area of 11 (first truncation), 14 has 12 (fits whole, no
+    /// ellipsis), 15 has 13 (fits whole, one padding space), and frames 1
+    /// and 2 both collapse to a content area of 0.
+    #[test]
+    fn no_tasks_yet_does_not_eat_the_border_at_a_narrow_frame() {
+        let source = "# Plan\n\nNothing checkable here.\n";
+        let progress = Progress {
+            completed: 0,
+            total: 0,
+        };
+
+        let out = lines(source, &progress, 11);
+        let texts: Vec<String> = out.iter().map(|l| l.text()).collect();
+        assert!(
+            texts.contains(&"No tasks y…".to_string()),
+            "content area 11: {texts:?}"
+        );
+        for t in &texts {
+            assert!(crate::ui::layout::columns(t) <= 11, "{t:?}");
+        }
+
+        let out = lines(source, &progress, 12);
+        let texts: Vec<String> = out.iter().map(|l| l.text()).collect();
+        assert!(
+            texts.contains(&"No tasks yet".to_string()),
+            "content area 12: {texts:?}"
+        );
+
+        let out = lines(source, &progress, 13);
+        let texts: Vec<String> = out.iter().map(|l| l.text()).collect();
+        assert!(
+            texts.contains(&"No tasks yet ".to_string()),
+            "content area 13: {texts:?}"
+        );
+
+        // Frames 1 and 2 both produce a content area of 0.
+        let out = lines(source, &progress, 0);
+        assert!(out.is_empty(), "content area 0: {out:?}");
+
+        // The mandated pair: the literal fits whole and is padded to the
+        // full interior at both.
+        for width in [78, 58] {
+            let out = lines(source, &progress, width);
+            let texts: Vec<String> = out.iter().map(|l| l.text()).collect();
+            let want = format!("No tasks yet{}", " ".repeat(width as usize - 12));
+            assert!(texts.contains(&want), "width {width}: {texts:?}");
+        }
+    }
+
+    /// `tasks-progress-bar` :: "The bar measures at most its width at every
+    /// width" — a sweep of `0..=130`, including the two `usize::MAX`
+    /// `Progress` fixtures the spec adds beyond the existing sweeps.
+    #[test]
+    fn bar_measures_at_most_its_width_at_every_width() {
+        let cases = [
+            Progress {
+                completed: 4,
+                total: 9,
+            },
+            Progress {
+                completed: 0,
+                total: 0,
+            },
+            Progress {
+                completed: 0,
+                total: usize::MAX,
+            },
+            Progress {
+                completed: usize::MAX,
+                total: usize::MAX,
+            },
+        ];
+        for progress in cases {
+            for width in 0u16..=130 {
+                let bar = progress_bar(&progress, width);
+                let cols = crate::ui::layout::columns(&bar);
+                assert!(
+                    cols <= width as usize,
+                    "{progress:?} width {width}: {bar:?} measures {cols}, exceeds its width"
+                );
+            }
+            for width in [78, 58] {
+                let bar = progress_bar(&progress, width);
+                assert!(
+                    crate::ui::layout::columns(&bar) <= width as usize,
+                    "width {width}"
+                );
+            }
+        }
+    }
+
+    /// `tasks-progress-bar` :: "The full grammar at both mandated interior
+    /// widths" — the discriminating clause: the result is byte-identical to
+    /// what this requirement produced before display-column measurement.
+    /// The expected strings are built independently of `progress_bar` (from
+    /// the gauge-fill counts `bar_full_grammar` above already pins: 30/38 at
+    /// 78, 21/27 at 58) rather than by calling the function under test, so
+    /// this cannot pass by construction.
+    #[test]
+    fn full_grammar_is_byte_identical_to_pre_change_output() {
+        let progress = Progress {
+            completed: 4,
+            total: 9,
+        };
+        let want78 = format!("{}{} [4/9] 44%", "█".repeat(30), "░".repeat(38));
+        let want58 = format!("{}{} [4/9] 44%", "█".repeat(21), "░".repeat(27));
+        assert_eq!(progress_bar(&progress, 78), want78);
+        assert_eq!(progress_bar(&progress, 58), want58);
+    }
 }
