@@ -488,6 +488,16 @@ expect = "does not list src/ui/palette.rs in its PURE set"
 why = "the two standing view gates hard-code their PURE lists and only check that the files they name exist, so a forgotten edit would leave the new module unswept while both still print OK - nothing else in the tree can see that gap"
 
 [[control]]
+id = "palette-vacuous"
+script = "palette.sh"
+env = ""
+plant_kind = "create"
+plant_file = "src/ui/palette.rs"
+plant_content = "//! Planted stub: a palette module naming no ratatui colour at all.\npub fn style() {}\n"
+expect = "names no Color - exclusion is vacuous"
+why = "the positive control guarding the exclusion has its own failure mode and therefore its own planted control - without it the guard is attested rather than executed, and a palette gutted of its table would be reported as a clean tree"
+
+[[control]]
 id = "readonly-ui-write"
 script = "readonly-ui.sh"
 plant_file = "src/ui/mod.rs"
