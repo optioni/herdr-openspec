@@ -236,7 +236,7 @@ impl Dashboard {
             Action::OpenDetail => {
                 if self.filter.active {
                     self.filter.active = false;
-                } else {
+                } else if self.route != Route::Detail {
                     self.route = Route::Detail;
                     self.detail.scroll = 0;
                 }
@@ -596,13 +596,15 @@ impl Dashboard {
     }
 }
 
-/// A change is visible when its name, ASCII-lowercased, contains `query`,
-/// ASCII-lowercased. An empty query matches every change. See
-/// `specs/list-filtering/spec.md` -> "The query is a case-insensitive
-/// substring match on the change name".
+/// A change is visible when its name, Unicode-lowercased, contains `query`,
+/// Unicode-lowercased. An empty query matches every change. `str::to_lowercase`
+/// applies the Unicode **default** case-conversion mapping — not locale-tailored,
+/// not full case folding, and not normalising either side — so `to_ascii_lowercase`'s
+/// blind spot above U+007F is closed without introducing a different one. See
+/// `specs/list-filtering/spec.md` -> "The query is a case-insensitive substring
+/// match on the change name" and design.md -> Decision 6.
 pub fn matches(name: &str, query: &str) -> bool {
-    name.to_ascii_lowercase()
-        .contains(query.to_ascii_lowercase().as_str())
+    name.to_lowercase().contains(query.to_lowercase().as_str())
 }
 
 /// Map a terminal event and the current filter mode to one of the nine
