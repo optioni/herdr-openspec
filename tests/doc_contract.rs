@@ -470,6 +470,36 @@ fn msrv_mentions_right_boundary_control() {
 }
 
 #[test]
+fn msrv_mentions_sentence_ending_period_satisfies() {
+    // "." is not an ASCII digit, so it must satisfy the RIGHT boundary — ordinary prose
+    // ending a sentence right after the version must not be reported undocumented.
+    assert!(
+        msrv_mentions("the floor is 1.88.", "1.88"),
+        "a sentence-ending period immediately after the version must satisfy the leg"
+    );
+}
+
+#[test]
+fn msrv_mentions_patch_version_suffix_satisfies() {
+    // "1.88.0" contains "1.88" followed by ".", not a digit, so it satisfies the (relaxed)
+    // right boundary even though the full token is a patch version rather than bare "1.88".
+    assert!(
+        msrv_mentions("Rust 1.88.0 or newer", "1.88"),
+        "\"1.88.0\" must satisfy a search for \"1.88\" now that `.` is not a right-boundary char"
+    );
+}
+
+#[test]
+fn msrv_mentions_left_boundary_still_rejects_dotted_prefix() {
+    // "2.1.88" has "1.88" preceded by ".", which the LEFT boundary must still reject —
+    // only the right-hand boundary set drops `.`.
+    assert!(
+        !msrv_mentions("2.1.88", "1.88"),
+        "a `.` immediately to the left of the match must still be rejected"
+    );
+}
+
+#[test]
 fn msrv_mentions_delimited_match() {
     assert!(msrv_mentions("rust-version = \"1.88\"", "1.88"));
     assert!(msrv_mentions("the floor is 1.88 for now", "1.88"));
