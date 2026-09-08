@@ -851,7 +851,7 @@ is tested against scratch `#!/bin/sh` programs rather than the real `openspec`,
   one filesystem edge, tested against a real `ScratchDir` and against a path
   that does not exist
 - `refresh::start`, `refresh::none`, and the worker body — one of the
-  crate's two worker threads, tested through a `#[cfg(test)]` constructor
+  crate's **three** worker threads, tested through a `#[cfg(test)]` constructor
   (`worker_for_test`) that hands the test the worker's own result and exit
   channels directly, with every assertion made **after** a `recv_timeout`
   returned an item, never after a fixed sleep
