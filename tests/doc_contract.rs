@@ -159,6 +159,25 @@ fn set_diff_message(
 }
 
 #[test]
+fn pub_mod_names_handles_comments_attributes_and_indentation() {
+    let lib_rs = "\
+pub mod a; // a brand-new module
+#[cfg(feature = \"x\")]
+pub mod b;
+    pub mod c;
+// pub mod d;
+pub mod e;
+";
+    let names = pub_mod_names(lib_rs);
+    let expected: BTreeSet<String> = ["a", "b", "c", "e"].iter().map(|s| s.to_string()).collect();
+    assert_eq!(
+        names, expected,
+        "a trailing line comment, an attributed declaration, indentation, and a `pub mod` \
+         occurring inside a `//` comment must each be handled correctly: {names:?}"
+    );
+}
+
+#[test]
 fn module_map_matches_lib_rs() {
     let lib_rs = read_doc(&manifest_dir().join("src/lib.rs")).expect("read src/lib.rs");
     let spec_md = read_doc(&manifest_dir().join("SPEC.md")).expect("read SPEC.md");
