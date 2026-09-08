@@ -273,7 +273,7 @@ tier = "outer"
 proof = ["a_failed_cli_cycle_keeps_the_file_numbers"]
 verdict = "unproven"
 why = "a real run_wired run against a scratch openspec reporting a disagreeing root keeps the file-sourced numbers"
-covers = ["src/changes.rs:1585-1602"]
+covers = ["src/changes.rs:1588-1605"]
 
 [[row]]
 condition = "An `openspec` command exits non-zero"
@@ -281,7 +281,7 @@ tier = "unit"
 proof = ["a_failed_cli_cycle_keeps_the_file_numbers", "an_exec_failure_of_the_openspec_shim_reports_its_own_stderr", "a_shim_whose_interpreter_is_unreachable_exits_127_and_renders_a_problem_row"]
 verdict = "confirmed"
 why = "three proofs for the row's two halves, plus the S10 shim shape folded in rather than given a third row of its own: a_failed_cli_cycle_keeps_the_file_numbers (outer) runs a real run_wired cycle against a scratch openspec exiting non-zero and shows the file-sourced numbers survive; an_exec_failure_of_the_openspec_shim_reports_its_own_stderr (unit) feeds cli_error_problem the measured Failed{code:127} shape and shows the stderr line is carried; a_shim_whose_interpreter_is_unreachable_exits_127_and_renders_a_problem_row (unit, real worker thread) drives the same worker::worker_for_test seam group 9 already exercises with a Failed{code:127} openspec answer, and shows the file-sourced set survives with the problem recorded — group 9 deliberately folded the shim's unreachable-interpreter case into this existing row rather than adding a third, since a 127 exit is a 127 exit regardless of why the child never execed. The outer proof is the strongest of the three, since it exercises the real cycle rather than calling cli_error_problem or the worker directly. tier is \"unit\" because tests/degraded_coverage.rs applies its view/outer rendering check per proof entry, and neither unit proof's own body renders anything through a TestBackend"
-covers = ["src/changes.rs:1563-1570", "src/changes.rs:1341-1356"]
+covers = ["src/changes.rs:1566-1573", "src/changes.rs:1341-1356"]
 
 [[row]]
 condition = "A `herdr agent list` call exits non-zero, or the program cannot be started at all"
@@ -336,7 +336,7 @@ tier = "outer"
 proof = ["a_failed_cli_cycle_keeps_the_file_numbers"]
 verdict = "unproven"
 why = "a real run_wired run keeps the file-sourced result after a later failing CLI cycle"
-covers = ["src/changes.rs:1761-1762"]
+covers = ["src/changes.rs:1764-1765"]
 
 [[row]]
 condition = "A touched path is classified to the wrong change, or conservatively to every change"
@@ -392,4 +392,4 @@ tier = "unit"
 proof = ["a_change_archived_mid_cycle_appears_in_both_lists_for_one_cycle"]
 verdict = "confirmed"
 why = "changes::merge's own unit proof: two merges, the second with an empty CLI list, showing add-auth appears in both active and archived for one cycle and then self-corrects rather than sticking (design.md -> Decision D6)"
-covers = ["src/changes.rs:1736-1736", "src/changes.rs:1775-1776", "src/changes.rs:1783-1787"]
+covers = ["src/changes.rs:1739-1739", "src/changes.rs:1778-1779", "src/changes.rs:1786-1790"]
