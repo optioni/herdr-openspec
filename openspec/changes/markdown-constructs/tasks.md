@@ -355,7 +355,7 @@ including why the scenario headers keep their names and why `covers` stays where
 Per `AGENTS.md`, a gate's floor is its own script default; `NODEFAULT-UI` is the one recorded
 multi-subject exception whose floors live on the `Makefile` line.
 
-- [ ] 8.1 CHECK: Record the floors before the change so a move is measured, not guessed.
+- [x] 8.1 CHECK: Record the floors before the change so a move is measured, not guessed.
   Checks, run at HEAD:
 
   ```sh
@@ -369,11 +369,11 @@ multi-subject exception whose floors live on the `Makefile` line.
   `src/ui/view.rs`, which groups 0, 5, and 6 all add tests to; `NODEFAULT-UI OK (half B): 150
   literal/pattern spans scanned (>= 135)`.
 
-- [ ] 8.2 CHANGE: Re-run all three on the finished tree. Raise `scripts/gates/mdwidths.sh`'s
+- [x] 8.2 CHANGE: Re-run all three on the finished tree. Raise `scripts/gates/mdwidths.sh`'s
   `MD_MIN` and `scripts/gates/widths.sh`'s `WIDTHS_MIN` defaults to the new measured counts.
   Raise the `Makefile`'s view-set `SCAN_MIN` only if the measured span count moved.
 
-- [ ] 8.3 VERIFY: Confirm the gates still catch a planted defect rather than merely passing:
+- [x] 8.3 VERIFY: Confirm the gates still catch a planted defect rather than merely passing:
 
   ```sh
   cargo test --all-features --test gate_controls

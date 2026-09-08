@@ -1968,7 +1968,7 @@ mod tests {
             completed: 1,
             total: 2,
         };
-        for width in [58u16, 78u16] {
+        for width in [58, 78] {
             let tracked = crate::ui::tasks::lines(task_list_source, &progress, width);
             let tracked_text: Vec<String> = tracked
                 .iter()
@@ -1995,7 +1995,7 @@ mod tests {
         // this test fails if the narrowing is a reword that changed nothing.
         let departed =
             "| Gate | Runner |\n|---|---|\n| Format | cargo fmt |\n\nA ~~struck~~ word.\n";
-        for width in [58u16, 78u16] {
+        for width in [58, 78] {
             let rendered = lines(departed, width);
             let texts = text_of(&rendered);
             assert!(
@@ -2057,7 +2057,7 @@ mod tests {
     fn a_table_that_fits_renders_as_aligned_columns() {
         let source =
             "| Gate | Runner |\n|---|---|\n| Format | cargo fmt |\n| Lint | cargo clippy |\n";
-        for width in [58u16, 78u16] {
+        for width in [58, 78] {
             let rendered = lines(source, width);
             let texts = non_blank(&rendered);
             assert_eq!(
@@ -2145,7 +2145,7 @@ mod tests {
                          lima mike november oscar papa";
         assert_eq!(columns(cell_text), 98);
         let source = format!("| key | value |\n|---|---|\n| k | {cell_text} |\n");
-        for (width, expect_w) in [(58u16, vec![3usize, 48]), (78u16, vec![3, 68])] {
+        for (width, expect_w) in [(58, vec![3usize, 48]), (78, vec![3, 68])] {
             let rendered = lines(&source, width);
             let texts = non_blank(&rendered);
             let w = allocated_widths(&texts[1]);
@@ -2200,7 +2200,7 @@ mod tests {
         let source = format!(
             "| aaaa | bbbb | cccc | dddd |\n|---|---|---|---|\n| aaaa | bbbb | cccc | {wide} |\n"
         );
-        for (width, expect_w) in [(58u16, vec![4usize, 4, 4, 33]), (78u16, vec![4, 4, 4, 53])] {
+        for (width, expect_w) in [(58, vec![4usize, 4, 4, 33]), (78, vec![4, 4, 4, 53])] {
             let rendered = lines(&source, width);
             let texts = non_blank(&rendered);
             let w = allocated_widths(&texts[1]);
@@ -2235,7 +2235,7 @@ mod tests {
     #[test]
     fn alignment_markers_pad_the_side_they_name() {
         let source = "| left | cent | rght |\n|:---|:--:|---:|\n| x | x | x |\n";
-        for width in [58u16, 78u16] {
+        for width in [58, 78] {
             let texts = non_blank(&lines(source, width));
             let w = allocated_widths(&texts[1]);
             assert_eq!(w, vec![4, 4, 4], "width {width}");
@@ -2263,7 +2263,7 @@ mod tests {
         assert_eq!(columns(long), 30);
         let wrapped_source =
             format!("| left | cent | rght |\n|:---|:--:|---:|\n| {long} | {long} | {long} |\n");
-        for width in [58u16, 78u16] {
+        for width in [58, 78] {
             let texts = non_blank(&lines(&wrapped_source, width));
             let w = allocated_widths(&texts[1]);
             let body = &texts[2..];
@@ -2326,7 +2326,7 @@ mod tests {
             "pulldown-cmark no longer normalises a ragged row to the declared column count"
         );
 
-        for width in [58u16, 78u16] {
+        for width in [58, 78] {
             let texts = non_blank(&lines(source, width));
             let w = allocated_widths(&texts[1]);
             assert_eq!(w, vec![1, 1, 1], "width {width}");
@@ -2395,7 +2395,7 @@ mod tests {
                 assert!(columns(text) <= width as usize, "width {width}: {text:?}");
             }
         }
-        for width in [58u16, 78u16] {
+        for width in [58, 78] {
             let texts = non_blank(&lines(source, width));
             assert_eq!(
                 texts,
@@ -2416,7 +2416,7 @@ mod tests {
     #[test]
     fn a_struck_run_carries_the_face_and_composes() {
         let source = "A ~~struck~~ word, ~~**struck bold**~~, and `~~x~~` in code.\n";
-        for width in [58u16, 78u16] {
+        for width in [58, 78] {
             let rendered = lines(source, width);
             let segments: Vec<&Segment> = rendered.iter().flat_map(|l| &l.segments).collect();
 
