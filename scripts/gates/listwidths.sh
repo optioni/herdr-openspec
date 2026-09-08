@@ -1,13 +1,15 @@
 # LISTWIDTHS — every #[test] in src/ui/list.rs names both 38 and 58, the two list-region
 # INTERIORS the mandated 120- and 60-column frames produce. Carried forward from list-view
-# BYTE-IDENTICALLY, invocation included: its floor is 17 and this change adds no list test.
+# BYTE-IDENTICALLY, invocation logic included: only LIST_MIN's default moves, 32 -> 39, per
+# view-fidelity's re-measurement (design.md -> Decision 4: gate floors move up, because they
+# are floors).
 #
 # Known limit inherited from WIDTHS, stated rather than discovered later: the number scan is
 # `\b(\d+)\b`, which does NOT see a suffixed literal such as `38u16` or `38usize`. It fails
 # closed — a test using only suffixed literals is reported as missing a width — so write the
 # widths unsuffixed, or as a `const` the test also names bare.
 [ -f src/ui/list.rs ] || { echo "LISTWIDTHS FAIL: src/ui/list.rs missing" >&2; exit 1; }
-LIST_MIN="${LIST_MIN:-32}" python3 - <<'PY'
+LIST_MIN="${LIST_MIN:-39}" python3 - <<'PY'
 import re, sys, os
 raw = open("src/ui/list.rs").read()
 src = "\n".join(l for l in raw.splitlines()

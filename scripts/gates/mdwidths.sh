@@ -3,8 +3,9 @@
 # 60-column body less two border columns, and the wide layout's Min(0) column of 80 less two
 # border columns). Same script as LISTWIDTHS pointed at a different file and a different
 # pair; same stated limits; same pairing — it is a FLOOR, and
-# `testcount --lib 'ui::markdown::tests::' 23` is what proves the tests exist and run.
-# Because this block is new here, its default IS this change's final floor: 23.
+# `testcount --lib 'ui::markdown::tests::' 26` is what proves the tests exist and run.
+# MD_MIN's default moves, 25 -> 26, per view-fidelity's re-measurement (design.md -> Decision
+# 4: gate floors move up, because they are floors).
 #
 # Known limit inherited from WIDTHS: the number scan is `\b(\d+)\b`, which does NOT see a
 # suffixed literal such as `78u16`. It fails closed — a test using only suffixed literals is
@@ -16,7 +17,7 @@
 # precisely so that no test in this file has a legitimate reason to name neither width. An
 # exemption list is how a width check rots into a rubber stamp.
 [ -f src/ui/markdown.rs ] || { echo "MDWIDTHS FAIL: src/ui/markdown.rs missing" >&2; exit 1; }
-MD_MIN="${MD_MIN:-25}" python3 - <<'PY'
+MD_MIN="${MD_MIN:-26}" python3 - <<'PY'
 import re, sys, os
 raw = open("src/ui/markdown.rs").read()
 src = "\n".join(l for l in raw.splitlines()

@@ -3,9 +3,9 @@
 # 60-column body less two border columns, and the wide layout's Min(0) column of 80 less two
 # border columns). Same script as LISTWIDTHS and MDWIDTHS pointed at a different file and the
 # same pair MDWIDTHS uses; same stated limits; same pairing — it is a FLOOR, and
-# `testcount --lib 'ui::detail::tests::' 19` is what proves the tests exist and run.
-# Because this block is new here, its default IS this change's final floor: 19 (the
-# sum of groups 4, 5, and 6 — 5 + 9 + 5 — per the test-module table above).
+# `testcount --lib 'ui::detail::tests::' 38` is what proves the tests exist and run.
+# DETAIL_MIN's default moves, 32 -> 38, per view-fidelity's re-measurement (design.md ->
+# Decision 4: gate floors move up, because they are floors).
 #
 # Known limit inherited from WIDTHS: the number scan is `\b(\d+)\b`, which does NOT see a
 # suffixed literal such as `78u16`. It fails closed — a test using only suffixed literals is
@@ -18,7 +18,7 @@
 # reason to name neither width. An exemption list is how a width check rots into a rubber
 # stamp.
 [ -f src/ui/detail.rs ] || { echo "DETAILWIDTHS FAIL: src/ui/detail.rs missing" >&2; exit 1; }
-DETAIL_MIN="${DETAIL_MIN:-32}" python3 - <<'PY'
+DETAIL_MIN="${DETAIL_MIN:-38}" python3 - <<'PY'
 import re, sys, os
 raw = open("src/ui/detail.rs").read()
 src = "\n".join(l for l in raw.splitlines()

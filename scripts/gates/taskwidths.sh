@@ -3,8 +3,9 @@
 # body less two border columns, and the wide layout's Min(0) column of 80 less two border
 # columns). Same script as WIDTHS, LISTWIDTHS, MDWIDTHS, and DETAILWIDTHS pointed at a
 # different file and the same pair DETAILWIDTHS uses; same stated limits; same pairing — it
-# is a FLOOR, and `testcount --lib 'ui::tasks::tests::' 14` is what proves the tests exist
-# and run.
+# is a FLOOR, and `testcount --lib 'ui::tasks::tests::' 22` is what proves the tests exist
+# and run. TASK_MIN's default moves, 16 -> 22, per view-fidelity's re-measurement
+# (design.md -> Decision 4: gate floors move up, because they are floors).
 #
 # Known limits, stated rather than discovered later: a `58` in a comment satisfies it, and so
 # does an unrelated `58` literal. The number scan is `\b(\d+)\b`, which does NOT see a
@@ -19,7 +20,7 @@
 #
 # This check FAILS with "missing" until group 4 creates the file; task 0.3 records that.
 [ -f src/ui/tasks.rs ] || { echo "TASKWIDTHS FAIL: src/ui/tasks.rs missing" >&2; exit 1; }
-TASK_MIN="${TASK_MIN:-16}" python3 - <<'PY'
+TASK_MIN="${TASK_MIN:-22}" python3 - <<'PY'
 import re, sys, os
 raw = open("src/ui/tasks.rs").read()
 src = "\n".join(l for l in raw.splitlines()
