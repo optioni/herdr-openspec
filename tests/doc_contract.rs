@@ -1277,3 +1277,370 @@ fn context_names_every_gate_tier() {
          recipe only) that command verbatim"
     );
 }
+
+// --- Worker-thread count leg ------------------------------------------------------------
+//
+// See `specs/doc-conformance/spec.md` -> "The documented worker-thread count equals the
+// crate's production thread sites". The rule below is NOT the one that spec originally
+// stated. `seam-resilience` (commit 137d21b) added two per-invocation pipe-drain threads to
+// `src/cli.rs`'s production slice, above its first `#[cfg(test)]`. The original rule — "a
+// file's production slice names `std::thread::spawn`" — now computes four files
+// (`agents.rs`, `cli.rs`, `launch.rs`, `refresh.rs`), not the true three. `src/cli.rs`'s two
+// threads are per-invocation pipe pumps joined by `JoinHandle::join()`; they answer no one,
+// so they are not worker threads.
+//
+// The corrected second site: a file's production slice names BOTH `std::thread::spawn` AND
+// `mpsc`. This is not invented for this test — it is `scripts/gates/noblock.sh`'s own Guard
+// A, its positive control for leg 1: `prod src/refresh.rs | grep -qE 'mpsc'` alongside
+// `grep -qE 'thread::spawn'`, on the reasoning that a worker thread answers over a channel.
+// Measured at HEAD: `agents.rs`, `launch.rs`, `refresh.rs` name both and are counted;
+// `cli.rs` names `thread::spawn` but no `mpsc` and is excluded; `watch.rs` names `mpsc` but
+// spawns no thread of its own (`notify` spawns it) and is excluded from the other direction.
+//
+// LIMIT, STATED PLAINLY: this discriminator does not generalise to every possible worker
+// thread. A future worker thread that answers over something other than `mpsc` — a
+// `Mutex`/`Condvar` pair, or a channel type from a crate this crate does not currently
+// depend on — would not be counted by this rule. That is acceptable today only because the
+// crate has six dependencies and none of them provides a channel type, and because
+// `NOBLOCK` leg 3 enumerates the four seam modules (`watch`, `refresh`, `agents`, `launch`)
+// independently of this leg, so a silent gap here is not the only guard against a hidden
+// worker. A reader who adds such a thread must find this sentence rather than rediscover
+// the gap by tracing a stale count back through git blame.
+//
+// `thread::spawn` is matched ANCHORED per line — no `/` character anywhere before it on that
+// line — the same rule `NOBLOCK`'s own thread::spawn checks use (`^[^/]*thread::spawn`), so
+// a doc comment reading "the worker is started by a single `thread::spawn`" does not count.
+// `mpsc` is matched UNANCHORED, a plain whole-file substring, deliberately: that is exactly
+// Guard A's own shape (`grep -qE 'mpsc'`, no anchor), reused rather than tightened, so this
+// leg and that gate can never disagree about which files carry a channel.
+
+/// The text of `src` before its first line equal to `#[cfg(test)]` — the same cut
+/// `scripts/gates/noblock.sh`'s `prod()` uses. A file with no such line is entirely
+/// production.
+fn production_slice(src: &str) -> &str {
+    let mut offset = 0;
+    for line in src.lines() {
+        if line == "#[cfg(test)]" {
+            return &src[..offset];
+        }
+        offset += line.len() + 1;
+    }
+    src
+}
+
+/// Whether `prod`'s production slice names `thread::spawn` on some line with no `/`
+/// character before it on that line — excluding a `//`, `///`, or `//!` comment mention,
+/// including a module doc comment.
+fn spawns_thread_in_production(prod: &str) -> bool {
+    prod.lines().any(|line| match line.find("thread::spawn") {
+        Some(idx) => !line[..idx].contains('/'),
+        None => false,
+    })
+}
+
+/// Whether `prod` names `mpsc` anywhere at all — unanchored, comments included. Deliberately
+/// the same shape as `noblock.sh`'s Guard A (`grep -qE 'mpsc'`), not the stricter anchored
+/// form used for `thread::spawn` above: see the leg header for why the two are asymmetric.
+fn names_mpsc(prod: &str) -> bool {
+    prod.contains("mpsc")
+}
+
+/// Whether `src`'s production slice makes it a worker-thread module under the corrected
+/// rule: both `thread::spawn` (anchored) and `mpsc` (unanchored) in the production slice.
+fn is_worker_thread_source(src: &str) -> bool {
+    let prod = production_slice(src);
+    spawns_thread_in_production(prod) && names_mpsc(prod)
+}
+
+/// The names of every `(name, content)` pair whose content is a worker-thread source under
+/// `is_worker_thread_source`, as a `BTreeSet` so a failure names every counted file, sorted,
+/// rather than only a count.
+fn worker_thread_files<'a>(
+    sources: impl IntoIterator<Item = (&'a str, &'a str)>,
+) -> BTreeSet<String> {
+    sources
+        .into_iter()
+        .filter(|(_, content)| is_worker_thread_source(content))
+        .map(|(name, _)| name.to_string())
+        .collect()
+}
+
+/// The number words the claim parser accepts, `one` through `six`, in ascending order.
+const WORKER_COUNT_WORDS: [(&str, usize); 6] = [
+    ("one", 1),
+    ("two", 2),
+    ("three", 3),
+    ("four", 4),
+    ("five", 5),
+    ("six", 6),
+];
+
+/// Parse every occurrence of `crate's <number-word> worker threads` in `text`, where the
+/// number word may optionally be wrapped in `**` emphasis (the phrase itself never is —
+/// `design.md` -> Decision 3 measured that at HEAD the phrase carries no markup at all).
+/// Matches the PLURAL `worker threads` only: `SPEC.md`'s singular ordinal phrasing ("the
+/// crate's third worker thread") has no trailing `s` and so never matches this marker.
+///
+/// `Err` when no occurrence exists ("the claim could not be located" — a distinct failure
+/// from "the count disagrees") and when two or more occurrences state different numbers (a
+/// contradiction is never silently resolved to one of them). `Ok` with the shared value
+/// when every occurrence agrees.
+fn worker_thread_claim(text: &str) -> Result<usize, String> {
+    const MARKER: &str = "worker threads";
+    let mut found = Vec::new();
+    let mut search_from = 0;
+    while let Some(rel) = text[search_from..].find(MARKER) {
+        let idx = search_from + rel;
+        let before = text[..idx].trim_end();
+        let before = before.strip_suffix("**").unwrap_or(before);
+        for (word, value) in WORKER_COUNT_WORDS {
+            if let Some(rest) = before.strip_suffix(word) {
+                let rest = rest.strip_suffix("**").unwrap_or(rest);
+                if rest.trim_end().ends_with("crate's") {
+                    found.push(value);
+                    break;
+                }
+            }
+        }
+        search_from = idx + MARKER.len();
+    }
+
+    match found.as_slice() {
+        [] => {
+            Err("no occurrence of \"crate's <number-word> worker threads\" was found".to_string())
+        }
+        [only, rest @ ..] if rest.iter().all(|v| v == only) => Ok(*only),
+        multiple => Err(format!(
+            "conflicting worker-thread counts found in the same document: {multiple:?}"
+        )),
+    }
+}
+
+#[test]
+fn production_slice_cuts_before_cfg_test() {
+    let src = "fn a() {}\n\n#[cfg(test)]\nmod tests {\n    fn b() {}\n}\n";
+    assert_eq!(production_slice(src), "fn a() {}\n\n");
+}
+
+#[test]
+fn production_slice_whole_file_when_no_cfg_test() {
+    let src = "fn a() {}\nfn b() {}\n";
+    assert_eq!(production_slice(src), src);
+}
+
+#[test]
+fn thread_spawn_in_comment_not_counted() {
+    let prod = "// the worker is started by a single thread::spawn in start\nfn start() {}\n";
+    assert!(
+        !spawns_thread_in_production(prod),
+        "a comment mentioning thread::spawn must not count, the same rule NOBLOCK applies"
+    );
+}
+
+#[test]
+fn thread_spawn_in_code_is_counted() {
+    let prod = "fn start() {\n    thread::spawn(move || {});\n}\n";
+    assert!(spawns_thread_in_production(prod));
+}
+
+#[test]
+fn mpsc_in_comment_counts_like_noblock_guard_a() {
+    // Guard A's own shape is unanchored (`grep -qE 'mpsc'`), so a doc-comment mention of
+    // `mpsc` counts here exactly as it would count for that gate — deliberately, not an
+    // oversight; see the leg header for the asymmetry with `thread::spawn`.
+    let prod = "//! answers over an mpsc channel\nfn start() {}\n";
+    assert!(names_mpsc(prod));
+}
+
+#[test]
+fn cli_rs_excluded_without_mpsc() {
+    // The load-bearing exclusion: two production thread::spawn sites, no mpsc.
+    let src = "fn drain_stdout() {\n    thread::spawn(move || {});\n}\n\
+               fn drain_stderr() {\n    thread::spawn(move || {});\n}\n";
+    assert!(
+        !is_worker_thread_source(src),
+        "a production slice with thread::spawn but no mpsc must not count as a worker module"
+    );
+}
+
+#[test]
+fn watch_rs_excluded_without_thread_spawn() {
+    // notify spawns watch.rs's background thread, not watch.rs itself: mpsc with no spawn.
+    let src = "use std::sync::mpsc;\nfn start() -> mpsc::Receiver<()> { todo!() }\n";
+    assert!(
+        !is_worker_thread_source(src),
+        "a production slice with mpsc but no thread::spawn of its own must not count"
+    );
+}
+
+#[test]
+fn worker_claim_absent() {
+    let text = "This document never states the worker-thread count in the bound form.";
+    let result = worker_thread_claim(text);
+    assert!(
+        result.is_err(),
+        "an absent claim must Err, never pass vacuously"
+    );
+    let err = result.unwrap_err();
+    assert!(
+        err.contains("could not be located") || err.contains("no occurrence"),
+        "the error should say the claim could not be located: {err}"
+    );
+}
+
+#[test]
+fn worker_claim_singular_ordinal_is_not_matched() {
+    // SPEC.md line 886's real phrasing: singular, an ordinal, not the bound plural phrase.
+    let text = "and the worker — the crate's third worker thread, confined to this module";
+    assert!(
+        worker_thread_claim(text).is_err(),
+        "the singular ordinal phrase must not satisfy the plural-phrase parser"
+    );
+}
+
+#[test]
+fn worker_claim_unemphasised_matches() {
+    assert_eq!(
+        worker_thread_claim("one of the crate's two worker threads, tested through"),
+        Ok(2)
+    );
+}
+
+#[test]
+fn worker_claim_emphasised_matches() {
+    assert_eq!(
+        worker_thread_claim("one of the crate's **three** worker threads, tested through"),
+        Ok(3)
+    );
+}
+
+#[test]
+fn worker_claim_disagreement_is_a_contradiction() {
+    let text = "first it says crate's two worker threads, then crate's **three** worker \
+                threads";
+    let result = worker_thread_claim(text);
+    assert!(
+        result.is_err(),
+        "two disagreeing occurrences must be reported as a contradiction, not resolved to \
+         either value: {result:?}"
+    );
+}
+
+#[test]
+fn worker_count_stale() {
+    // Synthetic sources computing three, against a documented claim of two — the "documented
+    // count is stale" scenario, stated without touching the real tree.
+    let sources: Vec<(&str, &str)> = vec![
+        (
+            "agents.rs",
+            "use std::sync::mpsc;\nfn start() { thread::spawn(move || {}); }\n",
+        ),
+        (
+            "launch.rs",
+            "use std::sync::mpsc;\nfn start() { thread::spawn(move || {}); }\n",
+        ),
+        (
+            "refresh.rs",
+            "use std::sync::mpsc;\nfn start() { thread::spawn(move || {}); }\n",
+        ),
+        ("cli.rs", "fn drain() { thread::spawn(move || {}); }\n"),
+        (
+            "watch.rs",
+            "use std::sync::mpsc;\nfn poll() -> mpsc::Receiver<()> { todo!() }\n",
+        ),
+    ];
+    let counted = worker_thread_files(sources);
+    let expected: BTreeSet<String> = ["agents.rs", "launch.rs", "refresh.rs"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    assert_eq!(counted, expected);
+
+    let documented = worker_thread_claim("crate's two worker threads").expect("parse claim");
+    assert_ne!(
+        documented,
+        counted.len(),
+        "documented {documented} must disagree with computed {} ({counted:?}) for this to \
+         prove the stale-count scenario",
+        counted.len()
+    );
+}
+
+#[test]
+fn worker_count_grows() {
+    // A fifth synthetic module whose production slice names both thread::spawn and mpsc:
+    // computed grows from three to four while the document still says three.
+    let sources: Vec<(&str, &str)> = vec![
+        (
+            "agents.rs",
+            "use std::sync::mpsc;\nfn start() { thread::spawn(move || {}); }\n",
+        ),
+        (
+            "launch.rs",
+            "use std::sync::mpsc;\nfn start() { thread::spawn(move || {}); }\n",
+        ),
+        (
+            "refresh.rs",
+            "use std::sync::mpsc;\nfn start() { thread::spawn(move || {}); }\n",
+        ),
+        (
+            "poll5.rs",
+            "use std::sync::mpsc;\nfn start() { thread::spawn(move || {}); }\n",
+        ),
+    ];
+    let counted = worker_thread_files(sources);
+    assert_eq!(
+        counted.len(),
+        4,
+        "the fifth planted module must be counted: {counted:?}"
+    );
+
+    let documented = worker_thread_claim("crate's three worker threads").expect("parse claim");
+    assert_ne!(
+        documented,
+        counted.len(),
+        "documented {documented} must disagree with computed {} once a fourth worker module \
+         is added",
+        counted.len()
+    );
+}
+
+#[test]
+fn worker_threads_match_sources() {
+    let src_dir = manifest_dir().join("src");
+    let mut sources: Vec<(String, String)> = Vec::new();
+    for entry in std::fs::read_dir(&src_dir).expect("read src directory") {
+        let entry = entry.expect("read src directory entry");
+        let path = entry.path();
+        if path.is_file() && path.extension().is_some_and(|ext| ext == "rs") {
+            let name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .expect("utf8 file name")
+                .to_string();
+            let content = read_doc(&path).unwrap_or_else(|e| panic!("{e}"));
+            sources.push((name, content));
+        }
+    }
+    assert!(
+        !sources.is_empty(),
+        "src/ must contain at least one top-level .rs file to scan"
+    );
+
+    let borrowed: Vec<(&str, &str)> = sources
+        .iter()
+        .map(|(name, content)| (name.as_str(), content.as_str()))
+        .collect();
+    let counted = worker_thread_files(borrowed);
+    let computed = counted.len();
+
+    let spec_md = read_doc(&manifest_dir().join("SPEC.md")).expect("read SPEC.md");
+    let documented = worker_thread_claim(&spec_md)
+        .unwrap_or_else(|e| panic!("SPEC.md's worker-thread claim could not be parsed: {e}"));
+
+    assert_eq!(
+        documented, computed,
+        "SPEC.md documents {documented} worker thread(s) but {computed} file(s) under src/ \
+         have a production slice naming both thread::spawn and mpsc: {counted:?}"
+    );
+}
