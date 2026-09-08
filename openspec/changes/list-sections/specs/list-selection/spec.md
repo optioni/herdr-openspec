@@ -348,7 +348,7 @@ while handling `ToggleSection`, exactly as it does for every other action.
 
 #### Scenario: A refresh keeps the cursor on the same change
 
-- **WHEN** a `Dashboard` with three active changes, two archived changes, `archived_total` 2,
+- **WHEN** a `Dashboard` with two active changes, two archived changes, `archived_total` 2,
   **both sections open**, and `selected` 4 — addressing the archived change `add-auth` —
   adopts a `RefreshResult::Files` and then a `RefreshResult::Merged`, each carrying a
   `ChangeSet` in which one further active change has appeared **above** `add-auth`

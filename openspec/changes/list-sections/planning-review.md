@@ -128,3 +128,23 @@ future change that wants live refresh in file mode will find the argument here.
   `design.md` → Decision 3: a `RowKind` names what a row is and a palette `Role` names how it
   looks, `view-palette` already records `AgentBadge(Unknown)` sharing this role, and the rename
   would restate four of that capability's requirements for no change to a rendered cell.
+
+## Repairs Made During Implementation
+
+| # | Source Artifact | Problem | Repair | Found by |
+|---|---|---|---|---|
+| I1 | `specs/list-selection/spec.md` | Scenario *A refresh keeps the cursor on the same change* opened on "three active changes" while its own `selected` 4, "`selected` is 5" and "`visible()` position of 3" clauses only hold for **two**. With three active, `targets()` index 4 is the archived header, not `add-auth`. | Precondition corrected to "two active changes"; every other clause of the scenario was already right and is unchanged. | Group 3's implementer, building the test against the scenario |
+
+**Reviewed Against, updated:** implementation proceeds from `74a0b2e`, which differs from the
+reviewed `1437787` only by this change's own planning artifacts (`git show --stat 74a0b2e`
+touches nothing outside `openspec/changes/list-sections/`). No source, `Makefile`, `SPEC.md`,
+`README.md`, `AGENTS.md`, or archive file moved, so every measurement in `tasks.md`'s check
+table still holds.
+
+**The wiring-tier intermittents are environmental, not code.** Measured at group 3: the same
+commit runs `ui::tests::` in **4.1s, green**, inside a `/tmp` git worktree and in **33s with
+six failures** in `/Users/juusopiikkila/Code/herdr-openspec`, and the pre-change baseline
+`74a0b2e` behaves identically in that worktree (4.07s, green). The main checkout single-threaded
+is a clean 1137/1137. So the intermittents recorded in `tasks.md` check E belong to the checkout,
+not to any commit; verify a suspected regression with `cargo test --lib -- --test-threads=1`
+before treating a wiring failure as one.
