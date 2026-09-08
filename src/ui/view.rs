@@ -745,7 +745,7 @@ mod tests {
         d.agents.agents = vec![unattributed_agent("nothing-like-a-change")];
 
         let expected = "q quit  Enter detail  Esc back  1 unattributed";
-        assert_eq!(expected.chars().count(), 46);
+        assert_eq!(columns(expected), 46);
         let buf60 = render_at(60, 20, &d);
         assert_eq!(
             row_text(&buf60, 19),
@@ -780,7 +780,7 @@ mod tests {
         reachable.agents.agents = vec![unattributed_agent("nothing-like-a-change")];
         reachable.agents.reachable = true;
         let expected_120 = "q quit  Enter detail  Esc back  a/c/s launch  g focus  1 unattributed";
-        assert_eq!(expected_120.chars().count(), 69);
+        assert_eq!(columns(expected_120), 69);
         assert_eq!(
             row_text(&render_at(120, 20, &reachable), 19),
             format!("{expected_120}{}", " ".repeat(51))
@@ -1023,7 +1023,7 @@ mod tests {
 
         let buf60 = render_at(60, 20, &d);
         for y in [2u16, 3, 4] {
-            assert_eq!(interior_cols(&buf60, y).chars().count(), 58);
+            assert_eq!(columns(&interior_cols(&buf60, y)), 58);
         }
         assert_eq!(interior_cols(&buf60, 2).chars().nth(51), Some('w'));
         assert_eq!(interior_cols(&buf60, 3).chars().nth(51), Some('b'));
@@ -1209,7 +1209,7 @@ mod tests {
     #[test]
     fn header_path_shortened_from_the_left() {
         let repo = "/home/dev/workspaces/openspec-demos/a-rather-long-repository-name-here";
-        assert_eq!(repo.chars().count(), 70);
+        assert_eq!(columns(repo), 70);
         let d = dashboard(Some(repo), Route::List);
 
         let buf = render_at(60, 20, &d);
@@ -1310,7 +1310,7 @@ mod tests {
                 row_text(&buf, 0),
                 format!(
                     "OpenSpec{}/tmp/demo-repo",
-                    " ".repeat(width as usize - 8 - "/tmp/demo-repo".chars().count())
+                    " ".repeat(width as usize - 8 - columns("/tmp/demo-repo"))
                 ),
                 "width {width}: the landed header must be unchanged"
             );
@@ -1331,7 +1331,7 @@ mod tests {
     #[test]
     fn badge_rebases_the_shortening_arithmetic() {
         let long_path = format!("/repo/{}", "x".repeat(99));
-        assert_eq!(long_path.chars().count(), 105);
+        assert_eq!(columns(&long_path), 105);
 
         for width in [120, 60] {
             let plain = dashboard(Some(&long_path), Route::List);
@@ -1341,7 +1341,7 @@ mod tests {
             assert_eq!(
                 cols(
                     &row_text(&plain_buf, 0),
-                    (width as usize - plain_shown.chars().count())..width as usize
+                    (width as usize - columns(&plain_shown))..width as usize
                 ),
                 plain_shown,
                 "width {width}: no-badge path"
@@ -1354,7 +1354,7 @@ mod tests {
             assert_eq!(
                 cols(
                     &row_text(&badged_buf, 0),
-                    (width as usize - badged_shown.chars().count())..width as usize
+                    (width as usize - columns(&badged_shown))..width as usize
                 ),
                 badged_shown,
                 "width {width}: badged path"
@@ -2266,7 +2266,7 @@ mod tests {
             active: false,
         };
         let expected = "/add  q quit  Enter detail  Esc back";
-        assert_eq!(expected.chars().count(), 36);
+        assert_eq!(columns(expected), 36);
         let buf60 = render_at(60, 20, &d);
         assert_eq!(
             row_text(&buf60, 19),
@@ -2295,7 +2295,7 @@ mod tests {
         d.filter.query = "add".to_string();
         d.agents.agents = vec![unattributed_agent("nothing-like-a-change")];
         let with_count = "/add  q quit  Enter detail  Esc back  1 unattributed";
-        assert_eq!(with_count.chars().count(), 52);
+        assert_eq!(columns(with_count), 52);
         let buf60 = render_at(60, 20, &d);
         assert_eq!(
             row_text(&buf60, 19),
@@ -2312,7 +2312,7 @@ mod tests {
         d.agents.reachable = true;
         let with_hints_and_count =
             "/add  q quit  Enter detail  Esc back  a/c/s launch  g focus  1 unattributed";
-        assert_eq!(with_hints_and_count.chars().count(), 75);
+        assert_eq!(columns(with_hints_and_count), 75);
         assert!(
             row_text(&render_at(120, 20, &d), 19).starts_with(with_hints_and_count),
             "width 120"
@@ -2333,7 +2333,7 @@ mod tests {
         };
         let buf60 = render_at(60, 20, &d);
         let row60 = row_text(&buf60, 19);
-        assert_eq!(row60.chars().count(), 60);
+        assert_eq!(columns(&row60), 60);
         assert!(row60.ends_with('_'));
         assert_eq!(row60.chars().next(), Some('a'));
 
@@ -3335,8 +3335,8 @@ mod tests {
             let buf = render_at(width, 20, &d);
             let expected = "1 proposal  2 specs  3 design  4 tasks  5 planning-review";
             assert_eq!(
-                detail_interior_cols(&buf, 3, w.min(expected.chars().count())),
-                &expected[..expected.chars().count().min(w)],
+                detail_interior_cols(&buf, 3, w.min(columns(expected))),
+                &expected[..columns(expected).min(w)],
                 "width {width}"
             );
             let from = if width == 60 { 1u16 } else { 41 };
@@ -3598,7 +3598,7 @@ mod tests {
             let buf3 = render_at(width, 20, &d3);
             let bar = crate::ui::tasks::progress_bar(&progress, interior_width(width));
             assert_eq!(
-                detail_interior_cols(&buf3, 4, bar.chars().count()),
+                detail_interior_cols(&buf3, 4, columns(&bar)),
                 bar,
                 "width {width}"
             );
@@ -3663,7 +3663,7 @@ mod tests {
             let buf0 = render_at(width, 20, &d0);
             let bar = crate::ui::tasks::progress_bar(&progress, interior_width(width));
             assert_eq!(
-                detail_interior_cols(&buf0, 4, bar.chars().count()),
+                detail_interior_cols(&buf0, 4, columns(&bar)),
                 bar,
                 "width {width}: id checklist carries the flag"
             );
@@ -3681,7 +3681,7 @@ mod tests {
                 "width {width}: id tasks does not carry the flag"
             );
             assert_ne!(
-                detail_interior_cols(&buf1, 4, bar.chars().count()),
+                detail_interior_cols(&buf1, 4, columns(&bar)),
                 bar,
                 "width {width}"
             );
@@ -4095,7 +4095,7 @@ mod tests {
         let mut d = dashboard(Some("/tmp/demo-repo"), Route::List);
         d.agents.reachable = true;
         let expected = "q quit  Enter detail  Esc back  a/c/s launch  g focus";
-        assert_eq!(expected.chars().count(), 53);
+        assert_eq!(columns(expected), 53);
         let buf60 = render_at(60, 20, &d);
         assert_eq!(row_text(&buf60, 19), format!("{expected}{}", " ".repeat(7)));
         let buf120 = render_at(120, 20, &d);
