@@ -167,19 +167,19 @@ doubles, exactly as the landed suite is.
 
 | Spec Scenario | Verification | Tier | Collaborators | Command |
 |---|---|---|---|---|
-| The constructed path is the program that runs | carried over unchanged, re-run | fixture | real scratch program | `cargo test --test cli` |
-| No argument is added and the working directory is inherited | reworded to name the no-directory constructor | fixture | real scratch program | `cargo test --test cli` |
-| A constructed working directory is the child's working directory | new test | fixture | real scratch program, real scratch dir | `cargo test --test cli` |
-| A working directory that does not exist fails rather than falling back | new test | fixture | real scratch program | `cargo test --test cli` |
-| A given overlay sets exactly those variables and disturbs no others | new test | fixture | real scratch program | `cargo test --test cli` |
-| No overlay leaves the child's environment byte-identical | new test | fixture | real scratch program | `cargo test --test cli` |
-| An interpreter-shim program fails without an overlay and succeeds with one | new test | fixture | two real scratch programs (shim + interpreter) | `cargo test --test cli` |
-| The default Herdr program name is `herdr` | carried over unchanged | unit | none | `cargo test --test cli` |
-| A program that reads stdin returns rather than blocking | carried over unchanged | fixture | real scratch program, real thread | `cargo test --test cli` |
-| A child that never exits times out with a named reason | new test | fixture | real scratch program, real thread, deadline-polled clock | `cargo test --test cli` |
-| A fast child is unaffected by the deadline | new test | fixture | real scratch program | `cargo test --test cli` |
-| A child that writes a large payload and exits is read in full | new test | fixture | real scratch program | `cargo test --test cli` |
-| The deadline is a named constant and is asserted | constant assertion | unit | none | `cargo test cli::tests::deadline` |
+| The constructed path is the program that runs | carried over unchanged, re-run | fixture | real scratch program | `cargo test cli::tests::` |
+| No argument is added and the working directory is inherited | reworded to name the no-directory constructor | fixture | real scratch program | `cargo test cli::tests::` |
+| A constructed working directory is the child's working directory | new test | fixture | real scratch program, real scratch dir | `cargo test cli::tests::` |
+| A working directory that does not exist fails rather than falling back | new test | fixture | real scratch program | `cargo test cli::tests::` |
+| A given overlay sets exactly those variables and disturbs no others | new test | fixture | real scratch program | `cargo test cli::tests::` |
+| No overlay leaves the child's environment byte-identical | new test | fixture | real scratch program | `cargo test cli::tests::` |
+| An interpreter-shim program fails without an overlay and succeeds with one | new test | fixture | two real scratch programs (shim + interpreter) | `cargo test cli::tests::` |
+| The default Herdr program name is `herdr` | carried over unchanged | unit | none | `cargo test cli::tests::` |
+| A program that reads stdin returns rather than blocking | carried over unchanged | fixture | real scratch program, real thread | `cargo test cli::tests::` |
+| A child that never exits times out with a named reason | new test | fixture | real scratch program, real thread, deadline-polled clock | `cargo test cli::tests::` |
+| A fast child is unaffected by the deadline | new test | fixture | real scratch program | `cargo test cli::tests::` |
+| A child that writes a large payload and exits is read in full | new test | fixture | real scratch program | `cargo test cli::tests::` |
+| The deadline is a named constant and is asserted | constant assertion | unit | none | `cargo test cli::tests::the_deadline_is_a_named_constant_and_is_asserted` |
 | A watcher that will not start degrades and names the reason | carried over unchanged | fixture | real `notify` | `cargo test watch::` |
 | A real watch reports a written file, polled to a deadline | carried over unchanged | fixture | real `notify`, real scratch dir | `cargo test watch::` |
 | The composition root watches `openspec/`, not the repository root | new test over `start_collaborators` | unit | recording watcher-start double | `cargo test ui::mod::tests::collaborators` |

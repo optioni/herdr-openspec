@@ -2863,7 +2863,7 @@ mod tests {
         }
 
         #[test]
-        fn dashboard_destructures_into_exactly_twelve_fields() {
+        fn dashboard_destructures_into_exactly_thirteen_fields() {
             let d = dashboard_at(Route::List);
             let Dashboard {
                 repo,
@@ -3003,7 +3003,7 @@ mod tests {
         }
 
         #[test]
-        fn agent_snapshot_destructures_into_exactly_three_fields() {
+        fn agent_snapshot_destructures_into_exactly_four_fields() {
             let snapshot = crate::agents::AgentSnapshot {
                 agents: Vec::new(),
                 reachable: true,
