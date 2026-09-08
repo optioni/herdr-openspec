@@ -22,6 +22,18 @@ pub enum Origin {
     Archived { date: Option<String> },
 }
 
+/// Whether [`from_files`] builds the archived tier or merely counts it —
+/// `list-sections`' lever against the truncation-by-count `archived_count`
+/// used to perform. See `openspec/changes/list-sections/design.md` ->
+/// Decision 1.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArchivedScope {
+    /// Enumerate and count the archive; build no archived `Change`.
+    Names,
+    /// Build every enumerated archived change.
+    Full,
+}
+
 /// One schema artifact's id and the concrete paths it resolved to on disk,
 /// in the schema's declared order. `paths` is empty when nothing is written
 /// yet — that is the "No content yet" state, not an error.
@@ -67,6 +79,13 @@ pub struct ChangeSet {
     pub active: Vec<Change>,
     pub archived: Vec<Change>,
     pub problems: Vec<String>,
+    /// The archive's true size, counted from enumeration alone — the same
+    /// number under either `ArchivedScope`. `list-sections`' addition:
+    /// `archived` is no longer always populated, and a collapsed section's
+    /// header still needs to say how many changes are behind it. See
+    /// `conformance::assert_set_invariants` for the two invariants this
+    /// field and `archived` must satisfy together.
+    pub archived_total: usize,
 }
 
 /// The shared gate that keeps `changes::from_files` and (from Phase 3)
@@ -76,7 +95,7 @@ pub struct ChangeSet {
 /// the one function both call.
 #[cfg(test)]
 pub(crate) mod conformance {
-    use super::{Change, Origin};
+    use super::{Change, ChangeSet, Origin};
 
     /// Panics naming the invariant that broke. The opening pattern is
     /// exhaustive and carries **no** `..` rest pattern: every field must be
@@ -133,6 +152,36 @@ pub(crate) mod conformance {
                 "an Archived Change's dir must end with its name"
             ),
         }
+    }
+
+    /// `list-sections`' addition, and a **new** function beside
+    /// `assert_invariants` rather than a widening of it — widening would
+    /// destroy mechanism 2's `E0027` guard for every landed call site.
+    /// Checks the two invariants `change-model` states on `archived_total`:
+    /// `archived.len()` is either `0` or exactly `archived_total`, and
+    /// `archived_total` is never less than `archived.len()`. The opening
+    /// pattern is exhaustive with no `..` rest, so a sixth `ChangeSet` field
+    /// makes this function fail to compile rather than silently pass unread.
+    pub(crate) fn assert_set_invariants(set: &ChangeSet) {
+        let ChangeSet {
+            active: _,
+            archived,
+            problems: _,
+            archived_total,
+        } = set;
+
+        assert!(
+            archived.is_empty() || archived.len() == *archived_total,
+            "ChangeSet::archived must be empty or exactly archived_total long, \
+             got archived.len() = {} and archived_total = {archived_total}",
+            archived.len()
+        );
+        assert!(
+            *archived_total >= archived.len(),
+            "ChangeSet::archived_total ({archived_total}) must never be less \
+             than archived.len() ({})",
+            archived.len()
+        );
     }
 }
 
@@ -350,15 +399,23 @@ pub(crate) mod fixture {
     /// A `ChangeSet` from already-built `active` and `archived` vectors and
     /// `problems`, preserving each vector's order untouched — `rows` and
     /// `Dashboard::visible` are what sort or filter, never the fixture.
+    /// `archived_total` is set to `archived.len()`, satisfying
+    /// `conformance::assert_set_invariants` for the common case where a
+    /// fixture's archived tier is fully resolved; a test that needs an
+    /// unresolved archive (`archived_total` exceeding `archived.len()`)
+    /// builds its own `ChangeSet` rather than widening this signature —
+    /// `list-sections` group 5 is where that need first arises.
     pub(crate) fn set(
         active: Vec<Change>,
         archived: Vec<Change>,
         problems: Vec<String>,
     ) -> ChangeSet {
+        let archived_total = archived.len();
         ChangeSet {
             active,
             archived,
             problems,
+            archived_total,
         }
     }
 
@@ -864,7 +921,6 @@ pub(crate) struct ArchivedEntry {
 /// record a second, redundant problem describing the same fault.
 pub(crate) fn archived_entries(
     repo: &std::path::Path,
-    archived_count: usize,
     active_unreadable: bool,
 ) -> (Vec<ArchivedEntry>, Vec<String>) {
     if active_unreadable {
@@ -910,21 +966,20 @@ pub(crate) fn archived_entries(
         (None, Some(_)) => std::cmp::Ordering::Greater,
         (None, None) => b.name.cmp(&a.name),
     });
-    entries.truncate(archived_count);
 
     (entries, problems)
 }
 
-/// The composition group 8's `from_files` calls: active names, ordered and
-/// truncated archived entries, and every problem from either listing —
+/// The composition group 8's `from_files` calls: active names, every
+/// enumerated archived entry — `list-sections` removed the truncation this
+/// used to apply — and every problem from either listing —
 /// `active_change_names`' plus `archived_entries`', with the short-circuit
 /// above already applied.
 pub(crate) fn list_changes(
     repo: &std::path::Path,
-    archived_count: usize,
 ) -> (Vec<String>, Vec<ArchivedEntry>, Vec<String>) {
     let (active, mut problems, active_unreadable) = active_change_names(repo);
-    let (archived, archived_problems) = archived_entries(repo, archived_count, active_unreadable);
+    let (archived, archived_problems) = archived_entries(repo, active_unreadable);
     problems.extend(archived_problems);
     (active, archived, problems)
 }
@@ -1738,6 +1793,7 @@ pub fn merge(files: ChangeSet, cli: CliChanges) -> ChangeSet {
         active: file_active,
         archived,
         problems: file_problems,
+        archived_total,
     } = files;
     let CliChanges {
         active: cli_active,
@@ -1787,6 +1843,7 @@ pub fn merge(files: ChangeSet, cli: CliChanges) -> ChangeSet {
         active: merged,
         archived,
         problems,
+        archived_total,
     }
 }
 
@@ -1800,21 +1857,28 @@ pub fn empty_set() -> ChangeSet {
         active: Vec::new(),
         archived: Vec::new(),
         problems: Vec::new(),
+        archived_total: 0,
     }
 }
 
 /// Paint the pane from disk: every active change under
-/// `<repo>/openspec/changes/`, the `archived_count` most recent archived
-/// changes under its `archive/`, and every problem recorded along the way.
-/// Total — never a `Result`, never panics, never `unwrap`s. `openspec/config.yaml`
-/// is read once and reused for every change; schemas are cached by name for
-/// the duration of this one call. See
-/// `openspec/changes/changes-from-files/design.md` for the full contract.
-pub fn from_files(repo: &std::path::Path, archived_count: usize) -> ChangeSet {
+/// `<repo>/openspec/changes/`, every problem recorded along the way, and —
+/// under `ArchivedScope::Full` — every archived change under its
+/// `archive/`; under `ArchivedScope::Names` the archive is enumerated and
+/// counted into `archived_total` but no archived `Change` is built, so no
+/// archived `.openspec.yaml`, schema, artifact, or task file is opened
+/// (`list-sections` -> "the archived tier is enumerated in full and
+/// resolved only when it is shown"). Total — never a `Result`, never
+/// panics, never `unwrap`s. `openspec/config.yaml` is read once and reused
+/// for every change; schemas are cached by name for the duration of this
+/// one call. See `openspec/changes/changes-from-files/design.md` for the
+/// full contract.
+pub fn from_files(repo: &std::path::Path, archived: ArchivedScope) -> ChangeSet {
     let project_config_path = repo.join("openspec").join("config.yaml");
     let project_config_text = crate::schema::read_file(&project_config_path);
 
-    let (active_names, archived_list, problems) = list_changes(repo, archived_count);
+    let (active_names, archived_list, problems) = list_changes(repo);
+    let archived_total = archived_list.len();
 
     let mut schema_cache: std::collections::HashMap<String, CachedSchemaLoad> =
         std::collections::HashMap::new();
@@ -1835,31 +1899,35 @@ pub fn from_files(repo: &std::path::Path, archived_count: usize) -> ChangeSet {
         })
         .collect();
 
-    let archived = archived_list
-        .into_iter()
-        .map(|entry| {
-            build_change(
-                repo,
-                &entry.dir,
-                &entry.name,
-                Origin::Archived { date: entry.date },
-                &project_config_path,
-                &project_config_text,
-                &mut schema_cache,
-            )
-        })
-        .collect();
+    let archived = match archived {
+        ArchivedScope::Full => archived_list
+            .into_iter()
+            .map(|entry| {
+                build_change(
+                    repo,
+                    &entry.dir,
+                    &entry.name,
+                    Origin::Archived { date: entry.date },
+                    &project_config_path,
+                    &project_config_text,
+                    &mut schema_cache,
+                )
+            })
+            .collect(),
+        ArchivedScope::Names => Vec::new(),
+    };
 
     ChangeSet {
         active,
         archived,
         problems,
+        archived_total,
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::conformance::assert_invariants;
+    use super::conformance::{assert_invariants, assert_set_invariants};
     use super::*;
 
     fn well_formed_active() -> Change {
@@ -2437,7 +2505,7 @@ mod tests {
             &repo.join("openspec/changes/add-auth/specs/escape"),
         );
 
-        let set = from_files(&repo, 5);
+        let set = from_files(&repo, ArchivedScope::Full);
         assert_eq!(set.active.len(), 1);
         let change = &set.active[0];
         assert!(change.problems.is_empty());
@@ -2495,7 +2563,7 @@ apply:
             &repo.join("openspec/changes/add-auth/tasks/linked"),
         );
 
-        let set = from_files(&repo, 5);
+        let set = from_files(&repo, ArchivedScope::Full);
         assert_eq!(set.active.len(), 1);
         let change = &set.active[0];
         assert_eq!(
@@ -3044,7 +3112,7 @@ apply:
         let repo = canonical(scratch.path());
         mkdir(&repo.join("openspec/changes/archive/2026-08-14-add-token-refresh"));
 
-        let (archived, problems) = archived_entries(&repo, 5, false);
+        let (archived, problems) = archived_entries(&repo, false);
         assert_eq!(archived.len(), 1);
         assert_eq!(archived[0].name, "add-token-refresh");
         assert_eq!(archived[0].date, Some("2026-08-14".to_string()));
@@ -3066,7 +3134,7 @@ apply:
         let (active, _, _) = active_change_names(&repo);
         assert!(active.contains(&".dot-change".to_string()));
 
-        let (archived, _) = archived_entries(&repo, 5, false);
+        let (archived, _) = archived_entries(&repo, false);
         assert_eq!(archived_names(&archived), vec!["real"]);
     }
 
@@ -3077,7 +3145,7 @@ apply:
         mkdir(&repo.join("openspec/changes/archive/2026-01-05-retry-policy"));
         mkdir(&repo.join("openspec/changes/archive/2026-07-22-retry-policy"));
 
-        let (archived, _) = archived_entries(&repo, 5, false);
+        let (archived, _) = archived_entries(&repo, false);
         assert_eq!(archived.len(), 2);
         assert!(archived.iter().all(|e| e.name == "retry-policy"));
         let dates: Vec<&str> = archived
@@ -3095,7 +3163,7 @@ apply:
         mkdir(&repo.join("openspec/changes/archive/2026-09-01-c"));
         mkdir(&repo.join("openspec/changes/archive/2026-07-22-b"));
 
-        let (archived, _) = archived_entries(&repo, 5, false);
+        let (archived, _) = archived_entries(&repo, false);
         assert_eq!(archived_names(&archived), vec!["c", "b", "a"]);
     }
 
@@ -3106,7 +3174,7 @@ apply:
         mkdir(&repo.join("openspec/changes/archive/2026-05-01-alpha"));
         mkdir(&repo.join("openspec/changes/archive/2026-05-01-zeta"));
 
-        let (archived, _) = archived_entries(&repo, 5, false);
+        let (archived, _) = archived_entries(&repo, false);
         assert_eq!(archived_names(&archived), vec!["zeta", "alpha"]);
     }
 
@@ -3118,15 +3186,21 @@ apply:
         mkdir(&repo.join("openspec/changes/archive/2026-01-05-a"));
         mkdir(&repo.join("openspec/changes/archive/alpha-undated"));
 
-        let (archived, _) = archived_entries(&repo, 5, false);
+        let (archived, _) = archived_entries(&repo, false);
         assert_eq!(
             archived_names(&archived),
             vec!["a", "zeta-undated", "alpha-undated"]
         );
     }
 
+    /// `list-sections` removed `archived_count`'s truncation of the
+    /// enumerated archive (the "REMOVED Requirements" entry in
+    /// `specs/change-enumeration/spec.md`): every directory is returned,
+    /// however many there are. Replaces the landed
+    /// `the_limit_keeps_the_most_recent_entries`, which asserted the
+    /// now-deleted opposite.
     #[test]
-    fn the_limit_keeps_the_most_recent_entries() {
+    fn archived_entries_are_never_truncated() {
         let scratch = ScratchDir::new();
         let repo = canonical(scratch.path());
         for day in 1..=7 {
@@ -3137,10 +3211,12 @@ apply:
             );
         }
 
-        let (archived, _) = archived_entries(&repo, 5, false);
+        let (archived, _) = archived_entries(&repo, false);
         assert_eq!(
             archived_names(&archived),
-            vec!["entry", "entry", "entry", "entry", "entry"]
+            vec![
+                "entry", "entry", "entry", "entry", "entry", "entry", "entry"
+            ]
         );
         let dates: Vec<&str> = archived
             .iter()
@@ -3153,29 +3229,11 @@ apply:
                 "2026-01-06",
                 "2026-01-05",
                 "2026-01-04",
-                "2026-01-03"
+                "2026-01-03",
+                "2026-01-02",
+                "2026-01-01",
             ]
         );
-    }
-
-    #[test]
-    fn a_limit_larger_than_the_archive_keeps_everything() {
-        let scratch = ScratchDir::new();
-        let repo = canonical(scratch.path());
-        mkdir(&repo.join("openspec/changes/archive/2026-01-01-a"));
-        mkdir(&repo.join("openspec/changes/archive/2026-01-02-b"));
-
-        let (archived, problems) = archived_entries(&repo, 50, false);
-        assert_eq!(archived.len(), 2);
-        assert!(problems.is_empty());
-
-        let (archived_zero, problems_zero) = archived_entries(&repo, 0, false);
-        assert!(archived_zero.is_empty());
-        assert!(problems_zero.is_empty());
-
-        let (active, active_problems, _) = active_change_names(&repo);
-        assert!(active.is_empty());
-        assert!(active_problems.is_empty());
     }
 
     #[test]
@@ -3183,7 +3241,7 @@ apply:
         let scratch = ScratchDir::new();
         let repo = canonical(scratch.path());
 
-        let (active, archived, problems) = list_changes(&repo, 5);
+        let (active, archived, problems) = list_changes(&repo);
         assert!(active.is_empty());
         assert!(archived.is_empty());
         assert!(problems.is_empty());
@@ -3196,7 +3254,7 @@ apply:
         let repo = canonical(scratch.path());
         mkdir(&repo.join("openspec"));
 
-        let (active, archived, problems) = list_changes(&repo, 5);
+        let (active, archived, problems) = list_changes(&repo);
         assert!(active.is_empty());
         assert!(archived.is_empty());
         assert!(problems.is_empty());
@@ -3209,7 +3267,7 @@ apply:
         mkdir(&repo.join("openspec/changes/archive/2026-01-01-a"));
         mkdir(&repo.join("openspec/changes/archive/2026-01-02-b"));
 
-        let (active, archived, problems) = list_changes(&repo, 5);
+        let (active, archived, problems) = list_changes(&repo);
         assert!(active.is_empty());
         assert_eq!(archived.len(), 2);
         assert!(problems.is_empty());
@@ -3222,7 +3280,7 @@ apply:
         write(&repo.join("openspec/changes/archive"), "not a directory");
         mkdir(&repo.join("openspec/changes/real-change"));
 
-        let (active, archived, problems) = list_changes(&repo, 5);
+        let (active, archived, problems) = list_changes(&repo);
         assert_eq!(active, vec!["real-change"]);
         assert!(archived.is_empty());
         assert!(problems.is_empty());
@@ -3240,7 +3298,7 @@ apply:
 
         std::fs::set_permissions(&changes_dir, std::fs::Permissions::from_mode(0o000))
             .expect("set changes/ unreadable");
-        let (active, archived, problems) = list_changes(&repo, 5);
+        let (active, archived, problems) = list_changes(&repo);
         std::fs::set_permissions(&changes_dir, std::fs::Permissions::from_mode(0o755))
             .expect("restore changes/ permissions");
 
@@ -3267,7 +3325,7 @@ apply:
 
         std::fs::set_permissions(&archive_dir, std::fs::Permissions::from_mode(0o000))
             .expect("set archive/ unreadable");
-        let (active, archived, problems) = list_changes(&repo, 5);
+        let (active, archived, problems) = list_changes(&repo);
         std::fs::set_permissions(&archive_dir, std::fs::Permissions::from_mode(0o755))
             .expect("restore archive/ permissions");
 
@@ -3300,7 +3358,7 @@ apply:
         mkdir(&repo.join("openspec/changes/archive/2026-01-01-a"));
 
         let before = snapshot(&repo);
-        let _ = list_changes(&repo, 5);
+        let _ = list_changes(&repo);
         let after = snapshot(&repo);
         assert_eq!(before, after);
         assert!(
@@ -3356,7 +3414,7 @@ apply:
             "- [x] a\n- [x] b\n- [x] c\n- [x] d\n- [ ] e\n- [ ] f\n- [ ] g\n- [ ] h\n- [ ] i\n",
         );
 
-        let set = from_files(&repo, 5);
+        let set = from_files(&repo, ArchivedScope::Full);
         assert_eq!(set.active.len(), 1);
         let change = &set.active[0];
         assert_eq!(
@@ -3416,7 +3474,7 @@ apply:
             "- [x] a\n- [x] b\n- [x] c\n",
         );
 
-        let set = from_files(&repo, 5);
+        let set = from_files(&repo, ArchivedScope::Full);
         assert!(set.active.is_empty());
         assert_eq!(set.archived.len(), 1);
         let change = &set.archived[0];
@@ -3456,7 +3514,7 @@ apply:
             "- [x] a\n- [x] b\n- [ ] c\n",
         );
 
-        let set = from_files(&repo, 5);
+        let set = from_files(&repo, ArchivedScope::Full);
         assert_eq!(set.active.len(), 1);
         let change = &set.active[0];
         assert_eq!(change.schema, "outside-in-tdd");
@@ -3485,7 +3543,7 @@ apply:
         );
         write(&repo.join("README.md"), "# unrelated\n");
 
-        let first = from_files(&repo, 5);
+        let first = from_files(&repo, ArchivedScope::Full);
 
         // Advance an unrelated file's modification time between the two
         // reads, deterministically rather than by sleeping past filesystem
@@ -3505,7 +3563,7 @@ apply:
             .expect("open fixture for touching");
         file.set_modified(advanced).expect("advance mtime");
 
-        let second = from_files(&repo, 5);
+        let second = from_files(&repo, ArchivedScope::Full);
         assert_eq!(first, second);
     }
 
@@ -3530,7 +3588,7 @@ apply:
             "- [x] a\n",
         );
 
-        let set = from_files(&repo, 5);
+        let set = from_files(&repo, ArchivedScope::Full);
         assert_eq!(set.active.len(), 2);
         assert_eq!(set.archived.len(), 3);
         for change in set.active.iter().chain(set.archived.iter()) {
@@ -3553,12 +3611,25 @@ apply:
             "- [x] a\n",
         );
 
-        let set = from_files(&repo, 5);
+        let set = from_files(&repo, ArchivedScope::Full);
         assert_eq!(set.active.len(), 1);
         assert_eq!(set.archived.len(), 1);
         assert_eq!(set.active[0].name, "add-auth");
         assert_eq!(set.archived[0].name, "add-auth");
         assert_ne!(set.active[0].dir, set.archived[0].dir);
+        assert_eq!(set.archived_total, 1);
+        assert_set_invariants(&set);
+
+        // `changes::merge` carries `archived_total` through untouched, on
+        // exactly the terms `archived` itself passes through — the CLI
+        // offers no way to address an archived change at all.
+        let cli = CliChanges {
+            active: Vec::new(),
+            problems: Vec::new(),
+        };
+        let merged = merge(set, cli);
+        assert_eq!(merged.archived_total, 1);
+        assert_set_invariants(&merged);
     }
 
     #[cfg(unix)]
@@ -3578,7 +3649,7 @@ apply:
 
         std::fs::set_permissions(&archive_dir, std::fs::Permissions::from_mode(0o000))
             .expect("set archive/ unreadable");
-        let set = from_files(&repo, 5);
+        let set = from_files(&repo, ArchivedScope::Full);
         std::fs::set_permissions(&archive_dir, std::fs::Permissions::from_mode(0o755))
             .expect("restore archive/ permissions");
 
@@ -3586,6 +3657,336 @@ apply:
         assert!(set.archived.is_empty());
         assert_eq!(set.problems.len(), 1);
         assert!(set.problems[0].contains(&archive_dir.display().to_string()));
+        // An unreadable tree reports no archive rather than an archive
+        // whose size is unknown.
+        assert_eq!(set.archived_total, 0);
+        assert_set_invariants(&set);
+    }
+
+    /// `change-enumeration` -> "The full archive is enumerated and counted
+    /// under either scope": enumeration is identical under both scopes, and
+    /// `Names` builds no archived `Change` at all while still counting the
+    /// same total.
+    #[test]
+    fn the_full_archive_is_enumerated_and_counted_under_either_scope() {
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+        write_project_config(&repo, "tdd");
+        for (day, name) in [
+            ("01", "one"),
+            ("02", "two"),
+            ("03", "three"),
+            ("04", "four"),
+            ("05", "five"),
+            ("06", "six"),
+            ("07", "seven"),
+        ] {
+            mkdir(
+                &repo
+                    .join("openspec/changes/archive")
+                    .join(format!("2026-01-{day}-{name}")),
+            );
+        }
+
+        let full = from_files(&repo, ArchivedScope::Full);
+        assert_eq!(full.archived.len(), 7);
+        assert_eq!(full.archived_total, 7);
+        assert_eq!(
+            full.archived
+                .iter()
+                .map(|c| c.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["seven", "six", "five", "four", "three", "two", "one"]
+        );
+
+        let names = from_files(&repo, ArchivedScope::Names);
+        assert!(names.archived.is_empty());
+        assert_eq!(names.archived_total, 7);
+
+        assert_eq!(full.active, names.active);
+        assert_eq!(full.problems, names.problems);
+        assert!(full.problems.is_empty());
+
+        assert_set_invariants(&full);
+        assert_set_invariants(&names);
+    }
+
+    /// `change-enumeration` -> "A collapsed archive opens no file beneath
+    /// an archived change" (design.md -> Decision 16): "costs no work" is
+    /// proved by a read recorder, never by an assertion on the returned
+    /// `ChangeSet` — every field of the return value is pinned to a
+    /// scope-independent value by this capability, so a `Names`
+    /// implementation that resolved every archived change and threw the
+    /// result away would satisfy every value-level assertion that can be
+    /// written. The `Full` leg is the positive control: a recorder wired to
+    /// nothing records zero for both arms and fails it.
+    #[test]
+    fn a_collapsed_archive_opens_no_file_beneath_an_archived_change() {
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+        write_project_config(&repo, "tdd");
+        for (day, name) in [("01", "a"), ("02", "b"), ("03", "c")] {
+            let dir = repo
+                .join("openspec/changes/archive")
+                .join(format!("2026-01-{day}-{name}"));
+            write(&dir.join(".openspec.yaml"), "schema: tdd\n");
+            write(&dir.join("tasks.md"), "- [ ] a\n");
+        }
+        let archive_dir = repo.join("openspec/changes/archive");
+        let before = snapshot(&repo);
+
+        let _ = crate::schema::take_recorded_reads();
+        let _ = crate::tasks::take_recorded_reads();
+        let names = from_files(&repo, ArchivedScope::Names);
+        let schema_reads_names = crate::schema::take_recorded_reads()
+            .into_iter()
+            .filter(|p| p.starts_with(&archive_dir))
+            .count();
+        let task_reads_names = crate::tasks::take_recorded_reads()
+            .into_iter()
+            .filter(|p| p.starts_with(&archive_dir))
+            .count();
+        assert_eq!(
+            schema_reads_names, 0,
+            "ArchivedScope::Names must open no .openspec.yaml beneath \
+             openspec/changes/archive/"
+        );
+        assert_eq!(
+            task_reads_names, 0,
+            "ArchivedScope::Names must open no tasks.md beneath \
+             openspec/changes/archive/"
+        );
+        assert!(names.archived.is_empty());
+        assert_eq!(names.archived_total, 3);
+        assert!(names.problems.is_empty());
+
+        // The positive control, checked per recorder: a recorder wired to
+        // nothing would record zero for both arms and prove nothing, and
+        // checking the two recorders separately (rather than summing them)
+        // is what makes disabling either one alone — not just both at
+        // once — turn this control red.
+        let full = from_files(&repo, ArchivedScope::Full);
+        let schema_reads_full = crate::schema::take_recorded_reads()
+            .into_iter()
+            .filter(|p| p.starts_with(&archive_dir))
+            .count();
+        let task_reads_full = crate::tasks::take_recorded_reads()
+            .into_iter()
+            .filter(|p| p.starts_with(&archive_dir))
+            .count();
+        assert!(
+            schema_reads_full >= 3,
+            "ArchivedScope::Full must open at least one .openspec.yaml per \
+             archived change, got {schema_reads_full}"
+        );
+        assert!(
+            task_reads_full >= 3,
+            "ArchivedScope::Full must open at least one tasks.md per \
+             archived change, got {task_reads_full}"
+        );
+        assert_eq!(full.archived.len(), 3);
+
+        let after = snapshot(&repo);
+        assert_eq!(
+            before, after,
+            "reading the archive must never write inside the repository"
+        );
+    }
+
+    /// `change-enumeration` -> "An unresolvable archived change is a
+    /// `Change` problem under `Full` and absent under `Names`". Mode
+    /// `0o000` on the newest archived directory alone — read *and* execute
+    /// removed, the house idiom this file already uses for an unreadable
+    /// `archive/` — because stripping read alone leaves `open()` working
+    /// beneath the directory and the `Full` leg would record no problem.
+    #[cfg(unix)]
+    #[test]
+    fn an_unresolvable_archived_change_is_a_change_problem_under_full_and_absent_under_names() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+        write_project_config(&repo, "tdd");
+        mkdir(&repo.join("openspec/changes/archive/2026-01-01-a"));
+        mkdir(&repo.join("openspec/changes/archive/2026-01-02-b"));
+        let newest = repo.join("openspec/changes/archive/2026-01-03-c");
+        mkdir(&newest);
+
+        std::fs::set_permissions(&newest, std::fs::Permissions::from_mode(0o000))
+            .expect("set the newest archived directory unreadable");
+        let full = from_files(&repo, ArchivedScope::Full);
+        let names = from_files(&repo, ArchivedScope::Names);
+        std::fs::set_permissions(&newest, std::fs::Permissions::from_mode(0o755))
+            .expect("restore the newest archived directory's permissions");
+
+        assert_eq!(full.archived.len(), 3);
+        let unresolvable = full
+            .archived
+            .iter()
+            .find(|c| c.name == "c")
+            .expect("the unreadable directory still becomes a Change");
+        assert!(!unresolvable.problems.is_empty());
+        assert!(
+            full.problems.is_empty(),
+            "a change's own problems are never merged upward onto the set"
+        );
+
+        assert!(names.archived.is_empty());
+        assert!(names.problems.is_empty());
+        assert_eq!(names.archived_total, 3);
+
+        assert_set_invariants(&full);
+        assert_set_invariants(&names);
+    }
+
+    /// `change-enumeration` -> "An empty archive counts zero under either
+    /// scope", across all three ways an archive can be empty: absent,
+    /// present-and-empty, and present-as-a-regular-file.
+    #[test]
+    fn an_empty_archive_counts_zero_under_either_scope() {
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+        write_project_config(&repo, "tdd");
+        write(&repo.join("openspec/changes/one/tasks.md"), "- [ ] a\n");
+        write(&repo.join("openspec/changes/two/tasks.md"), "- [ ] a\n");
+
+        for scope in [ArchivedScope::Full, ArchivedScope::Names] {
+            let set = from_files(&repo, scope);
+            assert_eq!(set.active.len(), 2);
+            assert!(set.archived.is_empty());
+            assert_eq!(set.archived_total, 0);
+            assert!(set.problems.is_empty());
+            assert_set_invariants(&set);
+        }
+
+        mkdir(&repo.join("openspec/changes/archive"));
+        for scope in [ArchivedScope::Full, ArchivedScope::Names] {
+            let set = from_files(&repo, scope);
+            assert!(set.archived.is_empty());
+            assert_eq!(set.archived_total, 0);
+            assert!(set.problems.is_empty());
+        }
+
+        std::fs::remove_dir(repo.join("openspec/changes/archive"))
+            .expect("remove the empty archive/ directory");
+        write(&repo.join("openspec/changes/archive"), "not a directory");
+        for scope in [ArchivedScope::Full, ArchivedScope::Names] {
+            let set = from_files(&repo, scope);
+            assert!(set.archived.is_empty());
+            assert_eq!(set.archived_total, 0);
+            assert!(set.problems.is_empty());
+        }
+    }
+
+    /// `change-enumeration` -> "A surviving scenario names its scope":
+    /// updates the landed `no_active_changes_still_lists_the_archive`
+    /// scenario (still true at the `list_changes` level, unchanged above)
+    /// for `from_files`, where the scope is now the deciding parameter.
+    #[test]
+    fn a_surviving_scenario_names_its_scope() {
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+        write_project_config(&repo, "tdd");
+        mkdir(&repo.join("openspec/changes/archive/2026-01-01-a"));
+        mkdir(&repo.join("openspec/changes/archive/2026-01-02-b"));
+
+        let full = from_files(&repo, ArchivedScope::Full);
+        assert!(full.active.is_empty());
+        assert_eq!(full.archived.len(), 2);
+        assert_eq!(full.archived_total, 2);
+        assert!(full.problems.is_empty());
+
+        let names = from_files(&repo, ArchivedScope::Names);
+        assert!(names.active.is_empty());
+        assert!(names.archived.is_empty());
+        assert_eq!(names.archived_total, 2);
+
+        assert_set_invariants(&full);
+        assert_set_invariants(&names);
+    }
+
+    /// `change-enumeration` -> "An unreadable archive counts nothing and
+    /// reports once, under either scope": neither scope records a second
+    /// problem, so the count being unavailable is not itself reported.
+    #[cfg(unix)]
+    #[test]
+    fn an_unreadable_archive_counts_nothing_and_reports_once_under_either_scope() {
+        use std::os::unix::fs::PermissionsExt;
+
+        for scope in [ArchivedScope::Full, ArchivedScope::Names] {
+            let scratch = ScratchDir::new();
+            let repo = canonical(scratch.path());
+            vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+            write_project_config(&repo, "tdd");
+            write(&repo.join("openspec/changes/one/tasks.md"), "- [ ] a\n");
+            write(&repo.join("openspec/changes/two/tasks.md"), "- [ ] a\n");
+            let archive_dir = repo.join("openspec/changes/archive");
+            mkdir(&archive_dir);
+
+            std::fs::set_permissions(&archive_dir, std::fs::Permissions::from_mode(0o000))
+                .expect("set archive/ unreadable");
+            let set = from_files(&repo, scope);
+            std::fs::set_permissions(&archive_dir, std::fs::Permissions::from_mode(0o755))
+                .expect("restore archive/ permissions");
+
+            assert_eq!(set.active.len(), 2);
+            assert!(set.archived.is_empty());
+            assert_eq!(set.archived_total, 0);
+            assert_eq!(set.problems.len(), 1);
+            assert!(set.problems[0].contains(&archive_dir.display().to_string()));
+            assert_set_invariants(&set);
+        }
+    }
+
+    /// `change-model` -> "The two `archived_total` invariants hold under
+    /// either scope".
+    #[test]
+    fn the_two_archived_total_invariants_hold_under_either_scope() {
+        let scratch = ScratchDir::new();
+        let repo = canonical(scratch.path());
+        vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
+        write_project_config(&repo, "tdd");
+        for day in 1..=22 {
+            mkdir(
+                &repo
+                    .join("openspec/changes/archive")
+                    .join(format!("2026-01-{day:02}-entry")),
+            );
+        }
+
+        let resolved = from_files(&repo, ArchivedScope::Full);
+        assert_eq!(resolved.archived.len(), 22);
+        assert_eq!(resolved.archived_total, 22);
+        assert_set_invariants(&resolved);
+
+        let unresolved = from_files(&repo, ArchivedScope::Names);
+        assert!(unresolved.archived.is_empty());
+        assert_eq!(unresolved.archived_total, 22);
+        assert_set_invariants(&unresolved);
+    }
+
+    /// The invariant is a check, not a comment: a hand-built `ChangeSet`
+    /// whose `archived` holds three changes while `archived_total` claims
+    /// 22 is rejected.
+    #[test]
+    #[should_panic(expected = "archived_total")]
+    fn assert_set_invariants_rejects_an_inconsistent_archived_total() {
+        let bad = ChangeSet {
+            active: Vec::new(),
+            archived: vec![
+                fixture::archived(Some("2026-01-01"), "a", 0, 0),
+                fixture::archived(Some("2026-01-02"), "b", 0, 0),
+                fixture::archived(Some("2026-01-03"), "c", 0, 0),
+            ],
+            problems: Vec::new(),
+            archived_total: 22,
+        };
+        assert_set_invariants(&bad);
     }
 
     #[test]
@@ -3600,7 +4001,7 @@ apply:
         );
         mkdir(&repo.join("openspec/changes/directory-tasks/tasks.md"));
 
-        let set = from_files(&repo, 5);
+        let set = from_files(&repo, ArchivedScope::Full);
         assert_eq!(set.active.len(), 2);
 
         let unvendored = set
@@ -3634,15 +4035,29 @@ apply:
         vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
         write_project_config(&repo, "tdd");
         write(&repo.join("openspec/changes/one/proposal.md"), "# P\n");
+        write(
+            &repo.join("openspec/changes/archive/2026-01-01-two/proposal.md"),
+            "# P\n",
+        );
 
+        // `list-sections` -> "Persistence gate": both scopes, several times
+        // each, over a tree that holds an archived change too — `from_files`
+        // never touches `HERDR_PLUGIN_STATE_DIR` at all, so the only claim
+        // this function's own boundary can make is the repository tree
+        // staying byte-identical.
         let before = snapshot(&repo);
-        let _ = from_files(&repo, 5);
-        let _ = from_files(&repo, 5);
-        let _ = from_files(&repo, 5);
+        let _ = from_files(&repo, ArchivedScope::Full);
+        let _ = from_files(&repo, ArchivedScope::Names);
+        let _ = from_files(&repo, ArchivedScope::Full);
+        let _ = from_files(&repo, ArchivedScope::Names);
         let after = snapshot(&repo);
         assert_eq!(before, after);
-        assert!(!repo.join("openspec/changes/archive").exists());
         assert!(!repo.join("openspec/changes/one/tasks.md").exists());
+        assert!(
+            !repo
+                .join("openspec/changes/archive/2026-01-01-two/tasks.md")
+                .exists()
+        );
     }
 
     #[test]
@@ -3663,7 +4078,7 @@ apply:
         );
         write(&repo.join("openspec/changes/b/tasks.md"), "- [ ] a\n");
 
-        let set = from_files(&repo, 5);
+        let set = from_files(&repo, ArchivedScope::Full);
         let a = set.active.iter().find(|c| c.name == "a").unwrap();
         let b = set.active.iter().find(|c| c.name == "b").unwrap();
         assert_eq!(a.schema, "tdd");
@@ -3680,7 +4095,7 @@ apply:
         vendor_schema(&repo, "tdd", TDD_ARTIFACTS);
         write(&repo.join("openspec/changes/a/tasks.md"), "- [ ] a\n");
 
-        let set = from_files(&repo, 5);
+        let set = from_files(&repo, ArchivedScope::Full);
         let change = &set.active[0];
         assert_eq!(change.schema, crate::schema::DEFAULT_SCHEMA);
         assert!(change.artifacts.is_empty());
@@ -3704,7 +4119,7 @@ apply:
         write(&repo.join("openspec/changes/a/proposal.md"), "# P\n");
         write(&repo.join("openspec/changes/a/specs/zeta/spec.md"), "# Z\n");
 
-        let set = from_files(&repo, 5);
+        let set = from_files(&repo, ArchivedScope::Full);
         let change = &set.active[0];
         assert_eq!(change.problems.len(), 1);
         assert!(change.problems[0].contains("specs"));
@@ -3741,7 +4156,7 @@ apply:
             "- [ ] a\n- [ ] b\n",
         );
 
-        let set = from_files(&repo, 5);
+        let set = from_files(&repo, ArchivedScope::Full);
         assert_eq!(set.active.len(), 1);
         let change = &set.active[0];
         assert_eq!(
@@ -7017,7 +7432,7 @@ apply:
             write(&repo.join("openspec/changes/sibling/proposal.md"), "# P\n");
             write(&repo.join("openspec/changes/sibling/tasks.md"), "- [x] a\n");
 
-            let files = from_files(&repo, 5);
+            let files = from_files(&repo, ArchivedScope::Full);
             let learning_tool_file = files
                 .active
                 .iter()
@@ -7229,6 +7644,7 @@ apply:
             active: Vec::new(),
             archived: Vec::new(),
             problems: Vec::new(),
+            archived_total: 0,
         };
         files.active.push(Change {
             name: "alpha".to_string(),
@@ -7330,6 +7746,7 @@ apply:
                 problems: vec![],
             }],
             problems: Vec::new(),
+            archived_total: 1,
         };
 
         let cli = CliChanges {
@@ -7356,6 +7773,10 @@ apply:
         assert!(
             merged.archived.iter().any(|c| c.name == "add-auth"),
             "the fresh file walk already sees add-auth as archived"
+        );
+        assert_eq!(
+            merged.archived_total, 1,
+            "merge carries archived_total through untouched"
         );
         assert!(
             merged.problems.is_empty(),

@@ -185,6 +185,9 @@ pub(crate) fn declared_name(
 /// `declared_name` for every change, rather than re-reading it once per
 /// change through `select`.
 pub(crate) fn read_file(path: &Path) -> FileText {
+    #[cfg(test)]
+    READ_PATHS.with(|paths| paths.borrow_mut().push(path.to_path_buf()));
+
     match std::fs::read_to_string(path) {
         Ok(text) => FileText::Read(text),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => FileText::Absent,
@@ -489,6 +492,28 @@ pub fn resolve(repo: &Path, change_dir: Option<&Path>) -> SchemaResolution {
         schema,
         problems,
     }
+}
+
+// `list-sections`' evidence that a collapsed archived section opens no
+// file beneath it (design.md -> Decision 16): every path `read_file`
+// reads is recorded here. `thread_local!`, never a `static`, for
+// `load_schema_cached`'s own reason — the suite runs this crate's tests in
+// parallel threads of one process, and a process-global recorder would let
+// the first test decide the answer for every other. Declared at the
+// bottom of the file, directly above `mod tests`, so a sweep that discards
+// a file's production slice from its first line-anchored `#[cfg(test)]`
+// onward — `READONLY-UI` and `NOBLOCK`'s technique, which does not yet
+// cover this file but might — still finds every production line above it.
+#[cfg(test)]
+thread_local! {
+    static READ_PATHS: std::cell::RefCell<Vec<PathBuf>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Every path [`read_file`] has read since the last [`take_recorded_reads`]
+/// call (or since the thread started), and clears the record.
+#[cfg(test)]
+pub(crate) fn take_recorded_reads() -> Vec<PathBuf> {
+    READ_PATHS.with(|paths| std::mem::take(&mut *paths.borrow_mut()))
 }
 
 #[cfg(test)]

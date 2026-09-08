@@ -184,6 +184,9 @@ pub fn parse(text: &str) -> Tasks {
 /// `specs/task-groups`. The dual-source model is what resolves it: the
 /// CLI's count arrives and corrects the pane.
 pub fn read(path: &std::path::Path) -> Tasks {
+    #[cfg(test)]
+    READ_PATHS.with(|paths| paths.borrow_mut().push(path.to_path_buf()));
+
     match std::fs::read_to_string(path) {
         Ok(text) => parse(&text),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Tasks {
@@ -318,6 +321,26 @@ fn skip_task_whitespace(it: &mut std::iter::Peekable<std::str::CharIndices<'_>>)
 /// inside the box, and after the box.
 fn is_task_whitespace(c: char) -> bool {
     (c.is_whitespace() || c == '\u{feff}') && c != '\u{85}'
+}
+
+// `list-sections`' evidence that a collapsed archived section opens no
+// file beneath it (design.md -> Decision 16): every path `read` reads is
+// recorded here, on `schema::read_file`'s own recorder's terms —
+// `thread_local!`, never a `static`, because the suite runs this crate's
+// tests in parallel threads of one process, and declared at the bottom of
+// the file, directly above `mod tests`, so a future production-slice
+// sweep still finds every production line above it.
+#[cfg(test)]
+thread_local! {
+    static READ_PATHS: std::cell::RefCell<Vec<std::path::PathBuf>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Every path [`read`] has read since the last [`take_recorded_reads`] call
+/// (or since the thread started), and clears the record.
+#[cfg(test)]
+pub(crate) fn take_recorded_reads() -> Vec<std::path::PathBuf> {
+    READ_PATHS.with(|paths| std::mem::take(&mut *paths.borrow_mut()))
 }
 
 #[cfg(test)]
