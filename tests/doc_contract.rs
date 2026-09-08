@@ -1358,11 +1358,12 @@ fn context_names_every_gate_tier() {
 // thread. A future worker thread that answers over something other than `mpsc` — a
 // `Mutex`/`Condvar` pair, or a channel type from a crate this crate does not currently
 // depend on — would not be counted by this rule. That is acceptable today only because the
-// crate has six dependencies and none of them provides a channel type, and because
-// `NOBLOCK` leg 3 enumerates the four seam modules (`watch`, `refresh`, `agents`, `launch`)
-// independently of this leg, so a silent gap here is not the only guard against a hidden
-// worker. A reader who adds such a thread must find this sentence rather than rediscover
-// the gap by tracing a stale count back through git blame.
+// crate has six dependencies and none of them provides a channel type. `NOBLOCK` leg 3
+// constrains the four NAMED seam modules' (`watch`, `refresh`, `agents`, `launch`) own
+// blocking behaviour — it cannot see a fifth worker module anywhere, named or not, so this
+// leg's `mpsc` requirement is the ONLY thing standing between a new worker thread and a
+// silently stale count. A reader who adds such a thread must find this sentence rather than
+// rediscover the gap by tracing a stale count back through git blame.
 //
 // `thread::spawn` is matched ANCHORED per line — no `/` character anywhere before it on that
 // line — the same rule `NOBLOCK`'s own thread::spawn checks use (`^[^/]*thread::spawn`), so
