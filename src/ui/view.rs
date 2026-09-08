@@ -5,7 +5,7 @@
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
+use ratatui::style::Style;
 use ratatui::widgets::Block;
 
 use crate::ui::app::{Dashboard, Route};
@@ -16,6 +16,7 @@ use crate::ui::layout::{
 };
 use crate::ui::list;
 use crate::ui::markdown::Face;
+use crate::ui::palette::{self, Role};
 
 /// The footer's key hints, in the order they are drawn and dropped from.
 const FOOTER_HINTS: [&str; 3] = ["q quit", "Enter detail", "Esc back"];
@@ -61,8 +62,9 @@ fn render_detail(frame: &mut Frame, interior: Rect, dashboard: &Dashboard) {
     render_detail_content(frame, content, dashboard);
 }
 
-/// The change header: `ui::detail::header_row`, bold, at the row's first
-/// column. Draws nothing at zero width or zero height.
+/// The change header: `ui::detail::header_row` under `Role::DetailHeader` —
+/// bold and uncoloured — at the row's first column. Draws nothing at zero
+/// width or zero height.
 fn render_detail_header(frame: &mut Frame, header: Rect, change: &crate::changes::Change) {
     if header.width == 0 || header.height == 0 {
         return;
@@ -72,13 +74,13 @@ fn render_detail_header(frame: &mut Frame, header: Rect, change: &crate::changes
         header.x,
         header.y,
         &text,
-        Style::default().add_modifier(Modifier::BOLD),
+        palette::style(Role::DetailHeader),
     );
 }
 
-/// The tab bar: every `ui::detail::Tab` at `tabs.x + tab.x`, bold for the
-/// selected cell and plain for every other. Draws nothing at zero width or
-/// zero height.
+/// The tab bar: every `ui::detail::Tab` at `tabs.x + tab.x`, under
+/// `Role::TabActive` for the selected cell and `Role::TabInactive` for every
+/// other. Draws nothing at zero width or zero height.
 fn render_detail_tabs(frame: &mut Frame, tabs: Rect, change: &crate::changes::Change, tab: usize) {
     if tabs.width == 0 || tabs.height == 0 {
         return;
@@ -90,11 +92,12 @@ fn render_detail_tabs(frame: &mut Frame, tabs: Rect, change: &crate::changes::Ch
         if x >= last_col {
             continue;
         }
-        let mut style = Style::default();
-        if cell.selected {
-            style = style.add_modifier(Modifier::BOLD);
-        }
-        buf.set_string(x, tabs.y, &cell.text, style);
+        let role = if cell.selected {
+            Role::TabActive
+        } else {
+            Role::TabInactive
+        };
+        buf.set_string(x, tabs.y, &cell.text, palette::style(role));
     }
 }
 
@@ -148,36 +151,63 @@ fn render_detail_content(frame: &mut Frame, content: Rect, dashboard: &Dashboard
     }
 }
 
-/// The crate's only `Face`-to-`Style` mapping: `heading` present or
-/// `strong` -> `BOLD`; `emphasis` -> `ITALIC`; `code` -> `DIM`; `link` ->
-/// `UNDERLINED`; `quoted` -> `DIM`. Flags compose, so a bold link's cells
-/// carry `BOLD` and `UNDERLINED` together.
+/// The crate's only `Face`-to-`Style` mapping, and it constructs no style of
+/// its own: the palette's face roles are folded onto `Style::default()` with
+/// `Style::patch` in the fixed order `Quoted`, `Link`, `Code`, `Emphasis`,
+/// `Strong`, `Heading` (`specs/view-palette/spec.md`).
+///
+/// Because `patch` lets the later value win, modifiers accumulate — a bold
+/// link's cells carry `BOLD` and `UNDERLINED` together, exactly as before —
+/// while the **foreground** of a span carrying several coloured faces is
+/// decided by the last one in that order: heading over code over link, so a
+/// heading line reads as one colour even where it contains a code span or a
+/// link (design.md -> Decision 8). Total: no `Face` panics, and
+/// `Face::plain()` maps to `Style::default()`.
 fn style_for(face: &Face) -> Style {
     let mut style = Style::default();
-    if face.heading.is_some() || face.strong {
-        style = style.add_modifier(Modifier::BOLD);
-    }
-    if face.emphasis {
-        style = style.add_modifier(Modifier::ITALIC);
-    }
-    if face.code {
-        style = style.add_modifier(Modifier::DIM);
+    if face.quoted {
+        style = style.patch(palette::style(Role::Quoted));
     }
     if face.link {
-        style = style.add_modifier(Modifier::UNDERLINED);
+        style = style.patch(palette::style(Role::Link));
     }
-    if face.quoted {
-        style = style.add_modifier(Modifier::DIM);
+    if face.code {
+        style = style.patch(palette::style(Role::Code));
+    }
+    if face.emphasis {
+        style = style.patch(palette::style(Role::Emphasis));
+    }
+    if face.strong {
+        style = style.patch(palette::style(Role::Strong));
+    }
+    if let Some(level) = face.heading {
+        style = style.patch(palette::style(Role::Heading(level)));
     }
     style
 }
 
 /// Draw `list::rows(dashboard, interior.width)` into `interior`: the slice
 /// `layout::viewport` selects, one row per terminal row starting at the
-/// interior's first row and column, with `Modifier::BOLD` applied to the
-/// selected row's cells and `Style::default()` to every other row's. Draws
-/// nothing when the interior has zero width or zero height — there is
-/// nothing to index into.
+/// interior's first row and column, each under the palette role [`row_role`]
+/// gives it. Draws nothing when the interior has zero width or zero height —
+/// there is nothing to index into.
+/// The palette role a drawn list row carries: `ListRowSelected` for the row
+/// holding the selection — which is why a badge on it stays bold, the badge
+/// role carrying no modifier of its own — and otherwise the role its
+/// `RowKind` names. Split out of [`render_list`] so the mapping reads as one
+/// table rather than as a branch inside a drawing loop.
+fn row_role(row: &list::Row) -> Role {
+    if row.selected {
+        return Role::ListRowSelected;
+    }
+    match row.kind {
+        list::RowKind::Problem => Role::ListProblem,
+        list::RowKind::Separator => Role::ListSeparator,
+        list::RowKind::Message => Role::ListMessage,
+        list::RowKind::Item { .. } => Role::ListRow,
+    }
+}
+
 fn render_list(frame: &mut Frame, interior: Rect, dashboard: &Dashboard) {
     if interior.width == 0 || interior.height == 0 {
         return;
@@ -193,23 +223,26 @@ fn render_list(frame: &mut Frame, interior: Rect, dashboard: &Dashboard) {
         .enumerate()
     {
         let y = interior.y + i as u16;
-        let mut style = Style::default();
-        if row.selected {
-            style = style.add_modifier(Modifier::BOLD);
-        }
-        buf.set_string(interior.x, y, &row.text, style);
+        buf.set_string(interior.x, y, &row.text, palette::style(row_role(row)));
     }
 }
 
-/// One bordered region with a title. `emphasised` bolds the border — the
-/// routed region always is, whether or not the other region is drawn
-/// alongside it.
+/// One bordered region with a title. `emphasised` picks
+/// `Role::RegionBorderFocused` over `Role::RegionBorder` — the routed region
+/// always is, whether or not the other region is drawn alongside it. Neither
+/// role carries a colour: the border frames the pane rather than saying
+/// anything about it.
 fn render_region(frame: &mut Frame, area: Rect, title: &'static str, emphasised: bool) {
-    let mut border_style = Style::default();
-    if emphasised {
-        border_style = border_style.add_modifier(Modifier::BOLD);
-    }
-    let block = Block::bordered().title(title).border_style(border_style);
+    let role = if emphasised {
+        Role::RegionBorderFocused
+    } else {
+        Role::RegionBorder
+    };
+    // `border_style`, never `style`: a blank interior's cells must still equal
+    // `Cell::default().style()`.
+    let block = Block::bordered()
+        .title(title)
+        .border_style(palette::style(role));
     frame.render_widget(block, area);
 }
 
@@ -236,7 +269,7 @@ fn render_header(frame: &mut Frame, header: Rect, dashboard: &Dashboard) {
         header.x,
         header.y,
         "OpenSpec",
-        Style::default().add_modifier(Modifier::BOLD),
+        palette::style(Role::HeaderTitle),
     );
 
     let show_badge = dashboard.file_mode && header.width >= BADGE_MIN_WIDTH;
@@ -245,7 +278,7 @@ fn render_header(frame: &mut Frame, header: Rect, dashboard: &Dashboard) {
             header.x + 9,
             header.y,
             FILE_MODE_BADGE,
-            Style::default().add_modifier(Modifier::DIM),
+            palette::style(Role::FileMode),
         );
     }
 
@@ -265,7 +298,7 @@ fn render_header(frame: &mut Frame, header: Rect, dashboard: &Dashboard) {
     if let Some(shown) = shorten_for_header(&text, a) {
         let shown_len = columns(&shown) as u16;
         let x = header.x + header.width.saturating_sub(shown_len);
-        buf.set_string(x, header.y, &shown, Style::default());
+        buf.set_string(x, header.y, &shown, palette::style(Role::HeaderPath));
     }
 }
 
@@ -331,7 +364,7 @@ fn render_footer(frame: &mut Frame, footer: Rect, dashboard: &Dashboard) {
     if !text.is_empty() {
         frame
             .buffer_mut()
-            .set_string(footer.x, footer.y, &text, Style::default());
+            .set_string(footer.x, footer.y, &text, palette::style(Role::Footer));
     }
 }
 
@@ -4396,7 +4429,7 @@ mod tests {
     fn faces_reach_the_buffer_as_coloured_styles() {
         let source = "# Title\n\n## Heading\n\n**bold** and *italic* and `code` and [link](u)\n";
         let d = detail_dashboard(source.to_string(), 0, Route::Detail);
-        for width in [120u16, 60] {
+        for width in [120, 60] {
             let buf = render_at(width, 20, &d);
 
             let title = find_cell_style(&buf, "# Title");
@@ -4522,7 +4555,7 @@ mod tests {
 
         let d = detail_dashboard("plain text only\n".to_string(), 0, Route::Detail);
         let default_style = Cell::default().style();
-        for (width, first, last) in [(120u16, 41u16, 118u16), (60, 1, 58)] {
+        for (width, first, last) in [(120, 41, 118), (60, 1, 58)] {
             let buf = render_at(width, 20, &d);
             assert!(
                 row_text(&buf, 4).contains("plain text only"),
@@ -4557,7 +4590,7 @@ mod tests {
             completed: 4,
             total: 9,
         };
-        for (width, first, last, w) in [(120u16, 41u16, 118u16, 78u16), (60, 1, 58, 58)] {
+        for (width, first, last, w) in [(120, 41, 118, 78), (60, 1, 58, 58)] {
             let buf = render_at(width, 20, &d);
             assert_eq!(
                 detail_interior_cols(&buf, 2, w as usize),
@@ -4696,9 +4729,9 @@ mod tests {
     #[test]
     fn the_selected_row_is_bold_and_uncoloured() {
         let d = three_active();
-        for width in [120u16, 60] {
+        for width in [120, 60] {
             let buf = render_at(width, 20, &d);
-            let last = if width == 60 { 58u16 } else { 38 };
+            let last = if width == 60 { 58 } else { 38 };
             assert_eq!(cell(&buf, 1, 2).symbol(), ">", "width {width}");
             assert_eq!(cell(&buf, 1, 3).symbol(), " ", "width {width}");
             for x in 1..=last {
@@ -4767,10 +4800,10 @@ mod tests {
     fn a_monochrome_reading_of_the_frame_is_unchanged() {
         // The list half. Rows: 2 the problem, 3 the selected change, 4 the badged one, 5
         // the third, 6 the separator, 7 the archived change.
-        for width in [120u16, 60] {
+        for width in [120, 60] {
             let d = monochrome_dashboard(Route::List);
             let buf = render_at(width, 20, &d);
-            let last = if width == 60 { 58u16 } else { 38 };
+            let last = if width == 60 { 58 } else { 38 };
 
             for x in 0..8u16 {
                 assert!(
@@ -4824,7 +4857,7 @@ mod tests {
         }
 
         // The detail half, at the same two widths.
-        for width in [120u16, 60] {
+        for width in [120, 60] {
             let d = monochrome_dashboard(Route::Detail);
             let buf = render_at(width, 20, &d);
             let (first, last) = if width == 60 {

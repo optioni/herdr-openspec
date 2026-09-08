@@ -132,12 +132,12 @@ Scope: `src/ui/view.rs` only. `Color::` is named **nowhere** in the crate at HEA
 (`grep -rnE 'Color::|ratatui::style::Color' src tests` → exit 1, no output), so every colour
 assertion written here is RED by construction.
 
-- [ ] 2.0 CHECK: Every colour assertion outside `src/ui/palette.rs` compares against
+- [x] 2.0 CHECK: Every colour assertion outside `src/ui/palette.rs` compares against
       `palette::style(role)`, never a `Color` literal — the gate from group 0 searches `src/`
       and this crate's view tests are inline `#[cfg(test)]` modules there. Verify by running
       `/bin/sh scripts/gates/palette.sh` after each RED task in groups 2, 3, and 4; it must
       stay at exit 0.
-- [ ] 2.1 RED: Write failing tests for: *Faces reach the buffer as coloured styles at both
+- [x] 2.1 RED: Write failing tests for: *Faces reach the buffer as coloured styles at both
       mandated widths*, *Heading foreground wins over a code span inside it*, *A plain face is
       the default style*, *Faces reach the buffer as styles at both widths*, *The badge is
       drawn dim after the label at both widths*, *A false flag renders the header that landed
@@ -150,9 +150,9 @@ assertion written here is RED by construction.
       Do not rename `file_mode_badge_is_dim_after_the_label` or
       `badge_drops_whole_below_eighteen_columns`: `tests/degraded-coverage.toml:18` names both
       as its proof, and a rename fails `cargo test --test degraded_coverage`.
-- [ ] 2.2 GREEN: Rewrite `style_for` as a `Style::patch` fold over the palette in the order
+- [x] 2.2 GREEN: Rewrite `style_for` as a `Style::patch` fold over the palette in the order
       `Quoted, Link, Code, Emphasis, Strong, Heading` (per design.md → Decision 8).
-- [ ] 2.3 GREEN: Replace every `Style` constructed in `render_header`, `render_region`,
+- [x] 2.3 GREEN: Replace every `Style` constructed in `render_header`, `render_region`,
       `render_list`, `render_detail_header`, `render_detail_tabs`, and `render_footer` — the
       last writes a bare `Style::default()` at `src/ui/view.rs:334` and takes `Role::Footer` —
       with
@@ -160,10 +160,10 @@ assertion written here is RED by construction.
       `ui::view` constructs no `Style` of its own afterwards except by `patch`. `render_region`
       passes the role's style to `Block::border_style`, never `Block::style`, so a blank
       interior's cells still equal `Cell::default().style()`.
-- [ ] 2.4 CHECK: Contract gate — re-inspect `palette::style`'s signature and its consumers.
+- [x] 2.4 CHECK: Contract gate — re-inspect `palette::style`'s signature and its consumers.
       `ui::view` is the only one; confirm `grep -rn 'palette::' src | grep -v '^src/ui/view.rs'`
       returns only the `pub mod palette;` declaration.
-- [ ] 2.5 VERIFY: Every landed `Modifier::` **assertion** still passes unedited. The 32 lines
+- [x] 2.5 VERIFY: Every landed `Modifier::` **assertion** still passes unedited. The 32 lines
       `grep -rn 'Modifier::' src tests | wc -l` reports at HEAD split into 13 production lines
       and 19 inside `src/`'s test modules, with `tests/` contributing none:
       `for f in $(find src -name '*.rs'); do awk '/^#\[cfg\(test\)\]/{exit} /Modifier::/{print}' $f; done | wc -l`
@@ -173,9 +173,9 @@ assertion written here is RED by construction.
       the check is a diff: `git diff -U0 <BASE> -- src tests | grep '^[-+].*Modifier::'` must
       show only additions, plus the group-4 rewrites design.md → Decision 3 names. This is that
       decision's falsifiable half.
-- [ ] 2.6 REFACTOR: Fold the six render functions' repeated role lookups if a shape emerges;
+- [x] 2.6 REFACTOR: Fold the six render functions' repeated role lookups if a shape emerges;
       otherwise state that no refactor was needed.
-- [ ] 2.7 Run the group tests — `cargo test --lib ui::view::` — no regressions.
+- [x] 2.7 Run the group tests — `cargo test --lib ui::view::` — no regressions.
 
 ## 3. The agent badge cell and the problem row
 <!-- kind: behavior -->
