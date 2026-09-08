@@ -2308,6 +2308,270 @@ mod tests {
             assert_eq!(d3.detail.scroll, 3);
         }
 
+        /// The `Dashboard` shape shared by this group's three `Enter`
+        /// scenarios below, factored out in the REFACTOR step: the same
+        /// twenty-line detail source as `twenty_line_detail`, an explicit
+        /// `route`, `filter`, and `detail.scroll`. Carries one real,
+        /// selected change — `ui::view::render_detail` draws nothing at all
+        /// when `selected_change()` is `None`, so an empty `ChangeSet` would
+        /// make every rendered-buffer assertion below vacuous regardless of
+        /// `detail.source` or `detail.scroll`.
+        fn dashboard_for_enter(route: Route, filter: Filter, scroll: usize) -> Dashboard {
+            Dashboard {
+                detail: Detail {
+                    source: twenty_line_detail().source,
+                    scroll,
+                    tab: 0,
+                    problems: Vec::new(),
+                    loaded: None,
+                },
+                repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
+                searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
+                changes: fixture::set(
+                    vec![fixture::active("detail-view", 4, 9)],
+                    Vec::new(),
+                    Vec::new(),
+                ),
+                route,
+                quit: false,
+                selected: 0,
+                filter,
+                refresh: crate::ui::app::Refresh {
+                    requested: false,
+                    reload: false,
+                    startup: Vec::new(),
+                    problems: Vec::new(),
+                },
+                agents: crate::agents::AgentSnapshot {
+                    agents: Vec::new(),
+                    reachable: false,
+                    stalled: false,
+                    problem: None,
+                },
+                agent_names: crate::state::Mapping::default(),
+                launch: crate::ui::app::Launch {
+                    pending: None,
+                    in_flight: false,
+                    problems: Vec::new(),
+                },
+                file_mode: false,
+            }
+        }
+
+        /// The detail content area's first row, at the column band the
+        /// buffer's own width mandates — 1..=9 at 60 columns, 41..=49 at
+        /// 120 — the same pair `ui::view`'s own (private) `detail_marker_cols`
+        /// asserts against.
+        fn detail_marker_cols(buf: &ratatui::buffer::Buffer, y: u16) -> String {
+            let (from, len) = if buf.area.width == 60 {
+                (1, 9)
+            } else {
+                (41, 9)
+            };
+            crate::testutil::row_text(buf, y)
+                .chars()
+                .skip(from)
+                .take(len)
+                .collect()
+        }
+
+        /// Whether any row of `buf` contains `needle` — `ui::view`'s own
+        /// `buffer_contains`, repeated here because that one is private to
+        /// `ui::view`'s own test module.
+        fn buffer_contains(buf: &ratatui::buffer::Buffer, needle: &str) -> bool {
+            (0..buf.area.height).any(|y| crate::testutil::row_text(buf, y).contains(needle))
+        }
+
+        /// `detail-scroll`: "Enter at the detail route moves nothing and
+        /// keeps the scroll" — design.md -> Decision 5. The guard is
+        /// `self.route != Route::Detail`, the same `before != after` shape
+        /// `Back` and `FilterStart` already use.
+        #[test]
+        fn enter_at_the_detail_route_is_a_noop() {
+            // A scroll safely inside `layout::scroll_offset`'s own render-time
+            // clamp (content height 14 over the twenty-line source, so a
+            // scroll above 6 is clamped regardless of this group's fix) — the
+            // point here is `OpenDetail`'s guard, not that pre-existing clamp.
+            let mut d = dashboard_for_enter(Route::Detail, empty_filter(), 3);
+            let before = d.clone();
+            let buf_before_120 = crate::testutil::render_at(120, 20, &d);
+            let buf_before_60 = crate::testutil::render_at(60, 20, &d);
+
+            d.apply(Action::OpenDetail);
+            d.apply(Action::OpenDetail);
+            d.apply(Action::OpenDetail);
+
+            assert_eq!(
+                d, before,
+                "OpenDetail at the detail route must change nothing at all, not only the scroll"
+            );
+
+            let buf_after_120 = crate::testutil::render_at(120, 20, &d);
+            assert_eq!(buf_after_120, buf_before_120);
+            let buf_after_60 = crate::testutil::render_at(60, 20, &d);
+            assert_eq!(buf_after_60, buf_before_60);
+            assert_eq!(detail_marker_cols(&buf_after_60, 4), "- line-03");
+        }
+
+        /// `detail-scroll`: "Enter from the list route still opens at the
+        /// top" — a scroll left behind by an earlier session at the detail
+        /// route must not survive a real route move.
+        #[test]
+        fn enter_from_list_route_still_opens_at_the_top() {
+            let mut d = dashboard_for_enter(Route::List, empty_filter(), 7);
+            d.apply(Action::OpenDetail);
+            assert_eq!(d.route, Route::Detail);
+            assert_eq!(
+                d.detail.scroll, 0,
+                "the guard narrows the reset to real route moves, it does not remove it"
+            );
+
+            for (width, height) in [(120u16, 20u16), (60, 20)] {
+                let buf = crate::testutil::render_at(width, height, &d);
+                assert_eq!(detail_marker_cols(&buf, 4), "- line-00", "width {width}");
+            }
+        }
+
+        /// `detail-scroll`: "Enter while filtering still dismisses the
+        /// filter and resets nothing" — accepting a filter is not a route
+        /// move at either route.
+        #[test]
+        fn enter_while_filtering_still_dismisses_and_resets_nothing() {
+            let mut detail_d = dashboard_for_enter(
+                Route::Detail,
+                Filter {
+                    query: "add".to_string(),
+                    active: true,
+                },
+                7,
+            );
+            detail_d.apply(Action::OpenDetail);
+            assert!(!detail_d.filter.active);
+            assert_eq!(detail_d.filter.query, "add");
+            assert_eq!(detail_d.route, Route::Detail);
+            assert_eq!(detail_d.detail.scroll, 7);
+
+            let mut list_d = dashboard_for_enter(
+                Route::List,
+                Filter {
+                    query: "add".to_string(),
+                    active: true,
+                },
+                7,
+            );
+            list_d.apply(Action::OpenDetail);
+            assert!(!list_d.filter.active);
+            assert_eq!(list_d.route, Route::List);
+            assert_eq!(list_d.detail.scroll, 7);
+        }
+
+        /// `list-filtering`: "Matching ignores case outside ASCII" —
+        /// `str::to_lowercase` folds both sides, where `to_ascii_lowercase`
+        /// left every codepoint above U+007F untouched.
+        #[test]
+        fn matches_ignores_case_outside_ascii() {
+            use crate::ui::app::matches;
+            assert!(matches("änderung", "Ä"));
+            assert!(matches("ÄNDERUNG", "ä"));
+            assert!(!matches("add-token-refresh", "Ä"));
+            assert!(matches("add-token-refresh", "add"));
+
+            let mut d = five_change_dashboard();
+            d.changes.active = vec![
+                fixture::active("änderung-der-api", 1, 2),
+                fixture::active("ÜBERSICHT", 1, 2),
+                fixture::active("add-token-refresh", 4, 9),
+            ];
+            d.changes.archived = Vec::new();
+
+            for query in ["Ä", "ä"] {
+                d.filter.query = query.to_string();
+                for (width, height) in [(120u16, 20u16), (60, 20)] {
+                    let buf = crate::testutil::render_at(width, height, &d);
+                    assert!(
+                        buffer_contains(&buf, "änderung-der-api"),
+                        "query {query} width {width}"
+                    );
+                    assert!(
+                        !buffer_contains(&buf, "ÜBERSICHT"),
+                        "query {query} width {width}"
+                    );
+                    assert!(
+                        !buffer_contains(&buf, "add-token-refresh"),
+                        "query {query} width {width}"
+                    );
+                }
+            }
+
+            for query in ["ÜBER", "über"] {
+                d.filter.query = query.to_string();
+                for (width, height) in [(120u16, 20u16), (60, 20)] {
+                    let buf = crate::testutil::render_at(width, height, &d);
+                    assert!(
+                        buffer_contains(&buf, "ÜBERSICHT"),
+                        "query {query} width {width}"
+                    );
+                    assert!(
+                        !buffer_contains(&buf, "änderung-der-api"),
+                        "query {query} width {width}"
+                    );
+                }
+            }
+
+            d.filter.query = "add".to_string();
+            for (width, height) in [(120u16, 20u16), (60, 20)] {
+                let buf = crate::testutil::render_at(width, height, &d);
+                assert!(buffer_contains(&buf, "add-token-refresh"), "width {width}");
+            }
+        }
+
+        /// `list-filtering`: "The fold is total and its documented edge
+        /// cases hold" — seven direct calls, none of which may panic.
+        #[test]
+        fn the_fold_is_total_and_its_documented_edge_cases_hold() {
+            use crate::ui::app::matches;
+
+            let long_name = "a".repeat(200);
+            let with_nul = format!("na{}me", '\u{0}');
+            let combining_only = "\u{0301}\u{0302}\u{0303}".to_string();
+            let family_emoji = "team-\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466}";
+
+            for name in [
+                "",
+                long_name.as_str(),
+                with_nul.as_str(),
+                combining_only.as_str(),
+                "ΟΔΟΣ",
+                "İstanbul",
+                family_emoji,
+            ] {
+                assert!(matches(name, ""), "an empty query must match {name:?}");
+            }
+
+            // A trailing Σ lowercases to ς (U+03C2, final sigma) by
+            // position, not to σ (U+03C3) — the default mapping's own
+            // documented behaviour, not a defect.
+            assert!(matches("ΟΔΟΣ", "οδο\u{03C2}"));
+            assert!(!matches("ΟΔΟΣ", "οδο\u{03C3}"));
+
+            // İ (U+0130) expands under to_lowercase to `i` plus a combining
+            // dot above (U+0307); a query already spelling that expansion
+            // matches, and so does the plain suffix that follows it.
+            assert!(matches("İstanbul", "i\u{0307}"));
+            assert!(matches("İstanbul", "stanbul"));
+
+            // No normalisation, either side: precomposed ä (U+00E4) and
+            // decomposed a + combining diaeresis (U+0308) are different
+            // codepoint sequences and neither matches the other.
+            assert!(!matches("\u{00E4}", "a\u{0308}"));
+            assert!(!matches("a\u{0308}", "\u{00E4}"));
+
+            // A multi-codepoint ZWJ emoji sequence must not panic, and
+            // matches itself.
+            assert!(matches(family_emoji, family_emoji));
+            assert!(!matches(family_emoji, "\u{0}"));
+        }
+
         #[test]
         fn normalise_scroll_clamps_against_the_frame() {
             // detail-scroll: "A resize renormalises the offset on the next

@@ -1078,6 +1078,120 @@ mod tests {
         assert_eq!(row, "- line-00");
     }
 
+    /// `detail-scroll`: "Enter at the detail route moves nothing and keeps
+    /// the scroll" — the loop-tier row of the scenario `ui::app`'s
+    /// `enter_at_the_detail_route_is_a_noop` proves at the `apply` level.
+    /// This drives the real `action_for` -> `apply` path through a scripted
+    /// `run_loop`, at a scroll value strictly inside `normalise_scroll`'s
+    /// own clamp (max 6 at height 20 over the twenty-line source, per
+    /// `a_resize_renormalises_the_offset` above), so any difference here is
+    /// attributable only to `OpenDetail`'s guard and not to that
+    /// pre-existing, unrelated clamp. `detail.loaded` is pre-set to the
+    /// selected change's own `(dir, tab)` key so `sync_detail` never
+    /// re-reads and never touches the scroll itself — the guard is the only
+    /// mechanism this test can be exercising.
+    #[test]
+    fn enter_at_the_detail_route_moves_nothing_through_run_loop() {
+        let backend = TestBackend::new(120, 20);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+
+        let change = crate::changes::fixture::with_artifacts(
+            crate::changes::fixture::active("add-auth", 1, 2),
+            &[("tasks", &["/repo/tasks.md"])],
+        );
+        let dir = change.dir.clone();
+        let mut dashboard = Dashboard {
+            repo: Some(std::path::PathBuf::from("/repo")),
+            searched_from: std::path::PathBuf::from("/repo"),
+            changes: crate::changes::fixture::set(vec![change], Vec::new(), Vec::new()),
+            route: Route::Detail,
+            quit: false,
+            selected: 0,
+            filter: crate::ui::app::Filter {
+                query: String::new(),
+                active: false,
+            },
+            detail: crate::ui::app::Detail {
+                source: (0..20).map(|i| format!("- line-{i:02}\n")).collect(),
+                scroll: 3,
+                tab: 0,
+                problems: Vec::new(),
+                loaded: Some((dir, 0)),
+            },
+            refresh: crate::ui::app::Refresh {
+                requested: false,
+                reload: false,
+                startup: Vec::new(),
+                problems: Vec::new(),
+            },
+            agents: crate::agents::AgentSnapshot {
+                agents: Vec::new(),
+                reachable: false,
+                stalled: false,
+                problem: None,
+            },
+            agent_names: crate::state::Mapping::default(),
+            launch: crate::ui::app::Launch {
+                pending: None,
+                in_flight: false,
+                problems: Vec::new(),
+            },
+            file_mode: false,
+        };
+        let before = dashboard.clone();
+
+        let mut events = Script::new(vec![
+            Ok(Some(press(KeyCode::Enter, KeyModifiers::NONE))),
+            Ok(Some(press(KeyCode::Enter, KeyModifiers::NONE))),
+            Ok(Some(press(KeyCode::Enter, KeyModifiers::NONE))),
+            Ok(Some(press(KeyCode::Char('c'), KeyModifiers::CONTROL))),
+        ]);
+
+        let mut fs = crate::watch::none();
+        let mut refresher = crate::refresh::none();
+        let mut agents = crate::agents::none();
+        let mut launcher = crate::launch::none();
+        let mut live = crate::ui::driver::Live {
+            fs: &mut *fs,
+            refresher: &mut *refresher,
+            agents: &mut *agents,
+            launcher: &mut *launcher,
+        };
+        let summary = run_loop(
+            &mut terminal,
+            &mut dashboard,
+            &mut events,
+            &mut live,
+            &|_: &std::path::Path| Ok(String::new()),
+            Duration::from_millis(1),
+        )
+        .expect("loop ends");
+
+        assert_eq!(
+            summary,
+            LoopSummary {
+                frames: 4,
+                polls: 4
+            }
+        );
+        assert!(dashboard.quit);
+        assert_eq!(
+            dashboard.route, before.route,
+            "Enter must not move the route away from Detail"
+        );
+        assert_eq!(dashboard.selected, before.selected);
+        assert_eq!(dashboard.filter, before.filter);
+        assert_eq!(
+            dashboard.detail, before.detail,
+            "Enter at the detail route must not reset the scroll or touch any other field"
+        );
+        assert_eq!(dashboard.changes, before.changes);
+
+        let buf = terminal.backend().buffer();
+        let row: String = row_text(buf, 4).chars().skip(41).take(9).collect();
+        assert_eq!(row, "- line-03");
+    }
+
     #[test]
     fn a_draw_failure_stops_before_polling() {
         let mut terminal = ratatui::Terminal::new(FailingBackend).expect("construct terminal");
