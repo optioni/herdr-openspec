@@ -143,12 +143,12 @@
 ## 8. The `COLWIDTH` gate and the re-measured width floors
 <!-- kind: operational -->
 
-- [ ] 8.1 CHECK: Confirm the RED evidence recorded in the header block still holds — run the script body from a scratch path outside the repo against this working tree, before 8.2 creates the file. It must exit 1 on the control.
-- [ ] 8.2 CHANGE: Add the script verbatim from the header block above as `scripts/gates/colwidth.sh` and add `/bin/sh scripts/gates/colwidth.sh` to the `Makefile`'s `gates:` recipe, run bare with no `MIN` override.
-- [ ] 8.3 VERIFY: Negative controls, three of them. Corrupt the sweep regex and confirm the self-test fires; delete `styled_graphemes` from `src/ui/layout.rs` and confirm control 2 fires; reintroduce one `.chars().count()` into `src/ui/list.rs` production code and confirm the sweep fires naming that file and line. Restore after each and confirm exit 0.
-- [ ] 8.4 VERIFY: `cargo test --test ci_workflow` — green, so the recipe names every script under `scripts/gates/` and vice versa with `colwidth.sh` present.
-- [ ] 8.5 VERIFY: `make gates` — green.
-- [ ] 8.6 CHANGE: Re-measure each width gate's `#[test]` count with `grep -cE '^[[:space:]]*#\[test\][[:space:]]*$' src/ui/<f>.rs` and raise `LIST_MIN`, `MD_MIN`, `TASK_MIN`, `DETAIL_MIN`, and `WIDTHS_MIN` to the new true counts in their own scripts. Re-run `make gates` — green.
+- [x] 8.1 CHECK: Confirm the RED evidence recorded in the header block still holds — run the script body from a scratch path outside the repo against this working tree, before 8.2 creates the file. It must exit 1 on the control.
+- [x] 8.2 CHANGE: Add the script verbatim from the header block above as `scripts/gates/colwidth.sh` and add `/bin/sh scripts/gates/colwidth.sh` to the `Makefile`'s `gates:` recipe, run bare with no `MIN` override.
+- [x] 8.3 VERIFY: Negative controls, three of them. Corrupt the sweep regex and confirm the self-test fires; delete `styled_graphemes` from `src/ui/layout.rs` and confirm control 2 fires; reintroduce one `.chars().count()` into `src/ui/list.rs` production code and confirm the sweep fires naming that file and line. Restore after each and confirm exit 0.
+- [x] 8.4 VERIFY: `cargo test --test ci_workflow` — green, so the recipe names every script under `scripts/gates/` and vice versa with `colwidth.sh` present.
+- [x] 8.5 VERIFY: `make gates` — green.
+- [x] 8.6 CHANGE: Re-measure each width gate's `#[test]` count with `grep -cE '^[[:space:]]*#\[test\][[:space:]]*$' src/ui/<f>.rs` and raise `LIST_MIN`, `MD_MIN`, `TASK_MIN`, `DETAIL_MIN`, and `WIDTHS_MIN` to the new true counts in their own scripts. Re-run `make gates` — green.
 
 ## 9. Change Review
 <!-- kind: operational -->
