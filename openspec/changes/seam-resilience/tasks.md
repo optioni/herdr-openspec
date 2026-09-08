@@ -117,21 +117,21 @@ apart by exit code.
 ## 11. Documentation
 <!-- kind: operational -->
 
-- [ ] 11.1 Rewrite in `AGENTS.md`: the "Nothing spawns a process outside `cli`" bullet (audience: every future session). The sentence "never sets `current_dir`" is now false for `RealOpenspecCli` and must be corrected in place, not appended to — replace it with the narrow rule (a caller-supplied working directory for `openspec` only, because the CLI resolves its root from the process cwd and has no root flag). Net effect: ~2 lines rewritten, none added.
-- [ ] 11.2 Rewrite in `AGENTS.md`: the "The render path blocks on nothing but the terminal" bullet (audience: every future session). Add one sentence naming the per-frame artifact read as the one accepted exception and the cache that bounds it (design.md -> Decision 10), so a later reader does not "fix" it. Net: +2 lines.
-- [ ] 11.3 Rewrite in `SPEC.md` -> Refresh: correct "one recursive watch on `openspec/`" to say what the composition root passes, and record that the `openspec` child runs with the repository root as its working directory. Replaces the current text rather than adding beside it.
-- [ ] 11.4 VERIFY: `cargo test --test manifest` green — the README/manifest contract is untouched by these edits.
+- [x] 11.1 Rewrite in `AGENTS.md`: the "Nothing spawns a process outside `cli`" bullet (audience: every future session). The sentence "never sets `current_dir`" is now false for `RealOpenspecCli` and must be corrected in place, not appended to — replace it with the narrow rule (a caller-supplied working directory for `openspec` only, because the CLI resolves its root from the process cwd and has no root flag). Net effect: ~2 lines rewritten, none added.
+- [x] 11.2 Rewrite in `AGENTS.md`: the "The render path blocks on nothing but the terminal" bullet (audience: every future session). Add one sentence naming the per-frame artifact read as the one accepted exception and the cache that bounds it (design.md -> Decision 10), so a later reader does not "fix" it. Net: +2 lines.
+- [x] 11.3 Rewrite in `SPEC.md` -> Refresh: correct "one recursive watch on `openspec/`" to say what the composition root passes, and record that the `openspec` child runs with the repository root as its working directory. Replaces the current text rather than adding beside it.
+- [x] 11.4 VERIFY: `cargo test --test manifest` green — the README/manifest contract is untouched by these edits.
 
 ## 12. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 12.1 CHECK: Inspect the intended verification commands and affected tiers — every gate below plus `make gates-full`, which this change does not otherwise reach.
-- [ ] 12.2 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors
-- [ ] 12.3 VERIFY: `cargo fmt --all -- --check` — clean
-- [ ] 12.4 VERIFY: `make gates` — every hygiene gate green, none run with a `MIN`/`SCAN_MIN` override that was not already on the recipe line
-- [ ] 12.5 VERIFY: `cargo test --all-features` — green
-- [ ] 12.6 VERIFY: `cargo llvm-cov --fail-under-lines 80` — at or above the floor, with no exclusion added
-- [ ] 12.7 VERIFY: `openspec validate seam-resilience --strict` — no errors
+- [x] 12.1 CHECK: Inspect the intended verification commands and affected tiers — every gate below plus `make gates-full`, which this change does not otherwise reach.
+- [x] 12.2 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors
+- [x] 12.3 VERIFY: `cargo fmt --all -- --check` — clean
+- [x] 12.4 VERIFY: `make gates` — every hygiene gate green, none run with a `MIN`/`SCAN_MIN` override that was not already on the recipe line
+- [x] 12.5 VERIFY: `cargo test --all-features` — green
+- [x] 12.6 VERIFY: `cargo llvm-cov --fail-under-lines 80` — at or above the floor, with no exclusion added
+- [x] 12.7 VERIFY: `openspec validate seam-resilience --strict` — no errors
 
 <!-- Parallelism, examined: groups 5, 6, and 7 each edit exactly one module nobody else in
      this change touches (`src/agents.rs`, `src/ui/terminal.rs`, `src/launch.rs`) and need
