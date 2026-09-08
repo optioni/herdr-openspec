@@ -399,7 +399,7 @@ fn msrv_bump_is_caught() {
     let version = manifest_rust_version(bumped_cargo_toml).expect("parse synthetic Cargo.toml");
 
     // Doc text unchanged from before the bump: still names the old floor, not the new one.
-    let doc_section = "## Environment\n\n- **Rust** stable, floor 1.88.\n";
+    let doc_section = "## Environment\n\n- **Rust** stable, floor 1.88 today.\n";
     assert!(
         !msrv_mentions(doc_section, &version),
         "a bumped rust-version ({version:?}) must not be satisfied by unchanged doc text"
