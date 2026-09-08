@@ -1371,6 +1371,38 @@ fn context_names_every_gate_tier() {
 // Guard A's own shape (`grep -qE 'mpsc'`, no anchor), reused rather than tightened, so this
 // leg and that gate can never disagree about which files carry a channel.
 
+/// Recursively collect every `.rs` file under `root`, paired with its content. The returned
+/// name is the file's path RELATIVE TO `root`, joined with `/` regardless of platform, so a
+/// file at `root/newdir/worker.rs` is reported as `newdir/worker.rs` rather than colliding
+/// with a same-named `root/worker.rs` in a failure message. `src/` is walked in full — the
+/// worker-thread claim this leg checks is about the crate's whole production tree, not only
+/// `src/`'s top level, and a new worker module under a new subdirectory (e.g. `src/ui/`, or
+/// any future `src/<other>/`) must be just as visible to it as one at the top level.
+fn collect_rs_files(root: &std::path::Path) -> Vec<(String, String)> {
+    let mut files = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.is_file() && path.extension().is_some_and(|ext| ext == "rs") {
+                let rel = path
+                    .strip_prefix(root)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .replace(std::path::MAIN_SEPARATOR, "/");
+                let content = read_doc(&path).unwrap_or_else(|e| panic!("{e}"));
+                files.push((rel, content));
+            }
+        }
+    }
+    files
+}
+
 /// The text of `src` before its first line equal to `#[cfg(test)]` — the same cut
 /// `scripts/gates/noblock.sh`'s `prod()` uses. A file with no such line is entirely
 /// production.
