@@ -223,7 +223,20 @@ fn render_list(frame: &mut Frame, interior: Rect, dashboard: &Dashboard) {
         .enumerate()
     {
         let y = interior.y + i as u16;
-        buf.set_string(interior.x, y, &row.text, palette::style(row_role(row)));
+        let style = palette::style(row_role(row));
+        buf.set_string(interior.x, y, &row.text, style);
+        // The badge is one column inside a row already drawn: re-write that single
+        // cell with the row's own style **patched** by the badge role, so it keeps
+        // every modifier the row carries — a badge on the selected row is bold and
+        // coloured — and gains only the status colour. `badge.x` at or past the
+        // interior's width is skipped rather than clamped, so no badge is ever drawn
+        // over a border.
+        if let Some(badge) = row.badge
+            && badge.x < interior.width
+            && let Some(cell) = buf.cell_mut((interior.x + badge.x, y))
+        {
+            cell.set_style(style.patch(palette::style(Role::AgentBadge(badge.status))));
+        }
     }
 }
 

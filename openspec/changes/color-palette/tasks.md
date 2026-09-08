@@ -189,15 +189,15 @@ assertion written here is RED by construction.
       coloured and the rest of the row does not*, *Problem rows are red and change rows are
       not, at both mandated widths*, *An empty-state message row is not a problem row*, and
       *A badged selected row keeps its bold under the badge colour*.
-- [ ] 3.3 GREEN: Add `BadgeCell { x, status }` and `Row::badge` in `src/ui/list.rs`, and have
+- [x] 3.3 GREEN: Add `BadgeCell { x, status }` and `Row::badge` in `src/ui/list.rs`, and have
       `active_style_row` and `archived_row_text` return the badge's column alongside their
       text. `Row::text` is byte-identical at every width — assert that against the landed
       row-grammar tests, unedited.
-- [ ] 3.4 GREEN: In `render_list`, draw the row, then re-write the single cell at
+- [x] 3.4 GREEN: In `render_list`, draw the row, then re-write the single cell at
       `interior.x + badge.x` with the row's own style patched by
       `palette::style(Role::AgentBadge(status))`, skipping it when `badge.x` is not less than
       the interior width.
-- [ ] 3.5 CHECK: Contract gate — `Row` gained a field. Confirm every construction and
+- [x] 3.5 CHECK: Contract gate — `Row` gained a field. Confirm every construction and
       exhaustive pattern is inside `src/ui/list.rs`:
       `grep -rn 'Row *{' src | grep -v '^src/ui/list.rs'` returns nothing.
 - [ ] 3.6 REFACTOR: Collapse the two badge-column computations into one helper if they read

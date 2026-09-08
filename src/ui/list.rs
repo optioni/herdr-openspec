@@ -18,14 +18,30 @@ pub enum RowKind {
     Message,
 }
 
-/// One drawn row: its text, exactly `width` display columns; its kind; and
-/// whether it carries the selection marker. `list.rs` never styles a row —
-/// `ui::view` applies `Modifier::BOLD` to the selected one.
+/// Where a row's agent badge sits, and what status it was derived from.
+/// `x` is the badge character's **display-column offset from the interior's
+/// first column**, so `text[x]` is that character; `status` is carried
+/// rather than re-parsed from the glyph, since `w`, `i`, `b`, `d`, and `?`
+/// all occur in change names. Plain data: no ratatui type, so `ui::view`
+/// alone decides what a badge looks like (`color-palette` design.md ->
+/// Decision 4).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BadgeCell {
+    pub x: u16,
+    pub status: crate::agents::AgentStatus,
+}
+
+/// One drawn row: its text, exactly `width` display columns; its kind;
+/// whether it carries the selection marker; and, when the row's text
+/// carries a badge cell that was not dropped, where that one column is.
+/// `list.rs` never styles a row — `ui::view` applies `Modifier::BOLD` to
+/// the selected one and the badge's own colour to [`BadgeCell::x`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Row {
     pub text: String,
     pub kind: RowKind,
     pub selected: bool,
+    pub badge: Option<BadgeCell>,
 }
 
 /// The progress cell: `[<completed>/<total>]`, or the three characters
@@ -131,17 +147,22 @@ fn shorten_left_row(text: &str, width: usize) -> String {
 /// for byte — see `agent-attribution` -> Decisions 3. Shared,
 /// unparameterised by date, by both the active row and the final
 /// degenerate branch of the archived row.
+///
+/// Returns the row's text together with the badge's own column, `None`
+/// whenever no badge was offered or the badge cell was dropped whole — the
+/// column is *reported* from the arithmetic that already placed the badge,
+/// never decided a second time (`color-palette` design.md -> Decision 4).
 fn active_style_row(
     marker: char,
     name: &str,
     progress: Option<&str>,
     badge: Option<char>,
     width: u16,
-) -> String {
+) -> (String, Option<u16>) {
     let w = i64::from(width);
     if w < 2 {
         let head = format!("{marker} ");
-        return truncate_columns(&head, w.max(0) as usize).to_string();
+        return (truncate_columns(&head, w.max(0) as usize).to_string(), None);
     }
     if let Some(progress) = progress {
         let progress_len = columns(progress) as i64;
@@ -149,18 +170,21 @@ fn active_style_row(
             let name_field_w = w - 2 - 1 - 1 - 1 - progress_len;
             if name_field_w >= 1 {
                 let name_field = pad_or_truncate_right(name, name_field_w as usize);
-                return format!("{marker} {name_field} {badge} {progress}");
+                return (
+                    format!("{marker} {name_field} {badge} {progress}"),
+                    Some((2 + name_field_w + 1) as u16),
+                );
             }
         }
         let name_field_w = w - 2 - 1 - progress_len;
         if name_field_w >= 1 {
             let name_field = pad_or_truncate_right(name, name_field_w as usize);
-            return format!("{marker} {name_field} {progress}");
+            return (format!("{marker} {name_field} {progress}"), None);
         }
     }
     let name_field_w = (w - 2) as usize;
     let name_field = pad_or_truncate_right(name, name_field_w);
-    format!("{marker} {name_field}")
+    (format!("{marker} {name_field}"), None)
 }
 
 /// The archived-change grammar: `[marker][space][date field: 10][space]`
@@ -171,6 +195,9 @@ fn active_style_row(
 /// separating space), then degenerating to `active_style_row` with neither
 /// a badge nor a progress cell ever offered — exactly as `change-rows`'
 /// "Archived changes sit below a separator" requirement states.
+///
+/// Returns the row's text together with the badge's own column, on exactly
+/// [`active_style_row`]'s terms.
 fn archived_row_text(
     marker: char,
     date: Option<&str>,
@@ -178,7 +205,7 @@ fn archived_row_text(
     progress: &str,
     badge: Option<char>,
     width: u16,
-) -> String {
+) -> (String, Option<u16>) {
     let w = i64::from(width);
     let date_field = date.map_or_else(|| " ".repeat(10), str::to_string);
     let progress_len = columns(progress) as i64;
@@ -189,7 +216,10 @@ fn archived_row_text(
         let name_field_w = w - 14 - 1 - 1 - progress_len;
         if name_field_w >= 1 {
             let name_field = pad_or_truncate_right(name, name_field_w as usize);
-            return format!("{marker} {date_field} {name_field} {badge} {progress}");
+            return (
+                format!("{marker} {date_field} {name_field} {badge} {progress}"),
+                Some((13 + name_field_w + 1) as u16),
+            );
         }
     }
 
@@ -198,7 +228,10 @@ fn archived_row_text(
     let name_field_full = w - 14 - progress_len;
     if name_field_full >= 1 {
         let name_field = pad_or_truncate_right(name, name_field_full as usize);
-        return format!("{marker} {date_field} {name_field} {progress}");
+        return (
+            format!("{marker} {date_field} {name_field} {progress}"),
+            None,
+        );
     }
 
     // Drop the progress cell and its separating space: marker + space +
@@ -206,7 +239,7 @@ fn archived_row_text(
     let name_field_no_progress = w - 13;
     if name_field_no_progress >= 1 {
         let name_field = pad_or_truncate_right(name, name_field_no_progress as usize);
-        return format!("{marker} {date_field} {name_field}");
+        return (format!("{marker} {date_field} {name_field}"), None);
     }
 
     // Drop the date field too: degenerate to the active grammar, with
@@ -259,16 +292,19 @@ fn no_repo_rows(searched_from: &std::path::Path, width: u16) -> Vec<Row> {
             text: message_row_text("No OpenSpec repository found", width),
             kind: RowKind::Message,
             selected: false,
+            badge: None,
         },
         Row {
             text: message_row_text("searched from:", width),
             kind: RowKind::Message,
             selected: false,
+            badge: None,
         },
         Row {
             text: shorten_left_row(&path_text, width as usize),
             kind: RowKind::Message,
             selected: false,
+            badge: None,
         },
     ]
 }
@@ -311,6 +347,7 @@ pub fn rows(dashboard: &Dashboard, width: u16) -> Vec<Row> {
             text: problem_row_text(text, width),
             kind: RowKind::Problem,
             selected: false,
+            badge: None,
         });
     };
     // `agent-launch`: launch problems lead the whole list, ahead of even refresh problems —
@@ -359,17 +396,20 @@ pub fn rows(dashboard: &Dashboard, width: u16) -> Vec<Row> {
                 text: message_row_text("No changes yet", width),
                 kind: RowKind::Message,
                 selected: false,
+                badge: None,
             });
         } else {
             out.push(Row {
                 text: message_row_text("No changes match", width),
                 kind: RowKind::Message,
                 selected: false,
+                badge: None,
             });
             out.push(Row {
                 text: message_row_text(&format!("/{query}"), width),
                 kind: RowKind::Message,
                 selected: false,
+                badge: None,
             });
         }
         return out;
@@ -381,26 +421,27 @@ pub fn rows(dashboard: &Dashboard, width: u16) -> Vec<Row> {
             text: message_row_text("No active changes", width),
             kind: RowKind::Message,
             selected: false,
+            badge: None,
         });
     } else {
         for change in &active {
             let selected = index == dashboard.selected;
             let marker = if selected { '>' } else { ' ' };
-            let badge = attribution
-                .badges
-                .get(&change.name)
-                .copied()
-                .map(badge_char);
+            let status = attribution.badges.get(&change.name).copied();
+            let (text, badge_x) = active_style_row(
+                marker,
+                &change.name,
+                Some(&progress_cell(&change.progress)),
+                status.map(badge_char),
+                width,
+            );
             out.push(Row {
-                text: active_style_row(
-                    marker,
-                    &change.name,
-                    Some(&progress_cell(&change.progress)),
-                    badge,
-                    width,
-                ),
+                text,
                 kind: RowKind::Item { index },
                 selected,
+                badge: badge_x
+                    .zip(status)
+                    .map(|(x, status)| BadgeCell { x, status }),
             });
             index += 1;
         }
@@ -411,6 +452,7 @@ pub fn rows(dashboard: &Dashboard, width: u16) -> Vec<Row> {
             text: separator_row_text(width),
             kind: RowKind::Separator,
             selected: false,
+            badge: None,
         });
         for change in &archived {
             let selected = index == dashboard.selected;
@@ -419,22 +461,22 @@ pub fn rows(dashboard: &Dashboard, width: u16) -> Vec<Row> {
                 crate::changes::Origin::Archived { date } => date.as_deref(),
                 crate::changes::Origin::Active => None,
             };
-            let badge = attribution
-                .badges
-                .get(&change.name)
-                .copied()
-                .map(badge_char);
+            let status = attribution.badges.get(&change.name).copied();
+            let (text, badge_x) = archived_row_text(
+                marker,
+                date,
+                &change.name,
+                &progress_cell(&change.progress),
+                status.map(badge_char),
+                width,
+            );
             out.push(Row {
-                text: archived_row_text(
-                    marker,
-                    date,
-                    &change.name,
-                    &progress_cell(&change.progress),
-                    badge,
-                    width,
-                ),
+                text,
                 kind: RowKind::Item { index },
                 selected,
+                badge: badge_x
+                    .zip(status)
+                    .map(|(x, status)| BadgeCell { x, status }),
             });
             index += 1;
         }
