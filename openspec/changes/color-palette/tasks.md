@@ -215,7 +215,7 @@ with more slack than today. The x offsets come from a second command,
 `python3 -c "ids=['proposal','specs','design','tasks','planning-review']; x=0; out=[]\nfor i in ids:\n out.append(x); x+=len(i)+3\nprint(out, out[-1]+len(ids[-1])+1)"`
 → `[0, 11, 19, 28, 36] 52`.
 
-- [ ] 4.1 RED: Rewrite the tab-bar tests in `src/ui/detail.rs` for the chip grammar, **and**
+- [x] 4.1 RED: Rewrite the tab-bar tests in `src/ui/detail.rs` for the chip grammar, **and**
       every landed assertion in `src/ui/view.rs` that spells a numbered label:
       `grep -c '1 proposal\|3 gamma' src/ui/view.rs` at HEAD → **12** lines, at `:2981`,
       `:2990`, `:2999`, `:3008`, `:3046`, `:3053`, `:3060`, `:3067`, `:3340`, `:3347`,
@@ -229,26 +229,26 @@ with more slack than today. The x offsets come from a second command,
       wider than the whole bar is truncated rather than dropped*, and *A selected index past
       the end of the list does not panic*. Every one names both **78** and **58**
       (`DETAILWIDTHS`).
-- [ ] 4.2 RED: Rewrite the two landed tab-bar tests that assert `Modifier::BOLD` at fixed
+- [x] 4.2 RED: Rewrite the two landed tab-bar tests that assert `Modifier::BOLD` at fixed
       columns — `the_five_tab_bars_exact_string_with_the_selected_tab_bold` (`:3320`, assertion
       at `:3353`) and `a_select_tab_at_route_list_is_visible_in_the_tab_row_at_120` (`:3370`,
       assertion at `:3390`) — for the chip grammar, and write *The tab bar reaches the buffer at
       both mandated widths* and *The tab bar never overwrites a border or the rows around it*,
       asserting the chip **backgrounds** and that the separating column carries none.
-- [ ] 4.3 GREEN: In `tab_bar`, build each cell as `" {id} "`, change `joined_width`'s
+- [x] 4.3 GREEN: In `tab_bar`, build each cell as `" {id} "`, change `joined_width`'s
       separator from 2 to 1, advance `x` by `cell_len + 1`, and delete the `i < 9` numbering
       branch. The `start`/`end` window loops stay byte-identical apart from that constant.
-- [ ] 4.4 GREEN: In `render_detail_tabs`, style each cell `TabActive` when `cell.selected` and
+- [x] 4.4 GREEN: In `render_detail_tabs`, style each cell `TabActive` when `cell.selected` and
       `TabInactive` otherwise, so every column of the chip including its padding is painted.
-- [ ] 4.5 VERIFY: `cargo test --lib ui::app::` — the seven `1`-`9`/`[`/`]` scenarios still
+- [x] 4.5 VERIFY: `cargo test --lib ui::app::` — the seven `1`-`9`/`[`/`]` scenarios still
       pass unedited; `action_for` and `Dashboard::apply` are untouched by the chip grammar.
       Then add the one render assertion *Tab keys act at both routes* needs: the third chip
       carries the active style at 120x20.
-- [ ] 4.6 VERIFY: `cargo test --lib ui::layout::` — *`split_detail` is exact at its degenerate
+- [x] 4.6 VERIFY: `cargo test --lib ui::layout::` — *`split_detail` is exact at its degenerate
       heights* still passes unedited; the split is untouched by the chip grammar.
-- [ ] 4.7 REFACTOR: Remove the now-dead numbering branch and any helper it alone needed;
+- [x] 4.7 REFACTOR: Remove the now-dead numbering branch and any helper it alone needed;
       otherwise state that no refactor was needed.
-- [ ] 4.8 Run the group tests — `cargo test --lib ui::detail:: ui::view:: ui::app::` and
+- [x] 4.8 Run the group tests — `cargo test --lib ui::detail:: ui::view:: ui::app::` and
       `make gates` — no regressions.
 
 ## 5. Acceptance Test — Outer Loop GREEN

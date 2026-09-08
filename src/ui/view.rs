@@ -80,7 +80,10 @@ fn render_detail_header(frame: &mut Frame, header: Rect, change: &crate::changes
 
 /// The tab bar: every `ui::detail::Tab` at `tabs.x + tab.x`, under
 /// `Role::TabActive` for the selected cell and `Role::TabInactive` for every
-/// other. Draws nothing at zero width or zero height.
+/// other. The chip's two padding columns are part of `Tab::text`
+/// (`color-palette` -> design.md -> Decision 5), so one `set_string` paints
+/// exactly the chip's own span and leaves the single separating column
+/// between two chips untouched. Draws nothing at zero width or zero height.
 fn render_detail_tabs(frame: &mut Frame, tabs: Rect, change: &crate::changes::Change, tab: usize) {
     if tabs.width == 0 || tabs.height == 0 {
         return;

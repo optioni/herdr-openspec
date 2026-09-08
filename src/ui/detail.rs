@@ -81,11 +81,14 @@ fn cell_text(text: &str, width: usize) -> String {
     }
 }
 
-/// The joined width of cells `start..=end`: their own widths plus two
-/// separating columns between every pair.
+/// The joined width of cells `start..=end`: their own widths plus **one**
+/// separating column between every pair. One column is the minimum that
+/// still shows an edge between two painted chips; two read as two chips
+/// with a gap rather than as a segmented control (`color-palette` ->
+/// design.md -> Decision 6).
 fn joined_width(cell_lens: &[usize], start: usize, end: usize) -> usize {
     let cells_width: usize = cell_lens[start..=end].iter().sum();
-    let seps = (end - start) * 2;
+    let seps = end - start;
     cells_width + seps
 }
 
@@ -97,6 +100,12 @@ fn joined_width(cell_lens: &[usize], start: usize, end: usize) -> usize {
 /// is treated as `0` for windowing purposes and marks no cell selected. See
 /// `openspec/changes/detail-view/design.md` -> Contracts and
 /// `specs/artifact-tabs/spec.md`.
+///
+/// Every cell is a **chip**: the bare `<id>` with one space on each side, so
+/// `ui::view` has a `columns(id) + 2` span to paint and the reported cell and
+/// the painted cell are one object (`color-palette` -> design.md -> Decision
+/// 5). No label carries a leading digit — `1`-`9` still select a tab, but the
+/// bar no longer advertises them.
 pub fn tab_bar(artifacts: &[crate::changes::ArtifactRef], selected: usize, width: u16) -> Vec<Tab> {
     if width == 0 {
         return Vec::new();
@@ -105,7 +114,7 @@ pub fn tab_bar(artifacts: &[crate::changes::ArtifactRef], selected: usize, width
 
     if artifacts.is_empty() {
         return vec![Tab {
-            text: cell_text("no artifacts", w),
+            text: cell_text(" no artifacts ", w),
             x: 0,
             index: None,
             selected: false,
@@ -113,17 +122,7 @@ pub fn tab_bar(artifacts: &[crate::changes::ArtifactRef], selected: usize, width
     }
 
     let n = artifacts.len();
-    let cells: Vec<String> = artifacts
-        .iter()
-        .enumerate()
-        .map(|(i, a)| {
-            if i < 9 {
-                format!("{} {}", i + 1, a.id)
-            } else {
-                a.id.clone()
-            }
-        })
-        .collect();
+    let cells: Vec<String> = artifacts.iter().map(|a| format!(" {} ", a.id)).collect();
     let cell_lens: Vec<usize> = cells.iter().map(|c| columns(c)).collect();
 
     let selected_valid = selected < n;
@@ -163,7 +162,7 @@ pub fn tab_bar(artifacts: &[crate::changes::ArtifactRef], selected: usize, width
             index: Some(i),
             selected: selected_valid && i == selected,
         });
-        x += cell_lens[i] as u16 + 2;
+        x += cell_lens[i] as u16 + 1;
     }
     out
 }
