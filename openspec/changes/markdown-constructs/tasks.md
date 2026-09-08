@@ -258,7 +258,7 @@ test on `Vec<Line>` can see the last three steps. Per design.md → Test Strateg
 ## 5. `style_for` and the rendered frame
 <!-- kind: behavior -->
 
-- [ ] 5.1 RED: Extend `src/ui/view.rs`'s tests for the affected view scenarios, using their
+- [x] 5.1 RED: Extend `src/ui/view.rs`'s tests for the affected view scenarios, using their
   **real** names: append ` and ~~struck~~` to the sources of `faces_reach_the_buffer_as_styles`,
   `faces_reach_the_buffer_as_coloured_styles`, and `a_monochrome_reading_of_the_frame_is_unchanged`,
   asserting `CROSSED_OUT` with **no** foreground; add the struck-bold-link face to
@@ -269,13 +269,13 @@ test on `Vec<Line>` can see the last three steps. Per design.md → Test Strateg
   test may name a `Color` literal — compare against `palette::style(role)`, since `PALETTE`
   searches `src/` including inline test modules.
 
-- [ ] 5.2 GREEN: Add the `Strikethrough` step to `style_for`'s fold, second, immediately after
+- [x] 5.2 GREEN: Add the `Strikethrough` step to `style_for`'s fold, second, immediately after
   `Quoted` (design.md → Decision 9). Verification: 5.1's tests pass at both widths.
 
-- [ ] 5.3 REFACTOR: Clean up any duplicated table fixture between the view tests — or state
+- [x] 5.3 REFACTOR: Clean up any duplicated table fixture between the view tests — or state
   that none was warranted.
 
-- [ ] 5.4 Run the group tests — no regressions:
+- [x] 5.4 Run the group tests — no regressions:
 
   ```sh
   cargo test --all-features --lib ui::view

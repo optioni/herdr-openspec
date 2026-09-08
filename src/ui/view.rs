@@ -171,6 +171,14 @@ fn style_for(face: &Face) -> Style {
     if face.quoted {
         style = style.patch(palette::style(Role::Quoted));
     }
+    // Second, immediately after `Quoted`: carrying no foreground, a struck face
+    // cannot displace a coloured role's colour wherever it sits, so it is placed
+    // beside the other uncoloured always-composing face rather than inserted
+    // into the coloured precedence chain, which stays heading over code over
+    // link (design.md -> Decision 9).
+    if face.strikethrough {
+        style = style.patch(palette::style(Role::Strikethrough));
+    }
     if face.link {
         style = style.patch(palette::style(Role::Link));
     }
@@ -2820,8 +2828,8 @@ mod tests {
         // `color-palette`: the heading fixture becomes the `## Heading` this scenario has
         // named since `markdown-viewer` — the delta's colour claim is about `Heading(2)`,
         // and the level-1 form is exercised by `faces_reach_the_buffer_as_coloured_styles`.
-        let source =
-            "## Heading\n\nA **bold** and *italic* line with `code` and [a link](x).\n\n> quoted\n";
+        let source = "## Heading\n\nA **bold** and *italic* line with `code` and [a link](x) \
+                      and ~~struck~~.\n\n> quoted\n";
         let d = detail_dashboard(source.to_string(), 0, Route::Detail);
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
@@ -2878,6 +2886,12 @@ mod tests {
                     .contains(Modifier::DIM),
                 "width {width}"
             );
+            assert!(
+                find_cell_style(&buf, "struck")
+                    .add_modifier
+                    .contains(Modifier::CROSSED_OUT),
+                "width {width}: the struck run is not crossed out"
+            );
 
             let and_style = find_cell_style(&buf, "and");
             assert!(
@@ -2894,6 +2908,10 @@ mod tests {
             );
             assert!(
                 !and_style.add_modifier.contains(Modifier::UNDERLINED),
+                "width {width}"
+            );
+            assert!(
+                !and_style.add_modifier.contains(Modifier::CROSSED_OUT),
                 "width {width}"
             );
 
@@ -2923,6 +2941,11 @@ mod tests {
                 find_cell_style(&buf, "quoted").fg,
                 uncoloured().fg,
                 "width {width}"
+            );
+            assert_eq!(
+                find_cell_style(&buf, "struck").fg,
+                uncoloured().fg,
+                "width {width}: struck must carry no foreground"
             );
             assert_eq!(and_style.fg, uncoloured().fg, "width {width}");
         }
@@ -3247,6 +3270,46 @@ mod tests {
                 );
             }
         }
+
+        // `markdown-constructs`: and the same again with a twelve-column table
+        // whose every cell is 200 characters long. Neither the pipe grammar nor
+        // the one-cell-per-line fallback it degrades to can reach the border —
+        // and this fixture is the tightest case there is, because the allocator
+        // spends the whole interior: `3n + 1 = 37` plus `avail` is exactly 78 at
+        // the wide interior and exactly 58 at the narrow one.
+        let wide_cell = "x".repeat(200);
+        let cells = format!(" {wide_cell} |").repeat(12);
+        let table_source = format!("|{cells}\n|{}\n|{cells}\n", "---|".repeat(12));
+        let table_d = detail_dashboard(table_source, 0, Route::Detail);
+
+        let tbuf120 = render_at(120, 20, &table_d);
+        for y in 1..=18u16 {
+            for x in [39u16, 40, 119] {
+                let s = cell(&tbuf120, x, y).symbol();
+                assert!(
+                    matches!(s, "│" | "┌" | "└" | "┐" | "┘"),
+                    "table x={x} y={y}: {s:?}"
+                );
+            }
+        }
+        let tbuf60 = render_at(60, 20, &table_d);
+        for y in 1..=18u16 {
+            for x in [0u16, 59] {
+                let s = cell(&tbuf60, x, y).symbol();
+                assert!(
+                    matches!(s, "│" | "┌" | "└" | "┐" | "┘"),
+                    "table x={x} y={y}: {s:?}"
+                );
+            }
+        }
+        // The table really is drawn: the fixture would satisfy the border
+        // assertions above by rendering nothing at all.
+        for (label, buf) in [("120", &tbuf120), ("60", &tbuf60)] {
+            assert!(
+                (4..=17u16).any(|y| row_text(buf, y).contains('|')),
+                "width {label}: no table line was drawn"
+            );
+        }
     }
 
     #[test]
@@ -3373,6 +3436,48 @@ mod tests {
         for width in [60, 120] {
             let buf = render_at(width, 20, &md);
             assert!(buffer_contains(&buf, "line-00"));
+        }
+
+        // `markdown-constructs`: and every one of those renders once more with a
+        // table as the `detail.source`. 1x20 and 2x20 — where the interior is one
+        // or zero columns wide — still draw nothing and still do not panic.
+        let table_source: String = std::iter::once("| a | line-00 |\n|---|---|\n".to_string())
+            .chain((1..20).map(|i| format!("| a | line-{i:02} |\n")))
+            .collect();
+        let td = detail_dashboard(table_source, 0, Route::Detail);
+
+        for (w, h) in [(1u16, 20u16), (2, 20)] {
+            let buf = render_at(w, h, &td);
+            assert!(!buffer_contains(&buf, "line-00"), "table {w}x{h}");
+        }
+        for (height, header, tabs, content) in [
+            (4u16, false, false, false),
+            (5, true, false, false),
+            (6, true, true, false),
+            (7, true, true, true),
+        ] {
+            for width in [120u16, 60] {
+                let buf = render_at(width, height, &td);
+                assert_eq!(
+                    buffer_contains(&buf, "detail-view"),
+                    header,
+                    "table {width}x{height}: header"
+                );
+                assert_eq!(
+                    buffer_contains(&buf, " proposal "),
+                    tabs,
+                    "table {width}x{height}: tab bar"
+                );
+                assert_eq!(
+                    buffer_contains(&buf, "line-00"),
+                    content,
+                    "table {width}x{height}: content"
+                );
+            }
+        }
+        for width in [60, 120] {
+            let buf = render_at(width, 20, &td);
+            assert!(buffer_contains(&buf, "line-00"), "table width {width}");
         }
     }
 
@@ -4656,7 +4761,8 @@ mod tests {
     /// widths".
     #[test]
     fn faces_reach_the_buffer_as_coloured_styles() {
-        let source = "# Title\n\n## Heading\n\n**bold** and *italic* and `code` and [link](u)\n";
+        let source = "# Title\n\n## Heading\n\n**bold** and *italic* and `code` and [link](u) and \
+             ~~struck~~\n";
         let d = detail_dashboard(source.to_string(), 0, Route::Detail);
         for width in [120, 60] {
             let buf = render_at(width, 20, &d);
@@ -4723,6 +4829,16 @@ mod tests {
                 uncoloured().fg,
                 "width {width}: italic must carry no foreground"
             );
+            let struck = find_cell_style(&buf, "struck");
+            assert!(
+                struck.add_modifier.contains(Modifier::CROSSED_OUT),
+                "width {width}"
+            );
+            assert_eq!(
+                struck.fg,
+                uncoloured().fg,
+                "width {width}: struck must carry no foreground"
+            );
 
             // The heading assertions discriminate: the two levels are different colours.
             assert_ne!(title.fg, heading.fg, "width {width}");
@@ -4769,7 +4885,26 @@ mod tests {
         assert!(style.add_modifier.contains(Modifier::DIM));
         assert!(style.add_modifier.contains(Modifier::UNDERLINED));
 
-        // The two assertions discriminate rather than comparing one colour with itself.
+        // `markdown-constructs`: an uncoloured strikethrough neither loses its own
+        // modifier nor displaces the link's colour, which is why it is folded second
+        // rather than into the coloured precedence chain.
+        let struck_bold_link = Face {
+            strikethrough: true,
+            strong: true,
+            link: true,
+            ..Face::plain()
+        };
+        let style = style_for(&struck_bold_link);
+        assert!(style.add_modifier.contains(Modifier::CROSSED_OUT));
+        assert!(style.add_modifier.contains(Modifier::BOLD));
+        assert!(style.add_modifier.contains(Modifier::UNDERLINED));
+        assert_eq!(
+            style.fg,
+            palette::style(Role::Link).fg,
+            "an uncoloured strikethrough must not displace the link's foreground"
+        );
+
+        // The assertions discriminate rather than comparing one colour with itself.
         assert_ne!(
             palette::style(Role::Heading(2)).fg,
             palette::style(Role::Code).fg
@@ -4781,6 +4916,10 @@ mod tests {
     #[test]
     fn a_plain_face_is_the_default_style() {
         assert_eq!(style_for(&Face::plain()), Style::default());
+        assert!(
+            !Face::plain().strikethrough,
+            "the new field must not change what a plain face maps to"
+        );
 
         let d = detail_dashboard("plain text only\n".to_string(), 0, Route::Detail);
         let default_style = Cell::default().style();
@@ -5406,6 +5545,37 @@ mod tests {
                 bold, expected,
                 "width {width}: the selected chip must be the tab bar's only bold span"
             );
+        }
+
+        // `markdown-constructs`: the same source with `~~struck~~` appended renders
+        // that word's cells with CROSSED_OUT and leaves every other cell's modifier
+        // unchanged, so the new role adds a modifier only where the new construct
+        // appears — a construct the parser could not emit at all before.
+        for width in [120, 60] {
+            let before = monochrome_dashboard(Route::Detail);
+            let mut after = monochrome_dashboard(Route::Detail);
+            after.detail.source.push_str("and ~~struck~~\n");
+            let buf_before = render_at(width, 20, &before);
+            let buf_after = render_at(width, 20, &after);
+            assert!(
+                find_cell_style(&buf_after, "struck")
+                    .add_modifier
+                    .contains(Modifier::CROSSED_OUT),
+                "width {width}: the appended struck run is not crossed out"
+            );
+            for y in 0..20u16 {
+                for x in 0..width {
+                    let a = cell(&buf_after, x, y).style().add_modifier;
+                    if a.contains(Modifier::CROSSED_OUT) {
+                        continue;
+                    }
+                    assert_eq!(
+                        cell(&buf_before, x, y).style().add_modifier,
+                        a,
+                        "width {width}: cell {x},{y} changed modifier"
+                    );
+                }
+            }
         }
     }
 }
