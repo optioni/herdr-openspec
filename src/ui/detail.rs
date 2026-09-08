@@ -329,7 +329,7 @@ mod tests {
         };
         for (width, name_field_width) in [(78, 65usize), (58, 45)] {
             let got = header_row("detail-view", "tdd", &progress, width);
-            assert_eq!(got.chars().count(), width as usize, "width {width}");
+            assert_eq!(columns(&got), width as usize, "width {width}");
             let expected_name_field =
                 format!("{:<width$}", "detail-view", width = name_field_width);
             let expected = format!("{expected_name_field} (tdd) [4/42]");
@@ -346,7 +346,7 @@ mod tests {
         };
         for width in [78, 58] {
             let got = header_row("migrate-ai-sdk-v7", "tdd", &progress, width);
-            assert_eq!(got.chars().count(), width as usize, "width {width}");
+            assert_eq!(columns(&got), width as usize, "width {width}");
             assert!(got.ends_with("[-]"), "width {width}: {got:?}");
         }
     }
@@ -360,7 +360,7 @@ mod tests {
         };
         for width in [78, 58] {
             let got = header_row(&name, "tdd", &progress, width);
-            assert_eq!(got.chars().count(), width as usize, "width {width}");
+            assert_eq!(columns(&got), width as usize, "width {width}");
             assert!(got.contains("(tdd)"), "width {width}: {got:?}");
             assert!(got.ends_with("[4/42]"), "width {width}: {got:?}");
             let name_field_end = got.find(" (tdd)").expect("schema cell present");
@@ -380,7 +380,7 @@ mod tests {
         };
         for w in [78, 58, 13, 12, 7, 6, 5, 1, 0] {
             let got = header_row("add-token-refresh", "tdd", &progress, w);
-            assert_eq!(got.chars().count(), w as usize, "width {w}");
+            assert_eq!(columns(&got), w as usize, "width {w}");
             if w >= 13 {
                 assert!(got.contains("(tdd)"), "width {w}: {got:?}");
                 assert!(got.contains("[4/9]"), "width {w}: {got:?}");
@@ -411,7 +411,7 @@ mod tests {
         };
         for width in [78, 58] {
             let got = header_row("alpha", "", &progress, width);
-            assert_eq!(got.chars().count(), width as usize, "width {width}");
+            assert_eq!(columns(&got), width as usize, "width {width}");
             assert!(got.contains("() [1/2]"), "width {width}: {got:?}");
         }
     }
@@ -437,7 +437,7 @@ mod tests {
             let xs: Vec<u16> = tabs.iter().map(|t| t.x).collect();
             assert_eq!(xs, vec![0, 12, 21, 31, 40], "width {width}");
             let last = tabs.last().unwrap();
-            let last_end = last.x as usize + last.text.chars().count() - 1;
+            let last_end = last.x as usize + columns(&last.text) - 1;
             assert_eq!(last_end, 56, "width {width}");
             let indices: Vec<Option<usize>> = tabs.iter().map(|t| t.index).collect();
             assert_eq!(
@@ -498,7 +498,7 @@ mod tests {
         }
         let narrow = tab_bar(&artifacts(&[]), 0, 8);
         assert_eq!(narrow.len(), 1);
-        assert_eq!(narrow[0].text.chars().count(), 8);
+        assert_eq!(columns(&narrow[0].text), 8);
         assert!(narrow[0].text.ends_with('…'));
     }
 
@@ -536,7 +536,7 @@ mod tests {
                 }
                 assert_eq!(tabs[0].x, 0, "width {width} selected {selected}");
                 let last = tabs.last().unwrap();
-                let last_end = last.x as usize + last.text.chars().count();
+                let last_end = last.x as usize + columns(&last.text);
                 assert!(
                     last_end <= width as usize,
                     "width {width} selected {selected}: last cell's final column {last_end} \
@@ -599,11 +599,7 @@ mod tests {
             assert_eq!(tabs[0].x, 0, "width {width}");
             assert!(tabs[0].selected, "width {width}");
             assert_eq!(tabs[0].index, Some(0), "width {width}");
-            assert_eq!(
-                tabs[0].text.chars().count(),
-                width as usize,
-                "width {width}"
-            );
+            assert_eq!(columns(&tabs[0].text), width as usize, "width {width}");
             assert!(tabs[0].text.ends_with('…'), "width {width}");
         }
     }
@@ -1174,7 +1170,7 @@ mod tests {
     #[test]
     fn a_wrapped_paragraph_produces_strictly_more_lines_at_58_than_at_78() {
         let paragraph = format!("{}\n", "word ".repeat(40).trim());
-        assert!(paragraph.chars().count() > 100);
+        assert!(columns(&paragraph) > 100);
         let d = detail(&paragraph, Vec::new());
         let lines78 = content_lines(&d, None, 78);
         let lines58 = content_lines(&d, None, 58);
@@ -1185,10 +1181,10 @@ mod tests {
             lines78.len()
         );
         for line in &lines78 {
-            assert!(line.text().chars().count() <= 78);
+            assert!(columns(&line.text()) <= 78);
         }
         for line in &lines58 {
-            assert!(line.text().chars().count() <= 58);
+            assert!(columns(&line.text()) <= 58);
         }
     }
 
@@ -1348,7 +1344,7 @@ mod tests {
                     let lines = content_lines(d, change, width);
                     for line in &lines {
                         assert!(
-                            line.text().chars().count() <= width as usize,
+                            columns(&line.text()) <= width as usize,
                             "width {width}, source {:?}: {:?} exceeds its width",
                             d.source,
                             line.text()
