@@ -82,20 +82,20 @@
 ## 1. Display-width primitives in `ui::layout`
 <!-- kind: behavior -->
 
-- [ ] 1.1 RED: Write failing tests for `columns` agrees with what the buffer consumed and `truncate_columns` never splits a cluster and never overruns. The oracle is the `x` that `Buffer::set_stringn(0, 0, s, usize::MAX, Style::default())` **returns**, never the first blank cell — `set_stringn` resets the trailing cells of a wide cluster, so a first-blank scan reports 1 for `日本語`.
-- [ ] 1.2 GREEN: Add `pub(crate) fn columns(&str) -> usize` to `src/ui/layout.rs`, summing `cell_width()` over `Span::raw(text).styled_graphemes(Style::default())` per design.md → Decision 1. Both tests pass.
-- [ ] 1.3 GREEN: Add `pub(crate) fn truncate_columns(&str, usize) -> &str`, deriving each symbol's cut point from its byte offset within the original `&str` rather than from a running sum of symbol lengths. The `ab`+BEL+`日本語` case in 1.1 passes without panicking.
-- [ ] 1.4 REFACTOR: Share the grapheme walk between the two functions if it removes duplication; otherwise record that none was needed.
-- [ ] 1.5 Run `cargo test --lib ui::layout` — green, and `cargo test --lib` shows no regression elsewhere.
+- [x] 1.1 RED: Write failing tests for `columns` agrees with what the buffer consumed and `truncate_columns` never splits a cluster and never overruns. The oracle is the `x` that `Buffer::set_stringn(0, 0, s, usize::MAX, Style::default())` **returns**, never the first blank cell — `set_stringn` resets the trailing cells of a wide cluster, so a first-blank scan reports 1 for `日本語`.
+- [x] 1.2 GREEN: Add `pub(crate) fn columns(&str) -> usize` to `src/ui/layout.rs`, summing `cell_width()` over `Span::raw(text).styled_graphemes(Style::default())` per design.md → Decision 1. Both tests pass.
+- [x] 1.3 GREEN: Add `pub(crate) fn truncate_columns(&str, usize) -> &str`, deriving each symbol's cut point from its byte offset within the original `&str` rather than from a running sum of symbol lengths. The `ab`+BEL+`日本語` case in 1.1 passes without panicking.
+- [x] 1.4 REFACTOR: Share the grapheme walk between the two functions if it removes duplication; otherwise record that none was needed.
+- [x] 1.5 Run `cargo test --lib ui::layout` — green, and `cargo test --lib` shows no regression elsewhere.
 
 ## 2. The row grammar measures in columns
 <!-- kind: behavior -->
 
-- [ ] 2.1 RED: Write failing tests for A CJK change name stays inside the list region at both mandated widths, An emoji change name at 58 columns does not overwrite the border, A wide name is truncated whole and padded back to the full width, Rows are total over adversarial names at every width, and The no-repository block shortens its search path by columns. Every new test names 38 and 58 bare.
-- [ ] 2.2 GREEN: Rewrite `pad_or_truncate_right` to measure with `layout::columns`, truncate with `layout::truncate_columns`, and pad the truncating arm back to exactly `width` columns per design.md → Decision 3.
-- [ ] 2.3 GREEN: Rewrite `shorten_left`, `shorten_left_row`, and the row/problem/message/no-repository assembly in `src/ui/list.rs` to measure in columns. `awk '/^#\[cfg\(test\)\]/{exit} {print}' src/ui/list.rs | grep -cE '\.chars\(\)\.count\(\)|\.chars\(\)\.take\(|Vec<char>'` reports 0, down from 10.
-- [ ] 2.4 REFACTOR: Restate the 8 existing `.chars().count()` width assertions in `src/ui/list.rs`'s test module as `layout::columns(...)`. No pass/fail may move — every fixture there is ASCII, where the two measures are equal.
-- [ ] 2.5 Run `cargo test --lib ui::list`, `cargo test --lib ui::view`, and `sh scripts/gates/listwidths.sh` — all green, no regressions.
+- [x] 2.1 RED: Write failing tests for A CJK change name stays inside the list region at both mandated widths, An emoji change name at 58 columns does not overwrite the border, A wide name is truncated whole and padded back to the full width, Rows are total over adversarial names at every width, and The no-repository block shortens its search path by columns. Every new test names 38 and 58 bare.
+- [x] 2.2 GREEN: Rewrite `pad_or_truncate_right` to measure with `layout::columns`, truncate with `layout::truncate_columns`, and pad the truncating arm back to exactly `width` columns per design.md → Decision 3.
+- [x] 2.3 GREEN: Rewrite `shorten_left`, `shorten_left_row`, and the row/problem/message/no-repository assembly in `src/ui/list.rs` to measure in columns. `awk '/^#\[cfg\(test\)\]/{exit} {print}' src/ui/list.rs | grep -cE '\.chars\(\)\.count\(\)|\.chars\(\)\.take\(|Vec<char>'` reports 0, down from 10.
+- [x] 2.4 REFACTOR: Restate the 8 existing `.chars().count()` width assertions in `src/ui/list.rs`'s test module as `layout::columns(...)`. No pass/fail may move — every fixture there is ASCII, where the two measures are equal.
+- [x] 2.5 Run `cargo test --lib ui::list`, `cargo test --lib ui::view`, and `sh scripts/gates/listwidths.sh` — all green, no regressions.
 
 ## 3. Markdown wrapping measures in columns
 <!-- kind: behavior -->
