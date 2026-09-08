@@ -6,6 +6,8 @@
 
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 
+use crate::ui::layout::{columns, truncate_columns};
+
 /// A segment's styling. A struct of flags, not an enum: markdown nests
 /// (`[**bold link**](x)` is bold *and* a link), and an enum would force an
 /// arbitrary precedence rule. `heading` is `Option<u8>` because the level
@@ -828,14 +830,32 @@ mod tests {
     #[test]
     fn no_line_exceeds_the_width_it_was_given() {
         let source = composite_fixture();
+        // `responsive-layout`'s wide-character and ZWJ sources, checked at
+        // the same widths as the ASCII composite fixture above — `columns`,
+        // not `chars().count()`, is the measure a `chars().count()`-based
+        // wrap would silently disagree with here, since these two sources
+        // hold no ASCII at all.
+        let cjk_500 = "日本語".repeat(84);
+        let family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466}";
+        let zwj_run = family.repeat(50);
         for width in [0u16, 1, 2, 3, 10, 58, 78, 200] {
             let out = lines(&source, width);
             for line in &out {
                 assert!(
-                    line.text().chars().count() <= width as usize,
+                    columns(&line.text()) <= width as usize,
                     "width {width}: line {:?} exceeds it",
                     line.text()
                 );
+            }
+            for extra in [&cjk_500, &zwj_run] {
+                let out = lines(extra, width);
+                for line in &out {
+                    assert!(
+                        columns(&line.text()) <= width as usize,
+                        "width {width}: CJK/ZWJ line {:?} exceeds it",
+                        line.text()
+                    );
+                }
             }
         }
         for width in [58, 78] {
@@ -865,6 +885,7 @@ mod tests {
 
     #[test]
     fn lines_is_total_over_arbitrary_input() {
+        let family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466}";
         let pathological = [
             "#".to_string(),
             "```sh\nunclosed fence".to_string(),
@@ -874,29 +895,141 @@ mod tests {
             "     ".to_string(),
             "**bold".to_string(),
             "hold \u{0}my\u{301}beer".to_string(),
+            // A 500-column CJK run with no space, and a run of family emoji
+            // joined by zero-width joiners — `markdown-render`'s own named
+            // sources for "Rendering is total over arbitrary input".
+            "日本語".repeat(84),
+            family.repeat(50),
         ];
-        for width in [58, 78] {
+        for width in [1u16, 2, 58, 78] {
             for source in &pathological {
                 let out = lines(source, width);
                 for line in &out {
                     assert!(
-                        line.text().chars().count() <= width as usize,
+                        columns(&line.text()) <= width as usize,
                         "width {width} source {source:?}: line {:?} exceeds it",
                         line.text()
                     );
                 }
             }
             let hard = lines(&"x".repeat(500), width);
+            assert!(hard.iter().all(|l| columns(&l.text()) <= width as usize));
             assert!(
-                hard.iter()
-                    .all(|l| l.text().chars().count() <= width as usize)
-            );
-            assert!(
-                hard.iter()
-                    .any(|l| l.text().chars().count() == width as usize),
+                hard.iter().any(|l| columns(&l.text()) == width as usize),
                 "the 500-character token must be hard-split into full-width lines at {width}"
             );
         }
+
+        // At width 1, a two-column cluster — a CJK ideograph or a
+        // zero-width-joined family emoji — has no prefix that fits: it is
+        // dropped, producing an empty line for that position rather than a
+        // line that measures 2.
+        let cjk_500 = "日本語".repeat(84);
+        let zwj_run = family.repeat(50);
+        for source in [&cjk_500, &zwj_run] {
+            let out = lines(source, 1);
+            assert!(
+                out.iter().all(|l| columns(&l.text()) <= 1),
+                "width 1: {source:?} produced an over-wide line"
+            );
+            assert!(
+                out.iter().any(|l| l.text().is_empty()),
+                "width 1: a two-column cluster must be dropped, producing an empty line, \
+                 not a two-column one: {:?}",
+                out.iter().map(|l| l.text()).collect::<Vec<_>>()
+            );
+        }
+    }
+
+    /// `markdown-render` :: "A wide-character document wraps by columns at
+    /// both mandated widths". The paragraph is one unbroken 120-character,
+    /// 240-column CJK run — no interior space — so it exercises the
+    /// oversized-token split inside `wrap_prose`, not the ordinary
+    /// greedy-wrap path. Every character of "日本語" is uniformly 3 bytes
+    /// and 2 columns, which is what makes the byte-offset table below
+    /// exact rather than approximate: it states the expected re-slice by
+    /// hand instead of recomputing it from the function under test, so a
+    /// regression to `chars().count()` — which would chunk by *character*
+    /// count, not column count, and so would land on entirely different
+    /// byte offsets — is caught rather than silently reproduced.
+    #[test]
+    fn a_wide_character_document_wraps_by_columns_at_both_mandated_widths() {
+        let paragraph = "日本語".repeat(40);
+        let family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466}";
+        let source = format!("{paragraph}\n\n- \u{1F389} celebrate\n- {family} family\n");
+
+        for width in [58, 78] {
+            let out = lines(&source, width);
+            for line in &out {
+                assert!(
+                    columns(&line.text()) <= width as usize,
+                    "width {width}: {:?} exceeds it",
+                    line.text()
+                );
+            }
+            assert!(
+                out.iter().any(|l| {
+                    let c = columns(&l.text());
+                    c == width as usize || c + 1 == width as usize
+                }),
+                "width {width}: no line fills the region"
+            );
+        }
+
+        // At 58, the wide paragraph must wrap into strictly more lines than
+        // the same paragraph with every "日本語" replaced by three ASCII
+        // letters: the wide form consumes twice the columns per character.
+        let ascii_paragraph = paragraph.replace("日本語", "abc");
+        let wide_lines = lines(&paragraph, 58).len();
+        let ascii_lines = lines(&ascii_paragraph, 58).len();
+        assert!(
+            wide_lines > ascii_lines,
+            "width 58: wide paragraph produced {wide_lines} lines, ascii {ascii_lines}"
+        );
+
+        // The oversized-token split cuts the unbroken paragraph at exact,
+        // hand-computed byte offsets: a `width`-column chunk is
+        // `width / 2` characters, `3 * (width / 2)` bytes, since every
+        // character here is uniformly 2 columns and 3 bytes.
+        let texts58: Vec<String> = lines(&paragraph, 58).iter().map(Line::text).collect();
+        let expected_bytes_58 = [87usize, 87, 87, 87, 12];
+        assert_eq!(
+            texts58.len(),
+            expected_bytes_58.len(),
+            "width 58: {texts58:?}"
+        );
+        let mut offset = 0usize;
+        for (text, &blen) in texts58.iter().zip(expected_bytes_58.iter()) {
+            assert_eq!(text.len(), blen, "width 58: line byte length");
+            assert_eq!(
+                text.as_str(),
+                &paragraph[offset..offset + blen],
+                "width 58: rendered line must equal the source re-sliced at this exact byte \
+                 offset"
+            );
+            offset += blen;
+        }
+        assert_eq!(offset, paragraph.len(), "width 58: every byte accounted for");
+
+        let texts78: Vec<String> = lines(&paragraph, 78).iter().map(Line::text).collect();
+        let expected_bytes_78 = [117usize, 117, 117, 9];
+        assert_eq!(
+            texts78.len(),
+            expected_bytes_78.len(),
+            "width 78: {texts78:?}"
+        );
+        let mut offset = 0usize;
+        for (text, &blen) in texts78.iter().zip(expected_bytes_78.iter()) {
+            assert_eq!(text.len(), blen, "width 78: line byte length");
+            assert_eq!(
+                text.as_str(),
+                &paragraph[offset..offset + blen],
+                "width 78: rendered line must equal the source re-sliced at this exact byte \
+                 offset"
+            );
+            offset += blen;
+        }
+        assert_eq!(offset, paragraph.len(), "width 78: every byte accounted for");
     }
 
     #[test]
