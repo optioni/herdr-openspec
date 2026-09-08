@@ -185,7 +185,7 @@ assertion written here is RED by construction.
       column its badge occupies*, *A dropped badge cell reports no badge*, and *No non-change
       row carries a badge*. Every one names both **38** and **58**, which `LISTWIDTHS`
       requires of every `#[test]` in that file.
-- [ ] 3.2 RED: Write failing tests in `src/ui/view.rs` for: *The badge cell reaches the buffer
+- [x] 3.2 RED: Write failing tests in `src/ui/view.rs` for: *The badge cell reaches the buffer
       coloured and the rest of the row does not*, *Problem rows are red and change rows are
       not, at both mandated widths*, *An empty-state message row is not a problem row*, and
       *A badged selected row keeps its bold under the badge colour*.

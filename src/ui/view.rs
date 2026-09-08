@@ -4759,6 +4759,265 @@ mod tests {
         }
     }
 
+    /// Three active changes whose names and progress cells contain neither `w` nor
+    /// `b`, so [`only_column_of`] below can find a badge by scanning the drawn row
+    /// rather than by re-deriving `ui::list`'s own arithmetic. `alpha` is selected,
+    /// `alpha` and `gamma` are badged, `epsilon` is not.
+    fn badged_dashboard(selected: usize) -> Dashboard {
+        let mut d = dashboard_with(
+            vec![
+                fixture::active("alpha", 4, 9),
+                fixture::active("gamma", 7, 7),
+                fixture::active("epsilon", 0, 0),
+            ],
+            Vec::new(),
+            selected,
+            Route::List,
+        );
+        let mut working = unattributed_agent("alpha");
+        working.status = crate::agents::AgentStatus::Working;
+        let mut blocked = unattributed_agent("gamma");
+        blocked.status = crate::agents::AgentStatus::Blocked;
+        d.agents.agents = vec![working, blocked];
+        d
+    }
+
+    /// The one interior column of buffer row `y` carrying `glyph`, asserting there
+    /// is exactly one. The badge cell is located by reading the frame, never by
+    /// recomputing the row grammar the frame was drawn from.
+    fn only_column_of(buf: &Buffer, y: u16, glyph: &str, last: u16) -> u16 {
+        let found: Vec<u16> = (1..=last)
+            .filter(|x| cell(buf, *x, y).symbol() == glyph)
+            .collect();
+        assert_eq!(
+            found.len(),
+            1,
+            "row {y} must carry exactly one {glyph:?}: {found:?}"
+        );
+        found[0]
+    }
+
+    /// `change-rows` :: "The badge cell reaches the buffer coloured and the rest of
+    /// the row does not".
+    #[test]
+    fn the_badge_cell_reaches_the_buffer_coloured_and_the_rest_of_the_row_does_not() {
+        let d = badged_dashboard(0);
+        for width in [120, 60] {
+            let buf = render_at(width, 20, &d);
+            let last = if width == 60 { 58 } else { 38 };
+
+            let wx = only_column_of(&buf, 2, "w", last);
+            let working = cell(&buf, wx, 2).style();
+            assert_eq!(
+                working.fg,
+                palette::style(Role::AgentBadge(crate::agents::AgentStatus::Working)).fg,
+                "width {width}: the working badge is not the palette's colour"
+            );
+            assert!(
+                working.add_modifier.contains(Modifier::BOLD),
+                "width {width}: the badge on the selected row lost its bold"
+            );
+
+            let bx = only_column_of(&buf, 3, "b", last);
+            let blocked = cell(&buf, bx, 3).style();
+            assert_eq!(
+                blocked.fg,
+                palette::style(Role::AgentBadge(crate::agents::AgentStatus::Blocked)).fg,
+                "width {width}: the blocked badge is not the palette's colour"
+            );
+            assert!(
+                !blocked.add_modifier.contains(Modifier::BOLD),
+                "width {width}: an unselected row's badge is bold"
+            );
+
+            // Exactly one column was painted on each badged row: the separating
+            // spaces on either side of the badge carry no foreground at all.
+            for (x, y) in [(wx, 2u16), (bx, 3)] {
+                for neighbour in [x - 1, x + 1] {
+                    assert_eq!(
+                        cell(&buf, neighbour, y).style().fg,
+                        uncoloured().fg,
+                        "width {width}: cell {neighbour},{y} beside the badge is coloured"
+                    );
+                }
+            }
+
+            // The unbadged third row carries no foreground anywhere.
+            for x in 1..=last {
+                assert_eq!(
+                    cell(&buf, x, 4).style().fg,
+                    uncoloured().fg,
+                    "width {width}: unbadged cell {x} is coloured"
+                );
+            }
+        }
+    }
+
+    /// `change-rows` :: "A badged selected row keeps its bold under the badge colour"
+    /// — and the discriminating half: moving the selection moves the bold without
+    /// moving the colour.
+    #[test]
+    fn a_badged_selected_row_keeps_its_bold_under_the_badge_colour() {
+        let working = palette::style(Role::AgentBadge(crate::agents::AgentStatus::Working)).fg;
+        let blocked = palette::style(Role::AgentBadge(crate::agents::AgentStatus::Blocked)).fg;
+        for width in [120, 60] {
+            let last = if width == 60 { 58 } else { 38 };
+            for selected in [0usize, 1] {
+                let buf = render_at(width, 20, &badged_dashboard(selected));
+                let wx = only_column_of(&buf, 2, "w", last);
+                let bx = only_column_of(&buf, 3, "b", last);
+                assert_eq!(cell(&buf, wx, 2).style().fg, working, "width {width}");
+                assert_eq!(cell(&buf, bx, 3).style().fg, blocked, "width {width}");
+                assert_eq!(
+                    cell(&buf, wx, 2)
+                        .style()
+                        .add_modifier
+                        .contains(Modifier::BOLD),
+                    selected == 0,
+                    "width {width}: row 0's badge bold disagrees with the selection"
+                );
+                assert_eq!(
+                    cell(&buf, bx, 3)
+                        .style()
+                        .add_modifier
+                        .contains(Modifier::BOLD),
+                    selected == 1,
+                    "width {width}: row 1's badge bold disagrees with the selection"
+                );
+            }
+        }
+    }
+
+    /// `change-rows` :: "Problem rows are red and change rows are not, at both
+    /// mandated widths".
+    #[test]
+    fn problem_rows_are_red_and_change_rows_are_not_at_both_mandated_widths() {
+        let mut d = dashboard_with(
+            vec![
+                fixture::active("alpha", 4, 9),
+                fixture::active("gamma", 7, 7),
+                fixture::active("epsilon", 0, 0),
+            ],
+            vec![fixture::archived(Some("2026-08-14"), "old-change", 3, 3)],
+            0,
+            Route::List,
+        );
+        d.launch.problems = vec!["herdr agent start: refused".to_string()];
+        d.refresh.problems = vec!["watch: could not start".to_string()];
+        d.changes.problems = vec!["openspec/changes: unreadable".to_string()];
+
+        for width in [120, 60] {
+            let buf = render_at(width, 20, &d);
+            let last = if width == 60 { 58 } else { 38 };
+            assert!(
+                interior_cols(&buf, 2).starts_with("! herdr"),
+                "width {width}"
+            );
+            assert!(
+                interior_cols(&buf, 3).starts_with("! watch"),
+                "width {width}"
+            );
+            assert!(
+                interior_cols(&buf, 4).starts_with("! openspec"),
+                "width {width}"
+            );
+            assert!(interior_cols(&buf, 8).contains("archived"), "width {width}");
+
+            for x in 1..=last {
+                for y in [2u16, 3, 4] {
+                    let style = cell(&buf, x, y).style();
+                    assert_eq!(
+                        style.fg,
+                        palette::style(Role::ListProblem).fg,
+                        "width {width}: problem cell {x},{y} is not the problem colour"
+                    );
+                    assert!(
+                        style.add_modifier.is_empty(),
+                        "width {width}: problem cell {x},{y} gained a modifier"
+                    );
+                }
+                let separator = cell(&buf, x, 8).style();
+                assert_eq!(
+                    separator.fg,
+                    palette::style(Role::ListSeparator).fg,
+                    "width {width}: separator cell {x} is not the separator colour"
+                );
+                assert!(
+                    separator.add_modifier.is_empty(),
+                    "width {width}: separator cell {x} gained a modifier"
+                );
+                for y in [5u16, 6, 7, 9] {
+                    assert_eq!(
+                        cell(&buf, x, y).style().fg,
+                        uncoloured().fg,
+                        "width {width}: change cell {x},{y} is coloured"
+                    );
+                }
+                assert!(
+                    cell(&buf, x, 5)
+                        .style()
+                        .add_modifier
+                        .contains(Modifier::BOLD),
+                    "width {width}: the selected change row {x} lost its bold"
+                );
+            }
+        }
+    }
+
+    /// `change-rows` :: "An empty-state message row is not a problem row".
+    #[test]
+    fn an_empty_state_message_row_is_not_a_problem_row() {
+        let empty = dashboard(Some("/tmp/demo-repo"), Route::List);
+        let mut filtered = dashboard_with(
+            vec![fixture::active("alpha", 4, 9)],
+            Vec::new(),
+            0,
+            Route::List,
+        );
+        filtered.filter.query = "zzz".to_string();
+        let no_repo = dashboard(None, Route::List);
+
+        for width in [120, 60] {
+            let last = if width == 60 { 58 } else { 38 };
+
+            let buf = render_at(width, 20, &empty);
+            assert!(
+                interior_cols(&buf, 2).starts_with("No changes yet"),
+                "width {width}"
+            );
+            let buf_filtered = render_at(width, 20, &filtered);
+            assert!(
+                interior_cols(&buf_filtered, 2).starts_with("No changes match"),
+                "width {width}"
+            );
+            assert!(
+                interior_cols(&buf_filtered, 3).starts_with("/zzz"),
+                "width {width}"
+            );
+            let buf_no_repo = render_at(width, 20, &no_repo);
+            assert!(
+                interior_cols(&buf_no_repo, 2).starts_with("No OpenSpec repository"),
+                "width {width}"
+            );
+
+            for x in 1..=last {
+                for (label, buf, rows) in [
+                    ("empty", &buf, vec![2u16]),
+                    ("filtered", &buf_filtered, vec![2, 3]),
+                    ("no repository", &buf_no_repo, vec![2, 3, 4]),
+                ] {
+                    for y in rows {
+                        assert_eq!(
+                            cell(buf, x, y).style().fg,
+                            uncoloured().fg,
+                            "width {width}: {label} message cell {x},{y} is coloured"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     /// A frame carrying every span this change touches at once: file mode, a repository
     /// problem row, three active changes with the second badged `Working`, an archived
     /// change (so a separator row is drawn), and a selected change whose detail source
