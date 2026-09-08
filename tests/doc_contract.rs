@@ -734,6 +734,11 @@ fn target_recipe_lines<'a>(logical_lines: &'a [String], target: &str) -> Vec<&'a
 /// Apply steps 2-6 of the extraction rule to one already-continuation-joined recipe line,
 /// returning the external program it names, or `None` when the line names no external
 /// program (a shell guard keyword, `cargo`, or a `/bin/sh <scripts/ path>` invocation).
+///
+/// Examines only the FIRST token of the line: a compound line such as `cargo x && jq y` or
+/// `python3 a.py | jq` would hide its second program. This is faithful to spec step 5, which
+/// is itself stated against "the recipe line's first remaining token" — not a divergence this
+/// leg introduces, but worth naming here since nothing else in the file says so.
 fn program_from_recipe_line(line: &str) -> Option<String> {
     let stripped = line.trim_start_matches('\t');
     let stripped = stripped.trim_start_matches(['@', '-']);
