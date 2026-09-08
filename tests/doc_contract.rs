@@ -28,8 +28,7 @@ fn manifest_dir() -> PathBuf {
 /// otherwise unreadable), rather than treating an unreadable document as agreeing with
 /// whatever it was compared against.
 fn read_doc(path: &std::path::Path) -> Result<String, String> {
-    std::fs::read_to_string(path)
-        .map_err(|e| format!("could not read {}: {e}", path.display()))
+    std::fs::read_to_string(path).map_err(|e| format!("could not read {}: {e}", path.display()))
 }
 
 /// Slice the section of `text` introduced by `heading` (a literal line or inline marker,
@@ -80,10 +79,10 @@ fn pub_mod_names(lib_rs: &str) -> BTreeSet<String> {
     let mut names = BTreeSet::new();
     for line in lib_rs.lines() {
         let trimmed = line.trim_start();
-        if let Some(rest) = trimmed.strip_prefix("pub mod ") {
-            if let Some(name) = rest.trim_end().strip_suffix(';') {
-                names.insert(name.trim().to_string());
-            }
+        if let Some(rest) = trimmed.strip_prefix("pub mod ")
+            && let Some(name) = rest.trim_end().strip_suffix(';')
+        {
+            names.insert(name.trim().to_string());
         }
     }
     names
@@ -167,10 +166,13 @@ fn module_map_matches_lib_rs() {
     let declared = pub_mod_names(&lib_rs);
     let mapped = module_map_names(&spec_md).expect("parse SPEC.md's module map");
 
-    if let Some(diff) = set_diff_message("src/lib.rs's pub mod set", &declared, "SPEC.md's Module map", &mapped) {
-        panic!(
-            "SPEC.md's Module map disagrees with src/lib.rs's declared modules: {diff}"
-        );
+    if let Some(diff) = set_diff_message(
+        "src/lib.rs's pub mod set",
+        &declared,
+        "SPEC.md's Module map",
+        &mapped,
+    ) {
+        panic!("SPEC.md's Module map disagrees with src/lib.rs's declared modules: {diff}");
     }
 }
 
