@@ -125,11 +125,11 @@
 ## 6. The draw loop advances by consumed columns
 <!-- kind: behavior -->
 
-- [ ] 6.1 RED: Write failing tests for A wide-character path is shortened by columns and stays inside the header, and the border-cell assertions of A CJK change name stays inside the list region and A wide-character document stays inside the detail region driven through a full `ui::view::render`. Every new test names 60 and 120 bare.
-- [ ] 6.2 GREEN: Change `src/ui/view.rs:131` to advance `x` by `layout::columns(&segment.text)` and to draw `layout::truncate_columns(&segment.text, (last_col - x) as usize)`, keeping the `x >= last_col` guard, per design.md → Decision 8.
-- [ ] 6.3 GREEN: Rewrite the header's `A` arithmetic and the footer's hint budget and prompt tail-truncation in `src/ui/view.rs` to measure in columns. The `awk | grep -c` reports 0, down from 5.
-- [ ] 6.4 REFACTOR: Restate the 18 existing `.chars().count()` width assertions in `src/ui/view.rs`'s test module in columns; no pass/fail may move.
-- [ ] 6.5 Run `cargo test --lib ui::view` and `sh scripts/gates/widths.sh` — green, the mandated 60/120 pair unchanged.
+- [x] 6.1 RED: Write failing tests for A wide-character path is shortened by columns and stays inside the header, and the border-cell assertions of A CJK change name stays inside the list region and A wide-character document stays inside the detail region driven through a full `ui::view::render`. Every new test names 60 and 120 bare.
+- [x] 6.2 GREEN: Change `src/ui/view.rs:131` to advance `x` by `layout::columns(&segment.text)` and to draw `layout::truncate_columns(&segment.text, (last_col - x) as usize)`, keeping the `x >= last_col` guard, per design.md → Decision 8.
+- [x] 6.3 GREEN: Rewrite the header's `A` arithmetic and the footer's hint budget and prompt tail-truncation in `src/ui/view.rs` to measure in columns. The `awk | grep -c` reports 0, down from 5.
+- [x] 6.4 REFACTOR: Restate the 18 existing `.chars().count()` width assertions in `src/ui/view.rs`'s test module in columns; no pass/fail may move.
+- [x] 6.5 Run `cargo test --lib ui::view` and `sh scripts/gates/widths.sh` — green, the mandated 60/120 pair unchanged.
 
 ## 7. `Enter` guards its reset, and the filter folds all of Unicode
 <!-- kind: behavior -->
