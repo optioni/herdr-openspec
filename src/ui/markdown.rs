@@ -1203,11 +1203,16 @@ mod tests {
 
     fn composite_fixture() -> String {
         // Heading, paragraph, bullet list, nested list, fenced code, block
-        // quote, thematic break, link — this test only needs to prove
+        // quote, thematic break, link, and a three-column table whose widest
+        // cell exceeds the narrow interior — this test only needs to prove
         // totality and width compliance, not per-construct styling (the
         // dedicated tests below own that). Each block carries one
         // distinctive one-word marker so a check can find it regardless of
         // where a wrap point lands.
+        //
+        // The table is three columns, so `4n + 1` is 13 and the swept widths
+        // 1, 2, 3, and 10 all fall below it: the degenerate one-cell-per-line
+        // path is measured by this sweep rather than assumed.
         "# headingword marker\n\
          \n\
          paragraphword marker text padded out with extra words so the line wraps at both widths under test here today\n\
@@ -1222,7 +1227,11 @@ mod tests {
          \n\
          ---\n\
          \n\
-         See [linkword marker](design.md) for more padded words so this paragraph also wraps under test today.\n"
+         See [linkword marker](design.md) for more padded words so this paragraph also wraps under test today.\n\
+         \n\
+         | tableword | col2 | col3 |\n\
+         |---|:--:|---:|\n\
+         | a | b | this cell is padded out with enough extra words that it exceeds the narrow interior |\n"
             .to_string()
     }
 
@@ -1275,6 +1284,7 @@ mod tests {
             assert!(text.contains("codeword"), "code missing at {width}");
             assert!(text.contains("quoteword"), "quote missing at {width}");
             assert!(text.contains("linkword"), "link text missing at {width}");
+            assert!(text.contains("tableword"), "table missing at {width}");
             assert!(
                 !text.contains("design.md"),
                 "link destination leaked at {width}"
@@ -1299,6 +1309,17 @@ mod tests {
             // sources for "Rendering is total over arbitrary input".
             "日本語".repeat(84),
             family.repeat(50),
+            // `markdown-render`'s five adversarial table sources: a header
+            // with no delimiter row (so it is not a table at all), a body
+            // row carrying more cells than the header declares, one
+            // carrying fewer, a table of forty columns — `4n + 1` is 161,
+            // so every swept width takes the narrow fallback — and a table
+            // whose single cell is a 500-column CJK run with no space.
+            "| a | b |\n".to_string(),
+            "| a | b |\n|---|---|\n| c | d | e | f |\n".to_string(),
+            "| a | b | c |\n|---|---|---|\n| d |\n".to_string(),
+            format!("|{}\n|{}\n", " x |".repeat(40), "---|".repeat(40)),
+            format!("| h |\n|---|\n| {} |\n", "日本語".repeat(84)),
         ];
         for width in [1u16, 2, 58, 78] {
             for source in &pathological {

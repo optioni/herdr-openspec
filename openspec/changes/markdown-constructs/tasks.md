@@ -134,17 +134,17 @@ test on `Vec<Line>` can see the last three steps. Per design.md → Test Strateg
 ## 2. Table widths and totality
 <!-- kind: behavior -->
 
-- [ ] 2.1 RED: Extend `composite_fixture` with a three-column table whose widest cell exceeds
+- [x] 2.1 RED: Extend `composite_fixture` with a three-column table whose widest cell exceeds
   58 columns, so `no_line_exceeds_the_width_it_was_given` sweeps it at 0, 1, 2, 3, 10, 58, 78,
   and 200. Extend `lines_is_total_over_arbitrary_input`'s `pathological` array with the five
   new adversarial table sources the spec names — header-only, over-long row, short row,
   forty-column, and a 500-column CJK cell. The struck-run legs of both fixtures wait for
   group 3, which is what makes `ENABLE_STRIKETHROUGH` available.
 
-- [ ] 2.2 GREEN: Fix whatever the sweep and the totality test find. Verification: both tests
+- [x] 2.2 GREEN: Fix whatever the sweep and the totality test find. Verification: both tests
   pass at every listed width with no panic.
 
-- [ ] 2.3 Run the group tests — no regressions:
+- [x] 2.3 Run the group tests — no regressions:
 
   ```sh
   cargo test --all-features --lib ui::markdown
