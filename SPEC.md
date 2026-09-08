@@ -976,6 +976,10 @@ Two one-time setup steps are required for local development — `rustup componen
 clippy` and `cargo install cargo-llvm-cov` — since CI obtains `clippy` from the
 toolchain action and `cargo-llvm-cov` from `taiki-e/install-action`.
 
+`python3` is required too, for the hygiene-gate tier's own scripts and for the
+production-coverage floor script — no installable component, since it ships with the OS on
+both CI runners and the reference machine.
+
 ## Build and distribution
 
 Herdr installs a GitHub-managed plugin by cloning the repository at a resolved
