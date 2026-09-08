@@ -230,8 +230,150 @@ apply:
         let mut r = none();
         for _ in 0..10 {
             r.request(Selection::All);
-            assert_eq!(r.take_result(), None);
+            let result = r.take_result();
+            assert_eq!(result, None);
+            // `seam-resilience`: the inert refresher has no worker to lose, so it never
+            // reports one stopped.
+            assert!(!matches!(result, Some(RefreshResult::Stopped(_))));
         }
+    }
+
+    /// `seam-resilience`: `refresh-worker` -> "A dead refresh worker is reported once and
+    /// then stops being reported". Constructs a `RealRefresher` directly — the same private
+    /// struct `start` returns, reachable from this child module on exactly
+    /// `agents::RealAgentPoll`'s terms — over channels whose worker-side ends are dropped, so
+    /// both `result_rx` and `request_tx` are disconnected from the very first call.
+    #[test]
+    fn a_dead_refresh_worker_is_reported_once_and_then_stops_being_reported() {
+        let (request_tx, request_rx) = mpsc::channel::<Selection>();
+        let (result_tx, result_rx) = mpsc::channel::<RefreshResult>();
+        drop(result_tx);
+        drop(request_rx);
+        let mut r = RealRefresher {
+            request_tx,
+            result_rx,
+            dead: false,
+            pending_death: false,
+            outstanding: false,
+            pending_all: false,
+        };
+
+        match r.take_result() {
+            Some(RefreshResult::Stopped(reason)) => {
+                assert!(reason.to_lowercase().contains("refresh worker"), "{reason}");
+            }
+            other => panic!("expected Stopped, got {other:?}"),
+        }
+
+        r.request(Selection::All);
+        assert_eq!(r.take_result(), None, "reported once, then silence");
+        r.request(Selection::All);
+        assert_eq!(r.take_result(), None);
+    }
+
+    /// `seam-resilience`: `refresh-worker` -> "A refresh outstanding does not queue further
+    /// selections". Drives `RealRefresher::request` directly against a channel whose other
+    /// end nothing ever drains, so what actually reached the worker is asserted on the
+    /// channel's own contents.
+    #[test]
+    fn a_refresh_outstanding_does_not_queue_further_selections() {
+        let (request_tx, request_rx) = mpsc::channel::<Selection>();
+        let (result_tx, result_rx) = mpsc::channel::<RefreshResult>();
+        let mut r = RealRefresher {
+            request_tx,
+            result_rx,
+            dead: false,
+            pending_death: false,
+            outstanding: false,
+            pending_all: false,
+        };
+
+        r.request(Selection::Only(std::collections::BTreeSet::from([
+            "alpha".to_string()
+        ])));
+        r.request(Selection::Only(std::collections::BTreeSet::from([
+            "beta".to_string()
+        ])));
+        r.request(Selection::Only(std::collections::BTreeSet::from([
+            "gamma".to_string()
+        ])));
+
+        let received: Vec<Selection> = request_rx.try_iter().collect();
+        assert_eq!(
+            received,
+            vec![Selection::Only(std::collections::BTreeSet::from([
+                "alpha".to_string()
+            ]))],
+            "exactly one selection reached the worker's request channel"
+        );
+
+        result_tx
+            .send(RefreshResult::Merged(crate::changes::empty_set()))
+            .expect("channel still connected");
+        assert!(matches!(r.take_result(), Some(RefreshResult::Merged(_))));
+
+        r.request(Selection::Only(std::collections::BTreeSet::from([
+            "delta".to_string()
+        ])));
+        let received2: Vec<Selection> = request_rx.try_iter().collect();
+        assert_eq!(
+            received2,
+            vec![Selection::Only(std::collections::BTreeSet::from([
+                "delta".to_string()
+            ]))],
+            "the suppression is per-cycle, not permanent"
+        );
+    }
+
+    /// `seam-resilience`: `refresh-worker` -> "A forced refresh outstanding behind a
+    /// narrower one is not lost".
+    #[test]
+    fn a_forced_refresh_outstanding_behind_a_narrower_one_is_not_lost() {
+        let (request_tx, request_rx) = mpsc::channel::<Selection>();
+        let (result_tx, result_rx) = mpsc::channel::<RefreshResult>();
+        let mut r = RealRefresher {
+            request_tx,
+            result_rx,
+            dead: false,
+            pending_death: false,
+            outstanding: false,
+            pending_all: false,
+        };
+
+        r.request(Selection::Only(std::collections::BTreeSet::from([
+            "alpha".to_string()
+        ])));
+        r.request(Selection::All);
+
+        let first_batch: Vec<Selection> = request_rx.try_iter().collect();
+        assert_eq!(
+            first_batch,
+            vec![Selection::Only(std::collections::BTreeSet::from([
+                "alpha".to_string()
+            ]))]
+        );
+
+        result_tx
+            .send(RefreshResult::Files(crate::changes::empty_set()))
+            .expect("channel still connected");
+        assert!(matches!(r.take_result(), Some(RefreshResult::Files(_))));
+        let mid_batch: Vec<Selection> = request_rx.try_iter().collect();
+        assert!(
+            mid_batch.is_empty(),
+            "a Files result does not answer the cycle"
+        );
+
+        result_tx
+            .send(RefreshResult::Merged(crate::changes::empty_set()))
+            .expect("channel still connected");
+        assert!(matches!(r.take_result(), Some(RefreshResult::Merged(_))));
+
+        let second_batch: Vec<Selection> = request_rx.try_iter().collect();
+        assert_eq!(
+            second_batch,
+            vec![Selection::All],
+            "the remembered All is sent once the outstanding cycle answers"
+        );
     }
 
     #[test]
