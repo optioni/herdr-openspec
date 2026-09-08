@@ -50,11 +50,11 @@ are whole-change gates by definition and cannot precede the work they gate.
 ## 2. The refresh request carries the archived scope
 <!-- kind: behavior -->
 
-- [ ] 2.1 RED: Write failing tests in `src/refresh.rs` for `The scope on the request is the scope the file tier runs under` and `drain_and_fold unions selections and takes the last scope`, and update `A refresh outstanding does not queue further selections` and `A forced refresh outstanding behind a narrower one is not lost` to the two-field request.
-- [ ] 2.2 GREEN: Add `refresh::Request { selection, archived }`, change `Refresher::request` to take both, drop `archived_count` from `refresh::start` and `worker_for_test`, and pass `request.archived` to `from_files`. Verify with `cargo test refresh::tests::`.
-- [ ] 2.3 GREEN: Make `drain_and_fold` fold a `Request` — `Selection::union` for the selection, last-wins for the scope (design.md → Decision 9) — and give the remembered `Selection::All` the most recent suppressed scope. Verify single-threaded against a receiver whose sender queued two requests and was dropped.
-- [ ] 2.4 CHECK: Contract gate — confirm neither `Refresher` nor `RefreshResult` names `CliChanges`, `OpenspecCli`, or `from_cli`, by running `make gates` and reading `NOCLI-SHELL` and `NOBLOCK` OK.
-- [ ] 2.5 Run `cargo test --all-features` — no regressions, and state whether a refactor was needed.
+- [x] 2.1 RED: Write failing tests in `src/refresh.rs` for `The scope on the request is the scope the file tier runs under` and `drain_and_fold unions selections and takes the last scope`, and update `A refresh outstanding does not queue further selections` and `A forced refresh outstanding behind a narrower one is not lost` to the two-field request.
+- [x] 2.2 GREEN: Add `refresh::Request { selection, archived }`, change `Refresher::request` to take both, drop `archived_count` from `refresh::start` and `worker_for_test`, and pass `request.archived` to `from_files`. Verify with `cargo test refresh::tests::`.
+- [x] 2.3 GREEN: Make `drain_and_fold` fold a `Request` — `Selection::union` for the selection, last-wins for the scope (design.md → Decision 9) — and give the remembered `Selection::All` the most recent suppressed scope. Verify single-threaded against a receiver whose sender queued two requests and was dropped.
+- [x] 2.4 CHECK: Contract gate — confirm neither `Refresher` nor `RefreshResult` names `CliChanges`, `OpenspecCli`, or `from_cli`, by running `make gates` and reading `NOCLI-SHELL` and `NOBLOCK` OK.
+- [x] 2.5 Run `cargo test --all-features` — no regressions, and state whether a refactor was needed.
 
 ## 3. The section model and the re-indexed cursor
 <!-- kind: behavior -->
