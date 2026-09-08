@@ -180,7 +180,7 @@ assertion written here is RED by construction.
 ## 3. The agent badge cell and the problem row
 <!-- kind: behavior -->
 
-- [ ] 3.1 RED: Write failing tests in `src/ui/list.rs` for: *A badged active row reports the
+- [x] 3.1 RED: Write failing tests in `src/ui/list.rs` for: *A badged active row reports the
       column its badge occupies, at both mandated widths*, *A badged archived row reports the
       column its badge occupies*, *A dropped badge cell reports no badge*, and *No non-change
       row carries a badge*. Every one names both **38** and **58**, which `LISTWIDTHS`

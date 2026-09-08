@@ -1082,6 +1082,189 @@ mod tests {
         assert!(rows(&d, 58)[2].text.contains(" b ["));
     }
 
+    /// `change-rows`: "A badged active row reports the column its badge occupies, at
+    /// both mandated widths". The row's own `text` is asserted against the same
+    /// literals `a_badged_active_row_at_both_widths` above already pins, unedited by
+    /// this change — which is what makes "adding the field moves no cell" falsifiable
+    /// rather than merely stated.
+    #[test]
+    fn a_badged_active_row_reports_the_column_its_badge_occupies() {
+        let mut d = dashboard_with(
+            vec![
+                fixture::active("add-token-refresh", 4, 9),
+                fixture::active("fix-empty-basket", 7, 7),
+            ],
+            Vec::new(),
+            Vec::new(),
+            0,
+        );
+        d.agents.agents = vec![agent_at("add-token-refresh", AgentStatus::Working)];
+
+        let rows38 = rows(&d, 38);
+        assert_eq!(rows38[0].text, "> add-token-refresh            w [4/9]");
+        assert_eq!(rows38[1].text, "  fix-empty-basket               [7/7]");
+
+        let rows58 = rows(&d, 58);
+        assert_eq!(columns(&rows58[0].text), 58);
+        assert!(rows58[0].text.starts_with("> add-token-refresh"));
+        assert!(rows58[0].text.ends_with(" w [4/9]"));
+
+        // "[4/9]" is five columns, so the name field is `width - 10` and the badge
+        // sits three columns past its start: marker, its space, the name field, and
+        // the badge's own separating space.
+        for (width, badged, unbadged) in [
+            (38u16, &rows38[0], &rows38[1]),
+            (58, &rows58[0], &rows58[1]),
+        ] {
+            let badge = badged.badge.expect("the badged row must report its cell");
+            assert_eq!(badge.status, AgentStatus::Working, "width {width}");
+            assert_eq!(badge.x, (width - 10) + 3, "width {width}");
+            assert_eq!(
+                badged.text.chars().nth(badge.x as usize),
+                Some('w'),
+                "width {width}: text[x] is not the badge character"
+            );
+            assert_eq!(unbadged.badge, None, "width {width}");
+        }
+    }
+
+    /// `change-rows`: "A badged archived row reports the column its badge occupies" —
+    /// with the equality against an active row of the same width as the
+    /// discriminating half, since a date field forgotten on one side moves one of
+    /// the two.
+    #[test]
+    fn a_badged_archived_row_reports_the_column_its_badge_occupies() {
+        let mut archived = dashboard_with(
+            Vec::new(),
+            vec![fixture::archived(Some("2026-08-14"), "add-auth", 7, 7)],
+            Vec::new(),
+            0,
+        );
+        archived.agents.agents = vec![agent_at("add-auth", AgentStatus::Blocked)];
+        let mut active = dashboard_with(
+            vec![fixture::active("add-auth", 7, 7)],
+            Vec::new(),
+            Vec::new(),
+            0,
+        );
+        active.agents.agents = vec![agent_at("add-auth", AgentStatus::Blocked)];
+
+        let widths: [u16; 2] = [38, 58];
+        for width in widths {
+            // The archived block: a `No active changes` message, the separator, then
+            // the change itself.
+            let row = &rows(&archived, width)[2];
+            let badge = row.badge.expect("the badged row must report its cell");
+            assert_eq!(badge.status, AgentStatus::Blocked, "width {width}");
+            assert_eq!(
+                row.text.chars().nth(badge.x as usize),
+                Some('b'),
+                "width {width}: text[x] is not the badge character"
+            );
+            // marker, space, date field (10), space, name field, space.
+            let progress = 5u16;
+            let name_field_width = width - 14 - 1 - 1 - progress;
+            assert_eq!(badge.x, name_field_width + 14, "width {width}");
+
+            let active_badge = rows(&active, width)[0]
+                .badge
+                .expect("the active row must report its cell too");
+            assert_eq!(
+                badge.x, active_badge.x,
+                "width {width}: both grammars put the badge two columns left of the \
+                 progress cell"
+            );
+        }
+    }
+
+    /// `change-rows`: "A dropped badge cell reports no badge" — the field never
+    /// points at a column the row does not have.
+    #[test]
+    fn a_dropped_badge_cell_reports_no_badge() {
+        let mut d = dashboard_with(
+            vec![fixture::active("demo", 4, 9)],
+            Vec::new(),
+            Vec::new(),
+            0,
+        );
+        d.agents.agents = vec![agent_at("demo", AgentStatus::Working)];
+
+        // 38 and 58 are the two mandated interiors; 12 and 11 are the narrowest at
+        // which the badge cell still fits.
+        let fits: [u16; 4] = [38, 58, 12, 11];
+        for width in fits {
+            let row = &rows(&d, width)[0];
+            let badge = row.badge.expect("the badge cell still fits");
+            assert_eq!(badge.status, AgentStatus::Working, "width {width}");
+            assert_eq!(
+                row.text.chars().nth(badge.x as usize),
+                Some('w'),
+                "width {width}: text[x] is not the badge character"
+            );
+        }
+        let dropped: [u16; 4] = [10, 9, 1, 0];
+        for width in dropped {
+            assert_eq!(
+                rows(&d, width)[0].badge,
+                None,
+                "width {width}: a dropped badge cell must report no badge"
+            );
+        }
+    }
+
+    /// `change-rows`: "No non-change row carries a badge" — every `Problem`,
+    /// `Separator`, and `Message` row, at both mandated widths, whatever
+    /// `attribution().badges` holds.
+    #[test]
+    fn no_non_change_row_carries_a_badge() {
+        let mut problems = dashboard_with(
+            vec![fixture::active("alpha", 4, 9)],
+            vec![fixture::archived(Some("2026-08-14"), "add-auth", 7, 7)],
+            vec!["openspec/changes: unreadable".to_string()],
+            0,
+        );
+        problems.launch.problems = vec!["herdr agent start: refused".to_string()];
+        problems.refresh.problems = vec!["watch: could not start".to_string()];
+        problems.agents.agents = vec![
+            agent_at("alpha", AgentStatus::Working),
+            agent_at("add-auth", AgentStatus::Blocked),
+        ];
+        let mut filtered = problems.clone();
+        filtered.filter.query = "zzz".to_string();
+        let mut no_repo = problems.clone();
+        no_repo.repo = None;
+
+        let widths: [u16; 2] = [38, 58];
+        for width in widths {
+            for (label, d) in [
+                ("problems", &problems),
+                ("filtered", &filtered),
+                ("no repository", &no_repo),
+            ] {
+                for row in rows(d, width) {
+                    if matches!(row.kind, RowKind::Item { .. }) {
+                        continue;
+                    }
+                    assert_eq!(
+                        row.badge, None,
+                        "width {width}: {label}'s {:?} row carries a badge: {:?}",
+                        row.kind, row.text
+                    );
+                }
+            }
+            // Discriminating control: the change rows the same dashboard produces
+            // *are* badged, so the sweep above is not satisfied by a badgeless render.
+            let badged = rows(&problems, width)
+                .iter()
+                .filter(|r| r.badge.is_some())
+                .count();
+            assert_eq!(
+                badged, 2,
+                "width {width}: both change rows must carry a badge"
+            );
+        }
+    }
+
     #[test]
     fn archived_rows_carry_a_ten_column_date_field() {
         let d = dashboard_with(
