@@ -206,12 +206,12 @@ files.
 ## 12. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 12.1 CHECK: Inspect the intended verification commands and affected tiers — the contract tier is new, `src/` is untouched, and the coverage floor is unaffected because no `src/` line is added.
-- [ ] 12.2 VERIFY: `cargo fmt --all -- --check` — clean.
-- [ ] 12.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings.
-- [ ] 12.4 VERIFY: `make gates` — every hygiene gate exit 0.
-- [ ] 12.5 VERIFY: `cargo test --all-features` — green, including `doc_contract`, `manifest`, `degraded_coverage`, `spec_purposes`, and `ci_workflow`.
-- [ ] 12.6 VERIFY: `cargo llvm-cov --fail-under-lines 80` — at or above the floor. If short, add tests; never lower the floor.
-- [ ] 12.7 VERIFY: `make check` — exit 0 as a single gate; name the failing sub-command if it fails.
-- [ ] 12.8 VERIFY: `openspec validate doc-conformance --strict` — passes.
-- [ ] 12.9 VERIFY: `git diff --name-only <base>..HEAD -- src/`, with `<base>` from task 1.1's `notes/baseline.md`, lists nothing — confirming the spec scenario "The dashboard is unchanged". Commit.
+- [x] 12.1 CHECK: Inspect the intended verification commands and affected tiers — the contract tier is new, `src/` is untouched, and the coverage floor is unaffected because no `src/` line is added.
+- [x] 12.2 VERIFY: `cargo fmt --all -- --check` — clean.
+- [x] 12.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings.
+- [x] 12.4 VERIFY: `make gates` — every hygiene gate exit 0.
+- [x] 12.5 VERIFY: `cargo test --all-features` — green, including `doc_contract`, `manifest`, `degraded_coverage`, `spec_purposes`, and `ci_workflow`.
+- [x] 12.6 VERIFY: `cargo llvm-cov --fail-under-lines 80` — at or above the floor. If short, add tests; never lower the floor.
+- [x] 12.7 VERIFY: `make check` — exit 0 as a single gate; name the failing sub-command if it fails.
+- [x] 12.8 VERIFY: `openspec validate doc-conformance --strict` — passes.
+- [x] 12.9 VERIFY: `git diff --name-only <base>..HEAD -- src/`, with `<base>` from task 1.1's `notes/baseline.md`, lists nothing — confirming the spec scenario "The dashboard is unchanged". Commit.
