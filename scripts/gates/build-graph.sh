@@ -23,10 +23,14 @@ TMP=$(mktemp -d) || exit 1
 trap 'rm -rf "$TMP"' EXIT
 
 for t in $TRIPLES; do
+  # `--color never` is not cosmetic: CI exports CARGO_TERM_COLOR=always (dtolnay/rust-toolchain
+  # sets it), and cargo then wraps the "(*)" and "(proc-macro)" markers in ANSI escapes, which
+  # defeats the anchored sed strips below and makes every deduplicated line survive as a
+  # spurious extra package. Measured: this gate passed locally and failed on both CI runners.
   # Strip cargo's "(*)" repeat marker and "(proc-macro)" tag, drop this crate's own line,
   # and sort. `--target <triple>` once per triple, never `--target all`, which reports
   # optional resolutions cargo never builds.
-  cargo tree -e normal --target "$t" --prefix none 2>/dev/null \
+  cargo tree -e normal --color never --target "$t" --prefix none 2>/dev/null \
     | sed -e 's/ (\*)$//' -e 's/ (proc-macro)$//' -e '/^$/d' \
     | grep -v '^herdr-openspec ' | sort -u > "$TMP/$t"
   lines=$(wc -l < "$TMP/$t" | tr -d ' ')
@@ -69,7 +73,7 @@ expected_linux_only="inotify inotify-sys linux-raw-sys "
 # Measured from the HOST graph (cargo tree with no --target; cargo omits the "(proc-macro)"
 # tag for cross-target resolutions), and confirmed platform-independent by task 8.12.
 allow="darling_macro derive_more-impl document-features indoc instability rustversion strum_macros thiserror-impl"
-got=$(cargo tree -e normal --prefix none 2>/dev/null | grep '(proc-macro)' \
+got=$(cargo tree -e normal --color never --prefix none 2>/dev/null | grep '(proc-macro)' \
       | sed -e 's/ (\*)//' -e 's/ (proc-macro)//' | cut -d' ' -f1 | sort -u | tr '\n' ' ')
 want=$(printf '%s\n' $allow | sort -u | tr '\n' ' ')
 [ "$got" = "$want" ] || { echo "GRAPH-SNAP FAIL: proc-macro set is [$got], expected [$want]" >&2; exit 1; }
