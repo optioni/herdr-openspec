@@ -2,7 +2,10 @@
 //! no filesystem, process, environment, network, or standard-I/O API. See
 //! `openspec/changes/tui-shell/specs/responsive-layout/spec.md`.
 
+use ratatui::buffer::CellWidth;
 use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::style::Style;
+use ratatui::text::Span;
 
 use crate::ui::app::Route;
 
@@ -150,6 +153,59 @@ pub fn split_detail(interior: Rect) -> (Rect, Rect, Rect) {
             row(interior.y + 2, h - 2),
         ),
     }
+}
+
+/// The crate's only display-width measure: the number of terminal cells
+/// `Buffer::set_stringn` consumes for `text`, computed the way `set_stringn` itself
+/// computes it — summing each grapheme cluster's `cell_width()` — rather than by an
+/// independent table. See
+/// `openspec/changes/view-fidelity/specs/responsive-layout/spec.md` -> "Display width is
+/// measured in terminal columns by one pair of primitives".
+///
+/// `Span::raw(text).styled_graphemes(Style::default())` is named here and again in
+/// [`truncate_columns`] rather than behind a shared helper: `styled_graphemes`'s own
+/// signature is `fn styled_graphemes<S>(&'a self, ...) -> impl Iterator<Item =
+/// StyledGrapheme<'a>>` on `Span<'a>`, where `'a` is the `Span`'s own generic parameter, not
+/// a fresh borrow of `&self` — so a helper returning the iterator would have to return a
+/// value borrowing the `Span` it just constructed locally, which does not live long enough
+/// to satisfy that bound. The one-line call is the whole of the duplication; splitting it
+/// out would need an owned wrapper or a macro, either of which would cost more clarity than
+/// the duplication does.
+pub(crate) fn columns(text: &str) -> usize {
+    Span::raw(text)
+        .styled_graphemes(Style::default())
+        .map(|g| g.symbol.cell_width() as usize)
+        .sum()
+}
+
+/// The longest prefix of `text`, ending on a grapheme-cluster boundary, whose [`columns`]
+/// is at most `max`. Never splits a cluster and never panics for any `text` and any `max`.
+///
+/// The cut point is derived from each grapheme's own byte offset within `text` — computed
+/// from the returned symbol's own pointer position, which is a slice of `text` since
+/// `Span::raw` borrows rather than copies — and never from a running sum of the returned
+/// symbols' lengths: `styled_graphemes` drops clusters that hold a control character, so a
+/// running sum of what it yields is shifted by every dropped byte and would slice `text`
+/// mid-character. See the same requirement's second scenario. The grapheme split is
+/// duplicated from [`columns`] rather than shared; see that function's doc comment for why.
+pub(crate) fn truncate_columns(text: &str, max: usize) -> &str {
+    if max == 0 {
+        return "";
+    }
+    let mut used = 0usize;
+    let mut end = 0usize;
+    let mut truncated = false;
+    for grapheme in Span::raw(text).styled_graphemes(Style::default()) {
+        let width = grapheme.symbol.cell_width() as usize;
+        if used + width > max {
+            truncated = true;
+            break;
+        }
+        used += width;
+        let offset = grapheme.symbol.as_ptr() as usize - text.as_ptr() as usize;
+        end = offset + grapheme.symbol.len();
+    }
+    if truncated { &text[..end] } else { text }
 }
 
 #[cfg(test)]
