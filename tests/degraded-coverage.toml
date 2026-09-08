@@ -325,10 +325,10 @@ covers = ["src/watch.rs:243-250"]
 [[row]]
 condition = "The refresh worker stops answering (its worker thread has exited)"
 tier = "unit"
-proof = ["a_dead_refresh_worker_is_reported_once_and_then_stops_being_reported"]
+proof = ["a_dead_refresh_worker_is_reported_once_and_then_stops_being_reported", "a_send_error_from_request_is_reported_once_and_then_stops_being_reported"]
 verdict = "confirmed"
-why = "RealRefresher::take_result latches dead on the worker channel disconnecting and reports RefreshResult::Stopped exactly once, then silence, proven directly against the struct"
-covers = ["src/refresh.rs:120-121", "src/refresh.rs:143-146"]
+why = "RealRefresher::take_result latches dead on the worker channel disconnecting and reports RefreshResult::Stopped exactly once, then silence, proven directly against the struct; the sibling test proves the dominant production path instead - request's own SendError latching pending_death, consumed by the very next take_result - since the render loop's request always runs before take_result each iteration"
+covers = ["src/refresh.rs:120-121", "src/refresh.rs:123-127", "src/refresh.rs:143-146"]
 
 [[row]]
 condition = "A CLI cycle fails after the worker already sent its file-sourced result"

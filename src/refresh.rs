@@ -351,6 +351,48 @@ apply:
         assert_eq!(r.take_result(), None);
     }
 
+    /// `seam-resilience`: the other route to the same latch, and the dominant one in
+    /// production — the render loop's `request` runs before its `take_result` every
+    /// iteration, so on the first pass after the worker dies it is `request`'s own
+    /// `SendError` that first observes the death, not `take_result`'s `try_recv`. Only
+    /// the request `Receiver` is dropped here; `result_tx` stays alive, so `request`'s
+    /// `send` is what fails, latching `pending_death` — the sibling branch to
+    /// `a_dead_refresh_worker_is_reported_once_and_then_stops_being_reported` above, which
+    /// detects the death through a disconnected result channel instead. Both must latch
+    /// identically. See `specs/refresh-worker/spec.md` -> "SHALL NOT discard a
+    /// `SendError` from `request`".
+    #[test]
+    fn a_send_error_from_request_is_reported_once_and_then_stops_being_reported() {
+        let (request_tx, request_rx) = mpsc::channel::<Selection>();
+        let (result_tx, result_rx) = mpsc::channel::<RefreshResult>();
+        drop(request_rx);
+        let mut r = RealRefresher {
+            request_tx,
+            result_rx,
+            dead: false,
+            pending_death: false,
+            outstanding: false,
+            pending_all: false,
+        };
+
+        r.request(Selection::All);
+        match r.take_result() {
+            Some(RefreshResult::Stopped(reason)) => {
+                assert!(reason.to_lowercase().contains("refresh worker"), "{reason}");
+            }
+            other => panic!("expected Stopped, got {other:?}"),
+        }
+
+        r.request(Selection::All);
+        assert_eq!(r.take_result(), None, "reported once, then silence");
+        r.request(Selection::All);
+        assert_eq!(r.take_result(), None);
+
+        // `result_tx` is kept alive for the whole test: proves the `SendError` branch
+        // alone, without a disconnected result channel ever coming into play.
+        drop(result_tx);
+    }
+
     /// `seam-resilience`: `refresh-worker` -> "A refresh outstanding does not queue further
     /// selections". Drives `RealRefresher::request` directly against a channel whose other
     /// end nothing ever drains, so what actually reached the worker is asserted on the
