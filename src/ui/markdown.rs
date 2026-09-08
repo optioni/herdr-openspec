@@ -319,10 +319,7 @@ impl Folder {
         let indent = "  ".repeat(frame.depth);
         let qp = quote_prefix(self.quote_depth);
         self.first_prefix = format!("{qp}{indent}{marker}");
-        self.cont_prefix = format!(
-            "{qp}{}",
-            " ".repeat(indent.chars().count() + marker.chars().count())
-        );
+        self.cont_prefix = format!("{qp}{}", " ".repeat(columns(&indent) + columns(&marker)));
         self.prefix_face = Face::plain();
         self.category = Category::Item;
         self.hard_split = false;
@@ -552,10 +549,10 @@ fn emit_block(block: &Block, width: u16, out: &mut Vec<Line>) {
         });
         return;
     }
-    let prefix_len = block.first_prefix.chars().count() as u16;
+    let prefix_len = columns(&block.first_prefix) as u16;
     let content_width = width.saturating_sub(prefix_len);
     if content_width == 0 {
-        let truncated = truncate_chars(&block.first_prefix, width as usize);
+        let truncated = truncate_columns(&block.first_prefix, width as usize).to_string();
         if !truncated.is_empty() {
             out.push(Line {
                 segments: vec![Segment {
@@ -596,17 +593,38 @@ fn emit_block(block: &Block, width: u16, out: &mut Vec<Line>) {
     }
 }
 
-/// The first `n` characters of `s`, safe at any UTF-8 boundary.
-fn truncate_chars(s: &str, n: usize) -> String {
-    s.chars().take(n).collect()
-}
-
-/// Split `s` after its first `n` characters. `n` must be strictly less
-/// than `s`'s character count, which every call site guarantees.
-fn split_at_char(s: &str, n: usize) -> (&str, &str) {
-    match s.char_indices().nth(n) {
-        Some((idx, _)) => (&s[..idx], &s[idx..]),
-        None => (s, ""),
+/// Split `s` at a grapheme-cluster boundary into a prefix whose
+/// [`columns`] is at most `width`, and the remainder. Never panics and
+/// never splits a cluster, for any `s` and any `width`.
+///
+/// When even the first cluster does not fit — it alone measures more than
+/// `width` columns — it is **dropped** rather than emitted, per
+/// `markdown-render`'s carve-out for an over-wide token: the returned
+/// prefix is empty and the remainder skips the dropped cluster, so the
+/// caller always makes progress rather than looping on it forever. This is
+/// the one case in which content is lost; every other call returns a
+/// prefix that is a genuine byte-prefix of `s`.
+fn split_at_columns(s: &str, width: usize) -> (&str, &str) {
+    let prefix = truncate_columns(s, width);
+    if !prefix.is_empty() || s.is_empty() {
+        return (prefix, &s[prefix.len()..]);
+    }
+    // `truncate_columns` returned empty on non-empty `s`: the first
+    // grapheme cluster alone is wider than `width`. Find its byte length
+    // by growing the budget one column at a time until something fits —
+    // bounded by `s`'s own total columns, at which point `truncate_columns`
+    // returns `s` whole, so this always terminates.
+    let total = columns(s);
+    let mut probe = width + 1;
+    loop {
+        let candidate = truncate_columns(s, probe);
+        if !candidate.is_empty() {
+            return ("", &s[candidate.len()..]);
+        }
+        if probe >= total {
+            return ("", "");
+        }
+        probe += 1;
     }
 }
 
@@ -686,10 +704,12 @@ fn wrap_prose(group: &[Run], width: usize) -> Vec<Vec<Segment>> {
             Atom::Word(text, face) => {
                 let mut remaining = text.as_str();
                 loop {
-                    let word_len = remaining.chars().count();
-                    if current_len == 0 && word_len > width {
-                        let (chunk, rest) = split_at_char(remaining, width);
-                        append(&mut current, chunk, face);
+                    let word_cols = columns(remaining);
+                    if current_len == 0 && word_cols > width {
+                        let (chunk, rest) = split_at_columns(remaining, width);
+                        if !chunk.is_empty() {
+                            append(&mut current, chunk, face);
+                        }
                         lines.push(std::mem::take(&mut current));
                         current_len = 0;
                         pending_space = None;
@@ -704,13 +724,13 @@ fn wrap_prose(group: &[Run], width: usize) -> Vec<Vec<Segment>> {
                     } else {
                         0
                     };
-                    if current_len + sep + word_len <= width {
+                    if current_len + sep + word_cols <= width {
                         if let Some(sep_face) = pending_space.take() {
                             append(&mut current, " ", sep_face);
                             current_len += 1;
                         }
                         append(&mut current, remaining, face);
-                        current_len += word_len;
+                        current_len += word_cols;
                         pending_space = None;
                         break;
                     }
@@ -736,16 +756,21 @@ fn hard_split_group(group: &[Run], width: usize) -> Vec<Vec<Segment>> {
     if run.text.is_empty() {
         return vec![Vec::new()];
     }
-    let chars: Vec<char> = run.text.chars().collect();
-    chars
-        .chunks(width)
-        .map(|c| {
+    let mut out = Vec::new();
+    let mut remaining = run.text.as_str();
+    while !remaining.is_empty() {
+        let (chunk, rest) = split_at_columns(remaining, width);
+        out.push(if chunk.is_empty() {
+            Vec::new()
+        } else {
             vec![Segment {
-                text: c.iter().collect(),
+                text: chunk.to_string(),
                 face: run.face,
             }]
-        })
-        .collect()
+        });
+        remaining = rest;
+    }
+    out
 }
 
 /// Turn `source` into the lines a `width`-column-wide region would show.
@@ -1009,7 +1034,11 @@ mod tests {
             );
             offset += blen;
         }
-        assert_eq!(offset, paragraph.len(), "width 58: every byte accounted for");
+        assert_eq!(
+            offset,
+            paragraph.len(),
+            "width 58: every byte accounted for"
+        );
 
         let texts78: Vec<String> = lines(&paragraph, 78).iter().map(Line::text).collect();
         let expected_bytes_78 = [117usize, 117, 117, 9];
@@ -1029,7 +1058,11 @@ mod tests {
             );
             offset += blen;
         }
-        assert_eq!(offset, paragraph.len(), "width 78: every byte accounted for");
+        assert_eq!(
+            offset,
+            paragraph.len(),
+            "width 78: every byte accounted for"
+        );
     }
 
     #[test]
