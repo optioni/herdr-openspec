@@ -204,10 +204,20 @@ lowers only the total would otherwise still look compliant.
 Coverage is a floor that catches drift, not the mechanism that produces tests — the
 `tdd` schema drives RED → GREEN → REFACTOR, so tests come first by construction.
 
-`tests/manifest.rs` (run by `cargo test`, and therefore by the Test gate above) is the
-manifest/README/binary-name contract: a `herdr-plugin.toml`, `README.md`, or binary-name
-edit that drifts one against another fails it. It deliberately asserts nothing about
-`target/release/`, which `make check` never builds.
+This repository has a **contract tier**, run by `cargo test` and therefore by the Test
+gate above, with three members: `tests/manifest.rs` (the manifest/README/binary-name
+triangle — a `herdr-plugin.toml`, `README.md`, or binary-name edit that drifts one
+against another fails it, deliberately asserting nothing about `target/release/`, which
+`make check` never builds), `tests/degraded_coverage.rs` (`SPEC.md`'s degraded-states
+table bound to a named, passing proving test per row), and `tests/doc_contract.rs`
+(seven further claims — the module map, the tested-modules list, the worker-thread
+count, the MSRV, the gate-path programs, the manifest transcription, and the injected
+OpenSpec context — each bound to the repository file that determines it; see `SPEC.md`
+→ § Testing and quality gates → Doc-conformance checks). The rule all three share: **a
+documented claim with a computable second site is bound to that site inside `cargo
+test`, not left to a human re-reading it.** Durable because a future change adding a
+module, a worker thread, or a gate program will otherwise not know why its `make check`
+went red — the failure names both sides of the disagreement.
 
 `make gates` is not two scripts — it is every hygiene gate this project has ever argued
 for, extracted into its own repository file under `scripts/gates/` and composed into the
