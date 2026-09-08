@@ -17,7 +17,7 @@ and `agent-poller`'s.
 
 ### Requirement: `Dashboard::refresh` carries the live tier's state
 
-`ui::app::Refresh` SHALL carry exactly three fields:
+`ui::app::Refresh` SHALL carry exactly four fields:
 
 - `requested: bool` — set by `Action::Refresh` and by `ui::load` at startup, cleared by
   `run_loop` once it has asked the refresher for a full reload. It is the counterpart of
@@ -27,20 +27,39 @@ and `agent-poller`'s.
   unchanged `(change directory, tab)` key, which is what makes an edit to the artifact
   currently on screen visible: the cache key `artifact-content` compares does not change when
   a file's **content** does.
-- `problems: Vec<String>` — problems that outlive a reload. `live-refresh` populated it with
-  one condition, a watcher that would not start; `degraded-states` adds the two other standing
-  conditions the pane learns at startup, in this order: the configuration's key-by-key
-  fallbacks (`plugin-config`), then the `openspec` binary probe's (`openspec-binary`), then the
-  watcher's. All three share one lifetime — they are true for the whole session and no reload
-  re-derives them — which is exactly what `ChangeSet::problems` is not: everything the CLI or
-  the file walk reports rides there instead and is replaced wholesale on every adopt, which is
-  why none of these three may live there.
+- `startup: Vec<String>` — the standing conditions the pane learns **once**, at startup, in
+  causal order: the configuration's key-by-key fallbacks (`plugin-config`), then the
+  `openspec` binary probe's (`openspec-binary`), then the watcher's failure to start. Written
+  exactly once, by `run_wired` from `Collaborators::problems`, and **never** written again by
+  anything: not by `r`, not by a refresh, not by a watcher error. They are true for the whole
+  session and no reload re-derives them.
+- `problems: Vec<String>` — problems the **live** tier reports as the session runs: a
+  `FsEvents::drain` error, and a refresh worker reported stopped. Replaced wholesale by each
+  new one, never grown, since a collaborator failing on every poll must not accumulate an
+  unbounded list.
 
-`Refresh` SHALL carry exactly these three fields and no more. `degraded-states`' `file_mode`
-flag is a **`Dashboard`** field rather than a fourth one here, and that is a deliberate
+Splitting these two apart is this change's correction of a real, reachable defect.
+`degraded-states` seeded all three startup sources into `problems`, and step 3 of the loop
+below replaces `problems` **wholesale** on the first `FsEvents::drain` error — so the very
+first watcher error erases the rows naming a missing `openspec` binary and every
+configuration fallback, for the rest of the session, with nothing repopulating them. Driven
+live, two real problem rows became one. The erasing case is not hypothetical: it is exactly
+`SPEC.md`'s documented "`openspec/` is removed while the watcher runs" row, and it silently
+falsifies two other rows of the same table that promise those reasons are named. The
+wholesale replacement is deliberate and is kept; what changes is that it can no longer reach
+a value it did not produce.
+
+Both fields are what `ChangeSet::problems` is not: everything the CLI or the file walk
+reports rides there instead and is replaced wholesale on every adopt, which is why none of
+these may live there.
+
+`Refresh` SHALL carry exactly these four fields and no more. `degraded-states`' `file_mode`
+flag is a **`Dashboard`** field rather than a fifth one here, and that is a deliberate
 placement rather than an arbitrary one: `requested`, `reload`, and `problems` are all consumed
 or replaced as the session runs, while `file_mode` is decided once, at startup, and never
-moves. `dashboard-loop` carries its definition and the field count that follows from it.
+moves. `startup` is written once and never replaced, like `file_mode`, but it lives here
+because it is a **list of reasons rendered beside `problems`** and separating the two lists
+across two types would put the render order's two sources in different places. `dashboard-loop` carries its definition and the field count that follows from it.
 
 `Detail` SHALL still carry exactly **five**: `reload` deliberately lives on `Refresh` rather
 than on `Detail`, because `Dashboard` gains one field either way and putting it on `Refresh`
@@ -52,7 +71,7 @@ sentence; `dashboard-loop`'s own requirement is the single place that number liv
 requirement now defers to it rather than carrying a second copy that drifts.
 
 `Refresh` SHALL NOT implement `Default` — neither derived nor hand-written, anywhere in the
-crate — and every construction and destructuring of it SHALL name all three fields with no
+crate — and every construction and destructuring of it SHALL name all four fields with no
 `..` rest, on exactly the terms `Dashboard`, `Filter`, and `Detail` are already bound.
 
 #### Scenario: `Refresh` has no `Default` and no site elides a field
@@ -69,9 +88,31 @@ crate — and every construction and destructuring of it SHALL name all three fi
   default when the gate becomes a repository file; the landed **90**, measured at **107**, is
   superseded by that measurement
 - **AND** a compile-time companion destructures a `Dashboard` naming every one of its fields
-  with no `..`, and a `Refresh` naming all **three**, so a field added to either breaks the
+  with no `..`, and a `Refresh` naming all **four**, so a field added to either breaks the
   build at that site rather than passing a source grep that never saw it. The `Dashboard` arm
   names **thirteen** fields after `degraded-states` adds `file_mode`
+
+#### Scenario: A watcher error does not erase the startup problems
+
+- **WHEN** `run_loop` is driven over a `Dashboard` whose `refresh.startup` holds
+  `openspec binary not found on PATH` and `config.toml: archived_count not set, using 5`, with
+  an `FsEvents` double whose first `drain` returns `Err(WatchError)` and whose later drains
+  return `Ok(None)`, over a script of two timeouts then `Char('q')`
+- **THEN** `dashboard.refresh.startup` is unchanged afterwards, holding both entries in the
+  same order
+- **AND** `dashboard.refresh.problems` holds exactly one entry, the watcher's reason
+- **AND** the rendered list's interior rows 0, 1, and 2 are the two startup rows followed by
+  the watcher row, at both 120 and 60 columns — three `!`-marked rows where the behaviour
+  before this change rendered one
+
+#### Scenario: A forced refresh does not repopulate or duplicate the startup problems
+
+- **WHEN** the same dashboard is driven through a `Char('r')` press and a `Merged` result, and
+  then through a second watcher error
+- **THEN** `refresh.startup` still holds exactly its two original entries, neither duplicated
+  nor re-derived
+- **AND** `refresh.problems` still holds exactly one entry, so the live list is still replaced
+  wholesale rather than grown
 
 ### Requirement: `r` forces a full refresh and types itself while filtering
 
@@ -228,19 +269,29 @@ leave the offset past its end for more than one frame.
 once per iteration, **before** the draw:
 
 1. when `dashboard.launch.pending` is `Some`, take it — leaving `None` — and
-   `live.launcher.request(request)`;
+   `live.launcher.request(request)`, setting `dashboard.launch.in_flight` when and only when
+   the request taken was a `Request::Launch`;
 2. when `dashboard.refresh.requested` is set, `live.refresher.request(Selection::All)` and
    clear the flag;
-3. `live.fs.drain()`; on `Ok(Some(paths))`, `refresh.request(watch::invalidate(repo, &paths))`;
+3. `live.fs.drain()`; on `Ok(Some(paths))`, compute `watch::invalidate(repo, &paths)` and
+   `refresh.request(selection)` **only when the selection is not `Selection::Only` of the
+   empty set** — an empty selection invalidates nothing, and requesting one costs a full
+   `changes::from_files` directory re-walk plus an `openspec list --json` Node start, because
+   `changes::from_cli_cached` runs `list --json` before it ever consults the selection;
    on `Err(e)`, the reason replaces `dashboard.refresh.problems` wholesale — never grown, since
-   a watcher failing on every poll must not accumulate an unbounded list;
+   a watcher failing on every poll must not accumulate an unbounded list, and never touching
+   `dashboard.refresh.startup`, which the loop does not write at all;
 4. `live.refresher.take_result()`; on `Some(Files(set))` or `Some(Merged(set))`,
-   `dashboard.adopt(set)`;
+   `dashboard.adopt(set)`; on `Some(Stopped(reason))`, the reason replaces
+   `dashboard.refresh.problems` wholesale and **no** `adopt` runs — the change set on screen
+   is the last true one and replacing it with an empty set would make a dead worker look like
+   an empty repository;
 5. `live.agents.drain()`; on `Some(snapshot)`, `dashboard.agents = snapshot` — replaced
    wholesale, never merged, because a poll that found no agents means there are no agents;
-6. `live.launcher.drain()`; on `Some(outcome)`, insert `outcome.named`'s `(agent, change)` pair
+6. `live.launcher.drain()`; on `Some(outcome)`, clear `dashboard.launch.in_flight`, insert
+   `outcome.named`'s `(agent, change)` pair
    into `dashboard.agent_names.names` when it is `Some`, and replace
-   `dashboard.launch.problems` wholesale with `outcome.problem`'s zero or one entry — never
+   `dashboard.launch.problems` wholesale with `outcome.problems`' entries — never
    grown, on exactly step 3's terms, since a socket failing on every press must not accumulate
    an unbounded list;
 
@@ -332,9 +383,19 @@ three files it always meant, because the live tier then had a fourth member that
 `agent-launch` leaves the same three named while adding a second member that reaches the
 socket.
 
+`run_wired` SHALL seed `dashboard.refresh.startup` — **not** `dashboard.refresh.problems` —
+from `Collaborators::problems`, in the causal order `degraded-states`' Decision 4 mandates,
+and SHALL do so exactly once. `run_wired` SHALL additionally call
+`launch::settle(&mut *collaborators.launcher, launch::SETTLE_BUDGET)` after `run_loop`
+returns, when and only when `dashboard.launch.in_flight` is set, folding any returned
+`Outcome`'s `named` pair into `dashboard.agent_names.names` exactly as step 6 does
+(`agent-launch`). It SHALL name the constant and the function and nothing else: no clock, no
+join, no channel, so `NOBLOCK` leg 2's sweep over `src/ui/` stays green unweakened.
+
 `ui::load` SHALL produce a `Dashboard` whose `refresh` is `{ requested: true, reload: false,
-problems: [] }`, whose `agents` is `{ agents: [], reachable: false, problem: None }`, and whose
-`launch` is `{ pending: None, problems: [] }`, so the
+startup: [], problems: [] }`, whose `agents` is `{ agents: [], reachable: false, stalled:
+false, problem: None }`, and whose
+`launch` is `{ pending: None, problems: [], in_flight: false }`, so the
 CLI correction is asked for on the first iteration with no keypress, through the same step 2 the
 `r` key uses, the first agent poll goes out on the same iteration through step 5, and nothing is
 launched until a key is pressed.
@@ -375,6 +436,20 @@ not through a fourth, fifth, or sixth counter.
 - **AND** no request was made on the iterations whose `drain` returned `Ok(None)`
 - **AND** the assertion is an exact equality on the recorded request vector, so an
   implementation that requested `All` for every batch fails rather than passing
+
+#### Scenario: A batch that invalidates nothing issues no refresh
+
+- **WHEN** `run_loop` is driven over a dashboard whose repo is `/r`, with an `FsEvents` double
+  whose first `drain` returns `Ok(Some([/r/target/debug/build.log, /r/.git/index]))` — a batch
+  every path of which classifies `Outside`, so `watch::invalidate` yields `Selection::Only`
+  of the empty set — and whose later drains return `Ok(None)`, over a script of two timeouts
+  then `Char('q')`
+- **THEN** the `Refresher` double recorded exactly **one** request, the startup
+  `Selection::All`, and nothing for the batch
+- **AND** the assertion is an exact equality on the recorded request vector, so an
+  implementation that requested the empty selection records two and fails
+- **AND** `dashboard.refresh.problems` is empty: a batch that invalidates nothing is not a
+  problem, it is a non-event
 
 #### Scenario: A watcher error is recorded once and the loop continues
 
@@ -426,12 +501,39 @@ not through a fourth, fifth, or sixth counter.
 #### Scenario: An unreachable socket never becomes a problem row
 
 - **WHEN** `run_loop` is driven with an `AgentPoll` double whose first `drain` returns
-  `Some(AgentSnapshot { agents: [], reachable: false, problem: Some("herdr agent list exited 1: server_not_running") })`
+  `Some(AgentSnapshot { agents: [], reachable: false, stalled: false, problem: Some("herdr agent list exited 1: server_not_running") })`
 - **THEN** `dashboard.refresh.problems` is still empty and no `!`-marked row appears at either
   width
 - **AND** `dashboard.agents.problem` carries that text, so the reason is available to a later
   change without being rendered by this one
 - **AND** `run_loop` returns `Ok`: an unreachable socket is never a `LoopError`
+
+#### Scenario: A stalled poller becomes a problem row and withdraws the badges
+
+- **WHEN** `run_loop` is driven at 120x20 and 60x20 over a dashboard whose visible
+  `2fa-support` row carries a `working` badge from an earlier snapshot, with an `AgentPoll`
+  double whose next `drain` returns
+  `Some(AgentSnapshot { agents: [], reachable: false, stalled: true, problem: Some("herdr agent list has not answered in 5s") })`,
+  over a script of one timeout then `Char('q')`
+- **THEN** an `!`-marked row carrying that text is rendered in the list region at both widths
+- **AND** the `2fa-support` row no longer carries a badge, because the snapshot replaced the
+  agents wholesale
+- **AND** `run_loop` returns `Ok`, and `dashboard.refresh.problems` and
+  `dashboard.refresh.startup` are both untouched: the stall row is sourced from
+  `dashboard.agents`, not copied into either problem list
+
+#### Scenario: A stopped refresh worker becomes a problem row and keeps the list
+
+- **WHEN** `run_loop` is driven at 120x20 and 60x20 over a dashboard holding two active
+  changes, with a `Refresher` double whose first `take_result` returns
+  `Some(RefreshResult::Stopped("refresh worker stopped"))` and whose later results are `None`,
+  over a script of two timeouts then `Char('q')`
+- **THEN** `dashboard.refresh.problems` holds exactly that one entry and it is rendered as an
+  `!`-marked row at both widths
+- **AND** `dashboard.changes` still holds both changes: no `adopt` ran, so a dead worker does
+  not empty the list
+- **AND** `run_loop` returns `Ok`, and a second `Stopped` on a later iteration would replace
+  rather than grow the entry
 
 #### Scenario: An inert live tier leaves the loop exactly as it was
 
@@ -453,11 +555,13 @@ not through a fourth, fifth, or sixth counter.
   `Dashboard` whose `agents.reachable` is true and whose visible list holds `2fa-support`, and
   a script of a Press of `Char('a')`, then two `Ok(None)` timeouts, then `Char('q')`; the double
   answers its **second** `drain` with
-  `Outcome { named: Some(("c-2fa-support", "2fa-support")), problem: None }`
+  `Outcome { named: Some(("c-2fa-support", "2fa-support")), problems: [] }`
 - **THEN** the double recorded exactly **one** request,
   `Request::Launch { change: "2fa-support", agent: "c-2fa-support", intent: Apply }`
 - **AND** `dashboard.agent_names.names` afterwards holds `c-2fa-support -> 2fa-support`, and
   `dashboard.launch.problems` is empty
+- **AND** `dashboard.launch.in_flight` was `true` on the iterations between the hand-over and
+  that second `drain`, and is `false` afterwards
 - **AND** the double recorded exactly one `drain` call per iteration, so the loop neither drains
   twice per frame nor skips a frame
 - **AND** the exact equality on the recorded request vector is what makes this discriminating:
@@ -467,7 +571,7 @@ not through a fourth, fifth, or sixth counter.
 #### Scenario: A launch failure is recorded once and the loop continues
 
 - **WHEN** a `Launcher` double answers its first three `drain` calls with
-  `Outcome { named: None, problem: Some("herdr pane split exited with code 1: no space") }` and
+  `Outcome { named: None, problems: ["herdr pane split exited with code 1: no space"] }` and
   `None` thereafter, over a script of four timeouts then `Char('q')`
 - **THEN** `run_loop` returns `Ok(LoopSummary { frames: 5, polls: 5 })` — a failed launch is
   never a `LoopError` and never ends the loop
@@ -575,12 +679,31 @@ The requirement's name is kept verbatim from `live-refresh` because a delta's re
 headers are its merge key; its subject is unchanged and only the number of problem sources
 moves.
 
-`ui::list::rows` SHALL emit one `RowKind::Problem` row for each entry of
-`Dashboard::launch.problems`, in order, **followed** by one for each entry of
-`Dashboard::refresh.problems`, **followed** by one for each entry of
-`ChangeSet::problems`, before every other row. All three use the existing `! `-prefixed grammar
+`ui::list::rows` SHALL emit one `RowKind::Problem` row for each of the following, in this
+order, before every other row:
+
+1. each entry of `Dashboard::launch.problems`;
+2. `Dashboard::agents.problem` when — and only when — `Dashboard::agents.stalled` is set;
+3. each entry of `Dashboard::refresh.startup`;
+4. each entry of `Dashboard::refresh.problems`;
+5. each entry of `ChangeSet::problems`.
+
+All five use the existing `! `-prefixed grammar
 `change-rows` already specifies, truncated with `…` at the interior width by the same
 `pad_or_truncate_right` every other row uses.
+
+A **stalled** agent snapshot's problem is rendered and a non-stalled one's is not, which is
+the whole purpose of `agent-poller`'s `stalled` flag. An unreachable or erroring socket stays
+silent — it is the documented standalone-TUI state — while a socket that has stopped
+answering entirely is the one case where the pane is showing information it can no longer
+stand behind, and saying nothing there is how a reader concludes stale badges are current
+ones. It sits directly below the launch problems because, like them, it explains why a key
+the reader just pressed did nothing.
+
+`refresh.startup` precedes `refresh.problems` because it is the older and more general fact:
+a missing `openspec` binary explains the whole session, a watcher error explains this moment.
+This ordering is what makes the split of the two fields visible — before it, the first
+watcher error erased the startup rows entirely.
 
 Launch problems come first — `agent-launch`'s addition — because they are the only rows in the
 list that answer a key the reader has just pressed. A watcher that would not start is a
@@ -601,7 +724,33 @@ tree on every cycle and may vanish on the next one.
 The `repo.is_none()` early return SHALL be unchanged. A dashboard with no repository starts no
 watcher, so it can carry no refresh problem, and — with `launch::none()` as its launcher and no
 selected change for `launch::decide` to act on — no launch problem either; the no-repository
-block stays the three rows `change-rows` specifies.
+block stays the three rows `change-rows` specifies. A dashboard with no repository also polls
+no agents through `agents::none()`, so it can carry no stall row either, and its
+`refresh.startup` can hold only the configuration and probe fallbacks — never a watcher
+problem, since no watcher was started.
+
+#### Scenario: All five problem sources render in their specified order
+
+- **WHEN** a `Dashboard` carries one `launch.problems` entry `launch failed`, an
+  `agents` snapshot with `stalled: true` and `problem: Some("herdr agent list has not answered
+  in 5s")`, two `refresh.startup` entries `openspec binary not found` and
+  `config.toml: archived_count not set`, one `refresh.problems` entry `watch failed`, and one
+  `changes.problems` entry `openspec/changes unreadable`, rendered at 120x20 and 60x20
+- **THEN** interior rows 0 through 5 are, in order, `launch failed`, the stall reason, the two
+  startup reasons in the order they were seeded, `watch failed`, and
+  `openspec/changes unreadable`, and row 6 is the first change row
+- **AND** all six carry `RowKind::Problem` and none is addressable by `selected`
+- **AND** each is exactly the interior width — 38 columns at 120 and 58 at 60 — so the
+  ordering assertion is made at both widths rather than only at the wide one
+
+#### Scenario: A non-stalled agent problem draws no row
+
+- **WHEN** the same dashboard is rendered with the snapshot's `stalled` set to `false`, its
+  `problem` unchanged
+- **THEN** the stall row is absent and the remaining five rows shift up by one, byte-identical
+  to the same dashboard with an empty `agents.problem`
+- **AND** this is the documented silent standalone-TUI state, so an unreachable socket still
+  costs no row
 
 #### Scenario: A watch problem is the list's first row
 
@@ -649,3 +798,50 @@ block stays the three rows `change-rows` specifies.
   truncation is a width branch rather than unconditional
 - **AND** the row carries no badge cell and is not addressable by `selected`, whatever
   `attribution().badges` holds
+
+### Requirement: The per-frame artifact read is an accepted, bounded cost
+
+`run_loop` calls `Dashboard::sync_detail(read)` before every draw, and the production reader
+is `std::fs::read_to_string`. This is the one genuine blocking filesystem call left on the
+render path, and this requirement exists so the decision to keep it is recorded rather than
+discovered by a later reader as an oversight.
+
+The read SHALL remain on the render path, and it SHALL remain bounded by the cache
+`artifact-content` already specifies: `sync_detail` resolves content once per
+`(change directory, tab)` key and re-reads only when that key changes or when
+`refresh.reload` is set by an `adopt`. In steady state — a held `j`, an idle pane, a
+scrolling reader — no read happens at all, and the frame costs nothing.
+
+A read therefore happens on exactly three occasions: a tab switch, a change selection that
+moves the detail region, and the first frame after a refresh is adopted. Each is a direct
+consequence of an action the user just took or of new content arriving, each reads one
+artifact file, and each is the frame whose whole purpose is to show that file. Moving the
+read to the refresh worker would buy a smoother frame on a slow filesystem at the cost of a
+fourth request/response protocol, a second cache with its own invalidation, and a tab switch
+that renders empty for one frame before filling in — a worse pane in the common case to
+protect the rare one.
+
+This SHALL be recorded as a **deliberate** decision and SHALL NOT be treated as a violation
+of "the render path blocks on nothing but the terminal", whose subject is the four background
+collaborators. `AGENTS.md` and `SPEC.md` SHALL say so explicitly, so the exception is one
+sentence a reader can find rather than an inconsistency they must reconstruct.
+
+The cache SHALL be proved to hold, since it is the entire basis of the acceptance: an
+implementation that re-read on every frame would satisfy every rendering assertion in this
+capability while stalling the loop on every frame of a held key.
+
+#### Scenario: A held key causes no read
+
+- **WHEN** `run_loop` is driven at 120x20 and 60x20 over a counting reader with a script of
+  ten `Char('j')` presses at the detail route on a change whose selected tab does not change
+- **THEN** the reader was called exactly **once** across all ten frames
+- **AND** the rendered content is identical on every frame, so the cache served every frame
+  after the first
+
+#### Scenario: A tab switch and an adopted refresh each cause exactly one read
+
+- **WHEN** the same drive presses `]` once, then takes a `Merged` result on a later iteration
+- **THEN** the counting reader was called exactly twice more: once for the new tab, once for
+  the adopted set's forced `reload`
+- **AND** neither call happened on an iteration that changed neither the key nor `reload`, so
+  the read is caused by the event and not by the frame

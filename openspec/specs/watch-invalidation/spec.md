@@ -76,9 +76,23 @@ wrong `Outside` would silently stop the pane updating.
 `watch::invalidate(repo: &Path, paths: &[PathBuf]) -> Selection` SHALL fold a batch:
 `Selection::All` when any path classifies to `Repository` or `Archived`, otherwise
 `Selection::Only` of the `Change` names, and `Selection::Only` of the empty set when every
-path is `Outside`. `Only(empty)` is meaningful and is not the same as doing nothing — the
-worker still re-reads files and still runs `openspec list --json`, which is how a change
-appearing or vanishing is noticed.
+path is `Outside`.
+
+`Only(empty)` SHALL mean **nothing to do**, and the loop SHALL issue no refresh request for
+it (`live-updates` → "The loop drives the live tier without ever waiting on it", step 3).
+This reverses the previous reading, and the reason is that the previous reading's
+justification no longer holds: it said the worker "still re-reads files and still runs
+`openspec list --json`, which is how a change appearing or vanishing is noticed" — but a
+change appearing or vanishing classifies as `Repository`, never as `Outside`, so an
+all-`Outside` batch is by construction a batch that invalidates nothing. With the watch now
+rooted at `<repo>/openspec` such a batch should not arrive at all; the short-circuit is the
+second line of defence, and it is what stops a batch of build artefacts from spawning a Node
+process per debounce window if one ever does.
+
+`invalidate` and `classify` SHALL remain unchanged in signature and in return value: the
+short-circuit is the **caller's**, so both stay pure, total functions asserted on their own
+return values, and `Selection::Only(∅)` remains a value the worker handles correctly if it
+is ever handed one directly.
 
 Neither function SHALL touch the filesystem, canonicalize, or read the clock: both are pure
 functions of their arguments, so a path that no longer exists classifies exactly as one that
@@ -321,9 +335,27 @@ and then `pending_in` in the same iteration, so the value is at most one stateme
 
 Exactly one real implementation SHALL exist, holding a `notify::RecommendedWatcher`, the
 `std::sync::mpsc::Receiver` it sends to, and a `Debounce`. It SHALL be constructed through
-`watch::start(root: &Path) -> (Box<dyn FsEvents>, Vec<String>)`, which SHALL watch `root`
-recursively and SHALL NOT return a `Result`: a watcher that will not start is a degraded
-state, not a failure to open the pane.
+`watch::start(watch_root: &Path) -> (Box<dyn FsEvents>, Vec<String>)`, which SHALL watch
+`watch_root` recursively and SHALL NOT return a `Result`: a watcher that will not start is a
+degraded state, not a failure to open the pane.
+
+**The composition root SHALL pass `<repo>/openspec`, never the repository root.**
+`SPEC.md` → Refresh specifies "one recursive watch on `openspec/`"; passing the repository
+root instead makes the watch recursive over `target/`, `.git/`, `node_modules/`, and every
+other directory in the tree. The cost is not theoretical:
+
+- every batch of purely-outside touches classifies to `Selection::Only` of the empty set,
+  and the loop's step 3 still issues a refresh for it, which spawns `openspec list --json`
+  before the selection is ever consulted — so an ordinary `cargo build` in the watched
+  repository starts a Node process every debounce window for the whole build, plus a full
+  `changes::from_files` directory re-walk each time;
+- on Linux, a recursive `inotify` watch consumes one descriptor per directory, so a large
+  `target/` can exhaust `max_user_watches` and the watch fails outright — a degraded pane
+  caused entirely by watching directories the plugin never reads.
+
+`watch::start` SHALL NOT perform the join itself. It watches exactly the path it is given, so
+the module stays a watcher rather than acquiring knowledge of the repository layout, and its
+problem string keeps naming the path actually watched.
 
 `watch::none()` SHALL return the inert implementation — `drain` always `Ok(None)`,
 `pending_in` always `None` — which is what `start` returns on failure and what `ui::run`
@@ -365,6 +397,34 @@ included — a view test reading a clock is precisely the timing flake this desi
   producing the event it waits for
 - **AND** the whole scratch tree is byte-identical before and after, proving a watch is a read
 
+#### Scenario: The composition root watches `openspec/`, not the repository root
+
+- **WHEN** `ui::start_collaborators` is driven over a scratch repository root that exists but
+  deliberately holds **no** `openspec/` subdirectory, with the real `watch::start` — not a
+  recording double: `NOCLI-SHELL`'s sibling mechanical check for this task (`grep -rn
+  'watch::start(' src/ | wc -l` staying at exactly 3) would break the moment a double needed a
+  seventh `start_collaborators` parameter to receive it, and `NOSLEEP` bans a real sleep
+  anywhere under `src/ui`, so a live batch cannot be proven from this composition-root test
+  either way
+- **THEN** the returned `problems` name `<repo>/openspec` — proof that the watch was rooted
+  there rather than at the repository root, since a root that exists but holds no `openspec/`
+  subdirectory watches successfully and reports nothing, while `<repo>/openspec` itself does
+  not exist and so fails immediately, on exactly `watch::start_on_a_missing_path_degrades_and_
+  names_the_reason`'s already-proven terms
+- **AND** the live half — that a write under a sibling `target/` never reaches the debounce
+  while one under `openspec/` does — is proven separately, deterministically, and with no
+  wall-clock-bounded negative assertion, by the next scenario below
+  (`watch::a_write_outside_openspec_produces_no_batch`)
+
+#### Scenario: A write outside `openspec/` produces no batch
+
+- **WHEN** a real watcher is started on `<scratch>/openspec`, a file is written at
+  `<scratch>/target/x.o`, and `drain` is polled for a bounded window
+- **THEN** no poll returns `Ok(Some(_))` for that write
+- **AND** a subsequent write to `<scratch>/openspec/changes/alpha/tasks.md` **does** reach a
+  batch within the same deadline-polled loop, so the negative half is bounded by a positive
+  control rather than by elapsed time alone
+
 #### Scenario: The inert watcher never yields
 
 - **WHEN** `watch::none()`'s `drain` and `pending_in` are called ten times each
@@ -381,7 +441,8 @@ included — a view test reading a clock is precisely the timing flake this desi
   read failure, and carries no entry on `ChangeSet::problems`
 - **AND** the loop keeps drawing regardless: a `drain` returning `Err(WatchError)` is recorded
   on `refresh.problems` instead — the pane's actual signal that something is wrong — rendered
-  as the list region's leading `!`-marked row, and never becomes a `LoopError`, so no frame is
+  as the list region's leading `!`-marked row **below** the startup problems `live-updates`
+  now holds on their own field, and never becomes a `LoopError`, so no frame is
   skipped. That clause is verified **deterministically**, by a `ScriptedFs` whose `drain`
   returns `Err`, in `live-updates`'s "A watcher error is recorded once and the loop continues"
   — **not** by opening a real watcher on a removed tree and draining it for some elapsed

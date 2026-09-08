@@ -160,10 +160,30 @@ own schema marks required, so its absence is an ordinary payload, not a fault; b
 whose working directory is unknown cannot be shown to be in this repository, and counting it
 would be a guess.
 
-Both sides of the comparison are canonical in production and SHALL NOT be canonicalized here:
-`resolve::find_repo` canonicalizes the root it returns, and Herdr reports the operating
-system's own working directory for the pane. `attribute` performs no filesystem I/O, so it
-cannot canonicalize either side without breaking that.
+Both sides of the comparison SHALL be canonical by the time they reach `attribute`, and
+`attribute` SHALL NOT canonicalize either: it performs no filesystem I/O, so it cannot.
+`resolve::find_repo` already canonicalizes the root it returns. Herdr, however, reports the
+working directory **verbatim as the pane process was given it**, which is not canonical
+whenever the repository is reached through a symbolic link — `/tmp` resolving to
+`/private/tmp` on macOS, a symlinked home directory, a path under `/Volumes`. In that state
+the component-wise prefix test fails for **every** agent, and because the scope test precedes
+the unattributed count, the agents are not even reported as a number: every badge and the
+footer count vanish with no problem row and no other signal.
+
+Canonicalization SHALL therefore happen once, on the poller's own side of the seam, before a
+snapshot reaches `attribute`: `agents::AgentSnapshot`'s agents SHALL carry a `cwd` that has
+been passed through the same canonicalizing step `resolve::find_repo` applies to the root.
+The step SHALL be an injected `&dyn Fn(&Path) -> Option<PathBuf>` on exactly
+`config::env_lookup`'s and `resolve::openspec_bin`'s npm-hook terms, so the rule is driven by
+a test without a real symlink, and its one production binding SHALL live outside `src/ui/`
+alongside the poller. A path that cannot be canonicalized — it no longer exists, or the
+process cannot resolve it — SHALL be kept **verbatim** rather than dropped: a stale directory
+is still better evidence than none, and dropping it would reintroduce the same silent
+disappearance from the other direction.
+
+`attribute` SHALL remain a pure, total function performing no filesystem I/O, and its
+signature SHALL be unchanged: the canonicalization is a property of the values it is handed,
+never of the function.
 
 #### Scenario: An agent in another repository is neither badged nor counted
 
@@ -201,6 +221,30 @@ cannot canonicalize either side without breaking that.
 - **THEN** `badges` is empty and `unattributed` is `0`
 - **AND** nothing panics: a pane that never found a repository has no scope to attribute within,
   and its list has no rows to badge
+
+#### Scenario: A symlinked repository path still badges its agents
+
+- **WHEN** the poller's canonicalizing hook is a test closure mapping `/tmp/repo` to
+  `/private/tmp/repo` and every other path to itself, Herdr reports one `Working` agent whose
+  `cwd` is `/tmp/repo` and whose `name` is `Some("add-auth")`, and the resolved root is the
+  canonical `/private/tmp/repo` with `change_names` `["add-auth"]`
+- **THEN** the snapshot reaching `attribute` carries `cwd` `/private/tmp/repo`, and `badges` is
+  `{"add-auth": Working}`
+- **AND** without the canonicalizing step the same fixture yields empty `badges` **and**
+  `unattributed` `0` — the whole-session disappearance this scenario exists to catch — so the
+  test is discriminating in both directions
+- **AND** the hook is an injected closure, so no symbolic link is created on disk and the
+  scenario runs identically on both supported platforms
+
+#### Scenario: An unresolvable working directory is kept verbatim, not dropped
+
+- **WHEN** the canonicalizing hook returns `None` for an agent's `cwd` `/repo/gone`, the
+  resolved root is `/repo`, and `change_names` is `[]`
+- **THEN** the snapshot carries `cwd` `/repo/gone` unchanged and the agent is counted:
+  `unattributed` is `1`
+- **AND** an agent whose directory has since been deleted is therefore still reported as a
+  number rather than silently vanishing, which is the same failure this requirement's
+  canonicalization exists to remove
 
 ### Requirement: Tier 1 resolves an agent name through the plugin-local mapping
 
