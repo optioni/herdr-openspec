@@ -113,11 +113,11 @@ grep -l 'python3' scripts/gates/* | wc -l
 (`deps.sh detailwidths.sh gate-mech1.py listwidths.sh mdwidths.sh nodefault-ui.sh nosleep.sh
 taskseam.sh taskwidths.sh widths.sh`). **RED** on `README.md`.
 
-- [ ] 5.1 RED: Write `gate_programs_are_documented` and `gate_script_interpreters_are_documented` over the real files, plus `guard_block_yields_no_program`, `quoted_assignment_is_one_token`, `new_gate_program_is_caught`, and `empty_program_set_fails` over synthetic `Makefile` inputs. The extractor implements design.md → Decision 7's six steps exactly; the first two synthetic inputs carry the real shapes from the `lint:`/`coverage:` `@if … fi` guards and from `gates:` line 35's quoted `ENTRY=` value. Confirm the real-file tests fail naming `python3` and `README.md`, and that neither `if`, `fi`, nor `fn` is ever reported as a program.
-- [ ] 5.2 GREEN: Add `python3` to `README.md` → Development as a prerequisite and name the hygiene-gate tier in its description of `make check`. In `SPEC.md`, add `python3` as a **new sentence after** the "Two one-time setup steps" paragraph (`SPEC.md:911-913`), leaving that paragraph's own two-step count intact and editing nothing else in § Gates (design.md → Boundaries).
-- [ ] 5.3 CHECK: Confirm this group edited no line of § Gates' table or gate count: `git diff -U0 SPEC.md | grep -c '^[+-].*| Format \|^[+-].*all four in order\|^[+-].*| Coverage '` returns `0`.
-- [ ] 5.4 REFACTOR: State that no refactor was needed, or lift the word-boundary document matcher shared with group 4.
-- [ ] 5.5 Run `cargo test --test doc_contract` — green, no regressions. Commit.
+- [x] 5.1 RED: Write `gate_programs_are_documented` and `gate_script_interpreters_are_documented` over the real files, plus `guard_block_yields_no_program`, `quoted_assignment_is_one_token`, `new_gate_program_is_caught`, and `empty_program_set_fails` over synthetic `Makefile` inputs. The extractor implements design.md → Decision 7's six steps exactly; the first two synthetic inputs carry the real shapes from the `lint:`/`coverage:` `@if … fi` guards and from `gates:` line 35's quoted `ENTRY=` value. Confirm the real-file tests fail naming `python3` and `README.md`, and that neither `if`, `fi`, nor `fn` is ever reported as a program.
+- [x] 5.2 GREEN: Add `python3` to `README.md` → Development as a prerequisite and name the hygiene-gate tier in its description of `make check`. In `SPEC.md`, add `python3` as a **new sentence after** the "Two one-time setup steps" paragraph (`SPEC.md:911-913`), leaving that paragraph's own two-step count intact and editing nothing else in § Gates (design.md → Boundaries).
+- [x] 5.3 CHECK: Confirm this group edited no line of § Gates' table or gate count: `git diff -U0 SPEC.md | grep -c '^[+-].*| Format \|^[+-].*all four in order\|^[+-].*| Coverage '` returns `0`.
+- [x] 5.4 REFACTOR: State that no refactor was needed, or lift the word-boundary document matcher shared with group 4.
+- [x] 5.5 Run `cargo test --test doc_contract` — green, no regressions. Commit.
 
 ## 6. `SPEC.md`'s manifest transcription is bound to the manifest
 <!-- kind: behavior -->
