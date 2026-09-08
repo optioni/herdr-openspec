@@ -133,7 +133,8 @@ Important files:
 
 ## Environment
 
-- **Rust** stable (1.91+ at time of writing). Two one-time components:
+- **Rust** — `Cargo.toml`'s `rust-version = "1.88"` is the supported floor; the
+  reference machine runs 1.91. Two one-time components:
   `rustup component add clippy` and `cargo install cargo-llvm-cov`.
 - **python3** — required by `make check`: `scripts/gates/deps.sh` parses `cargo
   metadata`'s JSON through it. Present on both GitHub runners and on the reference

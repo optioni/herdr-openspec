@@ -92,7 +92,8 @@ itself as being in file mode.
 
 ## Development
 
-Requires Rust, plus two one-time components:
+Requires Rust — `Cargo.toml`'s `rust-version = "1.88"` is the supported floor
+— plus two one-time components:
 
 ```sh
 rustup component add clippy
