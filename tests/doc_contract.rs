@@ -235,6 +235,86 @@ fn absent_heading() {
     );
 }
 
+/// Return the subset of `declared` that does not appear in `section_text` as a `<name>::`
+/// token. A bare mention of the module name with no trailing `::` does not satisfy the leg
+/// (`specs/doc-conformance/spec.md` -> "Every public module is named in the tested-modules
+/// list"). Returned as a `BTreeSet` so a failure names every missing module, sorted, rather
+/// than only the first one a `grep -c`-shaped check would happen to count.
+fn missing_tested_modules(section_text: &str, declared: &BTreeSet<String>) -> BTreeSet<String> {
+    declared
+        .iter()
+        .filter(|name| !section_text.contains(&format!("{name}::")))
+        .cloned()
+        .collect()
+}
+
+#[test]
+fn tested_modules_names_every_module() {
+    let lib_rs = read_doc(&manifest_dir().join("src/lib.rs")).expect("read src/lib.rs");
+    let spec_md = read_doc(&manifest_dir().join("SPEC.md")).expect("read SPEC.md");
+
+    let declared = pub_mod_names(&lib_rs);
+    let tested_section = section(&spec_md, "### Unit-tested modules")
+        .expect("find the '### Unit-tested modules' section");
+
+    let missing = missing_tested_modules(tested_section, &declared);
+    assert!(
+        missing.is_empty(),
+        "modules declared `pub mod` in src/lib.rs but not named as `<name>::` in SPEC.md's \
+         '### Unit-tested modules' section: {missing:?}"
+    );
+}
+
+#[test]
+fn tested_modules_missing() {
+    let declared: BTreeSet<String> = ["config", "state", "launch"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+    let section_text = "\
+### Unit-tested modules
+
+- `config::load` reads configuration
+- `state::read` reads the mapping
+
+### Next section
+";
+    let missing = missing_tested_modules(section_text, &declared);
+    let expected: BTreeSet<String> = ["launch".to_string()].into_iter().collect();
+    assert_eq!(
+        missing, expected,
+        "expected only `launch` to be reported missing"
+    );
+}
+
+#[test]
+fn tested_modules_scoped_to_section() {
+    let declared: BTreeSet<String> = ["open"].iter().map(|s| s.to_string()).collect();
+    // `open::` is named above the heading and again after the next heading, but never
+    // inside the tested-modules section itself. A whole-file grep would wrongly pass this.
+    let text = "\
+## Somewhere else entirely
+
+`open::context` reads the invocation context.
+
+### Unit-tested modules
+
+- `config::load` reads configuration
+
+### Next section
+
+`open::run` drives the whole subcommand.
+";
+    let tested_section = section(text, "### Unit-tested modules")
+        .expect("find the '### Unit-tested modules' section");
+    let missing = missing_tested_modules(tested_section, &declared);
+    let expected: BTreeSet<String> = ["open".to_string()].into_iter().collect();
+    assert_eq!(
+        missing, expected,
+        "a mention outside the section must not satisfy the leg"
+    );
+}
+
 #[test]
 fn missing_document() {
     let path = manifest_dir().join("this-file-does-not-exist-doc-contract.md");
