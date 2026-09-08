@@ -183,10 +183,10 @@ in**. The sub-legs and directions that were green at HEAD prove nothing without 
 defect, and each control below names a direction no group already exercised against real
 files.
 
-- [ ] 9.1 CHECK: Plant each defect in the real files in turn, observe the named test go red, revert, observe green — (a) the **orphan direction**: add a `| \`zzz\` | … |` row to `SPEC.md`'s Module map with no `pub mod zzz;` in `src/lib.rs` → `module_map_matches_lib_rs` red reporting the row as mapped but undeclared; (b) change one `command` value inside `SPEC.md`'s manifest block → `spec_manifest_block_matches` red on **value** equality while `spec_manifest_block_order_matches` stays green; (c) change `Cargo.toml`'s `rust-version` to `1.92` → `msrv_is_documented` red; (d) delete the `python3` line from the `Makefile`'s `gates:` recipe → `gate_script_interpreters_are_documented` stays red via the `scripts/gates/` sub-leg.
-- [ ] 9.2 CHECK: Plant the **`AGENTS.md` direction** of leg 5, which no group drove — remove `python3` from `AGENTS.md` → Environment → `gate_programs_are_documented` red naming `AGENTS.md`, not only `README.md`. Revert.
-- [ ] 9.3 CHANGE: Record each planted defect, the exact failing assertion line, and the revert in `openspec/changes/doc-conformance/notes/planted-defects.md`, following `degraded-states`' file of the same name.
-- [ ] 9.4 VERIFY: `git status --porcelain` is clean of every plant, `git diff` against the baseline SHA from task 1.1 shows only intended edits, and `cargo test --test doc_contract` is green. Commit.
+- [x] 9.1 CHECK: Plant each defect in the real files in turn, observe the named test go red, revert, observe green — (a) the **orphan direction**: add a `| \`zzz\` | … |` row to `SPEC.md`'s Module map with no `pub mod zzz;` in `src/lib.rs` → `module_map_matches_lib_rs` red reporting the row as mapped but undeclared; (b) change one `command` value inside `SPEC.md`'s manifest block → `spec_manifest_block_matches` red on **value** equality while `spec_manifest_block_order_matches` stays green; (c) change `Cargo.toml`'s `rust-version` to `1.92` → `msrv_is_documented` red; (d) delete the `python3` line from the `Makefile`'s `gates:` recipe → `gate_script_interpreters_are_documented` stays red via the `scripts/gates/` sub-leg.
+- [x] 9.2 CHECK: Plant the **`AGENTS.md` direction** of leg 5, which no group drove — remove `python3` from `AGENTS.md` → Environment → `gate_programs_are_documented` red naming `AGENTS.md`, not only `README.md`. Revert.
+- [x] 9.3 CHANGE: Record each planted defect, the exact failing assertion line, and the revert in `openspec/changes/doc-conformance/notes/planted-defects.md`, following `degraded-states`' file of the same name.
+- [x] 9.4 VERIFY: `git status --porcelain` is clean of every plant, `git diff` against the baseline SHA from task 1.1 shows only intended edits, and `cargo test --test doc_contract` is green. Commit.
 
 ## 10. Change Review
 <!-- kind: operational -->
