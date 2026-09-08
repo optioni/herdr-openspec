@@ -98,31 +98,31 @@ collaborator is replaced — the test copies the real tree.
 ## 1. `ui::palette` — the role table
 <!-- kind: behavior -->
 
-- [ ] 1.1 RED: Write failing tests in `src/ui/palette.rs`, iterating a role list built from an
+- [x] 1.1 RED: Write failing tests in `src/ui/palette.rs`, iterating a role list built from an
       **exhaustive** `match role { … }` so a `Role` added later fails to compile until it is
       covered, for: *The palette answers every role
       with a `Style`*, *Each role's modifier set is exactly the table above*, *The coloured set
       is exactly the table above*, and *An out-of-range heading level does not panic*. Each
       enumerates every `Role` variant, the five `AgentStatus` values, and heading levels 1
       through 6, so no arm is asserted by a hand-listed subset.
-- [ ] 1.2 GREEN: Add `src/ui/palette.rs` — `Role`, `BadgeCell`-free, and
+- [x] 1.2 GREEN: Add `src/ui/palette.rs` — `Role`, `BadgeCell`-free, and
       `pub fn style(Role) -> Style` — per `specs/view-palette/spec.md`'s three tables, and
       declare `pub mod palette;` in `src/ui/mod.rs`. `Heading(l)` for `l` outside `1..=6`
       returns `Heading(6)`'s style.
-- [ ] 1.3 CHANGE: Add `src/ui/palette.rs` to `PURE` in `scripts/gates/noio-view.sh` (its
+- [x] 1.3 CHANGE: Add `src/ui/palette.rs` to `PURE` in `scripts/gates/noio-view.sh` (its
       closing message becomes `9 pure files`, and its header comment saying "the set is EIGHT
       files rather than seven" is rewritten) and to `PURE` in `scripts/gates/colwidth.sh` (its
       closing message becomes `eight pure view files`). This gate edit sits here rather than in
       group 6 because `palette.sh`'s third leg fails until it lands, which would leave
       `make gates` red across groups 2 to 5. Verify with `make gates` — both lines report the
       new counts.
-- [ ] 1.4 VERIFY: `/bin/sh scripts/gates/palette.sh` now exits 0, and
+- [x] 1.4 VERIFY: `/bin/sh scripts/gates/palette.sh` now exits 0, and
       `cargo test --test gate_controls` is green — all four of its tests, the
       `gate_controls_catch_their_plants` loop included. The outer-loop RED from group 0 is
       closed by the module existing, which is what makes it an outer loop.
-- [ ] 1.5 REFACTOR: None expected — the module is one `match`. State so explicitly if nothing
+- [x] 1.5 REFACTOR: None expected — the module is one `match`. State so explicitly if nothing
       is extracted.
-- [ ] 1.6 Run the group tests — `cargo test --lib ui::palette::` and `make gates` — no
+- [x] 1.6 Run the group tests — `cargo test --lib ui::palette::` and `make gates` — no
       regressions.
 
 ## 2. `ui::view` takes every style from the palette

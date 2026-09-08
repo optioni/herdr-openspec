@@ -1,6 +1,9 @@
 # NOIO-VIEW — the PURE files of the render seam name no I/O API at all.
-# Carried forward from detail-view with ONE deliberate edit, recorded in design.md ->
-# Boundaries: PURE gains src/ui/tasks.rs, so the set is EIGHT files rather than seven.
+# Carried forward from detail-view, which added src/ui/tasks.rs, and then from
+# color-palette (design.md -> Boundaries), which adds the colour table: PURE is NINE files
+# rather than eight. The palette belongs in the swept set rather than exempted from it —
+# it is a constant table, so it never reads NO_COLOR, never probes the terminal, and never
+# branches on a colour capability, and this is the gate that proves it.
 # Three files under src/ui/ are still deliberately NOT searched, each for a stated reason:
 # mod.rs holds ui::load, ui::read_artifact, and ui::run; terminal.rs holds the terminal seam;
 # and event.rs holds CrosstermEvents, which reads the real event stream. Do not "fix" the
@@ -17,7 +20,7 @@
 # the [ -f ] guard doing its job, not a defect: without it, a renamed or deleted module makes
 # the check report a clean tree. Task 0.3 records the expected failure; task 4.4 is its first
 # green run.
-PURE="src/ui/app.rs src/ui/detail.rs src/ui/layout.rs src/ui/list.rs src/ui/markdown.rs src/ui/tasks.rs src/ui/view.rs src/ui/driver.rs"
+PURE="src/ui/app.rs src/ui/detail.rs src/ui/layout.rs src/ui/list.rs src/ui/markdown.rs src/ui/palette.rs src/ui/tasks.rs src/ui/view.rs src/ui/driver.rs"
 # `tasks::read` is NEW in the pattern, and it is the second deliberate edit this change makes
 # to this block. crate::tasks::read is the filesystem edge of the module ui::tasks renders
 # from, and it matches NONE of the other alternatives - not `std::fs` (the call site writes
@@ -44,4 +47,4 @@ grep -qE 'std::io' src/ui/terminal.rs \
 hits=$(grep -nE "$IO_RE" $PURE || true)
 [ -z "$hits" ] || { echo "NOIO-VIEW FAIL: I/O API in a pure view file:" >&2
                     echo "$hits" >&2; exit 1; }
-echo "NOIO-VIEW OK: 8 pure files carry no I/O API; positive control matched"
+echo "NOIO-VIEW OK: 9 pure files carry no I/O API; positive control matched"

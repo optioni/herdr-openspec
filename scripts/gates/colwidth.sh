@@ -1,6 +1,6 @@
 #!/bin/sh
 set -u
-PURE="src/ui/app.rs src/ui/detail.rs src/ui/list.rs src/ui/markdown.rs src/ui/tasks.rs src/ui/view.rs src/ui/driver.rs"
+PURE="src/ui/app.rs src/ui/detail.rs src/ui/list.rs src/ui/markdown.rs src/ui/palette.rs src/ui/tasks.rs src/ui/view.rs src/ui/driver.rs"
 PAT='\.chars\(\)\.count\(\)|\.chars\(\)\.take\(|Vec<char>'
 # Control 1: the sweep's OWN pattern must independently match EACH of the three
 # alternatives, one probe per form. A single combined probe line holding all three
@@ -31,4 +31,4 @@ for f in $PURE; do
   fi
 done
 [ "$bad" = "0" ] || exit 1
-echo "COLWIDTH OK: no char-count measurement in the seven pure view files"
+echo "COLWIDTH OK: no char-count measurement in the eight pure view files"
