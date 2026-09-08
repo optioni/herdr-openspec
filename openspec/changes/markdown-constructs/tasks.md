@@ -286,14 +286,14 @@ test on `Vec<Line>` can see the last three steps. Per design.md → Test Strateg
 ## 6. Acceptance Test — Outer Loop GREEN
 <!-- kind: behavior -->
 
-- [ ] 6.1 VERIFY: Confirm `a_table_reaches_the_buffer_aligned` now passes end to end at both
+- [x] 6.1 VERIFY: Confirm `a_table_reaches_the_buffer_aligned` now passes end to end at both
   widths:
 
   ```sh
   cargo test --all-features --lib a_table_reaches_the_buffer
   ```
 
-- [ ] 6.2 REFACTOR: Clean up the acceptance test's fixture if group 1's own tests made part of
+- [x] 6.2 REFACTOR: Clean up the acceptance test's fixture if group 1's own tests made part of
   it redundant — or state that no refactor was needed.
 
 ---
