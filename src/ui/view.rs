@@ -2928,6 +2928,150 @@ mod tests {
         }
     }
 
+
+    /// The character offsets of every `|` in `row`, counted in characters and
+    /// never in bytes.
+    fn pipe_offsets(row: &str) -> Vec<usize> {
+        row.chars()
+            .enumerate()
+            .filter(|(_, c)| *c == '|')
+            .map(|(i, _)| i)
+            .collect()
+    }
+
+    /// `detail-scroll` :: "A table reaches the buffer aligned and inside the region".
+    ///
+    /// The outer-loop acceptance test, written RED before any parser or allocator
+    /// work: it is the only test that proves the whole path — the `Options` flag,
+    /// `fold`, the column allocation, the wrap, the alignment, the header face,
+    /// the palette, and `Buffer::set_string` — reaches a real buffer without
+    /// touching a border. Every unit test in `ui::markdown` sits inside it.
+    ///
+    /// The fixture's natural widths are `[6, 12, 40]` and `n` is 3, so the pipe
+    /// overhead is `3n + 1 = 10`. At the 78-column interior `avail = 68` and the
+    /// natural widths sum to 58, so `w = nat` and no cell wraps. At the
+    /// 58-column interior `avail = 48`, the max-min rule gives `w = [6, 12, 30]`,
+    /// and the 40-column note wraps into two lines — which is what makes the
+    /// wrapping row taller at 60 than at 120 rather than the fixture merely
+    /// being long.
+    #[test]
+    fn a_table_reaches_the_buffer_aligned() {
+        let source = "| Gate | Runner | Notes |\n\
+                      |---|---|---|\n\
+                      | Format | cargo fmt | quick |\n\
+                      | Lint | cargo clippy | this note wraps at the narrow width only |\n\
+                      | Test | cargo test | short |\n";
+        let d = detail_dashboard(source.to_string(), 0, Route::Detail);
+
+        let mut table_row_counts = Vec::new();
+        for width in [120u16, 60u16] {
+            let buf = render_at(width, 20, &d);
+
+            // The content area is rows 4 through 17: the frame header, the
+            // region's own border, the change header, and the tab bar sit above
+            // it, and the region's lower border and the footer below.
+            let interior = if width == 60 { 58 } else { 78 };
+            let drawn: Vec<(u16, String)> = (4..=17u16)
+                .map(|y| (y, detail_interior_cols(&buf, y, interior)))
+                .filter(|(_, text)| text.contains('|'))
+                .collect();
+            assert!(
+                drawn.len() >= 5,
+                "width {width}: the table drew {} lines, not the header, delimiter, and \
+                 three body rows at least: {drawn:?}",
+                drawn.len()
+            );
+            table_row_counts.push(drawn.len());
+
+            // The delimiter line is the one whose content is only pipes and
+            // dashes; its pipe offsets are what every row line's must equal.
+            let delimiter = drawn
+                .iter()
+                .find(|(_, text)| {
+                    let t = text.trim_end();
+                    !t.is_empty() && t.chars().all(|c| c == '|' || c == '-')
+                })
+                .expect("a delimiter line is drawn");
+            let expected = pipe_offsets(&delimiter.1);
+            assert_eq!(
+                expected.len(),
+                4,
+                "width {width}: a three-column table's delimiter line holds n + 1 = 4 pipes: \
+                 {:?}",
+                delimiter.1
+            );
+            for (y, text) in &drawn {
+                assert_eq!(
+                    pipe_offsets(text),
+                    expected,
+                    "width {width}, row {y}: the columns are not aligned with the delimiter \
+                     line's: {text:?}"
+                );
+            }
+
+            // The header cells read bold; the pipes and the padding spaces
+            // around them carry no modifier at all.
+            let (header_y, header_text) = &drawn[0];
+            let offset = if width == 60 { 1u16 } else { 41 };
+            for label in ["Gate", "Runner", "Notes"] {
+                let start = header_text
+                    .find(label)
+                    .unwrap_or_else(|| panic!("width {width}: {label} is drawn"));
+                let start = header_text[..start].chars().count();
+                for i in 0..label.chars().count() {
+                    let x = offset + (start + i) as u16;
+                    assert!(
+                        cell(&buf, x, *header_y)
+                            .style()
+                            .add_modifier
+                            .contains(Modifier::BOLD),
+                        "width {width}: {label}'s cell {i} is not bold"
+                    );
+                }
+            }
+            for (i, c) in header_text.chars().enumerate() {
+                if c != '|' && c != ' ' {
+                    continue;
+                }
+                let x = offset + i as u16;
+                assert_eq!(
+                    cell(&buf, x, *header_y).style().add_modifier,
+                    Modifier::empty(),
+                    "width {width}: the pipe or padding cell at interior column {i} carries \
+                     a modifier"
+                );
+            }
+
+            // No table cell reaches a border column. The two lists differ per
+            // buffer: below the breakpoint `layout::split_body` gives the detail
+            // region the whole body, so columns 39 and 40 are ordinary interior
+            // content at 60 and a table wrapping at 58 necessarily covers them.
+            let borders: &[u16] = if width == 60 {
+                &[0, 59]
+            } else {
+                &[0, 39, 40, 119]
+            };
+            for y in 1..=18u16 {
+                for x in borders {
+                    let s = cell(&buf, *x, y).symbol();
+                    assert!(
+                        matches!(s, "│" | "┌" | "└" | "┐" | "┘"),
+                        "width {width}: x={x} y={y} holds {s:?}, not a border"
+                    );
+                }
+            }
+        }
+
+        // The wrapping row occupies more rows at 60 than at 120.
+        assert!(
+            table_row_counts[1] > table_row_counts[0],
+            "the row that wraps at 58 must make the table taller at 60 ({} lines) than at \
+             120 ({} lines)",
+            table_row_counts[1],
+            table_row_counts[0]
+        );
+    }
+
     #[test]
     fn an_empty_detail_source_leaves_the_interior_blank() {
         // The scenario's name is kept verbatim; its subject moves from "an

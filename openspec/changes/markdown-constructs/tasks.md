@@ -30,13 +30,13 @@ The end-to-end wiring **is** the risk: a table must survive parse → fold → a
 → alignment → face → palette → `Buffer::set_string` without reaching a border, and no unit
 test on `Vec<Line>` can see the last three steps. Per design.md → Test Strategy.
 
-- [ ] 0.1 Confirm the harness and the replaced collaborators design.md → Test Boundaries
+- [x] 0.1 Confirm the harness and the replaced collaborators design.md → Test Boundaries
   names: the view tier renders through `render_at` into a `ratatui::backend::TestBackend` at
   120x20 and 60x20, `detail.source` is set in memory, and no filesystem, `openspec` binary, or
   Herdr socket is reached. Verification: the new test compiles against the existing `render_at`
   helper in `src/ui/view.rs`'s test module with no new fixture type.
 
-- [ ] 0.2 RED: Write `a_table_reaches_the_buffer_aligned` in `src/ui/view.rs`'s test module,
+- [x] 0.2 RED: Write `a_table_reaches_the_buffer_aligned` in `src/ui/view.rs`'s test module,
   for detail-scroll :: "A table reaches the buffer aligned and inside the region". Assert, at
   both widths: the `|` column offsets of the delimiter row equal those of every drawn row
   line; header cells report `Modifier::BOLD` while pipe and padding cells report none; the
@@ -45,7 +45,7 @@ test on `Vec<Line>` can see the last three steps. Per design.md → Test Strateg
   because below the breakpoint the detail region takes the whole body; asserting 39 and 40
   there would leave this test permanently red against a correct implementation.
 
-- [ ] 0.3 Confirm it fails because the behaviour is missing, not because the harness is
+- [x] 0.3 Confirm it fails because the behaviour is missing, not because the harness is
   misconfigured. Check, run at HEAD:
 
   ```sh
