@@ -3,7 +3,7 @@
 //! `openspec/changes/tui-shell/specs/responsive-layout/spec.md`.
 
 use ratatui::buffer::CellWidth;
-use ratatui::layout::{Constraint, Layout, Rect};
+use ratatui::layout::{Constraint, Layout, Position, Rect};
 use ratatui::style::Style;
 use ratatui::text::Span;
 
@@ -155,6 +155,81 @@ pub fn split_detail(interior: Rect) -> (Rect, Rect, Rect) {
     }
 }
 
+/// The part of the frame drawn at a point — `mouse-input`'s hit-test result.
+/// Named `Zone` rather than `Target`, which `list-sections` had already taken
+/// for "one addressable row the cursor can land on" (design.md -> Decision 1).
+///
+/// `ListRow` and `DetailTab` carry the rectangle they were derived from rather
+/// than only an offset, so the caller that resolves the offset to a row or a
+/// tab uses the very geometry the hit test used: recomputing the interior at
+/// the call site would be a second derivation of the same rectangle, and the
+/// two could drift (design.md -> Decision 2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Zone {
+    /// A row of the list region's interior. `interior` is that interior's own
+    /// rectangle; `row` is the offset of the addressed row below its first
+    /// interior row.
+    ListRow { interior: Rect, row: u16 },
+    /// The list region, but not one of its interior rows — its border.
+    List,
+    /// The detail region's tab-bar row. `bar` is that row's own rectangle;
+    /// `column` is the offset of the addressed column right of its first.
+    DetailTab { bar: Rect, column: u16 },
+    /// The detail region, anywhere but the tab-bar row: its border, its header
+    /// row, or its content area.
+    Detail,
+    /// The frame's header row, its footer row, or a point outside the frame.
+    Outside,
+}
+
+/// Map a terminal coordinate to the part of the frame drawn there, deriving
+/// the geometry through the same [`split_frame`], [`split_body`], [`interior`],
+/// and [`split_detail`] the draw path uses and holding no arithmetic of its own
+/// beyond a rectangle containment test.
+///
+/// Pure and total: every `Rect`, every `Route`, and every `(column, row)` pair
+/// including `(0, 0)` and `(u16::MAX, u16::MAX)` returns a `Zone` and none
+/// panics. Names no ratatui widget, no crossterm type, and no mouse type — it
+/// takes two integers, which is what keeps it in the pure view set and testable
+/// with no event at all.
+///
+/// The route is respected exactly as [`split_body`] respects it: at
+/// [`LayoutMode::Narrow`] only the routed region exists, so every point in the
+/// body resolves to that region's zones and none to the other's; at
+/// [`LayoutMode::Wide`] both exist at both routes and the route changes nothing.
+pub fn zone(area: Rect, route: Route, column: u16, row: u16) -> Zone {
+    let point = Position::new(column, row);
+    let (_, body, _) = split_frame(area);
+    let (list, detail) = split_body(body, route);
+    if let Some(list_area) = list
+        && list_area.contains(point)
+    {
+        let inner = interior(list_area);
+        return if inner.contains(point) {
+            Zone::ListRow {
+                interior: inner,
+                row: row - inner.y,
+            }
+        } else {
+            Zone::List
+        };
+    }
+    if let Some(detail_area) = detail
+        && detail_area.contains(point)
+    {
+        let (_, bar, _) = split_detail(interior(detail_area));
+        return if bar.contains(point) {
+            Zone::DetailTab {
+                bar,
+                column: column - bar.x,
+            }
+        } else {
+            Zone::Detail
+        };
+    }
+    Zone::Outside
+}
+
 /// The crate's only display-width measure: the number of terminal cells
 /// `Buffer::set_stringn` consumes for `text`, computed the way `set_stringn` itself
 /// computes it — summing each grapheme cluster's `cell_width()` — rather than by an
@@ -226,6 +301,168 @@ mod tests {
     use ratatui::layout::Rect;
     use ratatui::style::Style;
     use ratatui::widgets::Block;
+
+    /// `mouse-input`'s hit test. Every expected interior here is derived from
+    /// `split_frame`/`split_body`/`interior`/`split_detail` independently, never
+    /// from `zone`'s own answer — otherwise the test would pin whatever `zone`
+    /// happens to do rather than what the draw path does.
+    mod zone {
+        use crate::ui::app::Route;
+        use crate::ui::layout::{
+            LayoutMode, Zone, interior, mode, split_body, split_detail, split_frame, zone,
+        };
+        use ratatui::layout::Rect;
+
+        /// The list region's interior, derived the way the draw path derives it.
+        fn list_interior(area: Rect, route: Route) -> Rect {
+            let (_, body, _) = split_frame(area);
+            interior(split_body(body, route).0.expect("a list region is drawn"))
+        }
+
+        /// The detail region's tab-bar row, derived the same way.
+        fn detail_bar(area: Rect, route: Route) -> Rect {
+            let (_, body, _) = split_frame(area);
+            split_detail(interior(
+                split_body(body, route).1.expect("a detail region is drawn"),
+            ))
+            .1
+        }
+
+        #[test]
+        fn the_zones_tile_the_frame() {
+            let area = Rect::new(0, 0, 120, 40);
+            for route in [Route::List, Route::Detail] {
+                let list = list_interior(area, route);
+                let bar = detail_bar(area, route);
+                let last_row = list.height - 1;
+
+                let cases: [((u16, u16), Zone); 10] = [
+                    ((0, 0), Zone::Outside),
+                    ((0, 39), Zone::Outside),
+                    ((0, 1), Zone::List),
+                    (
+                        (list.x, list.y),
+                        Zone::ListRow {
+                            interior: list,
+                            row: 0,
+                        },
+                    ),
+                    (
+                        (list.x, list.y + last_row),
+                        Zone::ListRow {
+                            interior: list,
+                            row: last_row,
+                        },
+                    ),
+                    ((40, 5), Zone::Detail),
+                    ((bar.x, bar.y - 1), Zone::Detail),
+                    ((bar.x, bar.y), Zone::DetailTab { bar, column: 0 }),
+                    ((bar.x, bar.y + 1), Zone::Detail),
+                    ((200, 5), Zone::Outside),
+                ];
+                for ((column, row), expected) in cases {
+                    assert_eq!(
+                        zone(area, route, column, row),
+                        expected,
+                        "at ({column}, {row}) under {route:?}"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn below_the_breakpoint_only_the_routed_region() {
+            let area = Rect::new(0, 0, 60, 20);
+            let list = list_interior(area, Route::List);
+
+            assert_eq!(
+                zone(area, Route::List, list.x, list.y),
+                Zone::ListRow {
+                    interior: list,
+                    row: 0
+                }
+            );
+            assert!(matches!(
+                zone(area, Route::Detail, list.x, list.y),
+                Zone::Detail | Zone::DetailTab { .. }
+            ));
+
+            // No point anywhere in the body resolves to the other route's region.
+            let (_, body, _) = split_frame(area);
+            for row in body.y..body.y + body.height {
+                for column in body.x..body.x + body.width {
+                    assert!(
+                        !matches!(
+                            zone(area, Route::Detail, column, row),
+                            Zone::List | Zone::ListRow { .. }
+                        ),
+                        "({column}, {row}) is a list zone at Route::Detail"
+                    );
+                    assert!(
+                        !matches!(
+                            zone(area, Route::List, column, row),
+                            Zone::Detail | Zone::DetailTab { .. }
+                        ),
+                        "({column}, {row}) is a detail zone at Route::List"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn the_breakpoint_is_exact_for_zone() {
+            // Column 10, row 5: inside the list region at the wide layout, inside
+            // the (single) detail region at the narrow one.
+            for width in [99u16, 100, 101] {
+                let area = Rect::new(0, 0, width, 20);
+                let resolved = zone(area, Route::Detail, 10, 5);
+                match mode(width) {
+                    LayoutMode::Narrow => assert!(
+                        matches!(resolved, Zone::Detail | Zone::DetailTab { .. }),
+                        "width {width} resolved {resolved:?}"
+                    ),
+                    LayoutMode::Wide => assert!(
+                        matches!(resolved, Zone::List | Zone::ListRow { .. }),
+                        "width {width} resolved {resolved:?}"
+                    ),
+                }
+            }
+            assert_eq!(mode(99), LayoutMode::Narrow);
+            assert_eq!(mode(100), LayoutMode::Wide);
+            assert_eq!(mode(101), LayoutMode::Wide);
+        }
+
+        #[test]
+        fn degenerate_frames_resolve() {
+            let areas = [
+                Rect::new(0, 0, 0, 0),
+                Rect::new(0, 0, 1, 1),
+                Rect::new(0, 0, 2, 2),
+                Rect::new(0, 0, 3, 3),
+                Rect::new(0, 0, 120, 2),
+            ];
+            for area in areas {
+                let (_, body, _) = split_frame(area);
+                for route in [Route::List, Route::Detail] {
+                    for row in 0..area.height {
+                        for column in 0..area.width {
+                            let resolved = zone(area, route, column, row);
+                            if body.height == 0 {
+                                assert_eq!(
+                                    resolved,
+                                    Zone::Outside,
+                                    "{area:?} has no body, so ({column}, {row}) is Outside"
+                                );
+                            }
+                        }
+                    }
+                    // Total over the extremes too.
+                    let _ = zone(area, route, u16::MAX, u16::MAX);
+                    let _ = zone(area, route, 0, 0);
+                }
+            }
+        }
+    }
 
     /// `responsive-layout` :: "`columns` agrees with what the buffer consumed" — the oracle
     /// is `Buffer::set_stringn`'s own **return value**, never a first-blank-cell scan: a

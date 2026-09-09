@@ -162,7 +162,7 @@ shape. Only `run_loop` can prove otherwise.
 ## 2. The hit test — `layout::zone`
 <!-- kind: behavior -->
 
-- [ ] 2.1 RED: Write failing tests in `src/ui/layout.rs` for `responsive-layout`'s four
+- [x] 2.1 RED: Write failing tests in `src/ui/layout.rs` for `responsive-layout`'s four
       **pure** scenarios (its fifth, "The hit test agrees with what was drawn", is a view
       test and lands in group 3.1 beside the other one): `zone::the_zones_tile_the_frame`,
       `zone::below_the_breakpoint_only_the_routed_region`,
@@ -170,15 +170,24 @@ shape. Only `run_loop` can prove otherwise.
       each expected interior in the test from `split_frame`/`split_body`/`interior`/
       `split_detail` independently, never from `zone`'s own answer.
       `cargo test --lib layout::tests::zone` — expect RED.
-- [ ] 2.2 GREEN: Add `pub enum Zone` with the five variants specs/responsive-layout names,
+- [x] 2.2 GREEN: Add `pub enum Zone` with the five variants specs/responsive-layout names,
       and `pub fn zone(area, route, column, row) -> Zone` deriving its geometry through the
       existing splits and holding no arithmetic beyond containment.
-- [ ] 2.3 CHECK: Confirm `layout.rs` still names no filesystem, process, environment,
+- [x] 2.3 CHECK: Confirm `layout.rs` still names no filesystem, process, environment,
       network, or standard-I/O API and no crossterm type — `/bin/sh scripts/gates/noio-view.sh`
       exits 0. Not `colwidth.sh`: its `PURE` list is eight files and omits `src/ui/layout.rs`
       (`grep -n 'PURE=' scripts/gates/colwidth.sh`), so it would never read this file.
-- [ ] 2.4 Run the group tests — `cargo test --lib layout::` — no regressions, and record
+      **Run:** `NOIO-VIEW OK: 9 pure files carry no I/O API; positive control matched`,
+      **exit 0**. `colwidth.sh`'s `PURE` is confirmed to be the eight files without
+      `src/ui/layout.rs`. `zone` names no crossterm type and no ratatui widget — only
+      `Rect` and `Position`, both already used by this file.
+- [x] 2.4 Run the group tests — `cargo test --lib layout::` — no regressions, and record
       that no refactor was needed.
+      **Run:** `cargo test --lib layout::` → **21 passed**, 0 failed (17 before, plus the
+      four `zone::` tests). **No refactor was needed:** `zone` adds no arithmetic of its
+      own — it calls the four existing splits and `Rect::contains`, and the two offsets it
+      reports are the definitions of `ListRow::row` and `DetailTab::column` rather than a
+      second derivation of anything.
 
 ## 3. Row addressing — `list::row_at`
 <!-- kind: behavior -->
