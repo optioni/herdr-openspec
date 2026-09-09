@@ -62,8 +62,11 @@ panic hook capture must release from), and `color-palette`.
 
 No process is spawned anywhere: `src/cli.rs` is untouched, and neither `mouse_action` nor
 `zone` nor `row_at` nor `tab_at` names a spawn API, a filesystem API, an environment API, or
-a clock. No file is added under `src/ui/`, so `noio-view.sh`'s and `colwidth.sh`'s nine-file
-`PURE` lists are unchanged and the new code is swept by both from the day it lands. No
+a clock. No file is added under `src/ui/`, so both view gates' `PURE` lists are unchanged and the new
+code is swept from the day it lands — `noio-view.sh`'s nine files, and `colwidth.sh`'s
+**eight**, which omits `src/ui/layout.rs` because that file holds the crate's one width
+measure. `layout::zone` is therefore covered by `noio-view.sh` and, by construction, not by
+`colwidth.sh`; it does no measuring, only `Rect` containment. No
 worker thread is added; the crate stays at three.
 
 The `Change` type is not altered. `changes::from_files` and `changes::from_cli` are not
@@ -136,7 +139,8 @@ no wire format, no pagination, and no streaming.
 
 | Dependency | In acceptance test | In unit tests |
 |---|---|---|
-| The terminal (raw mode, alternate screen, mouse capture) | replaced — the recording `TerminalOps` double; `CrosstermOps` is never constructed outside `ui::run`, and `NORAW-GREP` proves it | replaced — same double |
+| The terminal (raw mode, alternate screen, mouse capture) | replaced — the recording `TerminalOps` double; `CrosstermOps` is constructed only in `ui::run` (`src/ui/mod.rs:379`) and in `terminal::install_panic_hook` (`src/ui/terminal.rs:163`), and `NORAW-GREP` leg 2 confines the name to those two files | replaced — same double |
+| The panic hook | not reached — installing one is process-global and `cargo test` runs tests in parallel threads of one process, so `install_panic_hook` is untested by construction (`src/ui/terminal.rs:150-157`). Its body is `restore_then_if`, which **is** driven through the recording double, including the new `disable_mouse` call | replaced — same double, via `restore_then` and `restore_then_if` |
 | The terminal event stream (`EventSource`) | replaced — the scripted double `run_loop` already takes | replaced — `mouse_action` takes a `MouseEvent` value directly, with no source at all |
 | The terminal backend (drawing) | replaced — `ratatui::backend::TestBackend` at 60x20 and 120x40 | replaced — same, for the view tests; the pure functions need no backend |
 | The filesystem (artifact reads) | replaced — the injected `ArtifactReader` closure | replaced — same |
@@ -194,7 +198,7 @@ through `run_loop` with a scripted source.
 | A click on an archived header opens an unresolved archive and requests its refresh | `driver::tests::a_header_click_requests_the_archive_refresh` | Unit | none | `cargo test --lib requests_the_archive_refresh` |
 | A click on a tab cell switches to that artifact | `driver::tests::a_tab_click_switches_the_tab` | Unit + view | replaced: backend | `cargo test --lib a_tab_click_switches` |
 | Clicks that address nothing are inert | `driver::tests::clicks_that_address_nothing_are_inert` | Unit | none | `cargo test --lib address_nothing_are_inert` |
-| The other buttons and the non-press kinds are inert | `driver::tests::the_other_buttons_are_inert` — asserts the launcher double received nothing | Unit | replaced: launcher | `cargo test --lib the_other_buttons_are_inert` |
+| The other buttons and the non-press kinds are inert | `driver::tests::the_other_buttons_are_inert` — asserts every call returns `Action::Ignore`, and in particular none of `LaunchApply`, `LaunchContinue`, `LaunchArchive`, `FocusAgent`. Not "the launcher received nothing": `mouse_action` is pure and takes no `Launcher`, so that assertion would be true before the function existed | Unit | none | `cargo test --lib the_other_buttons_are_inert` |
 | A click selects while the filter is open | `driver::tests::a_click_acts_while_filtering` | Unit | none | `cargo test --lib acts_while_filtering` |
 | The wheel scrolls while the filter is open | `driver::tests::the_wheel_acts_while_filtering` | Unit | none | `cargo test --lib the_wheel_acts_while_filtering` |
 | The key table is unchanged | the four tests that carry the table today, passing **unmodified**: `action_for_is_total_over_a_keycode_sweep` (`src/ui/app.rs:1906`), `quit_keys_and_their_near_misses` (`:1701`), `navigation_and_filter_keys_are_distinguished` (`:2120`), `space_maps_to_toggle_section_outside_filter_mode_and_types_inside_it` (`:2672`) | Unit | none | `cargo test --lib app::tests::` |
@@ -325,11 +329,15 @@ outside, and because the panic hook's `restore_then` has no guard to consult and
 its own answer anyway.
 
 **8. `mouse_action` lives in `ui::driver`, not `ui::app`.** It needs `list::rows` and
-`detail::tab_bar`. `ui::list` already imports `ui::app`, so putting the resolver in `app`
-would close a module cycle; `driver` already sits above both through `view` and is where
-`area` lives. *Alternative:* `ui::app`, rejected for the cycle; a new `src/ui/mouse.rs`,
-rejected because it would grow the `PURE` list from nine files to ten and change three
-gate scripts for no gain.
+`detail::tab_bar`, and `driver` is where the frame's `area` already lives — `run_loop`
+copies it out of the `CompletedFrame` for `normalise_scroll`, so the resolver's one input
+that nothing else has is already in hand there. Not for module-cycle reasons: Rust permits
+mutual references between modules of one crate, and this crate already has such a cycle
+(`app.rs:557` -> `ui::detail::content_lines`, `detail.rs:34` -> `ui::list::progress_cell`,
+`list.rs:6` -> `use crate::ui::app::…`). *Alternative:* `ui::app`, rejected because the
+resolver would then need the frame area threaded in from `driver` anyway, which is the
+argument for putting it where the area is; a new `src/ui/mouse.rs`, rejected because it
+would grow both view gates' `PURE` lists and change three gate scripts for no gain.
 
 **9. `run_loop` resolves against the frame just drawn.** The area is already copied out of
 the `CompletedFrame` for `normalise_scroll`; the resolver reuses it. A resize between the

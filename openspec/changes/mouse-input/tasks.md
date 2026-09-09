@@ -56,7 +56,7 @@ are whole-change gates and cannot precede the work they gate.
 | F (RED) | `grep -rn 'enable_mouse\|EnableMouseCapture' src tests` | no output, **exit 1** | Capture is never entered; group 1 turns this green |
 | G (RED) | `grep -rn 'mouse_problem' src tests` | no output, **exit 1** | The refused-capture reason has no carrier; groups 1 and 7 turn this green |
 | H (RED) | `grep -n 'EnableMouseCapture' scripts/gates/noraw-grep.sh` | no output, **exit 1** | The confinement sweep does not cover the two capture commands; group 8 turns this green |
-| I (green + negative control) | `/bin/sh scripts/gates/noraw-grep.sh` | `NORAW OK: 36 files searched, mode functions only in src/ui/terminal.rs, CrosstermOps at 6 sites`, **exit 0** | Negative control run in a scratch copy of `src tests scripts`: `RAW_RE` extended with `\|EnableMouseCapture\|DisableMouseCapture` and `// EnableMouseCapture` appended to `src/ui/app.rs` → `NORAW FAIL: terminal-mode function outside src/ui/terminal.rs: src/ui/app.rs:5295`, **exit 1**; plant removed → **exit 0** again |
+| I (green + negative control) | `/bin/sh scripts/gates/noraw-grep.sh` | `NORAW OK: 36 files searched, mode functions only in src/ui/terminal.rs, CrosstermOps at 6 sites`, **exit 0** | Negative control run in a scratch copy of `src tests scripts`: `RAW_RE` extended with `\|EnableMouseCapture\|DisableMouseCapture` and `// EnableMouseCapture` appended to `src/ui/app.rs` with `printf '\n// EnableMouseCapture\n' >> src/ui/app.rs` (a leading blank line, so the comment lands two past the file's 5293) → `NORAW FAIL: terminal-mode function outside src/ui/terminal.rs: src/ui/app.rs:5295`, **exit 1**; plant removed → **exit 0** again |
 | J (green + negative control) | `/bin/sh scripts/gates/wired.sh` | `WIRED OK: thirteen names present …`, **exit 0** | Leg 2 forbids a branch in `pub fn run()`; group 7 adds a field expression, not a branch. Negative control is already checked in: `cargo test --test gate_controls` plants a real defect per gate script |
 | K (must-change) | `awk '/^pub enum Action \{/{f=1;next} f&&/^\}/{exit} f&&/^    [A-Z]/{n++} END{print n}' src/ui/app.rs` | **18** | Must be `23` after group 5 |
 | L (must-change) | `grep -n '[^d]Startup {' src/ui/mod.rs \| grep -v Probed` | **6** sites — 386 (the production one, in `run`), 2724, 2776, 3065, 3690, 3840 | Every site names every field, so all 6 must name `mouse_problem` after group 7. A bare `grep -c 'Startup {'` reports **11**: five are `ProbedStartup {`, a different test-local struct at `:2755`, not construction sites of this type |
@@ -98,10 +98,16 @@ shape. Only `run_loop` can prove otherwise.
       `alternate_screen_failure_unwinds_raw_mode` (`:254`), and
       `teardown_errors_do_not_panic_and_both_are_attempted` (`:266`).
       `cargo test --lib terminal::` — expect RED, and expect more than 0 tests to run.
-- [ ] 1.2 RED: Update the four existing panic-path and refusal tests to the lists the
-      `terminal-lifecycle` delta now states — `src/ui/terminal.rs:288` (unwinding),
-      `:300` (`restore_then`), `:344` (render-thread `restore_then_if`), and
-      `ui::enter_if_terminal`'s own `Ok` arm. The worker-thread test's `["previous_hook"]`
+- [ ] 1.2 RED: Update the five existing panic-path and refusal tests to the lists the
+      `terminal-lifecycle` delta now states — `a_panic_still_restores`
+      (`src/ui/terminal.rs:281`), `restore_then_restores_before_delegating` (`:300`),
+      `restore_then_delegates_even_when_both_restores_fail` (`:310`),
+      `a_panic_on_the_render_thread_still_restores` (`:343`), and `ui::enter_if_terminal`'s
+      own `Ok` arm. All four terminal tests break the moment `disable_mouse` joins
+      `restore_then` (`:74-78`), which `Drop` and the panic hook share.
+      `a_panic_on_a_worker_thread_restores_nothing` (`:322`) must stay **unchanged**, and
+      `teardown_errors_do_not_panic_and_both_are_attempted` (`:266`) survives untouched
+      because it slices the last two calls rather than asserting the whole list. The worker-thread test's `["previous_hook"]`
       is unchanged and must stay unchanged, which is the check that capture gained no
       exception off the render thread. `cargo test --lib terminal:: enter_if_terminal` —
       expect RED.
@@ -137,9 +143,9 @@ shape. Only `run_loop` can prove otherwise.
       and `pub fn zone(area, route, column, row) -> Zone` deriving its geometry through the
       existing splits and holding no arithmetic beyond containment.
 - [ ] 2.3 CHECK: Confirm `layout.rs` still names no filesystem, process, environment,
-      network, or standard-I/O API and no crossterm type —
-      `/bin/sh scripts/gates/noio-view.sh` and `/bin/sh scripts/gates/colwidth.sh` both
-      exit 0.
+      network, or standard-I/O API and no crossterm type — `/bin/sh scripts/gates/noio-view.sh`
+      exits 0. Not `colwidth.sh`: its `PURE` list is eight files and omits `src/ui/layout.rs`
+      (`grep -n 'PURE=' scripts/gates/colwidth.sh`), so it would never read this file.
 - [ ] 2.4 Run the group tests — `cargo test --lib layout::` — no regressions, and record
       that no refactor was needed.
 
@@ -196,7 +202,8 @@ shape. Only `run_loop` can prove otherwise.
       once.
 - [ ] 5.4 CHECK: Contract gate — `Action` is enumerated in two places that must agree. Add
       the five variants to `no_action_mutates_changes`' hand-written array
-      (`src/ui/app.rs:1977`) and confirm
+      (`src/ui/app.rs:1977`) **and** to its `assert_eq!(variants.len(), 18, …)` literal and
+      prose at `:2030`, which is the third site that must agree. Then confirm
       `awk '/^pub enum Action \{/{f=1;next} f&&/^\}/{exit} f&&/^    [A-Z]/{n++} END{print n}' src/ui/app.rs`
       reports **23** (check K, **18** at HEAD).
 - [ ] 5.5 CHECK: `SCAN_MIN=206 TYPES='Dashboard Filter Detail Sections' /bin/sh scripts/gates/nodefault-ui.sh`
@@ -256,10 +263,11 @@ shape. Only `run_loop` can prove otherwise.
       `dashboard.refresh.startup` after `collaborators.problems`.
 - [ ] 7.3 GREEN: `ui::run` binds the guard and passes `guard.mouse_problem()` as the field's
       value — a field expression, so `pub fn run()` still holds no branch and no loop.
-- [ ] 7.4 CHECK: Contract gate — `Startup` has no `Default` and every site names every
-      field. `SCAN_MIN=206 TYPES='Dashboard Filter Detail Sections' /bin/sh scripts/gates/nodefault-ui.sh`
-      exits 0, and `grep -n '[^d]Startup {' src/ui/mod.rs | grep -v Probed` still reports the
-      **6** sites of check L, each naming the new field.
+- [ ] 7.4 CHECK: Contract gate — every `Startup` construction site names the new field.
+      `grep -c 'mouse_problem:' src/ui/mod.rs` reports **6** (it is `0` at HEAD), one per site
+      of check L. `nodefault-ui.sh` is deliberately not the check here: it loops only over its
+      `$TYPES` argument and never reads `Startup`; that `Startup` has no `Default` is enforced
+      by rustc, since no site elides a field.
 - [ ] 7.5 CHECK: Persistence gate — no migration, backfill, cache invalidation, or index
       rebuild applies (design.md → Persistence and Rollout). Confirm the plugin's writes are
       still exactly `agent-names.toml`: `/bin/sh scripts/gates/readonly-ui.sh` exits 0.
@@ -283,8 +291,11 @@ shape. Only `run_loop` can prove otherwise.
       struct is inside `code "$MOD"`'s slice: `sed -n '94p;542p' src/ui/mod.rs` shows both.
       A leg-1 entry would be satisfied by the field declaration alone.
 - [ ] 8.4 CHANGE: Add a body-scoped **leg 5c** to `wired.sh`, mirroring leg 5: `pub fn run()`'s
-      body must name `mouse_problem(` and must not hardcode `mouse_problem: None`. Leg 1's
-      thirteen names are unchanged.
+      body must name `mouse_problem(` and must not hardcode `mouse_problem: None`. Add a
+      positive control anchored on `^    pub fn mouse_problem(` in `src/ui/terminal.rs`, on
+      Guard A's terms, so a rename fails in the defining file. Leg 1's thirteen names are
+      unchanged, so `wired.sh:246`'s `thirteen names present` message stays true; extend it
+      to mention leg 5c rather than restating a count.
 - [ ] 8.5 CHANGE: Add four `[[control]]` entries to `tests/gate-controls.toml`, each a
       single exact-substring find/replace, which is all that file's format supports:
       (a) `EnableMouseCapture` planted in `src/ui/list.rs`, expecting `NORAW-GREP`'s
