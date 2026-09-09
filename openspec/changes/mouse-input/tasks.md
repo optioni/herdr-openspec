@@ -220,18 +220,30 @@ shape. Only `run_loop` can prove otherwise.
 ## 4. Tab addressing — `detail::tab_at`
 <!-- kind: behavior -->
 
-- [ ] 4.1 RED: Write failing tests for `artifact-tabs`' four addressing scenarios:
+- [x] 4.1 RED: Write failing tests for `artifact-tabs`' four addressing scenarios:
       `detail::tests::tab_at::each_cell_answers_for_its_own_columns` (at the mandated 78 and
       58), `tab_at::a_windowed_bar_answers_for_drawn_cells`,
       `tab_at::the_placeholder_addresses_nothing`, `tab_at::a_wide_id_is_addressed_by_columns`.
       `cargo test --lib tab_at` — expect RED.
-- [ ] 4.2 GREEN: Implement `tab_at(artifacts, selected, width, column) -> Option<usize>` from
+- [x] 4.2 GREEN: Implement `tab_at(artifacts, selected, width, column) -> Option<usize>` from
       `tab_bar`'s own output, measuring each cell through `crate::ui::layout::columns`.
-- [ ] 4.3 CHECK: `/bin/sh scripts/gates/detailwidths.sh` and
+- [x] 4.3 CHECK: `/bin/sh scripts/gates/detailwidths.sh` and
       `/bin/sh scripts/gates/colwidth.sh` both exit 0 — the new function is parameterised by
       width and counts no `char`s.
-- [ ] 4.4 Run the group tests — `cargo test --lib detail::` — no regressions, and record
+      **Run:** `DETAILWIDTHS OK: all 42 detail tests name both 58 and 78`, exit 0, and
+      `COLWIDTH OK: no char-count measurement in the eight pure view files`, exit 0. The
+      gate caught real work: all four new tests initially named only 78 (and named it
+      `78u16`, which the gate's `\b(\d+)\b` scan deliberately does not see), so each was
+      rewritten to loop over an unsuffixed `[u16; 2] = [78, 58]`. Two of the four —
+      `a_windowed_bar_answers_for_drawn_cells` and `the_placeholder_addresses_nothing` —
+      are stated by `artifact-tabs` at width 78 alone and now assert at both; 58 windows
+      harder, so neither claim is weakened.
+- [x] 4.4 Run the group tests — `cargo test --lib detail::` — no regressions, and record
       that no refactor was needed.
+      **Run:** `cargo test --lib detail::` → **46 passed**, 0 failed (42 before, plus the
+      four `tab_at::` tests). **No refactor was needed:** `tab_at` is one `find_map` over
+      `tab_bar`'s own output; there is no second placement calculation to fold away, which
+      is the property `artifact-tabs` asks for.
 
 ## 5. The five actions and `Dashboard::apply`
 <!-- kind: behavior -->

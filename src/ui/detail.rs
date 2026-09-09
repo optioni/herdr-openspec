@@ -167,6 +167,41 @@ pub fn tab_bar(artifacts: &[crate::changes::ArtifactRef], selected: usize, width
     out
 }
 
+/// The artifact position of the tab cell [`tab_bar`] places over `column` — an
+/// offset from the bar's own first column — and `None` when that column holds
+/// no addressable cell.
+///
+/// A column holds a cell exactly when it falls within
+/// `[cell.x, cell.x + columns(cell.text))` for a [`Tab`] whose `index` is
+/// `Some`. The one separating column between two chips belongs to neither and
+/// returns `None`; so does a column past the last drawn cell, a column covered
+/// only by the `no artifacts` placeholder, and every column when `width` is `0`.
+///
+/// Built from `tab_bar`'s own output rather than from a second placement
+/// calculation, so the cell a click lands on and the cell painted there are the
+/// same cell — the same reason [`Tab`] reports its `x` rather than letting the
+/// view derive one. A cell's width is measured through
+/// [`crate::ui::layout::columns`], never a `char` count, so a bar whose artifact
+/// ids carry a CJK or emoji character targets the cell the reader sees.
+///
+/// Pure and total: no I/O, no clock, and no panic for any artifact slice
+/// including an empty one, any `selected` including one past the end, any
+/// `width`, and any `column`.
+pub fn tab_at(
+    artifacts: &[crate::changes::ArtifactRef],
+    selected: usize,
+    width: u16,
+    column: u16,
+) -> Option<usize> {
+    tab_bar(artifacts, selected, width)
+        .into_iter()
+        .find_map(|cell| {
+            let index = cell.index?;
+            let end = cell.x as usize + columns(&cell.text);
+            ((cell.x..end as u16).contains(&column)).then_some(index)
+        })
+}
+
 /// The single line list both `ui::view::render` and `Dashboard::normalise_scroll`
 /// derive the detail content from, so the drawn slice and the scroll clamp
 /// can never disagree about how many lines there are: one `"! <problem>"`
@@ -270,6 +305,149 @@ mod tests {
         Filter {
             query: String::new(),
             active: false,
+        }
+    }
+
+    /// `mouse-input`: a column of the tab bar resolves to the tab drawn there.
+    /// Every expected span is read off `tab_bar`'s own output, never computed a
+    /// second time — the cell a click lands on and the cell painted there must
+    /// be the same cell.
+    mod tab_at {
+        use crate::ui::detail::{tab_at, tab_bar};
+        use crate::ui::layout::columns;
+
+        use super::artifacts;
+
+        /// The columns `tab_bar` reported for cell `index`, as an inclusive-start,
+        /// exclusive-end range over the bar's own first column.
+        fn span(
+            a: &[crate::changes::ArtifactRef],
+            selected: usize,
+            width: u16,
+            index: usize,
+        ) -> std::ops::Range<u16> {
+            let cell = tab_bar(a, selected, width)
+                .into_iter()
+                .find(|t| t.index == Some(index))
+                .expect("the cell is drawn");
+            cell.x..cell.x + columns(&cell.text) as u16
+        }
+
+        #[test]
+        fn each_cell_answers_for_its_own_columns() {
+            let a = artifacts(&["proposal", "specs", "design", "tasks", "planning-review"]);
+            let widths: [u16; 2] = [78, 58];
+            for width in widths {
+                let bar = tab_bar(&a, 0, width);
+                assert_eq!(bar.len(), 5, "width {width}");
+                for index in 0..5 {
+                    let expected = span(&a, 0, width, index);
+                    let answered: Vec<u16> = (0..width)
+                        .filter(|c| tab_at(&a, 0, width, *c) == Some(index))
+                        .collect();
+                    assert_eq!(
+                        answered,
+                        expected.clone().collect::<Vec<_>>(),
+                        "width {width}, cell {index}: the columns returning Some(i) are \
+                         exactly the span tab_bar reported"
+                    );
+                }
+                // The one separating column between two cells belongs to neither.
+                for pair in bar.windows(2) {
+                    let separator = pair[0].x + columns(&pair[0].text) as u16;
+                    assert_eq!(separator, pair[1].x - 1);
+                    assert_eq!(tab_at(&a, 0, width, separator), None, "width {width}");
+                }
+                // Every column past the last drawn cell.
+                let last = bar.last().expect("cells are drawn");
+                let end = last.x + columns(&last.text) as u16;
+                for column in end..width {
+                    assert_eq!(tab_at(&a, 0, width, column), None, "width {width}");
+                }
+            }
+        }
+
+        #[test]
+        fn a_windowed_bar_answers_for_drawn_cells() {
+            let ids: Vec<String> = (0..12).map(|i| format!("artifact-{i:02}")).collect();
+            let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
+            let a = artifacts(&refs);
+            // The spec names width 78; the check is run at 58 too, which windows
+            // harder and is what `DETAILWIDTHS` requires of every test here.
+            let widths: [u16; 2] = [78, 58];
+            for width in widths {
+                let bar = tab_bar(&a, 9, width);
+                let drawn: Vec<usize> = bar.iter().filter_map(|t| t.index).collect();
+                assert!(
+                    bar.len() < 12,
+                    "width {width}: the fixture must actually window, {} cells drawn",
+                    bar.len()
+                );
+                let first = *drawn.first().expect("a cell is drawn");
+                assert_ne!(first, 0, "width {width}: the window does not start at 0");
+
+                for column in 0..width {
+                    if let Some(index) = tab_at(&a, 9, width, column) {
+                        assert!(
+                            drawn.contains(&index),
+                            "width {width} column {column} answered {index}, outside the \
+                             drawn window {drawn:?}"
+                        );
+                    }
+                }
+                for column in span(&a, 9, width, first) {
+                    assert_eq!(tab_at(&a, 9, width, column), Some(first));
+                }
+            }
+        }
+
+        #[test]
+        fn the_placeholder_addresses_nothing() {
+            let five = artifacts(&["proposal", "specs", "design", "tasks", "planning-review"]);
+            let widths: [u16; 2] = [78, 58];
+            for width in widths {
+                // The `no artifacts` placeholder carries `index: None`.
+                for column in 0..width {
+                    assert_eq!(tab_at(&[], 0, width, column), None, "column {column}");
+                }
+                // `column` past every drawn cell.
+                assert_eq!(tab_at(&five, 0, width, 65535), None);
+
+                // A `selected` past the end still addresses the cells the bar
+                // drew, since windowing treats it as `0`.
+                for cell in tab_bar(&five, 99, width) {
+                    let index = cell.index.expect("a real cell, not the placeholder");
+                    for column in span(&five, 99, width, index) {
+                        assert_eq!(tab_at(&five, 99, width, column), Some(index));
+                    }
+                }
+            }
+            // Width 0 draws nothing at all.
+            for column in [0u16, 1, 65535] {
+                assert_eq!(tab_at(&five, 0, 0, column), None);
+            }
+        }
+
+        #[test]
+        fn a_wide_id_is_addressed_by_columns() {
+            // `日` is two terminal columns wide.
+            let a = artifacts(&["日x", "next"]);
+            let widths: [u16; 2] = [78, 58];
+            for width in widths {
+                let first = span(&a, 0, width, 0);
+                assert_eq!(
+                    first.clone().count(),
+                    columns(" 日x "),
+                    "width {width}: the cell's span is measured in display columns, not chars"
+                );
+                // Both columns of the two-column character answer for the cell.
+                for column in first.clone() {
+                    assert_eq!(tab_at(&a, 0, width, column), Some(0), "column {column}");
+                }
+                let second = span(&a, 0, width, 1);
+                assert_eq!(tab_at(&a, 0, width, second.start), Some(1));
+                assert_eq!(tab_at(&a, 0, width, first.end), None, "the separator");
+            }
         }
     }
 
