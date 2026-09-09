@@ -29,10 +29,10 @@ pub enum Route {
     Detail,
 }
 
-/// The seventeen outcomes a terminal event can map to, under either filter mode. The count
-/// has moved twice since this comment was last true: to thirteen with `live-refresh`'s
-/// `Refresh`, and to seventeen with `agent-launch`'s `LaunchApply`, `LaunchContinue`,
-/// `LaunchArchive`, and `FocusAgent`.
+/// The eighteen outcomes a terminal event can map to, under either filter mode. The count
+/// has moved three times since this comment was last true: to thirteen with `live-refresh`'s
+/// `Refresh`, to seventeen with `agent-launch`'s `LaunchApply`, `LaunchContinue`,
+/// `LaunchArchive`, and `FocusAgent`, and to eighteen with `list-sections`'s `ToggleSection`.
 /// `action_for` is total over every `Event`. `Back` replaces the earlier
 /// `BackToList`: it now dismisses one of several layers rather than only
 /// ever returning to the list route. `Next` and `Prev` are renamed from
@@ -68,6 +68,11 @@ pub enum Action {
     LaunchContinue,
     LaunchArchive,
     FocusAgent,
+    /// `list-sections`'s addition: fold or unfold the section the cursor is
+    /// on or in. Mapped from `Char(' ')` outside filter mode; inside it, a
+    /// space types into the query on the same terms as every other
+    /// printable character.
+    ToggleSection,
     Ignore,
 }
 
@@ -270,7 +275,11 @@ pub struct Dashboard {
 
 impl Dashboard {
     /// Apply `action`, mutating only the field(s) it names. `Ignore` changes
-    /// nothing.
+    /// nothing. After the match, `list-sections`' one blanket rule runs for
+    /// **every** action: `refresh.requested` is set to `true` when
+    /// `needs_archived_refresh()` holds, so a future key that opens a
+    /// section cannot forget to trigger its resolution. See design.md ->
+    /// Decision 6.
     pub fn apply(&mut self, action: Action) {
         match action {
             Action::Quit => self.quit = true,
@@ -403,8 +412,77 @@ impl Dashboard {
             | Action::LaunchContinue
             | Action::LaunchArchive
             | Action::FocusAgent => self.apply_launch_action(action),
+            // `list-sections`: fold or unfold exactly one section — the one the cursor
+            // addresses, or the one the addressed change belongs to — and move `selected` to
+            // that section's header. Reaches no collaborator, spawns no process, touches no
+            // filesystem, and reads no clock. See `specs/list-selection/spec.md` -> "`Space`
+            // toggles the section the cursor is on or in".
+            Action::ToggleSection => self.apply_toggle_section(),
             Action::Ignore => {}
         }
+        // `list-sections`' one blanket rule, run after every action rather than a named
+        // subset: see design.md -> Decision 6. It never clears the flag.
+        if self.needs_archived_refresh() {
+            self.refresh.requested = true;
+        }
+    }
+
+    /// The section `Action::ToggleSection` acts on: the one `selected` already
+    /// addresses when it is a header, and otherwise the tier the addressed
+    /// change is drawn from — active for a change from `changes.active`,
+    /// archived for one from `changes.archived`. `None` when the target list
+    /// is empty, which is what makes an empty list inert.
+    fn target_section(&self) -> Option<SectionKey> {
+        match self.targets().get(self.selected)? {
+            Target::Section(key) => Some(*key),
+            Target::Change(i) => {
+                let active_visible = if self.section_open(SectionKey::Active) {
+                    self.changes
+                        .active
+                        .iter()
+                        .filter(|c| matches(&c.name, &self.filter.query))
+                        .count()
+                } else {
+                    0
+                };
+                if *i < active_visible {
+                    Some(SectionKey::Active)
+                } else {
+                    Some(SectionKey::Archived)
+                }
+            }
+        }
+    }
+
+    /// Fold `target_section()`'s section if it is open, unfold it otherwise,
+    /// and move `selected` to that section's header — collapsing a section
+    /// the cursor was inside would otherwise leave it addressing a change
+    /// that is no longer shown. A no-op when the target list is empty.
+    fn apply_toggle_section(&mut self) {
+        let Some(key) = self.target_section() else {
+            return;
+        };
+        if !self.sections.collapsed.remove(&key) {
+            self.sections.collapsed.insert(key);
+        }
+        if let Some(idx) = self
+            .targets()
+            .iter()
+            .position(|t| *t == Target::Section(key))
+        {
+            self.selected = idx;
+        }
+    }
+
+    /// Whether the next refresh cycle should resolve the archived tier: the
+    /// archived section is open, `changes.archived` is empty, and
+    /// `changes.archived_total` is greater than zero. Self-clearing, because
+    /// a `Full` cycle always yields `archived.len() == archived_total`. See
+    /// design.md -> Decision 6.
+    pub fn needs_archived_refresh(&self) -> bool {
+        self.section_open(SectionKey::Archived)
+            && self.changes.archived.is_empty()
+            && self.changes.archived_total > 0
     }
 
     /// The one place all four launch actions gather the same five values — the selected
@@ -826,6 +904,10 @@ pub fn action_for(event: &Event, filtering: bool) -> Action {
         }
         (KeyCode::Char(']'), KeyModifiers::NONE) => Action::NextTab,
         (KeyCode::Char('['), KeyModifiers::NONE) => Action::PrevTab,
+        // `list-sections`: the one new row in the `filtering` false table. While
+        // filtering, `' '` already falls through to the generic `Char(c)` arm above,
+        // which types it — no row is added to that table.
+        (KeyCode::Char(' '), KeyModifiers::NONE) => Action::ToggleSection,
         (KeyCode::Enter, KeyModifiers::NONE) => Action::OpenDetail,
         (KeyCode::Esc, KeyModifiers::NONE) => Action::Back,
         _ => Action::Ignore,
@@ -1915,6 +1997,7 @@ mod tests {
                     | Action::LaunchContinue
                     | Action::LaunchArchive
                     | Action::FocusAgent
+                    | Action::ToggleSection
                     | Action::Ignore => {}
                 }
             }
@@ -1939,12 +2022,14 @@ mod tests {
                 Action::LaunchContinue,
                 Action::LaunchArchive,
                 Action::FocusAgent,
+                // `list-sections`'s addition, bumping the count from seventeen to eighteen.
+                Action::ToggleSection,
                 Action::Ignore,
             ];
             assert_eq!(
                 variants.len(),
-                17,
-                "the seventeen variants this crate specifies"
+                18,
+                "the eighteen variants this crate specifies"
             );
             for v in &variants {
                 assert_known_variant(v);
@@ -2579,6 +2664,440 @@ mod tests {
                 Vec::new(),
             ));
             assert!(collapsed.selected < collapsed.targets().len());
+        }
+
+        /// `dashboard-loop` -> "`Space` maps to `ToggleSection` outside filter
+        /// mode and types inside it".
+        #[test]
+        fn space_maps_to_toggle_section_outside_filter_mode_and_types_inside_it() {
+            assert_eq!(
+                action_for(&press(KeyCode::Char(' '), KeyModifiers::NONE), false),
+                Action::ToggleSection
+            );
+            assert_eq!(
+                action_for(&press(KeyCode::Char(' '), KeyModifiers::NONE), true),
+                Action::FilterPush(' ')
+            );
+            assert_eq!(
+                action_for(&press(KeyCode::Char(' '), KeyModifiers::CONTROL), false),
+                Action::Ignore
+            );
+            assert_eq!(
+                action_for(&press(KeyCode::Char(' '), KeyModifiers::CONTROL), true),
+                Action::Ignore
+            );
+
+            let released = Event::Key(KeyEvent::new_with_kind(
+                KeyCode::Char(' '),
+                KeyModifiers::NONE,
+                KeyEventKind::Release,
+            ));
+            let repeated = Event::Key(KeyEvent::new_with_kind(
+                KeyCode::Char(' '),
+                KeyModifiers::NONE,
+                KeyEventKind::Repeat,
+            ));
+            for filtering in [false, true] {
+                assert_eq!(action_for(&released, filtering), Action::Ignore);
+                assert_eq!(action_for(&repeated, filtering), Action::Ignore);
+            }
+        }
+
+        /// `list-selection` -> "`Space` on a header folds and unfolds that
+        /// section".
+        #[test]
+        fn space_on_a_header_folds_and_unfolds_that_section() {
+            let mut d = dashboard_with_archive(
+                vec![fixture::active("fix-empty-basket", 7, 7)],
+                vec![
+                    fixture::archived(Some("2026-08-14"), "add-auth", 7, 7),
+                    fixture::archived(None, "legacy-cleanup", 3, 3),
+                ],
+                2,
+            );
+            assert_eq!(d.targets()[2], Target::Section(SectionKey::Archived));
+
+            d.apply(Action::ToggleSection);
+            assert_eq!(
+                d.sections.collapsed,
+                std::collections::BTreeSet::from([SectionKey::Archived])
+            );
+            assert_eq!(
+                d.visible()
+                    .iter()
+                    .map(|c| c.name.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["fix-empty-basket"]
+            );
+            assert_eq!(d.selected, 2, "still the archived header");
+
+            d.apply(Action::ToggleSection);
+            assert!(d.sections.collapsed.is_empty());
+            assert_eq!(
+                d.visible()
+                    .iter()
+                    .map(|c| c.name.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["fix-empty-basket", "add-auth", "legacy-cleanup"]
+            );
+            assert_eq!(d.selected, 2);
+        }
+
+        /// `list-selection` -> "`Space` inside a section folds it and moves
+        /// the cursor to its header".
+        #[test]
+        fn space_inside_a_section_folds_it_and_moves_the_cursor_to_its_header() {
+            let mut d = dashboard_with_archive(
+                vec![fixture::active("fix-empty-basket", 7, 7)],
+                vec![
+                    fixture::archived(Some("2026-08-14"), "add-auth", 7, 7),
+                    fixture::archived(None, "legacy-cleanup", 3, 3),
+                ],
+                4,
+            );
+            assert_eq!(d.selected_change().unwrap().name, "legacy-cleanup");
+
+            d.apply(Action::ToggleSection);
+            assert_eq!(
+                d.sections.collapsed,
+                std::collections::BTreeSet::from([SectionKey::Archived])
+            );
+            assert_eq!(d.selected, 2);
+            assert_eq!(d.targets()[2], Target::Section(SectionKey::Archived));
+            assert_eq!(d.selected_change(), None);
+
+            // The same action given at the active change collapses the
+            // active section instead — the section acted on is the one the
+            // cursor is in, not a fixed one.
+            let mut on_active = dashboard_with_archive(
+                vec![fixture::active("fix-empty-basket", 7, 7)],
+                vec![
+                    fixture::archived(Some("2026-08-14"), "add-auth", 7, 7),
+                    fixture::archived(None, "legacy-cleanup", 3, 3),
+                ],
+                1,
+            );
+            on_active.apply(Action::ToggleSection);
+            assert_eq!(
+                on_active.sections.collapsed,
+                std::collections::BTreeSet::from([SectionKey::Active])
+            );
+            assert_eq!(on_active.selected, 0);
+        }
+
+        /// `list-selection` -> "An empty list makes `Space` inert".
+        #[test]
+        fn an_empty_list_makes_space_inert() {
+            let mut d = dashboard_at(Route::List);
+            let before = d.clone();
+            for _ in 0..10 {
+                d.apply(Action::ToggleSection);
+            }
+            assert_eq!(d, before, "no field changed, and it did not panic");
+        }
+
+        /// `list-selection` -> "Opening an unresolved archive requests a
+        /// refresh".
+        #[test]
+        fn opening_an_unresolved_archive_requests_a_refresh() {
+            let mut d = dashboard_with_archive(Vec::new(), Vec::new(), 0);
+            d.changes.archived_total = 22;
+            d.sections.collapsed.insert(SectionKey::Archived);
+            d.refresh.requested = false;
+            assert_eq!(d.targets(), vec![Target::Section(SectionKey::Archived)]);
+            d.selected = 0;
+
+            d.apply(Action::ToggleSection);
+            assert!(d.sections.collapsed.is_empty());
+            assert!(d.refresh.requested);
+            assert_eq!(d.archived_scope(), crate::changes::ArchivedScope::Full);
+
+            // The reverse toggle from a resolved, open archive costs
+            // nothing, because a fold needs no data.
+            let mut resolved = dashboard_with_archive(
+                Vec::new(),
+                (0..22)
+                    .map(|i| fixture::archived(None, &format!("c{i}"), 0, 0))
+                    .collect(),
+                0,
+            );
+            resolved.refresh.requested = false;
+            resolved.apply(Action::ToggleSection);
+            assert!(!resolved.refresh.requested);
+        }
+
+        /// `list-selection` -> "A refresh does not undo a fold".
+        #[test]
+        fn a_refresh_does_not_undo_a_fold() {
+            let mut d = dashboard_with_archive(
+                vec![fixture::active("fix-empty-basket", 7, 7)],
+                vec![
+                    fixture::archived(Some("2026-08-14"), "add-auth", 7, 7),
+                    fixture::archived(None, "legacy-cleanup", 3, 3),
+                ],
+                0,
+            );
+            d.sections.collapsed.insert(SectionKey::Archived);
+            d.clamp_selection();
+
+            // `RefreshResult::Files`, then `RefreshResult::Merged` — both
+            // are just an `adopt` call from `Dashboard`'s own point of view.
+            d.adopt(fixture::set(
+                vec![fixture::active("wholly-different", 0, 1)],
+                vec![fixture::archived(None, "another-one", 0, 1)],
+                Vec::new(),
+            ));
+            assert_eq!(
+                d.sections.collapsed,
+                std::collections::BTreeSet::from([SectionKey::Archived]),
+                "a live update must never reopen what the reader folded"
+            );
+
+            d.adopt(fixture::set(
+                vec![fixture::active("yet-another", 2, 2)],
+                vec![fixture::archived(None, "and-another", 1, 1)],
+                Vec::new(),
+            ));
+            assert_eq!(
+                d.sections.collapsed,
+                std::collections::BTreeSet::from([SectionKey::Archived])
+            );
+        }
+
+        /// `list-filtering` -> "`Space` types into the query rather than
+        /// folding a section". The footer render assertion belongs to
+        /// `ui::view::tests::`, out of this group's file boundary; this test
+        /// covers the app-state half.
+        #[test]
+        fn space_types_into_the_query_rather_than_folding_a_section() {
+            let build = || {
+                dashboard_with_archive(
+                    vec![
+                        fixture::active("aaa", 0, 1),
+                        fixture::active("bbb", 0, 1),
+                        fixture::active("ccc", 0, 1),
+                    ],
+                    vec![
+                        fixture::archived(None, "ddd", 0, 1),
+                        fixture::archived(None, "eee", 0, 1),
+                    ],
+                    0,
+                )
+            };
+
+            let mut d = build();
+            d.sections.collapsed.insert(SectionKey::Archived);
+            d.apply(action_for(
+                &press(KeyCode::Char('/'), KeyModifiers::NONE),
+                false,
+            ));
+            for c in ['a', ' ', 'd'] {
+                d.apply(action_for(
+                    &press(KeyCode::Char(c), KeyModifiers::NONE),
+                    true,
+                ));
+            }
+            assert_eq!(d.filter.query, "a d");
+            assert!(d.filter.active);
+            assert_eq!(
+                d.sections.collapsed,
+                std::collections::BTreeSet::from([SectionKey::Archived]),
+                "no section was folded or unfolded by the key itself"
+            );
+
+            // The same three keys with `filter.active` false leave
+            // `filter.query` empty and fold a section on the second, so the
+            // typing above is the filter mode's doing and not the key
+            // losing its binding.
+            let mut not_filtering = build();
+            for c in ['a', ' ', 'd'] {
+                not_filtering.apply(action_for(
+                    &press(KeyCode::Char(c), KeyModifiers::NONE),
+                    false,
+                ));
+            }
+            assert_eq!(not_filtering.filter.query, "");
+            assert_eq!(
+                not_filtering.sections.collapsed,
+                std::collections::BTreeSet::from([SectionKey::Active])
+            );
+        }
+
+        /// `list-selection` -> "A query reaches a match inside a folded
+        /// archive" (the `ui::app::tests::` half; the render half belongs to
+        /// group 5, per tasks.md -> 5.1).
+        #[test]
+        fn a_query_reaches_a_match_inside_a_folded_archive() {
+            let mut d = dashboard_with_archive(
+                vec![
+                    fixture::active("fix-empty-basket", 7, 7),
+                    fixture::active("migrate-ai-sdk-v7", 0, 0),
+                ],
+                vec![
+                    fixture::archived(Some("2026-08-14"), "add-auth", 7, 7),
+                    fixture::archived(None, "legacy-cleanup", 3, 3),
+                ],
+                0,
+            );
+            d.sections.collapsed.insert(SectionKey::Archived);
+            d.filter.query = "auth".to_string();
+
+            assert!(
+                d.section_open(SectionKey::Archived),
+                "the query forces the archived section open"
+            );
+            assert_eq!(
+                d.visible()
+                    .iter()
+                    .map(|c| c.name.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["add-auth"]
+            );
+            assert_eq!(
+                d.targets(),
+                vec![Target::Section(SectionKey::Archived), Target::Change(0)],
+                "no active header — its matched count is zero"
+            );
+            assert_eq!(
+                d.sections.collapsed,
+                std::collections::BTreeSet::from([SectionKey::Archived]),
+                "the force-open is derived rather than written"
+            );
+
+            // Clearing the query restores the reader's own fold, with
+            // nothing having been saved.
+            d.filter.query.clear();
+            assert!(!d.section_open(SectionKey::Archived));
+            assert!(
+                d.visible()
+                    .iter()
+                    .all(|c| c.name != "add-auth" && c.name != "legacy-cleanup"),
+                "the archived tier is folded again"
+            );
+        }
+
+        /// `list-selection` -> "The archived count under a query is the
+        /// matched count" (the `ui::app::tests::` half; the render half
+        /// belongs to group 5, per tasks.md -> 5.1).
+        #[test]
+        fn the_archived_count_under_a_query_is_the_matched_count() {
+            let mut d = dashboard_with_archive(
+                vec![
+                    fixture::active("fix-empty-basket", 7, 7),
+                    fixture::active("migrate-ai-sdk-v7", 0, 0),
+                ],
+                vec![
+                    fixture::archived(Some("2026-08-14"), "add-auth", 7, 7),
+                    fixture::archived(None, "legacy-cleanup", 3, 3),
+                ],
+                0,
+            );
+            d.filter.query = "add".to_string();
+
+            assert_eq!(
+                d.targets(),
+                vec![Target::Section(SectionKey::Archived), Target::Change(0)],
+                "no active header at all, because a section whose matched \
+                 count is zero emits none"
+            );
+            assert_eq!(
+                d.visible()
+                    .iter()
+                    .map(|c| c.name.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["add-auth"]
+            );
+
+            d.filter.query.clear();
+            assert_eq!(
+                d.targets().len(),
+                6,
+                "both headers plus all four changes — the counts follow the \
+                 query when resolved and the true totals when it is not"
+            );
+        }
+
+        /// `list-selection` -> "The first character of a query requests the
+        /// archive it needs".
+        #[test]
+        fn the_first_character_of_a_query_requests_the_archive_it_needs() {
+            let mut d = dashboard_with_archive(Vec::new(), Vec::new(), 0);
+            d.changes.archived_total = 22;
+            d.sections.collapsed.insert(SectionKey::Archived);
+            d.clamp_selection();
+            d.refresh.requested = false;
+
+            d.apply(Action::FilterStart);
+            d.apply(Action::FilterPush('a'));
+            assert!(d.refresh.requested);
+            assert_eq!(d.archived_scope(), crate::changes::ArchivedScope::Full);
+
+            d.refresh.requested = false;
+            d.apply(Action::FilterPush('d'));
+            d.apply(Action::FilterPush('d'));
+            assert!(
+                d.refresh.requested,
+                "the predicate is still unsatisfied while the tier is unresolved"
+            );
+
+            // Against a dashboard whose twenty-two archived changes are
+            // already present, the same two characters leave the flag
+            // false: a resolved tier costs no further cycle.
+            let mut resolved = dashboard_with_archive(
+                Vec::new(),
+                (0..22)
+                    .map(|i| fixture::archived(None, &format!("c{i}"), 0, 0))
+                    .collect(),
+                0,
+            );
+            resolved.sections.collapsed.insert(SectionKey::Archived);
+            resolved.clamp_selection();
+            resolved.apply(Action::FilterStart);
+            resolved.apply(Action::FilterPush('a'));
+            resolved.refresh.requested = false;
+            resolved.apply(Action::FilterPush('d'));
+            resolved.apply(Action::FilterPush('d'));
+            assert!(!resolved.refresh.requested);
+
+            // `Backspace` back to an empty query leaves `archived_scope()`
+            // `Names` and `refresh.requested` untouched, because a fold
+            // needs no data.
+            d.apply(Action::FilterPop);
+            d.apply(Action::FilterPop);
+            d.refresh.requested = false;
+            d.apply(Action::FilterPop);
+            assert_eq!(d.filter.query, "");
+            assert_eq!(d.archived_scope(), crate::changes::ArchivedScope::Names);
+            assert!(!d.refresh.requested);
+        }
+
+        /// `dashboard-loop` -> "Space gains a meaning" and design.md ->
+        /// Decision 6's self-clearing claim.
+        #[test]
+        fn needs_archived_refresh_self_clears_once_resolved() {
+            let mut d = dashboard_with_archive(Vec::new(), Vec::new(), 0);
+            d.changes.archived_total = 3;
+            assert!(
+                d.needs_archived_refresh(),
+                "open, empty, and a nonzero total"
+            );
+
+            d.changes.archived = vec![
+                fixture::archived(None, "a", 0, 1),
+                fixture::archived(None, "b", 0, 1),
+                fixture::archived(None, "c", 0, 1),
+            ];
+            assert!(
+                !d.needs_archived_refresh(),
+                "archived.len() == archived_total"
+            );
+
+            d.sections.collapsed.insert(SectionKey::Archived);
+            d.changes.archived.clear();
+            assert!(
+                !d.needs_archived_refresh(),
+                "a collapsed section needs no data"
+            );
         }
 
         fn twenty_line_detail() -> Detail {

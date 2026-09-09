@@ -70,12 +70,12 @@ are whole-change gates by definition and cannot precede the work they gate.
 ## 4. `Space`, `ToggleSection`, and the refresh it triggers
 <!-- kind: behavior -->
 
-- [ ] 4.1 RED: Write failing tests for `Space maps to ToggleSection outside filter mode and types inside it`, `Space on a header folds and unfolds that section`, `Space inside a section folds it and moves the cursor to its header`, `An empty list makes Space inert`, `Opening an unresolved archive requests a refresh`, `A refresh does not undo a fold`, `Space types into the query rather than folding a section`, `A non-empty query forces every section open`'s three scenarios, and `The first character of a query requests the archive it needs`.
-- [ ] 4.2 GREEN: Add `Action::ToggleSection` — the eighteenth variant — map `KeyCode::Char(' ')` with no modifiers to it while `filtering` is false, and implement the toggle in `apply` so it moves `selected` to that section's header and changes nothing else.
-- [ ] 4.3 GREEN: Implement `needs_archived_refresh()` and set `refresh.requested` from it after **every** action in `apply`, not on a named subset (design.md → Decision 6). Verify the predicate self-clears once `archived.len() == archived_total`.
-- [ ] 4.4 CHECK: Confirm `Dashboard::adopt` does not touch `sections`, so a live update never reopens what the reader folded.
-- [ ] 4.5 CHECK: Update the hand-written `variants` array in `ui::app::tests::no_action_mutates_changes` to eighteen, and confirm the exhaustive `match` and the array enumerate the same set.
-- [ ] 4.6 Run `cargo test --all-features` — no regressions, and state whether a refactor was needed.
+- [x] 4.1 RED: Write failing tests for `Space maps to ToggleSection outside filter mode and types inside it`, `Space on a header folds and unfolds that section`, `Space inside a section folds it and moves the cursor to its header`, `An empty list makes Space inert`, `Opening an unresolved archive requests a refresh`, `A refresh does not undo a fold`, `Space types into the query rather than folding a section`, `A non-empty query forces every section open`'s three scenarios, and `The first character of a query requests the archive it needs`.
+- [x] 4.2 GREEN: Add `Action::ToggleSection` — the eighteenth variant — map `KeyCode::Char(' ')` with no modifiers to it while `filtering` is false, and implement the toggle in `apply` so it moves `selected` to that section's header and changes nothing else.
+- [x] 4.3 GREEN: Implement `needs_archived_refresh()` and set `refresh.requested` from it after **every** action in `apply`, not on a named subset (design.md → Decision 6). Verify the predicate self-clears once `archived.len() == archived_total`.
+- [x] 4.4 CHECK: Confirm `Dashboard::adopt` does not touch `sections`, so a live update never reopens what the reader folded.
+- [x] 4.5 CHECK: Update the hand-written `variants` array in `ui::app::tests::no_action_mutates_changes` to eighteen, and confirm the exhaustive `match` and the array enumerate the same set.
+- [x] 4.6 Run `cargo test --all-features` — no regressions, and state whether a refactor was needed.
 
 ## 5. Section rows and their styling
 <!-- kind: behavior -->
