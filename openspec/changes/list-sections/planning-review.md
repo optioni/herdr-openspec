@@ -134,6 +134,7 @@ future change that wants live refresh in file mode will find the argument here.
 | # | Source Artifact | Problem | Repair | Found by |
 |---|---|---|---|---|
 | I1 | `specs/list-selection/spec.md` | Scenario *A refresh keeps the cursor on the same change* opened on "three active changes" while its own `selected` 4, "`selected` is 5" and "`visible()` position of 3" clauses only hold for **two**. With three active, `targets()` index 4 is the archived header, not `add-auth`. | Precondition corrected to "two active changes"; every other clause of the scenario was already right and is unchanged. | Group 3's implementer, building the test against the scenario |
+| I2 | `specs/change-rows/spec.md` | Scenario *An archived row drops the progress cell, then the date, as the width falls* named the change row `rows()[1]`, contradicting the same file's own emission requirement: an active section whose count is zero emits a `No active changes` message row *before* the archived header, so the change row is `rows()[2]`. The landed `the_four_message_states_are_distinct` confirms the message/header/item order. | Index corrected to `rows()[2]`, with the two preceding rows named so the scenario states its own row order. The width assertions themselves were right and are unchanged. | Group 5's implementer, building the test against the scenario |
 
 **Reviewed Against, updated:** implementation proceeds from `74a0b2e`, which differs from the
 reviewed `1437787` only by this change's own planning artifacts (`git show --stat 74a0b2e`

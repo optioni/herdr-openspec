@@ -867,7 +867,9 @@ badged and is never a change.
   archived section open, and `selected` **1** so the cursor is on the change rather than on
   the archived section header above it, at widths 22, 21, 20, 19, 14, 13, 3, 1, and 0, and —
   as the contrasting controls at the mandated interiors — at 38 and 58; every assertion below
-  is about the **change** row, `rows()[1]`
+  is about the **change** row, `rows()[2]` — the active section's count is zero, so this
+  dashboard emits the `No active changes` message row at `rows()[0]` and the archived section
+  header at `rows()[1]` before it
 - **THEN** the rows are exactly `> 2026-08-14 … b [7/7]`, `> 2026-08-14 a… [7/7]`,
   `> 2026-08-14 … [7/7]`, `> 2026-08-14 add-a…`, `> 2026-08-14 …`, `> add-auth   `, `> …`,
   `>`, and the empty string, in that order
