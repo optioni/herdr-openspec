@@ -113,6 +113,14 @@ pub struct Startup<'a> {
     /// `HERDR_PROGRAM`'s established pattern: the dashboard shell reaches a production CLI
     /// binding only through a name that says nothing about the CLI seam itself.
     pub npm_hook: &'a dyn Fn() -> Option<std::path::PathBuf>,
+    /// `mouse-input`'s addition, on exactly `state_dir`'s and `env`'s terms: the
+    /// reason the terminal refused mouse capture, or `None` when it was entered.
+    /// `run` fills it from the `TerminalGuard`'s own `mouse_problem()` — a field
+    /// expression, not a branch, so `run`'s body still holds no branch and no
+    /// loop and the `WIRED` gate's leg 2 stays green. Owned rather than borrowed
+    /// because the guard hands out a `String` it built from a `TerminalError`'s
+    /// `Display` form, and nothing else in the process owns it.
+    pub mouse_problem: Option<String>,
 }
 
 /// The live tier's three collaborators, plus any problem folded in while
@@ -290,6 +298,15 @@ pub fn run_wired<B: Backend, E: EventSource>(
     // are seeded into `refresh.startup`, never `refresh.problems`, and exactly once: nothing
     // downstream of this call ever writes `startup` again.
     dashboard.refresh.startup = collaborators.problems;
+    // `mouse-input`: the refused-capture reason is appended **after** every
+    // problem `start_collaborators` reported, because it explains the least — a
+    // missing `openspec` binary or a watcher that would not start changes what
+    // the pane can show, while a refused capture only withdraws a second way to
+    // reach what the keys already reach, and it must not push a probe reason off
+    // the top of a short list.
+    if let Some(reason) = &startup.mouse_problem {
+        dashboard.refresh.startup.push(reason.clone());
+    }
     dashboard.file_mode = collaborators.file_mode;
     let result = {
         let mut live = crate::ui::driver::Live {
@@ -376,7 +393,7 @@ pub(crate) fn startup_dir(
 /// drives. Holds no branch and no loop of its own beyond `?` — see the
 /// `WIRED` check.
 pub fn run() -> Result<(), StartError> {
-    let _guard = enter_if_terminal(std::io::stdout().is_terminal(), &CrosstermOps)?;
+    let guard = enter_if_terminal(std::io::stdout().is_terminal(), &CrosstermOps)?;
     terminal::install_panic_hook();
     let config = crate::config::load_from_env();
     let env = crate::config::env_lookup();
@@ -390,6 +407,7 @@ pub fn run() -> Result<(), StartError> {
         state_dir: state_dir.as_deref(),
         env: &env,
         npm_hook: &crate::cli::npm_probe_hook,
+        mouse_problem: guard.mouse_problem(),
     };
     run_wired(
         &mut term,
@@ -2742,6 +2760,7 @@ apply:
                 state_dir,
                 env: &no_env,
                 npm_hook: &no_npm_hook,
+                mouse_problem: None,
             };
             let result = super::super::run_wired(
                 &mut terminal,
@@ -2774,6 +2793,11 @@ apply:
             state_dir: Option<&'a Path>,
             env: &'a dyn Fn(&str) -> Option<String>,
             npm_hook: &'a dyn Fn() -> Option<PathBuf>,
+            /// `mouse-input`'s addition, on `env`'s terms: the reason a terminal
+            /// refused mouse capture, as `TerminalGuard::mouse_problem` would
+            /// have reported it. `run_wired_at` passes `None`, which is what
+            /// every other test in this module drives.
+            mouse_problem: Option<String>,
         }
 
         /// `run_wired_at`'s twin, driving `run_wired` with an explicit `env`/`npm_hook` — see
@@ -2794,6 +2818,7 @@ apply:
                 state_dir: p.state_dir,
                 env: p.env,
                 npm_hook: p.npm_hook,
+                mouse_problem: p.mouse_problem,
             };
             let result = super::super::run_wired(
                 &mut terminal,
@@ -3083,6 +3108,7 @@ esac
                 state_dir,
                 env: &no_env,
                 npm_hook: &no_npm_hook,
+                mouse_problem: None,
             };
             let result = super::super::run_wired(
                 &mut terminal,
@@ -3708,6 +3734,7 @@ esac
                 state_dir: Some(state.path()),
                 env: &no_env,
                 npm_hook: &no_npm_hook,
+                mouse_problem: None,
             };
             let result = super::super::run_wired(
                 &mut terminal,
@@ -3858,6 +3885,7 @@ esac
                 state_dir: None,
                 env: &no_env,
                 npm_hook: &no_npm_hook,
+                mouse_problem: None,
             };
             let result = super::super::run_wired(
                 &mut terminal,
@@ -3895,6 +3923,7 @@ esac
                     state_dir: None,
                     env: &no_env,
                     npm_hook: &no_npm_hook,
+                    mouse_problem: None,
                 },
                 &|| true,
             );
@@ -3922,6 +3951,7 @@ esac
                     state_dir: None,
                     env: &no_env,
                     npm_hook: &resolving_npm,
+                    mouse_problem: None,
                 },
                 &predicate,
             );
@@ -4100,6 +4130,7 @@ esac
                     state_dir: None,
                     env: &env,
                     npm_hook: &no_npm_hook,
+                    mouse_problem: None,
                 },
                 &predicate,
             );
@@ -4144,6 +4175,7 @@ esac
                     state_dir: None,
                     env: &env,
                     npm_hook: &no_npm_hook,
+                    mouse_problem: None,
                 },
                 &predicate,
             );
@@ -4188,6 +4220,7 @@ esac
                     state_dir: None,
                     env: &env,
                     npm_hook: &no_npm_hook,
+                    mouse_problem: None,
                 },
                 &predicate,
             );
@@ -4276,6 +4309,132 @@ esac
                     "width {width}: no leading problem row names openspec_bin: {buf:?}"
                 );
             }
+        }
+
+        /// `terminal-lifecycle` (`mouse-input`) :: "A refused capture becomes a
+        /// leading problem row, below the probe's own".
+        #[test]
+        fn a_refused_capture_is_named_last() {
+            let scratch = scratch_repo_with_alpha();
+            let root = scratch.path();
+            let herdr = root.join("does-not-exist-herdr");
+            // A configured binary that does not exist, plus the neutral
+            // `no_env`/`no_npm_hook` pair: the probe resolves nothing and says so,
+            // which is what puts a reason of its own above this one. A *silent*
+            // probe (`Config::default()` with the same neutral environment) reports
+            // nothing at all, so it could not show the ordering this scenario is
+            // about.
+            let bad_bin = root.join("not-a-real-openspec-binary");
+            let config = Config {
+                openspec_bin: Some(bad_bin.clone()),
+                ..Config::default()
+            };
+            let (result, buf) = run_wired_probed(
+                ProbedStartup {
+                    width: 120,
+                    root,
+                    config: &config,
+                    herdr: &herdr,
+                    state_dir: None,
+                    env: &no_env,
+                    npm_hook: &no_npm_hook,
+                    mouse_problem: Some("enable_mouse: no mouse".to_string()),
+                },
+                &|| true,
+            );
+            let dashboard = result.expect("a refused capture is a supported state, not an error");
+
+            let startup = &dashboard.refresh.startup;
+            assert!(
+                startup.len() >= 2,
+                "the probe's own reasons come first: {startup:?}"
+            );
+            assert!(
+                startup[0].contains("openspec_bin")
+                    && startup[0].contains(&bad_bin.display().to_string()),
+                "the probe's own reason leads: {startup:?}"
+            );
+            assert_eq!(
+                startup.last().map(String::as_str),
+                Some("enable_mouse: no mouse"),
+                "the capture reason is last: {startup:?}"
+            );
+            assert!(
+                startup[..startup.len() - 1]
+                    .iter()
+                    .all(|p| p != "enable_mouse: no mouse"),
+                "it appears exactly once: {startup:?}"
+            );
+
+            // Each of them renders as a `!`-marked row above the change rows.
+            for reason in startup {
+                assert!(
+                    buf.iter().any(|row| row.contains('!') && {
+                        let head: String = reason.chars().take(20).collect();
+                        row.contains(&head)
+                    }),
+                    "no leading problem row names {reason:?}: {buf:?}"
+                );
+            }
+            // The loop ran normally: the pane drew and no error screen replaced it.
+            assert!(buf[0].starts_with("OpenSpec"));
+        }
+
+        /// `terminal-lifecycle` (`mouse-input`) :: "A successful capture adds no row".
+        #[test]
+        fn a_successful_capture_adds_no_row() {
+            let scratch = scratch_repo_with_alpha();
+            let root = scratch.path();
+            let herdr = root.join("does-not-exist-herdr");
+
+            let (result, buf) = run_wired_probed(
+                ProbedStartup {
+                    width: 120,
+                    root,
+                    config: &Config::default(),
+                    herdr: &herdr,
+                    state_dir: None,
+                    env: &no_env,
+                    npm_hook: &no_npm_hook,
+                    mouse_problem: None,
+                },
+                &|| true,
+            );
+            let dashboard = result.expect("a successful capture is the ordinary state");
+
+            // `refresh.startup` is exactly what `start_collaborators` reported —
+            // no extra entry. The comparison is against `run_wired_at`, which is
+            // the pre-`mouse-input` call shape verbatim, with the same scratch
+            // repository, the same neutral environment and the same predicate.
+            let scratch2 = scratch_repo_with_alpha();
+            let (baseline, baseline_buf) = run_wired_at(
+                120,
+                scratch2.path(),
+                &Config::default(),
+                &herdr,
+                None,
+                &|| true,
+            );
+            let baseline = baseline.expect("the baseline run also succeeds");
+            assert_eq!(
+                dashboard.refresh.startup.len(),
+                baseline.refresh.startup.len(),
+                "a None capture contributes no entry: {:?} against {:?}",
+                dashboard.refresh.startup,
+                baseline.refresh.startup
+            );
+            assert!(
+                dashboard
+                    .refresh
+                    .startup
+                    .iter()
+                    .all(|p| !p.contains("enable_mouse")),
+                "{:?}",
+                dashboard.refresh.startup
+            );
+            // The two scratch roots differ only in their own temporary path, which
+            // the header right-aligns, so every row below the header is identical.
+            assert_eq!(buf[1..], baseline_buf[1..], "the frame is unchanged");
         }
 
         /// `openspec-binary` :: "No binary anywhere is reported as file mode rather than as

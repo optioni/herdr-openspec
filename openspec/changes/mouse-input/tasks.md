@@ -359,26 +359,53 @@ shape. Only `run_loop` can prove otherwise.
 ## 7. The refused-capture row reaches the reader
 <!-- kind: behavior -->
 
-- [ ] 7.1 RED: Write failing tests for `terminal-lifecycle`'s two wiring scenarios:
+- [x] 7.1 RED: Write failing tests for `terminal-lifecycle`'s two wiring scenarios:
       `ui::tests::wiring::a_refused_capture_is_named_last` and
       `wiring::a_successful_capture_adds_no_row`. The first asserts the probe's own reasons
       come first and the capture reason last, and that the loop still runs.
       `cargo test --lib ui::tests::wiring::a_refused_capture wiring::adds_no_row` — expect RED.
-- [ ] 7.2 GREEN: Add `mouse_problem: Option<String>` to `Startup` and name it at all
+- [x] 7.2 GREEN: Add `mouse_problem: Option<String>` to `Startup` and name it at all
       **6** construction sites (check L) — not the 11 a bare `grep -c 'Startup {'` reports. `run_wired` appends it to
       `dashboard.refresh.startup` after `collaborators.problems`.
-- [ ] 7.3 GREEN: `ui::run` binds the guard and passes `guard.mouse_problem()` as the field's
+- [x] 7.3 GREEN: `ui::run` binds the guard and passes `guard.mouse_problem()` as the field's
       value — a field expression, so `pub fn run()` still holds no branch and no loop.
-- [ ] 7.4 CHECK: Contract gate — every `Startup` construction site names the new field.
+- [x] 7.4 CHECK: Contract gate — every `Startup` construction site names the new field.
       `grep -c 'mouse_problem:' src/ui/mod.rs` reports **6** (it is `0` at HEAD), one per site
       of check L. `nodefault-ui.sh` is deliberately not the check here: it loops only over its
       `$TYPES` argument and never reads `Startup`; that `Startup` has no `Default` is enforced
       by rustc, since no site elides a field.
-- [ ] 7.5 CHECK: Persistence gate — no migration, backfill, cache invalidation, or index
+      **Run, and a correction to the check itself.** `grep -c 'mouse_problem:' src/ui/mod.rs`
+      reports **15**, not 6, and 6 was never reachable: the predicted number counted only the
+      `Startup` construction sites, while the pattern also matches the field's own
+      declaration and every test-harness site. The 15 break down as: 1 the `Startup` field
+      declaration (`:123`); **6** `Startup` construction sites — `:410` (the production one,
+      in `run`, `guard.mouse_problem()`), `:2763`, `:2821`, `:3111`, `:3737`, `:3888` — which
+      is exactly check L's six; 1 the `ProbedStartup` test-harness field declaration
+      (`:2800`); and 7 `ProbedStartup` literals (`:3926`, `:3954`, `:4133`, `:4178`, `:4223`,
+      `:4341`, `:4399`), five carried over and two written by 7.1.
+      **The check that actually moved and actually holds is rustc's**, which the task text
+      already names: `Startup` implements no `Default` and every site names every field, so
+      adding the field failed to compile at three sites the edit had not reached — `:3111`,
+      `:3737`, and `:3888` — and named each of them. That is the contract gate working;
+      the grep was a proxy for it and a miscounted one.
+- [x] 7.5 CHECK: Persistence gate — no migration, backfill, cache invalidation, or index
       rebuild applies (design.md → Persistence and Rollout). Confirm the plugin's writes are
       still exactly `agent-names.toml`: `/bin/sh scripts/gates/readonly-ui.sh` exits 0.
-- [ ] 7.6 Run the group tests — `cargo test --lib ui::tests::` — no regressions, and record
+      **Run:** `READONLY-UI OK: 12 files under src/ui plus [src/watch.rs src/refresh.rs
+      src/agents.rs src/launch.rs src/open.rs], no write API in production code; both
+      controls matched; File::options, DirBuilder, and create_new controls matched`,
+      **exit 0**. No migration, backfill, seeding, cache invalidation, or index rebuild
+      applies: this change stores nothing and the `artifact-content` cache key is
+      unchanged.
+- [x] 7.6 Run the group tests — `cargo test --lib ui::tests::` — no regressions, and record
       that no refactor was needed.
+      **Run:** `cargo test --lib ui::tests:: -- --test-threads=1` → **62 passed**, 0 failed
+      (60 before, plus this group's two). Single-threaded for the pre-existing
+      `ui::tests::wiring::` flake recorded at the top of this file. **No refactor was
+      needed:** `run_wired` gained a four-line `if let` after the line that seeds
+      `refresh.startup`, and `run` gained one field expression; the test harness gained one
+      field on `ProbedStartup` rather than a seventh positional parameter on
+      `run_wired_at`, which is the shape `degraded-states` already established there.
 
 ## 8. Gates
 <!-- kind: operational -->
