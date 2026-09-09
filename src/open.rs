@@ -7,6 +7,7 @@
 //!
 //! `context` reads Herdr's injected invocation context through one injected lookup;
 //! `existing_pane` decides whether a listed pane is this workspace's dashboard;
+//! `split_target` decides which live pane a split targets when the injected one is gone;
 //! `open_args`/`focus_args` are the exact Herdr argument vectors; `run` is the impure
 //! driver over `&dyn HerdrCli`; `placement_for`/`report_output` are the two pure
 //! decisions `src/main.rs` would otherwise make itself (design.md -> Decision 10); and
@@ -130,6 +131,67 @@ pub fn existing_pane(listing: &str, workspace_id: &str) -> Result<Option<String>
         return Ok(Some(pane_id.to_string()));
     }
     Ok(None)
+}
+
+/// Which pane a split should target, decided against the live `herdr pane list` payload
+/// rather than trusted from the injected context.
+///
+/// Measured live against Herdr 0.9.0: an action invoked from a transient picker pane —
+/// Herdr Navigator's, for one — runs *after* that pane closes, so the context's
+/// `focused_pane_id` names a pane that no longer exists, and `herdr plugin pane open
+/// --target-pane <dead>` fails with `pane_not_found` rather than degrading. Dropping the
+/// flag is not an option either: `--placement split` with `--workspace` alone is refused
+/// with `invalid_params` ("split and zoomed plugin panes target an existing pane").
+///
+/// The rule: keep the injected pane when the listing shows it alive (anywhere — a live
+/// pane id is trusted as given); otherwise substitute the invoking workspace's own
+/// focused pane, else its first listed pane. When neither the listing nor the workspace
+/// offers a live candidate — an empty or unparseable listing, or a workspace with no
+/// panes at all — the injected value is returned unchanged, so this never turns a call
+/// that would have worked into one that cannot.
+pub fn split_target(
+    listing: &str,
+    workspace_id: &str,
+    focused_pane_id: Option<&str>,
+) -> Option<String> {
+    let injected = focused_pane_id.map(str::to_string);
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(listing) else {
+        return injected;
+    };
+    let Some(panes) = value
+        .get("result")
+        .and_then(|r| r.get("panes"))
+        .and_then(|p| p.as_array())
+    else {
+        return injected;
+    };
+
+    let mut focused_in_workspace: Option<String> = None;
+    let mut first_in_workspace: Option<String> = None;
+    for pane in panes {
+        let Some(obj) = pane.as_object() else {
+            continue;
+        };
+        let Some(pane_id) = obj.get("pane_id").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if focused_pane_id == Some(pane_id) {
+            return injected;
+        }
+        if obj.get("workspace_id").and_then(|v| v.as_str()) != Some(workspace_id) {
+            continue;
+        }
+        if first_in_workspace.is_none() {
+            first_in_workspace = Some(pane_id.to_string());
+        }
+        if focused_in_workspace.is_none()
+            && obj.get("focused").and_then(|v| v.as_bool()) == Some(true)
+        {
+            focused_in_workspace = Some(pane_id.to_string());
+        }
+    }
+
+    focused_in_workspace.or(first_in_workspace).or(injected)
 }
 
 /// Which kind of pane an `open`/`open-tab` invocation targets. See
@@ -264,21 +326,29 @@ fn herdr_reason(err: &crate::cli::CliError) -> String {
 /// Some(2), .. }` — the measured usage shape, what a Herdr without `plugin pane focus`
 /// produces — warns and falls through to opening once; any other focus failure stops.
 /// The open response is never parsed: exit status alone carries success
-/// (design.md -> Decisions 4 and 5).
+/// (design.md -> Decisions 4 and 5). The same listing also repairs a split's target pane
+/// when the injected `focused_pane_id` names a pane that has since closed — see
+/// [`split_target`].
 pub fn run(cli: &dyn crate::cli::HerdrCli, ctx: &Context, placement: Placement) -> Report {
     let mut warnings = Vec::new();
 
-    let existing = match cli.run(&["pane", "list"]) {
-        Ok(listing) => match existing_pane(&listing, &ctx.workspace_id) {
-            Ok(found) => found,
-            Err(reason) => {
-                warnings.push(reason);
-                None
-            }
-        },
+    // One listing answers two questions: whether a dashboard pane already exists, and
+    // which live pane a split may target (`split_target`).
+    let (existing, split_pane) = match cli.run(&["pane", "list"]) {
+        Ok(listing) => {
+            let found = match existing_pane(&listing, &ctx.workspace_id) {
+                Ok(found) => found,
+                Err(reason) => {
+                    warnings.push(reason);
+                    None
+                }
+            };
+            let target = split_target(&listing, &ctx.workspace_id, ctx.focused_pane_id.as_deref());
+            (found, target)
+        }
         Err(err) => {
             warnings.push(herdr_reason(&err));
-            None
+            (None, ctx.focused_pane_id.clone())
         }
     };
 
@@ -309,7 +379,14 @@ pub fn run(cli: &dyn crate::cli::HerdrCli, ctx: &Context, placement: Placement) 
         }
     }
 
-    let open = open_args(placement, ctx);
+    // The one field a live listing may correct. Every field is named: no `..` rest.
+    let open_ctx = Context {
+        plugin_id: ctx.plugin_id.clone(),
+        workspace_id: ctx.workspace_id.clone(),
+        workspace_cwd: ctx.workspace_cwd.clone(),
+        focused_pane_id: split_pane,
+    };
+    let open = open_args(placement, &open_ctx);
     let refs: Vec<&str> = open.iter().map(String::as_str).collect();
     match cli.run(&refs) {
         Ok(_) => Report {
@@ -456,7 +533,12 @@ mod tests {
         for listing in [unlabelled, empty] {
             let fake = crate::cli::FakeCli::new();
             fake.register_herdr(&["pane", "list"], Ok(listing.to_string()));
-            let argv = open_args(Placement::Split, &ctx);
+            // The unlabelled listing has no `w8:p1`, so the split target is repaired to
+            // the one pane it does list; the empty one leaves it untouched.
+            let mut targeted = ctx.clone();
+            targeted.focused_pane_id =
+                split_target(listing, &ctx.workspace_id, ctx.focused_pane_id.as_deref());
+            let argv = open_args(Placement::Split, &targeted);
             let refs: Vec<&str> = argv.iter().map(String::as_str).collect();
             fake.register_herdr(&refs, Ok(String::new()));
 
@@ -497,6 +579,107 @@ mod tests {
             {"pane_id":"w8:pH","label":"OpenSpec","workspace_id":"w8"}
         ]}}"#;
         assert_eq!(existing_pane(listing, "w8"), Ok(Some("w8:pG".to_string())));
+    }
+
+    // --- group 4b: repairing a dead split target ----------------------------------------
+
+    /// A listing in `herdr pane list`'s own shape: `(pane_id, workspace_id, focused)`.
+    fn pane_listing(panes: &[(&str, &str, bool)]) -> String {
+        let entries: Vec<String> = panes
+            .iter()
+            .map(|(id, ws, focused)| {
+                format!(
+                    r#"{{"pane_id":"{id}","label":"zsh","workspace_id":"{ws}","focused":{focused}}}"#
+                )
+            })
+            .collect();
+        format!(r#"{{"result":{{"panes":[{}]}}}}"#, entries.join(","))
+    }
+
+    #[test]
+    fn split_target_keeps_a_live_injected_pane() {
+        let listing = pane_listing(&[("w8:p1", "w8", false), ("w8:p2", "w8", true)]);
+        assert_eq!(
+            split_target(&listing, "w8", Some("w8:p1")),
+            Some("w8:p1".to_string()),
+            "a listed pane id is trusted as given, focused or not"
+        );
+    }
+
+    /// The measured bug: an action invoked from a picker pane that closes before this
+    /// process runs. Herdr 0.9.0 answered `--target-pane w8:pD` with `pane_not_found`.
+    #[test]
+    fn split_target_replaces_a_dead_injected_pane_with_the_workspace_focus() {
+        let listing = pane_listing(&[("w8:p1", "w8", false), ("w8:p2", "w8", true)]);
+        assert_eq!(
+            split_target(&listing, "w8", Some("w8:pD")),
+            Some("w8:p2".to_string()),
+            "the workspace's own focused pane wins over its first"
+        );
+    }
+
+    #[test]
+    fn split_target_falls_back_to_the_first_pane_when_none_is_focused() {
+        let listing = pane_listing(&[("w8:p1", "w8", false), ("w8:p2", "w8", false)]);
+        assert_eq!(
+            split_target(&listing, "w8", Some("w8:pD")),
+            Some("w8:p1".to_string())
+        );
+    }
+
+    #[test]
+    fn split_target_ignores_other_workspaces() {
+        let listing = pane_listing(&[("w9:p1", "w9", true), ("w8:p7", "w8", false)]);
+        assert_eq!(
+            split_target(&listing, "w8", Some("w8:pD")),
+            Some("w8:p7".to_string()),
+            "another workspace's focused pane is not a candidate"
+        );
+    }
+
+    /// Never turn a call that would have worked into one that cannot: with no live
+    /// candidate at all, the injected value is passed through unchanged.
+    #[test]
+    fn split_target_keeps_the_injected_pane_without_a_candidate() {
+        for listing in [
+            pane_listing(&[]),
+            pane_listing(&[("w9:p1", "w9", true)]),
+            "not json".to_string(),
+            r#"{"result":{}}"#.to_string(),
+        ] {
+            assert_eq!(
+                split_target(&listing, "w8", Some("w8:pD")),
+                Some("w8:pD".to_string()),
+                "listing: {listing}"
+            );
+            assert_eq!(
+                split_target(&listing, "w8", None),
+                None,
+                "listing: {listing}"
+            );
+        }
+    }
+
+    /// Malformed entries are skipped, never fatal, exactly as `existing_pane` skips them
+    /// (`entry_without_a_pane_id_is_no_match`).
+    #[test]
+    fn split_target_skips_malformed_entries() {
+        let listing = r#"{"result":{"panes":["not an object",{"workspace_id":"w8"},{"pane_id":"w8:p3","workspace_id":"w8","focused":true}]}}"#;
+        assert_eq!(
+            split_target(listing, "w8", Some("w8:pD")),
+            Some("w8:p3".to_string())
+        );
+    }
+
+    /// The context carrying no pane id at all used to reach Herdr as a split with no
+    /// `--target-pane`, which Herdr 0.9.0 refuses outright with `invalid_params`.
+    #[test]
+    fn split_target_supplies_a_target_when_the_context_carries_none() {
+        let listing = pane_listing(&[("w8:p1", "w8", true)]);
+        assert_eq!(
+            split_target(&listing, "w8", None),
+            Some("w8:p1".to_string())
+        );
     }
 
     // --- group 5: the argument vectors and the two pure `main` decisions ---------------
@@ -664,7 +847,7 @@ mod tests {
     }
 
     fn labelled_listing() -> String {
-        r#"{"result":{"panes":[{"pane_id":"w8:pG","label":"OpenSpec","workspace_id":"w8","cwd":"/repo"}]}}"#.to_string()
+        r#"{"result":{"panes":[{"pane_id":"w8:p1","label":"zsh","workspace_id":"w8","focused":true},{"pane_id":"w8:pG","label":"OpenSpec","workspace_id":"w8","cwd":"/repo"}]}}"#.to_string()
     }
 
     fn open_refs(placement: Placement, ctx: &Context) -> Vec<String> {
@@ -911,6 +1094,59 @@ mod tests {
             assert!(!report.warnings.is_empty(), "listing: {bad}");
             assert_eq!(report.outcome, Ok(()));
         }
+    }
+
+    /// The whole bug, end to end: the context names the picker pane that has already
+    /// closed, and the split must still open — against a live pane, not the dead one.
+    #[test]
+    fn a_dead_focused_pane_opens_against_a_live_one() {
+        let mut ctx = full_context();
+        ctx.focused_pane_id = Some("w8:pD".to_string());
+        let fake = FakeCli::new();
+        fake.register_herdr(
+            &["pane", "list"],
+            Ok(pane_listing(&[
+                ("w8:p1", "w8", false),
+                ("w8:p2", "w8", true),
+            ])),
+        );
+
+        let mut repaired = ctx.clone();
+        repaired.focused_pane_id = Some("w8:p2".to_string());
+        let argv = open_refs(Placement::Split, &repaired);
+        let refs: Vec<&str> = argv.iter().map(String::as_str).collect();
+        fake.register_herdr(&refs, Ok(String::new()));
+
+        let report = run(&fake, &ctx, Placement::Split);
+        assert_eq!(
+            report,
+            Report {
+                warnings: Vec::new(),
+                outcome: Ok(())
+            }
+        );
+        let opened = &fake.calls()[1].1;
+        assert!(opened.contains(&"w8:p2".to_string()), "{opened:?}");
+        assert!(!opened.contains(&"w8:pD".to_string()), "{opened:?}");
+    }
+
+    /// A tab never carries `--target-pane`, so a dead focused pane cannot affect it.
+    #[test]
+    fn a_dead_focused_pane_leaves_the_tab_vector_alone() {
+        let mut ctx = full_context();
+        ctx.focused_pane_id = Some("w8:pD".to_string());
+        let fake = FakeCli::new();
+        fake.register_herdr(
+            &["pane", "list"],
+            Ok(pane_listing(&[("w8:p2", "w8", true)])),
+        );
+        let argv = open_refs(Placement::Tab, &ctx);
+        let refs: Vec<&str> = argv.iter().map(String::as_str).collect();
+        fake.register_herdr(&refs, Ok(String::new()));
+
+        let report = run(&fake, &ctx, Placement::Tab);
+        assert_eq!(report.outcome, Ok(()));
+        assert!(!fake.calls()[1].1.contains(&"--target-pane".to_string()));
     }
 
     #[test]
