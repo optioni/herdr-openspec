@@ -21,7 +21,7 @@
 **Sequencing.** Groups 2, 3, 7, and 8 all write `src/ui/app.rs`, and groups 5 and 6 depend on
 the types those groups add, so the chain 2 → 3 → 5 → 6 → 7 → 8 is genuinely sequential — one
 file is shared mutable state, and a whole-crate `cargo test` cannot attribute a compile
-failure between two agents editing it. Group 4 is an operational gate edit that depends only on `Section` existing (group 2).
+failure between two agents editing it. Group 4 is an operational gate edit that depends only on `ArtifactSection` existing (group 2).
 Only group 1 (`src/ui/palette.rs`, two enum variants and two match arms, needed by group 5
 and by nothing before it) qualifies for `parallel-after: 0`.
 
@@ -45,13 +45,13 @@ frame, which no unit test sees.
 - [ ] 1.2 GREEN: Add both variants to `Role` and both arms to `style` (design.md → Decision 11).
 - [ ] 1.3 VERIFY: `cargo test --lib ui::palette` green; `/bin/sh scripts/gates/palette.sh` OK — its vacuity leg must still find `Color` in this file; and view-palette :: `The palette module reaches no I/O and measures no width` still reports nine and eight. State that no refactor was needed, or name the one performed.
 
-## 2. `Section`, `Detail.sections`, and `sync_detail`
+## 2. `ArtifactSection`, `Detail.sections`, and `sync_detail`
 <!-- kind: behavior -->
 
 - [ ] 2.1 RED: Write the label-rule tests for artifact-folds :: `The label derivation is total over adversarial paths` — the six paths the scenario names, asserting `a`, `b`, `notes.md`, `spec.md`, `spec.md`, and the empty string.
 - [ ] 2.2 RED: Write artifact-folds :: `The three spec files of a change become three labelled sections`, `A single-file artifact is one section and is not foldable`, `An artifact with no resolved paths has no sections`, and `An unreadable file drops its section and keeps its siblings`.
-- [ ] 2.3 GREEN: Add `pub struct Section { pub label: String, pub text: String }` to `src/ui/app.rs` and the label function, per design.md → Decision 5.
-- [ ] 2.4 GREEN: Replace `Detail.source: String` with `sections: Vec<Section>` and rewrite `sync_detail` step 4 to push one section per successful read, with no separator inserted (artifact-content :: `A multi-file artifact is concatenated in path order with a separating newline`, whose body this change rewrites).
+- [ ] 2.3 GREEN: Add `pub struct ArtifactSection { pub label: String, pub text: String }` to `src/ui/app.rs` and the label function, per design.md → Decision 5.
+- [ ] 2.4 GREEN: Replace `Detail.source: String` with `sections: Vec<ArtifactSection>` and rewrite `sync_detail` step 4 to push one section per successful read, with no separator inserted (artifact-content :: `A multi-file artifact is concatenated in path order with a separating newline`, whose body this change rewrites).
 - [ ] 2.5 GREEN: Update the 60 `Detail { … }` spans the baseline counted and the `.source` references it counted — 31 in `app.rs` and 22 outside it, 53 across `src/ui/`. Re-run the two counting commands afterwards; both must report the new field and no `source`.
 - [ ] 2.6 RED→GREEN: Re-assert on `sections` the five `sync_detail` scenarios that need no `expanded` — artifact-content :: `The selected tab's file is read once and reused`, `Switching the tab re-reads, and so does switching the change`, `Two changes with the same name are distinguished by directory`, `A multi-file artifact is concatenated in path order with a separating newline` (rewritten per the spec's new body), and `An unreadable file names its reason and does not lose its siblings` (extended with the not-foldable assertion). The four scenarios that assert `expanded` belong to group 3, which is where that field exists.
 - [ ] 2.7 Run the group tests — no regressions, and state that no refactor was needed or name the one performed. Group 2 reshapes `Detail` across six files, so this is the least plausible silent case.
@@ -65,16 +65,26 @@ frame, which no unit test sees.
 - [ ] 3.4 CHECK: Persistence gate — confirm no migration, backfill, cache invalidation, or index rebuild applies (design.md → Persistence and Rollout), and that the plugin's writes are still exactly `agent-names.toml`. Run `/bin/sh scripts/gates/readonly-ui.sh`, then plant a `std::fs::write` in `src/ui/app.rs`, confirm it exits non-zero, remove it, confirm it goes quiet. An unchanged `grep -c 'agent-names'` would not catch a *new* write and is not the check.
 - [ ] 3.5 Run the group tests — no regressions, and state that no refactor was needed or name the one performed.
 
-## 4. The `NODEFAULT-UI` gate learns `Section`
+## 4. The `NODEFAULT-UI` gate learns `ArtifactSection`
 <!-- kind: operational -->
 
 Split out of group 2 because it edits build config, which this schema classes as operational
-and which may not share a group with behavior work.
+and which may not share a group with behavior work. It runs **after** group 3 for a second
+reason, measured at planning time: the gate reports `half B found only 0 literal/pattern
+spans - the scan is vacuous` until real `ArtifactSection { … }` literals exist, so the floor
+cannot be measured before the construction sites are written.
 
-- [ ] 4.1 CHECK: Run `SCAN_MIN=0 TYPES='Section' /bin/sh scripts/gates/nodefault-ui.sh` and record the `Section` span count it reports. `SCAN_MIN` is per invocation, so `Section` gets its own floor rather than hiding inside line 45's 206.
-- [ ] 4.2 CHANGE: Add a **sixth** `nodefault-ui.sh` line to the `Makefile`'s `gates:` recipe — `SCAN_MIN=<4.1's count> TYPES='Section'` — beside the five that already carry their own floors.
-- [ ] 4.3 VERIFY: Plant `impl Default for Section` in `src/ui/app.rs`, confirm the new line exits non-zero naming `Section`, remove it, confirm it goes quiet. A separate line is what makes this falsifiable — folded into line 45, a `Section` scan matching zero spans would still have printed OK under that line's larger floor.
-- [ ] 4.4 VERIFY: Record the plant in `tests/gate-controls.toml` if the existing `nodefault-ui` control does not already cover the `Section` leg, and confirm `cargo test --test gate_controls` green.
+**Why the type is not called `Section`.** Measured against a scratch copy of `src/` and
+`scripts/`: `SCAN_MIN=1 TYPES='Section'` exits **1** with nine false hits — `src/ui/driver.rs:231`,
+`src/ui/list.rs:721,731,1755,1795,1813,1919`, `src/ui/view.rs:214,244` — because half B's
+pattern is `(?<![A-Za-z0-9_])Section\s*\{` and `:` is not a word character, so
+`list::RowKind::Section {` matches. `TYPES='ArtifactSection'` matches none of them. The name
+is load-bearing, not cosmetic.
+
+- [ ] 4.1 CHECK: Run `SCAN_MIN=1 TYPES='ArtifactSection' /bin/sh scripts/gates/nodefault-ui.sh` and record the span count it reports. `SCAN_MIN` is per invocation, so `ArtifactSection` gets its own floor rather than hiding inside line 45's 206.
+- [ ] 4.2 CHANGE: Add a **sixth** `nodefault-ui.sh` line to the `Makefile`'s `gates:` recipe — `SCAN_MIN=<4.1's count> TYPES='ArtifactSection'` — beside the five that already carry their own floors.
+- [ ] 4.3 VERIFY: Plant `impl Default for Section` in `src/ui/app.rs`, confirm the new line exits non-zero naming `ArtifactSection`, remove it, confirm it goes quiet. A separate line is what makes this falsifiable — folded into line 45, a `ArtifactSection` scan matching zero spans would still have printed OK under that line's larger floor.
+- [ ] 4.4 VERIFY: Record the plant in `tests/gate-controls.toml` if the existing `nodefault-ui` control does not already cover the `ArtifactSection` leg, and confirm `cargo test --test gate_controls` green.
 
 ## 5. `content_lines` header rows, bodies, and `section_at`
 <!-- kind: behavior -->
@@ -84,9 +94,9 @@ and which may not share a group with behavior work.
 - [ ] 5.3 RED: Write artifact-folds :: `Each drawn header row resolves to its own index` and `Resolution is total and inert where it should be`.
 - [ ] 5.4 GREEN: Change `content_lines`' return type to `Vec<ContentRow>` — a `markdown::Line` plus a `ContentKind` of `Problem`, `Body`, or `SectionHeader { section, selected }` — and update its two production callers, `ui::view::render`'s detail draw and `Dashboard::normalise_scroll` (which needs only `.len()`), per design.md → Decision 12. `ui::detail` names no `Role` and no `ratatui` type; confirm with `grep -n 'Role::' src/ui/detail.rs` returning nothing.
 - [ ] 5.5 GREEN: Emit header rows and per-section bodies, gated on `sections.len() > 1`, with the tracked-tasks branch concatenating (design.md → Decisions 3 and 8). Glyphs are `>` and `v`, per Decision 9.
-- [ ] 5.6 GREEN: Implement `ui::detail::section_at(rows, offset, content, row)` as a **lookup** into the caller's own row list, not a second derivation (design.md → Decision 12).
+- [ ] 5.6 GREEN: Implement `ui::detail::section_at(rows, offset, row)` as a **lookup** into the caller's own row list (design.md → Decision 12). It takes **no** `Rect` — `scripts/gates/notabseam.sh` greps this whole file for one — and `offset + row` saturates.
 - [ ] 5.7 GREEN: Extend the two existing width properties — artifact-content :: `content_lines` is total and width-parameterised (seven `Detail` values to nine) and `No content_lines line exceeds its width at any width` (the 0..=130 sweep over the foldable values).
-- [ ] 5.8 CHECK: `/bin/sh scripts/gates/colwidth.sh` and `/bin/sh scripts/gates/noio-view.sh` OK — no `.chars()` measurement and no I/O added to a pure view file. Plant `label.chars().count()` in `src/ui/detail.rs`, confirm `COLWIDTH` exits non-zero, remove it, confirm it goes quiet.
+- [ ] 5.8 CHECK: `/bin/sh scripts/gates/notabseam.sh`, `/bin/sh scripts/gates/colwidth.sh`, and `/bin/sh scripts/gates/noio-view.sh` OK — no `.chars()` measurement and no I/O added to a pure view file. Plant `label.chars().count()` in `src/ui/detail.rs`, confirm `COLWIDTH` exits non-zero, remove it, confirm it goes quiet.
 - [ ] 5.9 CHECK: `/bin/sh scripts/gates/detailwidths.sh` OK — every new test in `ui::detail` names both 58 and 78, which is what the gate counts.
 - [ ] 5.10 Run the group tests — no regressions, and state that no refactor was needed or name the one performed.
 
@@ -121,7 +131,7 @@ and which may not share a group with behavior work.
 - [ ] 8.3 RED: Extend `ui::layout::zone`'s four existing tests for the sixth variant — responsive-layout :: `The zones tile the frame at 120 columns` (the first and last content rows, and `DetailRow.content` derived independently), `Below the breakpoint only the routed region has zones` (the narrow `DetailRow` leg), `Degenerate frames resolve without panicking` (no zero-sized `DetailRow`), and `The hit test agrees with what was drawn` (`DetailRow` cells checked against `content_lines`' output at the drawn offset).
 - [ ] 8.4 GREEN: Add `Zone::DetailRow { content, row }` and narrow `Zone::Detail` by the content area in `src/ui/layout.rs`, mirroring `Zone::ListRow { interior, row }`.
 - [ ] 8.5 GREEN: Add `Target::DetailLine(usize)` and `Target::DetailHeader { line, section }` and resolve them in `mouse_action`.
-- [ ] 8.6 GREEN: Restructure `apply_click` so the `targets()` membership guard applies only in the `Section` and `Change` arms (design.md → Decision 7). Left at the top of the function it returns before either new arm is reached and every detail click is silently inert — 8.1's tests are what catch that. Route the header arm through the very code the detail-route `ToggleSection` runs.
+- [ ] 8.6 GREEN: Restructure `apply_click` so the `targets()` membership guard applies only in the `ArtifactSection` and `Change` arms (design.md → Decision 7). Left at the top of the function it returns before either new arm is reached and every detail click is silently inert — 8.1's tests are what catch that. Route the header arm through the very code the detail-route `ToggleSection` runs.
 - [ ] 8.7 CHECK: `mouse_action`'s existing totality test (`Resolution is total over adversarial geometry`) still passes with the new zone — it sweeps every kind at seven columns, five areas, and both routes, so a new variant that panics is caught there.
 - [ ] 8.8 CHECK: Contract gate — update `SPEC.md`'s mouse-binding table and confirm `mouse_bindings_match_spec_md` agrees. Its subject is the backticked `Action::` variant set, not the gesture rows, so it cannot fail for this change's new rows (both resolve to `Action::Click` / `Action::Ignore`, already documented): delete one documented row, confirm it fires, restore it, and record both halves — otherwise the check is believed and guards nothing.
 - [ ] 8.9 Run the group tests — no regressions, and state that no refactor was needed or name the one performed.

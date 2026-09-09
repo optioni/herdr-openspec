@@ -31,9 +31,10 @@ not an edge one. That is the design's central problem, and Decision 2 is its ans
 **Non-Goals:**
 
 - Changing `ui::markdown` itself. Soft-break reflow and glyph choices belong to the in-flight
-  `markdown-legibility` change; this one is the join above the renderer. No file this change
-  edits is a file that change edits, except `src/ui/detail.rs` (it touches `content_lines`'
-  neighbours, not `content_lines`) — the two are independent and can land in either order.
+  `markdown-legibility` change; this one is the join above the renderer. `src/ui/markdown.rs`
+  is that change's file and this one does not touch it — see Decision 12, which rejected the
+  `Face` extension partly for that reason. The measured overlap between the three in-flight
+  changes is recorded under Risks, not asserted here.
 - Editing, reordering, filtering, or persisting anything. The pane stays read-only and its
   only write stays `agent-names.toml`.
 - Unifying the two regions on one cursor model for every artifact tab. Considered in
@@ -49,13 +50,13 @@ spawn is added anywhere** — this change names no `HerdrCli`, no `OpenspecCli`,
 
 | File | What changes | Pattern it follows |
 |---|---|---|
-| `src/ui/app.rs` | `Detail.source` → `sections: Vec<Section>`; new `Detail.expanded`; new `Section` type; `sync_detail` step 4; `apply`'s `ToggleSection` arm becomes route-dependent; `apply_click` gains two arms; `Target` gains two variants; `normalise_scroll` branches | `Sections { collapsed }` and `apply_toggle_section`, the list region's own fold, mirrored |
-| `src/ui/detail.rs` | `content_lines` returns `Vec<ContentRow>` — a `markdown::Line` plus a `ContentKind` — instead of `Vec<markdown::Line>`; new `ContentRow`, `ContentKind`, `section_at` | `ui::list::rows` returning a `RowKind`, mirrored |
+| `src/ui/app.rs` | `Detail.source` → `sections: Vec<ArtifactSection>`; new `Detail.expanded`; new `ArtifactSection` type; `sync_detail` step 4; `apply`'s `ToggleSection` arm becomes route-dependent; `apply_click` gains two arms; `Target` gains two variants; `normalise_scroll` branches | `Sections { collapsed }` and `apply_toggle_section`, the list region's own fold, mirrored |
+| `src/ui/detail.rs` | `content_lines` returns `Vec<ContentRow>` — a `markdown::Line` plus a `ContentKind` — instead of `Vec<markdown::Line>`; new `ContentRow`, `ContentKind`, `section_at` (which takes **no** `Rect`: `NOTABSEAM` sweeps this file for one) | `ui::list::rows` returning a `RowKind`, mirrored — but *not* `row_at`'s signature, since `src/ui/list.rs` is excluded from that sweep and this file is not |
 | `src/ui/view.rs` | the detail slice's offset is `viewport` or `scroll_offset` by foldability; the detail draw loop patches a `Role` over `style_for` by the row's `ContentKind` | the list region already derives its slice with `viewport` and already maps `RowKind` → `Role` in this file |
 | `src/ui/driver.rs` | `mouse_action` resolves a click in the detail content area | its existing `Zone::ListRow` arm |
 | `src/ui/layout.rs` | `Zone` gains `DetailRow { content, row }` and `Detail` narrows by the content area (`responsive-layout` delta) | `Zone::ListRow { interior, row }`, mirrored exactly |
 | `src/ui/palette.rs` | two roles, `DetailSection` and `DetailSectionSelected`, joining the enum, the modifier table, and the uncoloured list (`view-palette` delta) | `ListRow` / `ListRowSelected` |
-| `Makefile` | `NODEFAULT-UI` gains a **sixth** recipe line for `Section` with its own measured `SCAN_MIN` | the gate's existing five-subject shape, where every line carries its own floor |
+| `Makefile` | `NODEFAULT-UI` gains a **sixth** recipe line for `ArtifactSection` with its own measured `SCAN_MIN` | the gate's existing five-subject shape, where every line carries its own floor |
 | `SPEC.md` | the key-binding table, the mouse-binding table, the `Detail` field list | — |
 | `tests/doc_contract.rs` | the documented mouse-binding list | its existing binding-list leg |
 
@@ -71,7 +72,7 @@ The change alters no seam module. `src/watch.rs`, `src/refresh.rs`, `src/agents.
 
 ## Contracts
 
-`Detail`, `Section`, `Target`, `Role`, `Zone`, `ContentRow`, and `ContentKind` are crate-internal types with no external consumer. `content_lines`' return type changes, and its two production callers — `ui::view::render`'s detail-content draw and `Dashboard::normalise_scroll`, which needs only `.len()` — change with it, as do the two width-property tests that iterate its output. The
+`Detail`, `ArtifactSection`, `Target`, `Role`, `Zone`, `ContentRow`, and `ContentKind` are crate-internal types with no external consumer. `content_lines`' return type changes, and its two production callers — `ui::view::render`'s detail-content draw and `Dashboard::normalise_scroll`, which needs only `.len()` — change with it, as do the two width-property tests that iterate its output. The
 only consumer-facing surfaces are the **key bindings** and the **mouse bindings**, and both
 change:
 
@@ -163,7 +164,7 @@ final verification.
 | artifact-folds :: The cursor's section header is the emphasised one | assert cell styles against `palette::style(Role::…)` for three cursor positions | view | terminal replaced | `cargo test --lib ui::view::tests::fold` |
 | artifact-folds :: A narrow pane truncates the label and keeps the glyph | assert header text at 18 and 13 columns; sweep 0..=20 for the width property | unit (pure) | none | `cargo test --lib ui::detail::tests::header` |
 | artifact-folds :: Each drawn header row resolves to its own index | `section_at` over the drawn frame's own row list and offset, four rows, twice | unit (pure) | none | `cargo test --lib ui::detail::tests::section_at` |
-| artifact-folds :: Resolution is total and inert where it should be | `section_at` over adversarial `Rect`s and rows | unit (pure) | none | `cargo test --lib ui::detail::tests::section_at` |
+| artifact-folds :: Resolution is total and inert where it should be | `section_at` over an empty list, a non-foldable list, and adversarial `offset`/`row` pairs | unit (pure) | none | `cargo test --lib ui::detail::tests::section_at` |
 | artifact-folds :: `Space` opens the section under the cursor and leaves its siblings shut | apply `ToggleSection`, assert state, then render | unit (pure) + view | terminal replaced | `cargo test --lib ui::app::tests::toggle_detail` |
 | artifact-folds :: `Space` inside an open section folds it and moves the cursor to its header | apply, assert `expanded` and `scroll`, then render | unit (pure) + view | terminal replaced | `cargo test --lib ui::app::tests::toggle_detail` |
 | artifact-folds :: `Space` on a problem row is inert | ten applies, assert field-for-field equality | unit (pure) | reader replaced | `cargo test --lib ui::app::tests::toggle_detail` |
@@ -191,7 +192,7 @@ final verification.
 | artifact-content :: A foldable tab's body is headers, and an open section's markdown beneath its own | assert the returned line list against `markdown::lines` at 78 and 58 | unit (pure) | none | `cargo test --lib ui::detail::tests::content_lines_fold` |
 | artifact-content :: A non-foldable tab is byte-identical to today | assert the returned rows' `line` values equal `markdown::lines` exactly and every `kind` is `Body` | unit (pure) + view | terminal replaced | `cargo test --lib ui::detail::tests::content_lines_fold` |
 | artifact-content :: The tracked-tasks tab concatenates rather than folding | assert equality with `tasks::lines` over the concatenation | unit (pure) | none | `cargo test --lib ui::detail::tests::content_lines_fold` |
-| detail-scroll :: `Detail` has no `Default` and no site elides a field | `NODEFAULT-UI` with `TYPES` extended by `Section`, plus the compile-time destructuring companions | gate + unit (pure) | none | `make gates` / `cargo test --lib names_agent_names_at_every_site` |
+| detail-scroll :: `Detail` has no `Default` and no site elides a field | `NODEFAULT-UI` with `TYPES` extended by `ArtifactSection`, plus the compile-time destructuring companions | gate + unit (pure) | none | `make gates` / `cargo test --lib names_agent_names_at_every_site` |
 | detail-scroll :: Startup leaves the detail empty and unscrolled | existing test, extended with `expanded` | unit (pure) | filesystem real (`ScratchDir`) | `cargo test --lib ui::tests::load` |
 | detail-scroll :: At the detail route the content scrolls by one line at both widths | existing test, re-asserted on `sections` | unit (pure) + view | terminal replaced | `cargo test --lib ui::app::tests::scroll` |
 | detail-scroll :: At a collapsed foldable tab the same keys walk the section list | two `Next`s, assert `scroll` and the emphasised header at 120x40 and 60x40 | view | terminal replaced | `cargo test --lib ui::view::tests::fold_cursor` |
@@ -276,7 +277,7 @@ final verification.
 
 ## Decisions
 
-### Decision 1 — `detail.source: String` becomes `detail.sections: Vec<Section>`
+### Decision 1 — `detail.source: String` becomes `detail.sections: Vec<ArtifactSection>`
 
 **Chosen:** replace the flat string with an ordered list of `{ label, text }`, one per
 successfully read path.
@@ -288,7 +289,7 @@ cannot express. (b) Keep `source` and re-derive the boundaries by re-reading the
 `content_lines`. Rejected outright: `content_lines` is a pure view function and may not touch
 the filesystem.
 
-**Consequence:** `Detail` goes from five fields to six (with `expanded`), and `Section` joins
+**Consequence:** `Detail` goes from five fields to six (with `expanded`), and `ArtifactSection` joins
 the `NODEFAULT-UI` type list so every construction site names both its fields.
 
 ### Decision 2 — the detail cursor: reinterpret `detail.scroll`, and derive the offset with `layout::viewport`
@@ -418,7 +419,7 @@ A `DetailLine` or `DetailHeader` carries indices `mouse_action` resolved against
 just drawn, and the per-frame `normalise_scroll` clamps whatever the list has since become,
 so re-validating against a list `apply` cannot recompute (it has no width) would be both
 impossible and pointless. `apply_click` therefore matches on the target first and applies the
-`targets()` guard only in the `Section` and `Change` arms.
+`targets()` guard only in the `ArtifactSection` and `Change` arms.
 
 ### Decision 8 — the tracked-tasks tab is never foldable
 
@@ -528,11 +529,36 @@ comparison, because `BOLD | REVERSED` equals no other role.
   `ui::list::pad_or_truncate_right`, which measures in display columns, and the width property
   is asserted over `0..=130` rather than at the two mandated widths, which is the sweep that
   can actually see it.
-- **`markdown-legibility` and this change both touch `src/ui/detail.rs`** → Different
-  functions (`content_lines`' emission versus `ui::markdown`'s output), and neither depends on
-  the other's spec. Whichever lands second resolves a textual conflict in one file, with no
-  behavioural interaction. Decision 12 is what keeps this true: had the header carried a
-  `Face` flag, both changes would edit `src/ui/markdown.rs` and the claim would be false.
+- **Three changes are in flight at once, and the overlap is real.** Read from each change's
+  own Boundaries table rather than assumed, because the first draft of this section asserted
+  it and was wrong in both directions:
+
+  | File | This change | `markdown-legibility` | `pane-chrome` |
+  |---|---|---|---|
+  | `src/ui/detail.rs` | `content_lines`, `ContentRow`, `section_at` | **nothing** | **nothing** (stated explicitly) |
+  | `src/ui/markdown.rs` | **nothing** | the parser and glyphs | **nothing** |
+  | `src/ui/layout.rs` | `Zone::DetailRow`, `Zone::Detail` narrows | nothing | `split_frame`, `interior`, `split_body`, `split_detail` → `(tabs, rule, content)`, **and `zone` follows** |
+  | `src/ui/palette.rs` | two roles added | nothing | **five roles removed, three added** |
+  | `src/ui/view.rs` | the detail draw loop and the offset choice | test re-baseline only (10 tests) | `render_header` deleted, `render_region`, `render_body` |
+  | `src/ui/app.rs` | `Detail`, `apply`, `apply_click`, `Target` | test re-baseline only (4 tests) | nothing |
+  | `src/ui/driver.rs` | `mouse_action` | test re-baseline only (3 tests) | nothing |
+  | `SPEC.md` | key and mouse tables, `Detail` fields | three paragraphs | pane chrome |
+
+  **`markdown-legibility` is genuinely independent** → it touches neither `src/ui/detail.rs`
+  nor `src/ui/layout.rs`, and its `view.rs`/`app.rs`/`driver.rs` work is test re-baselining on
+  the shared `- line-NN` fixture. Whichever lands second re-baselines a few more rendered
+  strings. Decision 12 is what keeps this true: had the header carried a `Face` flag, both
+  would edit `src/ui/markdown.rs`.
+
+  **`pane-chrome` genuinely conflicts, on two files** → it rewrites `split_detail`'s return
+  shape to `(tabs, rule, content)` and says "`zone` follows", while this change adds a `Zone`
+  variant carrying the very rectangle `split_detail` returns; and it removes five palette
+  roles and adds three, while this change adds two. Mitigation: **these two are sequenced, not
+  parallel.** `pane-chrome` first is the cheaper order — this change's `Zone` variant and two
+  roles are additive onto its new shapes, whereas the reverse forces `pane-chrome` to
+  re-derive a variant it did not write. That is a scheduling constraint for the user, not a
+  code change, and it is recorded here so the apply session does not discover it as a
+  conflict.
 - **`content_lines`' return type changes, and every caller and iterating test changes with
   it** → Two production callers (`ui::view::render`, `Dashboard::normalise_scroll`) and the
   two width-property tests, all named in Contracts and tasked in group 5. The compiler finds

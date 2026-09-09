@@ -21,7 +21,7 @@
    index. `force` is the second exit condition because the key does not change when a
    **file's content** does — an agent saving the very artifact on screen leaves the key
    identical, and without `force` the pane would keep showing the bytes it read at startup.
-4. Otherwise re-read: set `detail.sections` to one `Section` per successful `read(path)`
+4. Otherwise re-read: set `detail.sections` to one `ArtifactSection` per successful `read(path)`
    over the selected artifact's `paths` **in the order `changes::from_files` resolved
    them**, each carrying that path's `label` per `artifact-folds` and the returned text
    **verbatim**. Every `Err(e)` contributes no section and appends the problem

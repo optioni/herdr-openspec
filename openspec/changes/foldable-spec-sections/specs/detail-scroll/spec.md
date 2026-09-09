@@ -6,7 +6,7 @@
 
 ```rust
 pub struct Detail {
-    pub sections: Vec<Section>,
+    pub sections: Vec<ArtifactSection>,
     pub scroll: usize,
     pub tab: usize,
     pub problems: Vec<String>,
@@ -54,7 +54,7 @@ crate — and every construction and every destructuring of it SHALL name **all 
 with no `..` rest, on exactly the terms `dashboard-loop` states for `Dashboard`, `Filter`,
 and (from `live-refresh`) `Refresh`.
 
-`Section` SHALL NOT implement `Default` either, and SHALL be added to the same `NODEFAULT-UI`
+`ArtifactSection` SHALL NOT implement `Default` either, and SHALL be added to the same `NODEFAULT-UI`
 type list, so a field added to it later fails to compile at each construction site rather
 than defaulting silently.
 
@@ -65,20 +65,20 @@ than defaulting silently.
   preceding `struct Detail`, and for a `..` appearing inside a `Detail { … }` literal or
   pattern
 - **THEN** there is no match
-- **AND** the same holds for `Section`, searched the same way
+- **AND** the same holds for `ArtifactSection`, searched the same way
 - **AND** the search is the same parameterised check that covers `Dashboard`, `Filter`, and
   `Refresh`, rather than a second drifting check. `SCAN_MIN` is **per invocation**, so the
   `Makefile` recipe carries one line per subject set — `Dashboard Filter Detail Sections`,
   then `Refresh`, then `Launch`, then `src/agents.rs`'s set, then `src/launch.rs`'s
-  `Outcome` — and `Section` joins as a **sixth line** with its own measured floor rather than
+  `Outcome` — and `ArtifactSection` joins as a **sixth line** with its own measured floor rather than
   being folded into the first, where its span count would hide inside that line's larger one
-  and a scan matching zero `Section` spans would still print OK. The check's own `TYPES`
+  and a scan matching zero `ArtifactSection` spans would still print OK. The check's own `TYPES`
   parameter is what makes adding a subject a change to an invocation rather than to the check
 - **AND** it is paired with a positive control asserting that `src/ui/app.rs` **does**
   contain `struct Detail {`, and the check is proven able to fail against a copy carrying
   `impl Default for Detail { … }` and against a copy carrying `let Detail { sections, .. }`
 - **AND** a compile-time companion exists: a test destructures a `Detail` with an
-  exhaustive pattern naming all six fields and no `..`, a second destructures a `Section`
+  exhaustive pattern naming all six fields and no `..`, a second destructures an `ArtifactSection`
   naming both, the `Dashboard` companion continues to name all **fourteen** — the nine this
   requirement recorded at `live-refresh`, plus `agents`, `agent_names`, `launch`, `sections`,
   and `file_mode`, added by the four changes since; the stale count is corrected here rather

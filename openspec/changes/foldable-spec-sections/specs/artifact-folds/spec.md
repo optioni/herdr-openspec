@@ -6,13 +6,13 @@
 rather than as one string:
 
 ```rust
-pub struct Section {
+pub struct ArtifactSection {
     pub label: String,
     pub text: String,
 }
 ```
 
-with one `Section` per path the selected `ArtifactRef` resolved to, in the order
+with one `ArtifactSection` per path the selected `ArtifactRef` resolved to, in the order
 `changes::from_files` resolved them. `text` is that path's bytes as the injected reader
 returned them; a path the reader failed on contributes **no section at all** and its reason
 is recorded in `detail.problems`, per `artifact-content`.
@@ -222,27 +222,38 @@ emitted before the label so that the fold state survives any truncation.
 
 ### Requirement: A section header row resolves to its own section index
 
-`ui::detail::section_at(rows: &[ContentRow], offset: usize, content: Rect, row: u16) ->
-Option<usize>` SHALL return the `section` of the `ContentKind::SectionHeader` drawn at `row`
-of the content area `layout::split_detail` returns, and `None` for every other row — a
-problem row, a row inside an open section's body, a row past the last drawn row, and every
-row when the artifact is not foldable.
+`ui::detail::section_at(rows: &[ContentRow], offset: usize, row: u16) -> Option<usize>`
+SHALL return the `section` of the `ContentKind::SectionHeader` drawn `row` rows below the
+first drawn row, and `None` for every other row — a problem row, a row inside an open
+section's body, a row past the end of `rows`, and every row when the artifact is not
+foldable.
+
+**It takes no rectangle.** `scripts/gates/notabseam.sh` greps the whole of
+`src/ui/detail.rs` — comments included — for `ratatui|Modifier|Style|Span|Rect|Frame|Buffer`
+and fails on any hit, so a `content: Rect` parameter would turn `make gates` red. That is
+also why "mirror `ui::list::row_at`" is only a partial analogy: `src/ui/list.rs` is
+deliberately excluded from that sweep and `row_at` does take a `Rect`; `src/ui/detail.rs` is
+not excluded. The parameter is unnecessary anyway — the function is a lookup, and the caller
+that holds the rectangle has already used it to decide there is a row at all.
 
 It SHALL be a **lookup**, not a second derivation: it indexes `rows` at `offset + row` and
-reads that row's `kind`. Taking the already-computed row list and the already-computed
-offset as arguments is what makes "a click and the pixels can never disagree" true by
-construction rather than by two computations agreeing — the caller passes the very list and
-offset the draw used.
+reads that row's `kind`, returning `None` when that index is past the end. Taking the
+already-computed row list and the already-computed offset as arguments is what makes "a click
+and the pixels can never disagree" true by construction rather than by two computations
+agreeing — the caller passes the very list and offset the draw used. Bounding the click to
+the drawn region is `ui::layout::zone`'s job: a press outside the content area never becomes
+a `Zone::DetailRow` at all, so `section_at` never sees it.
 
-It SHALL be pure and total: every `Detail`, every `Rect` including a zero-width and
-zero-height one, and every `row` including `u16::MAX` returns without panicking. It SHALL
-name no `ratatui` widget and no mouse type, on the terms `ui::list::row_at` already meets.
+It SHALL be pure and total: every row list, every `offset` including `usize::MAX`, and every
+`row` including `u16::MAX` returns without panicking — `offset + row` SHALL be computed with
+saturating arithmetic rather than allowed to overflow. It SHALL name no `ratatui` type at
+all, which `NOTABSEAM` enforces over the whole file.
 
 #### Scenario: Each drawn header row resolves to its own index
 
 - **WHEN** the three-spec dashboard with every section collapsed is drawn at 120x40, and
-  `section_at` is called with that frame's own row list and offset for content rows `0`, `1`,
-  `2`, and `3`
+  `section_at` is called with that frame's own row list and offset for rows `0`, `1`, `2`,
+  and `3`
 - **THEN** it returns `Some(0)`, `Some(1)`, `Some(2)`, and `None`
 - **AND** with `detail.expanded` holding `0`, the row carrying the first line of that
   section's body returns `None`, and the row carrying the second header returns `Some(1)`
@@ -250,8 +261,8 @@ name no `ratatui` widget and no mouse type, on the terms `ui::list::row_at` alre
 #### Scenario: Resolution is total and inert where it should be
 
 - **WHEN** `section_at` is called against a non-foldable dashboard's row list, against an
-  empty row list, against a zero-width content area, against a zero-height one, with an
-  `offset` past the end of the list, and with `row` of `u16::MAX`
+  empty row list, with an `offset` past the end of the list, with `offset` at `usize::MAX`,
+  and with `row` of `u16::MAX`
 - **THEN** every call returns `None` and none panics
 - **AND** against a dashboard whose `detail.problems` holds two entries, content rows `0`
   and `1` return `None` and row `2` returns `Some(0)`

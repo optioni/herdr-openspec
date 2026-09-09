@@ -58,7 +58,7 @@ one.
 `apply_click`, `Target`), `src/ui/detail.rs` (`content_lines`, a new `section_at`),
 `src/ui/view.rs`, `src/ui/driver.rs` (`mouse_action`), `src/ui/layout.rs` (`Zone`), and
 `src/ui/palette.rs` (two roles). `Detail` and `Dashboard` are on the `NODEFAULT-UI` gate's
-type list, so a new field must be named at every construction site, and `Section` joins that
+type list, so a new field must be named at every construction site, and `ArtifactSection` joins that
 list. `SPEC.md`'s key and mouse binding tables and `tests/doc_contract.rs`'s binding lists
 change with them. No manifest, no config format, no dependency, and no process spawned.
 
