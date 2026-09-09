@@ -1,6 +1,8 @@
 <!-- Planning-time baseline: commit `a156f9a` on `main`, working tree clean except this
-     change's own untracked artifacts (`git status --porcelain` names only
-     `openspec/changes/mouse-input/`). Every measurement below was run at that commit. -->
+     change's own then-untracked artifacts. They have since been committed (`65924be`,
+     `702bf9c`), so `git status --porcelain` is now empty; `src/`, `scripts/`, `Makefile`,
+     `SPEC.md`, `AGENTS.md`, `tests/` and `openspec/specs/` are byte-identical between
+     `a156f9a` and HEAD, so every measurement below holds at both. -->
 
 **Known-flaky at HEAD, not caused by this change.** `cargo test --all-features` at `a156f9a`
 failed twice in three runs — `ui::tests::wiring::g_focuses_the_agent_the_launch_started`
@@ -10,16 +12,26 @@ passed **27/27**. The two tests spawn scratch `herdr` programs and race under pa
 execution. Group 13 re-runs the suite; a failure confined to those two names is this
 pre-existing flake, not a regression, and is a separate bug fix outside this change.
 
-**Groups 1 through 8 are sequential, and none is marked `parallel-after`.** File overlap
-orders only some pairs — group 1 and group 7 both write `src/ui/mod.rs`
-(`grep -c 'impl TerminalOps for' src/ui/mod.rs` is `1`, the test `Recorder`), and groups 2,
-3, 4 and 5 write four disjoint files. The criterion that orders every remaining pair is the
-third one: **a failure must stay attributable**, and every group here closes on
-`cargo test --all-features`, one whole-crate compile and one whole-suite run. Two concurrent
-implementers in this tree would each see the other's half-written file as their own red.
-This repository does dispatch code groups in parallel where that criterion holds
+**Groups 1 through 8 are sequential, and none is marked `parallel-after`.** This repository
+does dispatch code groups in parallel where the three criteria hold
 (`archive/2026-09-08-seam-resilience/tasks.md` groups 5, 6 and 7), so the sequential answer
-is stated rather than assumed.
+here is a finding, not a default.
+
+File overlap orders two pairs directly: group 1 and group 7 both write `src/ui/mod.rs`
+(`grep -c 'impl TerminalOps for' src/ui/mod.rs` → `1`, the test `Recorder`), and groups 0
+and 6 both write `src/ui/driver.rs`. Groups 2, 3, 4 and 5 do write disjoint files.
+
+What orders the rest is criterion 2, **a dependency between them** — not criterion 3, and
+not the vaguer "everything shares a compile". Every one of groups 2, 3 and 4 compiles
+against `src/ui/app.rs`, which is exactly what group 5 rewrites:
+`grep -n 'ui::app' src/ui/layout.rs src/ui/detail.rs src/ui/list.rs` reports **24** sites —
+`layout.rs:10 use crate::ui::app::Route`, `list.rs:6 use crate::ui::app::{Dashboard,
+SectionKey, Target, matches}`, `detail.rs:193 &crate::ui::app::Detail`, and their test
+modules' `Dashboard` constructions, every one of which names all fourteen fields with no
+`..` rest. Group 5 adds five `Action` variants and rewrites `apply`; while that file does not
+compile, none of groups 2, 3 or 4 can run its own scoped `cargo test --lib` either, because
+the filter selects which tests run, not which crate is built. That is a dependency, not a
+shared gate, and it holds however narrowly each group's command is scoped.
 
 Group 9 (Documentation) is placed **before** group 10 rather than after the review, against
 the schema's usual ordering, because group 10's two `tests/doc_contract.rs` tests read the
@@ -91,9 +103,12 @@ shape. Only `run_loop` can prove otherwise.
       `disable_mouse` first, unconditionally (per design.md → Decision 7), so the panic
       hook releases capture too — `restore_then` is the shared body `Drop` and the panic hook
       both delegate to, so one edit covers both paths.
-- [ ] 1.5 REFACTOR: State whether the three `TerminalOps` implementors share enough to
+- [ ] 1.5 CHECK: Contract gate — `TerminalOps` is a trait with three implementors
+      (check M). `grep -rn 'impl TerminalOps for' src tests` still reports exactly those 3
+      sites, each implementing all six methods, and no fourth appeared.
+- [ ] 1.6 REFACTOR: State whether the three `TerminalOps` implementors share enough to
       warrant extraction, or record that none was needed.
-- [ ] 1.6 Run the group tests — `cargo test --lib terminal::` and
+- [ ] 1.7 Run the group tests — `cargo test --lib terminal::` and
       `cargo test --lib ui::tests::` — no regressions.
 
 ## 2. The hit test — `layout::zone`
@@ -114,7 +129,8 @@ shape. Only `run_loop` can prove otherwise.
       network, or standard-I/O API and no crossterm type —
       `/bin/sh scripts/gates/noio-view.sh` and `/bin/sh scripts/gates/colwidth.sh` both
       exit 0.
-- [ ] 2.4 Run the group tests — `cargo test --lib layout::` — no regressions.
+- [ ] 2.4 Run the group tests — `cargo test --lib layout::` — no regressions, and record
+      that no refactor was needed.
 
 ## 3. Row addressing — `list::row_at`
 <!-- kind: behavior -->
@@ -150,7 +166,8 @@ shape. Only `run_loop` can prove otherwise.
 - [ ] 4.3 CHECK: `/bin/sh scripts/gates/detailwidths.sh` and
       `/bin/sh scripts/gates/colwidth.sh` both exit 0 — the new function is parameterised by
       width and counts no `char`s.
-- [ ] 4.4 Run the group tests — `cargo test --lib detail::` — no regressions.
+- [ ] 4.4 Run the group tests — `cargo test --lib detail::` — no regressions, and record
+      that no refactor was needed.
 
 ## 5. The five actions and `Dashboard::apply`
 <!-- kind: behavior -->
@@ -179,8 +196,12 @@ shape. Only `run_loop` can prove otherwise.
 <!-- kind: behavior -->
 
 - [ ] 6.1 RED: Write failing tests for `mouse-input`'s remaining resolver scenarios and
-      `dashboard-loop`'s two new ones, named as design.md → Test Strategy lists them under
-      `driver::tests::`. `mouse_action_is_total` drives the full kind × coordinate × area ×
+      `dashboard-loop`'s **four** new ones — including
+      `pointer_motion_does_not_draw` and `a_click_after_motion_resolves_against_the_frame`,
+      which assert `LoopSummary::frames`, the only observable that distinguishes a drawn
+      frame from a skipped one — plus `artifact-tabs`' two click scenarios
+      (`a_tab_click_equals_its_digit_key`, `a_tab_click_on_the_selected_cell_resets_nothing`),
+      named as design.md → Test Strategy lists them under `driver::tests::`. `mouse_action_is_total` drives the full kind × coordinate × area ×
       route × dashboard cross product the spec enumerates.
       `cargo test --lib driver::tests` — expect RED.
 - [ ] 6.2 GREEN: Implement `mouse_action(dashboard, area, mouse) -> Action` over
@@ -197,10 +218,19 @@ shape. Only `run_loop` can prove otherwise.
       `non_key_events_are_ignored` (`:1877`), which already asserts `Event::Mouse` → `Ignore`.
       Editing any of them to accommodate this change is the failure this task exists to
       catch. `cargo test --lib app::tests::` — expect green, having run more than 0 tests.
-- [ ] 6.5 CHECK: `/bin/sh scripts/gates/noblock.sh`, `/bin/sh scripts/gates/nosleep.sh`, and
+- [ ] 6.5 GREEN: `run_loop` skips the draw — and the `sync_detail` and `normalise_scroll`
+      around it — for a `MouseEventKind::Moved` or `Drag(_)` event, carries the previous
+      frame's `area` forward, and does not count the skipped iteration in
+      `LoopSummary::frames` (per design.md -> Decision 12). Covered by 6.1's RED tests
+      `pointer_motion_does_not_draw` and `a_click_after_motion_resolves_against_the_frame`.
+- [ ] 6.6 CHECK: `/bin/sh scripts/gates/noblock.sh`, `/bin/sh scripts/gates/nosleep.sh`, and
       `/bin/sh scripts/gates/nocli-shell.sh` all exit 0 — the resolver reads no clock,
       blocks on nothing, and names no `HerdrCli`.
-- [ ] 6.6 Run the group tests — `cargo test --lib driver::` — no regressions.
+- [ ] 6.7 CHECK: `dashboard-loop`'s `An ignored key redraws and keeps waiting` scenario's
+      existing test passes **unmodified** — the motion exemption must not have become a
+      general ignore-means-no-draw rule.
+- [ ] 6.8 Run the group tests — `cargo test --lib driver::` — no regressions, and record
+      that no refactor was needed beyond 6.5's own extraction.
 
 ## 7. The refused-capture row reaches the reader
 <!-- kind: behavior -->
@@ -221,7 +251,8 @@ shape. Only `run_loop` can prove otherwise.
 - [ ] 7.5 CHECK: Persistence gate — no migration, backfill, cache invalidation, or index
       rebuild applies (design.md → Persistence and Rollout). Confirm the plugin's writes are
       still exactly `agent-names.toml`: `/bin/sh scripts/gates/readonly-ui.sh` exits 0.
-- [ ] 7.6 Run the group tests — `cargo test --lib ui::tests::` — no regressions.
+- [ ] 7.6 Run the group tests — `cargo test --lib ui::tests::` — no regressions, and record
+      that no refactor was needed.
 
 ## 8. Gates
 <!-- kind: operational -->
@@ -234,37 +265,58 @@ shape. Only `run_loop` can prove otherwise.
       and add a per-name positive control beside the existing one-of-any guard: the run fails
       unless `src/ui/terminal.rs` names **each** of the six, so the pattern cannot cover the
       capture pair vacuously.
-- [ ] 8.3 CHANGE: Add `mouse_problem` to `wired.sh`'s leg 1 name list, so a `run` that stops
-      threading the guard's reason into `Startup` fails rather than silently dropping the row.
-- [ ] 8.4 CHANGE: Add a `[[control]]` to `tests/gate-controls.toml` planting
-      `EnableMouseCapture` outside `src/ui/terminal.rs`, and one planting the removal of
-      `mouse_problem` from `src/ui/mod.rs`'s production slice, each expecting its gate's own
-      FAIL line.
-- [ ] 8.5 VERIFY: `make gates` exits 0 (the change's artifacts must be `git add`ed first —
+- [ ] 8.3 CHECK: Confirm leg 1 cannot carry this name. `pub struct Startup<'a>` is at
+      `src/ui/mod.rs:94` and the file's only line-anchored `#[cfg(test)]` at `:542`, so the
+      struct is inside `code "$MOD"`'s slice: `sed -n '94p;542p' src/ui/mod.rs` shows both.
+      A leg-1 entry would be satisfied by the field declaration alone.
+- [ ] 8.4 CHANGE: Add a body-scoped **leg 5c** to `wired.sh`, mirroring leg 5: `pub fn run()`'s
+      body must name `mouse_problem(` and must not hardcode `mouse_problem: None`. Leg 1's
+      thirteen names are unchanged.
+- [ ] 8.5 CHANGE: Add three `[[control]]` entries to `tests/gate-controls.toml`, each a
+      single exact-substring find/replace, which is all that file's format supports:
+      (a) `EnableMouseCapture` planted in `src/ui/list.rs`, expecting `NORAW-GREP`'s
+      confinement FAIL; (b) `mouse_problem: guard.mouse_problem(),` → `mouse_problem: None,`
+      in `src/ui/mod.rs`, expecting leg 5c's FAIL; (c) `EnableMouseCapture` stripped from
+      `noraw-grep.sh`'s own `RAW_RE`, expecting the new per-name vacuity FAIL from 8.2 — the
+      clause `specs/terminal-lifecycle/spec.md` states and which (a) alone does not prove.
+- [ ] 8.6 VERIFY: `make gates` exits 0 (the change's artifacts must be `git add`ed first —
       `OPENSPEC-UNTOUCHED` fails on any untracked file under `openspec/`), and
-      `cargo test --test gate_controls` exits 0 with every planted defect caught.
+      `cargo test --test gate_controls` exits 0 with every planted defect caught, and record
+      that no refactor was needed.
 
 ## 9. Documentation
 <!-- kind: operational -->
 
-- [ ] 9.1 Add in `SPEC.md`: § Keys (audience: anyone reading the design contract) — a mouse
+- [ ] 9.1 CHECK: Read the two `SPEC.md` sections and the two `AGENTS.md` passages these
+      tasks rewrite, and confirm what is stale before writing: § Keys describes a
+      keyboard-only pane, § Degraded states has no capture row,
+      `grep -c 'EnableMouseCapture' AGENTS.md` is `0`, and `grep -n 'seven further claims'
+      AGENTS.md` finds the doc-conformance count group 10 makes nine.
+- [ ] 9.2 Add in `SPEC.md`: § Keys (audience: anyone reading the design contract) — a mouse
       table naming the wheel over each region, the click on a change row, the second click,
       the click on a section header, and the click on a tab cell, plus one line stating that
       capture costs the terminal's own drag-to-select and how to override it. Nothing
       existing is stale; the section has described only keys since `tui-shell`, and the pane
       now has a second input device.
-- [ ] 9.2 Add in `SPEC.md`: § Degraded states (audience: the same) — one row for a terminal
+- [ ] 9.3 Add in `SPEC.md`: § Degraded states (audience: the same) — one row for a terminal
       that refuses mouse capture, naming the reason's position as `refresh.startup`'s last
       entry. Required by that section's own contract: every degraded state is a row, and
       `tests/degraded_coverage.rs` fails on a row with no proof.
-- [ ] 9.3 Rewrite in `AGENTS.md`: the terminal-seam rule under § Architecture rules
+- [ ] 9.4 Rewrite in `AGENTS.md`: the terminal-seam rule under § Architecture rules
       (audience: every future session) — its list of confined crossterm functions grows from
       four to six. Rewritten in place, not appended: the existing sentence becomes false the
       moment group 1 lands.
-- [ ] 9.4 Rewrite in `AGENTS.md`: § Current repo state's sentence on the event loop
+- [ ] 9.5 Rewrite in `AGENTS.md`: § Current repo state's sentence on the event loop
       (audience: the same) — it enumerates the keys and says nothing about a pointer.
       Replace the enumeration's closing clause rather than adding a paragraph beside it;
       net addition to that section is at most two lines.
+- [ ] 9.6 Rewrite in `AGENTS.md`: § Quality gates' doc-conformance sentence (audience: the
+      same) — it calls `tests/doc_contract.rs` "seven further claims" and enumerates them;
+      group 10 adds two. Correct the count and the enumeration in place rather than
+      appending; this is a net-zero edit.
+- [ ] 9.7 VERIFY: The passages group 10 binds now exist —
+      `grep -c 'EnableMouseCapture' AGENTS.md` is at least `1` and `SPEC.md` § Keys holds a
+      mouse table. Group 10's tests are the real verification and run there.
 
 ## 10. Contract-tier bindings
 <!-- kind: operational -->
@@ -299,7 +351,7 @@ which the schema forbids. The evidence is a negative control instead.
 
 - [ ] 12.1 CHECK: Dispatch an independent reviewer — not a fork of the implementing session
       — against proposal.md, all eight spec files, design.md, and the diff. Concentration
-      points for this change: that every one of the 82 spec scenarios names a test that
+      points for this change: that every one of the 84 spec scenarios names a test that
       would go red if its behaviour were deleted; that `mouse_action` is genuinely reached
       by `run_loop` rather than only unit-tested; that `Action`'s two enumeration sites
       (`apply`'s match and `no_action_mutates_changes`' array) agree; that no mouse gesture

@@ -38,7 +38,8 @@ panic hook capture must release from), and `color-palette`.
 **Non-Goals:**
 
 - No drag of any kind, no hover styling, no motion handling — every `Moved`, `Drag`, and
-  `Up` maps to `Ignore`, which also keeps the loop from redrawing on pointer motion.
+  `Up` maps to `Ignore`, and a pointer-motion event does not trigger a draw (Decision 12 —
+  mapping it to `Ignore` is not by itself enough).
 - No right-click, no context menu, no mouse-driven agent launch.
 - No text selection of the pane's own; the terminal's is what capture displaces.
 - No new dependency: crossterm's mouse types come through `ratatui::crossterm`, as every
@@ -77,11 +78,16 @@ second is a change to a *specified* invariant, so it carries its own delta under
   commands could be named anywhere in the crate; without the second the extended pattern
   would pass vacuously for the capture pair, since `src/ui/terminal.rs` already names
   `enable_raw_mode`. Specified by the `terminal-lifecycle` delta.
-- `scripts/gates/wired.sh`'s leg 1 name list grows from thirteen to fourteen with
-  `mouse_problem`, so a `run` that stops threading the guard's reason into `Startup` fails
-  rather than silently dropping the row. `openspec/specs/quality-gates/spec.md` states that
-  list's size, so this change carries a `quality-gates` delta; without it the live spec would
-  keep asserting thirteen against a script naming fourteen.
+- `scripts/gates/wired.sh` gains a **body-scoped leg 5c**, not a fourteenth entry on leg 1.
+  Leg 1 greps `code "$MOD"` — the whole production slice of `src/ui/mod.rs`
+  (`scripts/gates/wired.sh:158-163`) — and `pub struct Startup<'a>` is declared in that slice
+  at `src/ui/mod.rs:94`, well above the file's single line-anchored `#[cfg(test)]` at `:542`.
+  The field declaration alone would satisfy a leg-1 name, leaving the gate green on a `run`
+  that had stopped passing the value. This is the failure leg 5 already documents for
+  `state::read` and answers by scoping to `$body`. Leg 5c does the same: `$body` must name
+  `mouse_problem(`, and must not hardcode `mouse_problem: None`, mirroring leg 5's
+  `state_dir: None` guard exactly. `openspec/specs/quality-gates/spec.md` states leg 1's size
+  and the shape of these legs, so this change carries a `quality-gates` delta.
 
 ## Contracts
 
@@ -185,6 +191,7 @@ through `run_loop` with a scripted source.
 | A name hidden in a block comment no longer satisfies the gate | `scripts/gates/wired.sh`'s stripper control, carried over unchanged | Gate | real: the tree | `make gates` |
 | Deleting the panic-hook call fails the gate | `tests/gate-controls.toml`'s existing `wired` control, carried over unchanged | Gate | real: the tree | `cargo test --test gate_controls` |
 | Deleting the mouse-capture reason from `run` fails the gate | new `[[control]]` in `tests/gate-controls.toml` planting the removal of `mouse_problem` from `ui::run` | Gate | real: the tree | `cargo test --test gate_controls` |
+| Hardcoding the mouse-capture reason in `run` fails the gate | new `[[control]]` planting `mouse_problem: None,` in `ui::run`, expecting `wired.sh` leg 5c's FAIL | Gate | real: the tree | `cargo test --test gate_controls` |
 | A renamed definition fails in the defining file | `scripts/gates/wired.sh`'s positive control, carried over unchanged | Gate | real: the tree | `make gates` |
 | The real implementation is the only place naming a terminal-mode function | `scripts/gates/noraw-grep.sh`, plus its planted-defect control | Gate | real: the tree | `make gates` |
 | No test constructs the real terminal implementation | `scripts/gates/noraw-grep.sh` leg 2 | Gate | real: the tree | `make gates` |
@@ -233,6 +240,8 @@ through `run_loop` with a scripted source.
 | The wheel moves the selection at the detail route | `app::tests::scroll::select_next_moves_at_the_detail_route` | Unit | none | `cargo test --lib moves_at_the_detail_route` |
 | A clamped move resets nothing | `app::tests::scroll::a_clamped_select_resets_nothing` | Unit | none | `cargo test --lib a_clamped_select_resets_nothing` |
 | `Next` at the list route and `SelectNext` are the same move | `app::tests::scroll::next_at_list_equals_select_next` | Unit | none | `cargo test --lib next_at_list_equals` |
+| Pointer motion does not cost a frame | `driver::tests::pointer_motion_does_not_draw` — drives `run_loop` with N `Moved` events and asserts `LoopSummary.frames` | Acceptance | replaced: events, backend, reader, collaborators | `cargo test --lib pointer_motion_does_not_draw` |
+| A click after motion still resolves against the drawn frame | `driver::tests::a_click_after_motion_resolves_against_the_frame` | Acceptance | replaced: events, backend, reader, collaborators | `cargo test --lib a_click_after_motion` |
 | A resize between the draw and the click costs one frame, not a panic | `driver::tests::a_resize_before_a_click_costs_one_frame` | Acceptance | replaced: events, backend, reader, collaborators | `cargo test --lib a_resize_before_a_click` |
 | The loop routes mouse and key events to different mappers | `driver::tests::the_loop_routes_mouse_and_key_to_different_mappers` | Acceptance | replaced: as above | `cargo test --lib different_mappers` |
 | The four action keys map, and their near misses do not | `app::tests::the_four_action_keys_map_and_their_near_misses_do_not` — carried over, unchanged, re-run | Unit | none | `cargo test --lib the_four_action_keys_map` |
@@ -319,6 +328,34 @@ because `Dashboard` deliberately carries no width, no layout mode, and no frame.
 resolved as a character; a click is not ambiguous. `mouse_action` therefore takes no filter
 flag at all, which makes the rule structural rather than a branch someone can get wrong.
 
+**12. A pointer-motion event does not trigger a draw.** Measured, not assumed: crossterm
+0.29.0's `EnableMouseCapture` writes `?1000h ?1002h ?1003h ?1015h ?1006h`
+(`crossterm-0.29.0/src/event.rs:321-335`), and `?1003h` is *any-event tracking — report all
+motion events*. `run_loop` draws at the top of every iteration
+(`src/ui/driver.rs:106-135`), so with capture on, merely moving the pointer across the pane
+would re-render a full frame per motion event — including recomputing `detail::content_lines`
+for the whole document. Resolving the event to `Action::Ignore` cannot prevent that: the
+draw happens before the event is even read.
+
+`run_loop` therefore skips the draw — and the `sync_detail` and `normalise_scroll` around it
+— for a `MouseEventKind::Moved` or `Drag(_)` event, carrying the previous frame's `area`
+forward so the next click still resolves against what is on screen, and not counting a
+skipped frame in `LoopSummary.frames`. Nothing else changes: an ignored **key** still
+redraws, which `dashboard-loop`'s existing "An ignored key redraws and keeps waiting"
+scenario pins and this change must not break.
+
+*Alternative A:* accept the redraws and correct the non-goal. Rejected — the pane sits in a
+Herdr split the reader moves a pointer across constantly to reach other panes, and a
+continuous re-render for pointer travel that is not even aimed at the pane is a cost with no
+benefit at all. *Alternative B:* emit button-event tracking only, writing
+`?1000h ?1002h ?1015h ?1006h` by hand instead of `EnableMouseCapture`. Rejected: crossterm
+offers no narrower command, so this puts raw escape literals in `CrosstermOps`, breaks the
+"one crossterm call per method, no decision" rule the seam has kept since `tui-shell`, and
+leaves `EnableMouseCapture` named nowhere — which would make the `NORAW-GREP` extension this
+change adds guard a name the crate does not use. *Alternative C:* skip the draw whenever the
+action is `Ignore`. Rejected: it silently rewrites the pinned key scenario above, for no gain
+over the narrow motion rule.
+
 **11. Problem and message rows stay unaddressable.** `row_at` reports their `RowKind`
 faithfully — they are what is drawn there — and `mouse_action` is what refuses to act on
 them. Keeping the refusal in the resolver rather than in the row grammar means
@@ -339,9 +376,15 @@ variants.
   a new `ChangeSet` in the same iteration) → `Action::Click` names a `Target`, not a row
   index, and `apply` does nothing when that target is absent from `targets()`. It never
   clamps to a neighbour, so the failure is an ignored click rather than a wrong selection.
-- **A held wheel produces a burst of events, each forcing a draw** → The same bound a held
-  `j` already has: `sync_detail`'s `(change directory, tab)` cache means a scroll re-reads
-  nothing, and the scroll clamp is applied per frame by `normalise_scroll`.
+- **A held wheel produces a burst of events, each forcing a draw** → Accepted, and the same
+  bound a held `j` already has: `sync_detail`'s `(change directory, tab)` cache means a
+  scroll re-reads nothing, and the clamp is applied per frame by `normalise_scroll`. A wheel
+  burst is the reader asking for frames; pointer *motion* is not, which is why only motion
+  is exempted from the draw (Decision 12).
+- **Any-event tracking cannot be turned off independently of capture** → `EnableMouseCapture`
+  is all-or-nothing in crossterm 0.29.0, so the pane receives motion events it never wants.
+  Mitigated in the loop rather than at the terminal, per Decision 12, and bound by a frame-count
+  assertion rather than left as a claim.
 - **`Action` grows to twenty-three variants, and `no_action_mutates_changes` enumerates
   them by hand** → The five new variants are added to that array in the same task group
   that adds them to the enum, and the exhaustive `match` in `apply` fails to compile until

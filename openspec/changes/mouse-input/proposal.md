@@ -48,10 +48,13 @@ no row of the plan ever asked whether the pane had a second input device.
 ## Non-Goals
 
 - **No drag of any kind** — no drag-select, no drag-scroll, no drag-resize of the 40-column
-  split. Motion events are ignored, which also keeps the render loop from redrawing on
-  every pointer move.
-- **No hover styling**, for the same reason: a frame per pointer motion is a cost the pane
-  does not need to pay for a cosmetic.
+  split. Motion and drag events resolve to `Action::Ignore`.
+- **No hover styling**: a frame per pointer motion is a cost the pane does not need to pay
+  for a cosmetic. Ignoring a motion event is **not** on its own enough to avoid that cost —
+  crossterm's `EnableMouseCapture` turns on any-event tracking (`?1003h`), so a terminal
+  reports every pointer move whether the pane wants it or not, and `run_loop` draws at the
+  top of every iteration regardless of what the event resolved to. The loop therefore gains
+  one rule: a pointer-motion event does not trigger a draw. See design.md -> Decision 12.
 - **No right-click, no context menu, no mouse-driven agent launch.** `a`/`c`/`s`/`g` start
   processes and stay deliberate keystrokes; a mis-click must not launch an agent.
 - **No text selection of the pane's own.** The terminal's selection is what capture

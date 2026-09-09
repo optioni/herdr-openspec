@@ -333,3 +333,41 @@ quit check.
 - **AND** after the `j` event `selected` has advanced and `detail.scroll` is back to `0`,
   because a selection move resets it — so the wheel reached `ScrollDown` and the key reached
   `Next`, and neither took the other's path
+
+### Requirement: A pointer-motion event does not trigger a draw
+
+`ui::driver::run_loop` SHALL NOT draw, SHALL NOT call `Dashboard::sync_detail`, and SHALL
+NOT call `Dashboard::normalise_scroll` on the iteration following an `Event::Mouse` whose
+kind is `MouseEventKind::Moved` or `MouseEventKind::Drag(_)`, and SHALL NOT count such an
+iteration in `LoopSummary::frames`. It SHALL carry the previous drawn frame's `area`
+forward, so a click arriving after any number of motion events still resolves against the
+frame that is on screen.
+
+This rule exists because mapping the event to `Action::Ignore` cannot prevent the draw: the
+draw happens at the top of the iteration, before the event is read. Crossterm's
+`EnableMouseCapture` writes `?1003h` — any-event tracking — so a terminal reports every
+pointer move whether the pane wants it or not, and without this rule moving a pointer across
+a Herdr split would re-render the whole detail document once per motion event.
+
+The rule SHALL be confined to pointer motion. An ignored **key** SHALL still redraw, exactly
+as `An ignored key redraws and keeps waiting` requires; a wheel event, a button press, a
+button release, a resize, a focus change, a paste, and a timeout SHALL all still draw.
+
+#### Scenario: Pointer motion does not cost a frame
+
+- **WHEN** `run_loop` is driven at 120x40 with a scripted source yielding twenty
+  `MouseEventKind::Moved` events at varying coordinates, then `q`
+- **THEN** `LoopSummary::frames` is `1` — the frame drawn before the first event was read —
+  and `LoopSummary::polls` is `21`
+- **AND** the same run with twenty `MouseEventKind::Drag(MouseButton::Left)` events reports
+  the same counts
+- **AND** the same run with twenty `Char('z')` presses — an ignored key — reports `frames`
+  `21`, so the exemption is scoped to pointer motion and did not become a general
+  ignore-means-no-draw rule
+
+#### Scenario: A click after motion still resolves against the drawn frame
+
+- **WHEN** `run_loop` is driven at 120x40 with five `Moved` events and then a left press on
+  the second change row, then `q`
+- **THEN** the press selects that row, exactly as it does with no motion events before it
+- **AND** the frame count is `2`: one before the first event, one after the press
