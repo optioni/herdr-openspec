@@ -288,7 +288,7 @@ shape. Only `run_loop` can prove otherwise.
 ## 6. The resolver and the loop
 <!-- kind: behavior -->
 
-- [ ] 6.1 RED: Write failing tests for `mouse-input`'s remaining resolver scenarios and
+- [x] 6.1 RED: Write failing tests for `mouse-input`'s remaining resolver scenarios and
       `dashboard-loop`'s **four** new ones — including
       `pointer_motion_does_not_draw` and `a_click_after_motion_resolves_against_the_frame`,
       which assert `LoopSummary::frames`, the only observable that distinguishes a drawn
@@ -297,13 +297,13 @@ shape. Only `run_loop` can prove otherwise.
       named as design.md → Test Strategy lists them under `driver::tests::`. `mouse_action_is_total` drives the full kind × coordinate × area ×
       route × dashboard cross product the spec enumerates.
       `cargo test --lib driver::tests` — expect RED.
-- [ ] 6.2 GREEN: Implement `mouse_action(dashboard, area, mouse) -> Action` over
+- [x] 6.2 GREEN: Implement `mouse_action(dashboard, area, mouse) -> Action` over
       `layout::zone`, `list::row_at`, and `detail::tab_at`. It takes no filter flag, per
       design.md → Decision 10.
-- [ ] 6.3 GREEN: `run_loop` routes an `Event::Mouse` to `mouse_action` with the `area` it
+- [x] 6.3 GREEN: `run_loop` routes an `Event::Mouse` to `mouse_action` with the `area` it
       already copies out of the `CompletedFrame`, and every other event to `action_for`
       with `dashboard.filter.active`. One action per event; the quit check is unchanged.
-- [ ] 6.4 CHECK: The four tests that actually carry the key table today pass **unmodified** —
+- [x] 6.4 CHECK: The four tests that actually carry the key table today pass **unmodified** —
       `app::tests::action_for_is_total_over_a_keycode_sweep` (`src/ui/app.rs:1906`),
       `quit_keys_and_their_near_misses` (`:1701`),
       `navigation_and_filter_keys_are_distinguished` (`:2120`), and
@@ -311,19 +311,50 @@ shape. Only `run_loop` can prove otherwise.
       `non_key_events_are_ignored` (`:1877`), which already asserts `Event::Mouse` → `Ignore`.
       Editing any of them to accommodate this change is the failure this task exists to
       catch. `cargo test --lib app::tests::` — expect green, having run more than 0 tests.
-- [ ] 6.5 GREEN: `run_loop` skips the draw — and the `sync_detail` and `normalise_scroll`
+      **Run:** **113 passed**, 0 failed — well above zero, so the filter matched.
+      `git diff` over `src/ui/app.rs` for this group is **4 lines**, all of them one test
+      rename (see 6.6); not one of the five named tests was touched by this group, and none
+      of them was touched by group 5 either — group 5's only edits to existing tests were
+      `no_action_mutates_changes`' three enumeration sites, which the design names as its
+      own subject.
+- [x] 6.5 GREEN: `run_loop` skips the draw — and the `sync_detail` and `normalise_scroll`
       around it — for a `MouseEventKind::Moved` or `Drag(_)` event, carries the previous
       frame's `area` forward, and does not count the skipped iteration in
       `LoopSummary::frames` (per design.md -> Decision 12). Covered by 6.1's RED tests
       `pointer_motion_does_not_draw` and `a_click_after_motion_resolves_against_the_frame`.
-- [ ] 6.6 CHECK: `/bin/sh scripts/gates/noblock.sh`, `/bin/sh scripts/gates/nosleep.sh`, and
+- [x] 6.6 CHECK: `/bin/sh scripts/gates/noblock.sh`, `/bin/sh scripts/gates/nosleep.sh`, and
       `/bin/sh scripts/gates/nocli-shell.sh` all exit 0 — the resolver reads no clock,
       blocks on nothing, and names no `HerdrCli`.
-- [ ] 6.7 CHECK: `dashboard-loop`'s `An ignored key redraws and keeps waiting` scenario's
+      **Run:** `NOBLOCK OK` (all three legs, 12 files), `NOSLEEP OK` (all three legs),
+      `NOCLI-SHELL OK: 12 files under src/ui name no CLI seam`, every one **exit 0**.
+      **`NOCLI-SHELL` fired first, on a false positive, and a test was renamed rather than
+      the gate loosened.** Its `CLI_RE` is `from_cli|OpenspecCli|HerdrCli|CliChanges|npm_prefix`
+      with no word boundary, so `from_cli` matched inside
+      `app::tests::click::a_collapsed_section_hides_its_rows_from_clicks` — the name
+      design.md's matrix gives that test. The test is now
+      `a_collapsed_section_hides_its_rows_when_clicked` and design.md's matrix row follows
+      it. The alternative — anchoring `CLI_RE`'s `from_cli` on a word boundary — is the
+      better repair of the two and is deliberately **not** made here: this change carries a
+      `quality-gates` delta for `wired.sh` and `noraw-grep.sh` and none for
+      `nocli-shell.sh`, and editing a specified gate with no delta authorising it is the
+      exact drift the planning review caught in `wired.sh`. Recorded as a finding: any
+      future identifier beginning `from_cli` — `from_client`, say — will trip this gate the
+      same way.
+- [x] 6.7 CHECK: `dashboard-loop`'s `An ignored key redraws and keeps waiting` scenario's
       existing test passes **unmodified** — the motion exemption must not have become a
       general ignore-means-no-draw rule.
-- [ ] 6.8 Run the group tests — `cargo test --lib driver::` — no regressions, and record
+      **Run:** `driver::tests::ignored_input_redraws_and_continues` — **1 passed**, unmodified
+      (`git diff` shows no edit to it). `pointer_motion_does_not_draw`'s third leg asserts the
+      same property from the other side: twenty ignored `Char('z')` presses report
+      `frames: 21`, not `1`.
+- [x] 6.8 Run the group tests — `cargo test --lib driver::` — no regressions, and record
       that no refactor was needed beyond 6.5's own extraction.
+      **Run:** **69 passed**, 0 failed (49 before, plus this group's twenty). **No refactor
+      was needed beyond 6.5's own:** `run_loop` gained two locals — `area`, carried across a
+      skipped draw, and `draw`, cleared for exactly one iteration by a motion event — and
+      the draw/sync/normalise trio moved inside `if draw`. `mouse_action` is one `match`
+      over the event kind and the zone; there is no arithmetic in it to fold away, since
+      `layout::zone`, `list::row_at`, and `detail::tab_at` own all of it.
 
 ## 7. The refused-capture row reaches the reader
 <!-- kind: behavior -->

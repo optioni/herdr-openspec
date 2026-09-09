@@ -6,8 +6,13 @@ use std::time::Duration;
 use ratatui::Terminal;
 use ratatui::backend::Backend;
 
-use crate::ui::app::{ArtifactReader, Dashboard, action_for};
+use ratatui::crossterm::event::{Event, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::layout::Rect;
+
+use crate::ui::app::{Action, ArtifactReader, Dashboard, Target, action_for};
 use crate::ui::event::{EventError, EventSource};
+use crate::ui::layout::Zone;
+use crate::ui::list::RowKind;
 use crate::ui::view;
 
 /// The tick `ui::run` passes to `run_loop`. A later change adding periodic
@@ -103,19 +108,31 @@ pub fn run_loop<B: Backend, E: EventSource>(
 ) -> Result<LoopSummary, LoopError> {
     let mut frames = 0usize;
     let mut polls = 0usize;
+    // The area of the frame most recently drawn — the geometry a mouse event is
+    // resolved against, and the value carried forward across a skipped draw.
+    // The first iteration always draws, so this initial value is never the one
+    // any event is resolved against.
+    let mut area = Rect::ZERO;
+    // `mouse-input` -> design.md -> Decision 12: cleared for exactly one
+    // iteration after a pointer-motion event, so moving a pointer across the
+    // pane costs no frames at all.
+    let mut draw = true;
     loop {
         drive_live_tier(dashboard, live);
 
-        dashboard.sync_detail(read);
-        let completed = terminal
-            .draw(|frame| view::render(frame, dashboard))
-            .map_err(|e| LoopError::Draw(e.to_string()))?;
-        // `CompletedFrame` borrows `terminal`; `area` is `Copy`, so it is
-        // copied out here and the borrow ends before `normalise_scroll`
-        // takes `dashboard` mutably.
-        let area = completed.area;
-        frames += 1;
-        dashboard.normalise_scroll(area);
+        if draw {
+            dashboard.sync_detail(read);
+            let completed = terminal
+                .draw(|frame| view::render(frame, dashboard))
+                .map_err(|e| LoopError::Draw(e.to_string()))?;
+            // `CompletedFrame` borrows `terminal`; `area` is `Copy`, so it is
+            // copied out here and the borrow ends before `normalise_scroll`
+            // takes `dashboard` mutably.
+            area = completed.area;
+            frames += 1;
+            dashboard.normalise_scroll(area);
+        }
+        draw = true;
 
         let timeout = crate::watch::poll_timeout(
             tick,
@@ -125,7 +142,24 @@ pub fn run_loop<B: Backend, E: EventSource>(
         polls += 1;
 
         if let Some(event) = event {
-            let action = action_for(&event, dashboard.filter.active);
+            // One action per event, and the quit check is unchanged: a mouse
+            // event can neither apply two actions nor bypass it.
+            let action = match &event {
+                // The mouse is resolved against the frame just drawn — never a
+                // stored size and never the size at startup. A resize between
+                // the draw and the click costs at most one mis-targeted event,
+                // which the next frame corrects: the same one-frame window
+                // `normalise_scroll` already accepts.
+                Event::Mouse(mouse) => {
+                    // No filter flag: a click is unambiguous where a keystroke
+                    // is not, so the rule is structural rather than a branch.
+                    if matches!(mouse.kind, MouseEventKind::Moved | MouseEventKind::Drag(_)) {
+                        draw = false;
+                    }
+                    mouse_action(dashboard, area, mouse)
+                }
+                _ => action_for(&event, dashboard.filter.active),
+            };
             dashboard.apply(action);
             if dashboard.quit {
                 break;
@@ -133,6 +167,74 @@ pub fn run_loop<B: Backend, E: EventSource>(
         }
     }
     Ok(LoopSummary { frames, polls })
+}
+
+/// Map a mouse event to one of the actions `Action` already carries, using
+/// `area` — the area of the frame `run_loop` has just drawn — as the geometry
+/// the pointer is resolved against.
+///
+/// Pure and total: it performs no I/O, reads no clock, mutates nothing, and
+/// returns an `Action` for every `MouseEvent` value, every `Rect` including a
+/// zero-sized one, and every `Dashboard` value, without panicking.
+///
+/// It takes **no filter flag** and resolves identically whether or not
+/// `dashboard.filter.active` is set: a printable key is ambiguous while
+/// filtering and is resolved as a character, but a click is not ambiguous
+/// (design.md -> Decision 10). It reads `MouseEvent::modifiers` nowhere either,
+/// so a `Shift`-click resolves exactly as a bare one — the drag-select override
+/// is the *terminal's*, applied before any sequence is sent (design.md ->
+/// Decision 13).
+///
+/// The wheel names the region under the pointer — the whole region, its border
+/// and the detail region's header and tab bar included — and the click names
+/// the row. Problem and message rows are refused here rather than in the row
+/// grammar, so `change-rows` gains no notion of clickability (design.md ->
+/// Decision 11). No gesture reaches a launch action: a mis-click must not start
+/// or focus an agent.
+///
+/// Lives here rather than in `ui::app` because `run_loop` already copies the
+/// drawn frame's `area` out of the `CompletedFrame` for `normalise_scroll`, so
+/// the resolver's one input that nothing else has is already in hand
+/// (design.md -> Decision 8).
+pub fn mouse_action(dashboard: &Dashboard, area: Rect, mouse: &MouseEvent) -> Action {
+    let zone = crate::ui::layout::zone(area, dashboard.route, mouse.column, mouse.row);
+    match mouse.kind {
+        MouseEventKind::ScrollDown => match zone {
+            Zone::List | Zone::ListRow { .. } => Action::SelectNext,
+            Zone::Detail | Zone::DetailTab { .. } => Action::ScrollDown,
+            Zone::Outside => Action::Ignore,
+        },
+        MouseEventKind::ScrollUp => match zone {
+            Zone::List | Zone::ListRow { .. } => Action::SelectPrev,
+            Zone::Detail | Zone::DetailTab { .. } => Action::ScrollUp,
+            Zone::Outside => Action::Ignore,
+        },
+        MouseEventKind::Down(MouseButton::Left) => match zone {
+            Zone::ListRow { interior, row } => {
+                match crate::ui::list::row_at(dashboard, interior, row) {
+                    Some(RowKind::Item { index }) => Action::Click(Target::Change(index)),
+                    Some(RowKind::Section { key, .. }) => Action::Click(Target::Section(key)),
+                    Some(RowKind::Problem) | Some(RowKind::Message) | None => Action::Ignore,
+                }
+            }
+            Zone::DetailTab { bar, column } => dashboard
+                .selected_change()
+                .and_then(|change| {
+                    crate::ui::detail::tab_at(
+                        &change.artifacts,
+                        dashboard.detail.tab,
+                        bar.width,
+                        column,
+                    )
+                })
+                .map_or(Action::Ignore, Action::SelectTab),
+            Zone::List | Zone::Detail | Zone::Outside => Action::Ignore,
+        },
+        // Right and middle presses, every release, every drag, pointer motion,
+        // and both horizontal wheel directions: there is no context menu, no
+        // drag of any kind, and the pane scrolls in one dimension only.
+        _ => Action::Ignore,
+    }
 }
 
 /// The live tier's four one-shot steps — see `run_loop`'s doc comment for
@@ -3335,6 +3437,880 @@ mod tests {
             agents: &mut *agents,
             launcher: &mut *launcher,
         };
+    }
+
+    // ------------------------------------------------------------------
+    // `mouse-input`: the resolver and the loop.
+    // ------------------------------------------------------------------
+
+    use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+    use ratatui::layout::Rect;
+
+    use crate::ui::app::{Action, SectionKey, Target, action_for};
+    use crate::ui::driver::mouse_action;
+
+    /// The two mandated frames. Every geometry below is derived from these
+    /// through `layout`'s own splits, never written down twice.
+    const WIDE: Rect = Rect {
+        x: 0,
+        y: 0,
+        width: 120,
+        height: 40,
+    };
+    const NARROW: Rect = Rect {
+        x: 0,
+        y: 0,
+        width: 60,
+        height: 20,
+    };
+
+    /// A bare `MouseEvent`, for the unit calls that need no `Event` wrapper.
+    fn m(kind: MouseEventKind, column: u16, row: u16) -> MouseEvent {
+        MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: KeyModifiers::NONE,
+        }
+    }
+
+    fn left(column: u16, row: u16) -> MouseEvent {
+        m(MouseEventKind::Down(MouseButton::Left), column, row)
+    }
+
+    /// A `Route::List` dashboard over `active` active changes and `archived`
+    /// archived ones, cursor on the active header.
+    fn mouse_dashboard(active: usize, archived: usize) -> Dashboard {
+        let a: Vec<_> = (0..active)
+            .map(|i| crate::changes::fixture::active(&format!("s{i}"), 0, 1))
+            .collect();
+        let z: Vec<_> = (0..archived)
+            .map(|i| crate::changes::fixture::archived(Some("2026-01-01"), &format!("z{i}"), 1, 1))
+            .collect();
+        let mut dashboard = dashboard_with_change("/repo", "unused", 0, 0);
+        dashboard.changes = crate::changes::fixture::set(a, z, Vec::new());
+        dashboard.selected = 0;
+        dashboard
+    }
+
+    /// The list region's interior for `area` at `route`, derived the way the
+    /// draw path derives it.
+    fn list_interior(area: Rect, route: Route) -> Rect {
+        let (_, body, _) = crate::ui::layout::split_frame(area);
+        crate::ui::layout::interior(
+            crate::ui::layout::split_body(body, route)
+                .0
+                .expect("a list region is drawn"),
+        )
+    }
+
+    /// The detail region's tab-bar row for `area` at `route`.
+    fn tab_bar_row(area: Rect, route: Route) -> Rect {
+        let (_, body, _) = crate::ui::layout::split_frame(area);
+        crate::ui::layout::split_detail(crate::ui::layout::interior(
+            crate::ui::layout::split_body(body, route)
+                .1
+                .expect("a detail region is drawn"),
+        ))
+        .1
+    }
+
+    /// The terminal row the list interior's `offset`-th drawn row occupies.
+    fn list_row(area: Rect, route: Route, offset: u16) -> u16 {
+        list_interior(area, route).y + offset
+    }
+
+    #[test]
+    fn mouse_action_is_total() {
+        // `mouse-input`: "Resolution is total over adversarial geometry".
+        let kinds = [
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Down(MouseButton::Right),
+            MouseEventKind::Down(MouseButton::Middle),
+            MouseEventKind::Up(MouseButton::Left),
+            MouseEventKind::Up(MouseButton::Right),
+            MouseEventKind::Up(MouseButton::Middle),
+            MouseEventKind::Drag(MouseButton::Left),
+            MouseEventKind::Drag(MouseButton::Right),
+            MouseEventKind::Drag(MouseButton::Middle),
+            MouseEventKind::Moved,
+            MouseEventKind::ScrollDown,
+            MouseEventKind::ScrollUp,
+            MouseEventKind::ScrollLeft,
+            MouseEventKind::ScrollRight,
+        ];
+        let coords = [0u16, 1, 39, 40, 59, 119, 65535];
+        let areas = [
+            Rect::new(0, 0, 0, 0),
+            Rect::new(0, 0, 1, 1),
+            Rect::new(0, 0, 2, 2),
+            NARROW,
+            WIDE,
+        ];
+        let mut no_repo = mouse_dashboard(0, 0);
+        no_repo.repo = None;
+        let dashboards = [no_repo, mouse_dashboard(0, 0), mouse_dashboard(3, 3)];
+        let modifiers = [
+            KeyModifiers::NONE,
+            KeyModifiers::SHIFT,
+            KeyModifiers::CONTROL,
+            KeyModifiers::ALT,
+        ];
+
+        for dashboard in &dashboards {
+            let before = dashboard.clone();
+            for kind in kinds {
+                for column in coords {
+                    for row in coords {
+                        for area in areas {
+                            for route in [Route::List, Route::Detail] {
+                                let mut routed = dashboard.clone();
+                                routed.route = route;
+                                let bare = mouse_action(&routed, area, &m(kind, column, row));
+                                for modifiers in modifiers {
+                                    let event = MouseEvent {
+                                        kind,
+                                        column,
+                                        row,
+                                        modifiers,
+                                    };
+                                    assert_eq!(
+                                        mouse_action(&routed, area, &event),
+                                        bare,
+                                        "{kind:?} at ({column}, {row}) in {area:?} under \
+                                         {route:?}: {modifiers:?} must resolve as NONE does"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            assert_eq!(
+                dashboard, &before,
+                "the dashboard is passed by shared reference and nothing mutated it"
+            );
+        }
+    }
+
+    #[test]
+    fn the_two_regions_scroll_independently() {
+        // `mouse-input`: "The two regions scroll independently at 120 columns".
+        for route in [Route::Detail, Route::List] {
+            let mut dashboard = mouse_dashboard(6, 0);
+            dashboard.route = route;
+            dashboard.selected = 1;
+            dashboard.detail.source = (0..20).map(|i| format!("- line-{i:02}\n")).collect();
+
+            let over_list = mouse_action(&dashboard, WIDE, &m(MouseEventKind::ScrollDown, 10, 10));
+            let over_detail =
+                mouse_action(&dashboard, WIDE, &m(MouseEventKind::ScrollDown, 80, 10));
+            assert_eq!(over_list, Action::SelectNext, "{route:?}");
+            assert_eq!(over_detail, Action::ScrollDown, "{route:?}");
+
+            let mut listed = dashboard.clone();
+            listed.apply(over_list);
+            assert_eq!(listed.selected, dashboard.selected + 1);
+            assert_eq!(listed.detail.scroll, 0);
+
+            let mut detailed = dashboard.clone();
+            detailed.apply(over_detail);
+            assert_eq!(detailed.detail.scroll, 1);
+            assert_eq!(detailed.selected, dashboard.selected);
+        }
+    }
+
+    #[test]
+    fn the_wheel_acts_over_a_border_and_not_the_chrome() {
+        // `mouse-input`: "The wheel acts over a border and not over the chrome".
+        let dashboard = mouse_dashboard(3, 0);
+        assert_eq!(
+            mouse_action(&dashboard, WIDE, &m(MouseEventKind::ScrollUp, 0, 1)),
+            Action::SelectPrev,
+            "the list region's own border column and row"
+        );
+        for (column, row) in [(10u16, 0u16), (10, 39), (200, 10)] {
+            assert_eq!(
+                mouse_action(&dashboard, WIDE, &m(MouseEventKind::ScrollUp, column, row)),
+                Action::Ignore,
+                "({column}, {row})"
+            );
+        }
+    }
+
+    #[test]
+    fn at_60_columns_only_the_routed_region_answers() {
+        // `mouse-input`: "At 60 columns only the routed region answers the wheel".
+        let mut listed = mouse_dashboard(3, 0);
+        listed.route = Route::List;
+        let mut detailed = mouse_dashboard(3, 0);
+        detailed.route = Route::Detail;
+        detailed.selected = 1;
+
+        assert_eq!(
+            mouse_action(&listed, NARROW, &m(MouseEventKind::ScrollDown, 30, 10)),
+            Action::SelectNext
+        );
+        assert_eq!(
+            mouse_action(&detailed, NARROW, &m(MouseEventKind::ScrollDown, 30, 10)),
+            Action::ScrollDown
+        );
+    }
+
+    #[test]
+    fn horizontal_wheel_events_do_nothing() {
+        // `mouse-input`: "Horizontal wheel events do nothing".
+        let dashboard = mouse_dashboard(3, 0);
+        for area in [WIDE, NARROW] {
+            for kind in [MouseEventKind::ScrollLeft, MouseEventKind::ScrollRight] {
+                // Over the list region, over the detail region, over the footer.
+                for (column, row) in [(10u16, 10u16), (80, 10), (10, area.height - 1)] {
+                    assert_eq!(
+                        mouse_action(&dashboard, area, &m(kind, column, row)),
+                        Action::Ignore,
+                        "{kind:?} at ({column}, {row}) in {area:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn a_click_selects_and_a_second_click_opens() {
+        // `mouse-input`: "A click selects a change row and a second click opens it".
+        let mut dashboard = mouse_dashboard(4, 0);
+        dashboard.detail.tab = 0;
+        // Interior row 0 is the `active` header; rows 1..4 are the changes, so
+        // the third drawn row is the second change.
+        let row = list_row(WIDE, Route::List, 2);
+        let action = mouse_action(&dashboard, WIDE, &left(5, row));
+        assert_eq!(action, Action::Click(Target::Change(1)));
+
+        dashboard.apply(action);
+        let index = dashboard
+            .targets()
+            .iter()
+            .position(|t| *t == Target::Change(1))
+            .expect("drawn");
+        assert_eq!(dashboard.selected, index);
+        assert_eq!(dashboard.detail.tab, 0);
+        assert_eq!(dashboard.detail.scroll, 0);
+        assert_eq!(dashboard.route, Route::List);
+
+        let second = mouse_action(&dashboard, WIDE, &left(5, row));
+        assert_eq!(second, action);
+        dashboard.apply(second);
+        assert_eq!(dashboard.route, Route::Detail);
+        assert_eq!(dashboard.detail.scroll, 0);
+        assert_eq!(dashboard.selected, index);
+
+        let third = mouse_action(&dashboard, WIDE, &left(5, row));
+        assert_eq!(third, action);
+        let before = dashboard.clone();
+        dashboard.apply(third);
+        assert_eq!(dashboard, before);
+    }
+
+    #[test]
+    fn a_header_click_equals_space() {
+        // `mouse-input`: "A click on a section header folds it exactly as `Space` does".
+        let mut clicked = mouse_dashboard(3, 3);
+        let row = list_row(WIDE, Route::List, 0);
+        let action = mouse_action(&clicked, WIDE, &left(5, row));
+        assert_eq!(action, Action::Click(Target::Section(SectionKey::Active)));
+
+        clicked.apply(action);
+        assert!(clicked.sections.collapsed.contains(&SectionKey::Active));
+        assert_eq!(
+            clicked.targets().get(clicked.selected),
+            Some(&Target::Section(SectionKey::Active))
+        );
+
+        let mut spaced = mouse_dashboard(3, 3);
+        spaced.selected = spaced
+            .targets()
+            .iter()
+            .position(|t| *t == Target::Section(SectionKey::Active))
+            .expect("drawn");
+        spaced.apply(Action::ToggleSection);
+        assert_eq!(clicked, spaced, "field for field");
+
+        let unfold = mouse_action(&clicked, WIDE, &left(5, row));
+        clicked.apply(unfold);
+        assert!(!clicked.sections.collapsed.contains(&SectionKey::Active));
+    }
+
+    #[test]
+    fn a_header_click_requests_the_archive_refresh() {
+        // `mouse-input`: "A click on an archived header opens an unresolved
+        // archive and requests its refresh".
+        let mut dashboard = mouse_dashboard(3, 0);
+        dashboard.changes.archived_total = 22;
+        dashboard.sections.collapsed.insert(SectionKey::Archived);
+        assert!(dashboard.changes.archived.is_empty());
+
+        // Rows: the `active` header, three changes, then the archived header.
+        let row = list_row(WIDE, Route::List, 4);
+        let action = mouse_action(&dashboard, WIDE, &left(5, row));
+        assert_eq!(action, Action::Click(Target::Section(SectionKey::Archived)));
+
+        dashboard.apply(action);
+        assert!(!dashboard.sections.collapsed.contains(&SectionKey::Archived));
+        assert!(dashboard.refresh.requested);
+    }
+
+    /// A change carrying the five `tdd` artifacts, selected, at `Route::List`.
+    fn tdd_dashboard() -> Dashboard {
+        let change = crate::changes::fixture::with_artifacts(
+            crate::changes::fixture::active("s0", 0, 1),
+            &[
+                ("proposal", &[]),
+                ("specs", &[]),
+                ("design", &[]),
+                ("tasks", &[]),
+                ("planning-review", &[]),
+            ],
+        );
+        let mut dashboard = mouse_dashboard(0, 0);
+        dashboard.changes = crate::changes::fixture::set(vec![change], Vec::new(), Vec::new());
+        dashboard.selected = 1;
+        dashboard
+    }
+
+    /// The terminal column of the `index`-th tab cell's first painted column.
+    fn tab_cell_start(dashboard: &Dashboard, area: Rect, route: Route, index: usize) -> u16 {
+        let bar = tab_bar_row(area, route);
+        let change = dashboard.selected_change().expect("a change is selected");
+        let cell = crate::ui::detail::tab_bar(&change.artifacts, dashboard.detail.tab, bar.width)
+            .into_iter()
+            .find(|t| t.index == Some(index))
+            .expect("the cell is drawn");
+        bar.x + cell.x
+    }
+
+    #[test]
+    fn a_tab_click_switches_the_tab() {
+        // `mouse-input`: "A click on a tab cell switches to that artifact".
+        let mut dashboard = tdd_dashboard();
+        dashboard.detail.scroll = 7;
+        let bar = tab_bar_row(WIDE, Route::List);
+        let third = tab_cell_start(&dashboard, WIDE, Route::List, 2);
+
+        let action = mouse_action(&dashboard, WIDE, &left(third + 1, bar.y));
+        assert_eq!(action, Action::SelectTab(2));
+        dashboard.apply(action);
+        assert_eq!(dashboard.detail.tab, 2);
+        assert_eq!(dashboard.detail.scroll, 0);
+
+        // The one separating column between two cells.
+        let fresh = tdd_dashboard();
+        let second = tab_cell_start(&fresh, WIDE, Route::List, 1);
+        assert_eq!(
+            mouse_action(&fresh, WIDE, &left(second - 1, bar.y)),
+            Action::Ignore,
+            "the separating column belongs to neither cell"
+        );
+
+        // A change with no artifacts draws only the `no artifacts` placeholder.
+        let mut bare = mouse_dashboard(1, 0);
+        bare.selected = 1;
+        for column in bar.x..bar.x + bar.width {
+            assert_eq!(
+                mouse_action(&bare, WIDE, &left(column, bar.y)),
+                Action::Ignore,
+                "column {column} over the placeholder"
+            );
+        }
+    }
+
+    #[test]
+    fn a_tab_click_equals_its_digit_key() {
+        // `artifact-tabs`: "A tab click and its digit key are indistinguishable".
+        let mut clicked = tdd_dashboard();
+        clicked.detail.scroll = 7;
+        let mut keyed = clicked.clone();
+
+        let bar = tab_bar_row(WIDE, Route::List);
+        let fourth = tab_cell_start(&clicked, WIDE, Route::List, 3);
+        let action = mouse_action(&clicked, WIDE, &left(fourth + 1, bar.y));
+        clicked.apply(action);
+        keyed.apply(action_for(
+            &press(KeyCode::Char('4'), KeyModifiers::NONE),
+            false,
+        ));
+
+        assert_eq!(clicked, keyed, "field for field");
+        assert_eq!(
+            clicked.route,
+            Route::List,
+            "clicking a tab does not open the detail"
+        );
+    }
+
+    #[test]
+    fn a_tab_click_on_the_selected_cell_resets_nothing() {
+        // `artifact-tabs`: "A tab click on the already-selected cell resets nothing".
+        let mut dashboard = tdd_dashboard();
+        dashboard.detail.tab = 2;
+        dashboard.detail.scroll = 5;
+        let bar = tab_bar_row(WIDE, Route::List);
+        let third = tab_cell_start(&dashboard, WIDE, Route::List, 2);
+
+        let action = mouse_action(&dashboard, WIDE, &left(third + 1, bar.y));
+        assert_eq!(action, Action::SelectTab(2));
+        dashboard.apply(action);
+        assert_eq!(dashboard.detail.tab, 2);
+        assert_eq!(dashboard.detail.scroll, 5);
+    }
+
+    #[test]
+    fn clicks_that_address_nothing_are_inert() {
+        // `mouse-input`: "Clicks that address nothing are inert".
+        let mut dashboard = mouse_dashboard(0, 0);
+        dashboard.changes.problems = vec!["a repository problem".to_string()];
+        assert!(dashboard.visible().is_empty());
+
+        let points = [
+            (5u16, list_row(WIDE, Route::List, 0)), // the problem row
+            (5, list_row(WIDE, Route::List, 1)),    // the `No changes yet` row
+            (5, list_row(WIDE, Route::List, 5)),    // below the last drawn row
+            (0, 1),                                 // the list region's border
+            (41, 2),                                // the detail region's header row
+            (41, 10),                               // the detail content area
+            (10, 39),                               // the frame's footer
+            (200, 10),                              // past the frame
+        ];
+        let before = dashboard.clone();
+        for (column, row) in points {
+            let action = mouse_action(&dashboard, WIDE, &left(column, row));
+            assert_eq!(action, Action::Ignore, "({column}, {row})");
+            let mut applied = dashboard.clone();
+            applied.apply(action);
+            assert_eq!(applied, before, "({column}, {row}) changed the dashboard");
+        }
+    }
+
+    #[test]
+    fn the_other_buttons_are_inert() {
+        // `mouse-input`: "The other buttons and the non-press kinds are inert".
+        let dashboard = mouse_dashboard(4, 0);
+        let row = list_row(WIDE, Route::List, 2);
+        for kind in [
+            MouseEventKind::Down(MouseButton::Right),
+            MouseEventKind::Down(MouseButton::Middle),
+            MouseEventKind::Up(MouseButton::Left),
+            MouseEventKind::Drag(MouseButton::Left),
+            MouseEventKind::Moved,
+        ] {
+            let action = mouse_action(&dashboard, WIDE, &m(kind, 5, row));
+            assert_eq!(action, Action::Ignore, "{kind:?}");
+            // In particular, no press of any button reaches a launch action.
+            // `mouse_action` is pure and takes no `Launcher`, so this is an
+            // assertion on the returned `Action`, not on a double.
+            assert_ne!(action, Action::LaunchApply);
+            assert_ne!(action, Action::LaunchContinue);
+            assert_ne!(action, Action::LaunchArchive);
+            assert_ne!(action, Action::FocusAgent);
+        }
+    }
+
+    #[test]
+    fn a_click_acts_while_filtering() {
+        // `mouse-input`: "A click selects while the filter is open".
+        let mut filtering = mouse_dashboard(6, 0);
+        filtering.filter.active = true;
+        filtering.filter.query = "s".to_string();
+        let closed = mouse_dashboard(6, 0);
+
+        let row = list_row(WIDE, Route::List, 2);
+        let action = mouse_action(&filtering, WIDE, &left(5, row));
+        assert_eq!(
+            action,
+            mouse_action(&closed, WIDE, &left(5, row)),
+            "the same press returns the same action with the filter closed"
+        );
+
+        filtering.apply(action);
+        assert_eq!(
+            filtering.targets().get(filtering.selected),
+            Some(&Target::Change(1))
+        );
+        assert!(
+            filtering.filter.active,
+            "the click neither cancels the filter"
+        );
+        assert_eq!(filtering.filter.query, "s", "nor accepts it");
+    }
+
+    #[test]
+    fn the_wheel_acts_while_filtering() {
+        // `mouse-input`: "The wheel scrolls while the filter is open".
+        let mut filtering = mouse_dashboard(6, 0);
+        filtering.filter.active = true;
+        filtering.filter.query = "s".to_string();
+        let closed = mouse_dashboard(6, 0);
+
+        for (column, expected) in [(10u16, Action::SelectNext), (80, Action::ScrollDown)] {
+            let event = m(MouseEventKind::ScrollDown, column, 10);
+            assert_eq!(mouse_action(&filtering, WIDE, &event), expected);
+            assert_eq!(
+                mouse_action(&closed, WIDE, &event),
+                expected,
+                "identical with the filter closed"
+            );
+        }
+    }
+
+    #[test]
+    fn every_mouse_action_has_an_equal_key() {
+        // `mouse-input`: "Every mouse action has a key that produces the same effect".
+        // Four list-and-detail outcomes, each driven once by the mouse action and
+        // once by the corresponding key at the corresponding route.
+        let cases: [(Action, Action, Route); 4] = [
+            (Action::SelectNext, Action::Next, Route::List),
+            (Action::SelectPrev, Action::Prev, Route::List),
+            (Action::ScrollDown, Action::Next, Route::Detail),
+            (Action::ScrollUp, Action::Prev, Route::Detail),
+        ];
+        for (wheel, key, route) in cases {
+            let mut wheeled = mouse_dashboard(6, 0);
+            wheeled.route = route;
+            wheeled.selected = 2;
+            wheeled.detail.scroll = 3;
+            let mut keyed = wheeled.clone();
+            wheeled.apply(wheel);
+            keyed.apply(key);
+            assert_eq!(wheeled, keyed, "{wheel:?} against {key:?} at {route:?}");
+        }
+
+        // A section toggle driven by a click against `Space`.
+        let mut clicked = mouse_dashboard(3, 3);
+        let mut spaced = mouse_dashboard(3, 3);
+        clicked.apply(Action::Click(Target::Section(SectionKey::Archived)));
+        spaced.selected = spaced
+            .targets()
+            .iter()
+            .position(|t| *t == Target::Section(SectionKey::Archived))
+            .expect("drawn");
+        spaced.apply(Action::ToggleSection);
+        assert_eq!(clicked, spaced);
+
+        // A tab switch driven by a tab click against the matching digit key.
+        let mut tab_clicked = tdd_dashboard();
+        let mut tab_keyed = tab_clicked.clone();
+        let bar = tab_bar_row(WIDE, Route::List);
+        let second = tab_cell_start(&tab_clicked, WIDE, Route::List, 1);
+        tab_clicked.apply(mouse_action(
+            &tab_clicked.clone(),
+            WIDE,
+            &left(second + 1, bar.y),
+        ));
+        tab_keyed.apply(action_for(
+            &press(KeyCode::Char('2'), KeyModifiers::NONE),
+            false,
+        ));
+        assert_eq!(tab_clicked, tab_keyed);
+    }
+
+    #[test]
+    fn pointer_motion_does_not_draw() {
+        // `dashboard-loop`: "Pointer motion does not cost a frame".
+        fn drive(kind: MouseEventKind) -> LoopSummary {
+            let mut queue: Vec<_> = (0..20)
+                .map(|i| Ok(Some(crate::testutil::mouse(kind, i as u16, 10))))
+                .collect();
+            queue.push(Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))));
+            drive_queue(queue)
+        }
+
+        for kind in [
+            MouseEventKind::Moved,
+            MouseEventKind::Drag(MouseButton::Left),
+        ] {
+            assert_eq!(
+                drive(kind),
+                LoopSummary {
+                    frames: 1,
+                    polls: 21
+                },
+                "{kind:?}"
+            );
+        }
+
+        // An ignored **key** still redraws: the exemption is scoped to pointer
+        // motion and did not become a general ignore-means-no-draw rule.
+        let mut queue: Vec<_> = (0..20)
+            .map(|_| Ok(Some(press(KeyCode::Char('z'), KeyModifiers::NONE))))
+            .collect();
+        queue.push(Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))));
+        assert_eq!(
+            drive_queue(queue),
+            LoopSummary {
+                frames: 21,
+                polls: 21
+            }
+        );
+    }
+
+    /// Drive `run_loop` at 120x40 over `mouse_dashboard(3, 0)` with `queue`,
+    /// returning the summary. Every collaborator is the inert double.
+    fn drive_queue(queue: Vec<Result<Option<Event>, crate::ui::event::EventError>>) -> LoopSummary {
+        let mut dashboard = mouse_dashboard(3, 0);
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        let mut events = Script::new(queue);
+        let mut fs = crate::watch::none();
+        let mut refresher = crate::refresh::none();
+        let mut agents = crate::agents::none();
+        let mut launcher = crate::launch::none();
+        let mut live = crate::ui::driver::Live {
+            fs: &mut *fs,
+            refresher: &mut *refresher,
+            agents: &mut *agents,
+            launcher: &mut *launcher,
+        };
+        run_loop(
+            &mut terminal,
+            &mut dashboard,
+            &mut events,
+            &mut live,
+            &|_: &std::path::Path| Ok(String::new()),
+            Duration::from_millis(1),
+        )
+        .expect("loop ends")
+    }
+
+    #[test]
+    fn a_click_after_motion_resolves_against_the_frame() {
+        // `dashboard-loop`: "A click after motion still resolves against the
+        // drawn frame".
+        let row = list_row(WIDE, Route::List, 2);
+        let mut dashboard = mouse_dashboard(3, 0);
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        let mut queue: Vec<Result<Option<Event>, crate::ui::event::EventError>> = (0..5)
+            .map(|i| Ok(Some(crate::testutil::mouse(MouseEventKind::Moved, i, 10))))
+            .collect();
+        queue.push(Ok(Some(crate::testutil::mouse(
+            MouseEventKind::Down(MouseButton::Left),
+            5,
+            row,
+        ))));
+        queue.push(Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))));
+        let mut events = Script::new(queue);
+        let mut fs = crate::watch::none();
+        let mut refresher = crate::refresh::none();
+        let mut agents = crate::agents::none();
+        let mut launcher = crate::launch::none();
+        let mut live = crate::ui::driver::Live {
+            fs: &mut *fs,
+            refresher: &mut *refresher,
+            agents: &mut *agents,
+            launcher: &mut *launcher,
+        };
+        let summary = run_loop(
+            &mut terminal,
+            &mut dashboard,
+            &mut events,
+            &mut live,
+            &|_: &std::path::Path| Ok(String::new()),
+            Duration::from_millis(1),
+        )
+        .expect("loop ends");
+
+        assert_eq!(
+            dashboard.targets().get(dashboard.selected),
+            Some(&Target::Change(1)),
+            "the press selects that row, exactly as it does with no motion before it"
+        );
+        assert_eq!(
+            summary,
+            LoopSummary {
+                frames: 2,
+                polls: 7
+            }
+        );
+    }
+
+    /// A `TestBackend` that reports 120x40 until its first `draw` and 60x20
+    /// after — the shape a real terminal resize has, since
+    /// `Terminal::autoresize` reads `Backend::size` at the top of every `draw`.
+    struct ShrinkingBackend {
+        inner: TestBackend,
+        drawn: std::cell::Cell<bool>,
+    }
+
+    impl Backend for ShrinkingBackend {
+        type Error = <TestBackend as Backend>::Error;
+
+        fn draw<'a, I>(&mut self, content: I) -> Result<(), Self::Error>
+        where
+            I: Iterator<Item = (u16, u16, &'a Cell)>,
+        {
+            self.drawn.set(true);
+            self.inner.draw(content)
+        }
+
+        fn hide_cursor(&mut self) -> Result<(), Self::Error> {
+            self.inner.hide_cursor()
+        }
+
+        fn show_cursor(&mut self) -> Result<(), Self::Error> {
+            self.inner.show_cursor()
+        }
+
+        fn get_cursor_position(&mut self) -> Result<Position, Self::Error> {
+            self.inner.get_cursor_position()
+        }
+
+        fn set_cursor_position<P: Into<Position>>(
+            &mut self,
+            position: P,
+        ) -> Result<(), Self::Error> {
+            self.inner.set_cursor_position(position)
+        }
+
+        fn clear(&mut self) -> Result<(), Self::Error> {
+            self.inner.clear()
+        }
+
+        fn clear_region(&mut self, clear_type: ClearType) -> Result<(), Self::Error> {
+            self.inner.clear_region(clear_type)
+        }
+
+        fn size(&self) -> Result<Size, Self::Error> {
+            Ok(if self.drawn.get() {
+                Size::new(60, 20)
+            } else {
+                Size::new(120, 40)
+            })
+        }
+
+        fn window_size(&mut self) -> Result<ratatui::backend::WindowSize, Self::Error> {
+            self.inner.window_size()
+        }
+
+        fn flush(&mut self) -> Result<(), Self::Error> {
+            self.inner.flush()
+        }
+    }
+
+    #[test]
+    fn a_resize_before_a_click_costs_one_frame() {
+        // `dashboard-loop`: "A resize between the draw and the click costs one
+        // frame, not a panic". Column 100 exists in the 120-column frame and
+        // does not exist in the 60-column one drawn after the resize.
+        let mut dashboard = mouse_dashboard(3, 0);
+        let backend = ShrinkingBackend {
+            inner: TestBackend::new(120, 40),
+            drawn: std::cell::Cell::new(false),
+        };
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        let mut events = Script::new(vec![
+            Ok(Some(Event::Resize(60, 20))),
+            Ok(Some(crate::testutil::mouse(
+                MouseEventKind::Down(MouseButton::Left),
+                100,
+                4,
+            ))),
+            Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
+        ]);
+        let mut fs = crate::watch::none();
+        let mut refresher = crate::refresh::none();
+        let mut agents = crate::agents::none();
+        let mut launcher = crate::launch::none();
+        let mut live = crate::ui::driver::Live {
+            fs: &mut *fs,
+            refresher: &mut *refresher,
+            agents: &mut *agents,
+            launcher: &mut *launcher,
+        };
+        let before = dashboard.clone();
+        let summary = run_loop(
+            &mut terminal,
+            &mut dashboard,
+            &mut events,
+            &mut live,
+            &|_: &std::path::Path| Ok(String::new()),
+            Duration::from_millis(1),
+        )
+        .expect("the loop completes without panicking");
+
+        assert_eq!(summary.polls, 3);
+        assert_eq!(
+            dashboard.selected, before.selected,
+            "column 100 falls outside the 60-column frame, so the press is Ignore"
+        );
+    }
+
+    #[test]
+    fn the_loop_routes_mouse_and_key_to_different_mappers() {
+        // `dashboard-loop`: "The loop routes mouse and key events to different
+        // mappers". Two runs, because the state between two events inside one
+        // `run_loop` call is not observable from outside it.
+        fn drive(queue: Vec<Result<Option<Event>, crate::ui::event::EventError>>) -> Dashboard {
+            let mut dashboard = mouse_dashboard(3, 0);
+            // A change carrying a readable artifact, and sixty rendered lines
+            // against a 34-row content area: the loop's own `sync_detail` fills
+            // `detail.source` from the reader before every draw, and
+            // `normalise_scroll` would clamp a one-line scroll straight back to
+            // zero against anything shorter than the area.
+            dashboard.changes = crate::changes::fixture::set(
+                vec![
+                    crate::changes::fixture::with_artifacts(
+                        crate::changes::fixture::active("s0", 0, 1),
+                        &[("proposal", &["/repo/proposal.md"])],
+                    ),
+                    crate::changes::fixture::active("s1", 0, 1),
+                    crate::changes::fixture::active("s2", 0, 1),
+                ],
+                Vec::new(),
+                Vec::new(),
+            );
+            dashboard.selected = 1;
+            let source: String = (0..60).map(|i| format!("- line-{i:02}\n")).collect();
+            let backend = TestBackend::new(120, 40);
+            let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+            let mut events = Script::new(queue);
+            let mut fs = crate::watch::none();
+            let mut refresher = crate::refresh::none();
+            let mut agents = crate::agents::none();
+            let mut launcher = crate::launch::none();
+            let mut live = crate::ui::driver::Live {
+                fs: &mut *fs,
+                refresher: &mut *refresher,
+                agents: &mut *agents,
+                launcher: &mut *launcher,
+            };
+            run_loop(
+                &mut terminal,
+                &mut dashboard,
+                &mut events,
+                &mut live,
+                &|_: &std::path::Path| Ok(source.clone()),
+                Duration::from_millis(1),
+            )
+            .expect("loop ends");
+            dashboard
+        }
+
+        let wheel = crate::testutil::mouse(MouseEventKind::ScrollDown, 80, 10);
+        let quit = press(KeyCode::Char('q'), KeyModifiers::NONE);
+
+        let after_wheel = drive(vec![Ok(Some(wheel.clone())), Ok(Some(quit.clone()))]);
+        assert_eq!(after_wheel.detail.scroll, 1, "the wheel reached ScrollDown");
+        assert_eq!(after_wheel.selected, 1, "and did not move the selection");
+
+        let after_key = drive(vec![
+            Ok(Some(wheel)),
+            Ok(Some(press(KeyCode::Char('j'), KeyModifiers::NONE))),
+            Ok(Some(quit)),
+        ]);
+        assert_eq!(after_key.selected, 2, "the key reached Next");
+        assert_eq!(
+            after_key.detail.scroll, 0,
+            "a selection move resets the scroll, so neither took the other's path"
+        );
     }
 
     /// `mouse-input`'s acceptance harness: a `Route::List` dashboard over three

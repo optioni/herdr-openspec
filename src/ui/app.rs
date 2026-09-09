@@ -1661,7 +1661,7 @@ mod tests {
         }
 
         #[test]
-        fn a_collapsed_section_hides_its_rows_from_clicks() {
+        fn a_collapsed_section_hides_its_rows_when_clicked() {
             let mut d = dashboard(3, 3, 1);
             let archived_target = Target::Change(3);
             assert!(d.targets().contains(&archived_target), "open, it is drawn");
@@ -1669,7 +1669,7 @@ mod tests {
             d.sections.collapsed.insert(SectionKey::Archived);
             let before = d.clone();
             d.apply(Action::Click(archived_target));
-            assert_eq!(d, before, "a collapsed section hides its rows from clicks");
+            assert_eq!(d, before, "a collapsed section hides its rows from a click");
 
             d.sections.collapsed.remove(&SectionKey::Archived);
             d.apply(Action::Click(archived_target));

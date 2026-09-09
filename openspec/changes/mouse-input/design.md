@@ -243,7 +243,7 @@ through `run_loop` with a scripted source.
 | A click on an unselected change moves the cursor and resets the tab | `app::tests::click::moves_the_cursor_and_resets_the_tab` | Unit | none | `cargo test --lib click::moves_the_cursor` |
 | A click on the already-selected change resets nothing | `app::tests::click::the_selected_change_resets_nothing` | Unit | none | `cargo test --lib the_selected_change_resets_nothing` |
 | A click naming a target that is gone changes nothing | `app::tests::click::an_absent_target_changes_nothing` | Unit | none | `cargo test --lib an_absent_target_changes_nothing` |
-| A click reaches a row a collapsed section hides only when it is open | `app::tests::click::a_collapsed_section_hides_its_rows_from_clicks` | Unit | none | `cargo test --lib hides_its_rows_from_clicks` |
+| A click reaches a row a collapsed section hides only when it is open | `app::tests::click::a_collapsed_section_hides_its_rows_when_clicked` | Unit | none | `cargo test --lib hides_its_rows_when_clicked` |
 | Click and `Space` produce equal dashboards | `app::tests::click::click_and_space_produce_equal_dashboards` | Unit | none | `cargo test --lib produce_equal_dashboards` |
 | Clicking open an unresolved archive requests the refresh that resolves it | `app::tests::click::clicking_open_an_unresolved_archive_requests_a_refresh` | Unit | none | `cargo test --lib unresolved_archive_requests` |
 | A click on a header that is not drawn is inert | `app::tests::click::an_undrawn_header_is_inert` | Unit | none | `cargo test --lib an_undrawn_header_is_inert` |
