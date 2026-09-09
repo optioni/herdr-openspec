@@ -56,6 +56,8 @@
 | WARNING | design.md | Two matrix rows verified against "the pre-change path" — no obtainable artifact after the change lands | Reduced to the property it stands for: rows equal `markdown::lines` cell for cell, every `kind` is `Body`, no cell reports `REVERSED` | `design.md`; `specs/artifact-folds/spec.md`; `specs/artifact-content/spec.md` |
 | WARNING | tasks.md | The baseline block named HEAD `68b345e` and recorded the suite as red at HEAD | Corrected to `027db45`: the suite is green idle (1222/0), and the `ui::tests::wiring` failures are the load flake already diagnosed in `markdown-legibility`'s own design, with the signature that separates it from a regression | `tasks.md` → Baseline |
 | WARNING | design.md | The in-flight-change analysis was wrong in both directions and missed a third change entirely: `markdown-legibility` touches neither `src/ui/detail.rs` nor `src/ui/layout.rs`, and `pane-chrome` rewrites `split_detail` and `zone` and replaces five palette roles | Replaced the assertion with a measured four-column table read from each change's own Boundaries, and recorded the resulting **sequencing constraint** — `pane-chrome` and this change are ordered, not parallel | `design.md` → Non-Goals, Risks |
+| WARNING | design.md | Decision 9 attributed the `▸`/`▾` glyph argument to `markdown-legibility`, which never mentions those glyphs — it is `pane-chrome` D6. Worse, `pane-chrome` moves the **list**'s fold glyphs while stating it touches `src/ui/detail.rs` not at all, so landing it first (the recommended order) would leave the two regions on different fold vocabularies with no owner | Rewrote Decision 9: this change takes the glyph pair from `src/ui/list.rs`'s `section_row_text` rather than writing a literal, and both branches of the ordering are named with their costs | `design.md` → Decision 9; `specs/artifact-folds/spec.md`; `tasks.md` 5.5 |
+| WARNING | design.md | The overlap table omitted three shared files (`src/ui/mod.rs`, `src/ui/tasks.rs`, `src/ui/list.rs`) and understated the `markdown-legibility` interaction as textual — both changes re-baseline the *same* `- line-NN` fixtures across four files | Added the rows and restated it as two-way test re-baselining | `design.md` → Risks |
 | SUGGESTION | tasks.md | `parallel-after: 0` on group 1 was inert (a one-member set) and would have failed the attributability criterion anyway — worktrees are forbidden here and group 1's own test compiles the whole library | Dropped the marker; the sequencing paragraph now names group 1 and the reason | `tasks.md` → Sequencing |
 | SUGGESTION | tasks.md | Task 2.5 mis-scoped the `.source` count as "53 outside `app.rs`" | Corrected to 31 in `app.rs` and 22 outside it | `tasks.md` 2.5 |
 | SUGGESTION | tasks.md | Group 9's REFACTOR ended the group unverified | Added the re-run | `tasks.md` 9.2 |
@@ -72,8 +74,12 @@ mechanically rather than by reading: scenario names extracted from the seven spe
 diffed against the matrix's row labels, `missing 0 / orphan 0`.
 
 One scheduling decision is the user's, not a planning gap: `pane-chrome` and this change
-conflict on `src/ui/layout.rs` and `src/ui/palette.rs`, and `design.md` → Risks recommends
-landing `pane-chrome` first because this change is additive onto its new shapes.
+conflict on `src/ui/layout.rs` and `src/ui/palette.rs`, and its D6 also decides this change's
+fold glyphs. `design.md` → Risks recommends landing `pane-chrome` first, because this change
+is additive onto its new shapes and inherits its already-argued glyph decision; the reverse
+order forces an amendment to `pane-chrome` D6, which currently states it touches
+`src/ui/detail.rs` not at all. Decision 9 names both branches so neither is discovered at
+implementation time.
 
 ## Deferred Non-Blocking Notes
 

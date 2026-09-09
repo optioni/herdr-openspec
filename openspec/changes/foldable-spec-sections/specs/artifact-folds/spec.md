@@ -123,8 +123,10 @@ closed section rather than a panic.
 
 - **WHEN** a `Dashboard` whose selected change carries the three spec files above is synced
   and rendered at 120x20 and at 60x20 in the detail route
-- **THEN** the content area's first three rows read `> degraded-coverage`,
-  `> markdown-render`, and `> tasks-checklist`, each padded to the content width
+- **THEN** the content area's first three rows read `<collapsed glyph> degraded-coverage`,
+  `<collapsed glyph> markdown-render`, and `<collapsed glyph> tasks-checklist`, each padded to
+  the content width, where the glyph is read from `src/ui/list.rs`'s own collapsed-header
+  glyph rather than written as a literal
 - **AND** no row carries any text from inside any of the three files
 - **AND** `detail.expanded` is empty
 
@@ -151,10 +153,12 @@ closed section rather than a panic.
 `ui::detail::content_lines` SHALL, when the selected artifact is foldable, emit for each
 section in order:
 
-- one **header row** reading `<glyph> <label>`, where `<glyph>` is `>` when the section is
-  collapsed and `v` when it is open — the same two glyphs `list-selection` already uses for
-  the `active` and `archived` headers, so one fold reads the same in both regions — passed
-  through `ui::list::pad_or_truncate_right` at `width`; followed by
+- one **header row** reading `<glyph> <label>`, where the glyph pair is **the one
+  `src/ui/list.rs`'s `section_row_text` uses for the `active` and `archived` headers**, so one
+  fold reads the same in both regions. That is `>` collapsed and `v` open today, and `▸`/`▾`
+  once `pane-chrome`'s D6 lands; this capability SHALL take the pair from that one site rather
+  than writing its own literal, and a test SHALL assert the two agree rather than asserting a
+  character. Passed through `ui::list::pad_or_truncate_right` at `width`; followed by
 - when and only when the section is open, that section's body: `ui::markdown::lines(&section.text, width)`.
 
 When the selected artifact is **not** foldable, `content_lines` SHALL emit no header row at

@@ -429,15 +429,40 @@ a multi-section tasks tab is unreachable today. Were a schema to declare a glob 
 with any per-section fold. Concatenating in path order preserves exactly today's behaviour
 for that one tab and costs one condition in `content_lines`.
 
-### Decision 9 — the header glyphs are `>` and `v`, reused from the list region
+### Decision 9 — the header glyphs are whatever the list region's are, and that is `pane-chrome`'s call
 
-`list-selection` already renders `  > archived (2)` collapsed and `  v archived (2)` open.
-Using the same two glyphs means a fold reads the same in both regions. **Alternative:** `▸`
-and `▾`. Rejected here: they are East Asian **Ambiguous**, the class `SPEC.md` names as
-painted at two columns by a CJK-locale terminal where `unicode-width` says one, and this
-change has no reason to widen that exposure. The in-flight `markdown-legibility` change is
-where that trade-off is being argued; if it lands and moves the list's glyphs, these follow
-it there rather than diverging here.
+The two regions must fold with the same glyph pair, or one dashboard shows two fold
+vocabularies. This change therefore does not pick a pair; it **adopts the list region's**,
+whatever it is when this lands.
+
+Today that is `>` collapsed and `v` open (`list-selection` renders `  > archived (2)` /
+`  v archived (2)`). But `pane-chrome` — committed at HEAD, and the change Risks recommends
+landing **first** — carries `D6 — ▾/▸ over +/- and over keeping v/>`
+(`openspec/changes/pane-chrome/design.md:345`), moving `src/ui/list.rs`'s
+`section_row_text` glyph pair to `▾`/`▸`. Its Boundaries table lists `src/ui/detail.rs` as
+changing **nothing**, so it cannot carry the detail region's headers with it.
+
+**So the pair this change ships is decided by the order, and both branches are named here
+rather than discovered at implementation time:**
+
+- **`pane-chrome` first (recommended):** this change ships `▾`/`▸`, matching the list. It
+  inherits `pane-chrome`'s own accepted risk rather than taking a new one — both glyphs are
+  East Asian **Ambiguous**, painted at two columns by a CJK-locale terminal where
+  `unicode-width` says one, which `SPEC.md` already names as this project's standing
+  uncompensated exposure and which `pane-chrome` D6 argues and accepts for the list region.
+  Every width computation here goes through `ui::layout::columns`, so the arithmetic is
+  consistent either way; what Ambiguous width costs is a mis-painted terminal, not a wrong
+  budget.
+- **This change first:** it ships `>`/`v`, and `pane-chrome`'s D6 must widen to
+  `src/ui/detail.rs` — an amendment to a change that currently states it touches that file
+  not at all. That is the more expensive order, and it is the second reason Risks recommends
+  against it.
+
+The earlier draft of this decision attributed the glyph argument to `markdown-legibility`.
+That was wrong — `grep -rn '▸\|▾' openspec/changes/markdown-legibility/` returns nothing;
+that change moves *body* glyphs (`- `→`• `, `> `→`│ `, `[x]`→`[✓]`) in `src/ui/markdown.rs`
+and `src/ui/tasks.rs`, not fold glyphs. The conditional was real but pointed at a change that
+could never trigger it, which would have left the two regions diverged with no owner.
 
 ### Decision 10 — cursor feedback is the section header's emphasis, not a highlighted line
 
@@ -542,13 +567,20 @@ comparison, because `BOLD | REVERSED` equals no other role.
   | `src/ui/view.rs` | the detail draw loop and the offset choice | test re-baseline only (10 tests) | `render_header` deleted, `render_region`, `render_body` |
   | `src/ui/app.rs` | `Detail`, `apply`, `apply_click`, `Target` | test re-baseline only (4 tests) | nothing |
   | `src/ui/driver.rs` | `mouse_action` | test re-baseline only (3 tests) | nothing |
+| `src/ui/mod.rs` | the `.source` rename (3 references) | test re-baseline only (5 tests) | nothing |
+| `src/ui/tasks.rs` | the `.source` rename (1 reference) | the item glyph string | nothing |
+| `src/ui/list.rs` | nothing | nothing | `section_row_text`'s glyph pair (Decision 9) |
   | `SPEC.md` | key and mouse tables, `Detail` fields | three paragraphs | pane chrome |
 
   **`markdown-legibility` is genuinely independent** → it touches neither `src/ui/detail.rs`
   nor `src/ui/layout.rs`, and its `view.rs`/`app.rs`/`driver.rs` work is test re-baselining on
   the shared `- line-NN` fixture. Whichever lands second re-baselines a few more rendered
-  strings. Decision 12 is what keeps this true: had the header carried a `Face` flag, both
-  would edit `src/ui/markdown.rs`.
+  strings — though on the *same* fixtures: its task 2.4 re-baselines 25 tests whose shared
+  cause is the `format!("- line-{i:02}\n")` detail fixture spelled across `driver.rs`,
+  `app.rs`, `mod.rs`, and `view.rs`, which are the very tests this change rewrites onto
+  `sections`. Two-way re-baselining, not a one-file textual conflict. Decision 12 is what
+  keeps the deeper independence true: had the header carried a `Face` flag, both would edit
+  `src/ui/markdown.rs`.
 
   **`pane-chrome` genuinely conflicts, on two files** → it rewrites `split_detail`'s return
   shape to `(tabs, rule, content)` and says "`zone` follows", while this change adds a `Zone`
