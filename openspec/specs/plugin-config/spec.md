@@ -104,6 +104,20 @@ plugin does not recognise SHALL be ignored without comment, so a newer plugin's
 configuration can be read by an older binary. Configuration SHALL be read once per
 process; nothing in this capability re-reads or watches the file.
 
+`archived_count` is **accepted and inert** as of `list-sections`. It is still read, still
+type-checked, still defaults to `5`, and still reports a malformed value as a problem — every
+scenario below is unchanged — but nothing consumes the value: `change-enumeration` no longer
+truncates the archived tier, and the archived section's fold is what decides how much of the
+archive is shown. The key is kept rather than removed so that no existing `config.toml`
+becomes invalid and no reader loses a setting to a hard error; it SHALL be documented as
+having no effect on the list in `README.md`'s configuration table and in `SPEC.md`'s
+`config.toml` description, so a reader is not left setting a value that does nothing while
+the documentation says it does something.
+
+The plugin SHALL NOT repurpose the key, SHALL NOT warn about its presence, and SHALL NOT
+report a problem for a well-formed value: a `config.toml` written before this change loads
+exactly as it did, with exactly the same `Config::problems`.
+
 #### Scenario: Every key is set
 
 - **WHEN** `config.toml` contains `openspec_bin = "/opt/bin/openspec"`,
@@ -137,9 +151,12 @@ process; nothing in this capability re-reads or watches the file.
 #### Scenario: Only one key is set
 
 - **WHEN** `config.toml` contains `archived_count = 0` and nothing else
-- **THEN** `archived_count` is 0, meaning no archived changes are listed
+- **THEN** `archived_count` is 0
 - **AND** `agent_kind` is `claude` and `openspec_bin` is absent
 - **AND** no problem is reported, because 0 is a legitimate value and not an absent one
+- **AND** loading a repository whose archive holds three changes with that `Config`, with the
+  archived section expanded, still lists all three: the value parsed and reached `Config`, and
+  nothing read it
 
 #### Scenario: Unrecognised keys are ignored
 
@@ -147,6 +164,16 @@ process; nothing in this capability re-reads or watches the file.
   `future_setting = "x"` and a `[some_table]` section
 - **THEN** `agent_kind` is `codex` and the other two keys are ignored
 - **AND** no problem is reported
+
+#### Scenario: A pre-`list-sections` configuration loads unchanged
+
+- **WHEN** `config.toml` contains `openspec_bin = "/opt/bin/openspec"`, `agent_kind = "codex"`,
+  and `archived_count = 25`
+- **THEN** the loaded `Config` carries that binary path, the agent kind `codex`, and an
+  archived count of 25, and reports no problem
+- **AND** the dashboard that `Config` produces lists **every** archived change once the
+  archived section is expanded, whatever the number is — 25, 5, or 0 — so the key is inert
+  rather than reinterpreted
 
 ### Requirement: Malformed configuration degrades to defaults and reports what it ignored
 
@@ -258,9 +285,11 @@ repository is untouched by the one code path in this change that does write.
 `Config::problems` names every key that fell back to its documented default, and `SPEC.md` →
 Degraded states promises exactly that: "the affected key falls back to its documented default
 while every other key that parsed correctly is still honoured; `Config::problems` names each
-fallback". The vector is populated correctly and **never read**: `ui::load` consults
-`config.archived_count` and nothing else, so a reader running against a malformed
-`config.toml` sees a pane that silently ignores their settings.
+fallback". The vector was, before `degraded-states`, populated correctly and never read. It is read now,
+and this requirement is what reads it — but the clause naming *what else* `ui::load` consults
+is retired here: as of `list-sections`, `ui::load` reads `openspec_bin` and `agent_kind` and
+**does not consult `config.archived_count` at all**, because that key no longer limits the
+archived tier.
 
 `ui::start_collaborators` SHALL fold `Config::problems` into the `problems` vector it hands to
 `run_wired`, in the vector's own order, so each fallback reaches `Dashboard::refresh.problems`
@@ -284,8 +313,9 @@ problem: `Config::problems` is empty in both cases and the pane renders exactly 
 - **THEN** the returned dashboard's `refresh.problems` holds that entry
 - **AND** the list region's first interior row, at both widths, begins `! archived_count:` and
   the change rows follow below it
-- **AND** `archived_count` in effect is still `5`, so the fallback was applied as well as
-  reported
+- **AND** the same run with a `Config` whose `archived_count` is `5`, `0`, or `25` produces a
+  byte-identical buffer at both widths: the fallback is still applied to the `Config` value
+  and still reported, and nothing downstream consumes it
 
 #### Scenario: Configuration problems precede binary and watcher problems
 
@@ -301,4 +331,3 @@ problem: `Config::problems` is empty in both cases and the pane renders exactly 
 - **THEN** `refresh.problems` is empty and the list's first interior row is a change row
 - **AND** the buffers are byte-identical to the ones the same dashboard produced before this
   change existed
-</content>

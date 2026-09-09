@@ -15,13 +15,481 @@ that region's capability; this specifies only the state, the dispatch, and the o
 
 ## Requirements
 
-### Requirement: `Dashboard` is a plain state value with no rendering and no I/O
+### Requirement: Key handling is a pure, total function over events
 
-`ui::app::Dashboard` SHALL carry exactly **thirteen** fields: `repo: Option<PathBuf>` — the
+`ui::app::action_for(event: &Event, filtering: bool) -> Action` SHALL map a terminal event
+and the current filter mode to one of exactly **eighteen** actions — `Quit`, `OpenDetail`,
+`Back`, `Next`, `Prev`, `SelectTab(usize)`, `NextTab`, `PrevTab`, `FilterStart`,
+`FilterPush(char)`, `FilterPop`, `Refresh`, `LaunchApply`, `LaunchContinue`, `LaunchArchive`,
+`FocusAgent`, `ToggleSection`, `Ignore` — and SHALL be total: every `Event`
+value, including mouse, paste, focus-gained, focus-lost, and resize events, maps to one of
+them under either value of `filtering`, and none panics.
+
+The count moved from thirteen to seventeen when `agent-launch` landed, not from nine to
+thirteen: `HANDOFF.md`'s Phase 5 constraint 8 read the count off a stale doc comment in
+`src/ui/app.rs` that still said "the nine outcomes" after four had been added. It moves to
+**eighteen** here, with `ToggleSection` `list-sections`' one addition.
+
+`SelectTab`, `NextTab`, and `PrevTab` are `detail-view`'s additions; `artifact-tabs` states
+their keys and their effect. They are route-agnostic in the same sense `Next` and `Prev`
+are: the detail region is drawn at both routes above the breakpoint, so a tab press at the
+list route is immediately visible. `Refresh` is `live-refresh`'s addition and is
+route-agnostic in a stronger sense: it names no region at all. `LaunchApply`,
+`LaunchContinue`, `LaunchArchive`, and `FocusAgent` are `agent-launch`'s additions and are
+route-agnostic in that same stronger sense: they act on the **selected** change, which is the
+same change at either route. `ToggleSection` is `list-sections`' addition and is
+route-agnostic in the same way: it folds the section the cursor is in, which is the same
+section at either route, and `list-selection` owns what it does. It moves no existing key —
+`Space` was `Ignore` outside filter mode and `FilterPush(' ')` inside it, and it stays
+`FilterPush(' ')` inside it.
+
+They are **four flat variants** rather than one variant carrying a payload. A payloaded
+`Launch(Intent)` would let `no_action_mutates_changes`' hand-written `variants` array carry one
+intent and silently omit the other two, which is precisely the failure that test's own comment
+warns against ("an enumerate-by-hand test would silently miss it"); four flat variants make the
+exhaustive `match` and the array enumerate the same four things.
+
+While `filtering` is **false** the mapping SHALL be:
+
+| Input | Action |
+|---|---|
+| `KeyCode::Char('q')` with no modifiers | `Quit` |
+| `KeyCode::Char('c')` with `KeyModifiers::CONTROL` | `Quit` |
+| `KeyCode::Char('j')` or `KeyCode::Down` with no modifiers | `Next` |
+| `KeyCode::Char('k')` or `KeyCode::Up` with no modifiers | `Prev` |
+| `KeyCode::Char('1')`–`Char('9')` with no modifiers | `SelectTab(digit - 1)` |
+| `KeyCode::Char(']')` with no modifiers | `NextTab` |
+| `KeyCode::Char('[')` with no modifiers | `PrevTab` |
+| `KeyCode::Char('/')` with no modifiers | `FilterStart` |
+| `KeyCode::Char('r')` with no modifiers | `Refresh` |
+| `KeyCode::Char('a')` with no modifiers | `LaunchApply` |
+| `KeyCode::Char('c')` with **no** modifiers | `LaunchContinue` |
+| `KeyCode::Char('s')` with no modifiers | `LaunchArchive` |
+| `KeyCode::Char('g')` with no modifiers | `FocusAgent` |
+| `KeyCode::Char(' ')` with no modifiers | `ToggleSection` |
+| `KeyCode::Enter` with no modifiers | `OpenDetail` |
+| `KeyCode::Esc` with no modifiers | `Back` |
+| anything else, including `Char('Q')`, `Char('0')`, `Char('R')`, `Char('A')`, `Char('G')`, and `Char('q')`, `Char('r')`, `Char('a')`, `Char('s')`, or `Char('g')` with a modifier | `Ignore` |
+
+`Char('c')` is the one key with two rows. Bare `c` is `LaunchContinue`; `c` with
+`KeyModifiers::CONTROL` is `Quit`, and remains so under both values of `filtering`. The two are
+distinguished by the modifier alone, which the mapping already matches on, so no key is
+overloaded ambiguously and `Ctrl-C` never launches.
+
+`action_for` SHALL NOT take the socket's reachability as a parameter and SHALL NOT consult it.
+Whether an action key is *offered* is `agent-launch`'s decision, made in `Dashboard::apply`
+against `agents.reachable`; the key-to-action mapping stays a pure function of the event and the
+filter mode, so a socket that comes and goes never changes what a key means.
+
+While `filtering` is **true** the mapping SHALL be the one `list-filtering` states, in which
+printable characters type into the query and only `Ctrl-C` quits. `1`–`9`, `[`, `]`, `r`, `a`,
+`c`, `s`, and `g` are printable characters and are therefore query characters there, with no
+exception carved out for any of them — and so is `' '`, which `list-filtering` states
+explicitly because a space in a text field is the one printable character a reader might
+expect to keep a command meaning.
+
+`action_for` SHALL act only on key events whose `kind` is `KeyEventKind::Press`. A key event
+with kind `Repeat` or `Release` SHALL map to `Ignore` under either value of `filtering`, so
+a terminal that reports release events does not quit twice, navigate on a release, type a
+character twice, refresh twice, or **launch a second agent**.
+
+`Dashboard::apply(&mut self, action: Action)` SHALL:
+
+- set `quit` on `Quit`;
+- on `OpenDetail`, clear `filter.active` and change nothing else when `filter.active` is
+  set — accepting a filter is not opening a detail — and otherwise set `route` to `Detail`
+  and reset `detail.scroll` to `0`;
+- on `Back`, dismiss exactly one layer, in this order: filter mode with its query when
+  `filter.active` is set; else a non-empty `filter.query`; else `route` back to `List`,
+  resetting `detail.scroll` to `0`; else nothing at all, so a stray `Esc` at the root cannot
+  close the pane. `launch.problems` SHALL NOT be one of the layers: no key dismisses a launch
+  problem, and the next launch outcome is what replaces it;
+- on `Next` and `Prev`, move and clamp `selected` per `list-selection` when `route` is
+  `List`, and move `detail.scroll` by one line per `detail-scroll` when `route` is `Detail`,
+  never both; and, at `Route::List` only, reset `detail.tab` and `detail.scroll` to `0`
+  exactly when `selected` changed value;
+- on `SelectTab`, `NextTab`, and `PrevTab`, move `detail.tab` per `artifact-tabs`, resetting
+  `detail.scroll` to `0` exactly when `detail.tab` changed value;
+- set `filter.active` and `route: List` on `FilterStart`, resetting `detail.scroll` to `0`
+  because that too is a route move, push on `FilterPush`, pop on `FilterPop`, clamping
+  `selected` after each;
+- set `refresh.requested` on `Refresh` and change nothing else at all — not `changes`, not
+  `selected`, not `route`, not `detail`, not `filter`, not `quit` — reaching no collaborator
+  and starting no work, so `apply` stays a pure function of `&mut self` and its argument;
+- on `ToggleSection`, fold or unfold exactly one section per `list-selection` — the one the
+  cursor addresses, or the one the addressed change belongs to — and move `selected` to that
+  section's header. It SHALL change nothing else: not `changes`, not `route`, not `detail`,
+  not `filter`, not `quit`, not `agents`, not `agent_names`, and not `launch`, and it SHALL
+  reach no collaborator;
+- on `LaunchApply`, `LaunchContinue`, `LaunchArchive`, and `FocusAgent`, map the action to the
+  corresponding `launch::Intent`, call `launch::decide` with the selected change's name, the
+  focus pane `attribution().panes` holds for it, `agents.reachable`, and the `name`s of the
+  live agents, and write the result: `Decision::Nothing` changes nothing at all;
+  `Decision::Refuse(reason)` replaces `launch.problems` with that one entry and leaves
+  `launch.pending` alone; `Decision::Go(request)` sets `launch.pending` to `Some(request)` and
+  clears `launch.problems`. **None of the four SHALL change `changes`, `selected`, `route`,
+  `detail`, `filter`, `quit`, `refresh`, `agents`, or `agent_names`, and none SHALL reach a
+  collaborator, spawn a process, touch the filesystem, or read a clock** — `apply` stays a pure
+  function of `&mut self` and its argument, and `run_loop` is what turns `launch.pending` into a
+  request to a collaborator that lives outside `src/ui/` entirely;
+- change nothing on `Ignore`.
+
+After applying **any** action, `apply` SHALL set `refresh.requested` to true when
+`Dashboard::needs_archived_refresh()` holds — `list-sections`' rule, stated in full by
+`list-selection`. Writing it once for every action rather than for a named subset is what
+keeps a future section-opening key from forgetting it; it is the one place `apply` sets a
+flag an action did not name, and it sets no other.
+
+`apply` SHALL never panic, SHALL never leave `selected` addressing a target that is not
+visible, and SHALL never leave `detail.scroll` unbounded for more than one frame — the
+normalisation `detail-scroll` requires of `ui::driver::run_loop` is what bounds it. It MAY
+leave `detail.tab` out of range for the selected change after a filter edit; `sync_detail`
+is what restores that invariant, before the next draw rather than after it.
+
+#### Scenario: The four action keys map, and their near misses do not
+
+- **WHEN** `action_for` is called with `filtering` false and Presses of `Char('a')`,
+  `Char('c')`, `Char('s')`, `Char('g')`, `Char('c')` with `CONTROL`, `Char('A')` with `SHIFT`,
+  `Char('G')` with `SHIFT`, `Char('a')` with `CONTROL`, and `Char('s')` with `ALT`
+- **THEN** the first four return `LaunchApply`, `LaunchContinue`, `LaunchArchive`, and
+  `FocusAgent`; the fifth returns `Quit`; and the last four return `Ignore`
+- **AND** with `filtering` true the same nine return `FilterPush('a')`, `FilterPush('c')`,
+  `FilterPush('s')`, `FilterPush('g')`, `Quit`, `FilterPush('A')`, `FilterPush('G')`,
+  `Ignore`, and `Ignore` — so `Ctrl-C` is the only one of the nine that still quits and none of
+  the four launches while a filter is open
+- **AND** a `Release` and a `Repeat` of each of `Char('a')`, `Char('c')`, `Char('s')`, and
+  `Char('g')` return `Ignore` under both modes, so a terminal reporting releases cannot launch
+  a second agent
+
+#### Scenario: A launch action reaches no collaborator and starts no work
+
+- **WHEN** a `Dashboard` with `agents.reachable` `true` and a selected change `add-auth` is
+  given `LaunchApply`
+- **THEN** `launch.pending` is
+  `Some(Request::Launch { change: "add-auth", agent: "add-auth", intent: Apply })` and
+  `launch.problems` is empty
+- **AND** `changes`, `selected`, `route`, `detail`, `filter`, `quit`, `refresh`, `agents`, and
+  `agent_names` are all unchanged, field for field
+- **AND** no process was spawned, no file was read or written, and no clock was read — `apply`
+  is a pure function of `&mut self` and its argument, and the dashboard value it produces is
+  `Clone` and `PartialEq` as before
+
+#### Scenario: A refused launch records the reason and produces no request
+
+- **WHEN** a `Dashboard` with `agents.reachable` `true`, a selected change `2fa-support`, and a
+  live agent named `c-2fa-support` is given `LaunchApply` three times in a row
+- **THEN** `launch.pending` is `None` after every one of the three
+- **AND** `launch.problems` holds exactly **one** entry after all three, naming
+  `c-2fa-support` and `g` — replaced wholesale each time, never grown
+
+#### Scenario: An unreachable socket makes the four keys change nothing
+
+- **WHEN** a `Dashboard` with `agents.reachable` `false` and a selected change is given
+  `LaunchApply`, `LaunchContinue`, `LaunchArchive`, and `FocusAgent` in turn
+- **THEN** `launch.pending` is `None` and `launch.problems` is empty after all four
+- **AND** the whole dashboard is equal, field for field, to the one before the four actions
+
+#### Scenario: Both quit keys quit and neither near-miss does
+
+- **WHEN** `action_for` is called with `filtering` false and a Press of `Char('q')` with no
+  modifiers, a Press of `Char('c')` with `CONTROL`, a Press of `Char('Q')` with `SHIFT`, a
+  Press of `Char('q')` with `CONTROL`, and a Press of `Char('c')` with no modifiers
+- **THEN** the first two return `Quit`, the next two return `Ignore`, and the fifth returns
+  `LaunchContinue` — bare `c` is `agent-launch`'s key and was `Ignore` before it
+- **AND** with `filtering` true the same five events return `FilterPush('q')`, `Quit`,
+  `FilterPush('Q')`, `Ignore`, and `FilterPush('c')`, so exactly one of them still quits
+
+#### Scenario: A released quit key does not quit
+
+- **WHEN** `action_for` is called with `Char('q')` carrying kind `Release`, then with
+  `Char('q')` carrying kind `Repeat`, then with `Char('q')` carrying kind `Press`, each
+  under `filtering` false and again under `filtering` true
+- **THEN** under `filtering` false the first two return `Ignore` and the third returns
+  `Quit`
+- **AND** under `filtering` true the first two return `Ignore` and the third returns
+  `FilterPush('q')`, so a release cannot type a character either
+- **AND** the same holds for `Char('1')`, `Char(']')`, and `Char('r')`: a `Release` or
+  `Repeat` of any of them returns `Ignore` under both modes, so a terminal reporting releases
+  cannot switch tabs twice or refresh twice
+
+#### Scenario: Enter and Esc move between the two routes
+
+- **WHEN** a `Dashboard` at `Route::List` with an empty, inactive filter and
+  `detail.scroll` of `0` is given the actions for a Press of `Enter`, then a Press of `Esc`,
+  then a second Press of `Esc`
+- **THEN** its route is `Detail`, then `List`, then still `List`
+- **AND** `quit` is false after all three, so `Esc` at the root does not close the pane
+- **AND** `detail.scroll` is `0` after each, since both route moves reset it
+- **AND** `detail.tab` is unchanged by all three, because a route move is not a change move
+- **AND** `refresh.requested` is unchanged by all three, because a route move is not a refresh
+- **AND** `launch.pending` and `launch.problems` are unchanged by all three, because `Esc` is
+  not a layer that dismisses a launch problem
+
+#### Scenario: `Esc` dismisses one layer at a time
+
+- **WHEN** a `Dashboard` at `Route::Detail` whose `filter.query` is `add`, whose
+  `filter.active` is true, and whose `detail.scroll` is `3` is given four consecutive `Back`
+  actions
+- **THEN** after the first, `filter.active` is false and `filter.query` is empty, and
+  `detail.scroll` is still `3` — dismissing the filter layer is not leaving the route; after
+  the second, `route` is `List` and `detail.scroll` is `0`; after the third and fourth,
+  nothing has changed and `quit` is still false
+- **AND** a second `Dashboard` at `Route::List` whose `filter.query` is `add` with
+  `filter.active` **false** reaches an empty query on its first `Back` and changes nothing
+  on its second
+- **AND** a third `Dashboard` carrying one `launch.problems` entry still carries it after four
+  consecutive `Back` actions
+
+#### Scenario: Navigation and filter keys are distinguished from near misses
+
+- **WHEN** `action_for` is called with `filtering` false and Presses of `Char('j')`,
+  `Down`, `Char('k')`, `Up`, `Char('/')`, `Char('J')` with `SHIFT`, `Down` with `CONTROL`,
+  and `Char('/')` with `CONTROL`
+- **THEN** the first five return `Next`, `Next`, `Prev`, `Prev`, and `FilterStart`, and the
+  last three return `Ignore`
+- **AND** Presses of `Char('1')`, `Char('9')`, `Char(']')`, and `Char('[')` return
+  `SelectTab(0)`, `SelectTab(8)`, `NextTab`, and `PrevTab`, while `Char('0')`, `Char('{')`,
+  and `Char(']')` with `CONTROL` return `Ignore`
+- **AND** a Press of `Char('r')` returns `Refresh`, while `Char('R')` with `SHIFT` and
+  `Char('r')` with `CONTROL` both return `Ignore`
+
+#### Scenario: Non-key events are ignored without panicking
+
+- **WHEN** `action_for` is called with `Event::Resize(60, 20)`, `Event::FocusGained`,
+  `Event::FocusLost`, `Event::Paste("q".to_string())`, `Event::Paste("1".to_string())`,
+  `Event::Paste("r".to_string())`, `Event::Paste("a".to_string())`, and a mouse event, each
+  under `filtering` false and again under `filtering` true
+- **THEN** each returns `Ignore` under both
+- **AND** in particular a paste whose text is the single character `q` neither quits nor
+  types into the query, a paste whose text is `1` does not switch tabs, a paste whose text
+  is `r` does not refresh, and a paste whose text is `a` **does not launch an agent**, so
+  pasted content cannot close the pane, edit the filter, move the tab, start a CLI cycle, or
+  spawn a process
+
+#### Scenario: `Space` maps to `ToggleSection` outside filter mode and types inside it
+
+- **WHEN** `action_for` is called with `filtering` false and a Press of `Char(' ')`, then with
+  `filtering` true and the same Press, then with `filtering` false and a Press of `Char(' ')`
+  carrying `KeyModifiers::CONTROL`, and finally with a `Release` and a `Repeat` of
+  `Char(' ')` under both modes
+- **THEN** the first returns `ToggleSection`, the second returns `FilterPush(' ')`, and the
+  last three under each mode return `Ignore`
+- **AND** the **seventeen** other actions' mappings are unchanged: the same table of inputs
+  `agent-launch` asserted returns exactly the same actions under both modes, so `Space`
+  gaining a meaning moved no existing key
+- **AND** `KeyCode::Char(' ')` is the only new row in the `filtering` false table, and
+  `filtering` true gains no row at all
+
+### Requirement: The loop draws before it waits and stops when quit is set
+
+`ui::driver::run_loop(terminal, dashboard, events, live, read, tick)` SHALL be generic over
+any `ratatui::backend::Backend` and any `ui::event::EventSource`, so tests drive it with a
+`TestBackend` and a scripted event source and no terminal exists in the test process. `read`
+is the `artifact-content` reader: a `&dyn Fn(&Path) -> Result<String, String>`, so no
+filesystem API is named in `src/ui/driver.rs` and tests drive the loop with an in-memory
+double.
+
+`live` is `live-refresh`'s addition, extended by `agent-polling` and again by `agent-launch`: a
+`ui::driver::Live` carrying `&mut dyn watch::FsEvents`, `&mut dyn refresh::Refresher`,
+`&mut dyn agents::AgentPoll`, and `&mut dyn launch::Launcher`, all
+of whose every method is non-blocking. It is a struct rather than four further parameters so
+the signature stays at **six** arguments and the four collaborators are named as one concept —
+cohesion, not a lint. Measured on this crate and toolchain, clippy's `too_many_arguments` fires
+at **eight** parameters, not seven, so a seventh would not have tripped it; the crate's single
+`#[allow(clippy::too_many_arguments)]`, on `changes::build_change`, is itself vestigial for the
+same reason. That correction is recorded here so a later change does not inherit a forcing
+constraint that does not exist and choose a worse shape believing it had no option.
+
+`Live` SHALL be constructed only with all four fields named and no `..` rest, so a collaborator
+added to the loop fails to compile at every construction site — the compile-time half of the
+guarantee whose behavioural half is `agent-launch`'s wiring test. It cannot implement `Default`
+at all, since every field is a `&mut dyn` reference, so no source sweep is needed for it; it is
+also outside `NODEFAULT-UI`'s reach, whose positive control anchors on `struct <T> {` and cannot
+match a type generic over a lifetime.
+
+**Both `request` call sites carry the scope**, and that is `list-sections`' change to this
+requirement. Step 2 is the `refresh.requested` path — the startup request, `r`, and the
+`needs_archived_refresh()` rule `list-selection` states — and step 3 is the watch-invalidate
+path. A watch event that lands while the archived section is open must resolve that section
+too; passing `Names` there would silently empty an archive the reader had just opened, on the
+next file change.
+
+Each iteration SHALL, in this order:
+
+1. when `dashboard.launch.pending` is `Some`, take it — leaving `None` — and hand it to
+   `live.launcher.request`;
+2. when `dashboard.refresh.requested` is set, request `Selection::All` **and**
+   `dashboard.archived_scope()` of `live.refresher`, and clear the flag;
+3. `live.fs.drain()`, and on a non-empty batch request `watch::invalidate(repo, &paths)` **and**
+   `dashboard.archived_scope()` of `live.refresher`; on `Err`, the reason replaces
+   `dashboard.refresh.problems` wholesale and the loop continues;
+4. `live.refresher.take_result()`, and on `Some(_)` adopt the carried `ChangeSet` through
+   `Dashboard::adopt`;
+5. `live.agents.drain()`, and on `Some(snapshot)` replace `dashboard.agents` with it;
+6. `live.launcher.drain()`, and on `Some(outcome)` insert `outcome.named`'s
+   `(agent, change)` pair into `dashboard.agent_names.names` when it is `Some`, and replace
+   `dashboard.launch.problems` wholesale with `outcome.problem`'s zero or one entry;
+7. `dashboard.sync_detail(read)`;
+8. draw the frame;
+9. `dashboard.normalise_scroll(area)`;
+10. wait up to
+    `watch::poll_timeout(tick, watch::soonest(live.fs.pending_in(), live.agents.pending_in()))`
+    for an event.
+
+Step 1 leads because the request it hands over answers a key the reader pressed on the previous
+iteration, and every step below it is a background tier's own business. Step 6 follows step 5 so
+a launch that has just recorded a mapping is visible to the very next `attribution()` call, in
+the frame step 8 draws. `watch::soonest` takes **two** arguments and gains no third: the launcher
+has no schedule of its own and no `pending_in`, so it never shortens the loop's wait.
+
+Steps 1 to 6 precede the sync and the draw, so a result, a snapshot, or an outcome taken this
+iteration is visible in the frame this iteration draws rather than the next; and every one of
+them is non-blocking, so the pane is still painted with the selected artifact's content before
+any input is read — not blank on the first frame and filled on the second. After applying an
+event's action, the loop SHALL break when `dashboard.quit` is set, without syncing or drawing
+again; a `launch.pending` set by the last action before a quit is therefore **not** dispatched,
+which is deliberate: a reader who launches and immediately quits has closed the pane, and
+starting a process on the way out would be a side effect with nothing left to show it.
+
+Step 2 preceding step 3 is `live-updates`' rule and is restated here rather than contradicted:
+this requirement previously listed the drain first, which disagreed with `live-updates` and with
+the shipped loop, and `agent-polling` corrects it while adding the agent drain.
+
+`EventSource::next_event(&mut self, timeout: Duration) -> Result<Option<Event>,
+EventError>` SHALL return `Ok(None)` for a timeout with no event. A timeout SHALL NOT end
+the loop and SHALL NOT be treated as an event.
+
+On success `run_loop` SHALL return `LoopSummary { frames, polls }`, counting draws
+performed and `next_event` calls made. `LoopSummary` SHALL gain **no** field for the live
+tier: requests taken, results adopted, snapshots drained, and launch outcomes applied are
+observed through the doubles' own recorders, which keeps every landed
+`LoopSummary { frames, polls }` literal in the suite
+unchanged. A draw error SHALL end the loop with `LoopError::Draw` carrying the backend error's
+`Display` text; an event-source error SHALL end it with `LoopError::Events`. Neither a **watch**
+error, an **unreachable Herdr socket**, nor a **failed launch** SHALL end it or become a
+`LoopError`: all three are degraded states, and the pane keeps drawing from files. Neither
+`LoopError` SHALL panic, and neither SHALL be retried in a loop that could spin.
+
+`ui::driver::TICK` SHALL be 250 milliseconds and SHALL be what `ui::run` passes. It is now
+the *upper bound* on a wait rather than the wait itself: `watch::poll_timeout` shortens it to
+whichever of the debounce window and the agent poll is due sooner, so the loop wakes at the
+moment either becomes due rather than at the next tick.
+
+#### Scenario: A pending launch request is handed over exactly once
+
+- **WHEN** `run_loop` is driven at 60x20 over a recording launcher double, with a script of a
+  Press of `Char('a')`, then two `Ok(None)` timeouts, then a Press of `Char('q')`, against a
+  `Dashboard` whose `agents.reachable` is `true` and whose visible list holds `add-auth`
+- **THEN** the recording launcher received exactly **one** `Request`, and it is
+  `Request::Launch { change: "add-auth", agent: "add-auth", intent: Apply }`
+- **AND** `dashboard.launch.pending` is `None` on every iteration after the first that followed
+  the press, so a request cannot be handed over twice
+- **AND** the launcher received nothing at all on the iterations before the press
+
+#### Scenario: A launch outcome updates the mapping and replaces the problem
+
+- **WHEN** `run_loop` is driven at 60x20 over a scripted launcher whose first `drain` answers
+  `Outcome { named: None, problem: Some("split failed") }` and whose second answers
+  `Outcome { named: Some(("c-2fa-support", "2fa-support")), problem: None }`
+- **THEN** after the first, `dashboard.launch.problems` is exactly `["split failed"]` and
+  `agent_names.names` is unchanged
+- **AND** after the second, `dashboard.launch.problems` is **empty** — replaced wholesale, so a
+  success clears the earlier failure — and `agent_names.names` holds
+  `c-2fa-support -> 2fa-support`
+- **AND** `changes`, `agents`, and `refresh` are unchanged by both
+
+#### Scenario: A quit on the same event as a launch dispatches nothing
+
+- **WHEN** `run_loop` is driven with a script of a Press of `Char('a')` immediately followed by
+  a Press of `Char('q')` on the very next `next_event` call, over a recording launcher
+- **THEN** the launcher received exactly **one** request — the one dispatched on the iteration
+  between the two presses
+- **AND** driving the same script with the `q` press first leaves the launcher with **zero**
+  requests, because the loop broke before the next iteration's step 1
+
+#### Scenario: The first frame is on screen before the first event is read
+
+- **WHEN** `run_loop` is driven over a `Terminal<TestBackend>` at 120x20 with an event
+  source whose script is **empty**, so its first `next_event` call returns
+  `Err(EventError)`, an inert `Live` (`watch::none()`, `refresh::none()`,
+  `agents::none()`, and `launch::none()`), and a reader returning `# proposal\n` for every path
+- **THEN** `run_loop` returns `Err(LoopError::Events)`
+- **AND** the backend's buffer nevertheless spells `OpenSpec` at row 0 column 0 and holds
+  `┌` at row 1 column 0 and at row 1 column 40, so a complete frame was drawn before the
+  failing wait — a loop that waited first would leave the buffer blank
+
+#### Scenario: Timeouts are not events and do not end the loop
+
+- **WHEN** `run_loop` is driven at 60x20 with a script of three `Ok(None)` timeouts
+  followed by a Press of `Char('q')`, over an inert `Live`
+- **THEN** it returns `Ok(LoopSummary { frames: 4, polls: 4 })`
+- **AND** the dashboard's `quit` is true
+- **AND** the event source recorded that every `next_event` call was made with the `tick`
+  the caller passed, not a hard-coded value — an inert `FsEvents` and an inert `AgentPoll`
+  both return `None` from `pending_in`, so `soonest` is `None` and `poll_timeout` returns the
+  tick unchanged, and the launcher contributes nothing because it has no `pending_in` at all
+- **AND** the recording reader recorded exactly **one** call across the whole run, because
+  four iterations over an unchanged selection with no adopt re-read nothing
+
+#### Scenario: A backend draw failure ends the loop rather than spinning
+
+- **WHEN** `run_loop` is driven over a backend whose `draw` returns an error, with an event
+  source whose script would supply a `q` press and an inert `Live`
+- **THEN** it returns `Err(LoopError::Draw)` carrying the backend error's text
+- **AND** the event source recorded **zero** `next_event` calls, proving the loop stopped
+  at the failed draw rather than continuing past it
+- **AND** the reader recorded **one** call, because the sync precedes the draw and the
+  failure is in the draw
+
+#### Scenario: Ctrl-C ends the loop
+
+- **WHEN** `run_loop` is driven at 60x20 with a single Press of `Char('c')` carrying
+  `KeyModifiers::CONTROL` and an inert `Live`
+- **THEN** it returns `Ok(LoopSummary { frames: 1, polls: 1 })` and the dashboard's `quit`
+  is true
+- **AND** the recording launcher received **zero** requests, so `Ctrl-C` did not launch
+
+#### Scenario: An ignored key redraws and keeps waiting
+
+- **WHEN** `run_loop` is driven at 60x20 with a Press of `Char('Q')`, then a resize event,
+  then a Press of `Char('q')`, over an inert `Live`
+- **THEN** it returns `Ok(LoopSummary { frames: 3, polls: 3 })`
+- **AND** the dashboard's route is still `List`, so neither input navigated
+
+#### Scenario: A route change is visible in the next frame
+
+- **WHEN** `run_loop` is driven at 60x20 with a Press of `Enter` followed by a Press of
+  `Char('q')`, over an inert `Live`
+- **THEN** it returns `Ok(LoopSummary { frames: 2, polls: 2 })`
+- **AND** the final buffer's row 1 spells `Detail` starting at column 1 and the string
+  `Changes` appears nowhere, so the second frame reflected the route the first event set
+
+#### Scenario: `Live` cannot be built without naming the poller
+
+The scenario's name is kept verbatim from `agent-polling` because a delta's scenario headers are
+its merge key; its subject is unchanged and only the field count moves.
+
+- **WHEN** a compile-time companion in `ui::driver`'s tests destructures a `Live` with an
+  exhaustive pattern naming all four fields and no `..` rest
+- **THEN** the crate compiles, and adding a fifth field to `Live` breaks the build at that
+  companion and at every construction site — `ui::run_wired` and every test that builds one
+- **AND** the companion is the discriminating evidence rather than "the crate compiles at all":
+  compilation alone would still succeed if a later change gave `Live` a `..` rest at one site
+- **AND** `run_loop`'s parameter count is still six, and no
+  `#[allow(clippy::too_many_arguments)]` is added by this change — checked as a diff against the
+  base commit, not as a tree-wide grep, since `src/changes.rs` already carries one
+
+### Requirement: `Dashboard` carries fourteen fields, none defaulted and none elided
+
+`ui::app::Dashboard` SHALL carry exactly **fourteen** fields: `repo: Option<PathBuf>` — the
 repository root when one was found; `searched_from: PathBuf` — the directory the walk began
 at, rendered by `change-rows`' no-repository state; `changes: changes::ChangeSet`;
 `route: Route`, an enum of `List` and `Detail`; `quit: bool`, set by the quit action;
-`selected: usize`, the index into the visible list defined by `list-selection`;
+`selected: usize`, the index into the **visible targets** defined by `list-selection` —
+section headers and visible changes in emission order, which is `list-sections`' change to
+what this index addresses rather than to its type; `sections: Sections`, the per-session
+collapse state defined by `list-selection`, carrying a `BTreeSet<SectionKey>` of the sections
+the reader has folded;
 `filter: Filter`, the query and mode defined by `list-filtering`; `detail: Detail`, the
 detail region's state defined by `detail-scroll`, `artifact-tabs`, and `artifact-content`;
 `refresh: Refresh`, the live tier's state defined by `live-updates`;
@@ -234,7 +702,8 @@ its merge key; its subject is unchanged and only the type list and the field cou
   same-line grep with the brace-matching pass named above. The companion is kept for what it
   genuinely does, below
 - **AND** a compile-time companion exists: a test destructures a `Dashboard` with an
-  exhaustive pattern naming all **thirteen** fields and no `..`, a second destructures a `Filter`
+  exhaustive pattern naming all **fourteen** fields and no `..`, a companion destructures a
+  `Sections` naming its one field and no `..`, a second destructures a `Filter`
   naming both, a third destructures a `Detail` naming all five and no `..`, a fourth
   destructures a `Refresh` naming all **three** and no `..`, a fifth destructures a `Launch`
   naming both and no `..` — `launch::Outcome`'s companion below naming its two fields after
@@ -459,445 +928,33 @@ its merge key; its subject is unchanged and only the type list and the field cou
   `#!/bin/sh` program returns a dashboard whose `file_mode` is `false`, so the flag is the
   probe's answer and not a constant
 
-#### Scenario: The thirteenth field is named at every construction site
-
-- **WHEN** every `*.rs` file under `src/` is searched for a `..` inside a `Dashboard { … }`
-  literal or pattern, brace-matched from the opening `{` to its partner
-- **THEN** there is no match, so no construction site elides `file_mode`
-- **AND** the compile-time companion destructures a `Dashboard` naming all **thirteen** fields
-  with no `..`, so a fourteenth breaks the build at that site
-- **AND** `impl Default for Dashboard` appears nowhere in the crate, derived or hand-written
-
-### Requirement: Key handling is a pure, total function over events
-
-`ui::app::action_for(event: &Event, filtering: bool) -> Action` SHALL map a terminal event
-and the current filter mode to one of exactly **seventeen** actions — `Quit`, `OpenDetail`,
-`Back`, `Next`, `Prev`, `SelectTab(usize)`, `NextTab`, `PrevTab`, `FilterStart`,
-`FilterPush(char)`, `FilterPop`, `Refresh`, `LaunchApply`, `LaunchContinue`, `LaunchArchive`,
-`FocusAgent`, `Ignore` — and SHALL be total: every `Event`
-value, including mouse, paste, focus-gained, focus-lost, and resize events, maps to one of
-them under either value of `filtering`, and none panics.
-
-The count moves from thirteen to seventeen, not from nine to thirteen: `HANDOFF.md`'s Phase 5
-constraint 8 read the count off a stale doc comment in `src/ui/app.rs` that still said "the nine
-outcomes" after four had been added. The comment is corrected by this change along with the
-count.
-
-`SelectTab`, `NextTab`, and `PrevTab` are `detail-view`'s additions; `artifact-tabs` states
-their keys and their effect. They are route-agnostic in the same sense `Next` and `Prev`
-are: the detail region is drawn at both routes above the breakpoint, so a tab press at the
-list route is immediately visible. `Refresh` is `live-refresh`'s addition and is
-route-agnostic in a stronger sense: it names no region at all. `LaunchApply`,
-`LaunchContinue`, `LaunchArchive`, and `FocusAgent` are `agent-launch`'s additions and are
-route-agnostic in that same stronger sense: they act on the **selected** change, which is the
-same change at either route.
-
-They are **four flat variants** rather than one variant carrying a payload. A payloaded
-`Launch(Intent)` would let `no_action_mutates_changes`' hand-written `variants` array carry one
-intent and silently omit the other two, which is precisely the failure that test's own comment
-warns against ("an enumerate-by-hand test would silently miss it"); four flat variants make the
-exhaustive `match` and the array enumerate the same four things.
-
-While `filtering` is **false** the mapping SHALL be:
-
-| Input | Action |
-|---|---|
-| `KeyCode::Char('q')` with no modifiers | `Quit` |
-| `KeyCode::Char('c')` with `KeyModifiers::CONTROL` | `Quit` |
-| `KeyCode::Char('j')` or `KeyCode::Down` with no modifiers | `Next` |
-| `KeyCode::Char('k')` or `KeyCode::Up` with no modifiers | `Prev` |
-| `KeyCode::Char('1')`–`Char('9')` with no modifiers | `SelectTab(digit - 1)` |
-| `KeyCode::Char(']')` with no modifiers | `NextTab` |
-| `KeyCode::Char('[')` with no modifiers | `PrevTab` |
-| `KeyCode::Char('/')` with no modifiers | `FilterStart` |
-| `KeyCode::Char('r')` with no modifiers | `Refresh` |
-| `KeyCode::Char('a')` with no modifiers | `LaunchApply` |
-| `KeyCode::Char('c')` with **no** modifiers | `LaunchContinue` |
-| `KeyCode::Char('s')` with no modifiers | `LaunchArchive` |
-| `KeyCode::Char('g')` with no modifiers | `FocusAgent` |
-| `KeyCode::Enter` with no modifiers | `OpenDetail` |
-| `KeyCode::Esc` with no modifiers | `Back` |
-| anything else, including `Char('Q')`, `Char('0')`, `Char('R')`, `Char('A')`, `Char('G')`, and `Char('q')`, `Char('r')`, `Char('a')`, `Char('s')`, or `Char('g')` with a modifier | `Ignore` |
-
-`Char('c')` is the one key with two rows. Bare `c` is `LaunchContinue`; `c` with
-`KeyModifiers::CONTROL` is `Quit`, and remains so under both values of `filtering`. The two are
-distinguished by the modifier alone, which the mapping already matches on, so no key is
-overloaded ambiguously and `Ctrl-C` never launches.
-
-`action_for` SHALL NOT take the socket's reachability as a parameter and SHALL NOT consult it.
-Whether an action key is *offered* is `agent-launch`'s decision, made in `Dashboard::apply`
-against `agents.reachable`; the key-to-action mapping stays a pure function of the event and the
-filter mode, so a socket that comes and goes never changes what a key means.
-
-While `filtering` is **true** the mapping SHALL be the one `list-filtering` states, in which
-printable characters type into the query and only `Ctrl-C` quits. `1`–`9`, `[`, `]`, `r`, `a`,
-`c`, `s`, and `g` are printable characters and are therefore query characters there, with no
-exception carved out for any of them.
-
-`action_for` SHALL act only on key events whose `kind` is `KeyEventKind::Press`. A key event
-with kind `Repeat` or `Release` SHALL map to `Ignore` under either value of `filtering`, so
-a terminal that reports release events does not quit twice, navigate on a release, type a
-character twice, refresh twice, or **launch a second agent**.
-
-`Dashboard::apply(&mut self, action: Action)` SHALL:
-
-- set `quit` on `Quit`;
-- on `OpenDetail`, clear `filter.active` and change nothing else when `filter.active` is
-  set — accepting a filter is not opening a detail — and otherwise set `route` to `Detail`
-  and reset `detail.scroll` to `0`;
-- on `Back`, dismiss exactly one layer, in this order: filter mode with its query when
-  `filter.active` is set; else a non-empty `filter.query`; else `route` back to `List`,
-  resetting `detail.scroll` to `0`; else nothing at all, so a stray `Esc` at the root cannot
-  close the pane. `launch.problems` SHALL NOT be one of the layers: no key dismisses a launch
-  problem, and the next launch outcome is what replaces it;
-- on `Next` and `Prev`, move and clamp `selected` per `list-selection` when `route` is
-  `List`, and move `detail.scroll` by one line per `detail-scroll` when `route` is `Detail`,
-  never both; and, at `Route::List` only, reset `detail.tab` and `detail.scroll` to `0`
-  exactly when `selected` changed value;
-- on `SelectTab`, `NextTab`, and `PrevTab`, move `detail.tab` per `artifact-tabs`, resetting
-  `detail.scroll` to `0` exactly when `detail.tab` changed value;
-- set `filter.active` and `route: List` on `FilterStart`, resetting `detail.scroll` to `0`
-  because that too is a route move, push on `FilterPush`, pop on `FilterPop`, clamping
-  `selected` after each;
-- set `refresh.requested` on `Refresh` and change nothing else at all — not `changes`, not
-  `selected`, not `route`, not `detail`, not `filter`, not `quit` — reaching no collaborator
-  and starting no work, so `apply` stays a pure function of `&mut self` and its argument;
-- on `LaunchApply`, `LaunchContinue`, `LaunchArchive`, and `FocusAgent`, map the action to the
-  corresponding `launch::Intent`, call `launch::decide` with the selected change's name, the
-  focus pane `attribution().panes` holds for it, `agents.reachable`, and the `name`s of the
-  live agents, and write the result: `Decision::Nothing` changes nothing at all;
-  `Decision::Refuse(reason)` replaces `launch.problems` with that one entry and leaves
-  `launch.pending` alone; `Decision::Go(request)` sets `launch.pending` to `Some(request)` and
-  clears `launch.problems`. **None of the four SHALL change `changes`, `selected`, `route`,
-  `detail`, `filter`, `quit`, `refresh`, `agents`, or `agent_names`, and none SHALL reach a
-  collaborator, spawn a process, touch the filesystem, or read a clock** — `apply` stays a pure
-  function of `&mut self` and its argument, and `run_loop` is what turns `launch.pending` into a
-  request to a collaborator that lives outside `src/ui/` entirely;
-- change nothing on `Ignore`.
-
-`apply` SHALL never panic, SHALL never leave `selected` addressing a change that is not
-visible, and SHALL never leave `detail.scroll` unbounded for more than one frame — the
-normalisation `detail-scroll` requires of `ui::driver::run_loop` is what bounds it. It MAY
-leave `detail.tab` out of range for the selected change after a filter edit; `sync_detail`
-is what restores that invariant, before the next draw rather than after it.
-
-#### Scenario: The four action keys map, and their near misses do not
-
-- **WHEN** `action_for` is called with `filtering` false and Presses of `Char('a')`,
-  `Char('c')`, `Char('s')`, `Char('g')`, `Char('c')` with `CONTROL`, `Char('A')` with `SHIFT`,
-  `Char('G')` with `SHIFT`, `Char('a')` with `CONTROL`, and `Char('s')` with `ALT`
-- **THEN** the first four return `LaunchApply`, `LaunchContinue`, `LaunchArchive`, and
-  `FocusAgent`; the fifth returns `Quit`; and the last four return `Ignore`
-- **AND** with `filtering` true the same nine return `FilterPush('a')`, `FilterPush('c')`,
-  `FilterPush('s')`, `FilterPush('g')`, `Quit`, `FilterPush('A')`, `FilterPush('G')`,
-  `Ignore`, and `Ignore` — so `Ctrl-C` is the only one of the nine that still quits and none of
-  the four launches while a filter is open
-- **AND** a `Release` and a `Repeat` of each of `Char('a')`, `Char('c')`, `Char('s')`, and
-  `Char('g')` return `Ignore` under both modes, so a terminal reporting releases cannot launch
-  a second agent
-
-#### Scenario: A launch action reaches no collaborator and starts no work
-
-- **WHEN** a `Dashboard` with `agents.reachable` `true` and a selected change `add-auth` is
-  given `LaunchApply`
-- **THEN** `launch.pending` is
-  `Some(Request::Launch { change: "add-auth", agent: "add-auth", intent: Apply })` and
-  `launch.problems` is empty
-- **AND** `changes`, `selected`, `route`, `detail`, `filter`, `quit`, `refresh`, `agents`, and
-  `agent_names` are all unchanged, field for field
-- **AND** no process was spawned, no file was read or written, and no clock was read — `apply`
-  is a pure function of `&mut self` and its argument, and the dashboard value it produces is
-  `Clone` and `PartialEq` as before
-
-#### Scenario: A refused launch records the reason and produces no request
-
-- **WHEN** a `Dashboard` with `agents.reachable` `true`, a selected change `2fa-support`, and a
-  live agent named `c-2fa-support` is given `LaunchApply` three times in a row
-- **THEN** `launch.pending` is `None` after every one of the three
-- **AND** `launch.problems` holds exactly **one** entry after all three, naming
-  `c-2fa-support` and `g` — replaced wholesale each time, never grown
-
-#### Scenario: An unreachable socket makes the four keys change nothing
-
-- **WHEN** a `Dashboard` with `agents.reachable` `false` and a selected change is given
-  `LaunchApply`, `LaunchContinue`, `LaunchArchive`, and `FocusAgent` in turn
-- **THEN** `launch.pending` is `None` and `launch.problems` is empty after all four
-- **AND** the whole dashboard is equal, field for field, to the one before the four actions
-
-#### Scenario: Both quit keys quit and neither near-miss does
-
-- **WHEN** `action_for` is called with `filtering` false and a Press of `Char('q')` with no
-  modifiers, a Press of `Char('c')` with `CONTROL`, a Press of `Char('Q')` with `SHIFT`, a
-  Press of `Char('q')` with `CONTROL`, and a Press of `Char('c')` with no modifiers
-- **THEN** the first two return `Quit`, the next two return `Ignore`, and the fifth returns
-  `LaunchContinue` — bare `c` is `agent-launch`'s key and was `Ignore` before it
-- **AND** with `filtering` true the same five events return `FilterPush('q')`, `Quit`,
-  `FilterPush('Q')`, `Ignore`, and `FilterPush('c')`, so exactly one of them still quits
-
-#### Scenario: A released quit key does not quit
-
-- **WHEN** `action_for` is called with `Char('q')` carrying kind `Release`, then with
-  `Char('q')` carrying kind `Repeat`, then with `Char('q')` carrying kind `Press`, each
-  under `filtering` false and again under `filtering` true
-- **THEN** under `filtering` false the first two return `Ignore` and the third returns
-  `Quit`
-- **AND** under `filtering` true the first two return `Ignore` and the third returns
-  `FilterPush('q')`, so a release cannot type a character either
-- **AND** the same holds for `Char('1')`, `Char(']')`, and `Char('r')`: a `Release` or
-  `Repeat` of any of them returns `Ignore` under both modes, so a terminal reporting releases
-  cannot switch tabs twice or refresh twice
-
-#### Scenario: Enter and Esc move between the two routes
-
-- **WHEN** a `Dashboard` at `Route::List` with an empty, inactive filter and
-  `detail.scroll` of `0` is given the actions for a Press of `Enter`, then a Press of `Esc`,
-  then a second Press of `Esc`
-- **THEN** its route is `Detail`, then `List`, then still `List`
-- **AND** `quit` is false after all three, so `Esc` at the root does not close the pane
-- **AND** `detail.scroll` is `0` after each, since both route moves reset it
-- **AND** `detail.tab` is unchanged by all three, because a route move is not a change move
-- **AND** `refresh.requested` is unchanged by all three, because a route move is not a refresh
-- **AND** `launch.pending` and `launch.problems` are unchanged by all three, because `Esc` is
-  not a layer that dismisses a launch problem
-
-#### Scenario: `Esc` dismisses one layer at a time
-
-- **WHEN** a `Dashboard` at `Route::Detail` whose `filter.query` is `add`, whose
-  `filter.active` is true, and whose `detail.scroll` is `3` is given four consecutive `Back`
-  actions
-- **THEN** after the first, `filter.active` is false and `filter.query` is empty, and
-  `detail.scroll` is still `3` — dismissing the filter layer is not leaving the route; after
-  the second, `route` is `List` and `detail.scroll` is `0`; after the third and fourth,
-  nothing has changed and `quit` is still false
-- **AND** a second `Dashboard` at `Route::List` whose `filter.query` is `add` with
-  `filter.active` **false** reaches an empty query on its first `Back` and changes nothing
-  on its second
-- **AND** a third `Dashboard` carrying one `launch.problems` entry still carries it after four
-  consecutive `Back` actions
-
-#### Scenario: Navigation and filter keys are distinguished from near misses
-
-- **WHEN** `action_for` is called with `filtering` false and Presses of `Char('j')`,
-  `Down`, `Char('k')`, `Up`, `Char('/')`, `Char('J')` with `SHIFT`, `Down` with `CONTROL`,
-  and `Char('/')` with `CONTROL`
-- **THEN** the first five return `Next`, `Next`, `Prev`, `Prev`, and `FilterStart`, and the
-  last three return `Ignore`
-- **AND** Presses of `Char('1')`, `Char('9')`, `Char(']')`, and `Char('[')` return
-  `SelectTab(0)`, `SelectTab(8)`, `NextTab`, and `PrevTab`, while `Char('0')`, `Char('{')`,
-  and `Char(']')` with `CONTROL` return `Ignore`
-- **AND** a Press of `Char('r')` returns `Refresh`, while `Char('R')` with `SHIFT` and
-  `Char('r')` with `CONTROL` both return `Ignore`
-
-#### Scenario: Non-key events are ignored without panicking
-
-- **WHEN** `action_for` is called with `Event::Resize(60, 20)`, `Event::FocusGained`,
-  `Event::FocusLost`, `Event::Paste("q".to_string())`, `Event::Paste("1".to_string())`,
-  `Event::Paste("r".to_string())`, `Event::Paste("a".to_string())`, and a mouse event, each
-  under `filtering` false and again under `filtering` true
-- **THEN** each returns `Ignore` under both
-- **AND** in particular a paste whose text is the single character `q` neither quits nor
-  types into the query, a paste whose text is `1` does not switch tabs, a paste whose text
-  is `r` does not refresh, and a paste whose text is `a` **does not launch an agent**, so
-  pasted content cannot close the pane, edit the filter, move the tab, start a CLI cycle, or
-  spawn a process
-
-### Requirement: The loop draws before it waits and stops when quit is set
-
-`ui::driver::run_loop(terminal, dashboard, events, live, read, tick)` SHALL be generic over
-any `ratatui::backend::Backend` and any `ui::event::EventSource`, so tests drive it with a
-`TestBackend` and a scripted event source and no terminal exists in the test process. `read`
-is the `artifact-content` reader: a `&dyn Fn(&Path) -> Result<String, String>`, so no
-filesystem API is named in `src/ui/driver.rs` and tests drive the loop with an in-memory
-double.
-
-`live` is `live-refresh`'s addition, extended by `agent-polling` and again by `agent-launch`: a
-`ui::driver::Live` carrying `&mut dyn watch::FsEvents`, `&mut dyn refresh::Refresher`,
-`&mut dyn agents::AgentPoll`, and `&mut dyn launch::Launcher`, all
-of whose every method is non-blocking. It is a struct rather than four further parameters so
-the signature stays at **six** arguments and the four collaborators are named as one concept —
-cohesion, not a lint. Measured on this crate and toolchain, clippy's `too_many_arguments` fires
-at **eight** parameters, not seven, so a seventh would not have tripped it; the crate's single
-`#[allow(clippy::too_many_arguments)]`, on `changes::build_change`, is itself vestigial for the
-same reason. That correction is recorded here so a later change does not inherit a forcing
-constraint that does not exist and choose a worse shape believing it had no option.
-
-`Live` SHALL be constructed only with all four fields named and no `..` rest, so a collaborator
-added to the loop fails to compile at every construction site — the compile-time half of the
-guarantee whose behavioural half is `agent-launch`'s wiring test. It cannot implement `Default`
-at all, since every field is a `&mut dyn` reference, so no source sweep is needed for it; it is
-also outside `NODEFAULT-UI`'s reach, whose positive control anchors on `struct <T> {` and cannot
-match a type generic over a lifetime.
-
-Each iteration SHALL, in this order:
-
-1. when `dashboard.launch.pending` is `Some`, take it — leaving `None` — and hand it to
-   `live.launcher.request`;
-2. when `dashboard.refresh.requested` is set, request `Selection::All` of `live.refresher` and
-   clear the flag;
-3. `live.fs.drain()`, and on a non-empty batch request `watch::invalidate(repo, &paths)` of
-   `live.refresher`; on `Err`, the reason replaces `dashboard.refresh.problems` wholesale and
-   the loop continues;
-4. `live.refresher.take_result()`, and on `Some(_)` adopt the carried `ChangeSet` through
-   `Dashboard::adopt`;
-5. `live.agents.drain()`, and on `Some(snapshot)` replace `dashboard.agents` with it;
-6. `live.launcher.drain()`, and on `Some(outcome)` insert `outcome.named`'s
-   `(agent, change)` pair into `dashboard.agent_names.names` when it is `Some`, and replace
-   `dashboard.launch.problems` wholesale with `outcome.problem`'s zero or one entry;
-7. `dashboard.sync_detail(read)`;
-8. draw the frame;
-9. `dashboard.normalise_scroll(area)`;
-10. wait up to
-    `watch::poll_timeout(tick, watch::soonest(live.fs.pending_in(), live.agents.pending_in()))`
-    for an event.
-
-Step 1 leads because the request it hands over answers a key the reader pressed on the previous
-iteration, and every step below it is a background tier's own business. Step 6 follows step 5 so
-a launch that has just recorded a mapping is visible to the very next `attribution()` call, in
-the frame step 8 draws. `watch::soonest` takes **two** arguments and gains no third: the launcher
-has no schedule of its own and no `pending_in`, so it never shortens the loop's wait.
-
-Steps 1 to 6 precede the sync and the draw, so a result, a snapshot, or an outcome taken this
-iteration is visible in the frame this iteration draws rather than the next; and every one of
-them is non-blocking, so the pane is still painted with the selected artifact's content before
-any input is read — not blank on the first frame and filled on the second. After applying an
-event's action, the loop SHALL break when `dashboard.quit` is set, without syncing or drawing
-again; a `launch.pending` set by the last action before a quit is therefore **not** dispatched,
-which is deliberate: a reader who launches and immediately quits has closed the pane, and
-starting a process on the way out would be a side effect with nothing left to show it.
-
-Step 2 preceding step 3 is `live-updates`' rule and is restated here rather than contradicted:
-this requirement previously listed the drain first, which disagreed with `live-updates` and with
-the shipped loop, and `agent-polling` corrects it while adding the agent drain.
-
-`EventSource::next_event(&mut self, timeout: Duration) -> Result<Option<Event>,
-EventError>` SHALL return `Ok(None)` for a timeout with no event. A timeout SHALL NOT end
-the loop and SHALL NOT be treated as an event.
-
-On success `run_loop` SHALL return `LoopSummary { frames, polls }`, counting draws
-performed and `next_event` calls made. `LoopSummary` SHALL gain **no** field for the live
-tier: requests taken, results adopted, snapshots drained, and launch outcomes applied are
-observed through the doubles' own recorders, which keeps every landed
-`LoopSummary { frames, polls }` literal in the suite
-unchanged. A draw error SHALL end the loop with `LoopError::Draw` carrying the backend error's
-`Display` text; an event-source error SHALL end it with `LoopError::Events`. Neither a **watch**
-error, an **unreachable Herdr socket**, nor a **failed launch** SHALL end it or become a
-`LoopError`: all three are degraded states, and the pane keeps drawing from files. Neither
-`LoopError` SHALL panic, and neither SHALL be retried in a loop that could spin.
-
-`ui::driver::TICK` SHALL be 250 milliseconds and SHALL be what `ui::run` passes. It is now
-the *upper bound* on a wait rather than the wait itself: `watch::poll_timeout` shortens it to
-whichever of the debounce window and the agent poll is due sooner, so the loop wakes at the
-moment either becomes due rather than at the next tick.
-
-#### Scenario: A pending launch request is handed over exactly once
-
-- **WHEN** `run_loop` is driven at 60x20 over a recording launcher double, with a script of a
-  Press of `Char('a')`, then two `Ok(None)` timeouts, then a Press of `Char('q')`, against a
-  `Dashboard` whose `agents.reachable` is `true` and whose visible list holds `add-auth`
-- **THEN** the recording launcher received exactly **one** `Request`, and it is
-  `Request::Launch { change: "add-auth", agent: "add-auth", intent: Apply }`
-- **AND** `dashboard.launch.pending` is `None` on every iteration after the first that followed
-  the press, so a request cannot be handed over twice
-- **AND** the launcher received nothing at all on the iterations before the press
-
-#### Scenario: A launch outcome updates the mapping and replaces the problem
-
-- **WHEN** `run_loop` is driven at 60x20 over a scripted launcher whose first `drain` answers
-  `Outcome { named: None, problem: Some("split failed") }` and whose second answers
-  `Outcome { named: Some(("c-2fa-support", "2fa-support")), problem: None }`
-- **THEN** after the first, `dashboard.launch.problems` is exactly `["split failed"]` and
-  `agent_names.names` is unchanged
-- **AND** after the second, `dashboard.launch.problems` is **empty** — replaced wholesale, so a
-  success clears the earlier failure — and `agent_names.names` holds
-  `c-2fa-support -> 2fa-support`
-- **AND** `changes`, `agents`, and `refresh` are unchanged by both
-
-#### Scenario: A quit on the same event as a launch dispatches nothing
-
-- **WHEN** `run_loop` is driven with a script of a Press of `Char('a')` immediately followed by
-  a Press of `Char('q')` on the very next `next_event` call, over a recording launcher
-- **THEN** the launcher received exactly **one** request — the one dispatched on the iteration
-  between the two presses
-- **AND** driving the same script with the `q` press first leaves the launcher with **zero**
-  requests, because the loop broke before the next iteration's step 1
-
-#### Scenario: The first frame is on screen before the first event is read
-
-- **WHEN** `run_loop` is driven over a `Terminal<TestBackend>` at 120x20 with an event
-  source whose script is **empty**, so its first `next_event` call returns
-  `Err(EventError)`, an inert `Live` (`watch::none()`, `refresh::none()`,
-  `agents::none()`, and `launch::none()`), and a reader returning `# proposal\n` for every path
-- **THEN** `run_loop` returns `Err(LoopError::Events)`
-- **AND** the backend's buffer nevertheless spells `OpenSpec` at row 0 column 0 and holds
-  `┌` at row 1 column 0 and at row 1 column 40, so a complete frame was drawn before the
-  failing wait — a loop that waited first would leave the buffer blank
-
-#### Scenario: Timeouts are not events and do not end the loop
-
-- **WHEN** `run_loop` is driven at 60x20 with a script of three `Ok(None)` timeouts
-  followed by a Press of `Char('q')`, over an inert `Live`
-- **THEN** it returns `Ok(LoopSummary { frames: 4, polls: 4 })`
-- **AND** the dashboard's `quit` is true
-- **AND** the event source recorded that every `next_event` call was made with the `tick`
-  the caller passed, not a hard-coded value — an inert `FsEvents` and an inert `AgentPoll`
-  both return `None` from `pending_in`, so `soonest` is `None` and `poll_timeout` returns the
-  tick unchanged, and the launcher contributes nothing because it has no `pending_in` at all
-- **AND** the recording reader recorded exactly **one** call across the whole run, because
-  four iterations over an unchanged selection with no adopt re-read nothing
-
-#### Scenario: A backend draw failure ends the loop rather than spinning
-
-- **WHEN** `run_loop` is driven over a backend whose `draw` returns an error, with an event
-  source whose script would supply a `q` press and an inert `Live`
-- **THEN** it returns `Err(LoopError::Draw)` carrying the backend error's text
-- **AND** the event source recorded **zero** `next_event` calls, proving the loop stopped
-  at the failed draw rather than continuing past it
-- **AND** the reader recorded **one** call, because the sync precedes the draw and the
-  failure is in the draw
-
-#### Scenario: Ctrl-C ends the loop
-
-- **WHEN** `run_loop` is driven at 60x20 with a single Press of `Char('c')` carrying
-  `KeyModifiers::CONTROL` and an inert `Live`
-- **THEN** it returns `Ok(LoopSummary { frames: 1, polls: 1 })` and the dashboard's `quit`
-  is true
-- **AND** the recording launcher received **zero** requests, so `Ctrl-C` did not launch
-
-#### Scenario: An ignored key redraws and keeps waiting
-
-- **WHEN** `run_loop` is driven at 60x20 with a Press of `Char('Q')`, then a resize event,
-  then a Press of `Char('q')`, over an inert `Live`
-- **THEN** it returns `Ok(LoopSummary { frames: 3, polls: 3 })`
-- **AND** the dashboard's route is still `List`, so neither input navigated
-
-#### Scenario: A route change is visible in the next frame
-
-- **WHEN** `run_loop` is driven at 60x20 with a Press of `Enter` followed by a Press of
-  `Char('q')`, over an inert `Live`
-- **THEN** it returns `Ok(LoopSummary { frames: 2, polls: 2 })`
-- **AND** the final buffer's row 1 spells `Detail` starting at column 1 and the string
-  `Changes` appears nowhere, so the second frame reflected the route the first event set
-
-#### Scenario: `Live` cannot be built without naming the poller
-
-The scenario's name is kept verbatim from `agent-polling` because a delta's scenario headers are
-its merge key; its subject is unchanged and only the field count moves.
-
-- **WHEN** a compile-time companion in `ui::driver`'s tests destructures a `Live` with an
-  exhaustive pattern naming all four fields and no `..` rest
-- **THEN** the crate compiles, and adding a fifth field to `Live` breaks the build at that
-  companion and at every construction site — `ui::run_wired` and every test that builds one
-- **AND** the companion is the discriminating evidence rather than "the crate compiles at all":
-  compilation alone would still succeed if a later change gave `Live` a `..` rest at one site
-- **AND** `run_loop`'s parameter count is still six, and no
-  `#[allow(clippy::too_many_arguments)]` is added by this change — checked as a diff against the
-  base commit, not as a tree-wide grep, since `src/changes.rs` already carries one
-
-### Requirement: Startup state is read from files only
-
-`ui::load(start: &Path, config: &Config, state_dir: Option<&Path>) -> Dashboard` SHALL call
-`resolve::find_repo` on `start` and then, when a root was found,
-`changes::from_files(root, config.archived_count)`.
+#### Scenario: The fourteenth field is named at every construction site
+
+- **WHEN** every `*.rs` file under `src/` is searched for a `..` inside a `Dashboard { … }` or
+  a `Sections { … }` literal or pattern, brace-matched from the opening `{` to its partner
+- **THEN** there is no match, so no construction site elides `file_mode` or `sections`
+- **AND** the compile-time companion destructures a `Dashboard` naming all **fourteen** fields
+  with no `..`, so a fifteenth breaks the build at that site, and a further companion
+  destructures a `Sections` naming its one field
+- **AND** `impl Default for Dashboard` and `impl Default for Sections` appear nowhere in the
+  crate, derived or hand-written
+
+### Requirement: Startup state is read from files only, with the archive counted and not resolved
+
+`ui::load(start: &Path, config: &Config, state_dir: Option<&Path>, archived: ArchivedScope)
+-> Dashboard` SHALL call `resolve::find_repo` on `start` and then, when a root was found,
+`changes::from_files(root, archived)`. It SHALL NOT read `config.archived_count`, which
+`list-sections` leaves accepted and inert (`plugin-config`).
+
+The scope is a **parameter rather than a constant**, and the composition root SHALL choose it
+from whether a worker will exist to resolve the archive later: `ArchivedScope::Names` when the
+binary probe resolved an `openspec` binary, and `ArchivedScope::Full` when it did not.
+`refresh::start` returns the inert refresher unless it has both a repository and a CLI, so in
+**file mode** there is no worker at all — a `Space` on the archived header would set
+`refresh.requested`, the loop would hand it to a refresher that records nothing, and the
+section would stay open and empty for the rest of the session. Resolving the archive once at
+startup is what keeps file mode from failing closed; `design.md` → Decision 13 records the
+alternative, a file-only worker, and why it is deferred.
 It SHALL make no CLI call, spawn no process, start no thread, start no watcher, and consult
 no `openspec` binary, so the dashboard opens with a complete change list on a machine where
 `openspec` is not installed. It SHALL read no artifact file either: `load` produces a
@@ -918,8 +975,8 @@ touching the process environment.
 
 `load` SHALL set `refresh.requested` to **true**, `refresh.reload` to false, and
 `refresh.problems` to empty. Setting the flag is not a CLI call: it is a state value the
-loop's step 3 turns into the startup request, so the startup path and the `r` key share one
-mechanism and are tested once. `ui::run` — not `load` — is what starts the watcher and the
+loop's step **2** turns into the startup request, so the startup path and the `r` key share
+one mechanism and are tested once. `ui::run` — not `load` — is what starts the watcher and the
 worker, and it is where a watcher that would not start contributes its problem string.
 
 When `find_repo` reports `NotFound`, `load` SHALL produce a `Dashboard` whose `repo` is
@@ -931,9 +988,14 @@ When `find_repo` reports `NotFound`, `load` SHALL produce a `Dashboard` whose `r
 
 `load` SHALL always return a `Dashboard`, never a `Result`, and SHALL never panic. Its
 route SHALL start at `Route::List`, its `quit` flag at false, its `selected` at `0`, its
-`filter` with an empty query and `active` false, its `detail` empty in all five fields, and
+`filter` with an empty query and `active` false, its `sections` with `collapsed` holding
+exactly `SectionKey::Archived`, its `detail` empty in all five fields, and
 its `agents` the inert `AgentSnapshot` — empty, `reachable` false, no problem — which the
 loop's first poll replaces.
+
+`selected` `0` therefore addresses the **active section header** on a repository with at
+least one active change, not the first change, which is `list-selection`'s change to what
+that index means rather than a change to the value.
 
 #### Scenario: A scratch repository is loaded from disk with no binary present
 
@@ -944,8 +1006,9 @@ loop's first poll replaces.
 - **THEN** the returned `Dashboard`'s `repo` is the canonicalized scratch root
 - **AND** its `changes.active` holds exactly one change named `alpha` whose progress is
   2 of 3
-- **AND** its `route` is `Route::List`, its `quit` is false, its `selected` is 0, and its
-  `filter` is an empty, inactive query
+- **AND** its `route` is `Route::List`, its `quit` is false, its `selected` is 0, its
+  `filter` is an empty, inactive query, and its `sections.collapsed` holds exactly
+  `SectionKey::Archived`
 - **AND** its `refresh` is `{ requested: true, reload: false, problems: [] }`
 - **AND** its `agent_names.names` and `agent_names.problems` are both empty
 - **AND** no `openspec` binary was consulted and no thread was started: `load` takes no
@@ -961,18 +1024,45 @@ loop's first poll replaces.
   guards the same fixture
 - **THEN** the returned `Dashboard`'s `repo` is `None`
 - **AND** its `searched_from` is the directory the search reported
-- **AND** its `changes.active`, `changes.archived`, and `changes.problems` are all empty
-- **AND** its `selected` is 0 and its `filter` is an empty, inactive query
+- **AND** its `changes.active`, `changes.archived`, and `changes.problems` are all empty and
+  its `changes.archived_total` is `0`
+- **AND** its `selected` is 0, its `filter` is an empty, inactive query, and its
+  `sections.collapsed` holds exactly `SectionKey::Archived` — the same seed on both branches,
+  since a repository found later must not open with a different fold
 - **AND** its `refresh.problems` is empty: no watcher was started, so none could fail
 
-#### Scenario: The configured archived count is passed through
+#### Scenario: Startup counts the archive without resolving it
 
 - **WHEN** a scratch repository holding seven directories under `openspec/changes/archive/`,
   each named `YYYY-MM-DD-<name>` with seven distinct dates, is loaded by `ui::load` with a
   `Config` whose `archived_count` is 3
-- **THEN** `changes.archived` holds exactly 3 entries, the three most recent by date
-- **AND** loading the same tree with `archived_count` 7 yields 7, so the value is read from
-  the `Config` rather than being a literal inside `load`
+- **THEN** `changes.archived` is empty and `changes.archived_total` is 7
+- **AND** loading the same tree with `archived_count` 7, and again with 0, yields exactly the
+  same `Dashboard`, so the key is inert rather than read
+- **AND** `sections.collapsed` holds exactly `SectionKey::Archived`, `targets()` names the
+  archived section, and rendering at 120x20 and at 60x20 shows `No active changes` and then
+  `> > archived (7)` and no archived name — the active section's count is zero so its message
+  row stands above, and the archived header is target 0 and therefore carries the cursor, so
+  its selection marker and its collapsed glyph are both `>` (Decision 4's documented collision)
+- **AND** `needs_archived_refresh()` is false, so a session that never opens the archive never
+  requests it
+
+#### Scenario: File mode opens the archive with no binary present
+
+- **WHEN** `ui::run_wired` is driven at the wiring tier over a scratch repository whose
+  archive holds four dated directories, with the binary probe resolving **nothing** — no
+  configured `openspec_bin`, nothing on the injected `PATH`, no nvm tree, and an
+  `npm prefix -g` hook returning nothing — and an event source that presses `Space` on the
+  archived header and then `q`
+- **THEN** the final dashboard's `changes.archived` holds all four changes with their schemas
+  and task counts resolved, and `archived_total` is 4
+- **AND** the rendered list at 120x20 and at 60x20 holds `  v archived (4)` followed by the
+  four rows, so the archive is reachable with no `openspec` binary installed
+- **AND** `file_mode` is true and the header carries its `file mode` badge, so the pane is in
+  the mode this scenario is about rather than accidentally resolving a binary
+- **AND** the same run with the probe resolving a scratch `openspec` program leaves
+  `changes.archived` empty until the worker answers, so `Full` at startup is the file-mode
+  branch and not the general one
 
 #### Scenario: Loading writes nothing
 

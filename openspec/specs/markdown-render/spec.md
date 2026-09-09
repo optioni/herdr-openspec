@@ -581,8 +581,8 @@ A block quote's every line, continuations included, SHALL be prefixed `> ` and c
 `> > `.
 
 A thematic break SHALL be a line of `-` repeated to fill the width exactly, carrying
-`Face::plain()` — the same ASCII rule `change-rows`' archived separator uses, rather than a
-box-drawing character.
+`Face::plain()` — the same ASCII rule `change-rows`' section headers use for their fold
+glyphs, rather than a box-drawing character.
 
 The parser SHALL be configured with
 `pulldown_cmark::Options::ENABLE_TABLES | pulldown_cmark::Options::ENABLE_STRIKETHROUGH`,

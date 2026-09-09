@@ -166,10 +166,21 @@ sleep, join a thread, or wait on a channel:
 
 ```rust
 pub trait Refresher {
-    fn request(&mut self, selection: Selection);
+    fn request(&mut self, selection: Selection, archived: ArchivedScope);
     fn take_result(&mut self) -> Option<RefreshResult>;
 }
 ```
+
+`archived: ArchivedScope` is `list-sections`' addition and carries the archived section's
+fold state to the worker on every request, because the section can be folded and unfolded at
+any moment and the scope is therefore a property of the cycle rather than of the worker. It
+is `Dashboard::archived_scope()` — `Full` when the archived section is effectively open,
+`Names` when it is not. `dashboard-loop`'s loop requirement is what reads it, at **both** of
+its `request` call sites — step 2, the `refresh.requested` path, and step 3, the
+`fs.drain()` → `watch::invalidate` path — since a watch event that arrives while the archive
+is open must resolve it too. The two internal
+values a request carries SHALL be one named value, `refresh::Request { selection,
+archived }`, so the folding rule below has one thing to fold.
 
 `RefreshResult` SHALL carry exactly three variants:
 
@@ -215,12 +226,17 @@ and never becomes a queue. The unbounded `mpsc::Sender` the landed implementatio
 a hung `openspec` accumulate one queued cycle per debounce window for as long as the child
 hangs, every one of which then runs in series when it finally answers.
 
+A remembered `Selection::All` SHALL carry the `ArchivedScope` of the **most recent**
+suppressed request, not the scope of the request that first set it: the scope describes what
+the pane looks like now, and a stale one would resolve an archive the reader has since folded
+or leave folded an archive they have since opened.
+
 A cycle SHALL be considered answered when its **`Merged`** result arrives, since the worker
 answers each request twice, and also when a `Stopped` is latched.
 
 `refresh::none()` SHALL return the inert implementation: `request` records nothing and does
 nothing, `take_result` is always `None`. `refresh::start(repo: Option<&Path>, cli:
-Option<Arc<dyn OpenspecCli>>, archived_count: usize) -> Box<dyn Refresher>` SHALL return the
+Option<Arc<dyn OpenspecCli>>) -> Box<dyn Refresher>` SHALL return the
 inert implementation when either argument is `None`, so a machine with no `openspec` binary
 installed at all runs the landed file-only dashboard with no worker and no thread. The inert
 implementation SHALL never report `Stopped`: it has no worker to lose.
@@ -257,8 +273,8 @@ implementation SHALL never report `Stopped`: it has no worker to lose.
 
 - **WHEN** a real `Refresher` over a worker that has not yet answered is given
   `Selection::Only({"alpha"})`, then `Selection::Only({"beta"})`, then
-  `Selection::Only({"gamma"})`
-- **THEN** exactly **one** selection reached the worker's request channel, asserted on the
+  `Selection::Only({"gamma"})`, each with `ArchivedScope::Names`
+- **THEN** exactly **one** request reached the worker's request channel, asserted on the
   channel's own contents
 - **AND** after the outstanding cycle's `Merged` result is taken, a fourth `request` does
   reach the worker, so the suppression is per-cycle and not permanent
@@ -266,12 +282,16 @@ implementation SHALL never report `Stopped`: it has no worker to lose.
 #### Scenario: A forced refresh outstanding behind a narrower one is not lost
 
 - **WHEN** a real `Refresher` over a worker that has not yet answered is given
-  `Selection::Only({"alpha"})` and then `Selection::All`, and the outstanding cycle then
-  answers `Files` followed by `Merged`
-- **THEN** the worker's request channel receives `Selection::Only({"alpha"})` and then,
-  after the `Merged`, exactly one `Selection::All`
+  `(Selection::Only({"alpha"}), Names)` and then `(Selection::All, Names)` and then
+  `(Selection::All, Full)`, and the outstanding cycle then answers `Files` followed by
+  `Merged`
+- **THEN** the worker's request channel receives `Request { Selection::Only({"alpha"}),
+  Names }` and then, after the `Merged`, exactly one `Request { Selection::All, Full }`
 - **AND** it receives no further request, so `r` pressed five times while a cycle is
   outstanding costs one extra cycle rather than five
+- **AND** the remembered request carries `Full` rather than the `Names` of the first
+  suppressed one, so the archive the reader opened while the cycle was outstanding is the
+  archive the next cycle resolves
 
 ### Requirement: The worker answers one request with the file result then the merged one
 
@@ -282,8 +302,8 @@ remains the crate's only spawn site, checked tree-wide by `NOSPAWN-GREP`.
 
 For each request the worker SHALL, in this order:
 
-1. run `changes::from_files(repo, archived_count)` and send `RefreshResult::Files(files)`;
-2. run `changes::from_cli_cached(cli, repo, &selection, &mut cache)` against a `CliCache` it
+1. run `changes::from_files(repo, request.archived)` and send `RefreshResult::Files(files)`;
+2. run `changes::from_cli_cached(cli, repo, &request.selection, &mut cache)` against a `CliCache` it
    owns for its whole lifetime, and send
    `RefreshResult::Merged(changes::merge(files, cli_changes))`.
 
@@ -291,12 +311,19 @@ Sending the file result **before** the CLI call is what makes the dual-source mo
 mechanical rather than described: the cheap, always-available answer is on the channel within
 a millisecond, and the authoritative one arrives 200–400ms later and replaces it.
 
-Before starting a cycle the worker SHALL drain any further queued requests and fold them with
-`Selection::union`, in a **named private function** — `drain_and_fold(first: Selection, rx:
-&Receiver<Selection>) -> Selection` — so the rule is provable single-threaded, by handing that
-function a receiver whose sender has already queued two requests and been dropped. A folding
-rule proved only through a live worker is a rule proved by whichever interleaving happened to
-occur, which is the same defect as a timing assertion wearing different clothes.
+Before starting a cycle the worker SHALL drain any further queued requests and fold them in a
+**named private function** — `drain_and_fold(first: Request, rx: &Receiver<Request>) ->
+Request` — so the rule is provable single-threaded, by handing that function a receiver whose
+sender has already queued two requests and been dropped. A folding rule proved only through a
+live worker is a rule proved by whichever interleaving happened to occur, which is the same
+defect as a timing assertion wearing different clothes.
+
+The fold SHALL combine the two fields by **different** rules, and that difference is the
+whole of `list-sections`' change here: `selection` folds with `Selection::union`, because a
+cycle that answers about too many changes is merely wasteful, while `archived` takes the
+**last** request's value, because it describes the pane's current fold and an older value is
+simply wrong. Folding `archived` with a union-like "widest wins" rule would resolve an archive
+the reader had already folded, on every cycle, for the rest of the session.
 
 When the request channel is disconnected — the `Refresher` was dropped — the worker SHALL
 return, and when the result channel is disconnected it SHALL return rather than continue
@@ -309,7 +336,7 @@ and `Box<dyn Refresher>` deliberately exposes only the non-blocking `take_result
 
 ```rust
 #[cfg(test)]
-pub(crate) fn worker_for_test(repo, cli, archived_count)
+pub(crate) fn worker_for_test(repo, cli)
     -> (Box<dyn Refresher>, Receiver<RefreshResult>, Receiver<()>);
 ```
 
@@ -423,6 +450,30 @@ naming `thread::spawn`, and no file under `src/ui/` SHALL name `thread::spawn`, 
 - **AND** the fake `OpenspecCli` confirms no command other than `list --json` and
   `instructions apply --change <n> --json` was run, so no `openspec validate`, no write, and
   no `--fix` reached the tree
+
+#### Scenario: The scope on the request is the scope the file tier runs under
+
+- **WHEN** a real worker over a scratch repository whose archive holds four dated directories
+  is given one request carrying `ArchivedScope::Names` and, once that cycle has answered,
+  a second carrying `ArchivedScope::Full`
+- **THEN** the first cycle's `Files` and `Merged` results both carry `archived` empty and
+  `archived_total` 4
+- **AND** the second cycle's both carry four archived changes and `archived_total` 4
+- **AND** neither cycle records a problem, and the `active` list is equal across all four
+  results, so the scope reached `from_files` and changed nothing else
+
+#### Scenario: `drain_and_fold` unions selections and takes the last scope
+
+- **WHEN** `drain_and_fold` is called single-threaded with a first request of
+  `Request { Selection::Only({"alpha"}), Full }` and a receiver whose sender has queued
+  `Request { Selection::Only({"beta"}), Names }` and then
+  `Request { Selection::Only({"gamma"}), Names }` and been dropped
+- **THEN** the returned request's `selection` is `Selection::Only({"alpha", "beta", "gamma"})`
+  and its `archived` is `Names`
+- **AND** the same call with the two queued requests carrying `Names` then `Full` returns
+  `Full`, so the rule is "last wins" and not "widest wins"
+- **AND** `drain_and_fold` with an empty, dropped receiver returns its `first` argument
+  unchanged, both fields included
 
 ### Requirement: The CLI-merge tier engages regardless of the pane process's own working directory
 
