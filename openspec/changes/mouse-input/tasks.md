@@ -606,7 +606,7 @@ which the schema forbids. The evidence is a negative control instead.
 ## 12. Change Review
 <!-- kind: operational -->
 
-- [ ] 12.1 CHECK: Dispatch an independent reviewer — not a fork of the implementing session
+- [x] 12.1 CHECK: Dispatch an independent reviewer — not a fork of the implementing session
       — against proposal.md, all eight spec files, design.md, and the diff. Concentration
       points for this change: that every one of the 84 spec scenarios names a test that
       would go red if its behaviour were deleted; that `mouse_action` is genuinely reached
@@ -614,8 +614,54 @@ which the schema forbids. The evidence is a negative control instead.
       (`apply`'s match and `no_action_mutates_changes`' array) agree; that no mouse gesture
       reaches the launcher; and that the two documents and the gate script name the same six
       confined functions.
+      **Dispatched:** the repository's `outside-in-tdd-reviewer` agent, in its own session
+      rather than a fork of this one, against `proposal.md`, all eight spec files,
+      `design.md`, `tasks.md`, `planning-review.md`, and `git diff baa22c7..HEAD`. It
+      reported findings and edited nothing. Concentration points 2, 3, 4 and 5 all hold; it
+      re-ran every gate and every tier itself and found them green. Its two substantive
+      findings were both established **by mutation** — it changed the production code, showed
+      the whole suite stayed green, and named the missing assertion — which is the standard
+      this project's own review asks for and is why they are acted on rather than argued
+      with.
 - [ ] 12.2 CHANGE: Fix every CRITICAL, resolve or accept each WARNING with a one-line
       reason, note SUGGESTIONs, and re-run affected tests.
+
+      **CRITICAL — `dashboard-loop`'s "the area used SHALL be the one just drawn" was not
+      pinned. Fixed.** `a_resize_before_a_click_costs_one_frame` chose the point `(100, 4)`,
+      which at 120x40 is the detail region's *content area* and resolves to `Action::Ignore`
+      via `Zone::Detail` — the same answer the 60x20 frame gives via `Zone::Outside`. The
+      test therefore held under a `run_loop` that had pinned the startup frame's geometry
+      forever. Reproduced here before fixing: mutating `area = completed.area;` to
+      `if area == Rect::ZERO { area = completed.area; }` left **all 69 driver tests and all
+      1213 lib tests green**. The test now presses `(62, 3)` — the third `tdd` tab cell,
+      painted at columns 60-67 of the 120-column frame and outside the 60-column one — so
+      stale geometry yields `SelectTab(2)` and moves `detail.tab`, fresh geometry yields
+      `Ignore`. It asserts `detail.tab` is unmoved, `LoopSummary { frames: 3, polls: 3 }`,
+      and derives the cell's own column rather than trusting the number. Verified RED against
+      the mutation (`left: 2, right: 0`) and GREEN with it reverted.
+
+      **WARNING — the wheel over the detail region's tab bar was not pinned. Fixed.**
+      `mouse-input` states the region is the whole region, "its header row and its **tab
+      bar** as well as its content area". Deleting `Zone::DetailTab { .. }` from both wheel
+      arms left **all 1213 tests green** (only the recorded `wiring::` flake failed).
+      `the_wheel_acts_over_a_border_and_not_the_chrome` now asserts `ScrollUp` **and**
+      `ScrollDown` at four points of the detail region — its own border column, its header
+      row, its tab-bar row, and its content area. Verified RED against the mutation and
+      GREEN with it reverted.
+
+      **WARNING — leg 5c's *name* half had no checked-in plant. Fixed.** `tests/gate-controls.toml`
+      carried only `wired-mouse-problem-hardcoded`, which drives leg 5c's *literal* half
+      (`mouse_problem: None`); design.md → Test Strategy names a control for the name half
+      too, and task 8.5 narrowed five rows to four without recording the drop. Added
+      `wired-mouse-problem-renamed`, planting `mouse_problem: capture_reason(),` — which
+      matches neither `None` nor `mouse_problem(` — expecting `WIRED FAIL: leg 5c`. Controls
+      go from 57 to **58**, all passing.
+
+      **WARNING — `proposal.md` still claimed `WIRED`'s list grows to fourteen. Fixed.** Both
+      its Modified Capabilities bullet and its Impact bullet were left over from the draft the
+      planning review corrected; `design.md`, the `quality-gates` delta and the shipped
+      `wired.sh` all do the opposite. Rewritten to state leg 5c and that leg 1 stays at
+      thirteen, with the reason.
 - [ ] 12.3 VERIFY: Confirm no blocking or unowned finding remains.
 
 ## 13. Lint & Verify

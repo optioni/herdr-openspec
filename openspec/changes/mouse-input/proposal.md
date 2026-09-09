@@ -91,9 +91,13 @@ no row of the plan ever asked whether the pane had a second input device.
   either route, independently of each other.
 - `change-rows`: the row a point lands on is the row drawn there — one shared derivation of
   the scrolled slice, used by both the draw path and the hit test.
-- `quality-gates`: `WIRED`'s required-name list grows to fourteen with `mouse_problem`, so a
-  `run` that stops threading the refused-capture reason fails the gate rather than shipping
-  an unreachable problem row.
+- `quality-gates`: `WIRED` gains a body-scoped **leg 5c** — `pub fn run()`'s own body must
+  name `mouse_problem(` and must not hardcode `mouse_problem: None` — so a `run` that stops
+  threading the refused-capture reason fails the gate rather than shipping an unreachable
+  problem row. Leg 1's required-name list stays at **thirteen**: a fourteenth name there
+  would be satisfied by `pub struct Startup`'s own field declaration, which sits inside the
+  production slice leg 1 greps, leaving the gate green on exactly the defect it was added
+  for. Corrected during planning review; measured again during implementation.
 
 ## Impact
 
@@ -102,9 +106,11 @@ no row of the plan ever asked whether the pane had a second input device.
   nine-file `PURE` list every view gate sweeps is unchanged. Nothing under `src/` outside
   `src/ui/` is touched.
 - **Checked-in verification files:** `scripts/gates/noraw-grep.sh` (the confinement pattern
-  grows by the two capture commands), `scripts/gates/wired.sh` (the required-name list grows
-  to fourteen), `tests/gate-controls.toml` (a planted defect for each), `tests/doc_contract.rs`
-  (two new bindings), and `tests/degraded-coverage.toml` (the refused-capture row).
+  grows by the two capture commands, and its positive control becomes per-name),
+  `scripts/gates/wired.sh` (a body-scoped leg 5c, its own positive control, and leg 1
+  unchanged at thirteen), `tests/gate-controls.toml` (a planted defect for each),
+  `tests/doc_contract.rs` (two new bindings), and `tests/degraded-coverage.toml` (the
+  refused-capture row).
 - **Docs:** `SPEC.md` → Keys gains a mouse table and the drag-to-select cost, and
   → Degraded states gains the refused-capture row; `AGENTS.md` → the terminal-seam rule's
   list of confined functions grows from four names to six, and § Current repo state's

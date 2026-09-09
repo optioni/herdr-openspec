@@ -3636,6 +3636,35 @@ mod tests {
                 "({column}, {row})"
             );
         }
+
+        // The region under the wheel is the **whole** region — for the detail
+        // region, its header row and its tab bar as well as its content area,
+        // and its border. Without these four the wheel arms could stop
+        // answering for `Zone::DetailTab` entirely with every test still green.
+        let detail_border = 40u16;
+        let header_row = tab_bar_row(WIDE, Route::List).y - 1;
+        let bar_row = tab_bar_row(WIDE, Route::List).y;
+        for (column, row, label) in [
+            (detail_border, 5u16, "the detail region's own border column"),
+            (50, header_row, "the detail region's header row"),
+            (50, bar_row, "the detail region's tab-bar row"),
+            (50, 10, "the detail content area"),
+        ] {
+            assert_eq!(
+                mouse_action(&dashboard, WIDE, &m(MouseEventKind::ScrollUp, column, row)),
+                Action::ScrollUp,
+                "{label} at ({column}, {row})"
+            );
+            assert_eq!(
+                mouse_action(
+                    &dashboard,
+                    WIDE,
+                    &m(MouseEventKind::ScrollDown, column, row)
+                ),
+                Action::ScrollDown,
+                "{label} at ({column}, {row})"
+            );
+        }
     }
 
     #[test]
@@ -4198,9 +4227,26 @@ mod tests {
     #[test]
     fn a_resize_before_a_click_costs_one_frame() {
         // `dashboard-loop`: "A resize between the draw and the click costs one
-        // frame, not a panic". Column 100 exists in the 120-column frame and
-        // does not exist in the 60-column one drawn after the resize.
-        let mut dashboard = mouse_dashboard(3, 0);
+        // frame, not a panic", and — the half this test exists for — "the area
+        // used SHALL be the one just drawn, never a stored size and never the
+        // size at startup".
+        //
+        // The point is chosen to **discriminate**, which the obvious one does
+        // not. At 120x40 the detail region's tab bar is row 3 spanning columns
+        // 41-118, and the third `tdd` cell (` design `) is painted at columns
+        // 60-67 — past the 60-column frame's right edge entirely. So:
+        //
+        //   - resolved against the **stale** 120-column frame, (62, 3) is a
+        //     drawn tab cell and yields `Action::SelectTab(2)`, moving
+        //     `detail.tab` to 2;
+        //   - resolved against the **fresh** 60-column frame, column 62 is
+        //     outside the frame, `Zone::Outside`, and yields `Action::Ignore`.
+        //
+        // A point in the detail *content* area would not discriminate: it
+        // resolves to `Action::Ignore` under both geometries, one via
+        // `Zone::Detail` and the other via `Zone::Outside`, so the assertion
+        // would hold on a loop that had pinned the startup frame forever.
+        let mut dashboard = tdd_dashboard();
         let backend = ShrinkingBackend {
             inner: TestBackend::new(120, 40),
             drawn: std::cell::Cell::new(false),
@@ -4210,8 +4256,8 @@ mod tests {
             Ok(Some(Event::Resize(60, 20))),
             Ok(Some(crate::testutil::mouse(
                 MouseEventKind::Down(MouseButton::Left),
-                100,
-                4,
+                62,
+                3,
             ))),
             Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
         ]);
@@ -4226,6 +4272,27 @@ mod tests {
             launcher: &mut *launcher,
         };
         let before = dashboard.clone();
+        // The geometry this test's discrimination rests on, derived rather than
+        // asserted from memory: the third cell really is painted past column 59.
+        let bar = tab_bar_row(WIDE, Route::List);
+        let third = tab_cell_start(&dashboard, WIDE, Route::List, 2);
+        assert!(
+            third >= 60 && bar.y == 3,
+            "the fixture must place the third tab cell past the 60-column frame: \
+             cell at {third}, bar row {}",
+            bar.y
+        );
+        assert_eq!(
+            mouse_action(&dashboard, WIDE, &left(62, 3)),
+            Action::SelectTab(2),
+            "against the 120-column frame the press is a tab click"
+        );
+        assert_eq!(
+            mouse_action(&dashboard, NARROW, &left(62, 3)),
+            Action::Ignore,
+            "against the 60-column frame it is outside the frame"
+        );
+
         let summary = run_loop(
             &mut terminal,
             &mut dashboard,
@@ -4236,11 +4303,20 @@ mod tests {
         )
         .expect("the loop completes without panicking");
 
-        assert_eq!(summary.polls, 3);
         assert_eq!(
-            dashboard.selected, before.selected,
-            "column 100 falls outside the 60-column frame, so the press is Ignore"
+            summary,
+            LoopSummary {
+                frames: 3,
+                polls: 3
+            },
+            "the resize costs one frame, not a panic"
         );
+        assert_eq!(
+            dashboard.detail.tab, before.detail.tab,
+            "the press was resolved against the 60-column frame drawn after the \
+             resize, not against the 120-column frame drawn before it"
+        );
+        assert_eq!(dashboard.selected, before.selected);
     }
 
     #[test]

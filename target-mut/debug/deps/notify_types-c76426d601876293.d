@@ -1,0 +1,10 @@
+/Users/juusopiikkila/Code/herdr-openspec/target-mut/debug/deps/notify_types-c76426d601876293.d: /Users/juusopiikkila/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-types-2.1.0/src/lib.rs /Users/juusopiikkila/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-types-2.1.0/src/debouncer_full.rs /Users/juusopiikkila/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-types-2.1.0/src/debouncer_mini.rs /Users/juusopiikkila/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-types-2.1.0/src/event.rs
+
+/Users/juusopiikkila/Code/herdr-openspec/target-mut/debug/deps/libnotify_types-c76426d601876293.rlib: /Users/juusopiikkila/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-types-2.1.0/src/lib.rs /Users/juusopiikkila/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-types-2.1.0/src/debouncer_full.rs /Users/juusopiikkila/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-types-2.1.0/src/debouncer_mini.rs /Users/juusopiikkila/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-types-2.1.0/src/event.rs
+
+/Users/juusopiikkila/Code/herdr-openspec/target-mut/debug/deps/libnotify_types-c76426d601876293.rmeta: /Users/juusopiikkila/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-types-2.1.0/src/lib.rs /Users/juusopiikkila/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-types-2.1.0/src/debouncer_full.rs /Users/juusopiikkila/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-types-2.1.0/src/debouncer_mini.rs /Users/juusopiikkila/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-types-2.1.0/src/event.rs
+
+/Users/juusopiikkila/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-types-2.1.0/src/lib.rs:
+/Users/juusopiikkila/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-types-2.1.0/src/debouncer_full.rs:
+/Users/juusopiikkila/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-types-2.1.0/src/debouncer_mini.rs:
+/Users/juusopiikkila/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/notify-types-2.1.0/src/event.rs:

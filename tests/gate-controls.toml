@@ -403,6 +403,15 @@ expect = "WIRED FAIL: leg 5c"
 why = "quality-gates (mouse-input): a run that stopped threading the guard's reason ships a refused-capture problem row that can never appear, with cargo test --all-features entirely green — every test constructs its own Startup and drives run_wired directly. Measured: leg 1 with mouse_problem as a fourteenth name is GREEN against this same tree, because pub struct Startup's own field declaration sits inside the production slice leg 1 greps; that is why this is a body-scoped leg 5c and not a leg-1 entry"
 
 [[control]]
+id = "wired-mouse-problem-renamed"
+script = "wired.sh"
+plant_file = "src/ui/mod.rs"
+plant_find = "mouse_problem: guard.mouse_problem(),"
+plant_replace = "mouse_problem: capture_reason(),"
+expect = "WIRED FAIL: leg 5c"
+why = "quality-gates (mouse-input): leg 5c's NAME half, the other of its two. `wired-mouse-problem-hardcoded` drives only the literal half (`mouse_problem: None`); a run that stopped calling the guard at all — renaming the method, or reaching for some other source — keeps the field, matches neither `None` nor `mouse_problem(`, and would pass a gate that checked only the literal. Both halves are needed on leg 5's exact terms, and design.md -> Test Strategy names both as controls"
+
+[[control]]
 id = "nosleep-unguarded"
 script = "nosleep.sh"
 plant_file = "src/ui/list.rs"
