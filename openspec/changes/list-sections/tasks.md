@@ -129,11 +129,11 @@ are whole-change gates by definition and cannot precede the work they gate.
 ## 10. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 10.1 CHECK: Inspect the intended verification commands and affected tiers — `make check` runs format, lint, gates, test, and coverage, and is the single gate this repository ends on.
-- [ ] 10.2 VERIFY: `cargo fmt --all -- --check` — clean.
-- [ ] 10.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
-- [ ] 10.4 VERIFY: `make gates` — every gate OK.
-- [ ] 10.5 VERIFY: `cargo test --all-features` — green against check E's baseline, with the two known `ui::tests::wiring` intermittents re-run before being treated as a regression.
-- [ ] 10.6 VERIFY: `cargo llvm-cov --fail-under-lines 80` and the production-slice floor beside it — no floor lowered, no exclusion added. Check G leaves roughly eight uncovered production lines of slack, so run this before concluding.
-- [ ] 10.7 VERIFY: `make check` as the single gate, naming the failing sub-command if it fails.
-- [ ] 10.8 VERIFY: `openspec validate list-sections --strict` — valid.
+- [x] 10.1 CHECK: Inspect the intended verification commands and affected tiers — `make check` runs format, lint, gates, test, and coverage, and is the single gate this repository ends on.
+- [x] 10.2 VERIFY: `cargo fmt --all -- --check` — clean.
+- [x] 10.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
+- [x] 10.4 VERIFY: `make gates` — every gate OK.
+- [x] 10.5 VERIFY: `cargo test --all-features` — green against check E's baseline, with the two known `ui::tests::wiring` intermittents re-run before being treated as a regression.
+- [x] 10.6 VERIFY: `cargo llvm-cov --fail-under-lines 80` and the production-slice floor beside it — no floor lowered, no exclusion added. Check G leaves roughly eight uncovered production lines of slack, so run this before concluding.
+- [x] 10.7 VERIFY: `make check` as the single gate, naming the failing sub-command if it fails.
+- [x] 10.8 VERIFY: `openspec validate list-sections --strict` — valid.
