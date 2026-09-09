@@ -156,6 +156,21 @@ pub fn run_loop<B: Backend, E: EventSource>(
                     if matches!(mouse.kind, MouseEventKind::Moved | MouseEventKind::Drag(_)) {
                         draw = false;
                     }
+                    // One consequence the skipped draw carries, named here because
+                    // it is the exemption's own cost: `drive_live_tier` still runs
+                    // on a skipped-draw iteration, so an adopted `ChangeSet` can
+                    // change `targets()` while the frame on screen predates that
+                    // adopt — and a click read at the end of that same iteration
+                    // resolves against rows the reader is not looking at. Without
+                    // the exemption the window does not exist, because an adopt is
+                    // always followed by a draw before the next event is read.
+                    // Bounded by the rule design.md -> Risks already states:
+                    // `Action::Click` names a `Target`, never a row index, and
+                    // `apply` does nothing when that target is absent from
+                    // `targets()`. A target that still exists and now names a
+                    // different change does move the cursor — accepted, at the
+                    // width of one adopt landing between a pointer motion and a
+                    // click, and corrected by the very next frame.
                     mouse_action(dashboard, area, mouse)
                 }
                 _ => action_for(&event, dashboard.filter.active),
@@ -3906,6 +3921,7 @@ mod tests {
             (0, 1),                                 // the list region's border
             (41, 2),                                // the detail region's header row
             (41, 10),                               // the detail content area
+            (10, 0),                                // the frame's header
             (10, 39),                               // the frame's footer
             (200, 10),                              // past the frame
         ];

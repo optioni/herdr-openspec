@@ -623,7 +623,7 @@ which the schema forbids. The evidence is a negative control instead.
       the whole suite stayed green, and named the missing assertion — which is the standard
       this project's own review asks for and is why they are acted on rather than argued
       with.
-- [ ] 12.2 CHANGE: Fix every CRITICAL, resolve or accept each WARNING with a one-line
+- [x] 12.2 CHANGE: Fix every CRITICAL, resolve or accept each WARNING with a one-line
       reason, note SUGGESTIONs, and re-run affected tests.
 
       **CRITICAL — `dashboard-loop`'s "the area used SHALL be the one just drawn" was not
@@ -662,6 +662,46 @@ which the schema forbids. The evidence is a negative control instead.
       planning review corrected; `design.md`, the `quality-gates` delta and the shipped
       `wired.sh` all do the opposite. Rewritten to state leg 5c and that leg 1 stays at
       thirteen, with the reason.
+
+      **SUGGESTIONs — four acted on, one recorded.**
+      - *design.md's matrix named three tests that do not exist* —
+        `unwinding_still_restores`, `restore_then_delegates_last`,
+        `render_thread_restores`. This is the same defect the planning review's fourth
+        CRITICAL caught (a matrix filter matching zero tests exits 0 and proves nothing),
+        reappearing in the three rows group 1 touched: task 1.1 deliberately kept the
+        existing test names and the matrix was never updated to follow. Repointed at
+        `a_panic_still_restores`, `restore_then_restores_before_delegating`, and
+        `a_panic_on_the_render_thread_still_restores`, and each filter re-run to confirm it
+        matches more than zero: **1**, **2**, **1 passed**.
+      - *`clicks_that_address_nothing_are_inert` omitted the frame's header row*, which the
+        left-click table names alongside the footer. `(10, 0)` added.
+      - *`non_key_events_are_ignored` asserted neither `Paste("1")` nor `Paste("a")`*, though
+        `dashboard-loop`'s scenario names both with their own AND clauses ("does not switch
+        tabs", "**does not launch an agent**"). Pre-existing, but this change's MODIFIED
+        `dashboard-loop` delta re-asserts that scenario, so its proof is in scope. Both
+        added. **This edits one of the five tests task 6.4 requires to pass unmodified**, and
+        the tension is worth naming: 6.4's subject is that no key test was *weakened* to
+        accommodate the mouse, and design.md's own matrix row for this scenario already
+        directs that it be "extended". Four of the five are untouched; the fifth is
+        strengthened by two assertions that pass equally before and after this change.
+      - *Decision 12's skipped draw opens a window the design did not name*: `drive_live_tier`
+        still runs on a skipped-draw iteration, so an adopted `ChangeSet` can change
+        `targets()` while the frame on screen predates the adopt. Named in `run_loop` and in
+        design.md → Decision 12, with its bound — `Action::Click` names a `Target`, never an
+        index — and its residue: a target that still exists and now names a different change
+        does move the cursor. No code change; the reviewer confirmed the frame accounting
+        itself is correct.
+      - *Coverage sits exactly on the production floor* — 96.00% (4371/4553) against a 96%
+        floor, no margin, with `src/ui/terminal.rs` at 32/81 as design.md predicted for the
+        two new deliberately-uncovered `CrosstermOps` bindings. Recorded, not acted on: the
+        floor is met and the rule is to add tests rather than lower it, but the next
+        uncovered production line anywhere in the crate fails the gate.
+
+      **Re-run after the fixes:** `cargo test --all-features --lib -- --test-threads=1` →
+      **1213 passed**, 0 failed (the test *count* is unchanged — every repair strengthened an
+      existing test rather than adding one, which is the point);
+      `cargo test --test gate_controls` → **4 passed**, 58 controls; clippy and `cargo fmt`
+      clean; `openspec validate mouse-input --strict` valid.
 - [ ] 12.3 VERIFY: Confirm no blocking or unowned finding remains.
 
 ## 13. Lint & Verify

@@ -2326,6 +2326,22 @@ mod tests {
                     Action::Ignore,
                     "a paste of the single character r must not refresh or type, filtering={filtering}"
                 );
+                // `dashboard-loop` names these two explicitly, with their own AND
+                // clauses — "a paste whose text is `1` does not switch tabs" and one
+                // whose text is `a` "does not launch an agent". Added by
+                // `mouse-input`'s Change Review: the scenario has asserted them since
+                // `agent-launch` and the test never did.
+                assert_eq!(
+                    action_for(&Event::Paste("1".to_string()), filtering),
+                    Action::Ignore,
+                    "a paste of the single character 1 must not switch tabs, filtering={filtering}"
+                );
+                assert_eq!(
+                    action_for(&Event::Paste("a".to_string()), filtering),
+                    Action::Ignore,
+                    "a paste of the single character a must not launch an agent, \
+                     filtering={filtering}"
+                );
                 let mouse = Event::Mouse(MouseEvent {
                     kind: MouseEventKind::Moved,
                     column: 0,

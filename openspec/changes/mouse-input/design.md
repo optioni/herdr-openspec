@@ -217,10 +217,10 @@ through `run_loop` with a scripted source.
 | Raw mode fails and nothing else is attempted | `terminal::tests::guard::enable_raw_failure_attempts_nothing_further` (`src/ui/terminal.rs:245`), extended with the `enable_mouse` assertion | Unit | replaced: double | `cargo test --lib enable_raw_failure` |
 | The alternate screen fails and raw mode is unwound | `terminal::tests::guard::alternate_screen_failure_unwinds_raw_mode` (`src/ui/terminal.rs:254`), extended with the `enable_mouse` assertion | Unit | replaced: double | `cargo test --lib alternate_screen_failure` |
 | Mouse capture fails and the guard is still returned | `terminal::tests::guard::mouse_failure_still_returns_a_guard` | Unit | replaced: double | `cargo test --lib mouse_failure` |
-| Unwinding past the guard still restores | `terminal::tests::guard::unwinding_still_restores` — updated to the six-entry list | Unit | replaced: `TerminalOps` double | `cargo test --lib unwinding_still_restores` |
-| The hook restores before the previous hook runs | `terminal::tests::hook::restore_then_delegates_last` — updated to lead with `disable_mouse` | Unit | replaced: double | `cargo test --lib restore_then` |
+| Unwinding past the guard still restores | `terminal::tests::guard::a_panic_still_restores` — updated to the six-entry list | Unit | replaced: `TerminalOps` double | `cargo test --lib a_panic_still_restores` |
+| The hook restores before the previous hook runs | `terminal::tests::guard::restore_then_restores_before_delegating` — updated to lead with `disable_mouse` | Unit | replaced: double | `cargo test --lib restore_then` |
 | A panic on a worker thread restores nothing | existing test, asserted **unchanged** at `["previous_hook"]` — the check that capture gained no off-thread exception | Unit | replaced: double | `cargo test --lib worker_thread` |
-| A panic on the render thread still restores | `terminal::tests::hook::render_thread_restores` — updated to lead with `disable_mouse` | Unit | replaced: double | `cargo test --lib render_thread_restores` |
+| A panic on the render thread still restores | `terminal::tests::guard::a_panic_on_the_render_thread_still_restores` — updated to lead with `disable_mouse` | Unit | replaced: double | `cargo test --lib a_panic_on_the_render_thread` |
 | The refusal touches no terminal operation | `ui::tests::enter_if_terminal_*` — the `Ok` arm's list becomes three entries; the empty-list assertion is unchanged | Unit | replaced: double | `cargo test --lib enter_if_terminal` |
 | Teardown errors are swallowed rather than panicking in Drop | `terminal::tests::guard::teardown_errors_do_not_panic_and_both_are_attempted` (`src/ui/terminal.rs:266`), extended to all three teardown operations | Unit | replaced: double | `cargo test --lib teardown_errors` |
 | A refused capture becomes a leading problem row, below the probe's own | `ui::tests::wiring::a_refused_capture_is_named_last` | Acceptance | replaced: terminal, events, backend, reader, collaborators | `cargo test --lib a_refused_capture` |
@@ -364,6 +364,18 @@ forward so the next click still resolves against what is on screen, and not coun
 skipped frame in `LoopSummary.frames`. Nothing else changes: an ignored **key** still
 redraws, which `dashboard-loop`'s existing "An ignored key redraws and keeps waiting"
 scenario pins and this change must not break.
+
+**The exemption's own cost, named during Change Review rather than discovered later.**
+`drive_live_tier` still runs on a skipped-draw iteration, so an adopted `ChangeSet` can
+change `targets()` while the frame on screen predates that adopt, and a click read at the end
+of that same iteration is resolved against rows the reader is not looking at. Without the
+exemption this window does not exist, because an adopt is always followed by a draw before
+the next event is read. It is bounded by the rule Risks below already states — `Action::Click`
+names a `Target`, never a row index, and `apply` does nothing when that target is absent from
+`targets()` — but that mitigation covers only the *absent*-target case: a target that still
+exists and now names a different change does move the cursor. Accepted at the width of one
+adopt landing between a pointer motion and a click, and corrected by the very next frame,
+which is the same one-frame window Decision 9 already accepts for a resize.
 
 *Alternative A:* accept the redraws and correct the non-goal. Rejected — the pane sits in a
 Herdr split the reader moves a pointer across constantly to reach other panes, and a
