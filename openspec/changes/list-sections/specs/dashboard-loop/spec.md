@@ -1054,8 +1054,10 @@ that index means rather than a change to the value.
 - **AND** loading the same tree with `archived_count` 7, and again with 0, yields exactly the
   same `Dashboard`, so the key is inert rather than read
 - **AND** `sections.collapsed` holds exactly `SectionKey::Archived`, `targets()` names the
-  archived section, and rendering at 120x20 and at 60x20 shows `  > archived (7)` and no
-  archived name
+  archived section, and rendering at 120x20 and at 60x20 shows `No active changes` and then
+  `> > archived (7)` and no archived name — the active section's count is zero so its message
+  row stands above, and the archived header is target 0 and therefore carries the cursor, so
+  its selection marker and its collapsed glyph are both `>` (Decision 4's documented collision)
 - **AND** `needs_archived_refresh()` is false, so a session that never opens the archive never
   requests it
 

@@ -135,12 +135,22 @@ future change that wants live refresh in file mode will find the argument here.
 |---|---|---|---|---|
 | I1 | `specs/list-selection/spec.md` | Scenario *A refresh keeps the cursor on the same change* opened on "three active changes" while its own `selected` 4, "`selected` is 5" and "`visible()` position of 3" clauses only hold for **two**. With three active, `targets()` index 4 is the archived header, not `add-auth`. | Precondition corrected to "two active changes"; every other clause of the scenario was already right and is unchanged. | Group 3's implementer, building the test against the scenario |
 | I2 | `specs/change-rows/spec.md` | Scenario *An archived row drops the progress cell, then the date, as the width falls* named the change row `rows()[1]`, contradicting the same file's own emission requirement: an active section whose count is zero emits a `No active changes` message row *before* the archived header, so the change row is `rows()[2]`. The landed `the_four_message_states_are_distinct` confirms the message/header/item order. | Index corrected to `rows()[2]`, with the two preceding rows named so the scenario states its own row order. The width assertions themselves were right and are unchanged. | Group 5's implementer, building the test against the scenario |
+| I3 | `specs/dashboard-loop/spec.md` | Scenario *Startup counts the archive without resolving it* illustrated the render as `  > archived (7)`, on an archive-only fixture where the archived header is target 0 and so carries the cursor — the real row is `> > archived (7)`, marker and collapsed glyph colliding per Decision 4 — and omitted the `No active changes` row that an empty active section puts above it. | Render clause restated with both rows and the correct marker. The scenario's `archived_total`, inertness and `needs_archived_refresh()` clauses were right and are unchanged. | Group 6's implementer, building the test against the scenario |
 
 **Reviewed Against, updated:** implementation proceeds from `74a0b2e`, which differs from the
 reviewed `1437787` only by this change's own planning artifacts (`git show --stat 74a0b2e`
 touches nothing outside `openspec/changes/list-sections/`). No source, `Makefile`, `SPEC.md`,
 `README.md`, `AGENTS.md`, or archive file moved, so every measurement in `tasks.md`'s check
 table still holds.
+
+**Three scenarios stated numbers that did not add up** (I1, I2, I3 above), each found by the
+implementer building a test against it, in three different spec files and by three different
+mechanisms — a precondition inconsistent with its own conclusions, a row index contradicting
+its own file's emission requirement, and an illustrative render string written without the
+selection marker. None was caught by the four-slice planning review, which checked 68 empirical
+claims against the repository but could not check a scenario's internal arithmetic against
+behaviour that did not exist yet. That is the standing limit of a pre-implementation review, and
+it is why each repair is logged here rather than silently absorbed.
 
 **The wiring-tier intermittents are environmental, not code.** Measured at group 3: the same
 commit runs `ui::tests::` in **4.1s, green**, inside a `/tmp` git worktree and in **33s with
