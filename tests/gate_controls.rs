@@ -683,3 +683,135 @@ fn gate_controls_catch_their_plants() {
         );
     }
 }
+
+/// `mouse-input`'s Change Review, gap 4: `quality-gates` -> "Hardcoding the
+/// mouse-capture reason in `run` fails the gate" carries three clauses. The
+/// first — that `WIRED` exits non-zero on leg 5c — is proved by the checked-in
+/// `wired-mouse-problem-hardcoded` control above, which runs the real script
+/// against a real planted tree.
+///
+/// This proves the **third**: that leg **1** stays green against that same
+/// tree, which is the whole reason leg 5c is body-scoped rather than a
+/// fourteenth leg-1 name. It restates leg 1's own predicate — `code "$MOD" |
+/// grep -q -- "$n"`, a plain substring search over the production slice — and
+/// leg 5c's two halves, against the planted text in memory. No tree copy and no
+/// subprocess: the claim is structural (where `pub struct Startup` sits
+/// relative to the file's first line-anchored `#[cfg(test)]`), so reading the
+/// real file and applying the real plant is the whole of it.
+///
+/// The scenario's remaining clause — that `cargo test --all-features` stays
+/// green against the planted tree — is deliberately **not** checked in: proving
+/// it costs a full suite run on a copied tree per invocation. It was
+/// reproduced by hand and recorded in `tasks.md` 8.3, and it is the weaker of
+/// the two claims anyway, since every test constructs its own `Startup` and
+/// drives `run_wired` directly, which is a property of the tests rather than of
+/// the plant.
+#[test]
+fn leg_one_cannot_see_the_defect_leg_five_c_catches() {
+    const PLANT_FIND: &str = "mouse_problem: guard.mouse_problem(),";
+    const PLANT_REPLACE: &str = "mouse_problem: None,";
+
+    let path = manifest_dir().join("src/ui/mod.rs");
+    let real = std::fs::read_to_string(&path).expect("read src/ui/mod.rs");
+    assert!(
+        real.contains(PLANT_FIND),
+        "the plant's find text is gone from src/ui/mod.rs - this check has no subject"
+    );
+    let planted = real.replace(PLANT_FIND, PLANT_REPLACE);
+
+    // `prod()`: everything before the first line that is exactly `#[cfg(test)]`.
+    let production = |src: &str| -> String {
+        let mut out = String::new();
+        for line in src.lines() {
+            if line == "#[cfg(test)]" {
+                return out;
+            }
+            out.push_str(line);
+            out.push('\n');
+        }
+        out
+    };
+    // Leg 2/5's cut: from `pub fn run()`'s signature to the next column-zero `}`.
+    let run_body = |prod: &str| -> String {
+        let mut out = String::new();
+        let mut inside = false;
+        for line in prod.lines() {
+            if line.starts_with("pub fn run()") {
+                inside = true;
+            }
+            if inside {
+                out.push_str(line);
+                out.push('\n');
+                if line == "}" {
+                    break;
+                }
+            }
+        }
+        out
+    };
+
+    let prod = production(&planted);
+    assert!(
+        !prod.is_empty() && prod.len() < planted.len(),
+        "the production cut must find src/ui/mod.rs's own #[cfg(test)]"
+    );
+
+    // Leg 1's predicate, restated: a slice-wide substring search is SATISFIED by
+    // the planted tree. This is the assertion that makes leg 5c necessary rather
+    // than redundant.
+    assert!(
+        prod.contains("mouse_problem"),
+        "leg 1 would be GREEN against the planted tree - if this ever fails, leg 5c \
+         could safely become a fourteenth leg-1 name"
+    );
+
+    // The stronger form, which is the one that actually carries the argument.
+    // The assertion above is satisfied by the plant's own `mouse_problem: None,`
+    // text, so on its own it would still hold in a tree where the name lived
+    // ONLY inside `run`. Strip every mention from `run`'s body as well: the
+    // production slice still names `mouse_problem`, because `pub struct
+    // Startup`'s own field declaration and `run_wired`'s read of it both sit
+    // above the file's first line-anchored `#[cfg(test)]`.
+    //
+    // That is the structural fact leg 5c exists for, and it is stronger than an
+    // observation about today's layout: it is FORCED. `ui::run` — production
+    // code — constructs a `Startup`, so the declaration cannot move below
+    // `#[cfg(test)]` without the crate failing to compile. Attempted as a
+    // negative control during `mouse-input`'s Change Review: hoisting the file's
+    // first `#[cfg(test)]` above `pub struct Startup` gives `E0422: cannot find
+    // struct ... Startup in this scope`, and renaming the field gives `E0609`.
+    // The assertion below therefore cannot be made to fail by any edit that
+    // leaves the crate compiling — which is the point, and is why leg 5c can
+    // never be replaced by a fourteenth leg-1 name.
+    let gutted = production(&real.replace(PLANT_FIND, ""));
+    let gutted_body = run_body(&gutted);
+    assert!(
+        !gutted_body.contains("mouse_problem"),
+        "the gutted body must name it nowhere: {gutted_body:?}"
+    );
+    assert!(
+        gutted.contains("mouse_problem"),
+        "leg 1 is green even on a `run` that names mouse_problem NOWHERE at all - \
+         the field declaration and run_wired's read are inside the slice it greps"
+    );
+
+    // Leg 5c's two halves, both firing on the same tree.
+    let body = run_body(&prod);
+    assert!(
+        body.contains("pub fn run()") && body.trim_end().ends_with('}'),
+        "the run-body cut failed: {body:?}"
+    );
+    assert!(
+        !body.contains("mouse_problem("),
+        "leg 5c's name half must fire: run's body still names mouse_problem("
+    );
+    assert!(
+        body.contains("mouse_problem: None"),
+        "leg 5c's literal half must fire: run's body does not hardcode None"
+    );
+
+    // And the unplanted tree passes both halves, so neither is vacuous.
+    let real_body = run_body(&production(&real));
+    assert!(real_body.contains("mouse_problem("));
+    assert!(!real_body.contains("mouse_problem: None"));
+}

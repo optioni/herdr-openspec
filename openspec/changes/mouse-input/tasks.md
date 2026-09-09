@@ -697,12 +697,49 @@ which the schema forbids. The evidence is a negative control instead.
         floor is met and the rule is to add tests rather than lower it, but the next
         uncovered production line anywhere in the crate fails the gate.
 
+      **The reviewer's concentration-point-1 verdict: four scenarios of the 84 had no proof
+      that would go red. Three are the findings above. The fourth is closed here.**
+      `quality-gates` → "Hardcoding the mouse-capture reason in `run` fails the gate" carries
+      three clauses. The first is proved by the checked-in `wired-mouse-problem-hardcoded`
+      control. The third — that leg **1** stays green against that same planted tree, which is
+      the entire reason leg 5c is body-scoped — existed only as 8.3's scratch transcript and
+      as prose in the control's `why`. It is now
+      `tests/gate_controls.rs::leg_one_cannot_see_the_defect_leg_five_c_catches`: it reads the
+      real `src/ui/mod.rs`, applies the real plant in memory, restates leg 1's own predicate
+      and leg 5c's two halves, and asserts leg 1 is green while both halves of leg 5c fire.
+      It also asserts the stronger form — leg 1 stays green on a `run` naming `mouse_problem`
+      **nowhere at all** — which turns out to be *forced* rather than merely observed:
+      `ui::run` constructs a `Startup`, so the declaration cannot move below `#[cfg(test)]`
+      without the crate failing to compile. Both attempted negative controls proved that
+      rather than falsifying it (`E0422: cannot find struct ... Startup`, and `E0609` for a
+      renamed field), and the test says so in place rather than claiming a falsifiability it
+      does not have.
+      **The second clause is accepted, not proved:** that `cargo test --all-features` stays
+      green against the planted tree needs a full suite run on a copied tree per invocation.
+      Reproduced by hand at 8.3 and recorded there. It is also the weaker claim — it is a
+      property of how the tests construct their own `Startup`, not of the plant.
+
       **Re-run after the fixes:** `cargo test --all-features --lib -- --test-threads=1` →
       **1213 passed**, 0 failed (the test *count* is unchanged — every repair strengthened an
       existing test rather than adding one, which is the point);
       `cargo test --test gate_controls` → **4 passed**, 58 controls; clippy and `cargo fmt`
       clean; `openspec validate mouse-input --strict` valid.
-- [ ] 12.3 VERIFY: Confirm no blocking or unowned finding remains.
+- [x] 12.3 VERIFY: Confirm no blocking or unowned finding remains.
+      **Confirmed.** The reviewer reported 1 CRITICAL, 4 WARNINGs and 5 SUGGESTIONs, and
+      answered concentration point 1 with four unproven scenarios. Every one is now either
+      fixed or accepted with a stated reason, and none is unowned:
+      - CRITICAL: fixed, verified RED against the mutation and GREEN reverted.
+      - WARNINGs 1-4: all fixed (the tab-bar wheel, the fifth gate control, `proposal.md`'s
+        stale "fourteen", and its remainder).
+      - SUGGESTIONs: four fixed (the three stale matrix names, the frame header row, the two
+        pastes, Decision 12's unnamed window); one — coverage sitting exactly on the 96%
+        production floor — recorded rather than acted on, since the floor is met and this
+        project's rule is to add tests rather than lower a floor. It is a standing hazard for
+        the next change, not a finding against this one.
+      - Concentration point 1's fourth gap: closed by
+        `leg_one_cannot_see_the_defect_leg_five_c_catches`; its one remaining clause is
+        accepted with the reason above.
+      Concentration points 2, 3, 4 and 5 the reviewer verified directly and found holding.
 
 ## 13. Lint & Verify
 <!-- kind: operational -->
