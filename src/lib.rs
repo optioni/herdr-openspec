@@ -326,6 +326,24 @@ pub(crate) mod testutil {
         ))
     }
 
+    /// `mouse-input`'s addition, beside [`press`] and on exactly its terms: a
+    /// mouse `Event` for a `Script`'s queue. Modifiers are `NONE` — the
+    /// resolver ignores them by construction (`mouse-input` -> design.md ->
+    /// Decision 13), and the tests that pin that ignore construct the
+    /// `MouseEvent` themselves rather than reaching for a second helper.
+    pub(crate) fn mouse(
+        kind: ratatui::crossterm::event::MouseEventKind,
+        column: u16,
+        row: u16,
+    ) -> ratatui::crossterm::event::Event {
+        ratatui::crossterm::event::Event::Mouse(ratatui::crossterm::event::MouseEvent {
+            kind,
+            column,
+            row,
+            modifiers: ratatui::crossterm::event::KeyModifiers::NONE,
+        })
+    }
+
     /// A scripted `watch::FsEvents` double, on `Script`'s terms: a queue of
     /// `drain` results and a queue of `pending_in` results, each recording
     /// every call. Synchronous and thread-free — it answers from a `RefCell`

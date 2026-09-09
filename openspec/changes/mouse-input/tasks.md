@@ -73,16 +73,21 @@ Taken, per design.md → Test Strategy: the defect this change can most plausibl
 resolver that is correct and never called, which is `live-refresh`'s own defect in a new
 shape. Only `run_loop` can prove otherwise.
 
-- [ ] 0.1 Add a `MouseEvent` constructor to `driver`'s existing scripted `EventSource`
+- [x] 0.1 Add a `MouseEvent` constructor to `driver`'s existing scripted `EventSource`
       double, honouring design.md → Test Boundaries: events, backend, artifact reader, and
       all four collaborators replaced; the terminal never constructed.
-- [ ] 0.2 RED: Write `driver::tests::a_mouse_event_moves_the_selection_through_the_loop`
+- [x] 0.2 RED: Write `driver::tests::a_mouse_event_moves_the_selection_through_the_loop`
       for `mouse-input` → "A mouse event is resolved through the loop and a key is not":
       drive `run_loop` at 120x40 with a left press on the second change row, then `q`, and
       assert the frame after the press carries the selection marker on that row.
-- [ ] 0.3 Confirm it fails because the behaviour is missing, not the harness: the same test
+- [x] 0.3 Confirm it fails because the behaviour is missing, not the harness: the same test
       with `Char('j')` in place of the press must pass at HEAD.
       `cargo test --lib driver::tests::a_mouse_event` — expect RED.
+      **Run:** RED as written — `left: " ", right: ">"` on row 4, whose text is
+      `"│  beta                             [-]│…"`, so the geometry is right and the
+      selection did not move. With `press(KeyCode::Char('j'), KeyModifiers::NONE)`
+      substituted for the mouse event and nothing else changed: **1 passed**. The harness
+      drives `run_loop` correctly; the mouse path is what is missing.
 
 ## 1. Terminal capture lifecycle
 <!-- kind: behavior -->

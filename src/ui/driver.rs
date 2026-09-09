@@ -3336,4 +3336,93 @@ mod tests {
             launcher: &mut *launcher,
         };
     }
+
+    /// `mouse-input`'s acceptance harness: a `Route::List` dashboard over three
+    /// active changes with the cursor on the **first** of them — target 1, since
+    /// target 0 is the `active` header — drawn at 120x40, driven with `event`
+    /// and then `q`, returning the last frame's buffer.
+    ///
+    /// Every collaborator is replaced (the inert doubles), the artifact reader
+    /// is a closure, and the terminal is a `TestBackend`: design.md -> Test
+    /// Boundaries names exactly this set.
+    fn drive_one_event(event: Event) -> ratatui::buffer::Buffer {
+        let mut dashboard = dashboard_with_change("/repo", "alpha", 0, 0);
+        dashboard.changes = crate::changes::fixture::set(
+            vec![
+                crate::changes::fixture::active("alpha", 0, 0),
+                crate::changes::fixture::active("beta", 0, 0),
+                crate::changes::fixture::active("gamma", 0, 0),
+            ],
+            Vec::new(),
+            Vec::new(),
+        );
+        dashboard.selected = 1;
+
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        let mut events = Script::new(vec![
+            Ok(Some(event)),
+            Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
+        ]);
+        let mut fs = crate::watch::none();
+        let mut refresher = crate::refresh::none();
+        let mut agents = crate::agents::none();
+        let mut launcher = crate::launch::none();
+        let mut live = crate::ui::driver::Live {
+            fs: &mut *fs,
+            refresher: &mut *refresher,
+            agents: &mut *agents,
+            launcher: &mut *launcher,
+        };
+        run_loop(
+            &mut terminal,
+            &mut dashboard,
+            &mut events,
+            &mut live,
+            &|_: &std::path::Path| Ok(String::new()),
+            Duration::from_millis(1),
+        )
+        .expect("loop ends");
+        terminal.backend().buffer().clone()
+    }
+
+    #[test]
+    fn a_mouse_event_moves_the_selection_through_the_loop() {
+        // `mouse-input`: "A mouse event is resolved through the loop and a key is
+        // not". At 120x40 the list interior is `x: 1, y: 2, width: 38, height: 36`,
+        // so interior row 2 — the `active` header, `alpha`, then `beta` — is
+        // terminal row 4, and the selection marker is the interior's own first
+        // column.
+        let buf = drive_one_event(crate::testutil::mouse(
+            ratatui::crossterm::event::MouseEventKind::Down(
+                ratatui::crossterm::event::MouseButton::Left,
+            ),
+            5,
+            4,
+        ));
+        assert_eq!(
+            cell(&buf, 1, 4).symbol(),
+            ">",
+            "the frame after the press carries the selection marker on the clicked row: {:?}",
+            row_text(&buf, 4)
+        );
+
+        // The key mapper is unchanged and the loop's own mouse handling is what
+        // moved the selection.
+        let event = crate::testutil::mouse(
+            ratatui::crossterm::event::MouseEventKind::Down(
+                ratatui::crossterm::event::MouseButton::Left,
+            ),
+            5,
+            4,
+        );
+        assert_eq!(
+            crate::ui::app::action_for(&event, false),
+            crate::ui::app::Action::Ignore
+        );
+        assert_eq!(
+            crate::ui::app::action_for(&event, true),
+            crate::ui::app::Action::Ignore
+        );
+    }
 }
