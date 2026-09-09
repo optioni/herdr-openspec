@@ -744,22 +744,80 @@ which the schema forbids. The evidence is a negative control instead.
 ## 13. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 13.1 CHECK: Inspect the intended verification commands and affected tiers — `make check`
+- [x] 13.1 CHECK: Inspect the intended verification commands and affected tiers — `make check`
       runs format, lint, gates, test, and coverage; the contract tier runs inside `cargo test`.
-- [ ] 13.2 VERIFY: `make check` exits 0, with the failing sub-command named if it does not.
-      A failure confined to `ui::tests::wiring::g_focuses_the_agent_the_launch_started` or
-      `wiring::an_unreachable_scratch_herdr_is_a_standalone_tui` is the pre-existing flake
-      recorded at the top of this file; re-run those two with `-- --test-threads=1` to
-      confirm before treating it as a regression.
-- [ ] 13.3 VERIFY: Coverage is the `coverage` sub-command of 13.2's `make check`
+      **Inspected:** `check: fmt-check lint gates test coverage`. The contract tier —
+      `tests/manifest.rs`, `tests/degraded_coverage.rs`, `tests/doc_contract.rs`,
+      `tests/gate_controls.rs`, `tests/ci_workflow.rs`, `tests/spec_purposes.rs`,
+      `tests/coverage_prod.rs`, `tests/cli.rs` — runs inside `test`. Every tier this change
+      touches is reached by that one target; nothing needed a separate invocation.
+- [x] 13.2 VERIFY: `make check` exits 0, with the failing sub-command named if it does not.
+      **`make check` exits 0** — verified in a clean checkout of this change's own HEAD
+      (`git worktree add` at the tip commit, `diff -r src` against the working tree reporting
+      no difference): format, lint, `make gates`, `cargo test --all-features` (**1213
+      passed**, 0 failed), and coverage all green.
+
+      **It does NOT exit 0 in the development working directory, and the reason is
+      environmental rather than this change's.** There, `ui::tests::wiring::` fails 1-4 tests
+      per run and takes ~35s instead of ~3.8s. Measured rather than assumed:
+
+      | tree | result |
+      |---|---|
+      | baseline `baa22c7` | 27/27, 3.7-3.8s, **5 consecutive runs** |
+      | group 6 `905bee4`, clean worktree | 27/27, 3.70s |
+      | group 7 `e0a1b0a`, clean worktree | 29/29, 3.75s |
+      | group 10 `ce0992b`, clean worktree | 29/29, 3.77s |
+      | HEAD, clean worktree | 29/29, 3.77s, twice |
+      | HEAD, this working directory | 1-4 failed, ~35s, **5 consecutive runs** |
+
+      Identical source — `diff -r src` is silent — so it is neither the code nor the commit.
+      The cause is load in this directory: two `./target/release/herdr-openspec ui` panes have
+      been running since Monday and Tuesday (29 and 20 minutes of CPU each), they watch this
+      repository's own `openspec/`, so every write to this file wakes both and spawns
+      `openspec list --json`; load average measured at 4.45. The wiring tests are bounded by
+      `testutil::UntilReady`'s **5-second** deadline, so under that load their predicates stop
+      settling in time — which is also why a failing run takes 35s: each failure burns its
+      full deadline.
+
+      **This is a correction to a claim made twice during implementation.** Groups 1 and 6
+      recorded these failures as the pre-existing flake this file's own header describes. That
+      was too quick. The header's flake could not be reproduced at `baa22c7` in five
+      consecutive runs of the same module, so either it was always this same environmental
+      effect or it is rarer than recorded; either way the header's diagnosis should not be
+      relied on by a future change. The honest statement is narrower: **the tree is green; this
+      working directory is not, for a reason outside the tree.**
+- [x] 13.3 VERIFY: Coverage is the `coverage` sub-command of 13.2's `make check`
       (`Makefile`: `check: fmt-check lint gates test coverage`), enforced at both floors —
       the total and the production slice — and is not re-run separately. If it falls short,
       add tests; never lower or waive a floor.
-- [ ] 13.4 VERIFY: `openspec validate mouse-input --strict` reports the change valid.
-- [ ] 13.5 CHECK: The new `mouse-input` capability needs a written `## Purpose` before it can
+      **Run, inside 13.2's `make check`:** `COVERAGE-PROD OK: production 96.00% (4371/4553)
+      >= floor 96%; test-module 95.41%`, and `cargo llvm-cov --fail-under-lines 80` reporting
+      a **96.07%** total. Both floors met, neither lowered, no waiver added. Recorded as a
+      standing hazard rather than a finding (Change Review, SUGGESTION 5): the production slice
+      sits **exactly** on its floor with no margin, so the next uncovered production line
+      anywhere in the crate fails this gate. `src/ui/terminal.rs` is at 32/81, the two new
+      `CrosstermOps` capture bindings having joined `enter_alternate`/`leave_alternate` as
+      deliberately-uncovered seam bindings exactly as design.md → Risks predicted.
+- [x] 13.4 VERIFY: `openspec validate mouse-input --strict` reports the change valid.
+      **Run:** `Change 'mouse-input' is valid`, exit 0 — before archiving, and again after
+      every Change Review repair to `proposal.md` and `design.md`. After archiving,
+      `openspec validate --specs --strict` reports **44 passed, 0 failed** over the whole
+      spec set, so the eighteen added and six modified requirements landed clean.
+- [x] 13.5 CHECK: The new `mouse-input` capability needs a written `## Purpose` before it can
       be archived. `openspec archive` writes the placeholder `TBD - created by archiving
       change <x>`, on which `tests/spec_purposes.rs` fails `cargo test` — HEAD's tip commit
       `a156f9a docs(specs): archive list-sections and repair the Purpose paragraphs` is this
       exact trap firing on the previous change. Write the paragraph into
       `openspec/specs/mouse-input/spec.md` immediately after archiving and confirm
       `cargo test --test spec_purposes` exits 0.
+      **The trap fired exactly as predicted.** `openspec archive mouse-input --yes` moved the
+      change to `archive/2026-09-09-mouse-input`, applied **+18 / ~6** across nine capability
+      specs, and seeded `openspec/specs/mouse-input/spec.md` with `TBD - created by archiving
+      change mouse-input`. `cargo test --test spec_purposes` → **FAILED**,
+      `every_capability_has_a_written_purpose`. The paragraph was written immediately after —
+      two paragraphs in the house style the sibling capabilities use: what the capability owns
+      (the resolver, the key-only mapper it does not disturb, and what stays inert), then the
+      two constraints that bound it, that nothing becomes mouse-only and that the resolver is
+      answerable to the frame actually drawn. Re-run → **3 passed**, 0 failed, including
+      `an_archived_placeholder_fails_the_test`, which is the control proving the check is not
+      vacuous.

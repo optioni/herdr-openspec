@@ -18,17 +18,27 @@ that region's capability; this specifies only the state, the dispatch, and the o
 ### Requirement: Key handling is a pure, total function over events
 
 `ui::app::action_for(event: &Event, filtering: bool) -> Action` SHALL map a terminal event
-and the current filter mode to one of exactly **eighteen** actions — `Quit`, `OpenDetail`,
-`Back`, `Next`, `Prev`, `SelectTab(usize)`, `NextTab`, `PrevTab`, `FilterStart`,
+and the current filter mode to one of exactly **twenty-three** actions — `Quit`,
+`OpenDetail`, `Back`, `Next`, `Prev`, `SelectNext`, `SelectPrev`, `ScrollDown`, `ScrollUp`,
+`Click(Target)`, `SelectTab(usize)`, `NextTab`, `PrevTab`, `FilterStart`,
 `FilterPush(char)`, `FilterPop`, `Refresh`, `LaunchApply`, `LaunchContinue`, `LaunchArchive`,
 `FocusAgent`, `ToggleSection`, `Ignore` — and SHALL be total: every `Event`
 value, including mouse, paste, focus-gained, focus-lost, and resize events, maps to one of
 them under either value of `filtering`, and none panics.
 
+`action_for` SHALL map **no key** to the five actions `mouse-input` adds. `SelectNext`,
+`SelectPrev`, `ScrollDown`, `ScrollUp`, and `Click(Target)` exist because a mouse event names
+the region or the row it landed on, where a key does not; `ui::driver::mouse_action` is the
+only producer of them, and `mouse-input` states what it produces. They are five flat variants
+rather than two carrying a direction or a region, for the same reason the four launch
+variants are flat: an enumerate-by-hand test must enumerate the same things the exhaustive
+`match` does.
+
 The count moved from thirteen to seventeen when `agent-launch` landed, not from nine to
 thirteen: `HANDOFF.md`'s Phase 5 constraint 8 read the count off a stale doc comment in
-`src/ui/app.rs` that still said "the nine outcomes" after four had been added. It moves to
-**eighteen** here, with `ToggleSection` `list-sections`' one addition.
+`src/ui/app.rs` that still said "the nine outcomes" after four had been added. It moved to
+**eighteen** with `ToggleSection`, `list-sections`' one addition, and moves to
+**twenty-three** here, with `mouse-input`'s five.
 
 `SelectTab`, `NextTab`, and `PrevTab` are `detail-view`'s additions; `artifact-tabs` states
 their keys and their effect. They are route-agnostic in the same sense `Next` and `Prev`
@@ -107,7 +117,24 @@ character twice, refresh twice, or **launch a second agent**.
 - on `Next` and `Prev`, move and clamp `selected` per `list-selection` when `route` is
   `List`, and move `detail.scroll` by one line per `detail-scroll` when `route` is `Detail`,
   never both; and, at `Route::List` only, reset `detail.tab` and `detail.scroll` to `0`
-  exactly when `selected` changed value;
+  exactly when `selected` changed value. `Next` and `Prev` SHALL be exactly a route
+  dispatch over the four region-explicit actions below and SHALL hold no arithmetic of
+  their own: `Next` does what `SelectNext` does at `Route::List` and what `ScrollDown` does
+  at `Route::Detail`, and `Prev` does what `SelectPrev` and `ScrollUp` do on the same terms,
+  so a key and a wheel over the same region can never diverge;
+- on `SelectNext` and `SelectPrev`, move and clamp `selected` per `list-selection` and reset
+  `detail.tab` and `detail.scroll` to `0` exactly when `selected` changed value, **at either
+  route** — these name the list region rather than inheriting the route, which is what lets
+  the wide layout's two regions scroll independently;
+- on `ScrollDown` and `ScrollUp`, move `detail.scroll` by one line per `detail-scroll`, **at
+  either route**, changing `selected`, `detail.tab`, and `route` not at all;
+- on `Click(target)`, do nothing when `target` is absent from `targets()`; otherwise act per
+  `mouse-input` — a `Target::Section(key)` toggles that section and moves the cursor to its
+  header exactly as `ToggleSection` does, and a `Target::Change(i)` moves the cursor to that
+  row (resetting `detail.tab` and `detail.scroll` to `0` when it moved), or, when the cursor
+  is already there and `route` is `List`, sets `route` to `Detail` and resets `detail.scroll`
+  to `0`. It SHALL reach no collaborator, spawn no process, touch no filesystem, and read no
+  clock;
 - on `SelectTab`, `NextTab`, and `PrevTab`, move `detail.tab` per `artifact-tabs`, resetting
   `detail.scroll` to `0` exactly when `detail.tab` changed value;
 - set `filter.active` and `route: List` on `FilterStart`, resetting `detail.scroll` to `0`
@@ -265,6 +292,9 @@ is what restores that invariant, before the next draw rather than after it.
   is `r` does not refresh, and a paste whose text is `a` **does not launch an agent**, so
   pasted content cannot close the pane, edit the filter, move the tab, start a CLI cycle, or
   spawn a process
+- **AND** the mouse event still returns `Ignore` from `action_for` under both modes after
+  `mouse-input` lands: the mouse is resolved by `ui::driver::mouse_action`, which takes the
+  frame geometry `action_for` never receives, so this mapper stays key-only
 
 #### Scenario: `Space` maps to `ToggleSection` outside filter mode and types inside it
 
@@ -274,7 +304,7 @@ is what restores that invariant, before the next draw rather than after it.
   `Char(' ')` under both modes
 - **THEN** the first returns `ToggleSection`, the second returns `FilterPush(' ')`, and the
   last three under each mode return `Ignore`
-- **AND** the **seventeen** other actions' mappings are unchanged: the same table of inputs
+- **AND** every other key's mapping is unchanged: the same table of inputs
   `agent-launch` asserted returns exactly the same actions under both modes, so `Space`
   gaining a meaning moved no existing key
 - **AND** `KeyCode::Char(' ')` is the only new row in the `filtering` false table, and
@@ -1106,3 +1136,78 @@ that index means rather than a change to the value.
   nothing else
 - **AND** nothing renders that problem: `agent_names.problems` reaches no row and no hint in
   this change, and `degraded-states` is the change that owns whether it ever does
+
+### Requirement: The loop resolves a mouse event against the frame it just drew
+
+`ui::driver::run_loop` SHALL keep the `area` of the frame it has just drawn — the value it
+already copies out of the `CompletedFrame` for `Dashboard::normalise_scroll` — and SHALL
+pass it to `ui::driver::mouse_action` when the event it reads is an `Event::Mouse`. Every
+other event SHALL continue to go to `ui::app::action_for` with `dashboard.filter.active`.
+
+The area used SHALL be the one just drawn, never a stored size and never the size at
+startup: a mouse event is a reply to a frame the reader is looking at, and resolving it
+against anything else would target rows that are not on screen. A resize between the draw
+and the click therefore costs at most one mis-targeted event, which the next frame
+corrects — the same one-frame window `normalise_scroll` already accepts for the scroll
+clamp.
+
+`run_loop` SHALL apply exactly one action per event and SHALL break on `dashboard.quit`
+exactly as it already does, so a mouse event can neither apply two actions nor bypass the
+quit check.
+
+#### Scenario: A resize between the draw and the click costs one frame, not a panic
+
+- **WHEN** `run_loop` is driven at 120x40 with a scripted source yielding
+  `Event::Resize(60, 20)`, then a left press at column 100 — a column that existed in the
+  frame before the resize and does not exist after it — then `q`
+- **THEN** the loop completes without panicking
+- **AND** the press is resolved against the 60-column frame drawn after the resize, so it
+  falls outside the frame and returns `Action::Ignore`
+
+#### Scenario: The loop routes mouse and key events to different mappers
+
+- **WHEN** `run_loop` is driven with a scripted source yielding a `ScrollDown` over the
+  detail region, then `Char('j')`, then `q`, on a dashboard at `Route::List` above the
+  breakpoint
+- **THEN** after the wheel event `detail.scroll` is `1` and `selected` is unchanged
+- **AND** after the `j` event `selected` has advanced and `detail.scroll` is back to `0`,
+  because a selection move resets it — so the wheel reached `ScrollDown` and the key reached
+  `Next`, and neither took the other's path
+
+### Requirement: A pointer-motion event does not trigger a draw
+
+`ui::driver::run_loop` SHALL NOT draw, SHALL NOT call `Dashboard::sync_detail`, and SHALL
+NOT call `Dashboard::normalise_scroll` on the iteration following an `Event::Mouse` whose
+kind is `MouseEventKind::Moved` or `MouseEventKind::Drag(_)`, and SHALL NOT count such an
+iteration in `LoopSummary::frames`. It SHALL carry the previous drawn frame's `area`
+forward, so a click arriving after any number of motion events still resolves against the
+frame that is on screen.
+
+This rule exists because mapping the event to `Action::Ignore` cannot prevent the draw: the
+draw happens at the top of the iteration, before the event is read. Crossterm's
+`EnableMouseCapture` writes `?1003h` — any-event tracking — so a terminal reports every
+pointer move whether the pane wants it or not, and without this rule moving a pointer across
+a Herdr split would re-render the whole detail document once per motion event.
+
+The rule SHALL be confined to pointer motion. An ignored **key** SHALL still redraw, exactly
+as `An ignored key redraws and keeps waiting` requires; a wheel event, a button press, a
+button release, a resize, a focus change, a paste, and a timeout SHALL all still draw.
+
+#### Scenario: Pointer motion does not cost a frame
+
+- **WHEN** `run_loop` is driven at 120x40 with a scripted source yielding twenty
+  `MouseEventKind::Moved` events at varying coordinates, then `q`
+- **THEN** `LoopSummary::frames` is `1` — the frame drawn before the first event was read —
+  and `LoopSummary::polls` is `21`
+- **AND** the same run with twenty `MouseEventKind::Drag(MouseButton::Left)` events reports
+  the same counts
+- **AND** the same run with twenty `Char('z')` presses — an ignored key — reports `frames`
+  `21`, so the exemption is scoped to pointer motion and did not become a general
+  ignore-means-no-draw rule
+
+#### Scenario: A click after motion still resolves against the drawn frame
+
+- **WHEN** `run_loop` is driven at 120x40 with five `Moved` events and then a left press on
+  the second change row, then `q`
+- **THEN** the press selects that row, exactly as it does with no motion events before it
+- **AND** the frame count is `2`: one before the first event, one after the press

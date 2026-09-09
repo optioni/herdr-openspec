@@ -923,6 +923,20 @@ join the required-name list, making it thirteen, with a positive control anchore
 `^pub fn install_panic_hook\(` in `src/ui/terminal.rs` so a rename fails in the file that
 defines it rather than leaving the leg hunting a name nobody defines.
 
+`mouse-input`'s `mouse_problem` SHALL **not** join that list, and the required-name count
+SHALL stay thirteen. Leg 1 searches the whole production slice of `src/ui/mod.rs`, and
+`pub struct Startup<'a>` is declared in that slice — so the field's own declaration would
+satisfy a leg-1 name while `ui::run` had stopped passing a value, which is precisely the
+failure leg 5 documents for `state::read` and answers by scoping to `$body`.
+
+`WIRED` SHALL instead carry a **body-scoped leg 5c**, on leg 5's exact terms: `pub fn run()`'s
+own body SHALL name `mouse_problem(`, and SHALL NOT hardcode `mouse_problem: None`. A `run`
+that stopped threading the guard's reason would otherwise ship a refused-capture problem row
+that can never appear, with every test green — every test constructs its own `Startup` and
+drives `run_wired` directly. This is the defect class `live-refresh` shipped and
+`gate-integrity` closed for the panic hook, arriving at the one kind of name leg 1 cannot
+see.
+
 The **behaviour** of the hook — that it must be inert off the render thread — is out of scope
 here and belongs to `seam-resilience`. This requirement makes the wiring provable, nothing
 more.
@@ -944,6 +958,19 @@ more.
   slice of `src/ui/mod.rs`
 - **AND** before this change the same deletion left `make check` entirely green, which is why
   the name is added to the list rather than left to review
+
+#### Scenario: Hardcoding the mouse-capture reason in `run` fails the gate
+
+- **WHEN** `mouse_problem: guard.mouse_problem(),` in `ui::run`'s `Startup` construction is
+  replaced with `mouse_problem: None,` and `make gates` is run
+- **THEN** `WIRED` exits non-zero on leg 5c, naming `mouse_problem: None` and that the
+  refused-capture row would be dead in the shipped binary
+- **AND** `cargo test --all-features` alone stays green against that same tree, since every
+  test constructs its own `Startup` and drives `run_wired` directly — which is why a gate is
+  the answer and review is not
+- **AND** leg **1** stays green against that same tree, because `pub struct Startup`'s own
+  field declaration satisfies a slice-wide name search; that is why this is leg 5c and not a
+  fourteenth entry on leg 1
 
 #### Scenario: A renamed definition fails in the defining file
 
