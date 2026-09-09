@@ -12,7 +12,6 @@ use crate::ui::app::{Dashboard, Route};
 use crate::ui::detail;
 use crate::ui::layout::{
     columns, interior, scroll_offset, split_body, split_detail, split_frame, truncate_columns,
-    viewport,
 };
 use crate::ui::list;
 use crate::ui::markdown::Face;
@@ -224,9 +223,10 @@ fn render_list(frame: &mut Frame, interior: Rect, dashboard: &Dashboard) {
     if interior.width == 0 || interior.height == 0 {
         return;
     }
-    let rows = list::rows(dashboard, interior.width);
-    let cursor = rows.iter().position(|r| r.selected).unwrap_or(0);
-    let offset = viewport(rows.len(), cursor, interior.height);
+    // `mouse-input`: the three lines this loop used to derive inline now live in
+    // `list::drawn_rows`, so `list::row_at` resolves a click against the very
+    // slice drawn here rather than against a second derivation of it.
+    let (rows, offset) = list::drawn_rows(dashboard, interior);
     let buf = frame.buffer_mut();
     for (i, row) in rows
         .iter()
@@ -467,6 +467,190 @@ mod tests {
         Filter {
             query: String::new(),
             active: false,
+        }
+    }
+
+    /// `mouse-input`: the two view scenarios that bind the hit test to the
+    /// frame the reader is actually looking at — `change-rows`' "Every drawn row
+    /// is reported by the row it occupies" and `responsive-layout`'s "The hit
+    /// test agrees with what was drawn".
+    mod hit_test {
+        use ratatui::layout::Rect;
+
+        use crate::changes::fixture;
+        use crate::testutil::render_at;
+        use crate::ui::app::{Dashboard, Route};
+        use crate::ui::layout::{Zone, interior, split_body, split_frame, viewport, zone};
+        use crate::ui::list::{row_at, rows};
+
+        /// One repository-level problem, three active changes, three archived
+        /// ones — every row kind the grammar emits except `Message`.
+        fn populated(route: Route) -> Dashboard {
+            let active: Vec<_> = ["alpha", "beta", "gamma"]
+                .iter()
+                .map(|n| fixture::active(n, 1, 3))
+                .collect();
+            let archived: Vec<_> = ["delta", "epsilon", "zeta"]
+                .iter()
+                .map(|n| fixture::archived(Some("2026-01-01"), n, 4, 4))
+                .collect();
+            let mut dashboard = super::dashboard_with(active, archived, 1, route);
+            dashboard.changes.problems = vec!["a repository problem".to_string()];
+            dashboard
+        }
+
+        #[test]
+        fn every_drawn_row_is_reported_by_row_at() {
+            for (width, height) in [(120u16, 40u16), (60, 20)] {
+                let dashboard = populated(Route::List);
+                let buffer = render_at(width, height, &dashboard);
+                let area = Rect::new(0, 0, width, height);
+                let (_, body, _) = split_frame(area);
+                let list = interior(
+                    split_body(body, dashboard.route)
+                        .0
+                        .expect("the list region is drawn"),
+                );
+
+                let all = rows(&dashboard, list.width);
+                let cursor = all.iter().position(|r| r.selected).unwrap_or(0);
+                let offset = viewport(all.len(), cursor, list.height);
+
+                for row in 0..list.height {
+                    let drawn = all.get(offset + row as usize);
+                    assert_eq!(
+                        row_at(&dashboard, list, row),
+                        drawn.map(|r| r.kind),
+                        "{width}x{height} offset {row}"
+                    );
+                    if let Some(drawn) = drawn {
+                        // Cell by cell rather than by slicing `row_text`: the
+                        // border characters either side are multi-byte, so a byte
+                        // index into that string is not a column index.
+                        let painted: String = (list.x..list.x + list.width)
+                            .map(|x| buffer[(x, list.y + row)].symbol().to_string())
+                            .collect();
+                        assert_eq!(
+                            painted, drawn.text,
+                            "{width}x{height} offset {row} draws its own row"
+                        );
+                    }
+                }
+                // Past the last drawn row, nothing is reported.
+                assert_eq!(row_at(&dashboard, list, list.height), None);
+                assert_eq!(row_at(&dashboard, list, u16::MAX), None);
+            }
+        }
+
+        #[test]
+        fn the_hit_test_agrees_with_the_drawn_buffer() {
+            const BORDERS: [&str; 6] = ["┌", "┐", "└", "┘", "│", "─"];
+            for (width, height) in [(120u16, 40u16), (60, 20)] {
+                for route in [Route::List, Route::Detail] {
+                    let dashboard = populated(route);
+                    let buffer = render_at(width, height, &dashboard);
+                    let area = Rect::new(0, 0, width, height);
+                    let (_, body, _) = split_frame(area);
+                    let (list_area, detail_area) = split_body(body, route);
+
+                    let drawn: Option<(Rect, Vec<crate::ui::list::Row>, usize)> =
+                        list_area.map(|a| {
+                            let inner = interior(a);
+                            let all = rows(&dashboard, inner.width);
+                            let cursor = all.iter().position(|r| r.selected).unwrap_or(0);
+                            let offset = viewport(all.len(), cursor, inner.height);
+                            (inner, all, offset)
+                        });
+
+                    for y in 0..height {
+                        for x in 0..width {
+                            let symbol = buffer[(x, y)].symbol().to_string();
+                            match zone(area, route, x, y) {
+                                Zone::ListRow {
+                                    interior: inner,
+                                    row,
+                                } => {
+                                    let (_, all, offset) = drawn
+                                        .as_ref()
+                                        .expect("a ListRow implies a drawn list region");
+                                    let text = all
+                                        .get(offset + row as usize)
+                                        .map(|r| r.text.as_str())
+                                        .unwrap_or("");
+                                    let column = (x - inner.x) as usize;
+                                    let expected = text
+                                        .chars()
+                                        .nth(column)
+                                        .map(|c| c.to_string())
+                                        .unwrap_or_else(|| " ".to_string());
+                                    assert_eq!(
+                                        symbol, expected,
+                                        "{width}x{height} {route:?} ({x}, {y}) is a ListRow \
+                                         holding a character from list::rows' own output"
+                                    );
+                                }
+                                Zone::List | Zone::Detail => {
+                                    let (region, title) =
+                                        if matches!(zone(area, route, x, y), Zone::List) {
+                                            (
+                                                list_area
+                                                    .expect("a List zone implies a list region"),
+                                                "Changes",
+                                            )
+                                        } else {
+                                            (
+                                                detail_area.expect(
+                                                    "a Detail zone implies a detail region",
+                                                ),
+                                                "Detail",
+                                            )
+                                        };
+                                    let left = x == region.x;
+                                    let right = x + 1 == region.x + region.width;
+                                    let top = y == region.y;
+                                    let bottom = y + 1 == region.y + region.height;
+                                    // The top edge carries the region's own title,
+                                    // drawn by `Block::title` from `region.x + 1`.
+                                    let in_title = top
+                                        && x > region.x
+                                        && x <= region.x + title.chars().count() as u16;
+                                    if (left || right || top || bottom) && !in_title {
+                                        assert!(
+                                            BORDERS.contains(&symbol.as_str()),
+                                            "{width}x{height} {route:?} ({x}, {y}) on a region \
+                                             boundary holds {symbol:?}, not a border character"
+                                        );
+                                    }
+                                }
+                                Zone::DetailTab { .. } | Zone::Outside => {}
+                            }
+                        }
+                    }
+
+                    // No cell is classified as belonging to a region the draw path
+                    // did not draw.
+                    if list_area.is_none() {
+                        for y in 0..height {
+                            for x in 0..width {
+                                assert!(!matches!(
+                                    zone(area, route, x, y),
+                                    Zone::List | Zone::ListRow { .. }
+                                ));
+                            }
+                        }
+                    }
+                    if detail_area.is_none() {
+                        for y in 0..height {
+                            for x in 0..width {
+                                assert!(!matches!(
+                                    zone(area, route, x, y),
+                                    Zone::Detail | Zone::DetailTab { .. }
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 

@@ -581,6 +581,43 @@ pub fn rows(dashboard: &Dashboard, width: u16) -> Vec<Row> {
     out
 }
 
+/// The rows `render_list` draws into `interior`, paired with the index of the
+/// first one — `layout::viewport`'s answer for the emitted row count, the
+/// cursor's position among them, and the interior's own height.
+///
+/// `mouse-input`'s extraction of the three lines `ui::view::render_list`
+/// performed inline. It exists exactly once so the draw path and
+/// [`row_at`] cannot derive a different first row: a second derivation could
+/// drift from the first by a resize, a filter edit, or a fold, and a click
+/// would then land on a row the reader is not looking at. Pure and total over
+/// every `Dashboard` and every `Rect`.
+pub fn drawn_rows(dashboard: &Dashboard, interior: ratatui::layout::Rect) -> (Vec<Row>, usize) {
+    let rows = rows(dashboard, interior.width);
+    let cursor = rows.iter().position(|r| r.selected).unwrap_or(0);
+    let offset = crate::ui::layout::viewport(rows.len(), cursor, interior.height);
+    (rows, offset)
+}
+
+/// The [`RowKind`] of the row `ui::view::render_list` draws at
+/// `interior.y + row`, and `None` when that terminal row holds no drawn row —
+/// an interior shorter than the row offset, a zero-width or zero-height
+/// interior, or a row past the end of what [`rows`] emitted.
+///
+/// Pure and total: no I/O, no clock, no mutation, and no panic for any
+/// `Dashboard`, any `Rect`, and any `row`.
+///
+/// `RowKind::Problem` and `RowKind::Message` rows stay **unaddressable** — but
+/// not here. This reports them faithfully, because they are what is drawn
+/// there; `ui::driver::mouse_action` is what refuses to act on them, so the row
+/// grammar gains no notion of clickability (design.md -> Decision 11).
+pub fn row_at(dashboard: &Dashboard, interior: ratatui::layout::Rect, row: u16) -> Option<RowKind> {
+    if interior.width == 0 || interior.height == 0 || row >= interior.height {
+        return None;
+    }
+    let (rows, offset) = drawn_rows(dashboard, interior);
+    rows.get(offset + row as usize).map(|r| r.kind)
+}
+
 /// The badge glyph for `status` — one ASCII column, collision-free against
 /// every other glyph this row grammar uses (`>`, `!`, `…`, `-`, `[`). See
 /// `specs/change-rows/spec.md` -> "The agent badge".
@@ -601,6 +638,133 @@ mod tests {
     use crate::ui::app::{Dashboard, Detail, Filter, Route, SectionKey};
     use crate::ui::layout::columns;
     use crate::ui::list::{Row, RowKind, problem_row_text, rows};
+
+    /// `mouse-input`: the row a point lands on is the row drawn there. Every
+    /// expected offset here is derived through `layout::viewport` independently,
+    /// never from `row_at`'s own answer.
+    mod row_at {
+        use ratatui::layout::Rect;
+
+        use crate::changes::fixture;
+        use crate::ui::app::SectionKey;
+        use crate::ui::layout::viewport;
+        use crate::ui::list::{RowKind, row_at, rows};
+
+        /// Six active changes and six archived ones, the cursor on the last
+        /// target — more rows than a short interior can hold, which is what makes
+        /// the scrolled slice observable.
+        fn crowded() -> crate::ui::app::Dashboard {
+            let active: Vec<_> = ["a1", "a2", "a3", "a4", "a5", "a6"]
+                .iter()
+                .map(|n| fixture::active(n, 0, 1))
+                .collect();
+            let archived: Vec<_> = ["z1", "z2", "z3", "z4", "z5", "z6"]
+                .iter()
+                .map(|n| fixture::archived(Some("2026-01-01"), n, 1, 1))
+                .collect();
+            let mut dashboard = super::dashboard_with(active, archived, Vec::new(), 0);
+            dashboard.selected = dashboard.targets().len() - 1;
+            dashboard
+        }
+
+        #[test]
+        fn the_reported_row_follows_the_scrolled_slice() {
+            let dashboard = crowded();
+            // A six-row interior against fourteen rows: the slice is scrolled.
+            let interior = Rect::new(1, 2, 38, 6);
+            let all = rows(&dashboard, interior.width);
+            let cursor = all
+                .iter()
+                .position(|r| r.selected)
+                .expect("the cursor is on a drawn row");
+            let offset = viewport(all.len(), cursor, interior.height);
+            assert!(offset > 0, "the fixture must actually scroll");
+
+            assert_eq!(row_at(&dashboard, interior, 0), Some(all[offset].kind));
+            assert_ne!(
+                row_at(&dashboard, interior, 0),
+                Some(all[0].kind),
+                "row 0 reports the first row of the scrolled slice, not of the emitted list"
+            );
+            for row in 0..interior.height {
+                assert_eq!(
+                    row_at(&dashboard, interior, row),
+                    all.get(offset + row as usize).map(|r| r.kind),
+                    "offset {row}"
+                );
+            }
+        }
+
+        #[test]
+        fn a_collapsed_section_reports_only_its_header() {
+            let mut dashboard = crowded();
+            dashboard.selected = 0;
+            dashboard.sections.collapsed.insert(SectionKey::Archived);
+            let interior = Rect::new(1, 2, 38, 36);
+            let all = rows(&dashboard, interior.width);
+            let header = all
+                .iter()
+                .position(|r| {
+                    matches!(
+                        r.kind,
+                        RowKind::Section {
+                            key: SectionKey::Archived,
+                            ..
+                        }
+                    )
+                })
+                .expect("the archived header is drawn");
+
+            assert!(matches!(
+                row_at(&dashboard, interior, header as u16),
+                Some(RowKind::Section {
+                    key: SectionKey::Archived,
+                    collapsed: true,
+                    ..
+                })
+            ));
+            // Nothing behind it: the six archived changes contribute no `Item`
+            // row, so every reported `Item` index belongs to an active change.
+            let active_visible = 6usize;
+            for row in 0..interior.height {
+                if let Some(RowKind::Item { index }) = row_at(&dashboard, interior, row) {
+                    assert!(
+                        index < active_visible,
+                        "offset {row} reached archived change {index} behind a collapsed section"
+                    );
+                }
+            }
+        }
+
+        #[test]
+        fn degenerate_interiors_report_nothing() {
+            let with_changes = crowded();
+            let empty = super::dashboard_with(Vec::new(), Vec::new(), Vec::new(), 0);
+            let mut no_repo = empty.clone();
+            no_repo.repo = None;
+
+            for dashboard in [&with_changes, &empty, &no_repo] {
+                for interior in [
+                    Rect::new(1, 2, 0, 0),
+                    Rect::new(1, 2, 1, 0),
+                    Rect::new(1, 2, 0, 1),
+                ] {
+                    for row in [0u16, 1, 65535] {
+                        assert_eq!(
+                            row_at(dashboard, interior, row),
+                            None,
+                            "{interior:?} draws nothing, so it addresses nothing"
+                        );
+                    }
+                }
+                // A 1x1 interior draws exactly one row and addresses only it.
+                let one = Rect::new(1, 2, 1, 1);
+                assert!(row_at(dashboard, one, 0).is_some());
+                assert_eq!(row_at(dashboard, one, 1), None);
+                assert_eq!(row_at(dashboard, one, 65535), None);
+            }
+        }
+    }
 
     /// An in-scope `Agent` named `name` at `/tmp/demo-repo` — this module's fixture
     /// dashboards' repository root — carrying `status`. `agent-attribution`'s own

@@ -192,7 +192,7 @@ shape. Only `run_loop` can prove otherwise.
 ## 3. Row addressing — `list::row_at`
 <!-- kind: behavior -->
 
-- [ ] 3.1 RED: Write failing tests for `change-rows`' four scenarios:
+- [x] 3.1 RED: Write failing tests for `change-rows`' four scenarios:
       `list::tests::row_at::the_reported_row_follows_the_scrolled_slice`,
       `row_at::a_collapsed_section_reports_only_its_header`,
       `row_at::degenerate_interiors_report_nothing`, and, in `src/ui/view.rs`,
@@ -201,14 +201,21 @@ shape. Only `run_loop` can prove otherwise.
       scenario — it classifies every cell of a rendered buffer by `layout::zone`, so it
       lands here with the other view test rather than in group 2's pure set), both at 120x40
       and 60x20. `cargo test --lib row_at the_hit_test_agrees` — expect RED.
-- [ ] 3.2 GREEN: Extract the offset derivation `render_list` performs inline
+- [x] 3.2 GREEN: Extract the offset derivation `render_list` performs inline
       (`src/ui/view.rs:227-229`: `rows`, the `position(|r| r.selected)` cursor, and
       `viewport`) into one `list` function, and implement
       `row_at(dashboard, interior, row) -> Option<RowKind>` on top of it.
-- [ ] 3.3 REFACTOR: Point `render_list` at the extracted function so the derivation exists
+- [x] 3.3 REFACTOR: Point `render_list` at the extracted function so the derivation exists
       once. The rendered buffers must stay byte-identical — every existing `ui::view` and
       `ui::list` test passes unchanged, which is the check.
-- [ ] 3.4 Run the group tests — `cargo test --lib list:: view::` — no regressions.
+      **Done:** `render_list`'s three inline lines became one `list::drawn_rows` call. Every
+      pre-existing `ui::view` and `ui::list` test passed unmodified, which is the check.
+- [x] 3.4 Run the group tests — `cargo test --lib list:: view::` — no regressions.
+      **Run:** the command as written is rejected by cargo (`unexpected argument 'view::'` —
+      `cargo test` takes one positional filter), so it was run as
+      `cargo test --lib -- list:: view::`, which passes both filters through to the test
+      harness: **169 passed**, 0 failed (164 before, plus the three `row_at::` tests and the
+      two `hit_test::` view tests).
 
 ## 4. Tab addressing — `detail::tab_at`
 <!-- kind: behavior -->
