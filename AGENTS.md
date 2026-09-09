@@ -64,7 +64,10 @@ draw-then-wait event loop — `q`/`Ctrl-C` to quit, `j`/`k`/arrows to move the
 list selection at the list route or scroll the detail content at the detail
 route, `/` to filter (where printable keys type instead of commanding and
 only `Ctrl-C` still quits), `Enter`/`Esc` to move between the list and detail
-routes outside filter mode — and a 100-column breakpoint deciding a one- or
+routes outside filter mode, and a mouse that scrolls the region under the
+pointer, selects a row, opens it on a second click, folds a section header,
+and switches an artifact tab (`mouse-input`; a pointer *motion* costs no
+frame at all) — and a 100-column breakpoint deciding a one- or
 two-region body. The list region now fills with real rows under two foldable
 section headers, `active` then `archived`, each carrying a glyph, a label and
 an honest count, with `Space` toggling the section the cursor is on or in and
@@ -213,9 +216,10 @@ triangle — a `herdr-plugin.toml`, `README.md`, or binary-name edit that drifts
 against another fails it, deliberately asserting nothing about `target/release/`, which
 `make check` never builds), `tests/degraded_coverage.rs` (`SPEC.md`'s degraded-states
 table bound to a named, passing proving test per row), and `tests/doc_contract.rs`
-(seven further claims — the module map, the tested-modules list, the worker-thread
-count, the MSRV, the gate-path programs, the manifest transcription, and the injected
-OpenSpec context — each bound to the repository file that determines it; see `SPEC.md`
+(nine further claims — the module map, the tested-modules list, the worker-thread
+count, the MSRV, the gate-path programs, the manifest transcription, the injected
+OpenSpec context, the documented mouse bindings, and the confined terminal-seam
+names — each bound to the repository file that determines it; see `SPEC.md`
 → § Testing and quality gates → Doc-conformance checks). The rule all three share: **a
 documented claim with a computable second site is bound to that site inside `cargo
 test`, not left to a human re-reading it.** Durable because a future change adding a
@@ -314,10 +318,13 @@ unreachable and the tests become integration tests by accident.
   search also names). `src/ui/terminal.rs`
   is the only file in the crate permitted to name a crossterm terminal-mode function
   (`enable_raw_mode`, `disable_raw_mode`, `EnterAlternateScreen`,
-  `LeaveAlternateScreen`) — checked the same tree-wide-grep-with-a-positive-control
-  way as the subprocess seam above, `tests/` included. A test that reaches the real
-  terminal implementation corrupts the developer's own session, because `cargo test`
-  spawns this binary.
+  `LeaveAlternateScreen`, `EnableMouseCapture`, and `DisableMouseCapture` —
+  `mouse-input` grew the confined set from four names to six) — checked the same
+  tree-wide-grep-with-a-positive-control way as the subprocess seam above, `tests/`
+  included, and with a control that is **per name** rather than one-of-any, since
+  `enable_raw_mode` alone satisfies the latter and would cover the capture pair
+  vacuously. A test that reaches the real terminal implementation corrupts the
+  developer's own session, because `cargo test` spawns this binary.
 - **The artifact read is confined to one binding.** `src/ui/mod.rs` is the only
   file under `src/ui/` permitted to name `read_to_string`, and `ui::read_artifact`
   — its one production binding, calling `std::fs::read_to_string` — is the only

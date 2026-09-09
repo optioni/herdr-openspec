@@ -543,6 +543,35 @@ whether there is a layer left to dismiss. Only `q` (outside filter mode) and
 Action keys, and their footer hints (`a/c/s launch  g focus`), are hidden when
 the Herdr socket is unreachable.
 
+The pane has a second input device. Every binding below is resolved by
+`ui::driver::mouse_action` against the frame just drawn, and every one of them
+has a key above that produces the same effect — nothing is mouse-only, so the
+pane stays fully usable over SSH in a terminal that reports no mouse
+(`mouse-input`).
+
+| Gesture | Action |
+|---|---|
+| Wheel down over the list region | `Action::SelectNext` — move the list selection, at **either** route, so the wide layout's two regions scroll independently |
+| Wheel up over the list region | `Action::SelectPrev`, on the same terms |
+| Wheel down over the detail region | `Action::ScrollDown` — scroll the detail content by one line, at either route |
+| Wheel up over the detail region | `Action::ScrollUp`, on the same terms |
+| Left click on a change row | `Action::Click` naming that row — move the cursor to it and reset the tab and the scroll, exactly as `j`/`k` do |
+| Left click again on the row already selected | The same `Action::Click`; applying it opens the detail, exactly as `Enter` does. A third click changes nothing |
+| Left click on a section header | The same `Action::Click`, naming the section — fold it if open, unfold it if collapsed, and move the cursor to it, exactly as `Space` does |
+| Left click on an artifact tab cell | `Action::SelectTab` for that cell's own position, exactly as its digit key. It does not change the route |
+| Anything else — a right or middle press, any release, any drag, pointer motion, a horizontal wheel, the header row, the footer row, a border, a problem or message row, or a point outside the frame | `Action::Ignore` |
+
+The region under a wheel is the **whole** region — its border included, and, for
+the detail region, its header row and its tab bar as well as its content area.
+The mouse acts while filtering, unlike a printable key: a click is unambiguous
+where a keystroke is not.
+
+**Enabling mouse capture costs the terminal's own drag-to-select.** With capture
+on, the terminal stops handling mouse gestures itself, so selecting and copying
+text out of the pane requires holding `Option` (macOS) or `Shift` (most Linux
+terminals). This is the change's one accepted regression, and it affects a reader
+who never presses a mouse button.
+
 ### Colour and style
 
 Every styled span in the pane takes its `Style` from one place: `src/ui/palette.rs`,
@@ -901,6 +930,7 @@ Every condition renders usable content rather than an error screen:
 | `open`/`open-tab`'s `plugin pane focus` call fails with a usage error (code 2) | Warns and falls through to opening once — refusing would fail closed on a Herdr the manifest's `min_herdr_version` still declares supported |
 | `open`/`open-tab`'s `plugin pane focus` call fails with a domain error, or `plugin pane open` itself fails | The command stops; the reason — `herdr exited with code <n>: <stderr>`, `herdr_reason`'s own formatted prefix, never Herdr's raw message byte-for-byte — goes to stderr and the process exits 1 |
 | The dashboard process opened by `open`/`open-tab` finds no workspace cwd in its own injected Herdr context (`ui::startup_cwd` returns `None`) | Falls back to `std::env::current_dir()` — the plugin root — and renders whatever `openspec/` (if any) is found there, exactly as a `--cwd`-less direct `herdr plugin pane open` always has; not a refusal |
+| The terminal refuses mouse capture (`enable_mouse` fails) | The pane starts and every key works — capture is the one entry operation the pane does not need in order to render. The reason is named as `refresh.startup`'s **last** entry, below every problem the binary probe and the collaborators reported, and rendered as a `!`-marked row above the change rows; it explains the least of them, withdrawing only a second way to reach what the keys already reach |
 | A change is archived between the worker's `list --json` call and its file walk | The merged `ChangeSet` holds it in both `active` (the CLI's stale answer) and `archived` (the fresh file walk) for exactly one refresh cycle, with no problem recorded — `merge` does not consult `files.archived` when deciding whether a CLI change is CLI-only, because doing so would invert the dual-source model's rule that the CLI corrects the files, for a state that self-corrects once the next `list --json` no longer names the change (design.md → Decision D6) |
 
 ### No terminal is not a degraded state
@@ -1058,6 +1088,8 @@ own such test lives in `ui::tests::load::`, never in a view module.
 - Every non-`cargo` program `make check`'s path invokes ↔ `README.md` and `AGENTS.md` (the `Makefile` walk and the `scripts/gates/` interpreter scan).
 - `SPEC.md`'s fenced manifest transcription ↔ `herdr-plugin.toml` (values and `[[…]]` order).
 - `openspec/config.yaml`'s injected `context` ↔ the repository (the fixture claim and every `check:` prerequisite target).
+- § Keys' mouse table ↔ the `Action::` variants `ui::driver::mouse_action`'s own body produces (`mouse-input`).
+- `AGENTS.md`'s confined terminal-seam names ↔ `scripts/gates/noraw-grep.sh`'s `RAW_RE` (`mouse-input`).
 - A claim with no second site is argued in review, not checked.
 
 ### Gates

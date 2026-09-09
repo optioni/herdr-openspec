@@ -471,36 +471,48 @@ shape. Only `run_loop` can prove otherwise.
 <!-- kind: operational -->
 <!-- parallel-after: 7 -->
 
-- [ ] 9.1 CHECK: Read the two `SPEC.md` sections and the two `AGENTS.md` passages these
+- [x] 9.1 CHECK: Read the two `SPEC.md` sections and the two `AGENTS.md` passages these
       tasks rewrite, and confirm what is stale before writing: § Keys describes a
       keyboard-only pane, § Degraded states has no capture row,
       `grep -c 'EnableMouseCapture' AGENTS.md` is `0`, and `grep -n 'seven further claims'
       AGENTS.md` finds the doc-conformance count group 10 makes nine.
-- [ ] 9.2 Add in `SPEC.md`: § Keys (audience: anyone reading the design contract) — a mouse
+      **Run, all four confirmed stale before writing:** `SPEC.md` § Keys (`:517`) is a
+      fourteen-row table of keys with no mention of a pointer; § Degraded states (`:851`)
+      has no capture row; `grep -c 'EnableMouseCapture' AGENTS.md` → **0**, and its
+      terminal-seam rule lists four names; `grep -n 'seven further claims' AGENTS.md` →
+      `:216`. `SPEC.md` § Doc-conformance checks (`:1052`) carries the matching seven-item
+      list and was updated with them, which 9.2-9.6 did not name but which group 10's own
+      tests read alongside `AGENTS.md`.
+- [x] 9.2 Add in `SPEC.md`: § Keys (audience: anyone reading the design contract) — a mouse
       table naming the wheel over each region, the click on a change row, the second click,
       the click on a section header, and the click on a tab cell, plus one line stating that
       capture costs the terminal's own drag-to-select and how to override it. Nothing
       existing is stale; the section has described only keys since `tui-shell`, and the pane
       now has a second input device.
-- [ ] 9.3 Add in `SPEC.md`: § Degraded states (audience: the same) — one row for a terminal
+- [x] 9.3 Add in `SPEC.md`: § Degraded states (audience: the same) — one row for a terminal
       that refuses mouse capture, naming the reason's position as `refresh.startup`'s last
       entry. Required by that section's own contract: every degraded state is a row, and
       `tests/degraded_coverage.rs` fails on a row with no proof.
-- [ ] 9.4 Rewrite in `AGENTS.md`: the terminal-seam rule under § Architecture rules
+- [x] 9.4 Rewrite in `AGENTS.md`: the terminal-seam rule under § Architecture rules
       (audience: every future session) — its list of confined crossterm functions grows from
       four to six. Rewritten in place, not appended: the existing sentence becomes false the
       moment group 1 lands.
-- [ ] 9.5 Rewrite in `AGENTS.md`: § Current repo state's sentence on the event loop
+- [x] 9.5 Rewrite in `AGENTS.md`: § Current repo state's sentence on the event loop
       (audience: the same) — it enumerates the keys and says nothing about a pointer.
       Replace the enumeration's closing clause rather than adding a paragraph beside it;
       net addition to that section is at most two lines.
-- [ ] 9.6 Rewrite in `AGENTS.md`: § Quality gates' doc-conformance sentence (audience: the
+- [x] 9.6 Rewrite in `AGENTS.md`: § Quality gates' doc-conformance sentence (audience: the
       same) — it calls `tests/doc_contract.rs` "seven further claims" and enumerates them;
       group 10 adds two. Correct the count and the enumeration in place rather than
       appending; this is a net-zero edit.
-- [ ] 9.7 VERIFY: The passages group 10 binds now exist —
+- [x] 9.7 VERIFY: The passages group 10 binds now exist —
       `grep -c 'EnableMouseCapture' AGENTS.md` is at least `1` and `SPEC.md` § Keys holds a
       mouse table. Group 10's tests are the real verification and run there.
+      **Run:** `grep -c 'EnableMouseCapture' AGENTS.md` → **1**; `SPEC.md` § Keys holds a
+      nine-row mouse table, each row naming its `Action` variant in backticks, which is the
+      extraction rule `specs/mouse-input/spec.md` states for
+      `mouse_bindings_match_spec_md`. `cargo test --test doc_contract` → **55 passed** with
+      the passages rewritten, so nothing that already existed was broken by the edits.
 
 ## 10. Contract-tier bindings
 <!-- kind: operational -->
