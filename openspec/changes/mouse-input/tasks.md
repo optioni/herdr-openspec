@@ -92,7 +92,7 @@ shape. Only `run_loop` can prove otherwise.
 ## 1. Terminal capture lifecycle
 <!-- kind: behavior -->
 
-- [ ] 1.1 RED: Write failing tests in `src/ui/terminal.rs` for: `normal_lifetime_records_all_six`,
+- [x] 1.1 RED: Write failing tests in `src/ui/terminal.rs` for: `normal_lifetime_records_all_six`,
       `mouse_failure_still_returns_a_guard`, and the updated
       `normal_lifetime_is_enter_enter_leave_disable` (filtering the capture pair out of the
       recorded list, so the four-operation claim survives verbatim). Extend the `Recorder`
@@ -103,35 +103,61 @@ shape. Only `run_loop` can prove otherwise.
       `alternate_screen_failure_unwinds_raw_mode` (`:254`), and
       `teardown_errors_do_not_panic_and_both_are_attempted` (`:266`).
       `cargo test --lib terminal::` — expect RED, and expect more than 0 tests to run.
-- [ ] 1.2 RED: Update the five existing panic-path and refusal tests to the lists the
+- [x] 1.2 RED: Update the five existing panic-path and refusal tests to the lists the
       `terminal-lifecycle` delta now states — `a_panic_still_restores`
       (`src/ui/terminal.rs:281`), `restore_then_restores_before_delegating` (`:300`),
       `restore_then_delegates_even_when_both_restores_fail` (`:310`),
       `a_panic_on_the_render_thread_still_restores` (`:343`), and `ui::enter_if_terminal`'s
       own `Ok` arm. All four terminal tests break the moment `disable_mouse` joins
       `restore_then` (`:74-78`), which `Drop` and the panic hook share.
-      `a_panic_on_a_worker_thread_restores_nothing` (`:322`) must stay **unchanged**, and
-      `teardown_errors_do_not_panic_and_both_are_attempted` (`:266`) survives untouched
-      because it slices the last two calls rather than asserting the whole list. The worker-thread test's `["previous_hook"]`
+      `a_panic_on_a_worker_thread_restores_nothing` (`:322`) must stay **unchanged**.
+      **Correction, made while implementing:**
+      `teardown_errors_do_not_panic_and_both_are_attempted` (`:266`) does *not* survive
+      untouched. It would still compile and pass on its two-call slice, but the
+      `terminal-lifecycle` delta reworded its own scenario to fail **all three** teardown
+      operations and assert the list ends `["disable_mouse", "leave_alternate",
+      "disable_raw"]`. The spec is authoritative over this note, so the test was updated to
+      the three-operation form. The worker-thread test's `["previous_hook"]`
       is unchanged and must stay unchanged, which is the check that capture gained no
       exception off the render thread. `cargo test --lib terminal:: enter_if_terminal` —
       expect RED.
-- [ ] 1.3 GREEN: Add `enable_mouse` and `disable_mouse` to `TerminalOps`, implemented in
+- [x] 1.3 GREEN: Add `enable_mouse` and `disable_mouse` to `TerminalOps`, implemented in
       `CrosstermOps` as one `ratatui::crossterm::execute!` of `EnableMouseCapture` /
       `DisableMouseCapture` each, mapping the error — no decision, no ordering, no state.
-- [ ] 1.4 GREEN: `TerminalGuard::enter` calls `enable_mouse` after `enter_alternate` and
+- [x] 1.4 GREEN: `TerminalGuard::enter` calls `enable_mouse` after `enter_alternate` and
       stores a failure instead of returning it; `mouse_problem(&self) -> Option<String>`
       returns the `TerminalError`'s `Display` text. `Drop` and `restore_then` call
       `disable_mouse` first, unconditionally (per design.md → Decision 7), so the panic
       hook releases capture too — `restore_then` is the shared body `Drop` and the panic hook
       both delegate to, so one edit covers both paths.
-- [ ] 1.5 CHECK: Contract gate — `TerminalOps` is a trait with three implementors
+- [x] 1.5 CHECK: Contract gate — `TerminalOps` is a trait with three implementors
       (check M). `grep -rn 'impl TerminalOps for' src tests` still reports exactly those 3
       sites, each implementing all six methods, and no fourth appeared.
-- [ ] 1.6 REFACTOR: State whether the three `TerminalOps` implementors share enough to
+      **Run:** exactly 3 — `src/ui/terminal.rs:123` (`CrosstermOps`),
+      `src/ui/terminal.rs:294` (that file's `Recorder`), and `src/ui/mod.rs:2186`
+      (`ui::tests::start`'s `Recorder`). The line numbers moved with the edit; the set did
+      not. All three compile, which is what proves each implements all six methods —
+      rustc rejects a partial `impl`.
+- [x] 1.6 REFACTOR: State whether the three `TerminalOps` implementors share enough to
       warrant extraction, or record that none was needed.
-- [ ] 1.7 Run the group tests — `cargo test --lib terminal::` and
+      **None was needed.** The three share only the trait's six signatures. `CrosstermOps`
+      is six one-line crossterm calls with no state; `terminal.rs`'s `Recorder` records a
+      call list and answers from a per-operation failure map; `mod.rs`'s `Recorder` records
+      a call list and carries one `bool`. Extracting a shared recording double would move a
+      test-only type across a module boundary to save eight lines and would couple two
+      independent test modules' failure models — the second double deliberately cannot fail
+      anything but `enable_raw`, which is the whole of what `enter_if_terminal`'s error arm
+      needs.
+- [x] 1.7 Run the group tests — `cargo test --lib terminal::` and
       `cargo test --lib ui::tests::` — no regressions.
+      **Run:** `cargo test --lib terminal::` → **13 passed**, 0 failed (11 before, plus
+      `normal_lifetime_records_all_six` and `mouse_failure_still_returns_a_guard`).
+      `cargo test --lib ui::tests::` → 7 failed under the default parallel run, every one
+      of them under `ui::tests::wiring::`; re-run as
+      `cargo test --lib ui::tests:: -- --test-threads=1` → **60 passed**, 0 failed. This is
+      the pre-existing flake recorded at the top of this file, wider than the two names
+      measured at `a156f9a` but the same class and the same module — the wiring tests spawn
+      scratch `herdr` programs and race under parallel execution.
 
 ## 2. The hit test — `layout::zone`
 <!-- kind: behavior -->

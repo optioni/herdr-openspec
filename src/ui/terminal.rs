@@ -1,7 +1,8 @@
-//! The terminal seam: raw mode and the alternate screen, entered and left
-//! in a fixed, mirrored order, behind an injected `TerminalOps` trait so
-//! this is testable with no real terminal. See
-//! `openspec/changes/tui-shell/specs/terminal-lifecycle/spec.md`.
+//! The terminal seam: raw mode, the alternate screen, and mouse capture,
+//! entered and left in a fixed, mirrored order, behind an injected
+//! `TerminalOps` trait so this is testable with no real terminal. See
+//! `openspec/changes/tui-shell/specs/terminal-lifecycle/spec.md` and
+//! `openspec/changes/mouse-input/specs/terminal-lifecycle/spec.md`.
 
 use std::fmt;
 
@@ -20,22 +21,35 @@ impl fmt::Display for TerminalError {
     }
 }
 
-/// The four fallible terminal-mode operations. `CrosstermOps` is the one
-/// implementation that touches a real terminal; every test uses a double.
+/// The six fallible terminal-mode operations — `mouse-input` added the
+/// capture pair, which the guard enters last and leaves first.
+/// `CrosstermOps` is the one implementation that touches a real terminal;
+/// every test uses a double.
 pub trait TerminalOps {
     fn enable_raw(&self) -> Result<(), TerminalError>;
     fn enter_alternate(&self) -> Result<(), TerminalError>;
+    fn enable_mouse(&self) -> Result<(), TerminalError>;
+    fn disable_mouse(&self) -> Result<(), TerminalError>;
     fn leave_alternate(&self) -> Result<(), TerminalError>;
     fn disable_raw(&self) -> Result<(), TerminalError>;
 }
 
-/// Enters `enable_raw` then `enter_alternate` on construction, and calls
-/// `leave_alternate` then `disable_raw` — the exact reverse — on drop,
-/// ignoring each teardown operation's error rather than panicking inside
-/// `Drop`. Restores exactly once: there is no way to clone, copy, or
-/// re-drop the same guard.
+/// Enters `enable_raw`, `enter_alternate`, then `enable_mouse` on
+/// construction, and calls `disable_mouse`, `leave_alternate`, then
+/// `disable_raw` — the exact reverse — on drop, ignoring each teardown
+/// operation's error rather than panicking inside `Drop`. Restores exactly
+/// once: there is no way to clone, copy, or re-drop the same guard.
+///
+/// A refused `enable_mouse` is **not** an error: it is stored and reported
+/// through [`TerminalGuard::mouse_problem`], because the pane is fully
+/// usable by key without capture and `SPEC.md`'s "never fail closed" rule
+/// makes refusing to start the wrong answer.
 pub struct TerminalGuard<'a> {
     ops: &'a dyn TerminalOps,
+    /// The `TerminalError`'s `Display` text when `enable_mouse` was refused,
+    /// `None` when it succeeded. Never consulted by teardown — see
+    /// [`restore_then`] and design.md -> Decision 7.
+    mouse_problem: Option<String>,
 }
 
 impl fmt::Debug for TerminalGuard<'_> {
@@ -45,18 +59,29 @@ impl fmt::Debug for TerminalGuard<'_> {
 }
 
 impl<'a> TerminalGuard<'a> {
-    /// Enter raw mode then the alternate screen, in that order. If
-    /// `enable_raw` fails, nothing else is attempted and there is no guard
-    /// to undo. If `enter_alternate` fails, `disable_raw` is called before
-    /// returning the error, so a partially entered terminal is never left
-    /// behind.
+    /// Enter raw mode, then the alternate screen, then mouse capture, in
+    /// that order. If `enable_raw` fails, nothing else is attempted and
+    /// there is no guard to undo. If `enter_alternate` fails, `disable_raw`
+    /// is called before returning the error, so a partially entered
+    /// terminal is never left behind. If `enable_mouse` fails, the error is
+    /// **stored** rather than returned: a guard is still produced and the
+    /// pane still starts.
     pub fn enter(ops: &'a dyn TerminalOps) -> Result<Self, TerminalError> {
         ops.enable_raw()?;
         if let Err(err) = ops.enter_alternate() {
             let _ = ops.disable_raw();
             return Err(err);
         }
-        Ok(Self { ops })
+        let mouse_problem = ops.enable_mouse().err().map(|err| err.to_string());
+        Ok(Self { ops, mouse_problem })
+    }
+
+    /// The reason mouse capture was refused, as the `TerminalError`'s own
+    /// `Display` text, or `None` when it was entered. `ui::run` threads this
+    /// onto `Startup::mouse_problem`, from where `run_wired` appends it to
+    /// `refresh.startup` as that list's last entry.
+    pub fn mouse_problem(&self) -> Option<String> {
+        self.mouse_problem.clone()
     }
 }
 
@@ -66,12 +91,22 @@ impl Drop for TerminalGuard<'_> {
     }
 }
 
-/// Leave the alternate screen and disable raw mode, ignoring either
-/// operation's error, then run `next`. This is the pure body both
-/// `TerminalGuard::drop` and the panic hook installed by
+/// Release mouse capture, leave the alternate screen, and disable raw mode,
+/// ignoring each operation's error, then run `next`. This is the pure body
+/// both `TerminalGuard::drop` and the panic hook installed by
 /// [`install_panic_hook`] delegate to — `next` restores before the previous
 /// panic hook runs, so the panic message lands on a cooked terminal.
+///
+/// `disable_mouse` is called **unconditionally**, whether or not
+/// `enable_mouse` succeeded: writing the disable sequence to a terminal that
+/// never enabled capture is inert, the hook has no guard to consult, and a
+/// conditional teardown would be a branch whose false arm no test could
+/// observe from outside (`mouse-input` -> design.md -> Decision 7). A panic
+/// that left capture enabled would leave the user's terminal emitting escape
+/// sequences for every click and scroll into whatever shell the panic message
+/// landed in.
 pub fn restore_then(ops: &dyn TerminalOps, next: &mut dyn FnMut()) {
+    let _ = ops.disable_mouse();
     let _ = ops.leave_alternate();
     let _ = ops.disable_raw();
     next();
@@ -97,6 +132,28 @@ impl TerminalOps for CrosstermOps {
         )
         .map_err(|e| TerminalError {
             op: "enter_alternate",
+            detail: e.to_string(),
+        })
+    }
+
+    fn enable_mouse(&self) -> Result<(), TerminalError> {
+        ratatui::crossterm::execute!(
+            std::io::stdout(),
+            ratatui::crossterm::event::EnableMouseCapture
+        )
+        .map_err(|e| TerminalError {
+            op: "enable_mouse",
+            detail: e.to_string(),
+        })
+    }
+
+    fn disable_mouse(&self) -> Result<(), TerminalError> {
+        ratatui::crossterm::execute!(
+            std::io::stdout(),
+            ratatui::crossterm::event::DisableMouseCapture
+        )
+        .map_err(|e| TerminalError {
+            op: "disable_mouse",
             detail: e.to_string(),
         })
     }
@@ -149,7 +206,8 @@ pub fn restore_then_if(
 /// Install a panic hook that restores the terminal before delegating to the
 /// hook already installed, so a panic message lands on a cooked terminal on
 /// the main screen rather than a raw alternate screen about to be torn
-/// down. Chains to, never discards, the previous hook. Restores only when
+/// down, and releases mouse capture along with them. Chains to, never
+/// discards, the previous hook. Restores only when
 /// the panicking thread is the one that installed the hook — the render
 /// thread — via `restore_then_if`; a worker thread's panic delegates
 /// without restoring. Not itself unit tested — installing a hook is
@@ -172,24 +230,46 @@ pub fn install_panic_hook() {
 mod tests {
     mod guard {
         use std::cell::RefCell;
-        use std::collections::HashSet;
+        use std::collections::BTreeMap;
         use std::panic::AssertUnwindSafe;
 
         use crate::ui::terminal::{TerminalError, TerminalGuard, TerminalOps, restore_then};
 
+        /// The two capture operations `mouse-input` added, filtered out of a
+        /// recorded list so the four-operation claim `tui-shell` made can be
+        /// asserted verbatim beside the six-operation one.
+        const CAPTURE: [&str; 2] = ["enable_mouse", "disable_mouse"];
+
         #[derive(Default)]
         struct Recorder {
             calls: RefCell<Vec<&'static str>>,
-            failing: RefCell<HashSet<&'static str>>,
+            /// The operation name to the `TerminalError::detail` its failure
+            /// carries — a map rather than `mouse-input`'s predecessor's set,
+            /// because `mouse_failure_still_returns_a_guard` asserts the
+            /// detail text reaches `mouse_problem()` unchanged.
+            failing: RefCell<BTreeMap<&'static str, String>>,
         }
 
         impl Recorder {
             fn fail(&self, op: &'static str) {
-                self.failing.borrow_mut().insert(op);
+                self.fail_with(op, "recorder configured to fail");
+            }
+
+            fn fail_with(&self, op: &'static str, detail: &str) {
+                self.failing.borrow_mut().insert(op, detail.to_string());
             }
 
             fn calls(&self) -> Vec<&'static str> {
                 self.calls.borrow().clone()
+            }
+
+            /// `calls()` without the two capture operations — the list the
+            /// four-operation scenario asserts.
+            fn calls_without_capture(&self) -> Vec<&'static str> {
+                self.calls()
+                    .into_iter()
+                    .filter(|op| !CAPTURE.contains(op))
+                    .collect()
             }
 
             fn note(&self, label: &'static str) {
@@ -198,13 +278,12 @@ mod tests {
 
             fn record(&self, op: &'static str) -> Result<(), TerminalError> {
                 self.calls.borrow_mut().push(op);
-                if self.failing.borrow().contains(op) {
-                    Err(TerminalError {
+                match self.failing.borrow().get(op) {
+                    Some(detail) => Err(TerminalError {
                         op,
-                        detail: "recorder configured to fail".to_string(),
-                    })
-                } else {
-                    Ok(())
+                        detail: detail.clone(),
+                    }),
+                    None => Ok(()),
                 }
             }
         }
@@ -216,6 +295,12 @@ mod tests {
             fn enter_alternate(&self) -> Result<(), TerminalError> {
                 self.record("enter_alternate")
             }
+            fn enable_mouse(&self) -> Result<(), TerminalError> {
+                self.record("enable_mouse")
+            }
+            fn disable_mouse(&self) -> Result<(), TerminalError> {
+                self.record("disable_mouse")
+            }
             fn leave_alternate(&self) -> Result<(), TerminalError> {
                 self.record("leave_alternate")
             }
@@ -226,12 +311,16 @@ mod tests {
 
         #[test]
         fn normal_lifetime_is_enter_enter_leave_disable() {
+            // `terminal-lifecycle`: "Normal lifetime records the four operations
+            // mirrored". The two capture operations are filtered out, so the claim
+            // this scenario has asserted since `tui-shell` survives verbatim after
+            // `mouse-input` added two around them.
             let rec = Recorder::default();
             {
                 let _guard = TerminalGuard::enter(&rec).expect("enter succeeds");
             }
             assert_eq!(
-                rec.calls(),
+                rec.calls_without_capture(),
                 vec![
                     "enable_raw",
                     "enter_alternate",
@@ -242,11 +331,65 @@ mod tests {
         }
 
         #[test]
+        fn normal_lifetime_records_all_six() {
+            // `terminal-lifecycle`: "Normal lifetime records all six operations
+            // mirrored".
+            let rec = Recorder::default();
+            {
+                let guard = TerminalGuard::enter(&rec).expect("enter succeeds");
+                assert_eq!(
+                    guard.mouse_problem(),
+                    None,
+                    "capture succeeded, so nothing is reported for its whole lifetime"
+                );
+            }
+            let calls = rec.calls();
+            assert_eq!(
+                calls,
+                vec![
+                    "enable_raw",
+                    "enter_alternate",
+                    "enable_mouse",
+                    "disable_mouse",
+                    "leave_alternate",
+                    "disable_raw"
+                ]
+            );
+            // The pair mirrors around the four it wraps: `enable_mouse` is the last
+            // entry operation and `disable_mouse` the first teardown one.
+            assert_eq!(calls[2], "enable_mouse");
+            assert_eq!(calls[3], "disable_mouse");
+        }
+
+        #[test]
+        fn mouse_failure_still_returns_a_guard() {
+            // `terminal-lifecycle`: "Mouse capture fails and the guard is still
+            // returned". Capture is the one entry operation the pane does not need
+            // in order to render, and `SPEC.md`'s "never fail closed" rule makes
+            // refusing to start the wrong answer.
+            let rec = Recorder::default();
+            rec.fail_with("enable_mouse", "no mouse");
+            {
+                let guard = TerminalGuard::enter(&rec).expect("enter returns Ok, not Err");
+                let problem = guard.mouse_problem().expect("the refusal is reported");
+                assert!(problem.contains("enable_mouse"), "{problem}");
+                assert!(problem.contains("no mouse"), "{problem}");
+            }
+            assert_eq!(
+                &rec.calls()[3..],
+                ["disable_mouse", "leave_alternate", "disable_raw"],
+                "teardown is unchanged by the failed entry"
+            );
+        }
+
+        #[test]
         fn enable_raw_failure_attempts_nothing_further() {
             let rec = Recorder::default();
             rec.fail("enable_raw");
             let err = TerminalGuard::enter(&rec).expect_err("enable_raw fails");
             assert_eq!(err.op, "enable_raw");
+            // In particular no `disable_raw` and no `enable_mouse`: raw mode was
+            // never entered.
             assert_eq!(rec.calls(), vec!["enable_raw"]);
         }
 
@@ -256,6 +399,8 @@ mod tests {
             rec.fail("enter_alternate");
             let err = TerminalGuard::enter(&rec).expect_err("enter_alternate fails");
             assert_eq!(err.op, "enter_alternate");
+            // Raw mode was undone rather than left set on a terminal the user is
+            // still typing into, and `enable_mouse` was never attempted.
             assert_eq!(
                 rec.calls(),
                 vec!["enable_raw", "enter_alternate", "disable_raw"]
@@ -264,7 +409,11 @@ mod tests {
 
         #[test]
         fn teardown_errors_do_not_panic_and_both_are_attempted() {
+            // `terminal-lifecycle`: every later teardown operation is attempted
+            // even though the one before it failed, because abandoning them would
+            // leave raw mode set. All **three** fail after `mouse-input`.
             let rec = Recorder::default();
+            rec.fail("disable_mouse");
             rec.fail("leave_alternate");
             rec.fail("disable_raw");
             {
@@ -272,8 +421,8 @@ mod tests {
             }
             let calls = rec.calls();
             assert_eq!(
-                &calls[calls.len() - 2..],
-                ["leave_alternate", "disable_raw"]
+                &calls[calls.len() - 3..],
+                ["disable_mouse", "leave_alternate", "disable_raw"]
             );
         }
 
@@ -290,6 +439,8 @@ mod tests {
                 vec![
                     "enable_raw",
                     "enter_alternate",
+                    "enable_mouse",
+                    "disable_mouse",
                     "leave_alternate",
                     "disable_raw"
                 ]
@@ -302,19 +453,30 @@ mod tests {
             restore_then(&rec, &mut || rec.note("previous_hook"));
             assert_eq!(
                 rec.calls(),
-                vec!["leave_alternate", "disable_raw", "previous_hook"]
+                vec![
+                    "disable_mouse",
+                    "leave_alternate",
+                    "disable_raw",
+                    "previous_hook"
+                ]
             );
         }
 
         #[test]
         fn restore_then_delegates_even_when_both_restores_fail() {
             let rec = Recorder::default();
+            rec.fail("disable_mouse");
             rec.fail("leave_alternate");
             rec.fail("disable_raw");
             restore_then(&rec, &mut || rec.note("previous_hook"));
             assert_eq!(
                 rec.calls(),
-                vec!["leave_alternate", "disable_raw", "previous_hook"]
+                vec![
+                    "disable_mouse",
+                    "leave_alternate",
+                    "disable_raw",
+                    "previous_hook"
+                ]
             );
         }
 
@@ -348,9 +510,16 @@ mod tests {
 
             restore_then_if(&rec, id, id, &mut || rec.note("previous_hook"));
 
+            // The same list the render-thread path produced before `mouse-input`,
+            // with `disable_mouse` prepended and nothing else moved.
             assert_eq!(
                 rec.calls(),
-                vec!["leave_alternate", "disable_raw", "previous_hook"]
+                vec![
+                    "disable_mouse",
+                    "leave_alternate",
+                    "disable_raw",
+                    "previous_hook"
+                ]
             );
         }
 

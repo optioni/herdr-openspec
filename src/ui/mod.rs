@@ -2198,6 +2198,14 @@ apply:
                 self.calls.borrow_mut().push("enter_alternate");
                 Ok(())
             }
+            fn enable_mouse(&self) -> Result<(), TerminalError> {
+                self.calls.borrow_mut().push("enable_mouse");
+                Ok(())
+            }
+            fn disable_mouse(&self) -> Result<(), TerminalError> {
+                self.calls.borrow_mut().push("disable_mouse");
+                Ok(())
+            }
             fn leave_alternate(&self) -> Result<(), TerminalError> {
                 self.calls.borrow_mut().push("leave_alternate");
                 Ok(())
@@ -2224,7 +2232,13 @@ apply:
             let rec = Recorder::default();
             let result = super::super::enter_if_terminal(true, &rec);
             assert!(result.is_ok());
-            assert_eq!(rec.calls(), vec!["enable_raw", "enter_alternate"]);
+            // `mouse-input`: three entry operations, not two — the `false` case is
+            // still proven to be a branch rather than a function that never does
+            // anything, and its own empty-list assertion is unchanged.
+            assert_eq!(
+                rec.calls(),
+                vec!["enable_raw", "enter_alternate", "enable_mouse"]
+            );
         }
 
         #[test]
