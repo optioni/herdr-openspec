@@ -2018,26 +2018,23 @@ fn terminal_seam_names_match_the_gate() {
     let documented = documented_seam_names(&agents_md).expect("AGENTS.md's confined set");
     let searched = gate_raw_names(&script).expect("noraw-grep.sh's RAW_RE");
 
-    let expected: BTreeSet<String> = [
-        "enable_raw_mode",
-        "disable_raw_mode",
-        "EnterAlternateScreen",
-        "LeaveAlternateScreen",
-        "EnableMouseCapture",
-        "DisableMouseCapture",
-    ]
-    .into_iter()
-    .map(str::to_string)
-    .collect();
-
     assert_eq!(
         documented, searched,
         "AGENTS.md names {documented:?} as the confined terminal-seam set while \
          noraw-grep.sh's RAW_RE searches for {searched:?}"
     );
+    // The size, not a third hardcoded list of the names themselves: `NORAW-GREP`
+    // sweeps `tests/` as well as `src/`, so spelling the six confined names in
+    // this file would break the very invariant this leg checks. `terminal-lifecycle`
+    // states six; the two sites above are what say *which* six, and
+    // `noraw-grep.sh`'s own per-name positive control is what binds that list to
+    // `src/ui/terminal.rs`.
     assert_eq!(
-        documented, expected,
-        "the confined set is the six names terminal-lifecycle states"
+        documented.len(),
+        6,
+        "terminal-lifecycle states six confined terminal-mode functions, not \
+         {}: {documented:?}",
+        documented.len()
     );
 }
 
@@ -2087,13 +2084,16 @@ fn gate_raw_names_parses_and_fails_loudly() {
 
 #[test]
 fn documented_seam_names_takes_identifiers_only() {
+    // Fabricated names, never the real six: `NORAW-GREP` sweeps `tests/` too, so a
+    // fixture spelling them here would fail the confinement this file's own
+    // `terminal_seam_names_match_the_gate` leg exists to check.
     let text = "`src/ui/terminal.rs` is the only file in the crate \
                 permitted to name a crossterm terminal-mode function\n  \
-                (`enable_raw_mode`, `EnableMouseCapture`) — six names since `mouse-input`\n";
+                (`alpha_mode`, `BetaScreen`) — two names since `some-change`\n";
     let names = documented_seam_names(text).expect("parse");
     assert_eq!(
         names,
-        ["enable_raw_mode", "EnableMouseCapture"]
+        ["BetaScreen", "alpha_mode"]
             .into_iter()
             .map(str::to_string)
             .collect(),
