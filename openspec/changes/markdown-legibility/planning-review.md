@@ -80,13 +80,17 @@ Ambiguous, and the ASCII glyphs they replace are not — and answered in favour 
 
 ## Deferred Non-Blocking Notes
 
-- **The test baseline is red and this change does not fix it.** `ui::tests::wiring::*` fails
-  5 of 29 on one run, 7 on the next, and **1 of 29** under `-- --test-threads=1` (173s against
-  ~55s parallel) — timing-dependent contention among the tests driving the four worker-thread
-  collaborators. Pre-existing and out of scope: this change touches no collaborator, thread or
-  clock. Resolution point recorded in `design.md` → Test Strategy and in `tasks.md`'s header:
-  every "no regressions" step means *no new failure outside `ui::tests::wiring::*`*. Fixing
-  the flakes is a separate change and is not scheduled here.
+- **The suite is green at HEAD (1222/0) but flaky under load, and this change does not fix
+  that.** `crate::testutil::Stages` (`src/lib.rs:660-724`) bounds 29 `ui::tests::wiring::*`
+  tests with a 5-second **wall-clock** `DEADLINE` and force-presses `q` on expiry, so a loaded
+  machine cuts runs short before the staged keys fire. Measured idle: 29/29 in ~3.8s, full
+  suite 1222/0. Measured with several agents running cargo here: 7, 11 and 10 failures of 29
+  across three runs taking 35–51s. The tenfold slowdown is the cause. A flake is identifiable
+  by signature — a count asserted against `0` with an **empty** log — where a real defect gives
+  a wrong call list. Pre-existing and out of scope: this change touches no collaborator, thread
+  or clock. Resolution point recorded in `design.md` → Test Strategy and `tasks.md`'s header.
+  Deserves its own change: 5 seconds is thin on a CI runner with fewer cores than the reference
+  machine, and CI runs these 29 tests on both `ubuntu-latest` and `macos-latest`.
 - **Two capability Purposes go stale at archive time.** `markdown-render`'s and
   `tasks-checklist`'s `## Purpose` sections state behaviour this change reverses, delta specs
   carry no Purpose, and `tests/spec_purposes.rs` rejects only an empty or placeholder one.

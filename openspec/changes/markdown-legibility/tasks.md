@@ -24,12 +24,18 @@
      `python3 -c "import re;print(re.findall(r'\b(\d+)\b','[58u16, 78]'))"` -> `['78']`.
      A snippet lifted in with a suffix fails `make gates`.
 
-     Baseline caveat: `cargo test --lib` is NOT green at HEAD. `ui::tests::wiring::*` fails
-     5 of 29 on one run, 7 on the next, and 1 of 29 under `-- --test-threads=1` — timing
-     dependent, pre-existing, and out of this change's scope (it touches no collaborator,
-     thread or clock). Every "no regressions" step below means no new failure OUTSIDE
-     `ui::tests::wiring::*`; re-run, or run that module serially, before treating one as
-     yours. See design.md -> Test Strategy. -->
+     Baseline: `cargo test --lib` at HEAD is 1222 passed / 0 failed, and
+     `cargo test --lib ui::` is 549 — but only on an unloaded machine. Under a competing
+     cargo run the wall-clock-deadlined tests in `ui::tests::wiring::*` fail
+     non-deterministically (measured here: 7, 11 and 10 of 29 on three runs taking 35-51s,
+     against 3.8s idle).
+
+     How to tell a flake from your own regression: a deadline flake is confined to
+     `ui::tests::wiring::*` AND its message asserts a count against 0 with an EMPTY log
+     (`left: 0 / right: 4`, `calls: []`) — the run was cut short, not mis-wired. Re-run
+     `cargo test --lib ui::tests::wiring` alone (~4s idle) to settle it. Do not chase one
+     into a re-baseline; that is exactly the "corrected a literal that was right" failure
+     mode 8.1 watches for. Pre-existing and out of scope. See design.md -> Test Strategy. -->
 
 ## 1. Soft breaks fold into the paragraph
 <!-- kind: behavior -->
@@ -167,7 +173,7 @@
 <!-- kind: operational -->
 
 - [ ] 10.1 CHECK: Commit the change directory before running `make gates`. At HEAD `/bin/sh scripts/gates/openspec-untouched.sh` exits **1** on this change's own untracked files (`OPENSPEC-UNTOUCHED FAIL: an untracked file exists inside openspec/`), which is the gate working, not a defect.
-- [ ] 10.2 VERIFY: Run `make check` as the single gate. If it fails, name the failing sub-command — `make fmt-check`, `make lint`, `make gates`, `make test`, or `make coverage` — rather than reporting the composite. Expect `ui::tests::wiring::*` failures that are not this change's: re-run to confirm they vary, and report them separately rather than folding them into this change's result.
+- [ ] 10.2 VERIFY: Run `make check` as the single gate. If it fails, name the failing sub-command — `make fmt-check`, `make lint`, `make gates`, `make test`, or `make coverage` — rather than reporting the composite. Run it on an otherwise idle machine. `ui::tests::wiring::*` failures under load are deadline flakes, not this change's — confirm by the empty-log signature and a clean isolated re-run, and report them separately rather than folding them into this change's result.
 - [ ] 10.3 VERIFY: Confirm `COLWIDTH` still passes and can still fail. `/bin/sh scripts/gates/colwidth.sh` at HEAD → exit **0**, `COLWIDTH OK: no char-count measurement in the eight pure view files`. Negative control, run at planning time: inserting `let _planted = source.chars().count();` into `lines` makes it exit **1** with `COLWIDTH FAIL: src/ui/markdown.rs has 1 char-count measurement(s) in production code`; removing the plant returns it to exit **0**.
 - [ ] 10.4 VERIFY: Read 10.2's coverage output and confirm both floors held — the total and the production slice. `Makefile:71` is `check: fmt-check lint gates test coverage`, so `make check` already ran it; re-running it here would be duplicate work, and the assertion is on its output. This change adds tests and no untested production branch, so a fall means a re-baselined test stopped exercising a path.
 - [ ] 10.5 VERIFY: Run `openspec validate markdown-legibility --strict` — valid.

@@ -156,14 +156,30 @@ Every `ui::markdown` and `ui::tasks` scenario asserts at **both** mandated inter
 58 and 78 — as this repository's width rule requires; the `Dashboard` scenarios assert at
 120x20 and 60x20.
 
-**The baseline is not green, and this change does not make it so.** Measured at HEAD:
-`cargo test --lib ui::tests::wiring` fails 5 of 29 on one run and 7 of 29 on the next, over
-the same test set — `a_keypress_launches_an_agent`, `a_polled_agent_reaches_a_rendered_badge`,
-`a_failed_cli_cycle_keeps_the_file_numbers` and others in `ui::tests::wiring::*`. Run serially
-with `-- --test-threads=1` the same set fails **1** of 29, in 173s against ~55s parallel. The
-variance across identical runs, and the collapse to one failure under serialisation, is what
-makes them timing-dependent rather than broken: these are the tests driving the four
-worker-thread collaborators, and they are contending under parallel execution. They are **pre-existing and out of scope**:
+**The baseline is green, but only on an unloaded machine.** `cargo test --lib` at HEAD is
+**1222 passed / 0 failed** when nothing competes for the CPU. Under contention it is not, and
+the failures are always inside `ui::tests::wiring::*`.
+
+The mechanism is in the source, not inferred. Those 29 tests are the only wall-clock-bounded
+ones in the suite: they drive `run_wired_staged` through `crate::testutil::Stages`
+(`src/lib.rs:660-724`), which carries `const DEADLINE = from_secs(5)` (`:670`) and, on expiry,
+force-presses `q` (`:720`) so the render loop exits before the staged keys fire. They also
+spawn real shell scripts standing in for `herdr` and `openspec` — one with a literal
+`sleep 0.3` — over real `ScratchDir`s, so they are the first to lose a race.
+
+Measured both ways: on an idle machine, `cargo test --lib ui::tests::wiring` is 29/29 across
+five runs at ~3.8s. On this machine with several agents running cargo concurrently, the same
+command took 35–51s and failed 7, 11, and 10 of 29 on three consecutive runs — a different set
+each time. The tenfold slowdown *is* the cause; the failures scale with it.
+
+**The signature tells a flake from a regression.** A deadline flake asserts an expected count
+against `0` with an **empty** log — `left: 0 / right: 4`, `calls: []` — because the run was cut
+short. A genuine wiring defect produces a wrong call *list*, not an empty one.
+
+This is pre-existing and out of scope: this change touches no collaborator, thread, or clock.
+It deserves its own change — a 5-second wall-clock deadline is thin on a CI runner with fewer
+cores than the reference machine, and CI runs these same 29 tests on both `ubuntu-latest` and
+`macos-latest`. They are **pre-existing and out of scope**:
 this change touches no collaborator, no thread, and no clock. Every "no regressions" step
 below therefore means *no new failure outside `ui::tests::wiring::*`*, and an implementer who
 sees one of those go red should re-run before treating it as theirs. Fixing them is a separate
