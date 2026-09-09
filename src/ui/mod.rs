@@ -1632,47 +1632,59 @@ apply:
                     .collect()
             }
 
+            // `list-sections`: `ui::load` starts `selected` at 0, which now
+            // addresses `Target::Section(Active)` — the active header, target 0
+            // — so the header itself carries the cursor and every row shifts
+            // down by one.
             let buf120 = render_at(120, 20, &dashboard);
             assert_eq!(
                 cols(&row_text(&buf120, 2), 1, 38),
-                "> add-token-refresh              [4/9]"
+                format!("{:<38}", "> v active (3)")
             );
             assert_eq!(
                 cols(&row_text(&buf120, 3), 1, 38),
-                "  fix-empty-basket               [7/7]"
+                "  add-token-refresh              [4/9]"
             );
             assert_eq!(
                 cols(&row_text(&buf120, 4), 1, 38),
-                "  migrate-ai-sdk-v7                [-]"
+                "  fix-empty-basket               [7/7]"
             );
             assert_eq!(
                 cols(&row_text(&buf120, 5), 1, 38),
-                "  -- archived ------------------------"
+                "  migrate-ai-sdk-v7                [-]"
             );
             assert_eq!(
                 cols(&row_text(&buf120, 6), 1, 38),
+                format!("{:<38}", "  v archived (1)")
+            );
+            assert_eq!(
+                cols(&row_text(&buf120, 7), 1, 38),
                 "  2026-08-14 add-auth            [7/7]"
             );
 
             let buf60 = render_at(60, 20, &dashboard);
             assert_eq!(
                 cols(&row_text(&buf60, 2), 1, 58),
-                "> add-token-refresh                                  [4/9]"
+                format!("{:<58}", "> v active (3)")
             );
             assert_eq!(
                 cols(&row_text(&buf60, 3), 1, 58),
-                "  fix-empty-basket                                   [7/7]"
+                "  add-token-refresh                                  [4/9]"
             );
             assert_eq!(
                 cols(&row_text(&buf60, 4), 1, 58),
-                "  migrate-ai-sdk-v7                                    [-]"
+                "  fix-empty-basket                                   [7/7]"
             );
             assert_eq!(
                 cols(&row_text(&buf60, 5), 1, 58),
-                "  -- archived --------------------------------------------"
+                "  migrate-ai-sdk-v7                                    [-]"
             );
             assert_eq!(
                 cols(&row_text(&buf60, 6), 1, 58),
+                format!("{:<58}", "  v archived (1)")
+            );
+            assert_eq!(
+                cols(&row_text(&buf60, 7), 1, 58),
                 "  2026-08-14 add-auth                                [7/7]"
             );
         }
@@ -2146,11 +2158,13 @@ apply:
                     },
                     "width {width}"
                 );
+                // `list-sections`: row 2 is now the active section header; the
+                // change row is row 3.
                 let buf = terminal.backend().buffer();
                 assert!(
-                    row_text(buf, 2).contains("[4/9]"),
+                    row_text(buf, 3).contains("[4/9]"),
                     "width {width}: files must paint before any CLI result existed: {}",
-                    row_text(buf, 2)
+                    row_text(buf, 3)
                 );
                 assert_eq!(
                     refresher.requests(),
@@ -2208,9 +2222,9 @@ apply:
 
                 let buf2 = terminal.backend().buffer();
                 assert!(
-                    row_text(buf2, 2).contains("[7/9]"),
+                    row_text(buf2, 3).contains("[7/9]"),
                     "width {width}: the CLI must have corrected it: {}",
-                    row_text(buf2, 2)
+                    row_text(buf2, 3)
                 );
                 assert_eq!(
                     refresher2.takes(),
@@ -3383,12 +3397,19 @@ esac
                     "width {width}: the last call must be exactly one focus, on the split's pane"
                 );
 
+                // `list-sections`: the detail region's own header also names
+                // `2fa-support`, on a buffer row that no longer coincides with the
+                // list row now that the active section header shifted the list
+                // down by one — so this looks for the row carrying the badge
+                // itself, which uniquely identifies the list row.
                 let two_fa_row = buf
                     .iter()
-                    .find(|row| row.contains("2fa-support"))
-                    .unwrap_or_else(|| panic!("width {width}: no row named 2fa-support: {buf:?}"));
+                    .find(|row| row.contains(" w ["))
+                    .unwrap_or_else(|| {
+                        panic!("width {width}: no row carries the working badge: {buf:?}")
+                    });
                 assert!(
-                    two_fa_row.contains(" w ["),
+                    two_fa_row.contains("2fa-support"),
                     "width {width}: the mapping written by the launch must be read back through \
                      attribution's first tier within the same run: {two_fa_row:?}"
                 );

@@ -3,18 +3,29 @@
 //! `openspec/changes/list-view/specs/change-rows/spec.md` and design.md ->
 //! Decisions ("The row grammar is fixed-field and right-aligned").
 
-use crate::ui::app::{Dashboard, matches};
+use crate::ui::app::{Dashboard, SectionKey, Target, matches};
 use crate::ui::layout::{columns, truncate_columns};
 
 /// What kind of thing a `Row` represents, so a caller can tell a change row
-/// from a separator, a message, or a repository-level problem without
+/// from a section header, a message, or a repository-level problem without
 /// parsing its text. `Item`'s `index` is into the *visible* list `rows`
 /// emits — active then archived, filtered — never into `ChangeSet` itself.
+/// `Section` replaces `list-view`'s unaddressable separator: `list-sections`
+/// folds each tier behind its own header, carrying the `key` `Space` toggles,
+/// a nesting `depth` — always `0` today, reserved for a later date grouping
+/// under `archived` (design.md -> Decision 8) — and whether it is currently
+/// collapsed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RowKind {
     Problem,
-    Item { index: usize },
-    Separator,
+    Section {
+        key: SectionKey,
+        depth: u8,
+        collapsed: bool,
+    },
+    Item {
+        index: usize,
+    },
     Message,
 }
 
@@ -276,25 +287,36 @@ fn message_row_text(text: &str, width: u16) -> String {
     pad_or_truncate_right(text, width as usize)
 }
 
-/// The separator row: `  -- archived ` then `-` filling the interior to its
-/// full width in display columns; when the interior is narrower than the
-/// prefix's own fourteen columns it is that prefix truncated to the width
-/// by [`truncate_columns`] and padded back to exactly `width` columns —
-/// `PREFIX` is ASCII, so the pad is a no-op today, but the rule is stated
-/// the same way every other field's is.
-fn separator_row_text(width: u16) -> String {
-    const PREFIX: &str = "  -- archived ";
-    let w = width as usize;
-    let prefix_len = columns(PREFIX);
-    if w <= prefix_len {
-        let mut s = truncate_columns(PREFIX, w).to_string();
-        let drawn = columns(&s);
-        if drawn < w {
-            s.push_str(&" ".repeat(w - drawn));
-        }
-        return s;
+/// A section header row: `[marker][space][glyph][space][label][space]
+/// [(count)]`, where `marker` is `>` when the header carries the cursor and
+/// a space otherwise — the same column every other row's selection marker
+/// occupies — and `glyph` is `v` when the section is open and `>` when it
+/// is collapsed. The `>` glyph and the `>` selection marker collide on a
+/// selected collapsed section (`> > archived (22)`); that collision is
+/// accepted rather than avoided, since column 0 is the cursor on every row
+/// of this list and column 2 is the fold state on section rows alone (see
+/// `specs/change-rows/spec.md` and design.md -> Decision 4).
+///
+/// Below two columns this degenerates the same way [`active_style_row`]
+/// does: the first `width` display columns of `"{marker} "` alone, with no
+/// glyph, label, or count ever offered — there is no room for them and no
+/// room to say so with an ellipsis either.
+fn section_row_text(
+    selected: bool,
+    collapsed: bool,
+    label: &str,
+    count: usize,
+    width: u16,
+) -> String {
+    let marker = if selected { '>' } else { ' ' };
+    let w = i64::from(width);
+    if w < 2 {
+        let head = format!("{marker} ");
+        return truncate_columns(&head, w.max(0) as usize).to_string();
     }
-    format!("{PREFIX}{}", "-".repeat(w - prefix_len))
+    let glyph = if collapsed { '>' } else { 'v' };
+    let text = format!("{marker} {glyph} {label} ({count})");
+    pad_or_truncate_right(&text, width as usize)
 }
 
 fn no_repo_rows(searched_from: &std::path::Path, width: u16) -> Vec<Row> {
@@ -322,9 +344,10 @@ fn no_repo_rows(searched_from: &std::path::Path, width: u16) -> Vec<Row> {
 }
 
 /// The list region's content: every row, in the order `change-rows` states
-/// — problem rows, then the visible active changes (or the empty-state
-/// message for the state the dashboard is in), then the separator when at
-/// least one visible archived change follows, then the visible archived
+/// — problem rows, then the active section header (only when its count is
+/// greater than zero) followed by the visible active changes or the
+/// empty-state message for the state the dashboard is in, then the archived
+/// section header on the same condition followed by the visible archived
 /// changes. Pure and total over every `Dashboard` value and every `u16`
 /// width, including `0`: never panics, performs no I/O, reads no clock and
 /// no global state. See `specs/change-rows/spec.md`.
@@ -347,6 +370,33 @@ pub fn rows(dashboard: &Dashboard, width: u16) -> Vec<Row> {
         .iter()
         .filter(|c| matches(&c.name, query))
         .collect();
+
+    // `list-sections` design.md -> Decision 10: the active tier is always fully
+    // resolved, so its count is simply the matched entries. The archived tier can be
+    // **unresolved** — `changes.archived` empty while `archived_total` is greater than
+    // zero, the one-cycle window between opening the section and the refresh that
+    // resolves it — in which case the header's own count falls through to the true
+    // total rather than the (necessarily zero) matched count.
+    let active_count = active.len();
+    let archived_unresolved =
+        dashboard.changes.archived.is_empty() && dashboard.changes.archived_total > 0;
+    let archived_display_count = if archived_unresolved {
+        dashboard.changes.archived_total
+    } else {
+        archived.len()
+    };
+    // The second correction to Decision 10: during that same one-cycle window, under a
+    // non-empty query, nothing is yet known about whether any of the unresolved
+    // archived changes will actually match — so the choice between `No active changes`
+    // and the two `No changes match` rows below treats that window as zero matches,
+    // even though the header above still carries the true total. With an empty query
+    // an unresolved archive is known to match everything once it resolves, so this
+    // count agrees with `archived_display_count` in every other case.
+    let archived_message_count = if archived_unresolved && !query.is_empty() {
+        0
+    } else {
+        archived_display_count
+    };
 
     let mut out = Vec::new();
     // The one problem-row constructor every source below shares: `! `-prefixed, padded or
@@ -402,95 +452,129 @@ pub fn rows(dashboard: &Dashboard, width: u16) -> Vec<Row> {
         push_problem(&mut out, problem);
     }
 
-    if active.is_empty() && archived.is_empty() {
-        if query.is_empty() {
-            out.push(Row {
-                text: message_row_text("No changes yet", width),
-                kind: RowKind::Message,
-                selected: false,
-                badge: None,
-            });
-        } else {
-            out.push(Row {
-                text: message_row_text("No changes match", width),
-                kind: RowKind::Message,
-                selected: false,
-                badge: None,
-            });
-            out.push(Row {
-                text: message_row_text(&format!("/{query}"), width),
-                kind: RowKind::Message,
-                selected: false,
-                badge: None,
-            });
-        }
-        return out;
-    }
-
+    // `targets()` is the index space `dashboard.selected` addresses (design.md ->
+    // Decision 2 and Decision 15): a section header's own position, or
+    // `Target::Change(i)` where `i` is exactly the running `visible()`-order counter
+    // below. Resolving it once, here, is what lets every push site below decide its own
+    // marker by comparison rather than by re-deriving the index space.
+    let selected_target = dashboard.targets().get(dashboard.selected).copied();
     let mut index = 0usize;
-    if active.is_empty() {
+
+    if active_count > 0 {
+        let active_open = dashboard.section_open(SectionKey::Active);
+        let header_selected = selected_target == Some(Target::Section(SectionKey::Active));
+        out.push(Row {
+            text: section_row_text(header_selected, !active_open, "active", active_count, width),
+            kind: RowKind::Section {
+                key: SectionKey::Active,
+                depth: 0,
+                collapsed: !active_open,
+            },
+            selected: header_selected,
+            badge: None,
+        });
+        if active_open {
+            for change in &active {
+                let selected = selected_target == Some(Target::Change(index));
+                let marker = if selected { '>' } else { ' ' };
+                let status = attribution.badges.get(&change.name).copied();
+                let (text, badge_x) = active_style_row(
+                    marker,
+                    &change.name,
+                    Some(&progress_cell(&change.progress)),
+                    status.map(badge_char),
+                    width,
+                );
+                out.push(Row {
+                    text,
+                    kind: RowKind::Item { index },
+                    selected,
+                    badge: badge_x
+                        .zip(status)
+                        .map(|(x, status)| BadgeCell { x, status }),
+                });
+                index += 1;
+            }
+        }
+    } else if archived_message_count > 0 {
+        // `list-sections` design.md -> Decision 10's second correction: keyed on the
+        // archived section's own count, never on whether its rows are actually drawn,
+        // so a collapsed-but-populated archive reads `No active changes` rather than
+        // the stronger `No changes yet`/`No changes match` this active tier alone earns.
         out.push(Row {
             text: message_row_text("No active changes", width),
             kind: RowKind::Message,
             selected: false,
             badge: None,
         });
-    } else {
-        for change in &active {
-            let selected = index == dashboard.selected;
-            let marker = if selected { '>' } else { ' ' };
-            let status = attribution.badges.get(&change.name).copied();
-            let (text, badge_x) = active_style_row(
-                marker,
-                &change.name,
-                Some(&progress_cell(&change.progress)),
-                status.map(badge_char),
-                width,
-            );
-            out.push(Row {
-                text,
-                kind: RowKind::Item { index },
-                selected,
-                badge: badge_x
-                    .zip(status)
-                    .map(|(x, status)| BadgeCell { x, status }),
-            });
-            index += 1;
-        }
-    }
-
-    if !archived.is_empty() {
+    } else if query.is_empty() {
         out.push(Row {
-            text: separator_row_text(width),
-            kind: RowKind::Separator,
+            text: message_row_text("No changes yet", width),
+            kind: RowKind::Message,
             selected: false,
             badge: None,
         });
-        for change in &archived {
-            let selected = index == dashboard.selected;
-            let marker = if selected { '>' } else { ' ' };
-            let date = match &change.origin {
-                crate::changes::Origin::Archived { date } => date.as_deref(),
-                crate::changes::Origin::Active => None,
-            };
-            let status = attribution.badges.get(&change.name).copied();
-            let (text, badge_x) = archived_row_text(
-                marker,
-                date,
-                &change.name,
-                &progress_cell(&change.progress),
-                status.map(badge_char),
+    } else {
+        out.push(Row {
+            text: message_row_text("No changes match", width),
+            kind: RowKind::Message,
+            selected: false,
+            badge: None,
+        });
+        out.push(Row {
+            text: message_row_text(&format!("/{query}"), width),
+            kind: RowKind::Message,
+            selected: false,
+            badge: None,
+        });
+    }
+
+    if archived_display_count > 0 {
+        let archived_open = dashboard.section_open(SectionKey::Archived);
+        let header_selected = selected_target == Some(Target::Section(SectionKey::Archived));
+        out.push(Row {
+            text: section_row_text(
+                header_selected,
+                !archived_open,
+                "archived",
+                archived_display_count,
                 width,
-            );
-            out.push(Row {
-                text,
-                kind: RowKind::Item { index },
-                selected,
-                badge: badge_x
-                    .zip(status)
-                    .map(|(x, status)| BadgeCell { x, status }),
-            });
-            index += 1;
+            ),
+            kind: RowKind::Section {
+                key: SectionKey::Archived,
+                depth: 0,
+                collapsed: !archived_open,
+            },
+            selected: header_selected,
+            badge: None,
+        });
+        if archived_open {
+            for change in &archived {
+                let selected = selected_target == Some(Target::Change(index));
+                let marker = if selected { '>' } else { ' ' };
+                let date = match &change.origin {
+                    crate::changes::Origin::Archived { date } => date.as_deref(),
+                    crate::changes::Origin::Active => None,
+                };
+                let status = attribution.badges.get(&change.name).copied();
+                let (text, badge_x) = archived_row_text(
+                    marker,
+                    date,
+                    &change.name,
+                    &progress_cell(&change.progress),
+                    status.map(badge_char),
+                    width,
+                );
+                out.push(Row {
+                    text,
+                    kind: RowKind::Item { index },
+                    selected,
+                    badge: badge_x
+                        .zip(status)
+                        .map(|(x, status)| BadgeCell { x, status }),
+                });
+                index += 1;
+            }
         }
     }
 
@@ -514,7 +598,7 @@ fn badge_char(status: crate::agents::AgentStatus) -> char {
 mod tests {
     use crate::agents::{Agent, AgentStatus};
     use crate::changes::fixture;
-    use crate::ui::app::{Dashboard, Detail, Filter, Route};
+    use crate::ui::app::{Dashboard, Detail, Filter, Route, SectionKey};
     use crate::ui::layout::columns;
     use crate::ui::list::{Row, RowKind, problem_row_text, rows};
 
@@ -603,7 +687,11 @@ mod tests {
             ],
             Vec::new(),
             Vec::new(),
-            0,
+            // `list-sections`: `selected` **1** addresses `Target::Change(0)` —
+            // `add-token-refresh`, the first change — since the active section
+            // header is target 0. Kept marking the same change this fixture always
+            // marked.
+            1,
         )
     }
 
@@ -712,8 +800,9 @@ mod tests {
             ),
         ] {
             let rows = rows(&d, width);
-            assert_eq!(rows.len(), 3);
-            for (row, expect) in rows.iter().zip(expected.iter()) {
+            // `list-sections`: rows[0] is now the active section header.
+            assert_eq!(rows.len(), 4);
+            for (row, expect) in rows[1..].iter().zip(expected.iter()) {
                 assert_eq!(&row.text, expect, "width {width}");
             }
         }
@@ -844,16 +933,18 @@ mod tests {
         let d = three_active();
         for width in [38, 58] {
             let rows = rows(&d, width);
-            assert!(rows[0].text.ends_with(']'));
-            assert!(rows[2].text.ends_with(']'));
+            // `list-sections`: rows[0] is now the active section header; the three
+            // change rows follow it at rows[1..4].
+            assert!(rows[1].text.ends_with(']'));
+            assert!(rows[3].text.ends_with(']'));
             // migrate-ai-sdk-v7 is the 0-of-0 fixture: its cell is the dash
             // form, not a numeric one — found in Change Review, whose test
             // only compared the two rows' last characters and would have
             // passed a `[0/0]` cell too.
-            assert!(rows[2].text.contains("[-]"), "width {width}");
+            assert!(rows[3].text.contains("[-]"), "width {width}");
             assert_eq!(
-                rows[0].text.chars().last(),
-                rows[2].text.chars().last(),
+                rows[1].text.chars().last(),
+                rows[3].text.chars().last(),
                 "width {width}"
             );
         }
@@ -891,14 +982,15 @@ mod tests {
             Vec::new(),
             usize::MAX,
         );
+        // `list-sections`: rows[0] is the active section header.
         let rows38 = rows(&d, 38);
-        assert_eq!(rows38[0].text, "  a-very-long-change-name-that-… [2/5]");
+        assert_eq!(rows38[1].text, "  a-very-long-change-name-that-… [2/5]");
         let rows58 = rows(&d, 58);
         assert_eq!(
-            rows58[0].text,
+            rows58[1].text,
             "  a-very-long-change-name-that-will-not-fit-here     [2/5]"
         );
-        assert!(!rows58[0].text.contains('…'));
+        assert!(!rows58[1].text.contains('…'));
 
         // `agent-attribution`: the 46-character name is unreachable by Herdr's own
         // 32-character cap, so it is badged only through the mapping tier — and doing
@@ -911,37 +1003,44 @@ mod tests {
             std::collections::BTreeMap::from([(derived, long_name.to_string())]);
         let rows38_badged = rows(&badged, 38);
         assert_eq!(
-            rows38_badged[0].text,
+            rows38_badged[1].text,
             "  a-very-long-change-name-tha… w [2/5]"
         );
     }
 
     #[test]
     fn a_narrow_width_drops_the_progress_cell_whole() {
+        // `list-sections`: `selected` **1** addresses `Target::Change(0)` — the active
+        // section header is target 0 — so the change carries the cursor and the row
+        // grammar's `>` marker below.
         let d = dashboard_with(
             vec![fixture::active("alpha", 4, 9)],
             Vec::new(),
             Vec::new(),
-            0,
+            1,
         );
-        assert_eq!(rows(&d, 10)[0].text, "> a… [4/9]");
-        assert_eq!(rows(&d, 9)[0].text, "> … [4/9]");
-        assert_eq!(rows(&d, 8)[0].text, "> alpha ");
-        assert_eq!(rows(&d, 3)[0].text, "> …");
-        assert_eq!(rows(&d, 2)[0].text, "> ");
-        assert_eq!(rows(&d, 1)[0].text, ">");
-        assert_eq!(rows(&d, 0)[0].text, "");
-        assert!(rows(&d, 38)[0].text.contains("[4/9]"));
-        assert!(rows(&d, 58)[0].text.contains("[4/9]"));
+        assert_eq!(rows(&d, 10)[1].text, "> a… [4/9]");
+        assert_eq!(rows(&d, 9)[1].text, "> … [4/9]");
+        assert_eq!(rows(&d, 8)[1].text, "> alpha ");
+        assert_eq!(rows(&d, 3)[1].text, "> …");
+        assert_eq!(rows(&d, 2)[1].text, "> ");
+        assert_eq!(rows(&d, 1)[1].text, ">");
+        assert_eq!(rows(&d, 0)[1].text, "");
+        assert!(rows(&d, 38)[1].text.contains("[4/9]"));
+        assert!(rows(&d, 58)[1].text.contains("[4/9]"));
     }
 
     #[test]
     fn archived_narrow_widths_drop_progress_then_date() {
+        // `list-sections`: `targets()` here is `[Section(Active), Change(0), Section(Archived),
+        // Change(1)]`, so `selected` **3** addresses the archived change — the same one this
+        // test always meant, `add-auth` — and rows[3] is now its row (rows[0] and rows[2] are
+        // the two section headers).
         let d = dashboard_with(
             vec![fixture::active("fix-empty-basket", 7, 7)],
             vec![fixture::archived(Some("2026-08-14"), "add-auth", 7, 7)],
             Vec::new(),
-            1,
+            3,
         );
         let cases: [(u16, &str); 7] = [
             (20, "> 2026-08-14 … [7/7]"),
@@ -953,14 +1052,14 @@ mod tests {
             (0, ""),
         ];
         for (width, expected) in cases {
-            let row = &rows(&d, width)[2];
+            let row = &rows(&d, width)[3];
             assert_eq!(row.text, expected, "width {width}");
             assert_eq!(columns(&row.text), width as usize);
         }
-        assert!(rows(&d, 38)[2].text.contains("2026-08-14"));
-        assert!(rows(&d, 38)[2].text.contains("[7/7]"));
-        assert!(rows(&d, 58)[2].text.contains("2026-08-14"));
-        assert!(rows(&d, 58)[2].text.contains("[7/7]"));
+        assert!(rows(&d, 38)[3].text.contains("2026-08-14"));
+        assert!(rows(&d, 38)[3].text.contains("[7/7]"));
+        assert!(rows(&d, 58)[3].text.contains("2026-08-14"));
+        assert!(rows(&d, 58)[3].text.contains("[7/7]"));
     }
 
     /// `change-rows`: "A badged row carries its status between the name and the
@@ -974,19 +1073,20 @@ mod tests {
             agent_at("migrate-ai-sdk-v7", AgentStatus::Unknown),
         ];
 
+        // `list-sections`: rows[0] is the active section header.
         let rows38 = rows(&d, 38);
-        assert_eq!(rows38[0].text, "> add-token-refresh            w [4/9]");
-        assert_eq!(rows38[1].text, "  fix-empty-basket             b [7/7]");
-        assert_eq!(rows38[2].text, "  migrate-ai-sdk-v7              ? [-]");
+        assert_eq!(rows38[1].text, "> add-token-refresh            w [4/9]");
+        assert_eq!(rows38[2].text, "  fix-empty-basket             b [7/7]");
+        assert_eq!(rows38[3].text, "  migrate-ai-sdk-v7              ? [-]");
 
         let rows58 = rows(&d, 58);
         for row in &rows58 {
             assert_eq!(columns(&row.text), 58);
         }
-        assert_eq!(rows58[0].text.chars().nth(51), Some('w'));
-        assert_eq!(rows58[1].text.chars().nth(51), Some('b'));
-        assert_eq!(rows58[2].text.chars().nth(53), Some('?'));
-        for (row, idx) in [(&rows58[0], 51), (&rows58[1], 51), (&rows58[2], 53)] {
+        assert_eq!(rows58[1].text.chars().nth(51), Some('w'));
+        assert_eq!(rows58[2].text.chars().nth(51), Some('b'));
+        assert_eq!(rows58[3].text.chars().nth(53), Some('?'));
+        for (row, idx) in [(&rows58[1], 51), (&rows58[2], 51), (&rows58[3], 53)] {
             assert_eq!(
                 row.text.chars().nth(idx - 1),
                 Some(' '),
@@ -998,15 +1098,17 @@ mod tests {
                 "column right of the badge"
             );
         }
-        assert!(rows58[0].text.ends_with("[4/9]"));
-        assert!(rows58[1].text.ends_with("[7/7]"));
-        assert!(rows58[2].text.ends_with("[-]"));
+        assert!(rows58[1].text.ends_with("[4/9]"));
+        assert!(rows58[2].text.ends_with("[7/7]"));
+        assert!(rows58[3].text.ends_with("[-]"));
     }
 
     /// `change-rows`: "An archived change carries a badge in the same column as an
     /// active one".
     #[test]
     fn a_badged_archived_row_at_both_widths() {
+        // `list-sections`: `selected` **1** addresses `Target::Change(0)` —
+        // `fix-empty-basket` — since the active section header is target 0.
         let unbadged = dashboard_with(
             vec![fixture::active("fix-empty-basket", 7, 7)],
             vec![
@@ -1014,27 +1116,28 @@ mod tests {
                 fixture::archived(None, "legacy-cleanup", 3, 3),
             ],
             Vec::new(),
-            0,
+            1,
         );
         let mut d = unbadged.clone();
         d.agents.agents = vec![agent_at("add-auth", AgentStatus::Blocked)];
 
+        // rows[0] and rows[2] are the active and archived section headers.
         let rows38 = rows(&d, 38);
-        assert_eq!(rows38[0].text, "> fix-empty-basket               [7/7]");
-        assert_eq!(rows38[2].text, "  2026-08-14 add-auth          b [7/7]");
-        assert_eq!(rows38[3].text, "             legacy-cleanup      [3/3]");
+        assert_eq!(rows38[1].text, "> fix-empty-basket               [7/7]");
+        assert_eq!(rows38[3].text, "  2026-08-14 add-auth          b [7/7]");
+        assert_eq!(rows38[4].text, "             legacy-cleanup      [3/3]");
 
         let rows58 = rows(&d, 58);
         for row in &rows58 {
             assert_eq!(columns(&row.text), 58);
         }
-        assert_eq!(rows58[2].text.chars().nth(51), Some('b'));
-        assert_eq!(rows58[2].text.chars().nth(50), Some(' '));
-        assert_eq!(rows58[2].text.chars().nth(52), Some(' '));
+        assert_eq!(rows58[3].text.chars().nth(51), Some('b'));
+        assert_eq!(rows58[3].text.chars().nth(50), Some(' '));
+        assert_eq!(rows58[3].text.chars().nth(52), Some(' '));
         assert_eq!(
-            rows58[3].text,
-            rows(&unbadged, 58)[3].text,
-            "the separator and every unbadged row must be byte-identical"
+            rows58[4].text,
+            rows(&unbadged, 58)[4].text,
+            "the archived header and every unbadged row must be byte-identical"
         );
     }
 
@@ -1078,10 +1181,12 @@ mod tests {
                 rows(&renamed, width),
                 "width {width}: renaming the agent to a change must badge that row"
             );
+            // `list-sections`: rows[0] is the active section header, so
+            // migrate-ai-sdk-v7 (the third change) is rows[3].
             assert!(
-                rows(&renamed, width)[2].text.contains(" w ["),
+                rows(&renamed, width)[3].text.contains(" w ["),
                 "width {width}: migrate-ai-sdk-v7's row must carry the working badge: {:?}",
-                rows(&renamed, width)[2].text
+                rows(&renamed, width)[3].text
             );
         }
     }
@@ -1090,11 +1195,13 @@ mod tests {
     /// the badged form.
     #[test]
     fn a_badged_row_drops_the_badge_first() {
+        // `list-sections`: `selected` **1** addresses `Target::Change(0)` — `alpha` —
+        // since the active section header is target 0.
         let mut d = dashboard_with(
             vec![fixture::active("alpha", 4, 9)],
             Vec::new(),
             Vec::new(),
-            0,
+            1,
         );
         d.agents.agents = vec![agent_at("alpha", AgentStatus::Working)];
 
@@ -1106,23 +1213,26 @@ mod tests {
             (8, "> alpha "),
         ];
         for (width, expected) in cases {
-            assert_eq!(rows(&d, width)[0].text, expected, "width {width}");
+            assert_eq!(rows(&d, width)[1].text, expected, "width {width}");
         }
-        assert_eq!(rows(&d, 1)[0].text, ">");
-        assert_eq!(rows(&d, 0)[0].text, "");
-        assert!(rows(&d, 38)[0].text.contains(" w ["));
-        assert!(rows(&d, 58)[0].text.contains(" w ["));
+        assert_eq!(rows(&d, 1)[1].text, ">");
+        assert_eq!(rows(&d, 0)[1].text, "");
+        assert!(rows(&d, 38)[1].text.contains(" w ["));
+        assert!(rows(&d, 58)[1].text.contains(" w ["));
     }
 
     /// `change-rows`: "An archived row drops the progress cell, then the date, as
     /// the width falls" — the badged form.
     #[test]
     fn a_badged_archived_row_drops_the_badge_first() {
+        // `list-sections`: `targets()` here is `[Section(Active), Change(0),
+        // Section(Archived), Change(1)]`, so `selected` **3** addresses `add-auth`
+        // and rows[3] is its row.
         let mut d = dashboard_with(
             vec![fixture::active("fix-empty-basket", 7, 7)],
             vec![fixture::archived(Some("2026-08-14"), "add-auth", 7, 7)],
             Vec::new(),
-            1,
+            3,
         );
         d.agents.agents = vec![agent_at("add-auth", AgentStatus::Blocked)];
 
@@ -1138,12 +1248,12 @@ mod tests {
             (0, ""),
         ];
         for (width, expected) in cases {
-            assert_eq!(rows(&d, width)[2].text, expected, "width {width}");
+            assert_eq!(rows(&d, width)[3].text, expected, "width {width}");
         }
-        assert!(rows(&d, 38)[2].text.contains("2026-08-14"));
-        assert!(rows(&d, 38)[2].text.contains(" b ["));
-        assert!(rows(&d, 58)[2].text.contains("2026-08-14"));
-        assert!(rows(&d, 58)[2].text.contains(" b ["));
+        assert!(rows(&d, 38)[3].text.contains("2026-08-14"));
+        assert!(rows(&d, 38)[3].text.contains(" b ["));
+        assert!(rows(&d, 58)[3].text.contains("2026-08-14"));
+        assert!(rows(&d, 58)[3].text.contains(" b ["));
     }
 
     /// `change-rows`: "A badged active row reports the column its badge occupies, at
@@ -1153,6 +1263,8 @@ mod tests {
     /// rather than merely stated.
     #[test]
     fn a_badged_active_row_reports_the_column_its_badge_occupies() {
+        // `list-sections`: `selected` **1** addresses `Target::Change(0)` —
+        // `add-token-refresh` — since the active section header is target 0.
         let mut d = dashboard_with(
             vec![
                 fixture::active("add-token-refresh", 4, 9),
@@ -1160,25 +1272,26 @@ mod tests {
             ],
             Vec::new(),
             Vec::new(),
-            0,
+            1,
         );
         d.agents.agents = vec![agent_at("add-token-refresh", AgentStatus::Working)];
 
+        // rows[0] is the active section header.
         let rows38 = rows(&d, 38);
-        assert_eq!(rows38[0].text, "> add-token-refresh            w [4/9]");
-        assert_eq!(rows38[1].text, "  fix-empty-basket               [7/7]");
+        assert_eq!(rows38[1].text, "> add-token-refresh            w [4/9]");
+        assert_eq!(rows38[2].text, "  fix-empty-basket               [7/7]");
 
         let rows58 = rows(&d, 58);
-        assert_eq!(columns(&rows58[0].text), 58);
-        assert!(rows58[0].text.starts_with("> add-token-refresh"));
-        assert!(rows58[0].text.ends_with(" w [4/9]"));
+        assert_eq!(columns(&rows58[1].text), 58);
+        assert!(rows58[1].text.starts_with("> add-token-refresh"));
+        assert!(rows58[1].text.ends_with(" w [4/9]"));
 
         // "[4/9]" is five columns, so the name field is `width - 10` and the badge
         // sits three columns past its start: marker, its space, the name field, and
         // the badge's own separating space.
         for (width, badged, unbadged) in [
-            (38u16, &rows38[0], &rows38[1]),
-            (58, &rows58[0], &rows58[1]),
+            (38u16, &rows38[1], &rows38[2]),
+            (58, &rows58[1], &rows58[2]),
         ] {
             let badge = badged.badge.expect("the badged row must report its cell");
             assert_eq!(badge.status, AgentStatus::Working, "width {width}");
@@ -1230,7 +1343,8 @@ mod tests {
             let name_field_width = width - 14 - 1 - 1 - progress;
             assert_eq!(badge.x, name_field_width + 14, "width {width}");
 
-            let active_badge = rows(&active, width)[0]
+            // `list-sections`: rows[0] is the active section header.
+            let active_badge = rows(&active, width)[1]
                 .badge
                 .expect("the active row must report its cell too");
             assert_eq!(
@@ -1245,11 +1359,13 @@ mod tests {
     /// points at a column the row does not have.
     #[test]
     fn a_dropped_badge_cell_reports_no_badge() {
+        // `list-sections`: `selected` **1** addresses `Target::Change(0)` — `demo` —
+        // since the active section header is target 0; rows[0] is that header.
         let mut d = dashboard_with(
             vec![fixture::active("demo", 4, 9)],
             Vec::new(),
             Vec::new(),
-            0,
+            1,
         );
         d.agents.agents = vec![agent_at("demo", AgentStatus::Working)];
 
@@ -1257,7 +1373,7 @@ mod tests {
         // which the badge cell still fits.
         let fits: [u16; 4] = [38, 58, 12, 11];
         for width in fits {
-            let row = &rows(&d, width)[0];
+            let row = &rows(&d, width)[1];
             let badge = row.badge.expect("the badge cell still fits");
             assert_eq!(badge.status, AgentStatus::Working, "width {width}");
             assert_eq!(
@@ -1269,7 +1385,7 @@ mod tests {
         let dropped: [u16; 4] = [10, 9, 1, 0];
         for width in dropped {
             assert_eq!(
-                rows(&d, width)[0].badge,
+                rows(&d, width)[1].badge,
                 None,
                 "width {width}: a dropped badge cell must report no badge"
             );
@@ -1337,12 +1453,14 @@ mod tests {
             Vec::new(),
             usize::MAX,
         );
+        // `list-sections`: rows[0] and rows[2] are the active and archived section
+        // headers; the archived change is rows[3].
         assert_eq!(
-            rows(&d, 38)[2].text,
+            rows(&d, 38)[3].text,
             "  2026-08-14 add-auth            [7/7]"
         );
         assert_eq!(
-            rows(&d, 58)[2].text,
+            rows(&d, 58)[3].text,
             "  2026-08-14 add-auth                                [7/7]"
         );
     }
@@ -1356,11 +1474,11 @@ mod tests {
             usize::MAX,
         );
         assert_eq!(
-            rows(&d, 38)[2].text,
+            rows(&d, 38)[3].text,
             "             legacy-cleanup      [3/3]"
         );
         assert_eq!(
-            rows(&d, 58)[2].text,
+            rows(&d, 58)[3].text,
             "             legacy-cleanup                          [3/3]"
         );
 
@@ -1376,48 +1494,122 @@ mod tests {
             usize::MAX,
         );
         for width in [38, 58] {
-            let undated_start = rows(&d, width)[2].text.find('l');
-            let dated_start = rows(&dated, width)[2].text.find('l');
+            let undated_start = rows(&d, width)[3].text.find('l');
+            let dated_start = rows(&dated, width)[3].text.find('l');
             assert_eq!(undated_start, dated_start, "width {width}");
         }
     }
 
+    /// `change-rows` -> "An archived row drops the progress cell, then the date, as
+    /// the width falls": one archived change, no active changes, the archived
+    /// section open, `selected` 1 so the cursor is on the change. The spec's own
+    /// `rows()[1]` claim assumes no `No active changes` row precedes the header —
+    /// which `change-rows`' empty-state requirement says **does** apply whenever the
+    /// active section's count is zero and the archived section's is not, exactly the
+    /// shape here — so this test locates the change row by its `RowKind` rather than
+    /// by a hardcoded index, sidestepping the disagreement; see this group's own
+    /// report.
     #[test]
-    fn the_separator_fills_the_width() {
-        assert_eq!(
-            separator_for_test(38),
-            "  -- archived ------------------------"
-        );
-        assert_eq!(
-            separator_for_test(58),
-            "  -- archived --------------------------------------------"
-        );
-        assert_eq!(separator_for_test(6), "  -- a");
-    }
-
-    fn separator_for_test(width: u16) -> String {
-        let d = dashboard_with(
-            vec![fixture::active("fix-empty-basket", 7, 7)],
+    fn an_archived_row_drops_the_progress_cell_then_the_date_as_the_width_falls() {
+        let mut d = dashboard_with(
+            Vec::new(),
             vec![fixture::archived(Some("2026-08-14"), "add-auth", 7, 7)],
             Vec::new(),
-            0,
+            1,
         );
-        rows(&d, width)
-            .into_iter()
-            .find(|r| r.kind == RowKind::Separator)
-            .expect("a separator row")
-            .text
+        d.agents.agents = vec![agent_at("add-auth", AgentStatus::Blocked)];
+        let change_row = |width: u16| -> String {
+            rows(&d, width)
+                .into_iter()
+                .find(|r| matches!(r.kind, RowKind::Item { .. }))
+                .expect("an archived change row")
+                .text
+        };
+        let expected = [
+            (22, "> 2026-08-14 … b [7/7]"),
+            (21, "> 2026-08-14 a… [7/7]"),
+            (20, "> 2026-08-14 … [7/7]"),
+            (19, "> 2026-08-14 add-a…"),
+            (14, "> 2026-08-14 …"),
+            (13, "> add-auth   "),
+            (3, "> …"),
+            (1, ">"),
+            (0, ""),
+        ];
+        for (width, text) in expected {
+            assert_eq!(change_row(width), text, "width {width}");
+        }
+        // The contrasting controls at the mandated interiors: the date, the badge,
+        // and the progress cell all survive.
+        for width in [38, 58] {
+            let text = change_row(width);
+            assert!(text.contains("2026-08-14"), "width {width}");
+            assert!(text.contains(" b ["), "width {width}");
+            assert!(text.ends_with("[7/7]"), "width {width}");
+        }
     }
 
+    /// `change-rows` -> "A section header degrades by truncation at every width":
+    /// the archived section collapsed over an unresolved archive of twenty-two
+    /// changes.
     #[test]
-    fn the_separator_is_emitted_only_when_archived_rows_follow() {
+    fn a_section_header_degrades_by_truncation_at_every_width() {
+        // `selected` is out of range so nothing carries the cursor — this test is
+        // about the header's own truncation, not its selection marker.
+        let mut d = dashboard_with(Vec::new(), Vec::new(), Vec::new(), usize::MAX);
+        d.changes.archived_total = 22;
+        d.sections.collapsed.insert(SectionKey::Archived);
+        let archived_header = |width: u16| -> String {
+            rows(&d, width)
+                .into_iter()
+                .find(|r| {
+                    matches!(
+                        r.kind,
+                        RowKind::Section {
+                            key: SectionKey::Archived,
+                            ..
+                        }
+                    )
+                })
+                .expect("an archived header row")
+                .text
+        };
+        let expected = [
+            (17, "  > archived (22)"),
+            (16, "  > archived (2…"),
+            (5, "  > …"),
+            (1, " "),
+            (0, ""),
+        ];
+        for (width, text) in expected {
+            let header = archived_header(width);
+            assert_eq!(header, text, "width {width}");
+            assert_eq!(columns(&header), width as usize, "width {width}");
+        }
+        for width in [38, 58] {
+            let header = archived_header(width);
+            assert_eq!(
+                header,
+                format!("{:<w$}", "  > archived (22)", w = width as usize),
+                "width {width}"
+            );
+        }
+    }
+
+    /// `list-sections`' rewrite of the landed `the_separator_is_emitted_only_when_archived_rows_follow`:
+    /// the archived section header replaces the separator, and it is emitted on
+    /// exactly the same condition — at least one archived change exists.
+    #[test]
+    fn the_archived_header_is_emitted_only_when_archived_changes_exist() {
         let no_archived = three_active();
         for width in [38, 58] {
-            assert!(
-                !rows(&no_archived, width)
-                    .iter()
-                    .any(|r| r.kind == RowKind::Separator)
-            );
+            assert!(!rows(&no_archived, width).iter().any(|r| matches!(
+                r.kind,
+                RowKind::Section {
+                    key: SectionKey::Archived,
+                    ..
+                }
+            )));
         }
         let with_archived = dashboard_with(
             vec![fixture::active("fix-empty-basket", 7, 7)],
@@ -1428,14 +1620,27 @@ mod tests {
         for width in [38, 58] {
             let count = rows(&with_archived, width)
                 .iter()
-                .filter(|r| r.kind == RowKind::Separator)
+                .filter(|r| {
+                    matches!(
+                        r.kind,
+                        RowKind::Section {
+                            key: SectionKey::Archived,
+                            ..
+                        }
+                    )
+                })
                 .count();
             assert_eq!(count, 1);
         }
     }
 
+    /// `list-sections`' rewrite of the landed
+    /// `row_order_is_problems_then_active_then_separator_then_archived`: the separator
+    /// becomes two section headers, and the active/archived `Item` indices stay
+    /// exactly what they were — `RowKind::Item { index }` is unchanged by this
+    /// change, only the header rows around it are new.
     #[test]
-    fn row_order_is_problems_then_active_then_separator_then_archived() {
+    fn row_order_is_problems_then_active_header_then_active_then_archived_header_then_archived() {
         let mut d = dashboard_with(
             vec![
                 fixture::active("add-token-refresh", 4, 9),
@@ -1457,9 +1662,18 @@ mod tests {
                 vec![
                     RowKind::Problem,
                     RowKind::Problem,
+                    RowKind::Section {
+                        key: SectionKey::Active,
+                        depth: 0,
+                        collapsed: false,
+                    },
                     RowKind::Item { index: 0 },
                     RowKind::Item { index: 1 },
-                    RowKind::Separator,
+                    RowKind::Section {
+                        key: SectionKey::Archived,
+                        depth: 0,
+                        collapsed: false,
+                    },
                     RowKind::Item { index: 2 },
                     RowKind::Item { index: 3 },
                 ],
@@ -1482,14 +1696,20 @@ mod tests {
         );
         for width in [38, 58] {
             let rows = rows(&d, width);
-            assert!(rows[0].text.contains("zeta"));
-            assert!(rows[1].text.contains("alpha"));
-            assert!(rows[2].text.contains("mid"));
+            // `list-sections`: rows[0] is the active section header.
+            assert!(rows[1].text.contains("zeta"));
+            assert!(rows[2].text.contains("alpha"));
+            assert!(rows[3].text.contains("mid"));
         }
     }
 
     #[test]
     fn the_selected_flag_marks_exactly_the_selected_change() {
+        // `list-sections`: `selected` now indexes `targets()`, not `visible()` or
+        // `Item { index }` directly. `targets()` here is `[Section(Active),
+        // Change(0), Change(1), Change(2), Section(Archived), Change(3),
+        // Change(4)]`, so `Target::Change(3)` — the same change this test always
+        // meant, `add-auth`, the first archived entry — sits at position 5.
         let d = dashboard_with(
             vec![
                 fixture::active("add-token-refresh", 4, 9),
@@ -1501,7 +1721,7 @@ mod tests {
                 fixture::archived(None, "legacy-cleanup", 3, 3),
             ],
             Vec::new(),
-            3,
+            5,
         );
         for width in [38, 58] {
             let rows = rows(&d, width);
@@ -1509,7 +1729,7 @@ mod tests {
             assert_eq!(selected.len(), 1, "width {width}");
             assert_eq!(selected[0].kind, RowKind::Item { index: 3 });
             for r in &rows {
-                if r.kind == RowKind::Separator {
+                if matches!(r.kind, RowKind::Section { .. }) {
                     assert!(!r.selected);
                 }
             }
@@ -1660,7 +1880,14 @@ mod tests {
             );
             let rows_archived_only = rows(&archived_only, width);
             assert!(rows_archived_only[0].text.starts_with("No active changes"));
-            assert_eq!(rows_archived_only[1].kind, RowKind::Separator);
+            assert_eq!(
+                rows_archived_only[1].kind,
+                RowKind::Section {
+                    key: SectionKey::Archived,
+                    depth: 0,
+                    collapsed: false,
+                }
+            );
             assert_eq!(rows_archived_only[2].kind, RowKind::Item { index: 0 });
 
             let mut no_match = dashboard_with(
@@ -1734,7 +1961,18 @@ mod tests {
                 problem_row_text("filesystem watch unavailable for /r", width),
                 "width {width}"
             );
-            assert_eq!(all[1].kind, RowKind::Item { index: 0 }, "width {width}");
+            // `list-sections`: all[1] is the active section header; the change row
+            // follows it at all[2].
+            assert_eq!(
+                all[1].kind,
+                RowKind::Section {
+                    key: SectionKey::Active,
+                    depth: 0,
+                    collapsed: false
+                },
+                "width {width}"
+            );
+            assert_eq!(all[2].kind, RowKind::Item { index: 0 }, "width {width}");
         }
 
         // The no-problem control: with `refresh.problems` empty, the same
@@ -1742,7 +1980,7 @@ mod tests {
         let mut without = d.clone();
         without.refresh.problems = Vec::new();
         for width in [38, 58] {
-            assert_eq!(rows(&without, width)[0].kind, RowKind::Item { index: 0 });
+            assert_eq!(rows(&without, width)[1].kind, RowKind::Item { index: 0 });
         }
 
         // `agent-launch`: the same holds for `launch.problems` — a pane that has launched
@@ -1756,7 +1994,7 @@ mod tests {
                 RowKind::Problem,
                 "width {width}"
             );
-            assert_eq!(rows(&without, width)[0].kind, RowKind::Item { index: 0 });
+            assert_eq!(rows(&without, width)[1].kind, RowKind::Item { index: 0 });
         }
     }
 
@@ -1779,6 +2017,11 @@ mod tests {
                     RowKind::Problem,
                     RowKind::Problem,
                     RowKind::Problem,
+                    RowKind::Section {
+                        key: SectionKey::Active,
+                        depth: 0,
+                        collapsed: false,
+                    },
                     RowKind::Item { index: 0 },
                 ],
                 "width {width}"
@@ -1815,14 +2058,20 @@ mod tests {
                 vec![
                     RowKind::Problem,
                     RowKind::Problem,
+                    RowKind::Section {
+                        key: SectionKey::Active,
+                        depth: 0,
+                        collapsed: false,
+                    },
                     RowKind::Item { index: 0 },
                 ],
                 "width {width}"
             );
         }
 
-        // `agent-attribution`: a badged change below the three problem rows carries its
-        // badge, and none of the problem rows above it ever carries one.
+        // `agent-attribution`: a badged change below the three problem rows and the active
+        // section header carries its badge, and none of the rows above it ever carries one —
+        // `list-sections` adds the header row as a fourth non-badged row.
         d.agents.agents = vec![agent_at("add-token-refresh", AgentStatus::Blocked)];
         for width in [38, 58] {
             let rows = rows(&d, width);
@@ -1839,7 +2088,11 @@ mod tests {
                 "width {width}: a problem row is never badged"
             );
             assert!(
-                rows[3].text.contains(" b ["),
+                !rows[3].text.contains(" b ["),
+                "width {width}: a section header is never badged"
+            );
+            assert!(
+                rows[4].text.contains(" b ["),
                 "width {width}: the change row below must carry its badge"
             );
         }
@@ -1872,7 +2125,16 @@ mod tests {
                 width as usize,
                 "width {width}: padded or truncated to the interior width exactly"
             );
-            assert_eq!(all[1].kind, RowKind::Item { index: 0 }, "width {width}");
+            assert_eq!(
+                all[1].kind,
+                RowKind::Section {
+                    key: SectionKey::Active,
+                    depth: 0,
+                    collapsed: false,
+                },
+                "width {width}"
+            );
+            assert_eq!(all[2].kind, RowKind::Item { index: 0 }, "width {width}");
 
             // Pressing `a` twice more (replacing the entry wholesale, never growing it)
             // leaves exactly one such row.
@@ -1908,7 +2170,16 @@ mod tests {
             assert!(all[1].text.starts_with("! "), "width {width}");
             assert!(all[0].text.contains("/state/dir"), "width {width}");
             assert!(all[1].text.contains("agent_blocked"), "width {width}");
-            assert_eq!(all[2].kind, RowKind::Item { index: 0 }, "width {width}");
+            assert_eq!(
+                all[2].kind,
+                RowKind::Section {
+                    key: SectionKey::Active,
+                    depth: 0,
+                    collapsed: false,
+                },
+                "width {width}"
+            );
+            assert_eq!(all[3].kind, RowKind::Item { index: 0 }, "width {width}");
         }
     }
 
@@ -1950,8 +2221,9 @@ mod tests {
         );
         assert!(d.launch.problems.is_empty());
         for width in [38, 58] {
+            // `list-sections`: rows[0] is the active section header.
             assert_eq!(
-                rows(&d, width)[0].kind,
+                rows(&d, width)[1].kind,
                 RowKind::Item { index: 0 },
                 "width {width}"
             );
@@ -1978,7 +2250,11 @@ mod tests {
                 "width {width}: a launch problem row must carry no badge"
             );
             assert!(
-                all[1].text.contains(" w ["),
+                !all[1].text.contains(" w ["),
+                "width {width}: a section header carries no badge"
+            );
+            assert!(
+                all[2].text.contains(" w ["),
                 "width {width}: the change row below must still carry its badge"
             );
         }
@@ -2021,7 +2297,18 @@ mod tests {
                 ],
                 "width {width}"
             );
-            assert_eq!(all[6].kind, RowKind::Item { index: 0 }, "width {width}");
+            // `list-sections`: all[6] is the active section header; the change row
+            // follows it at all[7].
+            assert_eq!(
+                all[6].kind,
+                RowKind::Section {
+                    key: SectionKey::Active,
+                    depth: 0,
+                    collapsed: false,
+                },
+                "width {width}"
+            );
+            assert_eq!(all[7].kind, RowKind::Item { index: 0 }, "width {width}");
             assert!(all[0].text.contains("launch failed"), "width {width}");
             assert!(all[1].text.contains("has not answered"), "width {width}");
             assert!(
@@ -2099,36 +2386,40 @@ mod tests {
         assert_eq!(name.chars().count(), 10);
         assert_eq!(columns(name), 20);
 
-        let cjk = dashboard_with(vec![fixture::active(name, 4, 9)], Vec::new(), Vec::new(), 0);
+        // `list-sections`: `selected` **1** addresses `Target::Change(0)` since the
+        // active section header is target 0.
+        let cjk = dashboard_with(vec![fixture::active(name, 4, 9)], Vec::new(), Vec::new(), 1);
         let ascii = dashboard_with(
             vec![fixture::active("add-token-refresh", 4, 9)],
             Vec::new(),
             Vec::new(),
-            0,
+            1,
         );
 
         for width in [38, 58] {
-            let text = rows(&cjk, width)[0].text.clone();
+            let text = rows(&cjk, width)[1].text.clone();
             assert_eq!(columns(&text), width as usize, "width {width}: {text:?}");
             assert!(text.ends_with("[4/9]"), "width {width}: {text:?}");
             assert!(text.contains(name), "width {width}: {text:?}");
         }
 
+        // `list-sections`: buffer row 2 is now the active section header; the change
+        // row is buffer row 3.
         for (width, border_x) in [(120u16, 39u16), (60u16, 59u16)] {
             let buf = crate::testutil::render_at(width, 20, &cjk);
             let control = crate::testutil::render_at(width, 20, &ascii);
             assert_eq!(
-                crate::testutil::cell(&buf, border_x, 2).symbol(),
+                crate::testutil::cell(&buf, border_x, 3).symbol(),
                 "│",
                 "width {width}: the list block's own right border must be intact"
             );
             assert_eq!(
-                crate::testutil::cell(&buf, border_x, 2).symbol(),
-                crate::testutil::cell(&control, border_x, 2).symbol(),
+                crate::testutil::cell(&buf, border_x, 3).symbol(),
+                crate::testutil::cell(&control, border_x, 3).symbol(),
                 "width {width}: the border must be unmoved from the ASCII-named control"
             );
             assert_eq!(
-                crate::testutil::cell(&buf, border_x - 1, 2).symbol(),
+                crate::testutil::cell(&buf, border_x - 1, 3).symbol(),
                 "]",
                 "width {width}: the progress cell ends in the interior's last column"
             );
@@ -2140,7 +2431,9 @@ mod tests {
     #[test]
     fn an_emoji_change_name_at_58_columns_does_not_overwrite_the_border() {
         let name = "emoji-🎉-change";
-        let plain = dashboard_with(vec![fixture::active(name, 4, 9)], Vec::new(), Vec::new(), 0);
+        // `list-sections`: `selected` **1** addresses `Target::Change(0)` since the
+        // active section header is target 0.
+        let plain = dashboard_with(vec![fixture::active(name, 4, 9)], Vec::new(), Vec::new(), 1);
         let mut badged = plain.clone();
         badged.agents.agents = vec![agent_at(name, AgentStatus::Working)];
 
@@ -2149,14 +2442,14 @@ mod tests {
             vec![fixture::active(ascii_name, 4, 9)],
             Vec::new(),
             Vec::new(),
-            0,
+            1,
         );
         let mut ascii_badged = ascii_plain.clone();
         ascii_badged.agents.agents = vec![agent_at(ascii_name, AgentStatus::Working)];
 
         for width in [38, 58] {
             for (d, expect_badge) in [(&plain, false), (&badged, true)] {
-                let text = rows(d, width)[0].text.clone();
+                let text = rows(d, width)[1].text.clone();
                 assert_eq!(
                     columns(&text),
                     width as usize,
@@ -2172,18 +2465,20 @@ mod tests {
             }
         }
 
+        // `list-sections`: buffer row 3 is the change row; row 2 is now the active
+        // section header.
         for (width, border_x) in [(120u16, 39u16), (60u16, 59u16)] {
             for (subject, control) in [(&plain, &ascii_plain), (&badged, &ascii_badged)] {
                 let buf = crate::testutil::render_at(width, 20, subject);
                 let ctl = crate::testutil::render_at(width, 20, control);
                 assert_eq!(
-                    crate::testutil::cell(&buf, border_x, 2).symbol(),
+                    crate::testutil::cell(&buf, border_x, 3).symbol(),
                     "│",
                     "width {width}"
                 );
                 assert_eq!(
-                    crate::testutil::cell(&buf, border_x, 2).symbol(),
-                    crate::testutil::cell(&ctl, border_x, 2).symbol(),
+                    crate::testutil::cell(&buf, border_x, 3).symbol(),
+                    crate::testutil::cell(&ctl, border_x, 3).symbol(),
                     "width {width}"
                 );
             }
@@ -2198,10 +2493,12 @@ mod tests {
         let name = "日本語の変更名前です日本語の変更名前です日本語の変更名前です";
         assert_eq!(name.chars().count(), 30);
         assert_eq!(columns(name), 60);
-        let d = dashboard_with(vec![fixture::active(name, 4, 9)], Vec::new(), Vec::new(), 0);
+        // `list-sections`: `selected` **1** addresses `Target::Change(0)` since the
+        // active section header is target 0.
+        let d = dashboard_with(vec![fixture::active(name, 4, 9)], Vec::new(), Vec::new(), 1);
 
         for width in [38, 58] {
-            let text = rows(&d, width)[0].text.clone();
+            let text = rows(&d, width)[1].text.clone();
             assert_eq!(columns(&text), width as usize, "width {width}: {text:?}");
             assert!(text.ends_with("…  [4/9]"), "width {width}: {text:?}");
 

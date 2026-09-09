@@ -5,7 +5,7 @@
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
-use ratatui::style::Style;
+use ratatui::style::{Modifier, Style};
 use ratatui::widgets::Block;
 
 use crate::ui::app::{Dashboard, Route};
@@ -202,18 +202,19 @@ fn style_for(face: &Face) -> Style {
 /// interior's first row and column, each under the palette role [`row_role`]
 /// gives it. Draws nothing when the interior has zero width or zero height —
 /// there is nothing to index into.
-/// The palette role a drawn list row carries: `ListRowSelected` for the row
-/// holding the selection — which is why a badge on it stays bold, the badge
-/// role carrying no modifier of its own — and otherwise the role its
-/// `RowKind` names. Split out of [`render_list`] so the mapping reads as one
-/// table rather than as a branch inside a drawing loop.
+/// The palette role a drawn list row carries: a `Section` row keeps
+/// `Role::ListSeparator` whether or not it holds the cursor — `render_list`
+/// is what patches `Modifier::BOLD` onto a selected one, since `list-sections`
+/// adds no new role for it (design.md -> Decision 3) — `ListRowSelected` for
+/// any other row holding the selection — which is why a badge on it stays
+/// bold, the badge role carrying no modifier of its own — and otherwise the
+/// role its `RowKind` names. Split out of [`render_list`] so the mapping
+/// reads as one table rather than as a branch inside a drawing loop.
 fn row_role(row: &list::Row) -> Role {
-    if row.selected {
-        return Role::ListRowSelected;
-    }
     match row.kind {
+        list::RowKind::Section { .. } => Role::ListSeparator,
+        _ if row.selected => Role::ListRowSelected,
         list::RowKind::Problem => Role::ListProblem,
-        list::RowKind::Separator => Role::ListSeparator,
         list::RowKind::Message => Role::ListMessage,
         list::RowKind::Item { .. } => Role::ListRow,
     }
@@ -234,7 +235,15 @@ fn render_list(frame: &mut Frame, interior: Rect, dashboard: &Dashboard) {
         .enumerate()
     {
         let y = interior.y + i as u16;
-        let style = palette::style(row_role(row));
+        let mut style = palette::style(row_role(row));
+        // `list-sections` design.md -> Decision 3: a `Section` row keeps
+        // `Role::ListSeparator`'s colour whether or not it carries the cursor —
+        // `row_role` never returns `ListRowSelected` for one — so the cursor is shown
+        // by patching `BOLD` on here instead, the one place `Role::ListRowSelected`'s
+        // own `BOLD` is added for every other row kind.
+        if row.selected && matches!(row.kind, list::RowKind::Section { .. }) {
+            style = style.add_modifier(Modifier::BOLD);
+        }
         buf.set_string(interior.x, y, &row.text, style);
         // The badge is one column inside a row already drawn: re-write that single
         // cell with the row's own style **patched** by the badge role, so it keeps
@@ -449,7 +458,7 @@ mod tests {
     use super::style_for;
     use crate::changes::{Change, empty_set, fixture};
     use crate::testutil::{cell, render_at, row_text};
-    use crate::ui::app::{Action, Dashboard, Detail, Filter, Route};
+    use crate::ui::app::{Action, Dashboard, Detail, Filter, Route, SectionKey};
     use crate::ui::layout::columns;
     use crate::ui::markdown::Face;
     use crate::ui::palette::{self, Role};
@@ -1091,27 +1100,33 @@ mod tests {
         unknown.status = crate::agents::AgentStatus::Unknown;
         d.agents.agents = vec![working, blocked, unknown];
 
+        // `list-sections`: buffer row 2 is now the active section header; the three
+        // change rows follow it at rows 3-5.
         let buf120 = render_at(120, 20, &d);
         assert_eq!(
             interior_cols(&buf120, 2),
-            "> add-token-refresh            w [4/9]"
+            format!("{:<38}", "  v active (3)")
         );
         assert_eq!(
             interior_cols(&buf120, 3),
-            "  fix-empty-basket             b [7/7]"
+            "> add-token-refresh            w [4/9]"
         );
         assert_eq!(
             interior_cols(&buf120, 4),
+            "  fix-empty-basket             b [7/7]"
+        );
+        assert_eq!(
+            interior_cols(&buf120, 5),
             "  migrate-ai-sdk-v7              ? [-]"
         );
 
         let buf60 = render_at(60, 20, &d);
-        for y in [2u16, 3, 4] {
+        for y in [3u16, 4, 5] {
             assert_eq!(columns(&interior_cols(&buf60, y)), 58);
         }
-        assert_eq!(interior_cols(&buf60, 2).chars().nth(51), Some('w'));
-        assert_eq!(interior_cols(&buf60, 3).chars().nth(51), Some('b'));
-        assert_eq!(interior_cols(&buf60, 4).chars().nth(53), Some('?'));
+        assert_eq!(interior_cols(&buf60, 3).chars().nth(51), Some('w'));
+        assert_eq!(interior_cols(&buf60, 4).chars().nth(51), Some('b'));
+        assert_eq!(interior_cols(&buf60, 5).chars().nth(53), Some('?'));
     }
 
     /// `agent-attribution`: "An unreachable socket yields no badge, no count, and
@@ -1665,7 +1680,11 @@ mod tests {
                 fixture::active("migrate-ai-sdk-v7", 0, 0),
             ],
             Vec::new(),
-            0,
+            // `list-sections`: `selected` **1** addresses `Target::Change(0)` —
+            // `add-token-refresh`, the first change — since the active section
+            // header is target 0. Kept marking the same change this fixture always
+            // marked.
+            1,
             Route::List,
         )
     }
@@ -1674,37 +1693,47 @@ mod tests {
     fn list_rows_render_at_60_and_120() {
         let d = three_active();
 
+        // `list-sections`: buffer row 2 is now the active section header; the three
+        // change rows follow it at rows 3-5.
         let buf120 = render_at(120, 20, &d);
         assert_eq!(
             interior_cols(&buf120, 2),
-            "> add-token-refresh              [4/9]"
+            format!("{:<38}", "  v active (3)")
         );
         assert_eq!(
             interior_cols(&buf120, 3),
-            "  fix-empty-basket               [7/7]"
+            "> add-token-refresh              [4/9]"
         );
         assert_eq!(
             interior_cols(&buf120, 4),
+            "  fix-empty-basket               [7/7]"
+        );
+        assert_eq!(
+            interior_cols(&buf120, 5),
             "  migrate-ai-sdk-v7                [-]"
         );
-        for y in 5..=17u16 {
+        for y in 6..=17u16 {
             assert!(cols(&row_text(&buf120, y), 1..39).chars().all(|c| c == ' '));
         }
 
         let buf60 = render_at(60, 20, &d);
         assert_eq!(
             interior_cols(&buf60, 2),
-            "> add-token-refresh                                  [4/9]"
+            format!("{:<58}", "  v active (3)")
         );
         assert_eq!(
             interior_cols(&buf60, 3),
-            "  fix-empty-basket                                   [7/7]"
+            "> add-token-refresh                                  [4/9]"
         );
         assert_eq!(
             interior_cols(&buf60, 4),
+            "  fix-empty-basket                                   [7/7]"
+        );
+        assert_eq!(
+            interior_cols(&buf60, 5),
             "  migrate-ai-sdk-v7                                    [-]"
         );
-        for y in 5..=17u16 {
+        for y in 6..=17u16 {
             assert!(cols(&row_text(&buf60, y), 1..59).chars().all(|c| c == ' '));
         }
     }
@@ -1721,14 +1750,16 @@ mod tests {
             0,
             Route::List,
         );
+        // `list-sections`: buffer row 2 is the active section header; the change
+        // row is row 3.
         let buf120 = render_at(120, 20, &d);
-        let row2 = interior_cols(&buf120, 2);
-        assert!(row2.contains('…'));
-        assert!(row2.contains("[2/5]"));
+        let row3 = interior_cols(&buf120, 3);
+        assert!(row3.contains('…'));
+        assert!(row3.contains("[2/5]"));
 
         let buf60 = render_at(60, 20, &d);
-        let row2_60 = interior_cols(&buf60, 2);
-        assert!(row2_60.contains("a-very-long-change-name-that-will-not-fit-here"));
+        let row3_60 = interior_cols(&buf60, 3);
+        assert!(row3_60.contains("a-very-long-change-name-that-will-not-fit-here"));
         assert!(!buffer_contains(&buf60, "…"));
     }
 
@@ -1762,82 +1793,389 @@ mod tests {
         let control120 = render_at(120, 20, &ascii);
         let buf60 = render_at(60, 20, &cjk);
         let control60 = render_at(60, 20, &ascii);
+        // `list-sections`: buffer row 2 is now the active section header; the
+        // change row is buffer row 3.
         for (width, border_x, buf, control) in [
             (120u16, 39u16, &buf120, &control120),
             (60u16, 59u16, &buf60, &control60),
         ] {
             assert_eq!(
-                cell(buf, border_x, 2).symbol(),
+                cell(buf, border_x, 3).symbol(),
                 "│",
                 "width {width}: the list block's own right border must be intact"
             );
             assert_eq!(
-                cell(buf, border_x, 2).symbol(),
-                cell(control, border_x, 2).symbol(),
+                cell(buf, border_x, 3).symbol(),
+                cell(control, border_x, 3).symbol(),
                 "width {width}: the border must be unmoved from the ASCII-named control"
             );
             assert_eq!(
-                cell(buf, border_x - 1, 2).symbol(),
+                cell(buf, border_x - 1, 3).symbol(),
                 "]",
                 "width {width}: the progress cell ends in the interior's last column"
             );
         }
     }
 
+    /// `change-rows` -> "The section header and archived rows render at both
+    /// mandated widths": one active change, two archived (one dated, one not),
+    /// both sections open, `selected` on the active change — target 0 is the
+    /// active section header. `list-sections`' rewrite of the landed
+    /// `separator_and_archived_rows_render_at_both_widths`.
     #[test]
-    fn separator_and_archived_rows_render_at_both_widths() {
+    fn the_section_header_and_archived_rows_render_at_both_mandated_widths() {
         let d = dashboard_with(
             vec![fixture::active("fix-empty-basket", 7, 7)],
             vec![
                 fixture::archived(Some("2026-08-14"), "add-auth", 7, 7),
                 fixture::archived(None, "legacy-cleanup", 3, 3),
             ],
-            usize::MAX,
+            1,
             Route::List,
         );
         let buf120 = render_at(120, 20, &d);
         assert_eq!(
             interior_cols(&buf120, 2),
-            "  fix-empty-basket               [7/7]"
+            format!("{:<38}", "  v active (1)")
         );
         assert_eq!(
             interior_cols(&buf120, 3),
-            "  -- archived ------------------------"
+            "> fix-empty-basket               [7/7]"
         );
         assert_eq!(
             interior_cols(&buf120, 4),
-            "  2026-08-14 add-auth            [7/7]"
+            format!("{:<38}", "  v archived (2)")
         );
         assert_eq!(
             interior_cols(&buf120, 5),
+            "  2026-08-14 add-auth            [7/7]"
+        );
+        assert_eq!(
+            interior_cols(&buf120, 6),
             "             legacy-cleanup      [3/3]"
         );
 
         let buf60 = render_at(60, 20, &d);
         assert_eq!(
             interior_cols(&buf60, 2),
-            "  fix-empty-basket                                   [7/7]"
+            format!("{:<58}", "  v active (1)")
         );
         assert_eq!(
             interior_cols(&buf60, 3),
-            "  -- archived --------------------------------------------"
+            "> fix-empty-basket                                   [7/7]"
         );
         assert_eq!(
             interior_cols(&buf60, 4),
-            "  2026-08-14 add-auth                                [7/7]"
+            format!("{:<58}", "  v archived (2)")
         );
         assert_eq!(
             interior_cols(&buf60, 5),
+            "  2026-08-14 add-auth                                [7/7]"
+        );
+        assert_eq!(
+            interior_cols(&buf60, 6),
             "             legacy-cleanup                          [3/3]"
+        );
+
+        assert!(!buffer_contains(&buf120, "-- archived"));
+        assert!(!buffer_contains(&buf60, "-- archived"));
+    }
+
+    /// `change-rows` -> "A collapsed archived section shows its count and no
+    /// rows".
+    #[test]
+    fn a_collapsed_archived_section_shows_its_count_and_no_rows() {
+        let mut d = dashboard_with(
+            vec![fixture::active("fix-empty-basket", 7, 7)],
+            vec![
+                fixture::archived(Some("2026-08-14"), "add-auth", 7, 7),
+                fixture::archived(None, "legacy-cleanup", 3, 3),
+            ],
+            1,
+            Route::List,
+        );
+        d.sections.collapsed.insert(SectionKey::Archived);
+        for width in [60, 120] {
+            let buf = render_at(width, 20, &d);
+            assert!(!buffer_contains(&buf, "add-auth"));
+            assert!(!buffer_contains(&buf, "legacy-cleanup"));
+        }
+        let buf120 = render_at(120, 20, &d);
+        assert_eq!(
+            interior_cols(&buf120, 2),
+            format!("{:<38}", "  v active (1)")
+        );
+        assert_eq!(
+            interior_cols(&buf120, 3),
+            "> fix-empty-basket               [7/7]"
+        );
+        assert_eq!(
+            interior_cols(&buf120, 4),
+            format!("{:<38}", "  > archived (2)")
+        );
+
+        // An unresolved tier's header counts from `archived_total`, not from the
+        // rows it holds.
+        let mut unresolved = dashboard_with(
+            vec![fixture::active("fix-empty-basket", 7, 7)],
+            Vec::new(),
+            1,
+            Route::List,
+        );
+        unresolved.changes.archived_total = 22;
+        unresolved.sections.collapsed.insert(SectionKey::Archived);
+        let buf = render_at(120, 20, &unresolved);
+        assert_eq!(
+            interior_cols(&buf, 4),
+            format!("{:<38}", "  > archived (22)")
         );
     }
 
+    /// `change-rows` -> "An expanded but unresolved archived section shows its
+    /// header alone": the archive is open but nothing has resolved it yet — one
+    /// active change so no empty-state message intervenes.
     #[test]
-    fn no_archived_changes_means_no_separator() {
+    fn an_expanded_but_unresolved_archived_section_shows_its_header_alone() {
+        let mut d = dashboard_with(
+            vec![fixture::active("fix-empty-basket", 7, 7)],
+            Vec::new(),
+            1,
+            Route::List,
+        );
+        d.changes.archived_total = 22;
+        // The archived section is open by default (`sections.collapsed` starts
+        // empty).
+        for width in [60, 120] {
+            let buf = render_at(width, 20, &d);
+            assert!(!buffer_contains(&buf, "No changes match"));
+            assert!(!buffer_contains(&buf, "No active changes"));
+            assert!(!buffer_contains(&buf, "!"));
+        }
+        let buf120 = render_at(120, 20, &d);
+        assert_eq!(
+            interior_cols(&buf120, 2),
+            format!("{:<38}", "  v active (1)")
+        );
+        assert_eq!(
+            interior_cols(&buf120, 3),
+            "> fix-empty-basket               [7/7]"
+        );
+        assert_eq!(
+            interior_cols(&buf120, 4),
+            format!("{:<38}", "  v archived (22)")
+        );
+        for y in 5..=17u16 {
+            assert!(cols(&row_text(&buf120, y), 1..39).chars().all(|c| c == ' '));
+        }
+
+        // The same dashboard with the twenty-two archived changes present renders
+        // the header identically and rows below it.
+        let mut resolved = d.clone();
+        resolved.changes.archived = (0..22)
+            .map(|i| fixture::archived(None, &format!("archived-{i:02}"), 1, 1))
+            .collect();
+        let buf_resolved = render_at(120, 20, &resolved);
+        assert_eq!(
+            interior_cols(&buf_resolved, 4),
+            format!("{:<38}", "  v archived (22)")
+        );
+        assert!(buffer_contains(&buf_resolved, "archived-00"));
+    }
+
+    /// `change-rows` -> "An archived change carries a badge in the same column
+    /// as an active one".
+    #[test]
+    fn an_archived_change_carries_a_badge_in_the_same_column_as_an_active_one() {
+        let mut d = dashboard_with(
+            vec![fixture::active("fix-empty-basket", 7, 7)],
+            vec![
+                fixture::archived(Some("2026-08-14"), "add-auth", 7, 7),
+                fixture::archived(None, "legacy-cleanup", 3, 3),
+            ],
+            1,
+            Route::List,
+        );
+        d.agents.agents = vec![unattributed_agent("add-auth")];
+        d.agents.agents[0].status = crate::agents::AgentStatus::Blocked;
+
+        let buf120 = render_at(120, 20, &d);
+        assert_eq!(
+            interior_cols(&buf120, 5),
+            "  2026-08-14 add-auth          b [7/7]"
+        );
+        assert_eq!(
+            interior_cols(&buf120, 6),
+            "             legacy-cleanup      [3/3]"
+        );
+        assert_eq!(
+            interior_cols(&buf120, 3),
+            "> fix-empty-basket               [7/7]"
+        );
+
+        let buf60 = render_at(60, 20, &d);
+        let row = interior_cols(&buf60, 5);
+        assert_eq!(columns(&row), 58);
+        assert_eq!(row.chars().nth(51), Some('b'));
+        assert_eq!(row.chars().nth(50), Some(' '));
+        assert_eq!(row.chars().nth(52), Some(' '));
+
+        // Both section-header rows are byte-identical at both widths to the
+        // agentless rendering, so no badge column was reserved on a row that
+        // cannot carry one.
+        let agentless = dashboard_with(
+            vec![fixture::active("fix-empty-basket", 7, 7)],
+            vec![
+                fixture::archived(Some("2026-08-14"), "add-auth", 7, 7),
+                fixture::archived(None, "legacy-cleanup", 3, 3),
+            ],
+            1,
+            Route::List,
+        );
+        let agentless_buf = render_at(120, 20, &agentless);
+        assert_eq!(interior_cols(&buf120, 2), interior_cols(&agentless_buf, 2));
+        assert_eq!(interior_cols(&buf120, 4), interior_cols(&agentless_buf, 4));
+    }
+
+    /// `change-rows` -> "A query against an unresolved archive counts from
+    /// `archived_total`": the archived tier is unresolved, and a query matching
+    /// nothing in the active tier is accepted before the refresh it requests has
+    /// answered.
+    #[test]
+    fn a_query_against_an_unresolved_archive_counts_from_archived_total() {
+        let mut d = dashboard_with(
+            vec![
+                fixture::active("fix-empty-basket", 7, 7),
+                fixture::active("migrate-ai-sdk-v7", 0, 0),
+            ],
+            Vec::new(),
+            usize::MAX,
+            Route::List,
+        );
+        d.changes.archived_total = 28;
+        d.sections.collapsed.insert(SectionKey::Archived);
+        d.filter.query = "zzz".to_string();
+        for width in [60, 120] {
+            let buf = render_at(width, 20, &d);
+            assert!(interior_cols(&buf, 2).starts_with("No changes match"));
+            assert!(interior_cols(&buf, 3).starts_with("/zzz"));
+            assert_eq!(
+                interior_cols(&buf, 4),
+                format!(
+                    "{:<w$}",
+                    "  v archived (28)",
+                    w = if width == 60 { 58 } else { 38 }
+                )
+            );
+            assert!(!buffer_contains(&buf, "! "));
+            for y in 5..=17u16 {
+                let last = if width == 60 { 58 } else { 38 };
+                assert!(
+                    cols(&row_text(&buf, y), 1..last + 1)
+                        .chars()
+                        .all(|c| c == ' ')
+                );
+            }
+        }
+
+        // Once the twenty-eight archived changes have arrived, none of which
+        // matches `zzz`, no archived header is emitted at all: that section's
+        // count is then zero, so the `(28)` above was the one-cycle unresolved
+        // window rather than a lasting count.
+        let mut resolved = d.clone();
+        resolved.changes.archived = (0..28)
+            .map(|i| fixture::archived(None, &format!("old-change-{i:02}"), 1, 1))
+            .collect();
+        let buf = render_at(120, 20, &resolved);
+        assert!(!buffer_contains(&buf, "archived"));
+    }
+
+    /// `change-rows` -> "No active changes with archived ones still browsable".
+    /// `list-sections`' rewrite of the landed `no_active_changes_keeps_archived_browsable`.
+    #[test]
+    fn no_active_changes_with_archived_ones_still_browsable() {
+        let d = dashboard_with(
+            Vec::new(),
+            vec![fixture::archived(Some("2026-08-14"), "add-auth", 7, 7)],
+            usize::MAX,
+            Route::List,
+        );
+        for width in [60, 120] {
+            let buf = render_at(width, 20, &d);
+            assert!(interior_cols(&buf, 2).starts_with("No active changes"));
+            assert_eq!(
+                interior_cols(&buf, 3),
+                format!(
+                    "{:<w$}",
+                    "  v archived (1)",
+                    w = if width == 60 { 58 } else { 38 }
+                )
+            );
+            assert!(interior_cols(&buf, 4).contains("add-auth"));
+            assert!(!buffer_contains(&buf, "No changes yet"));
+            assert!(!buffer_contains(&buf, "-- archived"));
+        }
+    }
+
+    /// `change-rows` -> "A collapsed but non-empty archive is not \"no changes
+    /// yet\"".
+    #[test]
+    fn a_collapsed_but_non_empty_archive_is_not_no_changes_yet() {
+        let mut d = dashboard_with(Vec::new(), Vec::new(), usize::MAX, Route::List);
+        d.changes.archived_total = 28;
+        d.sections.collapsed.insert(SectionKey::Archived);
+        for width in [60, 120] {
+            let buf = render_at(width, 20, &d);
+            assert!(interior_cols(&buf, 2).starts_with("No active changes"));
+            assert_eq!(
+                interior_cols(&buf, 3),
+                format!(
+                    "{:<w$}",
+                    "  > archived (28)",
+                    w = if width == 60 { 58 } else { 38 }
+                )
+            );
+            assert!(!buffer_contains(&buf, "No changes yet"));
+            assert!(!buffer_contains(&buf, "No changes match"));
+        }
+    }
+
+    /// `change-rows` -> "A collapsed active section shows its header and no
+    /// message row".
+    #[test]
+    fn a_collapsed_active_section_shows_its_header_and_no_message_row() {
+        let active: Vec<Change> = (0..9)
+            .map(|i| fixture::active(&format!("change-{i:02}"), 1, 2))
+            .collect();
+        let mut d = dashboard_with(active, Vec::new(), usize::MAX, Route::List);
+        d.sections.collapsed.insert(SectionKey::Active);
+        for width in [60, 120] {
+            let buf = render_at(width, 20, &d);
+            assert_eq!(
+                interior_cols(&buf, 2),
+                format!(
+                    "{:<w$}",
+                    "  > active (9)",
+                    w = if width == 60 { 58 } else { 38 }
+                )
+            );
+            assert!(!buffer_contains(&buf, "No active changes"));
+            assert!(!buffer_contains(&buf, "No changes yet"));
+            assert!(!buffer_contains(&buf, "change-00"));
+        }
+        // Expanding the same section renders the nine rows below it.
+        let mut opened = d.clone();
+        opened.sections.collapsed.clear();
+        let buf = render_at(120, 20, &opened);
+        assert!(buffer_contains(&buf, "change-00"));
+    }
+
+    #[test]
+    fn no_archived_changes_means_no_archived_header() {
         let d = three_active();
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
             assert!(!buffer_contains(&buf, "-- archived"));
+            assert!(!buffer_contains(&buf, "archived ("));
         }
         let with_archived = dashboard_with(
             vec![
@@ -1846,12 +2184,12 @@ mod tests {
                 fixture::active("migrate-ai-sdk-v7", 0, 0),
             ],
             vec![fixture::archived(Some("2026-08-14"), "add-auth", 7, 7)],
-            0,
+            1,
             Route::List,
         );
         for width in [60, 120] {
             let buf = render_at(width, 20, &with_archived);
-            assert!(buffer_contains(&buf, "-- archived"));
+            assert!(buffer_contains(&buf, "archived (1)"));
         }
     }
 
@@ -1921,23 +2259,6 @@ mod tests {
     }
 
     #[test]
-    fn no_active_changes_keeps_archived_browsable() {
-        let d = dashboard_with(
-            Vec::new(),
-            vec![fixture::archived(Some("2026-08-14"), "add-auth", 7, 7)],
-            0,
-            Route::List,
-        );
-        for width in [60, 120] {
-            let buf = render_at(width, 20, &d);
-            assert!(interior_cols(&buf, 2).starts_with("No active changes"));
-            assert!(interior_cols(&buf, 3).contains("-- archived"));
-            assert!(interior_cols(&buf, 4).contains("add-auth"));
-            assert!(!buffer_contains(&buf, "No changes yet"));
-        }
-    }
-
-    #[test]
     fn repository_problems_are_named_above_the_rows() {
         let mut d = dashboard_with(
             vec![fixture::active("fix-empty-basket", 7, 7)],
@@ -1947,12 +2268,14 @@ mod tests {
         );
         d.changes.problems = vec!["openspec/changes: Permission denied (os error 13)".to_string()];
 
+        // `list-sections`: row 3 is now the active section header; the change
+        // row is row 4.
         let buf120 = render_at(120, 20, &d);
         assert_eq!(
             interior_cols(&buf120, 2),
             "! openspec/changes: Permission denied…"
         );
-        assert!(interior_cols(&buf120, 3).contains("fix-empty-basket"));
+        assert!(interior_cols(&buf120, 4).contains("fix-empty-basket"));
 
         let buf60 = render_at(60, 20, &d);
         assert!(
@@ -1960,7 +2283,7 @@ mod tests {
                 .starts_with("! openspec/changes: Permission denied (os error 13)")
         );
         assert!(!interior_cols(&buf60, 2).contains('…'));
-        assert!(interior_cols(&buf60, 3).contains("fix-empty-basket"));
+        assert!(interior_cols(&buf60, 4).contains("fix-empty-basket"));
     }
 
     // `live-refresh` -> "The list region's leading rows name refresh
@@ -1985,8 +2308,9 @@ mod tests {
                 "width {width}: {}",
                 interior_cols(&buf, 2)
             );
+            // `list-sections`: row 3 is now the active section header.
             assert!(
-                interior_cols(&buf, 3).contains("fix-empty-basket"),
+                interior_cols(&buf, 4).contains("fix-empty-basket"),
                 "width {width}"
             );
         }
@@ -2013,8 +2337,9 @@ mod tests {
                 interior_cols(&buf, 3).starts_with("! openspec/changes unreadable"),
                 "width {width}"
             );
+            // `list-sections`: row 4 is now the active section header.
             assert!(
-                interior_cols(&buf, 4).contains("fix-empty-basket"),
+                interior_cols(&buf, 5).contains("fix-empty-basket"),
                 "width {width}"
             );
         }
@@ -2044,8 +2369,14 @@ mod tests {
             let buf = render_at(width, height, &d);
             let buf_same = render_at(width, height, &same);
             assert_eq!(buf, buf_same, "width {width}");
+            // `list-sections`: row 2 is the active section header, not a problem
+            // row — the change row follows it at row 3.
             assert!(
-                interior_cols(&buf, 2).contains("fix-empty-basket"),
+                !interior_cols(&buf, 2).starts_with('!'),
+                "width {width}: no leading problem row"
+            );
+            assert!(
+                interior_cols(&buf, 3).contains("fix-empty-basket"),
                 "width {width}: the change row must be first, no leading problem row"
             );
         }
@@ -2066,7 +2397,8 @@ mod tests {
         );
         for (width, height) in [(120, 20), (60, 20)] {
             let buf = render_at(width, height, &d);
-            assert!(interior_cols(&buf, 2).contains("[7/9]"), "width {width}");
+            // `list-sections`: row 2 is the active section header.
+            assert!(interior_cols(&buf, 3).contains("[7/9]"), "width {width}");
         }
     }
 
@@ -2093,8 +2425,9 @@ mod tests {
                 "width {width}: {}",
                 interior_cols(&buf, 2)
             );
+            // `list-sections`: row 3 is now the active section header.
             assert!(
-                interior_cols(&buf, 3).contains("alpha"),
+                interior_cols(&buf, 4).contains("alpha"),
                 "width {width}: the list still draws despite the watcher failure"
             );
         }
@@ -2180,10 +2513,13 @@ mod tests {
     #[test]
     fn more_changes_than_rows_do_not_overflow() {
         let d = dashboard_with(changes_named(30), Vec::new(), 0, Route::List);
+        // `list-sections`: row 2 is now the active section header, so the
+        // interior's remaining fifteen rows (3 through 17) hold change-00 through
+        // change-14 rather than change-00 through change-15.
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
-            assert!(interior_cols(&buf, 2).contains("change-00"));
-            assert!(interior_cols(&buf, 17).contains("change-15"));
+            assert!(interior_cols(&buf, 3).contains("change-00"));
+            assert!(interior_cols(&buf, 17).contains("change-14"));
             for y in [0u16, 1, 18, 19] {
                 assert!(!row_text(&buf, y).contains("change-"));
             }
@@ -2192,27 +2528,33 @@ mod tests {
 
     #[test]
     fn the_selected_row_carries_the_marker_and_bold() {
+        // `list-sections`: row 2 is the active section header (unselected here);
+        // the marked change row is row 3.
         let d = three_active();
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
             let last = if width == 60 { 58 } else { 38 };
-            assert_eq!(cell(&buf, 1, 2).symbol(), ">");
+            assert_eq!(cell(&buf, 1, 3).symbol(), ">");
             for x in 1..=last {
-                assert!(is_bold(cell(&buf, x, 2)), "x={x} width={width}");
+                assert!(is_bold(cell(&buf, x, 3)), "x={x} width={width}");
             }
-            assert!(!is_bold(cell(&buf, 1, 3)));
+            assert!(!is_bold(cell(&buf, 1, 4)));
         }
     }
 
     #[test]
     fn navigation_moves_the_marker() {
+        // `list-sections`: `three_active()` starts on `add-token-refresh` (target
+        // 1); two `Next` presses land on `migrate-ai-sdk-v7` (target 3), the
+        // interior's row 5 — row 2 is the active header, rows 3-5 the three
+        // changes.
         let mut d = three_active();
         d.apply(Action::Next);
         d.apply(Action::Next);
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
-            assert_eq!(cell(&buf, 1, 4).symbol(), ">");
-            assert!(is_bold(cell(&buf, 1, 4)));
+            assert_eq!(cell(&buf, 1, 5).symbol(), ">");
+            assert!(is_bold(cell(&buf, 1, 5)));
         }
     }
 
@@ -2222,24 +2564,19 @@ mod tests {
         for _ in 0..4 {
             d.apply(Action::Next);
         }
-        // `list-sections`: the clamp is now against `targets().len()` (the
-        // active header plus three changes, 4), not `visible_len()` (3), so
-        // the cursor stops on the third active change's *target* — `selected`
-        // 3 — rather than on the change-only index 2 this test asserted
-        // before.
+        // `list-sections`: the clamp is against `targets().len()` (the active
+        // header plus three changes, 4), so the cursor stops on the third
+        // active change's *target* — `selected` 3 — one past `three_active()`'s
+        // starting `selected` 1.
         assert_eq!(d.selected, 3);
         assert_eq!(d.selected_change().unwrap().name, "migrate-ai-sdk-v7");
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
-            // `ui::list::rows` still marks a row by comparing its own
-            // change-only counter (0, 1, 2 for three active changes) against
-            // `dashboard.selected` directly — it does not yet know about
-            // `targets()`'s header offset, which is `list-sections`' group 5.
-            // Until that group lands, a `selected` this far past the change
-            // count matches no row at all, so no marker is drawn anywhere in
-            // the interior — a real, if temporary, rendering gap this group's
-            // own design.md accepts as the cost of a sequential rollout.
-            for y in 2..=17u16 {
+            // Row 2 is the active header; the marker is now correctly on row 5,
+            // `migrate-ai-sdk-v7`'s row, and nowhere else.
+            assert_eq!(cell(&buf, 1, 5).symbol(), ">", "width {width}");
+            assert!(is_bold(cell(&buf, 1, 5)), "width {width}");
+            for y in [2u16, 3, 4] {
                 assert_ne!(cell(&buf, 1, y).symbol(), ">", "width {width} y={y}");
             }
         }
@@ -2247,22 +2584,33 @@ mod tests {
 
     #[test]
     fn selection_crosses_the_separator() {
+        // `list-sections`: `targets()` is `[Section(Active), Change(0)=fix-
+        // empty-basket, Section(Archived), Change(1)=add-auth, Change(2)=
+        // legacy-cleanup]`. Starting on `fix-empty-basket` (target 1), three
+        // `Next` presses cross the archived header (target 2, itself a stop
+        // now that it is selectable) and land on `legacy-cleanup` (target 4).
         let mut d = dashboard_with(
             vec![fixture::active("fix-empty-basket", 7, 7)],
             vec![
                 fixture::archived(Some("2026-08-14"), "add-auth", 7, 7),
                 fixture::archived(None, "legacy-cleanup", 3, 3),
             ],
-            0,
+            1,
             Route::List,
         );
         d.apply(Action::Next);
         d.apply(Action::Next);
+        d.apply(Action::Next);
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
-            assert!(interior_cols(&buf, 5).contains("legacy-cleanup"));
-            assert_eq!(cell(&buf, 1, 3).symbol(), " ");
-            assert!(!is_bold(cell(&buf, 1, 3)));
+            // Rows: 2 active header, 3 fix-empty-basket, 4 archived header, 5
+            // add-auth, 6 legacy-cleanup.
+            assert!(interior_cols(&buf, 6).contains("legacy-cleanup"));
+            assert_eq!(cell(&buf, 1, 6).symbol(), ">", "width {width}");
+            assert!(is_bold(cell(&buf, 1, 6)), "width {width}");
+            // The archived header the cursor passed through carries no marker.
+            assert_ne!(cell(&buf, 1, 4).symbol(), ">", "width {width}");
+            assert!(!is_bold(cell(&buf, 1, 4)), "width {width}");
         }
     }
 
@@ -2286,7 +2634,11 @@ mod tests {
 
     #[test]
     fn a_selection_past_the_interior_scrolls_the_slice() {
-        let d = dashboard_with(changes_named(30), Vec::new(), 20, Route::List);
+        // `list-sections`: `selected` **21** addresses `Target::Change(20)` since
+        // the active section header is target 0; the resulting buffer rows are
+        // unchanged, since the header shifts `rows.len()` and the cursor position
+        // by the same one row.
+        let d = dashboard_with(changes_named(30), Vec::new(), 21, Route::List);
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
             assert!(interior_cols(&buf, 2).contains("change-12"));
@@ -2300,7 +2652,8 @@ mod tests {
 
     #[test]
     fn the_last_change_is_reachable() {
-        let d = dashboard_with(changes_named(30), Vec::new(), 29, Route::List);
+        // `list-sections`: `selected` **30** addresses `Target::Change(29)`.
+        let d = dashboard_with(changes_named(30), Vec::new(), 30, Route::List);
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
             assert!(interior_cols(&buf, 2).contains("change-14"));
@@ -2314,7 +2667,8 @@ mod tests {
 
     #[test]
     fn the_viewport_boundary_is_rendered() {
-        let d = dashboard_with(changes_named(17), Vec::new(), 9, Route::List);
+        // `list-sections`: `selected` **10** addresses `Target::Change(9)`.
+        let d = dashboard_with(changes_named(17), Vec::new(), 10, Route::List);
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
             assert!(interior_cols(&buf, 2).contains("change-01"));
@@ -2323,7 +2677,8 @@ mod tests {
 
     #[test]
     fn resizing_changes_the_slice_on_the_next_frame() {
-        let d = dashboard_with(changes_named(30), Vec::new(), 20, Route::List);
+        // `list-sections`: `selected` **21** addresses `Target::Change(20)`.
+        let d = dashboard_with(changes_named(30), Vec::new(), 21, Route::List);
         let backend = TestBackend::new(120, 20);
         let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
         terminal
@@ -2525,38 +2880,50 @@ mod tests {
 
     #[test]
     fn a_query_narrows_both_tiers() {
-        let mut d = five_change_dashboard(0);
+        // `list-sections`: `selected` **1** addresses `Target::Change(0)` —
+        // `add-token-refresh`, the query's one active match — both before and
+        // after filtering, since the active header stays target 0 either way.
+        let mut d = five_change_dashboard(1);
         d.filter.query = "add".to_string();
         let buf120 = render_at(120, 20, &d);
         assert_eq!(
             interior_cols(&buf120, 2),
-            "> add-token-refresh              [4/9]"
+            format!("{:<38}", "  v active (1)")
         );
         assert_eq!(
             interior_cols(&buf120, 3),
-            "  -- archived ------------------------"
+            "> add-token-refresh              [4/9]"
         );
         assert_eq!(
             interior_cols(&buf120, 4),
+            format!("{:<38}", "  v archived (1)")
+        );
+        assert_eq!(
+            interior_cols(&buf120, 5),
             "  2026-08-14 add-auth            [7/7]"
         );
         let buf60 = render_at(60, 20, &d);
         assert_eq!(
             interior_cols(&buf60, 2),
-            "> add-token-refresh                                  [4/9]"
+            format!("{:<58}", "  v active (1)")
         );
         assert_eq!(
             interior_cols(&buf60, 3),
-            "  -- archived --------------------------------------------"
+            "> add-token-refresh                                  [4/9]"
         );
         assert_eq!(
             interior_cols(&buf60, 4),
+            format!("{:<58}", "  v archived (1)")
+        );
+        assert_eq!(
+            interior_cols(&buf60, 5),
             "  2026-08-14 add-auth                                [7/7]"
         );
         for buf in [&buf120, &buf60] {
             assert!(!buffer_contains(buf, "fix-empty-basket"));
             assert!(!buffer_contains(buf, "migrate-ai-sdk-v7"));
             assert!(!buffer_contains(buf, "legacy-cleanup"));
+            assert!(!buffer_contains(buf, "-- archived"));
         }
     }
 
@@ -2602,16 +2969,27 @@ mod tests {
 
     #[test]
     fn a_query_matching_only_an_archived_change() {
-        let mut d = five_change_dashboard(0);
+        // `list-sections`: `selected` **1** addresses `Target::Change(0)` —
+        // `add-auth`, the only match — since the archived header is target 0
+        // (the active section's count is zero and it emits no header).
+        let mut d = five_change_dashboard(1);
         d.filter.query = "auth".to_string();
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
             assert!(interior_cols(&buf, 2).starts_with("No active changes"));
-            assert!(interior_cols(&buf, 3).contains("-- archived"));
+            assert_eq!(
+                interior_cols(&buf, 3),
+                format!(
+                    "{:<w$}",
+                    "  v archived (1)",
+                    w = if width == 60 { 58 } else { 38 }
+                )
+            );
             assert!(interior_cols(&buf, 4).contains("add-auth"));
             assert_eq!(cell(&buf, 1, 4).symbol(), ">");
             assert!(!buffer_contains(&buf, "No changes match"));
             assert!(!buffer_contains(&buf, "No changes yet"));
+            assert!(!buffer_contains(&buf, "-- archived"));
         }
     }
 
@@ -2654,13 +3032,12 @@ mod tests {
         assert_eq!(d.selected_change().unwrap().name, "add-auth");
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
-            assert!(interior_cols(&buf, 4).contains("add-auth"));
-            // `ui::list::rows` still marks a row by its own change-only
-            // counter (0 for `add-token-refresh`, 1 for `add-auth`), unaware
-            // of `targets()`'s header offset until `list-sections`' group 5.
-            // `selected` 3 exceeds that counter, so no row is marked — a
-            // temporary rendering gap this group's design.md accepts.
-            for y in 2..=17u16 {
+            // Rows: 2 active header, 3 add-token-refresh, 4 archived header, 5
+            // add-auth — the marker is now correctly on row 5.
+            assert!(interior_cols(&buf, 5).contains("add-auth"));
+            assert_eq!(cell(&buf, 1, 5).symbol(), ">", "width {width}");
+            assert!(is_bold(cell(&buf, 1, 5)), "width {width}");
+            for y in [2u16, 3, 4] {
                 assert_ne!(cell(&buf, 1, y).symbol(), ">", "width {width} y={y}");
             }
         }
@@ -2862,15 +3239,13 @@ mod tests {
         let buf120 = render_at(120, 20, &d);
         assert_eq!(detail_marker_cols(&buf120, 4), "- line-00");
         assert_eq!(detail_marker_cols(&buf120, 17), "- line-13");
-        // `list-sections`: no `>` — `d.selected` (1) now addresses the change
-        // in `targets()` space (the active header is target 0), which is what
-        // the detail region above reads; `ui::list::rows` still marks a row
-        // by its own change-only counter (0 for the one active change here)
-        // until `list-sections`' group 5, so the two disagree on this row's
-        // marker for the moment. The row's *text* is unaffected.
+        // `list-sections`: row 2 is now the active section header; the change
+        // row is row 3. `base.selected` (1) addresses `Target::Change(0)` —
+        // the one active change — since the active header is target 0, so
+        // the row carries the marker.
         assert_eq!(
-            cols(&row_text(&buf120, 2), 1..39),
-            "  fix-empty-basket               [7/7]"
+            cols(&row_text(&buf120, 3), 1..39),
+            "> fix-empty-basket               [7/7]"
         );
 
         d.route = Route::Detail;
@@ -3676,11 +4051,11 @@ mod tests {
         assert_eq!(d.selected_change().unwrap().name, "migrate-ai-sdk-v7");
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
-            // `ui::list::rows` still marks a row by its own change-only
-            // counter (0, 1, 2 for three active changes), unaware of
-            // `targets()`'s header offset until `list-sections`' group 5.
-            // `selected` 3 exceeds that counter, so no row is marked.
-            for y in 2..=17u16 {
+            // Row 2 is the active header; migrate-ai-sdk-v7, the third change,
+            // is row 5 and correctly carries the marker.
+            assert_eq!(cell(&buf, 1, 5).symbol(), ">", "width {width}");
+            assert!(is_bold(cell(&buf, 1, 5)), "width {width}");
+            for y in [2u16, 3, 4] {
                 assert_ne!(cell(&buf, 1, y).symbol(), ">", "width {width} y={y}");
             }
         }
@@ -3846,11 +4221,13 @@ mod tests {
         }
 
         // Discriminating companion: with a change selected, the region is
-        // never blank.
+        // never blank. `list-sections`: `selected` **1** addresses
+        // `Target::Change(0)` — `alpha` — since the active section header is
+        // target 0.
         let with_change = dashboard_with(
             vec![fixture::active("alpha", 1, 2)],
             Vec::new(),
-            0,
+            1,
             Route::Detail,
         );
         let buf = render_at(120, 20, &with_change);
@@ -5238,14 +5615,16 @@ mod tests {
     /// widths".
     #[test]
     fn the_selected_row_is_bold_and_uncoloured() {
+        // `list-sections`: row 2 is the active section header; add-token-refresh
+        // (target 1) is row 3, and fix-empty-basket (unselected) is row 4.
         let d = three_active();
         for width in [120, 60] {
             let buf = render_at(width, 20, &d);
             let last = if width == 60 { 58 } else { 38 };
-            assert_eq!(cell(&buf, 1, 2).symbol(), ">", "width {width}");
-            assert_eq!(cell(&buf, 1, 3).symbol(), " ", "width {width}");
+            assert_eq!(cell(&buf, 1, 3).symbol(), ">", "width {width}");
+            assert_eq!(cell(&buf, 1, 4).symbol(), " ", "width {width}");
             for x in 1..=last {
-                let selected = cell(&buf, x, 2).style();
+                let selected = cell(&buf, x, 3).style();
                 assert!(
                     selected.add_modifier.contains(Modifier::BOLD),
                     "width {width}: selected cell {x} is not bold"
@@ -5255,7 +5634,7 @@ mod tests {
                     uncoloured().fg,
                     "width {width}: selected cell {x} carries a foreground"
                 );
-                let next = cell(&buf, x, 3).style();
+                let next = cell(&buf, x, 4).style();
                 assert!(
                     !next.add_modifier.contains(Modifier::BOLD),
                     "width {width}: unselected cell {x} is bold"
@@ -5311,13 +5690,16 @@ mod tests {
     /// the row does not".
     #[test]
     fn the_badge_cell_reaches_the_buffer_coloured_and_the_rest_of_the_row_does_not() {
-        let d = badged_dashboard(0);
+        // `list-sections`: `selected` **1** addresses `Target::Change(0)` —
+        // `alpha` — since the active section header is target 0; rows 3, 4, and
+        // 5 (not 2, 3, and 4) are alpha, gamma, and epsilon.
+        let d = badged_dashboard(1);
         for width in [120, 60] {
             let buf = render_at(width, 20, &d);
             let last = if width == 60 { 58 } else { 38 };
 
-            let wx = only_column_of(&buf, 2, "w", last);
-            let working = cell(&buf, wx, 2).style();
+            let wx = only_column_of(&buf, 3, "w", last);
+            let working = cell(&buf, wx, 3).style();
             assert_eq!(
                 working.fg,
                 palette::style(Role::AgentBadge(crate::agents::AgentStatus::Working)).fg,
@@ -5328,8 +5710,8 @@ mod tests {
                 "width {width}: the badge on the selected row lost its bold"
             );
 
-            let bx = only_column_of(&buf, 3, "b", last);
-            let blocked = cell(&buf, bx, 3).style();
+            let bx = only_column_of(&buf, 4, "b", last);
+            let blocked = cell(&buf, bx, 4).style();
             assert_eq!(
                 blocked.fg,
                 palette::style(Role::AgentBadge(crate::agents::AgentStatus::Blocked)).fg,
@@ -5342,7 +5724,7 @@ mod tests {
 
             // Exactly one column was painted on each badged row: the separating
             // spaces on either side of the badge carry no foreground at all.
-            for (x, y) in [(wx, 2u16), (bx, 3)] {
+            for (x, y) in [(wx, 3u16), (bx, 4)] {
                 for neighbour in [x - 1, x + 1] {
                     assert_eq!(
                         cell(&buf, neighbour, y).style().fg,
@@ -5355,7 +5737,7 @@ mod tests {
             // The unbadged third row carries no foreground anywhere.
             for x in 1..=last {
                 assert_eq!(
-                    cell(&buf, x, 4).style().fg,
+                    cell(&buf, x, 5).style().fg,
                     uncoloured().fg,
                     "width {width}: unbadged cell {x} is coloured"
                 );
@@ -5370,29 +5752,32 @@ mod tests {
     fn a_badged_selected_row_keeps_its_bold_under_the_badge_colour() {
         let working = palette::style(Role::AgentBadge(crate::agents::AgentStatus::Working)).fg;
         let blocked = palette::style(Role::AgentBadge(crate::agents::AgentStatus::Blocked)).fg;
+        // `list-sections`: `selected` **1** addresses `Target::Change(0)` — alpha
+        // — and **2** addresses `Target::Change(1)` — gamma — since the active
+        // section header is target 0; alpha and gamma's rows are 3 and 4.
         for width in [120, 60] {
             let last = if width == 60 { 58 } else { 38 };
-            for selected in [0usize, 1] {
+            for selected in [1usize, 2] {
                 let buf = render_at(width, 20, &badged_dashboard(selected));
-                let wx = only_column_of(&buf, 2, "w", last);
-                let bx = only_column_of(&buf, 3, "b", last);
-                assert_eq!(cell(&buf, wx, 2).style().fg, working, "width {width}");
-                assert_eq!(cell(&buf, bx, 3).style().fg, blocked, "width {width}");
+                let wx = only_column_of(&buf, 3, "w", last);
+                let bx = only_column_of(&buf, 4, "b", last);
+                assert_eq!(cell(&buf, wx, 3).style().fg, working, "width {width}");
+                assert_eq!(cell(&buf, bx, 4).style().fg, blocked, "width {width}");
                 assert_eq!(
-                    cell(&buf, wx, 2)
-                        .style()
-                        .add_modifier
-                        .contains(Modifier::BOLD),
-                    selected == 0,
-                    "width {width}: row 0's badge bold disagrees with the selection"
-                );
-                assert_eq!(
-                    cell(&buf, bx, 3)
+                    cell(&buf, wx, 3)
                         .style()
                         .add_modifier
                         .contains(Modifier::BOLD),
                     selected == 1,
-                    "width {width}: row 1's badge bold disagrees with the selection"
+                    "width {width}: alpha's badge bold disagrees with the selection"
+                );
+                assert_eq!(
+                    cell(&buf, bx, 4)
+                        .style()
+                        .add_modifier
+                        .contains(Modifier::BOLD),
+                    selected == 2,
+                    "width {width}: gamma's badge bold disagrees with the selection"
                 );
             }
         }
@@ -5402,6 +5787,10 @@ mod tests {
     /// mandated widths".
     #[test]
     fn problem_rows_are_red_and_change_rows_are_not_at_both_mandated_widths() {
+        // `list-sections`: `selected` **1** addresses `Target::Change(0)` —
+        // `alpha` — since the active section header is target 0. Rows: 2-4
+        // problems, 5 the active header, 6-8 alpha/gamma/epsilon, 9 the
+        // archived header, 10 old-change.
         let mut d = dashboard_with(
             vec![
                 fixture::active("alpha", 4, 9),
@@ -5409,7 +5798,7 @@ mod tests {
                 fixture::active("epsilon", 0, 0),
             ],
             vec![fixture::archived(Some("2026-08-14"), "old-change", 3, 3)],
-            0,
+            1,
             Route::List,
         );
         d.launch.problems = vec!["herdr agent start: refused".to_string()];
@@ -5431,7 +5820,7 @@ mod tests {
                 interior_cols(&buf, 4).starts_with("! openspec"),
                 "width {width}"
             );
-            assert!(interior_cols(&buf, 8).contains("archived"), "width {width}");
+            assert!(interior_cols(&buf, 9).contains("archived"), "width {width}");
 
             for x in 1..=last {
                 for y in [2u16, 3, 4] {
@@ -5446,17 +5835,27 @@ mod tests {
                         "width {width}: problem cell {x},{y} gained a modifier"
                     );
                 }
-                let separator = cell(&buf, x, 8).style();
+                let active_header = cell(&buf, x, 5).style();
+                assert_eq!(
+                    active_header.fg,
+                    palette::style(Role::ListSeparator).fg,
+                    "width {width}: active header cell {x} is not the separator colour"
+                );
+                assert!(
+                    active_header.add_modifier.is_empty(),
+                    "width {width}: unselected active header cell {x} gained a modifier"
+                );
+                let separator = cell(&buf, x, 9).style();
                 assert_eq!(
                     separator.fg,
                     palette::style(Role::ListSeparator).fg,
-                    "width {width}: separator cell {x} is not the separator colour"
+                    "width {width}: archived header cell {x} is not the separator colour"
                 );
                 assert!(
                     separator.add_modifier.is_empty(),
-                    "width {width}: separator cell {x} gained a modifier"
+                    "width {width}: archived header cell {x} gained a modifier"
                 );
-                for y in [5u16, 6, 7, 9] {
+                for y in [6u16, 7, 8, 10] {
                     assert_eq!(
                         cell(&buf, x, y).style().fg,
                         uncoloured().fg,
@@ -5464,7 +5863,7 @@ mod tests {
                     );
                 }
                 assert!(
-                    cell(&buf, x, 5)
+                    cell(&buf, x, 6)
                         .style()
                         .add_modifier
                         .contains(Modifier::BOLD),
@@ -5568,16 +5967,15 @@ mod tests {
     /// of every cell outside the tab-bar row is exactly what it was before this change.
     #[test]
     fn a_monochrome_reading_of_the_frame_is_unchanged() {
-        // The list half. Rows: 2 the problem, 3 the selected change (`add-token-refresh`),
-        // 4 the badged one (`fix-empty-basket`), 5 the third, 6 the separator, 7 the
+        // The list half. Rows: 2 the problem, 3 the active section header, 4 the
+        // selected change (`add-token-refresh`), 5 the badged one
+        // (`fix-empty-basket`), 6 the third, 7 the archived header, 8 the
         // archived change.
         //
-        // `list-sections`: `monochrome_dashboard`'s `selected` field is 1, addressing
-        // `add-token-refresh` in `targets()` space (the active header is target 0) — what
-        // the detail half below reads. `ui::list::rows` still marks a row by its own
-        // change-only counter (0, 1, 2 for the three active changes), unaware of that
-        // offset until `list-sections`' group 5, so it marks row 4 (`fix-empty-basket`,
-        // index 1) rather than row 3 for the moment.
+        // `monochrome_dashboard`'s `selected` field is 1, addressing
+        // `add-token-refresh` in `targets()` space (the active header is target
+        // 0) — what the detail half below reads too, and now what
+        // `ui::list::rows` marks as well.
         for width in [120, 60] {
             let d = monochrome_dashboard(Route::List);
             let buf = render_at(width, 20, &d);
@@ -5604,13 +6002,13 @@ mod tests {
                 "width {width}: row 2 is not the problem row"
             );
             assert!(
-                interior_cols(&buf, 6).contains("archived"),
-                "width {width}: row 6 is not the separator row"
+                interior_cols(&buf, 7).contains("archived"),
+                "width {width}: row 7 is not the separator row"
             );
-            let badge = interior_cols(&buf, 4);
+            let badge = interior_cols(&buf, 5);
             assert!(
                 badge.contains("fix-empty-basket") && badge.contains('w'),
-                "width {width}: row 4 does not carry the working badge: {badge:?}"
+                "width {width}: row 5 does not carry the working badge: {badge:?}"
             );
 
             for x in 1..=last {
@@ -5618,7 +6016,7 @@ mod tests {
                     is_bold(cell(&buf, x, 4)),
                     "width {width}: the marked row's cell {x} is not bold"
                 );
-                for y in [2u16, 3, 6] {
+                for y in [2u16, 3, 5, 7] {
                     assert!(
                         cell(&buf, x, y).style().add_modifier.is_empty(),
                         "width {width}: cell {x},{y} carries a modifier it did not before"

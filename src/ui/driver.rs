@@ -1495,11 +1495,13 @@ mod tests {
                 },
                 "width {width}: one frame, not two"
             );
+            // `list-sections`: row 2 is now the active section header; the change
+            // row is row 3.
             let buf = terminal.backend().buffer();
             assert!(
-                row_text(buf, 2).contains("[7/9]"),
+                row_text(buf, 3).contains("[7/9]"),
                 "width {width}: the result must reach the very frame that consumed it: {}",
-                row_text(buf, 2)
+                row_text(buf, 3)
             );
             assert_eq!(
                 refresher.takes(),
@@ -2432,11 +2434,13 @@ mod tests {
                 Vec::<String>::new(),
                 "width {width}: the second, successful outcome must replace both entries wholesale"
             );
+            // `list-sections`: row 2 is now the active section header; the change
+            // row is row 3.
             let buf = terminal.backend().buffer();
             assert!(
-                row_text(buf, 2).contains("2fa-support"),
+                row_text(buf, 3).contains("2fa-support"),
                 "width {width}: the list's first interior row must be the change row again: {:?}",
-                row_text(buf, 2)
+                row_text(buf, 3)
             );
         }
     }
