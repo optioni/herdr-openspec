@@ -176,3 +176,41 @@ up empty — the `file mode` badge is genuinely new), and the wholesale renderin
 A "close the table" change finding a small number of real gaps is not evidence an
 earlier change was incomplete on its own terms; it is evidence that closing a table
 this large should never have been assumed additive-free going in.
+
+## In flight, 2026-09-09: three concurrent unplanned changes
+
+The roadmap above ends at Phase 6 (`degraded-states`). Three changes are in flight past it,
+proposed independently by three Claude sessions working in this same checkout at the same
+time. Their capability footprints overlap, and OpenSpec's `MODIFIED` blocks carry the **whole**
+requirement — so archiving two changes that modify one requirement silently discards the edits
+of whichever archived first. That is not a conflict git will report. The order below exists to
+prevent it.
+
+| Change | Capabilities it modifies |
+|---|---|
+| `foldable-spec-sections` | `artifact-content`, `artifact-folds` (new), `detail-scroll`, `list-selection`, `mouse-input` |
+| `markdown-legibility` | `degraded-coverage`, `markdown-render`, `tasks-checklist` |
+| `pane-chrome` | `artifact-content`, `artifact-tabs`, `change-rows`, `detail-header`, `detail-scroll`, `list-filtering`, `list-selection`, `mouse-input`, `responsive-layout`, `tasks-checklist`, `view-palette` |
+
+**Archive order: `foldable-spec-sections`, then `markdown-legibility`, then `pane-chrome`.**
+
+The first two overlap **nothing** with each other, so their relative order is free. Only
+`pane-chrome`'s position is load-bearing, and it goes **last** for two reasons. It is the only
+one whose geometry the other two render into — it moves `interior()` to reserve two rows, gives
+it a `Gutters` argument, and shifts the buffer row of every detail-region row — so anything
+archived after it must be re-read against a changed frame. And the rebase is asymmetric: moving
+`pane-chrome` onto a settled tree is re-running mechanical substitutions over extracted
+requirement blocks, while moving another change onto `pane-chrome` means learning the new
+geometry to correct scenario row indices in a change that has nothing to do with layout.
+
+`pane-chrome` therefore rebases **five** of its eleven deltas before `/opsx:apply` —
+`artifact-content`, `detail-scroll`, `list-selection` and `mouse-input` onto
+`foldable-spec-sections`' archived specs, and `tasks-checklist` onto `markdown-legibility`'s.
+Re-extract each requirement block from `openspec/specs/<capability>/spec.md` after the earlier
+change archives, then re-apply that delta's edits; do not hand-merge the two versions.
+
+**A note for whoever runs the suite while more than one session is live.** `cargo test
+--all-features` was measured non-deterministic on this machine on 2026-09-09 with three
+sessions active: 4–5 tests under `ui::tests::wiring` failed, a **different set on each run**,
+and each passed in isolation. `src/` was byte-identical to HEAD throughout. Establish a green
+baseline in a quiet checkout before attributing a wiring failure to a change.
