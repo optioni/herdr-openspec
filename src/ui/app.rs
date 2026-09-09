@@ -29,10 +29,12 @@ pub enum Route {
     Detail,
 }
 
-/// The eighteen outcomes a terminal event can map to, under either filter mode. The count
-/// has moved three times since this comment was last true: to thirteen with `live-refresh`'s
-/// `Refresh`, to seventeen with `agent-launch`'s `LaunchApply`, `LaunchContinue`,
-/// `LaunchArchive`, and `FocusAgent`, and to eighteen with `list-sections`'s `ToggleSection`.
+/// The twenty-three outcomes a terminal event can map to, under either filter mode. The
+/// count has moved four times since this comment was last true: to thirteen with
+/// `live-refresh`'s `Refresh`, to seventeen with `agent-launch`'s `LaunchApply`,
+/// `LaunchContinue`, `LaunchArchive`, and `FocusAgent`, to eighteen with `list-sections`'s
+/// `ToggleSection`, and to twenty-three with `mouse-input`'s `SelectNext`, `SelectPrev`,
+/// `ScrollDown`, `ScrollUp`, and `Click`.
 /// `action_for` is total over every `Event`. `Back` replaces the earlier
 /// `BackToList`: it now dismisses one of several layers rather than only
 /// ever returning to the list route. `Next` and `Prev` are renamed from
@@ -73,6 +75,26 @@ pub enum Action {
     /// space types into the query on the same terms as every other
     /// printable character.
     ToggleSection,
+    /// `mouse-input`'s five. `action_for` maps **no key** to any of them:
+    /// they exist because a mouse event names the region or the row it landed
+    /// on, where a key does not, and `ui::driver::mouse_action` is their only
+    /// producer.
+    ///
+    /// `SelectNext`/`SelectPrev` move the list selection and
+    /// `ScrollDown`/`ScrollUp` move the detail offset **at either route**,
+    /// unlike `Next`/`Prev`, which do one or the other depending on it — which
+    /// is what lets the wide layout's two regions scroll independently.
+    ///
+    /// Five flat variants rather than two carrying a direction or a region, for
+    /// the same reason the four launch variants are flat: an enumerate-by-hand
+    /// test must enumerate the same things the exhaustive `match` does.
+    /// `Click` carries a `Target` because a click's subject is genuinely data —
+    /// the row — not a fixed choice from a small set (design.md -> Decision 3).
+    SelectNext,
+    SelectPrev,
+    ScrollDown,
+    ScrollUp,
+    Click(Target),
     Ignore,
 }
 
@@ -319,39 +341,30 @@ impl Dashboard {
                 }
             }
             // Route-dependent: the list selection at `Route::List`, the
-            // detail scroll at `Route::Detail`, never both. The scroll's
-            // upper bound is enforced by the draw-time clamp
-            // (`render_detail`) and the frame normalisation
-            // (`normalise_scroll`), not here — `saturating_add` alone would
-            // let a held key run the stored value arbitrarily far ahead.
+            // detail scroll at `Route::Detail`, never both. `mouse-input`
+            // design.md -> Decision 4: these two arms are exactly a route
+            // dispatch over the four region-explicit actions below and hold no
+            // arithmetic of their own, so a key and a wheel over the same
+            // region can never disagree about what one line means.
             Action::Next => match self.route {
-                Route::List => {
-                    let before = self.selected;
-                    self.selected = self.selected.saturating_add(1);
-                    self.clamp_selection();
-                    if self.selected != before {
-                        self.detail.tab = 0;
-                        self.detail.scroll = 0;
-                    }
-                }
-                Route::Detail => {
-                    self.detail.scroll = self.detail.scroll.saturating_add(1);
-                }
+                Route::List => self.select_by(1),
+                Route::Detail => self.scroll_by(1),
             },
             Action::Prev => match self.route {
-                Route::List => {
-                    let before = self.selected;
-                    self.selected = self.selected.saturating_sub(1);
-                    self.clamp_selection();
-                    if self.selected != before {
-                        self.detail.tab = 0;
-                        self.detail.scroll = 0;
-                    }
-                }
-                Route::Detail => {
-                    self.detail.scroll = self.detail.scroll.saturating_sub(1);
-                }
+                Route::List => self.select_by(-1),
+                Route::Detail => self.scroll_by(-1),
             },
+            // `mouse-input`: the wheel names its region rather than inheriting
+            // the route, so these four act at **either** route.
+            Action::SelectNext => self.select_by(1),
+            Action::SelectPrev => self.select_by(-1),
+            Action::ScrollDown => self.scroll_by(1),
+            Action::ScrollUp => self.scroll_by(-1),
+            // `mouse-input`: a click names the row it landed on. Inert when that
+            // target is absent from `targets()` — never clamped to a neighbour,
+            // since moving the cursor somewhere the reader did not click is
+            // worse than ignoring a click whose row is gone.
+            Action::Click(target) => self.apply_click(target),
             // `sync_detail` (group 8) owns clamping `detail.tab` against the
             // selected change's artifact count; these arms perform only the
             // validity check `artifact-tabs` -> Decisions 4 and 5 state.
@@ -424,6 +437,73 @@ impl Dashboard {
         // subset: see design.md -> Decision 6. It never clears the flag.
         if self.needs_archived_refresh() {
             self.refresh.requested = true;
+        }
+    }
+
+    /// Move `selected` by `step` (`1` or `-1`), clamp it, and reset
+    /// `detail.tab` and `detail.scroll` to zero exactly when it changed value.
+    /// The one implementation `Next`/`Prev` at `Route::List` and
+    /// `SelectNext`/`SelectPrev` at either route share, so the clamp-and-reset
+    /// rule exists once (design.md -> Decision 4).
+    fn select_by(&mut self, step: i8) {
+        let before = self.selected;
+        self.selected = if step > 0 {
+            self.selected.saturating_add(1)
+        } else {
+            self.selected.saturating_sub(1)
+        };
+        self.clamp_selection();
+        if self.selected != before {
+            self.detail.tab = 0;
+            self.detail.scroll = 0;
+        }
+    }
+
+    /// Move `detail.scroll` by one line, saturating at zero. The upper bound
+    /// stays where `detail-scroll` already puts it — the draw-time clamp in
+    /// `render_detail` and the per-frame `normalise_scroll` — not here, so a
+    /// wheel held down cannot run the stored offset arbitrarily far ahead any
+    /// more than a held `j` can. The one implementation `Next`/`Prev` at
+    /// `Route::Detail` and `ScrollDown`/`ScrollUp` at either route share.
+    fn scroll_by(&mut self, step: i8) {
+        self.detail.scroll = if step > 0 {
+            self.detail.scroll.saturating_add(1)
+        } else {
+            self.detail.scroll.saturating_sub(1)
+        };
+    }
+
+    /// `mouse-input`: act on the row a click landed on.
+    ///
+    /// Does nothing at all when `target` is absent from `targets()` — a change
+    /// filtered away, or a section folded, between the draw and the event. A
+    /// `Target::Section` moves the cursor to that header and toggles it through
+    /// `apply_toggle_section`, the very code `Action::ToggleSection` runs, so a
+    /// click and a `Space` on the same header can never diverge. A
+    /// `Target::Change` moves the cursor to that row when it is not already
+    /// there, and otherwise — at `Route::List` — opens the detail, which is what
+    /// makes a second click on a selected row an `Enter`.
+    fn apply_click(&mut self, target: Target) {
+        let Some(index) = self.targets().iter().position(|t| *t == target) else {
+            return;
+        };
+        match target {
+            Target::Section(_) => {
+                self.selected = index;
+                self.apply_toggle_section();
+            }
+            Target::Change(_) => {
+                if self.selected == index {
+                    if self.route == Route::List {
+                        self.route = Route::Detail;
+                        self.detail.scroll = 0;
+                    }
+                } else {
+                    self.selected = index;
+                    self.detail.tab = 0;
+                    self.detail.scroll = 0;
+                }
+            }
         }
     }
 
@@ -1498,6 +1578,360 @@ mod tests {
         }
     }
 
+    /// `mouse-input`: the wheel and click actions `Dashboard::apply` gains.
+    /// `list-selection`'s ten scenarios live here; `detail-scroll`'s seven live
+    /// in `mod scroll` beside it.
+    mod click {
+        use super::dashboard_for_attribution;
+        use crate::changes::fixture;
+        use crate::ui::app::{Action, Dashboard, Route, SectionKey, Target};
+        use std::collections::BTreeMap;
+
+        /// `active` active changes and `archived` archived ones, cursor on
+        /// target `selected`, at `Route::List`.
+        pub(super) fn dashboard(active: usize, archived: usize, selected: usize) -> Dashboard {
+            let a: Vec<_> = (0..active)
+                .map(|i| fixture::active(&format!("a{i}"), 0, 1))
+                .collect();
+            let z: Vec<_> = (0..archived)
+                .map(|i| fixture::archived(Some("2026-01-01"), &format!("z{i}"), 1, 1))
+                .collect();
+            dashboard_for_attribution(a, z, selected, Vec::new(), BTreeMap::new())
+        }
+
+        /// The `targets()` index that addresses `target`.
+        fn index_of(d: &Dashboard, target: Target) -> usize {
+            d.targets()
+                .iter()
+                .position(|t| *t == target)
+                .unwrap_or_else(|| panic!("{target:?} is not among {:?}", d.targets()))
+        }
+
+        #[test]
+        fn moves_the_cursor_and_resets_the_tab() {
+            let mut d = dashboard(4, 0, 0);
+            d.selected = index_of(&d, Target::Change(0));
+            d.detail.tab = 3;
+            d.detail.scroll = 9;
+            let before = d.clone();
+
+            d.apply(Action::Click(Target::Change(2)));
+
+            assert_eq!(d.selected, index_of(&d, Target::Change(2)));
+            assert_eq!(d.detail.tab, 0);
+            assert_eq!(d.detail.scroll, 0);
+            assert_eq!(d.route, before.route);
+            assert_eq!(d.filter, before.filter);
+            assert_eq!(d.changes, before.changes);
+            assert_eq!(d.agents, before.agents);
+            assert_eq!(d.agent_names, before.agent_names);
+            assert_eq!(d.launch, before.launch);
+        }
+
+        #[test]
+        fn the_selected_change_resets_nothing() {
+            let mut d = dashboard(4, 0, 0);
+            d.selected = index_of(&d, Target::Change(2));
+            d.detail.tab = 3;
+            d.detail.scroll = 9;
+            d.route = Route::Detail;
+            let before = d.clone();
+
+            d.apply(Action::Click(Target::Change(2)));
+
+            assert_eq!(d.selected, before.selected);
+            assert_eq!(d.detail.tab, before.detail.tab);
+            assert_eq!(d.detail.scroll, before.detail.scroll);
+            assert_eq!(d, before, "the whole dashboard is unchanged");
+        }
+
+        #[test]
+        fn an_absent_target_changes_nothing() {
+            // Three active changes plus their header: four targets.
+            let mut d = dashboard(3, 0, 1);
+            assert_eq!(d.targets().len(), 4);
+            let before = d.clone();
+            d.apply(Action::Click(Target::Change(7)));
+            assert_eq!(d, before);
+
+            let mut no_archive = dashboard(3, 0, 1);
+            let before = no_archive.clone();
+            no_archive.apply(Action::Click(Target::Section(SectionKey::Archived)));
+            assert_eq!(no_archive, before);
+        }
+
+        #[test]
+        fn a_collapsed_section_hides_its_rows_from_clicks() {
+            let mut d = dashboard(3, 3, 1);
+            let archived_target = Target::Change(3);
+            assert!(d.targets().contains(&archived_target), "open, it is drawn");
+
+            d.sections.collapsed.insert(SectionKey::Archived);
+            let before = d.clone();
+            d.apply(Action::Click(archived_target));
+            assert_eq!(d, before, "a collapsed section hides its rows from clicks");
+
+            d.sections.collapsed.remove(&SectionKey::Archived);
+            d.apply(Action::Click(archived_target));
+            assert_eq!(d.selected, index_of(&d, archived_target));
+        }
+
+        #[test]
+        fn click_and_space_produce_equal_dashboards() {
+            for key in [SectionKey::Active, SectionKey::Archived] {
+                let mut clicked = dashboard(3, 3, 0);
+                let mut spaced = dashboard(3, 3, 0);
+
+                clicked.apply(Action::Click(Target::Section(key)));
+                spaced.selected = index_of(&spaced, Target::Section(key));
+                spaced.apply(Action::ToggleSection);
+                assert_eq!(clicked, spaced, "{key:?}: the fold");
+
+                clicked.apply(Action::Click(Target::Section(key)));
+                spaced.selected = index_of(&spaced, Target::Section(key));
+                spaced.apply(Action::ToggleSection);
+                assert_eq!(clicked, spaced, "{key:?}: the unfold");
+            }
+        }
+
+        #[test]
+        fn clicking_open_an_unresolved_archive_requests_a_refresh() {
+            let mut d = dashboard(3, 0, 0);
+            d.changes.archived_total = 22;
+            d.sections.collapsed.insert(SectionKey::Archived);
+            assert!(d.changes.archived.is_empty());
+
+            d.apply(Action::Click(Target::Section(SectionKey::Archived)));
+            assert!(!d.sections.collapsed.contains(&SectionKey::Archived));
+            assert_eq!(
+                d.selected,
+                index_of(&d, Target::Section(SectionKey::Archived))
+            );
+            assert!(d.refresh.requested);
+
+            // The fold does not set it a second time.
+            d.refresh.requested = false;
+            d.apply(Action::Click(Target::Section(SectionKey::Archived)));
+            assert!(d.sections.collapsed.contains(&SectionKey::Archived));
+            assert!(!d.refresh.requested);
+        }
+
+        #[test]
+        fn an_undrawn_header_is_inert() {
+            let mut d = dashboard(3, 0, 1);
+            let before = d.clone();
+            d.apply(Action::Click(Target::Section(SectionKey::Archived)));
+            assert_eq!(d, before);
+            assert_eq!(d.sections.collapsed, before.sections.collapsed);
+        }
+
+        #[test]
+        fn the_second_click_opens_and_the_third_does_nothing() {
+            // The rule is the same above and below the breakpoint; `apply` sees
+            // no width at all, which is what makes that structural.
+            let mut d = dashboard(3, 0, 0);
+            let target = Target::Change(1);
+
+            d.apply(Action::Click(target));
+            assert_eq!(d.selected, index_of(&d, target));
+            assert_eq!(d.route, Route::List);
+
+            d.apply(Action::Click(target));
+            assert_eq!(d.route, Route::Detail);
+            assert_eq!(d.detail.scroll, 0);
+
+            let after_second = d.clone();
+            d.apply(Action::Click(target));
+            assert_eq!(d, after_second);
+        }
+
+        #[test]
+        fn the_second_click_matches_enter() {
+            let mut clicked = dashboard(3, 0, 0);
+            clicked.selected = index_of(&clicked, Target::Change(1));
+            let mut entered = clicked.clone();
+
+            clicked.apply(Action::Click(Target::Change(1)));
+            entered.apply(Action::OpenDetail);
+            assert_eq!(clicked, entered);
+        }
+
+        #[test]
+        fn two_header_clicks_fold_and_unfold() {
+            let mut d = dashboard(3, 3, 0);
+            d.apply(Action::Click(Target::Section(SectionKey::Active)));
+            assert!(d.sections.collapsed.contains(&SectionKey::Active));
+            assert_eq!(d.route, Route::List);
+
+            d.apply(Action::Click(Target::Section(SectionKey::Active)));
+            assert!(!d.sections.collapsed.contains(&SectionKey::Active));
+            assert_eq!(d.route, Route::List);
+        }
+    }
+
+    /// `mouse-input`: the four region-explicit wheel actions. `detail-scroll`'s
+    /// seven scenarios.
+    mod scroll {
+        use crate::ui::app::{Action, Dashboard, Route, Target};
+
+        use super::click::dashboard;
+
+        /// A twenty-line markdown list — one rendered line per source line.
+        fn lines(n: usize) -> String {
+            (0..n).map(|i| format!("- line-{i:02}\n")).collect()
+        }
+
+        /// The `targets()` index that addresses `target`.
+        fn index_of(d: &Dashboard, target: Target) -> usize {
+            d.targets()
+                .iter()
+                .position(|t| *t == target)
+                .expect("target is drawn")
+        }
+
+        #[test]
+        fn scroll_down_scrolls_at_the_list_route() {
+            let mut d = dashboard(3, 0, 0);
+            d.selected = index_of(&d, Target::Change(0));
+            d.detail.source = lines(40);
+            let selected_before = d.selected;
+
+            for _ in 0..3 {
+                d.apply(Action::ScrollDown);
+            }
+            assert_eq!(d.detail.scroll, 3);
+            assert_eq!(d.selected, selected_before);
+            assert_eq!(d.route, Route::List);
+
+            // The drawn detail region shows the content advanced by three lines
+            // while the list region still shows the same selected row.
+            let buffer = crate::testutil::render_at(120, 40, &d);
+            let content: String = (41..119)
+                .map(|x| buffer[(x, 4)].symbol().to_string())
+                .collect();
+            assert!(
+                content.starts_with("- line-03"),
+                "the first content row is {content:?}"
+            );
+            assert_eq!(buffer[(1, 3)].symbol(), ">", "the selected row is unmoved");
+        }
+
+        #[test]
+        fn scroll_up_stops_at_the_top() {
+            for route in [Route::List, Route::Detail] {
+                let mut d = dashboard(3, 0, 1);
+                d.route = route;
+                d.detail.source = lines(40);
+                let before = d.clone();
+                d.apply(Action::ScrollUp);
+                assert_eq!(d.detail.scroll, 0);
+                assert_eq!(d, before, "{route:?}: nothing else changes either");
+            }
+        }
+
+        #[test]
+        fn a_held_wheel_is_clamped_by_the_frame() {
+            let mut wheeled = dashboard(3, 0, 0);
+            wheeled.selected = index_of(&wheeled, Target::Change(0));
+            wheeled.detail.source = lines(12);
+            for _ in 0..500 {
+                wheeled.apply(Action::ScrollDown);
+            }
+            assert_eq!(wheeled.detail.scroll, 500, "`apply` does not clamp");
+
+            let area = ratatui::layout::Rect::new(0, 0, 120, 40);
+            let buffer = crate::testutil::render_at(120, 40, &wheeled);
+            let first: String = (41..119)
+                .map(|x| buffer[(x, 4)].symbol().to_string())
+                .collect();
+            assert!(
+                first.starts_with("- line-00"),
+                "twelve lines fit the 34-row content area whole, so the last screenful \
+                 starts at line 0 rather than leaving a blank region: {first:?}"
+            );
+
+            wheeled.normalise_scroll(area);
+            // The same value a held `j` at the detail route leaves behind.
+            let mut held = dashboard(3, 0, 0);
+            held.selected = index_of(&held, Target::Change(0));
+            held.detail.source = lines(12);
+            held.route = Route::Detail;
+            for _ in 0..500 {
+                held.apply(Action::Next);
+            }
+            held.normalise_scroll(area);
+            assert_eq!(wheeled.detail.scroll, held.detail.scroll);
+        }
+
+        #[test]
+        fn next_at_detail_equals_scroll_down() {
+            let mut keyed = dashboard(3, 0, 1);
+            keyed.route = Route::Detail;
+            keyed.detail.source = lines(40);
+            let mut wheeled = keyed.clone();
+            keyed.apply(Action::Next);
+            wheeled.apply(Action::ScrollDown);
+            assert_eq!(keyed, wheeled);
+
+            keyed.detail.scroll = 5;
+            wheeled.detail.scroll = 5;
+            keyed.apply(Action::Prev);
+            wheeled.apply(Action::ScrollUp);
+            assert_eq!(keyed, wheeled);
+        }
+
+        #[test]
+        fn select_next_moves_at_the_detail_route() {
+            let mut d = dashboard(6, 0, 0);
+            d.selected = index_of(&d, Target::Change(0));
+            d.route = Route::Detail;
+            d.detail.tab = 2;
+            d.detail.scroll = 9;
+            let before = d.selected;
+
+            d.apply(Action::SelectNext);
+
+            assert_eq!(d.selected, before + 1);
+            assert_eq!(d.detail.tab, 0);
+            assert_eq!(d.detail.scroll, 0);
+            assert_eq!(d.route, Route::Detail);
+        }
+
+        #[test]
+        fn a_clamped_select_resets_nothing() {
+            let mut last = dashboard(6, 0, 0);
+            last.selected = last.targets().len() - 1;
+            last.detail.tab = 2;
+            last.detail.scroll = 9;
+            let before = last.clone();
+            last.apply(Action::SelectNext);
+            assert_eq!(last, before);
+
+            let mut first = dashboard(6, 0, 0);
+            first.selected = 0;
+            first.detail.tab = 2;
+            first.detail.scroll = 9;
+            let before = first.clone();
+            first.apply(Action::SelectPrev);
+            assert_eq!(first, before);
+        }
+
+        #[test]
+        fn next_at_list_equals_select_next() {
+            let mut keyed = dashboard(6, 0, 1);
+            keyed.detail.tab = 2;
+            keyed.detail.scroll = 9;
+            let mut wheeled = keyed.clone();
+            keyed.apply(Action::Next);
+            wheeled.apply(Action::SelectNext);
+            assert_eq!(keyed, wheeled);
+
+            keyed.apply(Action::Prev);
+            wheeled.apply(Action::SelectPrev);
+            assert_eq!(keyed, wheeled);
+        }
+    }
+
     mod keys {
         use ratatui::crossterm::event::{
             Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind,
@@ -1998,6 +2432,11 @@ mod tests {
                     | Action::LaunchArchive
                     | Action::FocusAgent
                     | Action::ToggleSection
+                    | Action::SelectNext
+                    | Action::SelectPrev
+                    | Action::ScrollDown
+                    | Action::ScrollUp
+                    | Action::Click(_)
                     | Action::Ignore => {}
                 }
             }
@@ -2024,12 +2463,21 @@ mod tests {
                 Action::FocusAgent,
                 // `list-sections`'s addition, bumping the count from seventeen to eighteen.
                 Action::ToggleSection,
+                // `mouse-input`'s five, bumping the count from eighteen to twenty-three.
+                // `ui::driver::mouse_action` is their only producer — `action_for` maps no
+                // key to any of them — so this array and `apply`'s exhaustive match are the
+                // only two places that enumerate them, and they must agree.
+                Action::SelectNext,
+                Action::SelectPrev,
+                Action::ScrollDown,
+                Action::ScrollUp,
+                Action::Click(crate::ui::app::Target::Change(0)),
                 Action::Ignore,
             ];
             assert_eq!(
                 variants.len(),
-                18,
-                "the eighteen variants this crate specifies"
+                23,
+                "the twenty-three variants this crate specifies"
             );
             for v in &variants {
                 assert_known_variant(v);

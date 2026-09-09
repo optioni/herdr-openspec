@@ -248,26 +248,42 @@ shape. Only `run_loop` can prove otherwise.
 ## 5. The five actions and `Dashboard::apply`
 <!-- kind: behavior -->
 
-- [ ] 5.1 RED: Write failing tests for `list-selection`'s ten scenarios and `detail-scroll`'s
+- [x] 5.1 RED: Write failing tests for `list-selection`'s ten scenarios and `detail-scroll`'s
       seven, named as design.md → Test Strategy lists them under `app::tests::click::` and
       `app::tests::scroll::`. The four "are the same move" and "produce equal dashboards"
       scenarios assert equality of two `Dashboard` values, not of one field.
       `cargo test --lib app::tests::click app::tests::scroll` — expect RED.
-- [ ] 5.2 GREEN: Add `SelectNext`, `SelectPrev`, `ScrollDown`, `ScrollUp`, and
+- [x] 5.2 GREEN: Add `SelectNext`, `SelectPrev`, `ScrollDown`, `ScrollUp`, and
       `Click(Target)` to `Action` and handle each in `apply`. `Click` does nothing when its
       target is absent from `targets()` and never clamps to a neighbour.
-- [ ] 5.3 REFACTOR: Reduce the `Next` and `Prev` arms to a route dispatch over the four
+- [x] 5.3 REFACTOR: Reduce the `Next` and `Prev` arms to a route dispatch over the four
       region-explicit arms, per design.md → Decision 4, so the clamp-and-reset rule exists
       once.
-- [ ] 5.4 CHECK: Contract gate — `Action` is enumerated in two places that must agree. Add
+      **Done:** the arithmetic moved into two private helpers, `Dashboard::select_by(step)`
+      and `Dashboard::scroll_by(step)`. `Next`/`Prev` are now two-arm route dispatches
+      naming them, and `SelectNext`/`SelectPrev`/`ScrollDown`/`ScrollUp` name the same two.
+      `next_at_list_equals_select_next` and `next_at_detail_equals_scroll_down` are what
+      hold that true.
+- [x] 5.4 CHECK: Contract gate — `Action` is enumerated in two places that must agree. Add
       the five variants to `no_action_mutates_changes`' hand-written array
       (`src/ui/app.rs:1977`) **and** to its `assert_eq!(variants.len(), 18, …)` literal and
       prose at `:2030`, which is the third site that must agree. Then confirm
       `awk '/^pub enum Action \{/{f=1;next} f&&/^\}/{exit} f&&/^    [A-Z]/{n++} END{print n}' src/ui/app.rs`
       reports **23** (check K, **18** at HEAD).
-- [ ] 5.5 CHECK: `SCAN_MIN=206 TYPES='Dashboard Filter Detail Sections' /bin/sh scripts/gates/nodefault-ui.sh`
+      **Run:** `23`. All three sites were updated in the same commit, and rustc found two of
+      them for me: `assert_known_variant`'s wildcard-free match failed to compile with
+      `SelectNext … Click(Target) not covered`, which is exactly the signal that test's own
+      comment says it exists to give.
+- [x] 5.5 CHECK: `SCAN_MIN=206 TYPES='Dashboard Filter Detail Sections' /bin/sh scripts/gates/nodefault-ui.sh`
       exits 0 — no site elides a field on the four view-layer types.
-- [ ] 5.6 Run the group tests — `cargo test --lib app::` — no regressions.
+      **Run:** `NODEFAULT-UI OK (half B): 208 literal/pattern spans scanned (>= 206), none
+      elides a field` and `NODEFAULT-UI OK: no Default for [Dashboard Filter Detail
+      Sections], no elided field; positive controls matched`, **exit 0**. The count rose
+      from 206 to 208; the `SCAN_MIN` floor on the `Makefile` line is unchanged, since it is
+      a floor.
+- [x] 5.6 Run the group tests — `cargo test --lib app::` — no regressions.
+      **Run:** **113 passed**, 0 failed (96 before, plus the ten `click::` and seven
+      `scroll::` tests).
 
 ## 6. The resolver and the loop
 <!-- kind: behavior -->
