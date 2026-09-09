@@ -14,8 +14,10 @@ Clamping would move the cursor somewhere the reader did not click, which is wors
 ignoring a click whose row is gone.
 
 `Action::Click` SHALL change nothing but `selected`, `route`, `detail.tab`,
-`detail.scroll`, and `sections.collapsed`, and SHALL reach no collaborator, spawn no
-process, touch no filesystem, and read no clock.
+`detail.scroll`, `sections.collapsed`, and `refresh.requested` — the last only through the
+blanket rule `apply` runs after **every** action, never written by a `Click` arm itself, and
+so reachable only by a `Target::Section` click that opens an unresolved archive. It SHALL
+reach no collaborator, spawn no process, touch no filesystem, and read no clock.
 
 #### Scenario: A click on an unselected change moves the cursor and resets the tab
 

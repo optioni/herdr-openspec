@@ -75,24 +75,33 @@ shape. Only `run_loop` can prove otherwise.
       recorded list, so the four-operation claim survives verbatim). Extend the `Recorder`
       double in `src/ui/terminal.rs` and the one in `src/ui/mod.rs:2186` to the six-method
       trait. `cargo test --lib terminal::` — expect RED.
-- [ ] 1.2 GREEN: Add `enable_mouse` and `disable_mouse` to `TerminalOps`, implemented in
+- [ ] 1.2 RED: Update the four existing panic-path and refusal tests to the lists the
+      `terminal-lifecycle` delta now states — `src/ui/terminal.rs:288` (unwinding),
+      `:300` (`restore_then`), `:344` (render-thread `restore_then_if`), and
+      `ui::enter_if_terminal`'s own `Ok` arm. The worker-thread test's `["previous_hook"]`
+      is unchanged and must stay unchanged, which is the check that capture gained no
+      exception off the render thread. `cargo test --lib terminal:: enter_if_terminal` —
+      expect RED.
+- [ ] 1.3 GREEN: Add `enable_mouse` and `disable_mouse` to `TerminalOps`, implemented in
       `CrosstermOps` as one `ratatui::crossterm::execute!` of `EnableMouseCapture` /
       `DisableMouseCapture` each, mapping the error — no decision, no ordering, no state.
-- [ ] 1.3 GREEN: `TerminalGuard::enter` calls `enable_mouse` after `enter_alternate` and
+- [ ] 1.4 GREEN: `TerminalGuard::enter` calls `enable_mouse` after `enter_alternate` and
       stores a failure instead of returning it; `mouse_problem(&self) -> Option<String>`
       returns the `TerminalError`'s `Display` text. `Drop` and `restore_then` call
       `disable_mouse` first, unconditionally (per design.md → Decision 7), so the panic
-      hook releases capture too.
-- [ ] 1.4 REFACTOR: State whether the three `TerminalOps` implementors share enough to
+      hook releases capture too — `restore_then` is the shared body `Drop` and the panic hook
+      both delegate to, so one edit covers both paths.
+- [ ] 1.5 REFACTOR: State whether the three `TerminalOps` implementors share enough to
       warrant extraction, or record that none was needed.
-- [ ] 1.5 Run the group tests — `cargo test --lib terminal::` and
+- [ ] 1.6 Run the group tests — `cargo test --lib terminal::` and
       `cargo test --lib ui::tests::` — no regressions.
 
 ## 2. The hit test — `layout::zone`
 <!-- kind: behavior -->
 
 - [ ] 2.1 RED: Write failing tests in `src/ui/layout.rs` for `responsive-layout`'s four
-      pure scenarios: `zone::the_zones_tile_the_frame`,
+      **pure** scenarios (its fifth, "The hit test agrees with what was drawn", is a view
+      test and lands in group 3.1 beside the other one): `zone::the_zones_tile_the_frame`,
       `zone::below_the_breakpoint_only_the_routed_region`,
       `zone::the_breakpoint_is_exact_for_zone`, `zone::degenerate_frames_resolve`. Derive
       each expected interior in the test from `split_frame`/`split_body`/`interior`/
@@ -114,8 +123,11 @@ shape. Only `run_loop` can prove otherwise.
       `list::tests::row_at::the_reported_row_follows_the_scrolled_slice`,
       `row_at::a_collapsed_section_reports_only_its_header`,
       `row_at::degenerate_interiors_report_nothing`, and, in `src/ui/view.rs`,
-      `view::tests::every_drawn_row_is_reported_by_row_at` at 120x40 and 60x20.
-      `cargo test --lib row_at` — expect RED.
+      `view::tests::every_drawn_row_is_reported_by_row_at` and
+      `view::tests::the_hit_test_agrees_with_the_drawn_buffer` (responsive-layout's fifth
+      scenario — it classifies every cell of a rendered buffer by `layout::zone`, so it
+      lands here with the other view test rather than in group 2's pure set), both at 120x40
+      and 60x20. `cargo test --lib row_at the_hit_test_agrees` — expect RED.
 - [ ] 3.2 GREEN: Extract the offset derivation `render_list` performs inline
       (`src/ui/view.rs:227-229`: `rows`, the `position(|r| r.selected)` cursor, and
       `viewport`) into one `list` function, and implement
@@ -177,9 +189,14 @@ shape. Only `run_loop` can prove otherwise.
 - [ ] 6.3 GREEN: `run_loop` routes an `Event::Mouse` to `mouse_action` with the `area` it
       already copies out of the `CompletedFrame`, and every other event to `action_for`
       with `dashboard.filter.active`. One action per event; the quit check is unchanged.
-- [ ] 6.4 CHECK: `app::tests::the_full_key_table_is_unchanged` and
-      `app::tests::non_key_events_are_ignored` both pass — `action_for` still maps every
-      `Event::Mouse` to `Ignore` and no key moved.
+- [ ] 6.4 CHECK: The four tests that actually carry the key table today pass **unmodified** —
+      `app::tests::action_for_is_total_over_a_keycode_sweep` (`src/ui/app.rs:1906`),
+      `quit_keys_and_their_near_misses` (`:1701`),
+      `navigation_and_filter_keys_are_distinguished` (`:2120`), and
+      `space_maps_to_toggle_section_outside_filter_mode_and_types_inside_it` (`:2672`), plus
+      `non_key_events_are_ignored` (`:1877`), which already asserts `Event::Mouse` → `Ignore`.
+      Editing any of them to accommodate this change is the failure this task exists to
+      catch. `cargo test --lib app::tests::` — expect green, having run more than 0 tests.
 - [ ] 6.5 CHECK: `/bin/sh scripts/gates/noblock.sh`, `/bin/sh scripts/gates/nosleep.sh`, and
       `/bin/sh scripts/gates/nocli-shell.sh` all exit 0 — the resolver reads no clock,
       blocks on nothing, and names no `HerdrCli`.
@@ -250,19 +267,25 @@ shape. Only `run_loop` can prove otherwise.
       net addition to that section is at most two lines.
 
 ## 10. Contract-tier bindings
-<!-- kind: behavior -->
+<!-- kind: operational -->
 
-- [ ] 10.1 RED: Write `tests/doc_contract.rs::mouse_bindings_match_spec_md` and
-      `::terminal_seam_names_match_the_gate` for `mouse-input`'s two documentation
-      scenarios. Each must fail when its document passage is absent, not pass vacuously.
-      `cargo test --test doc_contract` — expect RED before 10.2 and green after.
-- [ ] 10.2 GREEN: Implement both, reading `SPEC.md`, `AGENTS.md`,
+Classified operational, not behavior: group 9 writes the passages these tests bind, so a
+RED between writing the test and implementing it could only be manufactured with a stub —
+which the schema forbids. The evidence is a negative control instead.
+
+- [ ] 10.1 CHECK: Write `tests/doc_contract.rs::mouse_bindings_match_spec_md` and
+      `::terminal_seam_names_match_the_gate`, then prove each can fail: in a scratch copy of
+      the tree, delete `SPEC.md` → Keys' mouse table and show the first exits non-zero
+      naming the absent table; restore it and show it goes quiet. Repeat by removing
+      `DisableMouseCapture` from `AGENTS.md`'s confined list for the second. Record both
+      halves' exit statuses in this file.
+- [ ] 10.2 CHANGE: Land both tests, reading `SPEC.md`, `AGENTS.md`,
       `scripts/gates/noraw-grep.sh`, and `src/ui/driver.rs` as the second sites.
 - [ ] 10.3 CHANGE: Add the refused-capture row to `tests/degraded-coverage.toml`, bound to
-      `a_refused_capture_is_named_last`, and confirm
-      `cargo test --test degraded_coverage` exits 0.
-- [ ] 10.4 Run the group tests — `cargo test --test doc_contract --test degraded_coverage`
-      — no regressions.
+      `a_refused_capture_is_named_last`. Prove the binding is real the same way: reword the
+      row's `condition` and show `cargo test --test degraded_coverage` fails.
+- [ ] 10.4 VERIFY: `cargo test --test doc_contract --test degraded_coverage` exits 0 — no
+      regressions.
 
 ## 11. Acceptance Test — Outer Loop GREEN
 <!-- kind: behavior -->
@@ -276,7 +299,7 @@ shape. Only `run_loop` can prove otherwise.
 
 - [ ] 12.1 CHECK: Dispatch an independent reviewer — not a fork of the implementing session
       — against proposal.md, all eight spec files, design.md, and the diff. Concentration
-      points for this change: that every one of the 73 spec scenarios names a test that
+      points for this change: that every one of the 82 spec scenarios names a test that
       would go red if its behaviour were deleted; that `mouse_action` is genuinely reached
       by `run_loop` rather than only unit-tested; that `Action`'s two enumeration sites
       (`apply`'s match and `no_action_mutates_changes`' array) agree; that no mouse gesture
@@ -299,3 +322,10 @@ shape. Only `run_loop` can prove otherwise.
 - [ ] 13.3 VERIFY: Coverage — `make coverage` exits 0 against both floors, the total and the
       production slice. If it falls short, add tests; never lower or waive a floor.
 - [ ] 13.4 VERIFY: `openspec validate mouse-input --strict` reports the change valid.
+- [ ] 13.5 CHECK: The new `mouse-input` capability needs a written `## Purpose` before it can
+      be archived. `openspec archive` writes the placeholder `TBD - created by archiving
+      change <x>`, on which `tests/spec_purposes.rs` fails `cargo test` — HEAD's tip commit
+      `a156f9a docs(specs): archive list-sections and repair the Purpose paragraphs` is this
+      exact trap firing on the previous change. Write the paragraph into
+      `openspec/specs/mouse-input/spec.md` immediately after archiving and confirm
+      `cargo test --test spec_purposes` exits 0.

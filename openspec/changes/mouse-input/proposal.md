@@ -28,7 +28,9 @@ no row of the plan ever asked whether the pane had a second input device.
   error return, and panic alike. It remains the only file in the crate permitted to name a
   crossterm terminal-mode function.
 - **A pure hit-test in `ui::layout`**: frame area, route, and a `(column, row)` pair to a
-  `Target`. Pure `Rect` arithmetic and a row lookup, no I/O — the views' rule is not bent
+  `Zone` — written `Target` when this proposal was drafted, before `list-sections` took that
+  name for the list-row payload (design.md -> Decision 1). Pure `Rect` arithmetic and a row
+  lookup, no I/O — the views' rule is not bent
   for input.
 - **Wheel scrolls the region under the pointer** — the list's selection at the list region,
   the detail content at the detail region — which in the wide layout means the two regions
@@ -37,6 +39,9 @@ no row of the plan ever asked whether the pane had a second input device.
   on an artifact tab switches to it; a click on a section header toggles it.**
 - **The mouse acts while filtering**, unlike printable keys, because a click is unambiguous
   where a keystroke is not.
+- **A terminal that refuses mouse capture is a degraded state, not a failure.** The pane
+  starts, every key works, and the reason is named as a leading problem row — `SPEC.md`'s
+  degraded-states table gains a row and `tests/degraded-coverage.toml` a proof for it.
 - **Nothing becomes mouse-only.** Every target keeps its key, no key moves, and the pane
   stays fully usable over SSH in a terminal that reports no mouse.
 
@@ -61,32 +66,51 @@ no row of the plan ever asked whether the pane had a second input device.
 
 ### New Capabilities
 
-- `mouse-input`: capture's lifecycle, the pure hit-test and its `Target` set, the
+- `mouse-input`: capture's lifecycle, the pure hit-test and its `Zone` set, the
   wheel/click/second-click bindings, the filter-mode rule, and the requirement that every
   target remain reachable by key.
 
 ### Modified Capabilities
 
-- `terminal-lifecycle`: the guard enters and leaves capture in the mirrored order, and
-  releases it on the panic path.
-- `dashboard-loop`: `Event::Mouse` stops mapping to `Action::Ignore`.
+- `terminal-lifecycle`: the guard enters and leaves capture in the mirrored order and
+  releases it on the panic path; a refused capture is non-fatal and its reason reaches the
+  reader through a new `Startup` field and a leading problem row.
+- `dashboard-loop`: `Action` grows five variants, and the loop resolves an `Event::Mouse`
+  against the frame it just drew. `ui::app::action_for` itself stays key-only and still maps
+  every `Event::Mouse` to `Action::Ignore`.
 - `responsive-layout`: the hit-test primitive, and the rule that a point outside every
   region is a no-op.
-- `list-selection`: a click selects; a second click on the selected row opens detail.
-- `artifact-tabs`: a click switches tab.
-- `detail-scroll`: the wheel scrolls the detail region, independently of the list.
-- `change-rows`: a click on a section header toggles it.
+- `list-selection`: a click selects; a second click on the selected row opens detail; a
+  click on a section header toggles it, exactly as `Space` does.
+- `artifact-tabs`: a column of the tab bar resolves to the tab drawn there, and a click
+  switches to it.
+- `detail-scroll`: the wheel scrolls the detail region and moves the list selection at
+  either route, independently of each other.
+- `change-rows`: the row a point lands on is the row drawn there — one shared derivation of
+  the scrolled slice, used by both the draw path and the hit test.
+- `quality-gates`: `WIRED`'s required-name list grows to fourteen with `mouse_problem`, so a
+  `run` that stops threading the refused-capture reason fails the gate rather than shipping
+  an unreachable problem row.
 
 ## Impact
 
-- **Code:** `src/ui/terminal.rs`, `src/ui/layout.rs`, `src/ui/app.rs`, `src/ui/driver.rs`,
-  `src/ui/list.rs`.
-- **Docs:** `SPEC.md` → Keys gains a mouse table and the drag-to-select cost;
-  `AGENTS.md` → the terminal-seam rule's list of confined functions grows.
+- **Code:** eight files under `src/ui/` — `terminal.rs`, `layout.rs`, `list.rs`,
+  `detail.rs`, `app.rs`, `driver.rs`, `view.rs`, and `mod.rs`. No file is added, so the
+  nine-file `PURE` list every view gate sweeps is unchanged. Nothing under `src/` outside
+  `src/ui/` is touched.
+- **Checked-in verification files:** `scripts/gates/noraw-grep.sh` (the confinement pattern
+  grows by the two capture commands), `scripts/gates/wired.sh` (the required-name list grows
+  to fourteen), `tests/gate-controls.toml` (a planted defect for each), `tests/doc_contract.rs`
+  (two new bindings), and `tests/degraded-coverage.toml` (the refused-capture row).
+- **Docs:** `SPEC.md` → Keys gains a mouse table and the drag-to-select cost, and
+  → Degraded states gains the refused-capture row; `AGENTS.md` → the terminal-seam rule's
+  list of confined functions grows from four names to six, and § Current repo state's
+  event-loop sentence stops describing a keyboard-only pane.
 - **Depends on all three siblings and one audit change.** `view-fidelity` first, because a
   hit-test maps *terminal columns* to rows and one built on `char` counts mis-targets every
   row containing an emoji or a CJK name. `list-sections`, for the section-header target.
-  `seam-resilience`, which is already rewriting the panic hook capture must release from.
-  `color-palette` is independent of it.
+  `seam-resilience`, which is already rewriting the panic hook capture must release from. And
+  `color-palette` after all: it is what made `detail::Tab` report its own `x`, which is the
+  span `tab_at` resolves a click against — so all four siblings are dependencies, not three.
 - No manifest, no config format, no dependency, no data model, no external service, no
   sibling repository.

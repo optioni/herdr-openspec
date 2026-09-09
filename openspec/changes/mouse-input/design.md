@@ -68,12 +68,20 @@ worker thread is added; the crate stays at three.
 The `Change` type is not altered. `changes::from_files` and `changes::from_cli` are not
 touched, so the question of keeping them in agreement does not arise here.
 
-Two gates need editing, and both edits are part of the change rather than a follow-up:
+Two gates need editing, and both edits are part of the change rather than a follow-up. The
+second is a change to a *specified* invariant, so it carries its own delta under the
+`quality-gates` capability rather than living only here:
 
-- `scripts/gates/noraw-grep.sh`'s `RAW_RE` gains `EnableMouseCapture|DisableMouseCapture`.
-  Without it the two new commands could be named anywhere in the crate.
-- `scripts/gates/wired.sh`'s leg 1 name list gains `mouse_problem`, so a `run` that stops
-  threading the guard's reason into `Startup` fails rather than silently dropping the row.
+- `scripts/gates/noraw-grep.sh`'s `RAW_RE` gains `EnableMouseCapture|DisableMouseCapture`,
+  and its one-of-any positive control becomes per-name. Without the first the two new
+  commands could be named anywhere in the crate; without the second the extended pattern
+  would pass vacuously for the capture pair, since `src/ui/terminal.rs` already names
+  `enable_raw_mode`. Specified by the `terminal-lifecycle` delta.
+- `scripts/gates/wired.sh`'s leg 1 name list grows from thirteen to fourteen with
+  `mouse_problem`, so a `run` that stops threading the guard's reason into `Startup` fails
+  rather than silently dropping the row. `openspec/specs/quality-gates/spec.md` states that
+  list's size, so this change carries a `quality-gates` delta; without it the live spec would
+  keep asserting thirteen against a script naming fourteen.
 
 ## Contracts
 
@@ -174,6 +182,10 @@ through `run_loop` with a scripted source.
 | Every mouse action has a key that produces the same effect | `driver::tests::every_mouse_action_has_an_equal_key` — six paired `Dashboard` equalities | Unit | none | `cargo test --lib has_an_equal_key` |
 | The documented bindings match the resolver | `tests/doc_contract.rs::mouse_bindings_match_spec_md` | Contract | real: `SPEC.md`, `src/ui/driver.rs` | `cargo test --test doc_contract mouse_bindings` |
 | The documented confined set matches the gate | `tests/doc_contract.rs::terminal_seam_names_match_the_gate` | Contract | real: `AGENTS.md`, `scripts/gates/noraw-grep.sh` | `cargo test --test doc_contract terminal_seam_names` |
+| A name hidden in a block comment no longer satisfies the gate | `scripts/gates/wired.sh`'s stripper control, carried over unchanged | Gate | real: the tree | `make gates` |
+| Deleting the panic-hook call fails the gate | `tests/gate-controls.toml`'s existing `wired` control, carried over unchanged | Gate | real: the tree | `cargo test --test gate_controls` |
+| Deleting the mouse-capture reason from `run` fails the gate | new `[[control]]` in `tests/gate-controls.toml` planting the removal of `mouse_problem` from `ui::run` | Gate | real: the tree | `cargo test --test gate_controls` |
+| A renamed definition fails in the defining file | `scripts/gates/wired.sh`'s positive control, carried over unchanged | Gate | real: the tree | `make gates` |
 | The real implementation is the only place naming a terminal-mode function | `scripts/gates/noraw-grep.sh`, plus its planted-defect control | Gate | real: the tree | `make gates` |
 | No test constructs the real terminal implementation | `scripts/gates/noraw-grep.sh` leg 2 | Gate | real: the tree | `make gates` |
 | Normal lifetime records the four operations mirrored | `terminal::tests::guard::normal_lifetime_is_enter_enter_leave_disable` — updated to filter the capture pair out | Unit | replaced: `TerminalOps` double | `cargo test --lib normal_lifetime` |
@@ -181,6 +193,11 @@ through `run_loop` with a scripted source.
 | Raw mode fails and nothing else is attempted | `terminal::tests::guard::raw_mode_failure_attempts_nothing_else` | Unit | replaced: double | `cargo test --lib raw_mode_failure` |
 | The alternate screen fails and raw mode is unwound | `terminal::tests::guard::alternate_failure_unwinds_raw` | Unit | replaced: double | `cargo test --lib alternate_failure` |
 | Mouse capture fails and the guard is still returned | `terminal::tests::guard::mouse_failure_still_returns_a_guard` | Unit | replaced: double | `cargo test --lib mouse_failure` |
+| Unwinding past the guard still restores | `terminal::tests::guard::unwinding_still_restores` — updated to the six-entry list | Unit | replaced: `TerminalOps` double | `cargo test --lib unwinding_still_restores` |
+| The hook restores before the previous hook runs | `terminal::tests::hook::restore_then_delegates_last` — updated to lead with `disable_mouse` | Unit | replaced: double | `cargo test --lib restore_then` |
+| A panic on a worker thread restores nothing | existing test, asserted **unchanged** at `["previous_hook"]` — the check that capture gained no off-thread exception | Unit | replaced: double | `cargo test --lib worker_thread` |
+| A panic on the render thread still restores | `terminal::tests::hook::render_thread_restores` — updated to lead with `disable_mouse` | Unit | replaced: double | `cargo test --lib render_thread_restores` |
+| The refusal touches no terminal operation | `ui::tests::enter_if_terminal_*` — the `Ok` arm's list becomes three entries; the empty-list assertion is unchanged | Unit | replaced: double | `cargo test --lib enter_if_terminal` |
 | Teardown errors are swallowed rather than panicking in Drop | `terminal::tests::guard::teardown_errors_are_swallowed` | Unit | replaced: double | `cargo test --lib teardown_errors` |
 | A refused capture becomes a leading problem row, below the probe's own | `ui::tests::wiring::a_refused_capture_is_named_last` | Acceptance | replaced: terminal, events, backend, reader, collaborators | `cargo test --lib a_refused_capture` |
 | A successful capture adds no row | `ui::tests::wiring::a_successful_capture_adds_no_row` | Acceptance | replaced: as above | `cargo test --lib adds_no_row` |
