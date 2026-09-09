@@ -166,17 +166,12 @@ fn drive_live_tier(dashboard: &mut Dashboard, live: &mut Live<'_>) {
         live.launcher.request(request);
     }
     if dashboard.refresh.requested {
-        // `list-sections` group 2 note: the real scope is
-        // `dashboard.archived_scope()`, which does not exist until group 3
-        // gives `Dashboard` its section state and group 6 wires it in here
-        // (design.md -> Decision 13, tasks.md -> 6.3). Until then this
-        // passes `ArchivedScope::Full` unconditionally, which is exactly
-        // the archive-resolution behaviour this call site already had
-        // before `Refresher::request` gained a second parameter.
-        live.refresher.request(
-            crate::changes::Selection::All,
-            crate::changes::ArchivedScope::Full,
-        );
+        // `list-sections` group 6: the scope is `dashboard.archived_scope()` — `Full` when
+        // the archived section is open, `Names` when it is collapsed — so the startup
+        // request (and every `r`-triggered one) resolves exactly as much of the archive as
+        // the reader can currently see.
+        live.refresher
+            .request(crate::changes::Selection::All, dashboard.archived_scope());
         dashboard.refresh.requested = false;
     }
     match live.fs.drain() {
@@ -190,12 +185,12 @@ fn drive_live_tier(dashboard: &mut Dashboard, live: &mut Live<'_>) {
                 let invalidates_nothing =
                     matches!(&selection, crate::changes::Selection::Only(s) if s.is_empty());
                 if !invalidates_nothing {
-                    // `list-sections` group 2 note: see the interim scope
-                    // comment on the other `request` call site above —
-                    // `ArchivedScope::Full` stands in for
-                    // `dashboard.archived_scope()` until group 6.
+                    // `list-sections` group 6: a watch event landing while the archived
+                    // section is open must resolve that section too, or the next file
+                    // change would silently empty an archive the reader had just opened
+                    // (dashboard-loop's own rule for this call site).
                     live.refresher
-                        .request(selection, crate::changes::ArchivedScope::Full);
+                        .request(selection, dashboard.archived_scope());
                 }
             }
         }
