@@ -264,79 +264,143 @@ well, so a region's interior grows from sixteen rows to eighteen. That count is 
   the first thing dropped
 
 
-### Requirement: A region is a heading row above a gutter-padded interior
+### Requirement: A region is a heading row, a padding row, and a gutter-padded interior
 
-A region SHALL be drawn without a border. `ui::view::render_region` SHALL draw no
-`Block`, no box-drawing character, and no title; it SHALL draw exactly one **heading row**
-across the region's interior width, and nothing else.
+A region SHALL be drawn without a border. `ui::view::render_region` SHALL draw no `Block`,
+no box-drawing character, and no title. Every region SHALL be composed of exactly three
+parts, in this order down its area:
 
-A region's geometry SHALL be, for a region rectangle `area`:
+| Part | Rectangle | Drawn |
+|---|---|---|
+| heading row | `Rect::new(x + gl, area.y, iw, 1)` | the region's own heading |
+| padding row | `Rect::new(x + gl, area.y + 1, iw, 1)` | never — it is blank by construction |
+| interior | `Rect::new(x + gl, area.y + 2, iw, area.height - 2)` | the region's content |
 
-| Part | Rectangle |
-|---|---|
-| left gutter | column `area.x`, every row of `area` |
-| right gutter | column `area.x + area.width - 1`, every row of `area` |
-| heading row | `Rect::new(area.x + 1, area.y, area.width - 2, 1)` |
-| interior | `Rect::new(area.x + 1, area.y + 1, area.width - 2, area.height - 1)` |
+where `gl` and `gr` are the region's left and right **gutter** columns, `x` is `area.x`, and
+`iw` is `area.width - gl - gr`. Gutter columns are never drawn into by any region.
 
-`ui::layout::interior(area)` SHALL return that interior: the origin advanced by one column
-and one row and clamped to the rectangle's own right and bottom edges, the width reduced by
-two saturating to zero, and the height reduced by **one** saturating to zero. The clamp is
-not decoration — at a 1x1 or 0x0 rectangle it is the difference between `x: 0` and `x: 1`.
-Only the height rule changes from the border arithmetic this function used before: a region
-spends one row on its heading and none on a bottom border.
+`ui::layout::interior(area: Rect, gutters: Gutters) -> Rect` SHALL return that interior:
+the origin advanced by `gl` columns and **two** rows and clamped to the rectangle's own
+right and bottom edges, the width reduced by `gl + gr` saturating to zero, and the height
+reduced by two saturating to zero. The clamp is not decoration — at a 1x1 or 0x0 rectangle
+it is the difference between `x: 0` and `x: 1`.
 
-The gutters are why the mandated interior widths do not move. A bordered region's interior
-was its area less two border columns; a borderless region's interior is its area less two
-gutter columns, and the two are the same arithmetic. **38** and **58** for the list and
-**78** and **58** for the detail are therefore unchanged by this change, and every landed
-row-grammar, markdown, tasks, and detail test that names them stays true. What changes is
-the interiors' **height**: sixteen rows at a 20-row frame becomes **eighteen**, two gained —
-one from the frame's removed header row and one from the region's removed bottom border.
+```rust
+pub enum Gutters { Both, LeftOnly }
+```
 
-Nothing SHALL be drawn in a gutter column except the divider below. At `LayoutMode::Wide`
-`ui::view` SHALL draw a **vertical rule** — the character `│` — down the detail region's
-**left gutter** column for every row of the body, styled `palette::style(Role::RegionRule)`.
-That column is `40` at the mandated 120-column frame. At `LayoutMode::Narrow` no vertical
-rule SHALL be drawn at all, because there is only one region and nothing to separate it
-from. The rule belongs to neither region: it is drawn by `render_body`, which is the one
-place that knows both rectangles.
+`Gutters::Both` SHALL give `gl = 1, gr = 1` and `Gutters::LeftOnly` `gl = 1, gr = 0`. The
+list region and the narrow layout's single region take `Both`; the **wide** layout's detail
+region takes `LeftOnly`, for the arithmetic reason the divider requirement below states.
+There is no `RightOnly` and no `Neither`: no region in this layout wants one, and a variant
+nothing constructs is a variant nothing tests.
 
-#### Scenario: A region draws a heading row and no border at both widths
+The **padding row** is why one rule covers both regions. The list region wants a blank row
+between the repository's name and its first change; the detail region wants one between the
+change's header and its tab bar. They are the same row at the same offset, so they are one
+part of one shape rather than two special cases in two draw paths.
+
+The gutters are why the mandated interior **widths** do not move. A bordered region's
+interior was its area less two border columns; a borderless region's interior is its area
+less its gutter columns, and for `Gutters::Both` the two are the same arithmetic. **38** and
+**58** for the list and **78** and **58** for the detail are therefore unchanged by this
+change, and every landed row-grammar, markdown, tasks, and detail test that names them stays
+true.
+
+The interior's **height** grows by exactly one row at every frame height: two rows are freed
+(the frame's header row and the region's bottom border row) and one is spent on the padding
+row. At a 20-row frame a region's interior is **17 rows**, up from sixteen, and its first row
+is buffer row **2** — the very row a bordered region's interior began at. That is not a
+coincidence to be relied on loosely: it is stated so that a scenario elsewhere asserting
+"buffer row 2 is the interior's first row" is known to be still true rather than accidentally
+so.
+
+#### Scenario: A region draws a heading, a blank row, and no border at both widths
 
 - **WHEN** a `Dashboard` whose repository root is `/tmp/demo-repo`, holding three active
   changes, at `Route::List`, is rendered at 120x20 and at 60x20
 - **THEN** no box-drawing character other than `│` appears in either buffer — no `┌`, no
-  `┐`, no `└`, no `┘`, and no `─`
-- **AND** in the 60-column buffer row 0 columns 1 through 58 are the list region's heading
-  row and row 1 columns 1 through 58 are the first list row, so the interior begins one row
-  below the heading
-- **AND** in the 60-column buffer every cell of column 0 and of column 59 is a space in
-  every row of the body, so both gutters are empty
+  `┐`, no `└`, no `┘`, and no `─` outside the detail region's own rule row
+- **AND** in the 60-column buffer row 0 columns 1 through 58 are the region's heading row,
+  every cell of row 1 columns 1 through 58 is a space, and row 2 columns 1 through 58 is the
+  first list row
+- **AND** in the 60-column buffer every cell of column 0 and of column 59 is a space in every
+  row of the body, so both gutters are empty
+- **AND** in the 60-column buffer row 18 holds a drawn list row, so the interior's last row is
+  content rather than a border
 
-#### Scenario: `interior` reserves one row, not two
+#### Scenario: `interior` reserves two rows and the gutters its `Gutters` names
 
-- **WHEN** `layout::interior` is called with `Rect::new(0, 0, 60, 19)`, with
-  `Rect::new(40, 0, 80, 19)`, with `Rect::new(0, 0, 1, 1)`, and with `Rect::new(0, 0, 0, 0)`
-- **THEN** the results are `Rect::new(1, 1, 58, 18)`, `Rect::new(41, 1, 78, 18)`,
-  `Rect::new(0, 0, 0, 0)`, and `Rect::new(0, 0, 0, 0)`
-- **AND** the first two interiors are eighteen rows tall, two more than the sixteen the
-  bordered arithmetic gave at the same frame height, and their widths and `x` origins are
-  unchanged
+- **WHEN** `layout::interior` is called with `(Rect::new(0, 0, 60, 19), Gutters::Both)`,
+  `(Rect::new(0, 0, 40, 19), Gutters::Both)`, `(Rect::new(41, 0, 79, 19), Gutters::LeftOnly)`,
+  `(Rect::new(0, 0, 1, 1), Gutters::Both)`, and `(Rect::new(0, 0, 0, 0), Gutters::Both)`
+- **THEN** the results are `Rect::new(1, 2, 58, 17)`, `Rect::new(1, 2, 38, 17)`,
+  `Rect::new(42, 2, 78, 17)`, `Rect::new(0, 0, 0, 0)`, and `Rect::new(0, 0, 0, 0)`
+- **AND** the first three are seventeen rows tall, one more than the sixteen the bordered
+  arithmetic gave at the same frame height, and each begins at row 2 exactly as it did
+- **AND** the `LeftOnly` interior's last column is `119`, the frame's own last column, while
+  each `Both` interior leaves its area's last column untouched
 
-#### Scenario: The vertical rule occupies the divider column above the breakpoint only
+### Requirement: A one-column divider separates the two regions, with a blank column each side
+
+At `LayoutMode::Wide` `ui::view::render_body` SHALL draw a **vertical divider** — the
+character `│` — down one column for every row of the body, styled
+`palette::style(Role::RegionRule)`. The divider column belongs to **neither** region: it is
+drawn by `render_body`, which is the one place that knows both rectangles, and no region's
+area contains it.
+
+At `LayoutMode::Narrow` no divider SHALL be drawn at all, because there is only one region
+and nothing to divide it from.
+
+The wide layout's body SHALL therefore be split horizontally into **three** parts, not two —
+`Constraint::Length(40)` for the list, `Constraint::Length(1)` for the divider, and
+`Constraint::Min(0)` for the detail — so that at a 120-column frame the columns are:
+
+| Column(s) | What |
+|---|---|
+| `0` | the list region's left gutter |
+| `1`–`38` | the list region's interior — **38** columns |
+| `39` | the list region's right gutter |
+| `40` | the divider `│` |
+| `41` | the detail region's left gutter |
+| `42`–`119` | the detail region's interior — **78** columns |
+
+A divider with a blank column on **both** sides costs **five** chrome columns, and
+`38 + 78` leaves exactly **four** at a 120-column frame. One outer gutter therefore cannot
+be had, and it is the **trailing** one that goes: the detail region takes `Gutters::LeftOnly`
+and its interior runs to the frame's own last column. The leading gutter is kept because
+column 0 carries the list's selection marker on every row, where a flush edge would read as
+part of the grammar; the trailing edge is reached only by a right-aligned cell — the detail
+header's progress and schema cells, and a markdown line that happens to fill the width.
+
+Taking the fifth column from an **interior** instead was measured and rejected: the literal
+`78` appears 162 times under `src/ui/` and is hard-coded in three `scripts/gates/` scripts,
+so a 77-column detail interior would rewrite roughly 145 hand-computed test expectations for
+a column of whitespace.
+
+#### Scenario: The divider has a blank column on each side at 120 columns
+
+- **WHEN** a `Dashboard` with `route: Route::List`, a repository root of `/tmp/demo-repo`,
+  and one active change `alpha` is rendered at 120x20
+- **THEN** every cell of column 40 in rows 0 through 18 is `│` and reports `Modifier::DIM`
+  and no foreground
+- **AND** every cell of column 39 and of column 41 in rows 0 through 18 is a space, so the
+  divider is not flush against either region's content
+- **AND** every cell of column 0 in rows 0 through 18 is a space, so the leading gutter
+  survived
+- **AND** row 19 — the footer — holds no `│`, so the divider is confined to the body
+
+#### Scenario: The divider column is a width branch, not a constant
 
 - **WHEN** the same `Dashboard` is rendered at 120x20, at 100x20, at 99x20, and at 60x20
-- **THEN** in the 120-column buffer every cell of column 40 in rows 0 through 18 is `│`, and
-  no other column of any row holds a `│`
-- **AND** in the 100-column buffer every cell of column 40 in rows 0 through 18 is `│`, so
-  the divider column is fixed by the list column's `Length(40)` rather than by the frame
-  width
+- **THEN** in the 120-column and 100-column buffers every cell of column 40 in rows 0
+  through 18 is `│`, so the divider column is fixed by the list's `Length(40)` rather than by
+  the frame width
 - **AND** in the 99-column and 60-column buffers the character `│` appears in no cell at all
-- **AND** in the 120-column buffer row 19 — the footer — holds no `│`, so the rule is
-  confined to the body
+- **AND** in the 100-column buffer the detail region's interior is `Rect::new(42, 2, 58, 17)`,
+  so every column gained beyond 100 still goes to the detail side
 
-#### Scenario: A one- and two-column region degenerates without drawing over a gutter
+#### Scenario: A one-, two-, and three-column frame degenerates without drawing over a gutter
 
 - **WHEN** the same `Dashboard` is rendered at 1x20, at 2x20, and at 3x20
 - **THEN** none of the three panics
@@ -344,6 +408,7 @@ place that knows both rectangles.
   interior is zero columns wide, so there is nothing to draw into
 - **AND** in the 3x20 buffer the heading row and every list row occupy column 1 alone, and
   columns 0 and 2 are spaces in every row
+- **AND** none of the three holds a `│`, because all three are below the breakpoint
 
 ### Requirement: The list region's heading names the repository directory
 
@@ -440,7 +505,7 @@ already makes for every list row.
   `/tmp/not-a-repo/deep/here`, is rendered at 120x20 and at 60x20
 - **THEN** row 0 spells exactly `no repository` from column 1 in both
 - **AND** the list region's interior still holds the three rows `change-rows` specifies for
-  that state, beginning at row 1
+  that state, beginning at row 2 — row 1 is the region's padding row and is blank
 - **AND** the string `not-a-repo` appears only in those interior rows and never in row 0
 
 ### Requirement: A region's heading style and the rules' style are palette roles
@@ -487,9 +552,10 @@ requirement names it only so the two are not read as disagreeing.
 #### Scenario: No heading or rule cell carries a colour
 
 - **WHEN** the same dashboards are rendered at 120x20 and at 60x20 with `file_mode` `false`
-- **THEN** no cell of either heading row and no cell of the vertical rule reports a
-  foreground or a background, so the palette gave each a role and not a colour
-- **AND** every cell of the vertical rule reports `Modifier::DIM` set
+- **THEN** no cell of either heading row and no cell of the vertical divider at column 40
+  reports a foreground or a background, so the palette gave each a role and not a colour
+- **AND** every cell of the vertical divider and of the detail region's horizontal rule
+  reports `Modifier::DIM` set
 - **AND** with `file_mode` `true` the nine badge cells of the list heading row do report
   foreground `Color::Yellow`, so the absence of colour above is a property of the heading
   role rather than of the row
@@ -504,24 +570,28 @@ requirement names it only so the two are not read as disagreeing.
 
 ## MODIFIED Requirements
 
+## MODIFIED Requirements
+
 ### Requirement: The 100-column breakpoint decides one region or two
 
 `ui::layout::WIDE_MIN_WIDTH` SHALL be `100`. `ui::layout::mode(width: u16)` SHALL return
 `LayoutMode::Wide` when `width >= WIDE_MIN_WIDTH` and `LayoutMode::Narrow` otherwise, and
 SHALL be a total function over every `u16`.
 
-At `LayoutMode::Wide` the body SHALL be split horizontally into exactly two regions —
-`Constraint::Length(40)` for the change list on the left and `Constraint::Min(0)` for the
-artifact detail on the right — so that every column gained beyond 100 goes to the detail
-side. Both regions SHALL be drawn, each as a heading row above a gutter-padded interior and
-neither as a bordered block. Their headings are not fixed titles: the list region's heading
-names the repository directory and the detail region's heading is the selected change's own
-header. The two are separated by the vertical rule in the detail region's left gutter.
+At `LayoutMode::Wide` the body SHALL be split horizontally into exactly three parts —
+`Constraint::Length(40)` for the change list, `Constraint::Length(1)` for the divider, and
+`Constraint::Min(0)` for the artifact detail — so that every column gained beyond 100 goes to
+the detail side. Both regions SHALL be drawn, each as a heading row, a padding row, and a
+gutter-padded interior, and neither as a bordered block. The list region takes
+`Gutters::Both` and the detail region `Gutters::LeftOnly`. Their headings are not fixed
+titles: the list region's heading names the repository directory and the detail region's
+heading is the selected change's own header.
 
 At `LayoutMode::Narrow` the body SHALL hold exactly one region occupying the whole body
-width, drawn the same borderless way, and it SHALL be the list region when the dashboard's
-route is `Route::List` and the detail region when it is `Route::Detail`. The region that is
-not routed to SHALL NOT be drawn at all, and no vertical rule SHALL be drawn.
+width with `Gutters::Both`, drawn the same borderless way, and it SHALL be the list region
+when the dashboard's route is `Route::List` and the detail region when it is
+`Route::Detail`. The region that is not routed to SHALL NOT be drawn at all, and no divider
+SHALL be drawn.
 
 The literal titles `Changes` and `Detail` are gone with the borders that carried them. They
 named the two halves of a split the reader can already see, and at a 60-column pane each
@@ -537,10 +607,10 @@ breakpoint changes layout on its next frame with no extra state.
 - **WHEN** a `Dashboard` with `route: Route::List`, a repository root of `/tmp/demo-repo`,
   and one active change `alpha` is rendered at 120x20, and — as the contrasting control at
   the mandated narrow width — at 60x20
-- **THEN** in the 120-column buffer row 0 spells `demo-repo` from column 1 and `alpha` from
-  column 41, so both regions drew their heading rows
+- **THEN** in the 120-column buffer row 0 spells `demo-repo` from column 1 and `alpha`'s own
+  change header from column 42, so both regions drew their heading rows
 - **AND** in the 120-column buffer every cell of column 40 in rows 0 through 18 is `│`, and
-  columns 0, 39, and 119 are spaces in every one of those rows
+  columns 0, 39, and 41 are spaces in every one of those rows
 - **AND** the strings `Changes` and `Detail` appear in no cell of either buffer
 - **AND** the 60-column buffer holds no `│` at all, so the divider is a width branch rather
   than something drawn unconditionally
@@ -552,7 +622,7 @@ breakpoint changes layout on its next frame with no extra state.
 - **THEN** in the 60-column buffer row 0 spells `demo-repo` from column 1 and the change's
   own header appears in no row, because the detail region was not drawn
 - **AND** in the 60-column buffer no cell holds `│`
-- **AND** the 120-column buffer does hold the change's header at row 0 column 41, so the
+- **AND** the 120-column buffer does hold the change's header at row 0 column 42, so the
   absence at 60 columns is the breakpoint and not the detail heading being missing
 
 #### Scenario: At 60 columns the detail route replaces the list region
@@ -562,7 +632,7 @@ breakpoint changes layout on its next frame with no extra state.
 - **AND** the string `demo-repo` appears in no row of the buffer, because the list region —
   and with it the repository heading — is not drawn
 - **AND** rendering the same dashboard at 120x20 still shows **both** `demo-repo` at row 0
-  column 1 and the change's header at row 0 column 41, because the route selects emphasis
+  column 1 and the change's header at row 0 column 42, because the route selects emphasis
   rather than visibility above the breakpoint
 
 #### Scenario: The breakpoint is exact at 99, 100, and 101 columns
@@ -592,17 +662,17 @@ border that carried the same claim before `pane-chrome` removed the borders.
 
 Neither region's interior is left blank unconditionally any longer. The **list** region's
 interior is owned by `change-rows`, with `list-selection` owning which slice is drawn. The
-**detail** region's interior is owned by `artifact-tabs` (its second row, under a blank
-first row), the horizontal rule below it, and `artifact-content` and `detail-scroll` (the
-content area beneath that), divided by `layout::split_detail`. The detail region's **change
-header** is no longer part of its interior at all: `detail-header` draws it into the
-region's heading row, one row above.
+**detail** region's interior is owned by `artifact-tabs` (its first row), the horizontal rule
+below that, a padding row, and `artifact-content` and `detail-scroll` (the content area
+beneath), divided by `layout::split_detail`. The detail region's **change header** is no
+longer part of its interior at all: `detail-header` draws it into the region's heading row,
+two rows above.
 
 The detail interior is blank on a frame **exactly when `Dashboard::visible()` is empty** — no
 repository, no changes, or a `/` filter matching none — and its heading row is blank on
 exactly the same condition. That is the whole of the blank case: with a change selected, the
-region always carries a heading, a blank row, a tab bar, a rule, and at least one content
-line, because `ui::detail::content_lines` returns `No content yet` rather than nothing.
+region always carries a heading, a tab bar, a rule, and at least one content line, because
+`ui::detail::content_lines` returns `No content yet` rather than nothing.
 
 When the interior **is** blank, every cell of it is a space whose `Style` equals
 `ratatui::buffer::Cell::default().style()`. The comparison is against `Cell::default().style()`
@@ -610,13 +680,15 @@ and **not** against `Style::default()`: `ratatui-crossterm` re-enables the `unde
 feature through its own defaults, so an untouched cell's style is
 `fg(Reset).bg(Reset).underline_color(Reset)`, which equals neither `Style::default()` nor
 `Style::reset()`. Comparing against the constructible value is what catches a style being
-applied to a whole region where one row was meant.
+applied to a whole region where one row was meant. Every cell of a region's **padding row**
+SHALL satisfy the same comparison on every frame, blank interior or not: nothing is ever
+drawn there.
 
-Content SHALL NOT bleed into a gutter or across the divider: no cell of a region's left or
-right gutter column SHALL be overwritten by a list row, a heading, a detail header, a tab
-cell, a rule, a problem line, or a markdown line, at either mandated width. The one cell any
-of them may write in a gutter is the vertical rule, which `render_body` draws into the detail
-region's left gutter and which no region writes.
+Content SHALL NOT bleed into a gutter or across the divider: no cell of a region's gutter
+column, and no cell of the divider column, SHALL be overwritten by a list row, a heading, a
+detail header, a tab cell, a rule, a problem line, or a markdown line, at either mandated
+width. The wide layout's detail region has no right gutter, so its interior's last column is
+the frame's last column and writing there is correct rather than a bleed.
 
 #### Scenario: The routed region's border is bold and the other's is not
 
@@ -627,7 +699,7 @@ is now made by the heading row.
 - **WHEN** a `Dashboard` with `route: Route::List`, a repository root of `/tmp/demo-repo`,
   and one active change is rendered at 120x20
 - **THEN** the cell at column 1, row 0 reports `Modifier::BOLD` set
-- **AND** the cell at column 41, row 0 reports `Modifier::BOLD` **not** set and
+- **AND** the cell at column 42, row 0 reports `Modifier::BOLD` **not** set and
   `Modifier::DIM` set
 - **AND** with `route: Route::Detail` and the same size, the two assertions swap, so the
   test discriminates rather than asserting a constant
@@ -643,26 +715,27 @@ write there.
 
 - **WHEN** a `Dashboard` with `route: Route::List`, a repository root of `/tmp/demo-repo`,
   `changes::empty_set()`, and an empty `detail` is rendered at 60x20 and at 120x20
-- **THEN** in the 120-column buffer every cell in rows 1 through 18 and columns 41 through
-  118 is a space whose `Style` equals `Cell::default().style()` — the detail region's
+- **THEN** in the 120-column buffer every cell in rows 2 through 18 and columns 42 through
+  119 is a space whose `Style` equals `Cell::default().style()` — the detail region's
   interior is untouched because `visible()` is empty
-- **AND** in the 120-column buffer row 0 columns 41 through 118 are spaces too, because the
-  detail region's heading row is its change header and there is no change to name
-- **AND** in the 120-column buffer row 1, columns 1 through 38, begins `No changes yet`, so
-  the list interior is written by `change-rows` rather than left blank, one row below its
+- **AND** in the 120-column buffer rows 0 and 1 of columns 42 through 119 are spaces too,
+  because the detail region's heading row is its change header and there is no change to
+  name, and its padding row is never drawn
+- **AND** in the 120-column buffer row 2, columns 1 through 38, begins `No changes yet`, so
+  the list interior is written by `change-rows` rather than left blank, two rows below its
   heading
-- **AND** in the 60-column buffer row 1, columns 1 through 58, begins `No changes yet`, and
-  rows 2 through 18 of columns 1 through 58 are entirely spaces whose `Style` equals
-  `Cell::default().style()`, so exactly one message row was drawn into an eighteen-row
+- **AND** in the 60-column buffer row 2, columns 1 through 58, begins `No changes yet`, and
+  rows 3 through 18 of columns 1 through 58 are entirely spaces whose `Style` equals
+  `Cell::default().style()`, so exactly one message row was drawn into a seventeen-row
   interior
 - **AND** the same dashboard with **one** active change added is no longer blank in the
-  detail region at 120x20: row 0 columns 41 onward holds that change's header, so the
+  detail region at 120x20: row 0 columns 42 onward holds that change's header, so the
   blankness asserted above is a property of the empty visible list rather than a constant
 
 #### Scenario: Rows do not overwrite the borders at either width
 
 The scenario's name is kept verbatim because a delta's scenario headers are its merge key.
-What a row must not overwrite is now a gutter column and the divider drawn in one of them.
+What a row must not overwrite is now a gutter column and the divider between them.
 
 - **WHEN** a `Dashboard` holding thirty active changes with names long enough to be
   truncated, whose selected change carries twelve artifacts with 40-character ids, and whose
@@ -670,32 +743,38 @@ What a row must not overwrite is now a gutter column and the divider drawn in on
   120x20
 - **THEN** in the 60-column buffer every cell of column 0 and column 59 in rows 0 through 18
   is a space
-- **AND** in the 120-column buffer every cell of columns 0, 39, and 119 in rows 0 through 18
+- **AND** in the 120-column buffer every cell of columns 0, 39, and 41 in rows 0 through 18
   is a space, and every cell of column 40 in those rows is `│` — so a 38-column row neither
   ran into the divider nor into the detail region, and neither a 78-column heading, a
   78-column tab bar, a 78-column rule, nor a 78-column markdown line ran into the divider or
   past the frame
+- **AND** in the 120-column buffer column 119 does carry detail content, because the wide
+  detail region has no right gutter, and no cell of any buffer lies past the frame's last
+  column
 - **AND** the same holds at `Route::Detail` at 60x20, where the detail region is the only one
-  drawn and no `│` appears at all
+  drawn, no `│` appears at all, and column 59 is a space because the narrow region takes
+  `Gutters::Both`
 
 ### Requirement: The detail region's two mandated interior widths are 78 and 58
 
 The detail region's interior width SHALL be **78** at a 120-column frame — the wide layout's
-`Constraint::Min(0)` column, 80 columns, less two **gutter** columns — and **58** at a
+`Constraint::Min(0)` part, 79 columns, less its **one** left gutter column — and **58** at a
 60-column frame in the detail route, where the region is the whole 60-column body less two
-gutter columns. Both interiors SHALL be **18 rows** at a 20-row frame.
+gutter columns. Both interiors SHALL be **17 rows** at a 20-row frame.
 
-Only the height moves. `pane-chrome` replaced each region's two border columns with two
-gutter columns, which is the same arithmetic, so both mandated widths are unchanged and
-every landed expectation that names them stays true; it removed the frame's header row and
-the region's bottom border row, which is where the two extra interior rows come from.
+Only the height moves, and only by one. `pane-chrome` replaced the region's border columns
+with gutter columns, which for the narrow region is the same arithmetic and for the wide
+detail region is one gutter plus one column surrendered to the divider's right-hand blank —
+so both mandated widths are unchanged and every landed expectation that names them stays
+true. It removed the frame's header row and the region's bottom border row and spent one of
+the two on the region's padding row, which is where the one extra interior row comes from.
 
 These two widths remain frozen for `detail-view` and `tasks-tab` to inherit, exactly as
 `change-rows`' 38 and 58 are. Every test of `ui::markdown` SHALL name both, and a source
 check SHALL enforce that with a floor on the number of tests found, on the same terms and
 with the same stated limits as the check over `src/ui/list.rs`.
 
-Because the wide layout's detail column is `Min(0)`, 78 is the width at the mandated frame
+Because the wide layout's detail part is `Min(0)`, 78 is the width at the mandated frame
 size and not a constant of the layout: every column gained beyond 120 goes to the detail
 region. Nothing SHALL depend on 78 other than the expectations of tests rendered at 120.
 
@@ -703,10 +782,10 @@ region. Nothing SHALL depend on 78 other than the expectations of tests rendered
 
 - **WHEN** `layout::split_frame` and `layout::split_body` are applied to `Rect::new(0, 0,
   120, 20)` with `Route::Detail`, and the resulting detail rectangle is passed to
-  `layout::interior`
-- **THEN** the interior is `Rect::new(41, 1, 78, 18)`
-- **AND** the same applied to `Rect::new(0, 0, 60, 20)` with `Route::Detail` gives
-  `Rect::new(1, 1, 58, 18)`
+  `layout::interior` with `Gutters::LeftOnly`
+- **THEN** the interior is `Rect::new(42, 2, 78, 17)`
+- **AND** the same applied to `Rect::new(0, 0, 60, 20)` with `Route::Detail` and
+  `Gutters::Both` gives `Rect::new(1, 2, 58, 17)`
 - **AND** at `Rect::new(0, 0, 60, 20)` with `Route::List` there is no detail rectangle at
   all, so the narrow list route has no detail interior to be 58 columns wide
 
@@ -737,19 +816,21 @@ no filesystem, process, environment, network, or standard-I/O API — and total:
 | Variant | Meaning |
 |---|---|
 | `ListRow { interior: Rect, row: u16 }` | A row of the list region's interior. `interior` is that interior's own rectangle and `row` is the offset of the addressed row below its first interior row |
-| `List` | The list region, but not one of its interior rows — its gutters, its heading row, or the divider column beside it |
+| `List` | The list region, but not one of its interior rows — its gutters, its heading row, or its padding row |
 | `DetailTab { bar: Rect, column: u16 }` | The detail region's tab-bar row. `bar` is that row's own rectangle and `column` is the offset of the addressed column right of its first column |
-| `Detail` | The detail region, anywhere but the tab-bar row: its gutters, its heading row, the blank row above the tab bar, the rule below it, or its content area |
+| `Detail` | The detail region, anywhere but the tab-bar row: its gutter, its heading row, its padding row, the rule below the tab bar, the content padding row, or its content area — and the divider column beside it |
 | `Outside` | The frame's footer row, or a point outside the frame entirely |
 
 `Outside` no longer covers a frame header row, because there is no longer one. Every row of
 the frame but the last is now a body row and resolves to a region's zone whenever a region is
 drawn there.
 
-The divider column belongs to the region whose gutter it is — the detail region's left gutter
-at `LayoutMode::Wide` — so a click on the rule resolves to `Detail` and a wheel over it
-scrolls the detail region. It is one column and the reader who lands on it meant one of the
-two regions; giving it to the one it is drawn inside is the answer that needs no special case.
+The **divider column** is in neither region's area, so its zone is decided rather than
+derived: it SHALL resolve to `Detail`. It is one column, the reader who lands on it meant one
+of the two regions, and the detail is the region whose content scrolls under a wheel — so
+giving it to the detail makes a near-miss do something rather than nothing. The choice is
+arbitrary in the sense that `List` would also be defensible; it is written down here so it is
+one answer rather than an accident.
 
 `ListRow` and `DetailTab` SHALL carry the rectangle the zone was derived from rather than
 only an offset, so the caller that resolves the offset to a row or a tab uses the very
@@ -768,16 +849,17 @@ integers, which is what keeps it in the pure view set and testable with no event
 
 - **WHEN** `zone` is called at a 120x40 frame, at `Route::List` and again at
   `Route::Detail`, for a point on the frame's footer row, the list region's heading row, the
-  list region's left gutter, the list interior's first row, the list interior's last row, the
-  divider column 40, the detail region's heading row, the detail interior's blank first row,
-  the detail interior's tab-bar row, the rule row below it, the detail interior's first
-  content row, and column 200
-- **THEN** the results are `Outside`, `List`, `List`, `ListRow` with `row` 0, `ListRow`
-  with `row` equal to the interior's last index, `Detail`, `Detail`, `Detail`, `DetailTab`
-  with `column` 0, `Detail`, `Detail`, and `Outside`, at both routes
-- **AND** every `ListRow`'s `interior` equals `interior(split_body(body, route).0.unwrap())`
-  and every `DetailTab`'s `bar` equals `split_detail(interior(detail_area)).0`, computed
-  independently in the test
+  list region's padding row, the list region's left gutter, the list interior's first row,
+  the list interior's last row, the divider column 40, the detail region's heading row, the
+  detail interior's tab-bar row, the rule row below it, the content padding row, the detail
+  interior's first content row, and column 200
+- **THEN** the results are `Outside`, `List`, `List`, `List`, `ListRow` with `row` 0,
+  `ListRow` with `row` equal to the interior's last index, `Detail`, `Detail`, `DetailTab`
+  with `column` 0, `Detail`, `Detail`, `Detail`, and `Outside`, at both routes
+- **AND** every `ListRow`'s `interior` equals
+  `interior(split_body(body, route).0.unwrap(), Gutters::Both)` and every `DetailTab`'s `bar`
+  equals `split_detail(interior(detail_area, Gutters::LeftOnly)).0`, computed independently
+  in the test
 - **AND** row 0 of the frame resolves to a region rather than to `Outside`, because the
   frame has no header row for it to belong to
 
@@ -812,7 +894,7 @@ integers, which is what keeps it in the pure view set and testable with no event
   classified by `zone`
 - **THEN** every cell `zone` reports as `ListRow` holds a character from `list::rows`' own
   output for that row, and every cell it reports as `List` or `Detail` in a gutter column
-  holds either a space or the divider's `│`
+  holds a space, and the divider column holds `│`
 - **AND** no cell of the drawn buffer is classified as belonging to a region the draw path
   did not draw
 

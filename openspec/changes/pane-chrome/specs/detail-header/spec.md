@@ -6,7 +6,8 @@ The scenario headers below are kept verbatim because a delta's scenario headers 
 key; the row this requirement names is no longer an interior row.
 
 `ui::view::render` SHALL draw `header_row` into the detail region's **heading row** — the
-region's own first row, one row above its interior — starting at that row's first column.
+region's own first row, two rows above its interior, with the region's blank padding row
+between them — starting at that row's first column.
 `pane-chrome` removed the region's border and gave the row it occupied to the region's
 heading; the change header is what a detail region's heading names, exactly as the
 repository's directory name is what the list region's heading names.
@@ -35,9 +36,10 @@ narrow layout is the detail route only.
 - **WHEN** a `Dashboard` at `Route::Detail` holding active changes `add-token-refresh` (4 of
   9, schema `tdd`) and `fix-empty-basket` (7 of 7), with `selected: 0`, is rendered at 120x20
   and at 60x20
-- **THEN** in the 120-column buffer row 0, columns 41 through 118, is the 78-character
+- **THEN** in the 120-column buffer row 0, columns 42 through 119, is the 78-character
   `header_row("add-token-refresh", "tdd", 4 of 9, 78)`, beginning `add-token-refresh` and
-  ending `(tdd) [4/9]`
+  ending `(tdd) [4/9]` in the frame's own last column, the wide detail region having no
+  right gutter
 - **AND** in the 60-column buffer row 0, columns 1 through 58, is the 58-character
   `header_row(…, 58)`, beginning `add-token-refresh` and ending `(tdd) [4/9]`
 - **AND** every cell of the header row in both buffers reports `Modifier::BOLD` set, because
@@ -70,8 +72,9 @@ narrow layout is the detail route only.
 - **WHEN** a `Dashboard` with `changes::empty_set()` is rendered at 120x20 at `Route::List`,
   and a second `Dashboard` holding one change `alpha` whose `filter.query` is `zzz` — so
   `visible()` is empty — is rendered at 120x20 and at 60x20 at `Route::Detail`
-- **THEN** in every one of those buffers each cell of the detail region's heading row **and**
-  of its interior is a space whose `Style` equals `ratatui::buffer::Cell::default().style()`
+- **THEN** in every one of those buffers each cell of the detail region's heading row, its
+  padding row, **and** its interior is a space whose `Style` equals
+  `ratatui::buffer::Cell::default().style()`
 - **AND** rendering does not panic at either width
 
 ### Requirement: The detail header's cells are measured in display columns
@@ -89,15 +92,16 @@ this repository the band boundaries `width >= 13`, `7 <= width <= 12`, and `1 <=
 are unchanged. The **name field** is the cell that can carry a wide character, because a
 change directory name is arbitrary, and it is where the measure genuinely changes: a CJK
 change name previously consumed roughly twice the columns its budget allowed, pushing the
-schema and progress cells off the row and, at the wide layout, into the detail region's own
-right gutter.
+schema and progress cells off the row and, at the wide layout, past the frame's last column — which at the wide layout is the divider column beside it, the detail region
+having no right gutter of its own.
 
 Because the field is padded by `ui::list::pad_or_truncate_right`, which `change-rows`
 requires to return exactly `width` columns in both arms, the header row measures exactly
 `width` columns even when a wide cluster is dropped whole and the truncated name lands one
 column short. The tab bar `artifact-tabs` draws is unaffected: its cells are artifact ids,
 which the schema fixes. `pane-chrome` moves the tab bar from the row directly below this one
-to two rows below it, with a blank row between; nothing about this measure depends on which.
+to two rows below it, with the region's padding row between; nothing about this measure
+depends on which.
 
 `header_row` SHALL remain total: no panic at any width, for any name — including an empty
 one, one longer than the row, one holding wide characters, emoji, combining marks, or a
@@ -122,12 +126,12 @@ what the header must not cross is now the region's right gutter column.
 - **WHEN** a `Dashboard` at `Route::Detail` whose selected change is named
   `日本語の変更名前です`, whose schema is `tdd`, and whose `progress` is
   `Progress { completed: 4, total: 9 }` is rendered at 120x20 and at 60x20
-- **THEN** in the 120-column buffer the detail region's heading row spans columns 41
-  through 118 and ends with `[4/9]`, and column 119 is a space
+- **THEN** in the 120-column buffer the detail region's heading row spans columns 42
+  through 119 and ends with `[4/9]` in the frame's last column
 - **AND** in the 60-column buffer that row spans columns 1 through 58 and column 59 is a
-  space
-- **AND** in the 120-column buffer column 39 is a space and column 40 holds the divider `│`,
-  unchanged from the same render with an ASCII name
+  space, the narrow region taking `Gutters::Both`
+- **AND** in the 120-column buffer columns 39 and 41 are spaces and column 40 holds the
+  divider `│`, unchanged from the same render with an ASCII name
 
 #### Scenario: The header is total over adversarial names at every width
 
@@ -165,12 +169,12 @@ competing with the chips would blunt exactly the distinction the chips exist to 
 - **WHEN** a `Dashboard` at `Route::Detail` holding active changes `add-token-refresh` (4 of
   9, schema `tdd`) and `fix-empty-basket` (7 of 7), with `selected: 0`, is rendered at 120x20
   and at 60x20
-- **THEN** in the 120-column buffer row 0, columns 41 through 118, is the 78-character
+- **THEN** in the 120-column buffer row 0, columns 42 through 119, is the 78-character
   `header_row("add-token-refresh", "tdd", 4 of 9, 78)`, and in the 60-column buffer row 0,
   columns 1 through 58, is the 58-character form
 - **AND** every cell of the header row in both buffers reports `Modifier::BOLD` set and no
   foreground and no background
-- **AND** the tab-bar row two rows below it does carry a background, so the two rows are
-  distinguishable and the header was not left unstyled by accident
+- **AND** the tab-bar row two rows below it — buffer row 2 — does carry a background, so the
+  two rows are distinguishable and the header was not left unstyled by accident
 - **AND** rendering the 120-column case at `Route::List` reports `Modifier::DIM` set and
   still no foreground and no background, so the role swap changes the modifier alone

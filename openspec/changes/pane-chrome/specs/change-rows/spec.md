@@ -10,18 +10,19 @@ through `Dashboard::attribution()`, which `agent-attribution` requires to be pur
 per call; that adds no I/O and no clock to this function.
 
 `ui::view::render` SHALL draw the rows it returns into the **interior** of the list
-region — the area below its heading row and inside its two gutter columns — starting at the
-interior's first row and first column, one `Row` per terminal row, and SHALL draw nothing
-outside that interior. The two interiors the mandated frame widths produce are fixed by
-`responsive-layout` and are **38 columns by 18 rows** at a 120x20 frame (the wide layout's
-`Constraint::Length(40)` list column, less two gutter columns) and **58 columns by 18
-rows** at a 60x20 frame.
+region — the area below its heading row and its padding row and inside its two gutter
+columns — starting at the interior's first row and first column, one `Row` per terminal row,
+and SHALL draw nothing outside that interior. The two interiors the mandated frame widths
+produce are fixed by `responsive-layout` and are **38 columns by 17 rows** at a 120x20 frame
+(the wide layout's `Constraint::Length(40)` list part, less two gutter columns) and
+**58 columns by 17 rows** at a 60x20 frame.
 
-The widths are unchanged by `pane-chrome`: it replaced each region's two border columns with
-two gutter columns, which is the same arithmetic. The **heights** grew by two — one row from
-the frame's removed header row and one from the region's removed bottom border — and the
-region's first row is now its heading rather than a border, so the interior begins at the
-region's **second** row instead of its second-from-the-top border row.
+`pane-chrome` changes neither width and moves neither origin: it replaced the region's two
+border columns with two gutter columns, which is the same arithmetic, and it spent one of the
+two rows it freed — the frame's header row and the region's bottom border row — on the
+region's own padding row. The interior therefore still begins at buffer row **2** at both
+mandated frames, and gained exactly one row at the bottom. Every row index in this
+capability's scenarios is unchanged except the last.
 
 Rows SHALL be emitted in this order and no other:
 
@@ -182,9 +183,9 @@ row — including a launch problem, the `No changes yet`, `No active changes`,
 any width and whatever `badges` holds.
 
 **Row numbering in this capability's scenarios** is the rendered **buffer** row, 0-based, so
-row 0 is the region's heading row and row 1 is the interior's first row at the mandated
-frames. `pane-chrome` moved every index in this capability down by one and grew the
-interior's last index from 17 to 18; the convention itself is unchanged. Every scenario below that asserts a row index uses that one convention, and every
+row 0 is the region's heading row, row 1 is its padding row, and row 2 is the interior's
+first row at the mandated frames. `pane-chrome` moved the interior's **last** index from 17
+to 18 and moved nothing else; the convention and every other index below are unchanged. Every scenario below that asserts a row index uses that one convention, and every
 scenario that asserts a selection marker states `selected` in its WHEN, because the marker
 now follows a cursor that can rest on a section header.
 
@@ -196,17 +197,17 @@ now follows a cursor that can rest on a section header.
   either kind, an empty filter query, `selected` **1** — the first change, since target 0 is
   now the active section header — and **no agents**, is rendered into a `TestBackend` at
   120x20 and again at 60x20
-- **THEN** in both buffers row 1 is the active section header, exactly `  ▾ active (3)`
+- **THEN** in both buffers row 2 is the active section header, exactly `  ▾ active (3)`
   padded to the interior width
-- **AND** in the 120-column buffer the 38 cells of row 2, columns 1 through 38, spell
-  exactly `> add-token-refresh              [4/9]`; row 3 spells
-  `  fix-empty-basket               [7/7]`; and row 4 spells
+- **AND** in the 120-column buffer the 38 cells of row 3, columns 1 through 38, spell
+  exactly `> add-token-refresh              [4/9]`; row 4 spells
+  `  fix-empty-basket               [7/7]`; and row 5 spells
   `  migrate-ai-sdk-v7                [-]`
-- **AND** in the 60-column buffer the 58 cells of row 2, columns 1 through 58, spell
-  exactly `> add-token-refresh                                  [4/9]`; row 3 spells
-  `  fix-empty-basket                                   [7/7]`; and row 4 spells
+- **AND** in the 60-column buffer the 58 cells of row 3, columns 1 through 58, spell
+  exactly `> add-token-refresh                                  [4/9]`; row 4 spells
+  `  fix-empty-basket                                   [7/7]`; and row 5 spells
   `  migrate-ai-sdk-v7                                    [-]`
-- **AND** in both buffers every cell of rows 5 through 18 is a space, so exactly four rows
+- **AND** in both buffers every cell of rows 6 through 18 is a space, so exactly four rows
   were drawn and nothing was repeated into the remaining height
 - **AND** the three change rows are byte-identical to the ones the same dashboard produced
   before `list-sections` existed at `selected` 0, and byte-identical to the ones it produced
@@ -214,7 +215,7 @@ now follows a cursor that can rest on a section header.
   an empty `badges` costs no column, and the section header is the one row this change adds
 - **AND** the same dashboard at `selected` **0** puts the `>` marker on the header row and a
   space in column 0 of all three change rows, so the marker follows the cursor onto a section
-- **AND** the same dashboard with the active section **collapsed** renders row 1 as exactly
+- **AND** the same dashboard with the active section **collapsed** renders row 2 as exactly
   `  ▸ active (3)` padded to the interior width, with no change name anywhere in either
   buffer, so the header's count is the tier's size and not the number of rows drawn
 
@@ -225,15 +226,15 @@ now follows a cursor that can rest on a section header.
   agent named `fix-empty-basket`, and an in-scope agent named `migrate-ai-sdk-v7` whose status
   is `AgentStatus::Unknown` — what `agent-list` decodes an unrecognised or absent
   `agent_status` string to
-- **THEN** in the 120-column buffer the 38 cells of row 2 spell exactly
-  `> add-token-refresh            w [4/9]`; row 3 spells
-  `  fix-empty-basket             b [7/7]`; and row 4 spells
+- **THEN** in the 120-column buffer the 38 cells of row 3 spell exactly
+  `> add-token-refresh            w [4/9]`; row 4 spells
+  `  fix-empty-basket             b [7/7]`; and row 5 spells
   `  migrate-ai-sdk-v7              ? [-]`
 - **AND** in the 60-column buffer each of the three rows is exactly 58 characters, the
   progress cell still ends in the interior's last column, and the badge sits two columns to
   the left of the progress cell's first column: interior column **51** (0-based, the 52nd cell
-  of the interior) holds `w` in row 2 and `b` in row 3, whose progress cells are five columns
-  wide, and interior column **53** holds `?` in row 4, whose `[-]` cell is three — the badge
+  of the interior) holds `w` in row 3 and `b` in row 4, whose progress cells are five columns
+  wide, and interior column **53** holds `?` in row 5, whose `[-]` cell is three — the badge
   tracks the progress cell rather than occupying a fixed column, exactly as the name field
   already does
 - **AND** in each of those three rows the column on either side of the badge is a space
@@ -307,10 +308,10 @@ now follows a cursor that can rest on a section header.
 - **WHEN** a `Dashboard` whose only active change is
   `a-very-long-change-name-that-will-not-fit-here` — 46 characters — at 2 of 5 tasks is
   rendered at 120x20 and at 60x20, with no agents
-- **THEN** the 120-column buffer's row 2, columns 1 through 38, spells exactly
+- **THEN** the 120-column buffer's row 3, columns 1 through 38, spells exactly
   `  a-very-long-change-name-that-… [2/5]`, so the name was cut to the field width less
   one and an `…` appended, and the progress cell was **not** truncated
-- **AND** the 60-column buffer's row 2, columns 1 through 58, spells exactly
+- **AND** the 60-column buffer's row 3, columns 1 through 58, spells exactly
   `  a-very-long-change-name-that-will-not-fit-here     [2/5]`, with no `…` anywhere in
   that row, so the truncation at 38 columns is a width branch rather than unconditional
 - **AND** rendering the same dashboard again with an in-scope `Working` agent carrying that
@@ -404,10 +405,10 @@ whenever `find_repo` reports `NotFound`, so a `Dashboard` with `repo: None` and 
 non-empty `changes.problems` is not a value the composition root can build. Stating the
 precedence anyway keeps `rows` total over every `Dashboard` value a test can construct.
 
-`ui::view::render` SHALL still draw the list region — its heading row and its interior — in
-every one of these states. No state SHALL replace the frame with an error screen. The region
-carries no border as of `pane-chrome`, so what a reader sees framing an empty state is the
-repository's own name on the heading row above it.
+`ui::view::render` SHALL still draw the list region — its heading row, its padding row, and
+its interior — in every one of these states. No state SHALL replace the frame with an error
+screen. The region carries no border as of `pane-chrome`, so what a reader sees framing an
+empty state is the repository's own name on the heading row two rows above it.
 
 #### Scenario: No repository names the directory searched, at both widths
 
@@ -415,15 +416,15 @@ repository's own name on the heading row above it.
   `/home/dev/workspaces/openspec-demos/a-rather-long-repository-name-here` — seventy
   characters — and whose `changes` is `changes::empty_set()`, is rendered at 120x20 and at
   60x20
-- **THEN** the 120-column buffer's interior rows 1, 2, and 3 at columns 1 through 38 begin
+- **THEN** the 120-column buffer's interior rows 2, 3, and 4 at columns 1 through 38 begin
   `No OpenSpec repository found`, `searched from:`, and
   `…os/a-rather-long-repository-name-here` respectively
-- **AND** the 60-column buffer's interior rows 1, 2, and 3 at columns 1 through 58 begin
+- **AND** the 60-column buffer's interior rows 2, 3, and 4 at columns 1 through 58 begin
   `No OpenSpec repository found`, `searched from:`, and
   `…kspaces/openspec-demos/a-rather-long-repository-name-here`
 - **AND** in both buffers row 0 spells `no repository` from the region's first interior
-  column, so the empty state renders below the region's own heading rather than replacing
-  the frame
+  column and row 1 is entirely spaces, so the empty state renders below the region's own
+  heading and padding rows rather than replacing the frame
 
 #### Scenario: A repository with no changes at all
 
@@ -471,11 +472,11 @@ repository's own name on the heading row above it.
 - **WHEN** a `Dashboard` whose `changes.problems` holds the single entry
   `openspec/changes: Permission denied (os error 13)` and whose `changes.active` holds
   `fix-empty-basket` at 7 of 7 is rendered at 120x20 and at 60x20
-- **THEN** in the 120-column buffer interior row 1 at columns 1 through 38 spells exactly
+- **THEN** in the 120-column buffer interior row 2 at columns 1 through 38 spells exactly
   `! openspec/changes: Permission denied…` — the two-character `! ` prefix, then the
-  problem text's first thirty-five characters, then `…` — and interior row 2 is the
+  problem text's first thirty-five characters, then `…` — and interior row 3 is the
   `fix-empty-basket` row
-- **AND** in the 60-column buffer interior row 1 at columns 1 through 58 spells
+- **AND** in the 60-column buffer interior row 2 at columns 1 through 58 spells
   `! openspec/changes: Permission denied (os error 13)` followed by spaces, with no `…`, so
   the truncation at 38 columns is a width branch
 - **AND** in both buffers the region is still the list region — its heading row above its
@@ -484,8 +485,9 @@ repository's own name on the heading row above it.
 ### Requirement: Rows are confined to the list region
 
 `ui::view::render` SHALL write no cell outside the list region's interior when
-drawing rows — its heading row, its two gutter columns, and the divider column beside it
-included. At `LayoutMode::Wide` the detail region's interior SHALL remain blank —
+drawing rows — its heading row, its padding row, its two gutter columns, and the divider
+column beside it included. At `LayoutMode::Wide` the detail region's interior SHALL remain
+blank —
 every cell a space whose `Style` equals `ratatui::buffer::Cell::default().style()` — and at
 `LayoutMode::Narrow` with `route: Route::Detail` no row SHALL be drawn at all, because the
 list region is not drawn at that width and route.
@@ -496,7 +498,7 @@ not drawn, and `list-selection` governs which slice is shown.
 #### Scenario: The detail region stays blank while the list fills
 
 - **WHEN** the three-active-change dashboard is rendered at 120x20
-- **THEN** every cell in rows 1 through 18 and columns 41 through 118 is a space whose
+- **THEN** every cell in rows 2 through 18 and columns 42 through 119 is a space whose
   `Style` equals `Cell::default().style()`
 - **AND** the same dashboard rendered at 60x20 draws its rows in columns 1 through 58 and
   every cell of column 0 and column 59 in rows 0 through 18 is a space
@@ -514,10 +516,10 @@ not drawn, and `list-selection` governs which slice is shown.
 
 - **WHEN** a `Dashboard` holding thirty active changes named `change-00` through
   `change-29`, each at 1 of 2 tasks, with `selected` 0, is rendered at 120x20 and at 60x20
-- **THEN** in both buffers exactly eighteen interior rows are drawn — rows 1 through 18 —
-  and rows 0 and 19 hold no change name
-- **AND** in both buffers the first interior row is the `change-00` row and the eighteenth
-  is the `change-17` row, so the region shows the first eighteen and stops
+- **THEN** in both buffers exactly seventeen interior rows are drawn — rows 2 through 18 —
+  and rows 0, 1, and 19 hold no change name
+- **AND** in both buffers the first interior row is the `change-00` row and the seventeenth
+  is the `change-16` row, so the region shows the first seventeen and stops
 
 ### Requirement: Every cell of the row grammar is measured in display columns
 
@@ -573,16 +575,16 @@ zero-width-joiner sequence.
   `changes.active` is the single change `日本語の変更名前です` — ten characters, twenty
   display columns — at 4 of 9 tasks, with no archived changes, no problems, an empty query,
   `selected` 0 and no agents, is rendered at 120x20 and at 60x20
-- **THEN** in the 120-column buffer interior row 1 measures exactly 38 columns, spells the
+- **THEN** in the 120-column buffer interior row 2 measures exactly 38 columns, spells the
   ten-character name from interior column 2, and ends with `[4/9]` in the interior's last
   five columns
 - **AND** in the 120-column buffer the list region's right gutter at column 39, the divider
   `│` at column 40, and every cell of the detail region's heading row are
   exactly what the same dashboard renders with the ASCII name `add-token-refresh` — the
   overwrite the audit measured is gone
-- **AND** in the 60-column buffer interior row 1 measures exactly 58 columns and its `[4/9]`
-  cell ends in the interior's last column, with the frame's right gutter column 59 still a
-  space
+- **AND** in the 60-column buffer interior row 2 measures exactly 58 columns and its `[4/9]`
+  cell ends in the interior's last column, with the frame's right gutter at column 59 still
+  a space
 
 #### Scenario: An emoji change name at 58 columns does not overwrite the border
 
