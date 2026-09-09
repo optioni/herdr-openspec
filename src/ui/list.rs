@@ -1507,9 +1507,9 @@ mod tests {
     /// the archived header at `rows()[1]` — an empty active section emits that
     /// message row whenever the archived section's count is not zero, exactly the
     /// shape here (`planning-review.md` I2 repaired the scenario, which had said
-    /// `rows()[1]`). This test still locates the change row by its `RowKind` rather
-    /// than by a hardcoded index, because that stays correct at every width in the
-    /// list, including the widths where the row degrades to the empty string.
+    /// `rows()[1]`). This test asserts that order at every width and then reads
+    /// `rows()[2]`, so it is bound to the scenario's own index rather than to
+    /// whichever row happens to be the first `RowKind::Item`.
     #[test]
     fn an_archived_row_drops_the_progress_cell_then_the_date_as_the_width_falls() {
         let mut d = dashboard_with(
@@ -1520,11 +1520,15 @@ mod tests {
         );
         d.agents.agents = vec![agent_at("add-auth", AgentStatus::Blocked)];
         let change_row = |width: u16| -> String {
-            rows(&d, width)
-                .into_iter()
-                .find(|r| matches!(r.kind, RowKind::Item { .. }))
-                .expect("an archived change row")
-                .text
+            let rows = rows(&d, width);
+            // The scenario's own index, and its own row order: an active section whose
+            // count is zero puts `No active changes` at 0 and the archived header at 1.
+            assert!(
+                matches!(rows[2].kind, RowKind::Item { .. }),
+                "width {width}: the change row is rows()[2]: {:?}",
+                rows.iter().map(|r| &r.kind).collect::<Vec<_>>()
+            );
+            rows[2].text.clone()
         };
         let expected = [
             (22, "> 2026-08-14 … b [7/7]"),

@@ -178,6 +178,22 @@ all three SUGGESTIONs are taken.
 | S2 | SUGGESTION | Group 1 kept two `changes::` tests as scratch-tree tests where `design.md`'s Test Strategy table specifies hand-built `ChangeSet` unit tests. | Accepted deliberately: the scratch-tree form covers `from_files`' real enumeration, which a hand-built set cannot, and the reviewer found no coverage lost. Recorded here rather than amending the table. |
 | S3 | SUGGESTION | `change-enumeration`'s REMOVED-requirement Reason still read "twenty-two / five / seventeen", the numbers corrected to 28 / five / 23 everywhere else. | Restated as twenty-eight / five / twenty-three. |
 
+### Concentration points: all five clean
+
+The reviewer answered each with the command it ran, not an assurance.
+
+| Point | Verdict | How it was checked |
+|---|---|---|
+| The read recorder distinguishes the two scopes | **Yes**, verified in both directions | Deleting the recorder call in `schema::read_file` makes the `Full` positive control fail with `must open at least one .openspec.yaml per archived change, got 0` |
+| The 3.5 re-index weakened no assertion | **No weakening** | Every removed `assert` hunk in `app.rs`/`list.rs`/`view.rs`/`driver.rs` has a shifted replacement with a stated reason; `rows.len()` went 3→4 rather than being dropped; no test computes its expectation from `targets()` |
+| No write to `selected` uses a `visible()` index | **None** | The six production writes — `:330`, `:344`, `:473`, `:748`, `:839`, `:841` — are all in the `targets()` space |
+| `archived_total` and `archived.len()` cannot disagree | **Cannot** | All four production `ChangeSet` constructions read; `adopt` replaces the set wholesale and derives neither field |
+| No new width arithmetic bypasses `layout::columns` | **None** | `section_row_text` is the only new grammar site and reaches width only through `truncate_columns`/`pad_or_truncate_right`; the degradation test asserts `columns(&header) == width` at seven widths |
+
+`changes::fixture::set`'s narrowing blocks nothing: `archived_total` is `pub`, so the
+unresolved-archive tests assign it after construction and `changes::tests` writes the literal
+directly. No builder was needed and none was added.
+
 **The pattern C1 and C2 form is the durable lesson.** A task was marked complete, and its own
 report quoted replacement lines that were not in the tree, because the test written to prove
 the behaviour asserted on a value that a later step in the same function overwrites. Neither
