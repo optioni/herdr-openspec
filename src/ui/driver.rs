@@ -1558,6 +1558,75 @@ mod tests {
         );
     }
 
+    /// `dashboard-loop`: **both** `request` call sites — the `refresh.requested`
+    /// one and the watch-invalidate one — carry `dashboard.archived_scope()`,
+    /// not a constant. Driven twice over the same script, once with the
+    /// archived section collapsed and once with it open, so a constant of
+    /// either value fails one leg: the two legs disagree on every recorded
+    /// scope, which is the property a constant cannot have.
+    #[test]
+    fn both_request_call_sites_carry_the_dashboards_archived_scope() {
+        for (collapsed, expected) in [
+            (true, crate::changes::ArchivedScope::Names),
+            (false, crate::changes::ArchivedScope::Full),
+        ] {
+            let backend = TestBackend::new(60, 20);
+            let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+            let mut dashboard = dashboard();
+            dashboard.repo = Some(std::path::PathBuf::from("/r"));
+            dashboard.refresh.requested = true;
+            dashboard.sections = crate::ui::app::Sections {
+                collapsed: if collapsed {
+                    let mut set = std::collections::BTreeSet::new();
+                    set.insert(crate::ui::app::SectionKey::Archived);
+                    set
+                } else {
+                    std::collections::BTreeSet::new()
+                },
+            };
+            let mut events = Script::new(vec![
+                Ok(None),
+                Ok(None),
+                Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
+            ]);
+            let mut fs = ScriptedFs::new(
+                vec![Ok(Some(vec![std::path::PathBuf::from(
+                    "/r/openspec/changes/alpha/tasks.md",
+                )]))],
+                Vec::new(),
+            );
+            let mut refresher = RecordingRefresher::new(Vec::new());
+            let mut agents = crate::agents::none();
+            let mut launcher = crate::launch::none();
+            let mut live = crate::ui::driver::Live {
+                fs: &mut fs,
+                refresher: &mut refresher,
+                agents: &mut *agents,
+                launcher: &mut *launcher,
+            };
+            run_loop(
+                &mut terminal,
+                &mut dashboard,
+                &mut events,
+                &mut live,
+                &|_: &std::path::Path| Ok(String::new()),
+                Duration::from_millis(1),
+            )
+            .expect("loop ends");
+
+            assert_eq!(
+                refresher.requests().len(),
+                2,
+                "collapsed {collapsed}: both call sites must have fired"
+            );
+            assert_eq!(
+                refresher.scopes(),
+                vec![expected, expected],
+                "collapsed {collapsed}: a constant scope at either call site fails here"
+            );
+        }
+    }
+
     #[test]
     fn a_watch_error_is_recorded_once() {
         let backend = TestBackend::new(60, 20);

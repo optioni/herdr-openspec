@@ -5,9 +5,9 @@
 **Reason**: The cap was standing in for a missing interaction. The list was one flat run with
 no fold, so truncating the archive was the only lever available for keeping it readable;
 `list-sections` gives the archived tier a collapsible section, which is the lever the cap was
-approximating. With a fold present, a cap that silently drops entries — twenty-two archived
-changes on disk, five in the pane, seventeen with no row, badge, or count anywhere admitting
-it — is a defect rather than a setting.
+approximating. With a fold present, a cap that silently drops entries — twenty-eight archived
+changes on disk, five in the pane, twenty-three with no row, badge, or count anywhere
+admitting it — is a defect rather than a setting.
 
 **Migration**: None is required of a reader or of a `config.toml`. `archived_count` is still
 parsed, still defaults to `5`, and still reports a malformed value on `Config::problems`

@@ -111,9 +111,9 @@ are whole-change gates by definition and cannot precede the work they gate.
 ## 8. Change Review
 <!-- kind: operational -->
 
-- [ ] 8.1 CHECK: Dispatch an independent `outside-in-tdd-reviewer` against `proposal.md`, all eight spec deltas, `design.md`, `tasks.md`, and the diff — not this session's reasoning. Concentration points: whether the read recorder actually distinguishes the two scopes or was quietly reduced to a value assertion; whether the `selected` re-index in 3.5 weakened an assertion it was only supposed to move; whether any write to `selected` still uses a `visible()` index; whether `archived_total` and `archived.len()` can disagree on any path through `merge` or `adopt`; and whether any new width arithmetic bypassed `layout::columns`.
-- [ ] 8.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a one-line reason, note SUGGESTIONs, re-run the affected tests, and `git add` any note file the review produces before the next gate run.
-- [ ] 8.3 VERIFY: Confirm no blocking or unowned finding remains.
+- [x] 8.1 CHECK: Dispatch an independent `outside-in-tdd-reviewer` against `proposal.md`, all eight spec deltas, `design.md`, `tasks.md`, and the diff — not this session's reasoning. Concentration points: whether the read recorder actually distinguishes the two scopes or was quietly reduced to a value assertion; whether the `selected` re-index in 3.5 weakened an assertion it was only supposed to move; whether any write to `selected` still uses a `visible()` index; whether `archived_total` and `archived.len()` can disagree on any path through `merge` or `adopt`; and whether any new width arithmetic bypassed `layout::columns`.
+- [x] 8.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a one-line reason, note SUGGESTIONs, re-run the affected tests, and `git add` any note file the review produces before the next gate run.
+- [x] 8.3 VERIFY: Confirm no blocking or unowned finding remains.
 
 ## 9. Documentation
 <!-- kind: operational -->

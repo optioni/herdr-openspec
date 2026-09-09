@@ -1502,13 +1502,14 @@ mod tests {
 
     /// `change-rows` -> "An archived row drops the progress cell, then the date, as
     /// the width falls": one archived change, no active changes, the archived
-    /// section open, `selected` 1 so the cursor is on the change. The spec's own
-    /// `rows()[1]` claim assumes no `No active changes` row precedes the header —
-    /// which `change-rows`' empty-state requirement says **does** apply whenever the
-    /// active section's count is zero and the archived section's is not, exactly the
-    /// shape here — so this test locates the change row by its `RowKind` rather than
-    /// by a hardcoded index, sidestepping the disagreement; see this group's own
-    /// report.
+    /// section open, `selected` 1 so the cursor is on the change. The scenario now
+    /// names the change row `rows()[2]`, with `No active changes` at `rows()[0]` and
+    /// the archived header at `rows()[1]` — an empty active section emits that
+    /// message row whenever the archived section's count is not zero, exactly the
+    /// shape here (`planning-review.md` I2 repaired the scenario, which had said
+    /// `rows()[1]`). This test still locates the change row by its `RowKind` rather
+    /// than by a hardcoded index, because that stays correct at every width in the
+    /// list, including the widths where the row degrades to the empty string.
     #[test]
     fn an_archived_row_drops_the_progress_cell_then_the_date_as_the_width_falls() {
         let mut d = dashboard_with(

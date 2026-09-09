@@ -259,21 +259,31 @@ pub fn run_wired<B: Backend, E: EventSource>(
     // `load` rather than after it. `load` still re-derives `repo` itself from `startup.cwd`;
     // that second walk is the same cheap kind and keeps `load`'s own signature — `start: &Path`,
     // not a pre-resolved root — unchanged.
-    // INTERIM (pre-6.3) shim for a RED check: load unconditionally resolves Full, same as
-    // the pre-list-sections behaviour, ignoring the probe result entirely.
-    let mut dashboard = load(
-        startup.cwd,
-        startup.config,
-        startup.state_dir,
-        crate::changes::ArchivedScope::Full,
-    );
+    let probed_repo = match crate::resolve::find_repo(startup.cwd) {
+        crate::resolve::RepoSearch::Found { root } => Some(root),
+        crate::resolve::RepoSearch::NotFound { .. } => None,
+    };
     let mut collaborators = start_collaborators(
-        dashboard.repo.as_deref(),
+        probed_repo.as_deref(),
         startup.config,
         startup.herdr,
         startup.state_dir,
         startup.env,
         startup.npm_hook,
+    );
+    // File mode has no worker to resolve the archive later, so the archive it never opens is
+    // the archive it never sees: `load` resolves it up front. With a binary, the worker
+    // answers whatever `archived_scope()` asks for, so startup pays for names and a count
+    // only — `proposal.md`'s "a collapsed section costs no work, not just no rows".
+    let mut dashboard = load(
+        startup.cwd,
+        startup.config,
+        startup.state_dir,
+        if collaborators.file_mode {
+            crate::changes::ArchivedScope::Full
+        } else {
+            crate::changes::ArchivedScope::Names
+        },
     );
     // `seam-resilience`: the standing startup conditions — configuration fallbacks, the
     // binary probe's own reasons, then the watcher's failure to start, in that causal order —
@@ -4368,12 +4378,29 @@ esac
                 ..Config::default()
             };
             let predicate = || log_lines(&openspec_log) >= 1;
+            // `load` runs on this thread inside `run_wired`, and group 1's `#[cfg(test)]`
+            // read recorders are thread-local, so what they hold afterwards is `load`'s own
+            // file work and not the refresh worker's. Asserting on the returned
+            // `changes.archived` instead would prove nothing: the loop adopts a refresh
+            // computed under `archived_scope()`, which is `Names` while the archived section
+            // is collapsed, so that field is empty whatever scope `load` was given.
+            let _ = crate::schema::take_recorded_reads();
+            let _ = crate::tasks::take_recorded_reads();
             let (result, _rows) = run_wired_at(120, root, &config, &herdr, None, &predicate);
             let dashboard = result.expect("a resolving binary is a supported state");
+            let opened: Vec<_> = crate::schema::take_recorded_reads()
+                .into_iter()
+                .chain(crate::tasks::take_recorded_reads())
+                .filter(|p| p.to_string_lossy().contains("openspec/changes/archive/"))
+                .collect();
             assert!(!dashboard.file_mode);
             assert!(
-                dashboard.changes.archived.is_empty(),
-                "with a resolving binary, load must not have resolved the archive itself"
+                opened.is_empty(),
+                "with a resolving binary, load must ask for names and a count only — it opened {opened:?}"
+            );
+            assert_eq!(
+                dashboard.changes.archived_total, 4,
+                "the count is carried even though no archived change was resolved"
             );
         }
 

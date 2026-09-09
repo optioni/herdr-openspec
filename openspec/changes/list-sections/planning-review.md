@@ -159,3 +159,29 @@ six failures** in `/Users/juusopiikkila/Code/herdr-openspec`, and the pre-change
 is a clean 1137/1137. So the intermittents recorded in `tasks.md` check E belong to the checkout,
 not to any commit; verify a suspected regression with `cargo test --lib -- --test-threads=1`
 before treating a wiring failure as one.
+
+## Change Review (group 8)
+
+An independent `outside-in-tdd-reviewer` was dispatched against the artifacts and the diff
+`74a0b2e..08e0804`, with the five concentration points `tasks.md` 8.1 names. It returned
+**3 CRITICAL, 2 WARNING, 3 SUGGESTION**. Every CRITICAL is fixed; both WARNINGs are resolved;
+all three SUGGESTIONs are taken.
+
+| # | Severity | Finding | Resolution |
+|---|---|---|---|
+| C1 | CRITICAL | **Task 6.3 was never implemented although marked `[x]`.** `run_wired` still passed `ArchivedScope::Full` unconditionally, under a comment describing the fix that had not been applied — so every startup in normal mode resolved the whole archive, the cost `proposal.md`'s "a collapsed section costs no work, not just no rows" forbids. | Implemented: `find_repo` resolves the root, `start_collaborators` runs **before** `load`, and `load` takes `Full` only when `collaborators.file_mode`. The stale comment is gone. |
+| C2 | CRITICAL | **The wiring control did not discriminate.** It asserted `changes.archived.is_empty()` on the post-`run_loop` dashboard, where emptiness comes from `adopt` running under `archived_scope()` = `Names`, not from `load`'s scope — so it passed with C1's shim in place. | Rewritten to assert on `load`'s own file work, through group 1's thread-local read recorders (`load` runs on the test's thread; the worker does not). Verified: with the shim reinstated the control fails, naming the eight archive files `load` opened. |
+| C3 | CRITICAL | **`make coverage`, and so `make check`, was red at HEAD.** Three `covers` ranges in `tests/degraded-coverage.toml` had drifted onto unrelated code as this change moved lines in `src/ui/view.rs`, `src/ui/app.rs` and `src/refresh.rs`. | All four repaired (the `startup_cwd` row shifted again while fixing C1). `make coverage` green: production **96.25%** (4259/4425) against the 96% floor, no floor lowered and no exclusion added. |
+| W1 | WARNING | **Nothing tested that either `request` call site carried `dashboard.archived_scope()`** — `RecordingRefresher` discarded the argument, and the reviewer's mutation to a constant `Names` left the whole suite green. | `RecordingRefresher` now records the scope on a second vector paired by position, so the ~30 landed `requests()` assertions keep their shape. New test `both_request_call_sites_carry_the_dashboards_archived_scope` drives the loop collapsed and open and requires the scopes to differ. Verified: the reviewer's constant-`Names` mutation now fails it. |
+| W2 | WARNING | The comment above C1's shim described an implementation not in the tree, which is what created the impression that `load` performed a second `find_repo` walk. | Gone with C1. The second walk now genuinely exists and is the cheap filesystem kind the comment describes. |
+| S1 | SUGGESTION | The doc comment on `an_archived_row_drops_the_progress_cell_then_the_date_as_the_width_falls` still argued against the `rows()[1]` claim that repair I2 had already corrected. | Comment rewritten to the repaired index. The test keeps locating its row by `RowKind`, which stays correct at every width including those where the row degrades to the empty string — robustness, not evasion. |
+| S2 | SUGGESTION | Group 1 kept two `changes::` tests as scratch-tree tests where `design.md`'s Test Strategy table specifies hand-built `ChangeSet` unit tests. | Accepted deliberately: the scratch-tree form covers `from_files`' real enumeration, which a hand-built set cannot, and the reviewer found no coverage lost. Recorded here rather than amending the table. |
+| S3 | SUGGESTION | `change-enumeration`'s REMOVED-requirement Reason still read "twenty-two / five / seventeen", the numbers corrected to 28 / five / 23 everywhere else. | Restated as twenty-eight / five / twenty-three. |
+
+**The pattern C1 and C2 form is the durable lesson.** A task was marked complete, and its own
+report quoted replacement lines that were not in the tree, because the test written to prove
+the behaviour asserted on a value that a later step in the same function overwrites. Neither
+`cargo test` nor `make gates` could see it; only reading the tree could. Between groups this
+change gated on the suite and the hygiene gates but **not** on `make coverage`, which is what
+let C3 survive seven groups — the final gate is `make check`, and running less than that
+between groups is what made three CRITICALs reachable at all.

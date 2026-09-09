@@ -395,6 +395,7 @@ pub(crate) mod testutil {
         queue:
             std::cell::RefCell<std::collections::VecDeque<Option<crate::refresh::RefreshResult>>>,
         requests: std::cell::RefCell<Vec<crate::changes::Selection>>,
+        scopes: std::cell::RefCell<Vec<crate::changes::ArchivedScope>>,
         takes: std::cell::RefCell<usize>,
     }
 
@@ -403,11 +404,19 @@ pub(crate) mod testutil {
             Self {
                 queue: std::cell::RefCell::new(results.into()),
                 requests: std::cell::RefCell::new(Vec::new()),
+                scopes: std::cell::RefCell::new(Vec::new()),
                 takes: std::cell::RefCell::new(0),
             }
         }
 
         /// Every `Selection` passed to `request`, in call order.
+        /// The `ArchivedScope` of every request, positionally paired with
+        /// [`requests`]. Separate from `requests` so that the driver-tier
+        /// assertions that predate the archived section keep their shape.
+        pub(crate) fn scopes(&self) -> Vec<crate::changes::ArchivedScope> {
+            self.scopes.borrow().clone()
+        }
+
         pub(crate) fn requests(&self) -> Vec<crate::changes::Selection> {
             self.requests.borrow().clone()
         }
@@ -419,19 +428,18 @@ pub(crate) mod testutil {
     }
 
     impl crate::refresh::Refresher for RecordingRefresher {
-        // `list-sections` group 2 note: `Refresher::request` gained a second
-        // parameter, `archived: ArchivedScope`, but every `src/ui/driver.rs`
-        // assertion against `requests()` predates the archived section and
-        // checks `Selection` alone — so `archived` is recorded nowhere and
-        // `requests()` keeps its pre-`list-sections` signature. Nothing in
-        // this crate reads this double's archived scope until a later group
-        // gives `ui::driver`'s own tests a reason to.
+        // `list-sections`: both arguments are recorded, on separate vectors
+        // paired by position, so that the many `src/ui/driver.rs` assertions
+        // that predate the archived section keep checking `Selection` alone
+        // while `scopes()` can still prove `run_loop` passes
+        // `dashboard.archived_scope()` rather than a constant.
         fn request(
             &mut self,
             selection: crate::changes::Selection,
-            _archived: crate::changes::ArchivedScope,
+            archived: crate::changes::ArchivedScope,
         ) {
             self.requests.borrow_mut().push(selection);
+            self.scopes.borrow_mut().push(archived);
         }
 
         fn take_result(&mut self) -> Option<crate::refresh::RefreshResult> {

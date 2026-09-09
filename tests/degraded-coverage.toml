@@ -17,7 +17,7 @@ tier = "view"
 proof = ["file_mode_badge_is_dim_after_the_label", "badge_drops_whole_below_eighteen_columns"]
 verdict = "implemented"
 why = "the header renders a dim file mode badge, driven through render_at at both widths"
-covers = ["src/ui/view.rs:284-292"]
+covers = ["src/ui/view.rs:293-301"]
 
 [[row]]
 condition = "Schema unknown to the CLI"
@@ -153,7 +153,7 @@ tier = "view"
 proof = ["an_unreachable_socket_renders_the_agentless_pane"]
 verdict = "spec-corrected"
 why = "the pane renders identically whether AgentSnapshot::problem is Some or None, via render_at"
-covers = ["src/ui/app.rs:432-446"]
+covers = ["src/ui/app.rs:641-654"]
 
 [[row]]
 condition = "A launch's `pane split` call fails"
@@ -328,7 +328,7 @@ tier = "unit"
 proof = ["a_dead_refresh_worker_is_reported_once_and_then_stops_being_reported", "a_send_error_from_request_is_reported_once_and_then_stops_being_reported"]
 verdict = "confirmed"
 why = "RealRefresher::take_result latches dead on the worker channel disconnecting and reports RefreshResult::Stopped exactly once, then silence, proven directly against the struct; the sibling test proves the dominant production path instead - request's own SendError latching pending_death, consumed by the very next take_result - since the render loop's request always runs before take_result each iteration"
-covers = ["src/refresh.rs:120-121", "src/refresh.rs:123-127", "src/refresh.rs:143-146"]
+covers = ["src/refresh.rs:147-148", "src/refresh.rs:150-154", "src/refresh.rs:176-179"]
 
 [[row]]
 condition = "A CLI cycle fails after the worker already sent its file-sourced result"
@@ -384,7 +384,7 @@ tier = "unit"
 proof = ["prefers_the_workspace_cwd_and_falls_back_when_there_is_none", "a_herdr_context_with_no_workspace_cwd_is_the_fallback_case_not_a_failure"]
 verdict = "confirmed"
 why = "startup_dir's own unit tests drive both arms of the fallback decision directly"
-covers = ["src/ui/mod.rs:334-337"]
+covers = ["src/ui/mod.rs:343-348"]
 
 [[row]]
 condition = "A change is archived between the worker's `list --json` call and its file walk"
