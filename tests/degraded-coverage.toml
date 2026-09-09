@@ -384,7 +384,7 @@ tier = "unit"
 proof = ["prefers_the_workspace_cwd_and_falls_back_when_there_is_none", "a_herdr_context_with_no_workspace_cwd_is_the_fallback_case_not_a_failure"]
 verdict = "confirmed"
 why = "startup_dir's own unit tests drive both arms of the fallback decision directly"
-covers = ["src/ui/mod.rs:318-321"]
+covers = ["src/ui/mod.rs:334-337"]
 
 [[row]]
 condition = "A change is archived between the worker's `list --json` call and its file walk"
