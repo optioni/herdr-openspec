@@ -252,7 +252,21 @@ pub fn run_wired<B: Backend, E: EventSource>(
     read: ArtifactReader<'_>,
     tick: Duration,
 ) -> Result<Dashboard, StartError> {
-    let mut dashboard = load(startup.cwd, startup.config, startup.state_dir);
+    // `list-sections` group 6 (design.md -> Decision 13): `load`'s archived scope depends on
+    // whether a worker will exist to resolve the archive later, which depends on the same
+    // binary probe `start_collaborators` runs — so the repository is found here, standalone
+    // and cheaply (a filesystem walk, no process), and `start_collaborators` runs *before*
+    // `load` rather than after it. `load` still re-derives `repo` itself from `startup.cwd`;
+    // that second walk is the same cheap kind and keeps `load`'s own signature — `start: &Path`,
+    // not a pre-resolved root — unchanged.
+    // INTERIM (pre-6.3) shim for a RED check: load unconditionally resolves Full, same as
+    // the pre-list-sections behaviour, ignoring the probe result entirely.
+    let mut dashboard = load(
+        startup.cwd,
+        startup.config,
+        startup.state_dir,
+        crate::changes::ArchivedScope::Full,
+    );
     let mut collaborators = start_collaborators(
         dashboard.repo.as_deref(),
         startup.config,
@@ -391,15 +405,26 @@ pub fn read_artifact(path: &Path) -> Result<String, String> {
 /// process, and consults no `openspec` binary, so the dashboard opens with
 /// a complete change list on a machine where `openspec` is not installed.
 /// Always returns a `Dashboard`, never a `Result`, and never panics.
+//
+/// `archived` is `list-sections`' fourth parameter (design.md -> Decision 13):
+/// the composition root chooses it from whether a worker will exist to
+/// resolve the archive later — `ArchivedScope::Names` when the binary probe
+/// resolved an `openspec` binary, `ArchivedScope::Full` when it did not, so
+/// file mode is never left with an archived section that nothing will ever
+/// answer. `load` itself makes no such decision; it only threads the value
+/// through to `changes::from_files`.
 // `list-sections` group 1 note: `config.archived_count` was this
 // function's one use of `config` (`plugin-config` -> "`archived_count` is
 // kept, parsed, and inert" means it stays that way permanently, not just
-// for this group), so the parameter goes unread now that the call below no
-// longer consults it — kept in the signature and named `_config`, rather
-// than dropped, because group 6 (design.md -> Decision 13) gives `load` a
-// fourth `ArchivedScope` parameter and `config` a caller-visible reason to
-// exist again even though it will still name no field of its own.
-pub fn load(start: &Path, _config: &Config, state_dir: Option<&Path>) -> Dashboard {
+// for this group), so the parameter goes unread — `load` never consults it,
+// even with the fourth `ArchivedScope` parameter group 6 adds: the scope is
+// the composition root's decision, not a fact `config` carries.
+pub fn load(
+    start: &Path,
+    _config: &Config,
+    state_dir: Option<&Path>,
+    archived: crate::changes::ArchivedScope,
+) -> Dashboard {
     // The one further file `load` reads, on both branches below: Herdr agents exist
     // independently of an OpenSpec repository. `state::read` is infallible by
     // construction — every unusable input degrades to an empty mapping, with
@@ -408,14 +433,7 @@ pub fn load(start: &Path, _config: &Config, state_dir: Option<&Path>) -> Dashboa
     let agent_names = crate::state::read(state_dir);
     match crate::resolve::find_repo(start) {
         crate::resolve::RepoSearch::Found { root } => {
-            // `list-sections` group 1 note: `archived_count` no longer
-            // truncates the archived tier and `from_files` now takes an
-            // `ArchivedScope` instead. `ui::load` does not yet decide that
-            // scope itself — group 6 gives it a fourth parameter and the
-            // file-mode rule of design.md -> Decision 13 — so this call
-            // keeps the pre-`list-sections` behaviour (the whole archive,
-            // unconditionally resolved) as a minimal, compile-forced fix.
-            let changes = crate::changes::from_files(&root, crate::changes::ArchivedScope::Full);
+            let changes = crate::changes::from_files(&root, archived);
             let searched_from =
                 std::fs::canonicalize(start).unwrap_or_else(|_| start.to_path_buf());
             Dashboard {
@@ -454,8 +472,13 @@ pub fn load(start: &Path, _config: &Config, state_dir: Option<&Path>) -> Dashboa
                     in_flight: false,
                     problems: Vec::new(),
                 },
+                // `list-sections` group 6 (design.md -> Persistence and Rollout ->
+                // Seeding): the archived section starts collapsed on every load,
+                // independent of `archived` — the reader opens it deliberately.
                 sections: crate::ui::app::Sections {
-                    collapsed: std::collections::BTreeSet::new(),
+                    collapsed: std::collections::BTreeSet::from([
+                        crate::ui::app::SectionKey::Archived,
+                    ]),
                 },
                 file_mode: false,
             }
@@ -496,8 +519,10 @@ pub fn load(start: &Path, _config: &Config, state_dir: Option<&Path>) -> Dashboa
                 in_flight: false,
                 problems: Vec::new(),
             },
+            // Same seed as the found branch, above: a repository found later must
+            // not open with a different fold.
             sections: crate::ui::app::Sections {
-                collapsed: std::collections::BTreeSet::new(),
+                collapsed: std::collections::BTreeSet::from([crate::ui::app::SectionKey::Archived]),
             },
             file_mode: false,
         },
@@ -1156,7 +1181,8 @@ apply:
 
             for width in [120u16, 60u16] {
                 let config = crate::config::Config::default();
-                let mut dashboard = super::super::load(root, &config, None);
+                let mut dashboard =
+                    super::super::load(root, &config, None, crate::changes::ArchivedScope::Names);
 
                 let backend = ratatui::backend::TestBackend::new(width, 20);
                 let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
@@ -1313,7 +1339,8 @@ apply:
                 // including every lower-case letter — types into the query rather than
                 // launching, on `list-filtering`'s own terms). The snapshot claim is worth
                 // nothing if the keys did nothing.
-                let mut launch_dashboard = super::super::load(root, &config, None);
+                let mut launch_dashboard =
+                    super::super::load(root, &config, None, crate::changes::ArchivedScope::Names);
                 launch_dashboard.agents.reachable = true;
                 let mut launch_events = Script::new(vec![
                     // `list-sections`: `load` starts `selected` on the active
@@ -1436,14 +1463,24 @@ apply:
                 &root.join("openspec/changes/alpha/tasks.md"),
                 "- [x] a\n- [ ] b\n",
             );
-            let found = super::super::load(root, &Config::default(), None);
+            let found = super::super::load(
+                root,
+                &Config::default(),
+                None,
+                crate::changes::ArchivedScope::Names,
+            );
             assert!(
                 !found.file_mode,
                 "a repository being found must not itself claim file_mode"
             );
 
             let empty = ScratchDir::new();
-            let not_found = super::super::load(empty.path(), &Config::default(), None);
+            let not_found = super::super::load(
+                empty.path(),
+                &Config::default(),
+                None,
+                crate::changes::ArchivedScope::Names,
+            );
             assert!(
                 !not_found.file_mode,
                 "no repository found is unrelated to file_mode"
@@ -1462,7 +1499,12 @@ apply:
             let start = root.join("a").join("b");
             std::fs::create_dir_all(&start).expect("create a two-level-deep start directory");
 
-            let dashboard = super::super::load(&start, &config_with_archived_count(5), None);
+            let dashboard = super::super::load(
+                &start,
+                &config_with_archived_count(5),
+                None,
+                crate::changes::ArchivedScope::Names,
+            );
 
             assert_eq!(dashboard.repo, Some(canonical(root)));
             assert_eq!(dashboard.changes.active.len(), 1);
@@ -1478,6 +1520,12 @@ apply:
                     query: String::new(),
                     active: false
                 }
+            );
+            // `list-sections`: `sections.collapsed` is seeded with exactly
+            // `SectionKey::Archived` on both branches of `load`.
+            assert_eq!(
+                dashboard.sections.collapsed,
+                std::collections::BTreeSet::from([crate::ui::app::SectionKey::Archived])
             );
             assert!(dashboard.refresh.requested);
             assert!(!dashboard.refresh.reload);
@@ -1500,7 +1548,12 @@ apply:
                 &root.join("openspec/changes/alpha/tasks.md"),
                 "- [x] a\n- [ ] b\n",
             );
-            let found = super::super::load(root, &Config::default(), None);
+            let found = super::super::load(
+                root,
+                &Config::default(),
+                None,
+                crate::changes::ArchivedScope::Names,
+            );
             assert_eq!(
                 found.launch,
                 crate::ui::app::Launch {
@@ -1511,7 +1564,12 @@ apply:
             );
 
             let empty = ScratchDir::new();
-            let not_found = super::super::load(empty.path(), &Config::default(), None);
+            let not_found = super::super::load(
+                empty.path(),
+                &Config::default(),
+                None,
+                crate::changes::ArchivedScope::Names,
+            );
             assert_eq!(
                 not_found.launch,
                 crate::ui::app::Launch {
@@ -1548,11 +1606,17 @@ apply:
                 other => panic!("expected NotFound, got {other:?}"),
             };
 
-            let dashboard = super::super::load(start, &config_with_archived_count(5), None);
+            let dashboard = super::super::load(
+                start,
+                &config_with_archived_count(5),
+                None,
+                crate::changes::ArchivedScope::Names,
+            );
 
             assert_eq!(dashboard.repo, None);
             assert_eq!(dashboard.searched_from, expected_searched_from);
             assert_eq!(dashboard.changes, crate::changes::empty_set());
+            assert_eq!(dashboard.changes.archived_total, 0);
             assert_eq!(dashboard.selected, 0);
             assert_eq!(
                 dashboard.filter,
@@ -1560,6 +1624,12 @@ apply:
                     query: String::new(),
                     active: false
                 }
+            );
+            // `list-sections`: the same seed on both branches — a repository found
+            // later must not open with a different fold.
+            assert_eq!(
+                dashboard.sections.collapsed,
+                std::collections::BTreeSet::from([crate::ui::app::SectionKey::Archived])
             );
             assert!(dashboard.refresh.requested);
             assert!(!dashboard.refresh.reload);
@@ -1591,11 +1661,129 @@ apply:
                 );
             }
 
-            let three = super::super::load(root, &config_with_archived_count(3), None);
-            let seven = super::super::load(root, &config_with_archived_count(7), None);
+            let zero = super::super::load(
+                root,
+                &config_with_archived_count(0),
+                None,
+                crate::changes::ArchivedScope::Full,
+            );
+            let three = super::super::load(
+                root,
+                &config_with_archived_count(3),
+                None,
+                crate::changes::ArchivedScope::Full,
+            );
+            let seven = super::super::load(
+                root,
+                &config_with_archived_count(7),
+                None,
+                crate::changes::ArchivedScope::Full,
+            );
+            assert_eq!(zero.changes.archived.len(), 7);
             assert_eq!(three.changes.archived.len(), 7);
             assert_eq!(seven.changes.archived.len(), 7);
+            assert_eq!(zero.changes, three.changes);
             assert_eq!(three.changes, seven.changes);
+            // `plugin-config` :: "A pre-list-sections configuration loads unchanged" — the
+            // whole loaded `Dashboard`, not only `changes`, is equal across every value.
+            assert_eq!(zero, three);
+            assert_eq!(three, seven);
+        }
+
+        /// `dashboard-loop` :: "Startup counts the archive without resolving it" —
+        /// `ArchivedScope::Names` builds no archived `Change` at all, so the archived
+        /// tier is counted, not resolved: `changes.archived` is empty while
+        /// `archived_total` carries the true count, the header renders that count with
+        /// no archived row beneath it, and a session that never opens the archive never
+        /// requests it.
+        #[test]
+        fn startup_counts_the_archive_without_resolving_it() {
+            let scratch = ScratchDir::new();
+            let root = scratch.path();
+            for (i, day) in (1..=7).enumerate() {
+                write(
+                    &root
+                        .join(format!(
+                            "openspec/changes/archive/2026-01-{day:02}-entry{i}"
+                        ))
+                        .join("proposal.md"),
+                    "# P\n",
+                );
+            }
+
+            let dashboard = super::super::load(
+                root,
+                &config_with_archived_count(3),
+                None,
+                crate::changes::ArchivedScope::Names,
+            );
+            assert!(dashboard.changes.archived.is_empty());
+            assert_eq!(dashboard.changes.archived_total, 7);
+
+            // Loading the same tree with `archived_count` 7, and again with 0, yields
+            // exactly the same `Dashboard` — the key is inert rather than read.
+            let seven = super::super::load(
+                root,
+                &config_with_archived_count(7),
+                None,
+                crate::changes::ArchivedScope::Names,
+            );
+            let zero = super::super::load(
+                root,
+                &config_with_archived_count(0),
+                None,
+                crate::changes::ArchivedScope::Names,
+            );
+            assert_eq!(dashboard, seven);
+            assert_eq!(dashboard, zero);
+
+            assert_eq!(
+                dashboard.sections.collapsed,
+                std::collections::BTreeSet::from([crate::ui::app::SectionKey::Archived])
+            );
+            assert_eq!(
+                dashboard.targets(),
+                vec![crate::ui::app::Target::Section(
+                    crate::ui::app::SectionKey::Archived
+                )],
+                "the archived header is the one addressable target on a repository with no \
+                 active changes"
+            );
+
+            fn cols(text: &str, from: usize, to_inclusive: usize) -> String {
+                text.chars()
+                    .skip(from)
+                    .take(to_inclusive - from + 1)
+                    .collect()
+            }
+            // No active change exists in this fixture, so `ui::list::rows` leads with
+            // "No active changes" (`change-rows` -> Decision 10's second correction)
+            // before the archived header — selected and collapsed, so its marker and
+            // its fold glyph are both `>` (design.md -> Decision 4).
+            for width in [120u16, 60u16] {
+                let interior = if width == 120 { 38 } else { 58 };
+                let buf = render_at(width, 20, &dashboard);
+                assert_eq!(
+                    cols(&row_text(&buf, 2), 1, interior),
+                    format!("{:<width$}", "No active changes", width = interior),
+                    "width {width}"
+                );
+                assert_eq!(
+                    cols(&row_text(&buf, 3), 1, interior),
+                    format!("{:<width$}", "> > archived (7)", width = interior),
+                    "width {width}"
+                );
+                assert_eq!(
+                    cols(&row_text(&buf, 4), 1, interior),
+                    " ".repeat(interior),
+                    "width {width}: no archived name is drawn while the tier is unresolved"
+                );
+            }
+
+            assert!(
+                !dashboard.needs_archived_refresh(),
+                "a session that never opens the archive must never request it"
+            );
         }
 
         /// The outer-loop acceptance test: `ui::load` -> `changes::from_files` ->
@@ -1623,7 +1811,12 @@ apply:
                 "- [x] a\n- [x] b\n- [x] c\n- [x] d\n- [x] e\n- [x] f\n- [x] g\n",
             );
 
-            let dashboard = super::super::load(root, &config_with_archived_count(5), None);
+            let dashboard = super::super::load(
+                root,
+                &config_with_archived_count(5),
+                None,
+                crate::changes::ArchivedScope::Full,
+            );
 
             fn cols(text: &str, from: usize, to_inclusive: usize) -> String {
                 text.chars()
@@ -1635,7 +1828,11 @@ apply:
             // `list-sections`: `ui::load` starts `selected` at 0, which now
             // addresses `Target::Section(Active)` — the active header, target 0
             // — so the header itself carries the cursor and every row shifts
-            // down by one.
+            // down by one. `sections.collapsed` is seeded with exactly
+            // `SectionKey::Archived` (design.md -> Decision 13, Persistence and
+            // Rollout -> Seeding), so the archived header renders `>`, folded,
+            // with no archived row beneath it — row 7 is blank rather than
+            // `2026-08-14 add-auth`.
             let buf120 = render_at(120, 20, &dashboard);
             assert_eq!(
                 cols(&row_text(&buf120, 2), 1, 38),
@@ -1655,12 +1852,9 @@ apply:
             );
             assert_eq!(
                 cols(&row_text(&buf120, 6), 1, 38),
-                format!("{:<38}", "  v archived (1)")
+                format!("{:<38}", "  > archived (1)")
             );
-            assert_eq!(
-                cols(&row_text(&buf120, 7), 1, 38),
-                "  2026-08-14 add-auth            [7/7]"
-            );
+            assert_eq!(cols(&row_text(&buf120, 7), 1, 38), " ".repeat(38));
 
             let buf60 = render_at(60, 20, &dashboard);
             assert_eq!(
@@ -1681,12 +1875,9 @@ apply:
             );
             assert_eq!(
                 cols(&row_text(&buf60, 6), 1, 58),
-                format!("{:<58}", "  v archived (1)")
+                format!("{:<58}", "  > archived (1)")
             );
-            assert_eq!(
-                cols(&row_text(&buf60, 7), 1, 58),
-                "  2026-08-14 add-auth                                [7/7]"
-            );
+            assert_eq!(cols(&row_text(&buf60, 7), 1, 58), " ".repeat(58));
         }
 
         #[test]
@@ -1706,7 +1897,12 @@ apply:
 
             let before = snapshot(root);
             let state_before = snapshot(state.path());
-            let _ = super::super::load(root, &config_with_archived_count(5), Some(state.path()));
+            let _ = super::super::load(
+                root,
+                &config_with_archived_count(5),
+                Some(state.path()),
+                crate::changes::ArchivedScope::Names,
+            );
             let after = snapshot(root);
             let state_after = snapshot(state.path());
             assert_eq!(before, after, "ui::load wrote inside the repository");
@@ -1731,7 +1927,12 @@ apply:
             );
 
             let before = snapshot(root);
-            let mut dashboard = super::super::load(root, &config_with_archived_count(5), None);
+            let mut dashboard = super::super::load(
+                root,
+                &config_with_archived_count(5),
+                None,
+                crate::changes::ArchivedScope::Names,
+            );
             dashboard.sync_detail(&super::super::read_artifact);
             let after = snapshot(root);
             assert_eq!(
@@ -1786,7 +1987,12 @@ apply:
             write(&root.join("openspec/config.yaml"), "schema: tdd\n");
             write(&root.join("openspec/changes/alpha/proposal.md"), "# P\n");
 
-            let found = super::super::load(root, &config_with_archived_count(5), None);
+            let found = super::super::load(
+                root,
+                &config_with_archived_count(5),
+                None,
+                crate::changes::ArchivedScope::Names,
+            );
             assert_eq!(found.detail.source, "");
             assert_eq!(found.detail.scroll, 0);
             assert_eq!(found.detail.tab, 0);
@@ -1815,8 +2021,12 @@ apply:
                 );
                 ancestor = a.parent();
             }
-            let not_found =
-                super::super::load(scratch2.path(), &config_with_archived_count(5), None);
+            let not_found = super::super::load(
+                scratch2.path(),
+                &config_with_archived_count(5),
+                None,
+                crate::changes::ArchivedScope::Names,
+            );
             assert_eq!(not_found.repo, None);
             assert_eq!(not_found.detail.source, "");
             assert_eq!(not_found.detail.scroll, 0);
@@ -1845,8 +2055,12 @@ apply:
                 "[names]\nc-2fa-support = \"2fa-support\"\n",
             );
 
-            let with_state =
-                super::super::load(root, &config_with_archived_count(5), Some(state.path()));
+            let with_state = super::super::load(
+                root,
+                &config_with_archived_count(5),
+                Some(state.path()),
+                crate::changes::ArchivedScope::Names,
+            );
             assert_eq!(
                 with_state.agent_names.names,
                 std::collections::BTreeMap::from([(
@@ -1856,7 +2070,12 @@ apply:
             );
             assert!(with_state.agent_names.problems.is_empty());
 
-            let without_state = super::super::load(root, &config_with_archived_count(5), None);
+            let without_state = super::super::load(
+                root,
+                &config_with_archived_count(5),
+                None,
+                crate::changes::ArchivedScope::Names,
+            );
             assert!(
                 without_state.agent_names.names.is_empty(),
                 "the pair came from the directory, not from anywhere else"
@@ -1899,14 +2118,23 @@ apply:
             let root = scratch.path();
             write(&root.join("openspec/changes/alpha/proposal.md"), "# P\n");
 
-            let none_result = super::super::load(root, &config_with_archived_count(5), None);
+            let none_result = super::super::load(
+                root,
+                &config_with_archived_count(5),
+                None,
+                crate::changes::ArchivedScope::Names,
+            );
             assert!(none_result.agent_names.names.is_empty());
             assert!(none_result.agent_names.problems.is_empty());
 
             let malformed = ScratchDir::new();
             write(&malformed.path().join("agent-names.toml"), "[names");
-            let malformed_result =
-                super::super::load(root, &config_with_archived_count(5), Some(malformed.path()));
+            let malformed_result = super::super::load(
+                root,
+                &config_with_archived_count(5),
+                Some(malformed.path()),
+                crate::changes::ArchivedScope::Names,
+            );
             assert!(malformed_result.agent_names.names.is_empty());
             assert_eq!(malformed_result.agent_names.problems.len(), 1);
             assert!(
@@ -2118,7 +2346,8 @@ apply:
                 let scratch = scratch_repo_with_alpha();
                 let root = scratch.path();
                 let config = Config::default();
-                let mut dashboard = super::super::load(root, &config, None);
+                let mut dashboard =
+                    super::super::load(root, &config, None, crate::changes::ArchivedScope::Names);
 
                 let before = snapshot(root);
 
@@ -2317,7 +2546,8 @@ apply:
                 let scratch = scratch_repo_with_alpha();
                 let root = scratch.path();
                 let config = Config::default();
-                let mut dashboard = super::super::load(root, &config, None);
+                let mut dashboard =
+                    super::super::load(root, &config, None, crate::changes::ArchivedScope::Names);
 
                 let backend = ratatui::backend::TestBackend::new(width, 20);
                 let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
@@ -2361,7 +2591,8 @@ apply:
                 let scratch = scratch_repo_with_alpha();
                 let root = scratch.path();
                 let config = Config::default();
-                let mut dashboard = super::super::load(root, &config, None);
+                let mut dashboard =
+                    super::super::load(root, &config, None, crate::changes::ArchivedScope::Names);
 
                 let backend = ratatui::backend::TestBackend::new(width, 20);
                 let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
@@ -4045,6 +4276,107 @@ esac
             );
         }
 
+        /// `dashboard-loop` :: "File mode opens the archive with no binary present" — the one
+        /// outer-loop acceptance scenario this change takes (design.md -> Test Strategy,
+        /// Decision 13): with no `openspec` binary anywhere, `refresh::start` returns the
+        /// inert refresher, so `ui::load` must resolve the whole archive itself at startup or
+        /// a folded-then-reopened archive would stay empty for the rest of the session. A
+        /// `Space` press on the archived header (the only target, since this fixture has no
+        /// active change) must therefore reveal the four archived rows immediately, with no
+        /// further refresh cycle needed.
+        #[test]
+        fn file_mode_opens_the_archive_with_no_binary_present() {
+            for width in [120u16, 60u16] {
+                let scratch = ScratchDir::new();
+                let root = scratch.path();
+                for (i, day) in (1..=4).enumerate() {
+                    write_with_mode(
+                        &root.join(format!(
+                            "openspec/changes/archive/2026-02-{day:02}-entry{i}/proposal.md"
+                        )),
+                        b"# P\n",
+                        0o644,
+                    );
+                    write_with_mode(
+                        &root.join(format!(
+                            "openspec/changes/archive/2026-02-{day:02}-entry{i}/tasks.md"
+                        )),
+                        b"- [x] a\n- [ ] b\n",
+                        0o644,
+                    );
+                }
+                let herdr = root.join("does-not-exist-herdr");
+                let config = Config::default();
+
+                let (result, rows) = run_wired_staged(
+                    width,
+                    root,
+                    &config,
+                    &herdr,
+                    None,
+                    vec![(&|| true, key(' ')), (&|| true, key('q'))],
+                );
+                let dashboard = result.expect("no binary anywhere is a supported state");
+
+                assert_eq!(dashboard.changes.archived.len(), 4, "width {width}");
+                assert_eq!(dashboard.changes.archived_total, 4, "width {width}");
+                assert!(
+                    dashboard
+                        .changes
+                        .archived
+                        .iter()
+                        .all(|c| c.progress.completed == 1 && c.progress.total == 2),
+                    "width {width}: every archived change's task count must be resolved: {:?}",
+                    dashboard.changes.archived
+                );
+                assert!(dashboard.file_mode, "width {width}");
+
+                assert!(
+                    rows.iter().any(|r| r.contains("archived (4)")),
+                    "width {width}: {rows:?}"
+                );
+                assert_eq!(
+                    rows.iter().filter(|r| r.contains("entry")).count(),
+                    4,
+                    "width {width}: the four archived rows must all be drawn: {rows:?}"
+                );
+                assert!(
+                    rows.iter().any(|r| r.contains("file mode")),
+                    "width {width}: the header must carry its file-mode badge: {rows:?}"
+                );
+            }
+
+            // The discriminating control: the same run with the probe resolving a scratch
+            // `openspec` program leaves `changes.archived` empty until the worker answers,
+            // so `Full` at startup is the file-mode branch and not the general one.
+            let scratch = ScratchDir::new();
+            let root = scratch.path();
+            for (i, day) in (1..=4).enumerate() {
+                write_with_mode(
+                    &root.join(format!(
+                        "openspec/changes/archive/2026-02-{day:02}-entry{i}/proposal.md"
+                    )),
+                    b"# P\n",
+                    0o644,
+                );
+            }
+            let herdr = root.join("does-not-exist-herdr");
+            let openspec_log = root.join("openspec-resolving.log");
+            let openspec = openspec_script(root, &openspec_log, root);
+            let config = Config {
+                openspec_bin: Some(openspec),
+                ..Config::default()
+            };
+            let predicate = || log_lines(&openspec_log) >= 1;
+            let (result, _rows) = run_wired_at(120, root, &config, &herdr, None, &predicate);
+            let dashboard = result.expect("a resolving binary is a supported state");
+            assert!(!dashboard.file_mode);
+            assert!(
+                dashboard.changes.archived.is_empty(),
+                "with a resolving binary, load must not have resolved the archive itself"
+            );
+        }
+
         /// `openspec-binary` :: "A resolved binary contributes nothing" — whole-buffer
         /// equality, with a discriminating control (an unusable configured binary, which
         /// DOES add a problem row) so the equality is not satisfied by two empty buffers.
@@ -4183,7 +4515,8 @@ esac
                     ..Config::default()
                 };
 
-                let mut dashboard = super::super::load(&root, &config, None);
+                let mut dashboard =
+                    super::super::load(&root, &config, None, crate::changes::ArchivedScope::Names);
                 assert_eq!(
                     dashboard.repo.as_deref(),
                     Some(canonical(&root).as_path()),
@@ -4401,7 +4734,8 @@ esac
                 let scratch = scratch_repo_with_alpha();
                 let root = scratch.path();
                 let config = Config::default();
-                let mut dashboard = super::super::load(root, &config, None);
+                let mut dashboard =
+                    super::super::load(root, &config, None, crate::changes::ArchivedScope::Names);
 
                 let unwatchable = root.join("does-not-exist-at-all");
                 let (mut fs, watch_problems) = crate::watch::start(&unwatchable);
