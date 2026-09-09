@@ -146,6 +146,12 @@ grep -qE '^pub fn start\(' "$LAUNCH" || fail "positive control - $LAUNCH defines
 # naming $TERMINAL, rather than leg 1 hunting a name nobody defines any more.
 grep -qE '^pub fn install_panic_hook\(' "$TERMINAL" \
   || fail "positive control - $TERMINAL defines no 'pub fn install_panic_hook('"
+# mouse-input: leg 5c's own positive control, on exactly Guard A's terms. Anchored on the
+# method's definition form (four leading spaces - it is an inherent method on TerminalGuard,
+# not a free function), so renaming it fails HERE, in the defining file, rather than leaving
+# leg 5c searching `run`'s body for a name nobody defines any more.
+grep -qE '^    pub fn mouse_problem\(' "$TERMINAL" \
+  || fail "positive control - $TERMINAL defines no 'pub fn mouse_problem(' - leg 5c would search for a name that no longer exists"
 
 # Leg 1 — every collaborator the loop needs is started BY NAME in the production slice.
 # degraded-states: worker_cli_from_env dropped out of this list (start_collaborators reaches
@@ -190,6 +196,22 @@ printf '%s\n' "$body" | grep -q 'state::state_dir(' \
   || fail "leg 5: 'pub fn run()' does not resolve state::state_dir( - Startup.state_dir would be a literal"
 if printf '%s\n' "$body" | grep -q 'state_dir: None'; then
   fail "leg 5: 'pub fn run()' hardcodes 'state_dir: None' - the mapping tier would be dead in the shipped binary"
+fi
+
+# Leg 5c — NEW in mouse-input, and deliberately NOT a fourteenth name on leg 1. Leg 1 greps
+# `code "$MOD"` — the whole production slice of $MOD — and `pub struct Startup<'a>` is
+# declared in that slice, well above the file's single line-anchored #[cfg(test)]. The
+# FIELD'S OWN DECLARATION would therefore satisfy a leg-1 name while `run` had stopped
+# passing a value, which is precisely the failure leg 5 documents for state::read and answers
+# by scoping to $body. Both halves are needed, on leg 5's exact terms: the name-half catches
+# a `run` that stopped calling the guard at all, and the literal-half catches one that kept
+# the field and hardcoded it. A `run` that shipped `mouse_problem: None` would carry a
+# refused-capture problem row that can never appear, with `cargo test --all-features` green —
+# every test constructs its own Startup and drives run_wired directly.
+printf '%s\n' "$body" | grep -q 'mouse_problem(' \
+  || fail "leg 5c: 'pub fn run()' does not name mouse_problem( - the refused-capture row would be dead in the shipped binary"
+if printf '%s\n' "$body" | grep -q 'mouse_problem: None'; then
+  fail "leg 5c: 'pub fn run()' hardcodes 'mouse_problem: None' - the refused-capture row would be dead in the shipped binary"
 fi
 
 # Leg 5b — NEW in degraded-states. `plugin-actions` put the cwd-resolution branch into
@@ -243,4 +265,4 @@ h=$(find "$UIDIR" -name '*.rs' -print0 \
                  exit 1; }
 
 lines=$(printf '%s\n' "$body" | wc -l | tr -d ' ')
-echo "WIRED OK: thirteen names present in $MOD; run resolves state::state_dir; run names startup_dir(; $MOD names config.agent_kind; 'pub fn run()' is $lines lines with no branch and no loop; no \"herdr\" and no \"claude\" literal under $UIDIR"
+echo "WIRED OK: thirteen names present in $MOD; run resolves state::state_dir; run threads the guard's mouse_problem( (leg 5c); run names startup_dir(; $MOD names config.agent_kind; 'pub fn run()' is $lines lines with no branch and no loop; no \"herdr\" and no \"claude\" literal under $UIDIR"

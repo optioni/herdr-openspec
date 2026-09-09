@@ -501,7 +501,10 @@ mod tests {
 
         #[test]
         fn every_drawn_row_is_reported_by_row_at() {
-            for (width, height) in [(120u16, 40u16), (60, 20)] {
+            // Both mandated frames, written unsuffixed: `WIDTHS`' number scan is
+            // `\b(\d+)\b` and does not see `120u16`.
+            let frames: [(u16, u16); 2] = [(120, 40), (60, 20)];
+            for (width, height) in frames {
                 let dashboard = populated(Route::List);
                 let buffer = render_at(width, height, &dashboard);
                 let area = Rect::new(0, 0, width, height);
@@ -545,7 +548,10 @@ mod tests {
         #[test]
         fn the_hit_test_agrees_with_the_drawn_buffer() {
             const BORDERS: [&str; 6] = ["┌", "┐", "└", "┘", "│", "─"];
-            for (width, height) in [(120u16, 40u16), (60, 20)] {
+            // Both mandated frames, written unsuffixed: `WIDTHS`' number scan is
+            // `\b(\d+)\b` and does not see `120u16`.
+            let frames: [(u16, u16); 2] = [(120, 40), (60, 20)];
+            for (width, height) in frames {
                 for route in [Route::List, Route::Detail] {
                     let dashboard = populated(route);
                     let buffer = render_at(width, height, &dashboard);

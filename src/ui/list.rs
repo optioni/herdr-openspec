@@ -670,28 +670,37 @@ mod tests {
         #[test]
         fn the_reported_row_follows_the_scrolled_slice() {
             let dashboard = crowded();
-            // A six-row interior against fourteen rows: the slice is scrolled.
-            let interior = Rect::new(1, 2, 38, 6);
-            let all = rows(&dashboard, interior.width);
-            let cursor = all
-                .iter()
-                .position(|r| r.selected)
-                .expect("the cursor is on a drawn row");
-            let offset = viewport(all.len(), cursor, interior.height);
-            assert!(offset > 0, "the fixture must actually scroll");
-
-            assert_eq!(row_at(&dashboard, interior, 0), Some(all[offset].kind));
-            assert_ne!(
-                row_at(&dashboard, interior, 0),
-                Some(all[0].kind),
-                "row 0 reports the first row of the scrolled slice, not of the emitted list"
-            );
-            for row in 0..interior.height {
-                assert_eq!(
-                    row_at(&dashboard, interior, row),
-                    all.get(offset + row as usize).map(|r| r.kind),
-                    "offset {row}"
+            // Both mandated list interiors — 38 columns from the wide layout's
+            // Length(40) column, 58 from the narrow 60-column frame — against a
+            // six-row interior and fourteen rows, so the slice is scrolled.
+            let widths: [u16; 2] = [38, 58];
+            for width in widths {
+                let interior = Rect::new(1, 2, width, 6);
+                let all = rows(&dashboard, interior.width);
+                let cursor = all
+                    .iter()
+                    .position(|r| r.selected)
+                    .expect("the cursor is on a drawn row");
+                let offset = viewport(all.len(), cursor, interior.height);
+                assert!(
+                    offset > 0,
+                    "width {width}: the fixture must actually scroll"
                 );
+
+                assert_eq!(row_at(&dashboard, interior, 0), Some(all[offset].kind));
+                assert_ne!(
+                    row_at(&dashboard, interior, 0),
+                    Some(all[0].kind),
+                    "width {width}: row 0 reports the first row of the scrolled slice, not \
+                     of the emitted list"
+                );
+                for row in 0..interior.height {
+                    assert_eq!(
+                        row_at(&dashboard, interior, row),
+                        all.get(offset + row as usize).map(|r| r.kind),
+                        "width {width} offset {row}"
+                    );
+                }
             }
         }
 
@@ -700,38 +709,42 @@ mod tests {
             let mut dashboard = crowded();
             dashboard.selected = 0;
             dashboard.sections.collapsed.insert(SectionKey::Archived);
-            let interior = Rect::new(1, 2, 38, 36);
-            let all = rows(&dashboard, interior.width);
-            let header = all
-                .iter()
-                .position(|r| {
-                    matches!(
-                        r.kind,
-                        RowKind::Section {
-                            key: SectionKey::Archived,
-                            ..
-                        }
-                    )
-                })
-                .expect("the archived header is drawn");
+            let widths: [u16; 2] = [38, 58];
+            for width in widths {
+                let interior = Rect::new(1, 2, width, 36);
+                let all = rows(&dashboard, interior.width);
+                let header = all
+                    .iter()
+                    .position(|r| {
+                        matches!(
+                            r.kind,
+                            RowKind::Section {
+                                key: SectionKey::Archived,
+                                ..
+                            }
+                        )
+                    })
+                    .expect("the archived header is drawn");
 
-            assert!(matches!(
-                row_at(&dashboard, interior, header as u16),
-                Some(RowKind::Section {
-                    key: SectionKey::Archived,
-                    collapsed: true,
-                    ..
-                })
-            ));
-            // Nothing behind it: the six archived changes contribute no `Item`
-            // row, so every reported `Item` index belongs to an active change.
-            let active_visible = 6usize;
-            for row in 0..interior.height {
-                if let Some(RowKind::Item { index }) = row_at(&dashboard, interior, row) {
-                    assert!(
-                        index < active_visible,
-                        "offset {row} reached archived change {index} behind a collapsed section"
-                    );
+                assert!(matches!(
+                    row_at(&dashboard, interior, header as u16),
+                    Some(RowKind::Section {
+                        key: SectionKey::Archived,
+                        collapsed: true,
+                        ..
+                    })
+                ));
+                // Nothing behind it: the six archived changes contribute no `Item`
+                // row, so every reported `Item` index belongs to an active change.
+                let active_visible = 6usize;
+                for row in 0..interior.height {
+                    if let Some(RowKind::Item { index }) = row_at(&dashboard, interior, row) {
+                        assert!(
+                            index < active_visible,
+                            "width {width} offset {row} reached archived change {index} \
+                             behind a collapsed section"
+                        );
+                    }
                 }
             }
         }
@@ -744,10 +757,15 @@ mod tests {
             no_repo.repo = None;
 
             for dashboard in [&with_changes, &empty, &no_repo] {
+                // The zero-width and zero-height cases, including both mandated
+                // list interiors — 38 and 58 columns — reduced to zero height,
+                // which `render_list` also draws nothing into.
                 for interior in [
                     Rect::new(1, 2, 0, 0),
                     Rect::new(1, 2, 1, 0),
                     Rect::new(1, 2, 0, 1),
+                    Rect::new(1, 2, 38, 0),
+                    Rect::new(1, 2, 58, 0),
                 ] {
                     for row in [0u16, 1, 65535] {
                         assert_eq!(

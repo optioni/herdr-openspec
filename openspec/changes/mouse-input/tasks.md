@@ -410,26 +410,35 @@ shape. Only `run_loop` can prove otherwise.
 ## 8. Gates
 <!-- kind: operational -->
 
-- [ ] 8.1 CHECK: Confirm the two capture commands are outside the confinement sweep today —
+- [x] 8.1 CHECK: Confirm the two capture commands are outside the confinement sweep today —
       `grep -n 'EnableMouseCapture' scripts/gates/noraw-grep.sh` gives no output, **exit 1**
-      (check H).
-- [ ] 8.2 CHANGE: Extend `noraw-grep.sh`'s `RAW_RE` to
+      (check H). **Run:** no output, exit 1, as recorded.
+- [x] 8.2 CHANGE: Extend `noraw-grep.sh`'s `RAW_RE` to
       `enable_raw_mode|disable_raw_mode|EnterAlternateScreen|LeaveAlternateScreen|EnableMouseCapture|DisableMouseCapture`,
       and replace the one-of-any positive control with a per-name one: for each of the six
       names, the run fails unless the name matches `RAW_RE` **and** appears in
       `src/ui/terminal.rs`. One-of-any is satisfied by `enable_raw_mode` alone, so it would
       cover the capture pair vacuously in both directions.
-- [ ] 8.3 CHECK: Confirm leg 1 cannot carry this name. `pub struct Startup<'a>` is at
+- [x] 8.3 CHECK: Confirm leg 1 cannot carry this name. `pub struct Startup<'a>` is at
       `src/ui/mod.rs:94` and the file's only line-anchored `#[cfg(test)]` at `:542`, so the
       struct is inside `code "$MOD"`'s slice: `sed -n '94p;542p' src/ui/mod.rs` shows both.
       A leg-1 entry would be satisfied by the field declaration alone.
-- [ ] 8.4 CHANGE: Add a body-scoped **leg 5c** to `wired.sh`, mirroring leg 5: `pub fn run()`'s
+      **Run, and reproduced rather than reasoned about.** `pub struct Startup<'a>` is at
+      `src/ui/mod.rs:94` and the file's only line-anchored `#[cfg(test)]` is now at `:560`
+      (`:542` at planning time — this change's own edits moved it), so the struct is still
+      well inside `code "$MOD"`'s slice. Proved executably in a scratch copy of `src scripts
+      tests`: with `mouse_problem: guard.mouse_problem(),` replaced by `mouse_problem: None,`
+      in `ui::run` — the exact defect — and `mouse_problem` added as a **fourteenth leg-1
+      name** with leg 5c deleted, `wired.sh` printed `WIRED OK` and **exited 0**. The same
+      plant against the real script fails: `WIRED FAIL: leg 5c: 'pub fn run()' does not name
+      mouse_problem(`, **exit 1**. Reviewer D's finding, reproduced end to end.
+- [x] 8.4 CHANGE: Add a body-scoped **leg 5c** to `wired.sh`, mirroring leg 5: `pub fn run()`'s
       body must name `mouse_problem(` and must not hardcode `mouse_problem: None`. Add a
       positive control anchored on `^    pub fn mouse_problem(` in `src/ui/terminal.rs`, on
       Guard A's terms, so a rename fails in the defining file. Leg 1's thirteen names are
       unchanged, so `wired.sh:246`'s `thirteen names present` message stays true; extend it
       to mention leg 5c rather than restating a count.
-- [ ] 8.5 CHANGE: Add four `[[control]]` entries to `tests/gate-controls.toml`, each a
+- [x] 8.5 CHANGE: Add four `[[control]]` entries to `tests/gate-controls.toml`, each a
       single exact-substring find/replace, which is all that file's format supports:
       (a) `EnableMouseCapture` planted in `src/ui/list.rs`, expecting `NORAW-GREP`'s
       confinement FAIL; (b) `mouse_problem: guard.mouse_problem(),` → `mouse_problem: None,`
@@ -437,10 +446,26 @@ shape. Only `run_loop` can prove otherwise.
       `noraw-grep.sh`'s own `RAW_RE`; and (d) `DisableMouseCapture` stripped from
       `src/ui/terminal.rs`. (c) and (d) are the two directions of the per-name vacuity leg
       `specs/terminal-lifecycle/spec.md` states, and (a) alone proves neither.
-- [ ] 8.6 VERIFY: `make gates` exits 0 (the change's artifacts must be `git add`ed first —
+- [x] 8.6 VERIFY: `make gates` exits 0 (the change's artifacts must be `git add`ed first —
       `OPENSPEC-UNTOUCHED` fails on any untracked file under `openspec/`), and
       `cargo test --test gate_controls` exits 0 with every planted defect caught, and record
       that no refactor was needed.
+      **Run:** `make gates` → **exit 0**, every script green including
+      `NORAW OK: 36 files searched` and `WIRED OK: … run threads the guard's mouse_problem(
+      (leg 5c) …`. `cargo test --test gate_controls` → **4 passed**, 0 failed; all **57**
+      controls (53 before, plus this group's four) caught their plants.
+      **Two pre-existing width gates went red first, and both were repairs to group 3's own
+      tests rather than to a gate.** `LISTWIDTHS` requires every `#[test]` in
+      `src/ui/list.rs` to name both 38 and 58, and the three `row_at::` tests named only 38;
+      `WIDTHS` requires every test in `src/ui/view.rs` to name both 60 and 120, and the two
+      `hit_test::` tests wrote `(120u16, 40u16)` — the same suffixed-literal trap
+      `DETAILWIDTHS` caught in group 4, since all three gates scan `\b(\d+)\b` and do not
+      see `120u16`. All five tests now loop over an unsuffixed pair of the mandated widths.
+      This is a gap in the plan, not only in the work: groups 3 and 4 both close on a
+      `cargo test` filter, and nothing before this task runs `make gates`; group 4's own
+      3-line check happened to name `detailwidths.sh` and so caught its half, while group 3
+      named no width gate at all.
+      **No refactor was needed** to the two gate scripts beyond the specified edits.
 
 ## 9. Documentation
 <!-- kind: operational -->
