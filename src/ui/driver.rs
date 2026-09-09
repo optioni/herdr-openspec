@@ -3572,15 +3572,22 @@ mod tests {
             KeyModifiers::ALT,
         ];
 
+        // The route loop is outermost and the clone is hoisted out of the
+        // coordinate cross product: the inputs and the assertions are exactly
+        // those the spec enumerates, but the dashboard is cloned **six** times
+        // (three dashboards by two routes) rather than once per coordinate
+        // tuple. The inner form cost 20,580 `Dashboard` clones and made this
+        // one test heavy enough to destabilise the deadline-bounded
+        // `ui::tests::wiring::` suite running beside it.
         for dashboard in &dashboards {
             let before = dashboard.clone();
-            for kind in kinds {
-                for column in coords {
-                    for row in coords {
-                        for area in areas {
-                            for route in [Route::List, Route::Detail] {
-                                let mut routed = dashboard.clone();
-                                routed.route = route;
+            for route in [Route::List, Route::Detail] {
+                let mut routed = dashboard.clone();
+                routed.route = route;
+                for kind in kinds {
+                    for column in coords {
+                        for row in coords {
+                            for area in areas {
                                 let bare = mouse_action(&routed, area, &m(kind, column, row));
                                 for modifiers in modifiers {
                                     let event = MouseEvent {

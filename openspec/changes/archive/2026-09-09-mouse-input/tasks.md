@@ -771,13 +771,33 @@ which the schema forbids. The evidence is a negative control instead.
       | HEAD, this working directory | 1-4 failed, ~35s, **5 consecutive runs** |
 
       Identical source — `diff -r src` is silent — so it is neither the code nor the commit.
-      The cause is load in this directory: two `./target/release/herdr-openspec ui` panes have
-      been running since Monday and Tuesday (29 and 20 minutes of CPU each), they watch this
-      repository's own `openspec/`, so every write to this file wakes both and spawns
-      `openspec list --json`; load average measured at 4.45. The wiring tests are bounded by
-      `testutil::UntilReady`'s **5-second** deadline, so under that load their predicates stop
-      settling in time — which is also why a failing run takes 35s: each failure burns its
-      full deadline.
+
+      **The cause is where the test executable lives, and nothing else.** Two hypotheses were
+      tried and falsified before the real one: it is *not* the two stale
+      `./target/release/herdr-openspec ui` panes that had been running here since Monday and
+      Tuesday (killed; the failures continued unchanged), and it is *not* a stale build
+      artifact (forcing a rebuild produced the same result). The isolating experiment is one
+      variable: with `CARGO_TARGET_DIR` pointed outside `~/Code` and **the working directory
+      unchanged**, the full suite is **1213 passed, 0 failed, 8.38s**, twice; with the
+      repository's own `target/`, it is ~39s with one to four `ui::tests::wiring::` failures.
+      Sharper still: copying the *fast* binary into `target/debug/` makes it slow (35.6s, 3
+      failed) and copying the *slow* binary to `/private/tmp` makes it fast (3.87s, 29/29), so
+      the executable's **location** decides the outcome and its content does not.
+      `mdutil -s /` reports indexing enabled and `mdfind` confirms Spotlight has indexed
+      `target/debug/deps/herdr_openspec-*`; `/private/tmp` is excluded by default. The wiring
+      tests spawn scratch programs and are bounded by `testutil::UntilReady`'s **5-second**
+      deadline, so the per-exec scanning cost pushes their predicates past it — which is also
+      why a failing run takes 35s rather than 4s: each failure burns its full deadline.
+
+      Measured cost of this change itself, in clean worktrees: baseline **1158 passed in
+      4.69s**, HEAD **1213 passed in 8.56s**, from `ui::driver` (0.20s → 7.67s) and
+      `ui::view` (0.40s → 6.13s) — the totality cross product and the every-cell hit-test
+      sweep. Real, and worth knowing, but not the failure's cause: skipping both of those
+      tests made the failing runs *worse*, not better.
+
+      A developer seeing this locally can exclude `target/` from Spotlight
+      (`touch target/.metadata_never_index`, or add it in System Settings → Spotlight →
+      Privacy). CI is unaffected: GitHub runners index nothing.
 
       **This is a correction to a claim made twice during implementation.** Groups 1 and 6
       recorded these failures as the pre-existing flake this file's own header describes. That
