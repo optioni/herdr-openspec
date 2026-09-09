@@ -65,8 +65,11 @@ list selection at the list route or scroll the detail content at the detail
 route, `/` to filter (where printable keys type instead of commanding and
 only `Ctrl-C` still quits), `Enter`/`Esc` to move between the list and detail
 routes outside filter mode — and a 100-column breakpoint deciding a one- or
-two-region body. The list region now fills with real rows — active changes,
-a separator, then archived ones, with selection, scrolling, and a `/` filter
+two-region body. The list region now fills with real rows under two foldable
+section headers, `active` then `archived`, each carrying a glyph, a label and
+an honest count, with `Space` toggling the section the cursor is on or in and
+archived starting collapsed — with selection, scrolling, and a `/` filter that
+forces every section open for as long as the query is non-empty
 — and the detail region now shows the selected change's own header (name,
 schema, progress), an artifact tab bar built from the schema's declared
 order and switched with `1`–`9`/`[`/`]`, and that tab's content, read

@@ -180,8 +180,15 @@ and no view renders the second.
 **Archived changes.** Directories under `openspec/changes/archive/` named
 `YYYY-MM-DD-<name>`. Strip the date prefix; entries are ordered dated-newest-
 first, with same-date entries broken by name descending, and every undated
-entry ordered after all dated ones, among itself by name descending; show the
-five most recent (`archived_count` in plugin configuration). Archived changes
+entry ordered after all dated ones, among itself by name descending; the whole
+archive is enumerated, never truncated. `ChangeSet::archived_total` carries its
+true size so a collapsed archived section can say how many changes are behind
+it, and `changes::ArchivedScope` decides how much work that costs: under
+`Names` the tier is enumerated and counted but no `Change` is built and no file
+beneath an archived change is opened, under `Full` every archived change is
+resolved. A collapsed section therefore costs one `read_dir` and a sort, not
+merely no rows. (`archived_count` in plugin configuration is accepted and
+parsed but has no effect on any of this.) Archived changes
 are permanently file-sourced — the CLI has no way to address one — so this
 ordering is the plugin's own rather than copied from a CLI default.
 
@@ -225,7 +232,10 @@ the first usable candidate and probing no further:
    the same one `herdr plugin config-dir herdr-openspec` reports for a human,
    and is also the fallback path the plugin computes for itself when run
    outside a Herdr-started process. `config.toml` also holds `agent_kind` and
-   `archived_count`. The agent-name mapping lives separately, under
+   `archived_count` — the latter still parsed, still defaulting to `5`, and
+   still reporting a malformed value on `Config::problems`, but **inert**: it
+   limits nothing that is rendered, since the archived section's fold replaced
+   the cap it used to impose. The agent-name mapping lives separately, under
    `HERDR_PLUGIN_STATE_DIR` — see Herdr integration → Attributing an agent —
    because the plugin writes it and must not write into the directory the
    user hand-edits
@@ -366,19 +376,45 @@ that breaks the terminal it did not guess wrong for, so the pane makes none.
 
 ### List view
 
-One row per active change, then a separator, then the archived changes
-(`archived_count` in plugin configuration, five by default) — the real
-rendering against the wide layout's 38-column list-region interior
+Two foldable sections — `active`, then `archived` — each a selectable header
+row carrying a fold glyph, a label, and a count, with that section's change
+rows beneath it when it is open. **Archived starts collapsed and active starts
+expanded**, and `Space` toggles the section the cursor is on or in. Here is the
+real rendering against the wide layout's 38-column list-region interior
 (`Length(40)` less two border columns; the narrow layout's 60-column frame
-leaves 58), a `2fa-support` row carrying `w` shown for scale:
+leaves 58), in the state a pane opens in — a `2fa-support` row carrying `w`
+shown for scale, and twenty-eight archived changes behind the fold:
 
 ```
+  v active (3)
 > 2fa-support                  w [4/9]
   fix-empty-basket               [7/7]
   migrate-ai-sdk-v7                [-]
-  -- archived ------------------------
+  > archived (28)
+```
+
+`Space` on that last row expands it, and every archived change is shown — the
+count is the honest whole, not a capped one:
+
+```
+  v active (3)
+> 2fa-support                  w [4/9]
+  fix-empty-basket               [7/7]
+  migrate-ai-sdk-v7                [-]
+  v archived (28)
   2026-08-14 add-auth            [7/7]
 ```
+
+A section header is `[marker][space][glyph][space][label][space][(count)]`,
+padded or truncated to the interior width like every other row; its glyph is
+`v` when open and `>` when collapsed, so a *selected* collapsed header draws
+both, `> > archived (28)`. A section whose count is zero emits no header at
+all. The count is the section's resolved entries when the tier is resolved and
+`archived_total` when it is not, and under a `/` query it is the number of
+**matches**, because a query forces every section open — a header reading
+`(28)` above three rows would be a worse lie than the cap this replaced. A
+collapsed section's changes are not rows, are not addressable, and do not count
+toward `RowKind::Item { index }`, which indexes the *visible* list.
 
 Each row is a selection marker (`>` for the selected change, a space
 otherwise), a space, a name field, a space, and a progress cell right-aligned
@@ -487,6 +523,7 @@ agent editing `tasks.md` in another pane.
 | `Esc` | Dismiss one layer: filter mode with its query when active, else a non-empty query alone, else back to list, else nothing |
 | `1`–`9`, `[`, `]` | Switch artifact tab, at **both** routes — the wide layout draws the detail region at the list route too, so a tab press there is immediately visible (`detail-view`). `0` is inert: tab addressing is 1-based. While filtering, all of them type themselves into the query like any other printable key |
 | `/` | Start filter mode from either route, moving to the list: printable keys type into the query, `Backspace` deletes, `Enter` accepts, `Esc` cancels, and `Ctrl-C` still quits |
+| `Space` | Toggle the section the cursor is on or in, moving the cursor to that section's header. Inert over an empty visible list. Opening an archived section that is not yet resolved requests the refresh that resolves it; a resolved one costs no further cycle. While filtering, `Space` types itself into the query like every other printable key |
 | `r` | Force a full refresh: re-read every change from files, and re-ask the CLI about every one. While filtering, `r` types itself into the query instead, like every other printable key |
 | `a` | Launch an agent with `/opsx:apply`. Inert — no call, no problem — with no change selected; refused with a reason when the derived name is already running for this change (see Launch flow, Degraded states) |
 | `c` | Launch an agent with `/opsx:continue`, on the same terms as `a` |

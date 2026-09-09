@@ -83,7 +83,7 @@ back to `$HOME/.config/herdr/plugins/config/herdr-openspec`.
 |---|---|---|
 | `openspec_bin` | auto-detected | Path to the `openspec` binary |
 | `agent_kind` | `claude` | Herdr agent kind launched by `a` / `c` / `s`; does not affect `g`, which focuses whatever agent is already attributed regardless of kind |
-| `archived_count` | `5` | Archived changes listed below the separator |
+| `archived_count` | `5` | **Accepted and parsed, but has no effect on the list.** The archived section folds instead — `Space` toggles it, and an open one shows the whole archive. A malformed value is still reported as a problem row; the key is kept so no existing `config.toml` becomes invalid |
 
 The OpenSpec CLI is optional. When it is present the dashboard uses it as the
 authority on schemas, artifacts, and progress; when it is absent, or when it
