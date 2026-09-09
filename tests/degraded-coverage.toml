@@ -73,7 +73,7 @@ tier = "view"
 proof = ["a_missing_artifact_still_shows_its_tab_and_reads_no_content_yet"]
 verdict = "confirmed"
 why = "the detail region's No content yet state, rendered through render_at"
-covers = ["src/ui/detail.rs:230-237"]
+covers = ["src/ui/detail.rs:265-272"]
 
 [[row]]
 condition = "An artifact file exists and cannot be read (permission error, I/O error)"
@@ -81,7 +81,7 @@ tier = "view"
 proof = ["a_read_failure_is_named_above_the_content_at_both_widths"]
 verdict = "confirmed"
 why = "the detail region's leading problem line, rendered through render_at"
-covers = ["src/ui/detail.rs:210-216"]
+covers = ["src/ui/detail.rs:245-251"]
 
 [[row]]
 condition = "No change is selected (an empty visible list, or a `/` filter matching none)"
@@ -89,7 +89,7 @@ tier = "view"
 proof = ["an_empty_visible_list_leaves_the_whole_detail_interior_blank"]
 verdict = "confirmed"
 why = "the whole detail interior stays blank, rendered through render_at"
-covers = ["src/ui/view.rs:56-58"]
+covers = ["src/ui/view.rs:55-57"]
 
 [[row]]
 condition = "Markdown source holds a construct the parser does not model (a footnote, a task-list item), on a tab **other** than the tracked-tasks one"
@@ -113,7 +113,7 @@ tier = "view"
 proof = ["missing_tasks_artifact_no_content_yet"]
 verdict = "confirmed"
 why = "the header's counted pair beside the tab's own No content yet, rendered through render_at"
-covers = ["src/ui/detail.rs:218-223", "src/ui/detail.rs:230-237"]
+covers = ["src/ui/detail.rs:253-258", "src/ui/detail.rs:265-272"]
 
 [[row]]
 condition = "`openspec/changes/` or its `archive/` exists and cannot be read"
@@ -153,7 +153,7 @@ tier = "view"
 proof = ["an_unreachable_socket_renders_the_agentless_pane"]
 verdict = "spec-corrected"
 why = "the pane renders identically whether AgentSnapshot::problem is Some or None, via render_at"
-covers = ["src/ui/app.rs:641-654"]
+covers = ["src/ui/app.rs:721-734"]
 
 [[row]]
 condition = "A launch's `pane split` call fails"
@@ -384,7 +384,15 @@ tier = "unit"
 proof = ["prefers_the_workspace_cwd_and_falls_back_when_there_is_none", "a_herdr_context_with_no_workspace_cwd_is_the_fallback_case_not_a_failure"]
 verdict = "confirmed"
 why = "startup_dir's own unit tests drive both arms of the fallback decision directly"
-covers = ["src/ui/mod.rs:343-348"]
+covers = ["src/ui/mod.rs:360-365"]
+
+[[row]]
+condition = "The terminal refuses mouse capture (`enable_mouse` fails)"
+tier = "outer"
+proof = ["a_refused_capture_is_named_last", "a_successful_capture_adds_no_row"]
+verdict = "confirmed"
+why = "mouse-input: run_wired is driven with Startup::mouse_problem set and with it None; the first proves the reason lands as refresh.startup's LAST entry, below the binary probe's own, and renders as a `!`-marked row above the change rows while the loop runs normally; the second proves a successful capture adds no entry and leaves the frame unchanged"
+covers = ["src/ui/mod.rs:307-309", "src/ui/terminal.rs:75-75", "src/ui/terminal.rs:83-85"]
 
 [[row]]
 condition = "A change is archived between the worker's `list --json` call and its file walk"

@@ -521,19 +521,60 @@ Classified operational, not behavior: group 9 writes the passages these tests bi
 RED between writing the test and implementing it could only be manufactured with a stub —
 which the schema forbids. The evidence is a negative control instead.
 
-- [ ] 10.1 CHECK: Write `tests/doc_contract.rs::mouse_bindings_match_spec_md` and
+- [x] 10.1 CHECK: Write `tests/doc_contract.rs::mouse_bindings_match_spec_md` and
       `::terminal_seam_names_match_the_gate`, then prove each can fail: in a scratch copy of
       the tree, delete `SPEC.md` → Keys' mouse table and show the first exits non-zero
       naming the absent table; restore it and show it goes quiet. Repeat by removing
       `DisableMouseCapture` from `AGENTS.md`'s confined list for the second. Record both
       halves' exit statuses in this file.
-- [ ] 10.2 CHANGE: Land both tests, reading `SPEC.md`, `AGENTS.md`,
+      **Run, in a scratch copy of the tree (`src tests scripts SPEC.md AGENTS.md openspec` and
+      the manifests), `CARGO_TARGET_DIR` pointed at the real `target/`:**
+      - `mouse_bindings_match_spec_md`: with `SPEC.md` → Keys' mouse table deleted →
+        **FAILED**, exit non-zero, naming the absent table:
+        `SPEC.md -> Keys holds no mouse table (no \`| Gesture | Action |\` header row)`.
+        `SPEC.md` restored → **1 passed**, exit 0.
+      - `terminal_seam_names_match_the_gate`: with `DisableMouseCapture` removed from
+        `AGENTS.md`'s confined list → **FAILED**, exit non-zero, printing both sides —
+        `AGENTS.md names {…5 names…} … while noraw-grep.sh's RAW_RE searches for {…6 names…}`.
+        `AGENTS.md` restored → **1 passed**, exit 0.
+      Four parser controls are checked in beside them, so neither extraction can rot into a
+      vacuous one: `documented_mouse_actions_fails_on_a_missing_table` (an absent table, an
+      absent section, and a table naming no variant are each an `Err`),
+      `mouse_action_body_is_cut_from_the_production_slice` (the cut stops at the function's
+      own closing brace and never reaches the inline test module, which names every `Action`
+      variant the crate has), `gate_raw_names_parses_and_fails_loudly`, and
+      `documented_seam_names_takes_identifiers_only` (a hyphenated change name in the same
+      parenthetical is not an identifier and is not taken).
+- [x] 10.2 CHANGE: Land both tests, reading `SPEC.md`, `AGENTS.md`,
       `scripts/gates/noraw-grep.sh`, and `src/ui/driver.rs` as the second sites.
-- [ ] 10.3 CHANGE: Add the refused-capture row to `tests/degraded-coverage.toml`, bound to
+- [x] 10.3 CHANGE: Add the refused-capture row to `tests/degraded-coverage.toml`, bound to
       `a_refused_capture_is_named_last`. Prove the binding is real the same way: reword the
       row's `condition` and show `cargo test --test degraded_coverage` fails.
-- [ ] 10.4 VERIFY: `cargo test --test doc_contract --test degraded_coverage` exits 0 — no
+      **Run:** the row is bound to **two** proofs, not one —
+      `a_refused_capture_is_named_last` and `a_successful_capture_adds_no_row` — since the
+      `SPEC.md` row states both the position of the reason and that a successful capture
+      adds nothing. Negative control, in a scratch copy: `refuses` reworded to `declines` in
+      `tests/degraded-coverage.toml` only → **8 of 10 failed**, the first naming
+      `SPEC.md row "The terminal refuses mouse capture (\`enable_mouse\` fails)" has no
+      tests/degraded-coverage.toml [[row]] entry`; restored → **10 passed**, 1 ignored,
+      exit 0.
+      **Seven pre-existing `covers` ranges had drifted and were repaired.** The test checks
+      that each range holds a line of code, and this change's own edits shifted line numbers
+      in five files. Rather than repair only the one range the test happened to report
+      first, every entry was re-derived mechanically: for each `file:a-b`, the exact text at
+      `baa22c7:file` lines `a..b` was located in the current file, and the range rewritten
+      to where that same block now sits — `src/ui/detail.rs:210-216`→`245-251`,
+      `218-223`→`253-258`, `230-237`→`265-272` (two sites), `src/ui/view.rs:56-58`→`55-57`,
+      `src/ui/app.rs:641-654`→`721-734`, and `src/ui/mod.rs:343-348`→`360-365`. Every one
+      still covers the same code it was written for, not merely *some* code. This is a
+      standing hazard the row-level check cannot see: a range that drifts onto unrelated
+      code passes it.
+- [x] 10.4 VERIFY: `cargo test --test doc_contract --test degraded_coverage` exits 0 — no
       regressions.
+      **Run:** `doc_contract` → **61 passed**, 0 failed (55 before, plus the two bindings and
+      their four parser controls). `degraded_coverage` → **10 passed**, 0 failed, 1 ignored
+      (unchanged count; the new row joins the existing table-driven test rather than adding
+      one).
 
 ## 11. Acceptance Test — Outer Loop GREEN
 <!-- kind: behavior -->

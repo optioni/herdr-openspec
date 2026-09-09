@@ -318,8 +318,8 @@ unreachable and the tests become integration tests by accident.
   search also names). `src/ui/terminal.rs`
   is the only file in the crate permitted to name a crossterm terminal-mode function
   (`enable_raw_mode`, `disable_raw_mode`, `EnterAlternateScreen`,
-  `LeaveAlternateScreen`, `EnableMouseCapture`, and `DisableMouseCapture` —
-  `mouse-input` grew the confined set from four names to six) — checked the same
+  `LeaveAlternateScreen`, `EnableMouseCapture`, `DisableMouseCapture`) — six names
+  since `mouse-input` grew the set, four before it — checked the same
   tree-wide-grep-with-a-positive-control way as the subprocess seam above, `tests/`
   included, and with a control that is **per name** rather than one-of-any, since
   `enable_raw_mode` alone satisfies the latter and would cover the capture pair

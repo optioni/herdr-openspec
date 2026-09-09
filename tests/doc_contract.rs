@@ -1828,3 +1828,276 @@ fn worker_threads_match_sources() {
          have a production slice naming both thread::spawn and mpsc: {counted:?}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// `mouse-input`: the documented mouse bindings, and the documented confined
+// terminal-seam names.
+// ---------------------------------------------------------------------------
+
+/// Every backticked `Action::<Variant>` named in `SPEC.md` -> Keys' mouse table,
+/// as the bare variant names.
+///
+/// The table is located by its own header row, `| Gesture | Action |`, inside the
+/// `### Keys` section — never by position, and never by scanning the whole
+/// document, whose key table names no `Action` at all. `Err` names what was
+/// missing, so a deleted table fails loudly rather than comparing an empty set
+/// against an empty set and passing vacuously.
+///
+/// The extraction rule is stated in
+/// `openspec/changes/mouse-input/specs/mouse-input/spec.md`: **each row carries
+/// its `Action` variant in backticks**. A row that names none contributes
+/// nothing, which is why the header row and the separator row are harmless.
+fn documented_mouse_actions(spec_md: &str) -> Result<BTreeSet<String>, String> {
+    let keys = section(spec_md, "### Keys")?;
+    let start = keys.find("| Gesture | Action |").ok_or_else(|| {
+        "SPEC.md -> Keys holds no mouse table (no `| Gesture | Action |` header row)".to_string()
+    })?;
+    let table = &keys[start..];
+    let mut names = BTreeSet::new();
+    let mut rows = 0usize;
+    for line in table.lines() {
+        if !line.starts_with('|') {
+            break;
+        }
+        rows += 1;
+        for found in backticked_action_variants(line) {
+            names.insert(found);
+        }
+    }
+    if rows < 3 {
+        return Err(format!(
+            "SPEC.md -> Keys' mouse table has {rows} row(s) - a header, a separator, and at \
+             least one binding are the minimum"
+        ));
+    }
+    if names.is_empty() {
+        return Err(
+            "SPEC.md -> Keys' mouse table names no `Action::` variant in backticks - the \
+             extraction rule this check depends on is not being followed"
+                .to_string(),
+        );
+    }
+    Ok(names)
+}
+
+/// Every `Action::<Variant>` named in `text`, as the bare variant names. Used on
+/// one markdown table row (where the names are backticked, and the backticks
+/// simply fall outside the match) and on `mouse_action`'s own body alike.
+fn backticked_action_variants(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = text;
+    while let Some(idx) = rest.find("Action::") {
+        rest = &rest[idx + "Action::".len()..];
+        let end = rest
+            .find(|c: char| !c.is_ascii_alphanumeric() && c != '_')
+            .unwrap_or(rest.len());
+        if end > 0 {
+            out.push(rest[..end].to_string());
+        }
+        rest = &rest[end..];
+    }
+    out
+}
+
+/// `mouse_action`'s own body, cut from `src/ui/driver.rs`'s **production slice**:
+/// from the line beginning `pub fn mouse_action(` up to and including the next
+/// line that is exactly `}` at column zero.
+///
+/// The production slice matters: the file's inline `#[cfg(test)]` module names
+/// every `Action` variant this crate has, so a whole-file scan would compare the
+/// documented set against the enum rather than against what the resolver
+/// produces, and would pass on a resolver with swapped arms.
+fn mouse_action_body(driver_rs: &str) -> Result<&str, String> {
+    let prod = production_slice(driver_rs);
+    let mut offset = 0usize;
+    let mut start = None;
+    for line in prod.lines() {
+        if line.starts_with("pub fn mouse_action(") {
+            start = Some(offset);
+            break;
+        }
+        offset += line.len() + 1;
+    }
+    let start = start.ok_or_else(|| {
+        "src/ui/driver.rs's production slice defines no `pub fn mouse_action(`".to_string()
+    })?;
+    let body = &prod[start..];
+    // Up to and including the next line that is exactly `}` at column zero.
+    let mut end = None;
+    let mut at = 0usize;
+    for line in body.lines() {
+        if at > 0 && line == "}" {
+            end = Some(at);
+            break;
+        }
+        at += line.len() + 1;
+    }
+    let end = end
+        .ok_or_else(|| "`pub fn mouse_action(` has no closing brace at column zero".to_string())?;
+    Ok(&body[..end])
+}
+
+/// The six names `scripts/gates/noraw-grep.sh`'s `RAW_RE` searches for.
+fn gate_raw_names(script: &str) -> Result<BTreeSet<String>, String> {
+    let line = script
+        .lines()
+        .find(|l| l.starts_with("RAW_RE="))
+        .ok_or_else(|| "scripts/gates/noraw-grep.sh defines no RAW_RE".to_string())?;
+    let open = line.find('\'').ok_or_else(|| {
+        "scripts/gates/noraw-grep.sh's RAW_RE is not a single-quoted literal".to_string()
+    })?;
+    let rest = &line[open + 1..];
+    let close = rest
+        .find('\'')
+        .ok_or_else(|| "scripts/gates/noraw-grep.sh's RAW_RE is unterminated".to_string())?;
+    Ok(rest[..close]
+        .split('|')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect())
+}
+
+/// The confined terminal-seam function names `AGENTS.md` claims, read from the
+/// parenthetical that immediately follows its own marker sentence.
+///
+/// Only backticked **identifiers** are taken, so a change name like
+/// `mouse-input` mentioned nearby could never be read as a function name.
+fn documented_seam_names(agents_md: &str) -> Result<BTreeSet<String>, String> {
+    const MARKER: &str = "permitted to name a crossterm terminal-mode function";
+    let idx = agents_md
+        .find(MARKER)
+        .ok_or_else(|| format!("AGENTS.md holds no {MARKER:?} sentence"))?;
+    let rest = &agents_md[idx + MARKER.len()..];
+    let open = rest
+        .find('(')
+        .ok_or_else(|| "AGENTS.md's terminal-seam rule names no parenthesised list".to_string())?;
+    let close = rest[open..]
+        .find(')')
+        .ok_or_else(|| "AGENTS.md's terminal-seam parenthetical is unterminated".to_string())?;
+    let list = &rest[open + 1..open + close];
+    let names: BTreeSet<String> = list
+        .split('`')
+        .map(str::trim)
+        .filter(|s| {
+            !s.is_empty()
+                && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+                && s.chars().next().is_some_and(|c| c.is_ascii_alphabetic())
+        })
+        .map(str::to_string)
+        .collect();
+    if names.is_empty() {
+        return Err(
+            "AGENTS.md's terminal-seam parenthetical names no backticked function".to_string(),
+        );
+    }
+    Ok(names)
+}
+
+#[test]
+fn mouse_bindings_match_spec_md() {
+    let spec_md = read_doc(&manifest_dir().join("SPEC.md")).expect("read SPEC.md");
+    let driver = read_doc(&manifest_dir().join("src/ui/driver.rs")).expect("read src/ui/driver.rs");
+
+    let documented = documented_mouse_actions(&spec_md).expect("SPEC.md -> Keys' mouse table");
+    let body = mouse_action_body(&driver).expect("mouse_action's own body");
+    let implemented: BTreeSet<String> = backticked_action_variants(body).into_iter().collect();
+
+    assert_eq!(
+        documented, implemented,
+        "SPEC.md -> Keys' mouse table documents {documented:?} while \
+         ui::driver::mouse_action produces {implemented:?}"
+    );
+}
+
+#[test]
+fn terminal_seam_names_match_the_gate() {
+    let agents_md = read_doc(&manifest_dir().join("AGENTS.md")).expect("read AGENTS.md");
+    let script = read_doc(&manifest_dir().join("scripts/gates/noraw-grep.sh"))
+        .expect("read scripts/gates/noraw-grep.sh");
+
+    let documented = documented_seam_names(&agents_md).expect("AGENTS.md's confined set");
+    let searched = gate_raw_names(&script).expect("noraw-grep.sh's RAW_RE");
+
+    let expected: BTreeSet<String> = [
+        "enable_raw_mode",
+        "disable_raw_mode",
+        "EnterAlternateScreen",
+        "LeaveAlternateScreen",
+        "EnableMouseCapture",
+        "DisableMouseCapture",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect();
+
+    assert_eq!(
+        documented, searched,
+        "AGENTS.md names {documented:?} as the confined terminal-seam set while \
+         noraw-grep.sh's RAW_RE searches for {searched:?}"
+    );
+    assert_eq!(
+        documented, expected,
+        "the confined set is the six names terminal-lifecycle states"
+    );
+}
+
+#[test]
+fn documented_mouse_actions_fails_on_a_missing_table() {
+    // The parser control: a `### Keys` section with no mouse table must be an
+    // `Err` naming the absent table, never an empty set that compares equal to
+    // an empty set.
+    let no_table = "### Keys\n\n| Key | Action |\n|---|---|\n| `q` | Quit |\n\n### Next\n";
+    let err = documented_mouse_actions(no_table).expect_err("no mouse table is an error");
+    assert!(err.contains("no mouse table"), "{err}");
+
+    let no_section = "## Overview\n\nnothing here\n";
+    assert!(documented_mouse_actions(no_section).is_err());
+
+    // A table whose rows carry no backticked variant is an error too, so a
+    // reworded table cannot silently empty the documented set.
+    let unnamed = "### Keys\n\n| Gesture | Action |\n|---|---|\n| Wheel down | scrolls |\n";
+    let err = documented_mouse_actions(unnamed).expect_err("no variant named is an error");
+    assert!(err.contains("names no `Action::` variant"), "{err}");
+}
+
+#[test]
+fn mouse_action_body_is_cut_from_the_production_slice() {
+    // The parser control for the other side: the cut stops at the function's own
+    // closing brace, and never reaches the inline test module — which names
+    // every `Action` variant the crate has.
+    let src = "pub fn mouse_action(a: u8) -> Action {\n    Action::Ignore\n}\n\n\
+               pub fn other() {\n    Action::Quit\n}\n\n\
+               #[cfg(test)]\nmod tests {\n    fn t() { Action::Refresh; }\n}\n";
+    let body = mouse_action_body(src).expect("cut the body");
+    let found: BTreeSet<String> = backticked_action_variants(body).into_iter().collect();
+    assert_eq!(found, ["Ignore".to_string()].into_iter().collect());
+
+    assert!(mouse_action_body("fn nothing() {}\n").is_err());
+}
+
+#[test]
+fn gate_raw_names_parses_and_fails_loudly() {
+    let script = "RAW_RE='a|b|c'\n";
+    assert_eq!(
+        gate_raw_names(script).expect("parse"),
+        ["a", "b", "c"].into_iter().map(str::to_string).collect()
+    );
+    assert!(gate_raw_names("# no RAW_RE here\n").is_err());
+}
+
+#[test]
+fn documented_seam_names_takes_identifiers_only() {
+    let text = "`src/ui/terminal.rs` is the only file in the crate \
+                permitted to name a crossterm terminal-mode function\n  \
+                (`enable_raw_mode`, `EnableMouseCapture`) — six names since `mouse-input`\n";
+    let names = documented_seam_names(text).expect("parse");
+    assert_eq!(
+        names,
+        ["enable_raw_mode", "EnableMouseCapture"]
+            .into_iter()
+            .map(str::to_string)
+            .collect(),
+        "a hyphenated change name is not an identifier and is not taken"
+    );
+    assert!(documented_seam_names("nothing here\n").is_err());
+}
