@@ -103,10 +103,10 @@ are whole-change gates by definition and cannot precede the work they gate.
 ## 7. Gate floors
 <!-- kind: operational -->
 
-- [ ] 7.1 CHECK: Re-run `SCAN_MIN=135 TYPES='Dashboard Filter Detail Sections' /bin/sh scripts/gates/nodefault-ui.sh` and record the span count it reports. At HEAD the same leg without `Sections` reports 150 spans and exits 0 (check B).
-- [ ] 7.2 CHANGE: Add `Sections` to the first `NODEFAULT-UI` line's type set in the `Makefile` and raise that line's `SCAN_MIN` to the newly measured floor, leaving the other four legs' floors untouched.
-- [ ] 7.3 CHANGE: Write `notes/gate-floors.md` in this change directory recording the command, the measured span count, and the floor chosen — then `git add` it. `OPENSPEC-UNTOUCHED` fails on any untracked file under `openspec/` (check C), so an unstaged note turns 7.4 red for a reason unrelated to the floor.
-- [ ] 7.4 VERIFY: `make gates` — every gate OK. Negative control: raise the same line's `SCAN_MIN` above the measured count, confirm it prints `the scan is vacuous` and exits 1, restore it, and confirm the gate goes quiet again.
+- [x] 7.1 CHECK: Re-run `SCAN_MIN=135 TYPES='Dashboard Filter Detail Sections' /bin/sh scripts/gates/nodefault-ui.sh` and record the span count it reports. At HEAD the same leg without `Sections` reports 150 spans and exits 0 (check B).
+- [x] 7.2 CHANGE: Add `Sections` to the first `NODEFAULT-UI` line's type set in the `Makefile` and raise that line's `SCAN_MIN` to the newly measured floor, leaving the other four legs' floors untouched.
+- [x] 7.3 CHANGE: Write `notes/gate-floors.md` in this change directory recording the command, the measured span count, and the floor chosen — then `git add` it. `OPENSPEC-UNTOUCHED` fails on any untracked file under `openspec/` (check C), so an unstaged note turns 7.4 red for a reason unrelated to the floor.
+- [x] 7.4 VERIFY: `make gates` — every gate OK. Negative control: raise the same line's `SCAN_MIN` above the measured count, confirm it prints `the scan is vacuous` and exits 1, restore it, and confirm the gate goes quiet again.
 
 ## 8. Change Review
 <!-- kind: operational -->

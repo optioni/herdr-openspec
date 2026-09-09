@@ -42,7 +42,7 @@ gates:
 	/bin/sh scripts/gates/mdwidths.sh
 	/bin/sh scripts/gates/noblock.sh
 	/bin/sh scripts/gates/nocli-shell.sh
-	SCAN_MIN=135 /bin/sh scripts/gates/nodefault-ui.sh
+	SCAN_MIN=206 TYPES='Dashboard Filter Detail Sections' /bin/sh scripts/gates/nodefault-ui.sh
 	SCAN_MIN=53 TYPES='Refresh' /bin/sh scripts/gates/nodefault-ui.sh
 	SCAN_MIN=81 TYPES='Launch' /bin/sh scripts/gates/nodefault-ui.sh
 	SCAN_MIN=111 HOMEFILE=src/agents.rs TYPES='Agent Listed AgentSnapshot Attribution' /bin/sh scripts/gates/nodefault-ui.sh
