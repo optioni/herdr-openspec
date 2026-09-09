@@ -579,9 +579,29 @@ which the schema forbids. The evidence is a negative control instead.
 ## 11. Acceptance Test — Outer Loop GREEN
 <!-- kind: behavior -->
 
-- [ ] 11.1 VERIFY: `cargo test --lib driver::tests::a_mouse_event` passes end to end.
-- [ ] 11.2 REFACTOR: Clean up the scripted source's mouse constructor and the replaced
+- [x] 11.1 VERIFY: `cargo test --lib driver::tests::a_mouse_event` passes end to end.
+      **Run:** **1 passed**, 0 failed. The same test that was RED at group 0 — unmodified
+      since — now passes: a left press on the second change row, read from the scripted
+      source, reaches `mouse_action` through `run_loop` and moves the selection, while
+      `action_for` still maps the identical event to `Ignore` under both filter modes.
+- [x] 11.2 REFACTOR: Clean up the scripted source's mouse constructor and the replaced
       collaborators if warranted, or record that none was needed.
+      **One extraction was warranted and made; nothing further was.** The acceptance test's
+      own setup became `driver::tests::drive_one_event(event)`, which builds the dashboard,
+      the `TestBackend`, the `Script`, and the four inert collaborators, drives `run_loop`
+      with `event` then `q`, and returns the last frame's buffer — written that way at group
+      0 precisely so task 0.3's harness control could substitute a key for the press with
+      nothing else changed.
+      `testutil::mouse` needs no cleanup: it is four lines beside `press`, takes the kind and
+      a coordinate pair, and fixes `modifiers` to `NONE` on purpose — the tests that pin the
+      modifier rule (`mouse_action_is_total`) construct their own `MouseEvent` rather than
+      reaching for a second helper, so the constructor never grew a parameter nothing else
+      uses.
+      The replaced collaborators were left alone deliberately: group 6's three loop-driving
+      tests each build their own `watch::none()`/`refresh::none()`/`agents::none()`/
+      `launch::none()` quartet rather than sharing one, because two of them need a different
+      dashboard and a different reader, and folding the quartet into a helper would leave a
+      builder with more parameters than the four lines it replaced.
 
 ## 12. Change Review
 <!-- kind: operational -->
