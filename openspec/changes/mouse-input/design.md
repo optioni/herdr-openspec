@@ -105,8 +105,12 @@ no wire format, no pagination, and no streaming.
   exhaustively in `Dashboard::apply` and in `no_action_mutates_changes`' hand-written
   array, both of which must enumerate the same set; the compiler enforces the first and the
   test's own comment demands the second.
-- **`Startup` — breaking, five construction sites.** One new field, `mouse_problem:
-  Option<String>`. `Startup` implements no `Default` and is constructed with every field
+- **`Startup` — breaking, six construction sites.** One new field, `mouse_problem:
+  Option<String>`. Six, not the eleven a bare `grep -n 'Startup {' src/ui/mod.rs` reports:
+  five of those eleven hits are `ProbedStartup {`, a different, test-local struct declared at
+  `src/ui/mod.rs:2755`. The real sites are lines 386 (the one production site, in `run`),
+  2724, 2776, 3065, 3690, and 3840 — `grep -n '[^d]Startup {' src/ui/mod.rs | grep -v Probed`
+  reports exactly those six. `Startup` implements no `Default` and is constructed with every field
   named, so every site fails to compile until updated — which is the point.
 - **`Zone`, `row_at`, `tab_at`, `mouse_action` — additive.** New surface, no existing
   caller.
@@ -162,6 +166,15 @@ This repository's tiers, and the command that runs each:
   `tests/gate_controls.rs`. `cargo test --test doc_contract` and friends.
 - **Gates** — `make gates`.
 
+**Every filtered command in the matrix below must run more than zero tests.** Measured:
+`cargo test --lib the_full_key_table` at HEAD prints `running 0 tests … 1158 filtered out`
+and **exits 0**. A row whose filter matches nothing is therefore a green row that proves
+nothing, and this plan had three of them before review. Every command below either names an
+existing test that the implementer must confirm still matches, or names a test a RED task
+writes; a task that runs one and sees `0 passed` must treat that as a failure, not a pass.
+The whole-suite runs in group 13 are what actually gate the change; the filters are for
+iteration speed.
+
 **This change takes the outer-loop acceptance test.** Two behaviours are unreachable from
 any unit: that a mouse event read from the source reaches `mouse_action` at all (the defect
 `live-refresh` shipped, in its own shape — a resolver that is never called), and that the
@@ -184,7 +197,7 @@ through `run_loop` with a scripted source.
 | The other buttons and the non-press kinds are inert | `driver::tests::the_other_buttons_are_inert` — asserts the launcher double received nothing | Unit | replaced: launcher | `cargo test --lib the_other_buttons_are_inert` |
 | A click selects while the filter is open | `driver::tests::a_click_acts_while_filtering` | Unit | none | `cargo test --lib acts_while_filtering` |
 | The wheel scrolls while the filter is open | `driver::tests::the_wheel_acts_while_filtering` | Unit | none | `cargo test --lib the_wheel_acts_while_filtering` |
-| The key table is unchanged | `app::tests::the_full_key_table_is_unchanged` — the table `list-sections` asserted, re-run | Unit | none | `cargo test --lib the_full_key_table` |
+| The key table is unchanged | the four tests that carry the table today, passing **unmodified**: `action_for_is_total_over_a_keycode_sweep` (`src/ui/app.rs:1906`), `quit_keys_and_their_near_misses` (`:1701`), `navigation_and_filter_keys_are_distinguished` (`:2120`), `space_maps_to_toggle_section_outside_filter_mode_and_types_inside_it` (`:2672`) | Unit | none | `cargo test --lib app::tests::` |
 | Every mouse action has a key that produces the same effect | `driver::tests::every_mouse_action_has_an_equal_key` — six paired `Dashboard` equalities | Unit | none | `cargo test --lib has_an_equal_key` |
 | The documented bindings match the resolver | `tests/doc_contract.rs::mouse_bindings_match_spec_md` | Contract | real: `SPEC.md`, `src/ui/driver.rs` | `cargo test --test doc_contract mouse_bindings` |
 | The documented confined set matches the gate | `tests/doc_contract.rs::terminal_seam_names_match_the_gate` | Contract | real: `AGENTS.md`, `scripts/gates/noraw-grep.sh` | `cargo test --test doc_contract terminal_seam_names` |
@@ -195,17 +208,17 @@ through `run_loop` with a scripted source.
 | A renamed definition fails in the defining file | `scripts/gates/wired.sh`'s positive control, carried over unchanged | Gate | real: the tree | `make gates` |
 | The real implementation is the only place naming a terminal-mode function | `scripts/gates/noraw-grep.sh`, plus its planted-defect control | Gate | real: the tree | `make gates` |
 | No test constructs the real terminal implementation | `scripts/gates/noraw-grep.sh` leg 2 | Gate | real: the tree | `make gates` |
-| Normal lifetime records the four operations mirrored | `terminal::tests::guard::normal_lifetime_is_enter_enter_leave_disable` — updated to filter the capture pair out | Unit | replaced: `TerminalOps` double | `cargo test --lib normal_lifetime` |
+| Normal lifetime records the four operations mirrored | `terminal::tests::guard::normal_lifetime_is_enter_enter_leave_disable` (`src/ui/terminal.rs:228`) — updated to filter the capture pair out | Unit | replaced: `TerminalOps` double | `cargo test --lib normal_lifetime` |
 | Normal lifetime records all six operations mirrored | `terminal::tests::guard::normal_lifetime_records_all_six` | Unit | replaced: `TerminalOps` double | `cargo test --lib records_all_six` |
-| Raw mode fails and nothing else is attempted | `terminal::tests::guard::raw_mode_failure_attempts_nothing_else` | Unit | replaced: double | `cargo test --lib raw_mode_failure` |
-| The alternate screen fails and raw mode is unwound | `terminal::tests::guard::alternate_failure_unwinds_raw` | Unit | replaced: double | `cargo test --lib alternate_failure` |
+| Raw mode fails and nothing else is attempted | `terminal::tests::guard::enable_raw_failure_attempts_nothing_further` (`src/ui/terminal.rs:245`), extended with the `enable_mouse` assertion | Unit | replaced: double | `cargo test --lib enable_raw_failure` |
+| The alternate screen fails and raw mode is unwound | `terminal::tests::guard::alternate_screen_failure_unwinds_raw_mode` (`src/ui/terminal.rs:254`), extended with the `enable_mouse` assertion | Unit | replaced: double | `cargo test --lib alternate_screen_failure` |
 | Mouse capture fails and the guard is still returned | `terminal::tests::guard::mouse_failure_still_returns_a_guard` | Unit | replaced: double | `cargo test --lib mouse_failure` |
 | Unwinding past the guard still restores | `terminal::tests::guard::unwinding_still_restores` — updated to the six-entry list | Unit | replaced: `TerminalOps` double | `cargo test --lib unwinding_still_restores` |
 | The hook restores before the previous hook runs | `terminal::tests::hook::restore_then_delegates_last` — updated to lead with `disable_mouse` | Unit | replaced: double | `cargo test --lib restore_then` |
 | A panic on a worker thread restores nothing | existing test, asserted **unchanged** at `["previous_hook"]` — the check that capture gained no off-thread exception | Unit | replaced: double | `cargo test --lib worker_thread` |
 | A panic on the render thread still restores | `terminal::tests::hook::render_thread_restores` — updated to lead with `disable_mouse` | Unit | replaced: double | `cargo test --lib render_thread_restores` |
 | The refusal touches no terminal operation | `ui::tests::enter_if_terminal_*` — the `Ok` arm's list becomes three entries; the empty-list assertion is unchanged | Unit | replaced: double | `cargo test --lib enter_if_terminal` |
-| Teardown errors are swallowed rather than panicking in Drop | `terminal::tests::guard::teardown_errors_are_swallowed` | Unit | replaced: double | `cargo test --lib teardown_errors` |
+| Teardown errors are swallowed rather than panicking in Drop | `terminal::tests::guard::teardown_errors_do_not_panic_and_both_are_attempted` (`src/ui/terminal.rs:266`), extended to all three teardown operations | Unit | replaced: double | `cargo test --lib teardown_errors` |
 | A refused capture becomes a leading problem row, below the probe's own | `ui::tests::wiring::a_refused_capture_is_named_last` | Acceptance | replaced: terminal, events, backend, reader, collaborators | `cargo test --lib a_refused_capture` |
 | A successful capture adds no row | `ui::tests::wiring::a_successful_capture_adds_no_row` | Acceptance | replaced: as above | `cargo test --lib adds_no_row` |
 | The zones tile the frame at 120 columns | `layout::tests::zone::the_zones_tile_the_frame` | Unit | none | `cargo test --lib zone::the_zones_tile` |
@@ -355,6 +368,24 @@ leaves `EnableMouseCapture` named nowhere — which would make the `NORAW-GREP` 
 change adds guard a name the crate does not use. *Alternative C:* skip the draw whenever the
 action is `Ignore`. Rejected: it silently rewrites the pinned key scenario above, for no gain
 over the narrow motion rule.
+
+**13. Mouse modifiers are ignored.** `MouseEvent` carries a `modifiers: KeyModifiers`
+field (crossterm 0.29.0 `src/event.rs:777-786`) that nothing in this design reads: a
+`Shift+Down(Left)` resolves exactly as a bare one, and `Ctrl+ScrollDown` exactly as a bare
+wheel. This is deliberate and is the opposite of `action_for`'s rule, which is meticulous
+about modifiers because a modified key is usually a *different* key. A modified click is
+still a click on the same row, and inventing a second meaning for it would make a target
+reachable only by pointer — which the "nothing becomes mouse-only" requirement forbids.
+
+The one case that argued for the opposite is the drag-select escape hatch: a reader holding
+`Shift` (or `Option`) to select text. That override is the **terminal's**, applied before
+the sequence is ever sent — a terminal honouring it forwards no mouse event at all, so
+there is nothing for the resolver to ignore. A terminal that forwarded it instead would
+move the cursor under the reader's selection whether the resolver read the modifier or not,
+since the alternative — refusing every modified press — would break the readers whose
+terminals do intercept it and who therefore never send one. *Alternative:* map any modified
+press or wheel to `Ignore`. Rejected for that reason, and recorded here rather than left as
+an unstated assumption `mouse_action_is_total` would silently pin either way.
 
 **11. Problem and message rows stay unaddressable.** `row_at` reports their `RowKind`
 faithfully — they are what is drawn there — and `mouse_action` is what refuses to act on

@@ -30,9 +30,14 @@ crate, `tests/` included.
   nothing because the file was renamed or gutted fails rather than passing vacuously
 - **AND** the check fails when `src/ui/terminal.rs` is absent, rather than reporting a
   clean tree
-- **AND** the check fails when either capture command is dropped from the searched pattern
-  while `src/ui/terminal.rs` still names it, so the pattern cannot silently stop covering
-  the two operations this change added
+- **AND** the check's positive control is per name, not one-of-any: for **each** of the six
+  it asserts both that the name matches the searched pattern and that
+  `src/ui/terminal.rs` contains it. The one-of-any form this replaces is satisfied by
+  `enable_raw_mode` alone, so it would have covered the two capture commands vacuously
+- **AND** the check therefore fails in **both** directions — when a capture command is
+  dropped from the searched pattern while `src/ui/terminal.rs` still names it, and when it
+  is dropped from `src/ui/terminal.rs` while the pattern still searches for it — with a
+  planted control recorded for each of the two capture names
 
 #### Scenario: No test constructs the real terminal implementation
 

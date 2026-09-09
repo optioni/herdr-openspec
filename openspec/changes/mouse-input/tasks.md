@@ -33,11 +33,16 @@ compile, none of groups 2, 3 or 4 can run its own scoped `cargo test --lib` eith
 the filter selects which tests run, not which crate is built. That is a dependency, not a
 shared gate, and it holds however narrowly each group's command is scoped.
 
-Group 9 (Documentation) is placed **before** group 10 rather than after the review, against
-the schema's usual ordering, because group 10's two `tests/doc_contract.rs` tests read the
-`SPEC.md` and `AGENTS.md` passages group 9 writes. It is not marked `parallel-after: 0` for
-the same reason: 10 depends on it. Groups 11, 12 and 13 are whole-change gates and cannot
-precede the work they gate.
+**Group 9 is marked `parallel-after: 7`.** It writes only `SPEC.md` and `AGENTS.md`; group 8
+writes only `scripts/gates/*.sh` and `tests/gate-controls.toml`; neither needs the other's
+output and neither touches a `.rs` file, so a failure in either stays its own. Both depend
+on group 7, the last group to change behaviour they describe.
+
+Group 9 is also placed **before** group 10 rather than after the review, against the
+schema's usual ordering for a Documentation group, because group 10's two
+`tests/doc_contract.rs` tests read the `SPEC.md` and `AGENTS.md` passages group 9 writes.
+Group 10 is therefore ordered after 9 and carries no marker of its own. Groups 11, 12 and 13
+are whole-change gates and cannot precede the work they gate.
 
 **Planning-time checks, run at `a156f9a`:**
 
@@ -54,7 +59,8 @@ precede the work they gate.
 | I (green + negative control) | `/bin/sh scripts/gates/noraw-grep.sh` | `NORAW OK: 36 files searched, mode functions only in src/ui/terminal.rs, CrosstermOps at 6 sites`, **exit 0** | Negative control run in a scratch copy of `src tests scripts`: `RAW_RE` extended with `\|EnableMouseCapture\|DisableMouseCapture` and `// EnableMouseCapture` appended to `src/ui/app.rs` → `NORAW FAIL: terminal-mode function outside src/ui/terminal.rs: src/ui/app.rs:5295`, **exit 1**; plant removed → **exit 0** again |
 | J (green + negative control) | `/bin/sh scripts/gates/wired.sh` | `WIRED OK: thirteen names present …`, **exit 0** | Leg 2 forbids a branch in `pub fn run()`; group 7 adds a field expression, not a branch. Negative control is already checked in: `cargo test --test gate_controls` plants a real defect per gate script |
 | K (must-change) | `awk '/^pub enum Action \{/{f=1;next} f&&/^\}/{exit} f&&/^    [A-Z]/{n++} END{print n}' src/ui/app.rs` | **18** | Must be `23` after group 5 |
-| L (must-change) | `grep -c 'Startup {' src/ui/mod.rs` | **11** | Every site names every field; all 11 must name `mouse_problem` after group 7 |
+| L (must-change) | `grep -n '[^d]Startup {' src/ui/mod.rs \| grep -v Probed` | **6** sites — 386 (the production one, in `run`), 2724, 2776, 3065, 3690, 3840 | Every site names every field, so all 6 must name `mouse_problem` after group 7. A bare `grep -c 'Startup {'` reports **11**: five are `ProbedStartup {`, a different test-local struct at `:2755`, not construction sites of this type |
+| L2 (green + negative control) | `cargo test --lib the_full_key_table` | `running 0 tests … 1158 filtered out`, **exit 0** | A `cargo test` name filter matching nothing exits 0. Every filtered command in this plan and in design.md's matrix must therefore be checked for `0 passed`, which is a failure, not a pass — three matrix rows named tests that do not exist before review caught them |
 | M (must-change) | `grep -rn 'impl TerminalOps for' src tests` | **3** sites: `src/ui/terminal.rs:85`, `src/ui/terminal.rs:212`, `src/ui/mod.rs:2186` | All 3 must implement the six-method trait after group 1 |
 | N (baseline) | `cargo test --all-features --lib -- --test-threads=1` | **1158 passed**, exit 0 | The suite this change must leave green |
 
@@ -86,7 +92,12 @@ shape. Only `run_loop` can prove otherwise.
       `normal_lifetime_is_enter_enter_leave_disable` (filtering the capture pair out of the
       recorded list, so the four-operation claim survives verbatim). Extend the `Recorder`
       double in `src/ui/terminal.rs` and the one in `src/ui/mod.rs:2186` to the six-method
-      trait. `cargo test --lib terminal::` — expect RED.
+      trait. The four tests updated in place keep their existing names —
+      `normal_lifetime_is_enter_enter_leave_disable` (`src/ui/terminal.rs:228`),
+      `enable_raw_failure_attempts_nothing_further` (`:245`),
+      `alternate_screen_failure_unwinds_raw_mode` (`:254`), and
+      `teardown_errors_do_not_panic_and_both_are_attempted` (`:266`).
+      `cargo test --lib terminal::` — expect RED, and expect more than 0 tests to run.
 - [ ] 1.2 RED: Update the four existing panic-path and refusal tests to the lists the
       `terminal-lifecycle` delta now states — `src/ui/terminal.rs:288` (unwinding),
       `:300` (`restore_then`), `:344` (render-thread `restore_then_if`), and
@@ -241,13 +252,14 @@ shape. Only `run_loop` can prove otherwise.
       come first and the capture reason last, and that the loop still runs.
       `cargo test --lib ui::tests::wiring::a_refused_capture wiring::adds_no_row` — expect RED.
 - [ ] 7.2 GREEN: Add `mouse_problem: Option<String>` to `Startup` and name it at all
-      **11** construction sites (check L). `run_wired` appends it to
+      **6** construction sites (check L) — not the 11 a bare `grep -c 'Startup {'` reports. `run_wired` appends it to
       `dashboard.refresh.startup` after `collaborators.problems`.
 - [ ] 7.3 GREEN: `ui::run` binds the guard and passes `guard.mouse_problem()` as the field's
       value — a field expression, so `pub fn run()` still holds no branch and no loop.
 - [ ] 7.4 CHECK: Contract gate — `Startup` has no `Default` and every site names every
       field. `SCAN_MIN=206 TYPES='Dashboard Filter Detail Sections' /bin/sh scripts/gates/nodefault-ui.sh`
-      exits 0, and `grep -c 'Startup {' src/ui/mod.rs` still reports **11**.
+      exits 0, and `grep -n '[^d]Startup {' src/ui/mod.rs | grep -v Probed` still reports the
+      **6** sites of check L, each naming the new field.
 - [ ] 7.5 CHECK: Persistence gate — no migration, backfill, cache invalidation, or index
       rebuild applies (design.md → Persistence and Rollout). Confirm the plugin's writes are
       still exactly `agent-names.toml`: `/bin/sh scripts/gates/readonly-ui.sh` exits 0.
@@ -262,9 +274,10 @@ shape. Only `run_loop` can prove otherwise.
       (check H).
 - [ ] 8.2 CHANGE: Extend `noraw-grep.sh`'s `RAW_RE` to
       `enable_raw_mode|disable_raw_mode|EnterAlternateScreen|LeaveAlternateScreen|EnableMouseCapture|DisableMouseCapture`,
-      and add a per-name positive control beside the existing one-of-any guard: the run fails
-      unless `src/ui/terminal.rs` names **each** of the six, so the pattern cannot cover the
-      capture pair vacuously.
+      and replace the one-of-any positive control with a per-name one: for each of the six
+      names, the run fails unless the name matches `RAW_RE` **and** appears in
+      `src/ui/terminal.rs`. One-of-any is satisfied by `enable_raw_mode` alone, so it would
+      cover the capture pair vacuously in both directions.
 - [ ] 8.3 CHECK: Confirm leg 1 cannot carry this name. `pub struct Startup<'a>` is at
       `src/ui/mod.rs:94` and the file's only line-anchored `#[cfg(test)]` at `:542`, so the
       struct is inside `code "$MOD"`'s slice: `sed -n '94p;542p' src/ui/mod.rs` shows both.
@@ -272,13 +285,14 @@ shape. Only `run_loop` can prove otherwise.
 - [ ] 8.4 CHANGE: Add a body-scoped **leg 5c** to `wired.sh`, mirroring leg 5: `pub fn run()`'s
       body must name `mouse_problem(` and must not hardcode `mouse_problem: None`. Leg 1's
       thirteen names are unchanged.
-- [ ] 8.5 CHANGE: Add three `[[control]]` entries to `tests/gate-controls.toml`, each a
+- [ ] 8.5 CHANGE: Add four `[[control]]` entries to `tests/gate-controls.toml`, each a
       single exact-substring find/replace, which is all that file's format supports:
       (a) `EnableMouseCapture` planted in `src/ui/list.rs`, expecting `NORAW-GREP`'s
       confinement FAIL; (b) `mouse_problem: guard.mouse_problem(),` → `mouse_problem: None,`
       in `src/ui/mod.rs`, expecting leg 5c's FAIL; (c) `EnableMouseCapture` stripped from
-      `noraw-grep.sh`'s own `RAW_RE`, expecting the new per-name vacuity FAIL from 8.2 — the
-      clause `specs/terminal-lifecycle/spec.md` states and which (a) alone does not prove.
+      `noraw-grep.sh`'s own `RAW_RE`; and (d) `DisableMouseCapture` stripped from
+      `src/ui/terminal.rs`. (c) and (d) are the two directions of the per-name vacuity leg
+      `specs/terminal-lifecycle/spec.md` states, and (a) alone proves neither.
 - [ ] 8.6 VERIFY: `make gates` exits 0 (the change's artifacts must be `git add`ed first —
       `OPENSPEC-UNTOUCHED` fails on any untracked file under `openspec/`), and
       `cargo test --test gate_controls` exits 0 with every planted defect caught, and record
@@ -286,6 +300,7 @@ shape. Only `run_loop` can prove otherwise.
 
 ## 9. Documentation
 <!-- kind: operational -->
+<!-- parallel-after: 7 -->
 
 - [ ] 9.1 CHECK: Read the two `SPEC.md` sections and the two `AGENTS.md` passages these
       tasks rewrite, and confirm what is stale before writing: § Keys describes a
@@ -371,8 +386,10 @@ which the schema forbids. The evidence is a negative control instead.
       `wiring::an_unreachable_scratch_herdr_is_a_standalone_tui` is the pre-existing flake
       recorded at the top of this file; re-run those two with `-- --test-threads=1` to
       confirm before treating it as a regression.
-- [ ] 13.3 VERIFY: Coverage — `make coverage` exits 0 against both floors, the total and the
-      production slice. If it falls short, add tests; never lower or waive a floor.
+- [ ] 13.3 VERIFY: Coverage is the `coverage` sub-command of 13.2's `make check`
+      (`Makefile`: `check: fmt-check lint gates test coverage`), enforced at both floors —
+      the total and the production slice — and is not re-run separately. If it falls short,
+      add tests; never lower or waive a floor.
 - [ ] 13.4 VERIFY: `openspec validate mouse-input --strict` reports the change valid.
 - [ ] 13.5 CHECK: The new `mouse-input` capability needs a written `## Purpose` before it can
       be archived. `openspec archive` writes the placeholder `TBD - created by archiving

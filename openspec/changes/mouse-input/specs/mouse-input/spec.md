@@ -34,8 +34,10 @@ event, through `Dashboard::apply`.
   `ScrollLeft`, and `ScrollRight` — at columns and rows `0`, `1`, `39`, `40`, `59`, `119`,
   and `65535`, against frame areas of `0x0`, `1x1`, `2x2`, `60x20`, and `120x40`, at both
   routes, with a dashboard holding no repository, one holding no changes, and one holding
-  active and archived changes
+  active and archived changes, each under `KeyModifiers::NONE`, `SHIFT`, `CONTROL`, and `ALT`
 - **THEN** every call returns an `Action` and none panics
+- **AND** for every one of those inputs, the action returned under `SHIFT`, `CONTROL`, and
+  `ALT` equals the action returned under `NONE`
 - **AND** no call mutates the dashboard, which is passed by shared reference
 
 ### Requirement: The wheel scrolls the region under the pointer
