@@ -192,14 +192,19 @@ fn render_detail_content(frame: &mut Frame, content: Rect, dashboard: &Dashboard
     if content.width == 0 || content.height == 0 {
         return;
     }
-    let lines = detail::content_lines(
+    let rows = detail::content_lines(
         &dashboard.detail,
         dashboard.selected_change(),
         content.width,
     );
-    let offset = scroll_offset(lines.len(), dashboard.detail.scroll, content.height);
+    // The offset choice by foldability (`layout::viewport` for a foldable
+    // artifact) and the row's `ContentKind` -> `Role` mapping are group 6's
+    // work (design.md -> Decision 2 and Decision 12); this call site still
+    // reads every row's own line exactly as it did when `content_lines`
+    // returned a bare line list.
+    let offset = scroll_offset(rows.len(), dashboard.detail.scroll, content.height);
     let buf = frame.buffer_mut();
-    for (i, line) in lines
+    for (i, row) in rows
         .iter()
         .skip(offset)
         .take(content.height as usize)
@@ -208,7 +213,7 @@ fn render_detail_content(frame: &mut Frame, content: Rect, dashboard: &Dashboard
         let y = content.y + i as u16;
         let mut x = content.x;
         let last_col = content.x + content.width;
-        for segment in &line.segments {
+        for segment in &row.line.segments {
             if x >= last_col {
                 break;
             }
@@ -3734,9 +3739,16 @@ mod tests {
         let want = crate::ui::markdown::lines(&d.detail.sections[0].text, 78);
         let got = crate::ui::detail::content_lines(&d.detail, d.selected_change(), 78);
         assert_eq!(
-            got, want,
+            got.len(),
+            want.len(),
             "content_lines must equal markdown::lines exactly"
         );
+        for (row, line) in got.iter().zip(want.iter()) {
+            assert_eq!(
+                &row.line, line,
+                "content_lines must equal markdown::lines exactly"
+            );
+        }
 
         for width in [120, 60] {
             let buf = render_at(width, 20, &d);

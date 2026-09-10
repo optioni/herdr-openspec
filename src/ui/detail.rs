@@ -202,84 +202,239 @@ pub fn tab_at(
         })
 }
 
-/// The single line list both `ui::view::render` and `Dashboard::normalise_scroll`
-/// derive the detail content from, so the drawn slice and the scroll clamp
-/// can never disagree about how many lines there are: one `"! <problem>"`
-/// line per entry of the selected change's own `problems` (`degraded-states`'
-/// addition — `SPEC.md` rows naming a reason on `Change::problems` that
-/// nothing rendered before this change), then one such line per
-/// `detail.problems` entry, then the selected tab's **body**, and — only
-/// when all three are empty — exactly one line reading `No content yet`.
-/// When either problem source is non-empty and `sections` is empty, the
-/// problem lines alone are returned: the reason is known, and adding `No
-/// content yet` would say two contradictory things about the same tab.
+/// One row `content_lines` returns: a rendered `markdown::Line` plus what
+/// kind of row it is. Plain data, naming no styling type at all — the same
+/// shape `ui::list::Row`/`RowKind` already give the list region, so
+/// `ui::view` alone decides what a row looks like
+/// (`openspec/changes/foldable-spec-sections/design.md` -> Decision 12).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContentRow {
+    pub line: crate::ui::markdown::Line,
+    pub kind: ContentKind,
+}
+
+impl ContentRow {
+    /// `self.line.text()` — named here so most of this module's tests read
+    /// exactly as they did while `content_lines` returned a bare line list.
+    pub fn text(&self) -> String {
+        self.line.text()
+    }
+}
+
+/// What a [`ContentRow`] represents: a problem line (either problem source
+/// `artifact-content` stacks, change first), an ordinary body line, or a
+/// foldable artifact's own section-header row, naming its section's index
+/// and whether the cursor is on or in that section.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContentKind {
+    Problem,
+    Body,
+    SectionHeader { section: usize, selected: bool },
+}
+
+/// A foldable tab's own section-header row: `<glyph> <label>`, where the
+/// glyph is `ui::list::fold_glyph`'s own — the crate's one site for that
+/// pair, so one fold reads the same glyph in both regions
+/// (design.md -> Decision 9). Passed through the crate's one right-
+/// truncation grammar, `ui::list::pad_or_truncate_right`, so the glyph and
+/// its separating space — emitted first — survive any truncation the label
+/// needs and the row still measures at most `width` display columns.
+fn header(label: &str, expanded: bool, width: u16) -> String {
+    let glyph = crate::ui::list::fold_glyph(!expanded);
+    crate::ui::list::pad_or_truncate_right(&format!("{glyph} {label}"), width as usize)
+}
+
+/// The `No content yet` row, padded to `width` on the same terms every
+/// other row here is — `view-fidelity`'s repair, carried forward unchanged.
+fn no_content_yet_row(width: u16) -> ContentRow {
+    ContentRow {
+        line: crate::ui::markdown::Line {
+            segments: vec![crate::ui::markdown::Segment {
+                text: crate::ui::list::pad_or_truncate_right("No content yet", width as usize),
+                face: crate::ui::markdown::Face::plain(),
+            }],
+        },
+        kind: ContentKind::Body,
+    }
+}
+
+/// The `"! <problem>"` row both problem sources share.
+fn problem_row(p: &str, width: u16) -> ContentRow {
+    ContentRow {
+        line: crate::ui::markdown::Line {
+            segments: vec![crate::ui::markdown::Segment {
+                text: crate::ui::list::pad_or_truncate_right(&format!("! {p}"), width as usize),
+                face: crate::ui::markdown::Face::plain(),
+            }],
+        },
+        kind: ContentKind::Problem,
+    }
+}
+
+fn body_row(line: crate::ui::markdown::Line) -> ContentRow {
+    ContentRow {
+        line,
+        kind: ContentKind::Body,
+    }
+}
+
+/// The single row list both `ui::view::render` and
+/// `Dashboard::normalise_scroll` derive the detail content from, so the
+/// drawn slice and the scroll clamp can never disagree about how many rows
+/// there are: one `Problem` row per entry of the selected change's own
+/// `problems` (`degraded-states`' addition — `SPEC.md` rows naming a reason
+/// on `Change::problems` that nothing rendered before this change), then
+/// one such row per `detail.problems` entry, then the selected tab's
+/// **body**, and — only when all three are empty — exactly one `No content
+/// yet` row. When either problem source is non-empty and `sections` is
+/// empty, the problem rows alone are returned: the reason is known, and
+/// adding `No content yet` would say two contradictory things about the
+/// same tab.
 ///
 /// The body is `ui::tasks::lines(&text, &change.progress, width)` —
 /// `tasks-checklist`'s grammar and `tasks-progress-bar`'s leading line —
-/// when `change` is `Some` and the `ArtifactRef` at `detail.tab` carries
-/// `tracks_tasks == true`, and `ui::markdown::lines(&text, width)` in every
-/// other case, including a `None` change, a `detail.tab` past the end of the
-/// artifact list, and a change carrying no artifacts at all — where `text`
-/// is every entry of `detail.sections` concatenated in order, with no
-/// separator inserted, per `artifact-folds`. (`artifact-folds` itself adds
-/// per-section header rows and per-section folding on top of this body; that
-/// grammar lands with the type this function returns, `ContentRow`, rather
-/// than here.) The decision is made exactly here, once, so `ui::view::render`
-/// and `Dashboard::normalise_scroll` — both of which pass
+/// over the concatenation of every section's text, when `change` is `Some`
+/// and the `ArtifactRef` at `detail.tab` carries `tracks_tasks == true`
+/// (`artifact-folds` -> Decision 8: this tab is never foldable, at any
+/// section count); `artifact-folds`' own header rows and per-section
+/// bodies when the artifact is **foldable** (`detail.sections.len() > 1`,
+/// derived rather than stored — Decision 3); and
+/// `ui::markdown::lines(&text, width)` over the same concatenation in every
+/// other case — a single section, no section at all, a `None` change, a
+/// `detail.tab` past the end of the artifact list, and a change carrying no
+/// artifacts at all. Each header row carries `ContentKind::SectionHeader {
+/// section, selected }`, where `selected` is true for exactly the header
+/// whose section the cursor — `detail.scroll`, an index into this same row
+/// list — is on or in, and false on every header when the cursor addresses
+/// a problem row or when there are no sections.
+///
+/// The decision is made exactly here, once, so `ui::view::render` and
+/// `Dashboard::normalise_scroll` — both of which pass
 /// `Dashboard::selected_change()` — can never disagree about which grammar
 /// the tab holds.
 pub fn content_lines(
     detail: &crate::ui::app::Detail,
     change: Option<&crate::changes::Change>,
     width: u16,
-) -> Vec<crate::ui::markdown::Line> {
-    fn problem_line(p: &str, width: u16) -> crate::ui::markdown::Line {
-        crate::ui::markdown::Line {
-            segments: vec![crate::ui::markdown::Segment {
-                text: crate::ui::list::pad_or_truncate_right(&format!("! {p}"), width as usize),
-                face: crate::ui::markdown::Face::plain(),
-            }],
-        }
-    }
-
+) -> Vec<ContentRow> {
     // `degraded-states`: the selected change's own problems lead, above `detail.problems` —
     // "change_problem_precedes_tab_problem" — using the SAME `pad_or_truncate_right` call and
     // plain face `detail.problems` already renders with, on the existing problem-row
     // mechanism rather than a new one.
-    let mut out: Vec<crate::ui::markdown::Line> = change
+    let mut out: Vec<ContentRow> = change
         .map(|c| c.problems.as_slice())
         .unwrap_or(&[])
         .iter()
-        .map(|p| problem_line(p, width))
+        .map(|p| problem_row(p, width))
         .collect();
-    out.extend(detail.problems.iter().map(|p| problem_line(p, width)));
+    out.extend(detail.problems.iter().map(|p| problem_row(p, width)));
+    let problem_count = out.len();
 
-    // `artifact-folds`: every section's text concatenated in order, with no
-    // separator inserted — each section already carries the reader's bytes
-    // verbatim. The header-row / per-section fold grammar this concatenation
-    // will be replaced by is a later group's work.
-    let text: String = detail.sections.iter().map(|s| s.text.as_str()).collect();
     let tracked_tasks_progress = change.and_then(|c| {
         c.artifacts
             .get(detail.tab)
             .filter(|a| a.tracks_tasks)
             .map(|_| &c.progress)
     });
-    let body = match tracked_tasks_progress {
-        Some(progress) => crate::ui::tasks::lines(&text, progress, width),
-        None => crate::ui::markdown::lines(&text, width),
-    };
-    out.extend(body);
+
+    match tracked_tasks_progress {
+        Some(progress) => {
+            // `artifact-folds` -> Decision 8: every section's text
+            // concatenated in order, with no separator inserted, never
+            // folded — exactly the grammar this tab had before
+            // `artifact-folds` existed.
+            let text: String = detail.sections.iter().map(|s| s.text.as_str()).collect();
+            out.extend(
+                crate::ui::tasks::lines(&text, progress, width)
+                    .into_iter()
+                    .map(body_row),
+            );
+        }
+        None if detail.sections.len() > 1 => {
+            // `artifact-folds`: a header row per section, in order, each
+            // followed by that section's own rendered markdown exactly
+            // when it is open.
+            for (index, section) in detail.sections.iter().enumerate() {
+                let expanded = detail.expanded.contains(&index);
+                out.push(ContentRow {
+                    line: crate::ui::markdown::Line {
+                        segments: vec![crate::ui::markdown::Segment {
+                            text: header(&section.label, expanded, width),
+                            face: crate::ui::markdown::Face::plain(),
+                        }],
+                    },
+                    kind: ContentKind::SectionHeader {
+                        section: index,
+                        selected: false,
+                    },
+                });
+                if expanded {
+                    out.extend(
+                        crate::ui::markdown::lines(&section.text, width)
+                            .into_iter()
+                            .map(body_row),
+                    );
+                }
+            }
+        }
+        None => {
+            let text: String = detail.sections.iter().map(|s| s.text.as_str()).collect();
+            out.extend(
+                crate::ui::markdown::lines(&text, width)
+                    .into_iter()
+                    .map(body_row),
+            );
+        }
+    }
+
+    // The header whose section the cursor is on or in: the greatest
+    // section-header row index at or before `detail.scroll`. None at all
+    // when the cursor addresses a problem row (every problem row precedes
+    // every section) or there are no section headers to begin with — every
+    // `selected` already defaults to `false` above, so there is nothing
+    // further to do on either of those paths.
+    if detail.scroll >= problem_count {
+        let cursor_section = out
+            .iter()
+            .enumerate()
+            .filter_map(|(index, row)| match row.kind {
+                ContentKind::SectionHeader { section, .. } => Some((index, section)),
+                _ => None,
+            })
+            .take_while(|(index, _)| *index <= detail.scroll)
+            .map(|(_, section)| section)
+            .last();
+        if let Some(cursor_section) = cursor_section {
+            for row in &mut out {
+                if let ContentKind::SectionHeader { section, selected } = &mut row.kind {
+                    *selected = *section == cursor_section;
+                }
+            }
+        }
+    }
 
     if out.is_empty() {
-        out.push(crate::ui::markdown::Line {
-            segments: vec![crate::ui::markdown::Segment {
-                text: crate::ui::list::pad_or_truncate_right("No content yet", width as usize),
-                face: crate::ui::markdown::Face::plain(),
-            }],
-        });
+        out.push(no_content_yet_row(width));
     }
     out
+}
+
+/// The section index of the [`ContentKind::SectionHeader`] drawn `row` rows
+/// below `rows[offset]` — a **lookup**, not a second derivation: it indexes
+/// `rows` at `offset + row` (saturating, so it can never panic or wrap) and
+/// reads that row's own kind. `None` for every row that is not a section
+/// header, including one past the end of `rows`. See design.md ->
+/// Decision 12 and `specs/artifact-folds/spec.md` -> "A section header row
+/// resolves to its own section index". Takes no drawn geometry of its own:
+/// the caller that has a rectangle has already used it to decide there is a
+/// row here at all — the drawn row list and offset arrive as arguments
+/// instead, so a click and the pixels it landed on can never disagree.
+pub fn section_at(rows: &[ContentRow], offset: usize, row: u16) -> Option<usize> {
+    let index = offset.saturating_add(row as usize);
+    match rows.get(index)?.kind {
+        ContentKind::SectionHeader { section, .. } => Some(section),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -532,12 +687,17 @@ mod tests {
             assert!(at_18.starts_with(&format!("{glyph} ")));
             assert!(at_13.starts_with(&format!("{glyph} ")));
 
-            // The mandated pair, named explicitly per DETAILWIDTHS.
+            // The mandated pair, named explicitly per DETAILWIDTHS: the
+            // label fits whole at both, so the row is padded rather than
+            // truncated, and still opens with the glyph and its space.
             for width in [78, 58] {
                 let got = header(label, false, width);
                 assert_eq!(columns(&got), width as usize, "width {width}");
-                assert!(got.ends_with(label), "width {width}: {got:?}");
-                assert!(got.starts_with(&format!("{glyph} ")), "width {width}: {got:?}");
+                assert!(got.trim_end().ends_with(label), "width {width}: {got:?}");
+                assert!(
+                    got.starts_with(&format!("{glyph} ")),
+                    "width {width}: {got:?}"
+                );
             }
         }
 
@@ -633,14 +793,14 @@ mod tests {
             // `offset` past the end, at `usize::MAX`, and `row` at
             // `u16::MAX` — every combination saturates rather than
             // panicking or wrapping.
+            assert_eq!(section_at(&rows, rows.len() + 10, 0), None, "width {width}");
+            assert_eq!(section_at(&rows, usize::MAX, 0), None, "width {width}");
+            assert_eq!(section_at(&rows, 0, u16::MAX), None, "width {width}");
             assert_eq!(
-                section_at(&rows, rows.len() + 10, 0),
+                section_at(&rows, usize::MAX, u16::MAX),
                 None,
                 "width {width}"
             );
-            assert_eq!(section_at(&rows, usize::MAX, 0), None, "width {width}");
-            assert_eq!(section_at(&rows, 0, u16::MAX), None, "width {width}");
-            assert_eq!(section_at(&rows, usize::MAX, u16::MAX), None, "width {width}");
         }
     }
 
@@ -1168,9 +1328,22 @@ mod tests {
         }
     }
 
-    /// Renders `lines` as plain text, for an assertion failure message only.
-    fn lines_text(lines: &[crate::ui::markdown::Line]) -> Vec<String> {
-        lines.iter().map(|l| l.text().to_string()).collect()
+    /// Renders `rows` as plain text, for an assertion failure message only.
+    fn lines_text(rows: &[ContentRow]) -> Vec<String> {
+        rows.iter().map(|r| r.text()).collect()
+    }
+
+    /// Asserts every row in `got` carries a `line` equal to the
+    /// corresponding entry of `want`, in order, and that `got` has exactly
+    /// `want`'s length — the comparison `content_lines`' tracked-tasks and
+    /// non-foldable branches must always satisfy, since each wraps its
+    /// underlying grammar's own lines one `ContentRow` per `Line` with no
+    /// row added or dropped.
+    fn assert_rows_equal_lines(got: &[ContentRow], want: &[crate::ui::markdown::Line]) {
+        assert_eq!(got.len(), want.len(), "{:?}", lines_text(got));
+        for (row, line) in got.iter().zip(want.iter()) {
+            assert_eq!(&row.line, line, "{:?}", lines_text(got));
+        }
     }
 
     // --- degraded-states: group 7 proofs — the not-vendored/unparseable rows -------------
@@ -1619,22 +1792,15 @@ mod tests {
             let d = three_spec_detail(expanded);
             let rows = content_lines(&d, None, width);
 
+            // `selected` is not this scenario's concern (`view-palette`
+            // covers it) — only which section each header names.
             assert!(
-                matches!(
-                    rows[0].kind,
-                    ContentKind::SectionHeader {
-                        section: 0,
-                        selected: false
-                    }
-                ),
+                matches!(rows[0].kind, ContentKind::SectionHeader { section: 0, .. }),
                 "width {width}: {:?}",
                 rows[0].kind
             );
             assert!(
-                matches!(
-                    rows[1].kind,
-                    ContentKind::SectionHeader { section: 1, .. }
-                ),
+                matches!(rows[1].kind, ContentKind::SectionHeader { section: 1, .. }),
                 "width {width}: {:?}",
                 rows[1].kind
             );
@@ -1787,7 +1953,7 @@ mod tests {
                 "width {width}"
             );
             let want = crate::ui::tasks::lines(source, &progress, width);
-            assert_eq!(lines, want, "width {width}");
+            assert_rows_equal_lines(&lines, &want);
         }
     }
 
@@ -1815,7 +1981,7 @@ mod tests {
             };
             let lines = content_lines(&d, Some(&change), width);
             let want = crate::ui::markdown::lines(source, width);
-            assert_eq!(lines, want, "width {width}");
+            assert_rows_equal_lines(&lines, &want);
             assert_ne!(
                 lines[0].text(),
                 crate::ui::tasks::progress_bar(&progress, width),
@@ -1846,20 +2012,12 @@ mod tests {
                 expanded: std::collections::BTreeSet::new(),
             };
             let lines = content_lines(&d, Some(&change), width);
-            assert_eq!(
-                lines,
-                crate::ui::markdown::lines(source, width),
-                "width {width}"
-            );
+            assert_rows_equal_lines(&lines, &crate::ui::markdown::lines(source, width));
 
             // The same holds for a change carrying no artifacts at all.
             let empty_artifacts = fixture::with_marked_artifacts(&paths_free(&[]), None, progress);
             let lines_empty = content_lines(&d, Some(&empty_artifacts), width);
-            assert_eq!(
-                lines_empty,
-                crate::ui::markdown::lines(source, width),
-                "width {width}"
-            );
+            assert_rows_equal_lines(&lines_empty, &crate::ui::markdown::lines(source, width));
         }
     }
 
@@ -1916,6 +2074,13 @@ mod tests {
                 d.tab = 9;
                 d
             },
+            // `artifact-folds`' own eighth and ninth `Detail` values: three
+            // sections, every one collapsed, and three sections with
+            // `expanded` holding `0`, `1`, `2`, and `7` — the last one past
+            // the end, which `content_lines` must fold shut rather than
+            // panic on.
+            three_spec_detail(std::collections::BTreeSet::new()),
+            three_spec_detail(std::collections::BTreeSet::from([0, 1, 2, 7])),
         ];
         for width in [78, 58] {
             for change in [None, Some(&marked), Some(&unmarked), Some(&no_artifacts)] {
@@ -2263,11 +2428,17 @@ mod tests {
                 d.tab = 9;
                 d
             },
+            // `artifact-folds`' own eighth and ninth `Detail` values, per
+            // `content_lines_total` above: three collapsed sections, and
+            // three sections with `expanded` holding `0`, `1`, `2`, and `7`
+            // — the last past the end, folded shut rather than panicking.
+            three_spec_detail(std::collections::BTreeSet::new()),
+            three_spec_detail(std::collections::BTreeSet::from([0, 1, 2, 7])),
         ];
 
         // No clock read here: `src/ui/` — tests included — names no clock API (`NOBLOCK`).
         // Runtime is a verification-run concern, not an in-test assertion: this sweep (131
-        // widths x 7 `Detail` x 4 `change`, the widest matrix in the plan) measured well
+        // widths x 9 `Detail` x 4 `change`, the widest matrix in the plan) measured well
         // under a second — `cargo test --lib ui::detail::tests::no_content_lines_line_exceeds_its_width_at_any_width`
         // alone reported "finished in 0.61s" — so it is not narrowed by input.
         for width in 0u16..=130 {
