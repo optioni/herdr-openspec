@@ -96,22 +96,64 @@ builds until this group lands. See design.md → Decisions D1, D2, D3.
 ## 2. The palette's roles
 <!-- kind: behavior -->
 
-- [ ] 2.1 RED: extend `ui::palette::tests` to assert `RegionHeading` carries `DIM` and no
+- [x] 2.1 RED: extend `ui::palette::tests` to assert `RegionHeading` carries `DIM` and no
   colour, `RegionHeadingFocused` carries `BOLD` and no colour, and `RegionRule` carries `DIM`
   and no colour, and that the exhaustive `match` names no `RegionBorder`, `HeaderTitle`,
   `HeaderPath`, or `DetailHeader`.
   Check: `grep -c 'RegionBorder' src/ui/palette.rs` → `9`, exit 0 at HEAD, so the removal
   assertion fails and the three new variants do not exist.
-- [ ] 2.2 GREEN: remove the five roles, add the three, and update the modifier table per
+  The "no `RegionBorder`/etc." half is enforced at compile time, not by a runtime assertion:
+  `label`'s `match` is exhaustive over `Role`, so once 2.2 removes the five variants from the
+  enum, any surviving reference to one is a compile error. The RED step here is therefore the
+  three new `table()`/`label()` entries added for `RegionHeading`, `RegionHeadingFocused`, and
+  `RegionRule`, which fail to compile against the still-unchanged enum (`error[E0599]: no
+  variant ... found`) — confirmed by running `cargo test --all-features --lib ui::palette`.
+- [x] 2.2 GREEN: remove the five roles, add the three, and update the modifier table per
   `view-palette`'s delta. Every call site that named a removed role is a compile error; fix
   each to the role `view-palette`'s draw-span mapping gives it. Verify: 2.1 passes.
-- [ ] 2.3 REFACTOR: no role is left whose only difference from another is its name — D7 removes
+  Two of `src/ui/view.rs`'s four call sites are group-1 scaffolding not covered by name in the
+  mapping's bullet list, since that list describes the post-refactor drawing groups 3/4 write:
+  `render_detail_header` (still drawing `DetailHeader`'s row, deleted by group 4) now takes the
+  detail region's routed-ness and picks `RegionHeadingFocused`/`RegionHeading` — the same pair
+  the mapping's first bullet gives every region heading, including "the detail region's change
+  header" by name. `render_header`'s `OpenSpec` title and repository-path text (both deleted by
+  group 3's 3.2) are mapped to `RegionHeadingFocused` and `RegionHeading` respectively as the
+  closest available heading-row roles, preserving `HeaderTitle`'s prior `BOLD` and choosing the
+  dimmer of the two remaining roles for the secondary path text — a judgment call, not a literal
+  mapping-table entry, since this whole function is slated for deletion next group. Consequence:
+  `ui::view::tests::file_mode_badge_is_dim_after_the_label` (a currently-green test, not
+  red-baselined by group 1) newly fails, because the path text now carries `RegionHeading`'s
+  `DIM` where it previously carried no modifier. This is exactly the test task 3.3 already RED's
+  and 3.4 GREEN's once the badge moves into the real heading row, so the failure is accepted
+  rather than patched around here. `render_region`'s border-style role (the two regions'
+  focused/unfocused indicator) maps directly, 1:1, to the mapping's first bullet.
+- [x] 2.3 REFACTOR: no role is left whose only difference from another is its name — D7 removes
   `DetailHeader` for exactly that reason. Record "no refactor was needed" if none applies.
-- [ ] 2.4 VERIFY: `cargo test --all-features --lib ui::palette` — green. The earlier draft
+  No refactor was needed. `RegionHeading` and `RegionRule` do currently resolve to the same
+  `Style` (`DIM`, no colour), but they are not the kind of duplicate D7 warns against: D7's
+  `DetailHeader` was a second role standing in for the same draw span another role already
+  covered (a region's own heading, already unified across the list and detail regions).
+  `RegionRule` is a distinct draw span — "the vertical divider and the detail region's
+  horizontal rule" (`view-palette`'s own second mapping bullet, separate from the heading-row
+  bullet) — that merely happens to render identically to `RegionHeading` today, the same
+  documented pattern as the `FileMode`/`Code` and `AgentBadge(Unknown)`/`ListSeparator` pairs
+  already recorded in this file's own module doc.
+- [x] 2.4 VERIFY: `cargo test --all-features --lib ui::palette` — green. The earlier draft
   closed this group on the gate alone, which checks confinement rather than the table.
-- [ ] 2.5 VERIFY the confinement gate still holds: `bash scripts/gates/palette.sh` exits 0 and
+  `cargo test --all-features --lib ui::palette` → `4 passed; 0 failed`. Along the way, the two
+  landed tests design.md's Verification matrix renames for this delta's modified requirements
+  were renamed to match it exactly (matrix wins over any other name, per design.md's own
+  "not a suggestion" rule, and per group 1's precedent): `every_role_is_answered_and_the_
+  distinctions_are_real` → `the_palette_answers_every_role_with_a_style`, and
+  `each_roles_modifier_set_is_exactly_the_table` → `each_role_s_modifier_set_is_exactly_the_
+  table_above`. The other two landed palette tests (`the_coloured_set_is_exactly_the_table_...`
+  and `an_out_of_range_heading_level_falls_back_to_level_six`) prove scenarios from the
+  unmodified `color-palette` spec, absent from this delta's matrix, and keep their names.
+- [x] 2.5 VERIFY the confinement gate still holds: `bash scripts/gates/palette.sh` exits 0 and
   names the file count it searched. It exits 0 at HEAD, so this pins an invariant rather than
   proving new behaviour, and `tests/gate_controls.rs` is what proves it can fail.
+  `bash scripts/gates/palette.sh` → `PALETTE OK: 25 files searched (>= 25), Color only in
+  src/ui/palette.rs, named ANSI indices only, swept by NOIO-VIEW and COLWIDTH`, exit 0.
 
 ## 3. The list region's heading and its padding row
 <!-- kind: behavior -->
