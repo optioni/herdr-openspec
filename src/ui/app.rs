@@ -302,12 +302,18 @@ pub struct Sections {
     pub collapsed: std::collections::BTreeSet<SectionKey>,
 }
 
-/// `list-sections`' addition: one addressable row the cursor can land on —
-/// either a section header or a change, the latter as an index into
-/// `Dashboard::visible()`. `Dashboard::targets()` returns them in emission
-/// order, and `Dashboard::selected` indexes into that vector rather than
-/// into `visible()` directly, because a collapsed section's header is its
-/// only row and must stay reachable. See design.md -> Decision 2.
+/// `list-sections`' addition: one addressable row a click can land on.
+/// `Section` and `Change` address the **list** region — a section header or
+/// a change, the latter as an index into `Dashboard::visible()`.
+/// `Dashboard::targets()` returns them in emission order, and
+/// `Dashboard::selected` indexes into that vector rather than into
+/// `visible()` directly, because a collapsed section's header is its only
+/// row and must stay reachable. See design.md -> Decision 2.
+///
+/// `DetailLine` and `DetailHeader` are `foldable-spec-sections`' two
+/// additions and address the **detail** region instead; see their own doc
+/// comments and design.md -> Decision 7 for why they carry resolved indices
+/// rather than a bare row offset, and why `targets()` never returns them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Target {
     Section(SectionKey),
