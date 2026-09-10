@@ -58,7 +58,7 @@ spawn is added anywhere** — this change names no `HerdrCli`, no `OpenspecCli`,
 | `src/ui/palette.rs` | two roles, `DetailSection` and `DetailSectionSelected`, joining the enum, the modifier table, and the uncoloured list (`view-palette` delta) | `ListRow` / `ListRowSelected` |
 | `Makefile` | `NODEFAULT-UI` gains a **sixth** recipe line for `ArtifactSection` with its own measured `SCAN_MIN` | the gate's existing five-subject shape, where every line carries its own floor |
 | `SPEC.md` | the key-binding table, the mouse-binding table, the `Detail` field list | — |
-| `tests/doc_contract.rs` | the documented mouse-binding list | its existing binding-list leg |
+| `tests/doc_contract.rs` | **nothing — the file is not edited** | its existing binding-list leg, run unchanged. Measured after implementation: the leg's subject is the backticked `Action::` variant set, and this change's two new gestures resolve to `Action::Click`/`Action::Ignore`, both already documented — so `SPEC.md`'s table needed two rows and the test needed no edit at all. Task 8.8's delete/restore control is what proves the leg still guards something |
 
 `src/ui/detail.rs`, `src/ui/view.rs`, `src/ui/layout.rs`, `src/ui/palette.rs`, and
 `src/ui/app.rs` are all in the pure nine-file set, and stay pure: **this change adds no I/O

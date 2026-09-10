@@ -59,8 +59,9 @@ one.
 `src/ui/view.rs`, `src/ui/driver.rs` (`mouse_action`), `src/ui/layout.rs` (`Zone`), and
 `src/ui/palette.rs` (two roles). `Detail` and `Dashboard` are on the `NODEFAULT-UI` gate's
 type list, so a new field must be named at every construction site, and `ArtifactSection` joins that
-list. `SPEC.md`'s key and mouse binding tables and `tests/doc_contract.rs`'s binding lists
-change with them. No manifest, no config format, no dependency, and no process spawned.
+list. `SPEC.md`'s key and mouse binding tables change with them; `tests/doc_contract.rs`
+turned out **not** to, because its binding leg's subject is the backticked `Action::` variant
+set and both new gestures resolve to variants it already documents. No manifest, no config format, no dependency, and no process spawned.
 
 ## Roadmap position
 

@@ -22,8 +22,10 @@ the addressed change belongs to — active for a change from `changes.active`, a
 from `changes.archived`. When the target list is empty, it SHALL change nothing at all and
 SHALL record no problem.
 
-At `Route::Detail`, `ToggleSection` SHALL act on `detail.expanded` and SHALL NOT touch
-`sections`, `selected`, or `refresh.requested`. When the selected artifact is not foldable —
+At `Route::Detail`, `ToggleSection` SHALL act on `detail.expanded` and SHALL NOT itself touch
+`sections`, `selected`, or `refresh.requested` — the blanket archived-tier rule below, which
+runs after **any** action and whose condition concerns the list's archived tier rather than
+any fold, is the one stated exception. When the selected artifact is not foldable —
 one section or none — it SHALL change nothing at all and SHALL record no problem, on exactly
 the terms the empty target list makes it inert at the list route.
 

@@ -161,9 +161,13 @@ section in order:
   capability SHALL take it from there rather than writing its own literal. `section_row_text`
   is private, so the extraction is what makes "one site" reachable at all; it joins
   `progress_cell`, `pad_or_truncate_right`, and `shorten_left` as helpers `ui::detail` already
-  calls across that boundary. A test SHALL assert the two **agree** — comparing the two
-  function results, not a character, and not a glyph read out of `ui::list::rows`' drawn
-  output at a known offset, which would depend on row-grammar layout instead. Passed
+  calls across that boundary. **The extraction is what proves agreement**, and no separate
+  agreement test is required: both sites call the one function, so they cannot disagree, and
+  the pair is pinned against its literals by `ui::list`'s own glyph test — a changed
+  `fold_glyph` fails there. An assertion comparing the two function results would be
+  tautological, and this repository does not keep tests that cannot fail. What a test SHALL
+  NOT do is read the glyph out of `ui::list::rows`' drawn output at a known offset, which
+  would depend on row-grammar layout rather than on the shared site. Passed
   through `ui::list::pad_or_truncate_right` at `width`; followed by
 - when and only when the section is open, that section's body: `ui::markdown::lines(&section.text, width)`.
 
@@ -308,9 +312,16 @@ while handling `ToggleSection` at either route. In particular it SHALL NOT re-re
 artifact: a fold changes which lines are rendered from text already in `detail.sections`, and
 `sync_detail` is not involved.
 
-Opening a section SHALL NOT set `refresh.requested`. Unlike the archived list section, whose
-rows may not be resolved yet, every section's `text` was read when the tab was, so a fold
-needs no data.
+Opening a section SHALL NOT itself set `refresh.requested`. Unlike the archived list section,
+whose rows may not be resolved yet, every section's `text` was read when the tab was, so a
+fold needs no data.
+
+The blanket rule `list-selection` states — `Dashboard::apply` sets `refresh.requested` after
+**any** action when the archived tier needs resolving — is the stated exception, and is not a
+detail-route toggle doing anything. It runs after every action alike, its condition is about
+the *list*'s archived tier and never about a fold, and exempting it here is what keeps this
+clause true of the code rather than of the fixtures that happen to leave that condition
+false.
 
 #### Scenario: `Space` opens the section under the cursor and leaves its siblings shut
 

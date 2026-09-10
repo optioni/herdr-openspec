@@ -749,6 +749,12 @@ impl Dashboard {
         if !self.detail.expanded.remove(&section) {
             self.detail.expanded.insert(section);
         }
+        // A **second** derivation of the row list, deliberately: this one runs
+        // after the mutation above, and `artifact-folds` requires the cursor to
+        // land on the toggled section's header row "recomputed against the line
+        // list the fold just produced". Merging the two calls would reintroduce
+        // the bug that clause exists to prevent (Change Review, group 10, which
+        // raised the duplication and then withdrew it for this reason).
         if let Some(header_row) = self.detail_section_header_row(section) {
             self.detail.scroll = header_row;
         }
