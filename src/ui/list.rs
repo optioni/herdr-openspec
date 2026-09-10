@@ -2565,8 +2565,8 @@ mod tests {
 
     /// `change-rows`: "A CJK change name stays inside the list region at both mandated
     /// widths" — the row's own `columns()` is exact, and rendered into a real buffer the
-    /// list block's own right border is unmoved from an all-ASCII control render, which is
-    /// the overwrite the audit measured.
+    /// region's own right gutter is unmoved from an all-ASCII control render, which is the
+    /// overwrite the audit measured.
     #[test]
     fn a_cjk_change_name_stays_inside_the_list_region_at_both_mandated_widths() {
         let name = "日本語の変更名前です";
@@ -2597,13 +2597,13 @@ mod tests {
             let control = crate::testutil::render_at(width, 20, &ascii);
             assert_eq!(
                 crate::testutil::cell(&buf, border_x, 3).symbol(),
-                "│",
-                "width {width}: the list block's own right border must be intact"
+                " ",
+                "width {width}: the region's right gutter must stay a blank space"
             );
             assert_eq!(
                 crate::testutil::cell(&buf, border_x, 3).symbol(),
                 crate::testutil::cell(&control, border_x, 3).symbol(),
-                "width {width}: the border must be unmoved from the ASCII-named control"
+                "width {width}: the gutter must be unmoved from the ASCII-named control"
             );
             assert_eq!(
                 crate::testutil::cell(&buf, border_x - 1, 3).symbol(),
@@ -2660,7 +2660,7 @@ mod tests {
                 let ctl = crate::testutil::render_at(width, 20, control);
                 assert_eq!(
                     crate::testutil::cell(&buf, border_x, 3).symbol(),
-                    "│",
+                    " ",
                     "width {width}"
                 );
                 assert_eq!(
@@ -2854,7 +2854,7 @@ mod tests {
             for y in [2u16, 3, 4] {
                 assert_eq!(
                     crate::testutil::cell(&buf, border_x, y).symbol(),
-                    "│",
+                    " ",
                     "width {width} row {y}"
                 );
             }

@@ -1543,7 +1543,6 @@ mod tests {
         );
     }
 
-
     /// `responsive-layout` :: "The badge is right-aligned and dropped whole" — the badge
     /// sits at the heading row's own right edge, not at a fixed column after a label that no
     /// longer exists, and disappears whole rather than being cut short once the row cannot
@@ -1564,7 +1563,10 @@ mod tests {
             );
             let badge_start = 1 + iw - 9;
             assert_eq!(
-                cols(&row_text(&buf, 0), badge_start as usize..(badge_start + 9) as usize),
+                cols(
+                    &row_text(&buf, 0),
+                    badge_start as usize..(badge_start + 9) as usize
+                ),
                 "file mode",
                 "width {width}"
             );
@@ -1656,11 +1658,16 @@ mod tests {
                 "width {width}: row 2 must be the interior's first row"
             );
 
-            // Both gutters stay empty on every row of the body (rows 0 through 18).
+            // The list region's left gutter (column 0) and right gutter (column 39 at
+            // 120, the frame's own last column at 60, where the single region takes
+            // `Gutters::Both`) stay empty on every row of the body. At 120 the *frame's*
+            // last column belongs to the detail region, which has no right gutter of its
+            // own (D5) — that column is content, not a gutter, so it is not asserted here.
+            let list_right_gutter = if width == 60 { width - 1 } else { 39 };
             for y in 0..=18u16 {
                 assert_eq!(cell(&buf, 0, y).symbol(), " ", "width {width}: y={y}");
                 assert_eq!(
-                    cell(&buf, width - 1, y).symbol(),
+                    cell(&buf, list_right_gutter, y).symbol(),
                     " ",
                     "width {width}: y={y}"
                 );
@@ -1860,13 +1867,13 @@ mod tests {
         ] {
             assert_eq!(
                 cell(buf, border_x, 3).symbol(),
-                "│",
-                "width {width}: the list block's own right border must be intact"
+                " ",
+                "width {width}: the region's right gutter must stay a blank space"
             );
             assert_eq!(
                 cell(buf, border_x, 3).symbol(),
                 cell(control, border_x, 3).symbol(),
-                "width {width}: the border must be unmoved from the ASCII-named control"
+                "width {width}: the gutter must be unmoved from the ASCII-named control"
             );
             assert_eq!(
                 cell(buf, border_x - 1, 3).symbol(),
@@ -2292,8 +2299,11 @@ mod tests {
         assert!(interior_cols(&buf120, 2).starts_with("No OpenSpec repository found"));
         assert!(interior_cols(&buf120, 3).starts_with("searched from:"));
         assert!(interior_cols(&buf120, 4).starts_with("…os/a-rather-long-repository-name-here"));
-        assert_eq!(cell(&buf120, 0, 1).symbol(), "┌");
-        assert_eq!(cols(&row_text(&buf120, 1), 1..8), "Changes");
+        // `pane-chrome`: there is no border and no `Changes` title any more — the list
+        // region's own heading row (row 0) names `no repository` instead, and row 1 is the
+        // blank padding row above the no-repository block asserted above.
+        assert_eq!(cols(&row_text(&buf120, 0), 1..14), "no repository");
+        assert_eq!(interior_cols(&buf120, 1).trim_end(), "");
 
         let buf60 = render_at(60, 20, &d);
         assert!(interior_cols(&buf60, 2).starts_with("No OpenSpec repository found"));
@@ -2302,7 +2312,7 @@ mod tests {
             interior_cols(&buf60, 4)
                 .starts_with("…kspaces/openspec-demos/a-rather-long-repository-name-here")
         );
-        assert_eq!(cell(&buf60, 0, 1).symbol(), "┌");
+        assert_eq!(cols(&row_text(&buf60, 0), 1..14), "no repository");
     }
 
     #[test]
@@ -2520,18 +2530,23 @@ mod tests {
         let empty = dashboard_with(Vec::new(), Vec::new(), 0, Route::List);
         let default_style = Cell::default().style();
         let buf_empty = render_at(120, 20, &empty);
-        for y in 2..=17u16 {
-            for x in 41..=118u16 {
+        // `pane-chrome`: the interior grew to seventeen rows (2 through 18, not 2
+        // through 17) and the wide detail region's gutter-free interior now reaches
+        // column 119, not 118.
+        for y in 2..=18u16 {
+            for x in 41..=119u16 {
                 let c = cell(&buf_empty, x, y);
                 assert_eq!(c.symbol(), " ", "x={x} y={y}");
                 assert_eq!(c.style(), default_style, "x={x} y={y}");
             }
         }
 
+        // `pane-chrome`: there is no border any more — columns 0 and 59 are simply
+        // the narrow layout's own gutters, spaces on every row of the body.
         let buf60 = render_at(60, 20, &d);
-        for y in 2..=17u16 {
-            assert!(matches!(cell(&buf60, 0, y).symbol(), "│" | "┌" | "└"));
-            assert!(matches!(cell(&buf60, 59, y).symbol(), "│" | "┐" | "┘"));
+        for y in 0..=18u16 {
+            assert_eq!(cell(&buf60, 0, y).symbol(), " ", "y={y}");
+            assert_eq!(cell(&buf60, 59, y).symbol(), " ", "y={y}");
         }
     }
 
@@ -2572,14 +2587,15 @@ mod tests {
     #[test]
     fn more_changes_than_rows_do_not_overflow() {
         let d = dashboard_with(changes_named(30), Vec::new(), 0, Route::List);
-        // `list-sections`: row 2 is now the active section header, so the
-        // interior's remaining fifteen rows (3 through 17) hold change-00 through
-        // change-14 rather than change-00 through change-15.
+        // `list-sections`: row 2 is the active section header, so the interior's
+        // remaining sixteen rows (3 through 18 — `pane-chrome` grew the interior
+        // by one row, moving only its last index) hold change-00 through
+        // change-15.
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
             assert!(interior_cols(&buf, 3).contains("change-00"));
-            assert!(interior_cols(&buf, 17).contains("change-14"));
-            for y in [0u16, 1, 18, 19] {
+            assert!(interior_cols(&buf, 18).contains("change-15"));
+            for y in [0u16, 1, 19] {
                 assert!(!row_text(&buf, y).contains("change-"));
             }
         }
@@ -2712,13 +2728,17 @@ mod tests {
     #[test]
     fn the_last_change_is_reachable() {
         // `list-sections`: `selected` **30** addresses `Target::Change(29)`.
+        // `pane-chrome`: the interior grew from sixteen rows to seventeen
+        // (2 through 18, not 2 through 17), which shifts `layout::viewport`'s
+        // own offset by one item earlier — the first visible row is now
+        // `change-13`, not `change-14`.
         let d = dashboard_with(changes_named(30), Vec::new(), 30, Route::List);
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
-            assert!(interior_cols(&buf, 2).contains("change-14"));
-            assert!(interior_cols(&buf, 17).contains("change-29"));
-            assert_eq!(cell(&buf, 1, 17).symbol(), ">");
-            for y in 2..=17u16 {
+            assert!(interior_cols(&buf, 2).contains("change-13"));
+            assert!(interior_cols(&buf, 18).contains("change-29"));
+            assert_eq!(cell(&buf, 1, 18).symbol(), ">");
+            for y in 2..=18u16 {
                 assert!(!interior_cols(&buf, y).chars().all(|c| c == ' '));
             }
         }
@@ -2727,10 +2747,12 @@ mod tests {
     #[test]
     fn the_viewport_boundary_is_rendered() {
         // `list-sections`: `selected` **10** addresses `Target::Change(9)`.
+        // `pane-chrome`'s taller interior (seventeen rows, not sixteen) changes
+        // `layout::viewport`'s own offset for this cursor and row count: 1, not 2.
         let d = dashboard_with(changes_named(17), Vec::new(), 10, Route::List);
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
-            assert!(interior_cols(&buf, 2).contains("change-01"));
+            assert!(interior_cols(&buf, 2).contains("change-00"));
         }
     }
 
@@ -2774,21 +2796,26 @@ mod tests {
         // markdown document too, not only for over-wide list rows.
         d.detail.source = (0..30).map(|_| format!("{}\n", "x".repeat(200))).collect();
 
+        // `pane-chrome`: there is no border any more. Columns 0 and 59 are the
+        // narrow layout's own gutters — spaces on every row of the body — and at
+        // 120 columns 0, 39, and 41 are the wide layout's gutters and column 40
+        // is the divider `│`. No change is selected here (`selected` 0 addresses
+        // the active section header), so the detail region's own interior —
+        // including its gutter-free last column, 119 — stays blank; that claim
+        // belongs to `the_divider_has_a_blank_column_on_each_side_at_120_columns`
+        // and to `detail-header`, not to this over-wide-list-row scenario.
         let buf60 = render_at(60, 20, &d);
-        for y in 1..=18u16 {
-            assert!(matches!(cell(&buf60, 0, y).symbol(), "│" | "┌" | "└"));
-            assert!(matches!(cell(&buf60, 59, y).symbol(), "│" | "┐" | "┘"));
+        for y in 0..=18u16 {
+            assert_eq!(cell(&buf60, 0, y).symbol(), " ", "y={y}");
+            assert_eq!(cell(&buf60, 59, y).symbol(), " ", "y={y}");
         }
 
         let buf120 = render_at(120, 20, &d);
-        for y in 1..=18u16 {
-            for x in [0u16, 39, 40, 119] {
-                let s = cell(&buf120, x, y).symbol();
-                assert!(
-                    matches!(s, "│" | "┌" | "└" | "┐" | "┘"),
-                    "x={x} y={y} symbol={s:?}"
-                );
-            }
+        for y in 0..=18u16 {
+            assert_eq!(cell(&buf120, 0, y).symbol(), " ", "y={y}");
+            assert_eq!(cell(&buf120, 39, y).symbol(), " ", "y={y}");
+            assert_eq!(cell(&buf120, 40, y).symbol(), "│", "y={y}");
+            assert_eq!(cell(&buf120, 41, y).symbol(), " ", "y={y}");
         }
     }
 
@@ -3104,12 +3131,14 @@ mod tests {
 
     #[test]
     fn slash_starts_filter_mode_and_the_list_is_shown() {
+        // `pane-chrome`: there is no `Changes` title any more — the list being
+        // shown is asserted by one of its own rows appearing instead.
         let mut d = five_change_dashboard(0);
         d.route = Route::Detail;
         d.apply(Action::FilterStart);
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
-            assert!(buffer_contains(&buf, "Changes"));
+            assert!(buffer_contains(&buf, "add-token-refresh"));
         }
     }
 
