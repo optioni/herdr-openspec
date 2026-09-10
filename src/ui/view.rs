@@ -975,6 +975,10 @@ mod tests {
         cell.style().add_modifier.contains(Modifier::BOLD)
     }
 
+    fn is_dim(cell: &Cell) -> bool {
+        cell.style().add_modifier.contains(Modifier::DIM)
+    }
+
     #[test]
     fn frame_rows_at_60_and_120() {
         let d = dashboard(Some("/tmp/demo-repo"), Route::List);
@@ -1724,6 +1728,46 @@ mod tests {
                 !cols(&row_text(&buf, 0), 0..width as usize).contains("not-a-repo"),
                 "width {width}: the searched path must not appear in the heading row"
             );
+        }
+    }
+
+    /// `responsive-layout` :: "The routed region's heading is bold and the other's is
+    /// dim" — distinct from "The routed region's border is bold and the other's is not"
+    /// further below: `pane-chrome` deletes the border that scenario named, but
+    /// design.md keeps both spec scenarios, since task 3.9 could not re-baseline one
+    /// that asserts a shape rather than a row index, and the two are drawn by different
+    /// call sites (`render_region` for the list heading, `render_detail_header` for the
+    /// detail one).
+    #[test]
+    fn the_routed_region_s_heading_is_bold_and_the_other_s_is_dim() {
+        let list = dashboard_with(
+            vec![fixture::active("alpha", 1, 3)],
+            Vec::new(),
+            1,
+            Route::List,
+        );
+        let buf = render_at(120, 20, &list);
+        assert!(is_bold(cell(&buf, 1, 0)));
+        assert!(!is_dim(cell(&buf, 1, 0)));
+        assert!(!is_bold(cell(&buf, 42, 0)));
+        assert!(is_dim(cell(&buf, 42, 0)));
+
+        let detail = dashboard_with(
+            vec![fixture::active("alpha", 1, 3)],
+            Vec::new(),
+            1,
+            Route::Detail,
+        );
+        let buf = render_at(120, 20, &detail);
+        assert!(!is_bold(cell(&buf, 1, 0)));
+        assert!(is_dim(cell(&buf, 1, 0)));
+        assert!(is_bold(cell(&buf, 42, 0)));
+        assert!(!is_dim(cell(&buf, 42, 0)));
+
+        for route in [Route::List, Route::Detail] {
+            let d = dashboard_with(vec![fixture::active("alpha", 1, 3)], Vec::new(), 1, route);
+            let buf = render_at(60, 20, &d);
+            assert!(is_bold(cell(&buf, 1, 0)), "route {route:?}");
         }
     }
 
