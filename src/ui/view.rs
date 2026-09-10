@@ -11,7 +11,8 @@ use ratatui::widgets::Block;
 use crate::ui::app::{Dashboard, Route};
 use crate::ui::detail;
 use crate::ui::layout::{
-    columns, interior, scroll_offset, split_body, split_detail, split_frame, truncate_columns,
+    Gutters, columns, interior, scroll_offset, split_body, split_detail, split_frame,
+    truncate_columns,
 };
 use crate::ui::list;
 use crate::ui::markdown::Face;
@@ -21,25 +22,51 @@ use crate::ui::palette::{self, Role};
 const FOOTER_HINTS: [&str; 3] = ["q quit", "Enter detail", "Esc back"];
 
 /// Draw `dashboard` into `frame`. A pure function of its two arguments.
+///
+/// `pane-chrome` (group 1) removes the frame's header rect from
+/// `layout::split_frame`'s own return value — the header row moves into
+/// each region's own heading row, which groups 3 and 4 wire up. Until then
+/// this reconstructs the prior header/body split locally, from `body`'s own
+/// first row, so this group's signature change is compile-only here: every
+/// rectangle below is identical to what the old three-way `split_frame`
+/// produced at every frame size.
 pub fn render(frame: &mut Frame, dashboard: &Dashboard) {
-    let (header, body, footer) = split_frame(frame.area());
+    let (body, footer) = split_frame(frame.area());
+    let header = Rect {
+        x: body.x,
+        y: body.y,
+        width: body.width,
+        height: body.height.min(1),
+    };
+    let rest = Rect {
+        x: body.x,
+        y: body.y + header.height,
+        width: body.width,
+        height: body.height.saturating_sub(header.height),
+    };
     render_header(frame, header, dashboard);
     render_footer(frame, footer, dashboard);
-    render_body(frame, body, dashboard);
+    render_body(frame, rest, dashboard);
 }
 
 /// The body: one or two bordered regions, per `layout::split_body`. The list
 /// region's interior is filled by `render_list`; the detail region's by
 /// `render_detail` — `detail-view` is what will populate `detail.source`.
+///
+/// `pane-chrome` (group 1) adds a divider column between the two regions to
+/// `split_body`'s return value; drawing it is group 3's task, so it is
+/// ignored here. Both regions take `Gutters::Both` for now — the wide
+/// detail region's `Gutters::LeftOnly` is D5's trailing-gutter drop, which
+/// groups 3/4 wire up alongside the divider itself.
 fn render_body(frame: &mut Frame, body: Rect, dashboard: &Dashboard) {
-    let (list_area, detail) = split_body(body, dashboard.route);
+    let (list_area, _divider, detail) = split_body(body, dashboard.route);
     if let Some(area) = list_area {
         render_region(frame, area, "Changes", dashboard.route == Route::List);
-        render_list(frame, interior(area), dashboard);
+        render_list(frame, interior(area, Gutters::Both), dashboard);
     }
     if let Some(area) = detail {
         render_region(frame, area, "Detail", dashboard.route == Route::Detail);
-        render_detail(frame, interior(area), dashboard);
+        render_detail(frame, interior(area, Gutters::Both), dashboard);
     }
 }
 
@@ -55,7 +82,25 @@ fn render_detail(frame: &mut Frame, interior: Rect, dashboard: &Dashboard) {
     let Some(change) = dashboard.selected_change() else {
         return;
     };
-    let (header, tabs, content) = split_detail(interior);
+    // `pane-chrome` (group 1) changes `split_detail`'s own return value from
+    // `(header, tabs, content)` to `(tabs, rule, content)` — the header
+    // moves into the region's heading row (group 4) and a rule row is
+    // inserted (group 4). Until then, reconstruct the prior header row from
+    // `interior`'s own first row so this group's signature change is
+    // compile-only here; the rule is not drawn, which is group 4's task.
+    let header = Rect {
+        x: interior.x,
+        y: interior.y,
+        width: interior.width,
+        height: interior.height.min(1),
+    };
+    let rest = Rect {
+        x: interior.x,
+        y: interior.y + header.height,
+        width: interior.width,
+        height: interior.height.saturating_sub(header.height),
+    };
+    let (tabs, _rule, content) = split_detail(rest);
     render_detail_header(frame, header, change);
     render_detail_tabs(frame, tabs, change, dashboard.detail.tab);
     render_detail_content(frame, content, dashboard);
@@ -480,7 +525,7 @@ mod tests {
         use crate::changes::fixture;
         use crate::testutil::render_at;
         use crate::ui::app::{Dashboard, Route};
-        use crate::ui::layout::{Zone, interior, split_body, split_frame, viewport, zone};
+        use crate::ui::layout::{Gutters, Zone, interior, split_body, split_frame, viewport, zone};
         use crate::ui::list::{row_at, rows};
 
         /// One repository-level problem, three active changes, three archived
@@ -508,11 +553,12 @@ mod tests {
                 let dashboard = populated(Route::List);
                 let buffer = render_at(width, height, &dashboard);
                 let area = Rect::new(0, 0, width, height);
-                let (_, body, _) = split_frame(area);
+                let (body, _) = split_frame(area);
                 let list = interior(
                     split_body(body, dashboard.route)
                         .0
                         .expect("the list region is drawn"),
+                    Gutters::Both,
                 );
 
                 let all = rows(&dashboard, list.width);
@@ -556,12 +602,12 @@ mod tests {
                     let dashboard = populated(route);
                     let buffer = render_at(width, height, &dashboard);
                     let area = Rect::new(0, 0, width, height);
-                    let (_, body, _) = split_frame(area);
-                    let (list_area, detail_area) = split_body(body, route);
+                    let (body, _) = split_frame(area);
+                    let (list_area, _divider, detail_area) = split_body(body, route);
 
                     let drawn: Option<(Rect, Vec<crate::ui::list::Row>, usize)> =
                         list_area.map(|a| {
-                            let inner = interior(a);
+                            let inner = interior(a, Gutters::Both);
                             let all = rows(&dashboard, inner.width);
                             let cursor = all.iter().position(|r| r.selected).unwrap_or(0);
                             let offset = viewport(all.len(), cursor, inner.height);
@@ -928,7 +974,7 @@ mod tests {
     fn zero_height_frame_draws_nothing() {
         // responsive-layout: "at height 0 render SHALL draw nothing." Closes a
         // Change Review finding — split_frame's own height-0 case was tested at
-        // the layout tier (ui::layout::tests::split_frame_degenerate_heights)
+        // the layout tier (ui::layout::tests::split_frame_is_body_then_footer)
         // but render's two early returns (render_header, render_footer) were
         // not exercised at the view tier at all. A 0-height buffer has no rows
         // to read, so the assertion is "did not panic" — the strongest claim a

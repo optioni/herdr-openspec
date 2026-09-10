@@ -3511,23 +3511,25 @@ mod tests {
     /// The list region's interior for `area` at `route`, derived the way the
     /// draw path derives it.
     fn list_interior(area: Rect, route: Route) -> Rect {
-        let (_, body, _) = crate::ui::layout::split_frame(area);
+        let (body, _) = crate::ui::layout::split_frame(area);
         crate::ui::layout::interior(
             crate::ui::layout::split_body(body, route)
                 .0
                 .expect("a list region is drawn"),
+            crate::ui::layout::Gutters::Both,
         )
     }
 
     /// The detail region's tab-bar row for `area` at `route`.
     fn tab_bar_row(area: Rect, route: Route) -> Rect {
-        let (_, body, _) = crate::ui::layout::split_frame(area);
+        let (body, _) = crate::ui::layout::split_frame(area);
         crate::ui::layout::split_detail(crate::ui::layout::interior(
             crate::ui::layout::split_body(body, route)
-                .1
+                .2
                 .expect("a detail region is drawn"),
+            crate::ui::layout::Gutters::Both,
         ))
-        .1
+        .0
     }
 
     /// The terminal row the list interior's `offset`-th drawn row occupies.

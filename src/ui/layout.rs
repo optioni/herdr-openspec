@@ -1,6 +1,6 @@
 //! The 100-column breakpoint and the frame split. Pure `Rect` arithmetic —
 //! no filesystem, process, environment, network, or standard-I/O API. See
-//! `openspec/changes/tui-shell/specs/responsive-layout/spec.md`.
+//! `openspec/changes/pane-chrome/specs/responsive-layout/spec.md`.
 
 use ratatui::buffer::CellWidth;
 use ratatui::layout::{Constraint, Layout, Position, Rect};
@@ -31,14 +31,20 @@ pub fn mode(width: u16) -> LayoutMode {
     }
 }
 
-/// Split `area` into a header row, a body, and a footer row.
+/// Split `area` into a body and a footer row. `pane-chrome` removes the
+/// frame's header row: in a Herdr split the pane is already titled by
+/// Herdr, so the literal `OpenSpec` label the old header carried restated
+/// that title one row below it. The repository's and the change's own
+/// identity move into each region's own heading row instead
+/// (`responsive-layout` -> "A region is a heading row, a padding row, and a
+/// gutter-padded interior").
 ///
 /// Heights 0, 1, and 2 are branched on explicitly rather than handed to the
 /// constraint solver: measured against ratatui 0.30.2,
-/// `Layout::vertical([Length(1), Min(0), Length(1)])` at height 1 gives the
-/// single row to the footer, not the header, which is not the contract
-/// `responsive-layout` wants. See design.md -> Decisions.
-pub fn split_frame(area: Rect) -> (Rect, Rect, Rect) {
+/// `Layout::vertical([Min(0), Length(1)])` at height 1 gives the single row
+/// to the footer, not the body, which is not the contract
+/// `responsive-layout` wants.
+pub fn split_frame(area: Rect) -> (Rect, Rect) {
     let row = |y: u16, height: u16| Rect {
         x: area.x,
         y,
@@ -46,31 +52,46 @@ pub fn split_frame(area: Rect) -> (Rect, Rect, Rect) {
         height,
     };
     match area.height {
-        0 => (row(area.y, 0), row(area.y, 0), row(area.y, 0)),
-        1 => (row(area.y, 1), row(area.y + 1, 0), row(area.y + 1, 0)),
-        2 => (row(area.y, 1), row(area.y + 1, 0), row(area.y + 1, 1)),
-        h => (
-            row(area.y, 1),
-            row(area.y + 1, h - 2),
-            row(area.y + h - 1, 1),
-        ),
+        0 => (row(area.y, 0), row(area.y, 0)),
+        1 => (row(area.y, 1), row(area.y + 1, 0)),
+        h => (row(area.y, h - 1), row(area.y + h - 1, 1)),
     }
 }
 
-/// Split the body into the change-list region and the artifact-detail
-/// region. At [`LayoutMode::Wide`] both are drawn, divided at column 40;
-/// below the breakpoint only the routed region is drawn and the other is
-/// `None`.
-pub fn split_body(area: Rect, route: Route) -> (Option<Rect>, Option<Rect>) {
+/// The two gutter widths a region's interior is padded by, named rather than
+/// passed as raw column counts (design.md -> Decision 3): `Both` gives a
+/// left and a right gutter column, `LeftOnly` a left gutter alone. There is
+/// no `RightOnly` and no `Neither` — nothing in this layout wants one, and a
+/// variant nothing constructs is a variant nothing tests.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Gutters {
+    Both,
+    LeftOnly,
+}
+
+/// Split the body into the change-list region, the one-column divider
+/// between them, and the artifact-detail region. At [`LayoutMode::Wide`]
+/// both regions are drawn and the divider column is `Some`; below the
+/// breakpoint only the routed region is drawn and both the divider and the
+/// other region are `None`.
+///
+/// The divider is a `Length(1)` part of the body owned by neither region
+/// (design.md -> Decision 4): it is drawn by `ui::view::render_body`, the
+/// one place that knows both rectangles.
+pub fn split_body(area: Rect, route: Route) -> (Option<Rect>, Option<u16>, Option<Rect>) {
     match mode(area.width) {
         LayoutMode::Wide => {
-            let [list, detail] =
-                Layout::horizontal([Constraint::Length(40), Constraint::Min(0)]).areas(area);
-            (Some(list), Some(detail))
+            let [list, divider, detail] = Layout::horizontal([
+                Constraint::Length(40),
+                Constraint::Length(1),
+                Constraint::Min(0),
+            ])
+            .areas(area);
+            (Some(list), Some(divider.x), Some(detail))
         }
         LayoutMode::Narrow => match route {
-            Route::List => (Some(area), None),
-            Route::Detail => (None, Some(area)),
+            Route::List => (Some(area), None, None),
+            Route::Detail => (None, None, Some(area)),
         },
     }
 }
@@ -104,30 +125,52 @@ pub fn scroll_offset(lines: usize, scroll: usize, height: u16) -> usize {
     scroll.min(lines.saturating_sub(height as usize))
 }
 
-/// A bordered region's interior: the one place in the crate that computes
+/// A borderless region's interior: the one place in the crate that computes
 /// this, so `Dashboard::normalise_scroll` can derive it without
-/// constructing a `ratatui::widgets::Block`. Performs exactly the
-/// arithmetic `Block::bordered().inner` does: the origin advanced by one
-/// column and one row and clamped to the rectangle's own right and bottom
-/// edges, with the width and height each reduced by two, saturating to
+/// constructing a `ratatui::widgets::Block`. The origin is advanced by the
+/// left gutter's column and **two** rows — a heading row and a blank
+/// padding row (`responsive-layout` -> "A region is a heading row, a
+/// padding row, and a gutter-padded interior") — and clamped to the
+/// rectangle's own right and bottom edges, with the width reduced by the
+/// gutter columns `gutters` names and the height by two, each saturating to
 /// zero. The clamp is not decoration — at a 1x1 or 0x0 rectangle it is the
 /// difference between `x: 0` and `x: 1`.
-pub fn interior(area: Rect) -> Rect {
-    let x = area.x.saturating_add(1).min(area.x + area.width);
-    let y = area.y.saturating_add(1).min(area.y + area.height);
+///
+/// It no longer agrees with `ratatui::widgets::Block::bordered().inner`: a
+/// bordered block reserves a row at the **bottom** for its border, while a
+/// region reserves a second row at the **top** for its padding row. The two
+/// agree on `x` and on width for [`Gutters::Both`], and differ by one on `y`
+/// and by one on height (`detail-scroll` -> "`interior` agrees with a
+/// bordered block's own inner rectangle" pins the disagreement).
+pub fn interior(area: Rect, gutters: Gutters) -> Rect {
+    let (gl, gr) = match gutters {
+        Gutters::Both => (1u16, 1u16),
+        Gutters::LeftOnly => (1u16, 0u16),
+    };
+    let x = area.x.saturating_add(gl).min(area.x + area.width);
+    let y = area.y.saturating_add(2).min(area.y + area.height);
     Rect {
         x,
         y,
-        width: area.width.saturating_sub(2),
+        width: area.width.saturating_sub(gl + gr),
         height: area.height.saturating_sub(2),
     }
 }
 
-/// Split the detail region's interior into a one-row header, a one-row tab
-/// bar, and the content area below — each the interior's full width and
-/// carrying the interior's own `x` and `width`. Heights 0, 1, and 2 are
-/// branched on explicitly rather than handed to the constraint solver,
-/// exactly as `split_frame` is and for the same measured reason.
+/// Split the detail region's interior into a one-row tab bar, a one-row
+/// rule, and the content area below — each the interior's full width and
+/// carrying the interior's own `x` and `width`. There is no header
+/// rectangle any more: `detail-header` draws the change header into the
+/// region's own heading row, two rows above this interior entirely.
+///
+/// Heights 0, 1, and 2 are branched on explicitly rather than handed to the
+/// constraint solver, exactly as `split_frame` is and for the same measured
+/// reason. Above those, a **padding row** sits between the rule and the
+/// content — at `interior.y + 2` — which is why the content area's own `y`
+/// is `interior.y + 3`, not `interior.y + 2`: the bar, the rule, and the
+/// padding row are fixed chrome, so what shrinks first as height falls is a
+/// content line, then the padding row (`artifact-tabs`'s degenerate-height
+/// table).
 pub fn split_detail(interior: Rect) -> (Rect, Rect, Rect) {
     let row = |y: u16, height: u16| Rect {
         x: interior.x,
@@ -150,7 +193,7 @@ pub fn split_detail(interior: Rect) -> (Rect, Rect, Rect) {
         h => (
             row(interior.y, 1),
             row(interior.y + 1, 1),
-            row(interior.y + 2, h - 2),
+            row(interior.y + 3, h - 3),
         ),
     }
 }
@@ -170,15 +213,17 @@ pub enum Zone {
     /// rectangle; `row` is the offset of the addressed row below its first
     /// interior row.
     ListRow { interior: Rect, row: u16 },
-    /// The list region, but not one of its interior rows — its border.
+    /// The list region, but not one of its interior rows — its gutters, its
+    /// heading row, or its padding row.
     List,
     /// The detail region's tab-bar row. `bar` is that row's own rectangle;
     /// `column` is the offset of the addressed column right of its first.
     DetailTab { bar: Rect, column: u16 },
-    /// The detail region, anywhere but the tab-bar row: its border, its header
-    /// row, or its content area.
+    /// The detail region, anywhere but the tab-bar row: its gutter, its
+    /// heading row, its padding row, the rule below the tab bar, the content
+    /// padding row, or its content area.
     Detail,
-    /// The frame's header row, its footer row, or a point outside the frame.
+    /// The frame's footer row, or a point outside the frame entirely.
     Outside,
 }
 
@@ -197,14 +242,20 @@ pub enum Zone {
 /// [`LayoutMode::Narrow`] only the routed region exists, so every point in the
 /// body resolves to that region's zones and none to the other's; at
 /// [`LayoutMode::Wide`] both exist at both routes and the route changes nothing.
+///
+/// `pane-chrome` (group 1) leaves the divider column's own zone unresolved
+/// here — it currently falls through to [`Zone::Outside`] — because deciding
+/// it, and re-baselining every point this new geometry moves, is group 6's
+/// task (`responsive-layout` -> "A point in the frame resolves to exactly
+/// one zone": the divider SHALL resolve to `Detail`).
 pub fn zone(area: Rect, route: Route, column: u16, row: u16) -> Zone {
     let point = Position::new(column, row);
-    let (_, body, _) = split_frame(area);
-    let (list, detail) = split_body(body, route);
+    let (body, _) = split_frame(area);
+    let (list, _divider, detail) = split_body(body, route);
     if let Some(list_area) = list
         && list_area.contains(point)
     {
-        let inner = interior(list_area);
+        let inner = interior(list_area, Gutters::Both);
         return if inner.contains(point) {
             Zone::ListRow {
                 interior: inner,
@@ -217,7 +268,8 @@ pub fn zone(area: Rect, route: Route, column: u16, row: u16) -> Zone {
     if let Some(detail_area) = detail
         && detail_area.contains(point)
     {
-        let (_, bar, _) = split_detail(interior(detail_area));
+        let inner = interior(detail_area, Gutters::LeftOnly);
+        let (bar, _rule, _content) = split_detail(inner);
         return if bar.contains(point) {
             Zone::DetailTab {
                 bar,
@@ -306,26 +358,40 @@ mod tests {
     /// `split_frame`/`split_body`/`interior`/`split_detail` independently, never
     /// from `zone`'s own answer — otherwise the test would pin whatever `zone`
     /// happens to do rather than what the draw path does.
+    ///
+    /// `pane-chrome` (group 1) changed the geometry these tests were written
+    /// against (no more frame header row, a divider column between the two
+    /// regions, a taller interior). Re-baselining `zone`'s own hit-test
+    /// contract against that new geometry is group 6's task
+    /// (`responsive-layout` -> "A point in the frame resolves to exactly one
+    /// zone"); the changes below are the minimum mechanical edit needed to
+    /// keep this module compiling against the four new signatures, and are
+    /// not a re-specification of `zone`'s behaviour. Some assertions here now
+    /// fail against the new geometry — see this group's own report for which.
     mod zone {
         use crate::ui::app::Route;
         use crate::ui::layout::{
-            LayoutMode, Zone, interior, mode, split_body, split_detail, split_frame, zone,
+            Gutters, LayoutMode, Zone, interior, mode, split_body, split_detail, split_frame, zone,
         };
         use ratatui::layout::Rect;
 
         /// The list region's interior, derived the way the draw path derives it.
         fn list_interior(area: Rect, route: Route) -> Rect {
-            let (_, body, _) = split_frame(area);
-            interior(split_body(body, route).0.expect("a list region is drawn"))
+            let (body, _) = split_frame(area);
+            interior(
+                split_body(body, route).0.expect("a list region is drawn"),
+                Gutters::Both,
+            )
         }
 
         /// The detail region's tab-bar row, derived the same way.
         fn detail_bar(area: Rect, route: Route) -> Rect {
-            let (_, body, _) = split_frame(area);
-            split_detail(interior(
-                split_body(body, route).1.expect("a detail region is drawn"),
-            ))
-            .1
+            let (body, _) = split_frame(area);
+            let inner = interior(
+                split_body(body, route).2.expect("a detail region is drawn"),
+                Gutters::LeftOnly,
+            );
+            split_detail(inner).0
         }
 
         #[test]
@@ -388,7 +454,7 @@ mod tests {
             ));
 
             // No point anywhere in the body resolves to the other route's region.
-            let (_, body, _) = split_frame(area);
+            let (body, _) = split_frame(area);
             for row in body.y..body.y + body.height {
                 for column in body.x..body.x + body.width {
                     assert!(
@@ -442,7 +508,7 @@ mod tests {
                 Rect::new(0, 0, 120, 2),
             ];
             for area in areas {
-                let (_, body, _) = split_frame(area);
+                let (body, _) = split_frame(area);
                 for route in [Route::List, Route::Detail] {
                     for row in 0..area.height {
                         for column in 0..area.width {
@@ -567,45 +633,135 @@ mod tests {
         }
     }
 
+    /// `responsive-layout` -> "`interior` reserves two rows and the gutters
+    /// its `Gutters` names" — task 1.1's RED test.
     #[test]
-    fn the_detail_interior_is_78_at_120_and_58_at_60() {
-        let (_, body120, _) = split_frame(Rect::new(0, 0, 120, 20));
-        let (_, detail120) = split_body(body120, Route::Detail);
+    fn interior_reserves_two_rows_and_the_gutters_its_gutters_names() {
         assert_eq!(
-            interior(detail120.expect("detail region at 120")),
-            Rect::new(41, 2, 78, 16)
+            interior(Rect::new(0, 0, 60, 19), Gutters::Both),
+            Rect::new(1, 2, 58, 17)
+        );
+        assert_eq!(
+            interior(Rect::new(0, 0, 40, 19), Gutters::Both),
+            Rect::new(1, 2, 38, 17)
+        );
+        assert_eq!(
+            interior(Rect::new(41, 0, 79, 19), Gutters::LeftOnly),
+            Rect::new(42, 2, 78, 17)
+        );
+        // The origin clamp: `x` is `min(0 + 1, 0 + 1)` = 1 and `y` is
+        // `min(0 + 2, 0 + 1)` = 1, so the origin lands on the rectangle's own
+        // right and bottom edges rather than staying at zero.
+        assert_eq!(
+            interior(Rect::new(0, 0, 1, 1), Gutters::Both),
+            Rect {
+                x: 1,
+                y: 1,
+                width: 0,
+                height: 0
+            }
+        );
+        assert_eq!(
+            interior(Rect::new(0, 0, 0, 0), Gutters::Both),
+            Rect {
+                x: 0,
+                y: 0,
+                width: 0,
+                height: 0
+            }
+        );
+    }
+
+    #[test]
+    fn the_detail_interior_is_78_columns_at_120_and_58_at_60() {
+        let (body120, _) = split_frame(Rect::new(0, 0, 120, 20));
+        let (_, _, detail120) = split_body(body120, Route::Detail);
+        assert_eq!(
+            interior(detail120.expect("detail region at 120"), Gutters::LeftOnly),
+            Rect::new(42, 2, 78, 17)
         );
 
-        let (_, body60, _) = split_frame(Rect::new(0, 0, 60, 20));
-        let (_, detail60) = split_body(body60, Route::Detail);
+        let (body60, _) = split_frame(Rect::new(0, 0, 60, 20));
+        let (_, _, detail60) = split_body(body60, Route::Detail);
         assert_eq!(
-            interior(detail60.expect("detail region at 60, detail route")),
-            Rect::new(1, 2, 58, 16)
+            interior(
+                detail60.expect("detail region at 60, detail route"),
+                Gutters::Both
+            ),
+            Rect::new(1, 2, 58, 17)
         );
 
-        let (_, detail_at_list_route) = split_body(body60, Route::List);
+        let (list_at_list_route, _, detail_at_list_route) = split_body(body60, Route::List);
+        assert_eq!(list_at_list_route, Some(body60));
         assert_eq!(
             detail_at_list_route, None,
             "no detail rectangle at 60, list route"
         );
     }
 
+    /// `detail-scroll` -> "`interior` agrees with a bordered block's own
+    /// inner rectangle". Kept verbatim as a name because a delta's scenario
+    /// headers are its merge key; it now pins the **disagreement**
+    /// deliberately, so a future edit that quietly restores the bordered
+    /// arithmetic fails here rather than silently losing the padding row.
     #[test]
-    fn interior_agrees_with_a_bordered_block() {
+    fn interior_agrees_with_a_bordered_block_s_own_inner_rectangle() {
         for area in [
-            Rect::new(0, 1, 40, 18),
-            Rect::new(40, 1, 80, 18),
-            Rect::new(0, 1, 60, 18),
+            Rect::new(0, 0, 40, 19),
+            Rect::new(0, 0, 60, 19),
             Rect::new(0, 0, 2, 2),
-            Rect::new(0, 0, 1, 1),
-            Rect::new(0, 0, 0, 0),
         ] {
+            let ours = interior(area, Gutters::Both);
+            let bordered = Block::bordered().inner(area);
+            assert_eq!(ours.x, bordered.x, "area {area:?}: x");
+            assert_eq!(ours.width, bordered.width, "area {area:?}: width");
+            assert_eq!(ours.height, bordered.height, "area {area:?}: height");
             assert_eq!(
-                interior(area),
-                Block::bordered().inner(area),
-                "area {area:?}"
+                ours.y,
+                bordered.y + 1,
+                "area {area:?}: interior's y should be exactly one more than the bordered \
+                 block's"
             );
         }
+
+        assert_eq!(
+            interior(Rect::new(0, 0, 40, 19), Gutters::Both),
+            Rect::new(1, 2, 38, 17)
+        );
+        assert_eq!(
+            Block::bordered().inner(Rect::new(0, 0, 40, 19)),
+            Rect::new(1, 1, 38, 17)
+        );
+
+        // The two degenerate rectangles yield zero width and zero height
+        // rather than underflowing, and share the same origin clamp as the
+        // bordered block — the disagreement above is a property of
+        // non-degenerate rectangles only.
+        for area in [Rect::new(0, 0, 1, 1), Rect::new(0, 0, 0, 0)] {
+            assert_eq!(
+                interior(area, Gutters::Both),
+                Block::bordered().inner(area),
+                "degenerate area {area:?}: the origin clamp is shared"
+            );
+        }
+        assert_eq!(
+            interior(Rect::new(0, 0, 1, 1), Gutters::Both),
+            Rect {
+                x: 1,
+                y: 1,
+                width: 0,
+                height: 0
+            }
+        );
+        assert_eq!(
+            interior(Rect::new(0, 0, 0, 0), Gutters::Both),
+            Rect {
+                x: 0,
+                y: 0,
+                width: 0,
+                height: 0
+            }
+        );
     }
 
     #[test]
@@ -653,126 +809,120 @@ mod tests {
         assert_eq!(mode(u16::MAX), LayoutMode::Wide);
     }
 
+    /// `split_frame` returns `(body, footer)` — task 1.3's RED test. Body is
+    /// `Rect::new(0, 0, w, h - 1)` at `h >= 2`, the body alone at `h == 1`,
+    /// and both zero-height at `h == 0`.
     #[test]
-    fn split_frame_gives_header_body_footer_at_normal_height() {
+    fn split_frame_is_body_then_footer() {
         for width in [60u16, 120u16] {
-            let area = Rect::new(0, 0, width, 20);
-            let (header, body, footer) = split_frame(area);
-            assert_eq!(header, Rect::new(0, 0, width, 1));
-            assert_eq!(body, Rect::new(0, 1, width, 18));
-            assert_eq!(footer, Rect::new(0, 19, width, 1));
+            let (body, footer) = split_frame(Rect::new(0, 0, width, 19));
+            assert_eq!(body, Rect::new(0, 0, width, 18));
+            assert_eq!(footer, Rect::new(0, 18, width, 1));
+
+            let (body, footer) = split_frame(Rect::new(0, 0, width, 2));
+            assert_eq!(body, Rect::new(0, 0, width, 1));
+            assert_eq!(footer, Rect::new(0, 1, width, 1));
+
+            let (body, footer) = split_frame(Rect::new(0, 0, width, 1));
+            assert_eq!(body, Rect::new(0, 0, width, 1));
+            assert_eq!(footer.height, 0);
+
+            let (body, footer) = split_frame(Rect::new(0, 0, width, 0));
+            assert_eq!(body.height, 0);
+            assert_eq!(footer.height, 0);
         }
     }
 
+    /// `split_body` gives the divider column between the two regions —
+    /// task 1.5's RED test.
     #[test]
-    fn split_frame_degenerate_heights() {
-        for width in [60u16, 120u16] {
-            let (header, body, footer) = split_frame(Rect::new(0, 0, width, 0));
-            assert_eq!(header.height, 0);
-            assert_eq!(body.height, 0);
-            assert_eq!(footer.height, 0);
+    fn the_wide_body_splits_into_list_divider_detail() {
+        let (list, divider, detail) = split_body(Rect::new(0, 0, 120, 19), Route::List);
+        assert_eq!(list, Some(Rect::new(0, 0, 40, 19)));
+        assert_eq!(divider, Some(40));
+        assert_eq!(detail, Some(Rect::new(41, 0, 79, 19)));
 
-            let (header, body, footer) = split_frame(Rect::new(0, 0, width, 1));
-            assert_eq!(header, Rect::new(0, 0, width, 1));
-            assert_eq!(body.height, 0);
-            assert_eq!(footer.height, 0);
+        // Every column gained beyond 100 goes to the detail side.
+        let (list, divider, detail) = split_body(Rect::new(0, 0, 100, 19), Route::List);
+        assert_eq!(list, Some(Rect::new(0, 0, 40, 19)));
+        assert_eq!(divider, Some(40));
+        assert_eq!(detail, Some(Rect::new(41, 0, 59, 19)));
 
-            let (header, body, footer) = split_frame(Rect::new(0, 0, width, 2));
-            assert_eq!(header.y, 0);
-            assert_eq!(footer.y, 1);
-            assert_eq!(body.height, 0);
-        }
-    }
-
-    #[test]
-    fn split_body_wide_puts_the_divider_at_40() {
-        let body = Rect::new(0, 1, 120, 18);
-        let (list, detail) = split_body(body, Route::List);
-        assert_eq!(list, Some(Rect::new(0, 1, 40, 18)));
-        assert_eq!(detail, Some(Rect::new(40, 1, 80, 18)));
-
-        let body = Rect::new(0, 1, 100, 18);
-        let (list, detail) = split_body(body, Route::List);
-        assert_eq!(list, Some(Rect::new(0, 1, 40, 18)));
-        assert_eq!(detail, Some(Rect::new(40, 1, 60, 18)));
+        // Below the breakpoint there is no divider.
+        let (list, divider, detail) = split_body(Rect::new(0, 0, 60, 19), Route::List);
+        assert_eq!(list, Some(Rect::new(0, 0, 60, 19)));
+        assert_eq!(divider, None);
+        assert_eq!(detail, None);
     }
 
     #[test]
     fn split_body_narrow_yields_one_region_for_the_route() {
         let body = Rect::new(0, 1, 60, 18);
-        let (list, detail) = split_body(body, Route::List);
+        let (list, divider, detail) = split_body(body, Route::List);
         assert_eq!(list, Some(body));
+        assert_eq!(divider, None);
         assert_eq!(detail, None);
 
-        let (list, detail) = split_body(body, Route::Detail);
+        let (list, divider, detail) = split_body(body, Route::Detail);
         assert_eq!(list, None);
+        assert_eq!(divider, None);
         assert_eq!(detail, Some(body));
     }
 
-    /// `split_detail` at both mandated interior widths, at heights 0, 1, and
-    /// 2 — the three degenerate cases branched on explicitly, exactly as
-    /// `split_frame_degenerate_heights` covers `split_frame`'s. Base `y` is
-    /// non-zero so a hard-coded `0` could not pass by accident.
+    /// `artifact-tabs` -> "`split_detail` is exact at its degenerate
+    /// heights" — task 1.7's RED test, covering the full table at both
+    /// mandated widths: heights 0 through 4, and 17 (where the content area
+    /// is fourteen rows at `interior.y + 3`).
     #[test]
-    fn split_detail_degenerate_heights() {
+    fn split_detail_is_exact_at_its_degenerate_heights() {
         for width in [78u16, 58u16] {
             let at = |height: u16| Rect::new(3, 5, width, height);
 
-            let (header, tabs, content) = split_detail(at(0));
-            assert_eq!(header, Rect::new(3, 5, width, 0), "width {width} height 0");
+            let (tabs, rule, content) = split_detail(at(0));
             assert_eq!(tabs, Rect::new(3, 5, width, 0), "width {width} height 0");
+            assert_eq!(rule, Rect::new(3, 5, width, 0), "width {width} height 0");
             assert_eq!(content, Rect::new(3, 5, width, 0), "width {width} height 0");
 
-            let (header, tabs, content) = split_detail(at(1));
-            assert_eq!(header, Rect::new(3, 5, width, 1), "width {width} height 1");
-            assert_eq!(tabs, Rect::new(3, 6, width, 0), "width {width} height 1");
+            let (tabs, rule, content) = split_detail(at(1));
+            assert_eq!(tabs, Rect::new(3, 5, width, 1), "width {width} height 1");
+            assert_eq!(rule, Rect::new(3, 6, width, 0), "width {width} height 1");
             assert_eq!(content, Rect::new(3, 6, width, 0), "width {width} height 1");
 
-            let (header, tabs, content) = split_detail(at(2));
-            assert_eq!(header, Rect::new(3, 5, width, 1), "width {width} height 2");
-            assert_eq!(tabs, Rect::new(3, 6, width, 1), "width {width} height 2");
+            let (tabs, rule, content) = split_detail(at(2));
+            assert_eq!(tabs, Rect::new(3, 5, width, 1), "width {width} height 2");
+            assert_eq!(rule, Rect::new(3, 6, width, 1), "width {width} height 2");
             assert_eq!(content, Rect::new(3, 7, width, 0), "width {width} height 2");
-        }
-    }
 
-    /// `split_detail` above the degenerate heights: the header and tab bar
-    /// stay one row each and the content area is `height - 2` rows,
-    /// starting two rows below the interior's own `y`. `artifact-tabs` ->
-    /// "`split_detail` is exact at its degenerate heights" — heights 3 and
-    /// 16 are the two samples above the degenerate band.
-    #[test]
-    fn split_detail_gives_a_header_row_a_tab_row_and_a_content_area() {
-        for width in [78u16, 58u16] {
-            let at = |height: u16| Rect::new(3, 5, width, height);
+            let (tabs, rule, content) = split_detail(at(3));
+            assert_eq!(tabs, Rect::new(3, 5, width, 1), "width {width} height 3");
+            assert_eq!(rule, Rect::new(3, 6, width, 1), "width {width} height 3");
+            assert_eq!(content, Rect::new(3, 8, width, 0), "width {width} height 3");
 
-            let (header, tabs, content) = split_detail(at(3));
-            assert_eq!(header, Rect::new(3, 5, width, 1), "width {width} height 3");
-            assert_eq!(tabs, Rect::new(3, 6, width, 1), "width {width} height 3");
-            assert_eq!(content, Rect::new(3, 7, width, 1), "width {width} height 3");
+            let (tabs, rule, content) = split_detail(at(4));
+            assert_eq!(tabs, Rect::new(3, 5, width, 1), "width {width} height 4");
+            assert_eq!(rule, Rect::new(3, 6, width, 1), "width {width} height 4");
+            assert_eq!(content, Rect::new(3, 8, width, 1), "width {width} height 4");
 
-            let (header, tabs, content) = split_detail(at(16));
-            assert_eq!(header, Rect::new(3, 5, width, 1), "width {width} height 16");
-            assert_eq!(tabs, Rect::new(3, 6, width, 1), "width {width} height 16");
+            let (tabs, rule, content) = split_detail(at(17));
+            assert_eq!(tabs, Rect::new(3, 5, width, 1), "width {width} height 17");
+            assert_eq!(rule, Rect::new(3, 6, width, 1), "width {width} height 17");
             assert_eq!(
                 content,
-                Rect::new(3, 7, width, 14),
-                "width {width} height 16"
+                Rect::new(3, 8, width, 14),
+                "width {width} height 17"
             );
         }
     }
 
     /// Every one of the three returned rects carries the interior's own `x`
-    /// and `width`, at both mandated widths and at a non-zero `x` — the
-    /// clause `split_detail`'s degenerate-heights scenario names alongside
-    /// the row heights, checked here as its own discriminating assertion
-    /// rather than folded into the height tables above.
+    /// and `width`, at both mandated widths and at a non-zero `x`.
     #[test]
     fn split_detail_rects_all_carry_the_interiors_x_and_width() {
         for width in [78u16, 58u16] {
-            for height in [0u16, 1, 2, 3, 16] {
+            for height in [0u16, 1, 2, 3, 17] {
                 let interior = Rect::new(11, 5, width, height);
-                let (header, tabs, content) = split_detail(interior);
-                for (name, rect) in [("header", header), ("tabs", tabs), ("content", content)] {
+                let (tabs, rule, content) = split_detail(interior);
+                for (name, rect) in [("tabs", tabs), ("rule", rule), ("content", content)] {
                     assert_eq!(
                         rect.x, interior.x,
                         "width {width} height {height}: {name}.x"
@@ -783,70 +933,6 @@ mod tests {
                     );
                 }
             }
-        }
-    }
-    /// `responsive-layout` -> "`interior` reserves two rows and the gutters
-    /// its `Gutters` names" — task 1.1's RED test. `Gutters` does not exist
-    /// yet, so this fails to compile.
-    #[test]
-    fn interior_reserves_two_rows_and_the_gutters_its_gutters_names() {
-        assert_eq!(
-            interior(Rect::new(0, 0, 60, 19), Gutters::Both),
-            Rect::new(1, 2, 58, 17)
-        );
-        assert_eq!(
-            interior(Rect::new(0, 0, 40, 19), Gutters::Both),
-            Rect::new(1, 2, 38, 17)
-        );
-        assert_eq!(
-            interior(Rect::new(41, 0, 79, 19), Gutters::LeftOnly),
-            Rect::new(42, 2, 78, 17)
-        );
-    }
-
-    /// `split_frame` returns `(body, footer)` — task 1.3's RED test. Fails
-    /// to compile: `split_frame` still returns a three-tuple at HEAD.
-    #[test]
-    fn split_frame_is_body_then_footer() {
-        for width in [60u16, 120u16] {
-            let (body, footer) = split_frame(Rect::new(0, 0, width, 19));
-            assert_eq!(body, Rect::new(0, 0, width, 18));
-            assert_eq!(footer, Rect::new(0, 18, width, 1));
-        }
-    }
-
-    /// `split_body` gives the divider column between the two regions —
-    /// task 1.5's RED test. Fails to compile: `split_body` still returns
-    /// two `Option<Rect>` at HEAD and names no divider column.
-    #[test]
-    fn the_wide_body_splits_into_list_divider_detail() {
-        let (list, divider, detail) = split_body(Rect::new(0, 0, 120, 19), Route::List);
-        assert_eq!(list, Some(Rect::new(0, 0, 40, 19)));
-        assert_eq!(divider, Some(40));
-        assert_eq!(detail, Some(Rect::new(41, 0, 79, 19)));
-
-        let (list, divider, detail) = split_body(Rect::new(0, 0, 60, 19), Route::List);
-        assert_eq!(list, Some(Rect::new(0, 0, 60, 19)));
-        assert_eq!(divider, None);
-        assert_eq!(detail, None);
-    }
-
-    /// `artifact-tabs` -> "`split_detail` is exact at its degenerate
-    /// heights" — task 1.7's RED test. `split_detail` at HEAD returns a
-    /// header rect first, so this fails on its content-area assertions.
-    #[test]
-    fn split_detail_is_exact_at_its_degenerate_heights() {
-        for width in [78u16, 58u16] {
-            let at = |height: u16| Rect::new(3, 5, width, height);
-
-            let (tabs, rule, content) = split_detail(at(17));
-            assert_eq!(tabs, Rect::new(3, 5, width, 1), "width {width} height 17");
-            assert_eq!(rule, Rect::new(3, 6, width, 1), "width {width} height 17");
-            assert_eq!(
-                content,
-                Rect::new(3, 8, width, 14),
-                "width {width} height 17"
-            );
         }
     }
 }

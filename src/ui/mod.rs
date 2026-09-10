@@ -754,8 +754,8 @@ mod tests {
         /// it, so this test fails loudly if the breakpoint or the frame
         /// split ever moves rather than silently reading a stale rectangle.
         fn detail_interior(width: u16, height: u16, route: Route) -> Rect {
-            let (_, body, _) = split_frame(Rect::new(0, 0, width, height));
-            let (_, detail) = split_body(body, route);
+            let (body, _) = split_frame(Rect::new(0, 0, width, height));
+            let (_, _, detail) = split_body(body, route);
             let detail = detail.expect("detail region must be drawn for this test's routes");
             Block::bordered().inner(detail)
         }
