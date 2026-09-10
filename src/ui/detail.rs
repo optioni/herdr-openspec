@@ -2374,6 +2374,47 @@ mod tests {
                 );
             }
         }
+
+        // `foldable-spec-sections`: the same holds for a foldable artifact of three
+        // sections whose labels are CJK, with one section open, so a header row is
+        // measured in columns like every other row.
+        let cjk_change = fixture::with_artifacts(fixture::active("x", 0, 0), &[("proposal", &[])]);
+        let cjk_detail = Detail {
+            sections: vec![
+                ArtifactSection {
+                    label: "日本語ラベル".to_string(),
+                    text: "one\n".to_string(),
+                },
+                ArtifactSection {
+                    label: "見出し二番目".to_string(),
+                    text: paragraph.clone(),
+                },
+                ArtifactSection {
+                    label: "タスク一覧".to_string(),
+                    text: "three\n".to_string(),
+                },
+            ],
+            scroll: 0,
+            tab: 0,
+            problems: Vec::new(),
+            loaded: None,
+            expanded: std::collections::BTreeSet::from([1]),
+        };
+        let cjk_dashboard = dashboard_at_detail(cjk_change, cjk_detail);
+        for width in mandated {
+            let lines = content_lines(
+                &cjk_dashboard.detail,
+                cjk_dashboard.selected_change(),
+                width,
+            );
+            for line in &lines {
+                assert!(
+                    columns(&line.text()) <= width as usize,
+                    "width {width}: {:?} exceeds its width",
+                    line.text()
+                );
+            }
+        }
     }
 
     /// `artifact-content` :: "No `content_lines` line exceeds its width at any width" —
