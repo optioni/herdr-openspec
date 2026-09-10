@@ -284,12 +284,44 @@ pub fn content_lines(
 
 #[cfg(test)]
 mod tests {
-    use super::{Tab, content_lines, header_row, tab_bar};
+    use super::{
+        ContentKind, ContentRow, Tab, content_lines, header, header_row, section_at, tab_bar,
+    };
     use crate::changes::fixture;
     use crate::tasks::Progress;
     use crate::testutil::{cell, render_at, row_text};
     use crate::ui::app::{ArtifactSection, Dashboard, Detail, Filter, Route};
     use crate::ui::layout::columns;
+
+    /// Three sections with short, single-line bodies, so a scenario about
+    /// header rows and folding does not also have to reason about
+    /// `ui::markdown`'s own wrapping. Labels match the ones
+    /// `ui::app::tests::the_three_spec_files_of_a_change_become_three_labelled_sections`
+    /// already fixes for the same three-file shape, so a reader who has seen
+    /// that test recognises this one.
+    fn three_spec_detail(expanded: std::collections::BTreeSet<usize>) -> Detail {
+        Detail {
+            sections: vec![
+                ArtifactSection {
+                    label: "degraded-coverage".to_string(),
+                    text: "one\n".to_string(),
+                },
+                ArtifactSection {
+                    label: "markdown-render".to_string(),
+                    text: "two\n".to_string(),
+                },
+                ArtifactSection {
+                    label: "tasks-checklist".to_string(),
+                    text: "three\n".to_string(),
+                },
+            ],
+            scroll: 0,
+            tab: 0,
+            problems: Vec::new(),
+            loaded: None,
+            expanded,
+        }
+    }
 
     fn detail(source: &str, problems: Vec<String>) -> Detail {
         Detail {
@@ -465,6 +497,150 @@ mod tests {
                 assert_eq!(tab_at(&a, 0, width, second.start), Some(1));
                 assert_eq!(tab_at(&a, 0, width, first.end), None, "the separator");
             }
+        }
+    }
+
+    /// `artifact-folds` :: "A narrow pane truncates the label and keeps the
+    /// glyph" — the header-row grammar itself, called directly rather than
+    /// through `content_lines`, since the scenario is about `header`'s own
+    /// truncation rather than the tab's body.
+    mod header {
+        use super::header;
+        use crate::ui::layout::columns;
+        use crate::ui::list::fold_glyph;
+
+        /// The content areas a 20- and a 15-column narrow frame produce
+        /// below the 100-column breakpoint are 18 and 13 columns
+        /// (`layout::interior`'s own two gutter columns) — `artifact-folds`
+        /// states the frame widths; this test states the content widths
+        /// `header` itself is called with.
+        #[test]
+        fn a_narrow_pane_truncates_the_label_and_keeps_the_glyph() {
+            let label = "degraded-coverage";
+            let glyph = fold_glyph(true);
+
+            let at_18 = header(label, false, 18);
+            assert_eq!(columns(&at_18), 18);
+            assert_eq!(at_18, format!("{glyph} degraded-covera…"));
+
+            let at_13 = header(label, false, 13);
+            assert_eq!(columns(&at_13), 13);
+            assert_eq!(at_13, format!("{glyph} degraded-c…"));
+
+            // The glyph and its separating space survive the truncation at
+            // both widths: the row still opens with them, unchanged.
+            assert!(at_18.starts_with(&format!("{glyph} ")));
+            assert!(at_13.starts_with(&format!("{glyph} ")));
+
+            // The mandated pair, named explicitly per DETAILWIDTHS.
+            for width in [78, 58] {
+                let got = header(label, false, width);
+                assert_eq!(columns(&got), width as usize, "width {width}");
+                assert!(got.ends_with(label), "width {width}: {got:?}");
+                assert!(got.starts_with(&format!("{glyph} ")), "width {width}: {got:?}");
+            }
+        }
+
+        /// A CJK label is truncated in display columns, not in `char`s, so
+        /// its header still measures at most the content width even though
+        /// its `chars().count()` would be smaller than that.
+        #[test]
+        fn a_cjk_label_is_truncated_in_columns() {
+            let label = "日本語のラベルです見出しの続き";
+            for width in [18u16, 13, 78, 58] {
+                let got = header(label, false, width);
+                assert!(
+                    columns(&got) <= width as usize,
+                    "width {width}: {got:?} exceeds its width"
+                );
+            }
+        }
+
+        /// Total and never panicking from `0` through `20`, plus the
+        /// mandated pair — `header` is one of the functions `DETAILWIDTHS`
+        /// requires to name both.
+        #[test]
+        fn header_is_total_from_zero_through_twenty_columns() {
+            let label = "degraded-coverage";
+            for expanded in [false, true] {
+                for width in 0u16..=20 {
+                    let got = header(label, expanded, width);
+                    assert!(
+                        columns(&got) <= width as usize,
+                        "expanded {expanded} width {width}: {got:?}"
+                    );
+                }
+                for width in [78, 58] {
+                    let got = header(label, expanded, width);
+                    assert_eq!(columns(&got), width as usize, "width {width}");
+                }
+            }
+        }
+    }
+
+    /// `artifact-folds` :: "Each drawn header row resolves to its own
+    /// index".
+    #[test]
+    fn each_drawn_header_row_resolves_to_its_own_index() {
+        for width in [78, 58] {
+            let collapsed = three_spec_detail(std::collections::BTreeSet::new());
+            let rows = content_lines(&collapsed, None, width);
+            assert_eq!(rows.len(), 3, "width {width}");
+            assert_eq!(section_at(&rows, 0, 0), Some(0), "width {width}");
+            assert_eq!(section_at(&rows, 0, 1), Some(1), "width {width}");
+            assert_eq!(section_at(&rows, 0, 2), Some(2), "width {width}");
+            assert_eq!(section_at(&rows, 0, 3), None, "width {width}");
+
+            let mut expanded = std::collections::BTreeSet::new();
+            expanded.insert(0);
+            let opened = three_spec_detail(expanded);
+            let rows2 = content_lines(&opened, None, width);
+            // Row 0 is section 0's header; row 1 is the first (and only)
+            // line of its body, which resolves to no section at all; the
+            // header that follows resolves to section 1.
+            assert_eq!(section_at(&rows2, 0, 0), Some(0), "width {width}");
+            assert_eq!(section_at(&rows2, 0, 1), None, "width {width}");
+            let header1 = rows2
+                .iter()
+                .position(|r| matches!(r.kind, ContentKind::SectionHeader { section: 1, .. }))
+                .expect("section 1's header is drawn");
+            assert_eq!(
+                section_at(&rows2, 0, header1 as u16),
+                Some(1),
+                "width {width}"
+            );
+        }
+    }
+
+    /// `artifact-folds` :: "Resolution is total and inert where it should
+    /// be".
+    #[test]
+    fn resolution_is_total_and_inert_where_it_should_be() {
+        for width in [78, 58] {
+            // A non-foldable dashboard's row list: every row is `Body`, so
+            // `section_at` answers `None` everywhere, including past the
+            // end.
+            let single = detail("# heading\n", Vec::new());
+            let rows = content_lines(&single, None, width);
+            for row in 0..(rows.len() as u16 + 5) {
+                assert_eq!(section_at(&rows, 0, row), None, "width {width} row {row}");
+            }
+
+            // An empty row list.
+            let empty: Vec<ContentRow> = Vec::new();
+            assert_eq!(section_at(&empty, 0, 0), None, "width {width}");
+
+            // `offset` past the end, at `usize::MAX`, and `row` at
+            // `u16::MAX` — every combination saturates rather than
+            // panicking or wrapping.
+            assert_eq!(
+                section_at(&rows, rows.len() + 10, 0),
+                None,
+                "width {width}"
+            );
+            assert_eq!(section_at(&rows, usize::MAX, 0), None, "width {width}");
+            assert_eq!(section_at(&rows, 0, u16::MAX), None, "width {width}");
+            assert_eq!(section_at(&rows, usize::MAX, u16::MAX), None, "width {width}");
         }
     }
 
@@ -1428,6 +1604,143 @@ mod tests {
         }
         for line in &lines58 {
             assert!(columns(&line.text()) <= 58);
+        }
+    }
+
+    // --- artifact-folds: header rows, per-section bodies, and folding ----
+
+    /// `artifact-content` :: "A foldable tab's body is headers, and an open
+    /// section's markdown beneath its own".
+    #[test]
+    fn a_foldable_tabs_body_is_headers_and_an_open_sections_markdown_beneath_its_own() {
+        for width in [78, 58] {
+            let mut expanded = std::collections::BTreeSet::new();
+            expanded.insert(1);
+            let d = three_spec_detail(expanded);
+            let rows = content_lines(&d, None, width);
+
+            assert!(
+                matches!(
+                    rows[0].kind,
+                    ContentKind::SectionHeader {
+                        section: 0,
+                        selected: false
+                    }
+                ),
+                "width {width}: {:?}",
+                rows[0].kind
+            );
+            assert!(
+                matches!(
+                    rows[1].kind,
+                    ContentKind::SectionHeader { section: 1, .. }
+                ),
+                "width {width}: {:?}",
+                rows[1].kind
+            );
+
+            let body = crate::ui::markdown::lines(&d.sections[1].text, width);
+            let body_rows = &rows[2..2 + body.len()];
+            for (row, line) in body_rows.iter().zip(body.iter()) {
+                assert_eq!(&row.line, line, "width {width}");
+                assert_eq!(row.kind, ContentKind::Body, "width {width}");
+            }
+
+            let after = &rows[2 + body.len()];
+            assert!(
+                matches!(after.kind, ContentKind::SectionHeader { section: 2, .. }),
+                "width {width}: {:?}",
+                after.kind
+            );
+
+            // With `expanded` empty the returned list is exactly three
+            // header rows.
+            let collapsed = three_spec_detail(std::collections::BTreeSet::new());
+            let rows2 = content_lines(&collapsed, None, width);
+            assert_eq!(rows2.len(), 3, "width {width}");
+            assert!(
+                rows2
+                    .iter()
+                    .all(|r| matches!(r.kind, ContentKind::SectionHeader { .. })),
+                "width {width}: {:?}",
+                rows2.iter().map(|r| r.kind).collect::<Vec<_>>()
+            );
+
+            // No returned line exceeds `width`.
+            for row in &rows {
+                assert!(columns(&row.text()) <= width as usize, "width {width}");
+            }
+        }
+    }
+
+    /// `artifact-content` :: "A non-foldable tab is byte-identical to
+    /// today".
+    #[test]
+    fn a_non_foldable_tab_is_byte_identical_to_today() {
+        let source: String = (0..20).map(|i| format!("- line-{i:02}\n")).collect();
+        for width in [78, 58] {
+            let d = detail(&source, Vec::new());
+            let rows = content_lines(&d, None, width);
+            let want = crate::ui::markdown::lines(&d.sections[0].text, width);
+            assert_eq!(rows.len(), want.len(), "width {width}");
+            for (row, line) in rows.iter().zip(want.iter()) {
+                assert_eq!(&row.line, line, "width {width}");
+                assert_eq!(row.kind, ContentKind::Body, "width {width}");
+            }
+            assert!(
+                !rows
+                    .iter()
+                    .any(|r| matches!(r.kind, ContentKind::SectionHeader { .. })),
+                "width {width}: a header row was prepended"
+            );
+        }
+    }
+
+    /// `artifact-content` :: "The tracked-tasks tab concatenates rather
+    /// than folding".
+    #[test]
+    fn the_tracked_tasks_tab_concatenates_rather_than_folding() {
+        let progress = Progress {
+            completed: 1,
+            total: 2,
+        };
+        let change =
+            fixture::with_marked_artifacts(&paths_free(&["proposal", "tasks"]), Some(1), progress);
+        for width in [78, 58] {
+            let d = Detail {
+                sections: vec![
+                    ArtifactSection {
+                        label: String::new(),
+                        text: "## 1. Setup\n- [x] a\n".to_string(),
+                    },
+                    ArtifactSection {
+                        label: String::new(),
+                        text: "## 2. Build\n- [ ] b\n".to_string(),
+                    },
+                ],
+                scroll: 0,
+                tab: 1,
+                problems: Vec::new(),
+                loaded: None,
+                expanded: std::collections::BTreeSet::new(),
+            };
+            let rows = content_lines(&d, Some(&change), width);
+            let want = crate::ui::tasks::lines(
+                "## 1. Setup\n- [x] a\n## 2. Build\n- [ ] b\n",
+                &progress,
+                width,
+            );
+            assert_eq!(rows.len(), want.len(), "width {width}");
+            for (row, line) in rows.iter().zip(want.iter()) {
+                assert_eq!(&row.line, line, "width {width}");
+            }
+            assert!(
+                !rows
+                    .iter()
+                    .any(|r| matches!(r.kind, ContentKind::SectionHeader { .. })),
+                "width {width}: a header row must never appear on the tracked-tasks tab, \
+                 even with two sections"
+            );
         }
     }
 
