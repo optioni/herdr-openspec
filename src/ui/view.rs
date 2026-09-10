@@ -1073,22 +1073,34 @@ mod tests {
     }
 
     #[test]
-    fn one_column_frame_does_not_panic() {
+    fn a_one_column_frame_renders_without_panicking() {
         let d = dashboard(Some("/tmp/demo-repo"), Route::List);
         let buf = render_at(1, 1, &d);
         let _ = buf;
         let buf = render_at(1, 20, &d);
-        assert_eq!(row_text(&buf, 0), "O");
+        // The region's one column is its left gutter, its interior is zero columns
+        // wide, so the heading row is truncated to nothing rather than drawn over
+        // the gutter — row 0 is a single space.
+        assert_eq!(row_text(&buf, 0), " ");
+        // `q quit` needs six columns, so the first hint is dropped whole rather
+        // than truncated — row 19 is a single space too.
         assert_eq!(row_text(&buf, 19), " ");
         // Extended: a 2x20 render, so a zero-column list-region interior is
         // exercised too (a 2-wide frame's list region has width 2, and
-        // Block::bordered().inner() of that is width 0).
+        // `layout::interior` of that is width 0).
         let buf = render_at(2, 20, &d);
         let _ = buf;
+        // The two mandated widths, as contrasting controls: the one-column result
+        // above is a width branch rather than the heading and footer being absent
+        // everywhere.
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
-            assert_eq!(cols(&row_text(&buf, 0), 0..8), "OpenSpec");
-            assert_eq!(cols(&row_text(&buf, 19), 0..6), "q quit");
+            assert_eq!(
+                cols(&row_text(&buf, 0), 1..10),
+                "demo-repo",
+                "width {width}"
+            );
+            assert_eq!(cols(&row_text(&buf, 19), 0..6), "q quit", "width {width}");
         }
 
         // `agent-launch`: the same holds with `agents.reachable` `true`, which adds no hint
@@ -1467,66 +1479,110 @@ mod tests {
     }
 
     #[test]
-    fn wide_draws_two_regions_divided_at_40() {
-        let d = dashboard(Some("/tmp/demo-repo"), Route::List);
+    fn at_120_columns_both_regions_are_drawn_with_the_divider_at_column_40() {
+        let d = dashboard_with(
+            vec![fixture::active("alpha", 1, 3)],
+            Vec::new(),
+            1,
+            Route::List,
+        );
         let buf = render_at(120, 20, &d);
-        assert_eq!(cell(&buf, 0, 1).symbol(), "┌");
-        assert_eq!(cell(&buf, 39, 1).symbol(), "┐");
-        assert_eq!(cell(&buf, 40, 1).symbol(), "┌");
-        assert_eq!(cell(&buf, 119, 1).symbol(), "┐");
-        assert_eq!(cols(&row_text(&buf, 1), 1..8), "Changes");
-        assert_eq!(cols(&row_text(&buf, 1), 41..47), "Detail");
-        assert_eq!(cell(&buf, 0, 18).symbol(), "└");
-        assert_eq!(cell(&buf, 39, 18).symbol(), "┘");
-        assert_eq!(cell(&buf, 40, 18).symbol(), "└");
-        assert_eq!(cell(&buf, 119, 18).symbol(), "┘");
+        // Row 0 spells `demo-repo` from column 1 and `alpha`'s own change header
+        // from column 42, so both regions drew their heading rows.
+        assert_eq!(cols(&row_text(&buf, 0), 1..10), "demo-repo");
+        assert!(cols(&row_text(&buf, 0), 42..47).starts_with("alpha"));
 
-        let buf60 = render_at(60, 20, &d);
-        assert_eq!(count_char(&buf60, '┌'), 1);
-    }
-
-    #[test]
-    fn narrow_draws_only_the_list_region() {
-        let d = dashboard(Some("/tmp/demo-repo"), Route::List);
-        let buf = render_at(60, 20, &d);
-        assert_eq!(cell(&buf, 0, 1).symbol(), "┌");
-        assert_eq!(cell(&buf, 59, 1).symbol(), "┐");
-        assert_eq!(count_char(&buf, '┌'), 1);
-        assert_eq!(cols(&row_text(&buf, 1), 1..8), "Changes");
+        for y in 0..=18u16 {
+            assert_eq!(cell(&buf, 40, y).symbol(), "│", "y={y}");
+            assert_eq!(cell(&buf, 0, y).symbol(), " ", "y={y}");
+            assert_eq!(cell(&buf, 39, y).symbol(), " ", "y={y}");
+            assert_eq!(cell(&buf, 41, y).symbol(), " ", "y={y}");
+        }
+        assert!(!buffer_contains(&buf, "Changes"));
         assert!(!buffer_contains(&buf, "Detail"));
 
-        let buf120 = render_at(120, 20, &d);
-        assert_eq!(count_char(&buf120, '┌'), 2);
+        // The 60-column buffer, as the contrasting control at the mandated narrow
+        // width, holds no divider at all: it is a width branch, not something
+        // drawn unconditionally.
+        let buf60 = render_at(60, 20, &d);
+        assert!(!buffer_contains(&buf60, "│"));
     }
 
     #[test]
-    fn narrow_detail_route_replaces_the_list_region() {
-        let d = dashboard(Some("/tmp/demo-repo"), Route::Detail);
+    fn at_60_columns_only_the_routed_region_is_drawn() {
+        let d = dashboard_with(
+            vec![fixture::active("alpha", 1, 3)],
+            Vec::new(),
+            1,
+            Route::List,
+        );
         let buf = render_at(60, 20, &d);
-        assert_eq!(cols(&row_text(&buf, 1), 1..7), "Detail");
-        assert!(!buffer_contains(&buf, "Changes"));
+        // Row 0 spells `demo-repo` from column 1, and the change's own header —
+        // identified by its `(tdd)` schema cell, which no list row carries —
+        // appears in no row, because the detail region was not drawn.
+        assert_eq!(cols(&row_text(&buf, 0), 1..10), "demo-repo");
+        assert!(!buffer_contains(&buf, "(tdd)"));
+        assert!(!buffer_contains(&buf, "│"));
 
+        // The 120-column buffer, as the contrasting control at the mandated wide
+        // width, does hold the change's header, so the absence at 60 columns is the
+        // breakpoint and not the detail heading being missing.
         let buf120 = render_at(120, 20, &d);
-        assert_eq!(cols(&row_text(&buf120, 1), 1..8), "Changes");
-        assert_eq!(cols(&row_text(&buf120, 1), 41..47), "Detail");
+        assert!(buffer_contains(&buf120, "(tdd)"));
     }
 
     #[test]
-    fn breakpoint_is_exact_at_the_boundary() {
+    fn at_60_columns_the_detail_route_replaces_the_list_region() {
+        let d = dashboard_with(
+            vec![fixture::active("alpha", 1, 3)],
+            Vec::new(),
+            1,
+            Route::Detail,
+        );
+        let buf = render_at(60, 20, &d);
+        // Row 0 spells the selected change's header from column 1, and
+        // `demo-repo` appears in no row, because the list region — and with it
+        // the repository heading — is not drawn.
+        assert!(cols(&row_text(&buf, 0), 1..6).starts_with("alpha"));
+        assert!(!buffer_contains(&buf, "demo-repo"));
+
+        // The 120-column buffer still shows both, because the route selects
+        // emphasis rather than visibility above the breakpoint.
+        let buf120 = render_at(120, 20, &d);
+        assert_eq!(cols(&row_text(&buf120, 0), 1..10), "demo-repo");
+        assert!(cols(&row_text(&buf120, 0), 42..47).starts_with("alpha"));
+    }
+
+    #[test]
+    fn the_breakpoint_is_exact_at_99_100_and_101_columns() {
+        use crate::ui::layout::{LayoutMode, mode};
+
+        for width in [0u16, 1, 40, 60, 99] {
+            assert_eq!(mode(width), LayoutMode::Narrow, "width {width}");
+        }
+        for width in [100u16, 101, 120, u16::MAX] {
+            assert_eq!(mode(width), LayoutMode::Wide, "width {width}");
+        }
+
         let d = dashboard(Some("/tmp/demo-repo"), Route::List);
         for width in [60, 99] {
             let buf = render_at(width, 20, &d);
-            assert_eq!(count_char(&buf, '┌'), 1, "width {width}");
+            assert!(!buffer_contains(&buf, "│"), "width {width}");
         }
         for width in [100, 101, 120] {
             let buf = render_at(width, 20, &d);
-            assert_eq!(count_char(&buf, '┌'), 2, "width {width}");
-            assert_eq!(cell(&buf, 40, 1).symbol(), "┌");
+            for y in 0..=18u16 {
+                assert_eq!(cell(&buf, 40, y).symbol(), "│", "width {width}: y={y}");
+            }
         }
     }
 
     #[test]
-    fn resizing_the_backend_changes_the_next_frame() {
+    fn the_mode_follows_the_current_frame_not_the_startup_size() {
+        // `Dashboard` exposes no field naming a width, a layout mode, or a column
+        // count — a structural claim, unenforceable at this tier, but a `Dashboard`
+        // literal that named one would fail to compile against every other test in
+        // this module.
         let d = dashboard(Some("/tmp/demo-repo"), Route::List);
         let backend = TestBackend::new(120, 20);
         let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
@@ -1539,26 +1595,48 @@ mod tests {
             .draw(|frame| super::render(frame, &d))
             .expect("draw second frame");
         let second = terminal.backend().buffer().clone();
-        assert_eq!(count_char(&first, '┌'), 2);
-        assert_eq!(count_char(&second, '┌'), 1);
+        assert_eq!(
+            count_char(&first, '│'),
+            19,
+            "the first frame holds the divider"
+        );
+        assert_eq!(
+            count_char(&second, '│'),
+            0,
+            "the second frame holds no divider"
+        );
     }
 
     #[test]
-    fn routed_region_border_is_bold() {
-        let list = dashboard(Some("/tmp/demo-repo"), Route::List);
+    fn the_routed_region_s_border_is_bold_and_the_other_s_is_not() {
+        // The scenario's name is kept verbatim (design.md -> Verification matrix):
+        // there is no border any more, and the claim it made — the routed region is
+        // the emphasised one — is now made by the heading row.
+        let list = dashboard_with(
+            vec![fixture::active("alpha", 1, 3)],
+            Vec::new(),
+            1,
+            Route::List,
+        );
         let buf = render_at(120, 20, &list);
-        assert!(is_bold(cell(&buf, 0, 1)));
-        assert!(!is_bold(cell(&buf, 40, 1)));
+        assert!(is_bold(cell(&buf, 1, 0)));
+        assert!(!is_bold(cell(&buf, 42, 0)));
+        assert!(is_dim(cell(&buf, 42, 0)));
 
-        let detail = dashboard(Some("/tmp/demo-repo"), Route::Detail);
+        let detail = dashboard_with(
+            vec![fixture::active("alpha", 1, 3)],
+            Vec::new(),
+            1,
+            Route::Detail,
+        );
         let buf = render_at(120, 20, &detail);
-        assert!(!is_bold(cell(&buf, 0, 1)));
-        assert!(is_bold(cell(&buf, 40, 1)));
+        assert!(!is_bold(cell(&buf, 1, 0)));
+        assert!(is_bold(cell(&buf, 42, 0)));
 
         for route in [Route::List, Route::Detail] {
-            let d = dashboard(Some("/tmp/demo-repo"), route);
+            let d = dashboard_with(vec![fixture::active("alpha", 1, 3)], Vec::new(), 1, route);
             let buf = render_at(60, 20, &d);
-            assert!(is_bold(cell(&buf, 0, 1)), "route {route:?}");
+            assert!(is_bold(cell(&buf, 1, 0)), "route {route:?}");
         }
     }
 
@@ -5886,103 +5964,73 @@ mod tests {
         }
     }
 
-    /// The border cells of a region spanning columns `x0` through `x1` of a 20-row frame:
-    /// its top and bottom rows whole, and its two side columns between them.
-    fn border_cells(x0: u16, x1: u16) -> Vec<(u16, u16)> {
-        let mut out = Vec::new();
-        for x in x0..=x1 {
-            out.push((x, 1));
-            out.push((x, 18));
-        }
-        for y in 2..=17u16 {
-            out.push((x0, y));
-            out.push((x1, y));
-        }
-        out
-    }
-
-    /// `responsive-layout` :: "The routed region's border takes its style from the palette
-    /// at both widths".
+    /// `responsive-layout` :: "No heading or rule cell carries a colour" — the
+    /// replacement for the removed border's own colourlessness scenario: there is no
+    /// border any more, but the same claim holds of a region's heading row and of
+    /// both rules (the wide layout's divider and the detail region's horizontal
+    /// rule below its tab bar), whichever region is routed.
     #[test]
-    fn the_routed_regions_border_takes_its_style_from_the_palette() {
-        let default_style = Cell::default().style();
-        let list = dashboard(Some("/tmp/demo-repo"), Route::List);
-        let detail = dashboard(Some("/tmp/demo-repo"), Route::Detail);
+    fn no_heading_or_rule_cell_carries_a_colour() {
+        let list = dashboard_with(
+            vec![fixture::active("alpha", 1, 3)],
+            Vec::new(),
+            1,
+            Route::List,
+        );
+        let detail = dashboard_with(
+            vec![fixture::active("alpha", 1, 3)],
+            Vec::new(),
+            1,
+            Route::Detail,
+        );
 
-        let buf = render_at(120, 20, &list);
-        for (x, y) in border_cells(0, 39) {
-            assert!(is_bold(cell(&buf, x, y)), "routed list border at {x},{y}");
-        }
-        for (x, y) in border_cells(40, 119) {
-            assert!(
-                !is_bold(cell(&buf, x, y)),
-                "unrouted detail border at {x},{y}"
-            );
-        }
-        for (x, y) in border_cells(0, 39).into_iter().chain(border_cells(40, 119)) {
-            let style = cell(&buf, x, y).style();
-            assert_eq!(
-                style.fg,
-                uncoloured().fg,
-                "border {x},{y} carries a foreground"
-            );
-            assert_eq!(
-                style.bg,
-                uncoloured().bg,
-                "border {x},{y} carries a background"
-            );
-        }
-        // A blank region interior still equals the default cell style, so the role's style
-        // reached `border_style` rather than the block's own `style`.
-        for y in 2..=17u16 {
-            for x in 41..=118u16 {
-                assert_eq!(
-                    cell(&buf, x, y).style(),
-                    default_style,
-                    "blank interior cell {x},{y}"
-                );
+        for d in [&list, &detail] {
+            for width in [120u16, 60] {
+                let buf = render_at(width, 20, d);
+
+                // No cell of the list region's own heading row carries a colour.
+                let last = if width == 60 { 58u16 } else { 38 };
+                for x in 1..=last {
+                    let style = cell(&buf, x, 0).style();
+                    assert_eq!(style.fg, uncoloured().fg, "width {width}: list heading {x}");
+                    assert_eq!(style.bg, uncoloured().bg, "width {width}: list heading {x}");
+                }
+
+                if width == 120 {
+                    // Nor the detail region's own heading row.
+                    for x in 42..=119u16 {
+                        let style = cell(&buf, x, 0).style();
+                        assert_eq!(style.fg, uncoloured().fg, "detail heading {x}");
+                        assert_eq!(style.bg, uncoloured().bg, "detail heading {x}");
+                    }
+                    // Nor the vertical divider, which is dim throughout the body.
+                    for y in 0..=18u16 {
+                        let style = cell(&buf, 40, y).style();
+                        assert_eq!(style.fg, uncoloured().fg, "divider y={y}");
+                        assert_eq!(style.bg, uncoloured().bg, "divider y={y}");
+                        assert!(is_dim(cell(&buf, 40, y)), "divider y={y}");
+                    }
+                    // Nor the detail region's own horizontal rule, buffer row 3.
+                    for x in 42..=119u16 {
+                        let style = cell(&buf, x, 3).style();
+                        assert_eq!(style.fg, uncoloured().fg, "rule {x}");
+                        assert_eq!(style.bg, uncoloured().bg, "rule {x}");
+                        assert!(is_dim(cell(&buf, x, 3)), "rule {x}");
+                    }
+                }
             }
         }
 
-        // The same frame at the same width with the route moved: the two are swapped, so
-        // the assertion discriminates rather than asserting a constant.
-        let buf = render_at(120, 20, &detail);
-        for (x, y) in border_cells(40, 119) {
-            assert!(is_bold(cell(&buf, x, y)), "routed detail border at {x},{y}");
-        }
-        for (x, y) in border_cells(0, 39) {
-            assert!(
-                !is_bold(cell(&buf, x, y)),
-                "unrouted list border at {x},{y}"
-            );
-        }
-        for (x, y) in border_cells(0, 39).into_iter().chain(border_cells(40, 119)) {
-            let style = cell(&buf, x, y).style();
+        // With `file_mode` true the nine badge cells of the list heading row do
+        // report `Color::Yellow`, so the absence of colour above is a property of
+        // the heading role rather than of the row.
+        let file_mode = dashboard_in_file_mode(Some("/tmp/demo-repo"), Route::List);
+        let buf = render_at(120, 20, &file_mode);
+        for x in 30..=38u16 {
             assert_eq!(
-                style.fg,
-                uncoloured().fg,
-                "border {x},{y} carries a foreground"
-            );
-            assert_eq!(
-                style.bg,
-                uncoloured().bg,
-                "border {x},{y} carries a background"
-            );
-        }
-
-        let buf = render_at(60, 20, &detail);
-        for (x, y) in border_cells(0, 59) {
-            assert!(is_bold(cell(&buf, x, y)), "narrow routed border at {x},{y}");
-            let style = cell(&buf, x, y).style();
-            assert_eq!(
-                style.fg,
-                uncoloured().fg,
-                "border {x},{y} carries a foreground"
-            );
-            assert_eq!(
-                style.bg,
-                uncoloured().bg,
-                "border {x},{y} carries a background"
+                cell(&buf, x, 0).style().fg,
+                Some(ratatui::style::Color::Yellow),
+                "badge col {x}"
             );
         }
     }
