@@ -562,9 +562,8 @@ mod tests {
         assert!(matches!(result, Err(LoopError::Events(_))));
 
         let buf = terminal.backend().buffer();
-        assert_eq!(&row_text(buf, 0)[0..8], "OpenSpec");
-        assert_eq!(cell(buf, 0, 1).symbol(), "┌");
-        assert_eq!(cell(buf, 40, 1).symbol(), "┌");
+        assert_eq!(&row_text(buf, 0)[1..10], "demo-repo");
+        assert_eq!(cell(buf, 40, 1).symbol(), "│");
     }
 
     #[test]
@@ -781,8 +780,10 @@ mod tests {
         );
 
         let buf = terminal.backend().buffer();
-        let row1: String = row_text(buf, 1).chars().skip(1).take(6).collect();
-        assert_eq!(row1, "Detail");
+        assert!(
+            !(0..buf.area.height).any(|y| row_text(buf, y).contains("demo-repo")),
+            "the route change stopped drawing the list region's own heading"
+        );
         assert!(!(0..buf.area.height).any(|y| row_text(buf, y).contains("Changes")));
     }
 
@@ -890,19 +891,20 @@ mod tests {
             );
 
             let buf = terminal.backend().buffer();
-            let base = if width == 60 { 1 } else { 41 };
+            let base = if width == 60 { 1 } else { 42 };
             let row_at = |y: u16| -> String {
                 (base..base + 9)
                     .map(|x| row_text(buf, y).chars().nth(x as usize).unwrap())
                     .collect()
             };
-            // The content area starts two rows lower than the interior
-            // (the header and tab bar rows above it) and is two rows
-            // shorter, and `normalise_scroll` now clamps against the
-            // content area's own height, so the 14-row content area draws
-            // lines 6 through 19, not 4 through 19.
-            assert_eq!(row_at(4), "- line-06", "width {width}");
-            assert_eq!(row_at(17), "- line-19", "width {width}");
+            // The content area starts three rows below the interior (the
+            // heading, tab bar, rule, and content padding rows above it)
+            // and is two rows shorter than the interior, and
+            // `normalise_scroll` now clamps against the content area's own
+            // height, so the 14-row content area draws lines 6 through 19,
+            // not 4 through 19.
+            assert_eq!(row_at(5), "- line-06", "width {width}");
+            assert_eq!(row_at(18), "- line-19", "width {width}");
         }
     }
 
@@ -1027,14 +1029,14 @@ mod tests {
             );
 
             let buf = terminal.backend().buffer();
-            let base = if width == 60 { 1 } else { 41 };
+            let base = if width == 60 { 1 } else { 42 };
             let row_at = |y: u16, len: usize| -> String {
                 (base..base + len as u16)
                     .map(|x| row_text(buf, y).chars().nth(x as usize).unwrap())
                     .collect()
             };
             assert_eq!(
-                row_at(17, 11),
+                row_at(18, 11),
                 "[ ] line-19",
                 "width {width}: the clamp used the body that was actually drawn"
             );
@@ -1219,7 +1221,7 @@ mod tests {
         assert_eq!(dashboard.detail.scroll, 0);
 
         let buf = terminal.backend().buffer();
-        let row: String = row_text(buf, 4).chars().skip(41).take(9).collect();
+        let row: String = row_text(buf, 5).chars().skip(42).take(9).collect();
         assert_eq!(row, "- line-00");
     }
 
@@ -1337,7 +1339,7 @@ mod tests {
         assert_eq!(dashboard.changes, before.changes);
 
         let buf = terminal.backend().buffer();
-        let row: String = row_text(buf, 4).chars().skip(41).take(9).collect();
+        let row: String = row_text(buf, 5).chars().skip(42).take(9).collect();
         assert_eq!(row, "- line-03");
     }
 
@@ -1470,7 +1472,7 @@ mod tests {
             }
         );
         let buf = terminal.backend().buffer();
-        let row: String = row_text(buf, 4).chars().skip(41).take(10).collect();
+        let row: String = row_text(buf, 5).chars().skip(42).take(10).collect();
         assert_eq!(row, "# proposal");
         assert_eq!(recorder.calls(), 1);
     }
@@ -3645,15 +3647,20 @@ mod tests {
     }
 
     #[test]
-    fn the_wheel_acts_over_a_border_and_not_the_chrome() {
+    fn the_wheel_acts_over_a_border_and_not_over_the_chrome() {
         // `mouse-input`: "The wheel acts over a border and not over the chrome".
         let dashboard = mouse_dashboard(3, 0);
-        assert_eq!(
-            mouse_action(&dashboard, WIDE, &m(MouseEventKind::ScrollUp, 0, 1)),
-            Action::SelectPrev,
-            "the list region's own border column and row"
-        );
-        for (column, row) in [(10u16, 0u16), (10, 39), (200, 10)] {
+        for (column, row, label) in [
+            (0u16, 1u16, "the list region's own left gutter column"),
+            (10, 0, "the list region's own heading row"),
+        ] {
+            assert_eq!(
+                mouse_action(&dashboard, WIDE, &m(MouseEventKind::ScrollUp, column, row)),
+                Action::SelectPrev,
+                "{label} at ({column}, {row})"
+            );
+        }
+        for (column, row) in [(10u16, 39u16), (200, 10)] {
             assert_eq!(
                 mouse_action(&dashboard, WIDE, &m(MouseEventKind::ScrollUp, column, row)),
                 Action::Ignore,
@@ -4257,11 +4264,11 @@ mod tests {
         // size at startup".
         //
         // The point is chosen to **discriminate**, which the obvious one does
-        // not. At 120x40 the detail region's tab bar is row 3 spanning columns
-        // 41-118, and the third `tdd` cell (` design `) is painted at columns
+        // not. At 120x40 the detail region's tab bar is row 2 spanning columns
+        // 42-119, and the third `tdd` cell (` design `) is painted at columns
         // 60-67 — past the 60-column frame's right edge entirely. So:
         //
-        //   - resolved against the **stale** 120-column frame, (62, 3) is a
+        //   - resolved against the **stale** 120-column frame, (62, 2) is a
         //     drawn tab cell and yields `Action::SelectTab(2)`, moving
         //     `detail.tab` to 2;
         //   - resolved against the **fresh** 60-column frame, column 62 is
@@ -4282,7 +4289,7 @@ mod tests {
             Ok(Some(crate::testutil::mouse(
                 MouseEventKind::Down(MouseButton::Left),
                 62,
-                3,
+                2,
             ))),
             Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
         ]);
@@ -4302,18 +4309,18 @@ mod tests {
         let bar = tab_bar_row(WIDE, Route::List);
         let third = tab_cell_start(&dashboard, WIDE, Route::List, 2);
         assert!(
-            third >= 60 && bar.y == 3,
+            third >= 60 && bar.y == 2,
             "the fixture must place the third tab cell past the 60-column frame: \
              cell at {third}, bar row {}",
             bar.y
         );
         assert_eq!(
-            mouse_action(&dashboard, WIDE, &left(62, 3)),
+            mouse_action(&dashboard, WIDE, &left(62, bar.y)),
             Action::SelectTab(2),
             "against the 120-column frame the press is a tab click"
         );
         assert_eq!(
-            mouse_action(&dashboard, NARROW, &left(62, 3)),
+            mouse_action(&dashboard, NARROW, &left(62, bar.y)),
             Action::Ignore,
             "against the 60-column frame it is outside the frame"
         );
