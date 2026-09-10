@@ -26,21 +26,21 @@ Severity, owner, and whether it blocks. Repairs are recorded in the row.
 | 1 | Critical | `src/ui/layout.rs` — `zone` | Hardcodes `Gutters::LeftOnly`, so at the narrow layout the hit test builds a 59-column interior where the draw path built 58. `tab_bar` windows the artifact list by that width, so a click resolves to a tab other than the one drawn, and cells past the drawn bar resolve to an off-screen tab | **yes** | **Resolved** — `81f1608` (RED), `8ce5d4a` (GREEN) |
 | 2 | Critical | `src/ui/app.rs` — `normalise_scroll` | Hardcodes `Gutters::Both`, so at the wide layout the scroll clamp is computed against a 77-column content area where the draw uses 78. `content_lines` wraps by width, so `detail.scroll` can be left past the end of a document that fits the content area entirely | **yes** | **Resolved** — `81f1608` (RED), `8ce5d4a` (GREEN) |
 | 3 | Critical | `design.md` → Verification matrix | 58 of the 145 rows naming a test name one that exists nowhere in `src/` or `tests/`. The code groups renamed only tests they touched; no task covered the untouched landed tests the matrix also renamed. Task 10.2 fails on every one | **yes** | **Resolved** — `0f496b3`; all 149 rows now name an existing test |
-| 4 | Warning | `src/ui/view.rs` — `region_interiors_are_blank` | Sweeps the old bordered rectangle (rows 2–17, columns 41–118). Stays green only because the new blank area is a superset. The scenario's discriminating clause — that the same dashboard with one active change added is no longer blank — is absent, so the test cannot tell blankness from a constant | no | |
-| 5 | Warning | `src/ui/view.rs` — `rows_do_not_overwrite_the_borders` | Passes `selected: 0`, which addresses a section header, so the detail region is blank for the whole test and none of the four things the scenario names is exercised. Omits the `Route::Detail` 60x20 leg and the "column 119 does carry content" assertion. `design.md` → Risks names this test as where a future trailing-gutter regression would fail; it no longer would, though `the_divider_has_a_blank_column_on_each_side_at_120_columns` and `content_never_overwrites_the_detail_region_s_border` do cover the property | no | |
-| 6 | Warning | `src/ui/layout.rs` — `scroll_offset_is_exact_at_its_boundaries` | Uses height `16` throughout where `detail-scroll` specifies nine tuples at height `14`, and says explicitly that the heights are the content area's fourteen rows rather than the interior's seventeen. `16` is the stale interior figure this change moved | no | |
-| 7 | Warning | `src/ui/view.rs`, `src/ui/layout.rs` | One clause of "The divider column is a width branch, not a constant" is asserted nowhere: that in a 100-column buffer the detail interior is `Rect::new(42, 2, 58, 17)`. The divider half is covered by `the_breakpoint_is_exact_at_99_100_and_101_columns` | no | |
-| 8 | Warning | `tests/degraded-coverage.toml` | The re-baselined `covers` range for the file-mode row spans a doc comment, a constant and a signature — none of the badge-drawing body. `validate_covers` needs only one non-blank non-comment line in range, so the row passes vacuously and would keep passing if the badge code moved out from under it | no | |
-| 9 | Warning | `src/ui/mod.rs` — `detail_interior` | Still returns `Block::bordered().inner(detail)`, a rectangle the draw path no longer computes, with callers correcting it by hand (`interior.y + 4`, `interior.height - 3`, `interior.y - 1`). The arithmetic lands right today, but the helper's doc comment claims it "fails loudly if the frame split ever moves", which is now false | no | |
+| 4 | Warning | `src/ui/view.rs` — `region_interiors_are_blank` | Sweeps the old bordered rectangle (rows 2–17, columns 41–118). Stays green only because the new blank area is a superset. The scenario's discriminating clause — that the same dashboard with one active change added is no longer blank — is absent, so the test cannot tell blankness from a constant | no |**Resolved** |
+| 5 | Warning | `src/ui/view.rs` — `rows_do_not_overwrite_the_borders` | Passes `selected: 0`, which addresses a section header, so the detail region is blank for the whole test and none of the four things the scenario names is exercised. Omits the `Route::Detail` 60x20 leg and the "column 119 does carry content" assertion. `design.md` → Risks names this test as where a future trailing-gutter regression would fail; it no longer would, though `the_divider_has_a_blank_column_on_each_side_at_120_columns` and `content_never_overwrites_the_detail_region_s_border` do cover the property | no |**Resolved** |
+| 6 | Warning | `src/ui/layout.rs` — `scroll_offset_is_exact_at_its_boundaries` | Uses height `16` throughout where `detail-scroll` specifies nine tuples at height `14`, and says explicitly that the heights are the content area's fourteen rows rather than the interior's seventeen. `16` is the stale interior figure this change moved | no |**Resolved** |
+| 7 | Warning | `src/ui/view.rs`, `src/ui/layout.rs` | One clause of "The divider column is a width branch, not a constant" is asserted nowhere: that in a 100-column buffer the detail interior is `Rect::new(42, 2, 58, 17)`. The divider half is covered by `the_breakpoint_is_exact_at_99_100_and_101_columns` | no |**Resolved** |
+| 8 | Warning | `tests/degraded-coverage.toml` | The re-baselined `covers` range for the file-mode row spans a doc comment, a constant and a signature — none of the badge-drawing body. `validate_covers` needs only one non-blank non-comment line in range, so the row passes vacuously and would keep passing if the badge code moved out from under it | no |**Resolved** |
+| 9 | Warning | `src/ui/mod.rs` — `detail_interior` | Still returns `Block::bordered().inner(detail)`, a rectangle the draw path no longer computes, with callers correcting it by hand (`interior.y + 4`, `interior.height - 3`, `interior.y - 1`). The arithmetic lands right today, but the helper's doc comment claims it "fails loudly if the frame split ever moves", which is now false | no |**Resolved** |
 
 ### Suggestions
 
 - `tasks.md` cited commit `0a5a0f1` for the `src/ui/palette.rs` doc fix; no such object exists.
   The real commit is `e01249b`. **Repaired.** This was the orchestrator's own transcription error.
-- `src/ui/view.rs` — the badge scenario's additive clause asks for a 120x20 row 0 byte-identical
+- **Open, declined for now.** `src/ui/view.rs` — the badge scenario's additive clause asks for a 120x20 row 0 byte-identical
   to the unbadged one, but the test compares columns 1..10 of a 120-column buffer against
   columns 1..10 of a 21-column one. It holds only because both begin `demo-repo`.
-- `src/ui/view.rs` — `a_selection_past_the_interior_scrolls_the_slice` asserts row 17 holds
+- **Resolved** (`58429fd`). `src/ui/view.rs` — `a_selection_past_the_interior_scrolls_the_slice` asserted row 17 held
   `change-27` where `list-selection` asks for the last interior row, now 18, holding
   `change-28`. Asserting a middle row rather than the boundary is the one thing that scenario
   exists to pin, though `the_last_change_is_reachable` does cover row 18 correctly.
@@ -94,3 +94,36 @@ Confirmed rather than merely not disproved:
   `the_detail_interior_is_78_columns_at_120_and_58_at_60` assert `Rect::new(1,2,38,17)`,
   `Rect::new(1,2,58,17)` and `Rect::new(42,2,78,17)`. The width gates concur: `LISTWIDTHS` 48
   tests naming 38 and 58, `DETAILWIDTHS` 42, `MDWIDTHS` 34 and `TASKWIDTHS` 22 naming 58 and 78.
+
+## Resolution
+
+Every finding is resolved except one suggestion, declined with its reason.
+
+Repairs landed in `81f1608`, `8ce5d4a`, `0f496b3`, `5ab19f4`, `885f1a3`, `bf6227e`, `58429fd`
+and `2ff8bb1`. Two of them changed behaviour; the rest strengthened tests that passed while
+proving less than their scenario, or removed a duplicate of arithmetic `ui::layout` owns.
+
+**Only one repair caught a live defect through its own RED step.** Finding 5's test, restored to
+the fixture its scenario names, fails on the tree as it stood:
+
+```
+assertion `left == right` failed: the wide detail region's gutter-free last column carries content
+  left: " "
+ right: "x"
+```
+
+That is the assertion `design.md` → Risks nominates as the place a future change quietly
+re-adding a trailing gutter would be caught, and it was absent. Findings 4, 6 and 9 closed
+coverage gaps rather than defects: the geometry under them was already right.
+
+**Declined:** the badge scenario's additive clause compares columns 1..10 of a 120-column buffer
+against columns 1..10 of a 21-column one, holding only because both begin `demo-repo`. It is a
+weak comparison rather than a wrong one, the property it means to check is covered by the
+scenario's other legs, and tightening it is a test-fixture change with no failing case behind
+it. Recorded here so a future reader does not mistake the silence for nobody having looked.
+
+**Matrix follow-through.** Finding 7's repair created
+`the_detail_interior_is_58_columns_at_the_100_column_breakpoint`, and matrix row 314 — which had
+been sharing row 326's test — now binds to it. All 149 rows name an existing test and no test is
+named by two rows. Two rows' Tier column said `src/ui/app.rs, src/ui/driver.rs inline` where the
+proving test is in `src/ui/view.rs`; both corrected.

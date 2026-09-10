@@ -517,7 +517,7 @@ which is why each is a named line here rather than a note — see design.md → 
 
   One suggestion was the orchestrator's own error and is repaired here: the task 8.6 note cited
   commit `0a5a0f1`, which is not a valid object. The real commit is `e01249b`.
-- [ ] 9.3 VERIFY: every finding is resolved in the artifact that owns it, or declined with a
+- [x] 9.3 VERIFY: every finding is resolved in the artifact that owns it, or declined with a
   reason recorded. Implementation-review findings go in the change's own review record, not
   into `planning-review.md`, which is the log of the review that ran *before* implementation.
 
