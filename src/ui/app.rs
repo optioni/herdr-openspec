@@ -5637,6 +5637,67 @@ mod tests {
         }
 
         #[test]
+        fn a_tab_move_forgets_the_fold_a_forced_reload_does_not() {
+            // `artifact-folds` -> "A tab move forgets the fold, a forced
+            // reload does not" — three dashboards, one per path, each
+            // starting synced once with `expanded` holding `1`.
+            let reader = RecordingReader::always(Ok("# text".to_string()));
+            let read = |p: &std::path::Path| reader.read(p);
+            let artifacts: &[(&str, &[&str])] =
+                &[("proposal", &["/repo/p.md"]), ("design", &["/repo/d.md"])];
+
+            // Path 1: a tab move away and back forgets the fold.
+            let mut moved = dashboard_with_artifacts_named("x", artifacts);
+            moved.sync_detail(&read);
+            moved.detail.expanded = std::collections::BTreeSet::from([1]);
+            moved.detail.tab = 1;
+            moved.sync_detail(&read);
+            moved.detail.tab = 0;
+            moved.sync_detail(&read);
+            assert!(
+                moved.detail.expanded.is_empty(),
+                "the tab reopened after the round trip must reopen collapsed"
+            );
+
+            // Path 2: a forced reload of the same key leaves the fold and
+            // the scroll alone.
+            let mut reloaded = dashboard_with_artifacts_named("x", artifacts);
+            reloaded.sync_detail(&read);
+            reloaded.detail.expanded = std::collections::BTreeSet::from([1]);
+            reloaded.detail.scroll = 6;
+            reloaded.refresh.reload = true;
+            reloaded.sync_detail(&read);
+            assert_eq!(
+                reloaded.detail.expanded,
+                std::collections::BTreeSet::from([1]),
+                "a forced reload of an unchanged key must not fold anything shut"
+            );
+            assert_eq!(reloaded.detail.scroll, 6);
+
+            // Path 3: an adopted `RefreshResult::Files` then
+            // `RefreshResult::Merged` — both are just an `adopt` call — also
+            // leave the fold alone.
+            let mut adopted = dashboard_with_artifacts_named("x", artifacts);
+            adopted.sync_detail(&read);
+            adopted.detail.expanded = std::collections::BTreeSet::from([1]);
+            adopted.adopt(fixture::set(
+                vec![fixture::with_artifacts(fixture::active("x", 4, 9), artifacts)],
+                Vec::new(),
+                Vec::new(),
+            ));
+            adopted.adopt(fixture::set(
+                vec![fixture::with_artifacts(fixture::active("x", 4, 9), artifacts)],
+                Vec::new(),
+                Vec::new(),
+            ));
+            assert_eq!(
+                adopted.detail.expanded,
+                std::collections::BTreeSet::from([1]),
+                "adopt must never touch the fold state"
+            );
+        }
+
+        #[test]
         fn switching_the_tab_rereads_and_so_does_switching_the_change() {
             let a = fixture::with_artifacts(
                 fixture::active("a", 0, 0),
