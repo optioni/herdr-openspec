@@ -11,7 +11,7 @@ use crate::ui::app::{Dashboard, Route};
 use crate::ui::detail;
 use crate::ui::layout::{
     Gutters, columns, interior, scroll_offset, split_body, split_detail, split_frame,
-    truncate_columns,
+    truncate_columns, viewport,
 };
 use crate::ui::list;
 use crate::ui::markdown::Face;
@@ -182,9 +182,11 @@ fn render_detail_rule(frame: &mut Frame, rule: Rect) {
 }
 
 /// The content area: the slice of `ui::detail::content_lines`
-/// `layout::scroll_offset` selects, one rendered line per terminal row
-/// starting at the content area's first row and column, each segment drawn
-/// left to right with `style_for(&segment.face)` and stopping at the
+/// `layout::viewport` (a foldable artifact) or `layout::scroll_offset`
+/// (otherwise) selects, one rendered line per terminal row starting at the
+/// content area's first row and column, each segment drawn left to right
+/// with `style_for(&segment.face)`, patched by [`detail_row_role`]'s role
+/// for the row's own `ContentKind` where it names one, and stopping at the
 /// interior's last column. Draws nothing when the content area has zero
 /// width or zero height — `content_lines` always returns at least one
 /// line, but there may be no row to draw it into.
@@ -197,12 +199,14 @@ fn render_detail_content(frame: &mut Frame, content: Rect, dashboard: &Dashboard
         dashboard.selected_change(),
         content.width,
     );
-    // The offset choice by foldability (`layout::viewport` for a foldable
-    // artifact) and the row's `ContentKind` -> `Role` mapping are group 6's
-    // work (design.md -> Decision 2 and Decision 12); this call site still
-    // reads every row's own line exactly as it did when `content_lines`
-    // returned a bare line list.
-    let offset = scroll_offset(rows.len(), dashboard.detail.scroll, content.height);
+    // design.md -> Decision 2: a foldable artifact's `scroll` is a cursor over the
+    // row list, whose visible slice `layout::viewport` derives exactly as the list
+    // region already does; a non-foldable artifact keeps today's plain offset.
+    let offset = if dashboard.detail.sections.len() > 1 {
+        viewport(rows.len(), dashboard.detail.scroll, content.height)
+    } else {
+        scroll_offset(rows.len(), dashboard.detail.scroll, content.height)
+    };
     let buf = frame.buffer_mut();
     for (i, row) in rows
         .iter()
@@ -213,6 +217,7 @@ fn render_detail_content(frame: &mut Frame, content: Rect, dashboard: &Dashboard
         let y = content.y + i as u16;
         let mut x = content.x;
         let last_col = content.x + content.width;
+        let role = detail_row_role(&row.kind);
         for segment in &row.line.segments {
             if x >= last_col {
                 break;
@@ -229,10 +234,30 @@ fn render_detail_content(frame: &mut Frame, content: Rect, dashboard: &Dashboard
             // later change there could break it without ever touching this loop.
             let remaining = (last_col - x) as usize;
             let text = truncate_columns(&segment.text, remaining);
-            let style = style_for(&segment.face);
+            let mut style = style_for(&segment.face);
+            if let Some(role) = role {
+                style = style.patch(palette::style(role));
+            }
             buf.set_string(x, y, text, style);
             x += columns(text) as u16;
         }
+    }
+}
+
+/// The palette role a drawn detail-content row carries, patched over its own
+/// segments' `style_for` — [`row_role`]'s sibling for the detail region
+/// (design.md -> Decision 12). `ui::detail::ContentKind` is plain data naming
+/// no `ratatui` type and no `palette::Role`; this is the one place, beside
+/// [`row_role`], that turns a content kind into a style.
+fn detail_row_role(kind: &detail::ContentKind) -> Option<Role> {
+    match kind {
+        detail::ContentKind::SectionHeader { selected: true, .. } => {
+            Some(Role::DetailSectionSelected)
+        }
+        detail::ContentKind::SectionHeader {
+            selected: false, ..
+        } => Some(Role::DetailSection),
+        detail::ContentKind::Problem | detail::ContentKind::Body => None,
     }
 }
 
