@@ -167,12 +167,19 @@ fn artifact_section_label(change_dir: &std::path::Path, path: &std::path::Path) 
 /// selected change's `artifacts`; `problems` names each artifact file that
 /// could not be read; `loaded` is the `(change directory, tab)` key whose
 /// content `sections` currently holds — `sync_detail`'s cache key, and the
-/// reason an unchanged selection re-reads nothing. Deliberately implements no
-/// `Default`, anywhere in the crate, on the same terms as `Dashboard` and
-/// `Filter`: every construction and destructuring names all five fields, with
-/// no `..` rest. See `specs/detail-scroll/spec.md`, `specs/artifact-tabs/spec.md`,
-/// `specs/artifact-content/spec.md`, `specs/artifact-folds/spec.md`, and the
-/// `NODEFAULT-UI` check, whose type list covers this type too.
+/// reason an unchanged selection re-reads nothing. `expanded` is
+/// `artifact-folds`' addition: the indices of `sections` that are **open**,
+/// inverting `Sections { collapsed }` on purpose (design.md -> Decision 4) —
+/// the empty set means every section is collapsed, so no construction site
+/// needs to seed it. `sync_detail` clears it on exactly the condition that
+/// resets `scroll` — the `(change directory, tab)` key changed — and never
+/// on a forced-but-unchanged-key reload; `adopt` does not touch it at all.
+/// Deliberately implements no `Default`, anywhere in the crate, on the same
+/// terms as `Dashboard` and `Filter`: every construction and destructuring
+/// names all six fields, with no `..` rest. See `specs/detail-scroll/spec.md`,
+/// `specs/artifact-tabs/spec.md`, `specs/artifact-content/spec.md`,
+/// `specs/artifact-folds/spec.md`, and the `NODEFAULT-UI` check, whose type
+/// list covers this type too.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Detail {
     pub sections: Vec<ArtifactSection>,
@@ -180,6 +187,7 @@ pub struct Detail {
     pub tab: usize,
     pub problems: Vec<String>,
     pub loaded: Option<(PathBuf, usize)>,
+    pub expanded: std::collections::BTreeSet<usize>,
 }
 
 /// The loop's live tier state: `requested` and `reload` are one-shot flags
@@ -920,6 +928,7 @@ impl Dashboard {
             self.detail.tab = 0;
             self.detail.scroll = 0;
             self.detail.loaded = None;
+            self.detail.expanded.clear();
             return;
         };
         self.detail.tab = tab; // step 2
@@ -947,10 +956,12 @@ impl Dashboard {
                 }
             }
         }
-        // Step 5: the scroll resets on a key change only, never on a
-        // forced-but-unchanged-key reload.
+        // Step 5: the scroll and the fold state reset on a key change only,
+        // never on a forced-but-unchanged-key reload — `artifact-folds`'
+        // "A tab move forgets the fold, a forced reload does not".
         if key_changed {
             self.detail.scroll = 0;
+            self.detail.expanded.clear();
         }
         self.detail.loaded = Some(key);
     }

@@ -481,6 +481,7 @@ pub fn load(
                     tab: 0,
                     problems: Vec::new(),
                     loaded: None,
+                    expanded: std::collections::BTreeSet::new(),
                 },
                 refresh: crate::ui::app::Refresh {
                     requested: true,
@@ -528,6 +529,7 @@ pub fn load(
                 tab: 0,
                 problems: Vec::new(),
                 loaded: None,
+                expanded: std::collections::BTreeSet::new(),
             },
             refresh: crate::ui::app::Refresh {
                 requested: true,
