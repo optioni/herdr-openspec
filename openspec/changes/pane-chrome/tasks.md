@@ -158,48 +158,71 @@ builds until this group lands. See design.md → Decisions D1, D2, D3.
 ## 3. The list region's heading and its padding row
 <!-- kind: behavior -->
 
-- [ ] 3.1 RED: add `ui::view::tests::the_heading_names_the_directory_not_the_path` rendering a
+- [x] 3.1 RED: add `ui::view::tests::the_heading_names_the_directory_not_the_path` rendering a
   dashboard whose root is `/Users/dev/Code/herdr-openspec` at 120x20 and 60x20 and asserting
   row 0 spells `herdr-openspec` from column 1 and `/Users/dev/Code` appears in no cell.
   Check: `grep -c '"OpenSpec"' src/ui/view.rs` → `5`, exit 0 at HEAD — the literal is still
   drawn and the path is still right-aligned, so the assertion fails on both halves.
-- [ ] 3.2 GREEN: delete `render_header` and `shorten_for_header`; rewrite `render_region` to
+- [x] 3.2 GREEN: delete `render_header` and `shorten_for_header`; rewrite `render_region` to
   draw a heading row and no `Block`, taking the directory name through
   `ui::list::shorten_left`. Verify: 3.1 passes and
   `grep -c 'fn render_header' src/ui/view.rs` → `0` (it is `1` at HEAD).
-- [ ] 3.3 RED: the `file mode` badge, right-aligned and dropped whole below its budget, per
+  Named `the_heading_names_the_directory_not_the_path_at_both_widths` (3.1's test),
+  matching design.md's Verification matrix, which states its names are the contract rather
+  than a suggestion — the same resolution groups 1 and 2 took.
+- [x] 3.3 RED: the `file mode` badge, right-aligned and dropped whole below its budget, per
   `responsive-layout`'s badge scenario at 120, 60, **21 and 20** columns — the drop rule's own
   boundary, since an 18-column heading cannot hold `demo-repo`, a blank and the badge's nine.
   Check: `cargo test --all-features --lib file_mode_badge_is_dim_after_the_label` → `1 passed`
   at HEAD, asserting the badge sits after the `OpenSpec` label this change deletes, so the
   rewritten test fails until 3.4 lands.
-- [ ] 3.4 GREEN: draw the badge into the heading row's right edge. Verify: 3.3 passes, and
+- [x] 3.4 GREEN: draw the badge into the heading row's right edge. Verify: 3.3 passes, and
   `tests/degraded-coverage.toml`'s `openspec binary not found` row is updated in the same
   commit — both proof names, its `why`, and its `covers` range, which is `src/ui/view.rs:293-301`
   and spans the deleted `render_header`. Verify:
   `cargo test --all-features --test degraded_coverage`.
-- [ ] 3.5 RED: the padding row — assert every cell of row 1 inside the interior's columns is a
+  `file_mode_badge_is_dim_after_the_label` was rewritten as
+  `the_badge_is_right_aligned_and_dropped_whole` (the matrix name), with the separate
+  below-eighteen-columns case folded into it. `tests/degraded-coverage.toml`'s row was
+  updated in the same commit; `cargo test --all-features --test degraded_coverage` → 10
+  passed, 1 ignored, and that one ignore is the file's own planted fixture for
+  `a_proof_naming_an_ignored_test_fails`, not a waiver.
+- [x] 3.5 RED: the padding row — assert every cell of row 1 inside the interior's columns is a
   space whose `Style` equals `Cell::default().style()`, and that the first list row is row 2 at
   both widths. Check: at HEAD row 1 is the list region's top border, so the style assertion
   fails.
-- [ ] 3.6 GREEN: leave row 1 unpainted in `render_region`. Verify: 3.5 passes.
-- [ ] 3.7 RED: the divider and its two blank columns — column 40 is `│`, columns 39 and 41 are
+- [x] 3.6 GREEN: leave row 1 unpainted in `render_region`. Verify: 3.5 passes.
+  No artificial RED was available: task 3.2's removal of the `Block` already left row 1
+  unpainted and the interior beginning at row 2, so 3.5's assertions passed on arrival.
+  Recorded rather than forced.
+- [x] 3.7 RED: the divider and its two blank columns — column 40 is `│`, columns 39 and 41 are
   spaces, column 0 is a space, and column 119 carries detail content. **The test must assert at
   60 as well as at 120**: `scripts/gates/widths.sh` requires every `#[test]` in `src/ui/view.rs`
   to name both widths (`:32`), so a 120-only test fails the gate on arrival. At 60 the assertion
   is that no divider column exists below the breakpoint.
   Check: `grep -c '│' src/ui/view.rs` → `0` at HEAD.
-- [ ] 3.8 GREEN: draw the divider in `render_body`. Verify: 3.7 passes.
-- [ ] 3.9 Re-baseline `ui::list` and `ui::view`'s row expectations against the seventeen-row
+- [x] 3.8 GREEN: draw the divider in `render_body`. Verify: 3.7 passes.
+- [x] 3.9 Re-baseline `ui::list` and `ui::view`'s row expectations against the seventeen-row
   interior: `cargo test --all-features --lib ui::list` and `cargo test --all-features --lib
   ui::view`, run separately — `cargo test` takes one filter and two bare ones exit 1. Rows that
   name the interior's **last** row move, and so do the first rows at `src/ui/view.rs:2849` and
   `:2863`; the earlier claim that only last-row indices move was wrong.
-- [ ] 3.10 Verify the width gates still hold over the two files this group rewrites:
+  Beyond a row-index shift for `the_last_change_is_reachable` and
+  `the_viewport_boundary_is_rendered`: the interior's height feeds `layout::viewport`'s
+  own offset formula, so the content at a given row moved too, not only its index.
+  Result: `ui::list` 47 passed / 0 failed; `ui::view` 72 passed / 45 failed, every failure
+  owned by a later group — the detail region's header, tab bar, rule and content (group 4),
+  the fold glyphs (group 5), the hit test (group 6), and the frame/region-shape family still
+  asserting the deleted `OpenSpec`/`Changes`/`Detail` literals and the old border counts
+  (group 7; see the note added there).
+- [x] 3.10 Verify the width gates still hold over the two files this group rewrites:
   `bash scripts/gates/widths.sh` and `bash scripts/gates/listwidths.sh` each exit 0. At HEAD
   they report 122 view tests against a floor of 114 and 47 row-grammar tests against 39, so
   this group has **eight** view tests of headroom and task 3.2 deletes roughly that many.
 
+  After this group: `widths.sh` reports 117 view tests against its floor of 114 and
+  `listwidths.sh` 47 row-grammar tests against 39. Both exit 0. `noio-view.sh`,
+  `colwidth.sh` and `palette.sh` were checked alongside and are unaffected.
 ## 4. The detail region's heading, rule, and padding row
 <!-- kind: behavior -->
 
@@ -287,6 +310,19 @@ wrong tier. See design.md → Verification matrix for the test name each must ta
   frame renders one body row and the footer". Task 1.3 asserts `split_frame`'s tuple only; the
   render half includes rewriting `src/ui/view.rs:944 one_row_frame_draws_header_only`, whose
   name is falsified by this change.
+
+
+- [ ] 7.5 RED then GREEN: the frame/region-shape family group 3's re-baseline left red because
+  every one of them asserts chrome this change deletes — the `OpenSpec` frame header, the
+  `Changes`/`Detail` block titles, a bordered region, or the old border counts. Named here
+  because task 3.9 could not re-baseline them (they assert the *shape*, not a row index) and
+  no other group owns them: `frame_rows_at_60_and_120`, `wide_draws_two_regions_divided_at_40`,
+  `narrow_draws_only_the_list_region`, `narrow_detail_route_replaces_the_list_region`,
+  `breakpoint_is_exact_at_the_boundary`, `resizing_the_backend_changes_the_next_frame`,
+  `routed_region_border_is_bold`, `the_routed_regions_border_takes_its_style_from_the_palette`,
+  `one_column_frame_does_not_panic`, `one_row_frame_draws_header_only`, and
+  `two_row_frame_draws_no_body`. Each takes the name design.md's Verification matrix gives its
+  scenario; 7.2, 7.3 and 7.4 already own five of them by name, so this line is the remainder.
 
 ## 8. Documentation sites
 <!-- kind: operational -->
