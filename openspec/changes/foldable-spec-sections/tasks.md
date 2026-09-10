@@ -70,9 +70,9 @@ frame, which no unit test sees.
 ## 1. Palette roles
 <!-- kind: behavior -->
 
-- [ ] 1.1 RED: Extend `src/ui/palette.rs`'s three existing table tests for the two new roles — view-palette :: `The palette answers every role with a Style` (including the `DetailSectionSelected` inequality assertion), `Each role's modifier set is exactly the table above` (`BOLD | REVERSED`, not `BOLD` alone; the no-modifier count stays **seven** — `pane-chrome` removed `HeaderPath` and `RegionBorder` from that list, and the two new roles both carry a modifier), and `The coloured set is exactly the table above` (both report `fg: None`, `bg: None`). Place both variants after `TabInactive`, per the delta's own enum.
-- [ ] 1.2 GREEN: Add both variants to `Role` and both arms to `style` (design.md → Decision 11).
-- [ ] 1.3 VERIFY: `cargo test --lib ui::palette` green; `/bin/sh scripts/gates/palette.sh` OK — its vacuity leg must still find `Color` in this file; and view-palette :: `The palette module reaches no I/O and measures no width` still reports nine and eight. State that no refactor was needed, or name the one performed.
+- [x] 1.1 RED: Extend `src/ui/palette.rs`'s three existing table tests for the two new roles — view-palette :: `The palette answers every role with a Style` (including the `DetailSectionSelected` inequality assertion), `Each role's modifier set is exactly the table above` (`BOLD | REVERSED`, not `BOLD` alone; the no-modifier count stays **seven** — `pane-chrome` removed `HeaderPath` and `RegionBorder` from that list, and the two new roles both carry a modifier), and `The coloured set is exactly the table above` (both report `fg: None`, `bg: None`). Place both variants after `TabInactive`, per the delta's own enum.
+- [x] 1.2 GREEN: Add both variants to `Role` and both arms to `style` (design.md → Decision 11).
+- [x] 1.3 VERIFY: `cargo test --lib ui::palette` green; `/bin/sh scripts/gates/palette.sh` OK — its vacuity leg must still find `Color` in this file; and view-palette :: `The palette module reaches no I/O and measures no width` still reports nine and eight. State that no refactor was needed, or name the one performed.
 
 ## 2. `ArtifactSection`, `Detail.sections`, and `sync_detail`
 <!-- kind: behavior -->
