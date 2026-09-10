@@ -482,6 +482,7 @@ pub fn load(
                     problems: Vec::new(),
                     loaded: None,
                     expanded: std::collections::BTreeSet::new(),
+                    drawn_width: None,
                 },
                 refresh: crate::ui::app::Refresh {
                     requested: true,
@@ -530,6 +531,7 @@ pub fn load(
                 problems: Vec::new(),
                 loaded: None,
                 expanded: std::collections::BTreeSet::new(),
+                drawn_width: None,
             },
             refresh: crate::ui::app::Refresh {
                 requested: true,
@@ -726,6 +728,7 @@ mod tests {
                     problems: Vec::new(),
                     loaded: None,
                     expanded: std::collections::BTreeSet::new(),
+                    drawn_width: None,
                 },
                 refresh: crate::ui::app::Refresh {
                     requested: false,
@@ -876,6 +879,7 @@ mod tests {
                         problems: Vec::new(),
                         loaded: None,
                         expanded: std::collections::BTreeSet::new(),
+                        drawn_width: None,
                     },
                     refresh: crate::ui::app::Refresh {
                         requested: false,
@@ -1025,6 +1029,7 @@ mod tests {
                         problems: Vec::new(),
                         loaded: None,
                         expanded: std::collections::BTreeSet::new(),
+                        drawn_width: None,
                     },
                     refresh: crate::ui::app::Refresh {
                         requested: false,

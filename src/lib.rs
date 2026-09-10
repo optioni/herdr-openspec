@@ -826,6 +826,7 @@ pub(crate) mod testutil {
                     problems: Vec::new(),
                     loaded: None,
                     expanded: std::collections::BTreeSet::new(),
+                    drawn_width: None,
                 },
                 refresh: crate::ui::app::Refresh {
                     requested: false,

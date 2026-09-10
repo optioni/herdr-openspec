@@ -188,6 +188,22 @@ pub struct Detail {
     pub problems: Vec<String>,
     pub loaded: Option<(PathBuf, usize)>,
     pub expanded: std::collections::BTreeSet<usize>,
+    /// The **content area's own width at the frame last drawn**, recorded by
+    /// [`Dashboard::normalise_scroll`], and `None` until a first frame exists.
+    ///
+    /// Derived geometry, deliberately cached, and the one exception to
+    /// `Dashboard`'s "carries no width" rule (design.md -> Decision 13).
+    /// `content_lines`' row list is width-dependent — `ui::markdown` word-wraps
+    /// at the content width, and this crate's own width property asserts the row
+    /// count is strictly greater at 58 than at 78 — while `Space` at
+    /// `Route::Detail` must fold the section the cursor is *on or in*, resolving
+    /// `scroll` through that same list. Resolving at any other width can name a
+    /// different section than the one the reader sees emphasised.
+    ///
+    /// `ui::view::render` never reads it: the render path has the real width in
+    /// hand, so this is only ever what a **keypress between frames** resolves
+    /// against, never a source of what is drawn.
+    pub drawn_width: Option<u16>,
 }
 
 impl Detail {
@@ -335,9 +351,13 @@ pub enum Target {
     },
 }
 
-/// The dashboard's whole state. Carries no width, no layout mode, no column
-/// count, no terminal handle, and no frame — those are derived from the
-/// frame area on every draw, never stored here. Deliberately implements no
+/// The dashboard's whole state. Carries no layout mode, no terminal handle, and
+/// no frame — those are derived from the frame area on every draw, never stored
+/// here. **One exception, and only one:** `Detail::drawn_width` records the
+/// content width of the frame last drawn, because a keypress taken *between*
+/// frames has to resolve against what the last one did and the render path is
+/// pure and cannot tell it (design.md -> Decision 13). It is never a source of
+/// what is drawn. Deliberately implements no
 /// `Default`, anywhere in the crate: every construction and every
 /// destructuring names all fourteen fields, so a field added later fails to
 /// compile at each site rather than defaulting silently. See
@@ -734,20 +754,6 @@ impl Dashboard {
         }
     }
 
-    /// The reference width `detail_cursor_section` and
-    /// `detail_section_header_row` derive `ui::detail::content_lines`' row
-    /// list at. `Dashboard::apply` carries no real frame width — design.md
-    /// -> Decision 7 states plainly that geometry-dependent resolution is
-    /// `mouse_action`'s job, not `apply`'s, and `Space` has none to
-    /// inherit: it is a route dispatch exactly like `Action::Next`, not a
-    /// resolved click. `u16::MAX` sidesteps the gap rather than guessing a
-    /// terminal size: at that width `ui::markdown::lines` wraps nothing, so
-    /// the row list this computes agrees with the one actually drawn
-    /// whenever a section's own body does not wrap — the convention every
-    /// fixture in this crate's own test suite already follows, for the
-    /// same reason (`ui::detail::tests::three_spec_detail`'s own comment).
-    const TOGGLE_REFERENCE_WIDTH: u16 = u16::MAX;
-
     /// The section `detail.scroll` is currently on or in, per
     /// `ui::detail::content_lines`' own `SectionHeader { selected }` flag —
     /// a **lookup** into that row list, never a second derivation of it
@@ -755,19 +761,18 @@ impl Dashboard {
     /// side of the fold). `None` when `detail.scroll` addresses a problem
     /// row or the artifact carries no sections at all.
     fn detail_cursor_section(&self) -> Option<usize> {
-        crate::ui::detail::content_lines(
-            &self.detail,
-            self.selected_change(),
-            Self::TOGGLE_REFERENCE_WIDTH,
-        )
-        .iter()
-        .find_map(|row| match row.kind {
-            crate::ui::detail::ContentKind::SectionHeader {
-                section,
-                selected: true,
-            } => Some(section),
-            _ => None,
-        })
+        // `None` before a first frame: the fold is inert rather than resolving
+        // against a guessed width (design.md -> Decision 13).
+        let width = self.detail.drawn_width?;
+        crate::ui::detail::content_lines(&self.detail, self.selected_change(), width)
+            .iter()
+            .find_map(|row| match row.kind {
+                crate::ui::detail::ContentKind::SectionHeader {
+                    section,
+                    selected: true,
+                } => Some(section),
+                _ => None,
+            })
     }
 
     /// `section`'s own header row index in the **current** row list — used
@@ -775,18 +780,15 @@ impl Dashboard {
     /// recomputed against the line list the fold produced rather than
     /// reused from before it.
     fn detail_section_header_row(&self, section: usize) -> Option<usize> {
-        crate::ui::detail::content_lines(
-            &self.detail,
-            self.selected_change(),
-            Self::TOGGLE_REFERENCE_WIDTH,
-        )
-        .iter()
-        .position(|row| {
-            matches!(
-                row.kind,
-                crate::ui::detail::ContentKind::SectionHeader { section: s, .. } if s == section
-            )
-        })
+        let width = self.detail.drawn_width?;
+        crate::ui::detail::content_lines(&self.detail, self.selected_change(), width)
+            .iter()
+            .position(|row| {
+                matches!(
+                    row.kind,
+                    crate::ui::detail::ContentKind::SectionHeader { section: s, .. } if s == section
+                )
+            })
     }
 
     /// Whether the next refresh cycle should resolve the archived tier: the
@@ -869,6 +871,9 @@ impl Dashboard {
         if content.width == 0 || content.height == 0 {
             return;
         }
+        // The one place the drawn content width is recorded, on the one call
+        // already made once per frame with it in hand (design.md -> Decision 13).
+        self.detail.drawn_width = Some(content.width);
         let total =
             crate::ui::detail::content_lines(&self.detail, self.selected_change(), content.width)
                 .len();
@@ -1300,6 +1305,7 @@ mod tests {
                 problems: Vec::new(),
                 loaded: None,
                 expanded: std::collections::BTreeSet::new(),
+                drawn_width: None,
             },
             refresh: Refresh {
                 requested: false,
@@ -1375,6 +1381,7 @@ mod tests {
                 problems: Vec::new(),
                 loaded: None,
                 expanded: std::collections::BTreeSet::new(),
+                drawn_width: None,
             }
         );
         assert!(!refresh.requested);
@@ -1999,6 +2006,10 @@ mod tests {
             problems: Vec::new(),
             loaded: None,
             expanded,
+            // 78 columns: the mandated wide detail interior. These bodies
+            // are single words, so no wrap -- the row list is the same at
+            // any width, and the fold resolves rather than going inert.
+            drawn_width: Some(78),
         }
     }
 
@@ -2132,6 +2143,93 @@ mod tests {
         );
     }
 
+    /// `artifact-folds`: "Space opens the section under the cursor" — the
+    /// regression test for the Change Review's second CRITICAL.
+    ///
+    /// A section body that **wraps** at the drawn width is what separates
+    /// resolving against `drawn_width` from resolving at `u16::MAX`
+    /// (design.md -> Decision 13). At 40 columns this body occupies several
+    /// rows; unwrapped it occupies one. A cursor parked inside the *second*
+    /// section's wrapped body therefore resolves to section 1 against the real
+    /// width and to something else against the unwrapped list — which is the
+    /// defect exactly: the reader folds a section they are not looking at.
+    ///
+    /// Fails against the `u16::MAX` implementation and passes against the
+    /// recorded-width one, which is what makes the repair falsifiable rather
+    /// than asserted.
+    #[test]
+    fn a_wrapping_body_folds_the_section_the_cursor_is_actually_in() {
+        let long = "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima\n";
+        let section = |label: &str| ArtifactSection {
+            label: label.to_string(),
+            text: long.to_string(),
+        };
+        let mut d = dashboard_with_detail(Detail {
+            sections: vec![section("first"), section("second"), section("third")],
+            scroll: 0,
+            tab: 0,
+            problems: Vec::new(),
+            loaded: None,
+            expanded: std::collections::BTreeSet::from([0, 1, 2]),
+            drawn_width: Some(40),
+        });
+        d.route = Route::Detail;
+
+        let at_40 = crate::ui::detail::content_lines(&d.detail, d.selected_change(), 40);
+        let unwrapped = crate::ui::detail::content_lines(&d.detail, d.selected_change(), u16::MAX);
+
+        // The cursor sits on the **last** row of section 0's wrapped body.
+        let header_1 = at_40
+            .iter()
+            .position(|r| {
+                matches!(
+                    r.kind,
+                    crate::ui::detail::ContentKind::SectionHeader { section: 1, .. }
+                )
+            })
+            .expect("section 1 has a header row at 40");
+        let inside_0 = header_1 - 1;
+
+        // The premise that makes this discriminate: at the drawn width that row
+        // is inside section 0, while the same index in the unwrapped list is a
+        // different section entirely. Asserted, not assumed -- if a future
+        // change stops the body wrapping, this test says so instead of quietly
+        // passing for the wrong reason.
+        let section_of = |rows: &[crate::ui::detail::ContentRow], row: usize| {
+            rows[..=row]
+                .iter()
+                .rev()
+                .find_map(|r| match r.kind {
+                    crate::ui::detail::ContentKind::SectionHeader { section, .. } => Some(section),
+                    _ => None,
+                })
+                .expect("a header precedes every body row")
+        };
+        assert_eq!(
+            section_of(&at_40, inside_0),
+            0,
+            "at 40 the row is in section 0"
+        );
+        assert!(
+            inside_0 < unwrapped.len(),
+            "the row must exist in the unwrapped list too, or the comparison is vacuous"
+        );
+        assert_ne!(
+            section_of(&unwrapped, inside_0),
+            0,
+            "unwrapped, the same index names a different section -- that gap IS the defect"
+        );
+
+        d.detail.scroll = inside_0;
+        d.apply(Action::ToggleSection);
+
+        assert_eq!(
+            d.detail.expanded,
+            std::collections::BTreeSet::from([1, 2]),
+            "the cursor was inside section 0's wrapped body, so that is the section that folds"
+        );
+    }
+
     /// `artifact-folds`: "Space on a problem row is inert".
     #[test]
     fn space_on_a_problem_row_is_inert() {
@@ -2151,6 +2249,10 @@ mod tests {
             problems: vec!["permission denied".to_string()],
             loaded: None,
             expanded: std::collections::BTreeSet::new(),
+            // A real width, not `None`: with no drawn width the fold is inert
+            // whatever else is true, so this assertion would pass even
+            // with the guard it is testing removed.
+            drawn_width: Some(78),
         });
         let before = d.clone();
         for _ in 0..10 {
@@ -2180,6 +2282,10 @@ mod tests {
             problems: Vec::new(),
             loaded: None,
             expanded: std::collections::BTreeSet::new(),
+            // A real width, not `None`: with no drawn width the fold is inert
+            // whatever else is true, so this assertion would pass even
+            // with the guard it is testing removed.
+            drawn_width: Some(78),
         });
         let before_one = one.clone();
         for _ in 0..10 {
@@ -2194,6 +2300,7 @@ mod tests {
             problems: Vec::new(),
             loaded: None,
             expanded: std::collections::BTreeSet::new(),
+            drawn_width: None,
         });
         let before_none = none.clone();
         for _ in 0..10 {
@@ -2247,6 +2354,10 @@ mod tests {
             problems: Vec::new(),
             loaded: None,
             expanded: std::collections::BTreeSet::new(),
+            // A real width, not `None`: with no drawn width the fold is inert
+            // whatever else is true, so this assertion would pass even
+            // with the guard it is testing removed.
+            drawn_width: Some(78),
         });
         let before = d.clone();
         for _ in 0..10 {
@@ -2742,6 +2853,7 @@ mod tests {
                 problems: Vec::new(),
                 loaded: None,
                 expanded: std::collections::BTreeSet::new(),
+                drawn_width: None,
             }
         }
 
@@ -2855,6 +2967,7 @@ mod tests {
                     problems: Vec::new(),
                     loaded: None,
                     expanded: std::collections::BTreeSet::new(),
+                    drawn_width: None,
                 },
                 refresh: crate::ui::app::Refresh {
                     requested: false,
@@ -3302,6 +3415,7 @@ mod tests {
                     problems: Vec::new(),
                     loaded: None,
                     expanded: std::collections::BTreeSet::new(),
+                    drawn_width: None,
                 },
                 // `agent-launch`: a real repository root and one in-scope, named agent, so
                 // `attribution()` populates `panes` and the four launch arms genuinely reach
@@ -4373,6 +4487,7 @@ mod tests {
                 problems: Vec::new(),
                 loaded: None,
                 expanded: std::collections::BTreeSet::new(),
+                drawn_width: None,
             }
         }
 
@@ -4386,6 +4501,7 @@ mod tests {
                 problems,
                 loaded,
                 expanded,
+                drawn_width,
             } = &d;
             assert_eq!(sections.len(), 1);
             assert!(sections[0].text.starts_with("- line-00"));
@@ -4394,6 +4510,11 @@ mod tests {
             assert!(problems.is_empty());
             assert_eq!(*loaded, None);
             assert!(expanded.is_empty());
+            // Named because `NODEFAULT-UI` requires the pattern to be
+            // exhaustive, and asserted rather than discarded with `_`: a
+            // fixture that never drew a frame has recorded no width, which is
+            // what makes the fold inert before the first draw.
+            assert_eq!(*drawn_width, None);
         }
 
         #[test]
@@ -4581,6 +4702,7 @@ mod tests {
                     problems: Vec::new(),
                     loaded: None,
                     expanded: std::collections::BTreeSet::new(),
+                    drawn_width: None,
                 },
                 repo: None,
                 searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
@@ -4625,6 +4747,7 @@ mod tests {
                     problems: Vec::new(),
                     loaded: None,
                     expanded: std::collections::BTreeSet::new(),
+                    drawn_width: None,
                 },
                 repo: None,
                 searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
@@ -4668,6 +4791,7 @@ mod tests {
                     problems: Vec::new(),
                     loaded: None,
                     expanded: std::collections::BTreeSet::new(),
+                    drawn_width: None,
                 },
                 repo: None,
                 searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
@@ -4745,6 +4869,7 @@ mod tests {
                     problems: Vec::new(),
                     loaded: None,
                     expanded: std::collections::BTreeSet::new(),
+                    drawn_width: None,
                 },
                 repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
                 searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
@@ -5015,6 +5140,7 @@ mod tests {
                     problems: Vec::new(),
                     loaded: None,
                     expanded: std::collections::BTreeSet::new(),
+                    drawn_width: None,
                 },
                 repo: None,
                 searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
@@ -5057,6 +5183,7 @@ mod tests {
                     problems: Vec::new(),
                     loaded: None,
                     expanded: std::collections::BTreeSet::new(),
+                    drawn_width: None,
                 },
                 repo: None,
                 searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
@@ -5099,6 +5226,7 @@ mod tests {
                     problems: Vec::new(),
                     loaded: None,
                     expanded: std::collections::BTreeSet::new(),
+                    drawn_width: None,
                 },
                 repo: None,
                 searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
@@ -5162,6 +5290,7 @@ mod tests {
                         problems: Vec::new(),
                         loaded: None,
                         expanded: std::collections::BTreeSet::new(),
+                        drawn_width: None,
                     },
                     repo: None,
                     searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
@@ -5229,6 +5358,7 @@ mod tests {
                     problems: Vec::new(),
                     loaded: None,
                     expanded: std::collections::BTreeSet::new(),
+                    drawn_width: None,
                 },
                 repo: None,
                 searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
@@ -5300,6 +5430,7 @@ mod tests {
                     problems: Vec::new(),
                     loaded: None,
                     expanded: std::collections::BTreeSet::new(),
+                    drawn_width: None,
                 },
                 repo: None,
                 searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
@@ -5433,6 +5564,7 @@ mod tests {
                     problems: Vec::new(),
                     loaded: None,
                     expanded: std::collections::BTreeSet::new(),
+                    drawn_width: None,
                 },
                 refresh: crate::ui::app::Refresh {
                     requested: false,
@@ -5513,6 +5645,7 @@ mod tests {
                     problems: Vec::new(),
                     loaded: None,
                     expanded: std::collections::BTreeSet::new(),
+                    drawn_width: None,
                 },
                 refresh: crate::ui::app::Refresh {
                     requested: false,
@@ -6044,6 +6177,7 @@ mod tests {
                     problems: Vec::new(),
                     loaded: None,
                     expanded: std::collections::BTreeSet::new(),
+                    drawn_width: None,
                 },
                 refresh: crate::ui::app::Refresh {
                     requested: false,
@@ -6096,6 +6230,7 @@ mod tests {
                     problems: Vec::new(),
                     loaded: None,
                     expanded: std::collections::BTreeSet::new(),
+                    drawn_width: None,
                 },
                 refresh: crate::ui::app::Refresh {
                     requested: false,
@@ -6160,6 +6295,7 @@ mod tests {
                     problems: Vec::new(),
                     loaded: None,
                     expanded: std::collections::BTreeSet::new(),
+                    drawn_width: None,
                 },
                 refresh: crate::ui::app::Refresh {
                     requested: false,
@@ -6395,6 +6531,7 @@ mod tests {
                     problems: Vec::new(),
                     loaded: None,
                     expanded: std::collections::BTreeSet::new(),
+                    drawn_width: None,
                 },
                 refresh: crate::ui::app::Refresh {
                     requested: false,
@@ -6472,6 +6609,7 @@ mod tests {
                     problems: Vec::new(),
                     loaded: None,
                     expanded: std::collections::BTreeSet::new(),
+                    drawn_width: None,
                 },
                 refresh: crate::ui::app::Refresh {
                     requested: false,
@@ -6664,6 +6802,7 @@ mod tests {
                     problems: Vec::new(),
                     loaded: None,
                     expanded: std::collections::BTreeSet::new(),
+                    drawn_width: None,
                 },
                 refresh: crate::ui::app::Refresh {
                     requested: false,
@@ -6749,6 +6888,7 @@ mod tests {
                     problems: vec!["stale problem".to_string()],
                     loaded: Some((std::path::PathBuf::from("/repo/x"), 0)),
                     expanded: std::collections::BTreeSet::from([1]),
+                    drawn_width: None,
                 },
                 refresh: crate::ui::app::Refresh {
                     requested: false,

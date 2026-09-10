@@ -12,6 +12,7 @@ pub struct Detail {
     pub problems: Vec<String>,
     pub loaded: Option<(std::path::PathBuf, usize)>,
     pub expanded: std::collections::BTreeSet<usize>,
+    pub drawn_width: Option<u16>,
 }
 ```
 
@@ -43,14 +44,33 @@ this behaviour and states it in `list-selection`.
 `tab`, `problems`, and `loaded` are `artifact-tabs`' and `artifact-content`'s, and are
 specified there; `expanded` is `artifact-folds`'.
 
-`Detail` SHALL carry exactly these **six** fields — five before this change, plus
-`expanded`. `live-refresh`'s forced-reload flag deliberately lives on `ui::app::Refresh`
+`Detail` SHALL carry exactly these **seven** fields — five before this change, plus
+`expanded` and `drawn_width`.
+
+`drawn_width` is the **content area's own width at the frame last drawn**, recorded by
+`Dashboard::normalise_scroll`, which already derives it once per frame, and `None` until a
+first frame has been drawn. It exists because `content_lines`' row list is width-dependent —
+`ui::markdown::wrap_prose` word-wraps at the content width, and this capability's own test
+asserts the row count is strictly greater at 58 than at 78 — while `Space` at `Route::Detail`
+must fold "the section the cursor is **on or in**", resolving `detail.scroll` through that
+same row list. Resolving it at any other width can name a different section than the one the
+reader sees emphasised, and can then leave `detail.scroll` inside an unrelated section's body.
+
+It is **derived geometry deliberately cached**, and the one exception to `dashboard-loop`'s
+"carries no width, no layout mode, no column count" rule, which `Dashboard`'s own
+documentation SHALL be amended to state rather than left contradicting the code. The
+justification is the same one `loaded` already carries: a keyboard action taken **between**
+frames needs to know what the last frame did, and the render path is pure and cannot tell it.
+`ui::view::render` SHALL NOT read `drawn_width` — it has the real width in hand — so the
+field is never the source of what is drawn, only of what a keypress resolves against.
+
+`live-refresh`'s forced-reload flag deliberately lives on `ui::app::Refresh`
 rather than here, and still does: `Dashboard` gains one field either way, and putting it on
 `Refresh` leaves every `Detail { … }` literal in the crate untouched. `live-updates` states
 that flag's contract and `artifact-content` states what `sync_detail` does with it.
 
 `Detail` SHALL NOT implement `Default` — neither derived nor hand-written, anywhere in the
-crate — and every construction and every destructuring of it SHALL name **all six** fields,
+crate — and every construction and every destructuring of it SHALL name **all seven** fields,
 with no `..` rest, on exactly the terms `dashboard-loop` states for `Dashboard`, `Filter`,
 and (from `live-refresh`) `Refresh`.
 
@@ -78,7 +98,7 @@ than defaulting silently.
   contain `struct Detail {`, and the check is proven able to fail against a copy carrying
   `impl Default for Detail { … }` and against a copy carrying `let Detail { sections, .. }`
 - **AND** a compile-time companion exists: a test destructures a `Detail` with an
-  exhaustive pattern naming all six fields and no `..`, a second destructures an `ArtifactSection`
+  exhaustive pattern naming all seven fields and no `..`, a second destructures an `ArtifactSection`
   naming both, the `Dashboard` companion continues to name all **fourteen** — the nine this
   requirement recorded at `live-refresh`, plus `agents`, `agent_names`, `launch`, `sections`,
   and `file_mode`, added by the four changes since; the stale count is corrected here rather

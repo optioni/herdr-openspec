@@ -566,35 +566,54 @@ pass for any bold body span and could not fail if the header lost its role. The 
 assertion for the unselected case is on the row's `kind`; the selected case keeps a cell
 comparison, because `BOLD | REVERSED` equals no other role.
 
-### Decision 13 — `apply` resolves the cursor's section at `u16::MAX`, not at a guessed width
+### Decision 13 — the fold resolves against the width last drawn, recorded on `Detail`
 
-**Discovered during implementation (group 7) and recorded here rather than left in a source
-comment**, because it is a genuine design decision the plan did not anticipate.
+**Discovered during implementation (group 7), and its first answer overturned by the Change
+Review (group 10).** Both halves are recorded, because the rejected one looked reasonable.
 
 `Space` at `Route::Detail` must fold "the section the cursor is on or in", and the cursor is
-`detail.scroll` — an index into `content_lines`' row list. But that row list is
-**width-dependent**: a section body wraps differently at 58 than at 78, so the same
-`detail.scroll` can name a different section at different widths. And `Dashboard::apply`
-carries **no frame width**: Decision 7 states plainly that geometry-dependent resolution is
-`mouse_action`'s job, and `Space` has no geometry to inherit — it is a route dispatch exactly
-like `Action::Next`, not a resolved click.
+`detail.scroll` — an index into `content_lines`' row list. That row list is **width-dependent**:
+`ui::markdown::wrap_prose` word-wraps at the content width. And `Dashboard::apply` carries no
+frame width — Decision 7 gives geometry-dependent resolution to `mouse_action`, and `Space`
+has no geometry to inherit.
 
-**Chosen:** derive the row list at `u16::MAX`. At that width `ui::markdown::lines` wraps
-nothing, so the row list `apply` computes agrees with the one actually drawn **whenever no
-section body wraps**. `src/ui/app.rs`'s `TOGGLE_REFERENCE_WIDTH` names it.
+**First answer, rejected:** derive the row list at `u16::MAX`, where nothing wraps, and accept
+that a wrapping section body makes `apply`'s row list disagree with the drawn one. The
+argument was that no fixture exercises the divergence.
 
-**Rejected:** guessing a terminal size (80, or the last drawn width) — a stored width is
-state the render path would have to keep in sync, and `NOBLOCK`/purity aside, a guess that is
-wrong resolves the fold to the wrong section rather than degrading.
+**Why that was wrong.** "No fixture exercises it" is not "it does not happen". This
+repository's own suite proves the width-dependence it relies on being absent —
+`src/ui/detail.rs`'s width property asserts `content_lines(…).len()` is **strictly greater at
+58 than at 78**, commenting that "the width must genuinely reach the wrap". The fixtures use
+short non-wrapping bodies as a convenience; the feature's **primary content** does not.
+`specs/<capability>/spec.md` files are wrapped prose well past 58 columns, and the `specs` tab
+of a change is the exact thing this capability exists to make readable. So the divergence is
+not a corner: it is the main case. Two consequences, both user-visible — the header the reader
+sees emphasised and the section `Space` toggles can be **different sections** once the cursor
+is inside an open wrapping body, and the post-toggle `detail.scroll` then lands inside an
+unrelated section's body.
 
-**The known limit, stated rather than hidden.** For a section whose body *does* wrap at the
-drawn width, `apply`'s row list is shorter than the drawn one, so a `detail.scroll` deep
-inside a wrapped body can resolve to the section before the one the reader sees emphasised.
-Every fixture in this crate's suite uses short, non-wrapping section bodies — the convention
-`ui::detail::tests::three_spec_detail`'s own comment already records — so no test exercises
-the divergence, which is precisely why it is written down here instead. The honest repair, if
-it ever matters, is to carry the last drawn content width on `Detail` the way `loaded` already
-carries the last read key; that is a change of its own and not this one's.
+**Chosen:** `Detail` carries `drawn_width: Option<u16>`, the content area's own width at the
+frame last drawn, recorded by `Dashboard::normalise_scroll` — which already derives it once
+per frame on `&mut self`, so this costs no new plumbing and no new call site. `None` until a
+first frame exists, which makes the fold inert before anything has been drawn rather than
+guessing.
+
+**What it costs, stated rather than glossed:** a seventh `Detail` field, named at every
+construction span (the compiler finds them all, and `NODEFAULT-UI` insists); an amendment to
+`Dashboard`'s own "carries no width, no layout mode, no column count — those are derived from
+the frame area on every draw, never stored here"; and the same amendment in `detail-scroll`'s
+field list. The invariant becomes "**never stored except** `Detail::drawn_width`, which is a
+keypress's record of the last frame, never a source of what is drawn" — and `ui::view::render`
+SHALL NOT read it, so the render path stays a pure function of the real width.
+
+**Rejected alternatives:** guessing a terminal size, which is wrong silently rather than
+inert; and resolving lazily so `Space` is a no-op until the first frame, which avoids the
+field but leaves a first-keypress edge case and needs a decision of its own.
+
+The click path does not depend on any of this: `mouse_action` resolves `section` against the
+frame just drawn and `apply` toggles the index it was handed (Decision 7), which the Change
+Review's first CRITICAL restored.
 
 ## Risks / Trade-offs
 

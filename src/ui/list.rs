@@ -831,6 +831,7 @@ mod tests {
             problems: Vec::new(),
             loaded: None,
             expanded: std::collections::BTreeSet::new(),
+            drawn_width: None,
         }
     }
 

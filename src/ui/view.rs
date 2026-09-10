@@ -930,6 +930,7 @@ mod tests {
             problems: Vec::new(),
             loaded: None,
             expanded: std::collections::BTreeSet::new(),
+            drawn_width: None,
         }
     }
 
@@ -3763,6 +3764,7 @@ mod tests {
                 problems: Vec::new(),
                 loaded: None,
                 expanded: std::collections::BTreeSet::new(),
+                drawn_width: None,
             },
             refresh: crate::ui::app::Refresh {
                 requested: false,
@@ -3862,6 +3864,10 @@ mod tests {
             problems: Vec::new(),
             loaded: None,
             expanded,
+            // 78 columns: the mandated wide detail interior. These bodies
+            // are single words, so no wrap -- the row list is the same at
+            // any width, and the fold resolves rather than going inert.
+            drawn_width: Some(78),
         };
         dashboard_with_detail(vec![change], Vec::new(), 1, route, detail)
     }
@@ -4065,6 +4071,7 @@ mod tests {
             problems: Vec::new(),
             loaded: None,
             expanded: std::collections::BTreeSet::from([0, 1, 7]),
+            drawn_width: None,
         };
         let d = dashboard_with_detail(vec![change], Vec::new(), 1, Route::Detail, detail);
         for width in [120, 60] {
@@ -4552,6 +4559,7 @@ mod tests {
                 problems: Vec::new(),
                 loaded: None,
                 expanded: std::collections::BTreeSet::new(),
+                drawn_width: None,
             },
             refresh: crate::ui::app::Refresh {
                 requested: false,
@@ -5080,6 +5088,7 @@ mod tests {
             problems,
             loaded: None,
             expanded: std::collections::BTreeSet::new(),
+            drawn_width: None,
         }
     }
 
@@ -7068,6 +7077,7 @@ mod tests {
                 problems: Vec::new(),
                 loaded: None,
                 expanded: std::collections::BTreeSet::new(),
+                drawn_width: None,
             },
         );
         d.file_mode = true;
@@ -7115,6 +7125,7 @@ mod tests {
                 problems: Vec::new(),
                 loaded: None,
                 expanded: std::collections::BTreeSet::new(),
+                drawn_width: None,
             },
         );
         d.file_mode = true;

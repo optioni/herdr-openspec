@@ -418,6 +418,7 @@ mod tests {
                 problems: Vec::new(),
                 loaded: None,
                 expanded: std::collections::BTreeSet::new(),
+                drawn_width: None,
             },
             refresh: crate::ui::app::Refresh {
                 requested: false,
@@ -463,6 +464,7 @@ mod tests {
                 problems: Vec::new(),
                 loaded: None,
                 expanded: std::collections::BTreeSet::new(),
+                drawn_width: None,
             },
             refresh: crate::ui::app::Refresh {
                 requested: false,
@@ -854,6 +856,7 @@ mod tests {
                 problems: Vec::new(),
                 loaded: None,
                 expanded: std::collections::BTreeSet::new(),
+                drawn_width: None,
             },
             refresh: crate::ui::app::Refresh {
                 requested: false,
@@ -992,6 +995,7 @@ mod tests {
                 problems: Vec::new(),
                 loaded: None,
                 expanded: std::collections::BTreeSet::new(),
+                drawn_width: None,
             },
             refresh: crate::ui::app::Refresh {
                 requested: false,
@@ -1218,6 +1222,7 @@ mod tests {
                 problems: base.detail.problems,
                 loaded: base.detail.loaded,
                 expanded: std::collections::BTreeSet::new(),
+                drawn_width: None,
             },
             refresh: crate::ui::app::Refresh {
                 requested: false,
@@ -1295,6 +1300,7 @@ mod tests {
                 problems: Vec::new(),
                 loaded: None,
                 expanded: std::collections::BTreeSet::new(),
+                drawn_width: None,
             },
             refresh: dashboard.refresh.clone(),
             agents: dashboard.agents.clone(),
@@ -1370,6 +1376,7 @@ mod tests {
                 problems: Vec::new(),
                 loaded: Some((dir, 0)),
                 expanded: std::collections::BTreeSet::new(),
+                drawn_width: None,
             },
             refresh: crate::ui::app::Refresh {
                 requested: false,
@@ -1437,9 +1444,30 @@ mod tests {
         );
         assert_eq!(dashboard.selected, before.selected);
         assert_eq!(dashboard.filter, before.filter);
+        // Compared field by field rather than as a whole `Detail`, because one
+        // field legitimately differs: `normalise_scroll` records `drawn_width`
+        // on every frame, so a loop that drew one sets it while `Enter` itself
+        // does not (design.md -> Decision 13). Asserting it separately below
+        // pins the recorder instead of hiding it behind a re-baselined clone.
         assert_eq!(
-            dashboard.detail, before.detail,
-            "Enter at the detail route must not reset the scroll or touch any other field"
+            dashboard.detail.sections, before.detail.sections,
+            "Enter at the detail route must not touch the sections"
+        );
+        assert_eq!(
+            dashboard.detail.scroll, before.detail.scroll,
+            "Enter at the detail route must not reset the scroll"
+        );
+        assert_eq!(dashboard.detail.tab, before.detail.tab);
+        assert_eq!(dashboard.detail.problems, before.detail.problems);
+        assert_eq!(dashboard.detail.loaded, before.detail.loaded);
+        assert_eq!(
+            dashboard.detail.expanded, before.detail.expanded,
+            "Enter at the detail route must not fold anything"
+        );
+        assert_eq!(
+            dashboard.detail.drawn_width,
+            Some(78),
+            "the frame that was drawn recorded its own content width -- the wide              layout's mandated 78-column detail interior"
         );
         assert_eq!(dashboard.changes, before.changes);
 
@@ -1512,6 +1540,7 @@ mod tests {
                 problems: Vec::new(),
                 loaded: None,
                 expanded: std::collections::BTreeSet::new(),
+                drawn_width: None,
             },
             refresh: crate::ui::app::Refresh {
                 requested: false,
@@ -3470,6 +3499,7 @@ mod tests {
                 problems: Vec::new(),
                 loaded: None,
                 expanded: std::collections::BTreeSet::new(),
+                drawn_width: None,
             },
             refresh: crate::ui::app::Refresh {
                 requested: false,
@@ -3683,6 +3713,7 @@ mod tests {
             problems: Vec::new(),
             loaded: None,
             expanded,
+            drawn_width: Some(78),
         };
         d
     }
@@ -4948,6 +4979,7 @@ mod tests {
                 problems: Vec::new(),
                 loaded: None,
                 expanded: std::collections::BTreeSet::new(),
+                drawn_width: None,
             },
             refresh: crate::ui::app::Refresh {
                 requested: false,

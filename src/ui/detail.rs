@@ -475,6 +475,10 @@ mod tests {
             problems: Vec::new(),
             loaded: None,
             expanded,
+            // 78 columns: the mandated wide detail interior. These bodies
+            // are single words, so no wrap -- the row list is the same at
+            // any width, and the fold resolves rather than going inert.
+            drawn_width: Some(78),
         }
     }
 
@@ -493,6 +497,7 @@ mod tests {
             problems,
             loaded: None,
             expanded: std::collections::BTreeSet::new(),
+            drawn_width: None,
         }
     }
 
@@ -1492,6 +1497,7 @@ mod tests {
                     problems: Vec::new(),
                     loaded: None,
                     expanded: std::collections::BTreeSet::new(),
+                    drawn_width: None,
                 };
                 let lines = content_lines(&d, Some(change), width);
                 // Markdown, not the checklist grammar: a `# heading` renders as one line
@@ -1578,6 +1584,7 @@ mod tests {
                 problems: Vec::new(),
                 loaded: None,
                 expanded: std::collections::BTreeSet::new(),
+                drawn_width: None,
             };
             let lines = content_lines(&d, Some(change), width);
             assert!(
@@ -1748,6 +1755,7 @@ mod tests {
                     problems: Vec::new(),
                     loaded: None,
                     expanded: std::collections::BTreeSet::new(),
+                    drawn_width: None,
                 };
                 let lines = content_lines(&d, Some(change), width);
                 assert!(
@@ -1889,6 +1897,7 @@ mod tests {
                 problems: Vec::new(),
                 loaded: None,
                 expanded: std::collections::BTreeSet::new(),
+                drawn_width: None,
             };
             let rows = content_lines(&d, Some(&change), width);
             let want = crate::ui::tasks::lines(
@@ -1942,6 +1951,7 @@ mod tests {
                 problems: Vec::new(),
                 loaded: None,
                 expanded: std::collections::BTreeSet::new(),
+                drawn_width: None,
             };
             let lines = content_lines(&d, Some(&change), width);
             // Discriminating: the marked body's first line is the bar,
@@ -1978,6 +1988,7 @@ mod tests {
                 problems: Vec::new(),
                 loaded: None,
                 expanded: std::collections::BTreeSet::new(),
+                drawn_width: None,
             };
             let lines = content_lines(&d, Some(&change), width);
             let want = crate::ui::markdown::lines(source, width);
@@ -2010,6 +2021,7 @@ mod tests {
                 problems: Vec::new(),
                 loaded: None,
                 expanded: std::collections::BTreeSet::new(),
+                drawn_width: None,
             };
             let lines = content_lines(&d, Some(&change), width);
             assert_rows_equal_lines(&lines, &crate::ui::markdown::lines(source, width));
@@ -2399,6 +2411,7 @@ mod tests {
             problems: Vec::new(),
             loaded: None,
             expanded: std::collections::BTreeSet::from([1]),
+            drawn_width: None,
         };
         let cjk_dashboard = dashboard_at_detail(cjk_change, cjk_detail);
         for width in mandated {
