@@ -489,7 +489,7 @@ which is why each is a named line here rather than a note — see design.md → 
   single gutter flush to the frame's last column.
 
   One stale claim was found outside this group's edit scope and fixed separately
-  (`0a5a0f1`): `src/ui/palette.rs`'s role-table doc comment argued `FileMode` and `Code`
+  (`e01249b`): `src/ui/palette.rs`'s role-table doc comment argued `FileMode` and `Code`
   "cannot meet" because one is drawn in the frame header. The argument holds; the frame
   header does not.
 
@@ -499,11 +499,24 @@ which is why each is a named line here rather than a note — see design.md → 
 ## 9. Change Review
 <!-- kind: operational -->
 
-- [ ] 9.1 CHECK: assemble the review input — this change's artifacts and the full diff against
+- [x] 9.1 CHECK: assemble the review input — this change's artifacts and the full diff against
   `0437e05`.
-- [ ] 9.2 CHANGE: dispatch the outside-in TDD reviewer. It must be **a fresh agent, not a fork
+- [x] 9.2 CHANGE: dispatch the outside-in TDD reviewer. It must be **a fresh agent, not a fork
   of the implementing session**: a fork inherits the assumptions under audit and will confirm
   them.
+  The review ran against `b3cf2be` with the diff taken from `0437e05`, and was dispatched to a
+  fresh `outside-in-tdd-reviewer` — not a fork of any implementing session. It reported nine
+  findings and four suggestions, recorded in `change-review.md` beside this file rather than in
+  `planning-review.md`, which logs the review that ran *before* implementation.
+
+  **Three block.** Two are behavioural regressions this change introduced — `zone` and
+  `normalise_scroll` each hardcode a `Gutters` value where `render_body` derives it, so the
+  narrow-layout hit test and the wide-layout scroll clamp each disagree with what was drawn by
+  one column. All 1221 tests passed over both. The third is that 58 Verification-matrix rows
+  name a test that exists nowhere, which task 10.2 fails on by construction.
+
+  One suggestion was the orchestrator's own error and is repaired here: the task 8.6 note cited
+  commit `0a5a0f1`, which is not a valid object. The real commit is `e01249b`.
 - [ ] 9.3 VERIFY: every finding is resolved in the artifact that owns it, or declined with a
   reason recorded. Implementation-review findings go in the change's own review record, not
   into `planning-review.md`, which is the log of the review that ran *before* implementation.
