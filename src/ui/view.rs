@@ -607,8 +607,7 @@ mod tests {
         }
 
         #[test]
-        fn the_hit_test_agrees_with_the_drawn_buffer() {
-            const BORDERS: [&str; 6] = ["┌", "┐", "└", "┘", "│", "─"];
+        fn the_hit_test_agrees_with_what_was_drawn() {
             // Both mandated frames, written unsuffixed: `WIDTHS`' number scan is
             // `\b(\d+)\b` and does not see `120u16`.
             let frames: [(u16, u16); 2] = [(120, 40), (60, 20)];
@@ -618,7 +617,15 @@ mod tests {
                     let buffer = render_at(width, height, &dashboard);
                     let area = Rect::new(0, 0, width, height);
                     let (body, _) = split_frame(area);
-                    let (list_area, _divider, detail_area) = split_body(body, route);
+                    let (list_area, divider, detail_area) = split_body(body, route);
+                    // `Gutters::LeftOnly` only at the wide layout, where the
+                    // divider spends the detail region's trailing gutter —
+                    // `render_body`'s own choice, derived rather than assumed.
+                    let detail_gutters = if divider.is_some() {
+                        Gutters::LeftOnly
+                    } else {
+                        Gutters::Both
+                    };
 
                     let drawn: Option<(Rect, Vec<crate::ui::list::Row>, usize)> =
                         list_area.map(|a| {
@@ -656,41 +663,45 @@ mod tests {
                                          holding a character from list::rows' own output"
                                     );
                                 }
-                                Zone::List | Zone::Detail => {
-                                    let (region, title) =
-                                        if matches!(zone(area, route, x, y), Zone::List) {
-                                            (
-                                                list_area
-                                                    .expect("a List zone implies a list region"),
-                                                "Changes",
-                                            )
-                                        } else {
-                                            (
-                                                detail_area.expect(
-                                                    "a Detail zone implies a detail region",
-                                                ),
-                                                "Detail",
-                                            )
-                                        };
-                                    let left = x == region.x;
-                                    let right = x + 1 == region.x + region.width;
-                                    let top = y == region.y;
-                                    let bottom = y + 1 == region.y + region.height;
-                                    // The top edge carries the region's own title,
-                                    // drawn by `Block::title` from `region.x + 1`.
-                                    let in_title = top
-                                        && x > region.x
-                                        && x <= region.x + title.chars().count() as u16;
-                                    if (left || right || top || bottom) && !in_title {
-                                        assert!(
-                                            BORDERS.contains(&symbol.as_str()),
-                                            "{width}x{height} {route:?} ({x}, {y}) on a region \
-                                             boundary holds {symbol:?}, not a border character"
+                                Zone::List => {
+                                    let region =
+                                        list_area.expect("a List zone implies a list region");
+                                    // `Gutters::Both`: both edge columns are gutters.
+                                    let gutter = x == region.x || x + 1 == region.x + region.width;
+                                    if gutter {
+                                        assert_eq!(
+                                            symbol, " ",
+                                            "{width}x{height} {route:?} ({x}, {y}) is a List \
+                                             zone in a gutter column"
+                                        );
+                                    }
+                                }
+                                Zone::Detail => {
+                                    let region =
+                                        detail_area.expect("a Detail zone implies a detail region");
+                                    let gutter = x == region.x
+                                        || (detail_gutters == Gutters::Both
+                                            && x + 1 == region.x + region.width);
+                                    if gutter {
+                                        assert_eq!(
+                                            symbol, " ",
+                                            "{width}x{height} {route:?} ({x}, {y}) is a Detail \
+                                             zone in a gutter column"
                                         );
                                     }
                                 }
                                 Zone::DetailTab { .. } | Zone::Outside => {}
                             }
+                        }
+                    }
+
+                    if let Some(col) = divider {
+                        for y in body.y..body.y + body.height {
+                            assert_eq!(
+                                buffer[(col, y)].symbol(),
+                                "│",
+                                "{width}x{height} {route:?} the divider column holds │"
+                            );
                         }
                     }
 
