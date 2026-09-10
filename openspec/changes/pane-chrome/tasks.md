@@ -226,26 +226,59 @@ builds until this group lands. See design.md → Decisions D1, D2, D3.
 ## 4. The detail region's heading, rule, and padding row
 <!-- kind: behavior -->
 
-- [ ] 4.1 RED: assert the change header is buffer row 0 at columns 42–119 (120x20) and 1–58
+- [x] 4.1 RED: assert the change header is buffer row 0 at columns 42–119 (120x20) and 1–58
   (60x20), bold at `Route::Detail` and dim at `Route::List`. Verify: fails at HEAD, where the
   header is row 2 at columns 41–118 and is always bold.
-- [ ] 4.2 GREEN: draw `detail::header_row` into the region's heading row with
+  Outcome: `the_header_names_the_selected_change_at_both_mandated_widths` (already present,
+  matrix-named) failed at HEAD exactly as described — `left: " add-token-refresh…[4/9"`
+  (row 2, columns 41–118, missing its last column) vs the expected row-0/42–119 string —
+  confirming it fails for the intended reason.
+- [x] 4.2 GREEN: draw `detail::header_row` into the region's heading row with
   `RegionHeadingFocused`/`RegionHeading`. Verify: 4.1 passes.
-- [ ] 4.3 RED: the tab bar at buffer row 2, the `─` rule at row 3 in `RegionRule`, the padding
+  Outcome: `render_detail` now takes the whole detail region rect (not a pre-computed
+  interior) and draws the header into `Rect { x: region_interior.x, y: area.y, width:
+  region_interior.width, height: area.height.min(1) }` before splitting the interior;
+  4.1's test passes.
+- [x] 4.3 RED: the tab bar at buffer row 2, the `─` rule at row 3 in `RegionRule`, the padding
   row at row 4, and content from row 5 — fourteen rows to row 18. Check:
   `cargo test --all-features --lib the_tab_bar_is_the_second_interior_row` → passes at HEAD
   against the bar's current row, so the rewritten expectation fails.
-- [ ] 4.4 GREEN: change the detail draw path to `split_detail`'s `(tabs, rule, content)`.
+  Outcome: no test named `the_tab_bar_is_the_second_interior_row` exists in the tree (0 tests
+  run for that filter, at HEAD and after) — the landed test for this scenario is the
+  matrix-named `the_tab_bar_reaches_the_buffer_at_both_mandated_widths`, already present at
+  HEAD asserting the bar at row 3; rewritten to row 2 plus new row-3 (rule) and row-1/row-4
+  (blank padding) assertions, it failed at HEAD (`left: "──────…", right: " proposal…"`,
+  the row-3 slice reading the still-undrawn rule rather than the still-row-3 tab bar) for the
+  intended reason.
+- [x] 4.4 GREEN: change the detail draw path to `split_detail`'s `(tabs, rule, content)`.
   Verify: 4.3 passes.
-- [ ] 4.5 Verify the content area did not change **size**: it is fourteen rows before and
+  Outcome: `render_detail` now calls `split_detail(region_interior)` and draws tabs, a new
+  `render_detail_rule` (`─` repeated under `Role::RegionRule`), and content from the three
+  returned rects; 4.3's test passes.
+- [x] 4.5 Verify the content area did not change **size**: it is fourteen rows before and
   after, and it **moves** from rows 4–17 to rows 5–18. The expectations live in
   `src/ui/mod.rs:843` and `:1132`, which neither `ui::view` nor `ui::layout` selects, so run
   `cargo test --all-features --lib ui::tests`. Their row indices change; their row **count**
   must not. If a count needs editing, the arithmetic is wrong; re-read design.md → D2.
-- [ ] 4.6 Verify the mandated widths did not move: `bash scripts/gates/detailwidths.sh`,
+  Outcome: the four `ui::tests::detail` acceptance tests derived their own expected rows from
+  `detail_interior` — a `Block::bordered().inner()` helper that still agrees with the real
+  interior on `x` and `height` but is one row higher on `y` and (at the wide layout only) one
+  column narrower — so `content_y = interior.y + 2` became `+ 4` and `content_height =
+  interior.height - 2` became `- 3` (still 14 rows: `17 - 3 = 14`); two of the four also read
+  the header/bar row directly off `interior.y ± 1` at the bordered helper's own (too-narrow at
+  120) width, corrected to `interior.y - 1`/`interior.y + 1` at a `full_width` that adds the
+  wide layout's missing column. `cargo test --all-features --lib ui::tests` (single-threaded):
+  61 passed, 1 failed (`a_refused_capture_is_named_last`, confirmed pre-existing and unrelated
+  — fails identically on a clean checkout of HEAD, checking a literal `"OpenSpec"` heading
+  string against a scratch-repo fixture, nothing to do with detail geometry).
+- [x] 4.6 Verify the mandated widths did not move: `bash scripts/gates/detailwidths.sh`,
   `bash scripts/gates/mdwidths.sh`, and `bash scripts/gates/taskwidths.sh` each exit 0 and
   report all tests naming both `58` and `78`. All three exit 0 at HEAD; they pin an invariant
   this change must not break.
+  Outcome: all three exit 0 after the change — `detailwidths.sh` (42 tests), `mdwidths.sh` (34
+  tests), `taskwidths.sh` (22 tests) — unchanged counts from HEAD.
+  `bash scripts/gates/widths.sh` also still exits 0 (117 `ui::view` tests naming both `60` and
+  `120`, floor 114, unchanged from HEAD's own count).
 
 ## 5. The fold glyphs
 <!-- kind: behavior -->
