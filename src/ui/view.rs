@@ -101,25 +101,33 @@ fn render_detail(frame: &mut Frame, interior: Rect, dashboard: &Dashboard) {
         height: interior.height.saturating_sub(header.height),
     };
     let (tabs, _rule, content) = split_detail(rest);
-    render_detail_header(frame, header, change);
+    render_detail_header(frame, header, change, dashboard.route == Route::Detail);
     render_detail_tabs(frame, tabs, change, dashboard.detail.tab);
     render_detail_content(frame, content, dashboard);
 }
 
-/// The change header: `ui::detail::header_row` under `Role::DetailHeader` —
-/// bold and uncoloured — at the row's first column. Draws nothing at zero
-/// width or zero height.
-fn render_detail_header(frame: &mut Frame, header: Rect, change: &crate::changes::Change) {
+/// The change header: `ui::detail::header_row` under `Role::RegionHeadingFocused`
+/// when the detail region is routed, else `Role::RegionHeading` — the same
+/// region-heading pair every other region's heading takes (`view-palette` ->
+/// draw-span mapping). Draws nothing at zero width or zero height.
+fn render_detail_header(
+    frame: &mut Frame,
+    header: Rect,
+    change: &crate::changes::Change,
+    focused: bool,
+) {
     if header.width == 0 || header.height == 0 {
         return;
     }
+    let role = if focused {
+        Role::RegionHeadingFocused
+    } else {
+        Role::RegionHeading
+    };
     let text = detail::header_row(&change.name, &change.schema, &change.progress, header.width);
-    frame.buffer_mut().set_string(
-        header.x,
-        header.y,
-        &text,
-        palette::style(Role::DetailHeader),
-    );
+    frame
+        .buffer_mut()
+        .set_string(header.x, header.y, &text, palette::style(role));
 }
 
 /// The tab bar: every `ui::detail::Tab` at `tabs.x + tab.x`, under
@@ -306,15 +314,15 @@ fn render_list(frame: &mut Frame, interior: Rect, dashboard: &Dashboard) {
 }
 
 /// One bordered region with a title. `emphasised` picks
-/// `Role::RegionBorderFocused` over `Role::RegionBorder` — the routed region
+/// `Role::RegionHeadingFocused` over `Role::RegionHeading` — the routed region
 /// always is, whether or not the other region is drawn alongside it. Neither
 /// role carries a colour: the border frames the pane rather than saying
 /// anything about it.
 fn render_region(frame: &mut Frame, area: Rect, title: &'static str, emphasised: bool) {
     let role = if emphasised {
-        Role::RegionBorderFocused
+        Role::RegionHeadingFocused
     } else {
-        Role::RegionBorder
+        Role::RegionHeading
     };
     // `border_style`, never `style`: a blank interior's cells must still equal
     // `Cell::default().style()`.
@@ -347,7 +355,7 @@ fn render_header(frame: &mut Frame, header: Rect, dashboard: &Dashboard) {
         header.x,
         header.y,
         "OpenSpec",
-        palette::style(Role::HeaderTitle),
+        palette::style(Role::RegionHeadingFocused),
     );
 
     let show_badge = dashboard.file_mode && header.width >= BADGE_MIN_WIDTH;
@@ -376,7 +384,7 @@ fn render_header(frame: &mut Frame, header: Rect, dashboard: &Dashboard) {
     if let Some(shown) = shorten_for_header(&text, a) {
         let shown_len = columns(&shown) as u16;
         let x = header.x + header.width.saturating_sub(shown_len);
-        buf.set_string(x, header.y, &shown, palette::style(Role::HeaderPath));
+        buf.set_string(x, header.y, &shown, palette::style(Role::RegionHeading));
     }
 }
 

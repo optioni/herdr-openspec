@@ -38,19 +38,17 @@ use crate::agents::AgentStatus;
 /// be answered with a value rather than a lookup miss.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Role {
-    HeaderTitle,
-    HeaderPath,
     FileMode,
     Footer,
-    RegionBorder,
-    RegionBorderFocused,
+    RegionHeading,
+    RegionHeadingFocused,
+    RegionRule,
     ListRow,
     ListRowSelected,
     ListProblem,
     ListSeparator,
     ListMessage,
     AgentBadge(AgentStatus),
-    DetailHeader,
     TabActive,
     TabInactive,
     Heading(u8),
@@ -75,14 +73,13 @@ pub enum Role {
 /// an unknown status and a divider rule are both exactly that).
 pub fn style(role: Role) -> Style {
     match role {
-        Role::HeaderTitle => Style::default().add_modifier(Modifier::BOLD),
-        Role::HeaderPath => Style::default(),
         Role::FileMode => Style::default()
             .add_modifier(Modifier::DIM)
             .fg(Color::Yellow),
         Role::Footer => Style::default(),
-        Role::RegionBorder => Style::default(),
-        Role::RegionBorderFocused => Style::default().add_modifier(Modifier::BOLD),
+        Role::RegionHeading => Style::default().add_modifier(Modifier::DIM),
+        Role::RegionHeadingFocused => Style::default().add_modifier(Modifier::BOLD),
+        Role::RegionRule => Style::default().add_modifier(Modifier::DIM),
         Role::ListRow => Style::default(),
         Role::ListRowSelected => Style::default().add_modifier(Modifier::BOLD),
         Role::ListProblem => Style::default().fg(Color::Red),
@@ -95,7 +92,6 @@ pub fn style(role: Role) -> Style {
             AgentStatus::Done => Color::Blue,
             AgentStatus::Unknown => Color::DarkGray,
         }),
-        Role::DetailHeader => Style::default().add_modifier(Modifier::BOLD),
         Role::TabActive => Style::default()
             .add_modifier(Modifier::BOLD)
             .fg(Color::Black)
@@ -163,16 +159,15 @@ mod tests {
     }
 
     /// Every `Role` variant, the five `AgentStatus` values, and heading levels 1
-    /// through 6 — thirty-one rows, so no arm of `style` is asserted by a
+    /// through 6 — twenty-nine rows, so no arm of `style` is asserted by a
     /// hand-listed subset of the enum.
     fn table() -> Vec<Expect> {
         vec![
-            row(Role::HeaderTitle, Modifier::BOLD, None, None),
-            row(Role::HeaderPath, NONE, None, None),
             row(Role::FileMode, Modifier::DIM, Some(Color::Yellow), None),
             row(Role::Footer, NONE, None, None),
-            row(Role::RegionBorder, NONE, None, None),
-            row(Role::RegionBorderFocused, Modifier::BOLD, None, None),
+            row(Role::RegionHeading, Modifier::DIM, None, None),
+            row(Role::RegionHeadingFocused, Modifier::BOLD, None, None),
+            row(Role::RegionRule, Modifier::DIM, None, None),
             row(Role::ListRow, NONE, None, None),
             row(Role::ListRowSelected, Modifier::BOLD, None, None),
             row(Role::ListProblem, NONE, Some(Color::Red), None),
@@ -208,10 +203,6 @@ mod tests {
                 Some(Color::DarkGray),
                 None,
             ),
-            row(Role::DetailHeader, Modifier::BOLD, None, None),
-            row(Role::RegionHeading, Modifier::DIM, None, None),
-            row(Role::RegionHeadingFocused, Modifier::BOLD, None, None),
-            row(Role::RegionRule, Modifier::DIM, None, None),
             row(
                 Role::TabActive,
                 Modifier::BOLD,
@@ -246,22 +237,17 @@ mod tests {
     /// reports through it.
     fn label(role: Role) -> String {
         match role {
-            Role::HeaderTitle => "HeaderTitle".to_string(),
-            Role::HeaderPath => "HeaderPath".to_string(),
             Role::FileMode => "FileMode".to_string(),
             Role::Footer => "Footer".to_string(),
-            Role::RegionBorder => "RegionBorder".to_string(),
-            Role::RegionBorderFocused => "RegionBorderFocused".to_string(),
+            Role::RegionHeading => "RegionHeading".to_string(),
+            Role::RegionHeadingFocused => "RegionHeadingFocused".to_string(),
+            Role::RegionRule => "RegionRule".to_string(),
             Role::ListRow => "ListRow".to_string(),
             Role::ListRowSelected => "ListRowSelected".to_string(),
             Role::ListProblem => "ListProblem".to_string(),
             Role::ListSeparator => "ListSeparator".to_string(),
             Role::ListMessage => "ListMessage".to_string(),
             Role::AgentBadge(status) => format!("AgentBadge({status:?})"),
-            Role::DetailHeader => "DetailHeader".to_string(),
-            Role::RegionHeading => "RegionHeading".to_string(),
-            Role::RegionHeadingFocused => "RegionHeadingFocused".to_string(),
-            Role::RegionRule => "RegionRule".to_string(),
             Role::TabActive => "TabActive".to_string(),
             Role::TabInactive => "TabInactive".to_string(),
             Role::Heading(level) => format!("Heading({level})"),
@@ -307,7 +293,7 @@ mod tests {
 
     /// `view-palette` :: "The palette answers every role with a `Style`".
     #[test]
-    fn every_role_is_answered_and_the_distinctions_are_real() {
+    fn the_palette_answers_every_role_with_a_style() {
         for expect in table() {
             // A `Style` came back and nothing panicked on the way.
             let _ = style(expect.role);
@@ -371,7 +357,7 @@ mod tests {
 
     /// `view-palette` :: "Each role's modifier set is exactly the table above".
     #[test]
-    fn each_roles_modifier_set_is_exactly_the_table() {
+    fn each_role_s_modifier_set_is_exactly_the_table_above() {
         for expect in table() {
             assert_eq!(
                 style(expect.role).add_modifier,
@@ -381,11 +367,9 @@ mod tests {
             );
         }
 
-        // The nine roles the spec names as carrying no modifier at all.
+        // The seven roles the spec names as carrying no modifier at all.
         for role in [
-            Role::HeaderPath,
             Role::Footer,
-            Role::RegionBorder,
             Role::ListRow,
             Role::ListProblem,
             Role::ListSeparator,
