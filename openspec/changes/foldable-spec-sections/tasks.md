@@ -62,10 +62,10 @@ a fold must read no file, and the per-frame clamp must leave the cursor on the l
 rather than the last *screenful*. Both are about what happens between a keypress and the next
 frame, which no unit test sees.
 
-- [ ] 0.1 Build the loop fixture in `src/ui/driver.rs`'s test module from `changes::fixture` values plus a recording reader, the inert `FsEvents`/`Refresher`/`AgentPoll`/`Launcher` stubs the module already uses, and a scripted event source. **No `ScratchDir`** — `grep -n ScratchDir src/ui/driver.rs` returns nothing today, and design.md → Test Boundaries grants a real filesystem only to the `ui::load` startup scenarios.
-- [ ] 0.2 RED: Write `a_fold_reads_no_file` (artifact-folds) — script `Enter`, four `Char(' ')`, `q` at 120x40; assert the reader recorded one call per resolved path and none during the folds, and that the final buffer shows the resulting fold state.
-- [ ] 0.3 RED: Write `a_foldable_tab_is_clamped_to_its_last_line` (detail-scroll) — script ten `Char('j')` then `q` at 120x40 and 60x40; assert `detail.scroll == 2` and that the third header row carries the selected style.
-- [ ] 0.4 Confirm both fail because the behavior is missing, not because the fixture is wrong: the same fixture with the script reduced to `q` must draw one frame and return `Ok`.
+- [x] 0.1 Build the loop fixture in `src/ui/driver.rs`'s test module from `changes::fixture` values plus a recording reader, the inert `FsEvents`/`Refresher`/`AgentPoll`/`Launcher` stubs the module already uses, and a scripted event source. **No `ScratchDir`** — `grep -n ScratchDir src/ui/driver.rs` returns nothing today, and design.md → Test Boundaries grants a real filesystem only to the `ui::load` startup scenarios.
+- [x] 0.2 RED: Write `a_fold_reads_no_file` (artifact-folds) — script `Enter`, four `Char(' ')`, `q` at 120x40; assert the reader recorded one call per resolved path and none during the folds, and that the final buffer shows the resulting fold state.
+- [x] 0.3 RED: Write `a_foldable_tab_is_clamped_to_its_last_line` (detail-scroll) — script ten `Char('j')` then `q` at 120x40 and 60x40; assert `detail.scroll == 2` and that the third header row carries the selected style.
+- [x] 0.4 Confirm both fail because the behavior is missing, not because the fixture is wrong: the same fixture with the script reduced to `q` must draw one frame and return `Ok`.
 
 ## 1. Palette roles
 <!-- kind: behavior -->
