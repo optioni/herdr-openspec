@@ -1233,6 +1233,55 @@ mod tests {
         let buf = terminal.backend().buffer();
         let row: String = row_text(buf, 5).chars().skip(42).take(9).collect();
         assert_eq!(row, "- line-00");
+
+        // A foldable dashboard whose `detail.scroll` is `2` over three
+        // collapsed sections is `2` after all three areas below, because a
+        // cursor does not move when the pane resizes.
+        let mut foldable = Dashboard {
+            detail: crate::ui::app::Detail {
+                sections: vec![
+                    ArtifactSection {
+                        label: "a".to_string(),
+                        text: "one\n".to_string(),
+                    },
+                    ArtifactSection {
+                        label: "b".to_string(),
+                        text: "two\n".to_string(),
+                    },
+                    ArtifactSection {
+                        label: "c".to_string(),
+                        text: "three\n".to_string(),
+                    },
+                ],
+                scroll: 2,
+                tab: 0,
+                problems: Vec::new(),
+                loaded: None,
+                expanded: std::collections::BTreeSet::new(),
+            },
+            ..dashboard.clone()
+        };
+        let backend2 = TestBackend::new(120, 20);
+        let mut terminal2 = ratatui::Terminal::new(backend2).expect("construct terminal");
+        let frame = terminal2
+            .draw(|f| view::render(f, &foldable))
+            .expect("draw foldable first frame");
+        foldable.normalise_scroll(frame.area);
+        assert_eq!(foldable.detail.scroll, 2);
+
+        terminal2.backend_mut().resize(120, 40);
+        let frame = terminal2
+            .draw(|f| view::render(f, &foldable))
+            .expect("draw foldable second frame");
+        foldable.normalise_scroll(frame.area);
+        assert_eq!(foldable.detail.scroll, 2);
+
+        terminal2.backend_mut().resize(60, 20);
+        let frame = terminal2
+            .draw(|f| view::render(f, &foldable))
+            .expect("draw foldable third frame");
+        foldable.normalise_scroll(frame.area);
+        assert_eq!(foldable.detail.scroll, 2);
     }
 
     /// `detail-scroll`: "Enter at the detail route moves nothing and keeps
@@ -3810,6 +3859,9 @@ mod tests {
             .iter()
             .position(|t| *t == Target::Section(SectionKey::Active))
             .expect("drawn");
+        // `list-selection`: `ToggleSection` is route-dependent since group 7 —
+        // pinned here, since `mouse_dashboard` already builds at `Route::List`.
+        assert_eq!(spaced.route, Route::List);
         spaced.apply(Action::ToggleSection);
         assert_eq!(clicked, spaced, "field for field");
 

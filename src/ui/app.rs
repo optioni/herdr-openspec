@@ -1081,7 +1081,7 @@ mod tests {
     use crate::agents::{Agent, AgentStatus};
     use crate::changes::fixture;
     use crate::ui::app::{
-        Action, Dashboard, Detail, Filter, Refresh, Route, Sections, action_for,
+        Action, ArtifactSection, Dashboard, Detail, Filter, Refresh, Route, Sections, action_for,
         artifact_section_label,
     };
     use std::collections::BTreeMap;
@@ -1785,6 +1785,352 @@ mod tests {
         assert!(d.detail.foldable(), "still foldable");
     }
 
+    /// A `Route::Detail` dashboard over one active, selected change, carrying
+    /// `detail` verbatim. The common shape group 7's `Space`-at-the-detail-
+    /// route scenarios build on, mirroring `ui::view::tests::dashboard_with_detail`.
+    fn dashboard_with_detail(detail: Detail) -> Dashboard {
+        let change =
+            fixture::with_artifacts(fixture::active("detail-view", 4, 9), &[("proposal", &[])]);
+        let mut d =
+            dashboard_for_attribution(vec![change], Vec::new(), 1, Vec::new(), BTreeMap::new());
+        d.route = Route::Detail;
+        d.detail = detail;
+        d
+    }
+
+    /// Mirrors `ui::view::tests::three_spec_dashboard` /
+    /// `ui::detail::tests::three_spec_detail`: three short, non-wrapping
+    /// sections, so a scenario about *which* section `Space` acts on does
+    /// not also have to reason about `ui::markdown`'s own wrapping. Labels
+    /// and bodies match the ones
+    /// `the_three_spec_files_of_a_change_become_three_labelled_sections` and
+    /// `three_spec_dashboard` already fix for the same three-file shape.
+    fn three_spec_detail(expanded: std::collections::BTreeSet<usize>, scroll: usize) -> Detail {
+        Detail {
+            sections: vec![
+                ArtifactSection {
+                    label: "degraded-coverage".to_string(),
+                    text: "one\n".to_string(),
+                },
+                ArtifactSection {
+                    label: "markdown-render".to_string(),
+                    text: "two\n".to_string(),
+                },
+                ArtifactSection {
+                    label: "tasks-checklist".to_string(),
+                    text: "three\n".to_string(),
+                },
+            ],
+            scroll,
+            tab: 0,
+            problems: Vec::new(),
+            loaded: None,
+            expanded,
+        }
+    }
+
+    /// `dashboard_with_detail(three_spec_detail(expanded, scroll))` — the
+    /// shape most of group 7's `artifact-folds` and `detail-scroll`
+    /// scenarios need.
+    fn foldable_dashboard(expanded: std::collections::BTreeSet<usize>, scroll: usize) -> Dashboard {
+        dashboard_with_detail(three_spec_detail(expanded, scroll))
+    }
+
+    /// `<glyph> <label>` padded to `width` — built the same way
+    /// `ui::detail::header` builds it, from `ui::list::fold_glyph` and
+    /// `ui::list::pad_or_truncate_right`, so a test never writes its own
+    /// copy of the glyph pair. Mirrors `ui::view::tests::expected_header`.
+    fn expected_header(label: &str, collapsed: bool, width: u16) -> String {
+        let glyph = crate::ui::list::fold_glyph(collapsed);
+        crate::ui::list::pad_or_truncate_right(&format!("{glyph} {label}"), width as usize)
+    }
+
+    /// The detail content area's row `y`, across its own mandated interior
+    /// width — 78 at 120 columns, 58 at 60 — the same band
+    /// `ui::view::tests::detail_interior_cols` measures.
+    fn detail_interior_row(buf: &ratatui::buffer::Buffer, y: u16) -> String {
+        let (from, width) = if buf.area.width == 60 { (1, 58) } else { (42, 78) };
+        crate::testutil::row_text(buf, y)
+            .chars()
+            .skip(from)
+            .take(width)
+            .collect()
+    }
+
+    /// `artifact-folds`: "Space opens the section under the cursor and
+    /// leaves its siblings shut".
+    #[test]
+    fn space_opens_the_section_under_the_cursor_and_leaves_its_siblings_shut() {
+        let mut d = foldable_dashboard(std::collections::BTreeSet::new(), 1);
+        let before = d.clone();
+
+        d.apply(Action::ToggleSection);
+
+        assert_eq!(d.detail.expanded, std::collections::BTreeSet::from([1]));
+        assert_eq!(d.detail.scroll, 1, "did not move: nothing above it changed height");
+        assert_eq!(d.sections.collapsed, before.sections.collapsed);
+        assert_eq!(d.selected, before.selected);
+        assert_eq!(d.refresh.requested, before.refresh.requested);
+        assert_eq!(d.route, before.route);
+        assert_eq!(d.filter, before.filter);
+        assert_eq!(d.changes, before.changes);
+
+        for (width, height) in [(120u16, 40u16), (60, 40)] {
+            let buf = crate::testutil::render_at(width, height, &d);
+            let interior = if width == 60 { 58 } else { 78 };
+            assert_eq!(
+                detail_interior_row(&buf, 5),
+                expected_header("degraded-coverage", true, interior),
+                "width {width}: first header, collapsed"
+            );
+            assert_eq!(
+                detail_interior_row(&buf, 6),
+                expected_header("markdown-render", false, interior),
+                "width {width}: second header, opened"
+            );
+            let body = crate::ui::markdown::lines("two\n", interior);
+            assert_eq!(body.len(), 1, "width {width}: the fixture body is one line");
+            assert_eq!(
+                detail_interior_row(&buf, 7),
+                crate::ui::list::pad_or_truncate_right(&body[0].text(), interior as usize),
+                "width {width}: the opened section's own body"
+            );
+            assert_eq!(
+                detail_interior_row(&buf, 8),
+                expected_header("tasks-checklist", true, interior),
+                "width {width}: third header, still collapsed"
+            );
+        }
+    }
+
+    /// `artifact-folds`: "Space inside an open section folds it and moves
+    /// the cursor to its header".
+    #[test]
+    fn space_inside_an_open_section_folds_it_and_moves_the_cursor_to_its_header() {
+        // Section 0 open (one body line), cursor at row 1 — inside its body.
+        let mut d = foldable_dashboard(std::collections::BTreeSet::from([0]), 1);
+
+        d.apply(Action::ToggleSection);
+
+        assert!(d.detail.expanded.is_empty());
+        assert_eq!(d.detail.scroll, 0, "the folded section's own header row");
+        for (width, height) in [(120u16, 40u16), (60, 40)] {
+            let buf = crate::testutil::render_at(width, height, &d);
+            let rows = crate::ui::detail::content_lines(
+                &d.detail,
+                d.selected_change(),
+                if width == 60 { 58 } else { 78 },
+            );
+            assert_eq!(rows.len(), 3, "width {width}: three collapsed sections");
+            assert!(
+                rows.iter()
+                    .all(|r| matches!(r.kind, crate::ui::detail::ContentKind::SectionHeader { .. })),
+                "width {width}: every row is a header"
+            );
+            let _ = buf;
+        }
+
+        // Section 0 still open, cursor now on the third header row — the row
+        // index depends on the one body line the open first section
+        // contributes.
+        let mut third = foldable_dashboard(std::collections::BTreeSet::from([0]), 3);
+        third.apply(Action::ToggleSection);
+        assert_eq!(
+            third.detail.expanded,
+            std::collections::BTreeSet::from([0, 2]),
+            "the third section opened and the first stayed open"
+        );
+    }
+
+    /// `artifact-folds`: "Space on a problem row is inert".
+    #[test]
+    fn space_on_a_problem_row_is_inert() {
+        let mut d = dashboard_with_detail(Detail {
+            sections: vec![
+                ArtifactSection {
+                    label: "a".to_string(),
+                    text: "one\n".to_string(),
+                },
+                ArtifactSection {
+                    label: "b".to_string(),
+                    text: "two\n".to_string(),
+                },
+            ],
+            scroll: 0,
+            tab: 0,
+            problems: vec!["permission denied".to_string()],
+            loaded: None,
+            expanded: std::collections::BTreeSet::new(),
+        });
+        let before = d.clone();
+        for _ in 0..10 {
+            d.apply(Action::ToggleSection);
+        }
+        assert_eq!(d, before, "no field changed, and it did not panic");
+
+        d.detail.scroll = 1;
+        d.apply(Action::ToggleSection);
+        assert_eq!(
+            d.detail.expanded,
+            std::collections::BTreeSet::from([0]),
+            "moving off the problem row lets the same action toggle the first section"
+        );
+    }
+
+    /// `artifact-folds`: "Space is inert on a non-foldable artifact".
+    #[test]
+    fn space_is_inert_on_a_non_foldable_artifact() {
+        let mut one = dashboard_with_detail(Detail {
+            sections: vec![ArtifactSection {
+                label: "a".to_string(),
+                text: "one\n".to_string(),
+            }],
+            scroll: 0,
+            tab: 0,
+            problems: Vec::new(),
+            loaded: None,
+            expanded: std::collections::BTreeSet::new(),
+        });
+        let before_one = one.clone();
+        for _ in 0..10 {
+            one.apply(Action::ToggleSection);
+        }
+        assert_eq!(one, before_one);
+
+        let mut none = dashboard_with_detail(Detail {
+            sections: Vec::new(),
+            scroll: 0,
+            tab: 0,
+            problems: Vec::new(),
+            loaded: None,
+            expanded: std::collections::BTreeSet::new(),
+        });
+        let before_none = none.clone();
+        for _ in 0..10 {
+            none.apply(Action::ToggleSection);
+        }
+        assert_eq!(none, before_none);
+    }
+
+    /// `list-selection`: "Space at the detail route leaves the list alone".
+    #[test]
+    fn space_at_the_detail_route_leaves_the_list_alone() {
+        let mut d = foldable_dashboard(std::collections::BTreeSet::new(), 1);
+        let before = d.clone();
+        let buf_before = crate::testutil::render_at(120, 20, &d);
+
+        d.apply(Action::ToggleSection);
+
+        assert_eq!(d.sections.collapsed, before.sections.collapsed);
+        assert_eq!(d.selected, before.selected);
+        assert_eq!(d.refresh.requested, before.refresh.requested);
+        assert_eq!(d.detail.expanded, std::collections::BTreeSet::from([1]));
+
+        let buf_after = crate::testutil::render_at(120, 20, &d);
+        for y in 0..20u16 {
+            let before_row: String = crate::testutil::row_text(&buf_before, y)
+                .chars()
+                .take(40)
+                .collect();
+            let after_row: String = crate::testutil::row_text(&buf_after, y)
+                .chars()
+                .take(40)
+                .collect();
+            assert_eq!(before_row, after_row, "row {y}: the list region did not move");
+        }
+    }
+
+    /// `list-selection`: "Space at the detail route is inert on a
+    /// non-foldable artifact".
+    #[test]
+    fn space_at_the_detail_route_is_inert_on_a_non_foldable_artifact() {
+        let mut d = dashboard_with_detail(Detail {
+            sections: vec![ArtifactSection {
+                label: "a".to_string(),
+                text: "one\n".to_string(),
+            }],
+            scroll: 0,
+            tab: 0,
+            problems: Vec::new(),
+            loaded: None,
+            expanded: std::collections::BTreeSet::new(),
+        });
+        let before = d.clone();
+        for _ in 0..10 {
+            d.apply(Action::ToggleSection);
+        }
+        assert_eq!(d, before);
+    }
+
+    /// `detail-scroll`: "At a collapsed foldable tab the same keys walk the
+    /// section list". Named `ui::view::tests::…` in design.md's Test
+    /// Strategy table, but the analogous existing test for this exact
+    /// shape — `the_wheel_moves_the_cursor_at_a_foldable_tab` below — is
+    /// itself `ui::app::tests::…` despite being a "view" tier row; this one
+    /// follows that precedent instead of the table's literal path.
+    #[test]
+    fn at_a_collapsed_foldable_tab_the_same_keys_walk_the_section_list() {
+        let mut d = foldable_dashboard(std::collections::BTreeSet::new(), 0);
+        for (want_scroll, want_row) in [(1usize, 6u16), (2, 7)] {
+            d.apply(Action::Next);
+            assert_eq!(d.detail.scroll, want_scroll);
+            for (width, height) in [(120u16, 40u16), (60, 40)] {
+                let buf = crate::testutil::render_at(width, height, &d);
+                let interior = if width == 60 { 58 } else { 78 };
+                for (row, label) in [
+                    (5u16, "degraded-coverage"),
+                    (6, "markdown-render"),
+                    (7, "tasks-checklist"),
+                ] {
+                    assert_eq!(
+                        detail_interior_row(&buf, row),
+                        expected_header(label, true, interior),
+                        "width {width} row {row}: still collapsed, three headers stay drawn"
+                    );
+                }
+                let _ = want_row;
+            }
+        }
+        d.apply(Action::Next);
+        d.normalise_scroll(ratatui::layout::Rect::new(0, 0, 120, 40));
+        assert_eq!(
+            d.detail.scroll, 2,
+            "clamped to the last line, not the last screenful"
+        );
+    }
+
+    /// `detail-scroll`: "The wheel moves the cursor at a foldable tab".
+    #[test]
+    fn the_wheel_moves_the_cursor_at_a_foldable_tab() {
+        let mut d = foldable_dashboard(std::collections::BTreeSet::new(), 0);
+        d.route = Route::List;
+
+        d.apply(Action::ScrollDown);
+        d.apply(Action::ScrollDown);
+        assert_eq!(d.detail.scroll, 2);
+        assert!(d.detail.expanded.is_empty());
+        let rows = crate::ui::detail::content_lines(&d.detail, d.selected_change(), 78);
+        assert!(matches!(
+            rows[2].kind,
+            crate::ui::detail::ContentKind::SectionHeader {
+                selected: true,
+                ..
+            }
+        ));
+
+        d.apply(Action::ScrollUp);
+        d.apply(Action::ScrollUp);
+        assert_eq!(d.detail.scroll, 0);
+        let rows = crate::ui::detail::content_lines(&d.detail, d.selected_change(), 78);
+        assert!(matches!(
+            rows[0].kind,
+            crate::ui::detail::ContentKind::SectionHeader {
+                selected: true,
+                ..
+            }
+        ));
+    }
+
     /// `mouse-input`: the wheel and click actions `Dashboard::apply` gains.
     /// `list-selection`'s ten scenarios live here; `detail-scroll`'s seven live
     /// in `mod scroll` beside it.
@@ -2108,6 +2454,17 @@ mod tests {
             keyed.apply(Action::Prev);
             wheeled.apply(Action::ScrollUp);
             assert_eq!(keyed, wheeled);
+
+            // The same holds at a foldable tab, for both pairs.
+            let mut keyed_f = super::foldable_dashboard(std::collections::BTreeSet::new(), 0);
+            let mut wheeled_f = keyed_f.clone();
+            keyed_f.apply(Action::Next);
+            wheeled_f.apply(Action::ScrollDown);
+            assert_eq!(keyed_f, wheeled_f);
+
+            keyed_f.apply(Action::Prev);
+            wheeled_f.apply(Action::ScrollUp);
+            assert_eq!(keyed_f, wheeled_f);
         }
 
         #[test]
@@ -3417,6 +3774,10 @@ mod tests {
                 2,
             );
             assert_eq!(d.targets()[2], Target::Section(SectionKey::Archived));
+            // `list-selection`: `Space` is route-dependent since group 7 — pinned
+            // here rather than assumed, since `ToggleSection` at `Route::Detail`
+            // folds an artifact section instead.
+            assert_eq!(d.route, Route::List);
 
             d.apply(Action::ToggleSection);
             assert_eq!(
@@ -3457,6 +3818,8 @@ mod tests {
                 4,
             );
             assert_eq!(d.selected_change().unwrap().name, "legacy-cleanup");
+            // `list-selection`: pinned to `Route::List` — see the sibling test above.
+            assert_eq!(d.route, Route::List);
 
             d.apply(Action::ToggleSection);
             assert_eq!(
@@ -3478,6 +3841,7 @@ mod tests {
                 ],
                 1,
             );
+            assert_eq!(on_active.route, Route::List);
             on_active.apply(Action::ToggleSection);
             assert_eq!(
                 on_active.sections.collapsed,
@@ -3507,6 +3871,7 @@ mod tests {
             d.refresh.requested = false;
             assert_eq!(d.targets(), vec![Target::Section(SectionKey::Archived)]);
             d.selected = 0;
+            assert_eq!(d.route, Route::List);
 
             d.apply(Action::ToggleSection);
             assert!(d.sections.collapsed.is_empty());
@@ -3523,6 +3888,7 @@ mod tests {
                 0,
             );
             resolved.refresh.requested = false;
+            assert_eq!(resolved.route, Route::List);
             resolved.apply(Action::ToggleSection);
             assert!(!resolved.refresh.requested);
         }
@@ -3932,6 +4298,23 @@ mod tests {
                 d.apply(Action::Prev);
                 assert_eq!(d.detail.scroll, 0);
             }
+
+            // The same four actions against a foldable tab leave
+            // `detail.scroll` at `0` and the first header row emphasised.
+            let mut foldable = super::foldable_dashboard(std::collections::BTreeSet::new(), 0);
+            for _ in 0..4 {
+                foldable.apply(Action::Prev);
+                assert_eq!(foldable.detail.scroll, 0);
+            }
+            let rows =
+                crate::ui::detail::content_lines(&foldable.detail, foldable.selected_change(), 78);
+            assert!(matches!(
+                rows[0].kind,
+                crate::ui::detail::ContentKind::SectionHeader {
+                    selected: true,
+                    ..
+                }
+            ));
         }
 
         #[test]
@@ -4129,6 +4512,28 @@ mod tests {
             };
             d3.apply(Action::Back);
             assert_eq!(d3.detail.scroll, 3);
+
+            // A fourth dashboard, at a foldable tab with `detail.expanded`
+            // holding `1`: none of the three route moves clears it.
+            let mut d4 = super::foldable_dashboard(std::collections::BTreeSet::from([1]), 2);
+            d4.apply(Action::Back);
+            assert_eq!(
+                d4.detail.expanded,
+                std::collections::BTreeSet::from([1]),
+                "Back"
+            );
+            d4.apply(Action::OpenDetail);
+            assert_eq!(
+                d4.detail.expanded,
+                std::collections::BTreeSet::from([1]),
+                "OpenDetail"
+            );
+            d4.apply(Action::FilterStart);
+            assert_eq!(
+                d4.detail.expanded,
+                std::collections::BTreeSet::from([1]),
+                "FilterStart"
+            );
         }
 
         /// The `Dashboard` shape shared by this group's three `Enter`
