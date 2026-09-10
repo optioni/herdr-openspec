@@ -190,6 +190,24 @@ pub struct Detail {
     pub expanded: std::collections::BTreeSet<usize>,
 }
 
+impl Detail {
+    /// Whether the selected artifact is **foldable**: more than one resolved
+    /// section. Derived, never stored (design.md -> Decision 3), and named here
+    /// so it is decided in **one** place — `ui::detail` asks it to decide
+    /// whether to emit header rows, `ui::view` to choose between
+    /// `layout::viewport` and `layout::scroll_offset`, and `Dashboard::apply`
+    /// and `normalise_scroll` to decide whether `Space` and the clamp act on a
+    /// cursor at all. Four inline `sections.len() > 1` tests would be four
+    /// places for the answer to drift.
+    ///
+    /// A single-section artifact and one with no sections are both **not**
+    /// foldable, which is what keeps a one-file artifact byte-identical to its
+    /// pre-change rendering.
+    pub fn foldable(&self) -> bool {
+        self.sections.len() > 1
+    }
+}
+
 /// The loop's live tier state: `requested` and `reload` are one-shot flags
 /// the loop consumes, `problems` is text that outlives a reload — none of it
 /// is derived geometry, and none of it is a watcher, a worker handle, a
@@ -1696,7 +1714,7 @@ mod tests {
         for section in &d.detail.sections {
             assert_eq!(section.text, "## MODIFIED Requirements\n");
         }
-        assert!(d.detail.sections.len() > 1, "foldable: sections.len() is 3");
+        assert!(d.detail.foldable(), "foldable: sections.len() is 3");
     }
 
     /// `artifact-folds`: "An artifact with no resolved paths has no
@@ -1764,7 +1782,7 @@ mod tests {
         assert_eq!(d.detail.problems.len(), 1);
         assert!(d.detail.problems[0].contains("/repo/openspec/changes/c/specs/b/spec.md"));
         assert!(d.detail.problems[0].contains("permission denied"));
-        assert!(d.detail.sections.len() > 1, "still foldable");
+        assert!(d.detail.foldable(), "still foldable");
     }
 
     /// `mouse-input`: the wheel and click actions `Dashboard::apply` gains.

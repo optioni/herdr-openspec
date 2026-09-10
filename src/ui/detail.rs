@@ -297,7 +297,7 @@ fn body_row(line: crate::ui::markdown::Line) -> ContentRow {
 /// and the `ArtifactRef` at `detail.tab` carries `tracks_tasks == true`
 /// (`artifact-folds` -> Decision 8: this tab is never foldable, at any
 /// section count); `artifact-folds`' own header rows and per-section
-/// bodies when the artifact is **foldable** (`detail.sections.len() > 1`,
+/// bodies when the artifact is **foldable** (`Detail::foldable`,
 /// derived rather than stored — Decision 3); and
 /// `ui::markdown::lines(&text, width)` over the same concatenation in every
 /// other case — a single section, no section at all, a `None` change, a
@@ -350,7 +350,7 @@ pub fn content_lines(
                     .map(body_row),
             );
         }
-        None if detail.sections.len() > 1 => {
+        None if detail.foldable() => {
             // `artifact-folds`: a header row per section, in order, each
             // followed by that section's own rendered markdown exactly
             // when it is open.

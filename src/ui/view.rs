@@ -202,7 +202,7 @@ fn render_detail_content(frame: &mut Frame, content: Rect, dashboard: &Dashboard
     // design.md -> Decision 2: a foldable artifact's `scroll` is a cursor over the
     // row list, whose visible slice `layout::viewport` derives exactly as the list
     // region already does; a non-foldable artifact keeps today's plain offset.
-    let offset = if dashboard.detail.sections.len() > 1 {
+    let offset = if dashboard.detail.foldable() {
         viewport(rows.len(), dashboard.detail.scroll, content.height)
     } else {
         scroll_offset(rows.len(), dashboard.detail.scroll, content.height)
