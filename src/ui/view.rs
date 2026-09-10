@@ -1661,6 +1661,72 @@ mod tests {
         assert!(!buffer_contains(&plain_buf, "file mode"));
     }
 
+    /// `responsive-layout` :: "A name longer than the heading row keeps its tail" — the
+    /// heading row's own degraded state, reachable through no happy-path fixture above:
+    /// a fifty-character directory name is shortened from the **left**, the same
+    /// `shorten_left` rule `change-rows` uses for a row too long for its field, keeping
+    /// the characters that distinguish a directory from its siblings.
+    #[test]
+    fn a_name_longer_than_the_heading_row_keeps_its_tail() {
+        let name: String = (0..50).map(|i| char::from(b'a' + (i % 26) as u8)).collect();
+        assert_eq!(name.chars().count(), 50);
+        let repo = format!("/tmp/{name}");
+        let d = dashboard(Some(&repo), Route::List);
+
+        // At 120 columns the list region's 38-column interior cannot hold the name
+        // whole: `…` plus the name's last 37 columns fills it exactly.
+        let buf120 = render_at(120, 20, &d);
+        let tail: String = name.chars().skip(50 - 37).collect();
+        assert_eq!(
+            cols(&row_text(&buf120, 0), 1..39),
+            format!("…{tail}"),
+            "the ellipsis plus the last 37 columns must fill the 38-column heading"
+        );
+
+        // At 60 columns the 58-column interior holds all fifty characters whole, so the
+        // ellipsis above is the narrower list column and not a constant.
+        let buf60 = render_at(60, 20, &d);
+        assert_eq!(
+            cols(&row_text(&buf60, 0), 1..51),
+            name,
+            "50 columns fit in 58, so no shortening is needed at the wider row"
+        );
+    }
+
+    /// `responsive-layout` :: "No repository names itself in the heading" — the heading
+    /// row's other degraded state: with no repository root at all, the row spells the
+    /// literal `no repository` rather than being left blank, and the list interior still
+    /// carries `change-rows`' own three-row "no repository" message beneath it.
+    #[test]
+    fn no_repository_names_itself_in_the_heading() {
+        let mut d = dashboard(None, Route::List);
+        d.searched_from = std::path::PathBuf::from("/tmp/not-a-repo/deep/here");
+
+        for width in [120u16, 60] {
+            let buf = render_at(width, 20, &d);
+            assert_eq!(
+                cols(&row_text(&buf, 0), 1..14),
+                "no repository",
+                "width {width}"
+            );
+            // Row 1 is the region's blank padding row; the interior — `change-rows`' own
+            // three-row "no repository" message — starts at row 2, with the searched
+            // path itself on row 4.
+            assert!(
+                interior_cols(&buf, 2).starts_with("No OpenSpec repository found"),
+                "width {width}"
+            );
+            assert!(
+                interior_cols(&buf, 4).contains("not-a-repo"),
+                "width {width}: the searched path must appear in the interior"
+            );
+            assert!(
+                !cols(&row_text(&buf, 0), 0..width as usize).contains("not-a-repo"),
+                "width {width}: the searched path must not appear in the heading row"
+            );
+        }
+    }
+
     /// `responsive-layout` :: "A region draws a heading, a blank row, and no border at both
     /// widths" — the padding row between a region's heading and its interior is never
     /// painted, and the interior's first row is the buffer's row 2 at both mandated widths.
