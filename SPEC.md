@@ -576,7 +576,9 @@ pane stays fully usable over SSH in a terminal that reports no mouse
 | Left click again on the row already selected | The same `Action::Click`; applying it opens the detail, exactly as `Enter` does. A third click changes nothing |
 | Left click on a section header | The same `Action::Click`, naming the section — fold it if open, unfold it if collapsed, and move the cursor to it, exactly as `Space` does |
 | Left click on an artifact tab cell | `Action::SelectTab` for that cell's own position, exactly as its digit key. It does not change the route |
-| Anything else — a right or middle press, any release, any drag, pointer motion, a horizontal wheel, the footer row, a region's heading row, its padding row, or its gutter, a problem or message row, or a point outside the frame | `Action::Ignore` |
+| Left click on an artifact-section header, when the selected artifact is foldable | `Action::Click` naming that row's own content-line index and section index — fold it if open, unfold it if collapsed, and move the detail cursor to it, exactly as `Space` does at `Route::Detail` (`foldable-spec-sections`) |
+| Left click on any other row of a foldable artifact's content | `Action::Click` naming that row's own content-line index — move the detail cursor to it and fold nothing, exactly as `j`/`k` do there (`foldable-spec-sections`) |
+| Anything else — a right or middle press, any release, any drag, pointer motion, a horizontal wheel, the footer row, a region's heading row, its padding row, or its gutter, a problem or message row, the detail content area when the selected artifact is not foldable, a content row past the last one a foldable artifact drew, or a point outside the frame | `Action::Ignore` |
 
 The region under a wheel is the **whole** region — its heading row, its padding
 row, and its gutters included, and, for the detail region, its tab bar as well as its content area.
