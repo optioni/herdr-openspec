@@ -29,8 +29,12 @@ to the other. The line lists themselves come from `markdown-render` and `tasks-c
 rule beneath it, and the blank padding row beneath that — with
 `ui::detail::content_lines(&dashboard.detail, dashboard.selected_change(), content.width)`,
 drawing the slice that starts at
-`layout::scroll_offset(lines.len(), dashboard.detail.scroll, content.height)` and runs for at
-most `content.height` lines, one rendered line per terminal row, starting at the content
+`layout::viewport(rows.len(), dashboard.detail.scroll, content.height)` when the selected
+artifact is **foldable** and at
+`layout::scroll_offset(rows.len(), dashboard.detail.scroll, content.height)` otherwise — the
+branch this requirement's own opening states and `artifact-content` restates, named here too
+so this sentence cannot be read as the unconditional rule it was before this change — and
+runs for at most `content.height` rows, one rendered line per terminal row, starting at the content
 area's first row and first column, drawing each segment left to right with the
 `ratatui::style::Style` its `Face` maps to and never writing past the interior's last column.
 A rendered line shorter than the content area leaves the rest of its row untouched, because
@@ -92,8 +96,8 @@ The scenario's name is kept verbatim from `markdown-viewer` because a delta's sc
 headers are its merge key; its subject is the same document, drawn two rows lower.
 
 - **WHEN** a `Dashboard` at `Route::Detail`, whose selected change carries one artifact not
-  marked `tracks_tasks` and whose one section holds a bullet list of the twenty items
-  `line-00` through `line-19`, is rendered at 120x20 and at 60x20
+  marked `tracks_tasks` and whose selected artifact is a single section holding a bullet
+  list of the twenty items `line-00` through `line-19`, is rendered at 120x20 and at 60x20
 - **THEN** in the 120-column buffer row 5 columns 42 onward reads `- line-00` and row 18
   reads `- line-13`, so fourteen items are drawn into the content area — the same fourteen
   the bordered layout drew, two rows lower and one column right
@@ -168,8 +172,9 @@ The scenario's name is kept verbatim because a delta's scenario headers are its 
 there is no border now, and what content must not overwrite is a gutter column or the divider.
 
 - **WHEN** a `Dashboard` at `Route::Detail` whose selected change carries five artifacts with
-  40-character ids, whose name is 200 characters long, and whose one section holds thirty
-  lines each 200 characters long, is rendered at 120x20 and at 60x20
+  40-character ids, whose name is 200 characters long, and whose selected artifact is a
+  single section of thirty lines each 200 characters long, is rendered at 120x20 and at
+  60x20
 - **THEN** in the 60-column buffer every cell of column 0 and column 59 in rows 0 through 18
   is a space
 - **AND** in the 120-column buffer every cell of columns 0, 39, and 41 in rows 0 through 18
@@ -216,8 +221,8 @@ of zero rows and would exercise only the earliest guard.
   `tracks_tasks`, where the one content row at 120x7 and 60x7 holds the progress bar rather
   than a task item, and 1x20 and 2x20 — where the interior is one or zero columns wide —
   still draw nothing and still do not panic
-- **AND** every one of those renders is repeated once more with a table as the
-  `detail.sections`, where 1x20 and 2x20 still draw nothing and still do not panic
+- **AND** every one of those renders is repeated once more with a table as the section's
+  text, where 1x20 and 2x20 still draw nothing and still do not panic
 
 ### Requirement: Switching to and from the tracked-tasks tab renormalises the scroll
 
@@ -261,33 +266,77 @@ order `dashboard-loop` already specifies; this change adds no loop step and no n
 
 ```rust
 pub struct Detail {
-    pub source: String,
+    pub sections: Vec<ArtifactSection>,
     pub scroll: usize,
     pub tab: usize,
     pub problems: Vec<String>,
     pub loaded: Option<(std::path::PathBuf, usize)>,
+    pub expanded: std::collections::BTreeSet<usize>,
+    pub drawn_width: Option<u16>,
 }
 ```
 
-`source` is the markdown the detail region shows. From `detail-view` onward it **is** set:
-`ui::load` still starts it empty, and `Dashboard::sync_detail` — driven by
+`sections` is the content the detail region shows, one entry per file the selected artifact
+resolved to; it replaces the single `source: String` this requirement previously named, and
+`artifact-folds` states its shape, its labels, and why the split is per file rather than per
+document. `ui::load` still starts it empty, and `Dashboard::sync_detail` — driven by
 `ui::driver::run_loop` with `artifact-content`'s injected reader — fills it from the selected
-change's selected artifact. `scroll` is the index of the first rendered line the region
-draws, and is a **user-controlled position**, not derived geometry: it is the detail region's
-counterpart to `list-selection`'s `selected`, not to `list-selection`'s derived `viewport`.
-`tab`, `problems`, and `loaded` are `artifact-tabs`' and `artifact-content`'s, and are
-specified there.
+change's selected artifact.
 
-`Detail` SHALL carry exactly these **five** fields after `live-refresh` too. That change's
-forced-reload flag deliberately lives on `ui::app::Refresh` rather than here: `Dashboard`
-gains one field either way, and putting it on `Refresh` leaves `Detail`'s five — and every
-`Detail { … }` literal in the crate — untouched. `live-updates` states the flag's contract
-and `artifact-content` states what `sync_detail` does with it.
+`scroll` is the reader's own position in the rendered line list, and is a **user-controlled
+position**, not derived geometry: it is the detail region's counterpart to
+`list-selection`'s `selected`, not to `list-selection`'s derived `viewport`. What the region
+does with it depends on whether the selected artifact is foldable:
+
+- at a **non-foldable** artifact it is the index of the first rendered line drawn, exactly as
+  before this change, and the drawn offset is `layout::scroll_offset`;
+- at a **foldable** one it is a **line cursor**, the drawn offset is `layout::viewport` — the
+  very helper `list-selection` already derives the list region's slice with — and the section
+  the cursor is on or in is the one `Space` acts upon.
+
+The cursor exists because `scroll_offset` returns `0` for every `scroll` whenever the content
+fits the region, and a collapsed foldable tab is a handful of header rows that almost always
+fits. Under an offset alone `Space` could address only the first section in any pane taller
+than the section count, which is the ordinary case rather than an edge one. `viewport` is
+chosen over a second bespoke helper because the list region's cursor already needs exactly
+this behaviour and states it in `list-selection`.
+
+`tab`, `problems`, and `loaded` are `artifact-tabs`' and `artifact-content`'s, and are
+specified there; `expanded` is `artifact-folds`'.
+
+`Detail` SHALL carry exactly these **seven** fields — five before this change, plus
+`expanded` and `drawn_width`.
+
+`drawn_width` is the **content area's own width at the frame last drawn**, recorded by
+`Dashboard::normalise_scroll`, which already derives it once per frame, and `None` until a
+first frame has been drawn. It exists because `content_lines`' row list is width-dependent —
+`ui::markdown::wrap_prose` word-wraps at the content width, and this capability's own test
+asserts the row count is strictly greater at 58 than at 78 — while `Space` at `Route::Detail`
+must fold "the section the cursor is **on or in**", resolving `detail.scroll` through that
+same row list. Resolving it at any other width can name a different section than the one the
+reader sees emphasised, and can then leave `detail.scroll` inside an unrelated section's body.
+
+It is **derived geometry deliberately cached**, and the one exception to `dashboard-loop`'s
+"carries no width, no layout mode, no column count" rule, which `Dashboard`'s own
+documentation SHALL be amended to state rather than left contradicting the code. The
+justification is the same one `loaded` already carries: a keyboard action taken **between**
+frames needs to know what the last frame did, and the render path is pure and cannot tell it.
+`ui::view::render` SHALL NOT read `drawn_width` — it has the real width in hand — so the
+field is never the source of what is drawn, only of what a keypress resolves against.
+
+`live-refresh`'s forced-reload flag deliberately lives on `ui::app::Refresh`
+rather than here, and still does: `Dashboard` gains one field either way, and putting it on
+`Refresh` leaves every `Detail { … }` literal in the crate untouched. `live-updates` states
+that flag's contract and `artifact-content` states what `sync_detail` does with it.
 
 `Detail` SHALL NOT implement `Default` — neither derived nor hand-written, anywhere in the
-crate — and every construction and every destructuring of it SHALL name **all five** fields,
+crate — and every construction and every destructuring of it SHALL name **all seven** fields,
 with no `..` rest, on exactly the terms `dashboard-loop` states for `Dashboard`, `Filter`,
 and (from `live-refresh`) `Refresh`.
+
+`ArtifactSection` SHALL NOT implement `Default` either, and SHALL be added to the same `NODEFAULT-UI`
+type list, so a field added to it later fails to compile at each construction site rather
+than defaulting silently.
 
 #### Scenario: `Detail` has no `Default` and no site elides a field
 
@@ -296,24 +345,32 @@ and (from `live-refresh`) `Refresh`.
   preceding `struct Detail`, and for a `..` appearing inside a `Detail { … }` literal or
   pattern
 - **THEN** there is no match
+- **AND** the same holds for `ArtifactSection`, searched the same way
 - **AND** the search is the same parameterised check that covers `Dashboard`, `Filter`, and
-  `Refresh`, run over the type list `Dashboard Filter Detail Refresh`, rather than a second
-  drifting check. `Refresh` is `live-refresh`'s addition to that list; the check's own
-  `TYPES` parameter is what makes adding it a change to an invocation rather than to the
-  check
+  `Refresh`, rather than a second drifting check. `SCAN_MIN` is **per invocation**, so the
+  `Makefile` recipe carries one line per subject set — `Dashboard Filter Detail Sections`,
+  then `Refresh`, then `Launch`, then `src/agents.rs`'s set, then `src/launch.rs`'s
+  `Outcome` — and `ArtifactSection` joins as a **sixth line** with its own measured floor rather than
+  being folded into the first, where its span count would hide inside that line's larger one
+  and a scan matching zero `ArtifactSection` spans would still print OK. The check's own `TYPES`
+  parameter is what makes adding a subject a change to an invocation rather than to the check
 - **AND** it is paired with a positive control asserting that `src/ui/app.rs` **does**
   contain `struct Detail {`, and the check is proven able to fail against a copy carrying
-  `impl Default for Detail { … }` and against a copy carrying `let Detail { source, .. }`
+  `impl Default for Detail { … }` and against a copy carrying `let Detail { sections, .. }`
 - **AND** a compile-time companion exists: a test destructures a `Detail` with an
-  exhaustive pattern naming all five fields and no `..`, the `Dashboard` companion
-  continues to name all **nine** — eight before `live-refresh`, plus `refresh` — and a
-  fourth companion destructures a `Refresh` naming all three
+  exhaustive pattern naming all seven fields and no `..`, a second destructures an `ArtifactSection`
+  naming both, the `Dashboard` companion continues to name all **fourteen** — the nine this
+  requirement recorded at `live-refresh`, plus `agents`, `agent_names`, `launch`, `sections`,
+  and `file_mode`, added by the four changes since; the stale count is corrected here rather
+  than left to be rediscovered — and a fourth companion destructures a `Refresh` naming all
+  three
 
 #### Scenario: Startup leaves the detail empty and unscrolled
 
 - **WHEN** `ui::load` is called over a scratch repository holding one change
 - **THEN** the returned `Dashboard`'s `detail.sections` is empty, `detail.problems` is empty,
-  and `detail.scroll`, `detail.tab`, and `detail.loaded` are `0`, `0`, and `None`
+  `detail.expanded` is empty, and `detail.scroll`, `detail.tab`, and `detail.loaded` are `0`,
+  `0`, and `None`
 - **AND** the same holds when `ui::load` finds **no** `openspec/` directory above its
   starting path and takes its `RepoSearch::NotFound` arm, which is a second `Dashboard`
   construction site and therefore a second place the field can be got wrong
@@ -388,9 +445,9 @@ bordered arithmetic fails here rather than silently losing the padding row.
 
 #### Scenario: A scroll offset past the end still draws the last screenful
 
-- **WHEN** a `Dashboard` at `Route::Detail` whose selected change carries one artifact, whose
-  whose one section holds the twenty-item list, and whose `detail.scroll` is `99`, is rendered at
-  120x20 and at 60x20
+- **WHEN** a `Dashboard` at `Route::Detail` whose selected change carries one artifact whose
+  single section holds the twenty-item list, and whose `detail.scroll` is `99`, is rendered
+  at 120x20 and at 60x20
 - **THEN** in the 120-column buffer the content area's first row reads `- line-06` and its
   last drawn row reads `- line-19`
 - **AND** in the 60-column buffer the same two rows read the same, so the fourteen-row
@@ -406,6 +463,12 @@ action is route-agnostic and only its effect is not — SHALL be interpreted by
 with `Prev` saturating at `0` and `Next` saturating at `usize::MAX`, the upper bound being
 enforced by the draw-time clamp and the frame normalisation below.
 
+That is one move, not two: `detail.scroll` advances by one **rendered line** at both a
+foldable and a non-foldable artifact, and `apply` SHALL NOT branch on foldability. Only the
+*interpretation* differs, and it differs at the draw and at the normalisation, not here — so
+at a collapsed foldable tab, where each section is one rendered line, `j` and `k` walk the
+section list one header at a time, and inside an open section they walk its rendered lines.
+
 `action_for` SHALL be unchanged in shape: it maps `Char('j')` and `Down` to `Next` and
 `Char('k')` and `Up` to `Prev` while `filtering` is false, and while `filtering` is true
 `j` and `k` still type themselves into the query and only the arrows navigate — the layering
@@ -415,7 +478,10 @@ enforced by the draw-time clamp and the frame normalisation below.
 twice opens at the top both times. That is three arms of `apply`: `OpenDetail` when it sets
 `Route::Detail`, `Back` when it returns to `Route::List`, and `FilterStart`, which
 `list-filtering` also defines as moving the route to `List`. Dismissing a filter layer is
-**not** a route move and SHALL leave `detail.scroll` alone.
+**not** a route move and SHALL leave `detail.scroll` alone. A route move SHALL NOT clear
+`detail.expanded`: the fold is reset by `sync_detail` on a key change and by nothing else,
+per `artifact-folds`, so returning to a change through `Enter` reopens it exactly as
+`sync_detail` last left it and a route move that reads no file folds nothing.
 
 **An action that does not move `route` SHALL NOT reset `detail.scroll`, and each of the three
 arms above SHALL guard on that.** `OpenDetail` SHALL reset the scroll only when
@@ -439,9 +505,9 @@ which the same guard already gives it.
 
 #### Scenario: At the detail route the content scrolls by one line at both widths
 
-- **WHEN** a `Dashboard` whose one section holds the twenty-item list, whose `route` is
-  `Route::Detail`, and whose `detail.scroll` is `0` is given a `Next` action, then a second
-  `Next`
+- **WHEN** a `Dashboard` whose selected artifact is a single section holding the twenty-item
+  list, whose `route` is `Route::Detail`, and whose `detail.scroll` is `0` is given a `Next`
+  action, then a second `Next`
 - **THEN** `detail.scroll` is `1`, then `2`, and `selected` is unchanged throughout
 - **AND** rendering after the second action at 120x20 puts `- line-02` at row 5, columns 42
   through 50, and `- line-15` at row 18
@@ -453,9 +519,21 @@ which the same guard already gives it.
   `line-15`, not `line-17`. `pane-chrome` corrects the arithmetic while it is moving the two
   row indices anyway, rather than copying a stale expectation forward.
 
+#### Scenario: At a collapsed foldable tab the same keys walk the section list
+
+- **WHEN** a `Dashboard` at `Route::Detail` whose selected artifact resolves to three spec
+  files, with `detail.expanded` empty and `detail.scroll` `0`, is given two `Next` actions
+  and drawn at 120x40 and at 60x40 after each
+- **THEN** `detail.scroll` is `1` then `2`, and the emphasised header row is the second then
+  the third, per `artifact-folds`
+- **AND** at both sizes all three header rows stay drawn and the content area does not
+  scroll, because forty rows hold three lines
+- **AND** a third `Next` leaves `detail.scroll` at `2` after `normalise_scroll`, because a
+  cursor is clamped to the last line and not to the last screenful
+
 #### Scenario: At the list route the same actions still move the selection
 
-- **WHEN** a `Dashboard` with three active changes, a non-empty `detail.sections`, `route` of
+- **WHEN** a `Dashboard` with three active changes, a non-empty section list, `route` of
   `Route::List`, and `detail.scroll` of `0` is given two `Next` actions
 - **THEN** `selected` is `2` and `detail.scroll` is still `0`
 - **AND** rendering at 120x20 and at 60x20 puts the `>` marker on the third list row in
@@ -463,11 +541,14 @@ which the same guard already gives it.
 
 #### Scenario: Scrolling stops at the top
 
-- **WHEN** a `Dashboard` at `Route::Detail` whose one section holds the twenty-item list and
-  whose `detail.scroll` is `0` is given four consecutive `Prev` actions
+- **WHEN** a `Dashboard` at `Route::Detail` whose selected artifact is a single section
+  holding the twenty-item list and whose `detail.scroll` is `0` is given four consecutive
+  `Prev` actions
 - **THEN** `detail.scroll` is `0` after each, and nothing panics
 - **AND** rendering at 120x20 and at 60x20 still puts `- line-00` on the interior's first
   row in both
+- **AND** the same four actions against a foldable tab leave `detail.scroll` at `0` and the
+  first header row emphasised
 
 #### Scenario: While filtering, `j` and `k` still type into the query
 
@@ -480,21 +561,25 @@ which the same guard already gives it.
 
 #### Scenario: Every route move resets the scroll
 
-- **WHEN** a `Dashboard` at `Route::Detail` whose one section holds the twenty-item list and
-  whose `detail.scroll` is `3` is given a `Back` action, and then an `OpenDetail` action
+- **WHEN** a `Dashboard` at `Route::Detail` whose selected artifact is a single section
+  holding the twenty-item list and whose `detail.scroll` is `3` is given a `Back` action, and
+  then an `OpenDetail` action
 - **THEN** `detail.scroll` is `0` after the `Back` and still `0` after the `OpenDetail`
 - **AND** a second `Dashboard` in the same state given a `FilterStart` action instead has
   `route` `List` and `detail.scroll` `0`, while a third at `Route::Detail` with
   `filter.active` true and `detail.scroll` `3` given a `Back` — which dismisses the filter
   layer and not the route — still has `detail.scroll` `3`
+- **AND** a fourth `Dashboard` at a foldable tab with `detail.expanded` holding `1`, given
+  each of `Back`, `OpenDetail`, and `FilterStart` in turn, has `detail.expanded` still
+  holding `1` after every one
 - **AND** rendering the first dashboard at 120x20 and at 60x20 after the `OpenDetail` puts
   `- line-00` on the interior's first row in both
 
 #### Scenario: `Enter` at the detail route moves nothing and keeps the scroll
 
-- **WHEN** a `Dashboard` at `Route::Detail` with `filter.active` false, whose `detail.sections`
-  is the twenty-item list and whose `detail.scroll` is `7`, is given an `OpenDetail` action,
-  and then a second and a third
+- **WHEN** a `Dashboard` at `Route::Detail` with `filter.active` false, whose selected
+  artifact is a single section holding the twenty-item list and whose `detail.scroll` is `7`,
+  is given an `OpenDetail` action, and then a second and a third
 - **THEN** `route` is `Route::Detail` and `detail.scroll` is `7` after each of the three
 - **AND** `selected`, `filter`, and every other field of the `Dashboard` are unchanged, so
   the action is a no-op in state and not only in the scroll field
@@ -505,9 +590,9 @@ which the same guard already gives it.
 
 #### Scenario: `Enter` from the list route still opens at the top
 
-- **WHEN** a `Dashboard` at `Route::List` with `filter.active` false, whose `detail.sections`
-  is the twenty-item list and whose `detail.scroll` is `7` — a value left behind by an
-  earlier session at the detail route — is given an `OpenDetail` action
+- **WHEN** a `Dashboard` at `Route::List` with `filter.active` false, whose selected artifact
+  is a single section holding the twenty-item list and whose `detail.scroll` is `7` — a value
+  left behind by an earlier session at the detail route — is given an `OpenDetail` action
 - **THEN** `route` is `Route::Detail` and `detail.scroll` is `0`, because the action moved
   the route
 - **AND** rendering at 120x20 and at 60x20 puts `- line-00` on the content area's first row
@@ -528,10 +613,18 @@ which the same guard already gives it.
 `Dashboard::normalise_scroll(&mut self, frame_area: Rect)` SHALL be a pure total function of
 its two arguments that recomputes the detail region from `frame_area` through
 `layout::split_frame`, `layout::split_body`, `layout::interior`, and `layout::split_detail`,
-and assigns `detail.scroll = layout::scroll_offset(lines, detail.scroll, content.height)` for
-the line count `ui::detail::content_lines` produces at that content area's width. It SHALL
-change nothing when the detail region is not drawn — the narrow list route — or when the
-content area has zero width or zero height.
+and, for the line count `ui::detail::content_lines` produces at that content area's width,
+assigns
+
+- `detail.scroll = detail.scroll.min(lines.saturating_sub(1))` when the selected artifact is
+  **foldable**, so a cursor is clamped to the last **line** and every section header stays
+  reachable however tall the pane is; and
+- `detail.scroll = layout::scroll_offset(lines, detail.scroll, content.height)` otherwise, so
+  a held `j` on a long document still stops at the last screenful.
+
+It SHALL change nothing when the detail region is not drawn — the narrow list route — or when
+the content area has zero width or zero height. It SHALL leave `detail.scroll` at `0` when
+`lines` is `0`, on both branches.
 
 `ui::driver::run_loop` SHALL call it once per iteration, with the `area` of the
 `CompletedFrame` the draw returned, so a held key cannot leave `detail.scroll` arbitrarily
@@ -543,27 +636,42 @@ which is why the normalisation lives in the loop and not in the view.
 
 - **WHEN** `run_loop` runs against a `TestBackend` of 120x20 and a scripted event source
   delivering ten Presses of `Char('j')` and then a Press of `Char('q')`, over a `Dashboard`
-  at `Route::Detail` whose selected change carries one artifact whose file reads as the
-  twenty-item list, with a reader supplying it
+  at `Route::Detail` whose selected change carries one artifact resolving to one file that
+  reads as the twenty-item list, with a reader supplying it
 - **THEN** the run ends with `dashboard.detail.scroll` equal to `6`, not `10`: twenty lines
   in a fourteen-row content area allow an offset of at most six
 - **AND** the same holds at 60x20, so the normalisation is not a property of the wide layout
 - **AND** the final buffer's content area reads `- line-06` on its first row and `- line-19`
   on its last
 
+#### Scenario: A foldable tab is clamped to its last line, not its last screenful
+
+- **WHEN** `run_loop` runs against a `TestBackend` of 120x40 with the same script over a
+  `Dashboard` at `Route::Detail` whose selected artifact resolves to three spec files, every
+  section collapsed
+- **THEN** the run ends with `detail.scroll` equal to `2` — the last of three lines — where
+  the offset rule would have given `0`, because three lines fit a thirty-four-row content
+  area
+- **AND** the third header row carries the selected style in the final buffer, so the cursor
+  is where the state says it is
+- **AND** at 60x40 the same holds, and at both sizes nothing panics
+
 #### Scenario: A resize renormalises the offset on the next frame
 
-- **WHEN** a `Dashboard` at `Route::Detail` whose `detail.scroll` is `6` over the twenty-item
-  list has `normalise_scroll` called with a 120x20 area, then with a 120x40 area, then with a
-  60x20 area
+- **WHEN** a `Dashboard` at `Route::Detail` whose selected artifact is a single section
+  holding the twenty-item list and whose `detail.scroll` is `6` has `normalise_scroll` called
+  with a 120x20 area, then with a 120x40 area, then with a 60x20 area
 - **THEN** the offset is `6` after the first, `0` after the second — a 34-row content area
   holds every line — and `6` again after the third
 - **AND** no call panics
+- **AND** a foldable dashboard whose `detail.scroll` is `2` over three collapsed sections is
+  `2` after all three, because a cursor does not move when the pane resizes
 
 #### Scenario: The narrow list route leaves the stored offset alone
 
-- **WHEN** a `Dashboard` at `Route::List` whose `detail.scroll` is `9` has `normalise_scroll`
-  called with a 60x20 area
+- **WHEN** a `Dashboard` at `Route::List` whose selected artifact is a single section holding
+  the twenty-item list and whose `detail.scroll` is `9` has `normalise_scroll` called with a
+  60x20 area
 - **THEN** `detail.scroll` is still `9`, because no detail region was drawn to normalise
   against
 - **AND** with a 120x20 area — where the wide layout draws the detail region at the list
@@ -577,12 +685,17 @@ unlike `Next` and `Prev`, which do the same thing only at `Route::Detail`. The w
 the region it is over, so the wide layout's detail region scrolls while the list route is
 current.
 
-Both SHALL change nothing else: not `selected`, not `detail.tab`, not `route`, not
-`filter`, not `changes`, not `agents`, not `agent_names`, not `launch`.
+At a foldable artifact the wheel therefore moves the **cursor**, exactly as `j` and `k` do
+there. That is the list region's own behaviour — `SelectNext`/`SelectPrev` move `selected`
+rather than a viewport — so a wheel over either region moves that region's cursor and neither
+region has a scrollbar the other lacks.
+
+Both SHALL change nothing else: not `selected`, not `detail.tab`, not `detail.expanded`, not
+`route`, not `filter`, not `changes`, not `agents`, not `agent_names`, not `launch`.
 
 The upper bound SHALL stay where `detail-scroll` already puts it — the draw-time clamp in
 `render_detail` and the per-frame `Dashboard::normalise_scroll` — not in `apply`, so a wheel
-held down cannot run the stored offset arbitrarily far ahead any more than a held `j` can.
+held down cannot run the stored position arbitrarily far ahead any more than a held `j` can.
 
 `Action::Next` at `Route::Detail` SHALL be exactly `Action::ScrollDown` and `Action::Prev`
 at `Route::Detail` exactly `Action::ScrollUp`, through one shared implementation, so a key
@@ -590,12 +703,20 @@ and a wheel over the same region can never disagree about what one line means.
 
 #### Scenario: The wheel scrolls the detail region at the list route
 
-- **WHEN** a dashboard at `Route::List` at 120x40, with a forty-line artifact selected, is
-  given `Action::ScrollDown` three times
+- **WHEN** a dashboard at `Route::List` at 120x40, with a forty-line single-section artifact
+  selected, is given `Action::ScrollDown` three times
 - **THEN** `detail.scroll` is `3` and `selected` is unchanged
 - **AND** the drawn detail region shows the content advanced by three lines while the list
   region still shows the same selected row
 - **AND** `route` is still `Route::List`
+
+#### Scenario: The wheel moves the cursor at a foldable tab
+
+- **WHEN** a dashboard at `Route::List` at 120x40 whose selected artifact resolves to three
+  spec files, every section collapsed, is given `Action::ScrollDown` twice
+- **THEN** `detail.scroll` is `2`, `detail.expanded` is still empty, and the third header row
+  carries the selected style
+- **AND** `Action::ScrollUp` twice returns the emphasis to the first header row
 
 #### Scenario: `ScrollUp` stops at the top
 
@@ -617,6 +738,7 @@ and a wheel over the same region can never disagree about what one line means.
   `Action::ScrollDown`
 - **THEN** the two resulting `Dashboard` values are equal, field for field
 - **AND** the same holds for `Action::Prev` against `Action::ScrollUp`
+- **AND** the same holds at a foldable tab, for both pairs
 
 ### Requirement: `SelectNext` and `SelectPrev` move the list selection at either route
 

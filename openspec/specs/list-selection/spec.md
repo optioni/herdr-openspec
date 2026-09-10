@@ -136,8 +136,19 @@ pub enum Target {
     Section(SectionKey),
     /// An index into `Dashboard::visible()`.
     Change(usize),
+    /// An index into `ui::detail::content_lines`' own row list.
+    DetailLine(usize),
+    /// A section header row: its content-line index and its section index.
+    DetailHeader { line: usize, section: usize },
 }
 ```
+
+`DetailLine` and `DetailHeader` are `foldable-spec-sections`' two additions, and the enum is
+reproduced here so one capability declares it rather than two declaring it differently. They
+address the **detail** region and are therefore **not** returned by `targets()`, which
+enumerates the list region's rows and nothing else; `mouse-input` states how they are
+resolved and why `apply_click`'s `targets()` membership guard is scoped to the two list
+variants.
 
 `Dashboard::targets(&self) -> Vec<Target>` SHALL return them in exactly the order
 `change-rows` emits their rows: the active section header when that section's count is
@@ -283,13 +294,34 @@ the defect present.
 
 ### Requirement: `Space` toggles the section the cursor is on or in
 
-`Action::ToggleSection` SHALL fold or unfold exactly one section: the one the cursor
-addresses when `targets()[selected]` is a `Target::Section`, and otherwise the section the
-addressed change belongs to — active for a change from `changes.active`, archived for one
-from `changes.archived`. When the target list is empty, `ToggleSection` SHALL change nothing
-at all and SHALL record no problem.
+`Action::ToggleSection` SHALL be interpreted by `Dashboard::apply` according to the current
+route, exactly as `Action::Next` and `Action::Prev` already are and for the same reason — the
+action is route-agnostic and only its effect is not:
 
-`Dashboard` SHALL carry the collapse state in a field, not derive it per frame:
+- at `Route::List` it SHALL fold or unfold exactly one **list** section, as stated below;
+- at `Route::Detail` it SHALL fold or unfold exactly one **artifact** section, as
+  `artifact-folds` states.
+
+This is **BREAKING**. Before this change `ToggleSection` folded a list section at either
+route, so `Space` at the detail route reached past the region the reader was looking at and
+moved rows in the other one — in the narrow layout, a region not drawn at all. Nothing else
+about the key changes: `action_for` still maps `Char(' ')` to `ToggleSection` outside filter
+mode and still types a space into the query inside it, and no second fold key is introduced.
+
+At `Route::List`, `ToggleSection` SHALL fold or unfold exactly one section: the one the
+cursor addresses when `targets()[selected]` is a `Target::Section`, and otherwise the section
+the addressed change belongs to — active for a change from `changes.active`, archived for one
+from `changes.archived`. When the target list is empty, it SHALL change nothing at all and
+SHALL record no problem.
+
+At `Route::Detail`, `ToggleSection` SHALL act on `detail.expanded` and SHALL NOT itself touch
+`sections`, `selected`, or `refresh.requested` — the blanket archived-tier rule below, which
+runs after **any** action and whose condition concerns the list's archived tier rather than
+any fold, is the one stated exception. When the selected artifact is not foldable —
+one section or none — it SHALL change nothing at all and SHALL record no problem, on exactly
+the terms the empty target list makes it inert at the list route.
+
+`Dashboard` SHALL carry the list's collapse state in a field, not derive it per frame:
 
 ```rust
 pub struct Sections {
@@ -316,10 +348,12 @@ replaces `changes` and SHALL NOT touch `sections`. It is per-session and SHALL N
 persisted — nothing new is written under `HERDR_PLUGIN_STATE_DIR`, which stays exactly
 `agent-names.toml`.
 
-After a toggle, `selected` SHALL address that section's **header**. Collapsing a section the
-cursor was inside would otherwise leave the cursor pointing at a change that is no longer
-shown, and clamping alone would land it somewhere unrelated; moving it to the header is both
-the predictable answer and the position from which the next `Space` reopens the section.
+After a toggle **at the list route**, `selected` SHALL address that section's **header**.
+Collapsing a section the cursor was inside would otherwise leave the cursor pointing at a
+change that is no longer shown, and clamping alone would land it somewhere unrelated; moving
+it to the header is both the predictable answer and the position from which the next `Space`
+reopens the section. `artifact-folds` states the detail route's counterpart, which moves
+`detail.scroll` to the folded section's header for the same reason.
 
 `Dashboard::apply` SHALL, after applying **any** action, set `refresh.requested` to true when
 `needs_archived_refresh()` holds — the archived section is open, `changes.archived` is empty,
@@ -331,13 +365,13 @@ carrying `Dashboard::archived_scope()`, and `refresh-worker` answers it. Step 3,
 watch-invalidate path, carries the same scope for the same reason.
 
 `apply` SHALL reach no collaborator, spawn no process, touch no filesystem, and read no clock
-while handling `ToggleSection`, exactly as it does for every other action.
+while handling `ToggleSection` at either route, exactly as it does for every other action.
 
 #### Scenario: `Space` on a header folds and unfolds that section
 
-- **WHEN** a `Dashboard` with one active change, two resolved archived changes,
-  `archived_total` 2, both sections open, and `selected` 2 — the archived header — is given a
-  `ToggleSection` action, then another
+- **WHEN** a `Dashboard` at `Route::List` with one active change, two resolved archived
+  changes, `archived_total` 2, both sections open, and `selected` 2 — the archived header —
+  is given a `ToggleSection` action, then another
 - **THEN** after the first, `sections.collapsed` holds exactly `SectionKey::Archived`,
   `visible()` holds the active change alone, and `selected` is 2, still the archived header
 - **AND** after the second, `sections.collapsed` is empty, `visible()` holds all three
@@ -347,8 +381,8 @@ while handling `ToggleSection`, exactly as it does for every other action.
 
 #### Scenario: `Space` inside a section folds it and moves the cursor to its header
 
-- **WHEN** the same dashboard with `selected` 4 — the second archived change — is given a
-  `ToggleSection` action
+- **WHEN** the same dashboard at `Route::List` with `selected` 4 — the second archived change
+  — is given a `ToggleSection` action
 - **THEN** `sections.collapsed` holds `SectionKey::Archived`, and `selected` is 2, addressing
   `Target::Section(Archived)`
 - **AND** `selected_change()` is `None`, and rendering at 120x20 and at 60x20 puts the `>`
@@ -357,10 +391,28 @@ while handling `ToggleSection`, exactly as it does for every other action.
   **active** section instead and leaves `selected` 0, so the section acted on is the one the
   cursor is in and not a fixed one
 
+#### Scenario: `Space` at the detail route leaves the list alone
+
+- **WHEN** the same dashboard, its `route` set to `Route::Detail` and its selected artifact
+  resolving to three spec files, is given a `ToggleSection` action
+- **THEN** `sections.collapsed` is unchanged, `selected` is unchanged, and
+  `refresh.requested` is unchanged
+- **AND** `detail.expanded` holds the index of the section the detail cursor was on
+- **AND** at 120x20 — the width band where both regions are drawn — the list region's rows
+  are byte-identical before and after, so the key reached only the region the route names
+
+#### Scenario: `Space` at the detail route is inert on a non-foldable artifact
+
+- **WHEN** a `Dashboard` at `Route::Detail` whose selected artifact resolves to one path is
+  given ten `ToggleSection` actions
+- **THEN** the `Dashboard` is equal, field for field, to what it was before the ten
+- **AND** none panics, and no problem is recorded anywhere
+- **AND** the same holds for an artifact resolving to no path at all
+
 #### Scenario: An empty list makes `Space` inert
 
-- **WHEN** a `Dashboard` whose `changes` is `changes::empty_set()` is given ten
-  `ToggleSection` actions
+- **WHEN** a `Dashboard` at `Route::List` whose `changes` is `changes::empty_set()` is given
+  ten `ToggleSection` actions
 - **THEN** `sections.collapsed` is unchanged after all ten, `selected` is `0`,
   `refresh.requested` is unchanged, and none panics
 - **AND** `changes`, `route`, `detail`, `filter`, `quit`, `agents`, `agent_names`, and
@@ -368,9 +420,9 @@ while handling `ToggleSection`, exactly as it does for every other action.
 
 #### Scenario: Opening an unresolved archive requests a refresh
 
-- **WHEN** a `Dashboard` whose `changes.archived` is empty, whose `archived_total` is 22,
-  whose archived section is collapsed, and whose `refresh.requested` is false has its cursor
-  put on the archived header and is given a `ToggleSection` action
+- **WHEN** a `Dashboard` at `Route::List` whose `changes.archived` is empty, whose
+  `archived_total` is 22, whose archived section is collapsed, and whose `refresh.requested`
+  is false has its cursor put on the archived header and is given a `ToggleSection` action
 - **THEN** `sections.collapsed` is empty and `refresh.requested` is true
 - **AND** `Dashboard::archived_scope()` is `ArchivedScope::Full`
 - **AND** giving the **reverse** toggle from a resolved, open archive — twenty-two entries in

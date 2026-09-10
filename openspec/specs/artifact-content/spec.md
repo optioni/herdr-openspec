@@ -77,8 +77,9 @@ receives the bytes `sync_detail` already placed in `detail.sections` and parses 
 0. Take and clear `refresh.reload`, holding the taken value as `force` for the rest of the
    call. Taking it here — rather than reading it later — is what makes one flag produce
    exactly one re-read, on every path out of the function including the empty-list one.
-1. When `visible()` is empty, clear `detail.sections` and `detail.problems`, set `detail.tab`
-   and `detail.scroll` to `0`, set `detail.loaded` to `None`, and return.
+1. When `visible()` is empty, clear `detail.sections`, `detail.problems`, and
+   `detail.expanded`, set `detail.tab` and `detail.scroll` to `0`, set `detail.loaded` to
+   `None`, and return.
 2. Clamp `detail.tab` against the selected change's `artifacts`: `0` when the list is empty,
    otherwise at most `artifacts.len() - 1`. This is the one place the `(change, tab)`
    invariant is restored, so a `/` filter edit that moves the selection to a change with
@@ -90,19 +91,28 @@ receives the bytes `sync_detail` already placed in `detail.sections` and parses 
    index. `force` is the second exit condition because the key does not change when a
    **file's content** does — an agent saving the very artifact on screen leaves the key
    identical, and without `force` the pane would keep showing the bytes it read at startup.
-4. Otherwise re-read: set `detail.sections` to the concatenation of `read(path)` over the
-   selected artifact's `paths` **in the order `changes::from_files` resolved them**,
-   inserting a `\n` between two files when the preceding one does not already end in one, so
-   two spec files cannot run together on one line. Every `Err(e)` contributes no text and
-   appends the problem `"<path>: <e>"` to `detail.problems`, which is cleared first. Set
-   `detail.scroll` to `0` **exactly when the key changed**, and set `detail.loaded` to the
-   key.
+4. Otherwise re-read: set `detail.sections` to one `ArtifactSection` per successful `read(path)`
+   over the selected artifact's `paths` **in the order `changes::from_files` resolved
+   them**, each carrying that path's `label` per `artifact-folds` and the returned text
+   **verbatim**. Every `Err(e)` contributes no section and appends the problem
+   `"<path>: <e>"` to `detail.problems`, which is cleared first. Set `detail.scroll` to `0`
+   and clear `detail.expanded` **exactly when the key changed**, and set `detail.loaded` to
+   the key.
 
-Resetting the scroll on a key change and not on a forced reload is the whole point of the
-split: a tab or change move starts at the top, while an agent's save re-renders the document
-under a reader who is halfway down it without throwing them back to line one.
-`layout::scroll_offset` and `Dashboard::normalise_scroll` still clamp the preserved offset
-against the new content's length, so a document that shrank is corrected within one frame.
+Step 4 no longer concatenates. The separating `\n` this requirement previously inserted
+between two files that would otherwise run together on one line is unnecessary once each
+file is its own section: a section's body is rendered on its own lines under its own header,
+and a file that ends without a newline can no longer collide with the next file's first
+line. A section's `text` is therefore the reader's bytes unmodified, which is also what lets
+`artifact-folds`' label rule and `ui::markdown` each see exactly what is on disk.
+
+Resetting the scroll and the fold state on a key change and not on a forced reload is the
+whole point of the split: a tab or change move starts at the top with every section
+collapsed, while an agent's save re-renders the document under a reader who is halfway down
+it — and inside a section they opened — without throwing them back to line one or folding it
+shut. `layout::scroll_offset`, `layout::viewport`, and `Dashboard::normalise_scroll` still
+clamp the preserved position against the new content's length, so a document that shrank is
+corrected within one frame.
 
 `sync_detail` SHALL be called by `ui::driver::run_loop` once per iteration, **before** the
 draw and **after** the loop's live tier has adopted any result waiting for it, so the very
@@ -120,8 +130,8 @@ fails on every path.
   `[/repo/p.md]` and `design` → `[/repo/d.md]`, with `detail.tab: 0` and `refresh.reload`
   false, is given `sync_detail` with a recording reader returning `# proposal` for any path,
   three times in a row
-- **THEN** whose one section holds `# proposal`, `detail.problems` is empty, and
-  `detail.loaded` is `Some((change dir, 0))`
+- **THEN** `detail.sections` holds one entry whose `text` is `# proposal`,
+  `detail.problems` is empty, and `detail.loaded` is `Some((change dir, 0))`
 - **AND** the reader recorded exactly **one** call, for `/repo/p.md`, so an unchanged
   selection re-reads nothing
 
@@ -130,18 +140,20 @@ fails on every path.
 - **WHEN** the same dashboard, already synced once and scrolled to `detail.scroll: 6`, has
   `refresh.reload` set and is synced again with a reader now returning `# proposal (edited)`
 - **THEN** the reader recorded a **second** call for `/repo/p.md`
-- **AND** whose one section holds `# proposal (edited)`
-- **AND** `detail.scroll` is still `6`, because the key did not change
+- **AND** `detail.sections` holds one entry whose `text` is `# proposal (edited)`
+- **AND** `detail.scroll` is still `6` and `detail.expanded` is unchanged, because the key
+  did not change
 - **AND** `refresh.reload` is false afterwards, and a third sync with the flag still clear
   records no further call
 
 #### Scenario: A tab move under a forced reload still resets the scroll
 
-- **WHEN** a `Dashboard` scrolled to `6` has both `detail.tab` moved from `0` to `1` and
-  `refresh.reload` set, and is then synced
-- **THEN** the reader was called with `/repo/d.md` and `detail.scroll` is `0`
+- **WHEN** a `Dashboard` scrolled to `6`, with `detail.expanded` holding `1`, has both
+  `detail.tab` moved from `0` to `1` and `refresh.reload` set, and is then synced
+- **THEN** the reader was called with `/repo/d.md`, `detail.scroll` is `0`, and
+  `detail.expanded` is empty
 - **AND** the reset is attributable to the key change rather than to the flag, because the
-  previous scenario proves a forced reload alone preserves the offset
+  previous scenario proves a forced reload alone preserves both
 
 #### Scenario: Switching the tab re-reads, and so does switching the change
 
@@ -149,8 +161,8 @@ fails on every path.
   `selected` is moved to a second change and it is synced a third time
 - **THEN** the reader recorded three calls, for `/repo/p.md`, `/repo/d.md`, and the second
   change's first artifact path, in that order
-- **AND** `detail.sections` holds the second change's text at the end, and `detail.scroll` is
-  `0` after each re-read
+- **AND** `detail.sections` holds the second change's text at the end, and `detail.scroll`
+  is `0` and `detail.expanded` empty after each re-read
 
 #### Scenario: Two changes with the same name are distinguished by directory
 
@@ -160,26 +172,32 @@ fails on every path.
   a distinct path, is synced with `selected: 0`, then `selected` is set to `1` and it is
   synced again
 - **THEN** the reader recorded two calls, one per directory
-- **AND** `detail.sections` holds the archived change's text after the second sync, so keying
-  on the name alone would have shown the wrong artifact
+- **AND** `detail.sections` holds the archived change's text after the second sync, so
+  keying on the name alone would have shown the wrong artifact
 
 #### Scenario: A multi-file artifact is concatenated in path order with a separating newline
 
-- **WHEN** a `Dashboard` whose selected artifact resolves to `[/repo/specs/a/spec.md,
-  /repo/specs/b/spec.md]` is synced with a reader returning `# a` for the first (no trailing
+- **WHEN** a `Dashboard` whose selected artifact resolves to `[<dir>/specs/a/spec.md,
+  <dir>/specs/b/spec.md]` is synced with a reader returning `# a` for the first (no trailing
   newline) and `# b\n` for the second
-- **THEN** the two sections hold `# a\n` and `# b\n`
-- **AND** with a reader returning `# a\n` for the first instead, they hold
-  `# a\n` and `# b\n` as well, so a file that already ends in a newline gains no second one
+- **THEN** `detail.sections` holds two entries, labelled `a` and `b` in that order, whose
+  `text` values are `# a` and `# b\n` — the reader's bytes verbatim, with no separator
+  inserted and no newline added
+- **AND** rendering at 120x20 and at 60x20 in the detail route puts `> a` on the content
+  area's first row and `> b` on its second, so the two files cannot run together on one line
+  even though the first ends without a newline
 
 #### Scenario: An unreadable file names its reason and does not lose its siblings
 
 - **WHEN** a `Dashboard` whose selected artifact resolves to two paths is synced with a
   reader that returns `Err("permission denied")` for the first and `Ok("# b\n")` for the
   second
-- **THEN** whose one section holds `# b\n`
+- **THEN** `detail.sections` holds exactly one entry, labelled for the second path, whose
+  `text` is `# b\n`
 - **AND** `detail.problems` holds exactly one entry, which contains the failing path and the
   text `permission denied`
+- **AND** the artifact is **not** foldable, because one section remains, so no header row is
+  drawn for the file that did survive
 - **AND** a second sync after a tab move and back clears the previous `problems` before
   recording again, so a transient failure does not accumulate
 - **AND** the same holds across a forced reload: a `refresh.reload` that re-reads an
@@ -190,8 +208,8 @@ fails on every path.
 
 - **WHEN** a `Dashboard` whose selected artifact has an **empty** `paths` list is synced with
   a recording reader
-- **THEN** `detail.sections` and `detail.problems` are both empty and `detail.loaded` is
-  `Some((change dir, tab))`
+- **THEN** `detail.sections`, `detail.problems`, and `detail.expanded` are all empty and
+  `detail.loaded` is `Some((change dir, tab))`
 - **AND** the reader recorded **zero** calls, so "no content yet" costs no filesystem access
 
 #### Scenario: A tab out of range for the newly selected change is clamped before the read
@@ -207,8 +225,8 @@ fails on every path.
 
 - **WHEN** a `Dashboard` holding one change is synced, and then its `filter.query` is set to
   a string matching no change and it is synced again
-- **THEN** after the second sync `detail.sections` and `detail.problems` are empty,
-  `detail.tab` and `detail.scroll` are `0`, and `detail.loaded` is `None`
+- **THEN** after the second sync `detail.sections`, `detail.problems`, and `detail.expanded`
+  are empty, `detail.tab` and `detail.scroll` are `0`, and `detail.loaded` is `None`
 - **AND** the same holds for a `Dashboard` built over `changes::empty_set()`, which is synced
   without the reader being called at all
 - **AND** a `refresh.reload` set on such a dashboard is still cleared by the sync, so the flag
@@ -227,76 +245,117 @@ fails on every path.
 ### Requirement: The content area renders the artifact, its problems, or `No content yet`
 
 `ui::detail::content_lines(detail: &Detail, change: Option<&Change>, width: u16) ->
-Vec<markdown::Line>` SHALL be the single line list both `ui::view::render` and
+Vec<ContentRow>` SHALL be the single row list both `ui::view::render` and
 `Dashboard::normalise_scroll` derive the detail content from, so the drawn slice and the
-clamp can never disagree. It SHALL return:
+clamp can never disagree, where
+
+```rust
+pub struct ContentRow {
+    pub line: crate::ui::markdown::Line,
+    pub kind: ContentKind,
+}
+
+pub enum ContentKind {
+    Problem,
+    Body,
+    SectionHeader { section: usize, selected: bool },
+}
+```
+
+The return type changes from `Vec<markdown::Line>` because a `markdown::Face` cannot express
+a section header: `Face` is seven markdown-construct flags, and a header row is not a
+markdown construct. `kind` is **plain data carrying no `ratatui` type and no
+`palette::Role`**, on exactly the terms `ui::list::RowKind` already is, so `ui::view` alone
+decides what a row looks like. `ContentRow` and `ContentKind` are derived view data rather
+than state types and SHALL NOT join the `NODEFAULT-UI` type list, on the same terms
+`ui::list::RowKind` does not.
+
+`kind` SHALL be `Problem` for a problem row — **both** sources of them, the selected change's
+own `Change::problems` and the tab's `detail.problems`, which the requirement below stacks in
+that order — `SectionHeader` for a header row, and `Body` for every other row, including every
+line of an open section's rendered markdown and every line of a non-foldable artifact's body.
+
+`selected` SHALL be true for exactly the one header whose section the cursor is on or in, and
+false on every header when the cursor addresses a problem row or when there are no sections.
+Because both problem sources precede every section and are counted in the same row list, a
+change that gained a problem between two frames shifts every section's row index by one, and
+`detail.scroll` — an index into that same list — follows the shift rather than the section.
+That is the same behaviour a problem row already gives the scroll offset today, and it is
+corrected within one frame by `Dashboard::normalise_scroll`.
+
+Each returned row's `line` SHALL be:
 
 - one line per entry of `detail.problems`, each the text `"! <problem>"` passed through
   `ui::list::pad_or_truncate_right` at `width`, followed by
 - the selected tab's **body**, which is:
-  - `ui::tasks::lines(&text, &change.progress, width)` — `tasks-checklist`'s
-    grammar and `tasks-progress-bar`'s leading line — when `change` is `Some` and the
-    `ArtifactRef` at `detail.tab` carries `tracks_tasks == true`, and
-  - `ui::markdown::lines(&text, width)`, unchanged, in every other case,
-    including a `None` change, a `detail.tab` past the end of the artifact list, and a
-    change carrying no artifacts at all;
+  - `ui::tasks::lines(&text, &change.progress, width)` — `tasks-checklist`'s grammar and
+    `tasks-progress-bar`'s leading line — when `change` is `Some` and the `ArtifactRef` at
+    `detail.tab` carries `tracks_tasks == true`, over the concatenation of every section's
+    `text` in order, and
+  - otherwise, when the artifact is **foldable** (more than one section), `artifact-folds`'
+    header rows with each open section's `ui::markdown::lines(&section.text, width)` beneath
+    its own, and
+  - `ui::markdown::lines(&text, width)` in every other case — a single section, no section
+    at all, a `None` change, a `detail.tab` past the end of the artifact list, and a change
+    carrying no artifacts at all;
 - and, when `detail.problems` is empty **and** `detail.sections` is empty, exactly one line
   reading `No content yet` — the state `SPEC.md`'s degraded-states table names for a missing
   artifact file — **passed through `ui::list::pad_or_truncate_right` at `width`**, on
-  exactly the terms every problem row, task item, heading, and progress-bar line already is.
+  exactly the terms every problem row, task item, heading, section header, and progress-bar
+  line already is.
 
-That last clause is the repair, not a restatement. `No content yet` was pushed as a bare
-`String` while every neighbouring line went through the padding, and this requirement's own
-promise — that no returned line exceeds `width` — was therefore false at every `width` below
-14: at a 15-column narrow **frame** in the detail route, whose content area is 13 columns,
-the rendered row read `│No content yet` and ate the region's right border, as the region
-still had one. The literal is now
-truncated with the same `…` rule as everything else, so at `width` 13 it reads
-`No content y…`, at 12 `No content …`, at 11 `No content…`, and at 0 it is the empty string.
-Every `width` in this paragraph is the **content area's**, which at the narrow layout is the
-frame's less the region's two **gutter** columns — the same arithmetic the two border columns
-gave before `pane-chrome`, so every truncation point below is unchanged; the scenario below
-gives frame widths and says so.
+The tracked-tasks body is deliberately **not** foldable, at any section count. The tasks
+artifact's `generates` is a literal path in every schema this repository ships, so a
+multi-section tasks tab is unreachable in practice; were a schema to declare a glob there,
+`tasks-checklist`'s progress bar counts the change's whole `progress` and would disagree
+with a per-section fold. Concatenating in path order preserves exactly today's behaviour for
+that one tab.
+
+That `No content yet` clause is the repair, not a restatement. `No content yet` was pushed as
+a bare `String` while every neighbouring line went through the padding, and this
+requirement's own promise — that no returned line exceeds `width` — was therefore false at
+every `width` below 14: at a 15-column narrow **frame** in the detail route, whose content
+area is 13 columns, the rendered row read `│No content yet` and ate the region's right
+border, as the region still had one. The literal is now truncated with the same `…` rule as
+everything else, so at `width` 13 it reads `No content y…`, at 12 `No content …`, at 11
+`No content…`, and at 0 it is the empty string. Every `width` in this paragraph is the
+**content area's**, which at the narrow layout is the frame's less the region's two **gutter**
+columns — the same arithmetic the two border columns gave before `pane-chrome`, so every
+truncation point below is unchanged; the scenario below gives frame widths and says so.
 The line SHALL still be a single `Segment` carrying `Face::plain()`.
 
 The `change` argument is the **only** reason the tracked-tasks decision is made once rather
 than at each of the two call sites; both callers SHALL pass `Dashboard::selected_change()`
 and SHALL NOT decide the grammar themselves.
 
-Both bodies SHALL return nothing for no sections at all, so the `No content yet` rule
-above is unaffected by which body was selected: an artifact file that does not exist reads
-`No content yet` whether or not it is the tracked-tasks artifact, and never reads
-`tasks-checklist`'s `No tasks yet`.
+Both non-foldable bodies SHALL return nothing for an empty section list, so the
+`No content yet` rule above is unaffected by which body was selected: an artifact file that
+does not exist reads `No content yet` whether or not it is the tracked-tasks artifact, and
+never reads `tasks-checklist`'s `No tasks yet`.
 
-When `detail.problems` is non-empty and `detail.sections` is empty, the problems alone SHALL be
-returned and `No content yet` SHALL NOT appear: the reason is known, and reporting both would
-say two contradictory things about the same tab.
+When `detail.problems` is non-empty and `detail.sections` is empty, the problems alone SHALL
+be returned and `No content yet` SHALL NOT appear: the reason is known, and reporting both
+would say two contradictory things about the same tab.
 
-Every line SHALL carry plain faces except those `markdown::lines` and `ui::tasks::lines`
-produce; `content_lines` SHALL name no `ratatui` type, on the same terms `ui::markdown`,
-`ui::list`, and `ui::tasks` do not.
+Every row's `line` SHALL carry plain faces except those `markdown::lines` and
+`ui::tasks::lines` produce; a section header's emphasis is carried by its `kind`, never by a
+`Face`. `content_lines` SHALL name no `ratatui` type and no `palette::Role`, on the same
+terms `ui::markdown`, `ui::list`, and `ui::tasks` do not.
 
-**Every line `content_lines` returns SHALL measure at most `width` display columns**, as
+**Every `line` `content_lines` returns SHALL measure at most `width` display columns**, as
 `responsive-layout` defines them, at **every** `width` — not only at the two mandated
 interiors. A line that is exactly `width` columns is permitted; one column over is not. This
 is stated as a total property rather than as two width cases because the two mandated widths
 are both at or above 14 and could not see the `No content yet` overflow at all.
 
 `ui::view::render` SHALL draw the slice of `content_lines` that starts at
-`layout::scroll_offset(lines.len(), detail.scroll, content.height)` and runs for at most
-`content.height` lines, into the content area `layout::split_detail` returns, starting at its
-first row and first column, never writing past the interior's last column.
-
-The per-segment draw loop SHALL advance its cursor by the **columns `set_string` consumed**,
-`layout::columns(&segment.text)`, and not by the segment's `char` count. Under a `char`
-count the cursor under-counted for any wide character, so the `x >= last_col` guard that
-stops the row never fired and the segments after it were written past the region — into the
-neighbouring region's border and beyond — because `Buffer::set_string` clips at the
-**buffer's** right edge, never at the region's. The loop SHALL additionally clamp each
-segment to the columns remaining, drawing `layout::truncate_columns(&segment.text, last_col
-- x)` rather than the whole segment, so a single over-wide segment cannot escape the region
-even at the moment the guard is about to fire. The guard SHALL remain, unchanged, as the
-loop's exit condition.
+`layout::viewport(rows.len(), detail.scroll, content.height)` when the selected artifact is
+foldable and at `layout::scroll_offset(rows.len(), detail.scroll, content.height)`
+otherwise, and runs for at most `content.height` rows, into the content area
+`layout::split_detail` returns, starting at its first row and first column, never writing
+past the interior's last column. The two offsets are `detail-scroll`'s, which states why a
+foldable tab follows a cursor and a non-foldable one clamps an offset. `view-palette` states
+how a row's `kind` becomes the `Style` its cells carry.
 
 #### Scenario: A missing artifact still shows its tab and reads `No content yet`
 
@@ -317,7 +376,7 @@ loop's exit condition.
 The scenario's name is kept verbatim because a delta's scenario headers are its merge key;
 what the literal must not eat is now the region's right gutter column.
 
-- **WHEN** the same empty-source `Dashboard` at `Route::Detail` is rendered at 15x20, at
+- **WHEN** the same section-less `Dashboard` at `Route::Detail` is rendered at 15x20, at
   14x20, at 13x20, at 2x20, and at 1x20
 - **THEN** at 15x20 — a frame of 15, so a content area of 13 — the content area's first row
   reads `No content y…` and the frame's right gutter column is a space, not the letter `t`:
@@ -335,18 +394,19 @@ what the literal must not eat is now the region's right gutter column.
 #### Scenario: A read failure is named above the content at both widths
 
 - **WHEN** a `Dashboard` whose `detail.problems` is `["/repo/specs/a/spec.md: permission
-  denied"]` and whose one section holds `# b\n` is rendered at 120x20 and at 60x20 at
-  `Route::Detail`
+  denied"]` and whose `detail.sections` is a single section holding `# b\n` is rendered at
+  120x20 and at 60x20 at `Route::Detail`
 - **THEN** in each buffer the content area's first row begins `! /repo/specs/a/spec.md:` and
   its second row begins `# b`
 - **AND** `No content yet` appears in neither buffer
 - **AND** each problem row is exactly the interior width — 78 and 58 — so it neither
   overwrites a gutter nor leaves a partial cell
+- **AND** no header row is drawn, because one surviving section is not foldable
 
 #### Scenario: The rendered markdown fills the content area, not the whole interior
 
 - **WHEN** a `Dashboard` at `Route::Detail` whose selected change carries one artifact,
-  **not** marked `tracks_tasks`, and whose one section holds twenty lines reading
+  **not** marked `tracks_tasks`, resolving to a single section holding twenty lines reading
   `- line-00` through `- line-19` is rendered at 120x20 and at 60x20
 - **THEN** in each buffer the header row and the tab row are unchanged and the content
   area's first row holds `- line-00`
@@ -369,8 +429,8 @@ what the literal must not eat is now the region's right gutter column.
 #### Scenario: A wide-character document stays inside the detail region
 
 - **WHEN** a `Dashboard` at `Route::Detail` whose selected change carries one unmarked
-  artifact, and whose one section holds a document holding a paragraph of forty repetitions
-  of `日本語`, a `# 🎉 見出し` heading, and a bullet holding a family emoji joined by
+  artifact, resolving to a single section holding a paragraph of forty repetitions of
+  `日本語`, a `# 🎉 見出し` heading, and a bullet holding a family emoji joined by
   zero-width joiners, is rendered at 120x20 and at 60x20
 - **THEN** in the 120-column buffer every cell of columns 39 and 41 is a space and every cell
   of column 40 is the divider `│`, unchanged from the same render with an ASCII document —
@@ -378,15 +438,18 @@ what the literal must not eat is now the region's right gutter column.
 - **AND** in the 60-column buffer every cell of column 0 and column 59 is a space
 - **AND** in both buffers every drawn content row's own `layout::columns` is at most the
   content area's width, and no cell outside the content area was written
+- **AND** the same holds for a **foldable** artifact of three sections whose labels are CJK,
+  with one section open, so a header row is measured in columns like every other row
 
 #### Scenario: `content_lines` is total and width-parameterised
 
 - **WHEN** `content_lines` is called at width `78` and at width `58`, and with `change` set
   to `None`, to a change with no artifacts, to a change whose artifact at `detail.tab` is
   marked, and to one whose is not, over: an empty `Detail`; one with problems only; one with
-  a source only; one with both; one whose source is a 200-character paragraph; one whose
-  source is a 200-column CJK paragraph; and one whose `tab` is past the end of the artifact
-  list
+  a single section only; one with both; one whose section is a 200-character paragraph; one
+  whose section is a 200-column CJK paragraph; one whose `tab` is past the end of the
+  artifact list; one holding three sections with `expanded` empty; and one holding three
+  sections with `expanded` holding `0`, `1`, `2`, and `7`
 - **THEN** no call panics at either width for any combination
 - **AND** the wrapped paragraph produces strictly more lines at `58` than at `78`, so the
   width genuinely reaches both bodies
@@ -395,7 +458,7 @@ what the literal must not eat is now the region's right gutter column.
 #### Scenario: No `content_lines` line exceeds its width at any width
 
 - **WHEN** `content_lines` is called at **every** width from `0` through `130`, for each of
-  the same seven `Detail` values and four `change` values above, and additionally for an
+  the same nine `Detail` values and four `change` values above, and additionally for an
   empty `Detail` with a `None` change — the `No content yet` case
 - **THEN** no call panics, and at every width every returned line's `layout::columns` is at
   most that width
@@ -403,6 +466,36 @@ what the literal must not eat is now the region's right gutter column.
   which the literal is longer than the region — the range no mandated-width test can reach,
   which is why this property is stated over all widths rather than adding a narrow case to
   the mandated pair
+- **AND** the foldable cases are included at widths `0` through `13`, the range in which a
+  header row's glyph, its separating space, and its label are together longer than the region
+
+#### Scenario: A foldable tab's body is headers, and an open section's markdown beneath its own
+
+- **WHEN** a `Dashboard` whose selected artifact resolves to three spec files, with
+  `detail.expanded` holding `1`, has `content_lines` called at widths 78 and 58
+- **THEN** the first line is a header row for section `0` with the collapsed glyph, the
+  second is a header row for section `1` with the open glyph, the lines after it are
+  `ui::markdown::lines(&sections[1].text, width)` in order, and the line after those is a
+  header row for section `2` with the collapsed glyph
+- **AND** at both widths no returned line exceeds `width` display columns
+- **AND** with `detail.expanded` empty the returned list is exactly three header rows
+
+#### Scenario: A non-foldable tab is byte-identical to today
+
+- **WHEN** a `Dashboard` whose selected artifact resolves to one path holding a twenty-item
+  markdown list has `content_lines` called at widths 78 and 58
+- **THEN** every returned row's `line` equals the corresponding `ui::markdown::lines(&sections[0].text, width)`
+  entry exactly, every `kind` is `Body`, and no header row is prepended
+- **AND** rendering it at 120x20 and at 60x20 writes those same lines into the content area
+  with no cell reporting `REVERSED` and no row carrying a role
+
+#### Scenario: The tracked-tasks tab concatenates rather than folding
+
+- **WHEN** a `Dashboard` whose selected artifact carries `tracks_tasks == true` and resolves
+  to two paths reading `## 1. Setup\n- [x] a\n` and `## 2. Build\n- [ ] b\n` has
+  `content_lines` called at widths 78 and 58
+- **THEN** the returned list is `ui::tasks::lines` over `## 1. Setup\n- [x] a\n## 2. Build\n- [ ] b\n`
+- **AND** no header row appears, at either width, even though the artifact has two sections
 
 ### Requirement: The content area names the selected change's own problems above the tab's
 

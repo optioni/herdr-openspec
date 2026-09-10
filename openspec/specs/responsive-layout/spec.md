@@ -116,7 +116,9 @@ The detail interior is blank on a frame **exactly when `Dashboard::visible()` is
 repository, no changes, or a `/` filter matching none — and its heading row is blank on
 exactly the same condition. That is the whole of the blank case: with a change selected, the
 region always carries a heading, a tab bar, a rule, and at least one content line, because
-`ui::detail::content_lines` returns `No content yet` rather than nothing.
+`ui::detail::content_lines` returns `No content yet` rather than nothing — one section header
+row and its body, or a single section's body alone, whichever the selected artifact resolves
+to.
 
 When the interior **is** blank, every cell of it is a space whose `Style` equals
 `ratatui::buffer::Cell::default().style()`. The comparison is against `Cell::default().style()`
@@ -183,8 +185,8 @@ What a row must not overwrite is now a gutter column and the divider between the
 
 - **WHEN** a `Dashboard` holding thirty active changes with names long enough to be
   truncated, whose selected change carries twelve artifacts with 40-character ids, and whose
-  whose one section holds thirty lines each 200 characters long, is rendered at 60x20 and at
-  120x20
+  selected artifact resolves to a **single** section of thirty lines each 200 characters
+  long, is rendered at 60x20 and at 120x20
 - **THEN** in the 60-column buffer every cell of column 0 and column 59 in rows 0 through 18
   is a space
 - **AND** in the 120-column buffer every cell of columns 0, 39, and 41 in rows 0 through 18
@@ -198,6 +200,10 @@ What a row must not overwrite is now a gutter column and the divider between the
 - **AND** the same holds at `Route::Detail` at 60x20, where the detail region is the only one
   drawn, no `│` appears at all, and column 59 is a space because the narrow region takes
   `Gutters::Both`
+- **AND** the same dashboard whose selected artifact resolves to **three** files instead of
+  one, so its content area opens as three section header rows, satisfies every assertion
+  above unchanged: a header row is truncated by the same rule a markdown line is, so it
+  reaches no gutter, no divider column, and no cell past the frame's last column
 
 ### Requirement: The detail region's two mandated interior widths are 78 and 58
 
@@ -400,14 +406,15 @@ no filesystem, process, environment, network, or standard-I/O API — and total:
 `Rect`, every `Route`, and every `(column, row)` pair including `(0, 0)` and
 `(u16::MAX, u16::MAX)` returns a `Zone` and none panics.
 
-`Zone` SHALL have exactly five variants:
+`Zone` SHALL have exactly six variants:
 
 | Variant | Meaning |
 |---|---|
 | `ListRow { interior: Rect, row: u16 }` | A row of the list region's interior. `interior` is that interior's own rectangle and `row` is the offset of the addressed row below its first interior row |
 | `List` | The list region, but not one of its interior rows — its gutters, its heading row, or its padding row |
 | `DetailTab { bar: Rect, column: u16 }` | The detail region's tab-bar row. `bar` is that row's own rectangle and `column` is the offset of the addressed column right of its first column |
-| `Detail` | The detail region, anywhere but the tab-bar row: its gutter, its heading row, its padding row, the rule below the tab bar, the content padding row, or its content area — and the divider column beside it |
+| `DetailRow { content: Rect, row: u16 }` | A row of the detail region's **content area** — the rectangle `split_detail` returns third, below the tab-bar row, the rule, and the content padding row. `content` is that area's own rectangle and `row` is the offset of the addressed row below its first |
+| `Detail` | The detail region, anywhere but the tab-bar row and the content area: its gutter, its heading row, its padding row, the rule below the tab bar, or the content padding row — and the divider column beside it |
 | `Outside` | The frame's footer row, or a point outside the frame entirely |
 
 `Outside` no longer covers a frame header row, because there is no longer one. Every row of
@@ -421,10 +428,24 @@ giving it to the detail makes a near-miss do something rather than nothing. The 
 arbitrary in the sense that `List` would also be defensible; it is written down here so it is
 one answer rather than an accident.
 
-`ListRow` and `DetailTab` SHALL carry the rectangle the zone was derived from rather than
-only an offset, so the caller that resolves the offset to a row or a tab uses the very
-geometry the hit test used. Recomputing the interior at the call site would be a second
-derivation of the same rectangle, and the two could drift.
+`DetailRow` is `foldable-spec-sections`' addition, and `Detail` narrows by exactly the
+content area to make room for it. `artifact-folds` gives a multi-file artifact's content
+clickable section header rows, and `mouse-input` resolves a press there to the row it landed
+on; without a variant carrying the content area's own rectangle, `mouse_action` would have to
+recompute `split_detail` at the call site, which is the second derivation `ListRow` and
+`DetailTab` already exist to avoid.
+
+`ListRow`, `DetailTab`, and `DetailRow` SHALL each carry the rectangle the zone was derived
+from rather than only an offset, so the caller that resolves the offset to a row, a tab, or a
+section uses the very geometry the hit test used. Recomputing the interior at the call site
+would be a second derivation of the same rectangle, and the two could drift.
+
+Resolving a `DetailRow` to a section, and deciding whether a press on it means anything at
+all, SHALL NOT be `zone`'s work: `zone` answers where the pointer is, and
+`ui::detail::section_at` answers what is drawn there. A content area of zero height
+contributes no `DetailRow` at any point, and a row past the content area's last row is
+`Outside` or `Detail` by the same containment test every other variant uses — never a
+`DetailRow` with an out-of-range offset.
 
 `zone` SHALL respect the route below the breakpoint exactly as `split_body` does: at
 `LayoutMode::Narrow` only the routed region exists, so every point in the body resolves to
@@ -441,24 +462,31 @@ integers, which is what keeps it in the pure view set and testable with no event
   list region's padding row, the list region's left gutter, the list interior's first row,
   the list interior's last row, the divider column 40, the detail region's heading row, the
   detail interior's tab-bar row, the rule row below it, the content padding row, the detail
-  interior's first content row, and column 200
+  interior's first content row, the detail interior's last content row, and column 200
 - **THEN** the results are `Outside`, `List`, `List`, `List`, `ListRow` with `row` 0,
   `ListRow` with `row` equal to the interior's last index, `Detail`, `Detail`, `DetailTab`
-  with `column` 0, `Detail`, `Detail`, `Detail`, and `Outside`, at both routes
+  with `column` 0, `Detail`, `Detail`, `DetailRow` with `row` 0, `DetailRow` with `row` equal
+  to the content area's last index, and `Outside`, at both routes
 - **AND** every `ListRow`'s `interior` equals
-  `interior(split_body(body, route).0.unwrap(), Gutters::Both)` and every `DetailTab`'s `bar`
-  equals `split_detail(interior(detail_area, Gutters::LeftOnly)).0`, computed independently
-  in the test
+  `interior(split_body(body, route).0.unwrap(), Gutters::Both)`, every `DetailTab`'s `bar`
+  equals `split_detail(interior(detail_area, Gutters::LeftOnly)).0`, and every `DetailRow`'s
+  `content` equals `split_detail(interior(detail_area, Gutters::LeftOnly)).2`, each computed
+  independently in the test
 - **AND** row 0 of the frame resolves to a region rather than to `Outside`, because the
   frame has no header row for it to belong to
+- **AND** the detail region's gutter, heading row, padding row, rule row, and content padding
+  row still resolve to `Detail`, so the narrowing took exactly the content area and nothing
+  else
 
 #### Scenario: Below the breakpoint only the routed region has zones
 
 - **WHEN** `zone` is called at a 60x20 frame at `Route::List` for the interior's first row,
   and then at `Route::Detail` for the same point
-- **THEN** the first is a `ListRow` and the second is a `Detail` or `DetailTab`
+- **THEN** the first is a `ListRow` and the second is a `Detail`, `DetailTab`, or `DetailRow`
 - **AND** no point anywhere in the 60-column body resolves to a list zone at `Route::Detail`,
   and none resolves to a detail zone at `Route::List`
+- **AND** at `Route::Detail` the narrow frame's first content row resolves to `DetailRow` with
+  `row` 0, so the new variant exists on both sides of the breakpoint
 
 #### Scenario: The breakpoint is exact for the hit test too
 
@@ -475,6 +503,8 @@ integers, which is what keeps it in the pure view set and testable with no event
 - **THEN** every call returns a `Zone` and none panics
 - **AND** a frame with no body resolves every point to `Outside`, since there is no region
   to be over
+- **AND** no call returns a `DetailRow` whose `content` has zero width or zero height, so a
+  detail region too short to hold a content area contributes no clickable row at all
 
 #### Scenario: The hit test agrees with what was drawn
 
@@ -484,6 +514,10 @@ integers, which is what keeps it in the pure view set and testable with no event
 - **THEN** every cell `zone` reports as `ListRow` holds a character from `list::rows`' own
   output for that row, and every cell it reports as `List` or `Detail` in a gutter column
   holds a space, and the divider column holds `│`
+- **AND** every cell `zone` reports as `DetailRow` holds a character from
+  `ui::detail::content_lines`' own output for that row, resolved through the same offset the
+  draw path used, so the new variant is checked against the drawn pixels rather than only
+  against the geometry
 - **AND** no cell of the drawn buffer is classified as belonging to a region the draw path
   did not draw
 
