@@ -80,7 +80,9 @@ through an injected `&dyn Fn(&Path) -> Result<String, String>` reader
 (`ui::read_artifact` is the one production binding, in `src/ui/mod.rs`) and
 resolved once per `(change directory, tab)` rather than on every frame;
 the content is scrollable and clamped against the content area's own
-height, below the header and tab-bar rows, so a held key cannot run it
+height, below the tab bar, a rule, and a padding row — the change header
+itself is drawn into the detail region's own heading row, above the
+interior entirely, not counted among these rows — so a held key cannot run it
 away. The tab the schema marks as tracking tasks (`ArtifactRef::tracks_tasks`,
 set by position, never by id or filename) renders `ui::tasks`' grammar
 instead of markdown: a progress bar showing the change's own `progress`
@@ -334,7 +336,9 @@ unreachable and the tests become integration tests by accident.
   seam, with a second leg proving the injection is real rather than decorative.
 - **The list region's two mandated interior widths are 38 and 58 columns** — the
   wide layout's `Length(40)` list column and the narrow layout's 60-column frame,
-  each less two border columns. Every row-grammar test in `ui::list` asserts both.
+  each less its two gutter columns (`pane-chrome` replaced the region's border
+  with a heading row, a padding row, and this same gutter, so the widths
+  themselves never moved). Every row-grammar test in `ui::list` asserts both.
 - **`pulldown_cmark` is named only in `src/ui/markdown.rs`, and `ratatui::style::Color`
   only in `src/ui/palette.rs`.** One rule, two seams: the markdown parser and the colour
   table each stay replaceable by editing one file, on the same terms `src/cli.rs` is the
@@ -354,9 +358,10 @@ unreachable and the tests become integration tests by accident.
   into `fold`'s `_ => {}` wildcards rather than degrade to literal text, and no gate can
   see a wrongly-added flag.
 - **The detail region's two mandated interior widths are 78 and 58 columns** — the
-  wide layout's `Min(0)` detail column at the mandated 120-column frame and the
-  narrow layout's 60-column frame in the detail route, each less two border
-  columns. Every test in `ui::markdown`, `ui::detail`, and `ui::tasks` asserts
+  wide layout's `Min(0)` detail column at the mandated 120-column frame, less
+  its one left gutter column only (its right edge runs flush to the frame's
+  own last column), and the narrow layout's 60-column frame in the detail
+  route, less its two gutter columns. Every test in `ui::markdown`, `ui::detail`, and `ui::tasks` asserts
   both — all three because every public function there is parameterised by
   width, which is what makes an exemption-free width check possible.
 - **Every width computation under `src/ui/` is measured in terminal display columns, never
