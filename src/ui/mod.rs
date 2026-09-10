@@ -4403,8 +4403,20 @@ esac
                     "no leading problem row names {reason:?}: {buf:?}"
                 );
             }
-            // The loop ran normally: the pane drew and no error screen replaced it.
-            assert!(buf[0].starts_with("OpenSpec"));
+            // The loop ran normally: the pane drew and no error screen replaced it — the
+            // change list and the footer are exactly what a successful render produces.
+            // `buf[0]` is no longer a fixed `OpenSpec` header row (`pane-chrome` removes
+            // it): it is now the list region's own heading, naming the repository
+            // directory, which this scratch repository's own random name makes
+            // unpredictable to assert directly.
+            assert!(
+                buf.iter().any(|row| row.contains("alpha")),
+                "the change list must still be drawn: {buf:?}"
+            );
+            assert!(
+                buf.last().is_some_and(|row| row.starts_with("q quit")),
+                "the footer must still be drawn: {buf:?}"
+            );
         }
 
         /// `terminal-lifecycle` (`mouse-input`) :: "A successful capture adds no row".
@@ -4498,7 +4510,16 @@ esac
         fn file_mode_opens_the_archive_with_no_binary_present() {
             for width in [120u16, 60u16] {
                 let scratch = ScratchDir::new();
-                let root = scratch.path();
+                // Nested under a short, fixed name rather than `scratch.path()` itself:
+                // the list heading names the repository's own final path component
+                // (`responsive-layout` -> "The list region's heading names the
+                // repository directory"), and `ScratchDir`'s own generated name is long
+                // enough that the wide layout's 38-column list interior (`Length(40)`,
+                // unaffected by the frame's own width) would drop the `file mode` badge
+                // whole rather than shorten the name — the very rule this test would
+                // then be exercising by accident instead of the archive-reveal behaviour
+                // it names.
+                let root = &scratch.path().join("demo-repo");
                 for (i, day) in (1..=4).enumerate() {
                     write_with_mode(
                         &root.join(format!(
