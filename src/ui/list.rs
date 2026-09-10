@@ -290,12 +290,15 @@ fn message_row_text(text: &str, width: u16) -> String {
 /// A section header row: `[marker][space][glyph][space][label][space]
 /// [(count)]`, where `marker` is `>` when the header carries the cursor and
 /// a space otherwise — the same column every other row's selection marker
-/// occupies — and `glyph` is `v` when the section is open and `>` when it
-/// is collapsed. The `>` glyph and the `>` selection marker collide on a
-/// selected collapsed section (`> > archived (22)`); that collision is
-/// accepted rather than avoided, since column 0 is the cursor on every row
-/// of this list and column 2 is the fold state on section rows alone (see
-/// `specs/change-rows/spec.md` and design.md -> Decision 4).
+/// occupies — and `glyph` is `▾` (U+25BE) when the section is open and `▸`
+/// (U+25B8) when it is collapsed. Both are unambiguous-width in Unicode's
+/// East Asian Width table, so `layout::columns` measures each as one column
+/// regardless of a terminal's ambiguous-width setting. Neither collides with
+/// the `>` selection marker — `pane-chrome` replaced the earlier `v`/`>`
+/// pair for exactly that reason: it made the glyph and the marker the same
+/// character two columns apart, so a selected collapsed section read
+/// `> > archived (22)` (see `specs/change-rows/spec.md` and
+/// design.md -> Decision 6).
 ///
 /// Below two columns this degenerates the same way [`active_style_row`]
 /// does: the first `width` display columns of `"{marker} "` alone, with no
@@ -314,7 +317,7 @@ fn section_row_text(
         let head = format!("{marker} ");
         return truncate_columns(&head, w.max(0) as usize).to_string();
     }
-    let glyph = if collapsed { '>' } else { 'v' };
+    let glyph = if collapsed { '▸' } else { '▾' };
     let text = format!("{marker} {glyph} {label} ({count})");
     pad_or_truncate_right(&text, width as usize)
 }
