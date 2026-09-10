@@ -1804,10 +1804,15 @@ mod tests {
             assert_eq!(d.route, Route::List);
 
             // The drawn detail region shows the content advanced by three lines
-            // while the list region still shows the same selected row.
+            // while the list region still shows the same selected row. The
+            // content area's first row is buffer row 5 (the region's heading
+            // row and its padding row sit two rows above the interior, and the
+            // tab bar, the rule, and the interior's own padding row take three
+            // more), and the interior's first column is 42, one gutter past the
+            // divider at column 40.
             let buffer = crate::testutil::render_at(120, 40, &d);
-            let content: String = (41..119)
-                .map(|x| buffer[(x, 4)].symbol().to_string())
+            let content: String = (42..120)
+                .map(|x| buffer[(x, 5)].symbol().to_string())
                 .collect();
             assert!(
                 content.starts_with("- line-03"),
@@ -1841,8 +1846,11 @@ mod tests {
 
             let area = ratatui::layout::Rect::new(0, 0, 120, 40);
             let buffer = crate::testutil::render_at(120, 40, &wheeled);
-            let first: String = (41..119)
-                .map(|x| buffer[(x, 4)].symbol().to_string())
+            // The content area's first row is buffer row 5 and its first column is
+            // 42, per the same geometry `scroll_down_scrolls_at_the_list_route`
+            // documents.
+            let first: String = (42..120)
+                .map(|x| buffer[(x, 5)].symbol().to_string())
                 .collect();
             assert!(
                 first.starts_with("- line-00"),
@@ -3946,7 +3954,7 @@ mod tests {
             let (from, len) = if buf.area.width == 60 {
                 (1, 9)
             } else {
-                (41, 9)
+                (42, 9)
             };
             crate::testutil::row_text(buf, y)
                 .chars()
@@ -3990,7 +3998,7 @@ mod tests {
             assert_eq!(buf_after_120, buf_before_120);
             let buf_after_60 = crate::testutil::render_at(60, 20, &d);
             assert_eq!(buf_after_60, buf_before_60);
-            assert_eq!(detail_marker_cols(&buf_after_60, 4), "- line-03");
+            assert_eq!(detail_marker_cols(&buf_after_60, 5), "- line-03");
         }
 
         /// `detail-scroll`: "Enter from the list route still opens at the
@@ -4008,7 +4016,7 @@ mod tests {
 
             for (width, height) in [(120u16, 20u16), (60, 20)] {
                 let buf = crate::testutil::render_at(width, height, &d);
-                assert_eq!(detail_marker_cols(&buf, 4), "- line-00", "width {width}");
+                assert_eq!(detail_marker_cols(&buf, 5), "- line-00", "width {width}");
             }
         }
 
