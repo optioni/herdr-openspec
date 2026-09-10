@@ -243,15 +243,23 @@ pub enum Zone {
 /// body resolves to that region's zones and none to the other's; at
 /// [`LayoutMode::Wide`] both exist at both routes and the route changes nothing.
 ///
-/// `pane-chrome` (group 1) leaves the divider column's own zone unresolved
-/// here — it currently falls through to [`Zone::Outside`] — because deciding
-/// it, and re-baselining every point this new geometry moves, is group 6's
-/// task (`responsive-layout` -> "A point in the frame resolves to exactly
-/// one zone": the divider SHALL resolve to `Detail`).
+/// The divider column is in neither region's `Rect`, so it is decided rather
+/// than derived from a containment test: any point whose column equals
+/// [`split_body`]'s own returned divider column, within the body's own row
+/// range, resolves to [`Zone::Detail`] (`responsive-layout` -> "A point in
+/// the frame resolves to exactly one zone": the divider SHALL resolve to
+/// `Detail`).
 pub fn zone(area: Rect, route: Route, column: u16, row: u16) -> Zone {
     let point = Position::new(column, row);
     let (body, _) = split_frame(area);
-    let (list, _divider, detail) = split_body(body, route);
+    let (list, divider, detail) = split_body(body, route);
+    if let Some(divider_x) = divider
+        && column == divider_x
+        && row >= body.y
+        && row < body.y + body.height
+    {
+        return Zone::Detail;
+    }
     if let Some(list_area) = list
         && list_area.contains(point)
     {
