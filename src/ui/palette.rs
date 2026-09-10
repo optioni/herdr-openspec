@@ -36,6 +36,13 @@ use crate::agents::AgentStatus;
 /// `AgentBadge` and `Heading` are parameterised rather than expanded into one
 /// variant per value (design.md -> Decision 1), which is what lets `Heading(255)`
 /// be answered with a value rather than a lookup miss.
+///
+/// `DetailSection` and `DetailSectionSelected` sit after `TabInactive`, where the
+/// detail region's own chrome roles end and the markdown faces begin: an
+/// artifact-section header is chrome drawn inside the content area, not a
+/// construct the parser emitted (`foldable-spec-sections` -> design.md ->
+/// Decision 11). They join no earlier group because `pane-chrome` removed
+/// `DetailHeader`, so there is no detail-chrome role left to sit beside.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Role {
     FileMode,
@@ -51,6 +58,8 @@ pub enum Role {
     AgentBadge(AgentStatus),
     TabActive,
     TabInactive,
+    DetailSection,
+    DetailSectionSelected,
     Heading(u8),
     Strong,
     Emphasis,
@@ -72,6 +81,11 @@ pub enum Role {
 /// only inside the detail region's content area), and `AgentBadge(Unknown)` with
 /// `ListSeparator` (both `DarkGray`, this palette's one "no information" grey, and
 /// an unknown status and a divider rule are both exactly that).
+///
+/// `DetailSection`'s plain `BOLD` equals several other roles' modifier set
+/// deliberately — plain-`BOLD` equality is not a distinction this table polices —
+/// while `DetailSectionSelected` is a style equal to no other role's, so the
+/// shared set stays exactly the two pairs above.
 pub fn style(role: Role) -> Style {
     match role {
         Role::FileMode => Style::default()
@@ -98,6 +112,15 @@ pub fn style(role: Role) -> Style {
             .fg(Color::Black)
             .bg(Color::Cyan),
         Role::TabInactive => Style::default().bg(Color::DarkGray),
+        // `foldable-spec-sections` -> design.md -> Decision 11: modifier-only.
+        // A section header is a fold control, and `REVERSED` is how a terminal
+        // says "this is the one the keys address" without spending a column on a
+        // marker glyph or borrowing a colour that would then mean two things.
+        // This is the table's first use of `REVERSED`.
+        Role::DetailSection => Style::default().add_modifier(Modifier::BOLD),
+        Role::DetailSectionSelected => Style::default()
+            .add_modifier(Modifier::BOLD)
+            .add_modifier(Modifier::REVERSED),
         Role::Heading(level) => Style::default()
             .add_modifier(Modifier::BOLD)
             .fg(match level {
@@ -160,8 +183,9 @@ mod tests {
     }
 
     /// Every `Role` variant, the five `AgentStatus` values, and heading levels 1
-    /// through 6 — twenty-nine rows, so no arm of `style` is asserted by a
-    /// hand-listed subset of the enum.
+    /// through 6 — thirty-one rows, so no arm of `style` is asserted by a
+    /// hand-listed subset of the enum. `foldable-spec-sections` added the last
+    /// two, `DetailSection` and `DetailSectionSelected`.
     fn table() -> Vec<Expect> {
         vec![
             row(Role::FileMode, Modifier::DIM, Some(Color::Yellow), None),
@@ -211,6 +235,13 @@ mod tests {
                 Some(Color::Cyan),
             ),
             row(Role::TabInactive, NONE, None, Some(Color::DarkGray)),
+            row(Role::DetailSection, Modifier::BOLD, None, None),
+            row(
+                Role::DetailSectionSelected,
+                Modifier::BOLD | Modifier::REVERSED,
+                None,
+                None,
+            ),
             row(Role::Heading(1), Modifier::BOLD, Some(Color::Magenta), None),
             row(Role::Heading(2), Modifier::BOLD, Some(Color::Cyan), None),
             row(Role::Heading(3), Modifier::BOLD, Some(Color::Blue), None),
@@ -251,6 +282,8 @@ mod tests {
             Role::AgentBadge(status) => format!("AgentBadge({status:?})"),
             Role::TabActive => "TabActive".to_string(),
             Role::TabInactive => "TabInactive".to_string(),
+            Role::DetailSection => "DetailSection".to_string(),
+            Role::DetailSectionSelected => "DetailSectionSelected".to_string(),
             Role::Heading(level) => format!("Heading({level})"),
             Role::Strong => "Strong".to_string(),
             Role::Emphasis => "Emphasis".to_string(),
@@ -292,7 +325,8 @@ mod tests {
         Color::White,
     ];
 
-    /// `view-palette` :: "The palette answers every role with a `Style`".
+    /// `view-palette` :: "The palette answers every role with a `Style`", including
+    /// `DetailSection` and `DetailSectionSelected`.
     #[test]
     fn the_palette_answers_every_role_with_a_style() {
         for expect in table() {
@@ -354,6 +388,24 @@ mod tests {
                 label(expect.role)
             );
         }
+
+        // `foldable-spec-sections`: and `DetailSectionSelected` is a **fourth**
+        // style equal to no other role's, so the emphasised section header is
+        // distinguishable from every other span the frame can draw. Asserted for
+        // the selected role only: `DetailSection`'s plain `BOLD` deliberately
+        // equals several other roles' (the delta's modifier table says so), and
+        // plain-`BOLD` equality is not a distinction this table polices.
+        for expect in table() {
+            if expect.role == Role::DetailSectionSelected {
+                continue;
+            }
+            assert_ne!(
+                style(Role::DetailSectionSelected),
+                style(expect.role),
+                "DetailSectionSelected must not share a style with {}",
+                label(expect.role)
+            );
+        }
     }
 
     /// `view-palette` :: "Each role's modifier set is exactly the table above".
@@ -403,6 +455,21 @@ mod tests {
                 .add_modifier
                 .contains(Modifier::DIM)
         );
+
+        // `foldable-spec-sections`: `BOLD | REVERSED`, not `BOLD` alone — the
+        // assertion that fails if the selected header is given the same modifier
+        // set as the unselected one, which is the whole distinction the cursor
+        // feedback rests on.
+        assert_eq!(
+            style(Role::DetailSectionSelected).add_modifier,
+            Modifier::BOLD | Modifier::REVERSED
+        );
+        assert_eq!(style(Role::DetailSection).add_modifier, Modifier::BOLD);
+        assert!(
+            !style(Role::DetailSection)
+                .add_modifier
+                .contains(Modifier::REVERSED)
+        );
     }
 
     /// `view-palette` :: "The coloured set is exactly the table above", and
@@ -438,6 +505,14 @@ mod tests {
         // palette's one "no information" grey, which struck text is not.
         assert_eq!(style(Role::Strikethrough).fg, None);
         assert_eq!(style(Role::Strikethrough).bg, None);
+
+        // `foldable-spec-sections`: `BOLD` and `BOLD | REVERSED` already carry the
+        // whole distinction between a fold header and the fold header the keys
+        // address, so a colour there would be decoration.
+        for role in [Role::DetailSection, Role::DetailSectionSelected] {
+            assert_eq!(style(role).fg, None, "{}: unexpected fg", label(role));
+            assert_eq!(style(role).bg, None, "{}: unexpected bg", label(role));
+        }
 
         // Every role the table leaves uncoloured reports neither, so the coloured
         // set is exactly the table rather than merely a subset of it.
