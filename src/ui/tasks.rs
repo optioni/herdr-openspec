@@ -294,7 +294,7 @@ pub fn lines(
 
     // An empty source is `artifact-content`'s "No content yet" state, not
     // this capability's "No tasks yet" — the two SHALL NOT be conflated.
-    // Both bodies return nothing for an empty `detail.source`, matching
+    // Both bodies return nothing for an empty `detail.sections`, matching
     // `ui::markdown::lines`, so `content_lines`' outer `No content yet`
     // fallback fires regardless of which body was selected.
     if source.is_empty() {

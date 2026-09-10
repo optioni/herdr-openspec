@@ -7511,7 +7511,7 @@ apply:
             // detail-interior widths.
             for width in [78, 58] {
                 let empty_detail = crate::ui::app::Detail {
-                    source: String::new(),
+                    sections: Vec::new(),
                     scroll: 0,
                     tab: 0,
                     problems: Vec::new(),

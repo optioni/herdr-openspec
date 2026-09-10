@@ -210,18 +210,22 @@ pub fn tab_at(
 /// nothing rendered before this change), then one such line per
 /// `detail.problems` entry, then the selected tab's **body**, and — only
 /// when all three are empty — exactly one line reading `No content yet`.
-/// When either problem source is non-empty and `source` is empty, the
+/// When either problem source is non-empty and `sections` is empty, the
 /// problem lines alone are returned: the reason is known, and adding `No
 /// content yet` would say two contradictory things about the same tab.
 ///
-/// The body is `ui::tasks::lines(&detail.source, &change.progress, width)`
-/// — `tasks-checklist`'s grammar and `tasks-progress-bar`'s leading line —
+/// The body is `ui::tasks::lines(&text, &change.progress, width)` —
+/// `tasks-checklist`'s grammar and `tasks-progress-bar`'s leading line —
 /// when `change` is `Some` and the `ArtifactRef` at `detail.tab` carries
-/// `tracks_tasks == true`, and `ui::markdown::lines(&detail.source, width)`
-/// in every other case, including a `None` change, a `detail.tab` past the
-/// end of the artifact list, and a change carrying no artifacts at all.
-/// The decision is made exactly here, once, so `ui::view::render` and
-/// `Dashboard::normalise_scroll` — both of which pass
+/// `tracks_tasks == true`, and `ui::markdown::lines(&text, width)` in every
+/// other case, including a `None` change, a `detail.tab` past the end of the
+/// artifact list, and a change carrying no artifacts at all — where `text`
+/// is every entry of `detail.sections` concatenated in order, with no
+/// separator inserted, per `artifact-folds`. (`artifact-folds` itself adds
+/// per-section header rows and per-section folding on top of this body; that
+/// grammar lands with the type this function returns, `ContentRow`, rather
+/// than here.) The decision is made exactly here, once, so `ui::view::render`
+/// and `Dashboard::normalise_scroll` — both of which pass
 /// `Dashboard::selected_change()` — can never disagree about which grammar
 /// the tab holds.
 pub fn content_lines(
@@ -250,6 +254,11 @@ pub fn content_lines(
         .collect();
     out.extend(detail.problems.iter().map(|p| problem_line(p, width)));
 
+    // `artifact-folds`: every section's text concatenated in order, with no
+    // separator inserted — each section already carries the reader's bytes
+    // verbatim. The header-row / per-section fold grammar this concatenation
+    // will be replaced by is a later group's work.
+    let text: String = detail.sections.iter().map(|s| s.text.as_str()).collect();
     let tracked_tasks_progress = change.and_then(|c| {
         c.artifacts
             .get(detail.tab)
@@ -257,8 +266,8 @@ pub fn content_lines(
             .map(|_| &c.progress)
     });
     let body = match tracked_tasks_progress {
-        Some(progress) => crate::ui::tasks::lines(&detail.source, progress, width),
-        None => crate::ui::markdown::lines(&detail.source, width),
+        Some(progress) => crate::ui::tasks::lines(&text, progress, width),
+        None => crate::ui::markdown::lines(&text, width),
     };
     out.extend(body);
 
@@ -279,12 +288,19 @@ mod tests {
     use crate::changes::fixture;
     use crate::tasks::Progress;
     use crate::testutil::{cell, render_at, row_text};
-    use crate::ui::app::{Dashboard, Detail, Filter, Route};
+    use crate::ui::app::{ArtifactSection, Dashboard, Detail, Filter, Route};
     use crate::ui::layout::columns;
 
     fn detail(source: &str, problems: Vec<String>) -> Detail {
         Detail {
-            source: source.to_string(),
+            sections: if source.is_empty() {
+                Vec::new()
+            } else {
+                vec![ArtifactSection {
+                    label: String::new(),
+                    text: source.to_string(),
+                }]
+            },
             scroll: 0,
             tab: 0,
             problems,
@@ -1111,13 +1127,16 @@ mod tests {
         // The exact bytes already written to each artifact file above, spelled out directly
         // rather than read back — this file names no file-reading API at all (`READSEAM`
         // and `NOIO-VIEW` both forbid it here), on exactly the terms `content_lines` itself
-        // is proven against: `detail.source` is filled by the injected reader before this
+        // is proven against: `detail.sections` is filled by the injected reader before this
         // function ever runs.
         let sources = ["# proposal\n", "# specs\n", "# design\n"];
         for width in [78, 58] {
             for (tab, source_heading) in [(0, "proposal"), (1, "specs"), (2, "design")] {
                 let d = Detail {
-                    source: sources[tab].to_string(),
+                    sections: vec![ArtifactSection {
+                        label: String::new(),
+                        text: sources[tab].to_string(),
+                    }],
                     scroll: 0,
                     tab,
                     problems: Vec::new(),
@@ -1202,7 +1221,7 @@ mod tests {
 
         for width in [78, 58] {
             let d = Detail {
-                source: String::new(),
+                sections: Vec::new(),
                 scroll: 0,
                 tab: 0,
                 problems: Vec::new(),
@@ -1371,7 +1390,7 @@ mod tests {
         for width in [78, 58] {
             for change in [change, change2] {
                 let d = Detail {
-                    source: String::new(),
+                    sections: Vec::new(),
                     scroll: 0,
                     tab: 0,
                     problems: Vec::new(),
@@ -1431,7 +1450,10 @@ mod tests {
         let source = "## 1. Setup\n\n- [x] a\n- [ ] b\n- [ ] c\n";
         for width in [78, 58] {
             let d = Detail {
-                source: source.to_string(),
+                sections: vec![ArtifactSection {
+                    label: String::new(),
+                    text: source.to_string(),
+                }],
                 scroll: 0,
                 tab: 1,
                 problems: Vec::new(),
@@ -1463,7 +1485,10 @@ mod tests {
         for width in [78, 58] {
             // tab 0 ("proposal") is not the marked position.
             let d = Detail {
-                source: source.to_string(),
+                sections: vec![ArtifactSection {
+                    label: String::new(),
+                    text: source.to_string(),
+                }],
                 scroll: 0,
                 tab: 0,
                 problems: Vec::new(),
@@ -1491,7 +1516,10 @@ mod tests {
         let source = "- [x] a\n";
         for width in [78, 58] {
             let d = Detail {
-                source: source.to_string(),
+                sections: vec![ArtifactSection {
+                    label: String::new(),
+                    text: source.to_string(),
+                }],
                 scroll: 0,
                 tab: 7,
                 problems: Vec::new(),
@@ -1577,7 +1605,7 @@ mod tests {
                         assert!(
                             columns(&line.text()) <= width as usize,
                             "width {width}, source {:?}: {:?} exceeds its width",
-                            d.source,
+                            d.sections,
                             line.text()
                         );
                     }
@@ -1930,7 +1958,7 @@ mod tests {
                         assert!(
                             columns(&line.text()) <= width as usize,
                             "width {width}, source {:?}: {:?} exceeds its width",
-                            d.source,
+                            d.sections,
                             line.text()
                         );
                     }

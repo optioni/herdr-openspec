@@ -820,7 +820,7 @@ pub(crate) mod testutil {
                     active: false,
                 },
                 detail: crate::ui::app::Detail {
-                    source: String::new(),
+                    sections: Vec::new(),
                     scroll: 0,
                     tab: 0,
                     problems: Vec::new(),

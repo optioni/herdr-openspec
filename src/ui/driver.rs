@@ -356,7 +356,7 @@ mod tests {
 
     use crate::changes::empty_set;
     use crate::testutil::{RecordingRefresher, Script, ScriptedFs, cell, press, row_text};
-    use crate::ui::app::{Dashboard, Route};
+    use crate::ui::app::{ArtifactSection, Dashboard, Route};
     use crate::ui::driver::{Live, LoopError, LoopSummary, TICK, run_loop};
     use crate::ui::view;
 
@@ -382,7 +382,7 @@ mod tests {
                 active: false,
             },
             detail: crate::ui::app::Detail {
-                source: String::new(),
+                sections: Vec::new(),
                 scroll: 0,
                 tab: 0,
                 problems: Vec::new(),
@@ -426,7 +426,7 @@ mod tests {
                 active: false,
             },
             detail: crate::ui::app::Detail {
-                source: String::new(),
+                sections: Vec::new(),
                 scroll: 0,
                 tab: 0,
                 problems: Vec::new(),
@@ -791,9 +791,9 @@ mod tests {
         // A real selected change with a real artifact PATH, not
         // `empty_set()` and not a path-free artifact: `run_loop` now
         // calls `sync_detail` before every draw, and a path-free artifact
-        // would clear `detail.source` back to empty on the very first
+        // would clear `detail.sections` back to empty on the very first
         // iteration. Tests driving this dashboard through `run_loop` pass
-        // a reader supplying `detail.source`'s own twenty-line text for
+        // a reader supplying `detail.sections`'s own twenty-line text for
         // that path, so the manually-set source and the injected reader
         // agree, exactly as `ui::mod`'s acceptance test does.
         let change = crate::changes::fixture::with_artifacts(
@@ -813,7 +813,10 @@ mod tests {
                 active: false,
             },
             detail: crate::ui::app::Detail {
-                source: (0..20).map(|i| format!("- line-{i:02}\n")).collect(),
+                sections: vec![ArtifactSection {
+                    label: String::new(),
+                    text: (0..20).map(|i| format!("- line-{i:02}\n")).collect(),
+                }],
                 scroll: 0,
                 tab: 0,
                 problems: Vec::new(),
@@ -856,8 +859,10 @@ mod tests {
             presses.push(Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))));
             let mut events = Script::new(presses);
 
-            let recorder =
-                crate::testutil::RecordingReader::always(Ok(dashboard.detail.source.clone()));
+            let recorder = crate::testutil::RecordingReader::always(Ok(dashboard.detail.sections
+                [0]
+            .text
+            .clone()));
             let read = |p: &std::path::Path| recorder.read(p);
 
             let mut fs = crate::watch::none();
@@ -948,7 +953,7 @@ mod tests {
                 active: false,
             },
             detail: crate::ui::app::Detail {
-                source: String::new(),
+                sections: Vec::new(),
                 scroll: 0,
                 tab: 1,
                 problems: Vec::new(),
@@ -1173,7 +1178,7 @@ mod tests {
             selected: base.selected,
             filter: base.filter,
             detail: crate::ui::app::Detail {
-                source: base.detail.source,
+                sections: base.detail.sections,
                 scroll: 4,
                 tab: base.detail.tab,
                 problems: base.detail.problems,
@@ -1260,7 +1265,10 @@ mod tests {
                 active: false,
             },
             detail: crate::ui::app::Detail {
-                source: (0..20).map(|i| format!("- line-{i:02}\n")).collect(),
+                sections: vec![ArtifactSection {
+                    label: String::new(),
+                    text: (0..20).map(|i| format!("- line-{i:02}\n")).collect(),
+                }],
                 scroll: 3,
                 tab: 0,
                 problems: Vec::new(),
@@ -1401,7 +1409,7 @@ mod tests {
                 active: false,
             },
             detail: crate::ui::app::Detail {
-                source: String::new(),
+                sections: Vec::new(),
                 scroll: 0,
                 tab: 0,
                 problems: Vec::new(),
@@ -3358,7 +3366,7 @@ mod tests {
                 active: false,
             },
             detail: crate::ui::app::Detail {
-                source: String::new(),
+                sections: Vec::new(),
                 scroll: 0,
                 tab: 0,
                 problems: Vec::new(),
@@ -3625,7 +3633,10 @@ mod tests {
             let mut dashboard = mouse_dashboard(6, 0);
             dashboard.route = route;
             dashboard.selected = 1;
-            dashboard.detail.source = (0..20).map(|i| format!("- line-{i:02}\n")).collect();
+            dashboard.detail.sections = vec![ArtifactSection {
+                label: String::new(),
+                text: (0..20).map(|i| format!("- line-{i:02}\n")).collect(),
+            }];
 
             let over_list = mouse_action(&dashboard, WIDE, &m(MouseEventKind::ScrollDown, 10, 10));
             let over_detail =
@@ -4359,7 +4370,7 @@ mod tests {
             let mut dashboard = mouse_dashboard(3, 0);
             // A change carrying a readable artifact, and sixty rendered lines
             // against a 34-row content area: the loop's own `sync_detail` fills
-            // `detail.source` from the reader before every draw, and
+            // `detail.sections` from the reader before every draw, and
             // `normalise_scroll` would clamp a one-line scroll straight back to
             // zero against anything shorter than the area.
             dashboard.changes = crate::changes::fixture::set(
@@ -4577,7 +4588,7 @@ mod tests {
                 active: false,
             },
             detail: crate::ui::app::Detail {
-                source: String::new(),
+                sections: Vec::new(),
                 scroll: 0,
                 tab: 0,
                 problems: Vec::new(),

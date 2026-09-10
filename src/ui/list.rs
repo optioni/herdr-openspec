@@ -813,7 +813,7 @@ mod tests {
 
     fn empty_detail() -> Detail {
         Detail {
-            source: String::new(),
+            sections: Vec::new(),
             scroll: 0,
             tab: 0,
             problems: Vec::new(),

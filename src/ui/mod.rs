@@ -476,7 +476,7 @@ pub fn load(
                     active: false,
                 },
                 detail: Detail {
-                    source: String::new(),
+                    sections: Vec::new(),
                     scroll: 0,
                     tab: 0,
                     problems: Vec::new(),
@@ -523,7 +523,7 @@ pub fn load(
                 active: false,
             },
             detail: Detail {
-                source: String::new(),
+                sections: Vec::new(),
                 scroll: 0,
                 tab: 0,
                 problems: Vec::new(),
@@ -698,7 +698,7 @@ mod tests {
 
         /// A dashboard whose one selected active change carries one
         /// artifact resolving to `/repo/p.md` — `detail-view`'s
-        /// `sync_detail` is what fills `detail.source` now, driven by the
+        /// `sync_detail` is what fills `detail.sections` now, driven by the
         /// injected reader, rather than this fixture setting it directly.
         fn dashboard() -> Dashboard {
             let change = crate::changes::fixture::with_artifacts(
@@ -718,7 +718,7 @@ mod tests {
                     active: false,
                 },
                 detail: Detail {
-                    source: String::new(),
+                    sections: Vec::new(),
                     scroll: 0,
                     tab: 0,
                     problems: Vec::new(),
@@ -867,7 +867,7 @@ mod tests {
                         active: false,
                     },
                     detail: Detail {
-                        source: String::new(),
+                        sections: Vec::new(),
                         scroll: 0,
                         tab: 0,
                         problems: Vec::new(),
@@ -1015,7 +1015,7 @@ mod tests {
                         active: false,
                     },
                     detail: Detail {
-                        source: String::new(),
+                        sections: Vec::new(),
                         scroll: 0,
                         tab: 0,
                         problems: Vec::new(),
@@ -2036,7 +2036,7 @@ apply:
                 None,
                 crate::changes::ArchivedScope::Names,
             );
-            assert_eq!(found.detail.source, "");
+            assert!(found.detail.sections.is_empty());
             assert_eq!(found.detail.scroll, 0);
             assert_eq!(found.detail.tab, 0);
             assert!(found.detail.problems.is_empty());
@@ -2071,7 +2071,7 @@ apply:
                 crate::changes::ArchivedScope::Names,
             );
             assert_eq!(not_found.repo, None);
-            assert_eq!(not_found.detail.source, "");
+            assert!(not_found.detail.sections.is_empty());
             assert_eq!(not_found.detail.scroll, 0);
             assert!(
                 !not_found.refresh.reload,
