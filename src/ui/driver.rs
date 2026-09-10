@@ -5132,6 +5132,44 @@ mod tests {
             "",
             "no body is drawn beneath a shut section"
         );
+
+        // The ratchet. Four presses is an **even** number, so the assertions
+        // above are equally satisfied by a detail-route `Space` that does
+        // nothing at all — before group 7 this test went red only because the
+        // route-blind `Space` folded the *list* section and emptied the detail,
+        // and that accident is gone. One press, through the same helper, is
+        // what keeps the scenario able to fail for the behaviour it is the
+        // outer loop for (Change Review, group 10).
+        let opened = run_three_section_loop(
+            Route::List,
+            vec![
+                press(KeyCode::Enter, KeyModifiers::NONE),
+                press(KeyCode::Char(' '), KeyModifiers::NONE),
+                press(KeyCode::Char('q'), KeyModifiers::NONE),
+            ],
+            120,
+            40,
+        );
+        let open = crate::ui::list::fold_glyph(false);
+        assert_eq!(
+            content_row(&opened, 120, 0),
+            format!("{open} alpha"),
+            "one press opens the section the cursor is on"
+        );
+        assert_eq!(
+            content_row(&opened, 120, 1),
+            "# alpha body",
+            "and its body is drawn beneath its own header"
+        );
+        assert_eq!(
+            content_row(&opened, 120, 2),
+            format!("{shut} beta"),
+            "while its siblings stay shut"
+        );
+        assert_eq!(
+            opened.reads, run.reads,
+            "and opening a section reads no file either"
+        );
     }
 
     /// `detail-scroll` :: "A foldable tab is clamped to its last line, not its

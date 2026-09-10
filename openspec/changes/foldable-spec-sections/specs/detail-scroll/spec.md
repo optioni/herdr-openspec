@@ -416,8 +416,12 @@ and a wheel over the same region can never disagree about what one line means.
 rule beneath it, and the blank padding row beneath that — with
 `ui::detail::content_lines(&dashboard.detail, dashboard.selected_change(), content.width)`,
 drawing the slice that starts at
-`layout::scroll_offset(lines.len(), dashboard.detail.scroll, content.height)` and runs for at
-most `content.height` lines, one rendered line per terminal row, starting at the content
+`layout::viewport(rows.len(), dashboard.detail.scroll, content.height)` when the selected
+artifact is **foldable** and at
+`layout::scroll_offset(rows.len(), dashboard.detail.scroll, content.height)` otherwise — the
+branch this requirement's own opening states and `artifact-content` restates, named here too
+so this sentence cannot be read as the unconditional rule it was before this change — and
+runs for at most `content.height` rows, one rendered line per terminal row, starting at the content
 area's first row and first column, drawing each segment left to right with the
 `ratatui::style::Style` its `Face` maps to and never writing past the interior's last column.
 A rendered line shorter than the content area leaves the rest of its row untouched, because
