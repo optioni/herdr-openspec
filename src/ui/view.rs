@@ -1769,8 +1769,8 @@ mod tests {
         let default_style = Cell::default().style();
 
         let buf = render_at(120, 20, &d);
-        for y in 2..=17u16 {
-            for x in 41..=118u16 {
+        for y in 2..=18u16 {
+            for x in 42..=119u16 {
                 let c = cell(&buf, x, y);
                 assert_eq!(c.symbol(), " ", "x={x} y={y}");
                 assert_eq!(c.style(), default_style, "x={x} y={y}");
@@ -1780,13 +1780,30 @@ mod tests {
 
         let buf = render_at(60, 20, &d);
         assert!(interior_cols(&buf, 2).starts_with("No changes yet"));
-        for y in 3..=17u16 {
+        for y in 3..=18u16 {
             for x in 1..=58u16 {
                 let c = cell(&buf, x, y);
                 assert_eq!(c.symbol(), " ", "x={x} y={y}");
                 assert_eq!(c.style(), default_style, "x={x} y={y}");
             }
         }
+
+        // The discriminating clause: the same dashboard with one active
+        // change added is no longer blank in the detail region at 120x20 —
+        // row 0 columns 42 onward holds that change's header — so the
+        // blankness swept above is a property of the empty visible list
+        // rather than a constant this test could not tell from a bug.
+        let with_change = dashboard_with(
+            vec![fixture::active("alpha", 1, 3)],
+            Vec::new(),
+            1,
+            Route::List,
+        );
+        let buf = render_at(120, 20, &with_change);
+        assert!(
+            cols(&row_text(&buf, 0), 42..47).starts_with("alpha"),
+            "a selected change's header must reach the detail region's heading row"
+        );
     }
 
     /// `responsive-layout` :: "The heading names the directory, not the path, at both
@@ -3157,11 +3174,31 @@ mod tests {
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
             assert!(interior_cols(&buf, 2).contains("change-12"));
-            assert!(interior_cols(&buf, 17).contains("change-27"));
+            // The last interior row, 18, is what the scenario exists to
+            // pin — the slice's own upper boundary, not a middle row.
+            assert!(interior_cols(&buf, 18).contains("change-28"));
             let y20 = 2 + (20 - 12);
             assert!(interior_cols(&buf, y20).contains("change-20"));
             assert_eq!(cell(&buf, 1, y20).symbol(), ">");
             assert!(is_bold(cell(&buf, 1, y20)));
+        }
+
+        // The same dashboard with the active section collapsed draws
+        // exactly one interior row, the header, with `selected` clamped to
+        // 0 — `ToggleSection` folds the section the cursor is on or in and
+        // then clamps `selected` against the shrunk target list.
+        let mut collapsed = d.clone();
+        collapsed.apply(Action::ToggleSection);
+        assert_eq!(collapsed.selected, 0);
+        for width in [60, 120] {
+            let buf = render_at(width, 20, &collapsed);
+            assert!(interior_cols(&buf, 2).contains("active"));
+            for y in 3..=18u16 {
+                assert!(
+                    interior_cols(&buf, y).chars().all(|c| c == ' '),
+                    "width {width} y={y}"
+                );
+            }
         }
     }
 
@@ -3222,7 +3259,14 @@ mod tests {
 
     #[test]
     fn rows_do_not_overwrite_the_borders() {
-        let names: Vec<Change> = (0..30)
+        // The scenario's selected change: twelve 40-character artifact ids,
+        // so the tab bar is exercised at its own full width, not just the
+        // list rows.
+        let ids: Vec<String> = (0..12)
+            .map(|i| format!("{}{i}", "x".repeat(40 - i.to_string().len())))
+            .collect();
+        let pairs: Vec<(&str, &[&str])> = ids.iter().map(|id| (id.as_str(), &[][..])).collect();
+        let mut names: Vec<Change> = (0..30)
             .map(|i| {
                 fixture::active(
                     &format!("a-very-long-change-name-that-will-not-fit-here-{i:02}"),
@@ -3231,7 +3275,10 @@ mod tests {
                 )
             })
             .collect();
-        let mut d = dashboard_with(names, Vec::new(), 0, Route::List);
+        names[0] = fixture::with_artifacts(names[0].clone(), &pairs);
+        // `selected` 1 addresses `names[0]` (target 0 is the active section
+        // header), so the detail region is populated rather than blank.
+        let mut d = dashboard_with(names, Vec::new(), 1, Route::List);
         // detail-scroll: the border assertion below must hold for a
         // markdown document too, not only for over-wide list rows.
         d.detail.source = (0..30).map(|_| format!("{}\n", "x".repeat(200))).collect();
@@ -3239,11 +3286,9 @@ mod tests {
         // `pane-chrome`: there is no border any more. Columns 0 and 59 are the
         // narrow layout's own gutters — spaces on every row of the body — and at
         // 120 columns 0, 39, and 41 are the wide layout's gutters and column 40
-        // is the divider `│`. No change is selected here (`selected` 0 addresses
-        // the active section header), so the detail region's own interior —
-        // including its gutter-free last column, 119 — stays blank; that claim
-        // belongs to `the_divider_has_a_blank_column_on_each_side_at_120_columns`
-        // and to `detail-header`, not to this over-wide-list-row scenario.
+        // is the divider `│`. The selected change's 78-column heading, tab bar,
+        // rule, and markdown line must respect those same gutters and the
+        // divider, never running into either.
         let buf60 = render_at(60, 20, &d);
         for y in 0..=18u16 {
             assert_eq!(cell(&buf60, 0, y).symbol(), " ", "y={y}");
@@ -3256,6 +3301,26 @@ mod tests {
             assert_eq!(cell(&buf120, 39, y).symbol(), " ", "y={y}");
             assert_eq!(cell(&buf120, 40, y).symbol(), "│", "y={y}");
             assert_eq!(cell(&buf120, 41, y).symbol(), " ", "y={y}");
+        }
+        // Column 119 does carry detail content — the wide detail region has
+        // no right gutter, so its interior's last column is the frame's own
+        // last column rather than a bleed. Row 5 is the content area's own
+        // first row, filled edge to edge by the 200-character markdown line.
+        assert_eq!(
+            cell(&buf120, 119, 5).symbol(),
+            "x",
+            "the wide detail region's gutter-free last column carries content"
+        );
+
+        // The same holds at `Route::Detail` at 60x20, where the detail
+        // region is the only one drawn: no `│` appears at all, and column
+        // 59 is a space because the narrow region takes `Gutters::Both`.
+        let mut detail_route = d.clone();
+        detail_route.route = Route::Detail;
+        let buf = render_at(60, 20, &detail_route);
+        assert!(!buffer_contains(&buf, "│"));
+        for y in 0..=18u16 {
+            assert_eq!(cell(&buf, 59, y).symbol(), " ", "y={y}");
         }
     }
 
