@@ -585,3 +585,22 @@ which is why each is a named line here rather than a note — see design.md → 
 - [x] 10.10 VERIFY: `openspec validate pane-chrome --strict`.
 - [ ] 10.11 Build and look at it: `make build`, then open the pane in a Herdr split at 60
   columns and in a dedicated tab, and compare against the prototype named in design.md.
+
+  **Deferred, not done — by the user's decision, with the reason recorded here rather than
+  ticked away.** The pane cannot show this build as the machine stands: `herdr plugin list`
+  reports `herdr-openspec` installed from `github:optioni/herdr-openspec@8f069d0a`, an ancestor
+  of this change's HEAD but **72 commits behind it**, predating every commit of `pane-chrome`.
+  Opening the pane would render the old bordered chrome and prove nothing. Seeing this build
+  requires `herdr plugin link .`, which swaps the GitHub install for this checkout in a live
+  environment shared with other sessions, and that was judged not worth doing for a visual
+  confirmation.
+
+  What this leaves unverified: nothing machine-checkable. Every geometry claim is asserted by a
+  `TestBackend` render at 60 and 120 columns, and `make gates` pins the mandated widths. What is
+  genuinely unchecked is whether the result *looks* right in a real terminal — glyph rendering
+  for `▾`/`▸`/`│`/`─` under this user's terminal and font, and the ambiguous-width exposure
+  `design.md` → Risks accepts for `│` (`U+2502`) and `─` (`U+2500`). Worth a look whenever the
+  plugin next updates from GitHub.
+
+  Also untested ground, noted for whoever does look: Herdr here is **0.9.0**, where this change's
+  `--cwd` pane-resolution behaviour was measured against 0.8.2.
