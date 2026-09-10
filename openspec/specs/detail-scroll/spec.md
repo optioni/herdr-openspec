@@ -2,12 +2,20 @@
 
 ## Purpose
 Answers where in a long artifact the reader is and which slice of it reaches the buffer: the
-`detail.scroll` offset as a user-controlled position, `j`/`k`/arrows moving it by a line at the
+`detail.scroll` position as a user-controlled index, `j`/`k`/arrows moving it by a line at the
 detail route while the same actions move the list selection at the list route, every route move
-resetting it to the top, and `layout::scroll_offset` deriving the drawn window on every frame
-from the current content area rather than from anything stored. It also fixes the drawing side —
-lines painted below the header and tab-bar rows, each segment styled by the one `Face`-to-`Style`
-mapping in `ui::view`, never past a border, never panicking at a one-row interior — and requires
+resetting it to the top, and the drawn window derived on every frame from the current content
+area rather than from anything stored. What `detail.scroll` *means* is decided by whether the
+selected artifact is foldable: at a single-section artifact it is a scroll **offset** and the
+window comes from `layout::scroll_offset`, while at a foldable one it is a line **cursor** and
+the window comes from `layout::viewport`, the helper the list region already uses — without a
+cursor a fold could not be addressed at all, since `scroll_offset` clamps to `0` whenever the
+content fits the region. The one piece of geometry the dashboard stores, `Detail::drawn_width`,
+lives here too: a keypress taken between frames has to resolve `detail.scroll` through the same
+width-dependent row list the last frame drew. It also fixes the drawing side —
+lines painted below the tab-bar row, the rule, and the padding row, each segment styled by the
+one `Face`-to-`Style` mapping in `ui::view`, never past a gutter, never panicking at a one-row
+interior — and requires
 `normalise_scroll` to clamp the stored offset against the same `content_lines` the draw used, so
 a switch between the markdown and checklist bodies cannot leave an offset valid for one applied
 to the other. The line lists themselves come from `markdown-render` and `tasks-checklist`.
@@ -84,7 +92,7 @@ The scenario's name is kept verbatim from `markdown-viewer` because a delta's sc
 headers are its merge key; its subject is the same document, drawn two rows lower.
 
 - **WHEN** a `Dashboard` at `Route::Detail`, whose selected change carries one artifact not
-  marked `tracks_tasks` and whose `detail.source` is a bullet list of the twenty items
+  marked `tracks_tasks` and whose one section holds a bullet list of the twenty items
   `line-00` through `line-19`, is rendered at 120x20 and at 60x20
 - **THEN** in the 120-column buffer row 5 columns 42 onward reads `- line-00` and row 18
   reads `- line-13`, so fourteen items are drawn into the content area — the same fourteen
@@ -97,7 +105,7 @@ headers are its merge key; its subject is the same document, drawn two rows lowe
 #### Scenario: Faces reach the buffer as styles at both widths
 
 - **WHEN** a `Dashboard` at `Route::Detail` whose selected change carries one artifact not
-  marked `tracks_tasks` and whose `detail.source` is
+  marked `tracks_tasks` and whose one section holds
   `## Heading\n\n**bold** and *italic* and `code` and [link](u) and ~~struck~~\n` is rendered
   at 120x20 and at 60x20
 - **THEN** in each buffer the cells of `## Heading` in the content area's first row report
@@ -115,7 +123,7 @@ headers are its merge key; its subject is the same document, drawn two rows lowe
 #### Scenario: A table reaches the buffer aligned and inside the region
 
 - **WHEN** a `Dashboard` at `Route::Detail` whose selected change carries one artifact not
-  marked `tracks_tasks` and whose `detail.source` is a three-column table with a header row,
+  marked `tracks_tasks` and whose one section holds a three-column table with a header row,
   a delimiter row, and three body rows — one of whose cells is long enough to wrap at 58 and
   not at 78 — is rendered at 120x20 and at 60x20
 - **THEN** in each buffer the `|` characters of the delimiter row fall at exactly the same
@@ -147,7 +155,7 @@ degraded-states row.
   `Route::Detail`
 - **THEN** every cell of the detail region's heading row, padding row and interior in each
   buffer is a space whose `Style` equals `ratatui::buffer::Cell::default().style()`
-- **AND** a third `Dashboard` with a change selected and an empty `detail.source` rendered at
+- **AND** a third `Dashboard` with a change selected and no sections at all rendered at
   the same two sizes shows `No content yet` in the content area's first row and is therefore
   **not** blank, so the two states are distinguished rather than conflated
 - **AND** a fourth `Dashboard`, identical to the third but with its artifact marked
@@ -160,7 +168,7 @@ The scenario's name is kept verbatim because a delta's scenario headers are its 
 there is no border now, and what content must not overwrite is a gutter column or the divider.
 
 - **WHEN** a `Dashboard` at `Route::Detail` whose selected change carries five artifacts with
-  40-character ids, whose name is 200 characters long, and whose `detail.source` is thirty
+  40-character ids, whose name is 200 characters long, and whose one section holds thirty
   lines each 200 characters long, is rendered at 120x20 and at 60x20
 - **THEN** in the 60-column buffer every cell of column 0 and column 59 in rows 0 through 18
   is a space
@@ -192,7 +200,7 @@ bar, the rule and the content padding row, so the **content area** first has one
 frame height of **7**. Those are the heights this scenario samples; 2 and 3 give an interior
 of zero rows and would exercise only the earliest guard.
 
-- **WHEN** a `Dashboard` with a change selected and a non-empty `detail.source` is rendered
+- **WHEN** a `Dashboard` with a change selected and a non-empty section list is rendered
   at 120x3, 120x4, 120x5, 120x6, 120x7, 60x4, 60x5, 60x6, 60x7, 1x20, and 2x20
 - **THEN** no render panics at any of them
 - **AND** at 120x3 and its narrow counterpart the interior has zero rows and nothing at all is
@@ -209,7 +217,7 @@ of zero rows and would exercise only the earliest guard.
   than a task item, and 1x20 and 2x20 — where the interior is one or zero columns wide —
   still draw nothing and still do not panic
 - **AND** every one of those renders is repeated once more with a table as the
-  `detail.source`, where 1x20 and 2x20 still draw nothing and still do not panic
+  `detail.sections`, where 1x20 and 2x20 still draw nothing and still do not panic
 
 ### Requirement: Switching to and from the tracked-tasks tab renormalises the scroll
 
@@ -304,7 +312,7 @@ and (from `live-refresh`) `Refresh`.
 #### Scenario: Startup leaves the detail empty and unscrolled
 
 - **WHEN** `ui::load` is called over a scratch repository holding one change
-- **THEN** the returned `Dashboard`'s `detail.source` is empty, `detail.problems` is empty,
+- **THEN** the returned `Dashboard`'s `detail.sections` is empty, `detail.problems` is empty,
   and `detail.scroll`, `detail.tab`, and `detail.loaded` are `0`, `0`, and `None`
 - **AND** the same holds when `ui::load` finds **no** `openspec/` directory above its
   starting path and takes its `RepoSearch::NotFound` arm, which is a second `Dashboard`
@@ -381,7 +389,7 @@ bordered arithmetic fails here rather than silently losing the padding row.
 #### Scenario: A scroll offset past the end still draws the last screenful
 
 - **WHEN** a `Dashboard` at `Route::Detail` whose selected change carries one artifact, whose
-  `detail.source` is the twenty-item list, and whose `detail.scroll` is `99`, is rendered at
+  whose one section holds the twenty-item list, and whose `detail.scroll` is `99`, is rendered at
   120x20 and at 60x20
 - **THEN** in the 120-column buffer the content area's first row reads `- line-06` and its
   last drawn row reads `- line-19`
@@ -431,7 +439,7 @@ which the same guard already gives it.
 
 #### Scenario: At the detail route the content scrolls by one line at both widths
 
-- **WHEN** a `Dashboard` whose `detail.source` is the twenty-item list, whose `route` is
+- **WHEN** a `Dashboard` whose one section holds the twenty-item list, whose `route` is
   `Route::Detail`, and whose `detail.scroll` is `0` is given a `Next` action, then a second
   `Next`
 - **THEN** `detail.scroll` is `1`, then `2`, and `selected` is unchanged throughout
@@ -447,7 +455,7 @@ which the same guard already gives it.
 
 #### Scenario: At the list route the same actions still move the selection
 
-- **WHEN** a `Dashboard` with three active changes, a non-empty `detail.source`, `route` of
+- **WHEN** a `Dashboard` with three active changes, a non-empty `detail.sections`, `route` of
   `Route::List`, and `detail.scroll` of `0` is given two `Next` actions
 - **THEN** `selected` is `2` and `detail.scroll` is still `0`
 - **AND** rendering at 120x20 and at 60x20 puts the `>` marker on the third list row in
@@ -455,7 +463,7 @@ which the same guard already gives it.
 
 #### Scenario: Scrolling stops at the top
 
-- **WHEN** a `Dashboard` at `Route::Detail` whose `detail.source` is the twenty-item list and
+- **WHEN** a `Dashboard` at `Route::Detail` whose one section holds the twenty-item list and
   whose `detail.scroll` is `0` is given four consecutive `Prev` actions
 - **THEN** `detail.scroll` is `0` after each, and nothing panics
 - **AND** rendering at 120x20 and at 60x20 still puts `- line-00` on the interior's first
@@ -472,7 +480,7 @@ which the same guard already gives it.
 
 #### Scenario: Every route move resets the scroll
 
-- **WHEN** a `Dashboard` at `Route::Detail` whose `detail.source` is the twenty-item list and
+- **WHEN** a `Dashboard` at `Route::Detail` whose one section holds the twenty-item list and
   whose `detail.scroll` is `3` is given a `Back` action, and then an `OpenDetail` action
 - **THEN** `detail.scroll` is `0` after the `Back` and still `0` after the `OpenDetail`
 - **AND** a second `Dashboard` in the same state given a `FilterStart` action instead has
@@ -484,7 +492,7 @@ which the same guard already gives it.
 
 #### Scenario: `Enter` at the detail route moves nothing and keeps the scroll
 
-- **WHEN** a `Dashboard` at `Route::Detail` with `filter.active` false, whose `detail.source`
+- **WHEN** a `Dashboard` at `Route::Detail` with `filter.active` false, whose `detail.sections`
   is the twenty-item list and whose `detail.scroll` is `7`, is given an `OpenDetail` action,
   and then a second and a third
 - **THEN** `route` is `Route::Detail` and `detail.scroll` is `7` after each of the three
@@ -497,7 +505,7 @@ which the same guard already gives it.
 
 #### Scenario: `Enter` from the list route still opens at the top
 
-- **WHEN** a `Dashboard` at `Route::List` with `filter.active` false, whose `detail.source`
+- **WHEN** a `Dashboard` at `Route::List` with `filter.active` false, whose `detail.sections`
   is the twenty-item list and whose `detail.scroll` is `7` — a value left behind by an
   earlier session at the detail route — is given an `OpenDetail` action
 - **THEN** `route` is `Route::Detail` and `detail.scroll` is `0`, because the action moved

@@ -183,7 +183,7 @@ What a row must not overwrite is now a gutter column and the divider between the
 
 - **WHEN** a `Dashboard` holding thirty active changes with names long enough to be
   truncated, whose selected change carries twelve artifacts with 40-character ids, and whose
-  `detail.source` is thirty lines each 200 characters long, is rendered at 60x20 and at
+  whose one section holds thirty lines each 200 characters long, is rendered at 60x20 and at
   120x20
 - **THEN** in the 60-column buffer every cell of column 0 and column 59 in rows 0 through 18
   is a space

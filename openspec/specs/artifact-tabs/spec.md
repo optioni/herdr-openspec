@@ -455,7 +455,7 @@ removed bottom border row gained; what the reader gets for it is separation rath
 #### Scenario: The bar, the rule, and the content never leave the interior
 
 - **WHEN** a `Dashboard` whose selected change carries twelve artifacts with 40-character
-  ids and whose `detail.source` is thirty 200-character lines is rendered at 120x20 and at
+  ids and whose one section holds thirty 200-character lines is rendered at 120x20 and at
   60x20 at `Route::Detail`
 - **THEN** in the 60-column buffer every cell of column 0 and column 59 in rows 0 through 18
   is a space

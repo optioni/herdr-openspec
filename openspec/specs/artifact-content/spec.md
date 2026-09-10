@@ -4,9 +4,12 @@
 Governs what the detail region's body actually holds: `Dashboard::sync_detail` resolves the
 selected `(change directory, tab)` pair into text by reading the artifact's files through a
 single injected reader closure — one production binding, `ui::read_artifact`, so no view file
-ever names a filesystem API — concatenating multiple paths in resolution order, caching on the
-key so an unchanged selection re-reads nothing, and re-reading when a live refresh forces it
-without throwing a mid-document reader back to line one. It also fixes what the content area
+ever names a filesystem API — producing **one section per resolved file**, in resolution order
+and with no separator inserted, caching on the key so an unchanged selection re-reads nothing,
+and re-reading when a live refresh forces it without throwing a mid-document reader back to
+line one. An artifact resolving to more than one path is **foldable**, and `artifact-folds`
+owns what that means; the row list `content_lines` returns carries a *kind* per row so
+`ui::view` alone decides what a row looks like. It also fixes what the content area
 shows: problem rows for files that failed to read, then either the markdown body or, for the
 schema's tracked-tasks artifact, the checklist body, and `No content yet` only when there is
 neither content nor a reason. Which tabs exist is `artifact-tabs`', how far the body scrolls is
@@ -45,7 +48,7 @@ composition that calls it, on the same terms `config::env_lookup` does: it is a 
 binding to the real world, and a binding nothing asserts is untested residue.
 
 The tracked-tasks tab SHALL add no second read and no second binding. `ui::tasks::lines`
-receives the bytes `sync_detail` already placed in `detail.source` and parses them in memory;
+receives the bytes `sync_detail` already placed in `detail.sections` and parses them in memory;
 `tasks::read`, the filesystem edge of the same module, SHALL be named nowhere under
 `src/ui/`.
 
@@ -74,7 +77,7 @@ receives the bytes `sync_detail` already placed in `detail.source` and parses th
 0. Take and clear `refresh.reload`, holding the taken value as `force` for the rest of the
    call. Taking it here — rather than reading it later — is what makes one flag produce
    exactly one re-read, on every path out of the function including the empty-list one.
-1. When `visible()` is empty, clear `detail.source` and `detail.problems`, set `detail.tab`
+1. When `visible()` is empty, clear `detail.sections` and `detail.problems`, set `detail.tab`
    and `detail.scroll` to `0`, set `detail.loaded` to `None`, and return.
 2. Clamp `detail.tab` against the selected change's `artifacts`: `0` when the list is empty,
    otherwise at most `artifacts.len() - 1`. This is the one place the `(change, tab)`
@@ -87,7 +90,7 @@ receives the bytes `sync_detail` already placed in `detail.source` and parses th
    index. `force` is the second exit condition because the key does not change when a
    **file's content** does — an agent saving the very artifact on screen leaves the key
    identical, and without `force` the pane would keep showing the bytes it read at startup.
-4. Otherwise re-read: set `detail.source` to the concatenation of `read(path)` over the
+4. Otherwise re-read: set `detail.sections` to the concatenation of `read(path)` over the
    selected artifact's `paths` **in the order `changes::from_files` resolved them**,
    inserting a `\n` between two files when the preceding one does not already end in one, so
    two spec files cannot run together on one line. Every `Err(e)` contributes no text and
@@ -117,7 +120,7 @@ fails on every path.
   `[/repo/p.md]` and `design` → `[/repo/d.md]`, with `detail.tab: 0` and `refresh.reload`
   false, is given `sync_detail` with a recording reader returning `# proposal` for any path,
   three times in a row
-- **THEN** `detail.source` is `# proposal`, `detail.problems` is empty, and
+- **THEN** whose one section holds `# proposal`, `detail.problems` is empty, and
   `detail.loaded` is `Some((change dir, 0))`
 - **AND** the reader recorded exactly **one** call, for `/repo/p.md`, so an unchanged
   selection re-reads nothing
@@ -127,7 +130,7 @@ fails on every path.
 - **WHEN** the same dashboard, already synced once and scrolled to `detail.scroll: 6`, has
   `refresh.reload` set and is synced again with a reader now returning `# proposal (edited)`
 - **THEN** the reader recorded a **second** call for `/repo/p.md`
-- **AND** `detail.source` is `# proposal (edited)`
+- **AND** whose one section holds `# proposal (edited)`
 - **AND** `detail.scroll` is still `6`, because the key did not change
 - **AND** `refresh.reload` is false afterwards, and a third sync with the flag still clear
   records no further call
@@ -146,7 +149,7 @@ fails on every path.
   `selected` is moved to a second change and it is synced a third time
 - **THEN** the reader recorded three calls, for `/repo/p.md`, `/repo/d.md`, and the second
   change's first artifact path, in that order
-- **AND** `detail.source` holds the second change's text at the end, and `detail.scroll` is
+- **AND** `detail.sections` holds the second change's text at the end, and `detail.scroll` is
   `0` after each re-read
 
 #### Scenario: Two changes with the same name are distinguished by directory
@@ -157,7 +160,7 @@ fails on every path.
   a distinct path, is synced with `selected: 0`, then `selected` is set to `1` and it is
   synced again
 - **THEN** the reader recorded two calls, one per directory
-- **AND** `detail.source` holds the archived change's text after the second sync, so keying
+- **AND** `detail.sections` holds the archived change's text after the second sync, so keying
   on the name alone would have shown the wrong artifact
 
 #### Scenario: A multi-file artifact is concatenated in path order with a separating newline
@@ -165,16 +168,16 @@ fails on every path.
 - **WHEN** a `Dashboard` whose selected artifact resolves to `[/repo/specs/a/spec.md,
   /repo/specs/b/spec.md]` is synced with a reader returning `# a` for the first (no trailing
   newline) and `# b\n` for the second
-- **THEN** `detail.source` is `# a\n# b\n`
-- **AND** with a reader returning `# a\n` for the first instead, `detail.source` is
-  `# a\n# b\n` as well, so a file that already ends in a newline gains no second one
+- **THEN** the two sections hold `# a\n` and `# b\n`
+- **AND** with a reader returning `# a\n` for the first instead, they hold
+  `# a\n` and `# b\n` as well, so a file that already ends in a newline gains no second one
 
 #### Scenario: An unreadable file names its reason and does not lose its siblings
 
 - **WHEN** a `Dashboard` whose selected artifact resolves to two paths is synced with a
   reader that returns `Err("permission denied")` for the first and `Ok("# b\n")` for the
   second
-- **THEN** `detail.source` is `# b\n`
+- **THEN** whose one section holds `# b\n`
 - **AND** `detail.problems` holds exactly one entry, which contains the failing path and the
   text `permission denied`
 - **AND** a second sync after a tab move and back clears the previous `problems` before
@@ -187,7 +190,7 @@ fails on every path.
 
 - **WHEN** a `Dashboard` whose selected artifact has an **empty** `paths` list is synced with
   a recording reader
-- **THEN** `detail.source` and `detail.problems` are both empty and `detail.loaded` is
+- **THEN** `detail.sections` and `detail.problems` are both empty and `detail.loaded` is
   `Some((change dir, tab))`
 - **AND** the reader recorded **zero** calls, so "no content yet" costs no filesystem access
 
@@ -204,7 +207,7 @@ fails on every path.
 
 - **WHEN** a `Dashboard` holding one change is synced, and then its `filter.query` is set to
   a string matching no change and it is synced again
-- **THEN** after the second sync `detail.source` and `detail.problems` are empty,
+- **THEN** after the second sync `detail.sections` and `detail.problems` are empty,
   `detail.tab` and `detail.scroll` are `0`, and `detail.loaded` is `None`
 - **AND** the same holds for a `Dashboard` built over `changes::empty_set()`, which is synced
   without the reader being called at all
@@ -231,13 +234,13 @@ clamp can never disagree. It SHALL return:
 - one line per entry of `detail.problems`, each the text `"! <problem>"` passed through
   `ui::list::pad_or_truncate_right` at `width`, followed by
 - the selected tab's **body**, which is:
-  - `ui::tasks::lines(&detail.source, &change.progress, width)` — `tasks-checklist`'s
+  - `ui::tasks::lines(&text, &change.progress, width)` — `tasks-checklist`'s
     grammar and `tasks-progress-bar`'s leading line — when `change` is `Some` and the
     `ArtifactRef` at `detail.tab` carries `tracks_tasks == true`, and
-  - `ui::markdown::lines(&detail.source, width)`, unchanged, in every other case,
+  - `ui::markdown::lines(&text, width)`, unchanged, in every other case,
     including a `None` change, a `detail.tab` past the end of the artifact list, and a
     change carrying no artifacts at all;
-- and, when `detail.problems` is empty **and** `detail.source` is empty, exactly one line
+- and, when `detail.problems` is empty **and** `detail.sections` is empty, exactly one line
   reading `No content yet` — the state `SPEC.md`'s degraded-states table names for a missing
   artifact file — **passed through `ui::list::pad_or_truncate_right` at `width`**, on
   exactly the terms every problem row, task item, heading, and progress-bar line already is.
@@ -260,12 +263,12 @@ The `change` argument is the **only** reason the tracked-tasks decision is made 
 than at each of the two call sites; both callers SHALL pass `Dashboard::selected_change()`
 and SHALL NOT decide the grammar themselves.
 
-Both bodies SHALL return nothing for an empty `detail.source`, so the `No content yet` rule
+Both bodies SHALL return nothing for no sections at all, so the `No content yet` rule
 above is unaffected by which body was selected: an artifact file that does not exist reads
 `No content yet` whether or not it is the tracked-tasks artifact, and never reads
 `tasks-checklist`'s `No tasks yet`.
 
-When `detail.problems` is non-empty and `detail.source` is empty, the problems alone SHALL be
+When `detail.problems` is non-empty and `detail.sections` is empty, the problems alone SHALL be
 returned and `No content yet` SHALL NOT appear: the reason is known, and reporting both would
 say two contradictory things about the same tab.
 
@@ -298,7 +301,7 @@ loop's exit condition.
 #### Scenario: A missing artifact still shows its tab and reads `No content yet`
 
 - **WHEN** a `Dashboard` whose selected change carries the five tdd artifacts, whose
-  `detail.tab` is `1`, whose `detail.source` and `detail.problems` are empty, is rendered at
+  `detail.tab` is `1`, whose `detail.sections` and `detail.problems` are empty, is rendered at
   120x20 and at 60x20 at `Route::Detail`
 - **THEN** in the 120-column buffer row 5, columns 42 onward, begins `No content yet`
 - **AND** in the 60-column buffer row 5, columns 1 onward, begins `No content yet`
@@ -332,7 +335,7 @@ what the literal must not eat is now the region's right gutter column.
 #### Scenario: A read failure is named above the content at both widths
 
 - **WHEN** a `Dashboard` whose `detail.problems` is `["/repo/specs/a/spec.md: permission
-  denied"]` and whose `detail.source` is `# b\n` is rendered at 120x20 and at 60x20 at
+  denied"]` and whose one section holds `# b\n` is rendered at 120x20 and at 60x20 at
   `Route::Detail`
 - **THEN** in each buffer the content area's first row begins `! /repo/specs/a/spec.md:` and
   its second row begins `# b`
@@ -343,7 +346,7 @@ what the literal must not eat is now the region's right gutter column.
 #### Scenario: The rendered markdown fills the content area, not the whole interior
 
 - **WHEN** a `Dashboard` at `Route::Detail` whose selected change carries one artifact,
-  **not** marked `tracks_tasks`, and whose `detail.source` is twenty lines reading
+  **not** marked `tracks_tasks`, and whose one section holds twenty lines reading
   `- line-00` through `- line-19` is rendered at 120x20 and at 60x20
 - **THEN** in each buffer the header row and the tab row are unchanged and the content
   area's first row holds `- line-00`
@@ -366,7 +369,7 @@ what the literal must not eat is now the region's right gutter column.
 #### Scenario: A wide-character document stays inside the detail region
 
 - **WHEN** a `Dashboard` at `Route::Detail` whose selected change carries one unmarked
-  artifact, and whose `detail.source` is a document holding a paragraph of forty repetitions
+  artifact, and whose one section holds a document holding a paragraph of forty repetitions
   of `日本語`, a `# 🎉 見出し` heading, and a bullet holding a family emoji joined by
   zero-width joiners, is rendered at 120x20 and at 60x20
 - **THEN** in the 120-column buffer every cell of columns 39 and 41 is a space and every cell

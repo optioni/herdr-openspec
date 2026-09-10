@@ -61,8 +61,9 @@ joined by position, archived changes staying permanently file-sourced. `herdr-op
 raw mode and the alternate screen entered and left in a fixed, mirrored
 order (restored on normal return, error return, and panic alike), a
 draw-then-wait event loop — `q`/`Ctrl-C` to quit, `j`/`k`/arrows to move the
-list selection at the list route or scroll the detail content at the detail
-route, `/` to filter (where printable keys type instead of commanding and
+list selection at the list route, or at the detail route move the detail cursor
+— which scrolls the content at a single-section artifact and walks the section
+list at a foldable one, `/` to filter (where printable keys type instead of commanding and
 only `Ctrl-C` still quits), `Enter`/`Esc` to move between the list and detail
 routes outside filter mode, and a mouse that scrolls the region under the
 pointer, selects a row, opens it on a second click, folds a section header,
@@ -70,7 +71,8 @@ and switches an artifact tab (`mouse-input`; a pointer *motion* costs no
 frame at all) — and a 100-column breakpoint deciding a one- or
 two-region body. The list region now fills with real rows under two foldable
 section headers, `active` then `archived`, each carrying a glyph, a label and
-an honest count, with `Space` toggling the section the cursor is on or in and
+an honest count, with `Space` — at the **list** route; it is route-dependent
+since `foldable-spec-sections` — toggling the section the cursor is on or in and
 archived starting collapsed — with selection, scrolling, and a `/` filter that
 forces every section open for as long as the query is non-empty
 — and the detail region now shows the selected change's own header (name,
@@ -78,12 +80,20 @@ schema, progress), an artifact tab bar built from the schema's declared
 order and switched with `1`–`9`/`[`/`]`, and that tab's content, read
 through an injected `&dyn Fn(&Path) -> Result<String, String>` reader
 (`ui::read_artifact` is the one production binding, in `src/ui/mod.rs`) and
-resolved once per `(change directory, tab)` rather than on every frame;
-the content is scrollable and clamped against the content area's own
-height, below the tab bar, a rule, and a padding row — the change header
-itself is drawn into the detail region's own heading row, above the
-interior entirely, not counted among these rows — so a held key cannot run it
-away. The tab the schema marks as tracking tasks (`ArtifactRef::tracks_tasks`,
+resolved once per `(change directory, tab)` rather than on every frame, as one
+**section per resolved file** — an artifact whose `generates` is a glob, `specs`
+being the one every shipped schema has, becomes a list of foldable per-file
+sections, all collapsed at first, each labelled by its capability directory;
+`Detail::foldable` is the crate's one site for that question and derives it from
+the section count, never storing it. At a foldable tab `detail.scroll` is a
+**line cursor** whose window comes from `layout::viewport`, so `j`/`k` walk the
+section list rather than scrolling an offset, and `Space` folds the section the
+cursor is on or in; a single-section artifact keeps `layout::scroll_offset` and
+is unchanged in every respect. Either way the content is clamped against the
+content area's own height, below the tab bar, a rule, and a padding row — the
+change header itself is drawn into the detail region's own heading row, above
+the interior entirely, not counted among these rows — so a held key cannot run
+it away. The tab the schema marks as tracking tasks (`ArtifactRef::tracks_tasks`,
 set by position, never by id or filename) renders `ui::tasks`' grammar
 instead of markdown: a progress bar showing the change's own `progress`
 followed by task groups under their headings with a `[x]`/`[ ]` glyph per

@@ -39,7 +39,7 @@ change adds no code to it.
 #### Scenario: The tasks tab shows checkboxes and its siblings show markdown
 
 - **WHEN** a `Dashboard` at `Route::Detail`, whose selected change carries the five `tdd`
-  artifacts with `tracks_tasks` set at position 3 (`tasks`) and whose `detail.source` is
+  artifacts with `tracks_tasks` set at position 3 (`tasks`) and whose one section holds
   `## 1. Setup\n\n- [x] 1.1 first\n- [ ] 1.2 second\n`, is rendered at 120x20 and at 60x20
   with `detail.tab == 3`
 - **THEN** in each buffer the content area holds a progress-bar row, a blank row,
@@ -55,7 +55,7 @@ change adds no code to it.
 
 - **WHEN** a `Dashboard` whose selected change carries two artifacts, `checklist` at
   position 0 with `tracks_tasks == true` and `tasks` at position 1 with
-  `tracks_tasks == false`, and whose `detail.source` is `- [x] done\n`, is rendered at
+  `tracks_tasks == false`, and whose one section holds `- [x] done\n`, is rendered at
   120x20 and at 60x20
 - **THEN** with `detail.tab == 0` the content area holds the checklist grammar — a
   progress-bar row and a `[x] done` row
@@ -66,7 +66,7 @@ change adds no code to it.
 #### Scenario: A schema naming no tasks artifact leaves every tab as markdown
 
 - **WHEN** a `Dashboard` whose selected change carries three artifacts, none with
-  `tracks_tasks == true`, and whose `detail.source` is `- [ ] a\n`, is rendered at 120x20
+  `tracks_tasks == true`, and whose one section holds `- [ ] a\n`, is rendered at 120x20
   and at 60x20 with `detail.tab` at each of `0`, `1`, and `2`
 - **THEN** no render shows a progress-bar row and every render shows `- [ ] a` verbatim
 - **AND** the tab bar still holds all three cells in every render, so no tab was removed
@@ -229,7 +229,7 @@ heading" above, which governs a document that holds items *somewhere*: there, th
 group is one group among several and its heading carries information about a section not yet
 written; here, there is nothing to be a section of.
 
-When `detail.source` is **empty**, `artifact-content`'s existing rule governs and
+When `detail.sections` is **empty**, `artifact-content`'s existing rule governs and
 `No content yet` SHALL be rendered instead: an artifact file that does not exist is a
 different state from one that exists and holds no tasks, and the two SHALL NOT be
 conflated. `No tasks yet` and `No content yet` SHALL never both appear for the same tab.
@@ -237,7 +237,7 @@ conflated. `No tasks yet` and `No content yet` SHALL never both appear for the s
 #### Scenario: A prose-only tasks file reads `No tasks yet`
 
 - **WHEN** a `Dashboard` at `Route::Detail` whose selected change's tracked-tasks tab is
-  selected, whose `detail.source` is `# Plan\n\nNothing checkable here.\n`, and whose
+  selected, whose one section holds `# Plan\n\nNothing checkable here.\n`, and whose
   change carries `Progress { completed: 0, total: 0 }`, is rendered at 120x20 and at 60x20
 - **THEN** in each buffer the content area's first row holds `[-]` and its third row reads
   `No tasks yet`
@@ -274,7 +274,7 @@ what the literal must not eat is now the region's right gutter column.
 - **WHEN** a `Dashboard` at `Route::Detail` whose selected change's tracked-tasks tab is
   selected, whose `progress` is `Progress { completed: 4, total: 9 }` — non-zero, because
   `change-artifacts`' `tasks.md` fallback counted a file the marked artifact's `generates`
-  did not resolve to — and whose `detail.source` and `detail.problems` are both empty, is
+  did not resolve to — and whose `detail.sections` and `detail.problems` are both empty, is
   rendered at 120x20 and at 60x20
 - **THEN** in each buffer the content area's first row reads `No content yet`
 - **AND** no progress-bar row and no `No tasks yet` row appears, even though the change's
@@ -285,7 +285,7 @@ what the literal must not eat is now the region's right gutter column.
 #### Scenario: A read failure on the tasks tab names its reason and renders no checklist
 
 - **WHEN** the same `Dashboard` has `detail.problems ==
-  ["/repo/openspec/changes/x/tasks.md: permission denied"]` and an empty `detail.source`
+  ["/repo/openspec/changes/x/tasks.md: permission denied"]` and no sections at all
   and is rendered at 120x20 and at 60x20
 - **THEN** in each buffer the content area's first row begins
   `! /repo/openspec/changes/x/tasks.md:` and is exactly the interior width — 78 and 58

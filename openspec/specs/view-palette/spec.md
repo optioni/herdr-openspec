@@ -246,7 +246,7 @@ the text is still there.
 #### Scenario: A monochrome reading of the frame is unchanged
 
 - **WHEN** a `Dashboard` carrying a repository in file mode, one problem row, three active
-  changes of which one is badged `Working`, and a selected change whose `detail.source` is
+  changes of which one is badged `Working`, and a selected change whose one section holds
   `## Heading\n\n**bold** and *italic* and `code` and [link](u)\n` is rendered at 120x20 and
   at 60x20
 - **THEN** in both buffers the modifier of every cell **outside row 2, the tab bar** is
@@ -377,7 +377,7 @@ span or a link, which is the point of colouring the heading at all.
 #### Scenario: Faces reach the buffer as coloured styles at both mandated widths
 
 - **WHEN** a `Dashboard` at `Route::Detail` whose selected change carries one artifact not
-  marked `tracks_tasks` and whose `detail.source` is
+  marked `tracks_tasks` and whose one section holds
   `# Title\n\n## Heading\n\n**bold** and *italic* and `code` and [link](u) and ~~struck~~\n`
   is rendered at 120x20 and at 60x20
 - **THEN** in each buffer the cells of `# Title` report `BOLD` set and the foreground

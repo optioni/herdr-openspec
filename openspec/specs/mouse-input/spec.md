@@ -8,9 +8,13 @@ and the rule that `ui::app::action_for` stays key-only, because a mouse event's 
 depends on geometry a key mapper never receives. The wheel names the region under the
 pointer rather than inheriting the route, which is what lets the wide layout's two regions
 scroll independently for the first time; a left click names the row it landed on, opens the
-row it is already on, toggles a section header, or switches a tab cell. It fixes what stays
-inert: every other button, every release, every drag, pointer motion, both horizontal wheel
-directions, the frame's chrome, problem and message rows, and every point outside the frame.
+row it is already on, toggles a list section header, switches a tab cell, or — in the detail
+region's **content area**, when the selected artifact is foldable — moves the detail cursor to
+the row it landed on and folds that row's section if it is a section header, through the very
+code `Space` runs at the detail route. It fixes what stays inert: every other button, every
+release, every drag, pointer motion, both horizontal wheel directions, the frame's chrome,
+problem and message rows, the content area of a **non**-foldable artifact, a content row past
+the last one drawn, and every point outside the frame.
 Modifiers are read nowhere, and the filter mode is not an argument at all — a printable key
 is ambiguous while filtering and a click is not, so both rules are structural rather than
 branches a later change can get wrong.

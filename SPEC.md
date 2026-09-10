@@ -93,7 +93,7 @@ binding, not its only one — `NOBLOCK` leg 2 covers it identically.
 | `watch` | The recursive `notify` watch, the debounce, and classifying a touched path to a per-change `Selection` |
 | `refresh` | The worker thread and the non-blocking `Refresher` seam it answers through |
 | `open` | The `open` and `open-tab` subcommands that open or focus the dashboard pane through `herdr plugin pane`; the crate's third `HerdrCli` consumer |
-| `ui` | Views (the change-row grammar, the detail region's header/tab-bar/content grammar, markdown rendering, and `ui::tasks`' checklist-and-progress-bar grammar for the tracked-tasks tab), the semantic-role colour palette (`ui::palette`, the one table from a role to a `Style` and the crate's only `ratatui::style::Color` — see Colour and style), layout, the dashboard's own state (selection, the `/` filter, the detail scroll offset, the selected artifact tab, the live tier's refresh flag and standing problems, and the injected artifact-read binding), key handling, terminal lifecycle, and the event loop |
+| `ui` | Views (the change-row grammar, the detail region's header/tab-bar/content grammar, markdown rendering, and `ui::tasks`' checklist-and-progress-bar grammar for the tracked-tasks tab), the semantic-role colour palette (`ui::palette`, the one table from a role to a `Style` and the crate's only `ratatui::style::Color` — see Colour and style), layout, the dashboard's own state (selection, the `/` filter, the detail region's per-file sections and its fold set, the detail cursor, the width of the content area last drawn — the one piece of geometry the dashboard stores, and only so a keypress taken between frames can resolve against what the last frame did, never as a source of what is drawn — the selected artifact tab, the live tier's refresh flag and standing problems, and the injected artifact-read binding), key handling, terminal lifecycle, and the event loop |
 | `cli` | The two subprocess traits and their real implementations |
 
 ## Data layer
@@ -526,7 +526,36 @@ uncoloured; and a construct the parser does not model — a footnote, a
 task-list item — renders as its literal source
 text rather than being dropped or mangled (see Degraded states). The content
 scrolls with `j` / `k` and the arrows at the detail route (`markdown-viewer`,
-tables and strikethrough by `markdown-constructs`).
+tables and strikethrough by `markdown-constructs`) — see the fold rules below,
+which make that a **cursor** rather than an offset at a foldable tab.
+
+An artifact whose `generates` is a **glob** resolves to more than one file — the
+`specs` artifact of every schema this repository ships is one — and its content
+is then a list of **foldable per-file sections** rather than one concatenated
+document (`foldable-spec-sections`). Each section carries a label, which for
+`specs/<capability>/spec.md` is the capability directory, and is drawn under a
+header row of `<glyph> <label>` whose glyph pair is the list region's own, read
+from `ui::list::fold_glyph` so one fold reads the same in both regions. **All
+sections start collapsed**, so the `specs` tab opens as a list of capability
+names — the problem it was built to solve, since OpenSpec spec files open at
+`## MODIFIED Requirements` and carry the capability name only in their
+directory. `Space` folds the section the cursor is on or in, and a left click on
+a header does the same thing through the same code.
+
+Foldability is **derived, never stored** (`Detail::foldable`, the crate's one
+site for the question): more than one section. An artifact resolving to **one**
+path is unaffected in every respect — no header row, no fold state, no
+behavioural change — and the tracked-tasks tab is never foldable at any section
+count, because its progress bar counts the change's whole `progress` and would
+disagree with a per-section fold.
+
+At a **foldable** tab the drawn window follows a **line cursor**: `detail.scroll`
+is an index into the row list and the offset is derived with `layout::viewport`,
+the helper the list region already uses, rather than with
+`layout::scroll_offset`. Without a cursor the fold could not be addressed at
+all — `scroll_offset` clamps the offset to `0` whenever the content fits the
+region, so three collapsed headers in a tall pane would leave only the first
+reachable. A non-foldable tab keeps the plain offset unchanged.
 
 Tasks are **read-only by design**. Writing a checkbox from the pane would race the
 agent editing `tasks.md` in another pane.
@@ -540,7 +569,7 @@ agent editing `tasks.md` in another pane.
 | `Esc` | Dismiss one layer: filter mode with its query when active, else a non-empty query alone, else back to list, else nothing |
 | `1`–`9`, `[`, `]` | Switch artifact tab, at **both** routes — the wide layout draws the detail region at the list route too, so a tab press there is immediately visible (`detail-view`). `0` is inert: tab addressing is 1-based. While filtering, all of them type themselves into the query like any other printable key |
 | `/` | Start filter mode from either route, moving to the list: printable keys type into the query, `Backspace` deletes, `Enter` accepts, `Esc` cancels, and `Ctrl-C` still quits |
-| `Space` | Toggle the section the cursor is on or in, moving the cursor to that section's header. Inert over an empty visible list. Opening an archived section that is not yet resolved requests the refresh that resolves it; a resolved one costs no further cycle. While filtering, `Space` types itself into the query like every other printable key |
+| `Space` | **Route-dependent**, exactly as `Next` and `Prev` are (`foldable-spec-sections`). At the **list** route: toggle the list section the cursor is on or in, moving the cursor to that section's header; inert over an empty visible list; opening an archived section that is not yet resolved requests the refresh that resolves it, while a resolved one costs no further cycle. At the **detail** route: toggle the artifact section the detail cursor is on or in, moving `detail.scroll` to that section's header row; inert, with no problem recorded, when the selected artifact is not foldable — one section or none — and when no frame has been drawn yet. It touches the other region in neither direction. While filtering, `Space` types itself into the query like every other printable key |
 | `r` | Force a full refresh: re-read every change from files, and re-ask the CLI about every one. While filtering, `r` types itself into the query instead, like every other printable key |
 | `a` | Launch an agent with `/opsx:apply`. Inert — no call, no problem — with no change selected; refused with a reason when the derived name is already running for this change (see Launch flow, Degraded states) |
 | `c` | Launch an agent with `/opsx:continue`, on the same terms as `a` |

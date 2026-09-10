@@ -81,7 +81,7 @@ change on the same frame.
 
 - **WHEN** a `Dashboard` at `Route::Detail`, whose selected change's tracked-tasks tab is
   selected, whose `progress` is `Progress { completed: 4, total: 9 }`, and whose
-  `detail.source` holds nine task lines, is rendered at 120x20 and at 60x20
+  whose one section holds nine task lines, is rendered at 120x20 and at 60x20
 - **THEN** in the 120-column buffer row 4 columns 41 through 118 hold the 78-column bar,
   ending `[4/9] 44%`
 - **AND** in the 60-column buffer row 4 columns 1 through 58 hold the 58-column bar,
@@ -198,7 +198,7 @@ because it is the same `ui::list::progress_cell` call.
 
 - **WHEN** a `Dashboard` at `Route::Detail` whose selected change's tracked-tasks tab is
   selected, whose `progress` is `Progress { completed: 0, total: 0 }`, and whose
-  `detail.source` is `# Plan\n\nprose only\n`, is rendered at 120x20 and at 60x20
+  whose one section holds `# Plan\n\nprose only\n`, is rendered at 120x20 and at 60x20
 - **THEN** in the 120-column buffer row 4 columns 41 through 43 read `[-]` and column 44 is
   a space belonging to the untouched rest of the row
 - **AND** in the 60-column buffer row 4 columns 1 through 3 read `[-]`

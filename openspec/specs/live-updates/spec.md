@@ -241,7 +241,7 @@ leave the offset past its end for more than one frame.
   whose `detail.scroll` is `6` has `refresh.reload` set and is synced against a recording
   reader returning new, longer text for that path
 - **THEN** the reader recorded one call for that path — the unchanged key did not suppress it
-- **AND** `detail.source` holds the new text
+- **AND** the selected artifact's one section holds the new text
 - **AND** `detail.scroll` is still `6`
 - **AND** `refresh.reload` is false afterwards, so one flag drives exactly one re-read
 
