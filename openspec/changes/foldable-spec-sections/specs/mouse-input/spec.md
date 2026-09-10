@@ -12,7 +12,7 @@ A `MouseEventKind::Down(MouseButton::Left)` SHALL be resolved by where it lands:
 | A drawn tab cell in the detail region's tab-bar row | `Action::SelectTab(i)` for that cell's own artifact position |
 | A drawn artifact-section header row in the detail region's content area, when the selected artifact is foldable | `Action::Click(Target::DetailHeader { line, section })` for that row's own content-line index and section index |
 | Any other drawn row of the detail region's content area, when the selected artifact is foldable | `Action::Click(Target::DetailLine(line))` for that row's own content-line index |
-| A problem row, a message row, an interior row past the last drawn row, a border, the detail header, the detail content area when the selected artifact is **not** foldable, the detail content area below its last drawn line, the frame header, the frame footer, or outside the frame | `Action::Ignore` |
+| A problem row, a message row, an interior row past the last drawn row, a region's gutter, heading row or padding row, the divider, the detail region's rule row or content padding row, the detail content area when the selected artifact is **not** foldable, the detail content area below its last drawn line, the frame footer, or outside the frame | `Action::Ignore` |
 
 `Target` SHALL gain exactly two variants for this:
 
@@ -144,8 +144,10 @@ A `MouseEventKind::Down` of `MouseButton::Right` or `MouseButton::Middle` SHALL 
 - **WHEN** a dashboard whose `changes.problems` holds one entry and whose visible list is
   empty is drawn at 120x40, and left presses land on the problem row, on the `No changes
   yet` message row, on an interior row below the last drawn row, on the list region's
-  border, on the detail region's header row, on the detail content area — which holds no
-  foldable artifact, because no change is selected — on the frame's footer, and at column 200
+  left gutter, on the list region's heading row, on its padding row, on the detail region's
+  heading row, on the detail region's rule row, on its content padding row, on the detail
+  content area — which holds no foldable artifact, because no change is selected — on the
+  frame's footer, and at column 200
 - **THEN** every call returns `Action::Ignore`
 - **AND** applying `Action::Ignore` leaves the dashboard equal to what it was
 - **AND** a press on a detail content row **below** the last drawn line of a foldable

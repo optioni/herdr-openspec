@@ -82,8 +82,8 @@ while handling `ToggleSection` at either route, exactly as it does for every oth
   `visible()` holds the active change alone, and `selected` is 2, still the archived header
 - **AND** after the second, `sections.collapsed` is empty, `visible()` holds all three
   changes, and `selected` is still 2
-- **AND** rendering at 120x20 and at 60x20 between the two actions shows `  > archived (2)`
-  and no archived name, and after the second shows `  v archived (2)` with both names
+- **AND** rendering at 120x20 and at 60x20 between the two actions shows `  ▸ archived (2)`
+  and no archived name, and after the second shows `  ▾ archived (2)` with both names
 
 #### Scenario: `Space` inside a section folds it and moves the cursor to its header
 
