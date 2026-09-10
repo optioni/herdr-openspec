@@ -316,10 +316,20 @@ builds until this group lands. See design.md → Decisions D1, D2, D3.
   the frame header and resolves to `Outside`.
 - [ ] 6.2 GREEN: update `zone` to derive through the new `split_frame`, `interior` and
   `split_detail`, adding the divider-column branch per `responsive-layout`'s zone requirement.
-- [ ] 6.3 Update the two landed `src/ui/driver.rs` assertions the new geometry falsifies:
-  `:3646` expects `(10, 0)` to be `Action::Ignore` where row 0 is now the list region's
-  heading, and `:4303` expects the tab bar at `y == 3` where it becomes 2. Neither file was
-  named in the earlier task list.
+- [ ] 6.3 Update the landed `src/ui/driver.rs` assertions the new geometry falsifies. The
+  planned pair — `:3646`, which expects `(10, 0)` to be `Action::Ignore` where row 0 is now
+  the list region's heading, and `:4303`, which expects the tab bar at `y == 3` where it
+  becomes 2 — is **nine tests, not two**, measured after group 4:
+  `a_resize_before_a_click_costs_one_frame`, `a_resize_renormalises_the_offset`,
+  `checklist_scroll_is_clamped`, `enter_at_the_detail_route_moves_nothing_through_run_loop`,
+  `first_frame_precedes_the_first_poll`, `route_change_shows_in_the_next_frame`,
+  `scrolling_past_the_end_is_normalised_on_the_next_frame`, `the_loop_syncs_before_it_draws`,
+  and `the_wheel_acts_over_a_border_and_not_the_chrome`. Also
+  `ui::view::tests::hit_test::the_hit_test_agrees_with_the_drawn_buffer`, which is 6.4's own
+  subject. Rename each to design.md's Verification matrix name where the matrix gives it one
+  — `zone`'s two included: `the_zones_tile_the_frame` becomes
+  `the_zones_tile_the_frame_at_120_columns` and `degenerate_frames_resolve` becomes
+  `degenerate_frames_resolve_without_panicking`.
 - [ ] 6.4 Verify the drawn/hit-test agreement still holds at both widths:
   `cargo test --all-features --lib the_hit_test_agrees_with_the_drawn_buffer` and
   `cargo test --all-features --lib every_drawn_row_is_reported_by_row_at`, run separately.
@@ -356,6 +366,25 @@ wrong tier. See design.md → Verification matrix for the test name each must ta
   `one_column_frame_does_not_panic`, `one_row_frame_draws_header_only`, and
   `two_row_frame_draws_no_body`. Each takes the name design.md's Verification matrix gives its
   scenario; 7.2, 7.3 and 7.4 already own five of them by name, so this line is the remainder.
+
+- [ ] 7.6 RED then GREEN: the ten remaining re-baselines that live **outside** `src/ui/view.rs`
+  and that no group's file manifest claimed. Measured after group 4, each fails because it
+  asserts a region border, the deleted `OpenSpec` heading literal, or a content row the new
+  interior moved:
+  - `src/ui/detail.rs` — `a_wide_character_document_stays_inside_the_detail_region`,
+    `no_content_yet_does_not_eat_the_border_at_a_narrow_frame`, and
+    `the_header_reaches_the_buffer_without_crossing_the_region_border`. All three are named
+    rows of design.md's Verification matrix, so each keeps or takes the matrix's name.
+  - `src/ui/app.rs` — `keys::enter_at_the_detail_route_is_a_noop`,
+    `keys::enter_from_list_route_still_opens_at_the_top`,
+    `scroll::a_held_wheel_is_clamped_by_the_frame`, and
+    `scroll::scroll_down_scrolls_at_the_list_route`. These follow `normalise_scroll`'s clamp,
+    which design.md → Boundaries already says moves with the interior.
+  - `src/testutil.rs` — `tests::cell_reads_symbol_and_style` and
+    `tests::render_at_touches_no_directory`, whose fixtures assert the old chrome.
+  - `src/ui/mod.rs` — `ui::tests::wiring::a_refused_capture_is_named_last`, which asserts the
+    literal `OpenSpec` heading string task 3.2 deleted. This one is **not** the load flake the
+    baseline describes: it fails serially, with a non-empty call log.
 
 ## 8. Documentation sites
 <!-- kind: operational -->
