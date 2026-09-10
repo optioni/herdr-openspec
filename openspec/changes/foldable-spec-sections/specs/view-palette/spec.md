@@ -9,23 +9,21 @@ and no panic for any input.
 
 ```rust
 pub enum Role {
-    HeaderTitle,
-    HeaderPath,
     FileMode,
     Footer,
-    RegionBorder,
-    RegionBorderFocused,
+    RegionHeading,
+    RegionHeadingFocused,
+    RegionRule,
     ListRow,
     ListRowSelected,
     ListProblem,
     ListSeparator,
     ListMessage,
     AgentBadge(crate::agents::AgentStatus),
-    DetailHeader,
-    DetailSection,
-    DetailSectionSelected,
     TabActive,
     TabInactive,
+    DetailSection,
+    DetailSectionSelected,
     Heading(u8),
     Strong,
     Emphasis,
@@ -38,14 +36,30 @@ pub enum Role {
 pub fn style(role: Role) -> Style;
 ```
 
-`DetailSection` and `DetailSectionSelected` are this change's two new variants, and they are
-the reason the enum is reproduced here: `artifact-folds` gives a multi-file artifact's
-content a header row per file, and whether that row is the one the cursor addresses is a
-distinction this module decides, not `ui::detail`'s or `ui::view`'s. They sit beside
-`DetailHeader` because all three are chrome inside the detail region. The exhaustive-`match`
-role list the totality scenario iterates is what makes each addition a **compile error**
-until the table answers it, which is the property that keeps the enum and the table from
-drifting.
+The enum is reproduced here because two changes in a row alter its membership. `pane-chrome`
+made the first set: `RegionHeading` and `RegionHeadingFocused` replace `RegionBorder` and
+`RegionBorderFocused` — there is no border to style — and `RegionRule` is added for the
+vertical divider and the detail region's horizontal rule. `HeaderTitle` and `HeaderPath` are
+removed with the frame header row that carried them, and `DetailHeader` is removed because the
+detail region's change header is now a region heading and takes the same two roles every other
+region heading takes; keeping a third role identical to `RegionHeadingFocused` in everything
+but its name would let the two drift for no reason a reader could see.
+
+`DetailSection` and `DetailSectionSelected` are `foldable-spec-sections`' two additions:
+`artifact-folds` gives a multi-file artifact's content a header row per file, and whether that
+row is the one the cursor addresses is a distinction this module decides, not `ui::detail`'s
+or `ui::view`'s. They sit after `TabInactive`, which is where the detail region's own chrome
+roles end and the markdown faces begin — an artifact-section header is chrome drawn inside the
+detail region's content area, not a construct the markdown parser emitted. There is no
+detail-chrome role left for them to sit beside, `DetailHeader` having been removed above.
+
+`Strikethrough` remains the variant that first forced this reproduction: the face's `Style` is
+this module's to decide, not a render call site's. The exhaustive-`match` role list the
+totality scenario iterates is what makes each addition a **compile error** until the table
+answers it, which is the property that keeps the enum and
+the table from drifting — the same property that forced `Strikethrough` into the table rather
+than leaving it remembered, and that made each of `pane-chrome`'s three removals a compile
+error at every call site that named one.
 
 `src/ui/palette.rs` SHALL be the **only file under `src/`** that names
 `ratatui::style::Color` or a `Color::` variant. The scope is `src/` and not the whole crate
@@ -87,7 +101,8 @@ itself.
 
 `ui::palette` SHALL be in the pure view set both standing view gates already carry:
 `NOIO-VIEW`'s `PURE` list of **nine** files and `COLWIDTH`'s of **eight**. This change adds
-no module and moves neither count.
+no module and moves neither count. Measured at HEAD `08025d3`: `NOIO-VIEW OK: 9 pure files`
+and `COLWIDTH OK: … the eight pure view files`.
 
 #### Scenario: The palette answers every role with a `Style`
 
@@ -102,6 +117,9 @@ no module and moves neither count.
 - **AND** no two of `ListProblem`, `FileMode`, `TabActive`, `TabInactive`, and the five
   `AgentBadge` styles are equal to one another, so each carries a distinction rather than
   repeating its neighbour
+- **AND** `RegionHeading`, `RegionHeadingFocused`, and `RegionRule` each return a `Style`, and
+  the enum names no `RegionBorder`, `RegionBorderFocused`, `HeaderTitle`, `HeaderPath`, or
+  `DetailHeader`
 - **AND** the two deliberately shared pairs are asserted **equal** — `FileMode` with `Code`,
   and `AgentBadge(Unknown)` with `ListSeparator` — so the sharing is a recorded decision
   rather than a gap the distinctness assertion happens to step around, and `Strikethrough` is
@@ -131,7 +149,11 @@ no module and moves neither count.
 ### Requirement: Every role keeps the modifier the crate applied before this change
 
 Colour SHALL be added **beside** the modifier a role already carried, never in place of it,
-and `color-palette` added, removed, or altered **no modifier anywhere**. The consequence is
+and `color-palette` added, removed, or altered **no modifier anywhere**. `pane-chrome` is the
+first change that alters one: `RegionHeading` carries `DIM` where the `RegionBorder` it
+replaces carried none, because an unfocused **heading** is text a reader can mistake for
+content while an unfocused border was a line nobody read. `RegionHeadingFocused` keeps
+`RegionBorderFocused`'s `BOLD` unchanged, and no other row of the table below moves. The consequence is
 falsifiable rather than aspirational: in a captured `TestBackend` buffer compared by modifier
 alone, every cell **outside the artifact tab-bar row** after that change carries exactly the
 modifier it carried before it.
@@ -147,29 +169,28 @@ drops deliberately and `action_for` still answers.
 cell that carried a modifier before either change carries a different one after, and the only
 cells that gain a modifier are those the new construct or the new row produces — a
 `~~struck~~` source for `CROSSED_OUT`, and a multi-file artifact's own section header rows
-for the two below, neither of which could be drawn at all before.
+for the two below, neither of which could be drawn at all before. `pane-chrome`'s own single
+alteration is stated above and is the one exception to "alters none".
 
 The modifier each role SHALL carry:
 
 | Role | Modifiers |
 |---|---|
-| `HeaderTitle` | `BOLD` |
-| `HeaderPath` | none |
 | `FileMode` | `DIM` |
 | `Footer` | none |
-| `RegionBorder` | none |
-| `RegionBorderFocused` | `BOLD` |
+| `RegionHeading` | `DIM` |
+| `RegionHeadingFocused` | `BOLD` |
+| `RegionRule` | `DIM` |
 | `ListRow` | none |
 | `ListRowSelected` | `BOLD` |
 | `ListProblem` | none |
 | `ListSeparator` | none |
 | `ListMessage` | none |
 | `AgentBadge(_)` | none |
-| `DetailHeader` | `BOLD` |
-| `DetailSection` | `BOLD` |
-| `DetailSectionSelected` | `BOLD` + `REVERSED` |
 | `TabActive` | `BOLD` |
 | `TabInactive` | none |
+| `DetailSection` | `BOLD` |
+| `DetailSectionSelected` | `BOLD` + `REVERSED` |
 | `Heading(_)` | `BOLD` |
 | `Strong` | `BOLD` |
 | `Emphasis` | `ITALIC` |
@@ -188,19 +209,19 @@ the text is still there.
 is a fold control, and reversing it is how a terminal says "this is the one the keys address"
 without spending a column on a marker glyph or borrowing a colour that would then mean two
 things. `DetailSection`'s plain `BOLD` deliberately equals the plain `BOLD` that
-`HeaderTitle`, `RegionBorderFocused`, `ListRowSelected`, `DetailHeader`, `Strong`, and
-`TabActive`'s modifier set already carry — plain-`BOLD` equality is not a distinction this
-table polices, and the two shared *style* pairs named in the colour requirement are
-unaffected because neither new role carries a colour.
+`RegionHeadingFocused`, `ListRowSelected`, `TabActive`, `Heading(_)`, and `Strong` already
+carry — plain-`BOLD` equality is not a distinction this table polices, and the two shared
+*style* pairs named in the colour requirement are unaffected because neither new role carries
+a colour.
 
 #### Scenario: Each role's modifier set is exactly the table above
 
 - **WHEN** `palette::style` is called for every `Role` variant and its `add_modifier` set is
   compared against the table
-- **THEN** every role matches, and the nine roles that carry no modifier —
-  `HeaderPath`, `Footer`, `RegionBorder`, `ListRow`, `ListProblem`, `ListSeparator`,
-  `ListMessage`, `AgentBadge`, and `TabInactive` — carry none, the two new roles having
-  joined the modifier-carrying side and left that count at nine
+- **THEN** every role matches, and the seven roles that carry no modifier —
+  `Footer`, `ListRow`, `ListProblem`, `ListSeparator`, `ListMessage`, `AgentBadge`, and
+  `TabInactive` — carry none, the two new roles having joined the modifier-carrying side and
+  left that count at seven
 - **AND** the assertion discriminates: `Emphasis` reports `ITALIC` and not `BOLD`,
   `Strikethrough` reports `CROSSED_OUT` and not `DIM`, and `DetailSectionSelected` reports
   `BOLD | REVERSED` and not `BOLD` alone
@@ -211,8 +232,10 @@ unaffected because neither new role carries a colour.
   changes of which one is badged `Working`, and a selected change whose single-section
   content is `## Heading\n\n**bold** and *italic* and `code` and [link](u)\n` is rendered at
   120x20 and at 60x20
-- **THEN** in both buffers the modifier of every cell **outside row 3, the tab bar** is
-  exactly what the same dashboard produced before `color-palette`: `OpenSpec` and the detail header `BOLD`, the `file mode` badge
+- **THEN** in both buffers the modifier of every cell **outside row 2, the tab bar** is
+  exactly what the same dashboard produced before `color-palette` once `pane-chrome`'s own
+  three modifier changes are applied — the removed frame header row, the routed region's
+  heading `BOLD` and the unrouted one's `DIM`, and the rules' `DIM`: the `file mode` badge
   `DIM`, the selected row's cells `BOLD`, the heading and `bold` `BOLD`, `italic` `ITALIC`,
   `code` `DIM`, and `link` `UNDERLINED`
 - **AND** the problem row, the separator row, and the agent badge cell carry no modifier at
@@ -252,11 +275,10 @@ other:
 | `Code` | foreground `Yellow` |
 | `Link` | foreground `Blue` |
 
-`HeaderTitle`, `HeaderPath`, `Footer`, `RegionBorder`, `RegionBorderFocused`, `ListRow`,
-`ListRowSelected`, `ListMessage`, `DetailHeader`, `DetailSection`, `DetailSectionSelected`,
-`Strong`, `Emphasis`, `Quoted`, and `Strikethrough` SHALL carry **no** colour: each already
-carries a modifier that distinguishes it, and a colour there would be decoration rather than
-information. `Quoted` in particular stays `DIM` and uncoloured. `Strikethrough` joins that
+`Footer`, `RegionHeading`, `RegionHeadingFocused`, `RegionRule`, `ListRow`, `ListRowSelected`,
+`ListMessage`, `DetailSection`, `DetailSectionSelected`, `Strong`, `Emphasis`, `Quoted`, and
+`Strikethrough` SHALL carry **no** colour: each already carries a modifier that distinguishes
+it, and a colour there would be decoration rather than information. `Quoted` in particular stays `DIM` and uncoloured. `Strikethrough` joins that
 list rather than gaining an entry of its own: `CROSSED_OUT` already says the whole of what
 the face means, and the obvious candidate colour — `DarkGray` — is this palette's one "no
 information" grey, which struck text emphatically is not, since the reader is being shown
@@ -266,8 +288,9 @@ between a fold header and the fold header the keys address, and this change's ow
 records that adding a colour there would be decoration.
 
 Two pairs of roles SHALL share a style, deliberately rather than by oversight. `FileMode` and
-`Code` are both `DIM` + `Yellow`, and they cannot meet: one is drawn in the frame header, the
-other only inside the detail region's content area. `AgentBadge(Unknown)` and `ListSeparator`
+`Code` are both `DIM` + `Yellow`, and they cannot meet: one is drawn in the list region's
+heading row, the other only inside the detail region's content area. `AgentBadge(Unknown)`
+and `ListSeparator`
 are both `DarkGray`, and they do share the list region — that is the point, because `DarkGray`
 is this palette's one "no information" grey and an unknown agent status and a divider rule are
 both exactly that. Neither pair is a distinction the reader must draw, so neither is a
@@ -299,20 +322,20 @@ value the parser cannot emit.
 `palette::style(role)` for the role that span carries, or a fixed composition of such styles.
 The mapping from a drawn span to its role SHALL be:
 
-- the frame header's `OpenSpec` label → `HeaderTitle`;
-- the `file mode` badge → `FileMode`;
-- the right-aligned repository path or `no repository` → `HeaderPath`;
+- a region's heading row → `RegionHeadingFocused` when that region is the routed one, else
+  `RegionHeading`. That covers the list region's repository name and the detail region's
+  change header alike;
+- the `file mode` badge → the heading row's own style patched with `FileMode`, so the badge is
+  dim and yellow whether or not the list region is the routed one;
+- the vertical divider and the detail region's horizontal rule → `RegionRule`;
 - the footer row, in all three of its forms → `Footer`. It is named rather than left as a
   bare `Style::default()` so the requirement below — that `ui::view` constructs no `Style` of
   its own — is true of the whole file rather than of the functions this change happened to
   visit;
-- a region's border → `RegionBorderFocused` when that region is the routed one, else
-  `RegionBorder`;
 - a list row → `ListRowSelected` when `Row::selected`, else `ListProblem`, `ListSeparator`,
   or `ListMessage` by its `RowKind`, else `ListRow`;
 - a badged change row's badge cell → the row's own style patched with
   `AgentBadge(status)`, so a badge on the selected row is coloured **and** bold;
-- the detail region's change header → `DetailHeader`;
 - an artifact tab chip → `TabActive` when `Tab::selected`, else `TabInactive`;
 - a detail content row whose `ContentKind` is `SectionHeader { selected: true }` →
   `DetailSectionSelected`, and one whose kind is `SectionHeader { selected: false }` →
