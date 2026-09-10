@@ -4739,9 +4739,16 @@ mod tests {
 
         // The resulting fold state: four toggles of the section the cursor is
         // on leave it shut, so the tab reads as three collapsed headers.
-        assert_eq!(content_row(&run, 120, 0), "▸ alpha");
-        assert_eq!(content_row(&run, 120, 1), "▸ beta");
-        assert_eq!(content_row(&run, 120, 2), "▸ gamma");
+        // The glyph comes from `ui::list::fold_glyph`, the pair's one production
+        // site, rather than being written here as a character: `artifact-folds`
+        // requires this capability's own tests to compare function results, and
+        // `ui::detail`'s header tests already do. The landed list-region fixtures
+        // in `list.rs`, `mod.rs`, and `view.rs` do still spell the glyphs out —
+        // re-baselining those is `pane-chrome`'s legacy, not this change's job.
+        let shut = crate::ui::list::fold_glyph(true);
+        assert_eq!(content_row(&run, 120, 0), format!("{shut} alpha"));
+        assert_eq!(content_row(&run, 120, 1), format!("{shut} beta"));
+        assert_eq!(content_row(&run, 120, 2), format!("{shut} gamma"));
         assert_eq!(
             content_row(&run, 120, 3),
             "",
