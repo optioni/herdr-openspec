@@ -294,7 +294,7 @@ pub(crate) fn truncate_columns(text: &str, max: usize) -> &str {
 mod tests {
     use crate::ui::app::Route;
     use crate::ui::layout::{
-        LayoutMode, WIDE_MIN_WIDTH, columns, interior, mode, scroll_offset, split_body,
+        Gutters, LayoutMode, WIDE_MIN_WIDTH, columns, interior, mode, scroll_offset, split_body,
         split_detail, split_frame, truncate_columns, viewport,
     };
     use ratatui::buffer::Buffer;
@@ -783,6 +783,70 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+    /// `responsive-layout` -> "`interior` reserves two rows and the gutters
+    /// its `Gutters` names" — task 1.1's RED test. `Gutters` does not exist
+    /// yet, so this fails to compile.
+    #[test]
+    fn interior_reserves_two_rows_and_the_gutters_its_gutters_names() {
+        assert_eq!(
+            interior(Rect::new(0, 0, 60, 19), Gutters::Both),
+            Rect::new(1, 2, 58, 17)
+        );
+        assert_eq!(
+            interior(Rect::new(0, 0, 40, 19), Gutters::Both),
+            Rect::new(1, 2, 38, 17)
+        );
+        assert_eq!(
+            interior(Rect::new(41, 0, 79, 19), Gutters::LeftOnly),
+            Rect::new(42, 2, 78, 17)
+        );
+    }
+
+    /// `split_frame` returns `(body, footer)` — task 1.3's RED test. Fails
+    /// to compile: `split_frame` still returns a three-tuple at HEAD.
+    #[test]
+    fn split_frame_is_body_then_footer() {
+        for width in [60u16, 120u16] {
+            let (body, footer) = split_frame(Rect::new(0, 0, width, 19));
+            assert_eq!(body, Rect::new(0, 0, width, 18));
+            assert_eq!(footer, Rect::new(0, 18, width, 1));
+        }
+    }
+
+    /// `split_body` gives the divider column between the two regions —
+    /// task 1.5's RED test. Fails to compile: `split_body` still returns
+    /// two `Option<Rect>` at HEAD and names no divider column.
+    #[test]
+    fn the_wide_body_splits_into_list_divider_detail() {
+        let (list, divider, detail) = split_body(Rect::new(0, 0, 120, 19), Route::List);
+        assert_eq!(list, Some(Rect::new(0, 0, 40, 19)));
+        assert_eq!(divider, Some(40));
+        assert_eq!(detail, Some(Rect::new(41, 0, 79, 19)));
+
+        let (list, divider, detail) = split_body(Rect::new(0, 0, 60, 19), Route::List);
+        assert_eq!(list, Some(Rect::new(0, 0, 60, 19)));
+        assert_eq!(divider, None);
+        assert_eq!(detail, None);
+    }
+
+    /// `artifact-tabs` -> "`split_detail` is exact at its degenerate
+    /// heights" — task 1.7's RED test. `split_detail` at HEAD returns a
+    /// header rect first, so this fails on its content-area assertions.
+    #[test]
+    fn split_detail_is_exact_at_its_degenerate_heights() {
+        for width in [78u16, 58u16] {
+            let at = |height: u16| Rect::new(3, 5, width, height);
+
+            let (tabs, rule, content) = split_detail(at(17));
+            assert_eq!(tabs, Rect::new(3, 5, width, 1), "width {width} height 17");
+            assert_eq!(rule, Rect::new(3, 6, width, 1), "width {width} height 17");
+            assert_eq!(
+                content,
+                Rect::new(3, 8, width, 14),
+                "width {width} height 17"
+            );
         }
     }
 }
