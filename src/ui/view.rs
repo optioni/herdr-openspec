@@ -6,7 +6,6 @@
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
-use ratatui::widgets::Block;
 
 use crate::ui::app::{Dashboard, Route};
 use crate::ui::detail;
@@ -23,49 +22,38 @@ const FOOTER_HINTS: [&str; 3] = ["q quit", "Enter detail", "Esc back"];
 
 /// Draw `dashboard` into `frame`. A pure function of its two arguments.
 ///
-/// `pane-chrome` (group 1) removes the frame's header rect from
-/// `layout::split_frame`'s own return value — the header row moves into
-/// each region's own heading row, which groups 3 and 4 wire up. Until then
-/// this reconstructs the prior header/body split locally, from `body`'s own
-/// first row, so this group's signature change is compile-only here: every
-/// rectangle below is identical to what the old three-way `split_frame`
-/// produced at every frame size.
+/// `pane-chrome` removes the frame's header row entirely: `layout::split_frame`
+/// now returns only `(body, footer)`, and the repository's identity moves into
+/// the list region's own heading row (`render_region`), drawn as part of the
+/// body rather than above it.
 pub fn render(frame: &mut Frame, dashboard: &Dashboard) {
     let (body, footer) = split_frame(frame.area());
-    let header = Rect {
-        x: body.x,
-        y: body.y,
-        width: body.width,
-        height: body.height.min(1),
-    };
-    let rest = Rect {
-        x: body.x,
-        y: body.y + header.height,
-        width: body.width,
-        height: body.height.saturating_sub(header.height),
-    };
-    render_header(frame, header, dashboard);
     render_footer(frame, footer, dashboard);
-    render_body(frame, rest, dashboard);
+    render_body(frame, body, dashboard);
 }
 
-/// The body: one or two bordered regions, per `layout::split_body`. The list
-/// region's interior is filled by `render_list`; the detail region's by
-/// `render_detail` — `detail-view` is what will populate `detail.source`.
+/// The body: one or two borderless regions, per `layout::split_body`, with a
+/// one-column divider between them at `LayoutMode::Wide`. The list region's
+/// interior is filled by `render_list`; the detail region's by
+/// `render_detail`.
 ///
-/// `pane-chrome` (group 1) adds a divider column between the two regions to
-/// `split_body`'s return value; drawing it is group 3's task, so it is
-/// ignored here. Both regions take `Gutters::Both` for now — the wide
-/// detail region's `Gutters::LeftOnly` is D5's trailing-gutter drop, which
-/// groups 3/4 wire up alongside the divider itself.
+/// `render_region` draws only the **list** region's own heading — the
+/// repository directory name and the `file mode` badge. The detail region's
+/// heading is the selected change's own header, which `detail-header` draws
+/// directly into its area (group 4); until then this call site draws no
+/// heading for it at all, which is correct rather than a placeholder, since
+/// nothing has claimed that row yet.
+///
+/// The divider column `split_body` names is not yet drawn here — task 3.8 —
+/// and the detail region still takes `Gutters::Both` rather than D5's
+/// `LeftOnly` — also task 3.8, wired up alongside the divider itself.
 fn render_body(frame: &mut Frame, body: Rect, dashboard: &Dashboard) {
     let (list_area, _divider, detail) = split_body(body, dashboard.route);
     if let Some(area) = list_area {
-        render_region(frame, area, "Changes", dashboard.route == Route::List);
+        render_region(frame, area, dashboard, dashboard.route == Route::List);
         render_list(frame, interior(area, Gutters::Both), dashboard);
     }
     if let Some(area) = detail {
-        render_region(frame, area, "Detail", dashboard.route == Route::Detail);
         render_detail(frame, interior(area, Gutters::Both), dashboard);
     }
 }
@@ -313,96 +301,55 @@ fn render_list(frame: &mut Frame, interior: Rect, dashboard: &Dashboard) {
     }
 }
 
-/// One bordered region with a title. `emphasised` picks
-/// `Role::RegionHeadingFocused` over `Role::RegionHeading` — the routed region
-/// always is, whether or not the other region is drawn alongside it. Neither
-/// role carries a colour: the border frames the pane rather than saying
-/// anything about it.
-fn render_region(frame: &mut Frame, area: Rect, title: &'static str, emphasised: bool) {
+/// The `file mode` badge's own text — nine columns, drawn dim and yellow,
+/// right-aligned against the heading row's last column. See
+/// `specs/responsive-layout/spec.md`.
+const FILE_MODE_BADGE: &str = "file mode";
+
+/// The list region's own heading row: the repository directory name (or
+/// `no repository`), shortened from the left when it does not fit —
+/// `ui::list::shorten_left`. Draws no `Block`, no border, and nothing outside
+/// the heading row itself; the blank padding row below it and the interior
+/// are the caller's job. `emphasised` picks `Role::RegionHeadingFocused` over
+/// `Role::RegionHeading`, the same pair every region's heading takes.
+///
+/// The `file mode` badge is not drawn here yet — task 3.4.
+fn render_region(frame: &mut Frame, area: Rect, dashboard: &Dashboard, emphasised: bool) {
+    if area.height == 0 {
+        return;
+    }
+    let iw = area.width.saturating_sub(2);
+    if iw == 0 {
+        return;
+    }
     let role = if emphasised {
         Role::RegionHeadingFocused
     } else {
         Role::RegionHeading
     };
-    // `border_style`, never `style`: a blank interior's cells must still equal
-    // `Cell::default().style()`.
-    let block = Block::bordered()
-        .title(title)
-        .border_style(palette::style(role));
-    frame.render_widget(block, area);
+    let name = repo_heading_name(dashboard);
+    let shown = if columns(&name) <= iw as usize {
+        name
+    } else {
+        list::shorten_left(&name, iw as usize)
+    };
+    frame
+        .buffer_mut()
+        .set_string(area.x + 1, area.y, &shown, palette::style(role));
 }
 
-/// The `file mode` badge's own text — nine columns, drawn dim, immediately
-/// after `OpenSpec`'s separating blank. See `specs/responsive-layout/spec.md`.
-const FILE_MODE_BADGE: &str = "file mode";
-
-/// The narrowest header the badge is drawn in at all — `degraded-states`'
-/// addition. Below this the badge is dropped whole, before the path's own
-/// shortening arithmetic ever runs, rather than being truncated itself.
-const BADGE_MIN_WIDTH: u16 = 18;
-
-/// The header row: `OpenSpec`, bold, at column 0; when `dashboard.file_mode`
-/// and the header is wide enough, the dim `file mode` badge in columns 9-17
-/// (`degraded-states`' addition — `SPEC.md` row 2); then the repository's
-/// display path (or `no repository`) right-aligned, shortened from the left
-/// when the remaining width cannot hold it whole.
-fn render_header(frame: &mut Frame, header: Rect, dashboard: &Dashboard) {
-    if header.height == 0 {
-        return;
-    }
-    let buf = frame.buffer_mut();
-    buf.set_string(
-        header.x,
-        header.y,
-        "OpenSpec",
-        palette::style(Role::RegionHeadingFocused),
-    );
-
-    let show_badge = dashboard.file_mode && header.width >= BADGE_MIN_WIDTH;
-    if show_badge {
-        buf.set_string(
-            header.x + 9,
-            header.y,
-            FILE_MODE_BADGE,
-            palette::style(Role::FileMode),
-        );
-    }
-
-    let text = match &dashboard.repo {
-        Some(path) => path.display().to_string(),
+/// The list region's heading text: the repository root's final path
+/// component, the whole display path when the root has none (the filesystem
+/// root `/`), or the literal `no repository` when there is no root at all.
+/// See `specs/responsive-layout/spec.md` -> "The list region's heading names
+/// the repository directory".
+fn repo_heading_name(dashboard: &Dashboard) -> String {
+    match &dashboard.repo {
+        Some(path) => match path.file_name() {
+            Some(name) => name.to_string_lossy().into_owned(),
+            None => path.display().to_string(),
+        },
         None => "no repository".to_string(),
-    };
-    // `A` is the budget left for the path: the header width minus 9 (the eight columns of
-    // `OpenSpec` plus one separating blank) when no badge is drawn, or minus 19 (that same
-    // nine, plus the badge's own nine columns, plus a second separating blank) when it is —
-    // the badge's columns come from the path's own budget, never from `OpenSpec`'s.
-    let a = if show_badge {
-        header.width.saturating_sub(19)
-    } else {
-        header.width.saturating_sub(9)
-    };
-    if let Some(shown) = shorten_for_header(&text, a) {
-        let shown_len = columns(&shown) as u16;
-        let x = header.x + header.width.saturating_sub(shown_len);
-        buf.set_string(x, header.y, &shown, palette::style(Role::RegionHeading));
-    }
-}
-
-/// The header-shortening rule, isolated so it is readable independently of
-/// the frame: `text` fitting in `a` **columns** is shown whole; longer text
-/// is shown as `…` plus its last `a - 1` columns when `a >= 8`; otherwise
-/// nothing is shown at all, and only the (possibly itself truncated)
-/// `OpenSpec` label — and the badge, when [`render_header`] drew one — is
-/// shown.
-fn shorten_for_header(text: &str, a: u16) -> Option<String> {
-    let a = a as usize;
-    let text_cols = columns(text);
-    if text_cols <= a {
-        Some(text.to_string())
-    } else if a >= 8 {
-        Some(list::shorten_left(text, a))
-    } else {
-        None
     }
 }
 
@@ -1535,74 +1482,32 @@ mod tests {
         }
     }
 
+    /// `responsive-layout` :: "The heading names the directory, not the path, at both
+    /// widths" — `pane-chrome`'s replacement for the frame header's absolute repository
+    /// path: the list region's own heading row now names the directory alone.
     #[test]
-    fn header_path_right_aligned_whole() {
-        let d = dashboard(Some("/tmp/demo-repo"), Route::List);
-        let buf = render_at(60, 20, &d);
-        assert_eq!(cols(&row_text(&buf, 0), 46..60), "/tmp/demo-repo");
-        assert!(
-            cols(&row_text(&buf, 0), 8..46).chars().all(|c| c == ' '),
-            "columns 8..46 must be exactly spaces"
-        );
-
+    fn the_heading_names_the_directory_not_the_path_at_both_widths() {
+        let d = dashboard(Some("/Users/dev/Code/herdr-openspec"), Route::List);
+        for width in [120, 60] {
+            let buf = render_at(width, 20, &d);
+            assert_eq!(
+                cols(&row_text(&buf, 0), 1..15),
+                "herdr-openspec",
+                "width {width}"
+            );
+            assert!(
+                !buffer_contains(&buf, "/Users/dev/Code"),
+                "width {width}: the absolute path must not appear"
+            );
+        }
         let buf = render_at(120, 20, &d);
-        assert_eq!(cols(&row_text(&buf, 0), 106..120), "/tmp/demo-repo");
-    }
-
-    #[test]
-    fn header_path_shortened_from_the_left() {
-        let repo = "/home/dev/workspaces/openspec-demos/a-rather-long-repository-name-here";
-        assert_eq!(columns(repo), 70);
-        let d = dashboard(Some(repo), Route::List);
-
-        let buf = render_at(60, 20, &d);
         assert_eq!(
-            cols(&row_text(&buf, 0), 9..60),
-            "…/openspec-demos/a-rather-long-repository-name-here"
+            cols(&row_text(&buf, 0), 38..39),
+            " ",
+            "the heading stayed inside the list region's interior"
         );
-
-        let buf = render_at(120, 20, &d);
-        assert_eq!(cols(&row_text(&buf, 0), 50..120), repo);
-        assert!(!buffer_contains(&buf, "…"));
     }
 
-    #[test]
-    fn header_omits_the_path_when_too_narrow() {
-        let repo = "/home/dev/workspaces/openspec-demos/a-rather-long-repository-name-here";
-        let d = dashboard(Some(repo), Route::List);
-
-        let buf = render_at(16, 20, &d);
-        assert_eq!(row_text(&buf, 0), format!("OpenSpec{}", " ".repeat(8)));
-        assert!(!buffer_contains(&buf, "…"));
-
-        let buf = render_at(60, 20, &d);
-        assert_eq!(
-            cols(&row_text(&buf, 0), 9..60),
-            "…/openspec-demos/a-rather-long-repository-name-here"
-        );
-
-        let buf = render_at(120, 20, &d);
-        assert_eq!(cols(&row_text(&buf, 0), 50..120), repo);
-    }
-
-    #[test]
-    fn header_says_no_repository() {
-        // Rewritten for list-view: the landed assertion checked the WHOLE
-        // buffer for the searched-from path's absence. change-rows' own
-        // no-repository block now names it on purpose (row 2 of the body),
-        // so the assertion narrows to row 0 — the header row — which is
-        // what this requirement was ever about.
-        let d = dashboard(None, Route::List);
-        let buf = render_at(60, 20, &d);
-        assert_eq!(cols(&row_text(&buf, 0), 47..60), "no repository");
-        assert!(!row_text(&buf, 0).contains("/tmp/searched-from"));
-        assert!(row_text(&buf, 4).contains("/tmp/searched-from"));
-
-        let buf = render_at(120, 20, &d);
-        assert_eq!(cols(&row_text(&buf, 0), 107..120), "no repository");
-        assert!(!row_text(&buf, 0).contains("/tmp/searched-from"));
-        assert!(row_text(&buf, 4).contains("/tmp/searched-from"));
-    }
 
     /// `responsive-layout` :: "The badge is drawn dim after the label at both widths" —
     /// reads the buffer's `Modifier`, not only its characters, since a badge that renders
@@ -1675,247 +1580,6 @@ mod tests {
         }
     }
 
-    /// `responsive-layout` :: "A false flag renders the header that landed before this
-    /// change" — whole-buffer equality at both widths, with a discriminating control (the
-    /// same fixture with `file_mode` true) so the equality is not satisfied by two blank
-    /// headers.
-    #[test]
-    fn no_badge_is_byte_identical_to_the_landed_header() {
-        for width in [120, 60] {
-            let plain = dashboard(Some("/tmp/demo-repo"), Route::List);
-            let buf = render_at(width, 20, &plain);
-            assert_eq!(
-                row_text(&buf, 0),
-                format!(
-                    "OpenSpec{}/tmp/demo-repo",
-                    " ".repeat(width as usize - 8 - columns("/tmp/demo-repo"))
-                ),
-                "width {width}: the landed header must be unchanged"
-            );
-
-            // `color-palette`: no cell of row 0 carries a foreground, so the palette added
-            // colour to the badge and to nothing else on this row.
-            for x in 0..width {
-                assert_eq!(
-                    cell(&buf, x, 0).style().fg,
-                    uncoloured().fg,
-                    "width {width}: column {x} of the unbadged header carries a foreground"
-                );
-                assert_eq!(
-                    cell(&buf, x, 0).style().bg,
-                    uncoloured().bg,
-                    "width {width}: column {x} of the unbadged header carries a background"
-                );
-            }
-
-            let badged = dashboard_in_file_mode(Some("/tmp/demo-repo"), Route::List);
-            let badged_buf = render_at(width, 20, &badged);
-            assert_ne!(
-                row_text(&buf, 0),
-                row_text(&badged_buf, 0),
-                "width {width}: the control must render differently"
-            );
-            // The control discriminates on colour too: the badged header does carry one.
-            assert!(
-                (0..width).any(|x| cell(&badged_buf, x, 0).style().fg != uncoloured().fg),
-                "width {width}: the badged control must carry a foreground somewhere"
-            );
-        }
-    }
-
-    /// `responsive-layout` :: "The badge takes its columns from the path, not from the
-    /// label" — a path long enough to be shortened differently by the two budgets (`width -
-    /// 9` without the badge, `width - 19` with it) at BOTH mandated widths.
-    #[test]
-    fn badge_rebases_the_shortening_arithmetic() {
-        let long_path = format!("/repo/{}", "x".repeat(99));
-        assert_eq!(columns(&long_path), 105);
-
-        for width in [120, 60] {
-            let plain = dashboard(Some(&long_path), Route::List);
-            let plain_buf = render_at(width, 20, &plain);
-            let plain_a = width as usize - 9;
-            let plain_shown = crate::ui::list::shorten_left(&long_path, plain_a);
-            assert_eq!(
-                cols(
-                    &row_text(&plain_buf, 0),
-                    (width as usize - columns(&plain_shown))..width as usize
-                ),
-                plain_shown,
-                "width {width}: no-badge path"
-            );
-
-            let badged = dashboard_in_file_mode(Some(&long_path), Route::List);
-            let badged_buf = render_at(width, 20, &badged);
-            let badged_a = width as usize - 19;
-            let badged_shown = crate::ui::list::shorten_left(&long_path, badged_a);
-            assert_eq!(
-                cols(
-                    &row_text(&badged_buf, 0),
-                    (width as usize - columns(&badged_shown))..width as usize
-                ),
-                badged_shown,
-                "width {width}: badged path"
-            );
-            assert_ne!(
-                plain_shown, badged_shown,
-                "width {width}: the two budgets must actually differ for this fixture"
-            );
-        }
-    }
-
-    /// `responsive-layout` :: "A header too narrow for the badge drops it whole" — rendered
-    /// at 17, 18, 60, and 120: below 18 the badge is dropped before the path's own
-    /// shortening arithmetic ever runs; at 18 and above it is drawn.
-    #[test]
-    fn badge_drops_whole_below_eighteen_columns() {
-        for width in [17, 18, 60, 120] {
-            let d = dashboard_in_file_mode(Some("/tmp/demo-repo"), Route::List);
-            let buf = render_at(width, 20, &d);
-            let row = row_text(&buf, 0);
-            if width < 18 {
-                assert!(
-                    !row.contains("file mode"),
-                    "width {width}: the badge must be dropped whole below 18 columns: {row:?}"
-                );
-            } else {
-                assert_eq!(cols(&row, 9..18), "file mode", "width {width}");
-                for x in 9..18u16 {
-                    assert!(
-                        cell(&buf, x, 0)
-                            .style()
-                            .add_modifier
-                            .contains(Modifier::DIM),
-                        "width {width}: column {x} of the badge is not dim"
-                    );
-                }
-            }
-        }
-    }
-
-    /// Column range `range` of buffer row `y`, read **cell by cell** rather than through
-    /// `row_text`/`cols`: a CJK cluster occupies two buffer columns but the row-text
-    /// reconstruction folds its trailing (shadow) cell to an empty string, so a `char`-index
-    /// slice of that reconstruction no longer lines up with real buffer columns once any
-    /// cell is more than one column wide. `view-fidelity`'s own wide-character scenarios use
-    /// this instead of `cols(&row_text(...), ..)` for exactly that reason.
-    fn cell_range(buf: &Buffer, y: u16, range: std::ops::Range<u16>) -> String {
-        range
-            .map(|x| cell(buf, x, y).symbol().to_string())
-            .collect()
-    }
-
-    /// `cell_range`, with every wide cluster's trailing shadow cell — reset to a plain
-    /// space by ratatui itself — dropped. Safe whenever the expected text is known to
-    /// contain no real space of its own, which every fixture this helper is used against
-    /// does not.
-    fn cell_range_no_shadow(buf: &Buffer, y: u16, range: std::ops::Range<u16>) -> String {
-        cell_range(buf, y, range)
-            .chars()
-            .filter(|c| *c != ' ')
-            .collect()
-    }
-
-    /// `responsive-layout` :: "A wide-character path is shortened by columns and stays
-    /// inside the header" — the fixture (44 characters, 67 display columns) is chosen to
-    /// exceed `A` at 60 columns both badged (41) and unbadged (51), so both branches
-    /// actually shorten. Every check reads the buffer cell-by-cell (`cell_range`), never by
-    /// `chars()`-indexed string slicing, because the fixture is exactly the content that
-    /// slicing gets wrong.
-    #[test]
-    fn header_wide_character_path_shortens_by_columns_and_stays_inside_the_header() {
-        let repo = "/home/dev/workspaces/日本語のリポジトリ名前がとても長いディレクトリ";
-        assert_eq!(repo.chars().count(), 44, "fixture must be 44 characters");
-        assert_eq!(columns(repo), 67, "fixture must be 67 display columns");
-
-        let plain = dashboard(Some(repo), Route::List);
-        let badged = dashboard_in_file_mode(Some(repo), Route::List);
-
-        // The 60-column, non-badged buffer: A is 51. The shortened text begins with `…`
-        // no earlier than column 9, ends in the final column, and its `columns` is at
-        // most 51.
-        let a_unbadged = 51usize;
-        let expected_unbadged = crate::ui::list::shorten_left(repo, a_unbadged);
-        assert!(expected_unbadged.starts_with('…'));
-        assert!(columns(&expected_unbadged) <= a_unbadged);
-        let buf = render_at(60, 20, &plain);
-        let start = 60u16 - columns(&expected_unbadged) as u16;
-        assert!(
-            start >= 9,
-            "ellipsis must start no earlier than column 9: {start}"
-        );
-        assert_eq!(
-            cell_range_no_shadow(&buf, 0, start..60),
-            expected_unbadged,
-            "the shortened text must be right-aligned against the final column"
-        );
-
-        // Discriminating clause: a `char`-counted shortening would keep the last `A - 1`
-        // **characters** of the path rather than the last `A - 1` **columns**. Since the
-        // path is only 44 characters long — fewer than the 50 characters such a rule would
-        // try to keep — a char-counted rule keeps the WHOLE path, which measures 67
-        // columns: far more than the 51-column budget, and it would have run past the
-        // frame.
-        let char_based_keep = a_unbadged - 1;
-        let total_chars = repo.chars().count();
-        let start_char = total_chars.saturating_sub(char_based_keep);
-        let char_based_shown: String = repo.chars().skip(start_char).collect();
-        assert!(
-            columns(&char_based_shown) > a_unbadged,
-            "a char-counted shortening keeps {char_based_shown:?} at {} columns, which must \
-             exceed the {a_unbadged}-column budget for this fixture to discriminate",
-            columns(&char_based_shown)
-        );
-
-        // The 60-column, badged buffer: the badge takes columns 9..18, column 18 is a
-        // blank separator, and A is 41.
-        let a_badged = 41usize;
-        let expected_badged = crate::ui::list::shorten_left(repo, a_badged);
-        assert!(columns(&expected_badged) <= a_badged);
-        let buf = render_at(60, 20, &badged);
-        assert_eq!(cell_range(&buf, 0, 9..18), "file mode");
-        assert_eq!(cell_range(&buf, 0, 18..19), " ");
-        let start = 60u16 - columns(&expected_badged) as u16;
-        assert_eq!(cell_range_no_shadow(&buf, 0, start..60), expected_badged);
-
-        // The 120-column buffer: A (111 unbadged, 101 badged) comfortably holds the whole
-        // 67-column path, so it is drawn whole with no ellipsis, starting no earlier than
-        // column 50.
-        for d in [&plain, &badged] {
-            let buf = render_at(120, 20, d);
-            let start = 120u16 - columns(repo) as u16;
-            assert!(
-                start >= 50,
-                "path must start no earlier than column 50: {start}"
-            );
-            assert_eq!(cell_range_no_shadow(&buf, 0, start..120), repo);
-            assert!(
-                !row_text(&buf, 0).contains('…'),
-                "no ellipsis at 120 columns"
-            );
-        }
-
-        // 16, 18, 19, and 1 columns: rendering never panics, and the row never exceeds
-        // the frame — `row_text` itself is exactly `width` cells wide by construction, so
-        // the real assertion here is simply that render_at returns without panicking.
-        // Below A=8 (widths 16 and 1, where A is 7 and 0) the label alone is drawn and no
-        // ellipsis appears at all; at 18 and 19 (A 9 and 10) the path is shortened same as
-        // at 60, so an ellipsis is expected there too.
-        for width in [16u16, 1] {
-            let buf = render_at(width, 20, &plain);
-            assert!(
-                !row_text(&buf, 0).contains('…'),
-                "width {width}: below A=8, no ellipsis is drawn at all"
-            );
-        }
-        for width in [18u16, 19] {
-            let buf = render_at(width, 20, &plain);
-            assert!(
-                row_text(&buf, 0).contains('…'),
-                "width {width}: A is 9 or 10, so the path is shortened with an ellipsis"
-            );
-        }
-    }
     fn three_active() -> Dashboard {
         dashboard_with(
             vec![
