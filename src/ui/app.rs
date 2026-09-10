@@ -2020,12 +2020,8 @@ mod tests {
         assert!(d.detail.expanded.is_empty());
         assert_eq!(d.detail.scroll, 0, "the folded section's own header row");
         for (width, height) in [(120u16, 40u16), (60, 40)] {
-            let buf = crate::testutil::render_at(width, height, &d);
-            let rows = crate::ui::detail::content_lines(
-                &d.detail,
-                d.selected_change(),
-                if width == 60 { 58 } else { 78 },
-            );
+            let interior = if width == 60 { 58 } else { 78 };
+            let rows = crate::ui::detail::content_lines(&d.detail, d.selected_change(), interior);
             assert_eq!(rows.len(), 3, "width {width}: three collapsed sections");
             assert!(
                 rows.iter().all(|r| matches!(
@@ -2034,7 +2030,19 @@ mod tests {
                 )),
                 "width {width}: every row is a header"
             );
-            let _ = buf;
+
+            let buf = crate::testutil::render_at(width, height, &d);
+            for (row, label) in [
+                (5u16, "degraded-coverage"),
+                (6, "markdown-render"),
+                (7, "tasks-checklist"),
+            ] {
+                assert_eq!(
+                    detail_interior_row(&buf, row),
+                    expected_header(label, true, interior),
+                    "width {width} row {row}: collapsed"
+                );
+            }
         }
 
         // Section 0 still open, cursor now on the third header row — the row
@@ -2198,7 +2206,15 @@ mod tests {
                         "width {width} row {row}: still collapsed, three headers stay drawn"
                     );
                 }
-                let _ = want_row;
+                let from = if width == 60 { 1 } else { 42 };
+                let uncoloured = ratatui::buffer::Cell::default().style();
+                assert_eq!(
+                    crate::testutil::cell(&buf, from, want_row).style(),
+                    uncoloured.patch(crate::ui::palette::style(
+                        crate::ui::palette::Role::DetailSectionSelected
+                    )),
+                    "width {width}: header at row {want_row} carries the selected role"
+                );
             }
         }
         d.apply(Action::Next);
