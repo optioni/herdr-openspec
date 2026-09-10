@@ -152,14 +152,14 @@ is load-bearing, not cosmetic.
 ## 7. `Space` becomes route-dependent, and the clamp branches
 <!-- kind: behavior -->
 
-- [ ] 7.1 RED: Write artifact-folds :: `Space opens the section under the cursor and leaves its siblings shut`, `Space inside an open section folds it and moves the cursor to its header`, `Space on a problem row is inert`, and `Space is inert on a non-foldable artifact`.
-- [ ] 7.2 RED: Write list-selection :: `Space at the detail route leaves the list alone` and `Space at the detail route is inert on a non-foldable artifact`; pin the four existing list-route `Space` scenarios to `Route::List`; and pin mouse-input :: `A click on a section header folds it exactly as Space does`, whose `ToggleSection` comparison goes red at 7.8 unless its route is pinned here.
-- [ ] 7.3 RED: Write detail-scroll :: `At a collapsed foldable tab the same keys walk the section list` and `The wheel moves the cursor at a foldable tab`; extend `A resize renormalises the offset on the next frame`, `Scrolling stops at the top`, and `Next at the detail route and ScrollDown are the same move` with their foldable legs; and write `Every route move resets the scroll`'s fourth dashboard, proving `expanded` survives a route move.
-- [ ] 7.4 GREEN: Replace `src/ui/app.rs:433`'s unconditional arm (baseline check R5) with a `match self.route`, and implement the detail-route toggle including its cursor-to-header rule.
-- [ ] 7.5 GREEN: Branch `normalise_scroll` between `scroll.min(lines - 1)` and `layout::scroll_offset` on foldability — **ask `Detail::foldable()`**, the one site, never a fresh `sections.len() > 1` — and guard the three route-move arms so none clears `detail.expanded`.
-- [ ] 7.6 CHECK: Contract gate — re-read `SPEC.md`'s key-binding table and confirm the documented meaning of `Space` at each route matches `apply`. **No computable second site exists**: `tests/doc_contract.rs`'s one binding leg, `mouse_bindings_match_spec_md`, locates its table by `| Gesture | Action |` and its own parser control asserts `Err` on a `| Key | Action |` table, which is exactly SPEC.md's key table's shape. The behaviour itself is proved by `ui::app::tests::…toggle_route`; this task is a read.
-- [ ] 7.7 CHECK: `/bin/sh scripts/gates/noblock.sh` OK — the toggle reaches no collaborator, spawns nothing, and reads no clock.
-- [ ] 7.8 Run the group tests — no regressions, and state that no refactor was needed or name the one performed.
+- [x] 7.1 RED: Write artifact-folds :: `Space opens the section under the cursor and leaves its siblings shut`, `Space inside an open section folds it and moves the cursor to its header`, `Space on a problem row is inert`, and `Space is inert on a non-foldable artifact`.
+- [x] 7.2 RED: Write list-selection :: `Space at the detail route leaves the list alone` and `Space at the detail route is inert on a non-foldable artifact`; pin the four existing list-route `Space` scenarios to `Route::List`; and pin mouse-input :: `A click on a section header folds it exactly as Space does`, whose `ToggleSection` comparison goes red at 7.8 unless its route is pinned here.
+- [x] 7.3 RED: Write detail-scroll :: `At a collapsed foldable tab the same keys walk the section list` and `The wheel moves the cursor at a foldable tab`; extend `A resize renormalises the offset on the next frame`, `Scrolling stops at the top`, and `Next at the detail route and ScrollDown are the same move` with their foldable legs; and write `Every route move resets the scroll`'s fourth dashboard, proving `expanded` survives a route move.
+- [x] 7.4 GREEN: Replace `src/ui/app.rs:433`'s unconditional arm (baseline check R5) with a `match self.route`, and implement the detail-route toggle including its cursor-to-header rule.
+- [x] 7.5 GREEN: Branch `normalise_scroll` between `scroll.min(lines - 1)` and `layout::scroll_offset` on foldability — **ask `Detail::foldable()`**, the one site, never a fresh `sections.len() > 1` — and guard the three route-move arms so none clears `detail.expanded`.
+- [x] 7.6 CHECK: Contract gate — re-read `SPEC.md`'s key-binding table and confirm the documented meaning of `Space` at each route matches `apply`. **No computable second site exists**: `tests/doc_contract.rs`'s one binding leg, `mouse_bindings_match_spec_md`, locates its table by `| Gesture | Action |` and its own parser control asserts `Err` on a `| Key | Action |` table, which is exactly SPEC.md's key table's shape. The behaviour itself is proved by `ui::app::tests::…toggle_route`; this task is a read. **Outcome: the table does NOT match `apply`.** SPEC.md line 543 documents only the list-route behaviour — fold a list section, move the cursor to its header, request an archive refresh — and says nothing about `Route::Detail` folding an artifact section. Task 11.1 owns the edit.
+- [x] 7.7 CHECK: `/bin/sh scripts/gates/noblock.sh` OK — the toggle reaches no collaborator, spawns nothing, and reads no clock.
+- [x] 7.8 Run the group tests — no regressions, and state that no refactor was needed or name the one performed.
 
 ## 8. Clicking a section
 <!-- kind: behavior -->
@@ -196,6 +196,13 @@ new assertions that passed the moment they were written, rather than going red �
 Each may be legitimate (a property genuinely already held) or may be a scenario whose test
 does not discriminate. The reviewer should decide which, per scenario, rather than assume
 either.
+
+**Also for 10.1: design.md → Decision 13.** Group 7 found that `apply` has no frame width
+with which to resolve "the section the cursor is on or in", and resolves the row list at
+`u16::MAX` instead. That is now a recorded decision with a stated known limit — a section
+body that wraps at the drawn width can resolve to the wrong section, and no fixture exercises
+it because every fixture uses non-wrapping bodies. The reviewer should judge whether the
+limit is acceptable for this change or wants the `Detail`-carried width now.
 
 - [ ] 10.1 CHECK: Dispatch `outside-in-tdd-reviewer` — a fresh agent, not a fork of the implementing session — against proposal.md, all **seven** spec files, design.md, tasks.md, and the diff. Point it first at: whether any of the **122** scenarios has a test that could not go red; whether `sections.len() > 1` is asked in one place or several; and whether the two `Detail` fields are named at all **61** spans.
 - [ ] 10.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a one-line reason, note SUGGESTIONs, and re-run affected tests.

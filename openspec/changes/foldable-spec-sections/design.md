@@ -566,6 +566,36 @@ pass for any bold body span and could not fail if the header lost its role. The 
 assertion for the unselected case is on the row's `kind`; the selected case keeps a cell
 comparison, because `BOLD | REVERSED` equals no other role.
 
+### Decision 13 — `apply` resolves the cursor's section at `u16::MAX`, not at a guessed width
+
+**Discovered during implementation (group 7) and recorded here rather than left in a source
+comment**, because it is a genuine design decision the plan did not anticipate.
+
+`Space` at `Route::Detail` must fold "the section the cursor is on or in", and the cursor is
+`detail.scroll` — an index into `content_lines`' row list. But that row list is
+**width-dependent**: a section body wraps differently at 58 than at 78, so the same
+`detail.scroll` can name a different section at different widths. And `Dashboard::apply`
+carries **no frame width**: Decision 7 states plainly that geometry-dependent resolution is
+`mouse_action`'s job, and `Space` has no geometry to inherit — it is a route dispatch exactly
+like `Action::Next`, not a resolved click.
+
+**Chosen:** derive the row list at `u16::MAX`. At that width `ui::markdown::lines` wraps
+nothing, so the row list `apply` computes agrees with the one actually drawn **whenever no
+section body wraps**. `src/ui/app.rs`'s `TOGGLE_REFERENCE_WIDTH` names it.
+
+**Rejected:** guessing a terminal size (80, or the last drawn width) — a stored width is
+state the render path would have to keep in sync, and `NOBLOCK`/purity aside, a guess that is
+wrong resolves the fold to the wrong section rather than degrading.
+
+**The known limit, stated rather than hidden.** For a section whose body *does* wrap at the
+drawn width, `apply`'s row list is shorter than the drawn one, so a `detail.scroll` deep
+inside a wrapped body can resolve to the section before the one the reader sees emphasised.
+Every fixture in this crate's suite uses short, non-wrapping section bodies — the convention
+`ui::detail::tests::three_spec_detail`'s own comment already records — so no test exercises
+the divergence, which is precisely why it is written down here instead. The honest repair, if
+it ever matters, is to carry the last drawn content width on `Detail` the way `loaded` already
+carries the last read key; that is a change of its own and not this one's.
+
 ## Risks / Trade-offs
 
 - **Two scroll models in one region, chosen by an artifact's file count** → The predicate is
