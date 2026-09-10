@@ -324,13 +324,18 @@ builds until this group lands. See design.md → Decisions D1, D2, D3.
 ## 6. The hit test
 <!-- kind: behavior -->
 
-- [ ] 6.1 RED: extend `ui::layout::tests` so `zone` returns `List` for the heading and padding
+- [x] 6.1 RED: extend `ui::layout::tests` so `zone` returns `List` for the heading and padding
   rows, `Detail` for the divider column 40, and `ListRow`/`DetailTab` at the new offsets, and
   so row 0 resolves to a region rather than `Outside`. Verify: fails at HEAD, where row 0 is
   the frame header and resolves to `Outside`.
-- [ ] 6.2 GREEN: update `zone` to derive through the new `split_frame`, `interior` and
+- [x] 6.2 GREEN: update `zone` to derive through the new `split_frame`, `interior` and
   `split_detail`, adding the divider-column branch per `responsive-layout`'s zone requirement.
-- [ ] 6.3 Update the landed `src/ui/driver.rs` assertions the new geometry falsifies. The
+  `zone` was already deriving through `split_frame`/`split_body`/`interior`/`split_detail`
+  and already resolved row 0 to a region: the only functional gap was the divider-column
+  branch, so 6.1/6.2 were a precise fix rather than a rewrite. The branch reads
+  `split_body`'s own returned divider column — no hardcoded `40`, per `responsive-layout`'s
+  "The divider column is a width branch, not a constant".
+- [x] 6.3 Update the landed `src/ui/driver.rs` assertions the new geometry falsifies. The
   planned pair — `:3646`, which expects `(10, 0)` to be `Action::Ignore` where row 0 is now
   the list region's heading, and `:4303`, which expects the tab bar at `y == 3` where it
   becomes 2 — is **nine tests, not two**, measured after group 4:
@@ -344,10 +349,28 @@ builds until this group lands. See design.md → Decisions D1, D2, D3.
   — `zone`'s two included: `the_zones_tile_the_frame` becomes
   `the_zones_tile_the_frame_at_120_columns` and `degenerate_frames_resolve` becomes
   `degenerate_frames_resolve_without_panicking`.
-- [ ] 6.4 Verify the drawn/hit-test agreement still holds at both widths:
+  Nine driver tests rebaselined, in two categories: the wide detail interior moved from
+  column 41 to 42 (the divider displaced it), and the detail content rows moved (tab bar
+  3 → 2, content 4 → 5, last row 17 → 18). `route_change_shows_in_the_next_frame` and
+  `first_frame_precedes_the_first_poll` needed conceptual rewrites, since the literal
+  `OpenSpec`/`Detail`/border-glyph cells they read no longer exist.
+  Renamed to matrix names: `the_zones_tile_the_frame` →
+  `the_zones_tile_the_frame_at_120_columns`; `below_the_breakpoint_only_the_routed_region` →
+  `..._has_zones`; `the_breakpoint_is_exact_for_zone` →
+  `the_breakpoint_is_exact_for_the_hit_test_too`; `degenerate_frames_resolve` →
+  `degenerate_frames_resolve_without_panicking`; `the_wheel_acts_over_a_border_and_not_the_chrome`
+  → `..._and_not_over_the_chrome`; `the_hit_test_agrees_with_the_drawn_buffer` →
+  `the_hit_test_agrees_with_what_was_drawn`.
+- [x] 6.4 Verify the drawn/hit-test agreement still holds at both widths:
   `cargo test --all-features --lib the_hit_test_agrees_with_the_drawn_buffer` and
   `cargo test --all-features --lib every_drawn_row_is_reported_by_row_at`, run separately.
 
+  **This task's own command is stale by 6.3's rename** and would have matched nothing, which
+  exits 0 — exactly the vacuous-filter failure 10.2 exists to catch. Run
+  `cargo test --all-features --lib the_hit_test_agrees_with_what_was_drawn` (1 passed) and
+  `cargo test --all-features --lib every_drawn_row_is_reported_by_row_at` (1 passed).
+  `ui::layout` 20 passed / 0 failed; `ui::driver` 69 passed / 0 failed. 22 failures remain
+  crate-wide, every one of them group 7's.
 ## 7. Scenarios with no owning task above
 <!-- kind: behavior -->
 
@@ -396,9 +419,12 @@ wrong tier. See design.md → Verification matrix for the test name each must ta
     which design.md → Boundaries already says moves with the interior.
   - `src/testutil.rs` — `tests::cell_reads_symbol_and_style` and
     `tests::render_at_touches_no_directory`, whose fixtures assert the old chrome.
-  - `src/ui/mod.rs` — `ui::tests::wiring::a_refused_capture_is_named_last`, which asserts the
-    literal `OpenSpec` heading string task 3.2 deleted. This one is **not** the load flake the
-    baseline describes: it fails serially, with a non-empty call log.
+  - `src/ui/mod.rs` — `ui::tests::wiring::a_refused_capture_is_named_last` and
+    `ui::tests::wiring::file_mode_opens_the_archive_with_no_binary_present`, which assert the
+    literal `OpenSpec` heading string task 3.2 deleted and the badge's old position beside it.
+    Neither is the load flake the baseline describes: both fail serially, with a non-empty
+    call log. (The second was measured after group 6; the count at group 4 was ten and is
+    eleven.)
 
 ## 8. Documentation sites
 <!-- kind: operational -->
