@@ -119,10 +119,10 @@ pattern is `(?<![A-Za-z0-9_])Section\s*\{` and `:` is not a word character, so
 `list::RowKind::Section {` matches. `TYPES='ArtifactSection'` matches none of them. The name
 is load-bearing, not cosmetic.
 
-- [ ] 4.1 CHECK: Run `SCAN_MIN=1 TYPES='ArtifactSection' /bin/sh scripts/gates/nodefault-ui.sh` and record the span count it reports. `SCAN_MIN` is per invocation, so `ArtifactSection` gets its own floor rather than hiding inside line 45's 206 (measured at `08025d3`: lines 45–49 carry 206, 53, 81, 111, 26).
-- [ ] 4.2 CHANGE: Add a **sixth** `nodefault-ui.sh` line to the `Makefile`'s `gates:` recipe — `SCAN_MIN=<4.1's count> TYPES='ArtifactSection'` — beside the five that already carry their own floors.
-- [ ] 4.3 VERIFY: Plant `impl Default for Section` in `src/ui/app.rs`, confirm the new line exits non-zero naming `ArtifactSection`, remove it, confirm it goes quiet. A separate line is what makes this falsifiable — folded into line 45, a `ArtifactSection` scan matching zero spans would still have printed OK under that line's larger floor.
-- [ ] 4.4 VERIFY: Record the plant in `tests/gate-controls.toml` if the existing `nodefault-ui` control does not already cover the `ArtifactSection` leg, and confirm `cargo test --test gate_controls` green.
+- [x] 4.1 CHECK: Run `SCAN_MIN=1 TYPES='ArtifactSection' /bin/sh scripts/gates/nodefault-ui.sh` and record the span count it reports. `SCAN_MIN` is per invocation, so `ArtifactSection` gets its own floor rather than hiding inside line 45's 206 (measured at `08025d3`: lines 45–49 carry 206, 53, 81, 111, 26).
+- [x] 4.2 CHANGE: Add a **sixth** `nodefault-ui.sh` line to the `Makefile`'s `gates:` recipe — `SCAN_MIN=<4.1's count> TYPES='ArtifactSection'` — beside the five that already carry their own floors.
+- [x] 4.3 VERIFY: Plant `impl Default for ArtifactSection` — **not** `impl Default for Section`, which this line said and which no `ArtifactSection` scan can catch; the type was renamed during review for exactly the reason group 4's own preamble records — in `src/ui/app.rs`, confirm the new line exits non-zero naming `ArtifactSection`, remove it, confirm it goes quiet. A separate line is what makes this falsifiable — folded into line 45, a `ArtifactSection` scan matching zero spans would still have printed OK under that line's larger floor.
+- [x] 4.4 VERIFY: Record the plant in `tests/gate-controls.toml` if the existing `nodefault-ui` control does not already cover the `ArtifactSection` leg, and confirm `cargo test --test gate_controls` green.
 
 ## 5. `content_lines` header rows, bodies, and `section_at`
 <!-- kind: behavior -->
