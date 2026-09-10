@@ -1108,6 +1108,7 @@ mod tests {
                 tab: 0,
                 problems: Vec::new(),
                 loaded: None,
+                expanded: std::collections::BTreeSet::new(),
             },
             refresh: Refresh {
                 requested: false,
@@ -1182,6 +1183,7 @@ mod tests {
                 tab: 0,
                 problems: Vec::new(),
                 loaded: None,
+                expanded: std::collections::BTreeSet::new(),
             }
         );
         assert!(!refresh.requested);
@@ -2169,6 +2171,7 @@ mod tests {
                 tab: 0,
                 problems: Vec::new(),
                 loaded: None,
+                expanded: std::collections::BTreeSet::new(),
             }
         }
 
@@ -2281,6 +2284,7 @@ mod tests {
                     tab,
                     problems: Vec::new(),
                     loaded: None,
+                    expanded: std::collections::BTreeSet::new(),
                 },
                 refresh: crate::ui::app::Refresh {
                     requested: false,
@@ -2727,6 +2731,7 @@ mod tests {
                     tab: 0,
                     problems: Vec::new(),
                     loaded: None,
+                    expanded: std::collections::BTreeSet::new(),
                 },
                 // `agent-launch`: a real repository root and one in-scope, named agent, so
                 // `attribution()` populates `panes` and the four launch arms genuinely reach
@@ -3788,11 +3793,12 @@ mod tests {
                 tab: 0,
                 problems: Vec::new(),
                 loaded: None,
+                expanded: std::collections::BTreeSet::new(),
             }
         }
 
         #[test]
-        fn detail_destructures_into_exactly_five_fields() {
+        fn detail_destructures_into_exactly_six_fields() {
             let d = twenty_line_detail();
             let Detail {
                 sections,
@@ -3800,6 +3806,7 @@ mod tests {
                 tab,
                 problems,
                 loaded,
+                expanded,
             } = &d;
             assert_eq!(sections.len(), 1);
             assert!(sections[0].text.starts_with("- line-00"));
@@ -3807,6 +3814,7 @@ mod tests {
             assert_eq!(*tab, 0);
             assert!(problems.is_empty());
             assert_eq!(*loaded, None);
+            assert!(expanded.is_empty());
         }
 
         #[test]
@@ -3979,6 +3987,7 @@ mod tests {
                     tab: 0,
                     problems: Vec::new(),
                     loaded: None,
+                    expanded: std::collections::BTreeSet::new(),
                 },
                 repo: None,
                 searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
@@ -4022,6 +4031,7 @@ mod tests {
                     tab: 0,
                     problems: Vec::new(),
                     loaded: None,
+                    expanded: std::collections::BTreeSet::new(),
                 },
                 repo: None,
                 searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
@@ -4064,6 +4074,7 @@ mod tests {
                     tab: 0,
                     problems: Vec::new(),
                     loaded: None,
+                    expanded: std::collections::BTreeSet::new(),
                 },
                 repo: None,
                 searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
@@ -4118,6 +4129,7 @@ mod tests {
                     tab: 0,
                     problems: Vec::new(),
                     loaded: None,
+                    expanded: std::collections::BTreeSet::new(),
                 },
                 repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
                 searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
@@ -4387,6 +4399,7 @@ mod tests {
                     tab: 0,
                     problems: Vec::new(),
                     loaded: None,
+                    expanded: std::collections::BTreeSet::new(),
                 },
                 repo: None,
                 searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
@@ -4428,6 +4441,7 @@ mod tests {
                     tab: 0,
                     problems: Vec::new(),
                     loaded: None,
+                    expanded: std::collections::BTreeSet::new(),
                 },
                 repo: None,
                 searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
@@ -4469,6 +4483,7 @@ mod tests {
                     tab: 0,
                     problems: Vec::new(),
                     loaded: None,
+                    expanded: std::collections::BTreeSet::new(),
                 },
                 repo: None,
                 searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
@@ -4531,6 +4546,7 @@ mod tests {
                         tab: 0,
                         problems: Vec::new(),
                         loaded: None,
+                        expanded: std::collections::BTreeSet::new(),
                     },
                     repo: None,
                     searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
@@ -4597,6 +4613,7 @@ mod tests {
                     tab: 0,
                     problems: Vec::new(),
                     loaded: None,
+                    expanded: std::collections::BTreeSet::new(),
                 },
                 repo: None,
                 searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
@@ -4667,6 +4684,7 @@ mod tests {
                     tab: 0,
                     problems: Vec::new(),
                     loaded: None,
+                    expanded: std::collections::BTreeSet::new(),
                 },
                 repo: None,
                 searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
@@ -4799,6 +4817,7 @@ mod tests {
                     tab: 2,
                     problems: Vec::new(),
                     loaded: None,
+                    expanded: std::collections::BTreeSet::new(),
                 },
                 refresh: crate::ui::app::Refresh {
                     requested: false,
@@ -4878,6 +4897,7 @@ mod tests {
                     tab: 2,
                     problems: Vec::new(),
                     loaded: None,
+                    expanded: std::collections::BTreeSet::new(),
                 },
                 refresh: crate::ui::app::Refresh {
                     requested: false,
@@ -5408,6 +5428,7 @@ mod tests {
                     tab: 2,
                     problems: Vec::new(),
                     loaded: None,
+                    expanded: std::collections::BTreeSet::new(),
                 },
                 refresh: crate::ui::app::Refresh {
                     requested: false,
@@ -5459,6 +5480,7 @@ mod tests {
                     tab: 2,
                     problems: Vec::new(),
                     loaded: None,
+                    expanded: std::collections::BTreeSet::new(),
                 },
                 refresh: crate::ui::app::Refresh {
                     requested: false,
@@ -5522,6 +5544,7 @@ mod tests {
                     tab: 0,
                     problems: Vec::new(),
                     loaded: None,
+                    expanded: std::collections::BTreeSet::new(),
                 },
                 refresh: crate::ui::app::Refresh {
                     requested: false,
@@ -5590,6 +5613,7 @@ mod tests {
             let read_first = |p: &std::path::Path| first.read(p);
             d.sync_detail(&read_first);
             d.detail.scroll = 6;
+            d.detail.expanded = std::collections::BTreeSet::from([0]);
             assert_eq!(d.detail.loaded, Some((dir.clone(), 0)));
 
             d.refresh.reload = true;
@@ -5608,6 +5632,11 @@ mod tests {
             assert_eq!(
                 d.detail.scroll, 6,
                 "a forced reload must not move the scroll"
+            );
+            assert_eq!(
+                d.detail.expanded,
+                std::collections::BTreeSet::from([0]),
+                "artifact-content: expanded is unchanged because the key did not change"
             );
             assert!(!d.refresh.reload, "one flag must drive exactly one re-read");
             assert_eq!(d.detail.loaded, Some((dir, 0)));
@@ -5628,6 +5657,7 @@ mod tests {
             let read_first = |p: &std::path::Path| first.read(p);
             d.sync_detail(&read_first);
             d.detail.scroll = 6;
+            d.detail.expanded = std::collections::BTreeSet::from([0]);
 
             d.detail.tab = 1;
             d.refresh.reload = true;
@@ -5642,6 +5672,12 @@ mod tests {
             assert_eq!(
                 d.detail.scroll, 0,
                 "the tab move, not the forced flag, must reset the scroll"
+            );
+            assert!(
+                d.detail.expanded.is_empty(),
+                "artifact-content: the key change resets expanded, attributable to the \
+                 move rather than the flag — the preceding test proves a forced reload \
+                 alone preserves it"
             );
             assert!(!d.refresh.reload);
             assert_eq!(d.detail.loaded, Some((dir, 1)));
@@ -5692,12 +5728,18 @@ mod tests {
             adopted.sync_detail(&read);
             adopted.detail.expanded = std::collections::BTreeSet::from([1]);
             adopted.adopt(fixture::set(
-                vec![fixture::with_artifacts(fixture::active("x", 4, 9), artifacts)],
+                vec![fixture::with_artifacts(
+                    fixture::active("x", 4, 9),
+                    artifacts,
+                )],
                 Vec::new(),
                 Vec::new(),
             ));
             adopted.adopt(fixture::set(
-                vec![fixture::with_artifacts(fixture::active("x", 4, 9), artifacts)],
+                vec![fixture::with_artifacts(
+                    fixture::active("x", 4, 9),
+                    artifacts,
+                )],
                 Vec::new(),
                 Vec::new(),
             ));
@@ -5737,6 +5779,7 @@ mod tests {
                     tab: 0,
                     problems: Vec::new(),
                     loaded: None,
+                    expanded: std::collections::BTreeSet::new(),
                 },
                 refresh: crate::ui::app::Refresh {
                     requested: false,
@@ -5813,6 +5856,7 @@ mod tests {
                     tab: 0,
                     problems: Vec::new(),
                     loaded: None,
+                    expanded: std::collections::BTreeSet::new(),
                 },
                 refresh: crate::ui::app::Refresh {
                     requested: false,
@@ -5963,6 +6007,10 @@ mod tests {
 
             assert!(d.detail.sections.is_empty());
             assert!(d.detail.problems.is_empty());
+            assert!(
+                d.detail.expanded.is_empty(),
+                "artifact-content: no content yet costs no fold state either"
+            );
             assert_eq!(d.detail.loaded, Some((dir, 0)));
             assert_eq!(recorder.calls(), 0);
         }
@@ -6000,6 +6048,7 @@ mod tests {
                     tab: 4,
                     problems: Vec::new(),
                     loaded: None,
+                    expanded: std::collections::BTreeSet::new(),
                 },
                 refresh: crate::ui::app::Refresh {
                     requested: false,
@@ -6046,6 +6095,7 @@ mod tests {
             let read = |p: &std::path::Path| recorder.read(p);
             d.sync_detail(&read);
             assert!(!d.detail.sections.is_empty());
+            d.detail.expanded = std::collections::BTreeSet::from([0]);
 
             d.filter.query = "zzz".to_string();
             d.refresh.reload = true;
@@ -6053,6 +6103,10 @@ mod tests {
 
             assert!(d.detail.sections.is_empty());
             assert!(d.detail.problems.is_empty());
+            assert!(
+                d.detail.expanded.is_empty(),
+                "artifact-content: an empty visible list clears the fold state too"
+            );
             assert_eq!(d.detail.tab, 0);
             assert_eq!(d.detail.scroll, 0);
             assert_eq!(d.detail.loaded, None);
@@ -6079,6 +6133,7 @@ mod tests {
                     tab: 2,
                     problems: vec!["stale problem".to_string()],
                     loaded: Some((std::path::PathBuf::from("/repo/x"), 0)),
+                    expanded: std::collections::BTreeSet::from([1]),
                 },
                 refresh: crate::ui::app::Refresh {
                     requested: false,
@@ -6108,6 +6163,10 @@ mod tests {
             d2.sync_detail(&read2);
             assert!(d2.detail.sections.is_empty());
             assert!(d2.detail.problems.is_empty());
+            assert!(
+                d2.detail.expanded.is_empty(),
+                "artifact-content: the stale fold state over changes::empty_set() is cleared too"
+            );
             assert_eq!(d2.detail.tab, 0);
             assert_eq!(d2.detail.scroll, 0);
             assert_eq!(d2.detail.loaded, None);

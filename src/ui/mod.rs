@@ -725,6 +725,7 @@ mod tests {
                     tab: 0,
                     problems: Vec::new(),
                     loaded: None,
+                    expanded: std::collections::BTreeSet::new(),
                 },
                 refresh: crate::ui::app::Refresh {
                     requested: false,
@@ -874,6 +875,7 @@ mod tests {
                         tab: 0,
                         problems: Vec::new(),
                         loaded: None,
+                        expanded: std::collections::BTreeSet::new(),
                     },
                     refresh: crate::ui::app::Refresh {
                         requested: false,
@@ -1022,6 +1024,7 @@ mod tests {
                         tab: 0,
                         problems: Vec::new(),
                         loaded: None,
+                        expanded: std::collections::BTreeSet::new(),
                     },
                     refresh: crate::ui::app::Refresh {
                         requested: false,
@@ -2042,6 +2045,10 @@ apply:
             assert_eq!(found.detail.scroll, 0);
             assert_eq!(found.detail.tab, 0);
             assert!(found.detail.problems.is_empty());
+            assert!(
+                found.detail.expanded.is_empty(),
+                "detail-scroll: startup carries no fold state either"
+            );
             assert_eq!(found.detail.loaded, None);
             assert!(
                 !found.refresh.reload,
@@ -2075,6 +2082,10 @@ apply:
             assert_eq!(not_found.repo, None);
             assert!(not_found.detail.sections.is_empty());
             assert_eq!(not_found.detail.scroll, 0);
+            assert!(
+                not_found.detail.expanded.is_empty(),
+                "detail-scroll: startup carries no fold state either"
+            );
             assert!(
                 !not_found.refresh.reload,
                 "live-refresh: startup must not force a reload"

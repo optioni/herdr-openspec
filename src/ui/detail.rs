@@ -305,6 +305,7 @@ mod tests {
             tab: 0,
             problems,
             loaded: None,
+            expanded: std::collections::BTreeSet::new(),
         }
     }
 
@@ -1141,6 +1142,7 @@ mod tests {
                     tab,
                     problems: Vec::new(),
                     loaded: None,
+                    expanded: std::collections::BTreeSet::new(),
                 };
                 let lines = content_lines(&d, Some(change), width);
                 // Markdown, not the checklist grammar: a `# heading` renders as one line
@@ -1226,6 +1228,7 @@ mod tests {
                 tab: 0,
                 problems: Vec::new(),
                 loaded: None,
+                expanded: std::collections::BTreeSet::new(),
             };
             let lines = content_lines(&d, Some(change), width);
             assert!(
@@ -1395,6 +1398,7 @@ mod tests {
                     tab: 0,
                     problems: Vec::new(),
                     loaded: None,
+                    expanded: std::collections::BTreeSet::new(),
                 };
                 let lines = content_lines(&d, Some(change), width);
                 assert!(
@@ -1458,6 +1462,7 @@ mod tests {
                 tab: 1,
                 problems: Vec::new(),
                 loaded: None,
+                expanded: std::collections::BTreeSet::new(),
             };
             let lines = content_lines(&d, Some(&change), width);
             // Discriminating: the marked body's first line is the bar,
@@ -1493,6 +1498,7 @@ mod tests {
                 tab: 0,
                 problems: Vec::new(),
                 loaded: None,
+                expanded: std::collections::BTreeSet::new(),
             };
             let lines = content_lines(&d, Some(&change), width);
             let want = crate::ui::markdown::lines(source, width);
@@ -1524,6 +1530,7 @@ mod tests {
                 tab: 7,
                 problems: Vec::new(),
                 loaded: None,
+                expanded: std::collections::BTreeSet::new(),
             };
             let lines = content_lines(&d, Some(&change), width);
             assert_eq!(

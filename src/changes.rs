@@ -7516,6 +7516,7 @@ apply:
                     tab: 0,
                     problems: Vec::new(),
                     loaded: None,
+                    expanded: std::collections::BTreeSet::new(),
                 };
                 let lt_lines =
                     crate::ui::detail::content_lines(&empty_detail, Some(learning_tool), width);

@@ -387,6 +387,7 @@ mod tests {
                 tab: 0,
                 problems: Vec::new(),
                 loaded: None,
+                expanded: std::collections::BTreeSet::new(),
             },
             refresh: crate::ui::app::Refresh {
                 requested: false,
@@ -431,6 +432,7 @@ mod tests {
                 tab: 0,
                 problems: Vec::new(),
                 loaded: None,
+                expanded: std::collections::BTreeSet::new(),
             },
             refresh: crate::ui::app::Refresh {
                 requested: false,
@@ -821,6 +823,7 @@ mod tests {
                 tab: 0,
                 problems: Vec::new(),
                 loaded: None,
+                expanded: std::collections::BTreeSet::new(),
             },
             refresh: crate::ui::app::Refresh {
                 requested: false,
@@ -958,6 +961,7 @@ mod tests {
                 tab: 1,
                 problems: Vec::new(),
                 loaded: None,
+                expanded: std::collections::BTreeSet::new(),
             },
             refresh: crate::ui::app::Refresh {
                 requested: false,
@@ -1183,6 +1187,7 @@ mod tests {
                 tab: base.detail.tab,
                 problems: base.detail.problems,
                 loaded: base.detail.loaded,
+                expanded: std::collections::BTreeSet::new(),
             },
             refresh: crate::ui::app::Refresh {
                 requested: false,
@@ -1273,6 +1278,7 @@ mod tests {
                 tab: 0,
                 problems: Vec::new(),
                 loaded: Some((dir, 0)),
+                expanded: std::collections::BTreeSet::new(),
             },
             refresh: crate::ui::app::Refresh {
                 requested: false,
@@ -1414,6 +1420,7 @@ mod tests {
                 tab: 0,
                 problems: Vec::new(),
                 loaded: None,
+                expanded: std::collections::BTreeSet::new(),
             },
             refresh: crate::ui::app::Refresh {
                 requested: false,
@@ -3371,6 +3378,7 @@ mod tests {
                 tab: 0,
                 problems: Vec::new(),
                 loaded: None,
+                expanded: std::collections::BTreeSet::new(),
             },
             refresh: crate::ui::app::Refresh {
                 requested: false,
@@ -4593,6 +4601,7 @@ mod tests {
                 tab: 0,
                 problems: Vec::new(),
                 loaded: None,
+                expanded: std::collections::BTreeSet::new(),
             },
             refresh: crate::ui::app::Refresh {
                 requested: false,

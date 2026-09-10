@@ -825,6 +825,7 @@ pub(crate) mod testutil {
                     tab: 0,
                     problems: Vec::new(),
                     loaded: None,
+                    expanded: std::collections::BTreeSet::new(),
                 },
                 refresh: crate::ui::app::Refresh {
                     requested: false,

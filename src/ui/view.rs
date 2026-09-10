@@ -859,6 +859,7 @@ mod tests {
             tab: 0,
             problems: Vec::new(),
             loaded: None,
+            expanded: std::collections::BTreeSet::new(),
         }
     }
 
@@ -3691,6 +3692,7 @@ mod tests {
                 tab: 0,
                 problems: Vec::new(),
                 loaded: None,
+                expanded: std::collections::BTreeSet::new(),
             },
             refresh: crate::ui::app::Refresh {
                 requested: false,
@@ -4205,6 +4207,7 @@ mod tests {
                 tab: 0,
                 problems: Vec::new(),
                 loaded: None,
+                expanded: std::collections::BTreeSet::new(),
             },
             refresh: crate::ui::app::Refresh {
                 requested: false,
@@ -4732,6 +4735,7 @@ mod tests {
             tab,
             problems,
             loaded: None,
+            expanded: std::collections::BTreeSet::new(),
         }
     }
 
@@ -6617,6 +6621,7 @@ mod tests {
                 tab: 0,
                 problems: Vec::new(),
                 loaded: None,
+                expanded: std::collections::BTreeSet::new(),
             },
         );
         d.file_mode = true;
