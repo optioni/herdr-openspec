@@ -24,8 +24,9 @@ planning-review.md → Reviewed Against against `git log` first, as the apply fl
 | Check | Command | Result at HEAD |
 |---|---|---|
 | Spec scenarios in this change | `grep -rc '^#### Scenario:' openspec/changes/foldable-spec-sections/specs/*/spec.md \| awk -F: '{s+=$2} END {print s}'` | **122** (artifact-content 28, artifact-folds 18, detail-scroll 29, list-selection 15, mouse-input 13, responsive-layout 8, view-palette 11) |
-| `Detail { … }` literal/pattern spans | `grep -rn 'Detail {' src/ \| grep -v 'struct Detail' \| wc -l` | **61** (was 60 at `027db45`) — every one must name the new field |
-| `.source` references under `src/ui/` | `grep -rc '\.source\b' src/ui/*.rs \| grep -v ':0'` | app.rs 31, detail.rs 7, driver.rs 6, view.rs **4** (was 5), mod.rs 3, tasks.rs 1 — **52** in all, was 53 |
+| `Detail { … }` literal/pattern spans | `grep -rn 'Detail {' src/ \| grep -v 'struct Detail' \| wc -l` | **61** (was 60 at `027db45`) — every one must name the new field. **The command over-counts**: it also matches `Route::Detail {`, which is a `match`/`if` arm and not a `Detail` construction. At `08025d3` one such line existed (`src/ui/app.rs:385`), so the genuine span count was **60**; group 0's own control added a second (`src/ui/driver.rs`), and group 2's fixture a genuine one, so the command reports **63** afterwards for **61** genuine spans. Filter with `\| grep -v 'Route::Detail {'` when the exact figure matters (measured in group 2) |
+| `.source` references under `src/ui/` | `grep -rc '\.source\b' src/ui/*.rs \| grep -v ':0'` | app.rs 31, detail.rs 7, driver.rs 6, view.rs **4** (was 5), mod.rs 3, tasks.rs 1 — **52** in all, was 53. **Zero** after group 2 |
+| `Detail` construction sites outside `src/ui/` | `grep -rn 'Detail {' src/lib.rs src/changes.rs` | **two** — `src/lib.rs`'s `testutil` dashboard and `src/changes.rs`'s width test. Group 2's manifest missed both plus `src/ui/list.rs`'s `empty_detail`; the crate cannot compile with a renamed field unless all three are updated, so any future `Detail` field change must include them |
 | Fold glyph pair in `src/ui/list.rs`'s `section_row_text` | `grep -n "if collapsed" src/ui/list.rs` | **`▸` collapsed, `▾` open** — `pane-chrome` D6 landed, so Decision 9's conditional is resolved and this change ships that pair |
 | `Zone` variant count | `sed -n '/pub enum Zone/,/^}/p' src/ui/layout.rs` | **five** — unchanged by `pane-chrome`, so group 8 still adds the sixth |
 | Roles carrying no modifier | `src/ui/palette.rs`'s own table test | **seven**, not nine — `pane-chrome` removed `HeaderPath` and `RegionBorder` from that list. Task 1.1 asserts seven |
@@ -46,6 +47,14 @@ planning-review.md → Reviewed Against against `git log` first, as the apply fl
 question planning-review.md left to the user: this change is additive onto its new shapes and
 inherits its glyph decision (Decision 9). No sibling change is in flight against
 `src/ui/layout.rs` or `src/ui/palette.rs`.
+
+**Group 1 ran before group 0**, and the reason is worth recording rather than
+rediscovering: task 0.3 asserts the third header row carries the selected style, and
+`view-palette` requires that be compared against `palette::style(Role::DetailSectionSelected)`
+rather than a `Modifier` written at the call site — while task 0.4 requires a control that
+compiles and returns `Ok`. Naming the role before it exists is a compile error, which would
+have made 0.4 unrunnable. Group 1 is the only group this paragraph already marks as eligible
+to run alongside group 0, so this is within the plan's own ordering.
 
 Groups 2, 3, 7, and 8 all write `src/ui/app.rs`, and groups 5 and 6 depend on
 the types those groups add, so the chain 2 → 3 → 5 → 6 → 7 → 8 is genuinely sequential — one
@@ -77,13 +86,13 @@ frame, which no unit test sees.
 ## 2. `ArtifactSection`, `Detail.sections`, and `sync_detail`
 <!-- kind: behavior -->
 
-- [ ] 2.1 RED: Write the label-rule tests for artifact-folds :: `The label derivation is total over adversarial paths` — the six paths the scenario names, asserting `a`, `b`, `notes.md`, `spec.md`, `spec.md`, and the empty string.
-- [ ] 2.2 RED: Write artifact-folds :: `The three spec files of a change become three labelled sections`, `A single-file artifact is one section and is not foldable`, `An artifact with no resolved paths has no sections`, and `An unreadable file drops its section and keeps its siblings`.
-- [ ] 2.3 GREEN: Add `pub struct ArtifactSection { pub label: String, pub text: String }` to `src/ui/app.rs` and the label function, per design.md → Decision 5.
-- [ ] 2.4 GREEN: Replace `Detail.source: String` with `sections: Vec<ArtifactSection>` and rewrite `sync_detail` step 4 to push one section per successful read, with no separator inserted (artifact-content :: `A multi-file artifact is concatenated in path order with a separating newline`, whose body this change rewrites).
-- [ ] 2.5 GREEN: Update the 61 `Detail { … }` spans the baseline counted and the `.source` references it counted — 31 in `app.rs` and 21 outside it, 52 across `src/ui/`. Re-run the two counting commands afterwards; both must report the new field and no `source`.
-- [ ] 2.6 RED→GREEN: Re-assert on `sections` the five `sync_detail` scenarios that need no `expanded` — artifact-content :: `The selected tab's file is read once and reused`, `Switching the tab re-reads, and so does switching the change`, `Two changes with the same name are distinguished by directory`, `A multi-file artifact is concatenated in path order with a separating newline` (rewritten per the spec's new body), and `An unreadable file names its reason and does not lose its siblings` (extended with the not-foldable assertion). The four scenarios that assert `expanded` belong to group 3, which is where that field exists.
-- [ ] 2.7 Run the group tests — no regressions, and state that no refactor was needed or name the one performed. Group 2 reshapes `Detail` across six files, so this is the least plausible silent case.
+- [x] 2.1 RED: Write the label-rule tests for artifact-folds :: `The label derivation is total over adversarial paths` — the six paths the scenario names, asserting `a`, `b`, `notes.md`, `spec.md`, `spec.md`, and the empty string.
+- [x] 2.2 RED: Write artifact-folds :: `The three spec files of a change become three labelled sections`, `A single-file artifact is one section and is not foldable`, `An artifact with no resolved paths has no sections`, and `An unreadable file drops its section and keeps its siblings`.
+- [x] 2.3 GREEN: Add `pub struct ArtifactSection { pub label: String, pub text: String }` to `src/ui/app.rs` and the label function, per design.md → Decision 5.
+- [x] 2.4 GREEN: Replace `Detail.source: String` with `sections: Vec<ArtifactSection>` and rewrite `sync_detail` step 4 to push one section per successful read, with no separator inserted (artifact-content :: `A multi-file artifact is concatenated in path order with a separating newline`, whose body this change rewrites).
+- [x] 2.5 GREEN: Update the 61 `Detail { … }` spans the baseline counted and the `.source` references it counted — 31 in `app.rs` and 21 outside it, 52 across `src/ui/`. Re-run the two counting commands afterwards; both must report the new field and no `source`.
+- [x] 2.6 RED→GREEN: Re-assert on `sections` the five `sync_detail` scenarios that need no `expanded` — artifact-content :: `The selected tab's file is read once and reused`, `Switching the tab re-reads, and so does switching the change`, `Two changes with the same name are distinguished by directory`, `A multi-file artifact is concatenated in path order with a separating newline` (rewritten per the spec's new body), and `An unreadable file names its reason and does not lose its siblings` (extended with the not-foldable assertion). The four scenarios that assert `expanded` belong to group 3, which is where that field exists.
+- [x] 2.7 Run the group tests — no regressions, and state that no refactor was needed or name the one performed. Group 2 reshapes `Detail` across six files, so this is the least plausible silent case.
 
 ## 3. `Detail.expanded` and the fold reset
 <!-- kind: behavior -->
