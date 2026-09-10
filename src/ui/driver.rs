@@ -3615,6 +3615,65 @@ mod tests {
         list_interior(area, route).y + offset
     }
 
+    /// The detail region's content area for `area` at `route` —
+    /// `foldable-spec-sections`' addition, `split_detail`'s third rectangle
+    /// rather than its first (`tab_bar_row`'s sibling).
+    fn detail_content_area(area: Rect, route: Route) -> Rect {
+        let (body, _) = crate::ui::layout::split_frame(area);
+        let (_, divider, detail_area) = crate::ui::layout::split_body(body, route);
+        crate::ui::layout::split_detail(crate::ui::layout::interior(
+            detail_area.expect("a detail region is drawn"),
+            crate::ui::layout::detail_gutters(divider),
+        ))
+        .2
+    }
+
+    /// A `Route::Detail` dashboard whose selected artifact resolves to
+    /// three sections, mirroring `ui::app::tests::foldable_dashboard` /
+    /// `ui::detail::tests::three_spec_detail` — a reader who has seen either
+    /// recognises this one. `sections` is passed in rather than fixed, so a
+    /// scenario that needs a multi-line body can supply one.
+    fn foldable_dashboard(
+        sections: Vec<ArtifactSection>,
+        expanded: std::collections::BTreeSet<usize>,
+        scroll: usize,
+    ) -> Dashboard {
+        let change =
+            crate::changes::fixture::with_artifacts(crate::changes::fixture::active("s0", 0, 1), &[]);
+        let mut d = dashboard_with_change("/repo", "unused", 0, 0);
+        d.changes = crate::changes::fixture::set(vec![change], Vec::new(), Vec::new());
+        d.selected = 1;
+        d.route = Route::Detail;
+        d.detail = crate::ui::app::Detail {
+            sections,
+            scroll,
+            tab: 0,
+            problems: Vec::new(),
+            loaded: None,
+            expanded,
+        };
+        d
+    }
+
+    /// The three short, non-wrapping sections `ui::app::tests::three_spec_detail`
+    /// and `ui::detail::tests::three_spec_detail` already fix for the same shape.
+    fn three_spec_sections() -> Vec<ArtifactSection> {
+        vec![
+            ArtifactSection {
+                label: "degraded-coverage".to_string(),
+                text: "one\n".to_string(),
+            },
+            ArtifactSection {
+                label: "markdown-render".to_string(),
+                text: "two\n".to_string(),
+            },
+            ArtifactSection {
+                label: "tasks-checklist".to_string(),
+                text: "three\n".to_string(),
+            },
+        ]
+    }
+
     #[test]
     fn mouse_action_is_total() {
         // `mouse-input`: "Resolution is total over adversarial geometry".
@@ -4031,6 +4090,19 @@ mod tests {
             applied.apply(action);
             assert_eq!(applied, before, "({column}, {row}) changed the dashboard");
         }
+
+        // `foldable-spec-sections`: a press below the last drawn line of a
+        // foldable artifact — three collapsed sections draw three rows, so
+        // an empty region under them is not a fourth section.
+        let folded =
+            foldable_dashboard(three_spec_sections(), std::collections::BTreeSet::new(), 0);
+        let content = detail_content_area(WIDE, Route::Detail);
+        let past_last_row = content.y + 3;
+        let action = mouse_action(&folded, WIDE, &left(content.x, past_last_row));
+        assert_eq!(action, Action::Ignore, "past the last drawn content row");
+        let mut applied = folded.clone();
+        applied.apply(action);
+        assert_eq!(applied, folded, "changed the dashboard");
     }
 
     #[test]
@@ -4054,6 +4126,173 @@ mod tests {
             assert_ne!(action, Action::LaunchContinue);
             assert_ne!(action, Action::LaunchArchive);
             assert_ne!(action, Action::FocusAgent);
+        }
+
+        // `foldable-spec-sections`: the same five kinds over a drawn
+        // artifact-section header row — task 8.2's extension.
+        let folded = foldable_dashboard(three_spec_sections(), std::collections::BTreeSet::new(), 0);
+        let content = detail_content_area(WIDE, Route::Detail);
+        let header_row = content.y + 1;
+        for kind in [
+            MouseEventKind::Down(MouseButton::Right),
+            MouseEventKind::Down(MouseButton::Middle),
+            MouseEventKind::Up(MouseButton::Left),
+            MouseEventKind::Drag(MouseButton::Left),
+            MouseEventKind::Moved,
+        ] {
+            let action = mouse_action(&folded, WIDE, &m(kind, content.x, header_row));
+            assert_eq!(action, Action::Ignore, "{kind:?} over a header row");
+            assert_ne!(action, Action::LaunchApply);
+            assert_ne!(action, Action::LaunchContinue);
+            assert_ne!(action, Action::LaunchArchive);
+            assert_ne!(action, Action::FocusAgent);
+        }
+    }
+
+    #[test]
+    fn a_detail_header_click_equals_space() {
+        // `mouse-input`: "A click on an artifact-section header folds it
+        // exactly as `Space` does".
+        for (width, height) in [(120u16, 40u16), (60, 40)] {
+            let area = Rect::new(0, 0, width, height);
+            let content = detail_content_area(area, Route::Detail);
+            // Every section starts collapsed, so the content rows are the
+            // three headers in order; the second content row is the second
+            // header.
+            let row = content.y + 1;
+
+            let mut clicked =
+                foldable_dashboard(three_spec_sections(), std::collections::BTreeSet::new(), 0);
+            let action = mouse_action(&clicked, area, &left(content.x, row));
+            assert_eq!(
+                action,
+                Action::Click(Target::DetailHeader { line: 1, section: 1 }),
+                "{width}x{height}"
+            );
+
+            clicked.apply(action);
+            assert!(
+                clicked.detail.expanded.contains(&1),
+                "{width}x{height}: opened"
+            );
+            assert_eq!(clicked.detail.scroll, 1, "{width}x{height}: cursor on the header");
+
+            // Equal, field for field, to `Space` at `Route::Detail` with the
+            // cursor already on that header.
+            let mut spaced =
+                foldable_dashboard(three_spec_sections(), std::collections::BTreeSet::new(), 1);
+            spaced.apply(Action::ToggleSection);
+            assert_eq!(clicked, spaced, "{width}x{height}: field for field");
+
+            // A second click folds it again.
+            let unfold = mouse_action(&clicked, area, &left(content.x, row));
+            clicked.apply(unfold);
+            assert!(
+                !clicked.detail.expanded.contains(&1),
+                "{width}x{height}: folded again"
+            );
+        }
+
+        // The same press at `Route::List` on the 120-column frame — where
+        // the wide layout draws both regions — returns and applies the same
+        // action, so the detail region's headers are clickable at either
+        // route.
+        let content = detail_content_area(WIDE, Route::List);
+        let row = content.y + 1;
+        let mut at_list =
+            foldable_dashboard(three_spec_sections(), std::collections::BTreeSet::new(), 0);
+        at_list.route = Route::List;
+        let mut at_detail =
+            foldable_dashboard(three_spec_sections(), std::collections::BTreeSet::new(), 0);
+        let action_at_list = mouse_action(&at_list, WIDE, &left(content.x, row));
+        let action_at_detail = mouse_action(&at_detail, WIDE, &left(content.x, row));
+        assert_eq!(action_at_list, action_at_detail);
+        at_list.apply(action_at_list);
+        assert!(at_list.detail.expanded.contains(&1));
+    }
+
+    #[test]
+    fn a_body_click_moves_the_cursor_and_folds_nothing() {
+        // `mouse-input`: "A click in an open section's body moves the
+        // detail cursor and folds nothing".
+        let sections = vec![
+            ArtifactSection {
+                label: "degraded-coverage".to_string(),
+                text: "one\n".to_string(),
+            },
+            ArtifactSection {
+                label: "markdown-render".to_string(),
+                text: (0..5).map(|i| format!("line-{i:02}\n")).collect(),
+            },
+            ArtifactSection {
+                label: "tasks-checklist".to_string(),
+                text: "three\n".to_string(),
+            },
+        ];
+        for (width, height) in [(120u16, 40u16), (60, 40)] {
+            let area = Rect::new(0, 0, width, height);
+            let content = detail_content_area(area, Route::Detail);
+
+            let mut dashboard =
+                foldable_dashboard(sections.clone(), std::collections::BTreeSet::from([1]), 0);
+            // Rows: 0 = header 0 (collapsed), 1 = header 1 (open), 2..7 =
+            // "line-00".."line-04", 7 = header 2 (collapsed). The third
+            // rendered body line, "line-02", is content-line index 4.
+            let row = content.y + 4;
+
+            let action = mouse_action(&dashboard, area, &left(content.x, row));
+            assert_eq!(
+                action,
+                Action::Click(Target::DetailLine(4)),
+                "{width}x{height}"
+            );
+
+            let before = dashboard.clone();
+            dashboard.apply(action);
+            assert_eq!(dashboard.detail.scroll, 4, "{width}x{height}");
+            assert_eq!(
+                dashboard.detail.expanded, before.detail.expanded,
+                "{width}x{height}: nothing folded"
+            );
+            assert_eq!(dashboard.route, before.route, "{width}x{height}");
+            assert_eq!(dashboard.selected, before.selected, "{width}x{height}");
+            assert_eq!(dashboard.detail.tab, before.detail.tab, "{width}x{height}");
+
+            // A `ToggleSection` given immediately afterwards folds section 1,
+            // because the click left the cursor inside it.
+            dashboard.apply(Action::ToggleSection);
+            assert!(
+                !dashboard.detail.expanded.contains(&1),
+                "{width}x{height}: folded by the cursor the click left behind"
+            );
+        }
+    }
+
+    #[test]
+    fn a_click_on_a_non_foldable_tab_is_inert() {
+        // `mouse-input`: "A click on a non-foldable tab's content is inert".
+        let sections = vec![ArtifactSection {
+            label: String::new(),
+            text: (0..20).map(|i| format!("- line-{i:02}\n")).collect(),
+        }];
+        for (width, height) in [(120u16, 40u16), (60, 40)] {
+            let area = Rect::new(0, 0, width, height);
+            let dashboard = foldable_dashboard(sections.clone(), std::collections::BTreeSet::new(), 0);
+            assert!(!dashboard.detail.foldable(), "{width}x{height}: one section");
+
+            let content = detail_content_area(area, Route::Detail);
+            let before = dashboard.clone();
+            for row in [
+                content.y,
+                content.y + content.height / 2,
+                content.y + content.height - 1,
+            ] {
+                let action = mouse_action(&dashboard, area, &left(content.x, row));
+                assert_eq!(action, Action::Ignore, "{width}x{height} row {row}");
+                let mut applied = dashboard.clone();
+                applied.apply(action);
+                assert_eq!(applied, before, "{width}x{height} row {row}");
+            }
         }
     }
 

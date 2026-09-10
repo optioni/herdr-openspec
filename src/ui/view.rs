@@ -579,8 +579,10 @@ mod tests {
         use crate::changes::fixture;
         use crate::testutil::render_at;
         use crate::ui::app::{Dashboard, Route};
+        use crate::ui::detail::content_lines;
         use crate::ui::layout::{
-            Gutters, Zone, detail_gutters, interior, split_body, split_frame, viewport, zone,
+            Gutters, Zone, detail_gutters, interior, scroll_offset, split_body, split_frame,
+            viewport, zone,
         };
         use crate::ui::list::{row_at, rows};
 
@@ -729,6 +731,40 @@ mod tests {
                                         );
                                     }
                                 }
+                                Zone::DetailRow { content, row } => {
+                                    // `foldable-spec-sections`: checked against the drawn
+                                    // pixels, resolved through the same offset the draw path
+                                    // used — never only against the geometry.
+                                    let rows = content_lines(
+                                        &dashboard.detail,
+                                        dashboard.selected_change(),
+                                        content.width,
+                                    );
+                                    let content_offset = if dashboard.detail.foldable() {
+                                        viewport(rows.len(), dashboard.detail.scroll, content.height)
+                                    } else {
+                                        scroll_offset(
+                                            rows.len(),
+                                            dashboard.detail.scroll,
+                                            content.height,
+                                        )
+                                    };
+                                    let text = rows
+                                        .get(content_offset + row as usize)
+                                        .map(|r| r.text())
+                                        .unwrap_or_default();
+                                    let column = (x - content.x) as usize;
+                                    let expected = text
+                                        .chars()
+                                        .nth(column)
+                                        .map(|c| c.to_string())
+                                        .unwrap_or_else(|| " ".to_string());
+                                    assert_eq!(
+                                        symbol, expected,
+                                        "{width}x{height} {route:?} ({x}, {y}) is a DetailRow \
+                                         holding a character from content_lines' own output"
+                                    );
+                                }
                                 Zone::DetailTab { .. } | Zone::Outside => {}
                             }
                         }
@@ -761,7 +797,7 @@ mod tests {
                             for x in 0..width {
                                 assert!(!matches!(
                                     zone(area, route, x, y),
-                                    Zone::Detail | Zone::DetailTab { .. }
+                                    Zone::Detail | Zone::DetailTab { .. } | Zone::DetailRow { .. }
                                 ));
                             }
                         }

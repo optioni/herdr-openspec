@@ -417,15 +417,31 @@ mod tests {
             split_detail(inner).0
         }
 
+        /// The detail region's content area, derived the same way —
+        /// `foldable-spec-sections`' addition, `split_detail`'s third
+        /// rectangle rather than its first.
+        fn detail_content(area: Rect, route: Route) -> Rect {
+            let (body, _) = split_frame(area);
+            let inner = interior(
+                split_body(body, route).2.expect("a detail region is drawn"),
+                Gutters::LeftOnly,
+            );
+            split_detail(inner).2
+        }
+
         #[test]
         fn the_zones_tile_the_frame_at_120_columns() {
             let area = Rect::new(0, 0, 120, 40);
             for route in [Route::List, Route::Detail] {
                 let list = list_interior(area, route);
                 let bar = detail_bar(area, route);
+                // `foldable-spec-sections`: derived independently of `zone`'s
+                // own answer, the same way `list`/`bar` already are.
+                let content = detail_content(area, route);
                 let last_row = list.height - 1;
+                let last_content_row = content.height - 1;
 
-                let cases: [((u16, u16), Zone); 10] = [
+                let cases: [((u16, u16), Zone); 12] = [
                     ((0, 0), Zone::List),
                     ((0, 39), Zone::Outside),
                     ((0, 1), Zone::List),
@@ -447,6 +463,17 @@ mod tests {
                     ((bar.x, bar.y - 1), Zone::Detail),
                     ((bar.x, bar.y), Zone::DetailTab { bar, column: 0 }),
                     ((bar.x, bar.y + 1), Zone::Detail),
+                    (
+                        (content.x, content.y),
+                        Zone::DetailRow { content, row: 0 },
+                    ),
+                    (
+                        (content.x, content.y + last_content_row),
+                        Zone::DetailRow {
+                            content,
+                            row: last_content_row,
+                        },
+                    ),
                     ((200, 5), Zone::Outside),
                 ];
                 for ((column, row), expected) in cases {
@@ -473,8 +500,16 @@ mod tests {
             );
             assert!(matches!(
                 zone(area, Route::Detail, list.x, list.y),
-                Zone::Detail | Zone::DetailTab { .. }
+                Zone::Detail | Zone::DetailTab { .. } | Zone::DetailRow { .. }
             ));
+
+            // `foldable-spec-sections`: the narrow `DetailRow` leg — the new
+            // variant exists on both sides of the breakpoint.
+            let content = detail_content(area, Route::Detail);
+            assert_eq!(
+                zone(area, Route::Detail, content.x, content.y),
+                Zone::DetailRow { content, row: 0 }
+            );
 
             // No point anywhere in the body resolves to the other route's region.
             let (body, _) = split_frame(area);
@@ -490,7 +525,7 @@ mod tests {
                     assert!(
                         !matches!(
                             zone(area, Route::List, column, row),
-                            Zone::Detail | Zone::DetailTab { .. }
+                            Zone::Detail | Zone::DetailTab { .. } | Zone::DetailRow { .. }
                         ),
                         "({column}, {row}) is a detail zone at Route::List"
                     );
@@ -507,7 +542,10 @@ mod tests {
                 let resolved = zone(area, Route::Detail, 10, 5);
                 match mode(width) {
                     LayoutMode::Narrow => assert!(
-                        matches!(resolved, Zone::Detail | Zone::DetailTab { .. }),
+                        matches!(
+                            resolved,
+                            Zone::Detail | Zone::DetailTab { .. } | Zone::DetailRow { .. }
+                        ),
                         "width {width} resolved {resolved:?}"
                     ),
                     LayoutMode::Wide => assert!(
@@ -543,10 +581,24 @@ mod tests {
                                     "{area:?} has no body, so ({column}, {row}) is Outside"
                                 );
                             }
+                            // `foldable-spec-sections`: a detail region too
+                            // short to hold a content area contributes no
+                            // clickable row at all — never a zero-sized
+                            // `DetailRow`.
+                            if let Zone::DetailRow { content, .. } = resolved {
+                                assert!(
+                                    content.width > 0 && content.height > 0,
+                                    "{area:?} ({column}, {row}) is a zero-sized DetailRow: \
+                                     {content:?}"
+                                );
+                            }
                         }
                     }
                     // Total over the extremes too.
-                    let _ = zone(area, route, u16::MAX, u16::MAX);
+                    let extreme = zone(area, route, u16::MAX, u16::MAX);
+                    if let Zone::DetailRow { content, .. } = extreme {
+                        assert!(content.width > 0 && content.height > 0);
+                    }
                     let _ = zone(area, route, 0, 0);
                 }
             }
