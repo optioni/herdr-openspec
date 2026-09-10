@@ -97,11 +97,11 @@ frame, which no unit test sees.
 ## 3. `Detail.expanded` and the fold reset
 <!-- kind: behavior -->
 
-- [ ] 3.1 RED: Write artifact-folds :: `A tab move forgets the fold, a forced reload does not` — three dashboards, one per path (tab move, forced reload, adopted refresh).
-- [ ] 3.2 GREEN: Add `expanded: std::collections::BTreeSet<usize>` to `Detail`, clear it in `sync_detail` on exactly the condition that resets `detail.scroll`, and leave it untouched in `adopt` (design.md → Decision 4).
-- [ ] 3.3 GREEN: Update the same 61 spans for the second new field, and extend the four scenarios that assert `expanded` — artifact-content :: `A forced reload re-reads the same key and keeps the scroll`, `A tab move under a forced reload still resets the scroll`, `An artifact with no resolved paths reads nothing at all`, and `An empty visible list clears the detail` — plus detail-scroll :: `Startup leaves the detail empty and unscrolled`.
-- [ ] 3.4 CHECK: Persistence gate — confirm no migration, backfill, cache invalidation, or index rebuild applies (design.md → Persistence and Rollout), and that the plugin's writes are still exactly `agent-names.toml`. Run `/bin/sh scripts/gates/readonly-ui.sh`, then plant a `std::fs::write` in `src/ui/app.rs`, confirm it exits non-zero, remove it, confirm it goes quiet. An unchanged `grep -c 'agent-names'` would not catch a *new* write and is not the check.
-- [ ] 3.5 Run the group tests — no regressions, and state that no refactor was needed or name the one performed.
+- [x] 3.1 RED: Write artifact-folds :: `A tab move forgets the fold, a forced reload does not` — three dashboards, one per path (tab move, forced reload, adopted refresh).
+- [x] 3.2 GREEN: Add `expanded: std::collections::BTreeSet<usize>` to `Detail`, clear it in `sync_detail` on exactly the condition that resets `detail.scroll`, and leave it untouched in `adopt` (design.md → Decision 4).
+- [x] 3.3 GREEN: Update the same 61 spans for the second new field, and extend the four scenarios that assert `expanded` — artifact-content :: `A forced reload re-reads the same key and keeps the scroll`, `A tab move under a forced reload still resets the scroll`, `An artifact with no resolved paths reads nothing at all`, and `An empty visible list clears the detail` — plus detail-scroll :: `Startup leaves the detail empty and unscrolled`.
+- [x] 3.4 CHECK: Persistence gate — confirm no migration, backfill, cache invalidation, or index rebuild applies (design.md → Persistence and Rollout), and that the plugin's writes are still exactly `agent-names.toml`. Run `/bin/sh scripts/gates/readonly-ui.sh`, then plant a `std::fs::write` in `src/ui/app.rs`, confirm it exits non-zero, remove it, confirm it goes quiet. An unchanged `grep -c 'agent-names'` would not catch a *new* write and is not the check.
+- [x] 3.5 Run the group tests — no regressions, and state that no refactor was needed or name the one performed.
 
 ## 4. The `NODEFAULT-UI` gate learns `ArtifactSection`
 <!-- kind: operational -->
