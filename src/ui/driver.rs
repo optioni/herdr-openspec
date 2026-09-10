@@ -4508,4 +4508,298 @@ mod tests {
             crate::ui::app::Action::Ignore
         );
     }
+
+    // ---------------------------------------------------------------------
+    // `foldable-spec-sections`' outer-loop acceptance tier (tasks.md group 0).
+    //
+    // Two scenarios are true only of the assembled loop: a fold must read no
+    // file, and the per-frame clamp must leave the cursor on the last *line*
+    // rather than the last *screenful*. Both are about what happens between a
+    // keypress and the next frame, which no unit test sees.
+    //
+    // Built from `changes::fixture` values, a `RecordingReader`, the inert
+    // `FsEvents`/`Refresher`/`AgentPoll`/`Launcher` stubs this module already
+    // uses, and the scripted event source. **No `ScratchDir`** — design.md ->
+    // Test Boundaries grants a real filesystem only to the `ui::load` startup
+    // scenarios.
+    // ---------------------------------------------------------------------
+
+    /// The three paths a `specs/**/*.md` glob resolves to for the fixture
+    /// change, in resolution order. Their capability directories are what
+    /// `artifact-folds` derives the three section labels from.
+    const SPEC_PATHS: [&str; 3] = [
+        "/repo/openspec/changes/foldable/specs/alpha/spec.md",
+        "/repo/openspec/changes/foldable/specs/beta/spec.md",
+        "/repo/openspec/changes/foldable/specs/gamma/spec.md",
+    ];
+
+    /// A reader answering each of [`SPEC_PATHS`] with its own one-line body,
+    /// and recording every call so a fold can be shown to read nothing. Its
+    /// default is an **error**, so a read of any other path shows up as a
+    /// problem row rather than passing silently.
+    fn three_section_reader() -> crate::testutil::RecordingReader {
+        crate::testutil::RecordingReader::new(
+            SPEC_PATHS
+                .iter()
+                .map(|p| {
+                    let label = std::path::Path::new(p)
+                        .parent()
+                        .and_then(|d| d.file_name())
+                        .and_then(|n| n.to_str())
+                        .expect("fixture path has a capability directory")
+                        .to_string();
+                    (std::path::PathBuf::from(p), Ok(format!("# {label} body\n")))
+                })
+                .collect(),
+            Err("no such fixture path".to_string()),
+        )
+    }
+
+    /// A dashboard whose selected change carries one artifact resolving to
+    /// **three** paths, which is what makes it foldable. `route` lets one
+    /// fixture serve both the scenario that opens the detail with `Enter` and
+    /// the one that starts there.
+    fn three_section_dashboard(route: Route) -> Dashboard {
+        let change = crate::changes::fixture::with_artifacts(
+            crate::changes::fixture::active("foldable", 2, 7),
+            &[("specs", &SPEC_PATHS)],
+        );
+        Dashboard {
+            repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
+            searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
+            changes: crate::changes::fixture::set(vec![change], Vec::new(), Vec::new()),
+            route,
+            quit: false,
+            // `list-sections`: 1, not 0 — target 0 is the active header.
+            selected: 1,
+            filter: crate::ui::app::Filter {
+                query: String::new(),
+                active: false,
+            },
+            detail: crate::ui::app::Detail {
+                source: String::new(),
+                scroll: 0,
+                tab: 0,
+                problems: Vec::new(),
+                loaded: None,
+            },
+            refresh: crate::ui::app::Refresh {
+                requested: false,
+                reload: false,
+                startup: Vec::new(),
+                problems: Vec::new(),
+            },
+            agents: crate::agents::AgentSnapshot {
+                agents: Vec::new(),
+                reachable: false,
+                stalled: false,
+                problem: None,
+            },
+            agent_names: crate::state::Mapping::default(),
+            launch: crate::ui::app::Launch {
+                pending: None,
+                in_flight: false,
+                problems: Vec::new(),
+            },
+            sections: crate::ui::app::Sections {
+                collapsed: std::collections::BTreeSet::new(),
+            },
+            file_mode: false,
+        }
+    }
+
+    /// What one acceptance run leaves behind: the dashboard as the loop left
+    /// it, every path the reader was asked for in order, the final buffer, and
+    /// the loop's own summary.
+    struct AcceptanceRun {
+        dashboard: Dashboard,
+        reads: Vec<std::path::PathBuf>,
+        buffer: ratatui::buffer::Buffer,
+        summary: LoopSummary,
+    }
+
+    /// Run the fixture's loop over `script` at `width` x `height`. One place, so
+    /// the three scenarios below differ only in their script and their size.
+    fn run_three_section_loop(
+        route: Route,
+        script: Vec<ratatui::crossterm::event::Event>,
+        width: u16,
+        height: u16,
+    ) -> AcceptanceRun {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        let mut dashboard = three_section_dashboard(route);
+        let mut events = Script::new(script.into_iter().map(|e| Ok(Some(e))).collect());
+        let recorder = three_section_reader();
+        let read = |p: &std::path::Path| recorder.read(p);
+
+        let mut fs = crate::watch::none();
+        let mut refresher = crate::refresh::none();
+        let mut agents = crate::agents::none();
+        let mut launcher = crate::launch::none();
+        let mut live = crate::ui::driver::Live {
+            fs: &mut *fs,
+            refresher: &mut *refresher,
+            agents: &mut *agents,
+            launcher: &mut *launcher,
+        };
+        let summary = run_loop(
+            &mut terminal,
+            &mut dashboard,
+            &mut events,
+            &mut live,
+            &read,
+            Duration::from_millis(1),
+        )
+        .expect("loop ends");
+
+        AcceptanceRun {
+            dashboard,
+            reads: recorder.paths(),
+            buffer: terminal.backend().buffer().clone(),
+            summary,
+        }
+    }
+
+    /// The content area's first column at a given frame width: column 42 in the
+    /// wide layout's detail region, column 1 in the narrow one. Derived from the
+    /// breakpoint rather than written twice.
+    fn content_x(width: u16) -> u16 {
+        if width >= 100 { 42 } else { 1 }
+    }
+
+    /// The content area's first row, which `pane-chrome` put below the region's
+    /// heading row, its padding row, the tab bar, the rule, and the content
+    /// padding row.
+    const CONTENT_Y: u16 = 5;
+
+    /// The text of the content row `n` rows below the content area's first,
+    /// trimmed of the padding `pad_or_truncate_right` adds.
+    fn content_row(run: &AcceptanceRun, width: u16, n: u16) -> String {
+        row_text(&run.buffer, CONTENT_Y + n)
+            .chars()
+            .skip(content_x(width) as usize)
+            .collect::<String>()
+            .trim_end()
+            .to_string()
+    }
+
+    /// `artifact-folds` :: "A fold reads no file".
+    ///
+    /// The acceptance scenario for the whole point of the fold: it is a view
+    /// operation over already-read text, so four of them must not touch the
+    /// reader. `Enter` opens the detail and is what does read — once per
+    /// resolved path — and nothing after it reads at all.
+    #[test]
+    fn a_fold_reads_no_file() {
+        let run = run_three_section_loop(
+            Route::List,
+            vec![
+                press(KeyCode::Enter, KeyModifiers::NONE),
+                press(KeyCode::Char(' '), KeyModifiers::NONE),
+                press(KeyCode::Char(' '), KeyModifiers::NONE),
+                press(KeyCode::Char(' '), KeyModifiers::NONE),
+                press(KeyCode::Char(' '), KeyModifiers::NONE),
+                press(KeyCode::Char('q'), KeyModifiers::NONE),
+            ],
+            120,
+            40,
+        );
+
+        // One call per resolved path, in resolution order, and no call after
+        // them: the four folds that follow the `Enter` read nothing.
+        assert_eq!(
+            run.reads,
+            SPEC_PATHS
+                .iter()
+                .map(std::path::PathBuf::from)
+                .collect::<Vec<_>>(),
+            "the three paths once each, and nothing during the folds"
+        );
+
+        // The resulting fold state: four toggles of the section the cursor is
+        // on leave it shut, so the tab reads as three collapsed headers.
+        assert_eq!(content_row(&run, 120, 0), "▸ alpha");
+        assert_eq!(content_row(&run, 120, 1), "▸ beta");
+        assert_eq!(content_row(&run, 120, 2), "▸ gamma");
+        assert_eq!(
+            content_row(&run, 120, 3),
+            "",
+            "no body is drawn beneath a shut section"
+        );
+    }
+
+    /// `detail-scroll` :: "A foldable tab is clamped to its last line, not its
+    /// last screenful".
+    ///
+    /// The second acceptance scenario, and the reason `detail.scroll` becomes a
+    /// cursor at a foldable tab: `layout::scroll_offset` clamps the offset to
+    /// `0` whenever the content fits the region, so three collapsed headers in
+    /// a forty-row pane would leave only the first reachable.
+    #[test]
+    fn a_foldable_tab_is_clamped_to_its_last_line() {
+        for width in [120u16, 60] {
+            let mut script: Vec<ratatui::crossterm::event::Event> = (0..10)
+                .map(|_| press(KeyCode::Char('j'), KeyModifiers::NONE))
+                .collect();
+            script.push(press(KeyCode::Char('q'), KeyModifiers::NONE));
+            let run = run_three_section_loop(Route::Detail, script, width, 40);
+
+            assert_eq!(
+                run.dashboard.detail.scroll, 2,
+                "width {width}: the cursor stops on the last line, not the last screenful"
+            );
+
+            // The third header row is the emphasised one, compared against the
+            // palette rather than against a `Modifier` written here.
+            let selected =
+                crate::ui::palette::style(crate::ui::palette::Role::DetailSectionSelected);
+            assert_eq!(
+                cell(&run.buffer, content_x(width), CONTENT_Y + 2).style(),
+                selected,
+                "width {width}: the cursor's own section header carries the selected role"
+            );
+            // And it is the only row that does, so the assertion discriminates.
+            for n in [0u16, 1] {
+                assert_ne!(
+                    cell(&run.buffer, content_x(width), CONTENT_Y + n).style(),
+                    selected,
+                    "width {width}: header {n} must not be the emphasised one"
+                );
+            }
+        }
+    }
+
+    /// The control for the two acceptance scenarios above (tasks.md 0.4): the
+    /// same fixture, with the script reduced to `q`, draws one frame and returns
+    /// `Ok`. So when either of them fails it is because the behaviour is
+    /// missing, not because the fixture cannot run.
+    #[test]
+    fn the_acceptance_fixture_runs_with_no_behaviour_under_test() {
+        for (route, width) in [
+            (Route::List, 120u16),
+            (Route::Detail, 120),
+            (Route::Detail, 60),
+        ] {
+            let run = run_three_section_loop(
+                route,
+                vec![press(KeyCode::Char('q'), KeyModifiers::NONE)],
+                width,
+                40,
+            );
+            assert_eq!(
+                run.summary,
+                LoopSummary {
+                    frames: 1,
+                    polls: 1
+                },
+                "width {width}: one frame drawn and one poll taken"
+            );
+            // The reader was reachable and answered, so a failing acceptance
+            // assertion above cannot be a mis-wired fixture.
+            if route == Route::Detail {
+                assert_eq!(run.reads.len(), 3, "width {width}: three paths read");
+            }
+        }
+    }
 }
