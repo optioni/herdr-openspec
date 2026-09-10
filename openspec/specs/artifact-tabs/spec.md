@@ -7,8 +7,10 @@ duplicate artifact ids stay two separately selectable tabs, drawn as chips — e
 bare `<id>` padded one space on each side, carrying no digit at any position, though `1`-`9`
 still select the first nine — windowed to whole cells that always
 keep the selected tab on screen, and reduced to a single `no artifacts` placeholder when a
-change declares none. It also defines where the bar sits — the second interior row of the
-detail region, via `split_detail`'s header/tab-bar/content split — and the keys that move it:
+change declares none. It also defines where the bar sits — the detail region interior's own
+first row, via `split_detail`'s tab-bar/rule/content split, below the change header, which
+`detail-header` draws into the region's heading row above this interior entirely — and the
+keys that move it:
 `1`-`9`, `[` and `]` outside filter mode, inert rather than clamped on an out-of-range digit,
 resetting the scroll only when the tab actually changed. Reading the selected tab's file is
 `artifact-content`'s.

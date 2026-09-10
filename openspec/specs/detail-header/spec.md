@@ -1,15 +1,17 @@
 # detail-header Specification
 
 ## Purpose
-Specifies the one bold row at the top of the detail region and its grammar: the selected
-change's name in a padded-or-ellipsised field, its schema in parentheses, and the same
-right-aligned progress cell the list rows use — one implementation, so the header and the row
-can never disagree about a change's progress — with the schema cell and then the progress cell
-dropped whole at named width boundaries so the name is always what survives. It also fixes when
-the row is drawn at all: whenever the detail region is, and never when the visible list is
-empty, where the whole interior is left blank rather than repeating the empty state the list
-region already names. An archived change's header shows its stripped name and no date field;
-the date belongs to `change-rows`.
+Specifies the detail region's own heading row and its grammar: the selected change's name in
+a padded-or-ellipsised field, its schema in parentheses, and the same right-aligned progress
+cell the list rows use — one implementation, so the header and the row can never disagree
+about a change's progress — with the schema cell and then the progress cell dropped whole at
+named width boundaries so the name is always what survives. This heading is bold when the
+detail region is routed and dim otherwise, the same pair every region's heading takes; it is
+drawn above the region's interior, never inside it. It also fixes when the row is drawn at
+all: whenever the detail region is, and never when the visible list is empty, where the whole
+interior is left blank rather than repeating the empty state the list region already names.
+An archived change's header shows its stripped name and no date field; the date belongs to
+`change-rows`.
 
 ## Requirements
 

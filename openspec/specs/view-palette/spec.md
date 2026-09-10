@@ -2,9 +2,11 @@
 
 ## Purpose
 Holds the crate's one semantic-role table: `ui::palette`, a pure total module under `src/ui/`
-mapping a `Role` — a header title, a `file mode` badge, a list row and its degraded kinds, an
-agent badge per `AgentStatus`, a detail header, an active or inactive tab chip, and the
-markdown faces — to a `ratatui::style::Style`, and holding nothing else. It fixes three things
+mapping a `Role` — a region's heading, bold when that region is routed and dim otherwise, the
+rule that separates the two wide-layout regions and underlines the detail region's tab bar, a
+`file mode` badge, a list row and its degraded kinds, an agent badge per `AgentStatus`, an
+active or inactive tab chip, and the markdown faces — to a `ratatui::style::Style`, and
+holding nothing else. It fixes three things
 that were previously written out at render call sites: which modifier each role carries, which
 roles gain a colour and which deliberately carry none, and that a colour is always one of
 `ratatui::style::Color`'s sixteen **named** ANSI variants, never an `Rgb` triple, an
