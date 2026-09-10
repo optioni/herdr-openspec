@@ -58,7 +58,17 @@ fn render_body(frame: &mut Frame, body: Rect, dashboard: &Dashboard) {
         render_list(frame, interior(area, Gutters::Both), dashboard);
     }
     if let Some(area) = detail {
-        render_detail(frame, interior(area, Gutters::LeftOnly), dashboard);
+        // `Gutters::LeftOnly` only at the wide layout, where the divider
+        // (D5) spends the detail region's trailing gutter; below the
+        // breakpoint there is no divider to make room for, so the detail
+        // region keeps both gutters exactly as the narrow list region does
+        // (`the_detail_interior_is_78_columns_at_120_and_58_at_60`).
+        let gutters = if divider.is_some() {
+            Gutters::LeftOnly
+        } else {
+            Gutters::Both
+        };
+        render_detail(frame, area, gutters, dashboard);
     }
     if let Some(col) = divider {
         let style = palette::style(Role::RegionRule);
@@ -69,39 +79,38 @@ fn render_body(frame: &mut Frame, body: Rect, dashboard: &Dashboard) {
     }
 }
 
-/// Draw the change header, the tab bar, and the content area into
-/// `interior`, through `layout::split_detail` — nothing at all when
-/// `Dashboard::visible()` is empty (`selected_change()` is `None`), which is
-/// what leaves every interior cell blank in that state. When a change
-/// **is** selected, all three rows are always drawn: the header and the
-/// tab bar unconditionally, and the content area holds at least one line
-/// because `ui::detail::content_lines` returns `No content yet` rather
-/// than nothing.
-fn render_detail(frame: &mut Frame, interior: Rect, dashboard: &Dashboard) {
+/// Draw the change header into the detail region's own heading row, then
+/// the tab bar, the rule, and the content area into its interior — nothing
+/// at all when `Dashboard::visible()` is empty (`selected_change()` is
+/// `None`), which is what leaves the heading row and every interior cell
+/// blank in that state. When a change **is** selected, all four rows are
+/// always drawn: the header, the tab bar, and the rule unconditionally, and
+/// the content area holds at least one line because
+/// `ui::detail::content_lines` returns `No content yet` rather than
+/// nothing.
+///
+/// `area` is the whole detail **region**, not its interior — mirroring
+/// `render_region`/`render_list`'s own split for the list region. The
+/// heading row sits at `area`'s own first row, sharing the interior's `x`
+/// and `width` (`design.md` -> D2), with the region's blank padding row
+/// between it and the interior `layout::interior` returns
+/// (`detail-header` -> "The header row is drawn into the detail region's
+/// first interior row").
+fn render_detail(frame: &mut Frame, area: Rect, gutters: Gutters, dashboard: &Dashboard) {
     let Some(change) = dashboard.selected_change() else {
         return;
     };
-    // `pane-chrome` (group 1) changes `split_detail`'s own return value from
-    // `(header, tabs, content)` to `(tabs, rule, content)` — the header
-    // moves into the region's heading row (group 4) and a rule row is
-    // inserted (group 4). Until then, reconstruct the prior header row from
-    // `interior`'s own first row so this group's signature change is
-    // compile-only here; the rule is not drawn, which is group 4's task.
+    let region_interior = interior(area, gutters);
     let header = Rect {
-        x: interior.x,
-        y: interior.y,
-        width: interior.width,
-        height: interior.height.min(1),
+        x: region_interior.x,
+        y: area.y,
+        width: region_interior.width,
+        height: area.height.min(1),
     };
-    let rest = Rect {
-        x: interior.x,
-        y: interior.y + header.height,
-        width: interior.width,
-        height: interior.height.saturating_sub(header.height),
-    };
-    let (tabs, _rule, content) = split_detail(rest);
     render_detail_header(frame, header, change, dashboard.route == Route::Detail);
+    let (tabs, rule, content) = split_detail(region_interior);
     render_detail_tabs(frame, tabs, change, dashboard.detail.tab);
+    render_detail_rule(frame, rule);
     render_detail_content(frame, content, dashboard);
 }
 
@@ -153,6 +162,22 @@ fn render_detail_tabs(frame: &mut Frame, tabs: Rect, change: &crate::changes::Ch
         };
         buf.set_string(x, tabs.y, &cell.text, palette::style(role));
     }
+}
+
+/// The horizontal rule beneath the tab bar: `─` repeated across the row's
+/// full width, under `Role::RegionRule` — the same role the wide layout's
+/// column divider carries, since both are chrome that separates content
+/// rather than content itself (`artifact-tabs` -> "The tab bar is the
+/// detail interior's first row, above a rule and a padding row"). Draws
+/// nothing at zero width or zero height.
+fn render_detail_rule(frame: &mut Frame, rule: Rect) {
+    if rule.width == 0 || rule.height == 0 {
+        return;
+    }
+    let text = "─".repeat(rule.width as usize);
+    frame
+        .buffer_mut()
+        .set_string(rule.x, rule.y, &text, palette::style(Role::RegionRule));
 }
 
 /// The content area: the slice of `ui::detail::content_lines`
@@ -1724,11 +1749,12 @@ mod tests {
         // The footer row holds no divider: it is confined to the body.
         assert!(!row_text(&buf120, 19).contains('│'));
         // The detail region has no right gutter: content reaches the frame's own last
-        // column rather than stopping one short of it. `render_detail`'s own change-header
-        // scaffolding (group 4 has not landed) draws into its interior's first row, buffer
-        // row 2, on the same terms every other region's first content row does.
+        // column rather than stopping one short of it. The change header draws into the
+        // region's own heading row, buffer row 0, on the same terms every other region's
+        // heading does — drawn at both routes at the wide layout (`detail-header` -> "The
+        // header is drawn whenever the detail region is drawn").
         assert_ne!(
-            cell(&buf120, 119, 2).symbol(),
+            cell(&buf120, 119, 0).symbol(),
             " ",
             "the detail region's content must reach the frame's last column"
         );
@@ -2525,7 +2551,7 @@ mod tests {
             Route::List,
         );
         let buf120 = render_at(120, 20, &d);
-        assert!(detail_interior_cols(&buf120, 2, 78).contains("add-token-refresh"));
+        assert!(detail_interior_cols(&buf120, 0, 78).contains("add-token-refresh"));
 
         let empty = dashboard_with(Vec::new(), Vec::new(), 0, Route::List);
         let default_style = Cell::default().style();
@@ -3234,52 +3260,55 @@ mod tests {
 
     #[test]
     fn a_combining_mark_inflated_segment_stays_inside_the_detail_region() {
-        // 60-column frame: the detail interior is 58 columns, content starts at row 4,
-        // column 1, and the frame's own right border sits at column 59.
+        // 60-column frame: the detail interior is 58 columns, content starts at row 5,
+        // column 1, and the region's own trailing gutter sits at column 59 — the narrow
+        // layout keeps both gutters, unlike the wide one (D5).
         let d58 = detail_dashboard(combining_mark_overrun_source(58), 0, Route::Detail);
         let buf58 = render_at(60, 20, &d58);
         for x in 1..50u16 {
-            assert_eq!(cell(&buf58, x, 4).symbol(), "a", "x={x}");
+            assert_eq!(cell(&buf58, x, 5).symbol(), "a", "x={x}");
         }
         assert!(
-            cell(&buf58, 50, 4).symbol().starts_with('a'),
+            cell(&buf58, 50, 5).symbol().starts_with('a'),
             "the last cluster of the plain run carries the combining marks: {:?}",
-            cell(&buf58, 50, 4).symbol()
+            cell(&buf58, 50, 5).symbol()
         );
         assert!(
-            row_text(&buf58, 4).contains("OVERRUN!"),
-            "the bold segment must still be drawn, just inside the border: {:?}",
-            row_text(&buf58, 4)
+            row_text(&buf58, 5).contains("OVERRUN!"),
+            "the bold segment must still be drawn, just inside the gutter: {:?}",
+            row_text(&buf58, 5)
         );
         assert_eq!(
-            cell(&buf58, 59, 4).symbol(),
-            "│",
-            "the frame's right border must survive the over-counted segment"
+            cell(&buf58, 59, 5).symbol(),
+            " ",
+            "the region's trailing gutter must survive the over-counted segment"
         );
 
         // 120-column frame: the detail interior is 78 columns, content starts at column
-        // 41, and the frame's own right border sits at column 119.
+        // 42, and — the wide detail region having no right gutter (D5) — reaches the
+        // frame's own last column, 119, rather than stopping one short of it.
         let d78 = detail_dashboard(combining_mark_overrun_source(78), 0, Route::Detail);
         let buf78 = render_at(120, 20, &d78);
-        for x in 41..110u16 {
-            assert_eq!(cell(&buf78, x, 4).symbol(), "a", "x={x}");
+        for x in 42..111u16 {
+            assert_eq!(cell(&buf78, x, 5).symbol(), "a", "x={x}");
         }
-        assert!(cell(&buf78, 110, 4).symbol().starts_with('a'));
-        assert!(row_text(&buf78, 4).contains("OVERRUN!"));
-        assert_eq!(
-            cell(&buf78, 119, 4).symbol(),
-            "│",
-            "the frame's right border must survive the over-counted segment"
+        assert!(cell(&buf78, 111, 5).symbol().starts_with('a'));
+        assert!(row_text(&buf78, 5).contains("OVERRUN!"));
+        assert_ne!(
+            cell(&buf78, 119, 5).symbol(),
+            " ",
+            "the over-counted segment must not have been clipped short of the frame's last \
+             column"
         );
     }
 
-    /// Column range `1..=9` at 60, `41..=49` at 120 — the first nine
+    /// Column range `1..=9` at 60, `42..=50` at 120 — the first nine
     /// columns of the detail interior at either mandated width.
     fn detail_marker_cols(buf: &Buffer, y: u16) -> String {
         let (from, to) = if buf.area.width == 60 {
             (1, 9)
         } else {
-            (41, 49)
+            (42, 50)
         };
         cols(&row_text(buf, y), from..to + 1)
     }
@@ -3325,8 +3354,8 @@ mod tests {
         };
 
         let buf120 = render_at(120, 20, &d);
-        assert_eq!(detail_marker_cols(&buf120, 4), "- line-00");
-        assert_eq!(detail_marker_cols(&buf120, 17), "- line-13");
+        assert_eq!(detail_marker_cols(&buf120, 5), "- line-00");
+        assert_eq!(detail_marker_cols(&buf120, 18), "- line-13");
         // `list-sections`: row 2 is now the active section header; the change
         // row is row 3. `base.selected` (1) addresses `Target::Change(0)` —
         // the one active change — since the active header is target 0, so
@@ -3338,8 +3367,8 @@ mod tests {
 
         d.route = Route::Detail;
         let buf60 = render_at(60, 20, &d);
-        assert_eq!(detail_marker_cols(&buf60, 4), "- line-00");
-        assert_eq!(detail_marker_cols(&buf60, 17), "- line-13");
+        assert_eq!(detail_marker_cols(&buf60, 5), "- line-00");
+        assert_eq!(detail_marker_cols(&buf60, 18), "- line-13");
     }
 
     /// The style of the first cell of the first (by-char, never by-byte —
@@ -3370,7 +3399,7 @@ mod tests {
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
 
-            let title_row: Vec<char> = row_text(&buf, 4).chars().collect();
+            let title_row: Vec<char> = row_text(&buf, 5).chars().collect();
             let needle: Vec<char> = "## Heading".chars().collect();
             let title_start = title_row
                 .windows(needle.len())
@@ -3379,14 +3408,14 @@ mod tests {
             for i in 0..needle.len() {
                 let x = (title_start + i) as u16;
                 assert!(
-                    cell(&buf, x, 4)
+                    cell(&buf, x, 5)
                         .style()
                         .add_modifier
                         .contains(Modifier::BOLD),
                     "width {width}: heading cell {i} not bold"
                 );
                 assert_eq!(
-                    cell(&buf, x, 4).style().fg,
+                    cell(&buf, x, 5).style().fg,
                     palette::style(Role::Heading(2)).fg,
                     "width {width}: heading cell {i} does not carry Heading(2)'s foreground"
                 );
@@ -3525,11 +3554,11 @@ mod tests {
         for width in [120u16, 60u16] {
             let buf = render_at(width, 20, &d);
 
-            // The content area is rows 4 through 17: the frame header, the
-            // region's own border, the change header, and the tab bar sit above
-            // it, and the region's lower border and the footer below.
+            // The content area is rows 5 through 18: the region's heading row,
+            // its padding row, the tab bar, the rule, and the content's own
+            // padding row all sit above it, and the frame's footer below.
             let interior = if width == 60 { 58 } else { 78 };
-            let drawn: Vec<(u16, String)> = (4..=17u16)
+            let drawn: Vec<(u16, String)> = (5..=18u16)
                 .map(|y| (y, detail_interior_cols(&buf, y, interior)))
                 .filter(|(_, text)| text.contains('|'))
                 .collect();
@@ -3570,7 +3599,7 @@ mod tests {
             // The header cells read bold; the pipes and the padding spaces
             // around them carry no modifier at all.
             let (header_y, header_text) = &drawn[0];
-            let offset = if width == 60 { 1u16 } else { 41 };
+            let offset = if width == 60 { 1u16 } else { 42 };
             for label in ["Gate", "Runner", "Notes"] {
                 let start = header_text
                     .find(label)
@@ -3600,22 +3629,25 @@ mod tests {
                 );
             }
 
-            // No table cell reaches a border column. The two lists differ per
-            // buffer: below the breakpoint `layout::split_body` gives the detail
-            // region the whole body, so columns 39 and 40 are ordinary interior
-            // content at 60 and a table wrapping at 58 necessarily covers them.
-            let borders: &[u16] = if width == 60 {
-                &[0, 59]
-            } else {
-                &[0, 39, 40, 119]
-            };
-            for y in 1..=18u16 {
-                for x in borders {
-                    let s = cell(&buf, *x, y).symbol();
-                    assert!(
-                        matches!(s, "│" | "┌" | "└" | "┐" | "┘"),
-                        "width {width}: x={x} y={y} holds {s:?}, not a border"
+            // No table cell reaches a gutter or the divider. Column 119 is
+            // deliberately not in this list — the wide detail region has no
+            // right gutter (D5) — and below the breakpoint `layout::split_body`
+            // gives the detail region the whole body, so columns 39 and 40 are
+            // ordinary interior content at 60 and a table wrapping at 58
+            // necessarily covers them.
+            let gutters: &[u16] = if width == 60 { &[0, 59] } else { &[0, 39, 41] };
+            for y in 0..=18u16 {
+                for x in gutters {
+                    assert_eq!(
+                        cell(&buf, *x, y).symbol(),
+                        " ",
+                        "width {width}: x={x} y={y} is not blank"
                     );
+                }
+            }
+            if width == 120 {
+                for y in 0..=18u16 {
+                    assert_eq!(cell(&buf, 40, y).symbol(), "│", "y={y}");
                 }
             }
         }
@@ -3676,8 +3708,8 @@ mod tests {
         let default_style = Cell::default().style();
 
         let buf120 = render_at(120, 20, &no_change);
-        for y in 2..=17u16 {
-            for x in 41..=118u16 {
+        for y in 0..=18u16 {
+            for x in 41..=119u16 {
                 let c = cell(&buf120, x, y);
                 assert_eq!(c.symbol(), " ", "x={x} y={y}");
                 assert_eq!(c.style(), default_style, "x={x} y={y}");
@@ -3685,7 +3717,7 @@ mod tests {
         }
 
         let buf60 = render_at(60, 20, &no_change);
-        for y in 2..=17u16 {
+        for y in 0..=18u16 {
             for x in 1..=58u16 {
                 let c = cell(&buf60, x, y);
                 assert_eq!(c.symbol(), " ", "x={x} y={y}");
@@ -3699,7 +3731,7 @@ mod tests {
         for width in [120, 60] {
             let buf = render_at(width, 20, &with_change);
             assert!(
-                detail_interior_cols(&buf, 4, 14).starts_with("No content yet"),
+                detail_interior_cols(&buf, 5, 14).starts_with("No content yet"),
                 "width {width}"
             );
         }
@@ -3721,59 +3753,75 @@ mod tests {
         for width in [120, 60] {
             let buf = render_at(width, 20, &with_marked_change);
             assert!(
-                detail_interior_cols(&buf, 4, 14).starts_with("No content yet"),
+                detail_interior_cols(&buf, 5, 14).starts_with("No content yet"),
                 "width {width}: marked-but-empty"
             );
             assert!(
-                !row_text(&buf, 4).contains('█') && !row_text(&buf, 4).contains('░'),
+                !row_text(&buf, 5).contains('█') && !row_text(&buf, 5).contains('░'),
                 "width {width}: no progress bar"
             );
         }
     }
 
+    /// `pane-chrome` removed the border: every cell of columns 0, 39, and 41
+    /// is a space and column 40 is the divider `│` at the wide layout, and
+    /// every cell of columns 0 and 59 is a space at the narrow one — over
+    /// every row of the frame, heading and padding rows included. Column
+    /// 119 is deliberately absent from the wide sweep: the wide detail
+    /// region has no right gutter (D5), so content legitimately reaches it.
+    fn assert_gutters_and_divider_untouched(buf: &Buffer, label: &str) {
+        let width = buf.area.width;
+        for y in 0..=18u16 {
+            if width == 60 {
+                for x in [0u16, 59] {
+                    assert_eq!(cell(buf, x, y).symbol(), " ", "{label} x={x} y={y}");
+                }
+            } else {
+                for x in [0u16, 39, 41] {
+                    assert_eq!(cell(buf, x, y).symbol(), " ", "{label} x={x} y={y}");
+                }
+                assert_eq!(cell(buf, 40, y).symbol(), "│", "{label} y={y}");
+            }
+        }
+    }
+
     #[test]
-    fn detail_content_never_overwrites_the_border() {
+    fn content_never_overwrites_the_detail_region_s_border() {
         let source: String = (0..20).map(|_| format!("{}\n", "x".repeat(200))).collect();
         let d = detail_dashboard(source, 0, Route::Detail);
 
         let buf120 = render_at(120, 20, &d);
-        for y in 1..=18u16 {
-            for x in [39u16, 40, 119] {
-                let s = cell(&buf120, x, y).symbol();
-                assert!(
-                    matches!(s, "│" | "┌" | "└" | "┐" | "┘"),
-                    "x={x} y={y}: {s:?}"
-                );
-            }
-        }
-        for y in 2..=17u16 {
+        assert_gutters_and_divider_untouched(&buf120, "base 120");
+        // The wide detail region has no right gutter (D5): column 119 does
+        // carry content, rather than staying blank like the gutters above.
+        assert_ne!(cell(&buf120, 119, 5).symbol(), " ", "base 120: column 119");
+        // Every content row (5 through 18) holds some of the 200-character
+        // lines; row 4, the content's own padding row, is excluded — it is
+        // blank by design, not a failure of this sweep.
+        for y in [2u16, 3].into_iter().chain(5..=18u16) {
             assert!(
-                !cols(&row_text(&buf120, y), 41..119)
+                !cols(&row_text(&buf120, y), 42..120)
                     .chars()
-                    .all(|c| c == ' ')
+                    .all(|c| c == ' '),
+                "base 120 row {y} is unexpectedly blank"
             );
         }
 
         let buf60 = render_at(60, 20, &d);
-        for y in 1..=18u16 {
-            for x in [0u16, 59] {
-                let s = cell(&buf60, x, y).symbol();
-                assert!(
-                    matches!(s, "│" | "┌" | "└" | "┐" | "┘"),
-                    "x={x} y={y}: {s:?}"
-                );
-            }
-        }
-        for y in 2..=17u16 {
-            assert!(!cols(&row_text(&buf60, y), 1..59).chars().all(|c| c == ' '));
+        assert_gutters_and_divider_untouched(&buf60, "base 60");
+        for y in [2u16, 3].into_iter().chain(5..=18u16) {
+            assert!(
+                !cols(&row_text(&buf60, y), 1..59).chars().all(|c| c == ' '),
+                "base 60 row {y} is unexpectedly blank"
+            );
         }
 
         // The same holds with the selected tab marked `tracks_tasks` and
         // the same source turned into thirty 200-character task lines
         // under a 200-character heading — neither the checklist's wrap,
         // the heading's truncation, nor the progress bar's gauge can
-        // reach the border. Found in Change Review: the heading line
-        // originally had no width treatment at all.
+        // reach a gutter or the divider. Found in Change Review: the
+        // heading line originally had no width treatment at all.
         let task_source: String = std::iter::once(format!("## {}\n", "h".repeat(200)))
             .chain((0..30).map(|_| format!("- [ ] {}\n", "x".repeat(200))))
             .collect();
@@ -3790,62 +3838,30 @@ mod tests {
         );
 
         let mbuf120 = render_at(120, 20, &marked_d);
-        for y in 1..=18u16 {
-            for x in [39u16, 40, 119] {
-                let s = cell(&mbuf120, x, y).symbol();
-                assert!(
-                    matches!(s, "│" | "┌" | "└" | "┐" | "┘"),
-                    "marked x={x} y={y}: {s:?}"
-                );
-            }
-        }
+        assert_gutters_and_divider_untouched(&mbuf120, "marked 120");
         let mbuf60 = render_at(60, 20, &marked_d);
-        for y in 1..=18u16 {
-            for x in [0u16, 59] {
-                let s = cell(&mbuf60, x, y).symbol();
-                assert!(
-                    matches!(s, "│" | "┌" | "└" | "┐" | "┘"),
-                    "marked x={x} y={y}: {s:?}"
-                );
-            }
-        }
+        assert_gutters_and_divider_untouched(&mbuf60, "marked 60");
 
         // `markdown-constructs`: and the same again with a twelve-column table
         // whose every cell is 200 characters long. Neither the pipe grammar nor
-        // the one-cell-per-line fallback it degrades to can reach the border —
-        // and this fixture is the tightest case there is, because the allocator
-        // spends the whole interior: `3n + 1 = 37` plus `avail` is exactly 78 at
-        // the wide interior and exactly 58 at the narrow one.
+        // the one-cell-per-line fallback it degrades to can reach a gutter or
+        // the divider — and this fixture is the tightest case there is, because
+        // the allocator spends the whole interior: `3n + 1 = 37` plus `avail`
+        // is exactly 78 at the wide interior and exactly 58 at the narrow one.
         let wide_cell = "x".repeat(200);
         let cells = format!(" {wide_cell} |").repeat(12);
         let table_source = format!("|{cells}\n|{}\n|{cells}\n", "---|".repeat(12));
         let table_d = detail_dashboard(table_source, 0, Route::Detail);
 
         let tbuf120 = render_at(120, 20, &table_d);
-        for y in 1..=18u16 {
-            for x in [39u16, 40, 119] {
-                let s = cell(&tbuf120, x, y).symbol();
-                assert!(
-                    matches!(s, "│" | "┌" | "└" | "┐" | "┘"),
-                    "table x={x} y={y}: {s:?}"
-                );
-            }
-        }
+        assert_gutters_and_divider_untouched(&tbuf120, "table 120");
         let tbuf60 = render_at(60, 20, &table_d);
-        for y in 1..=18u16 {
-            for x in [0u16, 59] {
-                let s = cell(&tbuf60, x, y).symbol();
-                assert!(
-                    matches!(s, "│" | "┌" | "└" | "┐" | "┘"),
-                    "table x={x} y={y}: {s:?}"
-                );
-            }
-        }
-        // The table really is drawn: the fixture would satisfy the border
+        assert_gutters_and_divider_untouched(&tbuf60, "table 60");
+        // The table really is drawn: the fixture would satisfy the gutter
         // assertions above by rendering nothing at all.
         for (label, buf) in [("120", &tbuf120), ("60", &tbuf60)] {
             assert!(
-                (4..=17u16).any(|y| row_text(buf, y).contains('|')),
+                (5..=18u16).any(|y| row_text(buf, y).contains('|')),
                 "width {label}: no table line was drawn"
             );
         }
@@ -3861,50 +3877,35 @@ mod tests {
         let fallback_d = detail_dashboard(fallback_source, 0, Route::Detail);
 
         let fbuf120 = render_at(120, 20, &fallback_d);
-        for y in 1..=18u16 {
-            for x in [39u16, 40, 119] {
-                let s = cell(&fbuf120, x, y).symbol();
-                assert!(
-                    matches!(s, "│" | "┌" | "└" | "┐" | "┘"),
-                    "fallback x={x} y={y}: {s:?}"
-                );
-            }
-        }
+        assert_gutters_and_divider_untouched(&fbuf120, "fallback 120");
         let fbuf60 = render_at(60, 20, &fallback_d);
-        for y in 1..=18u16 {
-            for x in [0u16, 59] {
-                let s = cell(&fbuf60, x, y).symbol();
-                assert!(
-                    matches!(s, "│" | "┌" | "└" | "┐" | "┘"),
-                    "fallback x={x} y={y}: {s:?}"
-                );
-            }
-        }
+        assert_gutters_and_divider_untouched(&fbuf60, "fallback 60");
         // The two widths take the two different paths, which is the whole point
         // of this fixture: pipes at 120, none at 60.
         assert!(
-            (4..=17u16).any(|y| row_text(&fbuf120, y).contains('|')),
+            (5..=18u16).any(|y| row_text(&fbuf120, y).contains('|')),
             "at 120 the fifteen-column table still fits the pipe grammar"
         );
         assert!(
-            (4..=17u16).all(|y| !row_text(&fbuf60, y).contains('|')),
+            (5..=18u16).all(|y| !row_text(&fbuf60, y).contains('|')),
             "at 60 the fifteen-column table must degrade to one cell per line"
         );
         assert!(
-            (4..=17u16).any(|y| row_text(&fbuf60, y).contains('x')),
+            (5..=18u16).any(|y| row_text(&fbuf60, y).contains('x')),
             "at 60 the fallback must still draw the cells"
         );
     }
 
     #[test]
-    fn a_degenerate_detail_interior_draws_nothing() {
-        // The frame height a detail interior row costs is four — one
-        // frame-header row, one frame-footer row, and the region's two
-        // border rows — so the interior first has one row at a frame
-        // height of 5, two at 6, and three at 7; heights 3 and 4 give a
-        // zero-row interior and exercise only the earliest guard.
-        // `detail-scroll` -> "A degenerate detail interior draws nothing
-        // and does not panic".
+    fn a_degenerate_detail_interior_draws_nothing_and_does_not_panic() {
+        // The frame height a detail interior row costs is three — one
+        // frame-footer row and the region's own heading and padding rows
+        // — so the interior first has one row at a frame height of 4,
+        // two at 5, three at 6, and four at 7. `split_detail` spends the
+        // first three of those on the tab bar, the rule, and the
+        // content's own padding row, so the content area first has one
+        // row at a frame height of 7. `detail-scroll` -> "A degenerate
+        // detail interior draws nothing and does not panic".
         let d = detail_dashboard(twenty_line_source(), 0, Route::Detail);
 
         // 1x20 and 2x20: no render panics; the spec states no further
@@ -3914,31 +3915,42 @@ mod tests {
             let _ = buf;
         }
 
-        // 120x4 and 60x4: the interior has zero rows, so nothing at all —
-        // not the header, not a tab cell, not a markdown line — is drawn
-        // inside the region.
+        // 120x3 and 60x3: the interior has zero rows, so nothing at all
+        // inside it is drawn — not a tab cell, not the rule, not a
+        // markdown line — though the region's own heading row still
+        // names the change.
+        for width in [120u16, 60] {
+            let buf = render_at(width, 3, &d);
+            assert!(buffer_contains(&buf, "detail-view"), "width {width}");
+            assert!(!buffer_contains(&buf, " proposal "), "width {width}");
+            assert!(!buffer_contains(&buf, "─"), "width {width}");
+            assert!(!buffer_contains(&buf, "line-00"), "width {width}");
+        }
+
+        // 120x4 and 60x4: the tab bar is drawn; no rule and no markdown
+        // line appears anywhere in the frame.
         for width in [120u16, 60] {
             let buf = render_at(width, 4, &d);
-            assert!(!buffer_contains(&buf, "detail-view"), "width {width}");
-            assert!(!buffer_contains(&buf, " proposal "), "width {width}");
+            assert!(buffer_contains(&buf, " proposal "), "width {width}");
+            assert!(!buffer_contains(&buf, "─"), "width {width}");
             assert!(!buffer_contains(&buf, "line-00"), "width {width}");
         }
 
-        // 120x5 and 60x5: the header row is drawn; no tab cell and no
-        // markdown line appears anywhere in the frame.
+        // 120x5 and 60x5: the tab bar and the rule are drawn; no markdown
+        // line appears.
         for width in [120u16, 60] {
             let buf = render_at(width, 5, &d);
-            assert!(buffer_contains(&buf, "detail-view"), "width {width}");
-            assert!(!buffer_contains(&buf, " proposal "), "width {width}");
+            assert!(buffer_contains(&buf, " proposal "), "width {width}");
+            assert!(buffer_contains(&buf, "─"), "width {width}");
             assert!(!buffer_contains(&buf, "line-00"), "width {width}");
         }
 
-        // 120x6 and 60x6: the header row and the tab bar are drawn; no
-        // markdown line appears.
+        // 120x6 and 60x6: the same two are drawn and still no markdown
+        // line, the interior's third row being the content padding row.
         for width in [120u16, 60] {
             let buf = render_at(width, 6, &d);
-            assert!(buffer_contains(&buf, "detail-view"), "width {width}");
             assert!(buffer_contains(&buf, " proposal "), "width {width}");
+            assert!(buffer_contains(&buf, "─"), "width {width}");
             assert!(!buffer_contains(&buf, "line-00"), "width {width}");
         }
 
@@ -3980,26 +3992,30 @@ mod tests {
         }
 
         for width in [120u16, 60] {
-            let buf = render_at(width, 4, &md);
-            assert!(
-                !buffer_contains(&buf, "detail-view"),
-                "marked width {width}"
-            );
+            let buf = render_at(width, 3, &md);
+            assert!(buffer_contains(&buf, "detail-view"), "marked width {width}");
             assert!(!buffer_contains(&buf, " proposal "), "marked width {width}");
+            assert!(!buffer_contains(&buf, "line-00"), "marked width {width}");
+        }
+
+        for width in [120u16, 60] {
+            let buf = render_at(width, 4, &md);
+            assert!(buffer_contains(&buf, " proposal "), "marked width {width}");
+            assert!(!buffer_contains(&buf, "─"), "marked width {width}");
             assert!(!buffer_contains(&buf, "line-00"), "marked width {width}");
         }
 
         for width in [120u16, 60] {
             let buf = render_at(width, 5, &md);
-            assert!(buffer_contains(&buf, "detail-view"), "marked width {width}");
-            assert!(!buffer_contains(&buf, " proposal "), "marked width {width}");
+            assert!(buffer_contains(&buf, " proposal "), "marked width {width}");
+            assert!(buffer_contains(&buf, "─"), "marked width {width}");
             assert!(!buffer_contains(&buf, "line-00"), "marked width {width}");
         }
 
         for width in [120u16, 60] {
             let buf = render_at(width, 6, &md);
-            assert!(buffer_contains(&buf, "detail-view"), "marked width {width}");
             assert!(buffer_contains(&buf, " proposal "), "marked width {width}");
+            assert!(buffer_contains(&buf, "─"), "marked width {width}");
             assert!(!buffer_contains(&buf, "line-00"), "marked width {width}");
         }
 
@@ -4034,19 +4050,15 @@ mod tests {
             let buf = render_at(w, h, &td);
             assert!(!buffer_contains(&buf, "line-00"), "table {w}x{h}");
         }
-        for (height, header, tabs, content) in [
-            (4u16, false, false, false),
-            (5, true, false, false),
-            (6, true, true, false),
-            (7, true, true, true),
+        for (height, tabs, content) in [
+            (3u16, false, false),
+            (4, true, false),
+            (5, true, false),
+            (6, true, false),
+            (7, true, true),
         ] {
             for width in [120u16, 60] {
                 let buf = render_at(width, height, &td);
-                assert_eq!(
-                    buffer_contains(&buf, "detail-view"),
-                    header,
-                    "table {width}x{height}: header"
-                );
                 assert_eq!(
                     buffer_contains(&buf, " proposal "),
                     tabs,
@@ -4070,8 +4082,8 @@ mod tests {
         let d = detail_dashboard(twenty_line_source(), 99, Route::Detail);
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
-            assert_eq!(detail_marker_cols(&buf, 4), "- line-06", "width {width}");
-            assert_eq!(detail_marker_cols(&buf, 17), "- line-19", "width {width}");
+            assert_eq!(detail_marker_cols(&buf, 5), "- line-06", "width {width}");
+            assert_eq!(detail_marker_cols(&buf, 18), "- line-19", "width {width}");
         }
     }
 
@@ -4082,8 +4094,8 @@ mod tests {
         d.apply(Action::Next);
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
-            assert_eq!(detail_marker_cols(&buf, 4), "- line-02", "width {width}");
-            assert_eq!(detail_marker_cols(&buf, 17), "- line-15", "width {width}");
+            assert_eq!(detail_marker_cols(&buf, 5), "- line-02", "width {width}");
+            assert_eq!(detail_marker_cols(&buf, 18), "- line-15", "width {width}");
         }
     }
 
@@ -4149,7 +4161,7 @@ mod tests {
         }
         // The detail content, when drawn (wide layout only), is unmoved.
         let buf120 = render_at(120, 20, &d);
-        assert_eq!(detail_marker_cols(&buf120, 4), "- line-00");
+        assert_eq!(detail_marker_cols(&buf120, 5), "- line-00");
     }
 
     #[test]
@@ -4160,7 +4172,7 @@ mod tests {
         }
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
-            assert_eq!(detail_marker_cols(&buf, 4), "- line-00", "width {width}");
+            assert_eq!(detail_marker_cols(&buf, 5), "- line-00", "width {width}");
         }
     }
 
@@ -4171,14 +4183,14 @@ mod tests {
         d.apply(Action::OpenDetail);
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
-            assert_eq!(detail_marker_cols(&buf, 4), "- line-00", "width {width}");
+            assert_eq!(detail_marker_cols(&buf, 5), "- line-00", "width {width}");
         }
     }
 
-    /// Column range `1..=to` at 60, `41..=(40+to)` at 120 — the detail
+    /// Column range `1..=to` at 60, `42..=(41+to)` at 120 — the detail
     /// interior's first `to` columns of row `y`, at either mandated width.
     fn detail_interior_cols(buf: &Buffer, y: u16, to: usize) -> String {
-        let from = if buf.area.width == 60 { 1 } else { 41 };
+        let from = if buf.area.width == 60 { 1 } else { 42 };
         cols(&row_text(buf, y), from..from + to)
     }
 
@@ -4212,14 +4224,16 @@ mod tests {
             let buf = render_at(width, 20, &d);
             let expected = crate::ui::detail::header_row("add-token-refresh", "tdd", &progress, w);
             assert_eq!(
-                detail_interior_cols(&buf, 2, w as usize),
+                detail_interior_cols(&buf, 0, w as usize),
                 expected,
                 "width {width}"
             );
-            let last_col = if width == 60 { 58u16 } else { 118 };
+            // The wide detail region has no right gutter (D5): its header
+            // reaches the frame's own last column, 119, not 118.
+            let last_col = if width == 60 { 58u16 } else { 119 };
             for x in (last_col - 4)..=last_col {
                 assert!(
-                    cell(&buf, x, 2)
+                    cell(&buf, x, 0)
                         .style()
                         .add_modifier
                         .contains(Modifier::BOLD),
@@ -4242,14 +4256,14 @@ mod tests {
             Route::Detail,
         );
         let buf_first = render_at(120, 20, &d);
-        assert!(detail_interior_cols(&buf_first, 2, 78).contains("add-token-refresh"));
+        assert!(detail_interior_cols(&buf_first, 0, 78).contains("add-token-refresh"));
 
         // `list-sections`: 2, not 1 — target 1 is `add-token-refresh`,
         // target 2 is `fix-empty-basket`.
         d.selected = 2;
         for (width, w) in [(120, 78), (60, 58)] {
             let buf = render_at(width, 20, &d);
-            let header = detail_interior_cols(&buf, 2, w);
+            let header = detail_interior_cols(&buf, 0, w);
             assert!(header.contains("fix-empty-basket"), "width {width}");
             assert!(header.contains("[7/7]"), "width {width}");
             assert!(!header.contains("add-token-refresh"), "width {width}");
@@ -4257,7 +4271,7 @@ mod tests {
     }
 
     #[test]
-    fn an_archived_changes_header_carries_its_stripped_name_and_its_own_schema() {
+    fn an_archived_change_s_header_carries_its_stripped_name_and_its_own_schema() {
         let archived_change = fixture::with_schema(
             fixture::archived(Some("2026-08-14"), "add-auth", 7, 7),
             "spec-driven",
@@ -4267,7 +4281,7 @@ mod tests {
         let d = dashboard_with(Vec::new(), vec![archived_change], 1, Route::Detail);
         for width in [120, 60] {
             let buf = render_at(width, 20, &d);
-            let row = row_text(&buf, 2);
+            let row = row_text(&buf, 0);
             assert!(
                 row.starts_with("add-auth") || row.contains("add-auth"),
                 "width {width}"
@@ -4283,8 +4297,11 @@ mod tests {
         let default_style = Cell::default().style();
         let d = dashboard_with(Vec::new(), Vec::new(), 0, Route::List);
         let buf = render_at(120, 20, &d);
-        for y in 2..=17u16 {
-            for x in 41..=118u16 {
+        // Rows 0 and 1 are the region's heading and padding rows; 2 through 18
+        // are its seventeen-row interior — none of the three is drawn when
+        // nothing is selected.
+        for y in 0..=18u16 {
+            for x in 41..=119u16 {
                 assert_eq!(cell(&buf, x, y).symbol(), " ", "x={x} y={y}");
                 assert_eq!(cell(&buf, x, y).style(), default_style, "x={x} y={y}");
             }
@@ -4299,8 +4316,8 @@ mod tests {
         zzz.filter.query = "zzz".to_string();
         for width in [120, 60] {
             let buf = render_at(width, 20, &zzz);
-            for y in 2..=17u16 {
-                let last = if width == 60 { 58u16 } else { 118 };
+            for y in 0..=18u16 {
+                let last = if width == 60 { 58u16 } else { 119 };
                 let from = if width == 60 { 1u16 } else { 41 };
                 for x in from..=last {
                     assert_eq!(cell(&buf, x, y).symbol(), " ", "width {width} x={x} y={y}");
@@ -4319,7 +4336,7 @@ mod tests {
             Route::Detail,
         );
         let buf = render_at(120, 20, &with_change);
-        assert!(row_text(&buf, 2).contains("alpha"));
+        assert!(row_text(&buf, 0).contains("alpha"));
     }
 
     #[test]
@@ -4349,15 +4366,20 @@ mod tests {
         assert_eq!(columns(expected), 53);
         for width in [120, 60] {
             let buf = render_at(width, 20, &d);
-            assert_eq!(detail_interior_cols(&buf, 3, 53), expected, "width {width}");
-            let from = if width == 60 { 1u16 } else { 41 };
+            // The tab bar is the detail interior's own first row — buffer
+            // row 2, one row above the interior's own row 0 — not the
+            // second, now that the change header sits in the region's
+            // heading row instead of the interior.
+            assert_eq!(detail_interior_cols(&buf, 2, 53), expected, "width {width}");
+            let from = if width == 60 { 1u16 } else { 42 };
+            let interior_width = if width == 60 { 58usize } else { 78 };
 
             // The selected chip: every one of its eight columns, its two
             // padding columns included, carries `TabActive` — bold and
             // coloured together, so neither reading alone identifies it.
             let active = palette::style(Role::TabActive);
             for x in (from + 19)..(from + 27) {
-                let style = cell(&buf, x, 3).style();
+                let style = cell(&buf, x, 2).style();
                 assert!(
                     style.add_modifier.contains(Modifier::BOLD),
                     "width {width} x {x}: ` design ` should be bold"
@@ -4370,7 +4392,7 @@ mod tests {
             // background and none is bold.
             let inactive = palette::style(Role::TabInactive);
             for x in from..(from + 10) {
-                let style = cell(&buf, x, 3).style();
+                let style = cell(&buf, x, 2).style();
                 assert!(
                     !style.add_modifier.contains(Modifier::BOLD),
                     "width {width} x {x}: ` proposal ` should not be bold"
@@ -4382,18 +4404,46 @@ mod tests {
             // adjacent chips show an edge rather than one continuous field.
             for offset in [10u16, 18, 27, 35] {
                 assert_eq!(
-                    cell(&buf, from + offset, 3).style().bg,
+                    cell(&buf, from + offset, 2).style().bg,
                     uncoloured().bg,
                     "width {width} offset {offset}: a separator carries a background"
                 );
+            }
+
+            // Row 3 is the rule beneath the bar: `─` repeated across the
+            // interior's width, dim and uncoloured.
+            let rule_row = detail_interior_cols(&buf, 3, interior_width);
+            assert_eq!(rule_row, "─".repeat(interior_width), "width {width}");
+            for x in from..(from + interior_width as u16) {
+                let style = cell(&buf, x, 3).style();
+                assert!(
+                    style.add_modifier.contains(Modifier::DIM),
+                    "width {width} x {x}: the rule should be dim"
+                );
+                assert_eq!(style.fg, uncoloured().fg, "width {width} x {x}");
+            }
+
+            // Rows 1 and 4 — the region's own padding row and the content's —
+            // carry no background anywhere inside the interior's columns.
+            for y in [1u16, 4] {
+                for x in from..(from + interior_width as u16) {
+                    assert_eq!(
+                        cell(&buf, x, y).style().bg,
+                        uncoloured().bg,
+                        "width {width} x {x} y {y}"
+                    );
+                }
             }
         }
     }
 
     /// `artifact-tabs` :: "The tab bar never overwrites a border or the rows
     /// around it" — the painted span stops inside the interior, in both
-    /// directions: no border column carries a chip background, and the header
-    /// row above the bar is untouched.
+    /// directions: no gutter or divider column carries a chip background,
+    /// and the heading row above the bar is untouched. `pane-chrome` removed
+    /// the border: what a chip must not reach is now a gutter or the
+    /// divider, and column 119 is no longer one of them — the wide detail
+    /// region has no right gutter (D5).
     #[test]
     fn the_tab_bar_never_overwrites_a_border_or_the_rows_around_it() {
         let ids: Vec<String> = (0..12)
@@ -4413,27 +4463,23 @@ mod tests {
         let inactive = palette::style(Role::TabInactive);
         for width in [120, 60] {
             let buf = render_at(width, 20, &d);
-            let border_cols: Vec<u16> = if width == 60 {
+            let gutter_cols: Vec<u16> = if width == 60 {
                 vec![0, 59]
             } else {
-                vec![0, 39, 40, 119]
+                vec![0, 39, 41]
             };
-            for y in 1..=18u16 {
-                for x in &border_cols {
+            for y in 0..=18u16 {
+                for x in &gutter_cols {
                     let c = cell(&buf, *x, y);
-                    let s = c.symbol();
-                    assert!(
-                        matches!(s, "│" | "┌" | "└" | "┐" | "┘"),
-                        "width {width} x={x} y={y}: {s:?}"
-                    );
+                    assert_eq!(c.symbol(), " ", "width {width} x={x} y={y}");
                     assert_ne!(c.style().bg, active.bg, "width {width} x={x} y={y}");
                     assert_ne!(c.style().bg, inactive.bg, "width {width} x={x} y={y}");
                 }
             }
-            // The row above the tab bar still holds the change's own name, so
+            // The region's heading row still holds the change's own name, so
             // no chip wrapped upward into it.
             assert!(
-                detail_interior_cols(&buf, 2, 11).starts_with("detail-view"),
+                detail_interior_cols(&buf, 0, 11).starts_with("detail-view"),
                 "width {width}"
             );
         }
@@ -4454,14 +4500,14 @@ mod tests {
         );
         d.apply(Action::SelectTab(2));
         let buf = render_at(120, 20, &d);
-        assert!(row_text(&buf, 3).contains(" design "));
+        assert!(row_text(&buf, 2).contains(" design "));
         // The third chip — ` design `, eight columns from interior offset 19,
         // after ` proposal ` (10) and ` specs ` (7) and their two separators —
         // carries the active style, which is what makes the list-route press
         // visible at the wide layout.
         let active = palette::style(Role::TabActive);
-        for x in 41 + 19..41 + 19 + 8 {
-            let style = cell(&buf, x, 3).style();
+        for x in 42 + 19..42 + 19 + 8 {
+            let style = cell(&buf, x, 2).style();
             assert!(style.add_modifier.contains(Modifier::BOLD), "x {x}");
             assert_eq!(style.fg, active.fg, "x {x}");
             assert_eq!(style.bg, active.bg, "x {x}");
@@ -4470,12 +4516,11 @@ mod tests {
         // width: at 60, Route::List, the narrow layout draws only the list
         // region — no detail region, and so no tab row at all.
         let buf60 = render_at(60, 20, &d);
-        assert!(!row_text(&buf60, 3).contains(" design "));
+        assert!(!row_text(&buf60, 2).contains(" design "));
     }
 
     #[test]
-    fn the_border_sweep_holds_with_twelve_forty_character_tab_ids_and_two_hundred_character_lines()
-    {
+    fn the_bar_the_rule_and_the_content_never_leave_the_interior() {
         let ids: Vec<String> = (0..12)
             .map(|i| format!("{}{i}", "x".repeat(40 - i.to_string().len())))
             .collect();
@@ -4489,21 +4534,45 @@ mod tests {
             Route::Detail,
             empty_detail_with_tab(&source, Vec::new(), 0),
         );
+        // `pane-chrome` removed the border entirely: the columns that used to
+        // carry box-drawing glyphs are now the region's own gutters — plain
+        // spaces — with a lone `│` divider at column 40 in the wide layout.
         let buf60 = render_at(60, 20, &d);
-        for y in 1..=18u16 {
-            assert!(matches!(cell(&buf60, 0, y).symbol(), "│" | "┌" | "└"));
-            assert!(matches!(cell(&buf60, 59, y).symbol(), "│" | "┐" | "┘"));
+        for y in 0..=18u16 {
+            assert_eq!(cell(&buf60, 0, y).symbol(), " ", "y={y}");
+            assert_eq!(cell(&buf60, 59, y).symbol(), " ", "y={y}");
         }
         let buf120 = render_at(120, 20, &d);
-        for y in 1..=18u16 {
-            for x in [0u16, 39, 40, 119] {
-                let s = cell(&buf120, x, y).symbol();
-                assert!(
-                    matches!(s, "│" | "┌" | "└" | "┐" | "┘"),
-                    "x={x} y={y} symbol={s:?}"
-                );
+        for y in 0..=18u16 {
+            for x in [0u16, 39, 41] {
+                assert_eq!(cell(&buf120, x, y).symbol(), " ", "x={x} y={y}");
+                assert_ne!(cell(&buf120, x, y).symbol(), "─", "x={x} y={y}");
+            }
+            assert_eq!(cell(&buf120, 40, y).symbol(), "│", "y={y}");
+        }
+        // Neither the gutter columns nor the divider ever carry a chip
+        // background: the twelve wide chips and the thirty 200-character
+        // lines both stopped inside the interior.
+        let active = palette::style(Role::TabActive);
+        let inactive = palette::style(Role::TabInactive);
+        for buf in [&buf60, &buf120] {
+            let gutters: Vec<u16> = if buf.area.width == 60 {
+                vec![0, 59]
+            } else {
+                vec![0, 39, 40, 41]
+            };
+            for y in 0..=18u16 {
+                for x in &gutters {
+                    let bg = cell(buf, *x, y).style().bg;
+                    assert_ne!(bg, active.bg, "x={x} y={y}");
+                    assert_ne!(bg, inactive.bg, "x={x} y={y}");
+                }
             }
         }
+        // The region's heading row still holds the change's own name, so no
+        // chip and no content line wrapped upward into it.
+        assert!(detail_interior_cols(&buf60, 0, 11).starts_with("detail-view"));
+        assert!(detail_interior_cols(&buf120, 0, 11).starts_with("detail-view"));
     }
 
     #[test]
@@ -4528,11 +4597,11 @@ mod tests {
         for width in [120, 60] {
             let buf = render_at(width, 20, &d);
             assert!(
-                detail_interior_cols(&buf, 4, 14).starts_with("No content yet"),
+                detail_interior_cols(&buf, 5, 14).starts_with("No content yet"),
                 "width {width}"
             );
             assert!(
-                row_text(&buf, 3).contains(" specs "),
+                row_text(&buf, 2).contains(" specs "),
                 "width {width}: tab bar still intact"
             );
             // `artifact-content` :: "in both buffers that row measures exactly the
@@ -4541,7 +4610,7 @@ mod tests {
             // in `ui::detail`'s own tests.
             let interior = interior_width(width) as usize;
             assert_eq!(
-                columns(&detail_interior_cols(&buf, 4, interior)),
+                columns(&detail_interior_cols(&buf, 5, interior)),
                 interior,
                 "width {width}: the No content yet row is padded to the interior width"
             );
@@ -4573,18 +4642,18 @@ mod tests {
         for width in [120, 60] {
             let buf = render_at(width, 20, &d);
             assert!(
-                detail_interior_cols(&buf, 4, 14).starts_with("No content yet"),
+                detail_interior_cols(&buf, 5, 14).starts_with("No content yet"),
                 "width {width}: marked tab"
             );
             assert!(
-                !row_text(&buf, 4).contains('█') && !row_text(&buf, 4).contains('░'),
+                !row_text(&buf, 5).contains('█') && !row_text(&buf, 5).contains('░'),
                 "width {width}: no progress bar for a marked tab with no file"
             );
             // `artifact-content` :: the same "measures exactly the interior width"
             // clause, for the tracked-tasks position.
             let interior = interior_width(width) as usize;
             assert_eq!(
-                columns(&detail_interior_cols(&buf, 4, interior)),
+                columns(&detail_interior_cols(&buf, 5, interior)),
                 interior,
                 "width {width}: marked tab: the No content yet row is padded to the \
                  interior width"
@@ -4610,22 +4679,22 @@ mod tests {
         for width in [120, 60] {
             let buf = render_at(width, 20, &d);
             assert!(
-                detail_interior_cols(&buf, 4, 24).starts_with("! /repo/specs/a/spec.md:"),
+                detail_interior_cols(&buf, 5, 24).starts_with("! /repo/specs/a/spec.md:"),
                 "width {width}"
             );
             assert!(
-                detail_interior_cols(&buf, 5, 3).starts_with("# b"),
+                detail_interior_cols(&buf, 6, 3).starts_with("# b"),
                 "width {width}"
             );
             assert!(
-                !row_text(&buf, 4).contains("No content yet"),
+                !row_text(&buf, 5).contains("No content yet"),
                 "width {width}"
             );
         }
     }
 
     #[test]
-    fn the_twenty_item_list_fills_the_content_area_rows_4_through_17() {
+    fn the_twenty_item_list_fills_the_content_area_rows_5_through_18() {
         let change =
             fixture::with_artifacts(fixture::active("detail-view", 4, 9), &[("proposal", &[])]);
         let d = dashboard_with_detail(
@@ -4638,12 +4707,12 @@ mod tests {
         for width in [120, 60] {
             let buf = render_at(width, 20, &d);
             assert_eq!(
-                detail_interior_cols(&buf, 4, 9),
+                detail_interior_cols(&buf, 5, 9),
                 "- line-00",
                 "width {width}"
             );
             assert_eq!(
-                detail_interior_cols(&buf, 17, 9),
+                detail_interior_cols(&buf, 18, 9),
                 "- line-13",
                 "width {width}"
             );
@@ -4697,27 +4766,27 @@ mod tests {
             let buf3 = render_at(width, 20, &d3);
             let bar = crate::ui::tasks::progress_bar(&progress, interior_width(width));
             assert_eq!(
-                detail_interior_cols(&buf3, 4, columns(&bar)),
+                detail_interior_cols(&buf3, 5, columns(&bar)),
                 bar,
                 "width {width}"
             );
             assert_eq!(
-                detail_interior_cols(&buf3, 5, interior_width(width) as usize).trim(),
+                detail_interior_cols(&buf3, 6, interior_width(width) as usize).trim(),
                 "",
                 "width {width}: blank row"
             );
             assert_eq!(
-                detail_interior_cols(&buf3, 6, 11),
+                detail_interior_cols(&buf3, 7, 11),
                 "## 1. Setup",
                 "width {width}"
             );
             assert_eq!(
-                detail_interior_cols(&buf3, 7, 13),
+                detail_interior_cols(&buf3, 8, 13),
                 "[x] 1.1 first",
                 "width {width}"
             );
             assert_eq!(
-                detail_interior_cols(&buf3, 8, 14),
+                detail_interior_cols(&buf3, 9, 14),
                 "[ ] 1.2 second",
                 "width {width}"
             );
@@ -4725,24 +4794,24 @@ mod tests {
             let d0 = dashboard_with_marked_change(&ids, Some(3), progress, source, Vec::new(), 0);
             let buf0 = render_at(width, 20, &d0);
             assert_eq!(
-                detail_interior_cols(&buf0, 4, 11),
+                detail_interior_cols(&buf0, 5, 11),
                 "## 1. Setup",
                 "width {width}: no bar row above it"
             );
             assert_eq!(
-                detail_interior_cols(&buf0, 6, 15),
+                detail_interior_cols(&buf0, 7, 15),
                 "- [x] 1.1 first",
                 "width {width}: source bullet intact"
             );
             assert_eq!(
-                detail_interior_cols(&buf0, 7, 16),
+                detail_interior_cols(&buf0, 8, 16),
                 "- [ ] 1.2 second",
                 "width {width}: source bullet intact"
             );
 
             assert_eq!(
-                row_text(&buf3, 3),
-                row_text(&buf0, 3),
+                row_text(&buf3, 2),
+                row_text(&buf0, 2),
                 "width {width}: tab bar byte-identical between the two renders"
             );
         }
@@ -4762,12 +4831,12 @@ mod tests {
             let buf0 = render_at(width, 20, &d0);
             let bar = crate::ui::tasks::progress_bar(&progress, interior_width(width));
             assert_eq!(
-                detail_interior_cols(&buf0, 4, columns(&bar)),
+                detail_interior_cols(&buf0, 5, columns(&bar)),
                 bar,
                 "width {width}: id checklist carries the flag"
             );
             assert_eq!(
-                detail_interior_cols(&buf0, 6, 8),
+                detail_interior_cols(&buf0, 7, 8),
                 "[x] done",
                 "width {width}"
             );
@@ -4775,18 +4844,18 @@ mod tests {
             let d1 = dashboard_with_marked_change(&ids, Some(0), progress, source, Vec::new(), 1);
             let buf1 = render_at(width, 20, &d1);
             assert_eq!(
-                detail_interior_cols(&buf1, 4, 10),
+                detail_interior_cols(&buf1, 5, 10),
                 "- [x] done",
                 "width {width}: id tasks does not carry the flag"
             );
             assert_ne!(
-                detail_interior_cols(&buf1, 4, columns(&bar)),
+                detail_interior_cols(&buf1, 5, columns(&bar)),
                 bar,
                 "width {width}"
             );
 
-            assert!(row_text(&buf0, 3).contains(" checklist "), "width {width}");
-            assert!(row_text(&buf0, 3).contains(" tasks "), "width {width}");
+            assert!(row_text(&buf0, 2).contains(" checklist "), "width {width}");
+            assert!(row_text(&buf0, 2).contains(" tasks "), "width {width}");
         }
     }
 
@@ -4804,18 +4873,18 @@ mod tests {
                 let d = dashboard_with_marked_change(&ids, None, progress, source, Vec::new(), tab);
                 let buf = render_at(width, 20, &d);
                 assert!(
-                    !row_text(&buf, 4).contains('█') && !row_text(&buf, 4).contains('░'),
+                    !row_text(&buf, 5).contains('█') && !row_text(&buf, 5).contains('░'),
                     "width {width} tab {tab}: no progress-bar row"
                 );
                 assert_eq!(
-                    detail_interior_cols(&buf, 4, 7),
+                    detail_interior_cols(&buf, 5, 7),
                     "- [ ] a",
                     "width {width} tab {tab}"
                 );
                 assert!(
-                    row_text(&buf, 3).contains(" alpha ")
-                        && row_text(&buf, 3).contains(" beta ")
-                        && row_text(&buf, 3).contains(" gamma "),
+                    row_text(&buf, 2).contains(" alpha ")
+                        && row_text(&buf, 2).contains(" beta ")
+                        && row_text(&buf, 2).contains(" gamma "),
                     "width {width} tab {tab}: no tab removed"
                 );
             }
@@ -4838,9 +4907,9 @@ mod tests {
         );
         for width in [120, 60] {
             let buf = render_at(width, 20, &d);
-            assert_eq!(detail_interior_cols(&buf, 4, 3), "[-]", "width {width}");
+            assert_eq!(detail_interior_cols(&buf, 5, 3), "[-]", "width {width}");
             assert_eq!(
-                detail_interior_cols(&buf, 6, 12),
+                detail_interior_cols(&buf, 7, 12),
                 "No tasks yet",
                 "width {width}"
             );
@@ -4866,13 +4935,13 @@ mod tests {
         for width in [120, 60] {
             let buf = render_at(width, 20, &d);
             assert_eq!(
-                detail_interior_cols(&buf, 4, 14),
+                detail_interior_cols(&buf, 5, 14),
                 "No content yet",
                 "width {width}"
             );
             assert!(!buffer_contains(&buf, "No tasks yet"), "width {width}");
             assert!(
-                !row_text(&buf, 4).contains('█') && !row_text(&buf, 4).contains('░'),
+                !row_text(&buf, 5).contains('█') && !row_text(&buf, 5).contains('░'),
                 "width {width}: no progress-bar row"
             );
         }
@@ -4901,26 +4970,26 @@ mod tests {
             // `detail_interior_cols(buf, y, interior).len() == interior`
             // alone cannot fail (`cols` always returns exactly the length
             // asked for), so this checks the buffer directly instead.
-            let border_x = if width == 60 { 59 } else { 119 };
-            let last_interior_x = border_x - 1;
-            assert_ne!(
-                cell(&buf, last_interior_x, 4).symbol(),
-                "│",
-                "width {width}: the interior's last column is still row content"
-            );
-            assert_eq!(
-                cell(&buf, border_x, 4).symbol(),
-                "│",
-                "width {width}: the border one column past it is untouched"
-            );
+            // `pane-chrome`: there is no border any more to survive one column
+            // past the interior. At width 60 the narrow region keeps its
+            // trailing gutter — one column past the interior — untouched; the
+            // wide detail region has no right gutter at all (D5), so there is
+            // no further column to check there.
+            if width == 60 {
+                assert_eq!(
+                    cell(&buf, 59, 5).symbol(),
+                    " ",
+                    "width {width}: the region's trailing gutter is untouched"
+                );
+            }
             assert!(
-                detail_interior_cols(&buf, 4, 24).starts_with("! /repo/openspec/changes"),
+                detail_interior_cols(&buf, 5, 24).starts_with("! /repo/openspec/changes"),
                 "width {width}"
             );
             assert!(!buffer_contains(&buf, "No content yet"), "width {width}");
             assert!(!buffer_contains(&buf, "No tasks yet"), "width {width}");
             assert!(
-                !row_text(&buf, 4).contains('█') && !row_text(&buf, 4).contains('░'),
+                !row_text(&buf, 5).contains('█') && !row_text(&buf, 5).contains('░'),
                 "width {width}: no progress-bar row"
             );
         }
@@ -4944,21 +5013,21 @@ mod tests {
 
         let buf120 = render_at(120, 20, &d);
         assert_eq!(
-            cols(&row_text(&buf120, 4), 41..119),
+            cols(&row_text(&buf120, 5), 42..120),
             crate::ui::tasks::progress_bar(&progress, 78),
         );
-        assert!(cols(&row_text(&buf120, 4), 41..119).ends_with("[4/9] 44%"));
+        assert!(cols(&row_text(&buf120, 5), 42..120).ends_with("[4/9] 44%"));
 
         let buf60 = render_at(60, 20, &d);
         assert_eq!(
-            cols(&row_text(&buf60, 4), 1..59),
+            cols(&row_text(&buf60, 5), 1..59),
             crate::ui::tasks::progress_bar(&progress, 58),
         );
-        assert!(cols(&row_text(&buf60, 4), 1..59).ends_with("[4/9] 44%"));
+        assert!(cols(&row_text(&buf60, 5), 1..59).ends_with("[4/9] 44%"));
 
         for buf in [&buf120, &buf60] {
             let iw = interior_width(buf.area.width) as usize;
-            assert!(detail_interior_cols(buf, 5, iw).trim().is_empty());
+            assert!(detail_interior_cols(buf, 6, iw).trim().is_empty());
             assert!(buffer_contains(buf, "[ ] t0"));
         }
     }
@@ -4979,17 +5048,17 @@ mod tests {
         );
 
         let buf120 = render_at(120, 20, &d);
-        assert_eq!(cols(&row_text(&buf120, 4), 41..44), "[-]");
-        assert_eq!(cell(&buf120, 44, 4).symbol(), " ");
+        assert_eq!(cols(&row_text(&buf120, 5), 42..45), "[-]");
+        assert_eq!(cell(&buf120, 45, 5).symbol(), " ");
 
         let buf60 = render_at(60, 20, &d);
-        assert_eq!(cols(&row_text(&buf60, 4), 1..4), "[-]");
+        assert_eq!(cols(&row_text(&buf60, 5), 1..4), "[-]");
 
         for buf in [&buf120, &buf60] {
             assert_eq!(
-                detail_interior_cols(buf, 6, 12),
+                detail_interior_cols(buf, 7, 12),
                 "No tasks yet",
-                "row 6 reads No tasks yet"
+                "row 7 reads No tasks yet"
             );
         }
     }
@@ -5022,30 +5091,30 @@ mod tests {
             let buf_marked = render_at(width, 20, &d_marked);
 
             assert_eq!(
-                detail_interior_cols(&buf_marked, 4, 3),
+                detail_interior_cols(&buf_marked, 5, 3),
                 "[-]",
                 "width {width}"
             );
             assert!(
-                detail_interior_cols(&buf_marked, 5, interior_width(width) as usize)
+                detail_interior_cols(&buf_marked, 6, interior_width(width) as usize)
                     .trim()
                     .is_empty(),
                 "width {width}"
             );
             assert_eq!(
-                detail_interior_cols(&buf_marked, 6, 12),
+                detail_interior_cols(&buf_marked, 7, 12),
                 "No tasks yet",
                 "width {width}: the twenty bullets hold no task lines"
             );
 
             assert_eq!(
-                row_text(&buf_unmarked, 2),
-                row_text(&buf_marked, 2),
+                row_text(&buf_unmarked, 0),
+                row_text(&buf_marked, 0),
                 "width {width}: header row byte-identical"
             );
             assert_eq!(
-                row_text(&buf_unmarked, 3),
-                row_text(&buf_marked, 3),
+                row_text(&buf_unmarked, 2),
+                row_text(&buf_marked, 2),
                 "width {width}: tab row byte-identical"
             );
         }
@@ -5529,13 +5598,13 @@ mod tests {
 
         let d = detail_dashboard("plain text only\n".to_string(), 0, Route::Detail);
         let default_style = Cell::default().style();
-        for (width, first, last) in [(120, 41, 118), (60, 1, 58)] {
+        for (width, first, last) in [(120, 42, 119), (60, 1, 58)] {
             let buf = render_at(width, 20, &d);
             assert!(
-                row_text(&buf, 4).contains("plain text only"),
+                row_text(&buf, 5).contains("plain text only"),
                 "width {width}: the document was not drawn"
             );
-            for y in 4..=17u16 {
+            for y in 5..=18u16 {
                 for x in first..=last {
                     assert_eq!(
                         cell(&buf, x, y).style(),
@@ -5550,7 +5619,7 @@ mod tests {
     /// `detail-header` :: "The detail header is bold and uncoloured at both mandated
     /// widths".
     #[test]
-    fn the_detail_header_is_bold_and_uncoloured() {
+    fn the_detail_header_is_bold_and_uncoloured_at_both_mandated_widths() {
         let d = dashboard_with(
             vec![
                 fixture::active("add-token-refresh", 4, 9),
@@ -5565,15 +5634,17 @@ mod tests {
             completed: 4,
             total: 9,
         };
-        for (width, first, last, w) in [(120, 41, 118, 78), (60, 1, 58, 58)] {
+        // The wide detail region has no right gutter (D5), so its header
+        // spans columns 42 through 119, not 41 through 118.
+        for (width, first, last, w) in [(120, 42, 119, 78), (60, 1, 58, 58)] {
             let buf = render_at(width, 20, &d);
             assert_eq!(
-                detail_interior_cols(&buf, 2, w as usize),
+                detail_interior_cols(&buf, 0, w as usize),
                 crate::ui::detail::header_row("add-token-refresh", "tdd", &progress, w),
                 "width {width}"
             );
             for x in first..=last {
-                let style = cell(&buf, x, 2).style();
+                let style = cell(&buf, x, 0).style();
                 assert!(
                     style.add_modifier.contains(Modifier::BOLD),
                     "width {width}: header cell {x} is not bold"
@@ -5589,10 +5660,11 @@ mod tests {
                     "width {width}: header cell {x} carries a background"
                 );
             }
-            // The tab-bar row directly below does carry a background, so the two rows are
-            // distinguishable and the header was not left unstyled by accident.
+            // The tab-bar row two rows below it — buffer row 2 — does carry a
+            // background, so the two rows are distinguishable and the header
+            // was not left unstyled by accident.
             assert!(
-                (first..=last).any(|x| cell(&buf, x, 3).style().bg != uncoloured().bg),
+                (first..=last).any(|x| cell(&buf, x, 2).style().bg != uncoloured().bg),
                 "width {width}: the tab bar carries no background at all"
             );
         }
@@ -6069,13 +6141,15 @@ mod tests {
             let buf = render_at(width, 20, &d);
             let last = if width == 60 { 58 } else { 38 };
 
-            for x in 0..8u16 {
-                assert!(
-                    is_bold(cell(&buf, x, 0)),
-                    "width {width}: OpenSpec cell {x}"
-                );
+            // The list region's own heading row (`pane-chrome` -> D2): "demo-repo"
+            // bold at columns 1 through 9, one gutter column in from the region's
+            // own left edge, and the `file mode` badge right-aligned against the
+            // heading's own last column, nine columns wide.
+            for x in 1..10u16 {
+                assert!(is_bold(cell(&buf, x, 0)), "width {width}: heading cell {x}");
             }
-            for x in 9..18u16 {
+            let badge_start = last - 8;
+            for x in badge_start..=last {
                 assert!(
                     cell(&buf, x, 0)
                         .style()
@@ -6127,12 +6201,12 @@ mod tests {
             let (first, last) = if width == 60 {
                 (1u16, 58u16)
             } else {
-                (41, 118)
+                (42, 119)
             };
 
             for x in first..=last {
                 assert!(
-                    is_bold(cell(&buf, x, 2)),
+                    is_bold(cell(&buf, x, 0)),
                     "width {width}: detail header cell {x} is not bold"
                 );
             }
@@ -6176,7 +6250,7 @@ mod tests {
                 .map(|i| first + selected_tab.x + i)
                 .collect();
             let bold: Vec<u16> = (first..=last)
-                .filter(|x| is_bold(cell(&buf, *x, 3)))
+                .filter(|x| is_bold(cell(&buf, *x, 2)))
                 .collect();
             assert_eq!(
                 bold, expected,
