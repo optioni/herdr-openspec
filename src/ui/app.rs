@@ -4427,6 +4427,69 @@ mod tests {
             );
         }
 
+        /// `detail-scroll` -> "`ui::view::render` and `Dashboard::normalise_scroll`
+        /// cannot derive different content heights from the same frame".
+        /// `normalise_scroll` hardcoded `Gutters::Both` regardless of layout
+        /// mode, while `render_body` derives `Gutters::LeftOnly` at the wide
+        /// layout — the divider spends the detail region's trailing gutter
+        /// there. The clamp was therefore computed against a 77-column
+        /// content area while the draw path wraps at 78, so a document that
+        /// fits the drawn 14-row content area entirely could still be left
+        /// scrolled.
+        ///
+        /// A single 1092-character word hard-splits into exactly 14 full
+        /// lines at 78 columns (14 * 78 = 1092) but into 15 at 77 (14 full
+        /// lines of 77 plus a 14-character remainder) — the one-column
+        /// difference between the two candidate widths is what turns "fits"
+        /// into "overflows".
+        #[test]
+        fn normalise_scroll_agrees_with_render_about_the_wide_layouts_content_width() {
+            let mut d = Dashboard {
+                detail: Detail {
+                    source: "x".repeat(1092),
+                    scroll: 99,
+                    tab: 0,
+                    problems: Vec::new(),
+                    loaded: None,
+                },
+                repo: None,
+                searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
+                changes: empty_set(),
+                route: Route::Detail,
+                quit: false,
+                selected: 0,
+                filter: empty_filter(),
+                refresh: crate::ui::app::Refresh {
+                    requested: false,
+                    reload: false,
+                    startup: Vec::new(),
+                    problems: Vec::new(),
+                },
+                agents: crate::agents::AgentSnapshot {
+                    agents: Vec::new(),
+                    reachable: false,
+                    stalled: false,
+                    problem: None,
+                },
+                agent_names: crate::state::Mapping::default(),
+                launch: crate::ui::app::Launch {
+                    pending: None,
+                    in_flight: false,
+                    problems: Vec::new(),
+                },
+                sections: Sections {
+                    collapsed: std::collections::BTreeSet::new(),
+                },
+                file_mode: false,
+            };
+            d.normalise_scroll(ratatui::layout::Rect::new(0, 0, 120, 20));
+            assert_eq!(
+                d.detail.scroll, 0,
+                "a document that fits the drawn 78-column, 14-row content area \
+                 must not be left scrolled"
+            );
+        }
+
         #[test]
         fn selection_clamps_when_the_filter_shrinks_the_list() {
             let mut d = five_change_dashboard();

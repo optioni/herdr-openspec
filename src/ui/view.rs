@@ -730,6 +730,108 @@ mod tests {
                 }
             }
         }
+
+        /// `Gutters::LeftOnly` was hardcoded in `layout::zone` regardless of
+        /// layout mode, while `render_body` derives it — `Gutters::Both` at
+        /// the narrow layout, since there is no divider to spend a gutter on.
+        /// The tab bar's own width therefore disagreed by one column between
+        /// the hit test and the draw path, so a click past the drawn bar
+        /// could still resolve to a tab.
+        ///
+        /// Two artifacts, sized so their joined width fits the hit test's
+        /// (wrong) 59-column bar but not the drawn 58-column one, pin the
+        /// mismatch directly: `" a "` is 3 columns, and `" " + "b" * 53 + "
+        /// "` is 55, so the two together with their one separating column
+        /// (3 + 55 + 1 = 59) fit a 59-column bar but not a 58-column one.
+        #[test]
+        fn the_hit_test_agrees_with_the_drawn_tab_bar_at_the_narrow_layout() {
+            let second_id = "b".repeat(53);
+            let change = fixture::with_artifacts(
+                fixture::active("detail-view", 4, 9),
+                &[("a", &[]), (second_id.as_str(), &[])],
+            );
+            let d = super::dashboard_with_detail(
+                vec![change],
+                Vec::new(),
+                1, // `list-sections`: target 0 is the active header.
+                Route::Detail,
+                super::empty_detail_with_tab("", Vec::new(), 0),
+            );
+
+            let width = 60u16;
+            let height = 20u16;
+            let buffer = render_at(width, height, &d);
+            let area = Rect::new(0, 0, width, height);
+            let (body, _) = split_frame(area);
+            let detail_area = split_body(body, Route::Detail)
+                .2
+                .expect("a detail region is drawn at the narrow layout");
+            // The real, drawn bar: `render_body` chooses `Gutters::Both` at
+            // the narrow layout, since there is no divider to spend a gutter
+            // on.
+            let drawn_bar = interior(detail_area, Gutters::Both);
+            let bar_row = drawn_bar.y;
+
+            // Column 10 of the bar: past the single chip the drawn 58-column
+            // bar actually shows (` a ` occupies columns 0..3), but inside
+            // the second chip the hit test's own (wrong) 59-column bar would
+            // place there.
+            let column = 10u16;
+            let x = drawn_bar.x + column;
+            assert_eq!(
+                buffer[(x, bar_row)].symbol(),
+                " ",
+                "the drawn 58-column bar has nothing at column {column}"
+            );
+
+            match zone(area, Route::Detail, x, bar_row) {
+                Zone::DetailTab {
+                    bar,
+                    column: hit_column,
+                } => {
+                    assert_eq!(
+                        bar.width, drawn_bar.width,
+                        "the hit test's own bar must be the width `render_body` actually \
+                         drew, not a hardcoded `Gutters::LeftOnly`"
+                    );
+                    let resolved = crate::ui::detail::tab_at(
+                        &d.selected_change().unwrap().artifacts,
+                        d.detail.tab,
+                        bar.width,
+                        hit_column,
+                    );
+                    assert_eq!(
+                        resolved, None,
+                        "a click past the drawn bar resolved to a tab: {resolved:?}"
+                    );
+                }
+                other => panic!("expected a DetailTab zone at ({x}, {bar_row}), got {other:?}"),
+            }
+
+            // A cell actually inside the drawn chip still resolves to it.
+            let inside_x = drawn_bar.x + 1;
+            match zone(area, Route::Detail, inside_x, bar_row) {
+                Zone::DetailTab {
+                    bar,
+                    column: hit_column,
+                } => {
+                    let resolved = crate::ui::detail::tab_at(
+                        &d.selected_change().unwrap().artifacts,
+                        d.detail.tab,
+                        bar.width,
+                        hit_column,
+                    );
+                    assert_eq!(
+                        resolved,
+                        Some(0),
+                        "the drawn chip's own column must resolve to it"
+                    );
+                }
+                other => panic!(
+                    "expected a DetailTab zone at ({inside_x}, {bar_row}), got {other:?}"
+                ),
+            }
+        }
     }
 
     fn empty_detail() -> Detail {
