@@ -445,22 +445,22 @@ wrong tier. See design.md → Verification matrix for the test name each must ta
 Only the first of these fails a test when it goes stale. The other three drift in silence,
 which is why each is a named line here rather than a note — see design.md → Test Strategy.
 
-- [ ] 8.1 CHECK: record which documentation claims this change actually falsifies.
+- [x] 8.1 CHECK: record which documentation claims this change actually falsifies.
   `cargo test --all-features --test doc_contract --test degraded_coverage` → **10 and 61
   passed at HEAD**, so neither is red yet, and `degraded_coverage` is the one that will go.
   Note that the earlier task list named `doc_contract`'s **terminal-seam names** leg: this
   change adds and removes no crossterm terminal-mode function, so that leg has no subject
   here and must not be edited.
-- [ ] 8.2 CHANGE: `SPEC.md` — the frame description (audience: this repository's future
+- [x] 8.2 CHANGE: `SPEC.md` — the frame description (audience: this repository's future
   changes); the degraded-states row for the `file mode` badge, which says the badge sits
   "immediately after the `OpenSpec` label" that this change deletes (`:887`); the mouse
   table's ignored-gesture row, which lists "the header row" and "a border" (`:562`); and
   § List view's three example blocks and its sentence "its glyph is `v` when open and `>`
   when collapsed" (`:388-407`). Net change is a rewrite of existing text, not an addition.
-- [ ] 8.3 CHANGE: `AGENTS.md` — the mandated-width paragraph's justification (the widths
+- [x] 8.3 CHANGE: `AGENTS.md` — the mandated-width paragraph's justification (the widths
   themselves do not move, but they are now gutters rather than borders), the pure-view-set
   description, and the current-repo-state paragraph.
-- [ ] 8.4 CHANGE: the `## Purpose` of `openspec/specs/responsive-layout`, `detail-header`,
+- [x] 8.4 CHANGE: the `## Purpose` of `openspec/specs/responsive-layout`, `detail-header`,
   `artifact-tabs` and `view-palette` (audience: `openspec validate --specs --strict` and every
   future reader). Each states something this change falsifies — a bordered body and an
   emphasised border, a `bold` detail header, the tab bar as the interior's *second* row via a
@@ -468,11 +468,34 @@ which is why each is a named line here rather than a note — see design.md → 
   `tests/spec_purposes.rs` checks only that a Purpose exists and is not the archive
   placeholder, so nothing catches these; a delta carries requirements rather than a Purpose,
   so archiving cannot fix them either.
-- [ ] 8.5 CHECK: `README.md` needs no edit — no documented key or binding changed. Confirm
+- [x] 8.5 CHECK: `README.md` needs no edit — no documented key or binding changed. Confirm
   rather than assume: `cargo test --all-features --test manifest`.
-- [ ] 8.6 VERIFY: `cargo test --all-features --test doc_contract --test degraded_coverage`
+- [x] 8.6 VERIFY: `cargo test --all-features --test doc_contract --test degraded_coverage`
   passes, and `grep -rn '  v \|  > ' SPEC.md` returns nothing.
 
+
+  Measured on the finished tree rather than predicted: `degraded_coverage` **10 passed, 1
+  planted ignore** and `doc_contract` **61 passed** — both already green, because task 3.4
+  updated `tests/degraded-coverage.toml` in the same commit as the badge. So the one site
+  that *could* have failed loudly never went red, and all four sites were repaired as silent
+  drift. `manifest` 4 passed, confirming 8.5. `grep -rn '  v \|  > ' SPEC.md` → no matches.
+  `openspec validate --specs --strict` → 44 passed, 0 failed, over the four rewritten
+  Purposes.
+
+  Two sites beyond the task's list were repaired because they made the identical false claim:
+  `SPEC.md`'s paragraph beside the mouse table (`:564-565`), which also named a border and a
+  header row, and `AGENTS.md`'s **detail** mandated-width bullet, whose "two border columns"
+  justification is wrong for the wide detail region — that one is `Gutters::LeftOnly`, a
+  single gutter flush to the frame's last column.
+
+  One stale claim was found outside this group's edit scope and fixed separately
+  (`0a5a0f1`): `src/ui/palette.rs`'s role-table doc comment argued `FileMode` and `Code`
+  "cannot meet" because one is drawn in the frame header. The argument holds; the frame
+  header does not.
+
+  Deliberately not edited: `doc_contract`'s terminal-seam-names leg (no subject here — this
+  change adds and removes no crossterm terminal-mode function), the module map, the
+  worker-thread count, the tested-modules list, and `README.md`.
 ## 9. Change Review
 <!-- kind: operational -->
 
