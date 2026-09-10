@@ -1736,6 +1736,41 @@ mod tests {
         }
     }
 
+    /// `pane-chrome` -> Decision 6: the fold glyph pair becomes `▾`/`▸`, distinct
+    /// from the `>` selection marker, so a selected collapsed section no longer
+    /// reads as `> > archived (30)` — two identical glyphs that parse as one
+    /// repeated thing rather than a cursor beside a fold state.
+    #[test]
+    fn the_fold_glyphs_are_triangles_not_carets() {
+        for width in [38u16, 58, 17, 16, 5, 1, 0] {
+            let open = super::section_row_text(false, false, "active", 3, width);
+            let collapsed = super::section_row_text(false, true, "archived", 30, width);
+            assert_eq!(columns(&open), width as usize, "width {width}: open");
+            assert_eq!(
+                columns(&collapsed),
+                width as usize,
+                "width {width}: collapsed"
+            );
+        }
+        assert_eq!(
+            super::section_row_text(false, false, "active", 3, 38),
+            format!("{:<w$}", "  ▾ active (3)", w = 38)
+        );
+        assert_eq!(
+            super::section_row_text(false, true, "archived", 30, 58),
+            format!("{:<w$}", "  ▸ archived (30)", w = 58)
+        );
+        let selected_collapsed = super::section_row_text(true, true, "archived", 30, 58);
+        assert!(
+            selected_collapsed.starts_with("> ▸ archived (30)"),
+            "{selected_collapsed:?}"
+        );
+        assert!(
+            !selected_collapsed.contains("> >"),
+            "the cursor marker and the fold glyph must no longer collide: {selected_collapsed:?}"
+        );
+    }
+
     /// `change-rows` -> "A section header degrades by truncation at every width":
     /// the archived section collapsed over an unresolved archive of twenty-two
     /// changes.
