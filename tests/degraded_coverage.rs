@@ -407,7 +407,7 @@ fn validate_covers(condition: &str, covers: &[(String, usize, usize)]) -> Result
 /// nothing new; requiring the literal string in every calling test's own body would fail
 /// nearly every view test in this crate, which reaches a `TestBackend` through exactly
 /// these helpers rather than constructing one inline — inlining is the exception
-/// (`resizing_the_backend_changes_the_next_frame`, `resizing_changes_the_slice_on_the_next_frame`,
+/// (`the_mode_follows_the_current_frame_not_the_startup_size`, `resizing_changes_the_slice_on_the_next_frame`,
 /// and the two watcher sub-cases in `a_watch_failure_keeps_the_loop_drawing`), not the rule.
 fn renders_through_a_backend(body: &str) -> bool {
     const MARKERS: &[&str] = &[

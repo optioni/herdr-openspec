@@ -214,7 +214,7 @@ covers = ["src/launch.rs:155-163"]
 [[row]]
 condition = "Pane narrower than 100 columns"
 tier = "view"
-proof = ["wide_draws_two_regions_divided_at_40"]
+proof = ["at_120_columns_both_regions_are_drawn_with_the_divider_at_column_40"]
 verdict = "confirmed"
 why = "the single-column/two-region layout switch, rendered through render_at"
 covers = ["src/ui/layout.rs:27-30"]
