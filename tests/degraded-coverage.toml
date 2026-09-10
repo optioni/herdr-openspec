@@ -14,10 +14,10 @@ covers = ["src/ui/list.rs:300-322"]
 [[row]]
 condition = "`openspec` binary not found"
 tier = "view"
-proof = ["file_mode_badge_is_dim_after_the_label", "badge_drops_whole_below_eighteen_columns"]
+proof = ["the_badge_is_right_aligned_and_dropped_whole"]
 verdict = "implemented"
-why = "the header renders a dim file mode badge, driven through render_at at both widths"
-covers = ["src/ui/view.rs:293-301"]
+why = "the list region's heading renders a dim, yellow file mode badge right-aligned against its own last column, dropped whole below its budget, driven through render_at at both widths and at the drop rule's own boundary"
+covers = ["src/ui/view.rs:327-363"]
 
 [[row]]
 condition = "Schema unknown to the CLI"

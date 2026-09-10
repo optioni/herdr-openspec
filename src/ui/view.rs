@@ -308,12 +308,22 @@ const FILE_MODE_BADGE: &str = "file mode";
 
 /// The list region's own heading row: the repository directory name (or
 /// `no repository`), shortened from the left when it does not fit —
-/// `ui::list::shorten_left`. Draws no `Block`, no border, and nothing outside
-/// the heading row itself; the blank padding row below it and the interior
-/// are the caller's job. `emphasised` picks `Role::RegionHeadingFocused` over
-/// `Role::RegionHeading`, the same pair every region's heading takes.
+/// `ui::list::shorten_left` — and, when `dashboard.file_mode` is set, the
+/// `file mode` badge right-aligned against the heading row's last column.
+/// Draws no `Block`, no border, and nothing outside the heading row itself;
+/// the blank padding row below it and the interior are the caller's job.
+/// `emphasised` picks `Role::RegionHeadingFocused` over `Role::RegionHeading`,
+/// the same pair every region's heading takes.
 ///
-/// The `file mode` badge is not drawn here yet — task 3.4.
+/// The badge is dropped **whole**, before the name is shortened, whenever the
+/// heading row cannot hold the name, a separating blank, and the badge's nine
+/// columns together — `change-rows`' own drop-whole rule. `a` is therefore the
+/// full heading width when the badge does not fit alongside the name, and the
+/// heading width less ten (nine badge columns plus one separating blank)
+/// exactly when it does; the two together make the shortening branch
+/// reachable only when the badge was dropped, per
+/// `specs/responsive-layout/spec.md` -> "The list region's heading names the
+/// repository directory".
 fn render_region(frame: &mut Frame, area: Rect, dashboard: &Dashboard, emphasised: bool) {
     if area.height == 0 {
         return;
@@ -328,14 +338,28 @@ fn render_region(frame: &mut Frame, area: Rect, dashboard: &Dashboard, emphasise
         Role::RegionHeading
     };
     let name = repo_heading_name(dashboard);
-    let shown = if columns(&name) <= iw as usize {
-        name
-    } else {
-        list::shorten_left(&name, iw as usize)
-    };
-    frame
-        .buffer_mut()
-        .set_string(area.x + 1, area.y, &shown, palette::style(role));
+    let full_with_badge = iw.saturating_sub(10);
+    let show_badge = dashboard.file_mode && columns(&name) <= full_with_badge as usize;
+    let a = if show_badge { full_with_badge } else { iw };
+    let buf = frame.buffer_mut();
+    let x0 = area.x + 1;
+    if a > 0 {
+        let shown = if columns(&name) <= a as usize {
+            name
+        } else {
+            list::shorten_left(&name, a as usize)
+        };
+        buf.set_string(x0, area.y, &shown, palette::style(role));
+    }
+    if show_badge {
+        let badge_x = x0 + iw - 9;
+        buf.set_string(
+            badge_x,
+            area.y,
+            FILE_MODE_BADGE,
+            palette::style(Role::FileMode),
+        );
+    }
 }
 
 /// The list region's heading text: the repository root's final path
@@ -1509,21 +1533,31 @@ mod tests {
     }
 
 
-    /// `responsive-layout` :: "The badge is drawn dim after the label at both widths" —
-    /// reads the buffer's `Modifier`, not only its characters, since a badge that renders
-    /// the right text with the wrong style is still a defect a plain string comparison would
-    /// miss.
+    /// `responsive-layout` :: "The badge is right-aligned and dropped whole" — the badge
+    /// sits at the heading row's own right edge, not at a fixed column after a label that no
+    /// longer exists, and disappears whole rather than being cut short once the row cannot
+    /// hold the name, a separating blank, and its own nine columns together. `120` and `60`
+    /// exercise the mandated widths; `21` and `20` pin the drop rule's own boundary — one
+    /// column narrower than the rule needs is the first width at which the badge goes.
     #[test]
-    fn file_mode_badge_is_dim_after_the_label() {
-        for width in [120, 60] {
-            let d = dashboard_in_file_mode(Some("/tmp/demo-repo"), Route::List);
+    fn the_badge_is_right_aligned_and_dropped_whole() {
+        let repo = Some("/tmp/demo-repo");
+        for width in [120u16, 60] {
+            let d = dashboard_in_file_mode(repo, Route::List);
             let buf = render_at(width, 20, &d);
+            let iw = if width >= 100 { 38u16 } else { width - 2 };
             assert_eq!(
-                cols(&row_text(&buf, 0), 9..18),
+                cols(&row_text(&buf, 0), 1..10),
+                "demo-repo",
+                "width {width}"
+            );
+            let badge_start = 1 + iw - 9;
+            assert_eq!(
+                cols(&row_text(&buf, 0), badge_start as usize..(badge_start + 9) as usize),
                 "file mode",
                 "width {width}"
             );
-            for x in 9..18u16 {
+            for x in badge_start..badge_start + 9 {
                 assert!(
                     cell(&buf, x, 0)
                         .style()
@@ -1531,53 +1565,51 @@ mod tests {
                         .contains(Modifier::DIM),
                     "width {width}: column {x} of the badge is not dim"
                 );
-            }
-            // Discriminating control: column 8 (the separator) and the OpenSpec label itself
-            // must not carry DIM, so the assertion above is not satisfied by the whole row
-            // being dim.
-            assert!(
-                !cell(&buf, 0, 0)
-                    .style()
-                    .add_modifier
-                    .contains(Modifier::DIM),
-                "width {width}: the OpenSpec label must not be dim"
-            );
-
-            // `color-palette`: the badge is now coloured as well as dim. The colour is
-            // asserted against the palette entry rather than a literal — this file is
-            // inside the confinement gate's search set (design.md -> Decision 2).
-            for x in 9..18u16 {
                 assert_eq!(
                     cell(&buf, x, 0).style().fg,
                     palette::style(Role::FileMode).fg,
                     "width {width}: column {x} of the badge does not carry FileMode's foreground"
                 );
             }
-            // The label is bold and uncoloured, so the badge is distinguishable from it by
-            // colour as well as by weight and position.
-            for x in 0..8u16 {
-                assert!(is_bold(cell(&buf, x, 0)), "width {width}: label column {x}");
+            // The name is bold — the routed region's own heading — and carries no colour, so
+            // the badge is distinguishable from it by weight and by colour, not only by
+            // position.
+            for x in 1..10u16 {
+                assert!(is_bold(cell(&buf, x, 0)), "width {width}: name column {x}");
                 assert_eq!(
                     cell(&buf, x, 0).style().fg,
                     uncoloured().fg,
-                    "width {width}: label column {x} carries a foreground"
-                );
-            }
-            // The drawn path carries neither a modifier nor a foreground, so the yellow is
-            // confined to the badge's own nine columns.
-            for x in (width - 14)..width {
-                let style = cell(&buf, x, 0).style();
-                assert!(
-                    style.add_modifier.is_empty(),
-                    "width {width}: path column {x} carries a modifier"
-                );
-                assert_eq!(
-                    style.fg,
-                    uncoloured().fg,
-                    "width {width}: path column {x} carries a foreground"
+                    "width {width}: name column {x} carries a foreground"
                 );
             }
         }
+
+        // 21 columns: a heading row of 19 columns — `demo-repo`'s nine, one separating
+        // blank, and the badge's nine fit exactly.
+        let d = dashboard_in_file_mode(repo, Route::List);
+        let buf21 = render_at(21, 20, &d);
+        assert_eq!(cols(&row_text(&buf21, 0), 1..10), "demo-repo");
+        assert_eq!(cols(&row_text(&buf21, 0), 10..11), " ");
+        assert_eq!(cols(&row_text(&buf21, 0), 11..20), "file mode");
+
+        // 20 columns: a heading row of 18 columns — the badge is dropped whole rather than
+        // cut, and `demo-repo` is drawn whole in its place.
+        let buf20 = render_at(20, 20, &d);
+        assert!(
+            !row_text(&buf20, 0).contains("file mode"),
+            "the badge must be dropped whole below 21 columns: {:?}",
+            row_text(&buf20, 0)
+        );
+        assert_eq!(cols(&row_text(&buf20, 0), 1..10), "demo-repo");
+
+        // Additive: with `file_mode` false the 120-column row is byte-identical except for
+        // the missing badge — the name's own columns are unaffected by whether it is drawn.
+        let plain_buf = render_at(120, 20, &dashboard(repo, Route::List));
+        assert_eq!(
+            cols(&row_text(&plain_buf, 0), 1..10),
+            cols(&row_text(&buf21, 0), 1..10)
+        );
+        assert!(!buffer_contains(&plain_buf, "file mode"));
     }
 
     fn three_active() -> Dashboard {
