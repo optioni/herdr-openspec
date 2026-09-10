@@ -67,7 +67,8 @@ pub enum Role {
 ///
 /// Colour sits **beside** the modifier a role already carried, never in place of
 /// it. Two pairs share a style deliberately: `FileMode` with `Code` (both `DIM` +
-/// `Yellow`, and they cannot meet — one is drawn in the frame header, the other
+/// `Yellow`, and they cannot meet — one is drawn in the list region's heading
+/// row, the other
 /// only inside the detail region's content area), and `AgentBadge(Unknown)` with
 /// `ListSeparator` (both `DarkGray`, this palette's one "no information" grey, and
 /// an unknown status and a divider rule are both exactly that).
