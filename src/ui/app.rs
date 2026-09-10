@@ -313,6 +313,20 @@ pub enum Target {
     Section(SectionKey),
     /// An index into `Dashboard::visible()`.
     Change(usize),
+    /// `foldable-spec-sections`' addition: an index into
+    /// `ui::detail::content_lines`' own row list, already resolved against
+    /// the frame just drawn — `mouse_action` has the width to call
+    /// `content_lines`; `Dashboard::apply` does not (design.md -> Decision 7).
+    /// Not returned by `targets()`, which addresses only the list region.
+    DetailLine(usize),
+    /// A section-header row of the detail region's content: its own
+    /// content-line index beside its section index, both already resolved
+    /// by `mouse_action` for the same reason `DetailLine` carries one. Not
+    /// returned by `targets()`.
+    DetailHeader {
+        line: usize,
+        section: usize,
+    },
 }
 
 /// The dashboard's whole state. Carries no width, no layout mode, no column
@@ -557,24 +571,40 @@ impl Dashboard {
 
     /// `mouse-input`: act on the row a click landed on.
     ///
-    /// Does nothing at all when `target` is absent from `targets()` — a change
-    /// filtered away, or a section folded, between the draw and the event. A
-    /// `Target::Section` moves the cursor to that header and toggles it through
-    /// `apply_toggle_section`, the very code `Action::ToggleSection` runs, so a
-    /// click and a `Space` on the same header can never diverge. A
+    /// The `targets()` membership guard applies only in the `Target::Section`
+    /// and `Target::Change` arms — the two **list** targets `targets()`
+    /// yields — and does nothing at all when the target is absent there: a
+    /// change filtered away, or a section folded, between the draw and the
+    /// event. A `Target::Section` moves the cursor to that header and toggles
+    /// it through `apply_toggle_section`, the very code `Action::ToggleSection`
+    /// runs, so a click and a `Space` on the same header can never diverge. A
     /// `Target::Change` moves the cursor to that row when it is not already
-    /// there, and otherwise — at `Route::List` — opens the detail, which is what
-    /// makes a second click on a selected row an `Enter`.
+    /// there, and otherwise — at `Route::List` — opens the detail, which is
+    /// what makes a second click on a selected row an `Enter`.
+    ///
+    /// `Target::DetailLine`/`Target::DetailHeader` are exempt from that guard
+    /// (design.md -> Decision 7): they carry indices `mouse_action` already
+    /// resolved against the frame just drawn, not an index into a list that
+    /// may have changed since — re-validating against `targets()`, which does
+    /// not even contain them, would be both impossible and pointless. A
+    /// top-of-function guard would return before either arm is reached,
+    /// silently discarding every detail click; the two remain gated only by
+    /// `Detail::foldable()`, on the same terms `mouse_action` does not emit
+    /// either variant for a non-foldable artifact and `apply` checks anyway
+    /// rather than trusting it.
     fn apply_click(&mut self, target: Target) {
-        let Some(index) = self.targets().iter().position(|t| *t == target) else {
-            return;
-        };
         match target {
             Target::Section(_) => {
+                let Some(index) = self.targets().iter().position(|t| *t == target) else {
+                    return;
+                };
                 self.selected = index;
                 self.apply_toggle_section();
             }
             Target::Change(_) => {
+                let Some(index) = self.targets().iter().position(|t| *t == target) else {
+                    return;
+                };
                 if self.selected == index {
                     if self.route == Route::List {
                         self.route = Route::Detail;
@@ -584,6 +614,17 @@ impl Dashboard {
                     self.selected = index;
                     self.detail.tab = 0;
                     self.detail.scroll = 0;
+                }
+            }
+            Target::DetailLine(line) => {
+                if self.detail.foldable() {
+                    self.detail.scroll = line;
+                }
+            }
+            Target::DetailHeader { line, .. } => {
+                if self.detail.foldable() {
+                    self.detail.scroll = line;
+                    self.apply_toggle_detail_section();
                 }
             }
         }
@@ -596,6 +637,12 @@ impl Dashboard {
     /// is empty, which is what makes an empty list inert.
     fn target_section(&self) -> Option<SectionKey> {
         match self.targets().get(self.selected)? {
+            // `targets()` never emits `DetailLine`/`DetailHeader` — they
+            // address the detail region, not the list — so this arm is
+            // structurally unreachable; it exists only because the match is
+            // over `Target` as a whole (design.md -> Decision 7's own note
+            // on `list-selection/spec.md`).
+            Target::DetailLine(_) | Target::DetailHeader { .. } => None,
             Target::Section(key) => Some(*key),
             Target::Change(i) => {
                 let active_visible = if self.section_open(SectionKey::Active) {
@@ -967,6 +1014,8 @@ impl Dashboard {
         match self.targets().get(self.selected)? {
             Target::Change(i) => self.visible().get(*i).copied(),
             Target::Section(_) => None,
+            // Structurally unreachable — see `target_section`'s own note.
+            Target::DetailLine(_) | Target::DetailHeader { .. } => None,
         }
     }
 

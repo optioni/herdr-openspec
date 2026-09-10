@@ -237,9 +237,15 @@ pub enum Zone {
     /// The detail region's tab-bar row. `bar` is that row's own rectangle;
     /// `column` is the offset of the addressed column right of its first.
     DetailTab { bar: Rect, column: u16 },
-    /// The detail region, anywhere but the tab-bar row: its gutter, its
-    /// heading row, its padding row, the rule below the tab bar, the content
-    /// padding row, or its content area.
+    /// A row of the detail region's **content area** — the rectangle
+    /// `split_detail` returns third, below the tab-bar row, the rule, and
+    /// the content padding row. `content` is that area's own rectangle;
+    /// `row` is the offset of the addressed row below its first.
+    /// `foldable-spec-sections`' addition — see design.md -> Decision 7.
+    DetailRow { content: Rect, row: u16 },
+    /// The detail region, anywhere but the tab-bar row and the content
+    /// area: its gutter, its heading row, its padding row, the rule below
+    /// the tab bar, or the content padding row.
     Detail,
     /// The frame's footer row, or a point outside the frame entirely.
     Outside,
@@ -295,11 +301,17 @@ pub fn zone(area: Rect, route: Route, column: u16, row: u16) -> Zone {
         && detail_area.contains(point)
     {
         let inner = interior(detail_area, detail_gutters(divider));
-        let (bar, _rule, _content) = split_detail(inner);
-        return if bar.contains(point) {
-            Zone::DetailTab {
+        let (bar, _rule, content) = split_detail(inner);
+        if bar.contains(point) {
+            return Zone::DetailTab {
                 bar,
                 column: column - bar.x,
+            };
+        }
+        return if content.contains(point) {
+            Zone::DetailRow {
+                content,
+                row: row - content.y,
             }
         } else {
             Zone::Detail
@@ -394,7 +406,8 @@ mod tests {
     mod zone {
         use crate::ui::app::Route;
         use crate::ui::layout::{
-            Gutters, LayoutMode, Zone, interior, mode, split_body, split_detail, split_frame, zone,
+            Gutters, LayoutMode, Zone, detail_gutters, interior, mode, split_body, split_detail,
+            split_frame, zone,
         };
         use ratatui::layout::Rect;
 
@@ -419,12 +432,17 @@ mod tests {
 
         /// The detail region's content area, derived the same way —
         /// `foldable-spec-sections`' addition, `split_detail`'s third
-        /// rectangle rather than its first.
+        /// rectangle rather than its first. Unlike `detail_bar` above, this
+        /// derives its own gutters from the divider `split_body` actually
+        /// returns — `Gutters::LeftOnly` only holds at the wide layout,
+        /// where a divider is drawn; the narrow layout has none, so its
+        /// detail region keeps both its own gutters.
         fn detail_content(area: Rect, route: Route) -> Rect {
             let (body, _) = split_frame(area);
+            let (_, divider, detail_area) = split_body(body, route);
             let inner = interior(
-                split_body(body, route).2.expect("a detail region is drawn"),
-                Gutters::LeftOnly,
+                detail_area.expect("a detail region is drawn"),
+                detail_gutters(divider),
             );
             split_detail(inner).2
         }
@@ -463,10 +481,7 @@ mod tests {
                     ((bar.x, bar.y - 1), Zone::Detail),
                     ((bar.x, bar.y), Zone::DetailTab { bar, column: 0 }),
                     ((bar.x, bar.y + 1), Zone::Detail),
-                    (
-                        (content.x, content.y),
-                        Zone::DetailRow { content, row: 0 },
-                    ),
+                    ((content.x, content.y), Zone::DetailRow { content, row: 0 }),
                     (
                         (content.x, content.y + last_content_row),
                         Zone::DetailRow {

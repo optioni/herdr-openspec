@@ -741,7 +741,11 @@ mod tests {
                                         content.width,
                                     );
                                     let content_offset = if dashboard.detail.foldable() {
-                                        viewport(rows.len(), dashboard.detail.scroll, content.height)
+                                        viewport(
+                                            rows.len(),
+                                            dashboard.detail.scroll,
+                                            content.height,
+                                        )
                                     } else {
                                         scroll_offset(
                                             rows.len(),

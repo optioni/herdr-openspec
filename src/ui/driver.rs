@@ -216,12 +216,12 @@ pub fn mouse_action(dashboard: &Dashboard, area: Rect, mouse: &MouseEvent) -> Ac
     match mouse.kind {
         MouseEventKind::ScrollDown => match zone {
             Zone::List | Zone::ListRow { .. } => Action::SelectNext,
-            Zone::Detail | Zone::DetailTab { .. } => Action::ScrollDown,
+            Zone::Detail | Zone::DetailTab { .. } | Zone::DetailRow { .. } => Action::ScrollDown,
             Zone::Outside => Action::Ignore,
         },
         MouseEventKind::ScrollUp => match zone {
             Zone::List | Zone::ListRow { .. } => Action::SelectPrev,
-            Zone::Detail | Zone::DetailTab { .. } => Action::ScrollUp,
+            Zone::Detail | Zone::DetailTab { .. } | Zone::DetailRow { .. } => Action::ScrollUp,
             Zone::Outside => Action::Ignore,
         },
         MouseEventKind::Down(MouseButton::Left) => match zone {
@@ -243,12 +243,42 @@ pub fn mouse_action(dashboard: &Dashboard, area: Rect, mouse: &MouseEvent) -> Ac
                     )
                 })
                 .map_or(Action::Ignore, Action::SelectTab),
+            Zone::DetailRow { content, row } => detail_row_click(dashboard, content, row),
             Zone::List | Zone::Detail | Zone::Outside => Action::Ignore,
         },
         // Right and middle presses, every release, every drag, pointer motion,
         // and both horizontal wheel directions: there is no context menu, no
         // drag of any kind, and the pane scrolls in one dimension only.
         _ => Action::Ignore,
+    }
+}
+
+/// Resolve a press on the detail region's content area — `foldable-spec-sections`'
+/// addition (design.md -> Decision 7). `mouse_action` has `content`'s own width
+/// and can call `ui::detail::content_lines` and `ui::detail::section_at`;
+/// `Dashboard::apply` has neither, so both indices this returns are already
+/// resolved against the frame just drawn.
+///
+/// Inert when the selected artifact is not foldable — `Detail::foldable()`, the
+/// one site — and inert for a `row` past the last row `content_lines` produced,
+/// which covers a press below a foldable artifact's own last drawn row.
+fn detail_row_click(dashboard: &Dashboard, content: Rect, row: u16) -> Action {
+    if !dashboard.detail.foldable() {
+        return Action::Ignore;
+    }
+    let rows = crate::ui::detail::content_lines(
+        &dashboard.detail,
+        dashboard.selected_change(),
+        content.width,
+    );
+    let offset = crate::ui::layout::viewport(rows.len(), dashboard.detail.scroll, content.height);
+    let line = offset + row as usize;
+    if line >= rows.len() {
+        return Action::Ignore;
+    }
+    match crate::ui::detail::section_at(&rows, offset, row) {
+        Some(section) => Action::Click(Target::DetailHeader { line, section }),
+        None => Action::Click(Target::DetailLine(line)),
     }
 }
 
@@ -3638,8 +3668,10 @@ mod tests {
         expanded: std::collections::BTreeSet<usize>,
         scroll: usize,
     ) -> Dashboard {
-        let change =
-            crate::changes::fixture::with_artifacts(crate::changes::fixture::active("s0", 0, 1), &[]);
+        let change = crate::changes::fixture::with_artifacts(
+            crate::changes::fixture::active("s0", 0, 1),
+            &[],
+        );
         let mut d = dashboard_with_change("/repo", "unused", 0, 0);
         d.changes = crate::changes::fixture::set(vec![change], Vec::new(), Vec::new());
         d.selected = 1;
@@ -4130,7 +4162,8 @@ mod tests {
 
         // `foldable-spec-sections`: the same five kinds over a drawn
         // artifact-section header row — task 8.2's extension.
-        let folded = foldable_dashboard(three_spec_sections(), std::collections::BTreeSet::new(), 0);
+        let folded =
+            foldable_dashboard(three_spec_sections(), std::collections::BTreeSet::new(), 0);
         let content = detail_content_area(WIDE, Route::Detail);
         let header_row = content.y + 1;
         for kind in [
@@ -4166,7 +4199,10 @@ mod tests {
             let action = mouse_action(&clicked, area, &left(content.x, row));
             assert_eq!(
                 action,
-                Action::Click(Target::DetailHeader { line: 1, section: 1 }),
+                Action::Click(Target::DetailHeader {
+                    line: 1,
+                    section: 1
+                }),
                 "{width}x{height}"
             );
 
@@ -4175,7 +4211,10 @@ mod tests {
                 clicked.detail.expanded.contains(&1),
                 "{width}x{height}: opened"
             );
-            assert_eq!(clicked.detail.scroll, 1, "{width}x{height}: cursor on the header");
+            assert_eq!(
+                clicked.detail.scroll, 1,
+                "{width}x{height}: cursor on the header"
+            );
 
             // Equal, field for field, to `Space` at `Route::Detail` with the
             // cursor already on that header.
@@ -4202,7 +4241,7 @@ mod tests {
         let mut at_list =
             foldable_dashboard(three_spec_sections(), std::collections::BTreeSet::new(), 0);
         at_list.route = Route::List;
-        let mut at_detail =
+        let at_detail =
             foldable_dashboard(three_spec_sections(), std::collections::BTreeSet::new(), 0);
         let action_at_list = mouse_action(&at_list, WIDE, &left(content.x, row));
         let action_at_detail = mouse_action(&at_detail, WIDE, &left(content.x, row));
@@ -4277,8 +4316,12 @@ mod tests {
         }];
         for (width, height) in [(120u16, 40u16), (60, 40)] {
             let area = Rect::new(0, 0, width, height);
-            let dashboard = foldable_dashboard(sections.clone(), std::collections::BTreeSet::new(), 0);
-            assert!(!dashboard.detail.foldable(), "{width}x{height}: one section");
+            let dashboard =
+                foldable_dashboard(sections.clone(), std::collections::BTreeSet::new(), 0);
+            assert!(
+                !dashboard.detail.foldable(),
+                "{width}x{height}: one section"
+            );
 
             let content = detail_content_area(area, Route::Detail);
             let before = dashboard.clone();
