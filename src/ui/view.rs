@@ -1612,6 +1612,64 @@ mod tests {
         assert!(!buffer_contains(&plain_buf, "file mode"));
     }
 
+    /// `responsive-layout` :: "A region draws a heading, a blank row, and no border at both
+    /// widths" — the padding row between a region's heading and its interior is never
+    /// painted, and the interior's first row is the buffer's row 2 at both mandated widths.
+    /// Twenty changes so the interior's own **last** row (18) holds real content rather than
+    /// a blank cell, which is what distinguishes "no border" from "a border that happens to
+    /// be blank".
+    #[test]
+    fn a_region_draws_a_heading_a_blank_row_and_no_border_at_both_widths() {
+        const BORDERS: [&str; 4] = ["┌", "┐", "└", "┘"];
+        for width in [120u16, 60] {
+            let d = dashboard_with(changes_named(20), Vec::new(), 1, Route::List);
+            let buf = render_at(width, 20, &d);
+            let last = if width == 60 { 58u16 } else { 38 };
+
+            // The padding row (buffer row 1) is untouched by construction: every cell of it,
+            // inside the interior's own columns, is a space at the default style.
+            for x in 1..=last {
+                let c = cell(&buf, x, 1);
+                assert_eq!(c.symbol(), " ", "width {width}: padding row column {x}");
+                assert_eq!(
+                    c.style(),
+                    uncoloured(),
+                    "width {width}: padding row column {x} carries a style"
+                );
+            }
+
+            // The interior's first row is the buffer's row 2 — the active section header —
+            // at both mandated widths.
+            assert!(
+                interior_cols(&buf, 2).contains("active"),
+                "width {width}: row 2 must be the interior's first row"
+            );
+
+            // Both gutters stay empty on every row of the body (rows 0 through 18).
+            for y in 0..=18u16 {
+                assert_eq!(cell(&buf, 0, y).symbol(), " ", "width {width}: y={y}");
+                assert_eq!(
+                    cell(&buf, width - 1, y).symbol(),
+                    " ",
+                    "width {width}: y={y}"
+                );
+            }
+
+            // No box-drawing character survives — there is no `Block` any more.
+            assert!(
+                !BORDERS.iter().any(|b| buffer_contains(&buf, b)),
+                "width {width}: no border character may appear"
+            );
+
+            // The interior's last row (18) holds real content, not a blank cell — twenty
+            // changes fill all seventeen interior rows at both widths.
+            assert!(
+                !interior_cols(&buf, 18).trim().is_empty(),
+                "width {width}: row 18 must hold a drawn list row"
+            );
+        }
+    }
+
     fn three_active() -> Dashboard {
         dashboard_with(
             vec![
