@@ -627,10 +627,14 @@ impl Dashboard {
                     self.detail.scroll = line;
                 }
             }
-            Target::DetailHeader { line, .. } => {
+            Target::DetailHeader { line, section } => {
                 if self.detail.foldable() {
                     self.detail.scroll = line;
-                    self.apply_toggle_detail_section();
+                    // The carried `section`, not a re-derivation of it:
+                    // `mouse_action` resolved it against the frame just drawn
+                    // and `specs/mouse-input/spec.md` forbids `apply`
+                    // recomputing it.
+                    self.toggle_detail_section(section);
                 }
             }
         }
@@ -706,6 +710,22 @@ impl Dashboard {
         let Some(section) = self.detail_cursor_section() else {
             return;
         };
+        self.toggle_detail_section(section);
+    }
+
+    /// Fold `section` if it is open, unfold it if it is collapsed, and move the
+    /// detail cursor to its header row — `artifact-folds`' cursor-to-header
+    /// rule.
+    ///
+    /// Takes the section **already resolved**, which is what lets a click and a
+    /// `Space` on the same header run the very same code without the click
+    /// re-deriving an index it was already handed:
+    /// `specs/mouse-input/spec.md` requires that `Target::DetailHeader`'s two
+    /// indices arrive resolved against the frame just drawn and that
+    /// `Dashboard::apply` SHALL NOT recompute either, and design.md ->
+    /// Decision 7 states that carrying `section` beside `line` is exactly why
+    /// the variant has two fields.
+    fn toggle_detail_section(&mut self, section: usize) {
         if !self.detail.expanded.remove(&section) {
             self.detail.expanded.insert(section);
         }
