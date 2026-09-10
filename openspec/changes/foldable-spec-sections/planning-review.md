@@ -13,13 +13,26 @@
 
 ## Reviewed Against
 
-- This repository HEAD: `c9820c6` (`docs(foldable-spec-sections): propose foldable per-file
-  artifact sections`). The finding pass began at `43de01e`/`027db45`; the package was
-  repaired mid-review, so every finding below was re-verified against the committed text.
+- This repository HEAD: **`08025d3`** (`docs(pane-chrome): archive the change and sync the
+  capability specs`), after the drift refresh recorded in the second table below.
+
+  The original finding pass ran against HEAD `c9820c6`
+  (`docs(foldable-spec-sections): propose foldable per-file artifact sections`), having begun
+  at `43de01e`/`027db45`; the package was repaired mid-review, so every finding in the first
+  table was re-verified against the committed text at `c9820c6`.
+
+  **HEAD then moved.** `pane-chrome` landed and was archived in about sixty commits between
+  `c9820c6` and `08025d3`, rewriting the frame chrome this change draws into. The apply flow's
+  pre-implementation drift check caught it before the first implementation task, and the
+  refresh below re-based every affected artifact. Re-verified at `08025d3`:
+  `openspec validate --strict` passes, `make gates` exits 0 with 53 `OK` lines, and every
+  measured number in `tasks.md` → Baseline was taken again at that commit.
 - Sibling repositories: **Not applicable.** This change adds no dependency, touches no
   manifest, and crosses no repository boundary. `~/Code/openspec-schemas` supplies the
   vendored `tdd` schema and `.claude/agents/`, neither of which this change edits.
 - Working tree: clean apart from this change's own artifacts and the repairs recorded below.
+  The refresh commits are `f76be82`, `061cae5`, `305fa26`, and `e96e4f7` (delta re-bases) plus
+  the design/tasks refresh commit that carries this file.
 - Four `planning-reviewer` subagents, one slice each — (A) capability coverage and
   cross-artifact contradictions, (B) design completeness, test boundaries, and check
   falsifiability, (C) task alignment and lifecycle, (D) factual verification. None was a fork
@@ -65,6 +78,27 @@
 | SUGGESTION | tasks.md | Task 1.1 argued a point the design already settles | Trimmed to the citation | `tasks.md` 1.1, 1.2 |
 | SUGGESTION | specs/artifact-folds | A backward reference to `detail.source` read oddly for an archived spec | Reworded to "the concatenated source before this change" | `specs/artifact-folds/spec.md` |
 
+## Drift Repair at HEAD `08025d3`
+
+Found by the apply flow's own pre-implementation check — "compare the current HEAD with
+planning-review.md → Reviewed Against" — not by a second review pass. Two categories: text
+that `pane-chrome` invalidated, and one defect the original review recorded as repaired but
+had not repaired.
+
+| Severity | Source Artifact | Problem | Repair | Updated Location |
+|---|---|---|---|---|
+| CRITICAL | five spec deltas | **Archiving this change would have reverted `pane-chrome`.** A MODIFIED block replaces the live requirement wholesale, and eleven of the twenty-one carried requirements had bodies written against the pre-`pane-chrome` text: `view-palette` enumerated `HeaderTitle`, `HeaderPath`, `RegionBorder`, `RegionBorderFocused`, and `DetailHeader` across four requirements; `responsive-layout`, `detail-scroll`, `artifact-content`, and `mouse-input` described a bordered frame with a frame header row and a two-rectangle `split_detail` | Re-based all eleven onto the landed text plus this change's own intent, isolating that intent by diffing each delta against `c9820c6`'s live spec. Verified two ways: every remaining difference from the live spec is this change's own addition, and a token sweep confirms no identifier `pane-chrome` introduced is absent from a delta carrying its requirement | `specs/view-palette/spec.md`, `specs/responsive-layout/spec.md`, `specs/detail-scroll/spec.md`, `specs/artifact-content/spec.md`, `specs/mouse-input/spec.md`, `specs/list-selection/spec.md` |
+| CRITICAL | design.md | **The verification matrix's own CRITICAL was recorded as repaired but was not.** The first table above says every `cargo test` filter was corrected and "verified the module paths against `cargo test --lib -- --list`". Measured at `08025d3` — and equally at `c9820c6`, so this was never a drift — about **thirty-seven of fifty-one distinct filters selected zero tests**: `ui::app::tests::sync_detail`, `ui::view::tests::border`, `ui::view::tests::monochrome` and the rest named **submodules that do not exist**. The crate has exactly eight test submodules; the column had invented some forty. A filter that matches nothing exits `0`, so each of those rows read as a passing verification | Rewrote all 117 `--lib` cells as **full test paths**: the existing test that proves the row, verified against `cargo test --lib -- --list`, or — for the 31 rows whose test this change creates — the path the owning task will create, under this repository's `<module>::tests::<scenario, snake-cased>` convention. Added the convention and this history to design.md, and added **task 12.9**, which mechanically asserts every filter selects at least one test. That check's absence is what let the defect survive a review | `design.md` → Test Strategy; `tasks.md` 12.9 |
+| WARNING | tasks.md | Six measured baselines moved under `pane-chrome`: `Detail { … }` spans 60 → **61**; `.source` under `src/ui/` 53 → **52** (`view.rs` 5 → 4); the palette's no-modifier role count nine → **seven**; the library test count 1222 → **1224**; `make gates` exit 2 → **0**; and the fold glyph pair `>`/`v` → **`▸`/`▾`** | Re-measured every row at `08025d3` and marked which moved, and propagated the counts into tasks 1.1, 2.5, 3.3, 4.2, and 5.5 | `tasks.md` → Baseline, and those five tasks |
+| WARNING | design.md | Decision 9 left the fold glyph pair conditional on an ordering question — "`>`/`v` today, `▾`/`▸` if `pane-chrome` has landed first" — which is now answerable | Closed it: `pane-chrome` landed first, the recommended order, so this change ships `▸`/`▾` read from `section_row_text`. The not-taken branch is recorded as unreachable | `design.md` → Decision 9; `specs/artifact-folds/spec.md`; `tasks.md` 5.5 |
+| SUGGESTION | tasks.md | Task 10.1 said "the 111 scenarios", "all five spec files", and "all 60 spans" against a package of 122 scenarios, seven spec files, and 61 spans; R5 named "group 6" where the arm belongs to group 7 | Corrected all four | `tasks.md` 10.1, Baseline R5 |
+| SUGGESTION | planning-review.md | The one scheduling decision left to the user — `pane-chrome` first or this change first — is settled by `pane-chrome` having landed | Recorded in `tasks.md` → Sequencing, so no future reader re-opens it | `tasks.md` → Sequencing |
+
+Not re-reviewed: the refresh re-based artifact text onto a moved HEAD and repaired one
+mis-recorded check. It did not change this change's scope, contracts, decisions, or task
+lifecycle, so the original finding pass stands and no second `planning-reviewer` fan-out was
+run. Group 10's Change Review is still ahead and is where the implemented diff is reviewed.
+
 ## No Remaining Implementation-Blocking Gaps
 
 None remain. Every CRITICAL is repaired in the artifact that owns it, and both gate-level
@@ -97,4 +131,4 @@ implementation time.
   nothing.
 - **`make gates` was exiting 2 at review time** solely on `OPENSPEC-UNTOUCHED`, naming this
   change's own untracked artifacts. Resolved by committing them: re-run at `c9820c6` gives
-  exit 0 with 53 OK lines and no failures.
+  exit 0 with 53 OK lines and no failures, and again at `08025d3` after the drift refresh.

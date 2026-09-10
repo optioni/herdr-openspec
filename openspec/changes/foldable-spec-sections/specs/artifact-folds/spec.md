@@ -155,15 +155,16 @@ section in order:
 
 - one **header row** reading `<glyph> <label>`, where the glyph pair is **the one
   `src/ui/list.rs`'s `section_row_text` uses for the `active` and `archived` headers**, so one
-  fold reads the same in both regions. That is `>` collapsed and `v` open today, and `▸`/`▾`
-  once `pane-chrome`'s D6 lands; this capability SHALL take the pair from that one site rather
-  than writing its own literal, and a test SHALL assert the two agree rather than asserting a
-  character. Passed through `ui::list::pad_or_truncate_right` at `width`; followed by
+  fold reads the same in both regions. `pane-chrome`'s D6 has landed, so that pair is `▸`
+  collapsed and `▾` open; this capability SHALL take the pair from that one site rather than
+  writing its own literal, and a test SHALL assert the two agree rather than asserting a
+  character, so a later change to `section_row_text` moves both regions together. Passed
+  through `ui::list::pad_or_truncate_right` at `width`; followed by
 - when and only when the section is open, that section's body: `ui::markdown::lines(&section.text, width)`.
 
 When the selected artifact is **not** foldable, `content_lines` SHALL emit no header row at
-all and SHALL render the single section's `text` exactly as it renders `detail.source`
-today.
+all and SHALL render the single section's `text` exactly as it rendered the concatenated
+source before this change.
 
 Each header row SHALL carry `ContentKind::SectionHeader { section, selected }`, where
 `section` is its own index and `selected` is true for exactly the header whose section the
