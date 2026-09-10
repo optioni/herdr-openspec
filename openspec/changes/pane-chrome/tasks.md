@@ -33,42 +33,65 @@ The chain is therefore 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9, sequen
 The three signature changes here are compile errors at every call site, so nothing below
 builds until this group lands. See design.md → Decisions D1, D2, D3.
 
-- [ ] 1.1 RED: add `ui::layout::tests::interior_reserves_two_rows_and_the_named_gutters`
+- [x] 1.1 RED: add `ui::layout::tests::interior_reserves_two_rows_and_the_named_gutters`
   asserting `interior(Rect::new(0,0,60,19), Gutters::Both) == Rect::new(1,2,58,17)`,
   `interior(Rect::new(0,0,40,19), Gutters::Both) == Rect::new(1,2,38,17)`, and
   `interior(Rect::new(41,0,79,19), Gutters::LeftOnly) == Rect::new(42,2,78,17)`.
   Check: `grep -c 'Gutters' src/ui/layout.rs` → `0`, exit 1 at HEAD, so the type does not
   exist and the test cannot compile, let alone pass.
-- [ ] 1.2 GREEN: add `pub enum Gutters { Both, LeftOnly }` and change `interior` to
+  Named `interior_reserves_two_rows_and_the_gutters_its_gutters_names` instead (matching
+  design.md's Verification matrix, which states "the names in the Verification column are
+  the contract, not a suggestion" — the matrix row for this scenario names that exact test).
+  Also covers the two degenerate cases (`(0,0,1,1)`, `(0,0,0,0)`) `responsive-layout`'s own
+  scenario names alongside the three above.
+- [x] 1.2 GREEN: add `pub enum Gutters { Both, LeftOnly }` and change `interior` to
   `interior(area: Rect, gutters: Gutters) -> Rect`, advancing the origin by the left gutter
   and **two** rows, reducing width by `gl + gr` and height by two, each saturating, keeping
   the existing origin clamp. Verify: 1.1 passes.
-- [ ] 1.3 RED: add `ui::layout::tests::split_frame_is_body_then_footer` asserting
+- [x] 1.3 RED: add `ui::layout::tests::split_frame_is_body_then_footer` asserting
   `split_frame` returns `(body, footer)` with body `Rect::new(0,0,w,h-1)` at `h >= 2`, the
   body alone at `h == 1`, and both zero-height at `h == 0`.
   Check: `grep -n 'pub fn split_frame' src/ui/layout.rs` → `-> (Rect, Rect, Rect)` at HEAD,
   so the three-tuple destructuring in the test does not compile.
-- [ ] 1.4 GREEN: drop the header rect from `split_frame` and update `ui::view::render`'s
+- [x] 1.4 GREEN: drop the header rect from `split_frame` and update `ui::view::render`'s
   destructuring. Verify: 1.3 passes.
-- [ ] 1.5 RED: add `ui::layout::tests::the_wide_body_splits_into_list_divider_detail`
+- [x] 1.5 RED: add `ui::layout::tests::the_wide_body_splits_into_list_divider_detail`
   asserting `split_body` at `Rect::new(0,0,120,19)` gives list `Rect::new(0,0,40,19)`,
   divider column `40`, and detail `Rect::new(41,0,79,19)`, and that below the breakpoint
   there is no divider. Verify: fails at HEAD — `split_body` returns two `Option<Rect>` and
   names no divider column.
-- [ ] 1.6 GREEN: add the `Constraint::Length(1)` divider part between the two regions per
+- [x] 1.6 GREEN: add the `Constraint::Length(1)` divider part between the two regions per
   design.md → D4/D5. Verify: 1.5 passes.
-- [ ] 1.7 RED: add `ui::layout::tests::split_detail_is_tabs_rule_content` covering interior
+- [x] 1.7 RED: add `ui::layout::tests::split_detail_is_tabs_rule_content` covering interior
   heights `0`, `1`, `2`, `3`, `4`, and `17` against `artifact-tabs`' table, including that at
   height `17` the content area is fourteen rows at `interior.y + 3`. Verify: fails at HEAD —
   `split_detail` returns a header rect first.
-- [ ] 1.8 GREEN: change `split_detail` to `(tabs, rule, content)` on that table. Verify: 1.7
+  Named `split_detail_is_exact_at_its_degenerate_heights` instead (matching design.md's
+  Verification matrix name for `artifact-tabs`'s own scenario of the same title).
+- [x] 1.8 GREEN: change `split_detail` to `(tabs, rule, content)` on that table. Verify: 1.7
   passes.
-- [ ] 1.9 REFACTOR: run `cargo clippy --all-targets --all-features -- -D warnings` and
+- [x] 1.9 REFACTOR: run `cargo clippy --all-targets --all-features -- -D warnings` and
   `cargo fmt --all -- --check`; fix what they name and nothing else. If nothing needs
   restructuring, record "no refactor was needed" rather than leaving the step unmarked.
-- [ ] 1.10 VERIFY: `cargo test --all-features --lib ui::layout` — green. This group changes
+  Clippy was clean throughout. `cargo fmt` reformatted two spots in the new `zone` test
+  module (an import list line wrap and one call broken across lines); applied via
+  `cargo fmt --all` and reverified clean before the GREEN commit was made (the fix landed
+  inside that commit rather than a separate one, since it was applied before this group's
+  RED/GREEN history was reconstructed for the commit log). No structural refactor was
+  needed beyond that formatting fix.
+- [x] 1.10 VERIFY: `cargo test --all-features --lib ui::layout` — green. This group changes
   four signatures crate-wide and the earlier draft closed on the linters alone, which cannot
   see a wrong `Rect`.
+  19 passed, 1 failed: `ui::layout::tests::zone::the_zones_tile_the_frame` fails at its very
+  first case, `(0, 0)` under `Route::List`, expecting `Zone::Outside` (the old frame-header
+  contract) where the new geometry correctly gives `Zone::List` — `responsive-layout`'s own
+  scenario explicitly requires this ("row 0 of the frame resolves to a region rather than
+  Outside, because the frame has no header row for it to belong to"). This is squarely group
+  6's re-baselining task (6.1/6.2): the same test's later cases also expect the divider
+  column (120, x=40) to resolve to `Detail`, which `zone` does not yet implement (that branch
+  is explicitly deferred to task 6.2, per `responsive-layout`'s divider-column requirement).
+  Fixing only the first assertion would just move the failure to the next one without
+  completing group 6's task, so it is left red and flagged here rather than partially patched.
 
 ## 2. The palette's roles
 <!-- kind: behavior -->
