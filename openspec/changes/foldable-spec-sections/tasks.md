@@ -183,6 +183,20 @@ is load-bearing, not cosmetic.
 ## 10. Change Review
 <!-- kind: operational -->
 
+**Reported non-red tests, for 10.1's first question.** Implementing groups recorded three
+new assertions that passed the moment they were written, rather than going red — so the
+"could not go red" question has concrete leads rather than needing a blind sweep:
+
+- artifact-content :: `A wide-character document stays inside the detail region`'s
+  CJK-labelled foldable leg (group 6, `src/ui/detail.rs`) — group 5's width totality already
+  covered it, so no production change was needed.
+- two of group 6's four `artifact-folds` rendering scenarios — reported as asserting only
+  content and no-panic, both of which group 5 had already provided.
+
+Each may be legitimate (a property genuinely already held) or may be a scenario whose test
+does not discriminate. The reviewer should decide which, per scenario, rather than assume
+either.
+
 - [ ] 10.1 CHECK: Dispatch `outside-in-tdd-reviewer` — a fresh agent, not a fork of the implementing session — against proposal.md, all **seven** spec files, design.md, tasks.md, and the diff. Point it first at: whether any of the **122** scenarios has a test that could not go red; whether `sections.len() > 1` is asked in one place or several; and whether the two `Detail` fields are named at all **61** spans.
 - [ ] 10.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a one-line reason, note SUGGESTIONs, and re-run affected tests.
 - [ ] 10.3 VERIFY: Confirm no blocking or unowned finding remains.
