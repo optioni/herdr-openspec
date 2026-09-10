@@ -44,17 +44,28 @@ pub fn render(frame: &mut Frame, dashboard: &Dashboard) {
 /// heading for it at all, which is correct rather than a placeholder, since
 /// nothing has claimed that row yet.
 ///
-/// The divider column `split_body` names is not yet drawn here — task 3.8 —
-/// and the detail region still takes `Gutters::Both` rather than D5's
-/// `LeftOnly` — also task 3.8, wired up alongside the divider itself.
+/// The one-column divider between the two wide-layout regions is drawn here
+/// — `render_body` is the one place that knows both rectangles — as
+/// `Role::RegionRule`, down every row of the body, belonging to neither
+/// region. Costing five chrome columns for a divider with a blank column on
+/// both sides leaves only four at a 120-column frame (D5), so the detail
+/// region gives up its trailing gutter: `Gutters::LeftOnly`, its interior
+/// running to the frame's own last column.
 fn render_body(frame: &mut Frame, body: Rect, dashboard: &Dashboard) {
-    let (list_area, _divider, detail) = split_body(body, dashboard.route);
+    let (list_area, divider, detail) = split_body(body, dashboard.route);
     if let Some(area) = list_area {
         render_region(frame, area, dashboard, dashboard.route == Route::List);
         render_list(frame, interior(area, Gutters::Both), dashboard);
     }
     if let Some(area) = detail {
-        render_detail(frame, interior(area, Gutters::Both), dashboard);
+        render_detail(frame, interior(area, Gutters::LeftOnly), dashboard);
+    }
+    if let Some(col) = divider {
+        let style = palette::style(Role::RegionRule);
+        let buf = frame.buffer_mut();
+        for y in body.y..body.y.saturating_add(body.height) {
+            buf.set_string(col, y, "│", style);
+        }
     }
 }
 
@@ -1668,6 +1679,56 @@ mod tests {
                 "width {width}: row 18 must hold a drawn list row"
             );
         }
+    }
+
+    /// `responsive-layout` :: "The divider has a blank column on each side at 120 columns"
+    /// — named per design.md's Verification matrix, which titles the scenario `120`-only;
+    /// `scripts/gates/widths.sh` requires every `#[test]` in this file to name both mandated
+    /// widths, so the `60`-column half (no divider at all below the breakpoint) is folded
+    /// into the same test rather than left to a second one.
+    #[test]
+    fn the_divider_has_a_blank_column_on_each_side_at_120_columns() {
+        let d = dashboard_with(
+            vec![fixture::active("alpha", 1, 3)],
+            Vec::new(),
+            1,
+            Route::List,
+        );
+
+        let buf120 = render_at(120, 20, &d);
+        for y in 0..=18u16 {
+            assert_eq!(cell(&buf120, 40, y).symbol(), "│", "y={y}");
+            assert!(
+                cell(&buf120, 40, y)
+                    .style()
+                    .add_modifier
+                    .contains(Modifier::DIM),
+                "y={y}: the divider must be dim"
+            );
+            assert_eq!(
+                cell(&buf120, 40, y).style().fg,
+                uncoloured().fg,
+                "y={y}: the divider must carry no colour"
+            );
+            assert_eq!(cell(&buf120, 39, y).symbol(), " ", "y={y}");
+            assert_eq!(cell(&buf120, 41, y).symbol(), " ", "y={y}");
+            assert_eq!(cell(&buf120, 0, y).symbol(), " ", "y={y}");
+        }
+        // The footer row holds no divider: it is confined to the body.
+        assert!(!row_text(&buf120, 19).contains('│'));
+        // The detail region has no right gutter: content reaches the frame's own last
+        // column rather than stopping one short of it. `render_detail`'s own change-header
+        // scaffolding (group 4 has not landed) draws into its interior's first row, buffer
+        // row 2, on the same terms every other region's first content row does.
+        assert_ne!(
+            cell(&buf120, 119, 2).symbol(),
+            " ",
+            "the detail region's content must reach the frame's last column"
+        );
+
+        // Below the breakpoint there is no divider column at all.
+        let buf60 = render_at(60, 20, &d);
+        assert!(!buffer_contains(&buf60, "│"));
     }
 
     fn three_active() -> Dashboard {
