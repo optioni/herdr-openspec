@@ -365,7 +365,15 @@ fn render_region(frame: &mut Frame, area: Rect, dashboard: &Dashboard, emphasise
     if area.height == 0 {
         return;
     }
-    let iw = area.width.saturating_sub(2);
+    // The heading row's own span — `interior(area, Gutters::Both)`'s `x` and
+    // `width`, not its `y` or `height`: this draws into the region's own
+    // heading row at `area.y` itself, not into the interior two rows below
+    // it. Reusing `interior` here rather than a hand-written
+    // `area.width.saturating_sub(2)`/`area.x + 1` is what keeps the gutter
+    // arithmetic written in the one place that owns it (Change Review of
+    // `pane-chrome`'s `detail_gutters` fix).
+    let inner = interior(area, Gutters::Both);
+    let iw = inner.width;
     if iw == 0 {
         return;
     }
@@ -379,7 +387,7 @@ fn render_region(frame: &mut Frame, area: Rect, dashboard: &Dashboard, emphasise
     let show_badge = dashboard.file_mode && columns(&name) <= full_with_badge as usize;
     let a = if show_badge { full_with_badge } else { iw };
     let buf = frame.buffer_mut();
-    let x0 = area.x + 1;
+    let x0 = inner.x;
     if a > 0 {
         let shown = if columns(&name) <= a as usize {
             name
