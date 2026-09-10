@@ -1667,34 +1667,46 @@ mod tests {
 
         // (frame width, the detail region's own interior width, the interior's first
         // column) — the two mandated pairs, named as bare literals for `DETAILWIDTHS`.
-        let cases: [(u16, usize, usize); 2] = [(120, 78, 41), (60, 58, 1)];
+        // The header is now drawn into the region's own heading row (buffer row 0,
+        // `pane-chrome` -> "The header row is drawn into the detail region's first
+        // interior row"), not an interior row two rows below it.
+        let cases: [(u16, usize, usize); 2] = [(120, 78, 42), (60, 58, 1)];
         for (frame, interior, first_col) in cases {
             let buf = render_at(frame, 20, &d);
             let tail_start = first_col + interior - tail.len();
             assert_eq!(
-                cols(&row_text(&buf, 2), tail_start..tail_start + tail.len()),
+                cols(&row_text(&buf, 0), tail_start..tail_start + tail.len()),
                 tail,
                 "frame {frame}"
             );
             let last_col = (first_col + interior - 1) as u16;
-            assert_eq!(cell(&buf, last_col, 2).symbol(), "]", "frame {frame}");
-            assert_eq!(
-                cell(&buf, last_col + 1, 2).symbol(),
-                "│",
-                "frame {frame}: no content drawn past the detail block's own right border"
-            );
+            assert_eq!(cell(&buf, last_col, 0).symbol(), "]", "frame {frame}");
         }
 
+        // At 60 columns the narrow region takes `Gutters::Both`: the frame's own last
+        // column is the region's right gutter, always a space.
+        let buf60 = render_at(60, 20, &d);
+        assert_eq!(
+            cell(&buf60, 59, 0).symbol(),
+            " ",
+            "the narrow region's right gutter must stay blank"
+        );
+
+        // At 120 columns, unchanged from the same render with an ASCII name: columns
+        // 39 and 41 are the blank columns either side of the divider, and column 40
+        // holds it — the wide detail region has no right gutter of its own, so its
+        // content reaches the frame's own last column instead.
         let buf120 = render_at(120, 20, &d);
         assert_eq!(
-            cell(&buf120, 39, 2).symbol(),
-            "│",
-            "list block's right border"
+            cell(&buf120, 39, 0).symbol(),
+            " ",
+            "list region's right gutter"
         );
+        assert_eq!(cell(&buf120, 40, 0).symbol(), "│", "the divider");
         assert_eq!(
-            cell(&buf120, 40, 2).symbol(),
-            "│",
-            "detail block's left border"
+            cell(&buf120, 41, 0).symbol(),
+            " ",
+            "detail region's left gutter"
         );
     }
 
@@ -1775,15 +1787,19 @@ mod tests {
             (14, 12, "No content …"),
             (13, 11, "No content…"),
         ];
+        // The content area's first row is buffer row 5 now, not 4: the region's
+        // heading row (`pane-chrome`'s change header) and its blank padding row sit
+        // two rows above the interior, and the tab bar, the rule, and the interior's
+        // own padding row take three more before the content itself starts.
         for (frame, area_width, want) in cases {
             let buf = render_at(frame, 20, &d);
-            let row = cols(&row_text(&buf, 4), 1..1 + area_width);
+            let row = cols(&row_text(&buf, 5), 1..1 + area_width);
             assert_eq!(row, want, "frame {frame}");
             assert_eq!(columns(&row), area_width, "frame {frame}");
             assert_eq!(
-                cell(&buf, frame - 1, 4).symbol(),
-                "│",
-                "frame {frame}: the region's right border was overwritten"
+                cell(&buf, frame - 1, 5).symbol(),
+                " ",
+                "frame {frame}: the region's right gutter was overwritten"
             );
         }
 
@@ -1791,8 +1807,8 @@ mod tests {
         let mandated: [(u16, usize); 2] = [(120, 78), (60, 58)];
         for (frame, width) in mandated {
             let buf = render_at(frame, 20, &d);
-            let content_x = if frame == 120 { 41 } else { 1 };
-            let row = cols(&row_text(&buf, 4), content_x..content_x + width);
+            let content_x = if frame == 120 { 42 } else { 1 };
+            let row = cols(&row_text(&buf, 5), content_x..content_x + width);
             let want = format!("No content yet{}", " ".repeat(width - 14));
             assert_eq!(row, want, "width {width}");
         }
@@ -1802,7 +1818,7 @@ mod tests {
         for frame in [2u16, 1] {
             let buf = render_at(frame, 20, &d);
             assert!(
-                !row_text(&buf, 4).contains("No content"),
+                !row_text(&buf, 5).contains("No content"),
                 "frame {frame}: a zero-width content area must draw nothing"
             );
         }
@@ -1817,27 +1833,21 @@ mod tests {
         let change = fixture::with_artifacts(fixture::active("x", 0, 0), &[("proposal", &[])]);
         let d = dashboard_at_detail(change, detail(&source, Vec::new()));
 
+        // There is no border any more: at the narrow layout the region's two gutter
+        // columns stay blank at every body row, unchanged from an ASCII document.
         let buf60 = render_at(60, 20, &d);
-        for y in 1..=18u16 {
-            assert!(
-                matches!(cell(&buf60, 0, y).symbol(), "│" | "┌" | "└"),
-                "y={y}"
-            );
-            assert!(
-                matches!(cell(&buf60, 59, y).symbol(), "│" | "┐" | "┘"),
-                "y={y}"
-            );
+        for y in 0..=18u16 {
+            assert_eq!(cell(&buf60, 0, y).symbol(), " ", "y={y}");
+            assert_eq!(cell(&buf60, 59, y).symbol(), " ", "y={y}");
         }
 
+        // At the wide layout columns 39 and 41 — the blank columns either side of the
+        // divider — stay spaces and column 40 holds the divider `│`, at every body row.
         let buf120 = render_at(120, 20, &d);
-        for y in 1..=18u16 {
-            for x in [0u16, 39, 40, 119] {
-                let s = cell(&buf120, x, y).symbol();
-                assert!(
-                    matches!(s, "│" | "┌" | "└" | "┐" | "┘"),
-                    "x={x} y={y} symbol={s:?}"
-                );
-            }
+        for y in 0..=18u16 {
+            assert_eq!(cell(&buf120, 39, y).symbol(), " ", "y={y}");
+            assert_eq!(cell(&buf120, 40, y).symbol(), "│", "y={y}");
+            assert_eq!(cell(&buf120, 41, y).symbol(), " ", "y={y}");
         }
 
         let mandated: [u16; 2] = [78, 58];
