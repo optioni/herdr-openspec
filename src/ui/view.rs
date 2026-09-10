@@ -527,7 +527,7 @@ mod tests {
     use super::style_for;
     use crate::changes::{Change, empty_set, fixture};
     use crate::testutil::{cell, render_at, row_text};
-    use crate::ui::app::{Action, Dashboard, Detail, Filter, Route, SectionKey};
+    use crate::ui::app::{Action, ArtifactSection, Dashboard, Detail, Filter, Route, SectionKey};
     use crate::ui::layout::columns;
     use crate::ui::markdown::Face;
     use crate::ui::palette::{self, Role};
@@ -854,7 +854,7 @@ mod tests {
 
     fn empty_detail() -> Detail {
         Detail {
-            source: String::new(),
+            sections: Vec::new(),
             scroll: 0,
             tab: 0,
             problems: Vec::new(),
@@ -909,7 +909,7 @@ mod tests {
 
     /// `dashboard_with`, but with an explicit `Detail` — `detail-view`'s
     /// header/tab-bar/content scenarios need a selected change **and** a
-    /// specific `detail.tab`, `detail.source`, or `detail.problems`.
+    /// specific `detail.tab`, `detail.sections`, or `detail.problems`.
     fn dashboard_with_detail(
         active: Vec<Change>,
         archived: Vec<Change>,
@@ -3281,7 +3281,10 @@ mod tests {
         let mut d = dashboard_with(names, Vec::new(), 1, Route::List);
         // detail-scroll: the border assertion below must hold for a
         // markdown document too, not only for over-wide list rows.
-        d.detail.source = (0..30).map(|_| format!("{}\n", "x".repeat(200))).collect();
+        d.detail.sections = vec![ArtifactSection {
+            label: String::new(),
+            text: (0..30).map(|_| format!("{}\n", "x".repeat(200))).collect(),
+        }];
 
         // `pane-chrome`: there is no border any more. Columns 0 and 59 are the
         // narrow layout's own gutters — spaces on every row of the body — and at
@@ -3676,7 +3679,14 @@ mod tests {
             selected: 1,
             filter: empty_filter(),
             detail: Detail {
-                source,
+                sections: if source.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![ArtifactSection {
+                        label: String::new(),
+                        text: source,
+                    }]
+                },
                 scroll,
                 tab: 0,
                 problems: Vec::new(),
@@ -3704,6 +3714,41 @@ mod tests {
                 collapsed: std::collections::BTreeSet::new(),
             },
             file_mode: false,
+        }
+    }
+
+    /// `artifact-folds` :: "A single-file artifact is one section and is not
+    /// foldable" — a single-path artifact's `content_lines` output is
+    /// byte-for-byte what `ui::markdown::lines` produces for that section's
+    /// own text, with no row prepended and no cell reporting `REVERSED`.
+    /// `detail.expanded` does not exist until a later group in this change
+    /// lands it, so that half of the scenario is not asserted here.
+    #[test]
+    fn a_single_file_artifact_is_one_section_and_is_not_foldable() {
+        let d = detail_dashboard("# proposal\n".to_string(), 0, Route::Detail);
+        assert_eq!(d.detail.sections.len(), 1);
+        assert!(d.detail.sections.len() <= 1, "not foldable");
+
+        let want = crate::ui::markdown::lines(&d.detail.sections[0].text, 78);
+        let got = crate::ui::detail::content_lines(&d.detail, d.selected_change(), 78);
+        assert_eq!(
+            got, want,
+            "content_lines must equal markdown::lines exactly"
+        );
+
+        for width in [120, 60] {
+            let buf = render_at(width, 20, &d);
+            for y in 0..buf.area.height {
+                for x in 0..buf.area.width {
+                    assert!(
+                        !cell(&buf, x, y)
+                            .style()
+                            .add_modifier
+                            .contains(Modifier::REVERSED),
+                        "width {width}: no cell may report REVERSED"
+                    );
+                }
+            }
         }
     }
 
@@ -4155,7 +4200,7 @@ mod tests {
             selected: 0,
             filter: empty_filter(),
             detail: Detail {
-                source: String::new(),
+                sections: Vec::new(),
                 scroll: 0,
                 tab: 0,
                 problems: Vec::new(),
@@ -4518,7 +4563,7 @@ mod tests {
         }
 
         // `markdown-constructs`: and every one of those renders once more with a
-        // table as the `detail.source`. 1x20 and 2x20 — where the interior is one
+        // table as the `detail.sections`. 1x20 and 2x20 — where the interior is one
         // or zero columns wide — still draw nothing and still do not panic.
         let table_source: String = std::iter::once("| a | line-00 |\n|---|---|\n".to_string())
             .chain((1..20).map(|i| format!("| a | line-{i:02} |\n")))
@@ -4675,7 +4720,14 @@ mod tests {
 
     fn empty_detail_with_tab(source: &str, problems: Vec<String>, tab: usize) -> Detail {
         Detail {
-            source: source.to_string(),
+            sections: if source.is_empty() {
+                Vec::new()
+            } else {
+                vec![ArtifactSection {
+                    label: String::new(),
+                    text: source.to_string(),
+                }]
+            },
             scroll: 0,
             tab,
             problems,
@@ -6556,8 +6608,11 @@ mod tests {
             1,
             route,
             Detail {
-                source: "## Heading\n\n**bold** and *italic* and `code` and [link](u)\n"
-                    .to_string(),
+                sections: vec![ArtifactSection {
+                    label: String::new(),
+                    text: "## Heading\n\n**bold** and *italic* and `code` and [link](u)\n"
+                        .to_string(),
+                }],
                 scroll: 0,
                 tab: 0,
                 problems: Vec::new(),
@@ -6714,7 +6769,7 @@ mod tests {
         for width in [120, 60] {
             let before = monochrome_dashboard(Route::Detail);
             let mut after = monochrome_dashboard(Route::Detail);
-            after.detail.source.push_str("and ~~struck~~\n");
+            after.detail.sections[0].text.push_str("and ~~struck~~\n");
             let buf_before = render_at(width, 20, &before);
             let buf_after = render_at(width, 20, &after);
             assert!(
