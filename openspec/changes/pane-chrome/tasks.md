@@ -283,30 +283,44 @@ builds until this group lands. See design.md → Decisions D1, D2, D3.
 ## 5. The fold glyphs
 <!-- kind: behavior -->
 
-- [ ] 5.1 RED: assert `section_row_text` yields `  ▾ active (3)` open and `  ▸ archived (30)`
+- [x] 5.1 RED: assert `section_row_text` yields `  ▾ active (3)` open and `  ▸ archived (30)`
   collapsed, that a selected collapsed section reads `> ▸ archived (30)` and holds no `> >`,
   and that `layout::columns` of each row is exactly the requested width at 38, 58, 17, 16, 5,
   1 and 0.
   Check: `grep -c '▾\|▸' src/ui/list.rs` → `0`, exit 1 at HEAD.
-- [ ] 5.2 GREEN: swap the glyph pair in `section_row_text`. Verify: 5.1 passes and
+- [x] 5.2 GREEN: swap the glyph pair in `section_row_text`. Verify: 5.1 passes and
   `bash scripts/gates/colwidth.sh` exits 0 — the glyphs go through `layout::columns` like
   every other cell.
-- [ ] 5.3 Update every landed expectation naming `  v ` or `  > ` in `src/ui/list.rs`,
+  Added `ui::list::tests::the_fold_glyphs_are_triangles_not_carets` for 5.1's RED — no
+  Verification-matrix row names a test for the glyph pair, so this name is free rather than
+  contracted. `ui::list` 47 → 48 passed, 0 failed.
+- [x] 5.3 Update every landed expectation naming `  v ` or `  > ` in `src/ui/list.rs`,
   `src/ui/view.rs` and `src/ui/app.rs`.
   Check at HEAD: `grep -rn '"  v \|"  > ' src/ui/ | wc -l` → **28**. Verify after: the same
   command returns **0**. The quoting matters and the earlier draft got it wrong: the fixtures
   write these glyphs inside double-quoted string literals, so the backtick form
   `grep -rn '\`  v \|\`  > ' src/ui/` returns **0 at HEAD** — green before the work starts and
   green if the work is skipped.
-- [ ] 5.4 REFACTOR: the glyph pair is written once, in `section_row_text`, and read from there
+  Measured 28 before and 0 after, as written. **The Check pattern undercounts by four.** It
+  scans only the unselected forms `"  v ` and `"  > `; the *selected* forms `"> v ` and
+  `"> > ` exist too, and `src/ui/mod.rs` — which this task's file list omits, though its own
+  `grep` scans all of `src/ui/` — held two of the 28 plus two selected-form sites. Both were
+  fixed. A broader sweep confirmed no old-glyph fixture remains; the two `"> > nested` hits
+  in `src/ui/markdown.rs` are blockquote-nesting fixtures, not fold glyphs. `src/ui/app.rs`
+  needed no edit — it matched neither form.
+- [x] 5.4 REFACTOR: the glyph pair is written once, in `section_row_text`, and read from there
   by every other site — `foldable-spec-sections` → Decision 9 depends on that being true, since
   it adopts whatever pair the list region carries. Record "no refactor was needed" if none
   applies.
-- [ ] 5.5 VERIFY: `cargo test --all-features --lib ui::list` and
+- [x] 5.5 VERIFY: `cargo test --all-features --lib ui::list` and
   `cargo test --all-features --lib ui::view`, run separately — green.
-- [ ] 5.6 VERIFY: `bash scripts/gates/colwidth.sh` exits 0 — the new glyphs go through
+  `ui::list` 48 passed / 0 failed. `ui::view` 105 passed / 12 failed both before and after,
+  the identical set owned by tasks 6.3, 7.5 and 7.6 — this group added no new failure.
+- [x] 5.6 VERIFY: `bash scripts/gates/colwidth.sh` exits 0 — the new glyphs go through
   `layout::columns` like every other cell.
 
+  `COLWIDTH OK: no char-count measurement in the eight pure view files`. `listwidths.sh`
+  47 → 48 row-grammar tests against its floor of 39; `widths.sh` unchanged at 117 against 114.
 ## 6. The hit test
 <!-- kind: behavior -->
 
