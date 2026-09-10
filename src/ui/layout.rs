@@ -367,15 +367,12 @@ mod tests {
     /// from `zone`'s own answer — otherwise the test would pin whatever `zone`
     /// happens to do rather than what the draw path does.
     ///
-    /// `pane-chrome` (group 1) changed the geometry these tests were written
-    /// against (no more frame header row, a divider column between the two
-    /// regions, a taller interior). Re-baselining `zone`'s own hit-test
-    /// contract against that new geometry is group 6's task
+    /// `pane-chrome` changed the geometry these tests are written against: no
+    /// more frame header row, a divider column between the two regions, and a
+    /// taller interior. Row 0 now resolves to a region's own zone rather than
+    /// `Outside`, and the divider column resolves to `Detail`
     /// (`responsive-layout` -> "A point in the frame resolves to exactly one
-    /// zone"); the changes below are the minimum mechanical edit needed to
-    /// keep this module compiling against the four new signatures, and are
-    /// not a re-specification of `zone`'s behaviour. Some assertions here now
-    /// fail against the new geometry — see this group's own report for which.
+    /// zone").
     mod zone {
         use crate::ui::app::Route;
         use crate::ui::layout::{
@@ -403,7 +400,7 @@ mod tests {
         }
 
         #[test]
-        fn the_zones_tile_the_frame() {
+        fn the_zones_tile_the_frame_at_120_columns() {
             let area = Rect::new(0, 0, 120, 40);
             for route in [Route::List, Route::Detail] {
                 let list = list_interior(area, route);
@@ -445,7 +442,7 @@ mod tests {
         }
 
         #[test]
-        fn below_the_breakpoint_only_the_routed_region() {
+        fn below_the_breakpoint_only_the_routed_region_has_zones() {
             let area = Rect::new(0, 0, 60, 20);
             let list = list_interior(area, Route::List);
 
@@ -484,7 +481,7 @@ mod tests {
         }
 
         #[test]
-        fn the_breakpoint_is_exact_for_zone() {
+        fn the_breakpoint_is_exact_for_the_hit_test_too() {
             // Column 10, row 5: inside the list region at the wide layout, inside
             // the (single) detail region at the narrow one.
             for width in [99u16, 100, 101] {
@@ -507,7 +504,7 @@ mod tests {
         }
 
         #[test]
-        fn degenerate_frames_resolve() {
+        fn degenerate_frames_resolve_without_panicking() {
             let areas = [
                 Rect::new(0, 0, 0, 0),
                 Rect::new(0, 0, 1, 1),
