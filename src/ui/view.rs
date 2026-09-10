@@ -549,7 +549,9 @@ mod tests {
         use crate::changes::fixture;
         use crate::testutil::render_at;
         use crate::ui::app::{Dashboard, Route};
-        use crate::ui::layout::{Gutters, Zone, interior, split_body, split_frame, viewport, zone};
+        use crate::ui::layout::{
+            Gutters, Zone, detail_gutters, interior, split_body, split_frame, viewport, zone,
+        };
         use crate::ui::list::{row_at, rows};
 
         /// One repository-level problem, three active changes, three archived
@@ -627,14 +629,12 @@ mod tests {
                     let area = Rect::new(0, 0, width, height);
                     let (body, _) = split_frame(area);
                     let (list_area, divider, detail_area) = split_body(body, route);
-                    // `Gutters::LeftOnly` only at the wide layout, where the
-                    // divider spends the detail region's trailing gutter —
-                    // `render_body`'s own choice, derived rather than assumed.
-                    let detail_gutters = if divider.is_some() {
-                        Gutters::LeftOnly
-                    } else {
-                        Gutters::Both
-                    };
+                    // `layout::detail_gutters`: `Gutters::LeftOnly` only at the wide
+                    // layout, where the divider spends the detail region's trailing
+                    // gutter — `render_body`'s own choice, derived rather than
+                    // re-decided here (Change Review of `pane-chrome`'s
+                    // `detail_gutters` fix).
+                    let detail_gutters = detail_gutters(divider);
 
                     let drawn: Option<(Rect, Vec<crate::ui::list::Row>, usize)> =
                         list_area.map(|a| {

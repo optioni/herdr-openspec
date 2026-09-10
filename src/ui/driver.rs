@@ -3525,11 +3525,10 @@ mod tests {
     /// The detail region's tab-bar row for `area` at `route`.
     fn tab_bar_row(area: Rect, route: Route) -> Rect {
         let (body, _) = crate::ui::layout::split_frame(area);
+        let (_, divider, detail_area) = crate::ui::layout::split_body(body, route);
         crate::ui::layout::split_detail(crate::ui::layout::interior(
-            crate::ui::layout::split_body(body, route)
-                .2
-                .expect("a detail region is drawn"),
-            crate::ui::layout::Gutters::Both,
+            detail_area.expect("a detail region is drawn"),
+            crate::ui::layout::detail_gutters(divider),
         ))
         .0
     }
