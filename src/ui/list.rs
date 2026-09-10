@@ -287,13 +287,25 @@ fn message_row_text(text: &str, width: u16) -> String {
     pad_or_truncate_right(text, width as usize)
 }
 
+/// The fold glyph: `▾` (U+25BE) when a section is open and `▸` (U+25B8)
+/// when it is collapsed. Both are unambiguous-width in Unicode's East Asian
+/// Width table, so `layout::columns` measures each as one column regardless
+/// of a terminal's ambiguous-width setting. `pub(crate)` rather than
+/// private — the crate's one site for this pair, called by
+/// [`section_row_text`] below and by `ui::detail`'s own section-header row,
+/// so a fold reads the same glyph in both regions and a later edit to the
+/// pair moves both at once (`foldable-spec-sections` -> design.md ->
+/// Decision 9). Joins [`progress_cell`], [`pad_or_truncate_right`], and
+/// `shorten_left` as helpers this module already exposes across that same
+/// boundary.
+pub(crate) fn fold_glyph(collapsed: bool) -> char {
+    if collapsed { '▸' } else { '▾' }
+}
+
 /// A section header row: `[marker][space][glyph][space][label][space]
 /// [(count)]`, where `marker` is `>` when the header carries the cursor and
 /// a space otherwise — the same column every other row's selection marker
-/// occupies — and `glyph` is `▾` (U+25BE) when the section is open and `▸`
-/// (U+25B8) when it is collapsed. Both are unambiguous-width in Unicode's
-/// East Asian Width table, so `layout::columns` measures each as one column
-/// regardless of a terminal's ambiguous-width setting. Neither collides with
+/// occupies — and `glyph` is [`fold_glyph`]'s. Neither glyph collides with
 /// the `>` selection marker — `pane-chrome` replaced the earlier `v`/`>`
 /// pair for exactly that reason: it made the glyph and the marker the same
 /// character two columns apart, so a selected collapsed section read
@@ -317,7 +329,7 @@ fn section_row_text(
         let head = format!("{marker} ");
         return truncate_columns(&head, w.max(0) as usize).to_string();
     }
-    let glyph = if collapsed { '▸' } else { '▾' };
+    let glyph = fold_glyph(collapsed);
     let text = format!("{marker} {glyph} {label} ({count})");
     pad_or_truncate_right(&text, width as usize)
 }
