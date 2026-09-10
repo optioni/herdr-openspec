@@ -776,8 +776,8 @@ mod tests {
             for width in [120u16, 60u16] {
                 let mut dashboard = dashboard();
                 let interior = detail_interior(width, 20, Route::Detail);
-                let content_y = interior.y + 2;
-                let content_height = interior.height - 2;
+                let content_y = interior.y + 4;
+                let content_height = interior.height - 3;
 
                 let backend = ratatui::backend::TestBackend::new(width, 20);
                 let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
@@ -898,8 +898,8 @@ mod tests {
                     file_mode: false,
                 };
                 let interior = detail_interior(width, 20, Route::Detail);
-                let content_y = interior.y + 2;
-                let content_height = interior.height - 2;
+                let content_y = interior.y + 4;
+                let content_height = interior.height - 3;
 
                 let backend = ratatui::backend::TestBackend::new(width, 20);
                 let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
@@ -1101,7 +1101,19 @@ mod tests {
                         .map(|x| buf[(x, y)].symbol().to_string())
                         .collect()
                 };
-                let header_row = row_cols(interior.y, interior.width);
+                // `pane-chrome`: `interior` is `Block::bordered().inner`, which
+                // agrees with the real (borderless) interior on `x` and `height`
+                // but not on `width` at the wide layout — the real interior has
+                // no right gutter there (D5), so it is one column wider.
+                let full_width = if width == 60 {
+                    interior.width
+                } else {
+                    interior.width + 1
+                };
+                // The change header is the region's own heading row, one row
+                // above `interior.y`'s old bordered origin — not `interior.y`
+                // itself, which is now the tab bar's row.
+                let header_row = row_cols(interior.y - 1, full_width);
                 assert!(
                     header_row.starts_with("detail-view"),
                     "width {width}: header row does not start with the change name: {header_row:?}"
@@ -1117,10 +1129,16 @@ mod tests {
                     "width {width}: tab row does not begin with the first two tabs: {tab_row:?}"
                 );
 
+                // The content area starts three rows below the tab bar (the
+                // rule and the content's own padding row between them), at
+                // `interior.y + 4`, and its last row is `interior.y +
+                // interior.height` — one more than the pre-`pane-chrome`
+                // formula, since the interior itself grew by the same row the
+                // header vacated.
                 let content_row_at = |y: u16| -> String { row_cols(y, 9) };
-                assert_eq!(content_row_at(interior.y + 2), "- line-06", "width {width}");
+                assert_eq!(content_row_at(interior.y + 4), "- line-06", "width {width}");
                 assert_eq!(
-                    content_row_at(interior.y + interior.height - 1),
+                    content_row_at(interior.y + interior.height),
                     "- line-19",
                     "width {width}"
                 );
@@ -1267,20 +1285,29 @@ apply:
                 assert_eq!(dashboard.detail.tab, 3, "width {width}");
 
                 let interior = detail_interior(width, 20, Route::Detail);
-                let content_y = interior.y + 2;
+                let content_y = interior.y + 4;
                 let buf = terminal.backend().buffer();
                 let row_cols = |y: u16, len: u16| -> String {
                     (interior.x..interior.x + len)
                         .map(|x| buf[(x, y)].symbol().to_string())
                         .collect()
                 };
-                let bar_row = row_cols(content_y, interior.width);
+                // `pane-chrome`: `interior` is `Block::bordered().inner`, which
+                // agrees with the real (borderless) interior on `x` and `height`
+                // but not on `width` at the wide layout — the real interior has
+                // no right gutter there (D5), so it is one column wider.
+                let full_width = if width == 60 {
+                    interior.width
+                } else {
+                    interior.width + 1
+                };
+                let bar_row = row_cols(content_y, full_width);
                 assert!(
                     bar_row.trim_end().ends_with("[2/5] 40%"),
                     "width {width}: bar row does not end in its progress cell: {bar_row:?}"
                 );
                 assert_eq!(
-                    row_cols(content_y + 1, interior.width).trim(),
+                    row_cols(content_y + 1, full_width).trim(),
                     "",
                     "width {width}: no blank row after the bar"
                 );
