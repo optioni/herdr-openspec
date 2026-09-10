@@ -17,7 +17,7 @@ tier = "view"
 proof = ["the_badge_is_right_aligned_and_dropped_whole"]
 verdict = "implemented"
 why = "the list region's heading renders a dim, yellow file mode badge right-aligned against its own last column, dropped whole below its budget, driven through render_at at both widths and at the drop rule's own boundary"
-covers = ["src/ui/view.rs:327-363"]
+covers = ["src/ui/view.rs:386-407"]
 
 [[row]]
 condition = "Schema unknown to the CLI"
