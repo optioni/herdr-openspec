@@ -372,8 +372,8 @@ pub(crate) fn truncate_columns(text: &str, max: usize) -> &str {
 mod tests {
     use crate::ui::app::Route;
     use crate::ui::layout::{
-        Gutters, LayoutMode, WIDE_MIN_WIDTH, columns, interior, mode, scroll_offset, split_body,
-        split_detail, split_frame, truncate_columns, viewport,
+        Gutters, LayoutMode, WIDE_MIN_WIDTH, columns, detail_gutters, interior, mode,
+        scroll_offset, split_body, split_detail, split_frame, truncate_columns, viewport,
     };
     use ratatui::buffer::Buffer;
     use ratatui::layout::Rect;
@@ -632,16 +632,22 @@ mod tests {
 
     #[test]
     fn scroll_offset_is_exact_at_its_boundaries() {
+        // `detail-scroll`'s nine boundary tuples, at height **14** — the
+        // content area's own row count, not the interior's seventeen
+        // (`pane-chrome`'s taller interior did not change this height:
+        // the interior grew by the row the border-based header vacated,
+        // but the content area sits below the header, the tab bar, and
+        // the rule exactly as it did before).
         let table = [
-            (0usize, 0usize, 16u16, 0usize),
-            (16, 0, 16, 0),
-            (16, 9, 16, 0),
-            (17, 0, 16, 0),
-            (17, 1, 16, 1),
-            (17, 2, 16, 1),
-            (20, 4, 16, 4),
-            (20, 99, 16, 4),
-            (20, 4, 0, 0),
+            (0usize, 0usize, 14u16, 0usize),
+            (14, 0, 14, 0),
+            (14, 9, 14, 0),
+            (15, 0, 14, 0),
+            (15, 1, 14, 1),
+            (15, 2, 14, 1),
+            (20, 6, 14, 6),
+            (20, 99, 14, 6),
+            (20, 6, 0, 0),
         ];
         for (lines, scroll, height, expect) in table {
             let got = scroll_offset(lines, scroll, height);
@@ -719,6 +725,28 @@ mod tests {
         assert_eq!(
             detail_at_list_route, None,
             "no detail rectangle at 60, list route"
+        );
+    }
+
+    /// `responsive-layout` -> "The divider column is a width branch, not a
+    /// constant": at the narrowest **wide** frame — 100 columns, one past
+    /// the breakpoint — every column gained over the 60-column narrow
+    /// layout goes to the detail side, not the list side (fixed at
+    /// `Constraint::Length(40)`) or the divider (fixed at one column). The
+    /// list region stays 38 columns wide (`the_list_region_s_two_mandated_
+    /// interior_widths_are_38_and_58`'s own claim); this pins the detail
+    /// region's own interior instead, which the breakpoint scan in
+    /// `the_breakpoint_is_exact_at_99_100_and_101_columns` does not.
+    #[test]
+    fn the_detail_interior_is_58_columns_at_the_100_column_breakpoint() {
+        let (body100, _) = split_frame(Rect::new(0, 0, 100, 20));
+        let (_, divider, detail100) = split_body(body100, Route::Detail);
+        assert_eq!(
+            interior(
+                detail100.expect("detail region at 100"),
+                detail_gutters(divider)
+            ),
+            Rect::new(42, 2, 58, 17)
         );
     }
 
