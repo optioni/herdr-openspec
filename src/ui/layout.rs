@@ -403,7 +403,7 @@ mod tests {
                 let last_row = list.height - 1;
 
                 let cases: [((u16, u16), Zone); 10] = [
-                    ((0, 0), Zone::Outside),
+                    ((0, 0), Zone::List),
                     ((0, 39), Zone::Outside),
                     ((0, 1), Zone::List),
                     (
