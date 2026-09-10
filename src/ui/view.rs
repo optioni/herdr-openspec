@@ -6022,14 +6022,14 @@ mod tests {
         }
 
         // With `file_mode` true the nine badge cells of the list heading row do
-        // report `Color::Yellow`, so the absence of colour above is a property of
-        // the heading role rather than of the row.
+        // carry `Role::FileMode`'s own foreground, so the absence of colour above
+        // is a property of the heading role rather than of the row.
         let file_mode = dashboard_in_file_mode(Some("/tmp/demo-repo"), Route::List);
         let buf = render_at(120, 20, &file_mode);
         for x in 30..=38u16 {
             assert_eq!(
                 cell(&buf, x, 0).style().fg,
-                Some(ratatui::style::Color::Yellow),
+                palette::style(Role::FileMode).fg,
                 "badge col {x}"
             );
         }
