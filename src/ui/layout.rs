@@ -157,6 +157,24 @@ pub fn interior(area: Rect, gutters: Gutters) -> Rect {
     }
 }
 
+/// The detail region's `Gutters` choice, derived from `split_body`'s own
+/// divider column rather than re-decided at each call site: `Gutters::LeftOnly`
+/// when a divider is present (the wide layout, where the divider spends the
+/// detail region's trailing gutter, D5), `Gutters::Both` otherwise (the narrow
+/// layout, with no divider to make room for). `render_body`, `zone`, and
+/// `Dashboard::normalise_scroll` all derive the detail region's interior
+/// through this one function now, so the three can no longer disagree about
+/// which `Gutters` applies (`detail-scroll` -> "`ui::view::render` and
+/// `Dashboard::normalise_scroll` cannot derive different content heights from
+/// the same frame").
+pub fn detail_gutters(divider: Option<u16>) -> Gutters {
+    if divider.is_some() {
+        Gutters::LeftOnly
+    } else {
+        Gutters::Both
+    }
+}
+
 /// Split the detail region's interior into a one-row tab bar, a one-row
 /// rule, and the content area below — each the interior's full width and
 /// carrying the interior's own `x` and `width`. There is no header
@@ -276,7 +294,7 @@ pub fn zone(area: Rect, route: Route, column: u16, row: u16) -> Zone {
     if let Some(detail_area) = detail
         && detail_area.contains(point)
     {
-        let inner = interior(detail_area, Gutters::LeftOnly);
+        let inner = interior(detail_area, detail_gutters(divider));
         let (bar, _rule, _content) = split_detail(inner);
         return if bar.contains(point) {
             Zone::DetailTab {

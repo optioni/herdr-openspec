@@ -621,11 +621,12 @@ impl Dashboard {
     /// so a held key cannot leave the offset arbitrarily far past the end.
     pub fn normalise_scroll(&mut self, frame_area: ratatui::layout::Rect) {
         let (body, _) = crate::ui::layout::split_frame(frame_area);
-        let (_, _, detail_area) = crate::ui::layout::split_body(body, self.route);
+        let (_, divider, detail_area) = crate::ui::layout::split_body(body, self.route);
         let Some(area) = detail_area else {
             return;
         };
-        let interior = crate::ui::layout::interior(area, crate::ui::layout::Gutters::Both);
+        let interior =
+            crate::ui::layout::interior(area, crate::ui::layout::detail_gutters(divider));
         if interior.width == 0 || interior.height == 0 {
             return;
         }

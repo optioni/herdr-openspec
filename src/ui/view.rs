@@ -58,17 +58,18 @@ fn render_body(frame: &mut Frame, body: Rect, dashboard: &Dashboard) {
         render_list(frame, interior(area, Gutters::Both), dashboard);
     }
     if let Some(area) = detail {
-        // `Gutters::LeftOnly` only at the wide layout, where the divider
-        // (D5) spends the detail region's trailing gutter; below the
-        // breakpoint there is no divider to make room for, so the detail
-        // region keeps both gutters exactly as the narrow list region does
+        // `layout::detail_gutters`: `Gutters::LeftOnly` only at the wide
+        // layout, where the divider (D5) spends the detail region's
+        // trailing gutter; below the breakpoint there is no divider to
+        // make room for, so the detail region keeps both gutters exactly
+        // as the narrow list region does
         // (`the_detail_interior_is_78_columns_at_120_and_58_at_60`).
-        let gutters = if divider.is_some() {
-            Gutters::LeftOnly
-        } else {
-            Gutters::Both
-        };
-        render_detail(frame, area, gutters, dashboard);
+        render_detail(
+            frame,
+            area,
+            crate::ui::layout::detail_gutters(divider),
+            dashboard,
+        );
     }
     if let Some(col) = divider {
         let style = palette::style(Role::RegionRule);
@@ -743,8 +744,17 @@ mod tests {
         /// mismatch directly: `" a "` is 3 columns, and `" " + "b" * 53 + "
         /// "` is 55, so the two together with their one separating column
         /// (3 + 55 + 1 = 59) fit a 59-column bar but not a 58-column one.
+        ///
+        /// Only the narrow layout is exercised here: at the wide layout the
+        /// divider is always present, so `zone`'s hardcoded `Gutters::LeftOnly`
+        /// already agreed with `render_body`'s derived choice there even
+        /// before this fix.
         #[test]
         fn the_hit_test_agrees_with_the_drawn_tab_bar_at_the_narrow_layout() {
+            // Only 60 is exercised below: at 120 the divider is always
+            // present, so `zone`'s hardcoded `Gutters::LeftOnly` already
+            // agreed with `render_body`'s derived choice there even before
+            // this fix.
             let second_id = "b".repeat(53);
             let change = fixture::with_artifacts(
                 fixture::active("detail-view", 4, 9),
@@ -827,9 +837,9 @@ mod tests {
                         "the drawn chip's own column must resolve to it"
                     );
                 }
-                other => panic!(
-                    "expected a DetailTab zone at ({inside_x}, {bar_row}), got {other:?}"
-                ),
+                other => {
+                    panic!("expected a DetailTab zone at ({inside_x}, {bar_row}), got {other:?}")
+                }
             }
         }
     }
