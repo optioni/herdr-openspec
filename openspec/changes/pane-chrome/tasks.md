@@ -524,10 +524,10 @@ which is why each is a named line here rather than a note — see design.md → 
 ## 10. Final verification
 <!-- kind: operational -->
 
-- [ ] 10.1 CHECK: confirm the affected tiers are the four design.md → Test Strategy names, and
+- [x] 10.1 CHECK: confirm the affected tiers are the four design.md → Test Strategy names, and
   that no test added by this change enters raw mode, spawns a process, or calls
   `ui::read_artifact`.
-- [ ] 10.2 VERIFY: **the verification matrix is real.** Run every command in design.md →
+- [x] 10.2 VERIFY: **the verification matrix is real.** Run every command in design.md →
   Verification matrix and require each to run at least one test. A `--lib` filter matching
   nothing exits **0** with `0 passed`, so a mis-typed or never-written test name is otherwise
   indistinguishable from a passing one. This check is what makes that table evidence:
@@ -541,25 +541,47 @@ which is why each is a named line here rather than a note — see design.md → 
   ```
 
   Expected output: empty. Every name printed is a row of the matrix that proves nothing.
-- [ ] 10.3 VERIFY: `cargo fmt --all -- --check` — clean.
-- [ ] 10.4 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
-- [ ] 10.5 VERIFY: `make gates` — every gate OK. `OPENSPEC-UNTOUCHED` requires this change's
+  **Empty output — the matrix is evidence.** Every one of the 149 rows runs at least one real
+  test. This is the check the planning review added because a `--lib` filter matching nothing
+  exits 0; it caught nothing here only because the Change Review's finding 3 had already been
+  repaired, and it was that finding's independent confirmation.
+- [x] 10.3 VERIFY: `cargo fmt --all -- --check` — clean.
+- [x] 10.4 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
+- [x] 10.5 VERIFY: `make gates` — every gate OK. `OPENSPEC-UNTOUCHED` requires this change's
   artifacts committed first; if it still fails, the failure must name a file this change did
   not create.
-- [ ] 10.6 VERIFY: `cargo test --all-features` on an idle machine. A failure inside
+  `make gates` exit 0, 53 gates OK, including `OPENSPEC-UNTOUCHED` (no untracked file inside
+  `openspec/`).
+- [x] 10.6 VERIFY: `cargo test --all-features` on an idle machine. A failure inside
   `ui::tests::wiring` carrying the empty-call-log deadline signature is the known flake
   recorded in the baseline above; re-run it with `--test-threads=1` to confirm, and record
   which it was. A failure anywhere else, or one in that module with a non-empty call list, is
   this change's.
-- [ ] 10.7 VERIFY: `cargo llvm-cov --fail-under-lines 80`, and the production-slice floor from
+  **The known flake, confirmed rather than assumed.** Parallel: 1213 passed, 11 failed, every
+  failure inside `ui::tests::wiring` carrying the baseline's deadline signature — an expected
+  count asserted against `0` with an empty call log (`left: 0`, `calls: []`), the same figures
+  the baseline records. Serial: `ui::tests::wiring` 29 passed / 0 failed, and the whole suite
+  1224 passed / 0 failed across every test binary. The machine was running many concurrent
+  agent sessions, which is the load the mechanism describes.
+- [x] 10.7 VERIFY: `cargo llvm-cov --fail-under-lines 80`, and the production-slice floor from
   the same run — this change adds view-layer code, which is the gated slice.
-- [ ] 10.8 VERIFY: the plugin's own writes are unchanged. `git status --short openspec/` cannot
+  Total 95.96% against the 80% floor. Production slice **96.04% (4433/4616) against a floor of
+  96%** — roughly **two lines of headroom**, which is worth carrying forward: the next change to
+  add production code without tests breaches it, and `NOWAIVER` forbids lowering the floor.
+- [x] 10.8 VERIFY: the plugin's own writes are unchanged. `git status --short openspec/` cannot
   attribute this on its own: two **other** in-flight sessions have untracked directories under
   `openspec/changes/`, and deleting them is not the fix. Use the gate that has a subject and a
   planted control instead — `bash scripts/gates/readonly-ui.sh` exits 0, and
   `cargo test --all-features --test gate_controls` proves it can fail.
-- [ ] 10.9 VERIFY: `make check` as the single gate. If it fails, name the failing sub-command
+- [x] 10.9 VERIFY: `make check` as the single gate. If it fails, name the failing sub-command
   (`fmt`, `clippy`, `gates`, `test`, or `coverage`) and fix that, not the gate.
-- [ ] 10.10 VERIFY: `openspec validate pane-chrome --strict`.
+  **`make check` does not pass on a loaded machine, and this is not this change's defect.** It
+  fails at exactly one sub-command, `test` (`make: *** [test] Error 101`), because `make test`
+  runs `cargo test --all-features` in parallel and the `ui::tests::wiring` deadline flake fires;
+  every other sub-command passes on its own — `fmt-check` clean, `lint` clean, `gates` exit 0,
+  `coverage` above both floors — and the same suite is 1224 passed / 0 failed serially. The
+  flake is recorded in this file's baseline and in `planning-review.md` → Deferred Non-Blocking
+  Notes as a standing property of the suite, explicitly not fixed here.
+- [x] 10.10 VERIFY: `openspec validate pane-chrome --strict`.
 - [ ] 10.11 Build and look at it: `make build`, then open the pane in a Herdr split at 60
   columns and in a dedicated tab, and compare against the prototype named in design.md.
