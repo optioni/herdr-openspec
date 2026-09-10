@@ -1356,7 +1356,7 @@ mod tests {
         let buf120 = render_at(120, 20, &d);
         assert_eq!(
             interior_cols(&buf120, 2),
-            format!("{:<38}", "  v active (3)")
+            format!("{:<38}", "  ▾ active (3)")
         );
         assert_eq!(
             interior_cols(&buf120, 3),
@@ -1790,7 +1790,7 @@ mod tests {
         let buf120 = render_at(120, 20, &d);
         assert_eq!(
             interior_cols(&buf120, 2),
-            format!("{:<38}", "  v active (3)")
+            format!("{:<38}", "  ▾ active (3)")
         );
         assert_eq!(
             interior_cols(&buf120, 3),
@@ -1811,7 +1811,7 @@ mod tests {
         let buf60 = render_at(60, 20, &d);
         assert_eq!(
             interior_cols(&buf60, 2),
-            format!("{:<58}", "  v active (3)")
+            format!("{:<58}", "  ▾ active (3)")
         );
         assert_eq!(
             interior_cols(&buf60, 3),
@@ -1928,7 +1928,7 @@ mod tests {
         let buf120 = render_at(120, 20, &d);
         assert_eq!(
             interior_cols(&buf120, 2),
-            format!("{:<38}", "  v active (1)")
+            format!("{:<38}", "  ▾ active (1)")
         );
         assert_eq!(
             interior_cols(&buf120, 3),
@@ -1936,7 +1936,7 @@ mod tests {
         );
         assert_eq!(
             interior_cols(&buf120, 4),
-            format!("{:<38}", "  v archived (2)")
+            format!("{:<38}", "  ▾ archived (2)")
         );
         assert_eq!(
             interior_cols(&buf120, 5),
@@ -1950,7 +1950,7 @@ mod tests {
         let buf60 = render_at(60, 20, &d);
         assert_eq!(
             interior_cols(&buf60, 2),
-            format!("{:<58}", "  v active (1)")
+            format!("{:<58}", "  ▾ active (1)")
         );
         assert_eq!(
             interior_cols(&buf60, 3),
@@ -1958,7 +1958,7 @@ mod tests {
         );
         assert_eq!(
             interior_cols(&buf60, 4),
-            format!("{:<58}", "  v archived (2)")
+            format!("{:<58}", "  ▾ archived (2)")
         );
         assert_eq!(
             interior_cols(&buf60, 5),
@@ -1995,7 +1995,7 @@ mod tests {
         let buf120 = render_at(120, 20, &d);
         assert_eq!(
             interior_cols(&buf120, 2),
-            format!("{:<38}", "  v active (1)")
+            format!("{:<38}", "  ▾ active (1)")
         );
         assert_eq!(
             interior_cols(&buf120, 3),
@@ -2003,7 +2003,7 @@ mod tests {
         );
         assert_eq!(
             interior_cols(&buf120, 4),
-            format!("{:<38}", "  > archived (2)")
+            format!("{:<38}", "  ▸ archived (2)")
         );
 
         // An unresolved tier's header counts from `archived_total`, not from the
@@ -2019,7 +2019,7 @@ mod tests {
         let buf = render_at(120, 20, &unresolved);
         assert_eq!(
             interior_cols(&buf, 4),
-            format!("{:<38}", "  > archived (22)")
+            format!("{:<38}", "  ▸ archived (22)")
         );
     }
 
@@ -2046,7 +2046,7 @@ mod tests {
         let buf120 = render_at(120, 20, &d);
         assert_eq!(
             interior_cols(&buf120, 2),
-            format!("{:<38}", "  v active (1)")
+            format!("{:<38}", "  ▾ active (1)")
         );
         assert_eq!(
             interior_cols(&buf120, 3),
@@ -2054,7 +2054,7 @@ mod tests {
         );
         assert_eq!(
             interior_cols(&buf120, 4),
-            format!("{:<38}", "  v archived (22)")
+            format!("{:<38}", "  ▾ archived (22)")
         );
         for y in 5..=17u16 {
             assert!(cols(&row_text(&buf120, y), 1..39).chars().all(|c| c == ' '));
@@ -2069,7 +2069,7 @@ mod tests {
         let buf_resolved = render_at(120, 20, &resolved);
         assert_eq!(
             interior_cols(&buf_resolved, 4),
-            format!("{:<38}", "  v archived (22)")
+            format!("{:<38}", "  ▾ archived (22)")
         );
         assert!(buffer_contains(&buf_resolved, "archived-00"));
     }
@@ -2154,7 +2154,7 @@ mod tests {
                 interior_cols(&buf, 4),
                 format!(
                     "{:<w$}",
-                    "  v archived (28)",
+                    "  ▾ archived (28)",
                     w = if width == 60 { 58 } else { 38 }
                 )
             );
@@ -2198,7 +2198,7 @@ mod tests {
                 interior_cols(&buf, 3),
                 format!(
                     "{:<w$}",
-                    "  v archived (1)",
+                    "  ▾ archived (1)",
                     w = if width == 60 { 58 } else { 38 }
                 )
             );
@@ -2222,7 +2222,7 @@ mod tests {
                 interior_cols(&buf, 3),
                 format!(
                     "{:<w$}",
-                    "  > archived (28)",
+                    "  ▸ archived (28)",
                     w = if width == 60 { 58 } else { 38 }
                 )
             );
@@ -2246,7 +2246,7 @@ mod tests {
                 interior_cols(&buf, 2),
                 format!(
                     "{:<w$}",
-                    "  > active (9)",
+                    "  ▸ active (9)",
                     w = if width == 60 { 58 } else { 38 }
                 )
             );
@@ -3000,7 +3000,7 @@ mod tests {
         let buf120 = render_at(120, 20, &d);
         assert_eq!(
             interior_cols(&buf120, 2),
-            format!("{:<38}", "  v active (1)")
+            format!("{:<38}", "  ▾ active (1)")
         );
         assert_eq!(
             interior_cols(&buf120, 3),
@@ -3008,7 +3008,7 @@ mod tests {
         );
         assert_eq!(
             interior_cols(&buf120, 4),
-            format!("{:<38}", "  v archived (1)")
+            format!("{:<38}", "  ▾ archived (1)")
         );
         assert_eq!(
             interior_cols(&buf120, 5),
@@ -3017,7 +3017,7 @@ mod tests {
         let buf60 = render_at(60, 20, &d);
         assert_eq!(
             interior_cols(&buf60, 2),
-            format!("{:<58}", "  v active (1)")
+            format!("{:<58}", "  ▾ active (1)")
         );
         assert_eq!(
             interior_cols(&buf60, 3),
@@ -3025,7 +3025,7 @@ mod tests {
         );
         assert_eq!(
             interior_cols(&buf60, 4),
-            format!("{:<58}", "  v archived (1)")
+            format!("{:<58}", "  ▾ archived (1)")
         );
         assert_eq!(
             interior_cols(&buf60, 5),
@@ -3093,7 +3093,7 @@ mod tests {
                 interior_cols(&buf, 3),
                 format!(
                     "{:<w$}",
-                    "  v archived (1)",
+                    "  ▾ archived (1)",
                     w = if width == 60 { 58 } else { 38 }
                 )
             );

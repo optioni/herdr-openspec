@@ -1800,9 +1800,9 @@ mod tests {
                 .text
         };
         let expected = [
-            (17, "  > archived (22)"),
-            (16, "  > archived (2…"),
-            (5, "  > …"),
+            (17, "  ▸ archived (22)"),
+            (16, "  ▸ archived (2…"),
+            (5, "  ▸ …"),
             (1, " "),
             (0, ""),
         ];
@@ -1815,7 +1815,7 @@ mod tests {
             let header = archived_header(width);
             assert_eq!(
                 header,
-                format!("{:<w$}", "  > archived (22)", w = width as usize),
+                format!("{:<w$}", "  ▸ archived (22)", w = width as usize),
                 "width {width}"
             );
         }

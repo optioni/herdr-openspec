@@ -1825,7 +1825,7 @@ apply:
                 );
                 assert_eq!(
                     cols(&row_text(&buf, 3), 1, interior),
-                    format!("{:<width$}", "> > archived (7)", width = interior),
+                    format!("{:<width$}", "> ▸ archived (7)", width = interior),
                     "width {width}"
                 );
                 assert_eq!(
@@ -1891,7 +1891,7 @@ apply:
             let buf120 = render_at(120, 20, &dashboard);
             assert_eq!(
                 cols(&row_text(&buf120, 2), 1, 38),
-                format!("{:<38}", "> v active (3)")
+                format!("{:<38}", "> ▾ active (3)")
             );
             assert_eq!(
                 cols(&row_text(&buf120, 3), 1, 38),
@@ -1907,14 +1907,14 @@ apply:
             );
             assert_eq!(
                 cols(&row_text(&buf120, 6), 1, 38),
-                format!("{:<38}", "  > archived (1)")
+                format!("{:<38}", "  ▸ archived (1)")
             );
             assert_eq!(cols(&row_text(&buf120, 7), 1, 38), " ".repeat(38));
 
             let buf60 = render_at(60, 20, &dashboard);
             assert_eq!(
                 cols(&row_text(&buf60, 2), 1, 58),
-                format!("{:<58}", "> v active (3)")
+                format!("{:<58}", "> ▾ active (3)")
             );
             assert_eq!(
                 cols(&row_text(&buf60, 3), 1, 58),
@@ -1930,7 +1930,7 @@ apply:
             );
             assert_eq!(
                 cols(&row_text(&buf60, 6), 1, 58),
-                format!("{:<58}", "  > archived (1)")
+                format!("{:<58}", "  ▸ archived (1)")
             );
             assert_eq!(cols(&row_text(&buf60, 7), 1, 58), " ".repeat(58));
         }
