@@ -4,6 +4,21 @@
      re-measured value stands and the earlier one is shown struck through, so a reader can
      see which numbers moved. See planning-review.md -> Reviewed Against. -->
 
+## Where this stands
+
+**Planning is refreshed and implementation has not started.** Every task below is unchecked
+and that is accurate: the session that refreshed this plan stopped at the weekly usage limit
+before group 0. Nothing in `src/` has been touched by this change.
+
+What was done, in commits `f76be82`..`c571d35`: the pre-implementation drift refresh against
+HEAD `08025d3`, after `pane-chrome` landed past the planning review's `c9820c6`. Five spec
+deltas were re-based so archiving this change cannot revert `pane-chrome`, all 117 matrix
+filters were repaired, and every baseline below was re-measured. See planning-review.md →
+Drift Repair at HEAD `08025d3` for both findings and their verification.
+
+**Resume at task 0.1.** No refresh is owed unless HEAD has moved again — check
+planning-review.md → Reviewed Against against `git log` first, as the apply flow requires.
+
 ## Baseline re-measured at HEAD `08025d3`
 
 | Check | Command | Result at HEAD |
