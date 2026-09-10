@@ -48,7 +48,7 @@ change adds no code to it.
   `markdown::lines` instead: the content area's first row reads `## 1. Setup` with no
   progress-bar row above it, and the item rows read `- [x] 1.1 first` and
   `- [ ] 1.2 second` with their source bullets intact
-- **AND** the tab bar in row 3 is byte-identical between the two renders, so switching tabs
+- **AND** the tab bar in row 2 is byte-identical between the two renders, so switching tabs
   changed content and nothing else
 
 #### Scenario: The tab is chosen by `tracks_tasks`, not by its id
@@ -211,11 +211,13 @@ That `No tasks yet` line SHALL be passed through `ui::list::pad_or_truncate_righ
 was pushed as a bare `String` while every neighbouring line went through the padding, so at
 any `width` below 12 it overran the region: at a 13-column narrow **frame** in the detail
 route, whose content area is 11 columns, the rendered row read `│No tasks yet` and ate the
-region's right border. The literal is now truncated with the same `…` rule as everything
+region's right border, as the region still had one. The literal is now truncated with the
+same `…` rule as everything
 else — at `width` 11 it reads `No tasks y…`, at 0 it is the empty string — and measures
 exactly `width` columns in the fitting case, `width` 12 included, where the twelve-column
 literal fits whole and is padded by nothing. Every `width` here is the **content area's**,
-the frame's less the region's two border columns.
+the frame's less the region's two **gutter** columns — the same arithmetic the two border
+columns gave before `pane-chrome`, so every truncation point here is unchanged.
 The line SHALL remain a single `Segment` carrying `Face::plain()`.
 
 The trigger is items, not groups, and that distinction is load-bearing rather than pedantic:
@@ -248,10 +250,13 @@ conflated. `No tasks yet` and `No content yet` SHALL never both appear for the s
 
 #### Scenario: `No tasks yet` does not eat the border at a narrow frame
 
+The scenario's name is kept verbatim because a delta's scenario headers are its merge key;
+what the literal must not eat is now the region's right gutter column.
+
 - **WHEN** the same prose-only `Dashboard` is rendered at 15x20, at 14x20, at 13x20, at
   2x20, and at 1x20
 - **THEN** at 13x20 — a frame of 13, so a content area of 11 — the content area's third row
-  reads `No tasks y…` and the frame's right border column is a box-drawing character, not the
+  reads `No tasks y…` and the frame's right gutter column is a space, not the
   letter `t`: the audit's `│No tasks yet` row is gone
 - **AND** at 14x20 the content area is 12 columns and the row reads `No tasks yet` **whole**,
   with no ellipsis, because the literal is exactly twelve columns — the boundary at which

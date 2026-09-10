@@ -16,274 +16,31 @@ capabilities render into. What fills those interiors belongs to `change-rows`,
 
 ## Requirements
 
-### Requirement: The frame is a header row, a body, and a footer row
-
-`ui::view::render(frame, &Dashboard)` SHALL be a pure function of its two arguments: it
-SHALL perform no filesystem, process, environment, network, or terminal I/O, and SHALL
-read no clock and no global state. It SHALL divide `frame.area()` vertically into exactly
-three regions, in order — a header of `Constraint::Length(1)`, a body of
-`Constraint::Min(0)`, and a footer of `Constraint::Length(1)` — and SHALL draw nothing
-outside them.
-
-The header SHALL render the literal `OpenSpec` at column 0 with
-`Modifier::BOLD` set. The footer SHALL render the key hints `q quit`, `Enter detail`, and
-`Esc back` in that order, separated by two spaces, starting at column 0, dropping hints
-from the **end** when the remaining width cannot hold the next one whole.
-
-`agent-launch` adds **two further hints, placed after `Esc back`**: when
-`Dashboard::agents.reachable` is `true` the footer SHALL append `a/c/s launch` and then
-`g focus`, joined by the same two-space separator. When it is `false` both SHALL be absent
-entirely, so a pane with no reachable Herdr socket renders the footer this requirement
-specified before `agent-launch` existed — which is the whole of `SPEC.md` → Degraded states'
-"action keys hidden".
-
-They are **one compound hint plus one**, not four separate ones, and that is a width decision
-rather than a stylistic one: `q quit  Enter detail  Esc back  a apply  c continue  s archive`
-is **62** columns, so at the mandated 60-column frame `fit_hints` would drop `s archive` and
-`g focus` and offer the reader two of the four action keys with no indication that the other
-two exist. `a/c/s launch  g focus` costs 23 columns including its separators, bringing the
-footer to **53**, which fits the narrow frame whole. The keys themselves are documented in
-`SPEC.md` → Keys and `README.md` → Keys; the footer's job is to say the feature is available
-here and now, not to be the manual.
-
-`agent-attribution` adds a **hint placed last**: when
-`Dashboard::attribution().unattributed` is greater than zero, the footer SHALL append that
-count, a single space, and the word `unattributed` — `1 unattributed`, `12 unattributed` —
-after the action hints, joined by the same two-space separator. When the count is zero the hint
-SHALL be absent entirely, so an agentless pane's footer is byte-identical to the footer this
-requirement already specified. Being last means it is the **first** hint dropped as the width
-falls, which is the correct priority: the key hints tell a reader how to drive the
-pane, and the count tells them something they can act on later.
-
-That priority has a measured consequence `agent-launch` makes explicit rather than leaving to be
-discovered: the full reachable footer with a count is **69** columns, so at the mandated
-60-column frame **the count is dropped and the action hints are kept**. Before this change the
-count fitted at 60 (the footer was 46 columns); it still fits whenever the socket is
-unreachable, because the two hints it now competes with are absent. The drop order is unchanged
-— last hint first — and the hint list grew; nothing about the rule moved.
-
-`SPEC.md` → Attributing an agent's tier 3 requires a count and forbids a row: an agent that
-no tier attributed is reported here, in one shared cell, and never against a change. The
-footer is the whole of that report — there is no per-agent listing, no expansion, and no key
-that opens one. It is also never a `!`-marked problem row: an unattributed agent is a normal
-state of a shared Herdr session, not a fault. A **failed launch** is not reported here at all:
-`agent-launch` puts it on `Dashboard::launch.problems` and `change-rows` renders it as a
-leading `!`-marked list row, because it is a fault and it is one the reader just caused.
-
-The footer has two further forms, specified by `list-filtering` and restated here because
-this requirement owns the row: while `dashboard.filter.active` is set the hints are
-**replaced** by the prompt `/`, the query, and `_`, keeping its tail when it overflows —
-and the action hints and the unattributed count are replaced along with them, because the
-prompt replaces the whole row rather than the three key hints specifically; while the filter is
-inactive with a non-empty query, `/` and the query become a further hint placed **first** in the
-list above, dropped last rather than first, with the action hints and then the count after the
-three key hints as usual.
-
-Scenarios in this capability render a `Dashboard` whose `changes` is
-`changes::empty_set()` and whose `agents.reachable` is `false` unless they say otherwise. The
-first is no longer inert: with a repository root present, `change-rows` renders a
-`No changes yet` message row into the list region's interior, and the scenarios below are
-written so that none of them depends on that interior being blank. The second is stated
-explicitly for the first time here: every landed footer assertion in this capability was written
-against a dashboard whose socket was unreachable, and pinning that is what keeps those exact
-strings true rather than accidentally so.
-
-Degenerate heights SHALL be decided explicitly rather than delegated to the constraint
-solver — measured, not assumed: `Layout::vertical([Length(1), Min(0), Length(1)])` at
-height 1 gives the single row to the **footer**, so a naive split renders `q quit` where
-`OpenSpec` belongs. The explicit branch is: at height 0 `render` SHALL draw nothing; at
-height 1 it SHALL draw the header only; at height 2 it SHALL draw the header on row 0 and
-the footer on row 1 and no body; at height 3 or more it SHALL use the three-way split
-above. `render` SHALL NOT panic at any frame size of at least one column by one row, and
-SHALL NOT panic at an interior of zero columns or zero rows, which a one- or two-column
-frame produces.
-
-#### Scenario: Header, body, and footer occupy their rows at both widths
-
-- **WHEN** a `Dashboard` whose repository root is `/tmp/demo-repo` and whose
-  `agents.reachable` is `false` is rendered into a `TestBackend` at 60x20, and again at 120x20
-- **THEN** in both buffers row 0 column 0 through column 7 spells `OpenSpec`, and the cell
-  at (0, 0) reports `Modifier::BOLD` set
-- **AND** in both buffers row 19 begins with the exact string
-  `q quit  Enter detail  Esc back` at column 0, and every remaining cell of row 19 is a
-  space
-- **AND** in both buffers row 1 is the top border of a bordered region and row 18 is its
-  bottom border, so the body occupies rows 1 through 18 and nothing is drawn in row 0 or
-  row 19 by the body
-
-#### Scenario: The action hints follow `Esc back` when the socket is reachable
-
-- **WHEN** the same `Dashboard` with `agents.reachable` set to `true` and no agents is
-  rendered at 60x20 and at 120x20
-- **THEN** row 19 is exactly
-  `q quit  Enter detail  Esc back  a/c/s launch  g focus` — **53** characters — followed by
-  seven spaces at 60 and sixty-seven spaces at 120
-- **AND** rendering the identical dashboard with `agents.reachable` `false` produces row 19 of
-  exactly `q quit  Enter detail  Esc back` followed by thirty spaces at 60, byte-identical to
-  the row this capability specified before the action hints existed
-- **AND** nothing outside row 19 differs between the two renders at either width, so the
-  reachability flag moves the footer and nothing else
-
-#### Scenario: The action hints are dropped whole, `g focus` first
-
-- **WHEN** the reachable, agentless dashboard is rendered at 53x20, 52x20, 44x20, and 43x20
-- **THEN** the 53-column row is exactly
-  `q quit  Enter detail  Esc back  a/c/s launch  g focus`, filling the row with no trailing
-  space
-- **AND** the 52-column row is exactly `q quit  Enter detail  Esc back  a/c/s launch` followed
-  by eight spaces — `g focus` and its two-space separator need nine columns and only eight
-  remain, so it is dropped whole rather than cut to `g focu`
-- **AND** the 44-column row is exactly `q quit  Enter detail  Esc back  a/c/s launch`, filling
-  the row, and the 43-column row is exactly `q quit  Enter detail  Esc back` followed by
-  thirteen spaces
-- **AND** at 43 columns the three key hints are all still present, so both action hints are
-  dropped before any of them
-
-#### Scenario: A one-row frame renders the header and nothing else
-
-- **WHEN** the same `Dashboard` is rendered at 60x1 and at 120x1
-- **THEN** neither render panics
-- **AND** row 0 spells `OpenSpec` at column 0 in both
-- **AND** no box-drawing character and no `q quit` appears in either buffer, so neither the
-  body nor the footer was drawn into the header's row
-
-#### Scenario: A two-row frame renders the header and the footer with no body
-
-- **WHEN** the same `Dashboard` is rendered at 60x2 and at 120x2
-- **THEN** neither render panics
-- **AND** row 0 spells `OpenSpec` and row 1 begins `q quit` at column 0
-- **AND** no box-drawing character appears anywhere in either buffer, because the body
-  received zero rows
-
-#### Scenario: A one-column frame renders without panicking
-
-- **WHEN** the same `Dashboard` is rendered at 1x1, at 1x20, at 2x20, and — as the
-  contrasting controls at the two mandated widths — at 60x20 and 120x20
-- **THEN** none of the five panics, including the two whose list region has an interior of
-  zero columns
-- **AND** the 1x20 buffer's row 0 is the single character `O`, the first character of the
-  truncated `OpenSpec` label, so a one-column frame still draws rather than silently
-  skipping the header
-- **AND** the 1x20 buffer's row 19 is a single space: `q quit` needs six columns, so the
-  first hint is dropped whole rather than truncated to `q`
-- **AND** the same holds with `agents.reachable` `true`, which adds no hint that could fit in
-  one column and therefore changes no cell of the 1x20 buffer
-- **AND** the 60x20 and 120x20 buffers both spell `OpenSpec` in columns 0 through 7 and
-  both begin row 19 with `q quit`, so the one-column result is a width branch rather than
-  the header and footer being absent everywhere
-
-#### Scenario: The footer drops whole hints rather than truncating one
-
-- **WHEN** the same `Dashboard`, with `agents.reachable` `false`, is rendered at 18x20, at
-  20x20, at 60x20, and at 120x20
-- **THEN** the 18-column footer row is exactly `q quit` followed by twelve spaces —
-  `q quit  Enter detail` needs exactly 20 columns, so `Enter detail` and every hint after
-  it are dropped whole rather than cut short
-- **AND** the 20-column footer row is exactly `q quit  Enter detail`, filling the row with
-  no trailing space, which pins the boundary from the other side
-- **AND** the 60-column footer row is exactly `q quit  Enter detail  Esc back` — thirty
-  characters — followed by thirty spaces, so all three hints fit at the mandated narrow
-  width
-- **AND** the 120-column footer row is the same thirty characters followed by ninety
-  spaces
-
-#### Scenario: The unattributed count is the footer's last hint at both widths
-
-- **WHEN** a `Dashboard` whose repository root is `/tmp/demo-repo`, whose `changes` holds
-  one active change `alpha`, whose `agents.agents` holds one in-scope agent named
-  `nothing-like-a-change`, and whose `agents.reachable` is `false`, is rendered at 60x20 and at
-  120x20
-- **THEN** the 60-column footer row is exactly
-  `q quit  Enter detail  Esc back  1 unattributed` — forty-six characters — followed by
-  fourteen spaces
-- **AND** the 120-column footer row is the same forty-six characters followed by
-  seventy-four spaces
-- **AND** the same dashboard with `agents.reachable` set to `true` gives a 120-column footer row
-  of exactly `q quit  Enter detail  Esc back  a/c/s launch  g focus  1 unattributed` — **69**
-  characters — followed by fifty-one spaces, and a 60-column row of exactly
-  `q quit  Enter detail  Esc back  a/c/s launch  g focus` followed by seven spaces: the count
-  needs sixteen further columns and only seven remain, so it is dropped whole. That is the same
-  last-hint-first rule, applied to a longer list
-- **AND** rendering the identical dashboard with `agents.agents` empty and `reachable` `false`
-  produces a footer row of exactly `q quit  Enter detail  Esc back` and thirty spaces at 60
-  columns, byte-identical to the row this capability specified before the count existed
-- **AND** the count is a number of agents, not of changes: adding a second in-scope agent
-  named `also-nothing` makes the hint read `2 unattributed` at 120 columns under either value
-  of `reachable`, while the list region's rows are unchanged
-
-#### Scenario: The count is reported with an empty change list
-
-- **WHEN** a `Dashboard` whose repository root is `/tmp/demo-repo`, whose `changes` is
-  `changes::empty_set()`, whose `agents.agents` holds two in-scope agents named
-  `nothing-like-a-change` and `also-nothing`, and whose `agents.reachable` is `false`, is
-  rendered at 60x20 and at 120x20
-- **THEN** the footer row reads `q quit  Enter detail  Esc back  2 unattributed` at both
-  widths
-- **AND** the list region's interior holds exactly the single `No changes yet` message row
-  `change-rows` specifies, byte-identical to the agentless rendering of the same dashboard —
-  a `Message` row is never badged
-- **AND** the same holds with a `/` query matching nothing: the two message rows are
-  byte-identical and the count is unchanged, because the count is over agents and the filter
-  is over changes
-- **AND** with `agents.reachable` set to `true` the list region's interior is unchanged, cell
-  for cell, at both widths: the action hints live in the footer and never in the list
-
-#### Scenario: The count is dropped whole before the three key hints
-
-- **WHEN** the one-unattributed-agent dashboard with `agents.reachable` `false` is rendered at
-  46x20 and at 45x20
-- **THEN** the 46-column footer row is exactly
-  `q quit  Enter detail  Esc back  1 unattributed`, filling the row with no trailing space
-- **AND** the 45-column footer row is exactly `q quit  Enter detail  Esc back` followed by
-  fifteen spaces — the count and its two-space separator need sixteen columns and only
-  fifteen remain, so it is dropped whole rather than cut to `1 unattribute`
-- **AND** at 45 columns the three key hints are all still present, so the count is dropped
-  before any of them
-- **AND** the same dashboard with `agents.reachable` `true` pins the boundary one hint list
-  further out: the 69-column row is exactly
-  `q quit  Enter detail  Esc back  a/c/s launch  g focus  1 unattributed` with no trailing
-  space, and the 68-column row is exactly
-  `q quit  Enter detail  Esc back  a/c/s launch  g focus` followed by fifteen spaces — the
-  count dropped whole, both action hints kept
-
-#### Scenario: The filter prompt replaces the count along with the hints
-
-- **WHEN** the one-unattributed-agent dashboard with `agents.reachable` `false` is rendered at
-  60x20 and at 120x20 with `filter.active` set and `filter.query` `be`, and then again with
-  `filter.active` cleared and the same query kept
-- **THEN** the active-filter footer row is exactly `/be_` followed by spaces at both widths,
-  and the string `unattributed` appears nowhere in it
-- **AND** the accepted-query footer row is exactly
-  `/be  q quit  Enter detail  Esc back  1 unattributed` at both widths, so the query leads
-  the list and the count still trails it
-- **AND** both forms are byte-identical to what `list-filtering` specifies once the same
-  dashboard's `agents.agents` is emptied, so the count is additive rather than a rewrite of
-  either form
-- **AND** with `agents.reachable` `true` the active-filter row is still exactly `/be_` followed
-  by spaces at both widths, and the strings `a/c/s launch` and `g focus` appear nowhere in it:
-  the prompt replaces the **whole** row, action hints included
-- **AND** with `agents.reachable` `true` the accepted-query row is exactly
-  `/be  q quit  Enter detail  Esc back  a/c/s launch  g focus  1 unattributed` — 74 characters
-  — at 120, and exactly `/be  q quit  Enter detail  Esc back  a/c/s launch  g focus` — 58
-  characters — followed by two spaces at 60, so the query still leads and the count is still
-  the first thing dropped
-
 ### Requirement: The 100-column breakpoint decides one region or two
 
 `ui::layout::WIDE_MIN_WIDTH` SHALL be `100`. `ui::layout::mode(width: u16)` SHALL return
 `LayoutMode::Wide` when `width >= WIDE_MIN_WIDTH` and `LayoutMode::Narrow` otherwise, and
 SHALL be a total function over every `u16`.
 
-At `LayoutMode::Wide` the body SHALL be split horizontally into exactly two regions —
-`Constraint::Length(40)` for the change list on the left and `Constraint::Min(0)` for the
-artifact detail on the right — so that every column gained beyond 100 goes to the detail
-side. Both regions SHALL be drawn, each as a block with all four borders and a title:
-`Changes` on the left, `Detail` on the right.
+At `LayoutMode::Wide` the body SHALL be split horizontally into exactly three parts —
+`Constraint::Length(40)` for the change list, `Constraint::Length(1)` for the divider, and
+`Constraint::Min(0)` for the artifact detail — so that every column gained beyond 100 goes to
+the detail side. Both regions SHALL be drawn, each as a heading row, a padding row, and a
+gutter-padded interior, and neither as a bordered block. The list region takes
+`Gutters::Both` and the detail region `Gutters::LeftOnly`. Their headings are not fixed
+titles: the list region's heading names the repository directory and the detail region's
+heading is the selected change's own header.
 
 At `LayoutMode::Narrow` the body SHALL hold exactly one region occupying the whole body
-width, drawn as a block with all four borders, titled `Changes` when the dashboard's route
-is `Route::List` and `Detail` when it is `Route::Detail`. The region that is not routed to
-SHALL NOT be drawn at all.
+width with `Gutters::Both`, drawn the same borderless way, and it SHALL be the list region
+when the dashboard's route is `Route::List` and the detail region when it is
+`Route::Detail`. The region that is not routed to SHALL NOT be drawn at all, and no divider
+SHALL be drawn.
+
+The literal titles `Changes` and `Detail` are gone with the borders that carried them. They
+named the two halves of a split the reader can already see, and at a 60-column pane each
+spent a row saying which of the two routes was showing — which the footer's `Enter detail` /
+`Esc back` hints and the heading's own content already say.
 
 The mode SHALL be derived from the frame area passed to `render` on every draw, and SHALL
 NOT be stored on `Dashboard` or captured at startup, so a terminal resized across the
@@ -291,36 +48,36 @@ breakpoint changes layout on its next frame with no extra state.
 
 #### Scenario: At 120 columns both regions are drawn with the divider at column 40
 
-- **WHEN** a `Dashboard` with `route: Route::List` is rendered at 120x20, and — as the
-  contrasting control at the mandated narrow width — at 60x20
-- **THEN** in the 120-column buffer row 1 holds `┌` at column 0, `┐` at column 39, `┌` at
-  column 40, and `┐` at column 119
-- **AND** row 1 columns 1 through 7 spell `Changes`, and row 1 columns 41 through 46 spell
-  `Detail`
-- **AND** row 18 holds `└` at column 0, `┘` at column 39, `└` at column 40, and `┘` at
-  column 119
-- **AND** the 60-column buffer holds exactly one `┌` in the whole buffer, so the second
-  region is a width branch rather than something drawn unconditionally
+- **WHEN** a `Dashboard` with `route: Route::List`, a repository root of `/tmp/demo-repo`,
+  and one active change `alpha` is rendered at 120x20, and — as the contrasting control at
+  the mandated narrow width — at 60x20
+- **THEN** in the 120-column buffer row 0 spells `demo-repo` from column 1 and `alpha`'s own
+  change header from column 42, so both regions drew their heading rows
+- **AND** in the 120-column buffer every cell of column 40 in rows 0 through 18 is `│`, and
+  columns 0, 39, and 41 are spaces in every one of those rows
+- **AND** the strings `Changes` and `Detail` appear in no cell of either buffer
+- **AND** the 60-column buffer holds no `│` at all, so the divider is a width branch rather
+  than something drawn unconditionally
 
 #### Scenario: At 60 columns only the routed region is drawn
 
 - **WHEN** the same `Dashboard` with `route: Route::List` is rendered at 60x20, and — as
   the contrasting control at the mandated wide width — at 120x20
-- **THEN** in the 60-column buffer row 1 holds `┌` at column 0 and `┐` at column 59, and no
-  other `┌` appears anywhere in the buffer
-- **AND** row 1 columns 1 through 7 spell `Changes`
-- **AND** the string `Detail` appears in no row of the 60-column buffer
-- **AND** the 120-column buffer does contain `Detail`, at row 1 columns 41 through 46, so
-  the absence at 60 columns is the breakpoint and not the title being missing
+- **THEN** in the 60-column buffer row 0 spells `demo-repo` from column 1 and the change's
+  own header appears in no row, because the detail region was not drawn
+- **AND** in the 60-column buffer no cell holds `│`
+- **AND** the 120-column buffer does hold the change's header at row 0 column 42, so the
+  absence at 60 columns is the breakpoint and not the detail heading being missing
 
 #### Scenario: At 60 columns the detail route replaces the list region
 
-- **WHEN** a `Dashboard` with `route: Route::Detail` is rendered at 60x20
-- **THEN** row 1 columns 1 through 6 spell `Detail`
-- **AND** the string `Changes` appears in no row of the buffer
-- **AND** rendering the same dashboard at 120x20 still shows **both** `Changes` at row 1
-  column 1 and `Detail` at row 1 column 41, because the route selects emphasis rather than
-  visibility above the breakpoint
+- **WHEN** the same `Dashboard` with `route: Route::Detail` is rendered at 60x20
+- **THEN** row 0 spells the selected change's header from column 1
+- **AND** the string `demo-repo` appears in no row of the buffer, because the list region —
+  and with it the repository heading — is not drawn
+- **AND** rendering the same dashboard at 120x20 still shows **both** `demo-repo` at row 0
+  column 1 and the change's header at row 0 column 42, because the route selects emphasis
+  rather than visibility above the breakpoint
 
 #### Scenario: The breakpoint is exact at 99, 100, and 101 columns
 
@@ -328,291 +85,140 @@ breakpoint changes layout on its next frame with no extra state.
   `120`, and `u16::MAX`
 - **THEN** it returns `Narrow` for `0`, `1`, `40`, `60`, and `99`, and `Wide` for `100`,
   `101`, `120`, and `u16::MAX`
-- **AND** rendering the same `Dashboard` produces exactly one `┌` in the buffer at 60x20
-  and at 99x20, and exactly two — the second at column 40 — at 100x20, at 101x20, and at
-  120x20, so both mandated widths and all three boundary widths are rendered, not just
-  computed
+- **AND** rendering the same `Dashboard` produces no `│` in the buffer at 60x20 and at
+  99x20, and a full column of `│` at column 40 at 100x20, at 101x20, and at 120x20, so both
+  mandated widths and all three boundary widths are rendered, not just computed
 
 #### Scenario: The mode follows the current frame, not the startup size
 
 - **WHEN** one `Terminal<TestBackend>` is created at 120x20, a frame is drawn, the backend
   is resized to 60x20, and a second frame is drawn from the **same** unchanged `Dashboard`
-- **THEN** the first buffer holds two `┌` characters and the second holds one
+- **THEN** the first buffer holds a column of `│` at column 40 and the second holds no `│`
+  at all
 - **AND** `Dashboard` exposes no field naming a width, a layout mode, or a column count
 
 ### Requirement: The routed region is emphasised and region interiors are left empty
 
-The region the dashboard's route names SHALL have its border drawn with `Modifier::BOLD`
-set; the other region, when drawn, SHALL have its border drawn without it.
+The region the dashboard's route names SHALL have its **heading row** drawn with
+`Modifier::BOLD` set and `Modifier::DIM` clear; the other region, when drawn, SHALL have its
+heading row drawn with `Modifier::DIM` set and `Modifier::BOLD` clear. This replaces the bold
+border that carried the same claim before `pane-chrome` removed the borders.
 
 Neither region's interior is left blank unconditionally any longer. The **list** region's
 interior is owned by `change-rows`, with `list-selection` owning which slice is drawn. The
-**detail** region's interior is owned by `detail-header` (its first row), `artifact-tabs`
-(its second row), and `artifact-content` and `detail-scroll` (the content area below them),
-divided by `layout::split_detail`.
+**detail** region's interior is owned by `artifact-tabs` (its first row), the horizontal rule
+below that, a padding row, and `artifact-content` and `detail-scroll` (the content area
+beneath), divided by `layout::split_detail`. The detail region's **change header** is no
+longer part of its interior at all: `detail-header` draws it into the region's heading row,
+two rows above.
 
 The detail interior is blank on a frame **exactly when `Dashboard::visible()` is empty** — no
-repository, no changes, or a `/` filter matching none. That is the whole of the blank case
-from `detail-view` onward: with a change selected, the region always carries at least a
-header, a tab bar, and one content line, because `ui::detail::content_lines` returns
-`No content yet` rather than nothing. The earlier statement that the production pane's detail
-interior is blank on every frame, because nothing set `detail.source`, is what this change
-retires: `detail-view` is the change that was named there as the one that would.
+repository, no changes, or a `/` filter matching none — and its heading row is blank on
+exactly the same condition. That is the whole of the blank case: with a change selected, the
+region always carries a heading, a tab bar, a rule, and at least one content line, because
+`ui::detail::content_lines` returns `No content yet` rather than nothing.
 
 When the interior **is** blank, every cell of it is a space whose `Style` equals
 `ratatui::buffer::Cell::default().style()`. The comparison is against `Cell::default().style()`
 and **not** against `Style::default()`: `ratatui-crossterm` re-enables the `underline-color`
 feature through its own defaults, so an untouched cell's style is
 `fg(Reset).bg(Reset).underline_color(Reset)`, which equals neither `Style::default()` nor
-`Style::reset()`. Comparing against the constructible value is what catches a `Block::style`
-being set where `Block::border_style` was meant.
+`Style::reset()`. Comparing against the constructible value is what catches a style being
+applied to a whole region where one row was meant. Every cell of a region's **padding row**
+SHALL satisfy the same comparison on every frame, blank interior or not: nothing is ever
+drawn there.
 
-Content SHALL NOT bleed across a border: no cell of a region's border column or border row
-SHALL be overwritten by a list row, a detail header, a tab cell, a problem line, or a
-markdown line, at either mandated width.
+Content SHALL NOT bleed into a gutter or across the divider: no cell of a region's gutter
+column, and no cell of the divider column, SHALL be overwritten by a list row, a heading, a
+detail header, a tab cell, a rule, a problem line, or a markdown line, at either mandated
+width. The wide layout's detail region has no right gutter, so its interior's last column is
+the frame's last column and writing there is correct rather than a bleed.
 
 #### Scenario: The routed region's border is bold and the other's is not
 
-- **WHEN** a `Dashboard` with `route: Route::List` is rendered at 120x20
-- **THEN** the cell at column 0, row 1 reports `Modifier::BOLD` set
-- **AND** the cell at column 40, row 1 reports `Modifier::BOLD` **not** set
+The scenario's name is kept verbatim because a delta's scenario headers are its merge key.
+There is no border any more; the claim it made — the routed region is the emphasised one —
+is now made by the heading row.
+
+- **WHEN** a `Dashboard` with `route: Route::List`, a repository root of `/tmp/demo-repo`,
+  and one active change is rendered at 120x20
+- **THEN** the cell at column 1, row 0 reports `Modifier::BOLD` set
+- **AND** the cell at column 42, row 0 reports `Modifier::BOLD` **not** set and
+  `Modifier::DIM` set
 - **AND** with `route: Route::Detail` and the same size, the two assertions swap, so the
   test discriminates rather than asserting a constant
-- **AND** at 60x20 the single drawn region's border cell at column 0, row 1 reports
+- **AND** at 60x20 the single drawn region's heading cell at column 1, row 0 reports
   `Modifier::BOLD` set under **both** routes, because the region that is drawn is always
   the routed one below the breakpoint
 
 #### Scenario: Interiors are blank at both widths
 
-The scenario's name is kept verbatim from `tui-shell` because a delta's scenario headers are
-its merge key; the detail interior is blank now because no change is selected, not because
-nothing may write there.
+The scenario's name is kept verbatim because a delta's scenario headers are its merge key;
+the detail interior is blank now because no change is selected, not because nothing may
+write there.
 
 - **WHEN** a `Dashboard` with `route: Route::List`, a repository root of `/tmp/demo-repo`,
   `changes::empty_set()`, and an empty `detail` is rendered at 60x20 and at 120x20
-- **THEN** in the 120-column buffer every cell in rows 2 through 17 and columns 41 through
-  118 is a space whose `Style` equals `Cell::default().style()` — the detail region is
-  untouched because `visible()` is empty
+- **THEN** in the 120-column buffer every cell in rows 2 through 18 and columns 42 through
+  119 is a space whose `Style` equals `Cell::default().style()` — the detail region's
+  interior is untouched because `visible()` is empty
+- **AND** in the 120-column buffer rows 0 and 1 of columns 42 through 119 are spaces too,
+  because the detail region's heading row is its change header and there is no change to
+  name, and its padding row is never drawn
 - **AND** in the 120-column buffer row 2, columns 1 through 38, begins `No changes yet`, so
-  the list interior is written by `change-rows` rather than left blank
+  the list interior is written by `change-rows` rather than left blank, two rows below its
+  heading
 - **AND** in the 60-column buffer row 2, columns 1 through 58, begins `No changes yet`, and
-  rows 3 through 17 of columns 1 through 58 are entirely spaces whose `Style` equals
-  `Cell::default().style()`, so exactly one message row was drawn
+  rows 3 through 18 of columns 1 through 58 are entirely spaces whose `Style` equals
+  `Cell::default().style()`, so exactly one message row was drawn into a seventeen-row
+  interior
 - **AND** the same dashboard with **one** active change added is no longer blank in the
-  detail region at 120x20: row 2 columns 41 onward holds that change's header, so the
+  detail region at 120x20: row 0 columns 42 onward holds that change's header, so the
   blankness asserted above is a property of the empty visible list rather than a constant
 
 #### Scenario: Rows do not overwrite the borders at either width
+
+The scenario's name is kept verbatim because a delta's scenario headers are its merge key.
+What a row must not overwrite is now a gutter column and the divider between them.
 
 - **WHEN** a `Dashboard` holding thirty active changes with names long enough to be
   truncated, whose selected change carries twelve artifacts with 40-character ids, and whose
   `detail.source` is thirty lines each 200 characters long, is rendered at 60x20 and at
   120x20
-- **THEN** in the 60-column buffer every cell of column 0 and column 59 in rows 1 through 18
-  is a box-drawing character
-- **AND** in the 120-column buffer every cell of columns 0, 39, 40, and 119 in rows 1
-  through 18 is a box-drawing character, so a 38-column row neither ran into the divider nor
-  into the detail region, and neither a 78-column header, a 78-column tab bar, nor a
-  78-column markdown line ran into the divider or past the frame
-- **AND** the same holds at `Route::Detail` at 60x20, where the detail region is the only
-  one drawn
-
-### Requirement: The header names the repository root, shortened from the left when narrow
-
-The header row SHALL render, right-aligned so that its last column sits in the final
-column, the repository root's display path when one was found, and the literal
-`no repository` when none was. Exactly one blank column SHALL separate the `OpenSpec`
-label from the shortened text at minimum.
-
-**The `file mode` badge.** When `Dashboard::file_mode` is true — the `openspec` binary probe
-resolved no usable binary, so the change list is file-sourced for the whole session — the
-header SHALL draw the literal `file mode`, nine columns, immediately after the `OpenSpec`
-label and one separating blank, in columns 9 through 17, styled with
-`palette::style(Role::FileMode)`: ratatui's `DIM` modifier — and no other modifier — together
-with foreground `Color::Yellow`. The badge stays dim because it names a *mode*, not a fault:
-file mode is a supported way to run, and a badge competing with the repository path for
-attention would say otherwise. It is coloured because `DIM` alone is what an archived row's
-date, an inline code span, a block quote, and an agent badge already are, and a badge that
-shares its whole style with four other things names nothing.
-
-The `OpenSpec` label SHALL be drawn with `palette::style(Role::HeaderTitle)` and the
-right-aligned path — or `no repository` — with `palette::style(Role::HeaderPath)`. Neither
-carries a colour: the label already carries `BOLD` and the path is the row's only other
-content, so the badge's yellow is the one new distinction this row gains.
-
-The badge SHALL be dropped **whole**, never cut short, when the header width is below 18 —
-the eight columns of `OpenSpec`, one blank, and the badge's nine — on exactly `change-rows`'
-drop-whole rule. It is dropped **before** the path is shortened, not after: at a width that
-cannot hold both, the reader can still learn the repository from the pane's contents, and a
-half-drawn `file mo` would name nothing at all.
-
-When `file_mode` is false the header SHALL be byte-identical to the header this requirement
-already specified — no badge, no reserved columns, and the same `A`.
-
-Let `A` be the header width minus 9 — the eight columns of `OpenSpec` plus one separating
-blank — **floored at zero**, so widths below 9 do not underflow the unsigned subtraction.
-When the badge is drawn, `A` SHALL instead be the header width minus **19** — the same nine,
-plus the badge's nine and one further separating blank — floored at zero by the same rule.
-When the text's `layout::columns` is at most `A` it SHALL be rendered whole. When it is
-longer and `A` is at least 8, it SHALL be rendered as `…` followed by the **last `A - 1`
-columns** of the text — the longest suffix ending on a grapheme-cluster boundary that
-measures at most `A - 1`. When `A` is below 8 the text SHALL be omitted entirely and only
-`OpenSpec` SHALL be drawn; when the width is below 8 the label itself SHALL be truncated to
-the columns available. Shortening SHALL count **display columns**, not characters and not
-bytes, and SHALL keep the tail — the repository's own directory name is what identifies it,
-and the leading path components are what a reader can spare.
-
-Because a cluster is dropped whole, the shortened text MAY measure one column less than the
-space allotted to it. The row SHALL still be right-aligned against its own measured width,
-so the last drawn column is the final column and any slack falls to the **left** of the
-ellipsis, where the `OpenSpec` label's trailing blanks already are. The header SHALL never
-draw past its last column at any width for any path.
-
-The badge SHALL be drawn on the **frame** header, not on the detail region's change header.
-The two are different claims: a missing binary is a fact about the process, true of every
-change in the pane, while the detail header describes one change — and `SPEC.md` → Degraded
-states already gives the per-change equivalent its own row, "Schema unknown to the CLI",
-whose fall-back to file mode is per change and is named in the detail region instead.
-
-The shortening rule SHALL be one shared implementation with `change-rows`' no-repository
-block, which shortens `searched_from` by the same keep-the-tail rule against the list
-region's interior width rather than the header's.
-
-#### Scenario: A path that fits is right-aligned whole at both widths
-
-- **WHEN** a `Dashboard` whose repository root is `/tmp/demo-repo` — fourteen characters —
-  is rendered at 60x20 and at 120x20
-- **THEN** the 60-column header row spells `/tmp/demo-repo` in columns 46 through 59, and
-  columns 8 through 45 are spaces
-- **AND** the 120-column header row spells `/tmp/demo-repo` in columns 106 through 119
-
-#### Scenario: A path too long for the narrow header is shortened from the left
-
-- **WHEN** a `Dashboard` whose repository root is
-  `/home/dev/workspaces/openspec-demos/a-rather-long-repository-name-here` — seventy
-  characters — is rendered at 60x20 and at 120x20
-- **THEN** the 60-column header row spells
-  `…/openspec-demos/a-rather-long-repository-name-here` in columns 9 through 59, so the
-  first character of the shortened text is the ellipsis and the last is the final `e` of
-  the directory name
-- **AND** the 120-column header row spells the whole seventy-character path in columns 50
-  through 119, with no ellipsis anywhere in the buffer — which stays true only because
-  that `Dashboard`'s `changes` is `changes::empty_set()` with a repository root present,
-  so the list interior holds the fourteen-character `No changes yet` and needs no
-  ellipsis of its own
-
-#### Scenario: A header too narrow for any path shows only the label
-
-- **WHEN** the same seventy-character `Dashboard` is rendered at 16x20, at 60x20, and at
-  120x20
-- **THEN** the 16-column header row is exactly `OpenSpec` followed by eight spaces, and no
-  ellipsis appears in that row
-- **AND** the 60-column header row carries the shortened, ellipsis-prefixed path in columns
-  9 through 59, and the 120-column header row carries the full path in columns 50 through
-  119 — so the 16-column omission is a width branch and not the feature being absent
-- **AND** no ellipsis appears anywhere in the 16-column buffer: its list interior is
-  fourteen columns wide and `No changes yet` is exactly fourteen characters, so the body
-  neither truncates nor overflows
-
-#### Scenario: No repository found is named in the header at both widths
-
-- **WHEN** a `Dashboard` built with no repository root — the value `ui::load` produces when
-  `resolve::find_repo` reports `NotFound`, with `searched_from` `/tmp/searched-from` — is
-  rendered at 60x20 and at 120x20
-- **THEN** the 60-column header row spells `no repository` in columns 47 through 59
-- **AND** the 120-column header row spells `no repository` in columns 107 through 119
-- **AND** neither **header row** names the directory the search started from: row 0 of
-  each buffer does not contain `/tmp/searched-from`. The **body** now does, and that is
-  `change-rows`' no-repository block — the landed form of this scenario asserted the
-  string was absent from the whole buffer, which `list-view` makes false; the assertion
-  is narrowed to row 0, which is what the requirement was ever about
-
-#### Scenario: The badge is drawn dim after the label at both widths
-
-- **WHEN** a `Dashboard` whose repository root is `/tmp/demo-repo` and whose `file_mode` is
-  **true** is rendered at 60x20 and at 120x20
-- **THEN** the header row's columns 9 through 17 spell `file mode` at both widths, and column
-  8 is a space
-- **AND** every one of those nine cells carries ratatui's `DIM` modifier **and** the
-  foreground `Role::FileMode` carries (`Color::Yellow`), and the `OpenSpec` label's eight
-  cells carry `Modifier::BOLD` and no
-  foreground at all, so the badge is distinguishable from the label by colour as well as by
-  weight and position
-- **AND** the drawn path's cells carry neither a modifier nor a foreground, so the yellow is
-  confined to the badge's own nine columns
-- **AND** the 60-column header spells `/tmp/demo-repo` in columns 46 through 59 and the
-  120-column header in columns 106 through 119 — unchanged, because a fourteen-character path
-  fits inside `A` at both widths either way
-
-#### Scenario: A false flag renders the header that landed before this change
-
-- **WHEN** the same `Dashboard` is rendered with `file_mode` **false** at 60x20 and at 120x20
-- **THEN** neither buffer contains the substring `file mode` anywhere, in any row
-- **AND** both **header rows** are identical, cell for cell and style for style, to the ones
-  the same dashboard produced before this change existed — no cell of row 0 carries a
-  foreground, so the palette added colour to the badge and to nothing else on this row
-
-#### Scenario: The badge takes its columns from the path, not from the label
-
-- **WHEN** a `Dashboard` whose repository root is
-  `/home/dev/workspaces/openspec-demos/a-rather-long-repository-name-here` — seventy
-  characters — and whose `file_mode` is true is rendered at 60x20
-- **THEN** the header row's columns 9 through 17 spell `file mode`
-- **AND** the shortened path occupies columns 19 through 59 — `A` is 41 rather than 51 — and
-  begins with the ellipsis, so ten more leading characters were spared than without the badge
-- **AND** column 18 is a space, so the badge and the path never abut
-- **AND** the same dashboard at 120x20 spells the whole seventy-character path with no
-  ellipsis, the badge still in columns 9 through 17
-
-#### Scenario: A header too narrow for the badge drops it whole
-
-- **WHEN** the same seventy-character, file-mode `Dashboard` is rendered at 17x20, at 18x20,
-  and at 60x20
-- **THEN** the 17-column header row does not contain `file mode`, nor any prefix of it: it is
-  exactly `OpenSpec` followed by nine spaces
-- **AND** the 18-column header row spells `OpenSpec`, a space, then `file mode` in columns 9
-  through 17, so 18 is the exact width at which the badge appears and 17 the one at which it
-  does not
-- **AND** the 60-column header carries both the badge and the ellipsis-prefixed path, so the
-  17-column omission is a width branch and not the feature being absent
-- **AND** no ellipsis appears anywhere in the 17-column buffer's header row
-
-#### Scenario: A wide-character path is shortened by columns and stays inside the header
-
-- **WHEN** a `Dashboard` whose repository root is
-  `/home/dev/workspaces/日本語のリポジトリ名前がとても長いディレクトリ` — forty-four
-  characters and **sixty-seven display columns** — is rendered at 60x20 and at 120x20, and
-  again with `file_mode` true. The fixture is chosen to exceed `A` at the narrow width both
-  with the badge (41) and without it (51), so both branches actually shorten; a
-  wide-character path short enough to fit would leave every assertion below unreachable
-- **THEN** in every one of the four buffers the header row's last drawn column is the frame's
-  final column and no cell beyond it is written
-- **AND** in the 60-column, non-badged buffer the shortened text begins with `…` at a column
-  no earlier than 9 and ends in the final column, and its `columns` is at most `A` — 51
-- **AND** a `char`-counted shortening of the same path would have kept its last 50
-  **characters**, which measure far more than 51 columns and would have run past the frame —
-  so the scenario distinguishes the two measures rather than merely exercising one
-- **AND** in the 60-column, badged buffer the badge occupies columns 9 through 17, column 18
-  is blank, and the shortened path's `columns` is at most `A` — 41 — so the badge took its
-  columns from the path exactly as the unbadged rule says
-- **AND** in the 120-column buffer the whole sixty-seven-column path is drawn, its first
-  column no earlier than column 50, and no ellipsis appears in that row
-- **AND** rendering the same dashboard at 16x20, 18x20, 19x20, and 1x20 draws only the
-  label or a truncation of it, writes nothing past the last column, and does not panic
+- **THEN** in the 60-column buffer every cell of column 0 and column 59 in rows 0 through 18
+  is a space
+- **AND** in the 120-column buffer every cell of columns 0, 39, and 41 in rows 0 through 18
+  is a space, and every cell of column 40 in those rows is `│` — so a 38-column row neither
+  ran into the divider nor into the detail region, and neither a 78-column heading, a
+  78-column tab bar, a 78-column rule, nor a 78-column markdown line ran into the divider or
+  past the frame
+- **AND** in the 120-column buffer column 119 does carry detail content, because the wide
+  detail region has no right gutter, and no cell of any buffer lies past the frame's last
+  column
+- **AND** the same holds at `Route::Detail` at 60x20, where the detail region is the only one
+  drawn, no `│` appears at all, and column 59 is a space because the narrow region takes
+  `Gutters::Both`
 
 ### Requirement: The detail region's two mandated interior widths are 78 and 58
 
 The detail region's interior width SHALL be **78** at a 120-column frame — the wide layout's
-`Constraint::Min(0)` column, 80 columns, less two border columns — and **58** at a 60-column
-frame in the detail route, where the region is the whole 60-column body less two border
-columns. Both interiors SHALL be **16 rows** at a 20-row frame.
+`Constraint::Min(0)` part, 79 columns, less its **one** left gutter column — and **58** at a
+60-column frame in the detail route, where the region is the whole 60-column body less two
+gutter columns. Both interiors SHALL be **17 rows** at a 20-row frame.
 
-These two widths are frozen here for `detail-view` and `tasks-tab` to inherit, exactly as
-`change-rows`' 38 and 58 were frozen by `list-view`. Every test of `ui::markdown` SHALL name
-both, and a source check SHALL enforce that with a floor on the number of tests found, on
-the same terms and with the same stated limits as the check over `src/ui/list.rs`.
+Only the height moves, and only by one. `pane-chrome` replaced the region's border columns
+with gutter columns, which for the narrow region is the same arithmetic and for the wide
+detail region is one gutter plus one column surrendered to the divider's right-hand blank —
+so both mandated widths are unchanged and every landed expectation that names them stays
+true. It removed the frame's header row and the region's bottom border row and spent one of
+the two on the region's padding row, which is where the one extra interior row comes from.
 
-Because the wide layout's detail column is `Min(0)`, 78 is the width at the mandated frame
+These two widths remain frozen for `detail-view` and `tasks-tab` to inherit, exactly as
+`change-rows`' 38 and 58 are. Every test of `ui::markdown` SHALL name both, and a source
+check SHALL enforce that with a floor on the number of tests found, on the same terms and
+with the same stated limits as the check over `src/ui/list.rs`.
+
+Because the wide layout's detail part is `Min(0)`, 78 is the width at the mandated frame
 size and not a constant of the layout: every column gained beyond 120 goes to the detail
 region. Nothing SHALL depend on 78 other than the expectations of tests rendered at 120.
 
@@ -620,10 +226,10 @@ region. Nothing SHALL depend on 78 other than the expectations of tests rendered
 
 - **WHEN** `layout::split_frame` and `layout::split_body` are applied to `Rect::new(0, 0,
   120, 20)` with `Route::Detail`, and the resulting detail rectangle is passed to
-  `layout::interior`
-- **THEN** the interior is `Rect::new(41, 2, 78, 16)`
-- **AND** the same applied to `Rect::new(0, 0, 60, 20)` with `Route::Detail` gives
-  `Rect::new(1, 2, 58, 16)`
+  `layout::interior` with `Gutters::LeftOnly`
+- **THEN** the interior is `Rect::new(42, 2, 78, 17)`
+- **AND** the same applied to `Rect::new(0, 0, 60, 20)` with `Route::Detail` and
+  `Gutters::Both` gives `Rect::new(1, 2, 58, 17)`
 - **AND** at `Rect::new(0, 0, 60, 20)` with `Route::List` there is no detail rectangle at
   all, so the narrow list route has no detail interior to be 58 columns wide
 
@@ -784,33 +390,6 @@ changes and no landed footer assertion moves.
   `gates:` recipe, so `tests/ci_workflow.rs`'s recipe-versus-directory assertion covers it
   and it cannot silently drop out of `make gates`
 
-### Requirement: A region's border style is a palette role
-
-`ui::view::render_region` SHALL take the border's style from the palette:
-`palette::style(Role::RegionBorderFocused)` for the region the dashboard's route names, and
-`palette::style(Role::RegionBorder)` for the other region when it is drawn. It SHALL
-construct no `Style` of its own.
-
-`Role::RegionBorderFocused` SHALL carry `Modifier::BOLD` and **no colour**, and
-`Role::RegionBorder` SHALL carry neither, so the rendered result is exactly what "The routed
-region is emphasised and region interiors are left empty" already requires. The border frames
-the pane rather than saying anything about it; colouring it would tint every frame for no
-distinction. The style SHALL reach `Block::border_style` and not `Block::style`, so a blank
-interior's cells still equal `ratatui::buffer::Cell::default().style()`.
-
-#### Scenario: The routed region's border takes its style from the palette at both widths
-
-- **WHEN** a `Dashboard` at `Route::List` is rendered at 120x20, and a second at
-  `Route::Detail` is rendered at 120x20 and at 60x20
-- **THEN** in the first buffer every border cell of the `Changes` region reports
-  `Modifier::BOLD` set and the `Detail` region's border cells do not, and in the second the
-  two are swapped, so the assertion discriminates rather than asserting a constant
-- **AND** no border cell in any buffer reports a foreground or a background, so the palette
-  gave the border a role and not a colour
-- **AND** every cell of a blank region interior still equals
-  `ratatui::buffer::Cell::default().style()`, so the style reached `border_style` rather than
-  `style`
-
 ### Requirement: A point in the frame resolves to exactly one zone
 
 `ui::layout::zone(area: Rect, route: Route, column: u16, row: u16) -> Zone` SHALL map a
@@ -826,10 +405,21 @@ no filesystem, process, environment, network, or standard-I/O API — and total:
 | Variant | Meaning |
 |---|---|
 | `ListRow { interior: Rect, row: u16 }` | A row of the list region's interior. `interior` is that interior's own rectangle and `row` is the offset of the addressed row below its first interior row |
-| `List` | The list region, but not one of its interior rows — its border |
+| `List` | The list region, but not one of its interior rows — its gutters, its heading row, or its padding row |
 | `DetailTab { bar: Rect, column: u16 }` | The detail region's tab-bar row. `bar` is that row's own rectangle and `column` is the offset of the addressed column right of its first column |
-| `Detail` | The detail region, anywhere but the tab-bar row: its border, its header row, or its content area |
-| `Outside` | The frame's header row, its footer row, or a point outside the frame entirely |
+| `Detail` | The detail region, anywhere but the tab-bar row: its gutter, its heading row, its padding row, the rule below the tab bar, the content padding row, or its content area — and the divider column beside it |
+| `Outside` | The frame's footer row, or a point outside the frame entirely |
+
+`Outside` no longer covers a frame header row, because there is no longer one. Every row of
+the frame but the last is now a body row and resolves to a region's zone whenever a region is
+drawn there.
+
+The **divider column** is in neither region's area, so its zone is decided rather than
+derived: it SHALL resolve to `Detail`. It is one column, the reader who lands on it meant one
+of the two regions, and the detail is the region whose content scrolls under a wheel — so
+giving it to the detail makes a near-miss do something rather than nothing. The choice is
+arbitrary in the sense that `List` would also be defensible; it is written down here so it is
+one answer rather than an accident.
 
 `ListRow` and `DetailTab` SHALL carry the rectangle the zone was derived from rather than
 only an offset, so the caller that resolves the offset to a row or a tab uses the very
@@ -847,16 +437,20 @@ integers, which is what keeps it in the pure view set and testable with no event
 #### Scenario: The zones tile the frame at 120 columns
 
 - **WHEN** `zone` is called at a 120x40 frame, at `Route::List` and again at
-  `Route::Detail`, for a point on the frame's header row, a point on its footer row, the
-  list region's top-left border cell, the list interior's first row, the list interior's
-  last row, the divider column 40's border cell, the detail interior's header row, the
-  detail interior's tab-bar row, the detail interior's first content row, and column 200
-- **THEN** the results are `Outside`, `Outside`, `List`, `ListRow` with `row` 0, `ListRow`
-  with `row` equal to the interior's last index, `Detail`, `Detail`, `DetailTab` with
-  `column` 0, `Detail`, and `Outside`, at both routes
-- **AND** every `ListRow`'s `interior` equals `interior(split_body(body, route).0.unwrap())`
-  and every `DetailTab`'s `bar` equals `split_detail(interior(detail_area)).1`, computed
-  independently in the test
+  `Route::Detail`, for a point on the frame's footer row, the list region's heading row, the
+  list region's padding row, the list region's left gutter, the list interior's first row,
+  the list interior's last row, the divider column 40, the detail region's heading row, the
+  detail interior's tab-bar row, the rule row below it, the content padding row, the detail
+  interior's first content row, and column 200
+- **THEN** the results are `Outside`, `List`, `List`, `List`, `ListRow` with `row` 0,
+  `ListRow` with `row` equal to the interior's last index, `Detail`, `Detail`, `DetailTab`
+  with `column` 0, `Detail`, `Detail`, `Detail`, and `Outside`, at both routes
+- **AND** every `ListRow`'s `interior` equals
+  `interior(split_body(body, route).0.unwrap(), Gutters::Both)` and every `DetailTab`'s `bar`
+  equals `split_detail(interior(detail_area, Gutters::LeftOnly)).0`, computed independently
+  in the test
+- **AND** row 0 of the frame resolves to a region rather than to `Outside`, because the
+  frame has no header row for it to belong to
 
 #### Scenario: Below the breakpoint only the routed region has zones
 
@@ -888,7 +482,588 @@ integers, which is what keeps it in the pure view set and testable with no event
   `TestBackend` at 120x40 and again at 60x20, and every cell of the resulting buffer is
   classified by `zone`
 - **THEN** every cell `zone` reports as `ListRow` holds a character from `list::rows`' own
-  output for that row, and every cell it reports as `List` or `Detail` at a region boundary
-  holds a border character
+  output for that row, and every cell it reports as `List` or `Detail` in a gutter column
+  holds a space, and the divider column holds `│`
 - **AND** no cell of the drawn buffer is classified as belonging to a region the draw path
   did not draw
+
+### Requirement: The frame is a body and a footer row
+
+`ui::view::render(frame, &Dashboard)` SHALL be a pure function of its two arguments: it
+SHALL perform no filesystem, process, environment, network, or terminal I/O, and SHALL
+read no clock and no global state. It SHALL divide `frame.area()` vertically into exactly
+**two** regions, in order — a body of `Constraint::Min(0)` and a footer of
+`Constraint::Length(1)` — and SHALL draw nothing outside them.
+
+There SHALL be no header row. `pane-chrome` removes it: in a Herdr split the pane is
+already titled by Herdr, and the literal `OpenSpec` label this requirement used to mandate
+at row 0 column 0 restated that title one row below it while spending the row that could
+have named the repository. The repository's identity moves into the list region's own
+heading row, specified by "The list region's heading names the repository directory"; no
+part of the frame draws the literal `OpenSpec` any more.
+
+The footer SHALL render the key hints `q quit`, `Enter detail`, and
+`Esc back` in that order, separated by two spaces, starting at column 0, dropping hints
+from the **end** when the remaining width cannot hold the next one whole.
+
+`agent-launch` adds **two further hints, placed after `Esc back`**: when
+`Dashboard::agents.reachable` is `true` the footer SHALL append `a/c/s launch` and then
+`g focus`, joined by the same two-space separator. When it is `false` both SHALL be absent
+entirely, so a pane with no reachable Herdr socket renders the footer this requirement
+specified before `agent-launch` existed — which is the whole of `SPEC.md` → Degraded states'
+"action keys hidden".
+
+They are **one compound hint plus one**, not four separate ones, and that is a width decision
+rather than a stylistic one: `q quit  Enter detail  Esc back  a apply  c continue  s archive`
+is **62** columns, so at the mandated 60-column frame `fit_hints` would drop `s archive` and
+`g focus` and offer the reader two of the four action keys with no indication that the other
+two exist. `a/c/s launch  g focus` costs 23 columns including its separators, bringing the
+footer to **53**, which fits the narrow frame whole. The keys themselves are documented in
+`SPEC.md` → Keys and `README.md` → Keys; the footer's job is to say the feature is available
+here and now, not to be the manual.
+
+`agent-attribution` adds a **hint placed last**: when
+`Dashboard::attribution().unattributed` is greater than zero, the footer SHALL append that
+count, a single space, and the word `unattributed` — `1 unattributed`, `12 unattributed` —
+after the action hints, joined by the same two-space separator. When the count is zero the hint
+SHALL be absent entirely, so an agentless pane's footer is byte-identical to the footer this
+requirement already specified. Being last means it is the **first** hint dropped as the width
+falls, which is the correct priority: the key hints tell a reader how to drive the
+pane, and the count tells them something they can act on later.
+
+That priority has a measured consequence `agent-launch` makes explicit rather than leaving to be
+discovered: the full reachable footer with a count is **69** columns, so at the mandated
+60-column frame **the count is dropped and the action hints are kept**. Before this change the
+count fitted at 60 (the footer was 46 columns); it still fits whenever the socket is
+unreachable, because the two hints it now competes with are absent. The drop order is unchanged
+— last hint first — and the hint list grew; nothing about the rule moved.
+
+`SPEC.md` → Attributing an agent's tier 3 requires a count and forbids a row: an agent that
+no tier attributed is reported here, in one shared cell, and never against a change. The
+footer is the whole of that report — there is no per-agent listing, no expansion, and no key
+that opens one. It is also never a `!`-marked problem row: an unattributed agent is a normal
+state of a shared Herdr session, not a fault. A **failed launch** is not reported here at all:
+`agent-launch` puts it on `Dashboard::launch.problems` and `change-rows` renders it as a
+leading `!`-marked list row, because it is a fault and it is one the reader just caused.
+
+The footer has two further forms, specified by `list-filtering` and restated here because
+this requirement owns the row: while `dashboard.filter.active` is set the hints are
+**replaced** by the prompt `/`, the query, and `_`, keeping its tail when it overflows —
+and the action hints and the unattributed count are replaced along with them, because the
+prompt replaces the whole row rather than the three key hints specifically; while the filter is
+inactive with a non-empty query, `/` and the query become a further hint placed **first** in the
+list above, dropped last rather than first, with the action hints and then the count after the
+three key hints as usual.
+
+Scenarios in this capability render a `Dashboard` whose `changes` is
+`changes::empty_set()` and whose `agents.reachable` is `false` unless they say otherwise. The
+first is no longer inert: with a repository root present, `change-rows` renders a
+`No changes yet` message row into the list region's interior, and the scenarios below are
+written so that none of them depends on that interior being blank. The second is stated
+explicitly for the first time here: every landed footer assertion in this capability was written
+against a dashboard whose socket was unreachable, and pinning that is what keeps those exact
+strings true rather than accidentally so.
+
+Degenerate heights SHALL be decided explicitly rather than delegated to the constraint
+solver, on the same terms and for the same measured reason as before: `Layout::vertical([
+Min(0), Length(1)])` at height 1 gives the single row to the **footer**, so a naive split
+renders `q quit` where the repository's name belongs. The explicit branch is: at height 0
+`render` SHALL draw nothing; at height 1 it SHALL draw the **body** only, which is one row
+and therefore exactly the routed region's heading row; at height 2 or more it SHALL use the
+two-way split above, giving the body every row but the last. `render` SHALL NOT panic at any
+frame size of at least one column by one row, and SHALL NOT panic at an interior of zero
+columns or zero rows, which a one- or two-column frame produces.
+
+The row this change frees is spent on content, not on air: at a 20-row frame the body grows
+from eighteen rows to nineteen and the region's own former bottom border row is gone as
+well, so a region's interior grows from sixteen rows to seventeen. That count is asserted by
+"The routed region is emphasised and region interiors are left empty" rather than here.
+
+#### Scenario: Body and footer occupy their rows at both widths
+
+- **WHEN** a `Dashboard` whose repository root is `/tmp/demo-repo` and whose
+  `agents.reachable` is `false` is rendered into a `TestBackend` at 60x20, and again at 120x20
+- **THEN** in both buffers row 0 is the routed region's heading row — it spells `demo-repo`
+  from column 1 — and the string `OpenSpec` appears in no cell of either buffer
+- **AND** in both buffers row 19 begins with the exact string
+  `q quit  Enter detail  Esc back` at column 0, and every remaining cell of row 19 is a
+  space
+- **AND** in both buffers no box-drawing character appears in column 0 or in column
+  `width - 1` of any row, so the body occupies rows 0 through 18 with no bordered block in
+  it and nothing is drawn in row 19 by the body
+
+#### Scenario: The action hints follow `Esc back` when the socket is reachable
+
+- **WHEN** the same `Dashboard` with `agents.reachable` set to `true` and no agents is
+  rendered at 60x20 and at 120x20
+- **THEN** row 19 is exactly
+  `q quit  Enter detail  Esc back  a/c/s launch  g focus` — **53** characters — followed by
+  seven spaces at 60 and sixty-seven spaces at 120
+- **AND** rendering the identical dashboard with `agents.reachable` `false` produces row 19 of
+  exactly `q quit  Enter detail  Esc back` followed by thirty spaces at 60, byte-identical to
+  the row this capability specified before the action hints existed
+- **AND** nothing outside row 19 differs between the two renders at either width, so the
+  reachability flag moves the footer and nothing else
+
+#### Scenario: The action hints are dropped whole, `g focus` first
+
+- **WHEN** the reachable, agentless dashboard is rendered at 53x20, 52x20, 44x20, and 43x20
+- **THEN** the 53-column row is exactly
+  `q quit  Enter detail  Esc back  a/c/s launch  g focus`, filling the row with no trailing
+  space
+- **AND** the 52-column row is exactly `q quit  Enter detail  Esc back  a/c/s launch` followed
+  by eight spaces — `g focus` and its two-space separator need nine columns and only eight
+  remain, so it is dropped whole rather than cut to `g focu`
+- **AND** the 44-column row is exactly `q quit  Enter detail  Esc back  a/c/s launch`, filling
+  the row, and the 43-column row is exactly `q quit  Enter detail  Esc back` followed by
+  thirteen spaces
+- **AND** at 43 columns the three key hints are all still present, so both action hints are
+  dropped before any of them
+
+#### Scenario: A one-row frame renders the body's heading row and nothing else
+
+- **WHEN** the same `Dashboard` is rendered at 60x1 and at 120x1
+- **THEN** neither render panics
+- **AND** row 0 spells `demo-repo` from column 1 in both — the routed region's heading row,
+  which is the body's only row at this height
+- **AND** no `q quit` appears in either buffer, so the footer was not drawn into the body's
+  single row
+
+#### Scenario: A two-row frame renders one body row and the footer
+
+- **WHEN** the same `Dashboard` is rendered at 60x2 and at 120x2
+- **THEN** neither render panics
+- **AND** row 0 spells `demo-repo` from column 1 and row 1 begins `q quit` at column 0
+- **AND** no list row is drawn anywhere in either buffer, because the body received one row
+  and the heading row consumed it
+
+#### Scenario: A one-column frame renders without panicking
+
+- **WHEN** the same `Dashboard` is rendered at 1x1, at 1x20, at 2x20, and — as the
+  contrasting controls at the two mandated widths — at 60x20 and 120x20
+- **THEN** none of the five panics, including the two whose list region has an interior of
+  zero columns
+- **AND** the 1x20 buffer's row 0 is a single space: the region's one column is its left
+  gutter, its interior is zero columns wide, and the heading row is therefore truncated to
+  nothing rather than drawn over the gutter
+- **AND** the 1x20 buffer's row 19 is a single space: `q quit` needs six columns, so the
+  first hint is dropped whole rather than truncated to `q`
+- **AND** the same holds with `agents.reachable` `true`, which adds no hint that could fit in
+  one column and therefore changes no cell of the 1x20 buffer
+- **AND** the 60x20 and 120x20 buffers both spell `demo-repo` from column 1 of row 0 and
+  both begin row 19 with `q quit`, so the one-column result is a width branch rather than
+  the heading and footer being absent everywhere
+
+#### Scenario: The footer drops whole hints rather than truncating one
+
+- **WHEN** the same `Dashboard`, with `agents.reachable` `false`, is rendered at 18x20, at
+  20x20, at 60x20, and at 120x20
+- **THEN** the 18-column footer row is exactly `q quit` followed by twelve spaces —
+  `q quit  Enter detail` needs exactly 20 columns, so `Enter detail` and every hint after
+  it are dropped whole rather than cut short
+- **AND** the 20-column footer row is exactly `q quit  Enter detail`, filling the row with
+  no trailing space, which pins the boundary from the other side
+- **AND** the 60-column footer row is exactly `q quit  Enter detail  Esc back` — thirty
+  characters — followed by thirty spaces, so all three hints fit at the mandated narrow
+  width
+- **AND** the 120-column footer row is the same thirty characters followed by ninety
+  spaces
+
+#### Scenario: The unattributed count is the footer's last hint at both widths
+
+- **WHEN** a `Dashboard` whose repository root is `/tmp/demo-repo`, whose `changes` holds
+  one active change `alpha`, whose `agents.agents` holds one in-scope agent named
+  `nothing-like-a-change`, and whose `agents.reachable` is `false`, is rendered at 60x20 and at
+  120x20
+- **THEN** the 60-column footer row is exactly
+  `q quit  Enter detail  Esc back  1 unattributed` — forty-six characters — followed by
+  fourteen spaces
+- **AND** the 120-column footer row is the same forty-six characters followed by
+  seventy-four spaces
+- **AND** the same dashboard with `agents.reachable` set to `true` gives a 120-column footer row
+  of exactly `q quit  Enter detail  Esc back  a/c/s launch  g focus  1 unattributed` — **69**
+  characters — followed by fifty-one spaces, and a 60-column row of exactly
+  `q quit  Enter detail  Esc back  a/c/s launch  g focus` followed by seven spaces: the count
+  needs sixteen further columns and only seven remain, so it is dropped whole. That is the same
+  last-hint-first rule, applied to a longer list
+- **AND** rendering the identical dashboard with `agents.agents` empty and `reachable` `false`
+  produces a footer row of exactly `q quit  Enter detail  Esc back` and thirty spaces at 60
+  columns, byte-identical to the row this capability specified before the count existed
+- **AND** the count is a number of agents, not of changes: adding a second in-scope agent
+  named `also-nothing` makes the hint read `2 unattributed` at 120 columns under either value
+  of `reachable`, while the list region's rows are unchanged
+
+#### Scenario: The count is reported with an empty change list
+
+- **WHEN** a `Dashboard` whose repository root is `/tmp/demo-repo`, whose `changes` is
+  `changes::empty_set()`, whose `agents.agents` holds two in-scope agents named
+  `nothing-like-a-change` and `also-nothing`, and whose `agents.reachable` is `false`, is
+  rendered at 60x20 and at 120x20
+- **THEN** the footer row reads `q quit  Enter detail  Esc back  2 unattributed` at both
+  widths
+- **AND** the list region's interior holds exactly the single `No changes yet` message row
+  `change-rows` specifies, byte-identical to the agentless rendering of the same dashboard —
+  a `Message` row is never badged
+- **AND** the same holds with a `/` query matching nothing: the two message rows are
+  byte-identical and the count is unchanged, because the count is over agents and the filter
+  is over changes
+- **AND** with `agents.reachable` set to `true` the list region's interior is unchanged, cell
+  for cell, at both widths: the action hints live in the footer and never in the list
+
+#### Scenario: The count is dropped whole before the three key hints
+
+- **WHEN** the one-unattributed-agent dashboard with `agents.reachable` `false` is rendered at
+  46x20 and at 45x20
+- **THEN** the 46-column footer row is exactly
+  `q quit  Enter detail  Esc back  1 unattributed`, filling the row with no trailing space
+- **AND** the 45-column footer row is exactly `q quit  Enter detail  Esc back` followed by
+  fifteen spaces — the count and its two-space separator need sixteen columns and only
+  fifteen remain, so it is dropped whole rather than cut to `1 unattribute`
+- **AND** at 45 columns the three key hints are all still present, so the count is dropped
+  before any of them
+- **AND** the same dashboard with `agents.reachable` `true` pins the boundary one hint list
+  further out: the 69-column row is exactly
+  `q quit  Enter detail  Esc back  a/c/s launch  g focus  1 unattributed` with no trailing
+  space, and the 68-column row is exactly
+  `q quit  Enter detail  Esc back  a/c/s launch  g focus` followed by fifteen spaces — the
+  count dropped whole, both action hints kept
+
+#### Scenario: The filter prompt replaces the count along with the hints
+
+- **WHEN** the one-unattributed-agent dashboard with `agents.reachable` `false` is rendered at
+  60x20 and at 120x20 with `filter.active` set and `filter.query` `be`, and then again with
+  `filter.active` cleared and the same query kept
+- **THEN** the active-filter footer row is exactly `/be_` followed by spaces at both widths,
+  and the string `unattributed` appears nowhere in it
+- **AND** the accepted-query footer row is exactly
+  `/be  q quit  Enter detail  Esc back  1 unattributed` at both widths, so the query leads
+  the list and the count still trails it
+- **AND** both forms are byte-identical to what `list-filtering` specifies once the same
+  dashboard's `agents.agents` is emptied, so the count is additive rather than a rewrite of
+  either form
+- **AND** with `agents.reachable` `true` the active-filter row is still exactly `/be_` followed
+  by spaces at both widths, and the strings `a/c/s launch` and `g focus` appear nowhere in it:
+  the prompt replaces the **whole** row, action hints included
+- **AND** with `agents.reachable` `true` the accepted-query row is exactly
+  `/be  q quit  Enter detail  Esc back  a/c/s launch  g focus  1 unattributed` — 74 characters
+  — at 120, and exactly `/be  q quit  Enter detail  Esc back  a/c/s launch  g focus` — 58
+  characters — followed by two spaces at 60, so the query still leads and the count is still
+  the first thing dropped
+
+### Requirement: A region is a heading row, a padding row, and a gutter-padded interior
+
+A region SHALL be drawn without a border. `ui::view::render_region` SHALL draw no `Block`,
+no box-drawing character, and no title. Every region SHALL be composed of exactly three
+parts, in this order down its area:
+
+| Part | Rectangle | Drawn |
+|---|---|---|
+| heading row | `Rect::new(x + gl, area.y, iw, 1)` | the region's own heading |
+| padding row | `Rect::new(x + gl, area.y + 1, iw, 1)` | never — it is blank by construction |
+| interior | `Rect::new(x + gl, area.y + 2, iw, area.height - 2)` | the region's content |
+
+where `gl` and `gr` are the region's left and right **gutter** columns, `x` is `area.x`, and
+`iw` is `area.width - gl - gr`. Gutter columns are never drawn into by any region.
+
+`ui::layout::interior(area: Rect, gutters: Gutters) -> Rect` SHALL return that interior:
+the origin advanced by `gl` columns and **two** rows and clamped to the rectangle's own
+right and bottom edges, the width reduced by `gl + gr` saturating to zero, and the height
+reduced by two saturating to zero. The clamp is not decoration — at a 1x1 or 0x0 rectangle
+it is the difference between `x: 0` and `x: 1`.
+
+```rust
+pub enum Gutters { Both, LeftOnly }
+```
+
+`Gutters::Both` SHALL give `gl = 1, gr = 1` and `Gutters::LeftOnly` `gl = 1, gr = 0`. The
+list region and the narrow layout's single region take `Both`; the **wide** layout's detail
+region takes `LeftOnly`, for the arithmetic reason the divider requirement below states.
+There is no `RightOnly` and no `Neither`: no region in this layout wants one, and a variant
+nothing constructs is a variant nothing tests.
+
+The **padding row** is why one rule covers both regions. The list region wants a blank row
+between the repository's name and its first change; the detail region wants one between the
+change's header and its tab bar. They are the same row at the same offset, so they are one
+part of one shape rather than two special cases in two draw paths.
+
+The gutters are why the mandated interior **widths** do not move. A bordered region's
+interior was its area less two border columns; a borderless region's interior is its area
+less its gutter columns, and for `Gutters::Both` the two are the same arithmetic. **38** and
+**58** for the list and **78** and **58** for the detail are therefore unchanged by this
+change, and every landed row-grammar, markdown, tasks, and detail test that names them stays
+true.
+
+The interior's **height** grows by exactly one row at every frame height: two rows are freed
+(the frame's header row and the region's bottom border row) and one is spent on the padding
+row. At a 20-row frame a region's interior is **17 rows**, up from sixteen, and its first row
+is buffer row **2** — the very row a bordered region's interior began at. That is not a
+coincidence to be relied on loosely: it is stated so that a scenario elsewhere asserting
+"buffer row 2 is the interior's first row" is known to be still true rather than accidentally
+so.
+
+#### Scenario: A region draws a heading, a blank row, and no border at both widths
+
+- **WHEN** a `Dashboard` whose repository root is `/tmp/demo-repo`, holding three active
+  changes, at `Route::List`, is rendered at 120x20 and at 60x20
+- **THEN** no box-drawing character other than `│` appears in either buffer — no `┌`, no
+  `┐`, no `└`, no `┘`, and no `─` outside the detail region's own rule row
+- **AND** in the 60-column buffer row 0 columns 1 through 58 are the region's heading row,
+  every cell of row 1 columns 1 through 58 is a space, and row 2 columns 1 through 58 is the
+  first list row
+- **AND** in the 60-column buffer every cell of column 0 and of column 59 is a space in every
+  row of the body, so both gutters are empty
+- **AND** in the 60-column buffer row 18 holds a drawn list row, so the interior's last row is
+  content rather than a border
+
+#### Scenario: `interior` reserves two rows and the gutters its `Gutters` names
+
+- **WHEN** `layout::interior` is called with `(Rect::new(0, 0, 60, 19), Gutters::Both)`,
+  `(Rect::new(0, 0, 40, 19), Gutters::Both)`, `(Rect::new(41, 0, 79, 19), Gutters::LeftOnly)`,
+  `(Rect::new(0, 0, 1, 1), Gutters::Both)`, and `(Rect::new(0, 0, 0, 0), Gutters::Both)`
+- **THEN** the results are `Rect::new(1, 2, 58, 17)`, `Rect::new(1, 2, 38, 17)`,
+  `Rect::new(42, 2, 78, 17)`, `Rect::new(1, 1, 0, 0)`, and `Rect::new(0, 0, 0, 0)`
+- **AND** the `1x1` case keeps the **origin clamp**: `x` is `min(0 + 1, 0 + 1)` = 1 and `y`
+  is `min(0 + 2, 0 + 1)` = 1, so the origin lands on the rectangle's own right and bottom
+  edges rather than staying at zero, and only the width and height saturate. `detail-scroll`
+  states the same value for the same call
+- **AND** the first three are seventeen rows tall, one more than the sixteen the bordered
+  arithmetic gave at the same frame height, and each begins at row 2 exactly as it did
+- **AND** the `LeftOnly` interior's last column is `119`, the frame's own last column, while
+  each `Both` interior leaves its area's last column untouched
+
+### Requirement: A one-column divider separates the two regions, with a blank column each side
+
+At `LayoutMode::Wide` `ui::view::render_body` SHALL draw a **vertical divider** — the
+character `│` — down one column for every row of the body, styled
+`palette::style(Role::RegionRule)`. The divider column belongs to **neither** region: it is
+drawn by `render_body`, which is the one place that knows both rectangles, and no region's
+area contains it.
+
+At `LayoutMode::Narrow` no divider SHALL be drawn at all, because there is only one region
+and nothing to divide it from.
+
+The wide layout's body SHALL therefore be split horizontally into **three** parts, not two —
+`Constraint::Length(40)` for the list, `Constraint::Length(1)` for the divider, and
+`Constraint::Min(0)` for the detail — so that at a 120-column frame the columns are:
+
+| Column(s) | What |
+|---|---|
+| `0` | the list region's left gutter |
+| `1`–`38` | the list region's interior — **38** columns |
+| `39` | the list region's right gutter |
+| `40` | the divider `│` |
+| `41` | the detail region's left gutter |
+| `42`–`119` | the detail region's interior — **78** columns |
+
+A divider with a blank column on **both** sides costs **five** chrome columns, and
+`38 + 78` leaves exactly **four** at a 120-column frame. One outer gutter therefore cannot
+be had, and it is the **trailing** one that goes: the detail region takes `Gutters::LeftOnly`
+and its interior runs to the frame's own last column. The leading gutter is kept because
+column 0 carries the list's selection marker on every row, where a flush edge would read as
+part of the grammar; the trailing edge is reached only by a right-aligned cell — the detail
+header's progress and schema cells, and a markdown line that happens to fill the width.
+
+Taking the fifth column from an **interior** instead was measured and rejected: the literal
+`78` appears 162 times under `src/ui/` and is hard-coded in three `scripts/gates/` scripts,
+so a 77-column detail interior would rewrite roughly 145 hand-computed test expectations for
+a column of whitespace.
+
+#### Scenario: The divider has a blank column on each side at 120 columns
+
+- **WHEN** a `Dashboard` with `route: Route::List`, a repository root of `/tmp/demo-repo`,
+  and one active change `alpha` is rendered at 120x20
+- **THEN** every cell of column 40 in rows 0 through 18 is `│` and reports `Modifier::DIM`
+  and no foreground
+- **AND** every cell of column 39 and of column 41 in rows 0 through 18 is a space, so the
+  divider is not flush against either region's content
+- **AND** every cell of column 0 in rows 0 through 18 is a space, so the leading gutter
+  survived
+- **AND** row 19 — the footer — holds no `│`, so the divider is confined to the body
+
+#### Scenario: The divider column is a width branch, not a constant
+
+- **WHEN** the same `Dashboard` is rendered at 120x20, at 100x20, at 99x20, and at 60x20
+- **THEN** in the 120-column and 100-column buffers every cell of column 40 in rows 0
+  through 18 is `│`, so the divider column is fixed by the list's `Length(40)` rather than by
+  the frame width
+- **AND** in the 99-column and 60-column buffers the character `│` appears in no cell at all
+- **AND** in the 100-column buffer the detail region's interior is `Rect::new(42, 2, 58, 17)`,
+  so every column gained beyond 100 still goes to the detail side
+
+#### Scenario: A one-, two-, and three-column frame degenerates without drawing over a gutter
+
+- **WHEN** the same `Dashboard` is rendered at 1x20, at 2x20, and at 3x20
+- **THEN** none of the three panics
+- **AND** in the 1x20 and 2x20 buffers no heading text and no list row is drawn at all: the
+  interior is zero columns wide, so there is nothing to draw into
+- **AND** in the 3x20 buffer the heading row and every list row occupy column 1 alone, and
+  columns 0 and 2 are spaces in every row
+- **AND** none of the three holds a `│`, because all three are below the breakpoint
+
+### Requirement: The list region's heading names the repository directory
+
+The list region's heading row SHALL render the repository root's **final path component** —
+its directory name — when a root was found, and the literal `no repository` when none was.
+It SHALL be drawn left-aligned at the heading row's first column, which is the interior's
+first column. When the root has no final component — the filesystem root `/` — the whole
+display path SHALL be rendered instead, so the row is never empty when a root exists.
+
+The absolute path this row used to carry is gone. It was measured at a 60-column split to
+consume the row whole while naming, in its last component, the only part a reader uses; the
+directory name is that component. A reader who needs the absolute path has the pane's own
+`no repository` rows and the Herdr pane's own working directory, neither of which this row
+duplicates.
+
+**The `file mode` badge.** When `Dashboard::file_mode` is true — the `openspec` binary probe
+resolved no usable binary, so the change list is file-sourced for the whole session — the
+heading row SHALL draw the literal `file mode`, nine columns, **right-aligned** so its last
+column is the heading row's last column, styled `palette::style(Role::FileMode)`: ratatui's
+`DIM` modifier — and no other modifier — together with foreground `Color::Yellow`. The badge
+stays dim because it names a *mode*, not a fault: file mode is a supported way to run, and a
+badge competing with the repository's name for attention would say otherwise. It is coloured
+because `DIM` alone is what an archived row's date, an inline code span, a block quote, and
+an agent badge already are, and a badge that shares its whole style with four other things
+names nothing.
+
+The badge SHALL be dropped **whole**, never cut short, when the heading row cannot hold the
+name, at least one separating blank, and the badge's nine columns together — `change-rows`'
+drop-whole rule. It is dropped **before** the name is shortened, not after: at a width that
+cannot hold both, the reader can still learn the mode from the pane's behaviour, and a
+half-drawn `file mo` would name nothing at all. When `file_mode` is false the heading row
+SHALL be byte-identical to the row this requirement specifies with no badge — no reserved
+columns and no changed budget.
+
+Let `A` be the heading row's width when no badge is drawn, and its width minus ten — the
+badge's nine columns and one separating blank — floored at zero, when one is. When the
+name's `layout::columns` is at most `A` it SHALL be rendered whole. When it is longer it
+SHALL be shortened from the **left** by `change-rows`' shared `shorten_left` implementation:
+`…` followed by the longest suffix ending on a grapheme-cluster boundary that measures at
+most `A - 1` columns. A directory's own last characters are what distinguish it from its
+siblings. When `A` is zero the name SHALL be omitted entirely.
+
+The shortening branch is reachable **only when the badge was dropped**, and that is a
+consequence of the drop rule rather than a second rule: a badge survives only where the name,
+one blank, and nine columns all fit, which is exactly `name <= A`, which is the whole-name
+branch. So `A` is the full heading width in every case that shortens, and the `width - 10`
+form matters only for the cases that do not shorten. Stated here because the two rules are
+written in separate paragraphs and read as though they compose.
+
+Shortening SHALL count **display columns**, not characters and not bytes, and the heading
+row SHALL never draw past its last column at any width for any repository name.
+
+The badge SHALL be drawn on the **list** region's heading row, not on the detail region's.
+The two are different claims: a missing binary is a fact about the process, true of every
+change in the pane, while the detail heading describes one change — and `SPEC.md` → Degraded
+states already gives the per-change equivalent its own row, "Schema unknown to the CLI",
+whose fall-back to file mode is per change and is named in the detail region instead. Below
+the breakpoint at `Route::Detail` the list region is not drawn at all and the badge is
+therefore not drawn either; that is accepted, and is the same trade the routed-region rule
+already makes for every list row.
+
+#### Scenario: The heading names the directory, not the path, at both widths
+
+- **WHEN** a `Dashboard` whose repository root is `/Users/dev/Code/herdr-openspec`, whose
+  `file_mode` is `false`, at `Route::List`, is rendered at 120x20 and at 60x20
+- **THEN** in both buffers row 0 spells exactly `herdr-openspec` from column 1, followed by
+  spaces to the heading row's last column
+- **AND** the string `/Users/dev/Code` appears in no cell of either buffer
+- **AND** in the 120-column buffer the heading row ends at column 38 and column 39 is a
+  space, so the heading stayed inside the list region's interior
+
+#### Scenario: A name longer than the heading row keeps its tail
+
+- **WHEN** a `Dashboard` whose repository root's final component is a 50-character
+  directory name, whose `file_mode` is `false`, is rendered at 120x20
+- **THEN** row 0 columns 1 through 38 spell `…` followed by the name's last 37 columns
+- **AND** rendering the same dashboard at 60x20 spells the name whole from column 1, because
+  50 columns fit in 58 — so the ellipsis at 120 is the narrower list column and not a
+  constant
+
+#### Scenario: The badge is right-aligned and dropped whole
+
+- **WHEN** a `Dashboard` whose repository root is `/tmp/demo-repo` and whose `file_mode` is
+  `true` is rendered at 120x20, at 60x20, at 21x20, and at 20x20
+- **THEN** in the 120-column buffer row 0 spells `demo-repo` from column 1 and `file mode`
+  in columns 30 through 38 — the heading row's last nine columns — and every cell of that
+  badge reports `Modifier::DIM` set and foreground `Color::Yellow`
+- **AND** in the 60-column buffer the badge occupies columns 50 through 58, the heading row's
+  last nine, so it is right-aligned against the row rather than placed at a fixed column
+- **AND** in the 21-column buffer — a heading row of 19 columns — `demo-repo`'s nine columns,
+  one separating blank, and the badge's nine fit exactly: `demo-repo` occupies columns 1
+  through 9, column 10 is blank, and `file mode` occupies columns 11 through 19
+- **AND** in the 20-column buffer — a heading row of 18 columns — the badge is absent from
+  every cell and `demo-repo` is drawn whole, so the badge was dropped whole rather than cut,
+  and the pair 21/20 is the drop rule's own boundary: one column narrower than the rule
+  needs is the first width at which the badge goes
+- **AND** rendering the 120x20 case with `file_mode` `false` gives a row 0 byte-identical to
+  the first scenario's, so the badge is additive
+
+#### Scenario: No repository names itself in the heading
+
+- **WHEN** a `Dashboard` whose `repo` is `None`, whose `searched_from` is
+  `/tmp/not-a-repo/deep/here`, is rendered at 120x20 and at 60x20
+- **THEN** row 0 spells exactly `no repository` from column 1 in both
+- **AND** the list region's interior still holds the three rows `change-rows` specifies for
+  that state, beginning at row 2 — row 1 is the region's padding row and is blank
+- **AND** the string `not-a-repo` appears only in those interior rows and never in row 0
+
+### Requirement: A region's heading style and the rules' style are palette roles
+
+`ui::view` SHALL take every style it applies to a region's heading row and to either rule
+from the palette, and SHALL construct no `Style` of its own.
+
+A region's heading row SHALL be drawn with `palette::style(Role::RegionHeadingFocused)` when
+the dashboard's route names that region, and with `palette::style(Role::RegionHeading)`
+otherwise. `Role::RegionHeadingFocused` SHALL carry `Modifier::BOLD` and **no colour**;
+`Role::RegionHeading` SHALL carry `Modifier::DIM` and **no colour**. The pair says which
+region the keyboard is driving, which is exactly what the bold border said before; neither
+carries a colour, because the distinction is between two regions of the same pane and a hue
+would claim a meaning the region does not have.
+
+The `file mode` badge keeps `Role::FileMode` and is drawn **over** the heading row's style
+rather than under it, so the badge is dim and yellow whether or not the list region is the
+routed one.
+
+Both rules SHALL be drawn with `palette::style(Role::RegionRule)`, which SHALL carry
+`Modifier::DIM` and no colour: a rule is a separator, and a separator that competes with the
+text on either side of it has failed at its one job.
+
+`Role::RegionBorder`, `Role::RegionBorderFocused`, `Role::HeaderTitle`, `Role::HeaderPath`,
+and `Role::DetailHeader` SHALL be removed from `ui::palette::Role`, because nothing draws a
+border, a frame header title, a frame header path, or a separately-styled detail header any
+more. The removal is specified by `view-palette`, which owns the role table; this
+requirement names it only so the two are not read as disagreeing.
+
+#### Scenario: The routed region's heading is bold and the other's is dim
+
+- **WHEN** a `Dashboard` with `route: Route::List` and one active change is rendered at
+  120x20
+- **THEN** the cell at column 1, row 0 reports `Modifier::BOLD` set and `Modifier::DIM` not
+  set
+- **AND** the cell at column 42, row 0 — the detail region's heading row's first column,
+  column 41 being that region's left gutter and blank — reports
+  `Modifier::DIM` set and `Modifier::BOLD` not set
+- **AND** with `route: Route::Detail` and the same size the two assertions swap, so the test
+  discriminates rather than asserting a constant
+- **AND** at 60x20 the single drawn region's heading cell at column 1, row 0 reports
+  `Modifier::BOLD` set under **both** routes, because the region that is drawn is always the
+  routed one below the breakpoint
+
+#### Scenario: No heading or rule cell carries a colour
+
+- **WHEN** the same dashboards are rendered at 120x20 and at 60x20 with `file_mode` `false`
+- **THEN** no cell of either heading row and no cell of the vertical divider at column 40
+  reports a foreground or a background, so the palette gave each a role and not a colour
+- **AND** every cell of the vertical divider and of the detail region's horizontal rule
+  reports `Modifier::DIM` set
+- **AND** with `file_mode` `true` the nine badge cells of the list heading row do report
+  foreground `Color::Yellow`, so the absence of colour above is a property of the heading
+  role rather than of the row
+
+#### Scenario: Every colour literal still lives in the palette module alone
+
+- **WHEN** `src/`, inline `#[cfg(test)]` modules included, is searched for
+  `ratatui::style::Color`
+- **THEN** `src/ui/palette.rs` is the only file that names it
+- **AND** the render tests above assert a cell's colour by comparing it against
+  `palette::style(role)` rather than against a literal

@@ -74,13 +74,16 @@ event, through `Dashboard::apply`.
 A `MouseEventKind::ScrollDown` SHALL produce `Action::SelectNext` when the pointer is over
 the list region and `Action::ScrollDown` when it is over the detail region;
 `MouseEventKind::ScrollUp` SHALL produce `Action::SelectPrev` and `Action::ScrollUp` on the
-same terms. Both SHALL produce `Action::Ignore` when the pointer is over the frame's header
-row, its footer row, or outside the frame entirely.
+same terms. Both SHALL produce `Action::Ignore` when the pointer is over the frame's footer
+row or outside the frame entirely. There is no frame header row to ignore any more:
+`pane-chrome` removed it, so every row of the frame but the last is a body row.
 
-The region under the pointer is the whole region — its border included, and, for the detail
-region, its header row and its tab bar as well as its content area — not only the interior
-rows a click addresses. A wheel event one column inside a region's border scrolls that
-region rather than doing nothing.
+The region under the pointer is the whole region — its gutter columns, its heading row and
+its padding row included, and, for the detail region, its tab bar, its rule, its content
+padding row and its content area — not only the interior rows a click addresses. A wheel
+event in a region's gutter scrolls that region rather than doing nothing, and one on the
+**divider column**, which lies in neither region's area, scrolls the detail region:
+`responsive-layout`'s zone requirement is where that assignment is made and argued.
 
 `ScrollLeft` and `ScrollRight` SHALL produce `Action::Ignore`: the pane scrolls in one
 dimension only.
@@ -104,10 +107,15 @@ while `Route::List` is.
 
 #### Scenario: The wheel acts over a border and not over the chrome
 
+The scenario's name is kept verbatim because a delta's scenario headers are its merge key;
+the chrome is now the footer alone, and what was a border column is now a gutter.
+
 - **WHEN** `mouse_action` is called at 120x40 with `ScrollUp` at the list region's own
-  border column and row, then at the frame's header row (row 0), then at its footer row
-  (row 39), then at column 200 — past the frame's right edge
-- **THEN** the first returns `Action::SelectPrev` and the other three return
+  left gutter column (column 0), then at the list region's heading row (row 0), then at the
+  divider column 40, then at the frame's footer row (row 39), then at column 200 — past the
+  frame's right edge
+- **THEN** the first two return `Action::SelectPrev`, the third returns `Action::ScrollUp`
+  because `zone` gives the divider column to the detail region, and the last two return
   `Action::Ignore`
 
 #### Scenario: At 60 columns only the routed region answers the wheel
@@ -135,7 +143,7 @@ A `MouseEventKind::Down(MouseButton::Left)` SHALL be resolved by where it lands:
 | The drawn change row that already carries the cursor | `Action::Click(Target::Change(i))` for the same index |
 | A drawn section-header row in the list region's interior | `Action::Click(Target::Section(key))` for that header's own key |
 | A drawn tab cell in the detail region's tab-bar row | `Action::SelectTab(i)` for that cell's own artifact position |
-| A problem row, a message row, an interior row past the last drawn row, a border, the detail header, the detail content, the frame header, the frame footer, or outside the frame | `Action::Ignore` |
+| A problem row, a message row, an interior row past the last drawn row, a region's gutter, heading row or padding row, the divider, the detail region's rule row, content padding row or content area, the frame footer, or outside the frame | `Action::Ignore` |
 
 `Dashboard::apply(Action::Click(target))` SHALL:
 
@@ -205,8 +213,9 @@ A `MouseEventKind::Down` of `MouseButton::Right` or `MouseButton::Middle` SHALL 
 - **WHEN** a dashboard whose `changes.problems` holds one entry and whose visible list is
   empty is drawn at 120x40, and left presses land on the problem row, on the `No changes
   yet` message row, on an interior row below the last drawn row, on the list region's
-  border, on the detail region's header row, on the detail content area, on the frame's
-  footer, and at column 200
+  left gutter, on the list region's heading row, on its padding row, on the detail region's
+  heading row, on the detail region's rule row, on its content padding row, on the detail
+  content area, on the frame's footer, and at column 200
 - **THEN** every call returns `Action::Ignore`
 - **AND** applying `Action::Ignore` leaves the dashboard equal to what it was
 

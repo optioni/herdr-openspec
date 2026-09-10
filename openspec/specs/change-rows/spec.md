@@ -26,13 +26,20 @@ for any `Dashboard` value and any `u16` width, including `0`. It reaches the age
 through `Dashboard::attribution()`, which `agent-attribution` requires to be pure and derived
 per call; that adds no I/O and no clock to this function.
 
-`ui::view::render` SHALL draw the rows it returns into the **interior** of the `Changes`
-region — the area inside the block's four borders — starting at the interior's first row
-and first column, one `Row` per terminal row, and SHALL draw nothing outside that
-interior. The two interiors the mandated frame widths produce are fixed by
-`responsive-layout` and are **38 columns by 16 rows** at a 120x20 frame (the wide layout's
-`Constraint::Length(40)` list column, less two border columns) and **58 columns by 16
-rows** at a 60x20 frame.
+`ui::view::render` SHALL draw the rows it returns into the **interior** of the list
+region — the area below its heading row and its padding row and inside its two gutter
+columns — starting at the interior's first row and first column, one `Row` per terminal row,
+and SHALL draw nothing outside that interior. The two interiors the mandated frame widths
+produce are fixed by `responsive-layout` and are **38 columns by 17 rows** at a 120x20 frame
+(the wide layout's `Constraint::Length(40)` list part, less two gutter columns) and
+**58 columns by 17 rows** at a 60x20 frame.
+
+`pane-chrome` changes neither width and moves neither origin: it replaced the region's two
+border columns with two gutter columns, which is the same arithmetic, and it spent one of the
+two rows it freed — the frame's header row and the region's bottom border row — on the
+region's own padding row. The interior therefore still begins at buffer row **2** at both
+mandated frames, and gained exactly one row at the bottom. Every row index in this
+capability's scenarios is unchanged except the last.
 
 Rows SHALL be emitted in this order and no other:
 
@@ -97,18 +104,28 @@ the section is folded or not. It is never the number of rows actually drawn.
 
 **A section's row grammar** is `[marker][space][glyph][space][label][space][(count)]`, passed
 through the same `pad_or_truncate_right` every other row uses, so it measures exactly `width`
-display columns at every width including `0`. The `glyph` is `v` when the section is open and
-`>` when it is collapsed; the `label` is the literal `active` or `archived`; the count is the
-decimal count in parentheses. A section header at 38 columns therefore reads
-`  v active (9)` followed by twenty-four spaces — the header is fourteen display columns —
-and `  > archived (22)`, seventeen columns, followed by twenty-one. No cell is dropped whole and no field is right-aligned: unlike a change row the
+display columns at every width including `0`. The `glyph` is `▾` (U+25BE, BLACK DOWN-POINTING
+SMALL TRIANGLE) when the section is open and `▸` (U+25B8, BLACK RIGHT-POINTING SMALL
+TRIANGLE) when it is collapsed; the `label` is the literal `active` or `archived`; the count
+is the decimal count in parentheses. A section header at 38 columns therefore reads
+`  ▾ active (9)` followed by twenty-four spaces — the header is fourteen display columns —
+and `  ▸ archived (22)`, seventeen columns, followed by twenty-one. No cell is dropped whole and no field is right-aligned: unlike a change row the
 header is one label, and truncating it with `…` is the whole of its degradation.
 
-The `>` glyph and the `>` selection marker are the same character in different columns —
-a selected collapsed section reads `> > archived (22)`. That collision is accepted rather
-than overlooked: column `0` is the cursor on **every** row of this list and column `2` is the
-fold state on section rows alone, so neither is ambiguous once the grammar is read, and the
-alternative glyph pair `+`/`-` was rejected only because `proposal.md` names `v` and `>`.
+`pane-chrome` replaces the `v`/`>` pair `list-sections` landed. That pair made the glyph and
+the selection marker the **same character** in different columns, so a selected collapsed
+section read `> > archived (22)` — two identical glyphs two columns apart, which a reader
+parses as one repeated thing rather than as a cursor beside a fold state. The collision was
+accepted at the time on the grounds that column `0` is the cursor on every row and column `2`
+is the fold state on section rows alone; that argument is sound and is still why the columns
+are unambiguous, but it asks the reader to hold a grammar in their head to read a glyph. Two
+shapes that are not `>` cost nothing and ask nothing.
+
+Both replacements SHALL measure **one display column**, which is what keeps every landed
+column expectation in this capability true; `layout::columns` is the measure, and a section
+header's total width is unchanged. Each is an unambiguous-width character in Unicode's East
+Asian Width table, so the measure does not depend on a terminal's ambiguous-width setting.
+The `+`/`-` pair remains rejected: `-` already leads a `[-]` progress cell in this same list.
 
 **A section is open** when the reader has not collapsed it **or** `dashboard.filter.query`
 is non-empty; `list-filtering` owns that force-open rule. A closed section emits its header
@@ -183,8 +200,9 @@ row — including a launch problem, the `No changes yet`, `No active changes`,
 any width and whatever `badges` holds.
 
 **Row numbering in this capability's scenarios** is the rendered **buffer** row, 0-based, so
-row 1 is the region's top border and row 2 is the interior's first row at the mandated
-frames. Every scenario below that asserts a row index uses that one convention, and every
+row 0 is the region's heading row, row 1 is its padding row, and row 2 is the interior's
+first row at the mandated frames. `pane-chrome` moved the interior's **last** index from 17
+to 18 and moved nothing else; the convention and every other index below are unchanged. Every scenario below that asserts a row index uses that one convention, and every
 scenario that asserts a selection marker states `selected` in its WHEN, because the marker
 now follows a cursor that can rest on a section header.
 
@@ -196,7 +214,7 @@ now follows a cursor that can rest on a section header.
   either kind, an empty filter query, `selected` **1** — the first change, since target 0 is
   now the active section header — and **no agents**, is rendered into a `TestBackend` at
   120x20 and again at 60x20
-- **THEN** in both buffers row 2 is the active section header, exactly `  v active (3)`
+- **THEN** in both buffers row 2 is the active section header, exactly `  ▾ active (3)`
   padded to the interior width
 - **AND** in the 120-column buffer the 38 cells of row 3, columns 1 through 38, spell
   exactly `> add-token-refresh              [4/9]`; row 4 spells
@@ -206,7 +224,7 @@ now follows a cursor that can rest on a section header.
   exactly `> add-token-refresh                                  [4/9]`; row 4 spells
   `  fix-empty-basket                                   [7/7]`; and row 5 spells
   `  migrate-ai-sdk-v7                                    [-]`
-- **AND** in both buffers every cell of rows 6 through 17 is a space, so exactly four rows
+- **AND** in both buffers every cell of rows 6 through 18 is a space, so exactly four rows
   were drawn and nothing was repeated into the remaining height
 - **AND** the three change rows are byte-identical to the ones the same dashboard produced
   before `list-sections` existed at `selected` 0, and byte-identical to the ones it produced
@@ -215,7 +233,7 @@ now follows a cursor that can rest on a section header.
 - **AND** the same dashboard at `selected` **0** puts the `>` marker on the header row and a
   space in column 0 of all three change rows, so the marker follows the cursor onto a section
 - **AND** the same dashboard with the active section **collapsed** renders row 2 as exactly
-  `  > active (3)` padded to the interior width, with no change name anywhere in either
+  `  ▸ active (3)` padded to the interior width, with no change name anywhere in either
   buffer, so the header's count is the tier's size and not the number of rows drawn
 
 #### Scenario: A badged row carries its status between the name and the progress cell
@@ -266,7 +284,7 @@ now follows a cursor that can rest on a section header.
   120x20 and at 60x20
 - **THEN** the list interior's row 0 begins `! herdr pane split exited` at both widths, its
   row 1 begins `! filesystem watch unavailable`, its row 2 begins
-  `! openspec/changes unreadable`, its row 3 is the active section header `  v active (1)`,
+  `! openspec/changes unreadable`, its row 3 is the active section header `  ▾ active (1)`,
   and its row 4 is the change row — the one place this scenario counts from the interior's
   own first row rather than from the buffer's, as it always has
 - **AND** the same dashboard with `launch.problems` emptied renders rows 0, 1, and 2
@@ -370,8 +388,8 @@ When `dashboard.repo` is `Some`, the interior SHALL hold:
 Each state is keyed on the section **counts** `change-rows`' emission requirement defines,
 never on how many rows are drawn. That distinction is `list-sections`' correction and it is
 load-bearing in both directions. A **collapsed but populated** section contributes no visible
-changes, so a visibility-keyed rule would render `  > active (9)` immediately followed by
-`No active changes`, and would render `No changes yet` above `  > archived (28)` in a
+changes, so a visibility-keyed rule would render `  ▸ active (9)` immediately followed by
+`No active changes`, and would render `No changes yet` above `  ▸ archived (28)` in a
 repository whose only changes are archived — the same dishonesty the cap this change removes
 was condemned for. A section whose count is zero emits no header, so no state can show a
 header and its own contradiction together.
@@ -404,8 +422,10 @@ whenever `find_repo` reports `NotFound`, so a `Dashboard` with `repo: None` and 
 non-empty `changes.problems` is not a value the composition root can build. Stating the
 precedence anyway keeps `rows` total over every `Dashboard` value a test can construct.
 
-`ui::view::render` SHALL still draw a bordered `Changes` region in every one of these
-states. No state SHALL replace the frame with an error screen.
+`ui::view::render` SHALL still draw the list region — its heading row, its padding row, and
+its interior — in every one of these states. No state SHALL replace the frame with an error
+screen. The region carries no border as of `pane-chrome`, so what a reader sees framing an
+empty state is the repository's own name on the heading row two rows above it.
 
 #### Scenario: No repository names the directory searched, at both widths
 
@@ -419,8 +439,9 @@ states. No state SHALL replace the frame with an error screen.
 - **AND** the 60-column buffer's interior rows 2, 3, and 4 at columns 1 through 58 begin
   `No OpenSpec repository found`, `searched from:`, and
   `…kspaces/openspec-demos/a-rather-long-repository-name-here`
-- **AND** in both buffers row 1 still holds `┌` at the region's first column and the title
-  `Changes`, so the empty state renders inside the frame rather than replacing it
+- **AND** in both buffers row 0 spells `no repository` from the region's first interior
+  column and row 1 is entirely spaces, so the empty state renders below the region's own
+  heading and padding rows rather than replacing the frame
 
 #### Scenario: A repository with no changes at all
 
@@ -436,7 +457,7 @@ states. No state SHALL replace the frame with an error screen.
   `add-auth` dated `2026-08-14` at 7 of 7, whose `archived_total` is 1, and whose archived
   section is **open**, is rendered at 120x20 and at 60x20
 - **THEN** in both buffers the first interior row begins `No active changes`, the second is
-  exactly `  v archived (1)` padded to the interior width, and the third is the `add-auth` row
+  exactly `  ▾ archived (1)` padded to the interior width, and the third is the `add-auth` row
 - **AND** neither buffer contains `No changes yet`, so the two empty states are
   distinguished rather than sharing one message
 - **AND** no active section header is emitted, because that section's count is zero
@@ -447,7 +468,7 @@ states. No state SHALL replace the frame with an error screen.
   whose `archived_total` is 28, and whose archived section is **collapsed**, is rendered at
   120x20 and at 60x20
 - **THEN** in both buffers the first interior row begins `No active changes` and the second is
-  exactly `  > archived (28)` padded to the interior width
+  exactly `  ▸ archived (28)` padded to the interior width
 - **AND** neither buffer contains `No changes yet`: the archived section's count is 28, not
   zero, even though it contributes no visible change and no row
 - **AND** neither buffer contains `No changes match`, because the query is empty
@@ -456,11 +477,11 @@ states. No state SHALL replace the frame with an error screen.
 
 - **WHEN** a `Dashboard` with nine active changes, no archive, and the **active** section
   collapsed is rendered at 120x20 and at 60x20
-- **THEN** in both buffers the first interior row is exactly `  > active (9)` padded to the
+- **THEN** in both buffers the first interior row is exactly `  ▸ active (9)` padded to the
   interior width
 - **AND** neither buffer contains `No active changes`, `No changes yet`, or any change name:
   the message rows are keyed on the section's count of nine, not on its zero visible rows
-- **AND** expanding the same section renders `  v active (9)` followed by the nine rows, so
+- **AND** expanding the same section renders `  ▾ active (9)` followed by the nine rows, so
   the absence of a message row is the fold rather than the changes being gone
 
 #### Scenario: Repository-level problems are named above the rows
@@ -475,13 +496,15 @@ states. No state SHALL replace the frame with an error screen.
 - **AND** in the 60-column buffer interior row 2 at columns 1 through 58 spells
   `! openspec/changes: Permission denied (os error 13)` followed by spaces, with no `…`, so
   the truncation at 38 columns is a width branch
-- **AND** in both buffers the region is still the bordered `Changes` block, not an error
-  screen
+- **AND** in both buffers the region is still the list region — its heading row above its
+  rows — and not an error screen
 
 ### Requirement: Rows are confined to the list region
 
-`ui::view::render` SHALL write no cell outside the `Changes` region's interior when
-drawing rows. At `LayoutMode::Wide` the `Detail` region's interior SHALL remain blank —
+`ui::view::render` SHALL write no cell outside the list region's interior when
+drawing rows — its heading row, its padding row, its two gutter columns, and the divider
+column beside it included. At `LayoutMode::Wide` the detail region's interior SHALL remain
+blank —
 every cell a space whose `Style` equals `ratatui::buffer::Cell::default().style()` — and at
 `LayoutMode::Narrow` with `route: Route::Detail` no row SHALL be drawn at all, because the
 list region is not drawn at that width and route.
@@ -492,10 +515,10 @@ not drawn, and `list-selection` governs which slice is shown.
 #### Scenario: The detail region stays blank while the list fills
 
 - **WHEN** the three-active-change dashboard is rendered at 120x20
-- **THEN** every cell in rows 2 through 17 and columns 41 through 118 is a space whose
+- **THEN** every cell in rows 2 through 18 and columns 42 through 119 is a space whose
   `Style` equals `Cell::default().style()`
 - **AND** the same dashboard rendered at 60x20 draws its rows in columns 1 through 58 and
-  no cell of column 0 or column 59 in rows 2 through 17 is anything but a border character
+  every cell of column 0 and column 59 in rows 0 through 18 is a space
 
 #### Scenario: The narrow detail route draws no rows
 
@@ -510,10 +533,11 @@ not drawn, and `list-selection` governs which slice is shown.
 
 - **WHEN** a `Dashboard` holding thirty active changes named `change-00` through
   `change-29`, each at 1 of 2 tasks, with `selected` 0, is rendered at 120x20 and at 60x20
-- **THEN** in both buffers exactly sixteen interior rows are drawn — rows 2 through 17 —
-  and rows 0, 1, 18, and 19 hold no change name
-- **AND** in both buffers the first interior row is the `change-00` row and the sixteenth
-  is the `change-15` row, so the region shows the first sixteen and stops
+- **THEN** in both buffers exactly seventeen interior rows are drawn — rows 2 through 18 —
+  and rows 0, 1, and 19 hold no change name
+- **AND** in both buffers the first interior row is the **`active` section header**, which
+  `list-sections` put there, so the sixteen rows beneath it — buffer rows 3 through 18 —
+  hold `change-00` through `change-15`, and the region shows the first sixteen and stops
 
 ### Requirement: Every cell of the row grammar is measured in display columns
 
@@ -539,10 +563,10 @@ return a string measuring **exactly `width` display columns** in both of its arm
 - when `width` is `0`, the empty string.
 
 `ui::list::shorten_left` — the keep-the-tail rule the no-repository block and
-`responsive-layout`'s header share — SHALL likewise keep the longest **suffix ending on a
+`responsive-layout`'s list-region heading share — SHALL likewise keep the longest **suffix ending on a
 grapheme-cluster boundary** that measures at most `width - 1` columns, prefixed with `…`. It
-SHALL NOT pad, exactly as it does not today; the header right-aligns it within its own
-remaining space. `ui::list::shorten_left_row`, the padded form the no-repository block's
+SHALL NOT pad, exactly as it does not today; the heading row places it at its own first
+column and leaves the remainder blank. `ui::list::shorten_left_row`, the padded form the no-repository block's
 third row uses, SHALL pad the result back to exactly `width` display columns — a third
 measuring site, named here because it is easy to miss beside its un-padded sibling.
 
@@ -572,22 +596,25 @@ zero-width-joiner sequence.
 - **THEN** in the 120-column buffer interior row 2 measures exactly 38 columns, spells the
   ten-character name from interior column 2, and ends with `[4/9]` in the interior's last
   five columns
-- **AND** in the 120-column buffer the list block's right border at column 39, the detail
-  block's left border at column 40, and every cell of the detail region's header row are
+- **AND** in the 120-column buffer the list region's right gutter at column 39, the divider
+  `│` at column 40, and every cell of the detail region's heading row are
   exactly what the same dashboard renders with the ASCII name `add-token-refresh` — the
   overwrite the audit measured is gone
 - **AND** in the 60-column buffer interior row 2 measures exactly 58 columns and its `[4/9]`
-  cell ends in the interior's last column, with the frame's right border at column 59
-  intact
+  cell ends in the interior's last column, with the frame's right gutter at column 59 still
+  a space
 
 #### Scenario: An emoji change name at 58 columns does not overwrite the border
+
+The scenario's name is kept verbatim because a delta's scenario headers are its merge key;
+what a name must not overwrite is now the region's right gutter column.
 
 - **WHEN** a `Dashboard` whose single active change is named `emoji-🎉-change` at 4 of 9 is
   rendered at 60x20 and at 120x20, once with no agent and once carrying an in-scope
   `Working` agent for it
 - **THEN** in all four buffers the row measures exactly its interior width — 58 and 38 — the
-  progress cell ends in the interior's last column, and the frame's border column is
-  unchanged from the ASCII-named render
+  progress cell ends in the interior's last column, and the frame's right gutter column is
+  a space, unchanged from the ASCII-named render
 - **AND** in the badged renders the badge sits two columns left of the progress cell's first
   column, on exactly the landed rule, because the badge and progress cells are ASCII and
   their column budgets did not move
@@ -812,7 +839,7 @@ Every one of those rows is character-for-character the row the same change produ
 rows themselves.
 
 The archived rows SHALL be preceded by the archived **section header** the emission-order
-requirement above defines — `  > archived (22)` when collapsed, `  v archived (22)` when
+requirement above defines — `  ▸ archived (22)` when collapsed, `  ▾ archived (22)` when
 open, padded or truncated to exactly the interior width — and SHALL be emitted only when that
 section is open. The header SHALL be emitted only when the section's count is greater than
 zero, so a repository with nothing archived, or a query that matches no archived change,
@@ -827,9 +854,9 @@ badged and is never a change.
   active change, since target 0 is the active section header — and no agents, is rendered at
   120x20 and at 60x20
 - **THEN** the 120-column buffer's interior rows read, in order at columns 1 through 38:
-  `  v active (1)`, then
+  `  ▾ active (1)`, then
   `> fix-empty-basket               [7/7]`, then
-  `  v archived (2)`, then
+  `  ▾ archived (2)`, then
   `  2026-08-14 add-auth            [7/7]`, then
   `             legacy-cleanup      [3/3]` — the two header rows padded with spaces to the
   full interior width
@@ -860,7 +887,7 @@ badged and is never a change.
   nothing, is given a non-empty query of `zzz` and rendered at 120x20 and at 60x20 **before**
   the refresh that query requests has answered
 - **THEN** in both buffers the first interior row begins `No changes match`, the second holds
-  `/zzz`, and the third is exactly `  v archived (28)` padded to the interior width
+  `/zzz`, and the third is exactly `  ▾ archived (28)` padded to the interior width
 - **AND** no row below the header is drawn, and no `! `-prefixed problem row appears
 - **AND** rendering the same dashboard once the twenty-eight archived changes have arrived,
   none of which matches `zzz`, emits **no** archived header at all — that section's count is
@@ -871,19 +898,19 @@ badged and is never a change.
 
 - **WHEN** the same dashboard with the archived section **collapsed** is rendered at 120x20
   and at 60x20
-- **THEN** in both buffers interior row 2 is exactly `  > archived (2)` padded to the interior
+- **THEN** in both buffers interior row 2 is exactly `  ▸ archived (2)` padded to the interior
   width, and the strings `add-auth` and `legacy-cleanup` appear in no row
 - **AND** interior rows 0 and 1 — the active header and the `fix-empty-basket` row — are
   byte-identical to the open rendering, so folding one section moves nothing above it
 - **AND** the same dashboard whose `changes.archived` is empty while `archived_total` is 22
-  renders interior row 2 as exactly `  > archived (22)` padded to the interior width, so an
+  renders interior row 2 as exactly `  ▸ archived (22)` padded to the interior width, so an
   unresolved tier's header counts from `archived_total` rather than from the rows it holds
 
 #### Scenario: An expanded but unresolved archived section shows its header alone
 
 - **WHEN** a `Dashboard` whose `changes.archived` is empty, whose `archived_total` is 22, and
   whose archived section is **open** is rendered at 120x20 and at 60x20
-- **THEN** in both buffers the archived header row is exactly `  v archived (22)` padded to
+- **THEN** in both buffers the archived header row is exactly `  ▾ archived (22)` padded to
   the interior width
 - **AND** no row below it is drawn, and neither buffer contains `No changes match`,
   `No active changes`, or any `! `-prefixed problem row: an outstanding refresh is not a
@@ -917,11 +944,11 @@ badged and is never a change.
 
 - **WHEN** `ui::list::rows` is called for a dashboard whose archived section is collapsed over
   twenty-two archived changes, at widths 17, 16, 5, 1, and 0, and at 38 and 58
-- **THEN** the archived header row is exactly `  > archived (22)` at width 17, exactly
-  `  > archived (2…` at 16, exactly `  > …` at 5, exactly ` ` at 1, and the empty string at 0
+- **THEN** the archived header row is exactly `  ▸ archived (22)` at width 17, exactly
+  `  ▸ archived (2…` at 16, exactly `  ▸ …` at 5, exactly ` ` at 1, and the empty string at 0
 - **AND** every one of those rows measures exactly the requested width in display columns,
   and none panics
-- **AND** at 38 and 58 the row is `  > archived (22)` padded with spaces, so the truncation is
+- **AND** at 38 and 58 the row is `  ▸ archived (22)` padded with spaces, so the truncation is
   a width branch
 
 #### Scenario: No archived changes means no archived header
@@ -930,7 +957,7 @@ badged and is never a change.
   whose `archived_total` is `0`, is rendered at 120x20 and at 60x20
 - **THEN** the strings `archived` and `-- archived` appear in no row of either buffer
 - **AND** adding a single archived change to the same dashboard, with `archived_total` `1`,
-  and rendering again at both widths makes `  v archived (1)` appear, so the absence is the
+  and rendering again at both widths makes `  ▾ archived (1)` appear, so the absence is the
   emission rule and not the string being unrenderable
 - **AND** the same dashboard with an accepted query of `zzz-no-match` shows neither header at
   either width, because both sections' counts are zero and the two `No changes match` message

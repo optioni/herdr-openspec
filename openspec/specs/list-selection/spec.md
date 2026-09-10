@@ -41,11 +41,11 @@ after a resize.
 
 - **WHEN** a `Dashboard` holding thirty active changes named `change-00` through
   `change-29`, with `selected` **21** — target 0 is the active section header, so 21
-  addresses `change-20` — is rendered at 120x20 and at 60x20 — an interior of sixteen rows
+  addresses `change-20` — is rendered at 120x20 and at 60x20 — an interior of seventeen rows
   in both
 - **THEN** in both buffers the first interior row is the `change-12` row and the last is
-  the `change-27` row, because the row vector is 31 long and `layout::viewport(31, 21, 16)`
-  is `min(21 - 8, 31 - 16)` = 13, whose row is `change-12`
+  the `change-28` row, because the row vector is 31 long and `layout::viewport(31, 21, 17)`
+  is `min(21 - 8, 31 - 17)` = 13, whose row is `change-12`
 - **AND** in both buffers the `change-20` row carries the `>` marker and bold cells, so the
   selection is inside the drawn slice
 - **AND** the same dashboard with the active section **collapsed** draws exactly one interior
@@ -55,8 +55,8 @@ after a resize.
 
 - **WHEN** the same thirty-change dashboard with `selected` **30**, addressing `change-29`, is
   rendered at 120x20 and at 60x20
-- **THEN** in both buffers the first interior row is the `change-14` row and the last is
-  the `change-29` row, because `layout::viewport(31, 30, 16)` clamps `30 - 8` to `31 - 16` = 15
+- **THEN** in both buffers the first interior row is the `change-13` row and the last is
+  the `change-29` row, because `layout::viewport(31, 30, 17)` clamps `30 - 8` to `31 - 17` = 14
 - **AND** in both buffers the last interior row carries the `>` marker, and no interior row
   is blank, so the slice never runs past the final row
 
@@ -66,8 +66,15 @@ after a resize.
   `(17, 8, 16)`, `(17, 9, 16)`, `(17, 16, 16)`, and `(30, 20, 0)`
 - **THEN** it returns `0`, `0`, `0`, `0`, `1`, `1`, and `0` respectively
 - **AND** rendering a seventeen-change dashboard with `selected` **10** at 120x20 and at
-  60x20 shows `change-01` as the first interior row in both — eighteen rows with the header,
-  `viewport(18, 10, 16)` = 2 — so the boundary is rendered and not only computed
+  60x20 shows `change-00` as the first interior row in both — eighteen rows with the header,
+  `viewport(18, 10, 17)` = `min(10 - 8, 18 - 17)` = 1 — so the boundary is rendered and not
+  only computed
+
+  The unit calls above are unchanged: they pass `16` explicitly and pin `viewport`'s own
+  arithmetic, which `pane-chrome` does not touch. What moved is the **interior height** the
+  render path hands it — sixteen rows to seventeen, `responsive-layout`'s region shape — so
+  every rendered expectation in this requirement is recomputed at `17` while every computed
+  one stays at `16`.
 
 #### Scenario: A resize changes the slice on the next frame
 
@@ -75,8 +82,11 @@ after a resize.
   with `selected` **21** is drawn, the backend is resized to 120x12, and a second frame is
   drawn from the **same** unchanged `Dashboard`
 - **THEN** the first buffer's first interior row is the `change-12` row and the second
-  buffer's is the `change-16` row, because the interior height fell from 16 to 8 —
-  `viewport(31, 21, 8)` is `min(21 - 4, 31 - 8)` = 17
+  buffer's is the `change-16` row, because the interior height fell from 17 to **9** —
+  `viewport(31, 21, 9)` is `min(21 - 4, 31 - 9)` = 17. A 12-row frame gives a body of
+  eleven rows and an interior of nine, where the bordered arithmetic gave eight; the
+  half-height offset is `9 / 2` = 4, unchanged, so this scenario's rendered rows are the
+  same as before this change and its stated arithmetic is not
 - **AND** `Dashboard` exposes no field naming a scroll offset, a first visible row, or an
   interior height. `sections` is not such a field: it is a user decision, not derived
   geometry, which is why `list-sections` stores it and stores nothing else
@@ -332,8 +342,8 @@ while handling `ToggleSection`, exactly as it does for every other action.
   `visible()` holds the active change alone, and `selected` is 2, still the archived header
 - **AND** after the second, `sections.collapsed` is empty, `visible()` holds all three
   changes, and `selected` is still 2
-- **AND** rendering at 120x20 and at 60x20 between the two actions shows `  > archived (2)`
-  and no archived name, and after the second shows `  v archived (2)` with both names
+- **AND** rendering at 120x20 and at 60x20 between the two actions shows `  ▸ archived (2)`
+  and no archived name, and after the second shows `  ▾ archived (2)` with both names
 
 #### Scenario: `Space` inside a section folds it and moves the cursor to its header
 

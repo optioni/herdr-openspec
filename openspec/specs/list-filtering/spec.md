@@ -144,9 +144,9 @@ separator with two headers; the emission rule is the same rule, now applied twic
   `selected` **1** — target 0 is the active section header — and an accepted query `add`, is
   rendered at 120x20 and at 60x20
 - **THEN** the 120-column buffer's interior rows 2, 3, 4, and 5 at columns 1 through 38 spell
-  `  v active (1)` padded,
+  `  ▾ active (1)` padded,
   `> add-token-refresh              [4/9]`,
-  `  v archived (1)` padded, and
+  `  ▾ archived (1)` padded, and
   `  2026-08-14 add-auth            [7/7]`
 - **AND** the 60-column buffer's same four rows at columns 1 through 58 spell the same four,
   padded to 58
@@ -180,7 +180,7 @@ separator with two headers; the emission rule is the same rule, now applied twic
 
 - **WHEN** the same dashboard with the query `auth` is rendered at 120x20 and at 60x20
 - **THEN** in both buffers the first interior row begins `No active changes`, the second is
-  exactly `  v archived (1)` padded to the interior width, and the third is the `add-auth`
+  exactly `  ▾ archived (1)` padded to the interior width, and the third is the `add-auth`
   row carrying the `>` marker, because `selected` **1** addresses the first visible change
   and the only visible change is archived — `selected` 0 would put the marker on the archived
   header, which is target 0 here since the active section's count is zero and it emits no
@@ -347,22 +347,22 @@ because the predicate is false once the tier is resolved.
   **1** — target 0 is the archived section header, since the active section's count is zero
   and it emits none — is rendered at 120x20 and at 60x20 with the accepted query `auth`
 - **THEN** in both buffers the first interior row is `No active changes`, the second is
-  exactly `  v archived (1)` padded to the interior width, and the third is the `add-auth`
+  exactly `  ▾ archived (1)` padded to the interior width, and the third is the `add-auth`
   row carrying the `>` marker
 - **AND** the archived header's glyph is `v` although `sections.collapsed` still holds
   `SectionKey::Archived`, so the force-open is derived rather than written
-- **AND** clearing the query and rendering again shows `  > archived (2)` and no archived
+- **AND** clearing the query and rendering again shows `  ▸ archived (2)` and no archived
   name, so the reader's own fold came back with nothing having been saved
 
 #### Scenario: The archived count under a query is the matched count
 
 - **WHEN** the same dashboard with both sections open and the accepted query `add` is
   rendered at 120x20 and at 60x20
-- **THEN** in both buffers the archived header is exactly `  v archived (1)` padded to the
+- **THEN** in both buffers the archived header is exactly `  ▾ archived (1)` padded to the
   interior width, because one of the two archived changes matches
 - **AND** no active header is emitted at all, and the `No active changes` row stands in its
   place, because a section whose count is zero emits no header
-- **AND** clearing the query renders `  v active (2)` and `  v archived (2)`, so the counts
+- **AND** clearing the query renders `  ▾ active (2)` and `  ▾ archived (2)`, so the counts
   follow the query when the tier is resolved and the true total when it is not
 
 #### Scenario: The first character of a query requests the archive it needs

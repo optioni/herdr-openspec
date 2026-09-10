@@ -32,19 +32,17 @@ and no panic for any input.
 
 ```rust
 pub enum Role {
-    HeaderTitle,
-    HeaderPath,
     FileMode,
     Footer,
-    RegionBorder,
-    RegionBorderFocused,
+    RegionHeading,
+    RegionHeadingFocused,
+    RegionRule,
     ListRow,
     ListRowSelected,
     ListProblem,
     ListSeparator,
     ListMessage,
     AgentBadge(crate::agents::AgentStatus),
-    DetailHeader,
     TabActive,
     TabInactive,
     Heading(u8),
@@ -59,11 +57,21 @@ pub enum Role {
 pub fn style(role: Role) -> Style;
 ```
 
-`Strikethrough` is this change's one new variant, and it is the reason the enum is
-reproduced here: `markdown-render` gains a `strikethrough` face, and the face's `Style` is
+The enum is reproduced here because `pane-chrome` changes its membership. `RegionHeading` and
+`RegionHeadingFocused` replace `RegionBorder` and `RegionBorderFocused` — there is no border
+to style — and `RegionRule` is added for the vertical divider and the detail region's
+horizontal rule. `HeaderTitle` and `HeaderPath` are removed with the frame header row that
+carried them, and `DetailHeader` is removed because the detail region's change header is now a
+region heading and takes the same two roles every other region heading takes; keeping a third
+role identical to `RegionHeadingFocused` in everything but its name would let the two drift
+for no reason a reader could see.
+
+`Strikethrough` remains the variant that first forced this reproduction: the face's `Style` is
 this module's to decide, not a render call site's. The exhaustive-`match` role list the
-totality scenario iterates is what makes the addition a **compile error** until the table
-answers it, which is the property that keeps the enum and the table from drifting.
+totality scenario iterates is what makes any addition a **compile error** until the table
+answers it, which is the property that keeps the enum and the table from drifting — and what
+makes each of this change's three removals a compile error at every call site that named
+one.
 
 `src/ui/palette.rs` SHALL be the **only file under `src/`** that names
 `ratatui::style::Color` or a `Color::` variant. The scope is `src/` and not the whole crate
@@ -116,6 +124,9 @@ against, never a literal that test writes.
 - **AND** no two of `ListProblem`, `FileMode`, `TabActive`, `TabInactive`, and the five
   `AgentBadge` styles are equal to one another, so each carries a distinction rather than
   repeating its neighbour
+- **AND** `RegionHeading`, `RegionHeadingFocused`, and `RegionRule` each return a `Style`, and
+  the enum names no `RegionBorder`, `RegionBorderFocused`, `HeaderTitle`, `HeaderPath`, or
+  `DetailHeader`
 - **AND** the two deliberately shared pairs are asserted **equal** — `FileMode` with `Code`,
   and `AgentBadge(Unknown)` with `ListSeparator` — so the sharing is a recorded decision
   rather than a gap the distinctness assertion happens to step around, and `Strikethrough` is
@@ -171,7 +182,11 @@ and lets the terminal answer. Reading the environment from a view file is forbid
 ### Requirement: Every role keeps the modifier the crate applied before this change
 
 Colour SHALL be added **beside** the modifier a role already carried, never in place of it,
-and `color-palette` added, removed, or altered **no modifier anywhere**. The consequence is
+and `color-palette` added, removed, or altered **no modifier anywhere**. `pane-chrome` is the
+first change that alters one: `RegionHeading` carries `DIM` where the `RegionBorder` it
+replaces carried none, because an unfocused **heading** is text a reader can mistake for
+content while an unfocused border was a line nobody read. `RegionHeadingFocused` keeps
+`RegionBorderFocused`'s `BOLD` unchanged, and no other row of the table below moves. The consequence is
 falsifiable rather than aspirational: in a captured `TestBackend` buffer compared by modifier
 alone, every cell **outside the artifact tab-bar row** after that change carries exactly the
 modifier it carried before it.
@@ -191,19 +206,17 @@ The modifier each role SHALL carry:
 
 | Role | Modifiers |
 |---|---|
-| `HeaderTitle` | `BOLD` |
-| `HeaderPath` | none |
 | `FileMode` | `DIM` |
 | `Footer` | none |
-| `RegionBorder` | none |
-| `RegionBorderFocused` | `BOLD` |
+| `RegionHeading` | `DIM` |
+| `RegionHeadingFocused` | `BOLD` |
+| `RegionRule` | `DIM` |
 | `ListRow` | none |
 | `ListRowSelected` | `BOLD` |
 | `ListProblem` | none |
 | `ListSeparator` | none |
 | `ListMessage` | none |
 | `AgentBadge(_)` | none |
-| `DetailHeader` | `BOLD` |
 | `TabActive` | `BOLD` |
 | `TabInactive` | none |
 | `Heading(_)` | `BOLD` |
@@ -224,9 +237,9 @@ the text is still there.
 
 - **WHEN** `palette::style` is called for every `Role` variant and its `add_modifier` set is
   compared against the table
-- **THEN** every role matches, and the nine roles that carry no modifier —
-  `HeaderPath`, `Footer`, `RegionBorder`, `ListRow`, `ListProblem`, `ListSeparator`,
-  `ListMessage`, `AgentBadge`, and `TabInactive` — carry none
+- **THEN** every role matches, and the seven roles that carry no modifier —
+  `Footer`, `ListRow`, `ListProblem`, `ListSeparator`, `ListMessage`, `AgentBadge`, and
+  `TabInactive` — carry none
 - **AND** the assertion discriminates: `Emphasis` reports `ITALIC` and not `BOLD`, and
   `Strikethrough` reports `CROSSED_OUT` and not `DIM`
 
@@ -236,8 +249,10 @@ the text is still there.
   changes of which one is badged `Working`, and a selected change whose `detail.source` is
   `## Heading\n\n**bold** and *italic* and `code` and [link](u)\n` is rendered at 120x20 and
   at 60x20
-- **THEN** in both buffers the modifier of every cell **outside row 3, the tab bar** is
-  exactly what the same dashboard produced before `color-palette`: `OpenSpec` and the detail header `BOLD`, the `file mode` badge
+- **THEN** in both buffers the modifier of every cell **outside row 2, the tab bar** is
+  exactly what the same dashboard produced before `color-palette` once `pane-chrome`'s own
+  three modifier changes are applied — the removed frame header row, the routed region's
+  heading `BOLD` and the unrouted one's `DIM`, and the rules' `DIM`: the `file mode` badge
   `DIM`, the selected row's cells `BOLD`, the heading and `bold` `BOLD`, `italic` `ITALIC`,
   `code` `DIM`, and `link` `UNDERLINED`
 - **AND** the problem row, the separator row, and the agent badge cell carry no modifier at
@@ -317,20 +332,20 @@ value the parser cannot emit.
 `palette::style(role)` for the role that span carries, or a fixed composition of such styles.
 The mapping from a drawn span to its role SHALL be:
 
-- the frame header's `OpenSpec` label → `HeaderTitle`;
-- the `file mode` badge → `FileMode`;
-- the right-aligned repository path or `no repository` → `HeaderPath`;
+- a region's heading row → `RegionHeadingFocused` when that region is the routed one, else
+  `RegionHeading`. That covers the list region's repository name and the detail region's
+  change header alike;
+- the `file mode` badge → the heading row's own style patched with `FileMode`, so the badge is
+  dim and yellow whether or not the list region is the routed one;
+- the vertical divider and the detail region's horizontal rule → `RegionRule`;
 - the footer row, in all three of its forms → `Footer`. It is named rather than left as a
   bare `Style::default()` so the requirement below — that `ui::view` constructs no `Style` of
   its own — is true of the whole file rather than of the functions this change happened to
   visit;
-- a region's border → `RegionBorderFocused` when that region is the routed one, else
-  `RegionBorder`;
 - a list row → `ListRowSelected` when `Row::selected`, else `ListProblem`, `ListSeparator`,
   or `ListMessage` by its `RowKind`, else `ListRow`;
 - a badged change row's badge cell → the row's own style patched with
   `AgentBadge(status)`, so a badge on the selected row is coloured **and** bold;
-- the detail region's change header → `DetailHeader`;
 - an artifact tab chip → `TabActive` when `Tab::selected`, else `TabInactive`;
 - a rendered content segment → `style_for(&segment.face)`, below.
 

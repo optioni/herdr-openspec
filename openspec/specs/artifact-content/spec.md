@@ -246,11 +246,14 @@ That last clause is the repair, not a restatement. `No content yet` was pushed a
 `String` while every neighbouring line went through the padding, and this requirement's own
 promise — that no returned line exceeds `width` — was therefore false at every `width` below
 14: at a 15-column narrow **frame** in the detail route, whose content area is 13 columns,
-the rendered row read `│No content yet` and ate the region's right border. The literal is now
+the rendered row read `│No content yet` and ate the region's right border, as the region
+still had one. The literal is now
 truncated with the same `…` rule as everything else, so at `width` 13 it reads
 `No content y…`, at 12 `No content …`, at 11 `No content…`, and at 0 it is the empty string.
-Every `width` in this paragraph is the **content area's**, which is the frame's less the
-region's two border columns; the scenario below gives frame widths and says so.
+Every `width` in this paragraph is the **content area's**, which at the narrow layout is the
+frame's less the region's two **gutter** columns — the same arithmetic the two border columns
+gave before `pane-chrome`, so every truncation point below is unchanged; the scenario below
+gives frame widths and says so.
 The line SHALL still be a single `Segment` carrying `Face::plain()`.
 
 The `change` argument is the **only** reason the tracked-tasks decision is made once rather
@@ -297,9 +300,9 @@ loop's exit condition.
 - **WHEN** a `Dashboard` whose selected change carries the five tdd artifacts, whose
   `detail.tab` is `1`, whose `detail.source` and `detail.problems` are empty, is rendered at
   120x20 and at 60x20 at `Route::Detail`
-- **THEN** in the 120-column buffer row 4, columns 41 onward, begins `No content yet`
-- **AND** in the 60-column buffer row 4, columns 1 onward, begins `No content yet`
-- **AND** in both buffers row 3 still holds the full five-tab bar with `2 specs` bold, so a
+- **THEN** in the 120-column buffer row 5, columns 42 onward, begins `No content yet`
+- **AND** in the 60-column buffer row 5, columns 1 onward, begins `No content yet`
+- **AND** in both buffers row 2 still holds the full five-tab bar with `2 specs` bold, so a
   missing file removes neither the tab nor the header
 - **AND** the same holds with `detail.tab` set to `3`, the tracked-tasks position: a missing
   tasks artifact reads `No content yet` and shows no progress bar
@@ -308,11 +311,14 @@ loop's exit condition.
 
 #### Scenario: `No content yet` does not eat the border at a narrow frame
 
+The scenario's name is kept verbatim because a delta's scenario headers are its merge key;
+what the literal must not eat is now the region's right gutter column.
+
 - **WHEN** the same empty-source `Dashboard` at `Route::Detail` is rendered at 15x20, at
   14x20, at 13x20, at 2x20, and at 1x20
 - **THEN** at 15x20 — a frame of 15, so a content area of 13 — the content area's first row
-  reads `No content y…` and the frame's right border column is a box-drawing character, not
-  the letter `t`: the audit's `│No content yet` row is gone
+  reads `No content y…` and the frame's right gutter column is a space, not the letter `t`:
+  the audit's `│No content yet` row is gone
 - **AND** at 14x20 the row reads `No content …` (a content area of 12) and at 13x20
   `No content…` (a content area of 11), each exactly its content area's width in columns —
   the frame is two columns wider than the region it holds, which is why the frame widths and
@@ -332,7 +338,7 @@ loop's exit condition.
   its second row begins `# b`
 - **AND** `No content yet` appears in neither buffer
 - **AND** each problem row is exactly the interior width — 78 and 58 — so it neither
-  overwrites the border nor leaves a partial cell
+  overwrites a gutter nor leaves a partial cell
 
 #### Scenario: The rendered markdown fills the content area, not the whole interior
 
@@ -341,9 +347,10 @@ loop's exit condition.
   `- line-00` through `- line-19` is rendered at 120x20 and at 60x20
 - **THEN** in each buffer the header row and the tab row are unchanged and the content
   area's first row holds `- line-00`
-- **AND** the content area's last drawn row is `- line-13`, because the 16-row interior gives
-  the content area 14 rows, so the header and the tab bar took two rows from the markdown
-  rather than being drawn over it
+- **AND** the content area's last drawn row is `- line-13`, because the **17**-row interior
+  gives the content area 14 rows, so the tab bar, the rule, and the padding row took **three**
+  rows from the markdown rather than being drawn over it. The change header is no longer one
+  of them: it is the region's heading row, outside the interior entirely
 
 #### Scenario: The tracked-tasks tab renders the checklist body instead
 
@@ -362,10 +369,10 @@ loop's exit condition.
   artifact, and whose `detail.source` is a document holding a paragraph of forty repetitions
   of `日本語`, a `# 🎉 見出し` heading, and a bullet holding a family emoji joined by
   zero-width joiners, is rendered at 120x20 and at 60x20
-- **THEN** in the 120-column buffer every cell of column 39 is the list block's right border
-  and every cell of column 40 is the detail block's left border, unchanged from the same
-  render with an ASCII document — the audit's escaped row is gone
-- **AND** in the 60-column buffer every cell of column 0 and column 59 is a border character
+- **THEN** in the 120-column buffer every cell of columns 39 and 41 is a space and every cell
+  of column 40 is the divider `│`, unchanged from the same render with an ASCII document —
+  the audit's escaped row is gone
+- **AND** in the 60-column buffer every cell of column 0 and column 59 is a space
 - **AND** in both buffers every drawn content row's own `layout::columns` is at most the
   content area's width, and no cell outside the content area was written
 
