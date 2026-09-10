@@ -324,11 +324,11 @@ unusable.
 
 - **100 columns or wider:** two columns — change list left (`Length(40)`), artifact
   detail right (`Min(0)`), so every column gained beyond 100 goes to detail. At
-  this width `Enter` and `Esc` still move the route; they select which region is
-  emphasised (bold border) rather than which is visible.
+  this width `Enter` and `Esc` still move the route; they select which region's
+  heading is bold rather than which is visible.
 - **Narrower than 100 columns:** single column. The list is the root view; `Enter`
   opens detail and `Esc` returns. At this width the route selects which region is
-  visible, not merely emphasised.
+  visible, not merely which heading is bold.
 
 `Enter` and `Esc` move the route at **every** width when neither the filter mode
 nor a filter query is active — the difference is only what moving it does to the
@@ -338,19 +338,34 @@ touching the route, and `/` itself moves the route to the list at every width;
 constraints and the underlying every-width route rule are frozen here for
 `list-view`, `detail-view`, and `agent-attribution` to inherit.
 
+The frame is a **body and a footer** — there is no header row. The repository's
+own identity lives in the list region's own heading row instead (§ List view).
+Each region is borderless: a heading row, a blank padding row, and a
+gutter-padded interior, in place of the block a bordered region once drew. The
+routed region's heading is bold; the other's is dim — the same distinction a
+bold border used to carry. In the wide layout a single `│` column, owned by
+neither region, separates them, with a blank column on either side of it.
+
 The two constraints above produce four mandated interiors, one pair per region,
-each **16 rows** at the mandated 20-row frame: the **list** region is 38 columns
-wide at the wide layout's `Length(40)` column (less two border columns) and 58 at
+each **17 rows** at the mandated 20-row frame — `layout::interior` reserves two
+rows above a region's own content (the heading row and the padding row) and
+none below, so the interior still begins at buffer row 2, exactly where the
+bordered one did, with one more row freed by the missing frame header and
+border than the padding row spends: the **list** region is 38 columns wide at
+the wide layout's `Length(40)` column (less its two gutter columns) and 58 at
 the narrow layout's 60-column frame (`list-view`); the **detail** region is 78
-columns wide at the wide layout's `Min(0)` column — a property of the mandated
-120-column frame rather than a constant, since every column gained beyond 120
-also goes to it — and 58 at the narrow layout's 60-column frame in the detail
-route (`markdown-viewer`, frozen here for `detail-view` and `tasks-tab` to
-inherit). The detail region's sixteen rows are further divided by
-`layout::split_detail` (`detail-view`): row one the change header, row two the
-artifact tab bar, and the remaining **fourteen** rows the content area, whose
-own height — not the interior's — is what the scroll clamp is computed
-against.
+columns wide at the wide layout's `Min(0)` column — gutter-padded on the left
+only, since its right edge runs to the frame's own last column, and a property
+of the mandated 120-column frame rather than a constant, since every column
+gained beyond 120 also goes to it — and 58 at the narrow layout's 60-column
+frame in the detail route (`markdown-viewer`, frozen here for `detail-view`
+and `tasks-tab` to inherit). The detail region's seventeen rows are further
+divided by `layout::split_detail` (`detail-view`): row one the artifact tab
+bar, row two a horizontal rule, row three a blank padding row, and the
+remaining **fourteen** rows the content area, whose own height — not the
+interior's — is what the scroll clamp is computed against. The change header
+itself is no longer part of this interior; it is the detail region's own
+heading row, two rows above row one.
 
 **The Unicode promise, and its limit.** Every width and truncation in this section — the
 mandated interiors above, the list row grammar and the detail region's header, tab bar,
@@ -381,34 +396,36 @@ row carrying a fold glyph, a label, and a count, with that section's change
 rows beneath it when it is open. **Archived starts collapsed and active starts
 expanded**, and `Space` toggles the section the cursor is on or in. Here is the
 real rendering against the wide layout's 38-column list-region interior
-(`Length(40)` less two border columns; the narrow layout's 60-column frame
+(`Length(40)` less its two gutter columns; the narrow layout's 60-column frame
 leaves 58), in the state a pane opens in — a `2fa-support` row carrying `w`
 shown for scale, and twenty-eight archived changes behind the fold:
 
 ```
-  v active (3)
+  ▾ active (3)
 > 2fa-support                  w [4/9]
   fix-empty-basket               [7/7]
   migrate-ai-sdk-v7                [-]
-  > archived (28)
+  ▸ archived (28)
 ```
 
 `Space` on that last row expands it, and every archived change is shown — the
 count is the honest whole, not a capped one:
 
 ```
-  v active (3)
+  ▾ active (3)
 > 2fa-support                  w [4/9]
   fix-empty-basket               [7/7]
   migrate-ai-sdk-v7                [-]
-  v archived (28)
+  ▾ archived (28)
   2026-08-14 add-auth            [7/7]
 ```
 
 A section header is `[marker][space][glyph][space][label][space][(count)]`,
 padded or truncated to the interior width like every other row; its glyph is
-`v` when open and `>` when collapsed, so a *selected* collapsed header draws
-both, `> > archived (28)`. A section whose count is zero emits no header at
+`▾` when open and `▸` when collapsed — distinct from the `>` cursor marker two
+columns to its left, so a *selected* collapsed header draws `> ▸ archived
+(28)` rather than colliding on the same character the way the earlier `v`/`>`
+pair did. A section whose count is zero emits no header at
 all. The count is the section's resolved entries when the tier is resolved and
 `archived_total` when it is not, and under a `/` query it is the number of
 **matches**, because a query forces every section open — a header reading
@@ -559,10 +576,10 @@ pane stays fully usable over SSH in a terminal that reports no mouse
 | Left click again on the row already selected | The same `Action::Click`; applying it opens the detail, exactly as `Enter` does. A third click changes nothing |
 | Left click on a section header | The same `Action::Click`, naming the section — fold it if open, unfold it if collapsed, and move the cursor to it, exactly as `Space` does |
 | Left click on an artifact tab cell | `Action::SelectTab` for that cell's own position, exactly as its digit key. It does not change the route |
-| Anything else — a right or middle press, any release, any drag, pointer motion, a horizontal wheel, the header row, the footer row, a border, a problem or message row, or a point outside the frame | `Action::Ignore` |
+| Anything else — a right or middle press, any release, any drag, pointer motion, a horizontal wheel, the footer row, a region's heading row, its padding row, or its gutter, a problem or message row, or a point outside the frame | `Action::Ignore` |
 
-The region under a wheel is the **whole** region — its border included, and, for
-the detail region, its header row and its tab bar as well as its content area.
+The region under a wheel is the **whole** region — its heading row, its padding
+row, and its gutters included, and, for the detail region, its tab bar as well as its content area.
 The mouse acts while filtering, unlike a printable key: a click is unambiguous
 where a keystroke is not.
 
@@ -884,7 +901,7 @@ Every condition renders usable content rather than an error screen:
 | Condition | Behaviour |
 |---|---|
 | No `openspec/` found while walking up | Empty state naming the directory searched |
-| `openspec` binary not found | File mode, with a dim `file mode` badge in the header, immediately after the `OpenSpec` label; dropped whole (never truncated) below 18 columns |
+| `openspec` binary not found | File mode, with a dim, yellow `file mode` badge right-aligned in the list region's own heading row; dropped whole (never truncated) whenever the row cannot hold the repository name, a separating blank, and the badge together |
 | Schema unknown to the CLI | Per-change fall back to file mode. This is real: `learning-tool` declares schema `outside-in-tdd`, which the installed CLI rejects |
 | Schema not vendored (no `openspec/schemas/<name>/schema.yaml` locally) | Artifact list empty until the CLI tier supplies it; distinct from the row above, which is the CLI rejecting a schema the plugin already read — both can be true at once for a schema like `outside-in-tdd`. The detail region's tab bar renders `no artifacts` for such a change (`detail-view`) |
 | Schema unreadable or invalid (I/O error, or bytes that are not a usable schema) | Artifact list empty, and the reason is named. The detail region's tab bar renders `no artifacts` for such a change (`detail-view`) |
