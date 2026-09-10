@@ -518,8 +518,9 @@ not drawn, and `list-selection` governs which slice is shown.
   `change-29`, each at 1 of 2 tasks, with `selected` 0, is rendered at 120x20 and at 60x20
 - **THEN** in both buffers exactly seventeen interior rows are drawn — rows 2 through 18 —
   and rows 0, 1, and 19 hold no change name
-- **AND** in both buffers the first interior row is the `change-00` row and the seventeenth
-  is the `change-16` row, so the region shows the first seventeen and stops
+- **AND** in both buffers the first interior row is the **`active` section header**, which
+  `list-sections` put there, so the sixteen rows beneath it — buffer rows 3 through 18 —
+  hold `change-00` through `change-15`, and the region shows the first sixteen and stops
 
 ### Requirement: Every cell of the row grammar is measured in display columns
 

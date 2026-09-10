@@ -37,9 +37,12 @@ and for the same measured reason:
 | `2` | one row at `interior.y` | one row at `interior.y + 1` | zero-height at `interior.y + 2` | none |
 | `h >= 3` | one row at `interior.y` | one row at `interior.y + 1` | `h - 3` rows at `interior.y + 3` | one row at `interior.y + 2` |
 
-The padding row is the row the pane gives up first. Below three interior rows there is no room
-for both it and a content line, and a reader with two rows to spend wants the bar and the
-rule, not air.
+What the pane gives up first is a **content line**, not the padding row: the bar, the rule,
+and the padding row are fixed chrome and the content area is the variable part, so at exactly
+three interior rows the chrome is whole and the content is zero-height. The padding row goes
+next, below three rows, where there is no room for both it and the rule — a reader with two
+rows to spend wants the bar and the rule, not air. The table above is the contract; this
+paragraph only says why it falls in that order.
 
 At the mandated frames the arithmetic lands as follows: the detail region's interior is
 seventeen rows at a 20-row frame, beginning at buffer row 2, so the tab bar is buffer row

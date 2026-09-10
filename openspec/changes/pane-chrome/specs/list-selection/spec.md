@@ -65,8 +65,11 @@ after a resize.
   with `selected` **21** is drawn, the backend is resized to 120x12, and a second frame is
   drawn from the **same** unchanged `Dashboard`
 - **THEN** the first buffer's first interior row is the `change-12` row and the second
-  buffer's is the `change-16` row, because the interior height fell from 16 to 8 —
-  `viewport(31, 21, 8)` is `min(21 - 4, 31 - 8)` = 17
+  buffer's is the `change-16` row, because the interior height fell from 17 to **9** —
+  `viewport(31, 21, 9)` is `min(21 - 4, 31 - 9)` = 17. A 12-row frame gives a body of
+  eleven rows and an interior of nine, where the bordered arithmetic gave eight; the
+  half-height offset is `9 / 2` = 4, unchanged, so this scenario's rendered rows are the
+  same as before this change and its stated arithmetic is not
 - **AND** `Dashboard` exposes no field naming a scroll offset, a first visible row, or an
   interior height. `sections` is not such a field: it is a user decision, not derived
   geometry, which is why `list-sections` stores it and stores nothing else

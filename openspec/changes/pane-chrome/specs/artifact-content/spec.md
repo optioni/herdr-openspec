@@ -126,9 +126,10 @@ what the literal must not eat is now the region's right gutter column.
   `- line-00` through `- line-19` is rendered at 120x20 and at 60x20
 - **THEN** in each buffer the header row and the tab row are unchanged and the content
   area's first row holds `- line-00`
-- **AND** the content area's last drawn row is `- line-13`, because the 16-row interior gives
-  the content area 14 rows, so the header and the tab bar took two rows from the markdown
-  rather than being drawn over it
+- **AND** the content area's last drawn row is `- line-13`, because the **17**-row interior
+  gives the content area 14 rows, so the tab bar, the rule, and the padding row took **three**
+  rows from the markdown rather than being drawn over it. The change header is no longer one
+  of them: it is the region's heading row, outside the interior entirely
 
 #### Scenario: The tracked-tasks tab renders the checklist body instead
 

@@ -89,7 +89,7 @@ columns or zero rows, which a one- or two-column frame produces.
 
 The row this change frees is spent on content, not on air: at a 20-row frame the body grows
 from eighteen rows to nineteen and the region's own former bottom border row is gone as
-well, so a region's interior grows from sixteen rows to eighteen. That count is asserted by
+well, so a region's interior grows from sixteen rows to seventeen. That count is asserted by
 "The routed region is emphasised and region interiors are left empty" rather than here.
 
 #### Scenario: Body and footer occupy their rows at both widths
@@ -335,7 +335,11 @@ so.
   `(Rect::new(0, 0, 40, 19), Gutters::Both)`, `(Rect::new(41, 0, 79, 19), Gutters::LeftOnly)`,
   `(Rect::new(0, 0, 1, 1), Gutters::Both)`, and `(Rect::new(0, 0, 0, 0), Gutters::Both)`
 - **THEN** the results are `Rect::new(1, 2, 58, 17)`, `Rect::new(1, 2, 38, 17)`,
-  `Rect::new(42, 2, 78, 17)`, `Rect::new(0, 0, 0, 0)`, and `Rect::new(0, 0, 0, 0)`
+  `Rect::new(42, 2, 78, 17)`, `Rect::new(1, 1, 0, 0)`, and `Rect::new(0, 0, 0, 0)`
+- **AND** the `1x1` case keeps the **origin clamp**: `x` is `min(0 + 1, 0 + 1)` = 1 and `y`
+  is `min(0 + 2, 0 + 1)` = 1, so the origin lands on the rectangle's own right and bottom
+  edges rather than staying at zero, and only the width and height saturate. `detail-scroll`
+  states the same value for the same call
 - **AND** the first three are seventeen rows tall, one more than the sixteen the bordered
   arithmetic gave at the same frame height, and each begins at row 2 exactly as it did
 - **AND** the `LeftOnly` interior's last column is `119`, the frame's own last column, while
@@ -451,6 +455,13 @@ SHALL be shortened from the **left** by `change-rows`' shared `shorten_left` imp
 most `A - 1` columns. A directory's own last characters are what distinguish it from its
 siblings. When `A` is zero the name SHALL be omitted entirely.
 
+The shortening branch is reachable **only when the badge was dropped**, and that is a
+consequence of the drop rule rather than a second rule: a badge survives only where the name,
+one blank, and nine columns all fit, which is exactly `name <= A`, which is the whole-name
+branch. So `A` is the full heading width in every case that shortens, and the `width - 10`
+form matters only for the cases that do not shorten. Stated here because the two rules are
+written in separate paragraphs and read as though they compose.
+
 Shortening SHALL count **display columns**, not characters and not bytes, and the heading
 row SHALL never draw past its last column at any width for any repository name.
 
@@ -485,17 +496,19 @@ already makes for every list row.
 #### Scenario: The badge is right-aligned and dropped whole
 
 - **WHEN** a `Dashboard` whose repository root is `/tmp/demo-repo` and whose `file_mode` is
-  `true` is rendered at 120x20, at 60x20, at 20x20, and at 19x20
+  `true` is rendered at 120x20, at 60x20, at 21x20, and at 20x20
 - **THEN** in the 120-column buffer row 0 spells `demo-repo` from column 1 and `file mode`
   in columns 30 through 38 — the heading row's last nine columns — and every cell of that
   badge reports `Modifier::DIM` set and foreground `Color::Yellow`
 - **AND** in the 60-column buffer the badge occupies columns 50 through 58, the heading row's
   last nine, so it is right-aligned against the row rather than placed at a fixed column
-- **AND** in the 20-column buffer — a heading row of 18 columns — `demo-repo` is nine
-  columns and the badge needs ten more, so both are drawn: `demo-repo` from column 1 and
-  `file mode` in columns 10 through 18
-- **AND** in the 19-column buffer — a heading row of 17 columns — the badge is absent from
-  every cell and `demo-repo` is drawn whole, so the badge was dropped whole rather than cut
+- **AND** in the 21-column buffer — a heading row of 19 columns — `demo-repo`'s nine columns,
+  one separating blank, and the badge's nine fit exactly: `demo-repo` occupies columns 1
+  through 9, column 10 is blank, and `file mode` occupies columns 11 through 19
+- **AND** in the 20-column buffer — a heading row of 18 columns — the badge is absent from
+  every cell and `demo-repo` is drawn whole, so the badge was dropped whole rather than cut,
+  and the pair 21/20 is the drop rule's own boundary: one column narrower than the rule
+  needs is the first width at which the badge goes
 - **AND** rendering the 120x20 case with `file_mode` `false` gives a row 0 byte-identical to
   the first scenario's, so the badge is additive
 
@@ -541,7 +554,8 @@ requirement names it only so the two are not read as disagreeing.
   120x20
 - **THEN** the cell at column 1, row 0 reports `Modifier::BOLD` set and `Modifier::DIM` not
   set
-- **AND** the cell at column 41, row 0 — the detail region's heading row — reports
+- **AND** the cell at column 42, row 0 — the detail region's heading row's first column,
+  column 41 being that region's left gutter and blank — reports
   `Modifier::DIM` set and `Modifier::BOLD` not set
 - **AND** with `route: Route::Detail` and the same size the two assertions swap, so the test
   discriminates rather than asserting a constant
@@ -567,8 +581,6 @@ requirement names it only so the two are not read as disagreeing.
 - **THEN** `src/ui/palette.rs` is the only file that names it
 - **AND** the render tests above assert a cell's colour by comparing it against
   `palette::style(role)` rather than against a literal
-
-## MODIFIED Requirements
 
 ## MODIFIED Requirements
 

@@ -245,9 +245,10 @@ bordered arithmetic fails here rather than silently losing the padding row.
 - **WHEN** `interior` with `Gutters::Both` and `ratatui::widgets::Block::bordered().inner` are
   both applied to `Rect::new(0, 0, 40, 19)`, `Rect::new(0, 0, 60, 19)`, `Rect::new(0, 0, 2, 2)`,
   `Rect::new(0, 0, 1, 1)`, and `Rect::new(0, 0, 0, 0)`
-- **THEN** on each non-degenerate rectangle the two agree on `x` and on `width` and disagree
-  on `y` by exactly one and on `height` by exactly one, `interior` giving the larger `y` and
-  the smaller `height`
+- **THEN** on each non-degenerate rectangle the two agree on `x`, on `width`, and on
+  `height` — both subtract two rows — and disagree on `y` by exactly one, `interior` giving
+  the larger `y`. The bordered arithmetic spent its two rows one above and one below; this
+  one spends both above, which moves the origin and leaves the height alone
 - **AND** `interior(Rect::new(0, 0, 40, 19), Gutters::Both)` is `Rect::new(1, 2, 38, 17)`
   while the block's inner is `Rect::new(1, 1, 38, 17)`, compared as whole `Rect` values — all
   four fields, not width and height alone
