@@ -158,10 +158,15 @@ which the same guard already gives it.
   list, whose `route` is `Route::Detail`, and whose `detail.scroll` is `0` is given a `Next`
   action, then a second `Next`
 - **THEN** `detail.scroll` is `1`, then `2`, and `selected` is unchanged throughout
-- **AND** rendering after the second action at 120x20 puts `- line-02` at row 2, columns 41
-  through 49, and `- line-17` at row 17
-- **AND** rendering after the second action at 60x20 puts `- line-02` at row 2, columns 1
-  through 9, and `- line-17` at row 17
+- **AND** rendering after the second action at 120x20 puts `- line-02` at row 5, columns 42
+  through 50, and `- line-15` at row 18
+- **AND** rendering after the second action at 60x20 puts `- line-02` at row 5, columns 1
+  through 9, and `- line-15` at row 18
+
+  The landed text named rows 2 and 17 and the line `line-17`, which predate `detail-view`'s
+  own header and tab bar: a fourteen-row content area holding `line-02` first ends at
+  `line-15`, not `line-17`. `pane-chrome` corrects the arithmetic while it is moving the two
+  row indices anyway, rather than copying a stale expectation forward.
 
 #### Scenario: At a collapsed foldable tab the same keys walk the section list
 
@@ -387,8 +392,8 @@ and a wheel over the same region can never disagree about what one line means.
 ### Requirement: The detail region draws the rendered markdown document
 
 `ui::view::render` SHALL fill the detail region's **content area** — the rectangle
-`layout::split_detail` returns below the header row and the tab-bar row `detail-header` and
-`artifact-tabs` own — with
+`layout::split_detail` returns below the tab-bar row `artifact-tabs` owns, the horizontal
+rule beneath it, and the blank padding row beneath that — with
 `ui::detail::content_lines(&dashboard.detail, dashboard.selected_change(), content.width)`,
 drawing the slice that starts at
 `layout::scroll_offset(lines.len(), dashboard.detail.scroll, content.height)` and runs for at
@@ -402,7 +407,7 @@ width; the region draws it like any other line and the sentence above is unaffec
 
 The content area's **width** equals the interior's, so the two mandated interior widths, 78
 and 58, are also the two mandated wrapping widths and the widths every table in a rendered
-artifact is allocated against. Only the **height** changes: a 16-row interior gives the
+artifact is allocated against. Only the **height** changes: a 17-row interior gives the
 content area 14 rows.
 
 `content_lines` — not `markdown::lines` and not `ui::tasks::lines` directly — is what both
@@ -437,14 +442,14 @@ colour, `code` `Color::Yellow`, and `link` `Color::Blue`. `strong`, `emphasis`, 
 foreground precedence — heading over code over link — that decides the colour when a span
 carries more than one; this requirement adds no second rule.
 
-The region SHALL draw nothing at all — no header, no tab bar, no content — when `visible()`
+The region SHALL draw nothing at all — no header, no tab bar, no rule, no content — when `visible()`
 is empty, leaving every interior cell a space whose `Style` equals
 `ratatui::buffer::Cell::default().style()`, which is what `responsive-layout`'s
 blank-interior scenario asserts. When a change **is** selected, the region SHALL always draw
-its header and tab bar, and the content area SHALL always hold at least one line, because
+its header, tab bar and rule, and the content area SHALL always hold at least one line, because
 `content_lines` returns `No content yet` rather than nothing.
 
-The two mandated detail interiors are **78 columns by 16 rows** at a 120x20 frame and **58
+The two mandated detail interiors are **78 columns by 17 rows** at a 120x20 frame and **58
 columns by 16 rows** at a 60x20 frame in the detail route, giving content areas of 78x14 and
 58x14. Every scenario below is exercised at both.
 
@@ -454,19 +459,20 @@ The scenario's name is kept verbatim from `markdown-viewer` because a delta's sc
 headers are its merge key; its subject is the same document, drawn two rows lower.
 
 - **WHEN** a `Dashboard` at `Route::Detail`, whose selected change carries one artifact not
-  marked `tracks_tasks` and whose selected artifact is a single section holding a bullet list of the twenty items
-  `line-00` through `line-19`, is rendered at 120x20 and at 60x20
-- **THEN** in the 120-column buffer row 4 columns 41 onward reads `- line-00` and row 17
-  reads `- line-13`, so fourteen items are drawn into the content area
-- **AND** in the 60-column buffer row 4 columns 1 onward reads `- line-00` and row 17 reads
+  marked `tracks_tasks` and whose selected artifact is a single section holding a bullet
+  list of the twenty items `line-00` through `line-19`, is rendered at 120x20 and at 60x20
+- **THEN** in the 120-column buffer row 5 columns 42 onward reads `- line-00` and row 18
+  reads `- line-13`, so fourteen items are drawn into the content area — the same fourteen
+  the bordered layout drew, two rows lower and one column right
+- **AND** in the 60-column buffer row 5 columns 1 onward reads `- line-00` and row 18 reads
   `- line-13`
-- **AND** in both buffers row 2 holds the change header and row 3 the tab bar, so the
-  markdown began below them rather than over them
+- **AND** in both buffers row 0 holds the change header, row 2 the tab bar, row 3 the rule,
+  and rows 1 and 4 are blank, so the markdown began below all four rather than over them
 
 #### Scenario: Faces reach the buffer as styles at both widths
 
 - **WHEN** a `Dashboard` at `Route::Detail` whose selected change carries one artifact not
-  marked `tracks_tasks` and whose `detail.sections` is
+  marked `tracks_tasks` and whose one section holds
   `## Heading\n\n**bold** and *italic* and `code` and [link](u) and ~~struck~~\n` is rendered
   at 120x20 and at 60x20
 - **THEN** in each buffer the cells of `## Heading` in the content area's first row report
@@ -484,7 +490,7 @@ headers are its merge key; its subject is the same document, drawn two rows lowe
 #### Scenario: A table reaches the buffer aligned and inside the region
 
 - **WHEN** a `Dashboard` at `Route::Detail` whose selected change carries one artifact not
-  marked `tracks_tasks` and whose selected artifact is a single section holding a three-column table with a header row,
+  marked `tracks_tasks` and whose one section holds a three-column table with a header row,
   a delimiter row, and three body rows — one of whose cells is long enough to wrap at 58 and
   not at 78 — is rendered at 120x20 and at 60x20
 - **THEN** in each buffer the `|` characters of the delimiter row fall at exactly the same
@@ -494,13 +500,15 @@ headers are its merge key; its subject is the same document, drawn two rows lowe
   padding cells report no modifier at all
 - **AND** in the 60-column buffer the wrapping row occupies more rows than in the
   120-column buffer
-- **AND** no table cell is drawn on a border column, stated **per buffer** because the two
-  layouts have different ones: in the 120-column buffer none reaches column 0, 39, 40, or
-  119; in the 60-column buffer none reaches column 0 or 59. Columns 39 and 40 are ordinary
-  interior content at 60 columns — below the breakpoint `layout::split_body` gives the detail
-  region the whole body — and a table wrapping at 58 necessarily covers them, so asserting
-  the wide layout's divider columns against the narrow buffer would leave this test
-  permanently red against a correct implementation
+- **AND** no table cell is drawn on a gutter or divider column, stated **per buffer** because
+  the two layouts have different ones: in the 120-column buffer none reaches column 0, 39, 40,
+  or 41; in the 60-column buffer none reaches column 0 or 59. Column 119 is **not** in that
+  list — the wide detail region takes `Gutters::LeftOnly`, so its interior's last column is
+  the frame's last column and a table cell may legitimately reach it. Columns 39, 40 and 41
+  are ordinary interior content at 60 columns — below the breakpoint `layout::split_body`
+  gives the detail region the whole body — and a table wrapping at 58 necessarily covers them,
+  so asserting the wide layout's divider columns against the narrow buffer would leave this
+  test permanently red against a correct implementation
 
 #### Scenario: An empty source leaves the detail interior blank at both widths
 
@@ -512,8 +520,8 @@ degraded-states row.
 - **WHEN** a `Dashboard` over `changes::empty_set()` is rendered at 120x20 at `Route::List`
   and a `Dashboard` whose only change is filtered out is rendered at 60x20 at
   `Route::Detail`
-- **THEN** every cell of the detail region's interior in each buffer is a space whose `Style`
-  equals `ratatui::buffer::Cell::default().style()`
+- **THEN** every cell of the detail region's heading row, padding row and interior in each
+  buffer is a space whose `Style` equals `ratatui::buffer::Cell::default().style()`
 - **AND** a third `Dashboard` with a change selected and no sections at all rendered at
   the same two sizes shows `No content yet` in the content area's first row and is therefore
   **not** blank, so the two states are distinguished rather than conflated
@@ -523,22 +531,27 @@ degraded-states row.
 
 #### Scenario: Content never overwrites the detail region's border
 
+The scenario's name is kept verbatim because a delta's scenario headers are its merge key;
+there is no border now, and what content must not overwrite is a gutter column or the divider.
+
 - **WHEN** a `Dashboard` at `Route::Detail` whose selected change carries five artifacts with
-  40-character ids, whose name is 200 characters long, and whose selected artifact is a single section of thirty
-  lines each 200 characters long, is rendered at 120x20 and at 60x20
-- **THEN** in the 60-column buffer every cell of column 0 and column 59 in rows 1 through 18
-  is a box-drawing character
-- **AND** in the 120-column buffer every cell of columns 0, 39, 40, and 119 in rows 1
-  through 18 is a box-drawing character
-- **AND** no content is written above row 2 or below row 17 in either buffer
+  40-character ids, whose name is 200 characters long, and whose selected artifact is a
+  single section of thirty lines each 200 characters long, is rendered at 120x20 and at
+  60x20
+- **THEN** in the 60-column buffer every cell of column 0 and column 59 in rows 0 through 18
+  is a space
+- **AND** in the 120-column buffer every cell of columns 0, 39, and 41 in rows 0 through 18
+  is a space and every cell of column 40 is `│`, while column 119 does carry content because
+  the wide detail region has no right gutter
+- **AND** no content is written above row 5 or below row 18 in either buffer
 - **AND** the same holds with the selected tab marked `tracks_tasks` and the same source
   turned into thirty 200-character task lines, so neither the checklist's wrap nor the
-  progress bar's gauge can reach the border
+  progress bar's gauge can reach a gutter
 - **AND** the same holds again with the source replaced by a twelve-column table whose every
   cell is 200 characters long — which the pipe grammar fits at both interiors, spending each
   exactly — and once more with a fifteen-column one, whose `4n + 1` of 61 the 78-column
   interior clears and the 58-column one does not, so **both** the pipe grammar and the
-  one-cell-per-line fallback it degrades to are measured against the border
+  one-cell-per-line fallback it degrades to are measured against the gutters
 
   Corrected during Change Review: the first draft claimed the twelve-column fixture
   exercised the fallback. It does not — `3n + 1` is 37, so `avail` is 41 and 21, both at
@@ -548,28 +561,31 @@ degraded-states row.
 
 #### Scenario: A degenerate detail interior draws nothing and does not panic
 
-The frame height a detail interior row costs is four — one frame-header row, one frame-footer
-row, and the region's two border rows — so the interior first has one row at a frame height of
-**5**, two at **6**, and three at **7**. Those are the heights this scenario samples; 3 and 4
-give an interior of zero rows and would exercise only the earliest guard.
+The frame height a detail interior row costs is three — one frame-footer row and the region's
+heading and padding rows — so the interior first has one row at a frame height of **4**, two
+at **5**, three at **6**, and four at **7**. `split_detail` spends the first three on the tab
+bar, the rule and the content padding row, so the **content area** first has one row at a
+frame height of **7**. Those are the heights this scenario samples; 2 and 3 give an interior
+of zero rows and would exercise only the earliest guard.
 
 - **WHEN** a `Dashboard` with a change selected and a non-empty section list is rendered
-  at 120x4, 120x5, 120x6, 120x7, 60x5, 60x6, 60x7, 1x20, and 2x20
+  at 120x3, 120x4, 120x5, 120x6, 120x7, 60x4, 60x5, 60x6, 60x7, 1x20, and 2x20
 - **THEN** no render panics at any of them
-- **AND** at 120x4 and its narrow counterpart the interior has zero rows and nothing at all is
-  drawn inside the region
-- **AND** at 120x5 and 60x5 the header row **is** drawn and no tab cell and no markdown line
-  appears anywhere in the frame
-- **AND** at 120x6 and 60x6 the header row and the tab bar are drawn and no markdown line
-  appears
+- **AND** at 120x3 and its narrow counterpart the interior has zero rows and nothing at all is
+  drawn inside the region, though the heading row **is** drawn
+- **AND** at 120x4 and 60x4 the tab bar is drawn and no rule and no markdown line appears
+  anywhere in the frame
+- **AND** at 120x5 and 60x5 the tab bar and the rule are drawn and no markdown line appears
+- **AND** at 120x6 and 60x6 the same two are drawn and still no markdown line, the interior's
+  third row being the content padding row
 - **AND** at 120x7 and 60x7 exactly one content row is drawn, holding the source's first
   rendered line
 - **AND** every one of those renders is repeated with the selected tab marked
   `tracks_tasks`, where the one content row at 120x7 and 60x7 holds the progress bar rather
   than a task item, and 1x20 and 2x20 — where the interior is one or zero columns wide —
   still draw nothing and still do not panic
-- **AND** every one of those renders is repeated once more with a table as the
-  `detail.sections`, where 1x20 and 2x20 still draw nothing and still do not panic
+- **AND** every one of those renders is repeated once more with a table as the section's
+  text, where 1x20 and 2x20 still draw nothing and still do not panic
 
 ### Requirement: The drawn slice is derived on every draw from the current interior
 
@@ -580,16 +596,21 @@ derived on every draw rather than stored, exactly as `viewport` is, because the 
 height is a property of the current frame. From `detail-view` onward the `height` it is
 given for the detail region is the **content area's**, not the interior's.
 
-`ui::layout::interior(area: Rect) -> Rect` SHALL be the one place in the crate that computes
-a bordered region's interior, and SHALL perform exactly the arithmetic
-`ratatui::widgets::Block::bordered().inner` performs: the origin advanced by one column and
-one row and **clamped to the rectangle's own right and bottom edges**, with the width and
-height each reduced by two, saturating to zero. The clamp is not decoration — at
+`ui::layout::interior(area: Rect, gutters: Gutters) -> Rect` SHALL be the one place in the
+crate that computes a region's interior, on the arithmetic `responsive-layout`'s region shape
+states: the origin advanced by the left gutter's column and **two** rows and **clamped to the
+rectangle's own right and bottom edges**, with the width reduced by the gutter columns and the
+height by two, each saturating to zero. The clamp is not decoration — at
 `Rect::new(0, 0, 0, 0)` it is the difference between `Rect { x: 0, y: 0, … }` and
 `Rect { x: 1, y: 1, … }`, and `Rect` compares all four fields.
 
+It no longer agrees with `ratatui::widgets::Block::bordered().inner`, and that is the point:
+a bordered block reserves a row at the **bottom** for its border, while a region reserves a
+second row at the **top** for its padding row. The two agree on `x` and on width for
+`Gutters::Both`, and differ by one on `y` and by one on height.
+
 `ui::layout::split_detail(interior: Rect) -> (Rect, Rect, Rect)` SHALL be the one place in
-the crate that divides that interior into the header row, the tab-bar row, and the content
+the crate that divides that interior into the tab-bar row, the rule row, and the content
 area, so `ui::view::render` and `Dashboard::normalise_scroll` cannot derive different content
 heights from the same frame. `artifact-tabs` states its degenerate-height contract.
 
@@ -602,27 +623,38 @@ heights from the same frame. `artifact-tabs` states its degenerate-height contra
 - **AND** the value is never greater than `lines.saturating_sub(height)`, so the drawn
   slice never runs past the last line
 - **AND** the heights are the **content area's** fourteen rows rather than the interior's
-  sixteen, which is what `detail-view` changed about the caller
+  seventeen, which is what `detail-view` changed about the caller — the content area is
+  fourteen rows under `pane-chrome` exactly as it was before it
 
 #### Scenario: `interior` agrees with a bordered block's own inner rectangle
 
-- **WHEN** `interior` and `ratatui::widgets::Block::bordered().inner` are both applied to
-  `Rect::new(0, 1, 40, 18)`, `Rect::new(40, 1, 80, 18)`, `Rect::new(0, 1, 60, 18)`,
-  `Rect::new(0, 0, 2, 2)`, `Rect::new(0, 0, 1, 1)`, and `Rect::new(0, 0, 0, 0)`
-- **THEN** the two agree on every one of them, compared as whole `Rect` values — all four
-  fields, not width and height alone
+The scenario's name is kept verbatim because a delta's scenario headers are its merge key. It
+now pins the **disagreement** deliberately, so a future edit that quietly restores the
+bordered arithmetic fails here rather than silently losing the padding row.
+
+- **WHEN** `interior` with `Gutters::Both` and `ratatui::widgets::Block::bordered().inner` are
+  both applied to `Rect::new(0, 0, 40, 19)`, `Rect::new(0, 0, 60, 19)`, `Rect::new(0, 0, 2, 2)`,
+  `Rect::new(0, 0, 1, 1)`, and `Rect::new(0, 0, 0, 0)`
+- **THEN** on each non-degenerate rectangle the two agree on `x`, on `width`, and on
+  `height` — both subtract two rows — and disagree on `y` by exactly one, `interior` giving
+  the larger `y`. The bordered arithmetic spent its two rows one above and one below; this
+  one spends both above, which moves the origin and leaves the height alone
+- **AND** `interior(Rect::new(0, 0, 40, 19), Gutters::Both)` is `Rect::new(1, 2, 38, 17)`
+  while the block's inner is `Rect::new(1, 1, 38, 17)`, compared as whole `Rect` values — all
+  four fields, not width and height alone
 - **AND** the two degenerate rectangles yield zero width and zero height rather than
   underflowing, with `Rect::new(0, 0, 1, 1)` giving `Rect { x: 1, y: 1, width: 0, height: 0 }`
   and `Rect::new(0, 0, 0, 0)` giving `Rect { x: 0, y: 0, width: 0, height: 0 }` — the origin
-  clamp, which is the one place a hand-rolled interior and ratatui's disagree
+  clamp, which both share
 
 #### Scenario: A scroll offset past the end still draws the last screenful
 
-- **WHEN** a `Dashboard` at `Route::Detail` whose selected change carries one artifact, whose
-  selected artifact is a single section holding the twenty-item list, and whose `detail.scroll` is `99`, is rendered at
-  120x20 and at 60x20
+- **WHEN** a `Dashboard` at `Route::Detail` whose selected change carries one artifact whose
+  single section holds the twenty-item list, and whose `detail.scroll` is `99`, is rendered
+  at 120x20 and at 60x20
 - **THEN** in the 120-column buffer the content area's first row reads `- line-06` and its
   last drawn row reads `- line-19`
 - **AND** in the 60-column buffer the same two rows read the same, so the fourteen-row
-  content area — not the sixteen-row interior — is what the clamp used
-- **AND** no row above the content area and no row below row 17 carries markdown
+  content area — not the seventeen-row interior — is what the clamp used
+- **AND** no row above the content area and no row below row 18 carries markdown
+
