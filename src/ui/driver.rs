@@ -1238,6 +1238,13 @@ mod tests {
         // collapsed sections is `2` after all three areas below, because a
         // cursor does not move when the pane resizes.
         let mut foldable = Dashboard {
+            repo: dashboard.repo.clone(),
+            searched_from: dashboard.searched_from.clone(),
+            changes: dashboard.changes.clone(),
+            route: dashboard.route,
+            quit: dashboard.quit,
+            selected: dashboard.selected,
+            filter: dashboard.filter.clone(),
             detail: crate::ui::app::Detail {
                 sections: vec![
                     ArtifactSection {
@@ -1259,7 +1266,12 @@ mod tests {
                 loaded: None,
                 expanded: std::collections::BTreeSet::new(),
             },
-            ..dashboard.clone()
+            refresh: dashboard.refresh.clone(),
+            agents: dashboard.agents.clone(),
+            agent_names: dashboard.agent_names.clone(),
+            launch: dashboard.launch.clone(),
+            sections: dashboard.sections.clone(),
+            file_mode: dashboard.file_mode,
         };
         let backend2 = TestBackend::new(120, 20);
         let mut terminal2 = ratatui::Terminal::new(backend2).expect("construct terminal");

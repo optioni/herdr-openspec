@@ -498,12 +498,21 @@ impl Dashboard {
             | Action::LaunchContinue
             | Action::LaunchArchive
             | Action::FocusAgent => self.apply_launch_action(action),
-            // `list-sections`: fold or unfold exactly one section — the one the cursor
-            // addresses, or the one the addressed change belongs to — and move `selected` to
-            // that section's header. Reaches no collaborator, spawns no process, touches no
-            // filesystem, and reads no clock. See `specs/list-selection/spec.md` -> "`Space`
-            // toggles the section the cursor is on or in".
-            Action::ToggleSection => self.apply_toggle_section(),
+            // `list-sections` / `artifact-folds`: route-dependent, exactly as `Next`
+            // and `Prev` already are and for the same reason (design.md ->
+            // Decision 6) — at `Route::List` fold or unfold exactly one **list**
+            // section, moving `selected` to that section's header; at
+            // `Route::Detail` fold or unfold exactly one **artifact** section,
+            // moving `detail.scroll` to that section's header row. Neither arm
+            // reaches a collaborator, spawns a process, touches the filesystem,
+            // or reads a clock. See `specs/list-selection/spec.md` -> "`Space`
+            // toggles the section the cursor is on or in" and
+            // `specs/artifact-folds/spec.md` -> "`Space` toggles the artifact
+            // section the cursor is on or in".
+            Action::ToggleSection => match self.route {
+                Route::List => self.apply_toggle_section(),
+                Route::Detail => self.apply_toggle_detail_section(),
+            },
             Action::Ignore => {}
         }
         // `list-sections`' one blanket rule, run after every action rather than a named
@@ -627,6 +636,86 @@ impl Dashboard {
         }
     }
 
+    /// `artifact-folds`: `Space`'s detail-route counterpart to
+    /// `apply_toggle_section` — folds or unfolds exactly one **artifact**
+    /// section, the one `detail.scroll` is on or in, and moves
+    /// `detail.scroll` to that section's own header row, recomputed against
+    /// the line list the fold just produced. Touches only `detail.expanded`
+    /// and `detail.scroll`; leaves `sections`, `selected`, and
+    /// `refresh.requested` untouched. Inert, with no problem recorded, when
+    /// the selected artifact is not foldable (`Detail::foldable()` — the
+    /// one site, per design.md -> Decision 3) or when `detail.scroll`
+    /// addresses a problem row rather than a section.
+    fn apply_toggle_detail_section(&mut self) {
+        if !self.detail.foldable() {
+            return;
+        }
+        let Some(section) = self.detail_cursor_section() else {
+            return;
+        };
+        if !self.detail.expanded.remove(&section) {
+            self.detail.expanded.insert(section);
+        }
+        if let Some(header_row) = self.detail_section_header_row(section) {
+            self.detail.scroll = header_row;
+        }
+    }
+
+    /// The reference width `detail_cursor_section` and
+    /// `detail_section_header_row` derive `ui::detail::content_lines`' row
+    /// list at. `Dashboard::apply` carries no real frame width — design.md
+    /// -> Decision 7 states plainly that geometry-dependent resolution is
+    /// `mouse_action`'s job, not `apply`'s, and `Space` has none to
+    /// inherit: it is a route dispatch exactly like `Action::Next`, not a
+    /// resolved click. `u16::MAX` sidesteps the gap rather than guessing a
+    /// terminal size: at that width `ui::markdown::lines` wraps nothing, so
+    /// the row list this computes agrees with the one actually drawn
+    /// whenever a section's own body does not wrap — the convention every
+    /// fixture in this crate's own test suite already follows, for the
+    /// same reason (`ui::detail::tests::three_spec_detail`'s own comment).
+    const TOGGLE_REFERENCE_WIDTH: u16 = u16::MAX;
+
+    /// The section `detail.scroll` is currently on or in, per
+    /// `ui::detail::content_lines`' own `SectionHeader { selected }` flag —
+    /// a **lookup** into that row list, never a second derivation of it
+    /// (design.md -> Decision 12's own reasoning, carried to the keyboard
+    /// side of the fold). `None` when `detail.scroll` addresses a problem
+    /// row or the artifact carries no sections at all.
+    fn detail_cursor_section(&self) -> Option<usize> {
+        crate::ui::detail::content_lines(
+            &self.detail,
+            self.selected_change(),
+            Self::TOGGLE_REFERENCE_WIDTH,
+        )
+        .iter()
+        .find_map(|row| match row.kind {
+            crate::ui::detail::ContentKind::SectionHeader {
+                section,
+                selected: true,
+            } => Some(section),
+            _ => None,
+        })
+    }
+
+    /// `section`'s own header row index in the **current** row list — used
+    /// to move `detail.scroll` onto the header a fold just toggled,
+    /// recomputed against the line list the fold produced rather than
+    /// reused from before it.
+    fn detail_section_header_row(&self, section: usize) -> Option<usize> {
+        crate::ui::detail::content_lines(
+            &self.detail,
+            self.selected_change(),
+            Self::TOGGLE_REFERENCE_WIDTH,
+        )
+        .iter()
+        .position(|row| {
+            matches!(
+                row.kind,
+                crate::ui::detail::ContentKind::SectionHeader { section: s, .. } if s == section
+            )
+        })
+    }
+
     /// Whether the next refresh cycle should resolve the archived tier: the
     /// archived section is open, `changes.archived` is empty, and
     /// `changes.archived_total` is greater than zero. Self-clearing, because
@@ -710,8 +799,17 @@ impl Dashboard {
         let total =
             crate::ui::detail::content_lines(&self.detail, self.selected_change(), content.width)
                 .len();
-        self.detail.scroll =
-            crate::ui::layout::scroll_offset(total, self.detail.scroll, content.height);
+        // `detail-scroll` -> "The stored scroll offset is normalised against the
+        // frame just drawn": a foldable artifact clamps the cursor to the last
+        // **line**, so every section header stays reachable however tall the
+        // pane is (design.md -> Decision 2); a non-foldable one keeps today's
+        // screenful clamp. Both leave `detail.scroll` at `0` when `total` is
+        // `0`, since `total.saturating_sub(1)` is itself `0` there.
+        self.detail.scroll = if self.detail.foldable() {
+            self.detail.scroll.min(total.saturating_sub(1))
+        } else {
+            crate::ui::layout::scroll_offset(total, self.detail.scroll, content.height)
+        };
     }
 
     /// Whether `key`'s rows are shown: a non-empty `/` query forces every section
@@ -1849,7 +1947,11 @@ mod tests {
     /// width — 78 at 120 columns, 58 at 60 — the same band
     /// `ui::view::tests::detail_interior_cols` measures.
     fn detail_interior_row(buf: &ratatui::buffer::Buffer, y: u16) -> String {
-        let (from, width) = if buf.area.width == 60 { (1, 58) } else { (42, 78) };
+        let (from, width) = if buf.area.width == 60 {
+            (1, 58)
+        } else {
+            (42, 78)
+        };
         crate::testutil::row_text(buf, y)
             .chars()
             .skip(from)
@@ -1867,7 +1969,10 @@ mod tests {
         d.apply(Action::ToggleSection);
 
         assert_eq!(d.detail.expanded, std::collections::BTreeSet::from([1]));
-        assert_eq!(d.detail.scroll, 1, "did not move: nothing above it changed height");
+        assert_eq!(
+            d.detail.scroll, 1,
+            "did not move: nothing above it changed height"
+        );
         assert_eq!(d.sections.collapsed, before.sections.collapsed);
         assert_eq!(d.selected, before.selected);
         assert_eq!(d.refresh.requested, before.refresh.requested);
@@ -1923,8 +2028,10 @@ mod tests {
             );
             assert_eq!(rows.len(), 3, "width {width}: three collapsed sections");
             assert!(
-                rows.iter()
-                    .all(|r| matches!(r.kind, crate::ui::detail::ContentKind::SectionHeader { .. })),
+                rows.iter().all(|r| matches!(
+                    r.kind,
+                    crate::ui::detail::ContentKind::SectionHeader { .. }
+                )),
                 "width {width}: every row is a header"
             );
             let _ = buf;
@@ -2036,7 +2143,10 @@ mod tests {
                 .chars()
                 .take(40)
                 .collect();
-            assert_eq!(before_row, after_row, "row {y}: the list region did not move");
+            assert_eq!(
+                before_row, after_row,
+                "row {y}: the list region did not move"
+            );
         }
     }
 
@@ -2112,10 +2222,7 @@ mod tests {
         let rows = crate::ui::detail::content_lines(&d.detail, d.selected_change(), 78);
         assert!(matches!(
             rows[2].kind,
-            crate::ui::detail::ContentKind::SectionHeader {
-                selected: true,
-                ..
-            }
+            crate::ui::detail::ContentKind::SectionHeader { selected: true, .. }
         ));
 
         d.apply(Action::ScrollUp);
@@ -2124,10 +2231,7 @@ mod tests {
         let rows = crate::ui::detail::content_lines(&d.detail, d.selected_change(), 78);
         assert!(matches!(
             rows[0].kind,
-            crate::ui::detail::ContentKind::SectionHeader {
-                selected: true,
-                ..
-            }
+            crate::ui::detail::ContentKind::SectionHeader { selected: true, .. }
         ));
     }
 
@@ -4310,10 +4414,7 @@ mod tests {
                 crate::ui::detail::content_lines(&foldable.detail, foldable.selected_change(), 78);
             assert!(matches!(
                 rows[0].kind,
-                crate::ui::detail::ContentKind::SectionHeader {
-                    selected: true,
-                    ..
-                }
+                crate::ui::detail::ContentKind::SectionHeader { selected: true, .. }
             ));
         }
 
