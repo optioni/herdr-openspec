@@ -109,26 +109,73 @@ pub struct Filter {
     pub active: bool,
 }
 
-/// The detail region's markdown source and scroll offset, plus
-/// `detail-view`'s three additions. `source` is set by `Dashboard::sync_detail`,
-/// driven once per loop iteration by the injected `ArtifactReader`; `ui::load`
-/// still starts it empty. `scroll` is a user-controlled position, the detail
-/// region's counterpart to `Dashboard::selected`, not derived geometry: the
-/// offset actually drawn is still recomputed on every draw by
-/// `layout::scroll_offset` against the current content area's height. `tab`
-/// is the selected artifact's position in the selected change's `artifacts`;
-/// `problems` names each artifact file that could not be read; `loaded` is
-/// the `(change directory, tab)` key whose content `source` currently holds
-/// — `sync_detail`'s cache key, and the reason an unchanged selection
-/// re-reads nothing. Deliberately implements no `Default`, anywhere in the
-/// crate, on the same terms as `Dashboard` and `Filter`: every construction
-/// and destructuring names all five fields, with no `..` rest. See
-/// `specs/detail-scroll/spec.md`, `specs/artifact-tabs/spec.md`,
-/// `specs/artifact-content/spec.md`, and the `NODEFAULT-UI` check, whose type
-/// list covers this type too.
+/// `artifact-folds`' addition: one file of a multi-file artifact, once the
+/// injected reader has read it. `label` names the file — for
+/// `specs/<capability>/spec.md`, the capability directory — and `text` is
+/// the reader's bytes **verbatim**: no separator inserted between two
+/// sections and no newline added, unlike the single concatenated `source`
+/// string this type replaces. Labels are not required to be unique;
+/// sections are addressed by index everywhere, never by label. Joins the
+/// `NODEFAULT-UI` type list, so every construction site names both fields.
+/// See `specs/artifact-folds/spec.md` -> "A multi-file artifact's content
+/// is a list of named sections" and design.md -> Decision 1.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ArtifactSection {
+    pub label: String,
+    pub text: String,
+}
+
+/// The label `artifact_section_label` derives for `path`, relative to
+/// `change_dir`: when the file name is `spec.md` and the relative path has
+/// at least one parent component, the label is that parent's final
+/// component; otherwise the label is the file name. Total over every path,
+/// including one not under `change_dir`, an empty path, and one whose
+/// relevant path component is not valid UTF-8 — each of those falls back to
+/// the file name or the empty string rather than panicking. See
+/// `specs/artifact-folds/spec.md` -> "The label derivation is total over
+/// adversarial paths" and design.md -> Decision 5.
+fn artifact_section_label(change_dir: &std::path::Path, path: &std::path::Path) -> String {
+    let Some(file_name) = path.file_name().and_then(|n| n.to_str()) else {
+        return String::new();
+    };
+    if file_name == "spec.md"
+        && let Ok(relative) = path.strip_prefix(change_dir)
+    {
+        let components: Vec<_> = relative.components().collect();
+        if components.len() > 1
+            && let std::path::Component::Normal(parent) = components[components.len() - 2]
+        {
+            return match parent.to_str() {
+                Some(s) => s.to_string(),
+                None => String::new(),
+            };
+        }
+    }
+    file_name.to_string()
+}
+
+/// The detail region's content and scroll offset, plus `detail-view`'s three
+/// additions. `sections` is set by `Dashboard::sync_detail`, driven once per
+/// loop iteration by the injected `ArtifactReader`; `ui::load` still starts
+/// it empty. `artifact-folds`' addition: a path the reader failed on
+/// contributes no entry, so `sections.len()` is not `paths.len()` when a read
+/// failed. `scroll` is a user-controlled position, the detail region's
+/// counterpart to `Dashboard::selected`, not derived geometry: the offset
+/// actually drawn is still recomputed on every draw by `layout::scroll_offset`
+/// (or, at a foldable artifact, `layout::viewport`) against the current
+/// content area's height. `tab` is the selected artifact's position in the
+/// selected change's `artifacts`; `problems` names each artifact file that
+/// could not be read; `loaded` is the `(change directory, tab)` key whose
+/// content `sections` currently holds — `sync_detail`'s cache key, and the
+/// reason an unchanged selection re-reads nothing. Deliberately implements no
+/// `Default`, anywhere in the crate, on the same terms as `Dashboard` and
+/// `Filter`: every construction and destructuring names all five fields, with
+/// no `..` rest. See `specs/detail-scroll/spec.md`, `specs/artifact-tabs/spec.md`,
+/// `specs/artifact-content/spec.md`, `specs/artifact-folds/spec.md`, and the
+/// `NODEFAULT-UI` check, whose type list covers this type too.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Detail {
-    pub source: String,
+    pub sections: Vec<ArtifactSection>,
     pub scroll: usize,
     pub tab: usize,
     pub problems: Vec<String>,
@@ -868,7 +915,7 @@ impl Dashboard {
             (change.dir.clone(), tab, paths)
         }) else {
             // Step 1: nothing selected.
-            self.detail.source.clear();
+            self.detail.sections.clear();
             self.detail.problems.clear();
             self.detail.tab = 0;
             self.detail.scroll = 0;
@@ -881,17 +928,18 @@ impl Dashboard {
         if !key_changed && !forced {
             return; // step 3
         }
-        // Step 4: re-read every path, concatenating in order.
+        // Step 4: re-read every path, one `ArtifactSection` per successful
+        // read, in resolution order — no separator inserted and no newline
+        // added, per `artifact-folds`. A failing path contributes no
+        // section, only a problem.
         self.detail.problems.clear();
-        self.detail.source.clear();
+        self.detail.sections.clear();
         for path in &paths {
             match read(path) {
-                Ok(text) => {
-                    if !self.detail.source.is_empty() && !self.detail.source.ends_with('\n') {
-                        self.detail.source.push('\n');
-                    }
-                    self.detail.source.push_str(&text);
-                }
+                Ok(text) => self.detail.sections.push(ArtifactSection {
+                    label: artifact_section_label(&key.0, path),
+                    text,
+                }),
                 Err(e) => {
                     self.detail
                         .problems
@@ -1003,7 +1051,10 @@ mod tests {
     // submodule — actually match their full test paths.
     use crate::agents::{Agent, AgentStatus};
     use crate::changes::fixture;
-    use crate::ui::app::{Action, Dashboard, Detail, Filter, Refresh, Route, Sections, action_for};
+    use crate::ui::app::{
+        Action, Dashboard, Detail, Filter, Refresh, Route, Sections, action_for,
+        artifact_section_label,
+    };
     use std::collections::BTreeMap;
 
     fn agent(name: Option<&str>, status: AgentStatus, cwd: Option<&str>) -> Agent {
@@ -1041,7 +1092,7 @@ mod tests {
                 active: false,
             },
             detail: Detail {
-                source: String::new(),
+                sections: Vec::new(),
                 scroll: 0,
                 tab: 0,
                 problems: Vec::new(),
@@ -1115,7 +1166,7 @@ mod tests {
         assert_eq!(
             detail,
             &Detail {
-                source: String::new(),
+                sections: Vec::new(),
                 scroll: 0,
                 tab: 0,
                 problems: Vec::new(),
@@ -1579,6 +1630,130 @@ mod tests {
         }
     }
 
+    /// `artifact-folds`: "The label derivation is total over adversarial
+    /// paths" — the scenario's own six paths against one change directory,
+    /// none of which panics.
+    #[test]
+    fn the_label_derivation_is_total_over_adversarial_paths() {
+        let change_dir = std::path::Path::new("/repo/openspec/changes/c");
+        let cases: [(&str, &str); 6] = [
+            ("/repo/openspec/changes/c/specs/a/spec.md", "a"),
+            ("/repo/openspec/changes/c/specs/a/b/spec.md", "b"),
+            ("/repo/openspec/changes/c/specs/notes.md", "notes.md"),
+            ("/repo/openspec/changes/c/spec.md", "spec.md"),
+            ("/elsewhere/spec.md", "spec.md"),
+            ("", ""),
+        ];
+        for (path, want) in cases {
+            assert_eq!(
+                artifact_section_label(change_dir, std::path::Path::new(path)),
+                want,
+                "path {path:?}"
+            );
+        }
+    }
+
+    /// `artifact-folds`: "The three spec files of a change become three
+    /// labelled sections".
+    #[test]
+    fn the_three_spec_files_of_a_change_become_three_labelled_sections() {
+        let change = fixture::with_artifacts(
+            fixture::active("c", 0, 0),
+            &[(
+                "specs",
+                &[
+                    "/repo/openspec/changes/c/specs/degraded-coverage/spec.md",
+                    "/repo/openspec/changes/c/specs/markdown-render/spec.md",
+                    "/repo/openspec/changes/c/specs/tasks-checklist/spec.md",
+                ],
+            )],
+        );
+        let mut d =
+            dashboard_for_attribution(vec![change], Vec::new(), 1, Vec::new(), BTreeMap::new());
+        let recorder =
+            crate::testutil::RecordingReader::always(Ok("## MODIFIED Requirements\n".to_string()));
+        let read = |p: &std::path::Path| recorder.read(p);
+
+        d.sync_detail(&read);
+
+        assert_eq!(d.detail.sections.len(), 3);
+        assert_eq!(d.detail.sections[0].label, "degraded-coverage");
+        assert_eq!(d.detail.sections[1].label, "markdown-render");
+        assert_eq!(d.detail.sections[2].label, "tasks-checklist");
+        for section in &d.detail.sections {
+            assert_eq!(section.text, "## MODIFIED Requirements\n");
+        }
+        assert!(d.detail.sections.len() > 1, "foldable: sections.len() is 3");
+    }
+
+    /// `artifact-folds`: "An artifact with no resolved paths has no
+    /// sections".
+    #[test]
+    fn an_artifact_with_no_resolved_paths_has_no_sections() {
+        let change = fixture::with_artifacts(fixture::active("c", 0, 0), &[("specs", &[])]);
+        let mut d =
+            dashboard_for_attribution(vec![change], Vec::new(), 1, Vec::new(), BTreeMap::new());
+        let recorder =
+            crate::testutil::RecordingReader::always(Err("should not be called".to_string()));
+        let read = |p: &std::path::Path| recorder.read(p);
+
+        d.sync_detail(&read);
+
+        assert!(d.detail.sections.is_empty());
+        assert!(d.detail.sections.len() <= 1, "not foldable");
+        assert_eq!(recorder.calls(), 0);
+        let lines = crate::ui::detail::content_lines(&d.detail, None, 78);
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].text().starts_with("No content yet"));
+    }
+
+    /// `artifact-folds`: "An unreadable file drops its section and keeps
+    /// its siblings".
+    #[test]
+    fn an_unreadable_file_drops_its_section_and_keeps_its_siblings() {
+        let change = fixture::with_artifacts(
+            fixture::active("c", 0, 0),
+            &[(
+                "specs",
+                &[
+                    "/repo/openspec/changes/c/specs/a/spec.md",
+                    "/repo/openspec/changes/c/specs/b/spec.md",
+                    "/repo/openspec/changes/c/specs/d/spec.md",
+                ],
+            )],
+        );
+        let mut d =
+            dashboard_for_attribution(vec![change], Vec::new(), 1, Vec::new(), BTreeMap::new());
+        let recorder = crate::testutil::RecordingReader::new(
+            vec![
+                (
+                    std::path::PathBuf::from("/repo/openspec/changes/c/specs/a/spec.md"),
+                    Ok("# ok\n".to_string()),
+                ),
+                (
+                    std::path::PathBuf::from("/repo/openspec/changes/c/specs/b/spec.md"),
+                    Err("permission denied".to_string()),
+                ),
+                (
+                    std::path::PathBuf::from("/repo/openspec/changes/c/specs/d/spec.md"),
+                    Ok("# ok\n".to_string()),
+                ),
+            ],
+            Err("unexpected".to_string()),
+        );
+        let read = |p: &std::path::Path| recorder.read(p);
+
+        d.sync_detail(&read);
+
+        assert_eq!(d.detail.sections.len(), 2);
+        assert_eq!(d.detail.sections[0].label, "a");
+        assert_eq!(d.detail.sections[1].label, "d");
+        assert_eq!(d.detail.problems.len(), 1);
+        assert!(d.detail.problems[0].contains("/repo/openspec/changes/c/specs/b/spec.md"));
+        assert!(d.detail.problems[0].contains("permission denied"));
+        assert!(d.detail.sections.len() > 1, "still foldable");
+    }
+
     /// `mouse-input`: the wheel and click actions `Dashboard::apply` gains.
     /// `list-selection`'s ten scenarios live here; `detail-scroll`'s seven live
     /// in `mod scroll` beside it.
@@ -1773,7 +1948,7 @@ mod tests {
     /// `mouse-input`: the four region-explicit wheel actions. `detail-scroll`'s
     /// seven scenarios.
     mod scroll {
-        use crate::ui::app::{Action, Dashboard, Route, Target};
+        use crate::ui::app::{Action, ArtifactSection, Dashboard, Route, Target};
 
         use super::click::dashboard;
 
@@ -1794,7 +1969,10 @@ mod tests {
         fn scroll_down_scrolls_at_the_list_route() {
             let mut d = dashboard(3, 0, 0);
             d.selected = index_of(&d, Target::Change(0));
-            d.detail.source = lines(40);
+            d.detail.sections = vec![ArtifactSection {
+                label: String::new(),
+                text: lines(40),
+            }];
             let selected_before = d.selected;
 
             for _ in 0..3 {
@@ -1827,7 +2005,10 @@ mod tests {
             for route in [Route::List, Route::Detail] {
                 let mut d = dashboard(3, 0, 1);
                 d.route = route;
-                d.detail.source = lines(40);
+                d.detail.sections = vec![ArtifactSection {
+                    label: String::new(),
+                    text: lines(40),
+                }];
                 let before = d.clone();
                 d.apply(Action::ScrollUp);
                 assert_eq!(d.detail.scroll, 0);
@@ -1839,7 +2020,10 @@ mod tests {
         fn a_held_wheel_is_clamped_by_the_frame() {
             let mut wheeled = dashboard(3, 0, 0);
             wheeled.selected = index_of(&wheeled, Target::Change(0));
-            wheeled.detail.source = lines(12);
+            wheeled.detail.sections = vec![ArtifactSection {
+                label: String::new(),
+                text: lines(12),
+            }];
             for _ in 0..500 {
                 wheeled.apply(Action::ScrollDown);
             }
@@ -1863,7 +2047,10 @@ mod tests {
             // The same value a held `j` at the detail route leaves behind.
             let mut held = dashboard(3, 0, 0);
             held.selected = index_of(&held, Target::Change(0));
-            held.detail.source = lines(12);
+            held.detail.sections = vec![ArtifactSection {
+                label: String::new(),
+                text: lines(12),
+            }];
             held.route = Route::Detail;
             for _ in 0..500 {
                 held.apply(Action::Next);
@@ -1876,7 +2063,10 @@ mod tests {
         fn next_at_detail_equals_scroll_down() {
             let mut keyed = dashboard(3, 0, 1);
             keyed.route = Route::Detail;
-            keyed.detail.source = lines(40);
+            keyed.detail.sections = vec![ArtifactSection {
+                label: String::new(),
+                text: lines(40),
+            }];
             let mut wheeled = keyed.clone();
             keyed.apply(Action::Next);
             wheeled.apply(Action::ScrollDown);
@@ -1950,7 +2140,8 @@ mod tests {
         use crate::changes::fixture;
         use crate::testutil::RecordingReader;
         use crate::ui::app::{
-            Action, Dashboard, Detail, Filter, Route, SectionKey, Sections, Target, action_for,
+            Action, ArtifactSection, Dashboard, Detail, Filter, Route, SectionKey, Sections,
+            Target, action_for,
         };
 
         fn empty_filter() -> Filter {
@@ -1962,7 +2153,7 @@ mod tests {
 
         fn empty_detail() -> Detail {
             Detail {
-                source: String::new(),
+                sections: Vec::new(),
                 scroll: 0,
                 tab: 0,
                 problems: Vec::new(),
@@ -2074,7 +2265,7 @@ mod tests {
                 selected: 1,
                 filter: empty_filter(),
                 detail: Detail {
-                    source: String::new(),
+                    sections: Vec::new(),
                     scroll,
                     tab,
                     problems: Vec::new(),
@@ -2517,7 +2708,10 @@ mod tests {
             );
             let dashboard = Dashboard {
                 detail: Detail {
-                    source: "## 1. Setup\n- [x] a\n- [ ] b\n".to_string(),
+                    sections: vec![ArtifactSection {
+                        label: String::new(),
+                        text: "## 1. Setup\n- [x] a\n- [ ] b\n".to_string(),
+                    }],
                     scroll: 0,
                     tab: 0,
                     problems: Vec::new(),
@@ -3575,7 +3769,10 @@ mod tests {
 
         fn twenty_line_detail() -> Detail {
             Detail {
-                source: (0..20).map(|i| format!("- line-{i:02}\n")).collect(),
+                sections: vec![ArtifactSection {
+                    label: String::new(),
+                    text: (0..20).map(|i| format!("- line-{i:02}\n")).collect(),
+                }],
                 scroll: 0,
                 tab: 0,
                 problems: Vec::new(),
@@ -3587,13 +3784,14 @@ mod tests {
         fn detail_destructures_into_exactly_five_fields() {
             let d = twenty_line_detail();
             let Detail {
-                source,
+                sections,
                 scroll,
                 tab,
                 problems,
                 loaded,
             } = &d;
-            assert!(source.starts_with("- line-00"));
+            assert_eq!(sections.len(), 1);
+            assert!(sections[0].text.starts_with("- line-00"));
             assert_eq!(*scroll, 0);
             assert_eq!(*tab, 0);
             assert!(problems.is_empty());
@@ -3765,7 +3963,7 @@ mod tests {
         fn every_route_move_resets_the_scroll() {
             let mut d = Dashboard {
                 detail: Detail {
-                    source: twenty_line_detail().source,
+                    sections: twenty_line_detail().sections,
                     scroll: 3,
                     tab: 0,
                     problems: Vec::new(),
@@ -3808,7 +4006,7 @@ mod tests {
 
             let mut d2 = Dashboard {
                 detail: Detail {
-                    source: twenty_line_detail().source,
+                    sections: twenty_line_detail().sections,
                     scroll: 3,
                     tab: 0,
                     problems: Vec::new(),
@@ -3850,7 +4048,7 @@ mod tests {
 
             let mut d3 = Dashboard {
                 detail: Detail {
-                    source: twenty_line_detail().source,
+                    sections: twenty_line_detail().sections,
                     scroll: 3,
                     tab: 0,
                     problems: Vec::new(),
@@ -3900,11 +4098,11 @@ mod tests {
         /// selected change — `ui::view::render_detail` draws nothing at all
         /// when `selected_change()` is `None`, so an empty `ChangeSet` would
         /// make every rendered-buffer assertion below vacuous regardless of
-        /// `detail.source` or `detail.scroll`.
+        /// `detail.sections` or `detail.scroll`.
         fn dashboard_for_enter(route: Route, filter: Filter, scroll: usize) -> Dashboard {
             Dashboard {
                 detail: Detail {
-                    source: twenty_line_detail().source,
+                    sections: twenty_line_detail().sections,
                     scroll,
                     tab: 0,
                     problems: Vec::new(),
@@ -4173,7 +4371,7 @@ mod tests {
             // twenty-line source fits entirely and the clamp is 0.
             let mut d = Dashboard {
                 detail: Detail {
-                    source: twenty_line_detail().source,
+                    sections: twenty_line_detail().sections,
                     scroll: 99,
                     tab: 0,
                     problems: Vec::new(),
@@ -4214,7 +4412,7 @@ mod tests {
 
             let mut d2 = Dashboard {
                 detail: Detail {
-                    source: twenty_line_detail().source,
+                    sections: twenty_line_detail().sections,
                     scroll: 99,
                     tab: 0,
                     problems: Vec::new(),
@@ -4255,7 +4453,7 @@ mod tests {
 
             let mut d3 = Dashboard {
                 detail: Detail {
-                    source: twenty_line_detail().source,
+                    sections: twenty_line_detail().sections,
                     scroll: 99,
                     tab: 0,
                     problems: Vec::new(),
@@ -4314,7 +4512,10 @@ mod tests {
             fn dashboard_for(change: crate::changes::Change, source: String) -> Dashboard {
                 Dashboard {
                     detail: Detail {
-                        source,
+                        sections: vec![ArtifactSection {
+                            label: String::new(),
+                            text: source,
+                        }],
                         scroll: 99,
                         tab: 0,
                         problems: Vec::new(),
@@ -4380,7 +4581,7 @@ mod tests {
         fn normalise_scroll_is_inert_when_the_detail_region_is_not_drawn() {
             let mut d = Dashboard {
                 detail: Detail {
-                    source: twenty_line_detail().source,
+                    sections: twenty_line_detail().sections,
                     scroll: 9,
                     tab: 0,
                     problems: Vec::new(),
@@ -4447,7 +4648,10 @@ mod tests {
         fn normalise_scroll_agrees_with_render_about_the_wide_layouts_content_width() {
             let mut d = Dashboard {
                 detail: Detail {
-                    source: "x".repeat(1092),
+                    sections: vec![ArtifactSection {
+                        label: String::new(),
+                        text: "x".repeat(1092),
+                    }],
                     scroll: 99,
                     tab: 0,
                     problems: Vec::new(),
@@ -4576,7 +4780,10 @@ mod tests {
                     active: false,
                 },
                 detail: Detail {
-                    source: "stale".to_string(),
+                    sections: vec![ArtifactSection {
+                        label: String::new(),
+                        text: "stale".to_string(),
+                    }],
                     scroll: 5,
                     tab: 2,
                     problems: Vec::new(),
@@ -4652,7 +4859,10 @@ mod tests {
                     active: false,
                 },
                 detail: Detail {
-                    source: "stale".to_string(),
+                    sections: vec![ArtifactSection {
+                        label: String::new(),
+                        text: "stale".to_string(),
+                    }],
                     scroll: 6,
                     tab: 2,
                     problems: Vec::new(),
@@ -5182,7 +5392,7 @@ mod tests {
                 selected: 0,
                 filter: empty_filter(),
                 detail: Detail {
-                    source: String::new(),
+                    sections: Vec::new(),
                     scroll: 9,
                     tab: 2,
                     problems: Vec::new(),
@@ -5233,7 +5443,7 @@ mod tests {
                 selected: 0,
                 filter: empty_filter(),
                 detail: Detail {
-                    source: String::new(),
+                    sections: Vec::new(),
                     scroll: 9,
                     tab: 2,
                     problems: Vec::new(),
@@ -5296,7 +5506,7 @@ mod tests {
                 selected: 1,
                 filter: empty_filter(),
                 detail: Detail {
-                    source: String::new(),
+                    sections: Vec::new(),
                     scroll: 0,
                     tab: 0,
                     problems: Vec::new(),
@@ -5347,7 +5557,8 @@ mod tests {
             d.sync_detail(&read);
             assert!(!d.refresh.reload);
 
-            assert_eq!(d.detail.source, "# proposal");
+            assert_eq!(d.detail.sections.len(), 1);
+            assert_eq!(d.detail.sections[0].text, "# proposal");
             assert!(d.detail.problems.is_empty());
             assert_eq!(d.detail.loaded, Some((dir, 0)));
             assert_eq!(recorder.calls(), 1);
@@ -5381,7 +5592,8 @@ mod tests {
                 "the unchanged key must not suppress the forced re-read"
             );
             assert_eq!(second.paths(), vec![std::path::PathBuf::from("/repo/p.md")]);
-            assert_eq!(d.detail.source, "# a much longer proposal now");
+            assert_eq!(d.detail.sections.len(), 1);
+            assert_eq!(d.detail.sections[0].text, "# a much longer proposal now");
             assert_eq!(
                 d.detail.scroll, 6,
                 "a forced reload must not move the scroll"
@@ -5414,7 +5626,8 @@ mod tests {
 
             assert_eq!(second.calls(), 1);
             assert_eq!(second.paths(), vec![std::path::PathBuf::from("/repo/d.md")]);
-            assert_eq!(d.detail.source, "# design");
+            assert_eq!(d.detail.sections.len(), 1);
+            assert_eq!(d.detail.sections[0].text, "# design");
             assert_eq!(
                 d.detail.scroll, 0,
                 "the tab move, not the forced flag, must reset the scroll"
@@ -5447,7 +5660,7 @@ mod tests {
                 selected: 1,
                 filter: empty_filter(),
                 detail: Detail {
-                    source: String::new(),
+                    sections: Vec::new(),
                     scroll: 0,
                     tab: 0,
                     problems: Vec::new(),
@@ -5494,7 +5707,8 @@ mod tests {
                     std::path::PathBuf::from("/repo/b-p.md"),
                 ]
             );
-            assert_eq!(d.detail.source, "text");
+            assert_eq!(d.detail.sections.len(), 1);
+            assert_eq!(d.detail.sections[0].text, "text");
             assert_eq!(d.detail.scroll, 0);
         }
 
@@ -5522,7 +5736,7 @@ mod tests {
                 selected: 1,
                 filter: empty_filter(),
                 detail: Detail {
-                    source: String::new(),
+                    sections: Vec::new(),
                     scroll: 0,
                     tab: 0,
                     problems: Vec::new(),
@@ -5576,23 +5790,36 @@ mod tests {
             d.sync_detail(&read);
 
             assert_eq!(recorder.calls(), 2);
-            assert_eq!(d.detail.source, "ARCHIVED");
+            assert_eq!(d.detail.sections.len(), 1);
+            assert_eq!(d.detail.sections[0].text, "ARCHIVED");
         }
 
         #[test]
         fn a_multi_file_artifact_is_concatenated_in_path_order_with_a_separating_newline() {
+            // `artifact-folds`: rewritten per the spec's new body — a section's
+            // `text` is the reader's bytes **verbatim**, with no separator
+            // inserted and no newline added, even though the first file below
+            // does not end with one. The paths sit under the change directory
+            // (`fixture::active("x", ..)`'s own `/repo/openspec/changes/x`) so
+            // the two sections also carry the labels `artifact-folds` derives.
             let mut d = dashboard_with_artifacts_named(
                 "x",
-                &[("specs", &["/repo/specs/a/spec.md", "/repo/specs/b/spec.md"])],
+                &[(
+                    "specs",
+                    &[
+                        "/repo/openspec/changes/x/specs/a/spec.md",
+                        "/repo/openspec/changes/x/specs/b/spec.md",
+                    ],
+                )],
             );
             let recorder = RecordingReader::new(
                 vec![
                     (
-                        std::path::PathBuf::from("/repo/specs/a/spec.md"),
+                        std::path::PathBuf::from("/repo/openspec/changes/x/specs/a/spec.md"),
                         Ok("# a".to_string()),
                     ),
                     (
-                        std::path::PathBuf::from("/repo/specs/b/spec.md"),
+                        std::path::PathBuf::from("/repo/openspec/changes/x/specs/b/spec.md"),
                         Ok("# b\n".to_string()),
                     ),
                 ],
@@ -5600,30 +5827,12 @@ mod tests {
             );
             let read = |p: &std::path::Path| recorder.read(p);
             d.sync_detail(&read);
-            assert_eq!(d.detail.source, "# a\n# b\n");
 
-            // The preceding file already ending in a newline gains no
-            // second one.
-            let mut d2 = dashboard_with_artifacts_named(
-                "y",
-                &[("specs", &["/repo/specs/a/spec.md", "/repo/specs/b/spec.md"])],
-            );
-            let recorder2 = RecordingReader::new(
-                vec![
-                    (
-                        std::path::PathBuf::from("/repo/specs/a/spec.md"),
-                        Ok("# a\n".to_string()),
-                    ),
-                    (
-                        std::path::PathBuf::from("/repo/specs/b/spec.md"),
-                        Ok("# b\n".to_string()),
-                    ),
-                ],
-                Err("unexpected".to_string()),
-            );
-            let read2 = |p: &std::path::Path| recorder2.read(p);
-            d2.sync_detail(&read2);
-            assert_eq!(d2.detail.source, "# a\n# b\n");
+            assert_eq!(d.detail.sections.len(), 2);
+            assert_eq!(d.detail.sections[0].label, "a");
+            assert_eq!(d.detail.sections[0].text, "# a");
+            assert_eq!(d.detail.sections[1].label, "b");
+            assert_eq!(d.detail.sections[1].text, "# b\n");
         }
 
         #[test]
@@ -5648,7 +5857,12 @@ mod tests {
             let read = |p: &std::path::Path| recorder.read(p);
             d.sync_detail(&read);
 
-            assert_eq!(d.detail.source, "# b\n");
+            assert_eq!(d.detail.sections.len(), 1);
+            assert_eq!(d.detail.sections[0].text, "# b\n");
+            assert!(
+                d.detail.sections.len() <= 1,
+                "artifact-folds: one surviving section is not foldable"
+            );
             assert_eq!(d.detail.problems.len(), 1);
             assert!(d.detail.problems[0].contains("/repo/specs/a/spec.md"));
             assert!(d.detail.problems[0].contains("permission denied"));
@@ -5675,7 +5889,7 @@ mod tests {
 
             d.sync_detail(&read);
 
-            assert!(d.detail.source.is_empty());
+            assert!(d.detail.sections.is_empty());
             assert!(d.detail.problems.is_empty());
             assert_eq!(d.detail.loaded, Some((dir, 0)));
             assert_eq!(recorder.calls(), 0);
@@ -5709,7 +5923,7 @@ mod tests {
                 selected: 1,
                 filter: empty_filter(),
                 detail: Detail {
-                    source: String::new(),
+                    sections: Vec::new(),
                     scroll: 0,
                     tab: 4,
                     problems: Vec::new(),
@@ -5759,13 +5973,13 @@ mod tests {
             let recorder = RecordingReader::always(Ok("# proposal".to_string()));
             let read = |p: &std::path::Path| recorder.read(p);
             d.sync_detail(&read);
-            assert!(!d.detail.source.is_empty());
+            assert!(!d.detail.sections.is_empty());
 
             d.filter.query = "zzz".to_string();
             d.refresh.reload = true;
             d.sync_detail(&read);
 
-            assert!(d.detail.source.is_empty());
+            assert!(d.detail.sections.is_empty());
             assert!(d.detail.problems.is_empty());
             assert_eq!(d.detail.tab, 0);
             assert_eq!(d.detail.scroll, 0);
@@ -5785,7 +5999,10 @@ mod tests {
                 selected: 0,
                 filter: empty_filter(),
                 detail: Detail {
-                    source: "stale".to_string(),
+                    sections: vec![ArtifactSection {
+                        label: String::new(),
+                        text: "stale".to_string(),
+                    }],
                     scroll: 3,
                     tab: 2,
                     problems: vec!["stale problem".to_string()],
@@ -5817,7 +6034,7 @@ mod tests {
             let recorder2 = RecordingReader::always(Err("must not be called".to_string()));
             let read2 = |p: &std::path::Path| recorder2.read(p);
             d2.sync_detail(&read2);
-            assert!(d2.detail.source.is_empty());
+            assert!(d2.detail.sections.is_empty());
             assert!(d2.detail.problems.is_empty());
             assert_eq!(d2.detail.tab, 0);
             assert_eq!(d2.detail.scroll, 0);
