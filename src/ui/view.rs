@@ -3766,6 +3766,273 @@ mod tests {
         }
     }
 
+    /// Mirrors `ui::detail::tests::three_spec_detail` for the view tier: a dashboard
+    /// whose selected change carries three spec files, with labels matching
+    /// `ui::app::tests::the_three_spec_files_of_a_change_become_three_labelled_sections`
+    /// so a reader who has seen either fixture recognises this one.
+    fn three_spec_dashboard(
+        expanded: std::collections::BTreeSet<usize>,
+        scroll: usize,
+        route: Route,
+    ) -> Dashboard {
+        let change =
+            fixture::with_artifacts(fixture::active("detail-view", 4, 9), &[("proposal", &[])]);
+        let detail = Detail {
+            sections: vec![
+                ArtifactSection {
+                    label: "degraded-coverage".to_string(),
+                    text: "one\n".to_string(),
+                },
+                ArtifactSection {
+                    label: "markdown-render".to_string(),
+                    text: "two\n".to_string(),
+                },
+                ArtifactSection {
+                    label: "tasks-checklist".to_string(),
+                    text: "three\n".to_string(),
+                },
+            ],
+            scroll,
+            tab: 0,
+            problems: Vec::new(),
+            loaded: None,
+            expanded,
+        };
+        dashboard_with_detail(vec![change], Vec::new(), 1, route, detail)
+    }
+
+    /// The header row text `ui::detail::header` would emit — `<glyph> <label>` padded
+    /// to `width` — built the same way this group's own production code will, from
+    /// `ui::list::fold_glyph` and `ui::list::pad_or_truncate_right`, so a test never
+    /// writes its own copy of the glyph pair.
+    fn expected_header(label: &str, collapsed: bool, width: u16) -> String {
+        let glyph = crate::ui::list::fold_glyph(collapsed);
+        crate::ui::list::pad_or_truncate_right(&format!("{glyph} {label}"), width as usize)
+    }
+
+    /// The style shared by every cell of content row `y` across its `width` interior
+    /// columns — panics if the row is not uniformly styled. Used to assert a header
+    /// row's whole-row role, since a header row is always one plain-face segment
+    /// padded to the full content width.
+    fn uniform_row_style(buf: &Buffer, y: u16, width: u16) -> Style {
+        let from = if buf.area.width == 60 { 1 } else { 42 };
+        let first = cell(buf, from, y).style();
+        for x in from..from + width {
+            assert_eq!(
+                cell(buf, x, y).style(),
+                first,
+                "row {y} is not uniformly styled at column {x}"
+            );
+        }
+        first
+    }
+
+    /// `artifact-folds` :: "The specs tab opens as a list of capability names".
+    #[test]
+    fn the_specs_tab_opens_as_a_list_of_capability_names() {
+        let d = three_spec_dashboard(std::collections::BTreeSet::new(), 0, Route::Detail);
+        assert!(d.detail.expanded.is_empty());
+        for width in [120, 60] {
+            let interior = interior_width(width);
+            let buf = render_at(width, 20, &d);
+            let labels = ["degraded-coverage", "markdown-render", "tasks-checklist"];
+            for (i, label) in labels.iter().enumerate() {
+                let y = 5 + i as u16;
+                assert_eq!(
+                    detail_interior_cols(&buf, y, interior as usize),
+                    expected_header(label, true, interior),
+                    "width {width}: row {i}"
+                );
+            }
+            // No row carries any text from inside any of the three files: the whole
+            // content area is exactly the three header rows and nothing else.
+            let rows = crate::ui::detail::content_lines(&d.detail, d.selected_change(), interior);
+            assert_eq!(
+                rows.len(),
+                3,
+                "width {width}: three collapsed sections are three header rows and no bodies"
+            );
+            for row in &rows {
+                assert!(
+                    matches!(
+                        row.kind,
+                        crate::ui::detail::ContentKind::SectionHeader { .. }
+                    ),
+                    "width {width}: every row is a header"
+                );
+            }
+        }
+    }
+
+    /// `artifact-folds` :: "Folding one section shows its body and leaves its siblings
+    /// shut".
+    #[test]
+    fn folding_one_section_shows_its_body_and_leaves_its_siblings_shut() {
+        let d = three_spec_dashboard(std::collections::BTreeSet::from([1]), 0, Route::Detail);
+        for width in [120, 60] {
+            let interior = interior_width(width);
+            let buf = render_at(width, 20, &d);
+            assert_eq!(
+                detail_interior_cols(&buf, 5, interior as usize),
+                expected_header("degraded-coverage", true, interior),
+                "width {width}: first row"
+            );
+            assert_eq!(
+                detail_interior_cols(&buf, 6, interior as usize),
+                expected_header("markdown-render", false, interior),
+                "width {width}: second row is the open header"
+            );
+            let body = crate::ui::markdown::lines("two\n", interior);
+            let mut y = 7u16;
+            for line in &body {
+                assert_eq!(
+                    detail_interior_cols(&buf, y, interior as usize),
+                    crate::ui::list::pad_or_truncate_right(&line.text(), interior as usize),
+                    "width {width}: body row at {y}"
+                );
+                y += 1;
+            }
+            assert_eq!(
+                detail_interior_cols(&buf, y, interior as usize),
+                expected_header("tasks-checklist", true, interior),
+                "width {width}: row following the open section's last body line"
+            );
+            for row_y in 5..=y {
+                assert_eq!(
+                    columns(&detail_interior_cols(&buf, row_y, interior as usize)),
+                    interior as usize,
+                    "width {width}: row {row_y} measures exactly the content width"
+                );
+            }
+        }
+    }
+
+    /// `artifact-folds` :: "The cursor's section header is the emphasised one".
+    #[test]
+    fn the_cursors_section_header_is_the_emphasised_one() {
+        // Every section collapsed, cursor on the second (`scroll == 1`).
+        let collapsed = three_spec_dashboard(std::collections::BTreeSet::new(), 1, Route::Detail);
+        for width in [120, 60] {
+            let interior = interior_width(width);
+            let rows = crate::ui::detail::content_lines(
+                &collapsed.detail,
+                collapsed.selected_change(),
+                interior,
+            );
+            let selected: Vec<bool> = rows
+                .iter()
+                .map(|r| {
+                    matches!(
+                        r.kind,
+                        crate::ui::detail::ContentKind::SectionHeader { selected: true, .. }
+                    )
+                })
+                .collect();
+            assert_eq!(
+                selected,
+                vec![false, true, false],
+                "width {width}: collapsed"
+            );
+
+            let buf = render_at(width, 20, &collapsed);
+            assert_eq!(
+                uniform_row_style(&buf, 6, interior),
+                uncoloured().patch(palette::style(Role::DetailSectionSelected)),
+                "width {width}: the second header row carries the selected style"
+            );
+        }
+
+        // The second section open, cursor moved to a line inside its own body: the
+        // second header row still carries the selected style, because the cursor is
+        // *in* that section.
+        let open = three_spec_dashboard(std::collections::BTreeSet::from([1]), 2, Route::Detail);
+        for width in [120, 60] {
+            let interior = interior_width(width);
+            let buf = render_at(width, 20, &open);
+            assert_eq!(
+                uniform_row_style(&buf, 6, interior),
+                uncoloured().patch(palette::style(Role::DetailSectionSelected)),
+                "width {width}: the cursor is inside the second section's body"
+            );
+        }
+
+        // A problem row addressed by the cursor: no header row carries the selected
+        // style.
+        let mut with_problem =
+            three_spec_dashboard(std::collections::BTreeSet::new(), 0, Route::Detail);
+        with_problem.detail.problems = vec!["boom".to_string()];
+        for width in [120, 60] {
+            let interior = interior_width(width);
+            let rows = crate::ui::detail::content_lines(
+                &with_problem.detail,
+                with_problem.selected_change(),
+                interior,
+            );
+            assert!(
+                rows.iter().all(|r| !matches!(
+                    r.kind,
+                    crate::ui::detail::ContentKind::SectionHeader { selected: true, .. }
+                )),
+                "width {width}: no header is selected while the cursor addresses the problem \
+                 row"
+            );
+        }
+    }
+
+    /// `artifact-folds` :: "An index past the end folds shut rather than panicking".
+    #[test]
+    fn an_index_past_the_end_folds_shut_rather_than_panicking() {
+        let change =
+            fixture::with_artifacts(fixture::active("detail-view", 4, 9), &[("proposal", &[])]);
+        let detail = Detail {
+            sections: vec![
+                ArtifactSection {
+                    label: "degraded-coverage".to_string(),
+                    text: "one\n".to_string(),
+                },
+                ArtifactSection {
+                    label: "markdown-render".to_string(),
+                    text: "two\n".to_string(),
+                },
+            ],
+            scroll: 0,
+            tab: 0,
+            problems: Vec::new(),
+            loaded: None,
+            expanded: std::collections::BTreeSet::from([0, 1, 7]),
+        };
+        let d = dashboard_with_detail(vec![change], Vec::new(), 1, Route::Detail, detail);
+        for width in [120, 60] {
+            let interior = interior_width(width);
+            let rows = crate::ui::detail::content_lines(&d.detail, d.selected_change(), interior);
+            assert!(
+                rows.iter().all(|r| !matches!(
+                    r.kind,
+                    crate::ui::detail::ContentKind::SectionHeader { section, .. } if section == 7
+                )),
+                "width {width}: no line is attributable to section index 7"
+            );
+            let headers: Vec<_> = rows
+                .iter()
+                .filter(|r| matches!(r.kind, crate::ui::detail::ContentKind::SectionHeader { .. }))
+                .collect();
+            assert_eq!(headers.len(), 2, "width {width}: two header rows are drawn");
+            assert_eq!(
+                headers[0].text(),
+                expected_header("degraded-coverage", false, interior),
+                "width {width}: the first is open"
+            );
+            assert_eq!(
+                headers[1].text(),
+                expected_header("markdown-render", false, interior),
+                "width {width}: the second is open"
+            );
+
+            // Rendering the same dashboard must not panic.
+            let _buf = render_at(width, 20, &d);
+        }
+    }
+
     /// `artifact-content` :: "A wide-character document stays inside the detail region" —
     /// a discriminating instance of the scenario `detail.rs`'s own test already carries.
     /// That landed fixture (a CJK paragraph, a heading, and a family-emoji bullet) passes
@@ -5238,6 +5505,16 @@ mod tests {
                 "width {width}"
             );
         }
+
+        // `foldable-spec-sections`: no header row is drawn — one section is not
+        // foldable, whether or not a problem row precedes it.
+        let interior = interior_width(120);
+        let rows = crate::ui::detail::content_lines(&d.detail, d.selected_change(), interior);
+        assert!(
+            rows.iter()
+                .all(|r| !matches!(r.kind, crate::ui::detail::ContentKind::SectionHeader { .. })),
+            "a single surviving section draws no header row"
+        );
     }
 
     #[test]
@@ -6064,7 +6341,99 @@ mod tests {
 
             // The heading assertions discriminate: the two levels are different colours.
             assert_ne!(title.fg, heading.fg, "width {width}");
+
+            // `foldable-spec-sections`: no cell reports `REVERSED`, because a
+            // single-section artifact draws no header row.
+            for y in 0..buf.area.height {
+                for x in 0..buf.area.width {
+                    assert!(
+                        !cell(&buf, x, y)
+                            .style()
+                            .add_modifier
+                            .contains(Modifier::REVERSED),
+                        "width {width}: cell {x},{y} unexpectedly reports REVERSED"
+                    );
+                }
+            }
         }
+    }
+
+    /// `view-palette` :: "A section header's role is selected by its kind, not by its
+    /// face".
+    #[test]
+    fn a_section_headers_role_is_selected_by_its_kind_not_by_its_face() {
+        let d = three_spec_dashboard(std::collections::BTreeSet::new(), 1, Route::Detail);
+        for width in [120, 60] {
+            let interior = interior_width(width);
+            let rows = crate::ui::detail::content_lines(&d.detail, d.selected_change(), interior);
+            assert!(
+                matches!(
+                    rows[0].kind,
+                    crate::ui::detail::ContentKind::SectionHeader {
+                        selected: false,
+                        ..
+                    }
+                ),
+                "width {width}: first header"
+            );
+            assert!(
+                matches!(
+                    rows[1].kind,
+                    crate::ui::detail::ContentKind::SectionHeader { selected: true, .. }
+                ),
+                "width {width}: second header"
+            );
+            assert!(
+                matches!(
+                    rows[2].kind,
+                    crate::ui::detail::ContentKind::SectionHeader {
+                        selected: false,
+                        ..
+                    }
+                ),
+                "width {width}: third header"
+            );
+
+            let buf = render_at(width, 20, &d);
+            assert_eq!(
+                uniform_row_style(&buf, 6, interior),
+                uncoloured().patch(palette::style(Role::DetailSectionSelected)),
+                "width {width}: the second header row equals DetailSectionSelected"
+            );
+            assert_eq!(
+                uniform_row_style(&buf, 5, interior),
+                uncoloured().patch(palette::style(Role::DetailSection)),
+                "width {width}: the first header row equals DetailSection"
+            );
+            assert_eq!(
+                uniform_row_style(&buf, 7, interior),
+                uncoloured().patch(palette::style(Role::DetailSection)),
+                "width {width}: the third header row equals DetailSection"
+            );
+
+            // The second header row is the only one reporting REVERSED anywhere in the
+            // buffer — no other row, including every collapsed section's own header, is
+            // restyled by the cursor.
+            let reversed_rows: std::collections::BTreeSet<u16> = (0..buf.area.height)
+                .filter(|&y| {
+                    (0..buf.area.width).any(|x| {
+                        cell(&buf, x, y)
+                            .style()
+                            .add_modifier
+                            .contains(Modifier::REVERSED)
+                    })
+                })
+                .collect();
+            assert_eq!(
+                reversed_rows,
+                std::collections::BTreeSet::from([6u16]),
+                "width {width}: only the second header row reports REVERSED"
+            );
+        }
+
+        // `grep -n 'Role::' src/ui/detail.rs` must return nothing: the role selection
+        // lives in `ui::view` alone, and the kind is the only thing that crosses the
+        // boundary — checked by `scripts/gates/notabseam.sh`, not re-derived here.
     }
 
     /// `view-palette` :: "Heading foreground wins over a code span inside it".
@@ -6644,6 +7013,53 @@ mod tests {
         d
     }
 
+    /// `monochrome_dashboard`, but the selected artifact resolves to three spec
+    /// files instead of one — every section collapsed, cursor on the first.
+    fn monochrome_dashboard_three_sections(route: Route) -> Dashboard {
+        let selected = fixture::with_artifacts(
+            fixture::active("add-token-refresh", 4, 9),
+            &[("proposal", &[])],
+        );
+        let mut d = dashboard_with_detail(
+            vec![
+                selected,
+                fixture::active("fix-empty-basket", 7, 7),
+                fixture::active("migrate-ai-sdk-v7", 0, 0),
+            ],
+            vec![fixture::archived(Some("2026-01-01"), "old-change", 3, 3)],
+            // `list-sections`: 1, not 0 — target 0 is the active header.
+            1,
+            route,
+            Detail {
+                sections: vec![
+                    ArtifactSection {
+                        label: "degraded-coverage".to_string(),
+                        text: "one\n".to_string(),
+                    },
+                    ArtifactSection {
+                        label: "markdown-render".to_string(),
+                        text: "two\n".to_string(),
+                    },
+                    ArtifactSection {
+                        label: "tasks-checklist".to_string(),
+                        text: "three\n".to_string(),
+                    },
+                ],
+                scroll: 0,
+                tab: 0,
+                problems: Vec::new(),
+                loaded: None,
+                expanded: std::collections::BTreeSet::new(),
+            },
+        );
+        d.file_mode = true;
+        d.changes.problems = vec!["openspec/changes: unreadable".to_string()];
+        let mut working = unattributed_agent("fix-empty-basket");
+        working.status = crate::agents::AgentStatus::Working;
+        d.agents.agents = vec![working];
+        d
+    }
+
     /// `view-palette` :: "A monochrome reading of the frame is unchanged" — the modifier
     /// of every cell outside the tab-bar row is exactly what it was before this change.
     #[test]
@@ -6808,6 +7224,31 @@ mod tests {
                     );
                 }
             }
+        }
+
+        // `foldable-spec-sections`: the same dashboard whose selected artifact
+        // resolves to three files instead of one renders `REVERSED` on exactly one
+        // row — the cursor's own section header — and on no cell anywhere else, so a
+        // single-file artifact's frame is untouched by the two new roles.
+        for width in [120, 60] {
+            let d = monochrome_dashboard_three_sections(Route::Detail);
+            let buf = render_at(width, 20, &d);
+            let reversed_rows: std::collections::BTreeSet<u16> = (0..buf.area.height)
+                .filter(|&y| {
+                    (0..buf.area.width).any(|x| {
+                        cell(&buf, x, y)
+                            .style()
+                            .add_modifier
+                            .contains(Modifier::REVERSED)
+                    })
+                })
+                .collect();
+            assert_eq!(
+                reversed_rows,
+                std::collections::BTreeSet::from([5u16]),
+                "width {width}: exactly one row — the cursor's own section header — \
+                 reports REVERSED"
+            );
         }
     }
 }
