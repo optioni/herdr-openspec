@@ -322,6 +322,24 @@ expect = "NODEFAULT-UI FAIL: Dashboard has a Default"
 why = "an impl Default for Dashboard must fail half A"
 
 [[control]]
+id = "nodefault-ui-artifact-section"
+script = "nodefault-ui.sh"
+env = "SCAN_MIN=25 TYPES=ArtifactSection"
+plant_file = "src/ui/app.rs"
+plant_find = "pub struct ArtifactSection {"
+plant_replace = '''impl Default for ArtifactSection {
+    fn default() -> Self {
+        unimplemented!()
+    }
+}
+pub struct ArtifactSection {'''
+expect = "NODEFAULT-UI FAIL: ArtifactSection has a Default"
+why = '''the `nodefault-ui-dashboard` control above scans a different TYPES list, so it
+cannot fail for ArtifactSection: `foldable-spec-sections` gave the gate a sixth Makefile line
+with its own SCAN_MIN, and this is that line's own executed control rather than an attested
+one'''
+
+[[control]]
 id = "noio-view-hit"
 script = "noio-view.sh"
 plant_file = "src/ui/list.rs"

@@ -47,6 +47,7 @@ gates:
 	SCAN_MIN=81 TYPES='Launch' /bin/sh scripts/gates/nodefault-ui.sh
 	SCAN_MIN=111 HOMEFILE=src/agents.rs TYPES='Agent Listed AgentSnapshot Attribution' /bin/sh scripts/gates/nodefault-ui.sh
 	SCAN_MIN=26 HOMEFILE=src/launch.rs TYPES='Outcome' /bin/sh scripts/gates/nodefault-ui.sh
+	SCAN_MIN=25 TYPES='ArtifactSection' /bin/sh scripts/gates/nodefault-ui.sh
 	/bin/sh scripts/gates/noio-view.sh
 	/bin/sh scripts/gates/nojson-seam.sh
 	/bin/sh scripts/gates/nolit-change.sh
