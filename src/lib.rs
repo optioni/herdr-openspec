@@ -866,8 +866,12 @@ pub(crate) mod testutil {
                 "render_at wrote inside the owned scratch dir"
             );
 
+            // `pane-chrome` removes the frame's header row: row 0 is now the list
+            // region's own heading, naming the directory `no repository` when there
+            // is none, drawn at the interior's first column (the gutter at column 0
+            // stays blank).
             for buf in [&buf60, &buf120] {
-                assert_eq!(&row_text(buf, 0)[0..8], "OpenSpec");
+                assert_eq!(&row_text(buf, 0)[1..14], "no repository");
                 assert!(row_text(buf, buf.area.height - 1).starts_with("q quit"));
             }
         }
@@ -886,10 +890,17 @@ pub(crate) mod testutil {
             let dashboard = empty_dashboard();
             for width in [60u16, 120u16] {
                 let buf = render_at(width, 20, &dashboard);
-                let top_left = cell(&buf, 0, 0);
-                assert_eq!(top_left.symbol(), "O");
+                // Column 0 is the region's left gutter, always blank
+                // (`pane-chrome` removes the border it used to hold); the
+                // heading text starts one column in, at the routed region's
+                // heading row, and is bold because the list route is the
+                // routed one.
+                let gutter = cell(&buf, 0, 0);
+                assert_eq!(gutter.symbol(), " ");
+                let heading_start = cell(&buf, 1, 0);
+                assert_eq!(heading_start.symbol(), "n");
                 assert!(
-                    top_left
+                    heading_start
                         .style()
                         .add_modifier
                         .contains(ratatui::style::Modifier::BOLD)
