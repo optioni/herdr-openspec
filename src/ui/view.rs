@@ -980,23 +980,44 @@ mod tests {
     }
 
     #[test]
-    fn frame_rows_at_60_and_120() {
+    fn body_and_footer_occupy_their_rows_at_both_widths() {
         let d = dashboard(Some("/tmp/demo-repo"), Route::List);
         // `agent-launch`: pinned unreachable, so this footer is the one this capability
         // specified before the action hints existed.
         assert!(!d.agents.reachable);
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
-            assert_eq!(cols(&row_text(&buf, 0), 0..8), "OpenSpec");
-            assert!(is_bold(cell(&buf, 0, 0)));
+            // Row 0 is the routed region's heading row — it spells `demo-repo` from
+            // column 1 — and the literal `OpenSpec` appears nowhere: `pane-chrome`
+            // removes the frame's own header row entirely.
+            assert_eq!(
+                cols(&row_text(&buf, 0), 1..10),
+                "demo-repo",
+                "width {width}"
+            );
+            assert!(!buffer_contains(&buf, "OpenSpec"), "width {width}");
+
             let footer = row_text(&buf, 19);
-            assert!(footer.starts_with("q quit  Enter detail  Esc back"));
+            assert!(
+                footer.starts_with("q quit  Enter detail  Esc back"),
+                "width {width}"
+            );
             assert!(
                 footer.chars().skip(30).all(|c| c == ' '),
-                "footer remainder must be all spaces: {footer:?}"
+                "width {width}: footer remainder must be all spaces: {footer:?}"
             );
-            assert_eq!(cell(&buf, 0, 1).symbol(), "┌");
-            assert_eq!(cell(&buf, 0, 18).symbol(), "└");
+
+            // No box-drawing character appears in column 0 or in the last column of
+            // any row, so the body occupies rows 0 through 18 with no bordered block
+            // in it and nothing is drawn in row 19 by the body.
+            for y in 0..=18u16 {
+                assert_eq!(cell(&buf, 0, y).symbol(), " ", "width {width}: y={y}");
+                assert_eq!(
+                    cell(&buf, width - 1, y).symbol(),
+                    " ",
+                    "width {width}: y={y}"
+                );
+            }
         }
     }
 
@@ -1017,24 +1038,37 @@ mod tests {
     }
 
     #[test]
-    fn one_row_frame_draws_header_only() {
+    fn a_one_row_frame_renders_the_body_s_heading_row_and_nothing_else() {
         let d = dashboard(Some("/tmp/demo-repo"), Route::List);
         for width in [60, 120] {
             let buf = render_at(width, 1, &d);
-            assert_eq!(cols(&row_text(&buf, 0), 0..8), "OpenSpec");
-            assert!(!buffer_contains(&buf, "┌"));
-            assert!(!buffer_contains(&buf, "q quit"));
+            // Row 0 spells `demo-repo` from column 1 — the routed region's heading
+            // row, which is the body's only row at this height.
+            assert_eq!(
+                cols(&row_text(&buf, 0), 1..10),
+                "demo-repo",
+                "width {width}"
+            );
+            // No `q quit` appears anywhere: the footer was not drawn into the
+            // body's single row.
+            assert!(!buffer_contains(&buf, "q quit"), "width {width}");
         }
     }
 
     #[test]
-    fn two_row_frame_draws_no_body() {
+    fn a_two_row_frame_renders_one_body_row_and_the_footer() {
         let d = dashboard(Some("/tmp/demo-repo"), Route::List);
         for width in [60, 120] {
             let buf = render_at(width, 2, &d);
-            assert_eq!(cols(&row_text(&buf, 0), 0..8), "OpenSpec");
-            assert_eq!(cols(&row_text(&buf, 1), 0..6), "q quit");
-            assert!(!buffer_contains(&buf, "┌"));
+            assert_eq!(
+                cols(&row_text(&buf, 0), 1..10),
+                "demo-repo",
+                "width {width}"
+            );
+            assert_eq!(cols(&row_text(&buf, 1), 0..6), "q quit", "width {width}");
+            // No list row is drawn anywhere: the body received one row and the
+            // heading row consumed it.
+            assert!(!buffer_contains(&buf, "No changes yet"), "width {width}");
         }
     }
 
