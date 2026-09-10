@@ -1702,7 +1702,7 @@ mod tests {
         let mut d = dashboard(None, Route::List);
         d.searched_from = std::path::PathBuf::from("/tmp/not-a-repo/deep/here");
 
-        for width in [120u16, 60] {
+        for width in [120, 60] {
             let buf = render_at(width, 20, &d);
             assert_eq!(
                 cols(&row_text(&buf, 0), 1..14),
