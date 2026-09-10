@@ -468,8 +468,22 @@ HEAD `08025d3`:
 let glyph = if collapsed { '▸' } else { '▾' };   // src/ui/list.rs, section_row_text
 ```
 
-So **this change ships `▸`/`▾`**, and it reads them from `section_row_text` rather than
-writing a literal, so a later change to that one site moves both regions together. It
+So **this change ships `▸`/`▾`**, and it reads them from that one site rather than writing a
+literal, so a later change to it moves both regions together.
+
+**Where that one site is, precisely.** `section_row_text` is a **private** `fn` in
+`src/ui/list.rs`, so `ui::detail` cannot call it. Rather than hardcode the pair in
+`ui::detail::header` — which would agree with the list today and diverge the first time
+anyone edited one of the two — the pair is extracted into
+`ui::list::fold_glyph(collapsed: bool) -> char`, `pub(crate)` and called by both
+`section_row_text` and the artifact-section header row. That is the same shape three helpers
+already crossing this boundary have (`progress_cell`, `pad_or_truncate_right`, and
+`shorten_left` are all `pub(crate)` in `src/ui/list.rs` and all already called from
+`src/ui/detail.rs`), so it adds a caller to an existing seam rather than opening a new one.
+The agreement test compares the two function results directly, which is what "assert the two
+agree rather than asserting a character" requires; reading the glyph out of `ui::list::rows`'
+drawn output at a known offset would instead make the test depend on row-grammar layout — a
+second derivation of the kind this repository keeps eliminating. It
 inherits `pane-chrome`'s own accepted risk rather than taking a new one: both glyphs are East
 Asian **Ambiguous**, painted at two columns by a CJK-locale terminal where `unicode-width`
 says one, which `SPEC.md` already names as this project's standing uncompensated exposure and

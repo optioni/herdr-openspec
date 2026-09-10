@@ -153,12 +153,17 @@ closed section rather than a panic.
 `ui::detail::content_lines` SHALL, when the selected artifact is foldable, emit for each
 section in order:
 
-- one **header row** reading `<glyph> <label>`, where the glyph pair is **the one
-  `src/ui/list.rs`'s `section_row_text` uses for the `active` and `archived` headers**, so one
-  fold reads the same in both regions. `pane-chrome`'s D6 has landed, so that pair is `▸`
-  collapsed and `▾` open; this capability SHALL take the pair from that one site rather than
-  writing its own literal, and a test SHALL assert the two agree rather than asserting a
-  character, so a later change to `section_row_text` moves both regions together. Passed
+- one **header row** reading `<glyph> <label>`, where the glyph pair is **the one the list
+  region's `active` and `archived` headers use**, so one fold reads the same in both regions.
+  `pane-chrome`'s D6 has landed, so that pair is `▸` collapsed and `▾` open. That pair SHALL
+  live at exactly one site — `ui::list::fold_glyph(collapsed: bool) -> char`, `pub(crate)`,
+  called by both `ui::list`'s `section_row_text` and this capability's header row — and this
+  capability SHALL take it from there rather than writing its own literal. `section_row_text`
+  is private, so the extraction is what makes "one site" reachable at all; it joins
+  `progress_cell`, `pad_or_truncate_right`, and `shorten_left` as helpers `ui::detail` already
+  calls across that boundary. A test SHALL assert the two **agree** — comparing the two
+  function results, not a character, and not a glyph read out of `ui::list::rows`' drawn
+  output at a known offset, which would depend on row-grammar layout instead. Passed
   through `ui::list::pad_or_truncate_right` at `width`; followed by
 - when and only when the section is open, that section's body: `ui::markdown::lines(&section.text, width)`.
 
