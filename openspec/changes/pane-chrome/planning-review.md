@@ -67,6 +67,9 @@ verified each against the tree before acting on it, and made every repair below.
 | Non-blocking | tasks.md | The baseline called `cargo test` "not reliably green" and attributed it to concurrent sessions, superseding nothing and citing no diagnosis — though the repo already has one | Cites `markdown-legibility` design.md (commit `027db45`), the `Stages` deadline mechanism, the empty-call-log signature that separates flake from regression, and a re-measurement: 1220/2 parallel, 29 serial | `tasks.md` → baseline |
 | Non-blocking | design.md | Two matrix gate rows carried a `cargo test` command that runs no gate; two more pointed at `palette.sh` where the subject was `noio-view.sh` and `colwidth.sh` | Each gate row runs its script and `gate_controls` | `design.md` → Verification matrix |
 | Non-blocking | specs/responsive-layout | The badge's left-shorten branch is **unreachable whenever a badge is drawn** — a drawn badge means the name already fits — but the two rules are written in separate paragraphs and read as though they compose | Stated explicitly | `specs/responsive-layout/spec.md` |
+| Non-blocking | design.md | **D6 argues the fold glyphs are not Ambiguous-width and is silent on the two glyphs this change starts drawing that are.** `│` (`U+2502`) and `─` (`U+2500`) are East Asian `A`; `▾`/`▸` are `N`. The exposure is not new — `Block::bordered()` drew the same code points — but it moves into this crate's own draw calls | Risks bullet added naming both code points, the move of ownership, and why no compensation is added | `design.md` → Risks |
+| Non-blocking | proposal.md, design.md | **The live measurement in Why/Context was wrong.** "Four of its twenty rows and four of its sixty columns": a 60-column bordered frame has **three** chrome rows (0, 1, 18) and **two** chrome columns (0, 59). Four columns is the *wide* layout's figure, carried into a narrow-split measurement | Corrected at both sites, with the wide-layout figure named as such | `proposal.md` → Why, `design.md` → Context |
+| Non-blocking | design.md | D5 reused D1's "~145 hand-computed expectations" for a **detail-only** alternative. That set is `detail` 42 + `markdown` 34 + `tasks` 22 = **98**; `list`'s 47 name 38 and 58, not 78, and do not move | Corrected to ~98, with D1's 145 explained as the whole set | `design.md` → D5 |
 | Nit | specs/responsive-layout | Duplicated `## MODIFIED Requirements` header with an empty section between. `openspec validate --strict` passes regardless | Removed | `specs/responsive-layout/spec.md:571` |
 
 ## No Remaining Implementation-Blocking Gaps
@@ -86,7 +89,14 @@ the part that was measured rather than remembered:
   149 matrix rows, sorted diff byte-identical. Empty state, degenerate widths and heights,
   CJK, emoji, ZWJ and combining-mark names are specified rather than assumed.
 - **D5's measurements are honest.** `\b78\b` appears exactly **162** times under `src/ui/`, as
-  claimed, and exactly three gate scripts hard-code it.
+  claimed, and exactly three gate scripts hard-code it. D1's "roughly 145 hand-computed
+  expectations" is exact too (`list` 47 + `detail` 42 + `markdown` 34 + `tasks` 22); only D5's
+  reuse of that figure for a narrower alternative was wrong.
+- **The prototype is not load-bearing.** Checked directly: D2 gives the region shape as a
+  rectangle table plus the row-2 invariant, D5 gives the full 120-column column map and the
+  five-versus-four chrome arithmetic, and D6 names both code points and the rejected pairs. The
+  URL is cited as *why* a decision was taken, never as *what* it is. Only task 10.11's eyeball
+  check depends on opening it.
 - **D6's Unicode claim is correct.** `U+25BE`/`U+25B8` are East Asian Width `N`, unlike the
   `U+25BC`/`U+25B6` pair, so `layout::columns` measures them at one column and no
   ambiguous-width terminal setting widens them.
@@ -123,6 +133,12 @@ instead of passing quietly.
   If `pane-chrome` lands first — the order its Risks recommends — that change ships `▾`/`▸` and
   inherits this change's accepted Ambiguous-width risk. No action is required here; task 5.4
   keeps the pair written in one place so the dependency stays satisfiable.
+- **`foldable-spec-sections/design.md:449` mis-cites this change's D6.** It says `pane-chrome`
+  "argues and accepts" `▾`/`▸` as East Asian Ambiguous; D6 argues the reverse — that they are
+  `N` and therefore safe — and the Ambiguous glyphs in this change are `│` and `─`. That
+  sibling change has its own committed planning review, so the correction is left to it rather
+  than made here; its ordering conclusion is unaffected, since it adopts whatever pair the list
+  region carries.
 - **The `ui::tests::wiring` load flake** is a standing property of the suite, not of this
   change, and is not fixed here. Its mechanism, its signature, and how to tell it from a
   regression are recorded in `tasks.md` → baseline and in `markdown-legibility`'s design.

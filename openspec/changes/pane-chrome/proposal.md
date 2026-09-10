@@ -3,9 +3,11 @@
 In a Herdr split the pane is already framed and titled by Herdr itself, and the dashboard
 then redraws that same chrome inside it: a `OpenSpec` header row under a pane border that
 already says `OpenSpec`, and a bordered `Changes` box inside a pane that is already a box.
-Measured live at a 60-column split, four of the frame's rows and four of its columns carry
-no information at all, and the one row that could — the header — spends it on a literal
-label plus an absolute repository path too long to read. Inside the detail region the
+Measured live at a 60-column split, three of the frame's twenty rows and two of its sixty
+columns carry no information at all — the top and bottom border rows and the two border
+columns — and the one row that could carry some, the header, spends it on a literal label
+plus an absolute repository path too long to read. (Four *columns* is the wide layout's
+figure, where two regions carry two borders each; the narrow split has two.) Inside the detail region the
 change header, the tab bar, and the artifact's first line of markdown are three adjacent
 rows with nothing between them, so the reader parses the tab bar as content. On a selected
 collapsed section the cursor marker and the fold glyph are the same character and render as

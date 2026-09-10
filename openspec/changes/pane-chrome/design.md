@@ -1,8 +1,10 @@
 ## Context
 
 The dashboard's frame was designed in `tui-shell` against a full-screen terminal. The pane it
-actually occupies is a Herdr split, and measured live at 60 columns that frame spends four of
-its twenty rows and four of its sixty columns on chrome that says nothing: a header row whose
+actually occupies is a Herdr split, and measured live at 60 columns that frame spends three of
+its twenty rows and two of its sixty columns on chrome that says nothing — four columns is the
+**wide** layout's figure, two regions at two borders each, and this paragraph previously
+carried it into a 60-column measurement where it is not true: a header row whose
 literal `OpenSpec` restates the pane title Herdr already draws one row above it, and a
 bordered block titled `Changes` drawn inside a pane that is already a box. The rest of the
 header row carries an absolute repository path too long to read at that width, of which only
@@ -388,8 +390,10 @@ five, so one outer gutter cannot be had. The **leading** one is kept because col
 list's selection marker on every row, where a flush edge reads as part of the grammar; the
 trailing edge is reached only by a right-aligned cell. *Alternatives considered and measured:*
 (a) take the column from the detail interior, making it 77 — rejected, `78` appears 162 times
-under `src/ui/` and in three gate scripts, so a column of whitespace would cost ~145 recomputed
-expectations; (b) drop the leading gutter instead — rejected on looking at the prototype, the
+under `src/ui/` and in three gate scripts, so a column of whitespace would cost roughly **98**
+recomputed expectations (`detail` 42 + `markdown` 34 + `tasks` 22; the 145 figure D1 uses is the
+whole hand-computed set including `list`'s 47, which name 38 and 58 rather than 78 and so do not
+move for a detail-only change); (b) drop the leading gutter instead — rejected on looking at the prototype, the
 marker column is the more noticeable edge; (c) no divider at all, two blank columns — the only
 arrangement compromising nothing, kept in the prototype as a comparison and rejected because the
 two regions read as one field without it.
@@ -425,6 +429,15 @@ regions' headings drift for no reason a reader could see.
   already forbids `char`-count measurement across the pure view set, and the glyphs go through
   `layout::columns` like every other cell; `change-rows`' own display-column requirement covers
   them.
+- **The divider `│` and the rule `─` *are* East Asian Ambiguous, and this change is the first
+  to write them from its own code.** → Accepted, and named here because D6's width argument is
+  about the fold glyphs only and reads as though it covered every glyph the change adds. It does
+  not: `U+2502` and `U+2500` are `A`, where `▾`/`▸` are `N`. `SPEC.md` → § List view names
+  Ambiguous box-drawing characters as this project's standing uncompensated exposure, and the
+  exposure is not **new** — `Block::bordered()` drew the same two code points at the same cells
+  — but it moves from ratatui's widget into this crate's own draw calls, so this change owns it.
+  No compensation is added, for `SPEC.md`'s stated reason: any would break the terminal it
+  guessed wrong for.
 - **Eleven capability specs change at once, so a half-applied implementation leaves the tree
   self-contradictory.** → The three signature changes in `ui::layout` are compile errors at every
   call site, so a partial application does not build. The task order below finishes the geometry
