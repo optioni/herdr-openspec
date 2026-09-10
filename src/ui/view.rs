@@ -1771,6 +1771,67 @@ mod tests {
         }
     }
 
+    /// `responsive-layout` :: "A one-, two-, and three-column frame degenerates without
+    /// drawing over a gutter" — the divider requirement's own degenerate case, both
+    /// below the breakpoint: at one and two columns the list region's interior is zero
+    /// columns wide, and at three columns it is exactly one, wide enough to draw into
+    /// but not to leave any margin either side of it.
+    #[test]
+    fn a_one_two_and_three_column_frame_degenerates_without_drawing_over_a() {
+        let d = dashboard_with(
+            vec![fixture::active("alpha", 1, 3)],
+            Vec::new(),
+            1,
+            Route::List,
+        );
+
+        // Neither of the three panics.
+        let buf1 = render_at(1, 20, &d);
+        let buf2 = render_at(2, 20, &d);
+        let buf3 = render_at(3, 20, &d);
+
+        // At 1 and 2 columns the interior is zero columns wide: no heading text and
+        // no list row is drawn at all.
+        for buf in [&buf1, &buf2] {
+            assert!(!buffer_contains(buf, "demo-repo"));
+            assert!(!buffer_contains(buf, "alpha"));
+        }
+
+        // At 3 columns the interior is exactly one column: the heading row and every
+        // list row occupy column 1 alone, and columns 0 and 2 stay spaces on every row.
+        for y in 0..=18u16 {
+            assert_eq!(cell(&buf3, 0, y).symbol(), " ", "y={y}");
+            assert_eq!(cell(&buf3, 2, y).symbol(), " ", "y={y}");
+        }
+        assert_ne!(
+            cell(&buf3, 1, 0).symbol(),
+            " ",
+            "the heading row must occupy column 1"
+        );
+        // Row 3 is the selected `alpha` row (row 2 is the active section header,
+        // unselected and therefore blank at a one-column field): its marker alone
+        // still draws into column 1.
+        assert_ne!(
+            cell(&buf3, 1, 3).symbol(),
+            " ",
+            "the selected list row must occupy column 1"
+        );
+
+        // None of the three holds a divider: all three are below the breakpoint.
+        for buf in [&buf1, &buf2, &buf3] {
+            assert!(!buffer_contains(buf, "│"));
+        }
+
+        // The two mandated widths as contrasting controls: comfortably wide enough
+        // that the heading and the selected row draw whole, so the degenerate cases
+        // above are a width branch rather than something wrong at every size.
+        for width in [60, 120] {
+            let buf = render_at(width, 20, &d);
+            assert!(buffer_contains(&buf, "demo-repo"));
+            assert_eq!(cell(&buf, 1, 3).symbol(), ">", "width {width}");
+        }
+    }
+
     /// `responsive-layout` :: "A region draws a heading, a blank row, and no border at both
     /// widths" — the padding row between a region's heading and its interior is never
     /// painted, and the interior's first row is the buffer's row 2 at both mandated widths.
