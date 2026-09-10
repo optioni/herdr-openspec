@@ -377,22 +377,22 @@ builds until this group lands. See design.md → Decisions D1, D2, D3.
 Four scenarios added by the deltas were verified by no task, and three were tasked at the
 wrong tier. See design.md → Verification matrix for the test name each must take.
 
-- [ ] 7.1 RED then GREEN: `responsive-layout` → "A name longer than the heading row keeps its
+- [x] 7.1 RED then GREEN: `responsive-layout` → "A name longer than the heading row keeps its
   tail" and "No repository names itself in the heading" — the heading row's own degraded
   states, neither reachable through task 3.1's happy path.
-- [ ] 7.2 RED then GREEN: `responsive-layout` → "The routed region's heading is bold and the
+- [x] 7.2 RED then GREEN: `responsive-layout` → "The routed region's heading is bold and the
   other's is dim". Task 4.1 asserts this for the **detail** heading only; the list heading's
   own bold/dim pair has no task, and the two are drawn by different call sites.
-- [ ] 7.3 RED then GREEN: `responsive-layout` → "A one-, two-, and three-column frame
+- [x] 7.3 RED then GREEN: `responsive-layout` → "A one-, two-, and three-column frame
   degenerates without drawing over a gutter".
-- [ ] 7.4 RED then GREEN: the drawn-buffer half of "Body and footer occupy their rows at both
+- [x] 7.4 RED then GREEN: the drawn-buffer half of "Body and footer occupy their rows at both
   widths", "A one-row frame renders the body's heading row and nothing else", and "A two-row
   frame renders one body row and the footer". Task 1.3 asserts `split_frame`'s tuple only; the
   render half includes rewriting `src/ui/view.rs:944 one_row_frame_draws_header_only`, whose
   name is falsified by this change.
 
 
-- [ ] 7.5 RED then GREEN: the frame/region-shape family group 3's re-baseline left red because
+- [x] 7.5 RED then GREEN: the frame/region-shape family group 3's re-baseline left red because
   every one of them asserts chrome this change deletes — the `OpenSpec` frame header, the
   `Changes`/`Detail` block titles, a bordered region, or the old border counts. Named here
   because task 3.9 could not re-baseline them (they assert the *shape*, not a row index) and
@@ -404,7 +404,7 @@ wrong tier. See design.md → Verification matrix for the test name each must ta
   `two_row_frame_draws_no_body`. Each takes the name design.md's Verification matrix gives its
   scenario; 7.2, 7.3 and 7.4 already own five of them by name, so this line is the remainder.
 
-- [ ] 7.6 RED then GREEN: the ten remaining re-baselines that live **outside** `src/ui/view.rs`
+- [x] 7.6 RED then GREEN: the ten remaining re-baselines that live **outside** `src/ui/view.rs`
   and that no group's file manifest claimed. Measured after group 4, each fails because it
   asserts a region border, the deleted `OpenSpec` heading literal, or a content row the new
   interior moved:
@@ -426,6 +426,19 @@ wrong tier. See design.md → Verification matrix for the test name each must ta
     call log. (The second was measured after group 6; the count at group 4 was ten and is
     eleven.)
 
+
+  Group 7 landed in twelve commits (`0582575` … `9155b89`, plus `1f0e08c` for the two
+  files it left uncommitted when it went idle). Measured after it: `cargo test
+  --all-features --lib -- --test-threads=1` → **1221 passed, 0 failed**; `widths.sh` 117 →
+  **121** view tests against its floor of 114; `listwidths.sh` 48, `detailwidths.sh` 42,
+  `mdwidths.sh` 34, `taskwidths.sh` 22, `colwidth.sh`, `noio-view.sh` (nine pure files) and
+  `palette.sh` all OK. Contract tier: `degraded_coverage` 10 passed / 1 planted ignore,
+  `doc_contract` 61, `manifest` 4.
+
+  Two matrix renames reached beyond `src/`: `wide_draws_two_regions_divided_at_40` is a
+  `proof` in `tests/degraded-coverage.toml`, and `resizing_the_backend_changes_the_next_frame`
+  is cited by `tests/degraded_coverage.rs`'s own doc comment as one of the inline-backend
+  exceptions. Both followed; neither weakens a check.
 ## 8. Documentation sites
 <!-- kind: operational -->
 
