@@ -4843,18 +4843,43 @@ mod tests {
 
             // The third header row is the emphasised one, compared against the
             // palette rather than against a `Modifier` written here.
-            let selected =
-                crate::ui::palette::style(crate::ui::palette::Role::DetailSectionSelected);
+            //
+            // Patched over `Cell::default().style()`, not compared bare: ratatui
+            // fills an untouched cell's foreground, background and underline
+            // with its own reset value rather than leaving them empty, so a
+            // drawn cell's style is that reset ground with the role's own
+            // attributes patched on top. Comparing against the bare palette
+            // value asserts a `Style` the buffer can never hold. This is
+            // `ui::view::tests`' `uncoloured()` convention, which landed in
+            // group 6 — after this test was first written.
+            //
+            // The wording above avoids naming the ratatui colour type, which
+            // `scripts/gates/palette.sh` greps the whole of `src/` for, comments
+            // included — the known limit that gate states, whose stated repair
+            // is exactly this rewording.
+            let ground = ratatui::buffer::Cell::default().style();
+            let selected = ground.patch(crate::ui::palette::style(
+                crate::ui::palette::Role::DetailSectionSelected,
+            ));
+            let unselected = ground.patch(crate::ui::palette::style(
+                crate::ui::palette::Role::DetailSection,
+            ));
             assert_eq!(
                 cell(&run.buffer, content_x(width), CONTENT_Y + 2).style(),
                 selected,
                 "width {width}: the cursor's own section header carries the selected role"
             );
-            // And it is the only row that does, so the assertion discriminates.
+            // The other two carry the unselected role, and neither equals the
+            // selected one — so the check discriminates `REVERSED` rather than
+            // passing on any two styles that happen to differ.
             for n in [0u16, 1] {
+                let got = cell(&run.buffer, content_x(width), CONTENT_Y + n).style();
+                assert_eq!(
+                    got, unselected,
+                    "width {width}: header {n} carries the unselected role"
+                );
                 assert_ne!(
-                    cell(&run.buffer, content_x(width), CONTENT_Y + n).style(),
-                    selected,
+                    got, selected,
                     "width {width}: header {n} must not be the emphasised one"
                 );
             }
