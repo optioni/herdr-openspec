@@ -88,16 +88,18 @@ grep -q "plugin pane focus" "$S/argv.log"
 ## 2. `existing_pane` re-expressed through the extractor
 <!-- kind: refactor -->
 
-- [ ] 2.1 CHARACTERIZE: Confirm the **five** test functions that call `existing_pane` are green
+- [x] 2.1 CHARACTERIZE: Confirm the **five** test functions that call `existing_pane` are green
+      (**six** as implemented: group 1's `an_unparseable_listing_is_the_same_error_from_both_matchers`
+      legitimately calls it for the cross-matcher comparison.)
       and leave their *matcher* assertions unedited — they are the contract this refactor must
       preserve (`awk '/#\[test\]/{t=NR} /existing_pane\(/{if(t)print t}' src/open.rs | sort -u
       | wc -l` → 5; `cargo test --all-features --lib open::tests` at HEAD → 37 passed).
       This does **not** extend to the `run`-level call counts inside `no_match_opens_instead`,
       which group 3.4 must change; only its three `existing_pane(..)` assertions are frozen.
-- [ ] 2.2 REFACTOR: Reduce `existing_pane`'s body to the first element of
+- [x] 2.2 REFACTOR: Reduce `existing_pane`'s body to the first element of
       `dashboard_panes(..)`, keeping its signature and its one production call site, so the
       three-part test exists once (design.md → Decision 6).
-- [ ] 2.3 VERIFY: Run `cargo test --all-features --lib open::tests` — the unchanged characterization
+- [x] 2.3 VERIFY: Run `cargo test --all-features --lib open::tests` — the unchanged characterization
       tests still pass.
 
 ## 3. `run`'s post-open listing and focus
