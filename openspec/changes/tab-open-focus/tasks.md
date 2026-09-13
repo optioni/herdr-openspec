@@ -105,7 +105,7 @@ grep -q "plugin pane focus" "$S/argv.log"
 ## 3. `run`'s post-open listing and focus
 <!-- kind: behavior -->
 
-- [ ] 3.1 RED: Write failing tests for the nine Requirement-1 scenarios over `cli::FakeCli`:
+- [x] 3.1 RED: Write failing tests for the nine Requirement-1 scenarios over `cli::FakeCli`:
       `a_tab_open_lists_then_focuses`, `a_split_open_takes_the_same_path`,
       `a_failed_second_listing_warns_and_succeeds`,
       `an_unparseable_second_listing_warns_and_succeeds`,
@@ -115,17 +115,17 @@ grep -q "plugin pane focus" "$S/argv.log"
       `a_failed_open_makes_no_post_open_call`, and `the_already_open_path_is_untouched`.
       Register `["pane","list"]` twice on the fake — its per-argv `VecDeque` returns them in
       order and repeats the last (design.md → Test Boundaries).
-- [ ] 3.2 RED: Assert every one of those on `fake.calls()` — the recorded argument vectors —
+- [x] 3.2 RED: Assert every one of those on `fake.calls()` — the recorded argument vectors —
       not on `outcome` alone. `FakeCli` panics only on an *unregistered* call, so a test that
       checks `outcome == Ok` stays green with the whole post-open step deleted.
       `the_post_open_focus_names_the_newly_opened_pane` is the single test that falsifies an
       implementation passing a hardcoded empty pre-open id list; every other scenario either
       starts from an empty listing or leaves `before` and `after` equal.
-- [ ] 3.3 GREEN: Collect the pre-open dashboard ids from the first listing, and after a
+- [x] 3.3 GREEN: Collect the pre-open dashboard ids from the first listing, and after a
       successful `plugin pane open` issue a second `pane list`, choose the pane with
       `opened_pane`, and focus it — every failure after the open pushing a warning and leaving
       `outcome` as `Ok`.
-- [ ] 3.4 GREEN: Update the **five** existing tests the new call sequence invalidates. Every
+- [x] 3.4 GREEN: Update the **five** existing tests the new call sequence invalidates. Every
       test that reaches a *successful* `plugin pane open` is affected, because `FakeCli`
       repeats its last response per argv and so re-answers the second `pane list` with the
       first listing:
@@ -145,7 +145,7 @@ grep -q "plugin pane focus" "$S/argv.log"
         **second** `pane list` answer carrying a labelled pane, so `warnings` stays empty and
         the focus is exercised. Do **not** weaken the `warnings: Vec::new()` assertion — it is
         the only thing that test says about silence.
-- [ ] 3.5 CHECK: Confirm no spawn API entered `src/open.rs` and the `HerdrCli` handle is still
+- [x] 3.5 CHECK: Confirm no spawn API entered `src/open.rs` and the `HerdrCli` handle is still
       confined to five files — `make gates`, whose `NOSPAWN` leg is the one that fires and
       whose `LAUNCHSEAM` leg re-runs with `LAUNCH=src/open.rs`.
       **Negative control, run at planning time:** appending
@@ -157,8 +157,8 @@ grep -q "plugin pane focus" "$S/argv.log"
       (`src/open.rs:423`). Re-planted above that line it gives `LAUNCHSEAM FAIL (leg 1):
       src/open.rs spawns a process`. Both legs guard the production slice this change writes
       into. `tests/gate_controls.rs` holds the standing version of this control.
-- [ ] 3.6 REFACTOR: Clean up while green — or state explicitly that none was needed.
-- [ ] 3.7 Run `cargo test --all-features --lib open::tests` — green, no regressions.
+- [x] 3.6 REFACTOR: Clean up while green — or state explicitly that none was needed.
+- [x] 3.7 Run `cargo test --all-features --lib open::tests` — green, no regressions.
 
 ## 4. Acceptance Test — Outer Loop GREEN
 <!-- kind: behavior -->

@@ -120,7 +120,7 @@ echo "$@" >> "$D/argv.log"
 case "$*" in
   "pane list")
     if [ -f "$D/pane-list-count" ]; then
-      printf '{"pane_id":"w8:pG","label":"OpenSpec","workspace_id":"w8"}'
+      printf '{"result":{"panes":[{"pane_id":"w8:pG","label":"OpenSpec","workspace_id":"w8"}]}}'
     else
       : > "$D/pane-list-count"
       printf '{"result":{"panes":[]}}'
