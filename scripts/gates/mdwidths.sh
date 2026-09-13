@@ -18,7 +18,7 @@
 # precisely so that no test in this file has a legitimate reason to name neither width. An
 # exemption list is how a width check rots into a rubber stamp.
 [ -f src/ui/markdown.rs ] || { echo "MDWIDTHS FAIL: src/ui/markdown.rs missing" >&2; exit 1; }
-MD_MIN="${MD_MIN:-34}" python3 - <<'PY'
+MD_MIN="${MD_MIN:-35}" python3 - <<'PY'
 import re, sys, os
 raw = open("src/ui/markdown.rs").read()
 src = "\n".join(l for l in raw.splitlines()

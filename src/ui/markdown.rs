@@ -1288,6 +1288,14 @@ mod tests {
         // The table is three columns, so `4n + 1` is 13 and the swept widths
         // 1, 2, 3, and 10 all fall below it: the degenerate one-cell-per-line
         // path is measured by this sweep rather than assumed.
+        //
+        // The nested block quote and the three task-list items — checked,
+        // unchecked, and one nested inside a quote — are here rather than in
+        // a second all-constructs document beside this one, so every sweep
+        // and every set-difference check reads the same fixture. A task-list
+        // item's prefix is four columns, which the swept widths 1, 2, and 3
+        // all fall under: `width.saturating_sub(prefix)` is measured at
+        // underflow rather than assumed total.
         "# headingword marker\n\
          \n\
          paragraphword marker text padded out with extra words so the line wraps at both widths under test here today and ~~struckword~~ too\n\
@@ -1299,6 +1307,13 @@ mod tests {
          ```\n\
          \n\
          > quoteword marker text padded with extra words so the quote wraps under both widths under test today\n\
+         \n\
+         > > nestedquoteword marker text padded with extra words so the nested quote wraps under both widths\n\
+         \n\
+         > - [ ] quotedtaskword marker text padded with extra words so the item wraps under both widths\n\
+         \n\
+         - [x] checkedtaskword marker text padded with extra words so the item wraps under both widths\n\
+         - [ ] uncheckedtaskword marker text padded with extra words so the item wraps under both widths\n\
          \n\
          ---\n\
          \n\
@@ -1362,8 +1377,71 @@ mod tests {
             assert!(text.contains("tableword"), "table missing at {width}");
             assert!(text.contains("struckword"), "struck run missing at {width}");
             assert!(
+                text.contains("nestedquoteword"),
+                "nested quote missing at {width}"
+            );
+            assert!(
+                text.contains("checkedtaskword") && text.contains("uncheckedtaskword"),
+                "task-list items missing at {width}"
+            );
+            assert!(
+                text.contains("quotedtaskword"),
+                "quote-nested task-list item missing at {width}"
+            );
+            assert!(
                 !text.contains("design.md"),
                 "link destination leaked at {width}"
+            );
+        }
+    }
+
+    /// `markdown-render` :: "Each emitted glyph measures one column, and the
+    /// set is complete". The single property the whole glyph change rests on:
+    /// were any of the seven two columns under `layout::columns` — the measure
+    /// `Buffer::set_string` itself consumes — every line grammar built on them
+    /// would overrun its region silently.
+    ///
+    /// The set-difference leg reads [`composite_fixture`], which deliberately
+    /// holds no ordered list and no image: an ordered list renders `2.` from a
+    /// source `1.` and an image renders `[img]`, each contributing a non-source
+    /// character that is not one of these glyphs, which would make the equality
+    /// unfalsifiable rather than stricter.
+    #[test]
+    fn every_emitted_glyph_measures_one_column() {
+        let glyphs = ['•', '│', '─', '├', '┼', '┤', '✓'];
+        for glyph in glyphs {
+            assert_eq!(columns(&glyph.to_string()), 1, "{glyph:?}");
+        }
+
+        let source = composite_fixture();
+        for width in [58, 78] {
+            let rendered = text_of(&lines(&source, width));
+            for text in &rendered {
+                assert!(
+                    columns(text) <= width as usize,
+                    "width {width}: {text:?} exceeds it"
+                );
+            }
+            let in_source: std::collections::BTreeSet<char> = source.chars().collect();
+            let added: std::collections::BTreeSet<char> = rendered
+                .join("")
+                .chars()
+                .filter(|c| !c.is_whitespace() && !in_source.contains(c))
+                .collect();
+            // Measured on what is actually emitted, not only on the declared
+            // list above: a glyph added later without a width assertion is a
+            // two-column character reaching the buffer, and this is the leg
+            // that sees it.
+            for c in &added {
+                assert_eq!(columns(&c.to_string()), 1, "width {width}: emitted {c:?}");
+            }
+            assert_eq!(
+                added,
+                glyphs
+                    .into_iter()
+                    .collect::<std::collections::BTreeSet<_>>(),
+                "width {width}: the rendering's non-source characters are not exactly the \
+                 declared glyph set"
             );
         }
     }
@@ -1396,6 +1474,14 @@ mod tests {
             "| a | b | c |\n|---|---|---|\n| d |\n".to_string(),
             format!("|{}\n|{}\n", " x |".repeat(40), "---|".repeat(40)),
             format!("| h |\n|---|\n| {} |\n", "日本語".repeat(84)),
+            // `markdown-render`'s three adversarial task-list sources: an
+            // item whose text is a 500-character token with no space, a bare
+            // marker with no text after it, and one nested three quote levels
+            // deep — each reaching the four-column prefix's own
+            // `saturating_sub` at widths 1 and 2.
+            format!("- [ ] {}\n", "x".repeat(500)),
+            "- [x]\n".to_string(),
+            "> > > - [x] deep\n".to_string(),
         ];
         for width in [1u16, 2, 58, 78] {
             for source in &pathological {
