@@ -25,7 +25,7 @@ change adds no code to it.
 #### Scenario: The tasks tab shows checkboxes and its siblings show markdown
 
 - **WHEN** a `Dashboard` at `Route::Detail`, whose selected change carries the five `tdd`
-  artifacts with `tracks_tasks` set at position 3 (`tasks`) and whose `detail.source` is
+  artifacts with `tracks_tasks` set at position 3 (`tasks`) and whose one section holds
   `## 1. Setup\n\n- [x] 1.1 first\n- [ ] 1.2 second\n`, is rendered at 120x20 and at 60x20
   with `detail.tab == 3`
 - **THEN** in each buffer the content area holds a progress-bar row, a blank row,
@@ -36,14 +36,14 @@ change adds no code to it.
   that `markdown-render` models task-list items and both paths render the item rows as
   `[✓] 1.1 first` and `[ ] 1.2 second`. The glyphs agreeing across the two paths is asserted
   here, not incidental: it is the structural answer to the drift `markdown-render` names.
-- **AND** the tab bar in row 3 is byte-identical between the two renders, so switching tabs
+- **AND** the tab bar in row 2 is byte-identical between the two renders, so switching tabs
   changed content and nothing else
 
 #### Scenario: The tab is chosen by `tracks_tasks`, not by its id
 
 - **WHEN** a `Dashboard` whose selected change carries two artifacts, `checklist` at
   position 0 with `tracks_tasks == true` and `tasks` at position 1 with
-  `tracks_tasks == false`, and whose `detail.source` is `- [x] done\n`, is rendered at
+  `tracks_tasks == false`, and whose one section holds `- [x] done\n`, is rendered at
   120x20 and at 60x20
 - **THEN** with `detail.tab == 0` the content area holds the checklist grammar — a
   progress-bar row and a `[✓] done` row
@@ -55,7 +55,7 @@ change adds no code to it.
 #### Scenario: A schema naming no tasks artifact leaves every tab as markdown
 
 - **WHEN** a `Dashboard` whose selected change carries three artifacts, none with
-  `tracks_tasks == true`, and whose `detail.source` is `- [ ] a\n`, is rendered at 120x20
+  `tracks_tasks == true`, and whose one section holds `- [ ] a\n`, is rendered at 120x20
   and at 60x20 with `detail.tab` at each of `0`, `1`, and `2`
 - **THEN** no render shows a progress-bar row and every render shows `[ ] a`, the markdown
   path's own task-list rendering

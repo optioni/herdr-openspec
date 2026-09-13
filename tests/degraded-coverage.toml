@@ -96,7 +96,7 @@ condition = "Markdown source holds a construct the parser does not model (a foot
 tier = "unit"
 proof = ["unmodelled_constructs_render_as_source"]
 verdict = "unproven"
-why = "ui::markdown::lines renders a footnote as literal source, one line per source line; the same fixture's task-list item, table and struck run render as a checkbox glyph, as aligned columns and as a face — the three controls that say the narrowing is real"
+why = "ui::markdown::lines renders a footnote as literal source, one line per source line; the same test's three control fixtures — a task-list item, a table, and a struck run — render as a checkbox glyph, as aligned columns and as a face, which is what says the narrowing is real"
 covers = ["src/ui/markdown.rs:695-695"]
 
 [[row]]

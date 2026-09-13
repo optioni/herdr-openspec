@@ -968,8 +968,8 @@ mod tests {
     fn wide_character_checklist_lines_stay_within_width() {
         let family_emoji = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\u{200D}\u{1F466}";
         let source = format!(
-            "## 日本語の見出し\n\n- [x] 日本語のタスク\n- [ ] 🎉 celebrate\n\
-             - [ ] {family_emoji} family\n"
+            "## 日本語の見出し\n\n- [x] 日本語のタスク\n  - [ ] 🎉 celebrate\n\
+             \u{20}   - [ ] {family_emoji} family\n"
         );
         let progress = Progress {
             completed: 1,
@@ -996,6 +996,42 @@ mod tests {
             assert!(
                 out.iter().any(|l| l.text().contains(family_emoji)),
                 "width {width}: family-emoji item missing"
+            );
+
+            // The glyph budget did not move: `✓` (U+2713) is East Asian
+            // Neutral and one column, so `[✓]` is three columns exactly as
+            // `[x]` was. Asserted against an ASCII checklist of the same
+            // *shape* — the same three indents — rather than against a
+            // remembered offset, and on BOTH the column the glyph begins at
+            // and the column its text begins at: the first pins the indent
+            // rule, the second pins the glyph's own width, and a
+            // wider-than-one-column glyph moves only the second.
+            let ascii = lines(
+                "## heading\n\n- [x] alpha\n  - [ ] bravo\n    - [ ] charlie\n",
+                &progress,
+                width,
+            );
+            let offsets = |rendered: &[crate::ui::markdown::Line]| -> Vec<(usize, usize)> {
+                rendered
+                    .iter()
+                    .filter_map(|l| {
+                        let t = l.text();
+                        let glyph = ["[✓] ", "[ ] "]
+                            .into_iter()
+                            .find_map(|g| t.find(g).map(|byte| (byte, g)));
+                        glyph.map(|(byte, g)| (columns(&t[..byte]), columns(&t[..byte + g.len()])))
+                    })
+                    .collect()
+            };
+            assert_eq!(
+                offsets(&out),
+                offsets(&ascii),
+                "width {width}: the glyph's interior column offsets moved"
+            );
+            assert_eq!(
+                offsets(&out),
+                vec![(0, 4), (2, 6), (4, 8)],
+                "width {width}: the three indents and the four-column prefix"
             );
         }
     }

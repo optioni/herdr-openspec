@@ -389,7 +389,7 @@ impl Folder {
         self.list_stack.pop();
     }
 
-    /// `Tag::Item`: the marker (`- ` or the list's own sequential number),
+    /// `Tag::Item`: the marker ([`BULLET`] or the list's own sequential number),
     /// two columns of indent per nesting level, and a hanging indent —
     /// the marker's width plus the nesting indent — for wrapped
     /// continuation lines. The marker itself never carries a face, even
@@ -433,6 +433,14 @@ impl Folder {
     /// or totality assertion can detect that, because a shorter indent
     /// never overruns (design.md -> Decision 7).
     fn set_task_marker(&mut self, checked: bool) {
+        // The guard is for totality over the event stream, not a live case:
+        // `TaskListMarker` only ever arrives between `Start(Item)` and the
+        // item's content, and `start_paragraph` deliberately preserves
+        // `Category::Item` (see its `if self.category != Category::Item`), so
+        // a loose list's item keeps its marker. If it ever did fire, the
+        // effect would be the silent vanish this change exists to prevent —
+        // which is why the reason is written here rather than inferred from
+        // another function.
         if self.category != Category::Item {
             return;
         }
@@ -2335,20 +2343,20 @@ mod tests {
 
             // The columns are aligned: the delimiter line's `├`/`┼`/`┤`
             // offsets are every row line's `│` offsets.
-            let seps = |text: &str, set: [char; 3]| -> Vec<usize> {
+            let seps = |text: &str, set: &[char]| -> Vec<usize> {
                 text.chars()
                     .enumerate()
                     .filter(|(_, c)| set.contains(c))
                     .map(|(i, _)| i)
                     .collect()
             };
-            let expected = seps(&texts[1], ['├', '┼', '┤']);
+            let expected = seps(&texts[1], &['├', '┼', '┤']);
             assert_eq!(expected.len(), 3, "width {width}: n + 1 separators");
             for (i, text) in texts.iter().enumerate() {
                 if i == 1 {
                     continue;
                 }
-                let got = seps(text, ['│', '│', '│']);
+                let got = seps(text, &['│']);
                 assert_eq!(got, expected, "width {width}: {text:?} is not aligned");
             }
         }

@@ -563,8 +563,9 @@ treat each as one column and SHALL NOT special-case any of them.
 
 This is asserted rather than assumed because it is the single property the whole glyph change
 rests on: were any of them two columns under that measure, every line grammar built on it
-would overrun its region silently. It is **not** a claim about what a terminal paints — six of
-the eight are East Asian Ambiguous and a CJK-locale terminal paints them at two columns, which
+would overrun its region silently. It is **not** a claim about what a terminal paints — the
+list above enumerates `│` twice, as the quote prefix and as the table separator, but the set
+is **seven** distinct glyphs and six of the seven are East Asian Ambiguous and a CJK-locale terminal paints them at two columns, which
 this capability accepts uncompensated on `SPEC.md`'s standing rule and states in the
 thematic-break requirement above.
 
