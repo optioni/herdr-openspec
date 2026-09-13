@@ -127,9 +127,32 @@ screen pointed at the full list. `? help` is now the first hint on the row and t
 `openspec/IMPLEMENTATION-ORDER.md` records what that costs when two changes modify one
 requirement: the `MODIFIED` block carries the whole requirement, so archiving two such changes
 silently discards the edits of whichever archived first, and git reports nothing. Seven other
-changes are in flight in this checkout. `mouse-text-selection` overlaps `mouse-input`,
-`header-progress-bar` and `heading-sections` plausibly overlap `responsive-layout` and
-`detail-header`, and `settings-window` overlaps `dashboard-loop`. Before archiving this change,
-re-extract each requirement block from `openspec/specs/<capability>/spec.md` rather than
+changes are in flight in this checkout (`openspec list`, 2026-09-13). Before archiving this
+change, re-extract each requirement block from `openspec/specs/<capability>/spec.md` rather than
 trusting the block extracted here — and compare by **phrase**, never by line, since a later
 archive may have re-wrapped it.
+
+**`settings-window` is not a neighbour, it is a collision — read this before either is
+implemented.** Its Modified Capabilities list, verified at
+`openspec/changes/settings-window/proposal.md:69-77`, names `dashboard-loop`,
+`responsive-layout`, **and** `mouse-input` — three of this change's own — and it plans the same
+three mechanisms this change builds:
+
+| `settings-window` plans | `help-overlay` lands |
+|---|---|
+| "an overlay **route**, and what keys mean while it is open" | an overlay **layer**; `Route` deliberately left at `List`/`Detail` (design.md → Decision 2) |
+| "how the overlay sizes at the 100-column breakpoint and below" | `layout::help_band`, deliberately breakpoint-**independent** (design.md → Decision 3) |
+| "clicking a row, and clicking outside to dismiss" | click-outside dismissal, as an ADDED precedence requirement (design.md → Decision 7) |
+
+Both proposals cite `/` filter mode as their precedent, so the two were reasoned out from the
+same starting point without either knowing about the other. **Whichever lands first owns the
+machinery and the other adapts** — which this change's Sequencing already claimed, now with the
+specific disagreements named. The route-versus-layer choice is the load-bearing one: if
+`settings-window` ships a `Route::Settings` first, Decision 2 must be re-argued rather than
+rebased, because a third `Route` variant would have to remember which route to return to and
+this change's whole layer argument is that it should not.
+
+`mouse-text-selection` also overlaps `mouse-input` — it proposes reconsidering
+`EnableMouseCapture` entirely, which would change what every gesture in this change's precedence
+table can receive. `header-progress-bar` and `heading-sections` plausibly overlap
+`responsive-layout` and `detail-header`.
