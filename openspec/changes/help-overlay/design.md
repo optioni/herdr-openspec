@@ -195,7 +195,7 @@ and `make check` composes all three and is the gate before any group is called c
 | `help-overlay` / A held key cannot run the window off the end | `ui::help::tests` buffer assertion | view | `TestBackend` 60 and 120; no real terminal | `make test` |
 | `help-overlay` / No indicator when the content fits | `ui::help::tests` buffer assertion | view | `TestBackend` 60 and 120; no real terminal | `make test` |
 | `help-overlay` / Degenerate frames render without panicking | `ui::help::tests` buffer assertion | view | `TestBackend` 60 and 120; no real terminal | `make test` |
-| `help-overlay` / The reader is never trapped in a degenerate frame | `ui::app` unit over `apply` | unit | `Dashboard` in memory; none replaced | `make test` |
+| `help-overlay` / The reader is never trapped in a degenerate frame | `ui::help::tests` unit over `apply` | unit | `Dashboard` in memory; none replaced | `make test` |
 | `binding-inventory` / The inventory is const-evaluable, proved by a const item | `const _: &[Group] = INVENTORY;` — a compile-time item | contract | none; fails to compile rather than asserting | `make test` |
 | `binding-inventory` / Every binding names a field explicitly | `scripts/gates/nodefault-ui.sh` + a planted `..Default::default()` | gate | scratch tree copy of `src/` | `make gates` / `make test` |
 | `binding-inventory` / A row naming the wrong key fails | `tests/doc_contract.rs` input-parse check, with a planted wrong key | contract | `action_for` real; no I/O | `make test` |

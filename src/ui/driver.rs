@@ -131,6 +131,7 @@ pub fn run_loop<B: Backend, E: EventSource>(
             area = completed.area;
             frames += 1;
             dashboard.normalise_scroll(area);
+            dashboard.normalise_help_scroll(area);
         }
         draw = true;
 
@@ -2172,6 +2173,92 @@ mod tests {
             "launch::none() discards the request it was given"
         );
         assert!(dashboard.launch.problems.is_empty());
+    }
+
+    /// `specs/dashboard-loop/spec.md` -> "The overlay's scroll is clamped
+    /// where the detail region's is not". At 60x20 on `Route::List`,
+    /// `split_body` returns no detail region at all, so
+    /// `normalise_scroll` returns early — this is the one fixture that
+    /// proves `normalise_help_scroll` is a genuinely separate call, not
+    /// folded into a `normalise_scroll` that would have left `help.scroll`
+    /// unclamped here (design.md -> Decision 10).
+    #[test]
+    fn the_overlay_s_scroll_is_clamped_where_the_detail_region_s_is_not() {
+        let base = dashboard();
+        let backend = TestBackend::new(60, 20);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        let mut dashboard = base.clone();
+        dashboard.help = crate::ui::app::Help {
+            open: true,
+            scroll: 99,
+        };
+        let mut events = Script::new(vec![Ok(Some(press(
+            KeyCode::Char('q'),
+            KeyModifiers::NONE,
+        )))]);
+        let mut fs = ScriptedFs::new(Vec::new(), Vec::new());
+        let mut refresher = RecordingRefresher::new(Vec::new());
+        let mut agents = crate::agents::none();
+        let mut launcher = crate::launch::none();
+        let mut live = crate::ui::driver::Live {
+            fs: &mut fs,
+            refresher: &mut refresher,
+            agents: &mut *agents,
+            launcher: &mut *launcher,
+        };
+        run_loop(
+            &mut terminal,
+            &mut dashboard,
+            &mut events,
+            &mut live,
+            &|_: &std::path::Path| Ok(String::new()),
+            Duration::from_millis(1),
+        )
+        .expect("loop ends");
+
+        assert_eq!(
+            dashboard.help.scroll, 25,
+            "42 content rows less a 17-row interior"
+        );
+        assert_eq!(
+            dashboard.detail.scroll, 0,
+            "normalise_scroll still changes nothing when the detail region is not drawn"
+        );
+
+        // The same dashboard with the overlay closed leaves `help.scroll`
+        // untouched: `normalise_help_scroll` clamps nothing while it is
+        // false.
+        let backend2 = TestBackend::new(60, 20);
+        let mut terminal2 = ratatui::Terminal::new(backend2).expect("construct terminal");
+        let mut closed = base;
+        closed.help = crate::ui::app::Help {
+            open: false,
+            scroll: 99,
+        };
+        let mut events2 = Script::new(vec![Ok(Some(press(
+            KeyCode::Char('q'),
+            KeyModifiers::NONE,
+        )))]);
+        let mut fs2 = ScriptedFs::new(Vec::new(), Vec::new());
+        let mut refresher2 = RecordingRefresher::new(Vec::new());
+        let mut agents2 = crate::agents::none();
+        let mut launcher2 = crate::launch::none();
+        let mut live2 = crate::ui::driver::Live {
+            fs: &mut fs2,
+            refresher: &mut refresher2,
+            agents: &mut *agents2,
+            launcher: &mut *launcher2,
+        };
+        run_loop(
+            &mut terminal2,
+            &mut closed,
+            &mut events2,
+            &mut live2,
+            &|_: &std::path::Path| Ok(String::new()),
+            Duration::from_millis(1),
+        )
+        .expect("loop ends");
+        assert_eq!(closed.help.scroll, 99, "a closed overlay is not clamped");
     }
 
     // `agent-polling`: `Live`'s third field and the loop's fourth live step.

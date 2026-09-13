@@ -124,26 +124,26 @@ run it avoids.
 ## 6. Scrolling, the indicator, and the degraded frames
 <!-- kind: behavior -->
 
-- [ ] 6.1 RED: Add tests named for The overlay scrolls at both mandated sizes, A held key cannot
+- [x] 6.1 RED: Add tests named for The overlay scrolls at both mandated sizes, A held key cannot
   run the window off the end, No indicator when the content fits, Degenerate frames render
   without panicking, and The reader is never trapped in a degenerate frame. The held-key test
   applies two hundred `Next` actions and then two hundred `Prev`, redrawing after each.
-- [ ] 6.2 RED: Add the test named for The overlay's scroll is clamped where the detail region's
+- [x] 6.2 RED: Add the test named for The overlay's scroll is clamped where the detail region's
   is not, driving one `run_loop` iteration at 60x20 on `Route::List` with `help.scroll` `99` and
   asserting it lands on `25` while `detail.scroll` is untouched. `25` is `42 - 17`, the
   clamp `scroll_offset(42, help.scroll, 17)` applies at 60x20; an earlier draft read `22`,
   which is `39 - 17` from before the inventory grew to 31 bindings.
-- [ ] 6.3 GREEN: Window the interior through `layout::scroll_offset(content_rows, help.scroll,
+- [x] 6.3 GREEN: Window the interior through `layout::scroll_offset(content_rows, help.scroll,
   interior_height)` — the signature is `(lines, scroll, height)`, confirmed at
   `src/ui/layout.rs:121` — and draw the `<first>-<last>/<total>` indicator into the bottom rule
   when and only when the content does not fit. No arrow glyphs, per design.md → Decision 4.
-- [ ] 6.4 GREEN: Add `Dashboard::normalise_help_scroll(frame_area)` and call it in `run_loop`
+- [x] 6.4 GREEN: Add `Dashboard::normalise_help_scroll(frame_area)` and call it in `run_loop`
   beside `normalise_scroll`, per design.md → Decision 10.
-- [ ] 6.5 GREEN: Handle the degenerate branches — nothing at zero width or height, the top rule
+- [x] 6.5 GREEN: Handle the degenerate branches — nothing at zero width or height, the top rule
   alone at one row, both rules and no interior at two.
-- [ ] 6.6 REFACTOR: Collapse the three degenerate branches into one guard if they share a shape,
+- [x] 6.6 REFACTOR: Collapse the three degenerate branches into one guard if they share a shape,
   or state that no refactor was needed.
-- [ ] 6.7 Run `cargo test ui::help ui::driver` — no regressions.
+- [x] 6.7 Run `cargo test ui::help ui::driver` — no regressions.
 
 ## 7. Gate scripts and their planted controls
 <!-- kind: operational -->

@@ -1002,6 +1002,40 @@ impl Dashboard {
         };
     }
 
+    /// The overlay's own per-frame clamp — a **second** normaliser beside
+    /// [`Self::normalise_scroll`], called once per frame by
+    /// `ui::driver::run_loop` right after it. Changes nothing while
+    /// `help.open` is false; while it is true, clamps `help.scroll` against
+    /// the band's own interior height, derived from `frame_area` through
+    /// `layout::split_frame`'s body and `layout::help_band` — never through
+    /// the detail region `normalise_scroll` reads.
+    ///
+    /// It is not folded into `normalise_scroll`, and the reason is a
+    /// measured contradiction rather than tidiness: `normalise_scroll`
+    /// returns early when the detail region is not drawn, which
+    /// `detail-scroll` requires of it in as many words, and the detail
+    /// region is not drawn at `Route::List` below the breakpoint — exactly
+    /// the 60x20 `Route::List` fixture this change's own held-key scenario
+    /// uses. Sharing the function would leave `help.scroll` unclamped in
+    /// the one case that scenario exists to pin (design.md -> Decision 10).
+    ///
+    /// `ui::layout::scroll_offset`'s parameter order is `(lines, scroll,
+    /// height)` — `content_rows` first, on the same terms every other call
+    /// site in this change writes it.
+    pub fn normalise_help_scroll(&mut self, frame_area: ratatui::layout::Rect) {
+        if !self.help.open {
+            return;
+        }
+        let (body, _) = crate::ui::layout::split_frame(frame_area);
+        let band = crate::ui::layout::help_band(body, crate::ui::help::content_rows());
+        let interior_height = band.height.saturating_sub(2);
+        self.help.scroll = crate::ui::layout::scroll_offset(
+            crate::ui::help::content_rows(),
+            self.help.scroll,
+            interior_height,
+        );
+    }
+
     /// Whether `key`'s rows are shown: a non-empty `/` query forces every section
     /// open for as long as it is non-empty, regardless of the reader's own fold —
     /// a filter that silently hid a match behind a fold would be worse than the

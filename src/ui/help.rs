@@ -9,12 +9,14 @@
 //! no construction cost — see the test module's own
 //! `const _: &[Group] = INVENTORY;`.
 //!
-//! This module owns the inventory and the overlay's **interior** row
-//! grammar only: the band's own geometry (`layout::help_band`), its
-//! scrolling and position indicator, its degenerate-frame handling, and its
-//! wiring into `ui::view::render` are `help-overlay`'s later task groups (5,
-//! 6, and 9). [`render`] here draws [`rows`] top-anchored and unscrolled
-//! into whatever `Rect` its caller hands it — no rule rows, no window.
+//! This module owns the inventory, the overlay's interior row grammar, and
+//! the band's own row grammar — a top rule row, a scrolled window onto
+//! [`rows`], and a bottom rule row carrying the position indicator when the
+//! content does not fit. `layout::help_band` (the band's rectangle) and its
+//! wiring into `ui::view::render` (deciding *whether* and *where* to call
+//! [`render`] at all) live elsewhere — `help-overlay`'s later task group 9.
+//! [`render`] here is total over every `Rect`, degenerate ones included, and
+//! never panics.
 
 use crate::ui::app::{Action, Target};
 use crate::ui::layout::{columns, truncate_columns};
@@ -365,29 +367,147 @@ pub fn rows(width: u16) -> Vec<Row> {
     out
 }
 
-/// Draw [`rows`] into `area`, top-anchored and clipped to `area.height` —
-/// no rule rows, no scrolling window, no degenerate-frame handling beyond
-/// the zero-area guard below. `help-overlay`'s later groups window this
-/// through `layout::scroll_offset`, add the rule rows, and wire the whole
-/// band into `ui::view::render`.
-pub fn render(frame: &mut Frame, area: Rect) {
+/// `─ Help ` followed by `─` to `width`'s right edge — the band's fixed top
+/// row. `Help` is [`Role::RegionHeadingFocused`]; every `─`, and the two
+/// plain spaces the literal prefix carries, are [`Role::RegionRule`]. A
+/// `width` narrower than the seven-column prefix is truncated by
+/// [`truncate_columns`] as a single undivided segment, since at that width
+/// there is no whole `Help` left to colour differently — see
+/// `specs/help-overlay/spec.md` -> "The overlay degrades rather than
+/// panicking at any frame size".
+fn top_rule_row(width: usize) -> Row {
+    const PREFIX: &str = "─ Help ";
+    let prefix_cols = columns(PREFIX);
+    if width < prefix_cols {
+        return Row {
+            segments: vec![(
+                truncate_columns(PREFIX, width).to_string(),
+                Role::RegionRule,
+            )],
+        };
+    }
+    Row {
+        segments: vec![
+            ("─ ".to_string(), Role::RegionRule),
+            ("Help".to_string(), Role::RegionHeadingFocused),
+            (
+                format!(" {}", "─".repeat(width - prefix_cols)),
+                Role::RegionRule,
+            ),
+        ],
+    }
+}
+
+/// `─` repeated to `width` — the band's fixed bottom row — carrying the
+/// `<first>-<last>/<total>` position indicator in [`Role::ListSeparator`]
+/// when `content_rows` exceeds `interior_height` and `width` is wide enough
+/// to hold it (its own display width plus two; narrower, the rule is drawn
+/// whole rather than clipping the indicator). `interior_height` of `0`
+/// always draws the plain rule, since an empty window names nothing to
+/// report on — this is what lets [`render`]'s two-row degenerate case share
+/// this function rather than branch around it. The indicator's own final
+/// character lands exactly one column in from `width`'s right edge. See
+/// `specs/help-overlay/spec.md` -> "The overlay scrolls when the body
+/// cannot hold it".
+fn bottom_rule_row(
+    width: usize,
+    content_rows: usize,
+    interior_height: usize,
+    offset: usize,
+) -> Row {
+    if interior_height == 0 || content_rows <= interior_height {
+        return Row {
+            segments: vec![("─".repeat(width), Role::RegionRule)],
+        };
+    }
+    let first = offset + 1;
+    let last = first + interior_height - 1;
+    let indicator = format!("{first}-{last}/{content_rows}");
+    let indicator_cols = columns(&indicator);
+    if width < indicator_cols + 2 {
+        return Row {
+            segments: vec![("─".repeat(width), Role::RegionRule)],
+        };
+    }
+    let left = width - indicator_cols - 1;
+    Row {
+        segments: vec![
+            ("─".repeat(left), Role::RegionRule),
+            (indicator, Role::ListSeparator),
+            ("─".to_string(), Role::RegionRule),
+        ],
+    }
+}
+
+/// Draw one already-fitted [`Row`] at `(x, y)`, cell by cell, advancing by
+/// each segment's own [`columns`] width — the one place both [`render`] and
+/// its rule rows paint a row, so painting never disagrees with measuring.
+fn draw_row(buf: &mut ratatui::buffer::Buffer, x: u16, y: u16, row: &Row) {
+    let mut cx = x;
+    for (text, role) in &row.segments {
+        buf.set_string(cx, y, text, palette::style(*role));
+        cx = cx.saturating_add(columns(text) as u16);
+    }
+}
+
+/// Draw the whole band into `area`: [`top_rule_row`], a window onto
+/// [`rows`] at the offset [`layout::scroll_offset`] clamps `scroll` to, and
+/// [`bottom_rule_row`]. Total over every `Rect`, degenerate ones included,
+/// and never panics — see `specs/help-overlay/spec.md` -> "The overlay
+/// degrades rather than panicking at any frame size".
+///
+/// The two-row case (a top rule and a bottom rule with no interior) needs
+/// no branch of its own: at `interior_height` `0`,
+/// `layout::scroll_offset` returns `0`, the interior loop's `take(0)` draws
+/// nothing, and [`bottom_rule_row`]'s own `interior_height == 0` guard
+/// already omits the indicator. Only the fully empty case (zero width or
+/// height) and the one-row case (the top rule alone, no bottom rule) are
+/// distinct enough to need their own early return.
+///
+/// `scroll` is the caller's stored offset — `help.scroll`, on
+/// `detail.scroll`'s own terms — never resolved or clamped here; deciding
+/// *whether* to call this at all, and normalising `scroll` beforehand, are
+/// `Dashboard`'s job (`normalise_help_scroll`) and `ui::view::render`'s
+/// (`help-overlay`'s later task group 9).
+pub fn render(frame: &mut Frame, body: Rect, help: &crate::ui::app::Help) {
+    // The band is derived here, from the body, rather than taken as an
+    // already-computed rectangle. `help_band` is total and cheap, and owning
+    // the derivation is what makes the parameter impossible to get wrong: a
+    // caller that passed the body where a band was wanted would otherwise
+    // draw a full-height overlay with no error anywhere, which is precisely
+    // the silent-wrong-rectangle failure `scroll_offset`'s own argument-order
+    // note warns about one level down. `specs/help-overlay/spec.md` states
+    // this signature.
+    let area = crate::ui::layout::help_band(body, content_rows());
+    let scroll = help.scroll;
     if area.width == 0 || area.height == 0 {
         return;
     }
+    let width = area.width as usize;
     let buf = frame.buffer_mut();
-    for (i, row) in rows(area.width).into_iter().enumerate() {
-        let Some(y) = area.y.checked_add(i as u16) else {
-            break;
-        };
-        if y >= area.y.saturating_add(area.height) {
-            break;
-        }
-        let mut x = area.x;
-        for (text, role) in &row.segments {
-            buf.set_string(x, y, text, palette::style(*role));
-            x = x.saturating_add(columns(text) as u16);
-        }
+    draw_row(buf, area.x, area.y, &top_rule_row(width));
+    if area.height < 2 {
+        return;
     }
+    let total = content_rows();
+    let interior_height = (area.height - 2) as usize;
+    let offset = crate::ui::layout::scroll_offset(total, scroll, interior_height as u16);
+    for (i, row) in rows(area.width)
+        .iter()
+        .enumerate()
+        .skip(offset)
+        .take(interior_height)
+    {
+        let y = area.y + 1 + (i - offset) as u16;
+        draw_row(buf, area.x, y, row);
+    }
+    let bottom_y = area.y + area.height - 1;
+    draw_row(
+        buf,
+        area.x,
+        bottom_y,
+        &bottom_rule_row(width, total, interior_height, offset),
+    );
 }
 
 #[cfg(test)]
@@ -397,11 +517,95 @@ mod tests {
     };
     use crate::testutil::{cell, row_text};
     use crate::ui::app::Action;
-    use crate::ui::layout::columns;
+    use crate::ui::layout::{columns, help_band, split_frame};
     use crate::ui::palette::{self, Role};
     use ratatui::backend::TestBackend;
     use ratatui::layout::Rect;
     use std::collections::BTreeSet;
+
+    /// The **body** a full dashboard render at `total` would hand to
+    /// [`render`] — `layout::split_frame`'s own body region, the footer row
+    /// excluded. [`render`] derives the band from it with `help_band`, so
+    /// these tests exercise that derivation rather than bypassing it;
+    /// `band_for` below is what they compare the drawn rectangle against.
+    /// `ui::view::render`'s own wiring of this pair is `help-overlay`'s
+    /// later task group 9, and needs no `help_band` call of its own.
+    fn body_for(total: Rect) -> Rect {
+        let (body, _) = split_frame(total);
+        body
+    }
+
+    /// A closed-at-the-top [`Help`] — `scroll` `0`. [`render`] never reads
+    /// `open`: deciding *whether* to draw the overlay belongs to
+    /// `ui::view::render` (task group 9), so a scenario that is only about
+    /// the grammar or the geometry passes this and says so.
+    fn closed_at_top() -> crate::ui::app::Help {
+        crate::ui::app::Help {
+            open: false,
+            scroll: 0,
+        }
+    }
+
+    /// Where [`render`] will actually draw, given the same `total`. Kept
+    /// beside [`body_for`] so a test can assert against the band's own
+    /// geometry — including the vertical centring, which `body_for` alone
+    /// would not reach — without recomputing the rule twice.
+    fn band_for(total: Rect) -> Rect {
+        help_band(body_for(total), content_rows())
+    }
+
+    /// A `Dashboard` with `help` set and every other field at its emptiest
+    /// — no repository, no changes, `Route::List` — since none of this
+    /// module's own scenarios reach past `apply`/`normalise_help_scroll`
+    /// into anything that field would otherwise matter to. No `Default`
+    /// exists for `Dashboard`, so every field is still named here, on the
+    /// same terms as every other test module's own fixture.
+    fn minimal_dashboard(help: crate::ui::app::Help) -> crate::ui::app::Dashboard {
+        crate::ui::app::Dashboard {
+            help,
+            repo: None,
+            searched_from: std::path::PathBuf::new(),
+            changes: crate::changes::empty_set(),
+            route: crate::ui::app::Route::List,
+            quit: false,
+            selected: 0,
+            filter: crate::ui::app::Filter {
+                query: String::new(),
+                active: false,
+            },
+            detail: crate::ui::app::Detail {
+                sections: Vec::new(),
+                scroll: 0,
+                tab: 0,
+                problems: Vec::new(),
+                loaded: None,
+                expanded: BTreeSet::new(),
+                drawn_width: None,
+            },
+            refresh: crate::ui::app::Refresh {
+                requested: false,
+                reload: false,
+                startup: Vec::new(),
+                problems: Vec::new(),
+            },
+            agents: crate::agents::AgentSnapshot {
+                agents: Vec::new(),
+                reachable: false,
+                stalled: false,
+                problem: None,
+            },
+            agent_names: crate::state::Mapping::default(),
+            launch: crate::ui::app::Launch {
+                pending: None,
+                in_flight: false,
+                problems: Vec::new(),
+            },
+            sections: crate::ui::app::Sections {
+                collapsed: BTreeSet::new(),
+            },
+            file_mode: false,
+        }
+    }
 
     /// The observable second site `specs/binding-inventory/spec.md`'s own
     /// scenario names: a const item is evaluated at compile time, so an
@@ -542,20 +746,56 @@ mod tests {
     fn assert_grammar_renders_correctly(width: u16) {
         let content = rows(width);
         assert_eq!(content.len(), content_rows());
-        let height = content.len() as u16;
-        let area = Rect::new(0, 0, width, height);
+        // The band's own height is the interior plus its two rule rows —
+        // `content.len()` rows are visible with nothing left to scroll to,
+        // so `scroll` `0` shows all of them and `bottom_rule_row` draws no
+        // indicator (`content_rows <= interior_height`).
+        let height = content.len() as u16 + 2;
+        // Passed as the **body**: `help_band` over a body of exactly
+        // `content_rows + 2` returns that same rectangle — `min(44, 44)` with
+        // no remainder to centre — so the band fills it and the row indices
+        // below are the band's own.
+        let body = Rect::new(0, 0, width, height);
         let backend = TestBackend::new(width, height);
         let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
         terminal
-            .draw(|frame| render(frame, area))
+            .draw(|frame| render(frame, body, &closed_at_top()))
             .expect("draw a frame");
         let buffer = terminal.backend().buffer().clone();
 
-        // Row 0: the `Changes` heading, padded to the full width, bold.
-        let changes_heading = format!("Changes ({})", Scope::List.label().unwrap());
-        assert_eq!(row_text(&buffer, 0), fit(&changes_heading, width as usize));
+        // Row 0: the band's top rule — `─ Help ` then `─` to the right
+        // edge. `Help` is styled `RegionHeadingFocused`; the surrounding
+        // dashes and spaces are `RegionRule`. Both widths tested here are
+        // well past the seven-column prefix, so no truncation branch is
+        // exercised — `degenerate_frames_render_without_panicking` covers
+        // that one.
+        let top_prefix = ["─", " ", "H", "e", "l", "p", " "];
+        for (x, want) in top_prefix.iter().enumerate() {
+            assert_eq!(
+                cell(&buffer, x as u16, 0).symbol(),
+                *want,
+                "top rule column {x}"
+            );
+        }
         assert_eq!(
-            cell(&buffer, 0, 0).style(),
+            cell(&buffer, 2, 0).style(),
+            uncoloured().patch(palette::style(Role::RegionHeadingFocused)),
+            "the H of Help is styled RegionHeadingFocused"
+        );
+        for x in top_prefix.len()..width as usize {
+            assert_eq!(
+                cell(&buffer, x as u16, 0).symbol(),
+                "─",
+                "top rule fill at column {x}"
+            );
+        }
+
+        // Row 1: the `Changes` heading, padded to the full width, bold —
+        // the interior's own first row, one below the top rule.
+        let changes_heading = format!("Changes ({})", Scope::List.label().unwrap());
+        assert_eq!(row_text(&buffer, 1), fit(&changes_heading, width as usize));
+        assert_eq!(
+            cell(&buffer, 0, 1).style(),
             uncoloured().patch(palette::style(Role::RegionHeadingFocused))
         );
 
@@ -565,7 +805,7 @@ mod tests {
         let key_col = key_column();
         let desc_col = 2 + key_col + 2;
         for (i, binding) in INVENTORY[0].bindings.iter().enumerate() {
-            let y = 1 + i as u16;
+            let y = 2 + i as u16;
             // Sliced by **column**, one cell at a time, never by `char` over
             // the joined row: `row_text` concatenates cell symbols, and a cell
             // symbol is a grapheme that need not be one `char`. Counting chars
@@ -606,7 +846,7 @@ mod tests {
         }
 
         // A blank row separates the `Changes` group from the `Artifact` group.
-        let blank_y = 1 + INVENTORY[0].bindings.len() as u16;
+        let blank_y = 2 + INVENTORY[0].bindings.len() as u16;
         assert_eq!(row_text(&buffer, blank_y), " ".repeat(width as usize));
 
         // The `Artifact` heading follows the blank row.
@@ -633,6 +873,15 @@ mod tests {
             let total: usize = row.segments.iter().map(|(t, _)| columns(t)).sum();
             assert!(total <= width as usize, "a row exceeded {width} columns");
         }
+
+        // The band's last row is the bottom rule, drawn whole: all
+        // `content_rows()` rows fit the interior with none left over, so no
+        // indicator is due.
+        assert_eq!(
+            row_text(&buffer, height - 1),
+            "─".repeat(width as usize),
+            "the bottom rule carries no indicator when the content fits"
+        );
     }
 
     #[test]
@@ -643,5 +892,270 @@ mod tests {
     #[test]
     fn the_grammar_renders_at_60_columns() {
         assert_grammar_renders_correctly(60);
+    }
+
+    /// `specs/help-overlay/spec.md` -> "The overlay scrolls when the body
+    /// cannot hold it" -> "The overlay scrolls at both mandated sizes".
+    #[test]
+    fn the_overlay_scrolls_at_both_mandated_sizes() {
+        // 120x40: body 39 rows, band 39 (clamped against 44 wanted),
+        // interior 37 against 42 content rows.
+        let total = Rect::new(0, 0, 120, 40);
+        let body = body_for(total);
+        let band = band_for(total);
+        assert_eq!(
+            band.height, 39,
+            "120x40's band is clamped to the body's 39 rows"
+        );
+        let mut dashboard = minimal_dashboard(crate::ui::app::Help {
+            open: true,
+            scroll: 0,
+        });
+        let backend = TestBackend::new(120, 40);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        terminal
+            .draw(|f| render(f, body, &dashboard.help))
+            .expect("draw the unscrolled band");
+        let buffer = terminal.backend().buffer().clone();
+        let bottom_y = band.y + band.height - 1;
+        assert_indicator(&buffer, band, bottom_y, "1-37/42");
+
+        for _ in 0..10 {
+            dashboard.apply(Action::Next);
+        }
+        dashboard.normalise_help_scroll(total);
+        assert_eq!(dashboard.help.scroll, 5, "clamped to 42 - 37");
+        terminal
+            .draw(|f| render(f, body, &dashboard.help))
+            .expect("draw the scrolled band");
+        let buffer = terminal.backend().buffer().clone();
+        assert_indicator(&buffer, band, bottom_y, "6-42/42");
+
+        // 60x20: body 19 rows, band 19, interior 17 against 42 content
+        // rows.
+        let total = Rect::new(0, 0, 60, 20);
+        let body = body_for(total);
+        let band = band_for(total);
+        assert_eq!(band.height, 19);
+        let help = crate::ui::app::Help {
+            open: true,
+            scroll: 0,
+        };
+        let backend = TestBackend::new(60, 20);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        terminal
+            .draw(|f| render(f, body, &help))
+            .expect("draw the 60x20 band");
+        let buffer = terminal.backend().buffer().clone();
+        assert_indicator(&buffer, band, band.y + band.height - 1, "1-17/42");
+    }
+
+    /// Read the trailing `text.len()` columns of row `y`, cell by cell —
+    /// never by slicing a joined `String` by byte, since `─` is a
+    /// multi-byte glyph and a byte offset would not agree with a column
+    /// offset. Asserts the indicator's own final character sits exactly one
+    /// column in from `band`'s right edge, and that the one column after it
+    /// is still a plain rule.
+    fn assert_indicator(buffer: &ratatui::buffer::Buffer, band: Rect, y: u16, want: &str) {
+        let indicator_cols = columns(want);
+        let start = band.x as usize + band.width as usize - indicator_cols - 1;
+        let got: String = (start..start + indicator_cols)
+            .map(|x| cell(buffer, x as u16, y).symbol())
+            .collect();
+        assert_eq!(got, want, "indicator at row {y}");
+        assert_eq!(
+            cell(buffer, band.x + band.width - 1, y).symbol(),
+            "─",
+            "the indicator's final character is one column in from the right edge"
+        );
+        assert_eq!(
+            cell(buffer, (start - 1) as u16, y).symbol(),
+            "─",
+            "a rule column precedes the indicator"
+        );
+    }
+
+    /// `specs/help-overlay/spec.md` -> "A held key cannot run the window
+    /// off the end".
+    #[test]
+    fn a_held_key_cannot_run_the_window_off_the_end() {
+        let total = Rect::new(0, 0, 60, 20);
+        let body = body_for(total);
+        let band = band_for(total);
+        let mut dashboard = minimal_dashboard(crate::ui::app::Help {
+            open: true,
+            scroll: 0,
+        });
+        let backend = TestBackend::new(60, 20);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+
+        for _ in 0..200 {
+            dashboard.apply(Action::Next);
+            dashboard.normalise_help_scroll(total);
+            terminal
+                .draw(|f| render(f, body, &dashboard.help))
+                .expect("redraw after Next");
+        }
+        assert_eq!(dashboard.help.scroll, 25, "clamped to 42 - 17");
+        let buffer = terminal.backend().buffer().clone();
+        let last_content_row = &rows(band.width)[content_rows() - 1];
+        let interior_last_y = band.y + band.height - 2;
+        assert_eq!(
+            row_text(&buffer, interior_last_y),
+            row_plain_text(last_content_row),
+            "the window's last visible row is always content row 42, never blank"
+        );
+
+        for _ in 0..200 {
+            dashboard.apply(Action::Prev);
+            dashboard.normalise_help_scroll(total);
+            terminal
+                .draw(|f| render(f, body, &dashboard.help))
+                .expect("redraw after Prev");
+        }
+        assert_eq!(
+            dashboard.help.scroll, 0,
+            "a held Prev saturates rather than underflowing"
+        );
+        let buffer = terminal.backend().buffer().clone();
+        let first_content_row = &rows(band.width)[0];
+        assert_eq!(
+            row_text(&buffer, band.y + 1),
+            row_plain_text(first_content_row),
+            "two hundred Prev actions return the window to content row 1"
+        );
+    }
+
+    /// `specs/help-overlay/spec.md` -> "No indicator when the content
+    /// fits".
+    #[test]
+    fn no_indicator_when_the_content_fits() {
+        // 120x60: body 59 rows, band 44 (42 content rows + 2 rule rows,
+        // well under the body), interior 42 — exactly `content_rows()`, so
+        // every row is visible in one frame and no indicator is due.
+        let total = Rect::new(0, 0, 120, 60);
+        let body = body_for(total);
+        let band = band_for(total);
+        assert_eq!(band.height, 44);
+        let help = crate::ui::app::Help {
+            open: true,
+            scroll: 0,
+        };
+        let backend = TestBackend::new(120, 60);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        terminal
+            .draw(|f| render(f, body, &help))
+            .expect("draw the tall band");
+        let buffer = terminal.backend().buffer().clone();
+        assert_eq!(
+            row_text(&buffer, band.y + band.height - 1),
+            "─".repeat(band.width as usize),
+            "the bottom rule carries no digits"
+        );
+        for (i, row) in rows(band.width).iter().enumerate() {
+            assert_eq!(
+                row_text(&buffer, band.y + 1 + i as u16),
+                row_plain_text(row),
+                "content row {i} is visible in the one frame"
+            );
+        }
+    }
+
+    /// `specs/help-overlay/spec.md` -> "The overlay degrades rather than
+    /// panicking at any frame size" -> "Degenerate frames render without
+    /// panicking". Drawing the footer row is `ui::view::render`'s own job
+    /// (`help-overlay`'s later task group 9, not wired yet), so the
+    /// `with the footer on row 1` half of that scenario is not asserted
+    /// here — only what `render` itself is responsible for.
+    #[test]
+    fn degenerate_frames_render_without_panicking() {
+        let backend = TestBackend::new(130, 60);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        for (w, h) in [
+            (1u16, 1u16),
+            (1, 2),
+            (2, 1),
+            (0, 0),
+            (120, 1),
+            (120, 2),
+            (120, 3),
+            (5, 10),
+        ] {
+            let total = Rect::new(0, 0, w, h);
+            let body = body_for(total);
+            let band = band_for(total);
+            terminal
+                .draw(|f| render(f, body, &closed_at_top()))
+                .unwrap_or_else(|e| panic!("draw at {w}x{h} failed: {e}"));
+            let buffer = terminal.backend().buffer().clone();
+            // Read exactly `band.width` columns, cell by cell — the
+            // backend is a fixed 130 columns wide so every band here is
+            // narrower than it, and `row_text` reads the whole backend
+            // row, trailing blanks included.
+            let band_row = |y: u16| -> String {
+                (0..band.width)
+                    .map(|x| cell(&buffer, x, y).symbol())
+                    .collect()
+            };
+            match (w, h) {
+                (120, 2) => {
+                    // body 1 row -> band height 1: the top rule alone.
+                    assert_eq!(band.height, 1);
+                    let expected = format!("─ Help {}", "─".repeat(120 - 7));
+                    assert_eq!(band_row(band.y), expected);
+                }
+                (120, 3) => {
+                    // body 2 rows -> band height 2: top and bottom rule,
+                    // no interior, no indicator.
+                    assert_eq!(band.height, 2);
+                    let expected = format!("─ Help {}", "─".repeat(120 - 7));
+                    assert_eq!(band_row(band.y), expected);
+                    assert_eq!(band_row(band.y + 1), "─".repeat(120));
+                }
+                (5, 10) => {
+                    assert_eq!(
+                        band_row(band.y),
+                        "─ Hel",
+                        "the first five columns of ─ Help "
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// `specs/help-overlay/spec.md` -> "The overlay degrades rather than
+    /// panicking at any frame size" -> "The reader is never trapped in a
+    /// degenerate frame". `Dashboard::apply` never receives a `Rect` at
+    /// all, so the "1x1 frame" the scenario names is flavour rather than a
+    /// fixture this test needs to build — what it actually pins is that
+    /// `Quit`, `Back`, and `ToggleHelp` still act while `help.open` is
+    /// true, independent of anything the view ever computed. This test
+    /// lives here rather than in `ui::app`'s own test module because this
+    /// group's file manifest does not extend to `src/ui/app.rs` beyond
+    /// `normalise_help_scroll`; `Dashboard::apply` is `pub` and reachable
+    /// from any module that needs it.
+    #[test]
+    fn the_reader_is_never_trapped_in_a_degenerate_frame() {
+        let mut quitter = minimal_dashboard(crate::ui::app::Help {
+            open: true,
+            scroll: 0,
+        });
+        quitter.apply(Action::Quit);
+        assert!(quitter.quit);
+
+        let mut backer = minimal_dashboard(crate::ui::app::Help {
+            open: true,
+            scroll: 0,
+        });
+        backer.apply(Action::Back);
+        assert!(!backer.help.open);
+
+        let mut toggler = minimal_dashboard(crate::ui::app::Help {
+            open: true,
+            scroll: 0,
+        });
+        toggler.apply(Action::ToggleHelp);
+        assert!(!toggler.help.open);
     }
 }
