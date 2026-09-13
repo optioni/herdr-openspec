@@ -20,16 +20,26 @@ Two arguments this was not worth building before, and why they have flipped:
 
 ## What Changes
 
-- **A settings window**, opened by a key from either route, closed by `Esc`. It is the crate's
-  first overlay: `Route` is `List`/`Detail` today and no modal or overlay concept exists.
+- **A settings window**, opened by a key from either route **at any time**, closed by `Esc`. It
+  is the crate's first overlay: `Route` is `List`/`Detail` today and no modal or overlay concept
+  exists.
+- **Every editable setting stays editable for the life of the install.** This is not a first-run
+  wizard. Once a choice is recorded, `agent-client-choice`'s step 4 never fires again, so this
+  window is the **only** way to change the client without hand-editing `config.toml` — which
+  makes it the re-entry path, not a one-time prompt.
 - **It shows every setting, its effective value, and the level that decided it** — this is the
   primary job. "`agent_kind` = `codex`, from the single installed integration" answers the
   question a user actually has.
 - **It subsumes the client picker.** `agent-client-choice`'s step 4 is this window opened on the
   `agent_kind` row, so there is one modal in the crate rather than two.
-- **A small set is editable in place**, written to `HERDR_PLUGIN_STATE_DIR`: `agent_kind`
-  (choose among installed integrations) and `archived_count` (a number). Everything else is
-  **read-only** with its source shown.
+- **A small set is editable in place**, written to `HERDR_PLUGIN_STATE_DIR`: `agent_kind` and
+  `archived_count` (a number). Everything else is **read-only** with its source shown.
+- **The `agent_kind` row offers installed integrations as a shortlist but does not restrict to
+  them.** Any kind can be entered, because `integration status` is not an availability check — a
+  kind launches fine without its integration, and filtering by it would be the capability-check
+  misuse `agent-client-choice` explicitly rules out. Choosing a kind with no integration is
+  allowed and carries the "status will read `unknown`" warning beside it. The shortlist also
+  avoids hardcoding the 23-kind enum, which lives only in `--help` text.
 - **`config.toml` still wins.** An explicit key there outranks anything set here, and the
   window says so on any row where that is happening, rather than silently accepting an edit
   that will not take effect.
@@ -92,5 +102,8 @@ the fallback this window upgrades.
    100-column breakpoint; a third route is simpler and loses the context behind it.
 3. **What happens when `config.toml` overrides a row the user just edited?** Refusing the edit is
    honest; accepting it and showing it as shadowed is kinder and more confusing.
-4. **Which key opens it?** Single letters are nearly exhausted — `a c s g r q j k` and `1`–`9`,
+4. **Free-text entry or shortlist only?** Allowing any kind needs a text field, which the crate
+   has only in `/` filter mode. A shortlist alone is far simpler and silently blocks the
+   uninstalled-integration case.
+5. **Which key opens it?** Single letters are nearly exhausted — `a c s g r q j k` and `1`–`9`,
    `[`, `]`, `/`, `Space`, `Enter`, `Esc` are taken.
