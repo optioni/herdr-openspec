@@ -4231,8 +4231,8 @@ mod tests {
         };
 
         let buf120 = render_at(120, 20, &d);
-        assert_eq!(detail_marker_cols(&buf120, 5), "- line-00");
-        assert_eq!(detail_marker_cols(&buf120, 18), "- line-13");
+        assert_eq!(detail_marker_cols(&buf120, 5), "• line-00");
+        assert_eq!(detail_marker_cols(&buf120, 18), "• line-13");
         // `list-sections`: row 2 is now the active section header; the change
         // row is row 3. `base.selected` (1) addresses `Target::Change(0)` —
         // the one active change — since the active header is target 0, so
@@ -4244,8 +4244,8 @@ mod tests {
 
         d.route = Route::Detail;
         let buf60 = render_at(60, 20, &d);
-        assert_eq!(detail_marker_cols(&buf60, 5), "- line-00");
-        assert_eq!(detail_marker_cols(&buf60, 18), "- line-13");
+        assert_eq!(detail_marker_cols(&buf60, 5), "• line-00");
+        assert_eq!(detail_marker_cols(&buf60, 18), "• line-13");
     }
 
     /// The style of the first cell of the first (by-char, never by-byte —
@@ -4961,8 +4961,8 @@ mod tests {
         let d = detail_dashboard(twenty_line_source(), 99, Route::Detail);
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
-            assert_eq!(detail_marker_cols(&buf, 5), "- line-06", "width {width}");
-            assert_eq!(detail_marker_cols(&buf, 18), "- line-19", "width {width}");
+            assert_eq!(detail_marker_cols(&buf, 5), "• line-06", "width {width}");
+            assert_eq!(detail_marker_cols(&buf, 18), "• line-19", "width {width}");
         }
     }
 
@@ -4973,8 +4973,8 @@ mod tests {
         d.apply(Action::Next);
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
-            assert_eq!(detail_marker_cols(&buf, 5), "- line-02", "width {width}");
-            assert_eq!(detail_marker_cols(&buf, 18), "- line-15", "width {width}");
+            assert_eq!(detail_marker_cols(&buf, 5), "• line-02", "width {width}");
+            assert_eq!(detail_marker_cols(&buf, 18), "• line-15", "width {width}");
         }
     }
 
@@ -5040,7 +5040,7 @@ mod tests {
         }
         // The detail content, when drawn (wide layout only), is unmoved.
         let buf120 = render_at(120, 20, &d);
-        assert_eq!(detail_marker_cols(&buf120, 5), "- line-00");
+        assert_eq!(detail_marker_cols(&buf120, 5), "• line-00");
     }
 
     #[test]
@@ -5051,7 +5051,7 @@ mod tests {
         }
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
-            assert_eq!(detail_marker_cols(&buf, 5), "- line-00", "width {width}");
+            assert_eq!(detail_marker_cols(&buf, 5), "• line-00", "width {width}");
         }
     }
 
@@ -5062,7 +5062,7 @@ mod tests {
         d.apply(Action::OpenDetail);
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
-            assert_eq!(detail_marker_cols(&buf, 5), "- line-00", "width {width}");
+            assert_eq!(detail_marker_cols(&buf, 5), "• line-00", "width {width}");
         }
     }
 
@@ -5606,12 +5606,12 @@ mod tests {
             let buf = render_at(width, 20, &d);
             assert_eq!(
                 detail_interior_cols(&buf, 5, 9),
-                "- line-00",
+                "• line-00",
                 "width {width}"
             );
             assert_eq!(
                 detail_interior_cols(&buf, 18, 9),
-                "- line-13",
+                "• line-13",
                 "width {width}"
             );
         }
@@ -5698,12 +5698,12 @@ mod tests {
             );
             assert_eq!(
                 detail_interior_cols(&buf0, 7, 15),
-                "- [x] 1.1 first",
+                "• [x] 1.1 first",
                 "width {width}: source bullet intact"
             );
             assert_eq!(
                 detail_interior_cols(&buf0, 8, 16),
-                "- [ ] 1.2 second",
+                "• [ ] 1.2 second",
                 "width {width}: source bullet intact"
             );
 
@@ -5743,7 +5743,7 @@ mod tests {
             let buf1 = render_at(width, 20, &d1);
             assert_eq!(
                 detail_interior_cols(&buf1, 5, 10),
-                "- [x] done",
+                "• [x] done",
                 "width {width}: id tasks does not carry the flag"
             );
             assert_ne!(
@@ -5776,7 +5776,7 @@ mod tests {
                 );
                 assert_eq!(
                     detail_interior_cols(&buf, 5, 7),
-                    "- [ ] a",
+                    "• [ ] a",
                     "width {width} tab {tab}"
                 );
                 assert!(

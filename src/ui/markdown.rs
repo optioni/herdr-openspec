@@ -8,6 +8,17 @@ use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 
 use crate::ui::layout::{columns, truncate_columns};
 
+/// The glyphs this module emits that are not drawn from the source
+/// document. Each measures exactly one display column under
+/// `layout::columns`, which `markdown-render`'s own scenario asserts — the
+/// single property every line grammar built on them rests on. Six of the
+/// seven are East Asian **Ambiguous** and a CJK-locale terminal paints them
+/// at two columns; `SPEC.md` records that as an accepted, uncompensated
+/// exposure rather than guessing at a correction.
+const BULLET: &str = "• ";
+const QUOTE: &str = "│ ";
+const RULE: &str = "─";
+
 /// A segment's styling. A struct of flags, not an enum: markdown nests
 /// (`[**bold link**](x)` is bold *and* a link), and an enum would force an
 /// arbitrary precedence rule. `heading` is `Option<u8>` because the level
@@ -151,10 +162,10 @@ struct ListFrame {
     depth: usize,
 }
 
-/// `"> "` repeated once per block-quote nesting level. Empty outside a
+/// [`QUOTE`] repeated once per block-quote nesting level. Empty outside a
 /// quote.
 fn quote_prefix(depth: usize) -> String {
-    "> ".repeat(depth)
+    QUOTE.repeat(depth)
 }
 
 /// The fold's mutable state, one field per piece of context a nested
@@ -382,7 +393,7 @@ impl Folder {
             frame.next += 1;
             format!("{n}. ")
         } else {
-            "- ".to_string()
+            BULLET.to_string()
         };
         let indent = "  ".repeat(frame.depth);
         let qp = quote_prefix(self.quote_depth);
@@ -735,7 +746,7 @@ fn emit_block(block: &Block, width: u16, out: &mut Vec<Line>) {
     if matches!(block.kind, BlockKind::Rule) {
         out.push(Line {
             segments: vec![Segment {
-                text: "-".repeat(width as usize),
+                text: RULE.repeat(width as usize),
                 face: Face::plain(),
             }],
         });
@@ -1718,7 +1729,7 @@ mod tests {
         for width in [58, 78] {
             let out = lines(source, width);
             let non_blank: Vec<&Line> = out.iter().filter(|l| !l.segments.is_empty()).collect();
-            assert!(non_blank[0].text().starts_with("- alpha"), "width {width}");
+            assert!(non_blank[0].text().starts_with("• alpha"), "width {width}");
             for line in &non_blank[1..] {
                 let text = line.text();
                 assert!(text.starts_with("  "), "width {width}: {text:?}");
@@ -1734,14 +1745,14 @@ mod tests {
         let first58 = at58[0].text();
         assert_eq!(
             first58,
-            "- alpha bravo charlie delta echo foxtrot golf hotel india"
+            "• alpha bravo charlie delta echo foxtrot golf hotel india"
         );
         assert_eq!(columns(&first58), 57);
         let at78 = lines(source, 78);
         let first78 = at78[0].text();
         assert_eq!(
             first78,
-            "- alpha bravo charlie delta echo foxtrot golf hotel india juliett kilo lima"
+            "• alpha bravo charlie delta echo foxtrot golf hotel india juliett kilo lima"
         );
         assert_eq!(columns(&first78), 75);
     }
@@ -1780,7 +1791,7 @@ mod tests {
                 .collect();
             assert_eq!(
                 texts,
-                vec!["- outer", "  - inner", "    - deepest"],
+                vec!["• outer", "  • inner", "    • deepest"],
                 "width {width}"
             );
         }
@@ -1791,7 +1802,7 @@ mod tests {
             let non_blank: Vec<&Line> = out.iter().filter(|l| !l.segments.is_empty()).collect();
             let inner_start = non_blank
                 .iter()
-                .position(|l| l.text().starts_with("  - inner"))
+                .position(|l| l.text().starts_with("  • inner"))
                 .expect("the inner item's first line");
             for line in &non_blank[inner_start + 1..] {
                 let text = line.text();
@@ -1901,7 +1912,7 @@ mod tests {
             let non_blank: Vec<&Line> = out.iter().filter(|l| !l.segments.is_empty()).collect();
             for line in &non_blank {
                 let text = line.text();
-                assert!(text.starts_with("> "), "width {width}: {text:?}");
+                assert!(text.starts_with("│ "), "width {width}: {text:?}");
                 for seg in &line.segments {
                     assert!(seg.face.quoted, "width {width}: {seg:?}");
                 }
@@ -1911,7 +1922,7 @@ mod tests {
         let first58 = at58.iter().find(|l| !l.segments.is_empty()).unwrap().text();
         assert_eq!(
             first58,
-            "> alpha bravo charlie delta echo foxtrot golf hotel india"
+            "│ alpha bravo charlie delta echo foxtrot golf hotel india"
         );
         assert_eq!(columns(&first58), 57);
 
@@ -1919,7 +1930,7 @@ mod tests {
         for width in [58, 78] {
             let out = lines(nested, width);
             let first = out.iter().find(|l| !l.segments.is_empty()).unwrap().text();
-            assert!(first.starts_with("> > "), "width {width}: {first:?}");
+            assert!(first.starts_with("│ │ "), "width {width}: {first:?}");
         }
     }
 
@@ -1930,7 +1941,7 @@ mod tests {
             let out = lines(source, width);
             let idx = out
                 .iter()
-                .position(|l| l.segments.len() == 1 && l.segments[0].text.chars().all(|c| c == '-'))
+                .position(|l| l.segments.len() == 1 && l.segments[0].text.chars().all(|c| c == '─'))
                 .unwrap_or_else(|| panic!("width {width}: no rule line found"));
             let rule = &out[idx];
             assert_eq!(columns(&rule.text()), width as usize);
@@ -1951,17 +1962,26 @@ mod tests {
     /// **discriminating control**, so this test fails if the narrowing is not real.
     #[test]
     fn unmodelled_constructs_render_as_source() {
-        let sources = [
+        let sources: [(&str, &str, &[&str]); 2] = [
             (
                 "footnote reference and definition",
                 "See it here[^1].\n\n[^1]: The note.\n",
+                &["See it here[^1].", "", "[^1]: The note."],
             ),
-            ("task-list item", "- [ ] an item\n- [x] a done item\n"),
+            // The bullet marker has moved to `•`, so a task-list item's line
+            // is no longer byte-equal to its source; its checkbox text still
+            // is, which is what "unmodelled" still means here. Group 4
+            // narrows this entry out of the set entirely.
+            (
+                "task-list item",
+                "- [ ] an item\n- [x] a done item\n",
+                &["• [ ] an item", "• [x] a done item"],
+            ),
         ];
         for width in [58, 78] {
-            for (label, source) in sources {
+            for (label, source, expected) in sources {
                 let rendered = lines(source, width);
-                let source_lines: Vec<&str> = source.lines().collect();
+                let source_lines: Vec<&str> = expected.to_vec();
                 assert_eq!(
                     rendered.len(),
                     source_lines.len(),
@@ -2585,7 +2605,7 @@ mod tests {
             let quoted_lines = non_blank(&lines(&quoted, width));
             assert_eq!(quoted_lines.len(), 3, "width {width}");
             for text in &quoted_lines {
-                assert!(text.starts_with("> "), "width {width}: {text:?}");
+                assert!(text.starts_with("│ "), "width {width}: {text:?}");
                 assert_eq!(columns(text), 2 + 22, "width {width}: {text:?}");
                 assert!(columns(text) <= width as usize, "width {width}");
             }
@@ -2595,10 +2615,10 @@ mod tests {
             // them.
             let item_lines = non_blank(&lines(&item, width));
             assert_eq!(item_lines.len(), 3, "width {width}");
-            assert!(item_lines[0].starts_with("- "), "width {width}");
+            assert!(item_lines[0].starts_with("• "), "width {width}");
             for text in &item_lines[1..] {
                 assert!(
-                    text.starts_with("  ") && !text.starts_with("- "),
+                    text.starts_with("  ") && !text.starts_with("• "),
                     "width {width}: {text:?}"
                 );
             }
@@ -2625,12 +2645,12 @@ mod tests {
                 "width {width}: the top-level allocation"
             );
             assert_eq!(
-                allocated_widths(&nested[1][2..]),
+                allocated_widths(nested[1].strip_prefix("│ ").expect("the quote prefix")),
                 vec![3, width as usize - 12],
                 "width {width}: the nested allocation must lose the prefix's columns"
             );
             for text in &nested {
-                assert!(text.starts_with("> "), "width {width}: {text:?}");
+                assert!(text.starts_with("│ "), "width {width}: {text:?}");
                 assert_eq!(columns(text), width as usize, "width {width}: {text:?}");
             }
         }
@@ -2677,7 +2697,7 @@ mod tests {
                 .into_iter()
                 .filter(|s| !s.is_empty())
                 .collect();
-            assert_eq!(texts, vec!["- one", "- two", "- three"], "width {width}");
+            assert_eq!(texts, vec!["• one", "• two", "• three"], "width {width}");
             let out = lines(source, width);
             assert!(
                 !out.iter().any(|l| l.segments.is_empty()),

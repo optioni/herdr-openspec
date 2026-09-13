@@ -2683,7 +2683,7 @@ mod tests {
                 .map(|x| buffer[(x, 5)].symbol().to_string())
                 .collect();
             assert!(
-                content.starts_with("- line-03"),
+                content.starts_with("• line-03"),
                 "the first content row is {content:?}"
             );
             assert_eq!(buffer[(1, 3)].symbol(), ">", "the selected row is unmoved");
@@ -2727,7 +2727,7 @@ mod tests {
                 .map(|x| buffer[(x, 5)].symbol().to_string())
                 .collect();
             assert!(
-                first.starts_with("- line-00"),
+                first.starts_with("• line-00"),
                 "twelve lines fit the 34-row content area whole, so the last screenful \
                  starts at line 0 rather than leaving a blank region: {first:?}"
             );
@@ -4966,7 +4966,7 @@ mod tests {
             assert_eq!(buf_after_120, buf_before_120);
             let buf_after_60 = crate::testutil::render_at(60, 20, &d);
             assert_eq!(buf_after_60, buf_before_60);
-            assert_eq!(detail_marker_cols(&buf_after_60, 5), "- line-03");
+            assert_eq!(detail_marker_cols(&buf_after_60, 5), "• line-03");
         }
 
         /// `detail-scroll`: "Enter from the list route still opens at the
@@ -4984,7 +4984,7 @@ mod tests {
 
             for (width, height) in [(120u16, 20u16), (60, 20)] {
                 let buf = crate::testutil::render_at(width, height, &d);
-                assert_eq!(detail_marker_cols(&buf, 5), "- line-00", "width {width}");
+                assert_eq!(detail_marker_cols(&buf, 5), "• line-00", "width {width}");
             }
         }
 

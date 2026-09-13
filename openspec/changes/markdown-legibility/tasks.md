@@ -65,7 +65,7 @@
 ## 2. Bullet, quote, and thematic-break glyphs
 <!-- kind: behavior -->
 
-- [ ] 2.1 RED: Write failing tests for `Bullet items carry their marker and wrap under their text column`, `A nested list indents two columns per level`, `A block quote prefixes every one of its lines`, and `A thematic break fills the interior at both widths`.
+- [x] 2.1 RED: Write failing tests for `Bullet items carry their marker and wrap under their text column`, `A nested list indents two columns per level`, `A block quote prefixes every one of its lines`, and `A thematic break fills the interior at both widths`.
 
   Checks, run at HEAD:
 
@@ -77,10 +77,10 @@
 
   All three → exit **101**. `c4` reports `left: "------…" / right: "──────…"` at w=58; `c2` and `c3` fail on the `starts_with`.
 
-- [ ] 2.2 GREEN: Replace the bullet marker with `• `, the quote prefix with `│ ` and the nested one with `│ │ `, and the thematic break's fill character with `─`. The prefix widths are unchanged, so no wrap arithmetic moves.
-- [ ] 2.3 REFACTOR: Lift the four glyphs to named `const`s in `src/ui/markdown.rs` if they are otherwise written as bare literals at their use sites; state that no refactor was needed if they already sit behind one name each.
-- [ ] 2.4 GREEN: Re-baseline the **25** tests this group's two substitutions break, measured by planting them at HEAD and running `cargo test --lib`: `ui::view` 10, `ui::markdown` 6, `ui::app` 4, `ui::driver` 3, `ui::tests::detail` 2. (A raw run shows 28; three are `ui::tests::wiring::*` flakes — see the baseline caveat above.) Most share **one** cause: a detail fixture written `format!("- line-{i:02}\n")` and repeated across `src/ui/driver.rs`, `src/ui/app.rs`, `src/ui/mod.rs` and `src/ui/view.rs`, so the bullet change fails every site asserting it at once. The rest are the checklist literals at `src/ui/view.rs:4836` and `:4881`.
-- [ ] 2.5 Run `cargo test --lib ui::` — no regressions; no refactor was needed beyond 2.3.
+- [x] 2.2 GREEN: Replace the bullet marker with `• `, the quote prefix with `│ ` and the nested one with `│ │ `, and the thematic break's fill character with `─`. The prefix widths are unchanged, so no wrap arithmetic moves.
+- [x] 2.3 REFACTOR: Lift the four glyphs to named `const`s in `src/ui/markdown.rs` if they are otherwise written as bare literals at their use sites; state that no refactor was needed if they already sit behind one name each.
+- [x] 2.4 GREEN: **Measured 22 against this tree, not 25:** `ui::view` 10, `ui::markdown` 5, `ui::app` 4, `ui::driver` 3 (one of them re-baselined in group 1 already), `ui::tests::detail` 2 — the plan's count was taken before `foldable-spec-sections` landed. The shared `format!("- line-{i:02}\n")` fixture is left alone: it is *source*, and only the rendered literals asserted against it move. Two further sites the plan assigned elsewhere are touched here because this group's substitutions reach them first: `unmodelled_constructs_render_as_source`'s task-list entry gains an explicit expected-lines column (group 4 narrows the entry out entirely), and the four rendered checkbox literals in `ui::view::tests::*` become `• [x]`/`• [ ]` (group 4 makes them `[✓]`/`[ ]`), exactly the double-touch 4.5 already anticipates. Originally: Re-baseline the **25** tests this group's two substitutions break, measured by planting them at HEAD and running `cargo test --lib`: `ui::view` 10, `ui::markdown` 6, `ui::app` 4, `ui::driver` 3, `ui::tests::detail` 2. (A raw run shows 28; three are `ui::tests::wiring::*` flakes — see the baseline caveat above.) Most share **one** cause: a detail fixture written `format!("- line-{i:02}\n")` and repeated across `src/ui/driver.rs`, `src/ui/app.rs`, `src/ui/mod.rs` and `src/ui/view.rs`, so the bullet change fails every site asserting it at once. The rest are the checklist literals at `src/ui/view.rs:4836` and `:4881`.
+- [x] 2.5 Run `cargo test --lib ui::` — no regressions; no refactor was needed beyond 2.3.
 
 ## 3. Table separators become box-drawing
 <!-- kind: behavior -->

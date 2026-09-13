@@ -944,8 +944,8 @@ mod tests {
             // `normalise_scroll` now clamps against the content area's own
             // height, so the 14-row content area draws lines 6 through 19,
             // not 4 through 19.
-            assert_eq!(row_at(5), "- line-06", "width {width}");
-            assert_eq!(row_at(18), "- line-19", "width {width}");
+            assert_eq!(row_at(5), "• line-06", "width {width}");
+            assert_eq!(row_at(18), "• line-19", "width {width}");
         }
     }
 
@@ -1267,7 +1267,7 @@ mod tests {
 
         let buf = terminal.backend().buffer();
         let row: String = row_text(buf, 5).chars().skip(42).take(9).collect();
-        assert_eq!(row, "- line-00");
+        assert_eq!(row, "• line-00");
 
         // A foldable dashboard whose `detail.scroll` is `2` over three
         // collapsed sections is `2` after all three areas below, because a
@@ -1473,7 +1473,7 @@ mod tests {
 
         let buf = terminal.backend().buffer();
         let row: String = row_text(buf, 5).chars().skip(42).take(9).collect();
-        assert_eq!(row, "- line-03");
+        assert_eq!(row, "• line-03");
     }
 
     #[test]

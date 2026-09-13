@@ -830,10 +830,10 @@ mod tests {
                         .map(|x| buf[(x, y)].symbol().to_string())
                         .collect()
                 };
-                assert_eq!(row_at(content_y), "- line-06", "width {width}");
+                assert_eq!(row_at(content_y), "• line-06", "width {width}");
                 assert_eq!(
                     row_at(content_y + content_height - 1),
-                    "- line-19",
+                    "• line-19",
                     "width {width}"
                 );
 
@@ -1139,10 +1139,10 @@ mod tests {
                 // `interior.y + 3`, and its last row is `interior.y +
                 // interior.height - 1`.
                 let content_row_at = |y: u16| -> String { row_cols(y, 9) };
-                assert_eq!(content_row_at(interior.y + 3), "- line-06", "width {width}");
+                assert_eq!(content_row_at(interior.y + 3), "• line-06", "width {width}");
                 assert_eq!(
                     content_row_at(interior.y + interior.height - 1),
-                    "- line-19",
+                    "• line-19",
                     "width {width}"
                 );
 
