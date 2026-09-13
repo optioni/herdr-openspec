@@ -216,12 +216,12 @@ grep -q "plugin pane focus" "$S/argv.log"
 ## 7. Documentation
 <!-- kind: operational -->
 
-- [ ] 7.1 Rewrite in `SPEC.md`: § Herdr integration → **Open or focus** and **Focus can fail
+- [x] 7.1 Rewrite in `SPEC.md`: § Herdr integration → **Open or focus** and **Focus can fail
       two ways** (audience: anyone changing `open.rs`). Add that a successful open is followed
       by a second `pane list` and a `plugin pane focus`, and scope the existing exit-code split
       to the *pre-open* focus. Replaces the current text's implication that `--focus` is
       sufficient, which the measurement disproves.
-- [ ] 7.2 Rewrite in `AGENTS.md`: the paragraph beginning "Two more binary subcommands, `open`
+- [x] 7.2 Rewrite in `AGENTS.md`: the paragraph beginning "Two more binary subcommands, `open`
       and `open-tab`" (audience: every session). Add, in one clause, that the open path
       re-lists and focuses rather than reading the open response — the durable reason being
       that a future change will otherwise reach for `result.plugin_pane.pane.pane_id` and
@@ -230,7 +230,7 @@ grep -q "plugin pane focus" "$S/argv.log"
 ## 8. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 8.1 CHECK: Affected tiers are the `src/open.rs` unit tests, `tests/cli.rs`, and
+- [x] 8.1 CHECK: Affected tiers are the `src/open.rs` unit tests, `tests/cli.rs`, and
       `tests/degraded_coverage.rs`; no view, schema, or coverage-sensitive module is touched
       beyond `src/open.rs`.
 - [ ] 8.2 VERIFY: `make check` — green. If it fails, name the failing sub-command
