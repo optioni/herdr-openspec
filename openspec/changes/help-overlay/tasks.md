@@ -41,9 +41,9 @@ run it avoids.
 ## 1. Re-measure the baselines
 <!-- kind: operational -->
 
-- [ ] 1.1 CHECK: Re-run every command in the baseline table above and record any that moved.
+- [x] 1.1 CHECK: Re-run every command in the baseline table above and record any that moved.
   Seven other changes are in flight in this checkout.
-- [ ] 1.2 CHECK: Run `make check` and confirm it is green before any edit, so a later failure is
+- [x] 1.2 CHECK: Run `make check` and confirm it is green before any edit, so a later failure is
   attributable to this change. Record the failing sub-command if it is not.
 
 ## 2. `Action::ToggleHelp` and the `?` key
