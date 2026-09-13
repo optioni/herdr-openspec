@@ -126,10 +126,11 @@ enum BlockKind {
 }
 
 /// One block-level unit to lay out. `groups` holds one `Vec<Run>` per
-/// rendered "hard line" — a paragraph's soft-break-delimited segment, or
-/// one verbatim source line of a code or HTML block — and every group
-/// always starts a fresh output row, which is what the soft-break and
-/// verbatim-line rules require.
+/// rendered "hard line" — a hard-broken run of prose, or one verbatim
+/// source line of a code or HTML block — and every group always starts a
+/// fresh output row, which is what the hard-break and verbatim-line rules
+/// require. A *soft* break is not a group boundary: it folds into a single
+/// space so the whole run reflows at the region width.
 #[derive(Debug, Clone)]
 struct Block {
     kind: BlockKind,
@@ -286,8 +287,9 @@ impl Folder {
         });
     }
 
-    /// Close the current line-group (a soft/hard break, or the block's own
-    /// end) and start a new one.
+    /// Close the current line-group (a hard break, a verbatim line, or the
+    /// block's own end) and start a new one. A soft break does not reach
+    /// here: it folds into a space inside the current group.
     fn group_break(&mut self) {
         self.groups.push(std::mem::take(&mut self.group));
     }
@@ -692,7 +694,12 @@ fn fold(source: &str) -> Vec<Block> {
             // `start_verbatim_block`; `push_text` routes to
             // `push_verbatim` whenever that flag is set.
             Event::Html(text) => f.push_text(&text),
-            Event::SoftBreak | Event::HardBreak => f.group_break(),
+            // A soft break folds into a single space so the paragraph
+            // reflows as one unit at the region width; a hard break is the
+            // author's explicit opt-out and still starts a new rendered
+            // line (design.md -> Decision 1).
+            Event::SoftBreak => f.push_text(" "),
+            Event::HardBreak => f.group_break(),
             Event::Rule => f.push_rule(),
             // `FootnoteReference`, `TaskListMarker`, `InlineMath`, and
             // `DisplayMath` cannot be produced by this option set —
@@ -1627,13 +1634,48 @@ mod tests {
 
     #[test]
     fn a_soft_break_starts_a_new_line() {
-        let source = "first line\nsecond line\n";
+        // The scenario's name is its delta merge key and is kept verbatim;
+        // its assertions are the inverse of the ones it carried, which is
+        // what proves the reversal landed.
+        let sixty_words: String = {
+            let words: Vec<String> = (0..60).map(|i| format!("word{i:02}")).collect();
+            format!("{}\n", words.join("\n"))
+        };
         for width in [58, 78] {
-            let out = text_of(&lines(source, width));
-            let non_blank: Vec<&String> = out.iter().filter(|s| !s.is_empty()).collect();
-            assert_eq!(non_blank, vec!["first line", "second line"]);
-            assert!(!out.iter().any(|s| s == "first line second line"));
+            let folded = text_of(&lines("first line\nsecond line\n", width));
+            assert_eq!(folded, vec!["first line second line"], "width {width}");
+
+            // Two trailing spaces are a hard break: the author's explicit
+            // break survives where the incidental one does not.
+            let hard = text_of(&lines("first line  \nsecond line\n", width));
+            assert_eq!(hard, vec!["first line", "second line"], "width {width}");
+
+            // Sixty words, one per source line, reflow to fill the region.
+            let reflowed = text_of(&lines(&sixty_words, width));
+            assert!(reflowed.len() < 60, "width {width}: {}", reflowed.len());
+            let (last, filled) = reflowed.split_last().expect("at least one line");
+            for line in filled {
+                // Within one word of the width: every line but the last is
+                // filled, rather than the source's one word per line.
+                assert!(
+                    columns(line) + 8 > width as usize,
+                    "width {width}: short line {line:?}"
+                );
+                assert!(columns(line) <= width as usize, "width {width}: {line:?}");
+            }
+            assert!(columns(last) <= width as usize, "width {width}: {last:?}");
+
+            // A fenced block is verbatim: the fold must not leak into it.
+            // The trailing blank the verbatim path emits for the source's
+            // final newline is pre-existing and not this rule's subject.
+            let fenced = text_of(&lines("```\nalpha\nbravo\n```\n", width));
+            let fenced: Vec<&String> = fenced.iter().filter(|s| !s.is_empty()).collect();
+            assert_eq!(fenced, vec!["alpha", "bravo"], "width {width}");
         }
+        assert!(
+            text_of(&lines(&sixty_words, 78)).len() < text_of(&lines(&sixty_words, 58)).len(),
+            "the reflow is width-driven"
+        );
     }
 
     #[test]

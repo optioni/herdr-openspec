@@ -40,7 +40,7 @@
 ## 1. Soft breaks fold into the paragraph
 <!-- kind: behavior -->
 
-- [ ] 1.1 RED: Write failing tests for `A soft break starts a new line rather than being folded` — the fold at 58 and 78, the two-trailing-space hard-break carve-out still producing two lines, the sixty-word one-word-per-line source producing fewer lines at 78 than at 58, and a fenced block of `alpha`/`bravo` still producing two lines.
+- [x] 1.1 RED: Write failing tests for `A soft break starts a new line rather than being folded` — the fold at 58 and 78, the two-trailing-space hard-break carve-out still producing two lines, the sixty-word one-word-per-line source producing fewer lines at 78 than at 58, and a fenced block of `alpha`/`bravo` still producing two lines.
 
   Check, run at HEAD:
 
@@ -57,10 +57,10 @@
 
   `cargo test --test zz_planning_probe` → exit **101**, `left: ["first line", "second line"] / right: ["first line second line"]`. RED because the behavior is missing, not because the harness is wrong: the same harness reports the current two-line output.
 
-- [ ] 1.2 GREEN: Split `Event::SoftBreak | Event::HardBreak => f.group_break()` (`src/ui/markdown.rs:695`) into two arms — `SoftBreak` pushes a single-space `Run` into the current group, `HardBreak` keeps calling `group_break()` (per design.md → Decision 1). Nothing else moves; `groups` stays a `Vec<Vec<Run>>`.
-- [ ] 1.3 GREEN: Re-baseline the one test the fold breaks. Measured with Decision 1 planted at HEAD: `cargo test --lib` → 1221 passed, **1** failed, `ui::markdown::tests::a_soft_break_starts_a_new_line`. Any *other* failure in this group is a real regression, not a baseline — and that heuristic is scoped to this group: `src/ui/driver.rs:904` builds its fixture as `(0..20).map(|i| format!("- line-{i:02}\n"))` and group 2 re-baselines it legitimately.
-- [ ] 1.4 REFACTOR: Rename `groups`/`group_break` if "group" now reads as "source line" at its use sites; skip if it already reads as "hard-broken run" and say so.
-- [ ] 1.5 Run `cargo test --lib ui::` — no regressions. (549 tests at HEAD by `cargo test --lib ui:: -- --list`) Every behavior group in this plan verifies with this one filter rather than a per-module list: the `Dashboard` tests that assert rendered markdown live in `src/ui/view.rs` and `src/ui/mod.rs` (reached as `ui::tests`), and a narrower filter silently skips them.
+- [x] 1.2 GREEN: Split `Event::SoftBreak | Event::HardBreak => f.group_break()` (`src/ui/markdown.rs:695`) into two arms — `SoftBreak` pushes a single-space `Run` into the current group, `HardBreak` keeps calling `group_break()` (per design.md → Decision 1). Nothing else moves; `groups` stays a `Vec<Vec<Run>>`.
+- [x] 1.3 GREEN: Re-baseline the one test the fold breaks. **Measured against this tree, not the plan's HEAD:** the fold breaks **two**, not one — `ui::markdown::tests::a_soft_break_starts_a_new_line` (rewritten in 1.1) and `ui::driver::tests::a_body_click_moves_the_cursor_and_folds_nothing`, which `foldable-spec-sections` added after this plan was measured. Its fixture is the only `format!("line-{i:02}\n")` in the crate without a bullet — a five-line paragraph, which now folds to one rendered line — and it is re-baselined by making it a bullet list, the shape every sibling fixture already uses, which restores its five body lines and leaves every asserted index unchanged. Measured with Decision 1 planted at HEAD: `cargo test --lib` → 1221 passed, **1** failed, `ui::markdown::tests::a_soft_break_starts_a_new_line`. Any *other* failure in this group is a real regression, not a baseline — and that heuristic is scoped to this group: `src/ui/driver.rs:904` builds its fixture as `(0..20).map(|i| format!("- line-{i:02}\n"))` and group 2 re-baselines it legitimately.
+- [x] 1.4 REFACTOR: Rename `groups`/`group_break` if "group" now reads as "source line" at its use sites; skip if it already reads as "hard-broken run" and say so. **Done as a comment correction, not a rename:** the names already read as "hard-broken run" at every use site (`push_verbatim`, `finish`, and the new `HardBreak` arm), but `Block`'s doc comment and `group_break`'s both named the soft break as the boundary and were false. Both corrected in place.
+- [x] 1.5 Run `cargo test --lib ui::` — no regressions. (549 tests at HEAD by `cargo test --lib ui:: -- --list`) Every behavior group in this plan verifies with this one filter rather than a per-module list: the `Dashboard` tests that assert rendered markdown live in `src/ui/view.rs` and `src/ui/mod.rs` (reached as `ui::tests`), and a narrower filter silently skips them.
 
 ## 2. Bullet, quote, and thematic-break glyphs
 <!-- kind: behavior -->

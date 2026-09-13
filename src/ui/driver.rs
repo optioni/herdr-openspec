@@ -4292,7 +4292,10 @@ mod tests {
             },
             ArtifactSection {
                 label: "markdown-render".to_string(),
-                text: (0..5).map(|i| format!("line-{i:02}\n")).collect(),
+                // A bullet list, not a five-line paragraph: a soft break
+                // folds into the paragraph, so only a list keeps five
+                // rendered body lines for the click to land in.
+                text: (0..5).map(|i| format!("- line-{i:02}\n")).collect(),
             },
             ArtifactSection {
                 label: "tasks-checklist".to_string(),
