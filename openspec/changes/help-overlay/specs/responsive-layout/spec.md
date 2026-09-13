@@ -44,18 +44,40 @@ view module in the crate has a width gate of its own — `detailwidths.sh`, `lis
 `mdwidths.sh`, `taskwidths.sh`, and `widths.sh` (hard-coded to `src/ui/view.rs`) at
 `Makefile:39,40,42,64,66` — and without one, `ui::help` would be the only module carrying a
 "60 and 120, both widths, every time" mandate with nothing counting whether it is kept. A
-`scripts/gates/helpwidths.sh` SHALL be added on `detailwidths.sh`'s pattern, composed into the
-`gates:` recipe, its floor measured when the module's tests are written rather than guessed,
-and bound to its own planted defect in `tests/gate-controls.toml` like every other gate.
+`scripts/gates/helpwidths.sh` SHALL be added on `detailwidths.sh`'s **script** pattern — the
+same `#[test]`-splitting scan, the same doc-comment stripping, the same unsuffixed-literal
+limit — composed into the `gates:` recipe, its floor measured when the module's tests are
+written rather than guessed, and bound to its own planted defect in `tests/gate-controls.toml`
+like every other gate.
+
+It SHALL be a **count against a floor**, and SHALL NOT require every `#[test]` in the file to
+name both widths the way `detailwidths.sh` requires it of `src/ui/detail.rs`. That gate can be
+exemption-free because every public function in `src/ui/detail.rs` is parameterised by a width;
+`src/ui/help.rs` is not that module. Four of its tests are about `INVENTORY` as **data** — its
+group count, its scopes, its two `Space` rows, its `const`-evaluability — and name no width
+because there is no width in what they assert; `The grammar renders at 120 columns` and
+`The grammar renders at 60 columns` are a deliberate pair, one width each, because the spec
+states them as two scenarios; and `The reader is never trapped in a degenerate frame` drives
+`apply` and renders nothing at all. Requiring all twelve to name both widths would mean either
+deleting those assertions or padding them with a width they do not use, and a width written
+into a test that does not measure it is precisely the rubber stamp `detailwidths.sh`'s own
+comment warns an exemption list becomes.
+
+The floor SHALL therefore be the measured number of `src/ui/help.rs` tests that assert at both
+60 and 120, and the gate SHALL also fail when the file is missing or holds no `#[test]` at all
+— the vacuity leg every other width gate carries.
 
 #### Scenario: The overlay's both-widths rule is counted, not just stated
 
 - **WHEN** `scripts/gates/helpwidths.sh` is run against the tree at the end of this change
 - **THEN** it exits zero and reports the number of `src/ui/help.rs` tests asserting at both 60
   and 120 columns, against a floor measured from that tree
-- **AND** it exits non-zero against a copy in which a `ui::help` test asserting only at 120 is
-  added, and against one in which the module's tests are removed — the second being the vacuity
-  leg every other width gate carries
+- **AND** it exits non-zero against a copy in which a test that asserted at both widths is
+  **narrowed** to 120 alone — which is what drops the count below the floor — and against one
+  in which the module's tests are removed, the vacuity leg every other width gate carries.
+  Narrowed rather than *added*: this gate counts the tests that assert at both widths against a
+  floor, so a new single-width test raises the total without lowering that count and is not the
+  defect the floor exists to catch
 - **AND** `tests/gate-controls.toml` binds it to a planted defect, so a `helpwidths.sh` neutered
   to `exit 0` fails `cargo test` rather than passing `make gates` quietly
 
