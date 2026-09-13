@@ -169,7 +169,15 @@ character twice, refresh twice, or **launch a second agent**.
   renders;
 - change nothing on `Ignore`.
 
-**The overlay layer takes precedence over every dispatch above.** When `help.open` is set,
+**The overlay layer takes precedence over every dispatch above, and over every other
+capability that owns an action's semantics.** `Dashboard::apply`'s per-action behaviour is
+specified in several places — `detail-scroll` owns `ScrollDown`/`ScrollUp` and
+`SelectNext`/`SelectPrev`, `artifact-tabs` owns `SelectTab`/`NextTab`/`PrevTab`,
+`artifact-folds` and `list-selection` own `ToggleSection`, `live-updates` owns `Refresh`, and
+`agent-launch` owns the four launch actions. Several of those are worded "regardless of
+`route`", which remains true: the overlay is not a route. This clause binds all of them at
+once, so none needs a delta of its own and none is left contradicting the overlay after
+archive. A capability added later that owns an action inherits it without being edited. When `help.open` is set,
 `apply` SHALL dispatch per `help-overlay`'s table instead: `Quit` quits, `ToggleHelp` and
 `Back` close the overlay, `Next`/`ScrollDown` and `Prev`/`ScrollUp` move `help.scroll` by one
 line, and **every one of the other seventeen actions changes nothing at all**. The four
@@ -347,7 +355,7 @@ is what restores that invariant, before the next draw rather than after it.
   `mouse-input` asserted returns exactly the same actions, so `?` gaining a meaning moved no
   existing key, and `filtering` true gains no row at all
 
-#### Scenario: The overlay layer suppresses every action but four
+#### Scenario: The overlay layer suppresses every action but seven
 
 - **WHEN** a `Dashboard` at `Route::List` with `agents.reachable` true, six active changes,
   `selected` `2`, `detail.tab` `1`, and `help.open` true is given each of `OpenDetail`,
@@ -363,7 +371,7 @@ is what restores that invariant, before the next draw rather than after it.
   change it in the ways the bullets above require, so the suppression is the overlay's and not
   the dashboard's
 
-#### Scenario: The overlay's four live actions act and nothing else moves
+#### Scenario: The overlay's seven live actions act and nothing else moves
 
 - **WHEN** a `Dashboard` at `Route::Detail` with `detail.scroll` `4`, `selected` `1`, and
   `help.open` true is given `Next`, `ScrollDown`, `Prev`, `ScrollUp`, and `Prev`
@@ -373,6 +381,225 @@ is what restores that invariant, before the next draw rather than after it.
   is not the detail region's and not the list's
 - **AND** a sixth action, `Back`, sets `help.open` false and `help.scroll` `0`, and a seventh,
   `Quit`, sets `quit` — both from inside the overlay
+
+### Requirement: The loop draws before it waits and stops when quit is set
+
+`ui::driver::run_loop(terminal, dashboard, events, live, read, tick)` SHALL be generic over
+any `ratatui::backend::Backend` and any `ui::event::EventSource`, so tests drive it with a
+`TestBackend` and a scripted event source and no terminal exists in the test process. `read`
+is the `artifact-content` reader: a `&dyn Fn(&Path) -> Result<String, String>`, so no
+filesystem API is named in `src/ui/driver.rs` and tests drive the loop with an in-memory
+double.
+
+`live` is `live-refresh`'s addition, extended by `agent-polling` and again by `agent-launch`: a
+`ui::driver::Live` carrying `&mut dyn watch::FsEvents`, `&mut dyn refresh::Refresher`,
+`&mut dyn agents::AgentPoll`, and `&mut dyn launch::Launcher`, all
+of whose every method is non-blocking. It is a struct rather than four further parameters so
+the signature stays at **six** arguments and the four collaborators are named as one concept —
+cohesion, not a lint. Measured on this crate and toolchain, clippy's `too_many_arguments` fires
+at **eight** parameters, not seven, so a seventh would not have tripped it; the crate's single
+`#[allow(clippy::too_many_arguments)]`, on `changes::build_change`, is itself vestigial for the
+same reason. That correction is recorded here so a later change does not inherit a forcing
+constraint that does not exist and choose a worse shape believing it had no option.
+
+`Live` SHALL be constructed only with all four fields named and no `..` rest, so a collaborator
+added to the loop fails to compile at every construction site — the compile-time half of the
+guarantee whose behavioural half is `agent-launch`'s wiring test. It cannot implement `Default`
+at all, since every field is a `&mut dyn` reference, so no source sweep is needed for it; it is
+also outside `NODEFAULT-UI`'s reach, whose positive control anchors on `struct <T> {` and cannot
+match a type generic over a lifetime.
+
+**Both `request` call sites carry the scope**, and that is `list-sections`' change to this
+requirement. Step 2 is the `refresh.requested` path — the startup request, `r`, and the
+`needs_archived_refresh()` rule `list-selection` states — and step 3 is the watch-invalidate
+path. A watch event that lands while the archived section is open must resolve that section
+too; passing `Names` there would silently empty an archive the reader had just opened, on the
+next file change.
+
+Each iteration SHALL, in this order:
+
+1. when `dashboard.launch.pending` is `Some`, take it — leaving `None` — and hand it to
+   `live.launcher.request`;
+2. when `dashboard.refresh.requested` is set, request `Selection::All` **and**
+   `dashboard.archived_scope()` of `live.refresher`, and clear the flag;
+3. `live.fs.drain()`, and on a non-empty batch request `watch::invalidate(repo, &paths)` **and**
+   `dashboard.archived_scope()` of `live.refresher`; on `Err`, the reason replaces
+   `dashboard.refresh.problems` wholesale and the loop continues;
+4. `live.refresher.take_result()`, and on `Some(_)` adopt the carried `ChangeSet` through
+   `Dashboard::adopt`;
+5. `live.agents.drain()`, and on `Some(snapshot)` replace `dashboard.agents` with it;
+6. `live.launcher.drain()`, and on `Some(outcome)` insert `outcome.named`'s
+   `(agent, change)` pair into `dashboard.agent_names.names` when it is `Some`, and replace
+   `dashboard.launch.problems` wholesale with `outcome.problem`'s zero or one entry;
+7. `dashboard.sync_detail(read)`;
+8. draw the frame;
+9. `dashboard.normalise_scroll(area)`, then `dashboard.normalise_help_scroll(area)`;
+10. wait up to
+    `watch::poll_timeout(tick, watch::soonest(live.fs.pending_in(), live.agents.pending_in()))`
+    for an event.
+
+Step 9 is **two** calls, not one, and `help-overlay` is what makes it two. `normalise_scroll`
+returns early when the detail region is not drawn — `detail-scroll` requires exactly that of it —
+and the detail region is not drawn at `Route::List` below the breakpoint, so folding the
+overlay's clamp into it would leave `help.scroll` unbounded at a narrow pane on the list route.
+The two also read different geometry: `normalise_help_scroll` computes the band from the
+**body**, `normalise_scroll` the clamp from the detail region's content area. Both are
+non-blocking, read no clock, and reach no collaborator.
+
+Step 1 leads because the request it hands over answers a key the reader pressed on the previous
+iteration, and every step below it is a background tier's own business. Step 6 follows step 5 so
+a launch that has just recorded a mapping is visible to the very next `attribution()` call, in
+the frame step 8 draws. `watch::soonest` takes **two** arguments and gains no third: the launcher
+has no schedule of its own and no `pending_in`, so it never shortens the loop's wait.
+
+Steps 1 to 6 precede the sync and the draw, so a result, a snapshot, or an outcome taken this
+iteration is visible in the frame this iteration draws rather than the next; and every one of
+them is non-blocking, so the pane is still painted with the selected artifact's content before
+any input is read — not blank on the first frame and filled on the second. After applying an
+event's action, the loop SHALL break when `dashboard.quit` is set, without syncing or drawing
+again; a `launch.pending` set by the last action before a quit is therefore **not** dispatched,
+which is deliberate: a reader who launches and immediately quits has closed the pane, and
+starting a process on the way out would be a side effect with nothing left to show it.
+
+Step 2 preceding step 3 is `live-updates`' rule and is restated here rather than contradicted:
+this requirement previously listed the drain first, which disagreed with `live-updates` and with
+the shipped loop, and `agent-polling` corrects it while adding the agent drain.
+
+`EventSource::next_event(&mut self, timeout: Duration) -> Result<Option<Event>,
+EventError>` SHALL return `Ok(None)` for a timeout with no event. A timeout SHALL NOT end
+the loop and SHALL NOT be treated as an event.
+
+On success `run_loop` SHALL return `LoopSummary { frames, polls }`, counting draws
+performed and `next_event` calls made. `LoopSummary` SHALL gain **no** field for the live
+tier: requests taken, results adopted, snapshots drained, and launch outcomes applied are
+observed through the doubles' own recorders, which keeps every landed
+`LoopSummary { frames, polls }` literal in the suite
+unchanged. A draw error SHALL end the loop with `LoopError::Draw` carrying the backend error's
+`Display` text; an event-source error SHALL end it with `LoopError::Events`. Neither a **watch**
+error, an **unreachable Herdr socket**, nor a **failed launch** SHALL end it or become a
+`LoopError`: all three are degraded states, and the pane keeps drawing from files. Neither
+`LoopError` SHALL panic, and neither SHALL be retried in a loop that could spin.
+
+`ui::driver::TICK` SHALL be 250 milliseconds and SHALL be what `ui::run` passes. It is now
+the *upper bound* on a wait rather than the wait itself: `watch::poll_timeout` shortens it to
+whichever of the debounce window and the agent poll is due sooner, so the loop wakes at the
+moment either becomes due rather than at the next tick.
+
+#### Scenario: A pending launch request is handed over exactly once
+
+- **WHEN** `run_loop` is driven at 60x20 over a recording launcher double, with a script of a
+  Press of `Char('a')`, then two `Ok(None)` timeouts, then a Press of `Char('q')`, against a
+  `Dashboard` whose `agents.reachable` is `true` and whose visible list holds `add-auth`
+- **THEN** the recording launcher received exactly **one** `Request`, and it is
+  `Request::Launch { change: "add-auth", agent: "add-auth", intent: Apply }`
+- **AND** `dashboard.launch.pending` is `None` on every iteration after the first that followed
+  the press, so a request cannot be handed over twice
+- **AND** the launcher received nothing at all on the iterations before the press
+
+#### Scenario: A launch outcome updates the mapping and replaces the problem
+
+- **WHEN** `run_loop` is driven at 60x20 over a scripted launcher whose first `drain` answers
+  `Outcome { named: None, problem: Some("split failed") }` and whose second answers
+  `Outcome { named: Some(("c-2fa-support", "2fa-support")), problem: None }`
+- **THEN** after the first, `dashboard.launch.problems` is exactly `["split failed"]` and
+  `agent_names.names` is unchanged
+- **AND** after the second, `dashboard.launch.problems` is **empty** — replaced wholesale, so a
+  success clears the earlier failure — and `agent_names.names` holds
+  `c-2fa-support -> 2fa-support`
+- **AND** `changes`, `agents`, and `refresh` are unchanged by both
+
+#### Scenario: A quit on the same event as a launch dispatches nothing
+
+- **WHEN** `run_loop` is driven with a script of a Press of `Char('a')` immediately followed by
+  a Press of `Char('q')` on the very next `next_event` call, over a recording launcher
+- **THEN** the launcher received exactly **one** request — the one dispatched on the iteration
+  between the two presses
+- **AND** driving the same script with the `q` press first leaves the launcher with **zero**
+  requests, because the loop broke before the next iteration's step 1
+
+#### Scenario: The first frame is on screen before the first event is read
+
+- **WHEN** `run_loop` is driven over a `Terminal<TestBackend>` at 120x20 with an event
+  source whose script is **empty**, so its first `next_event` call returns
+  `Err(EventError)`, an inert `Live` (`watch::none()`, `refresh::none()`,
+  `agents::none()`, and `launch::none()`), and a reader returning `# proposal\n` for every path
+- **THEN** `run_loop` returns `Err(LoopError::Events)`
+- **AND** the backend's buffer nevertheless spells `OpenSpec` at row 0 column 0 and holds
+  `┌` at row 1 column 0 and at row 1 column 40, so a complete frame was drawn before the
+  failing wait — a loop that waited first would leave the buffer blank
+
+#### Scenario: Timeouts are not events and do not end the loop
+
+- **WHEN** `run_loop` is driven at 60x20 with a script of three `Ok(None)` timeouts
+  followed by a Press of `Char('q')`, over an inert `Live`
+- **THEN** it returns `Ok(LoopSummary { frames: 4, polls: 4 })`
+- **AND** the dashboard's `quit` is true
+- **AND** the event source recorded that every `next_event` call was made with the `tick`
+  the caller passed, not a hard-coded value — an inert `FsEvents` and an inert `AgentPoll`
+  both return `None` from `pending_in`, so `soonest` is `None` and `poll_timeout` returns the
+  tick unchanged, and the launcher contributes nothing because it has no `pending_in` at all
+- **AND** the recording reader recorded exactly **one** call across the whole run, because
+  four iterations over an unchanged selection with no adopt re-read nothing
+
+#### Scenario: A backend draw failure ends the loop rather than spinning
+
+- **WHEN** `run_loop` is driven over a backend whose `draw` returns an error, with an event
+  source whose script would supply a `q` press and an inert `Live`
+- **THEN** it returns `Err(LoopError::Draw)` carrying the backend error's text
+- **AND** the event source recorded **zero** `next_event` calls, proving the loop stopped
+  at the failed draw rather than continuing past it
+- **AND** the reader recorded **one** call, because the sync precedes the draw and the
+  failure is in the draw
+
+#### Scenario: Ctrl-C ends the loop
+
+- **WHEN** `run_loop` is driven at 60x20 with a single Press of `Char('c')` carrying
+  `KeyModifiers::CONTROL` and an inert `Live`
+- **THEN** it returns `Ok(LoopSummary { frames: 1, polls: 1 })` and the dashboard's `quit`
+  is true
+- **AND** the recording launcher received **zero** requests, so `Ctrl-C` did not launch
+
+#### Scenario: An ignored key redraws and keeps waiting
+
+- **WHEN** `run_loop` is driven at 60x20 with a Press of `Char('Q')`, then a resize event,
+  then a Press of `Char('q')`, over an inert `Live`
+- **THEN** it returns `Ok(LoopSummary { frames: 3, polls: 3 })`
+- **AND** the dashboard's route is still `List`, so neither input navigated
+
+#### Scenario: A route change is visible in the next frame
+
+- **WHEN** `run_loop` is driven at 60x20 with a Press of `Enter` followed by a Press of
+  `Char('q')`, over an inert `Live`
+- **THEN** it returns `Ok(LoopSummary { frames: 2, polls: 2 })`
+- **AND** the final buffer's row 1 spells `Detail` starting at column 1 and the string
+  `Changes` appears nowhere, so the second frame reflected the route the first event set
+
+#### Scenario: `Live` cannot be built without naming the poller
+
+The scenario's name is kept verbatim from `agent-polling` because a delta's scenario headers are
+its merge key; its subject is unchanged and only the field count moves.
+
+- **WHEN** a compile-time companion in `ui::driver`'s tests destructures a `Live` with an
+  exhaustive pattern naming all four fields and no `..` rest
+- **THEN** the crate compiles, and adding a fifth field to `Live` breaks the build at that
+  companion and at every construction site — `ui::run_wired` and every test that builds one
+- **AND** the companion is the discriminating evidence rather than "the crate compiles at all":
+  compilation alone would still succeed if a later change gave `Live` a `..` rest at one site
+- **AND** `run_loop`'s parameter count is still six, and no
+  `#[allow(clippy::too_many_arguments)]` is added by this change — checked as a diff against the
+  base commit, not as a tree-wide grep, since `src/changes.rs` already carries one
+
+#### Scenario: The overlay's scroll is clamped where the detail region's is not
+
+- **WHEN** a dashboard with `help.open` true and `help.scroll` `99` is driven through one
+  `run_loop` iteration at 60x20 on `Route::List` — the layout in which `split_body` returns no
+  detail region and `normalise_scroll` returns early
+- **THEN** `help.scroll` is `22` after the iteration: 39 content rows less a 17-row interior,
+  clamped by `normalise_help_scroll`
+- **AND** `detail.scroll` is untouched by that iteration, so `normalise_scroll` still changes
+  nothing when the detail region is not drawn and `detail-scroll`'s requirement stays true
+- **AND** the same dashboard with `help.open` false leaves `help.scroll` at `99`, since
+  `normalise_help_scroll` clamps nothing while the overlay is closed
 
 ## REMOVED Requirements
 
@@ -647,7 +874,7 @@ its merge key; its subject is unchanged and only the type list and the field cou
   same-line grep with the brace-matching pass named above. The companion is kept for what it
   genuinely does, below
 - **AND** a compile-time companion exists: a test destructures a `Dashboard` with an
-  exhaustive pattern naming all **fourteen** fields and no `..`, a companion destructures a
+  exhaustive pattern naming all **fifteen** fields and no `..`, a companion destructures a
   `Sections` naming its one field and no `..`, a second destructures a `Filter`
   naming both, a third destructures a `Detail` naming all five and no `..`, a fourth
   destructures a `Refresh` naming all **three** and no `..`, a fifth destructures a `Launch`
@@ -881,12 +1108,12 @@ its merge key; its subject is unchanged and only the type list and the field cou
   `#!/bin/sh` program returns a dashboard whose `file_mode` is `false`, so the flag is the
   probe's answer and not a constant
 
-#### Scenario: The fourteenth field is named at every construction site
+#### Scenario: The fifteenth field is named at every construction site
 
 - **WHEN** every `*.rs` file under `src/` is searched for a `..` inside a `Dashboard { … }` or
   a `Sections { … }` literal or pattern, brace-matched from the opening `{` to its partner
 - **THEN** there is no match, so no construction site elides `file_mode` or `sections`
-- **AND** the compile-time companion destructures a `Dashboard` naming all **fourteen** fields
+- **AND** the compile-time companion destructures a `Dashboard` naming all **fifteen** fields
   with no `..`, so a fifteenth breaks the build at that site, and a further companion
   destructures a `Sections` naming its one field
 - **AND** `impl Default for Dashboard` and `impl Default for Sections` appear nowhere in the

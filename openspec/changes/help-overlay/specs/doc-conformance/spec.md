@@ -10,20 +10,20 @@ requirement binds all three.
 
 `tests/doc_contract.rs` SHALL carry a check that:
 
-1. derives the set of bound actions by **executing** `ui::app::action_for` and
-   `ui::driver::mouse_action` over a swept input space, per `binding-inventory`;
-2. requires `ui::help::INVENTORY` to name exactly that set, less the closed two-name
-   exemption `binding-inventory` fixes;
-3. requires `SPEC.md` → Keys' **key** table to name every `input` string `INVENTORY`
+1. derives the set of bound actions and compares it against `ui::help::INVENTORY`, exactly as
+   `binding-inventory` requires. That requirement owns the sweep, the exemption set, and the
+   failure directions; this one neither restates nor weakens them, and legs 2 and 3 below are
+   what `doc-conformance` adds on top;
+2. requires `SPEC.md` → Keys' **key** table to name every `input` string `INVENTORY`
    holds, and to name no key `INVENTORY` does not;
-4. requires `README.md` → Keys to name the same set of `input` strings.
+3. requires `README.md` → Keys to name the same set of `input` strings.
 
-Legs 3 and 4 compare the prose against `INVENTORY`, not against the swept functions, and
-that is deliberate: leg 2 already binds `INVENTORY` to the functions, so binding the prose
+Legs 2 and 3 compare the prose against `INVENTORY`, not against the swept functions, and
+that is deliberate: leg 1 already binds `INVENTORY` to the functions, so binding the prose
 to `INVENTORY` makes the inventory the single hinge every other list turns on, and a
-binding added to the driver fails leg 2 before it can reach legs 3 and 4 at all.
+binding added to the driver fails leg 1 before it can reach legs 2 and 3 at all.
 
-Each of the four legs SHALL fail loudly rather than vacuously. A missing `### Keys`
+Each of the three legs SHALL fail loudly rather than vacuously. A missing `### Keys`
 section, a missing table, or a table from which every row has been deleted SHALL be an
 error naming what was missing, on exactly the terms `documented_mouse_actions` already
 holds to — it returns `Err` naming the absence rather than comparing an empty set against
@@ -41,17 +41,17 @@ disagreement between them is itself informative.
   holds no row
 - **THEN** the check fails naming that action, the swept function it came from, and the
   inventory that omitted it
-- **AND** when the inventory row is added but `SPEC.md` → Keys is not, leg 3 fails naming
+- **AND** when the inventory row is added but `SPEC.md` → Keys is not, leg 2 fails naming
   the `input` string and the document
-- **AND** when `SPEC.md` is updated but `README.md` is not, leg 4 fails on the same terms
+- **AND** when `SPEC.md` is updated but `README.md` is not, leg 3 fails on the same terms
 
 #### Scenario: The documented key set and the inventory agree at HEAD
 
 - **WHEN** the check is run against the tree at the end of this change
-- **THEN** all four legs pass
-- **AND** leg 3's extraction finds `SPEC.md` → Keys' key table by its own header row, not
+- **THEN** all three legs pass
+- **AND** leg 2's extraction finds `SPEC.md` → Keys' key table by its own header row, not
   by position, and reports at least one row
-- **AND** leg 4's extraction finds `README.md` → Keys the same way
+- **AND** leg 3's extraction finds `README.md` → Keys the same way
 
 #### Scenario: A gutted document fails as a broken control rather than a clean tree
 
@@ -62,27 +62,49 @@ disagreement between them is itself informative.
 - **AND** neither reports a pass, so a document that stopped documenting is a failure and
   not an agreement between two empty sets
 
-### Requirement: The pure view set and the module map name the new module
+### Requirement: The new module's documentation is bound where a binding exists, and hand-written where none does
 
-`SPEC.md`'s Module map SHALL name `ui::help`, and `SPEC.md` → § Unit-tested modules SHALL
-name it too. `tests/doc_contract.rs`'s existing module-map and tested-modules checks
-SHALL therefore cover it with no change to either check: both are computed from
-`src/ui/`'s own contents, which is why adding a module is a `make check` failure before it
-is a documentation review.
+`src/ui/help.rs` is a **submodule**, and the two existing map checks do not see submodules.
+`tests/doc_contract.rs`'s `pub_mod_names` reads `src/lib.rs`'s top-level `pub mod`
+declarations, and `SPEC.md`'s Module map carries a single `ui` row for all thirteen files
+under `src/ui/`; § Unit-tested modules is bound to "every **declared** module" on the same
+terms. Adding `src/ui/help.rs` therefore fails **neither** check, exactly as adding
+`src/ui/palette.rs` failed neither.
 
-`AGENTS.md`'s "The pure set is **nine** files" and `SPEC.md`'s corresponding sentence
-SHALL both read **ten**, and SHALL list `src/ui/help.rs` among them. `scripts/gates/
-noio-view.sh`'s `PURE` list SHALL hold ten entries and `scripts/gates/colwidth.sh`'s
-**nine**.
+This requirement states that plainly rather than claiming a binding that does not exist. An
+earlier draft of it asserted both checks would fail until the documents named `ui::help`,
+which is false and would have made its own scenario unfalsifiable — a guard that is believed
+and cannot fire is worse than no guard, which is this capability's own standing rule.
 
-#### Scenario: Adding the module fails the map checks until the documents name it
+What SHALL be machine-bound is what has a computable second site:
 
-- **WHEN** `src/ui/help.rs` is added and `SPEC.md`'s Module map is not
-- **THEN** `tests/doc_contract.rs`'s module-map check fails naming `ui::help` as present
-  in `src/ui/` and absent from the map
-- **AND** the tested-modules check fails on the same terms until § Unit-tested modules
-  names it
-- **AND** both pass once the two passages are written, with no edit to either check
+- `scripts/gates/noio-view.sh`'s `PURE` list SHALL hold **ten** entries and
+  `scripts/gates/colwidth.sh`'s **nine**, both naming `src/ui/help.rs`, and both gates SHALL
+  fail when it is absent — `view-palette` owns that leg and this change extends it.
+- `AGENTS.md`'s and `SPEC.md`'s "the pure set is **nine** files" SHALL both read **ten** and
+  SHALL list `src/ui/help.rs`. The gate output is the second site: a prose count that
+  disagrees with `NOIO-VIEW OK: 10 pure files` is a drift a reader can settle in one command.
+- `AGENTS.md`'s and `SPEC.md`'s "`tests/doc_contract.rs` carries **nine** further claims"
+  SHALL read **ten**, since this change adds the inventory/key-table binding to that file.
+
+What SHALL be hand-written, with no check claimed for it: `SPEC.md`'s Module map `ui` row
+and § Unit-tested modules SHALL mention the overlay and the inventory in prose, as
+documentation. Extending the two checks to submodule granularity is **not** in this change's
+scope — the `ui` row is a prose cell describing responsibilities, not a file list, and
+binding it to file names would be a fragile check written to satisfy a sentence.
+
+#### Scenario: The submodule is invisible to both map checks, and that is asserted rather than assumed
+
+- **WHEN** `src/ui/help.rs` is added and neither `SPEC.md`'s Module map nor § Unit-tested
+  modules is touched
+- **THEN** `tests/doc_contract.rs`'s module-map and tested-modules checks both still **pass**,
+  because both read `src/lib.rs`'s top-level `pub mod` set and `ui` is already in it
+- **AND** a test asserts exactly that — `pub_mod_names(src/lib.rs)` contains `ui` and does not
+  contain `help` or `ui::help` — so a future change that extends either check to submodules
+  fails this scenario and is told to update this requirement rather than discovering the
+  granularity by surprise
+- **AND** the checks that **do** fire for this module are `NOIO-VIEW` and `COLWIDTH`, covered
+  by the scenario below
 
 #### Scenario: The gate lists and the prose counts agree
 

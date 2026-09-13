@@ -42,17 +42,18 @@ terminal, a real thread, or a clock. A view test that needs a real directory is 
 that logic leaked out of the pure side of the render seam and into the view; a view test
 that needs a clock is the signal that a timing dependency leaked in with it.
 
+This scenario asserted a second thing until `help-overlay`: that row 0 spelled `OpenSpec` in
+columns 0 through 7. `pane-chrome` deleted the frame's header row and the literal with it, so
+that half has read false since and is **removed** rather than updated. The footer half is the
+half that still discriminates, and its expected string moves from `q quit` to `? help` because
+the help hint is now the footer's leading one.
+
 #### Scenario: The harness renders a state value with no repository on disk
 
 - **WHEN** a view test builds a `Dashboard` value directly in memory — `repo: None`,
   `changes: changes::empty_set()` — and renders it at 60x20 and at 120x20
-- **THEN** each buffer's
-  last row begins `? help` at column 0, so the scenario fails if rendering is deleted
-- **AND** the row-0 half of this claim is **removed** rather than updated: `pane-chrome`
-  deleted the frame's header row and with it the literal `OpenSpec` this scenario asserted at
-  columns 0 through 7, and the sentence has read false since. The footer half is the half that
-  still discriminates, and `help-overlay` moves its expected string from `q quit` to `? help`
-  because the help hint is now the footer's leading one
+- **THEN** each buffer's last row begins `? help` at column 0, so the scenario fails if
+  rendering is deleted
 - **AND** a `testutil::ScratchDir` the test creates for the purpose is byte-identical
   across both renders, compared with `testutil::snapshot` over that directory alone —
   **not** over `std::env::temp_dir()`, in which this crate's other tests create and destroy

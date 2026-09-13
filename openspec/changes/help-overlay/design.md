@@ -51,9 +51,14 @@ twenty-two.
 **Modules touched.** One new file, `src/ui/help.rs`, holding `INVENTORY` and the overlay's
 renderer; it follows `src/ui/palette.rs`'s pattern exactly — a pure `'static` table plus the
 functions that read it, swept by `NOIO-VIEW` and `COLWIDTH`. Edits to `src/ui/app.rs`
-(`Action::ToggleHelp`, `Help`, `apply`'s overlay branch), `src/ui/driver.rs` (`mouse_action`'s
-overlay branch, `normalise_scroll`), `src/ui/layout.rs` (`help_band`), `src/ui/view.rs`
-(`FOOTER_HINTS`, the post-body overlay draw), `tests/doc_contract.rs`, two gate scripts,
+(`Action::ToggleHelp`, `Help`, `apply`'s overlay branch, and `normalise_help_scroll` — which
+sits beside `normalise_scroll` at `src/ui/app.rs:865`, not in `src/ui/driver.rs`),
+`src/ui/driver.rs` (`mouse_action`'s overlay branch, and the `run_loop` call site for the
+second normaliser),
+`src/ui/layout.rs` (`help_band`), `src/ui/view.rs`
+(`FOOTER_HINTS`, the post-body overlay draw), **`src/ui/mod.rs`** (four byte-exact footer
+assertions in `mod wiring` that the prepend breaks — lines 3544, 3546, 3646, 4423; the file's
+production code is untouched), `tests/doc_contract.rs`, two gate scripts,
 `tests/gate-controls.toml`, `SPEC.md`, `README.md`, and `AGENTS.md`.
 
 **No process spawn is added anywhere.** `src/cli.rs` is untouched, and `src/ui/help.rs` names
@@ -142,8 +147,11 @@ Tiers used, in this repository's own terms:
   documents.
 - **gate** — `scripts/gates/*.sh` run by `make gates`, each bound to a planted defect in
   `tests/gate-controls.toml` and executed by `tests/gate_controls.rs`.
-- **wiring** — `ui::tests::wiring`, reached only by the two `agent-poller` scenarios this
-  change's footer edit touches.
+- **wiring** — `ui::tests::wiring` in `src/ui/mod.rs`. The footer prepend breaks **four**
+  assertions there across `agent-poller` and `agent-launch` fixtures, one of them a byte-exact
+  `assert_eq!` on the full 120-column row and two of them 60-column assertions that lose
+  `g focus`. Group 8 owns the repair; `grep -n 'q quit\|g focus' src/ui/mod.rs` finds the five
+  sites, of which four move.
 
 Commands: `make test` for the first five tiers' assertions, `make gates` for the gate scripts
 themselves, and `make check` as the single gate before any group is called complete.
@@ -155,11 +163,12 @@ themselves, and `make check` as the single gate before any group is called compl
 | `help-overlay` / `Esc` closes the overlay before any other layer | `ui::app` unit over `apply` | unit | `Dashboard` in memory; none replaced | `make test` |
 | `help-overlay` / The agent keys launch nothing while the overlay is open | `ui::app` unit over `apply` | unit | `Dashboard` in memory; none replaced | `make test` |
 | `help-overlay` / Both quit keys still quit from inside the overlay | `ui::app` unit over `apply` | unit | `Dashboard` in memory; none replaced | `make test` |
-| `help-overlay` / The overlay swallows the keys that would otherwise move the frame | `ui::app` unit over `apply` | unit | `Dashboard` in memory; none replaced | `make test` |
+| `help-overlay` / The overlay swallows the seventeen inert actions | `ui::app` unit over `apply` | unit | `Dashboard` in memory; none replaced | `make test` |
 | `help-overlay` / `j` and `k` scroll the overlay rather than the frame beneath | `ui::app` unit over `apply` | unit | `Dashboard` in memory; none replaced | `make test` |
 | `help-overlay` / The band's geometry at both mandated widths | `ui::help::tests` buffer assertion | view | `TestBackend` 60 and 120; no real terminal | `make test` |
 | `help-overlay` / The band paints every cell it covers | `ui::help::tests` buffer assertion | view | `TestBackend` 60 and 120; no real terminal | `make test` |
 | `help-overlay` / The frame beneath is unchanged when the overlay closes | `ui::help::tests` buffer assertion | view | `TestBackend` 60 and 120; no real terminal | `make test` |
+| `help-overlay` / The overlay lists the agent keys when the socket is unreachable | `ui::help::tests` two-render byte-identity assertion | view | `TestBackend` 60 and 120; `AgentSnapshot` in memory, socket not reached | `make test` |
 | `help-overlay` / The grammar renders at 120 columns | `ui::help::tests` buffer assertion | view | `TestBackend` 60 and 120; no real terminal | `make test` |
 | `help-overlay` / The grammar renders at 60 columns | `ui::help::tests` buffer assertion | view | `TestBackend` 60 and 120; no real terminal | `make test` |
 | `help-overlay` / The key column is measured in display columns | `ui::help::tests` buffer assertion | view | `TestBackend` 60 and 120; no real terminal | `make test` |
@@ -188,9 +197,20 @@ themselves, and `make check` as the single gate before any group is called compl
 | `dashboard-loop` / Navigation and filter keys are distinguished from near misses | `ui::app::tests` unit | unit | `Dashboard` in memory; none replaced | `make test` |
 | `dashboard-loop` / Non-key events are ignored without panicking | `ui::app::tests` unit | unit | `Dashboard` in memory; none replaced | `make test` |
 | `dashboard-loop` / `Space` maps to `ToggleSection` outside filter mode and types inside it | `ui::app::tests` unit | unit | `Dashboard` in memory; none replaced | `make test` |
+| `dashboard-loop` / A pending launch request is handed over exactly once | `ui::driver::tests` one-iteration drive | unit | inert `Live` doubles; `TestBackend` | `make test` |
+| `dashboard-loop` / A launch outcome updates the mapping and replaces the problem | `ui::driver::tests` one-iteration drive | unit | inert `Live` doubles; `TestBackend` | `make test` |
+| `dashboard-loop` / A quit on the same event as a launch dispatches nothing | `ui::driver::tests` one-iteration drive | unit | inert `Live` doubles; `TestBackend` | `make test` |
+| `dashboard-loop` / The first frame is on screen before the first event is read | `ui::driver::tests` `LoopSummary` assertion | unit | inert `Live` doubles; `TestBackend` | `make test` |
+| `dashboard-loop` / Timeouts are not events and do not end the loop | `ui::driver::tests` scripted `EventSource` | unit | replaced `EventSource`; `TestBackend` | `make test` |
+| `dashboard-loop` / A backend draw failure ends the loop rather than spinning | `ui::driver::tests` failing backend | unit | replaced backend; inert `Live` | `make test` |
+| `dashboard-loop` / Ctrl-C ends the loop | `ui::driver::tests` scripted `EventSource` | unit | replaced `EventSource`; `TestBackend` | `make test` |
+| `dashboard-loop` / An ignored key redraws and keeps waiting | `ui::driver::tests` `LoopSummary` assertion | unit | replaced `EventSource`; `TestBackend` | `make test` |
+| `dashboard-loop` / A route change is visible in the next frame | `ui::driver::tests` buffer assertion | unit | replaced `EventSource`; `TestBackend` | `make test` |
+| `dashboard-loop` / `Live` cannot be built without naming the poller | compile-time: `Live` has no `Default` | unit | none | `make test` |
+| `dashboard-loop` / The overlay's scroll is clamped where the detail region's is not | `ui::driver::tests` one-iteration drive at 60x20 `Route::List` | unit | inert `Live` doubles; `TestBackend` | `make test` |
 | `dashboard-loop` / `?` maps to `ToggleHelp` outside filter mode and types inside it | `ui::app::tests` unit | unit | `Dashboard` in memory; none replaced | `make test` |
-| `dashboard-loop` / The overlay layer suppresses every action but four | `ui::app::tests` unit | unit | `Dashboard` in memory; none replaced | `make test` |
-| `dashboard-loop` / The overlay's four live actions act and nothing else moves | `ui::app::tests` unit | unit | `Dashboard` in memory; none replaced | `make test` |
+| `dashboard-loop` / The overlay layer suppresses every action but seven | `ui::app::tests` unit | unit | `Dashboard` in memory; none replaced | `make test` |
+| `dashboard-loop` / The overlay's seven live actions act and nothing else moves | `ui::app::tests` unit | unit | `Dashboard` in memory; none replaced | `make test` |
 | `dashboard-loop` / `Dashboard` has no `Default` and no site elides a field | `scripts/gates/*.sh` + `tests/gate_controls.rs` plant | gate | scratch tree copy of the repo | `make gates` / `make test` |
 | `dashboard-loop` / The pure view files name no I/O API | `scripts/gates/*.sh` + `tests/gate_controls.rs` plant | gate | scratch tree copy of the repo | `make gates` / `make test` |
 | `dashboard-loop` / The shell never names the CLI seam | `ui::app::tests` unit | unit | `Dashboard` in memory; none replaced | `make test` |
@@ -198,7 +218,7 @@ themselves, and `make check` as the single gate before any group is called compl
 | `dashboard-loop` / The render path names no channel, thread, lock, or clock | `ui::app::tests` unit | unit | `Dashboard` in memory; none replaced | `make test` |
 | `dashboard-loop` / No test sleeps and then asserts something has already happened | `ui::app::tests` unit | unit | `Dashboard` in memory; none replaced | `make test` |
 | `dashboard-loop` / `file_mode` is set by the composition root and by nothing else | `ui::app::tests` unit | unit | `Dashboard` in memory; none replaced | `make test` |
-| `dashboard-loop` / The fourteenth field is named at every construction site | `ui::app::tests` unit | unit | `Dashboard` in memory; none replaced | `make test` |
+| `dashboard-loop` / The fifteenth field is named at every construction site | `ui::app::tests` unit | unit | `Dashboard` in memory; none replaced | `make test` |
 | `responsive-layout` / The band's rectangle at both mandated widths | `ui::layout::tests` unit over `help_band` | unit | `Rect` values in memory | `make test` |
 | `responsive-layout` / The band is total over degenerate and extreme rectangles | `ui::layout::tests` unit over `help_band` | unit | `Rect` values in memory | `make test` |
 | `responsive-layout` / The overlay does not move the breakpoint | `ui::layout::tests` unit over `help_band` | unit | `Rect` values in memory | `make test` |
@@ -222,7 +242,7 @@ themselves, and `make check` as the single gate before any group is called compl
 | `doc-conformance` / A binding added to the driver and not to the docs fails `make check` | `tests/doc_contract.rs` | contract | crate linked; documents read as text | `make test` |
 | `doc-conformance` / The documented key set and the inventory agree at HEAD | `tests/doc_contract.rs` | contract | crate linked; documents read as text | `make test` |
 | `doc-conformance` / A gutted document fails as a broken control rather than a clean tree | `scripts/gates/*.sh` + `tests/gate_controls.rs` plant | gate | scratch tree copy of the repo | `make gates` / `make test` |
-| `doc-conformance` / Adding the module fails the map checks until the documents name it | `tests/doc_contract.rs` | contract | crate linked; documents read as text | `make test` |
+| `doc-conformance` / The submodule is invisible to both map checks, and that is asserted rather than assumed | `tests/doc_contract.rs` assertion on `pub_mod_names(src/lib.rs)` | contract | `src/lib.rs` read as text | `make test` |
 | `doc-conformance` / The gate lists and the prose counts agree | `scripts/gates/*.sh` + `tests/gate_controls.rs` plant | gate | scratch tree copy of the repo | `make gates` / `make test` |
 | `view-palette` / The palette answers every role with a `Style` | `scripts/gates/palette.sh` + `tests/gate_controls.rs` plant | gate | scratch tree copy of `src/` | `make gates` / `make test` |
 | `view-palette` / The confinement gate catches a `Color` named outside the palette | `scripts/gates/*.sh` + `tests/gate_controls.rs` plant | gate | scratch tree copy of the repo | `make gates` / `make test` |
@@ -402,6 +422,53 @@ block being rewritten is worse than the scope it adds.
    deleted that row. The claim is **removed** rather than updated; the footer half of the same
    assertion is the half that still discriminates, and it moves from `q quit` to `? help`.
 
+### Decision 10 — A second normaliser, not a wider first one
+
+`Dashboard::normalise_help_scroll(frame_area)` is a new function called beside
+`normalise_scroll` in `run_loop`'s step 9, rather than a clamp added inside it.
+
+`normalise_scroll` returns early when the detail region is not drawn (`src/ui/app.rs:868`,
+`let Some(area) = detail_area else { return; }`), and `detail-scroll` requires exactly that of
+it in as many words. The detail region is not drawn at `Route::List` below the breakpoint —
+which is precisely the 60x20 fixture this change's own held-key scenario uses. Folding the
+overlay's clamp in would have left `help.scroll` unbounded in the one case the scenario exists
+to pin; widening `normalise_scroll` to not return early would need a `detail-scroll` delta
+contradicting a landed requirement.
+
+The two also read different geometry, which is the structural argument and the better one: the
+band is computed from the **body**, the detail clamp from the detail region's content area.
+Sharing one function was conflating two rectangles.
+
+*Alternatives considered.* **Clamping inside `ui::help::render`** — impossible, views are pure
+and cannot mutate `Dashboard`. **A `detail-scroll` delta widening `normalise_scroll`** — a
+thirteenth delta on a capability `foldable-spec-sections` already touches, to make a landed
+requirement less true.
+
+**A note on `scroll_offset`'s signature.** It is `scroll_offset(lines, scroll, height)`
+(`src/ui/layout.rs:121`), not `(scroll, lines, height)`. The two `usize` parameters are adjacent
+and interchangeable to the compiler, so a transposed call compiles and silently clamps against
+the wrong bound. Every call site in this change writes `lines` first.
+
+### Decision 11 — Group 7 is not parallel, and the marker is withdrawn
+
+An earlier draft marked the gate-script group `parallel-after: 4`. It fails all three
+independence conditions and the marker is withdrawn.
+
+Its planted controls land in `src/ui/help.rs`, which is the file groups 4, 6 and 9 all edit —
+so the pair shares a file. `..Default::default()` in a `Binding` literal is a hard compile error
+once `Binding` has no `Default`, so while that plant is in place every concurrent group's
+`cargo test` fails on group 7's plant rather than on its own work — a failure that is not
+attributable. And `make gates` sweeps the whole tree, so group 7's own runs would read the other
+lane's half-written file.
+
+The repair is two-part: the marker goes, and the plants move into `tests/gate-controls.toml`
+where `tests/gate_controls.rs` applies them to a `testutil::ScratchDir` copy. The second half
+matters independently of parallelism — planting in the real tree contradicts this design's own
+Test Boundaries row, which says the gate scripts' subject tree is a scratch copy.
+
+**No group in this change is parallel.** That is the finding, not an omission: groups 2-3 share
+`src/ui/app.rs`, groups 8-9 share `src/ui/view.rs`, and groups 4-6 are a dependency chain.
+
 ## Risks / Trade-offs
 
 - **The action sweep passes vacuously if the swept input space is too narrow** → the sweep is
@@ -428,6 +495,10 @@ block being rewritten is worse than the scope it adds.
 - **A tenth pure view file is added and a gate list is not updated** → `view-palette`'s existing
   gate already fails when a pure-view module is missing from either `PURE` list; this change
   extends that leg to cover `src/ui/help.rs`, and adds its own planted control.
+- **`scroll_offset`'s two `usize` parameters transpose silently** → a transposed call compiles
+  and clamps against the wrong bound with no error. The scrolling scenarios assert the exact
+  clamped value — `2` at 120x40 and `22` at 60x20 — rather than only that the window stayed in
+  range, which is what makes a transposition red rather than plausible.
 - **The overlay swallows a key the reader expected to work** → every suppressed action is
   enumerated in the spec as a closed list of seventeen, and a scenario applies all seventeen and
   asserts the dashboard is unchanged field for field.

@@ -11,8 +11,9 @@ on every refresh.
 A single compound hint is used rather than four separate ones because four do not fit the
 mandated 60-column footer: with `help-overlay`'s leading `? help`,
 `? help  q quit  Enter detail  Esc back  a apply  c continue  s archive`
-is 70 columns, so `fit_hints` would drop `s archive`, `c continue`, and `g focus` and offer the
-reader an arbitrary subset of the action keys at the narrow width. The compound form is kept
+is 70 columns, so `fit_hints` would drop `s archive` and `g focus` at 60 — the first five hints
+reach 59 columns and the sixth needs eleven more — and offer the reader an arbitrary subset of
+the action keys at the narrow width. The compound form is kept
 for that reason, unchanged.
 
 `help-overlay` does move one measured outcome: the reachable footer is now **61** columns, so

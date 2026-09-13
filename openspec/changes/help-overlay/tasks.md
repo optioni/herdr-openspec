@@ -19,13 +19,22 @@
 reaches no process, no socket, and no terminal, so there is no end-to-end wiring a slower
 tier could exercise that a `TestBackend` render and a swept pure function do not.
 
-**Parallelism.** Groups 2 and 3 both edit `src/ui/app.rs`; groups 4, 5 and 6 each edit a
-different file but every one of them needs `Action::ToggleHelp` and `Help` to exist first.
-Group 7 is the only genuinely independent one — it edits `scripts/gates/*.sh`,
-`tests/gate-controls.toml` and the `Makefile`, shares no file with any other group, and needs
-only that `src/ui/help.rs` exists (group 4). It is marked `parallel-after: 4`. Everything
-else is sequential, and the reason is one shared file: `src/ui/app.rs` for groups 2-3, and
-`src/ui/view.rs` for groups 8-9.
+**Parallelism: none. Every group is sequential, and the reason is a shared file in each
+case.** Groups 2 and 3 both edit `src/ui/app.rs`. Group 6 edits three files — `src/ui/help.rs`,
+`src/ui/app.rs` (`normalise_help_scroll` is a `Dashboard` method, beside `normalise_scroll` at
+`src/ui/app.rs:865`) and `src/ui/driver.rs` (the `run_loop` call site) — so it overlaps groups
+2-3, 4 and 9. Groups 8 and 9 both edit `src/ui/view.rs`. Groups 9 and 10 each own a
+documentation edit their own gate reads, so neither can be deferred past the other.
+
+Group 7 was marked `parallel-after: 4` in an earlier draft and the marker is **withdrawn**; it
+failed all three independence conditions. Its plants land in the real working tree, and
+`src/ui/help.rs` — the file it plants `use std::fs;` and a `.chars().count()` into — is exactly
+the file groups 4, 6 and 9 edit. Worse, `..Default::default()` in a `Binding` literal is a hard
+compile error once `Binding` has no `Default`, so while that plant is in place **every**
+concurrent group's `cargo test` fails on group 7's plant rather than on its own work. And
+`make gates` sweeps the whole tree, so group 7's own runs would read another lane's half-written
+file. A wrongly-marked pair means two agents in one working tree, which is worse than the serial
+run it avoids.
 
 ---
 
@@ -33,8 +42,7 @@ else is sequential, and the reason is one shared file: `src/ui/app.rs` for group
 <!-- kind: operational -->
 
 - [ ] 1.1 CHECK: Re-run every command in the baseline table above and record any that moved.
-  Seven changes are in flight in this checkout; a count taken at planning time and trusted at
-  apply time is the defect this group exists to prevent.
+  Seven other changes are in flight in this checkout.
 - [ ] 1.2 CHECK: Run `make check` and confirm it is green before any edit, so a later failure is
   attributable to this change. Record the failing sub-command if it is not.
 
@@ -52,17 +60,21 @@ else is sequential, and the reason is one shared file: `src/ui/app.rs` for group
   comment's count from twenty-three to twenty-four.
 - [ ] 2.3 CHECK: Contract gate — re-read `SPEC.md` → Keys and confirm the key table there still
   matches `action_for`'s `filtering` false table, row for row.
-- [ ] 2.4 Run `cargo test ui::app` — no regressions.
+- [ ] 2.4 REFACTOR: None expected — the change is one enum variant and two match arms. State
+  explicitly that no refactor was needed if that holds.
+- [ ] 2.5 Run `cargo test ui::app` — no regressions.
 
 ## 3. `Help` on `Dashboard`, and `apply`'s overlay layer
 <!-- kind: behavior -->
 
 - [ ] 3.1 RED: Add tests named for the scenarios The overlay opens and closes without moving the
   route, `Esc` closes the overlay before any other layer, The overlay layer suppresses every
-  action but four, The overlay's four live actions act and nothing else moves, Both quit keys
-  still quit from inside the overlay, and The agent keys launch nothing while the overlay is
-  open. The suppression test applies all seventeen inert actions and asserts the dashboard is
-  equal field for field.
+  action but seven, The overlay's seven live actions act and nothing else moves, Both quit keys
+  still quit from inside the overlay, The agent keys launch nothing while the overlay is open,
+  The overlay swallows the seventeen inert actions, and `j` and `k` scroll the overlay rather
+  than the frame beneath. The last two are `help-overlay`'s own and are not duplicates of the
+  `dashboard-loop` pair above them: one drives eleven actions at `Route::List`, the other pins
+  the route-agnostic scroll and the saturating underflow.
 - [ ] 3.2 GREEN: Add `pub struct Help { pub open: bool, pub scroll: usize }` with no `Default`,
   and the `help` field on `Dashboard`. Every construction site is a compile error until it names
   the field; fix each.
@@ -90,7 +102,9 @@ else is sequential, and the reason is one shared file: `src/ui/app.rs` for group
 - [ ] 4.4 GREEN: Write the row grammar — group heading with its parenthesised scope, binding rows
   padded to the key column, blank row between groups — taking every style from
   `palette::style(Role::…)` and every width from `layout::columns`/`truncate_columns`.
-- [ ] 4.5 Run `cargo test ui::help` — no regressions.
+- [ ] 4.5 REFACTOR: Extract the key-column measurement if 4.4's grammar and 4.2's data ended up
+  computing it twice, or state that no refactor was needed.
+- [ ] 4.6 Run `cargo test ui::help` — no regressions.
 
 ## 5. `layout::help_band`
 <!-- kind: behavior -->
@@ -101,7 +115,9 @@ else is sequential, and the reason is one shared file: `src/ui/app.rs` for group
   `u16::MAX` rectangles against `content_rows` of 0, 1, 39, and `usize::MAX`.
 - [ ] 5.2 GREEN: Implement `help_band`, every subtraction saturating, and assert in the test that
   every returned rectangle lies inside the body it was given.
-- [ ] 5.3 Run `cargo test ui::layout` — no regressions.
+- [ ] 5.3 REFACTOR: Fold `help_band`'s centring arithmetic into the existing saturating helpers
+  if one already exists in `src/ui/layout.rs`, or state that no refactor was needed.
+- [ ] 5.4 Run `cargo test ui::layout` — no regressions.
 
 ## 6. Scrolling, the indicator, and the degraded frames
 <!-- kind: behavior -->
@@ -110,18 +126,23 @@ else is sequential, and the reason is one shared file: `src/ui/app.rs` for group
   run the window off the end, No indicator when the content fits, Degenerate frames render
   without panicking, and The reader is never trapped in a degenerate frame. The held-key test
   applies two hundred `Next` actions and then two hundred `Prev`, redrawing after each.
-- [ ] 6.2 GREEN: Window the interior through `layout::scroll_offset(help.scroll, content_rows,
-  interior_height)`, and draw the `<first>-<last>/<total>` indicator into the bottom rule when
-  and only when the content does not fit. No arrow glyphs, per design.md → Decision 4.
-- [ ] 6.3 GREEN: Add `help.scroll` clamping to `run_loop`'s `normalise_scroll`, on the same terms
-  as `detail.scroll`.
-- [ ] 6.4 GREEN: Handle the degenerate branches — nothing at zero width or height, the top rule
+- [ ] 6.2 RED: Add the test named for The overlay's scroll is clamped where the detail region's
+  is not, driving one `run_loop` iteration at 60x20 on `Route::List` with `help.scroll` `99` and
+  asserting it lands on `22` while `detail.scroll` is untouched.
+- [ ] 6.3 GREEN: Window the interior through `layout::scroll_offset(content_rows, help.scroll,
+  interior_height)` — the signature is `(lines, scroll, height)`, confirmed at
+  `src/ui/layout.rs:121` — and draw the `<first>-<last>/<total>` indicator into the bottom rule
+  when and only when the content does not fit. No arrow glyphs, per design.md → Decision 4.
+- [ ] 6.4 GREEN: Add `Dashboard::normalise_help_scroll(frame_area)` and call it in `run_loop`
+  beside `normalise_scroll`, per design.md → Decision 10.
+- [ ] 6.5 GREEN: Handle the degenerate branches — nothing at zero width or height, the top rule
   alone at one row, both rules and no interior at two.
-- [ ] 6.5 Run `cargo test ui::help ui::driver` — no regressions.
+- [ ] 6.6 REFACTOR: Collapse the three degenerate branches into one guard if they share a shape,
+  or state that no refactor was needed.
+- [ ] 6.7 Run `cargo test ui::help ui::driver` — no regressions.
 
 ## 7. Gate scripts and their planted controls
 <!-- kind: operational -->
-<!-- parallel-after: 4 -->
 
 - [ ] 7.1 CHECK: Confirm `make gates` is green and record the three counts this group moves:
   `NOIO-VIEW OK: 9 pure files`, `COLWIDTH OK: … the eight pure view files`, and
@@ -131,17 +152,17 @@ else is sequential, and the reason is one shared file: `src/ui/app.rs` for group
 - [ ] 7.3 CHANGE: Extend `scripts/gates/palette.sh`'s `PURE`-list leg to fail when **either**
   `src/ui/palette.rs` or `src/ui/help.rs` is missing from either list.
 - [ ] 7.4 CHANGE: Add a seventh `nodefault-ui.sh` line to the `Makefile` with
-  `HOMEFILE=src/ui/help.rs TYPES='Binding Group'`, measuring its own `SCAN_MIN` by running the
-  script bare and writing the measured floor on the recipe line — the one documented exception
-  to "a gate's floor is its own script default".
-- [ ] 7.5 CHECK: Negative control for each of 7.2-7.4, since all three pin an invariant that is
-  already green. Plant `use std::fs;` in `src/ui/help.rs` and confirm `NOIO-VIEW` fires; plant
-  `s.chars().count()` and confirm `COLWIDTH` fires; remove `src/ui/help.rs` from each `PURE` list
-  in turn and confirm `PALETTE` fires; plant `..Default::default()` in a `Binding` literal and
-  confirm `NODEFAULT-UI` fires. Remove each plant and confirm the gate goes quiet. Record both
-  halves.
-- [ ] 7.6 CHANGE: Add each of those plants to `tests/gate-controls.toml` so `tests/gate_controls.rs`
-  executes them rather than this task having attested to them once.
+  `HOMEFILE=src/ui/help.rs TYPES='Binding Group'`. Measure its `SCAN_MIN` by running the script
+  bare and write that floor on the recipe line, as the other six do.
+- [ ] 7.5 CHANGE: Add a planted control per gate to `tests/gate-controls.toml` — `use std::fs;`
+  in `src/ui/help.rs` for `NOIO-VIEW`, `s.chars().count()` there for `COLWIDTH`, `src/ui/help.rs`
+  struck from each `PURE` list for `PALETTE`, and `..Default::default()` in a `Binding` literal
+  for `NODEFAULT-UI`. `tests/gate_controls.rs` copies the tree to a `testutil::ScratchDir` and
+  applies each plant there, which is the boundary design.md → Test Boundaries names.
+- [ ] 7.6 CHECK: Negative control — run `cargo test --test gate_controls` and confirm each of
+  the four plants makes its gate exit non-zero, and that `make gates` on the unplanted tree exits
+  zero. Record both halves; all four pin invariants that are already green, so the planted half
+  is the only evidence any of them can fail.
 - [ ] 7.7 VERIFY: Run `make gates` and `cargo test --test gate_controls` — both green.
 
 ## 8. The footer's leading hint
@@ -151,12 +172,20 @@ else is sequential, and the reason is one shared file: `src/ui/app.rs` for group
   `specs/responsive-layout/spec.md` and the five other footer deltas now mandate. Every width in
   those scenarios moved by eight columns; the boundary scenarios moved to 61/60/52/51, 54/53,
   77/76, and 28/27.
-- [ ] 8.2 GREEN: Change `FOOTER_HINTS` to `[&str; 4] = ["? help", "q quit", "Enter detail", "Esc
+- [ ] 8.2 RED: Update the four wiring-tier footer assertions in `src/ui/mod.rs` that the
+  prepend breaks — byte-exact `assert_eq!`s at lines 3544 and 3546
+  (`a_polled_agent_reaches_a_rendered_badge`), `footer_row.contains("g focus")` at 3646 inside a
+  `for width in [120, 60]` loop (`a_keypress_launches_an_agent`), and
+  `row.starts_with("q quit")` at 4423 (`a_refused_capture_is_named_last`). The two 60-column
+  ones lose `g focus` per design.md → Decision 6; line 3437 renders at 120 only and survives.
+  Confirm with `grep -n 'q quit\|g focus' src/ui/mod.rs` that five sites exist and four move.
+- [ ] 8.3 GREEN: Change `FOOTER_HINTS` to `[&str; 4] = ["? help", "q quit", "Enter detail", "Esc
   back"]`. Nothing else in `render_footer` moves — the drop-from-the-end rule is unchanged.
-- [ ] 8.3 CHECK: Contract gate — confirm `g focus` is dropped at 60 columns and that a scenario
-  asserts it, per design.md → Decision 6. This is the change's one behavioural regression and it
-  must be pinned by a test, not left as prose.
-- [ ] 8.4 Run `cargo test ui::view` — no regressions.
+- [ ] 8.4 CHECK: Contract gate — confirm a scenario asserts that `g focus` is dropped at 60
+  columns, per design.md → Decision 6.
+- [ ] 8.5 REFACTOR: None expected — the change is one const's length and contents. State
+  explicitly that no refactor was needed if that holds.
+- [ ] 8.6 Run `cargo test ui::view ui::tests::wiring` — no regressions.
 
 ## 9. Drawing the overlay, and the mouse
 <!-- kind: behavior -->
@@ -172,8 +201,14 @@ else is sequential, and the reason is one shared file: `src/ui/app.rs` for group
   and Nothing in the overlay is mouse-only.
 - [ ] 9.4 GREEN: Add `mouse_action`'s overlay branch ahead of the `zone` lookup, per
   `specs/mouse-input/spec.md`'s table.
-- [ ] 9.5 REFACTOR: Clean up while green, or state that none was needed.
-- [ ] 9.6 Run `cargo test ui` — no regressions.
+- [ ] 9.5 GREEN: Add the dismissing-click row to `SPEC.md` → Keys' **mouse** table. It must land
+  in this group, not in Documentation: `tests/doc_contract.rs:1850`'s `documented_mouse_actions`
+  compares that table against `mouse_action`'s own `Action::` variants, so 9.4 turns it red and
+  only this row turns it green again.
+- [ ] 9.6 CHECK: Contract gate — re-run `cargo test --test doc_contract documented_mouse` and
+  confirm the table and the function agree.
+- [ ] 9.7 REFACTOR: Clean up while green, or state that none was needed.
+- [ ] 9.8 Run `cargo test ui` — no regressions.
 
 ## 10. The contract tier
 <!-- kind: behavior -->
@@ -194,7 +229,12 @@ else is sequential, and the reason is one shared file: `src/ui/app.rs` for group
   bound but undocumented; restore it. Record both.
 - [ ] 10.4 CHECK: Confirm the landed `documented_mouse_actions` check still passes with the new
   mouse row in `SPEC.md` → Keys' mouse table.
-- [ ] 10.5 Run `cargo test --test doc_contract` — no regressions.
+- [ ] 10.5 GREEN: Add the `?` row to `SPEC.md` → Keys' key table and to `README.md` → Keys.
+  Legs 2 and 3 of the new check read those two documents, so they must land here or 10.1's
+  tests cannot go green in their own group.
+- [ ] 10.6 REFACTOR: Collapse the two sweeps' shared setup if it duplicates, or state that no
+  refactor was needed.
+- [ ] 10.7 Run `cargo test --test doc_contract` — no regressions.
 
 ## 11. Change Review
 <!-- kind: operational -->
@@ -211,22 +251,28 @@ else is sequential, and the reason is one shared file: `src/ui/app.rs` for group
 ## 12. Documentation
 <!-- kind: operational -->
 
-- [ ] 12.1 Rewrite in `SPEC.md` → Keys (audience: this repository's agents and maintainers) — add
-  the `?` row to the key table and one row to the mouse table for the dismissing click. Both
-  tables are machine-bound by `tests/doc_contract.rs`, so this is the site those checks read.
-- [ ] 12.2 Rewrite in `SPEC.md` → Module map and § Unit-tested modules — add `ui::help`. Both are
-  bound to `src/ui/`'s contents by `tests/doc_contract.rs` and fail until they name it.
-- [ ] 12.3 Rewrite in `SPEC.md` → Architecture — the pure view set goes from nine files to ten.
-  This passage still reads **eight** and omits `src/ui/palette.rs`; correct both, per design.md →
-  Decision 9.
-- [ ] 12.4 Rewrite in `README.md` → Keys (audience: a user installing the plugin) — add `?`. Bound
-  by the same contract check.
-- [ ] 12.5 Rewrite in `AGENTS.md` → Architecture rules (audience: every future session) — the pure
+- [ ] 12.0 CHECK: Confirm the passages this group edits still say what it expects — in
+  particular that `SPEC.md`'s pure-view sentence still reads **eight** and omits
+  `src/ui/palette.rs`, and that `AGENTS.md:247` still reads "nine further claims". If either has
+  moved, a concurrent change edited it and this group's text needs rebasing.
+  The `SPEC.md`/`README.md` → Keys rows are **not** here: groups 9 and 10 own them, because a
+  gate in each of those groups reads them.
+- [ ] 12.1 CHANGE: Rewrite in `SPEC.md` → Module map's `ui` row and § Unit-tested modules
+  (audience: this repository's agents) — mention the overlay and the binding inventory in prose.
+  No check enforces this: both map checks read `src/lib.rs`'s top-level `pub mod` set, so a
+  submodule is invisible to them (`specs/doc-conformance/spec.md`).
+- [ ] 12.2 CHANGE: Rewrite in `SPEC.md` → Architecture — the pure view set goes from nine files
+  to ten. This passage still reads **eight** and omits `src/ui/palette.rs`; correct both, per
+  design.md → Decision 9.
+- [ ] 12.3 CHANGE: Rewrite in `AGENTS.md` and `SPEC.md` → Doc-conformance checks — the
+  `tests/doc_contract.rs` claim count goes from **nine** to **ten**, this change adding the
+  inventory/key-table binding.
+- [ ] 12.4 CHANGE: Rewrite in `AGENTS.md` → Architecture rules (audience: every future session) — the pure
   set is **ten** files, naming `src/ui/help.rs`; and one new durable rule, in place rather than
   appended: the bindings are data in `src/ui/help.rs` and are bound to `action_for`/`mouse_action`
   by executing them, so a new keybinding needs a `Binding` row or `cargo test` fails. Net add is
   under ten lines; the pure-set sentence is a correction, not an addition.
-- [ ] 12.6 Rewrite in `openspec/IMPLEMENTATION-ORDER.md` — add a row for this change beside
+- [ ] 12.5 CHANGE: Rewrite in `openspec/IMPLEMENTATION-ORDER.md` — add a row for this change beside
   `doc-conformance` and `foldable-spec-sections` as unplanned post-roadmap work, and record in the
   in-flight section that six capabilities here carry byte-exact footer strings.
 

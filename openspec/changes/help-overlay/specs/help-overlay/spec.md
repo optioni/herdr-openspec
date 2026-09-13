@@ -30,9 +30,11 @@ one `Esc` away.
 - **WHEN** `action_for` is called with `filtering` false and Presses of `Char('?')` with
   `KeyModifiers::NONE`, `Char('?')` with `SHIFT`, `Char('?')` with `CONTROL`,
   `Char('/')` with `SHIFT`, and a `Release` and a `Repeat` of `Char('?')`
-- **THEN** the first two return `ToggleHelp`, and the last four return `Ignore`,
-  `FilterStart`, `Ignore`, and `Ignore` — `Char('/')` with `SHIFT` is not `?`, it is the
-  filter key with a stray modifier, and a terminal reporting releases cannot toggle twice
+- **THEN** the first two return `ToggleHelp` and the last four all return `Ignore` —
+  `Char('/')` with `SHIFT` is not `?`, and `action_for`'s filter arm matches
+  `KeyModifiers::NONE` only, so the filter key carrying a stray modifier falls to the
+  wildcard rather than starting a filter; and a terminal reporting releases cannot toggle
+  twice
 - **AND** with `filtering` true, `Char('?')` with `NONE` and with `SHIFT` both return
   `FilterPush('?')`, so the key types into the query and the overlay does not open
 - **AND** every other key's mapping is unchanged under both modes: the table
@@ -62,7 +64,7 @@ one `Esc` away.
   the third, `route` is `List`; after the fourth, nothing has changed
 - **AND** `quit` is false after all four
 
-### Requirement: The overlay takes six inputs and every other key is inert
+### Requirement: The overlay answers seven actions and every other one is inert
 
 While `help.open` is set, `Dashboard::apply` SHALL dispatch as follows, and this dispatch
 SHALL take precedence over the route dispatch and over the filter dispatch alike:
@@ -80,7 +82,9 @@ SHALL take precedence over the route dispatch and over the filter dispatch alike
 `PrevTab`, `FilterStart`, `FilterPush`, `FilterPop`, `Refresh`, `LaunchApply`,
 `LaunchContinue`, `LaunchArchive`, `FocusAgent`, `ToggleSection`, `SelectNext`,
 `SelectPrev`, `Click`, and `Ignore`. Seventeen actions, and none of them does anything
-while the overlay is open.
+while the overlay is open. Seven answer — `Quit`, `ToggleHelp`, `Back`, `Next`, `Prev`,
+`ScrollDown`, `ScrollUp` — and seventeen plus seven is the twenty-four `Action` carries after
+this change, so the two lists are exhaustive between them with nothing counted twice.
 
 `LaunchApply`, `LaunchContinue`, `LaunchArchive`, and `FocusAgent` being inert is the
 load-bearing half of "read-only": `a`, `c`, `s`, and `g` reach Herdr and start a process,
@@ -108,7 +112,9 @@ open, unchanged. It is not an action's effect and the overlay does not suppress 
   for that reason alone
 - **AND** the whole dashboard but for that one flag is equal, field for field, to the one
   before the five actions
-- **AND** no process was spawned, no file was read or written, and no clock was read
+- **AND** `apply` reaches no collaborator by construction — it takes `&mut self` and an
+  `Action` and holds no handle — so this scenario's evidence is the field-for-field equality
+  above and the `NOIO-VIEW` sweep over `src/ui/app.rs`, not a spy that could never fire
 
 #### Scenario: Both quit keys still quit from inside the overlay
 
@@ -117,7 +123,7 @@ open, unchanged. It is not an action's effect and the overlay does not suppress 
 - **AND** the same holds for a dashboard whose `help.open` is true and whose
   `filter.active` is also true, so no combination of layers traps the reader
 
-#### Scenario: The overlay swallows the keys that would otherwise move the frame
+#### Scenario: The overlay swallows the seventeen inert actions
 
 - **WHEN** a `Dashboard` at `Route::List` with six active changes, `selected` `2`,
   `detail.tab` `1`, and `help.open` true is given `OpenDetail`, `SelectTab(3)`,
@@ -139,6 +145,19 @@ open, unchanged. It is not an action's effect and the overlay does not suppress 
   route-agnostic where `Next` and `Prev` are not
 - **AND** `Prev` applied to a dashboard whose `help.scroll` is `0` leaves it `0` rather
   than underflowing
+
+#### Scenario: The overlay lists the agent keys when the socket is unreachable
+
+- **WHEN** a `Dashboard` with `agents.reachable` **false** and `help.open` true is rendered at
+  120x40 and at 60x20, and again with `agents.reachable` **true**
+- **THEN** the two bands are byte-identical, cell for cell, style included, at both widths
+- **AND** both hold the `Agents` group with all four of `a`, `c`, `s`, and `g` and their
+  descriptions
+- **AND** this is the scenario the change's accepted footer cost rests on: the footer drops
+  `a/c/s launch` and `g focus` when the socket is unreachable and drops `g focus` at 60 columns
+  when it is reachable, and the argument for accepting both is that the overlay lists them
+  anyway. `INVENTORY` is `'static` and no render path consults `agents.reachable`, which is what
+  makes that true rather than hoped for
 
 ### Requirement: The overlay is a full-width band, vertically centred in the body
 
@@ -187,9 +206,9 @@ has no text — so no character of the frame beneath shows through a gap.
 - **WHEN** a dashboard carrying six active changes, an archived section, and a selected
   change whose artifact content is twenty lines of markdown is rendered at 120x40 with
   `help.open` false, and then the identical dashboard with `help.open` true
-- **THEN** every cell inside the band's rectangle differs from, or is a space where, the
-  first buffer had list or artifact text, and no cell inside the band holds a character
-  from a change name or an artifact line
+- **THEN** no cell inside the band's rectangle holds a character from any change name or
+  artifact line present in the first buffer — asserted by collecting the band's rows as
+  strings and requiring each change name and each artifact line to appear in none of them
 - **AND** every cell **outside** the band's rectangle is byte-identical between the two
   buffers, style included, so opening the overlay changed nothing but the rows it covers
 
@@ -270,15 +289,25 @@ When `content_rows` exceeds the band's interior height, the band SHALL show a **
 onto the rows, and `help.scroll` SHALL be the first visible row's index.
 
 The offset actually drawn SHALL be recomputed on every draw by
-`ui::layout::scroll_offset(help.scroll, content_rows, interior_height)` — the same
-clamping `detail-scroll` already applies to `detail.scroll` — so a `help.scroll` left out
-of range by a resize is bounded before the frame is painted rather than after it, and a
-held `j` cannot run the window past the last row.
+`ui::layout::scroll_offset(content_rows, help.scroll, interior_height)` — the crate's
+existing clamp, whose parameter order is `(lines, scroll, height)` — so a `help.scroll`
+left out of range by a resize is bounded before the frame is painted rather than after it,
+and a held `j` cannot run the window past the last row.
 
-`ui::driver::run_loop`'s per-frame `normalise_scroll(area)` SHALL additionally clamp
-`help.scroll` against the interior height of the band it has just drawn, on exactly the
-terms it already clamps `detail.scroll`. `help.scroll` is a user-controlled position and
-not derived geometry, and it SHALL NOT be stored as a row count or a page number.
+`Dashboard` SHALL gain a **second** normaliser, `normalise_help_scroll(frame_area)`, and
+`ui::driver::run_loop` SHALL call it once per frame beside `normalise_scroll(area)`. It
+SHALL NOT be folded into `normalise_scroll`, and the reason is a measured contradiction
+rather than tidiness: `normalise_scroll` returns early when the detail region is not drawn
+— which `detail-scroll` requires of it in as many words — and the detail region is not
+drawn at `Route::List` below the breakpoint, which is precisely the 60x20 fixture the
+held-key scenario below uses. Sharing the function would leave `help.scroll` unclamped in
+the one case the scenario exists to pin. The two also read different geometry: the band is
+computed from the **body**, the detail clamp from the detail region's content area.
+
+`normalise_help_scroll` SHALL clamp `help.scroll` whenever the overlay is open, at either
+route and at either side of the breakpoint, and SHALL change nothing when it is closed.
+`help.scroll` is a user-controlled position and not derived geometry, and it SHALL NOT be
+stored as a row count or a page number.
 
 The **position indicator** SHALL be drawn into the band's bottom rule row when, and only
 when, `content_rows > interior_height`: the text `<first>-<last>/<total>`, where `first`
@@ -290,7 +319,7 @@ It SHALL carry **no arrow glyphs**. `▲` and `▼` are East Asian Ambiguous and
 the uncompensated CJK-locale exposure `SPEC.md` records, for information the numbers
 already carry: `1-37/39` says both that there is more below and exactly how much.
 
-When the band is too short to hold an indicator — a band whose width is under the
+When the band is too **narrow** to hold an indicator — a band whose width is under the
 indicator's own display width plus two — the indicator SHALL be omitted and the bottom
 rule SHALL be drawn whole. The content is still reachable by scrolling; a clipped
 indicator would not be.
@@ -301,9 +330,9 @@ indicator would not be.
   rows, the band is 39 rows, and its interior is 37 against 39 content rows
 - **THEN** the bottom rule row's final columns read `1-37/39`, ending one column in from
   column 119
-- **AND** after ten `Next` actions and a redraw, the interior's first row is content row
-  ten and the indicator reads `11-37/39` — clamped, because `help.scroll` of `10` would
-  put the last content row above the last interior row
+- **AND** after ten `Next` actions and a redraw the offset is **clamped to 2** — 39
+  content rows less a 37-row interior — so the interior's first row is content row 3 and
+  the indicator reads `3-39/39`, not the `11-47/39` an unclamped offset of ten would give
 - **AND** at 60x20 the body is 19 rows, the band is 19, its interior is 17, and the
   indicator reads `1-17/39`, ending one column in from column 59
 
@@ -314,7 +343,10 @@ indicator would not be.
 - **THEN** the last interior row is always content row 39 once the window has reached the
   end, and never a blank row past it
 - **AND** `help.scroll` is clamped on every frame by
-  `ui::layout::scroll_offset(help.scroll, 39, 17)`, so it is never used unbounded
+  `ui::layout::scroll_offset(39, help.scroll, 17)` to a maximum of 22, so it is never used
+  unbounded — and it is `normalise_help_scroll` that applies it, which is why this
+  60x20 `Route::List` fixture clamps at all where `normalise_scroll` would have returned
+  early
 - **AND** two hundred consecutive `Prev` actions from there return the window to content
   row 1 and leave `help.scroll` at `0` rather than underflowing
 
