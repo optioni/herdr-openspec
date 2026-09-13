@@ -23,38 +23,57 @@ that already exists.)*
 - **A kind with no known mapping is configurable, not fatal.** The user writes what to send;
   absent that, the action degrades to a problem row naming the kind, never a silent wrong
   prompt and never a blocked key.
+- **`herdr integration status` is read once at startup** to warn when the configured
+  `agent_kind`'s integration is missing — because agents launched under it will then report
+  `agent_status: unknown` forever, silently degrading the badges, attribution, and `g`.
 - Not **BREAKING**: every new key is optional and absence means "as today".
 
 ## Non-Goals
 
 - **Re-inventing `agent_kind`.** It exists, it works, it is documented. This change reads it.
-- **Probing for available clients — including through Herdr.** Considered and rejected on
-  measurement, see below.
+- **Probing for available clients.** Neither `PATH` nor Herdr is asked "can this be launched" —
+  `herdr agent start`'s own failure answers that. `integration status` is read for a narrower,
+  accurate purpose; see below.
 - **A first-run picker.** There is no unconfigured state to catch: `agent_kind` defaults to
   `claude` and works. A picker would interrupt a flow that is already correct.
 - Teaching non-Claude clients the OpenSpec workflow. This lets the user say what to send; it
   does not make `/opsx:apply` exist elsewhere.
 - Per-change or per-repository selection.
 
-## Why not ask Herdr which agents are available
+## What Herdr's own surfaces are good for
 
-Herdr does expose two surfaces, and both were measured against 0.9.0:
+Both were measured against 0.9.0, and they answer different questions.
 
-- `herdr agent start --kind` accepts a closed enum of **23** kinds (`pi, claude, codex, gemini,
-  cursor, devin, agy, cline, omp, mastracode, opencode, copilot, kimi, kiro, droid, amp, grok,
-  hermes, kilo, qodercli, qwen, maki, muse`). That list lives in `--help` **text**, not in a
-  machine-readable API. Scraping help output is more brittle than not validating at all.
-- `herdr integration status` lists 17 integrations with an installed/not-installed state. Two
-  problems. It prints **plain text, not JSON** — unlike every payload this crate parses. And,
-  decisively, it reports whether *Herdr's own status-reporting hook* is installed (the paths it
-  names are `~/.copilot/hooks/herdr-agent-state.sh` and similar), **not** whether the agent's
-  CLI exists or can be launched. On the reference machine `claude: current (v9)` and `codex:
-  current (v8)`, everything else "not installed" — which says nothing about what is runnable.
-  Using it as an availability signal would be wrong in both directions.
+`herdr agent start --kind` accepts a closed enum of **23** kinds (`pi, claude, codex, gemini,
+cursor, devin, agy, cline, omp, mastracode, opencode, copilot, kimi, kiro, droid, amp, grok,
+hermes, kilo, qodercli, qwen, maki, muse`) — but that list lives in `--help` **text**, not a
+machine-readable API. Scraping help output is more brittle than not validating, and no
+validation is needed: `herdr agent start` already fails with its own reason on an unsupported
+kind, and `launch` already carries that reason verbatim into a problem row.
 
-No probe is needed anyway: `herdr agent start` already fails with its own reason when a kind is
-unsupported, and `launch` already carries that reason verbatim into a problem row. The
-never-fail-closed path is the validation.
+`herdr integration status` **is** worth reading, for the question it actually answers. It lists
+17 integrations as installed or not, naming each hook's path (`~/.copilot/hooks/herdr-agent-state.sh`
+and similar). What it reports is whether **Herdr's status-reporting hook** is installed — *not*
+whether that agent's CLI exists or can be launched. A kind launches fine without its
+integration; what you lose is status.
+
+That distinction is the whole value here, because this dashboard **depends on agent status**:
+the list region's agent badges, `agent-attribution`, and the `g` key all read what
+`herdr agent list` reports. Measured on the reference machine: `claude: current (v9)` and
+`codex: current (v8)`, everything else not installed — and the one live agent, a `claude` one,
+reports `agent_status: working` rather than `unknown`.
+
+So it is used as a **warning**, never as a capability check or an availability filter:
+configuring an `agent_kind` whose integration is not installed means agents this plugin
+launches will report `unknown` forever, and the pane should say so rather than let the user
+discover it as a permanently blank badge. It is also a fair signal of which clients the user
+actually works with — someone who ran `herdr integration install codex` uses Codex — which is
+why it informs the warning rather than being ignored.
+
+It has **no `--json` form** (only `--outdated-only`), so this is a plain-text parse: one line
+per integration, `name: state`, with a path in parentheses. That parse lives on the testable
+side of the CLI seam like every other, and a failed or unparseable `integration status` means
+**no warning at all** — never a blocked launch.
 
 ## Capabilities
 
@@ -62,6 +81,8 @@ never-fail-closed path is the validation.
 
 - `agent-prompts`: the mapping from an action (apply / continue / archive) and an `agent_kind`
   to the text sent, its built-in default, and how an unmapped kind degrades.
+- `integration-status`: parsing `herdr integration status`, and warning when the configured
+  kind's integration is absent.
 
 ### Modified Capabilities
 
@@ -75,8 +96,9 @@ never-fail-closed path is the validation.
 - `src/config.rs` — the optional overrides beside the existing `agent_kind`.
 - `README.md`, `SPEC.md` — the `agent_kind` row gains the prompt half.
 - `SPEC.md`'s degraded-states table gains a row, bound in `tests/degraded-coverage.toml`.
-- No new dependency, no new spawn, no new seam: `launch` already reaches `herdr` through
-  `HerdrCli`, and a different prompt string is not a new collaborator.
+- One new `HerdrCli` call (`integration status`) from an existing consumer — no new spawn, no
+  new seam file, and the `ALLOWED` list does not change.
+- No new dependency.
 
 ## Open Questions for Review
 
@@ -87,3 +109,7 @@ never-fail-closed path is the validation.
    per kind? The first is tidier; the second is easier to explain in `README.md`.
 3. **Is a prompt-less kind a problem row or a config error at load?** The load path already
    accumulates config problems, so either fits — but they surface in different places.
+4. **Where does the integration warning go, and is it worth a startup call?** It is a
+   `refresh.startup` entry by nature, beside the mouse-capture problem. Whether it is worth one
+   more Herdr call on every pane open is the question — it could equally be read lazily, the
+   first time `a`/`c`/`s` is pressed.
