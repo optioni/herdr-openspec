@@ -130,7 +130,9 @@ run it avoids.
   applies two hundred `Next` actions and then two hundred `Prev`, redrawing after each.
 - [ ] 6.2 RED: Add the test named for The overlay's scroll is clamped where the detail region's
   is not, driving one `run_loop` iteration at 60x20 on `Route::List` with `help.scroll` `99` and
-  asserting it lands on `22` while `detail.scroll` is untouched.
+  asserting it lands on `25` while `detail.scroll` is untouched. `25` is `42 - 17`, the
+  clamp `scroll_offset(42, help.scroll, 17)` applies at 60x20; an earlier draft read `22`,
+  which is `39 - 17` from before the inventory grew to 31 bindings.
 - [ ] 6.3 GREEN: Window the interior through `layout::scroll_offset(content_rows, help.scroll,
   interior_height)` — the signature is `(lines, scroll, height)`, confirmed at
   `src/ui/layout.rs:121` — and draw the `<first>-<last>/<total>` indicator into the bottom rule

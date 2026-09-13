@@ -520,7 +520,7 @@ Test Boundaries row, which says the gate scripts' subject tree is a scratch copy
   extends that leg to cover `src/ui/help.rs`, and adds its own planted control.
 - **`scroll_offset`'s two `usize` parameters transpose silently** → a transposed call compiles
   and clamps against the wrong bound with no error. The scrolling scenarios assert the exact
-  clamped value — `2` at 120x40 and `22` at 60x20 — rather than only that the window stayed in
+  clamped value — `5` at 120x40 and `25` at 60x20 — rather than only that the window stayed in
   range, which is what makes a transposition red rather than plausible.
 - **The overlay swallows a key the reader expected to work** → every suppressed action is
   enumerated in the spec as a closed list of seventeen, and a scenario applies all seventeen and
