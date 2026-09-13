@@ -89,10 +89,15 @@ pub fn context(env: &dyn Fn(&str) -> Option<String>) -> Result<Context, String> 
 
 /// Decide whether `listing` (a `herdr pane list` payload) names an existing dashboard
 /// pane for this workspace, and if so, its pane id. A listed pane counts when it carries
-/// a string `pane_id`, its `label` equals [`DASHBOARD_LABEL`], and its `workspace_id`
-/// equals `workspace_id`. The first match in the list's own order wins. `Err` carries a
-/// reason when `listing` is not JSON or carries no `result.panes` array; the caller
-/// degrades on it rather than failing (design.md -> Decision 4).
+/// a **non-empty** string `pane_id`, its `label` equals [`DASHBOARD_LABEL`], and its
+/// `workspace_id` equals `workspace_id`. The first match in the list's own order wins.
+/// `Err` carries a reason when `listing` is not JSON or carries no `result.panes` array;
+/// the caller degrades on it rather than failing (design.md -> Decision 4).
+///
+/// **Re-expressed through [`dashboard_panes`]** (design.md -> Decision 6): this is its
+/// first element, so the three-part test — the non-empty `pane_id` clause included
+/// (design.md -> Decision 7) — exists in exactly one place, and the pre-open and
+/// post-open listings cannot drift apart.
 ///
 /// **No longer compares `cwd`.** Measured live against Herdr 0.8.2: passing `--cwd` to
 /// `herdr plugin pane open` also changes what a *relative* pane `command` resolves
@@ -101,46 +106,16 @@ pub fn context(env: &dyn Fn(&str) -> Option<String>) -> Result<Context, String> 
 /// regardless of workspace — the value would no longer discriminate anything
 /// (design.md -> Decision 6, corrected).
 pub fn existing_pane(listing: &str, workspace_id: &str) -> Result<Option<String>, String> {
-    let value: serde_json::Value = serde_json::from_str(listing)
-        .map_err(|e| format!("pane list payload is not valid JSON: {e}"))?;
-    let panes = value
-        .get("result")
-        .and_then(|r| r.get("panes"))
-        .and_then(|p| p.as_array())
-        .ok_or_else(|| "pane list payload has no \"result\".\"panes\" array".to_string())?;
-
-    for pane in panes {
-        let Some(obj) = pane.as_object() else {
-            continue;
-        };
-        let Some(pane_id) = obj.get("pane_id").and_then(|v| v.as_str()) else {
-            continue;
-        };
-        let Some(label) = obj.get("label").and_then(|v| v.as_str()) else {
-            continue;
-        };
-        if label != DASHBOARD_LABEL {
-            continue;
-        }
-        let Some(pane_workspace) = obj.get("workspace_id").and_then(|v| v.as_str()) else {
-            continue;
-        };
-        if pane_workspace != workspace_id {
-            continue;
-        }
-        return Ok(Some(pane_id.to_string()));
-    }
-    Ok(None)
+    Ok(dashboard_panes(listing, workspace_id)?.into_iter().next())
 }
 
-/// Every dashboard pane `listing` names for `workspace_id`, in the listing's own order —
-/// `existing_pane`'s three-part test (string `pane_id`, `label` equal to
-/// [`DASHBOARD_LABEL`], `workspace_id` equal to `workspace_id`), generalised from first
-/// match to all matches, with one clause made explicit: `pane_id` must be **non-empty**,
-/// which `existing_pane` does not enforce (design.md -> Decision 7). `Err` carries the
-/// same two reasons `existing_pane` does, verbatim, for the same unparseable input
-/// (design.md -> Decision 6: `existing_pane` is re-expressed through this function in
-/// group 2, so the three-part test exists in exactly one place).
+/// Every dashboard pane `listing` names for `workspace_id`, in the listing's own order:
+/// a **non-empty** string `pane_id`, a `label` equal to [`DASHBOARD_LABEL`], and a
+/// `workspace_id` equal to `workspace_id` (design.md -> Decision 7). This is the crate's
+/// one three-part dashboard-pane test — [`existing_pane`] is its first element, not a
+/// second copy of the same match (design.md -> Decision 6), so the pre-open and
+/// post-open listings cannot drift apart. `Err` carries a reason when `listing` is not
+/// JSON or carries no `result.panes` array.
 pub fn dashboard_panes(listing: &str, workspace_id: &str) -> Result<Vec<String>, String> {
     let value: serde_json::Value = serde_json::from_str(listing)
         .map_err(|e| format!("pane list payload is not valid JSON: {e}"))?;
@@ -706,10 +681,14 @@ mod tests {
                 "listing: {listing}"
             );
         }
-        // Deferred to group 2: the `existing_pane` half of this scenario ("existing_pane
-        // returns no match for that same empty-pane_id listing, which it does not do at
-        // HEAD") is `existing_pane`'s own refactor, not this group's. Only the
-        // `dashboard_panes` half is asserted here.
+        // The `existing_pane` half of this scenario: at HEAD before group 2's refactor,
+        // `existing_pane(empty_pane_id, "w8")` returned `Ok(Some(String::new()))` — no
+        // emptiness filter. Now that it is expressed through `dashboard_panes`, it agrees.
+        assert_eq!(
+            existing_pane(empty_pane_id, "w8"),
+            Ok(None),
+            "an empty pane_id must not match, same as dashboard_panes"
+        );
 
         assert_eq!(opened_pane(&[], &[]), None);
         assert_eq!(opened_pane(&["w8:pG".to_string()], &[]), None);
