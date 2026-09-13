@@ -67,22 +67,22 @@ grep -q "plugin pane focus" "$S/argv.log"
 ## 1. The two pure matchers
 <!-- kind: behavior -->
 
-- [ ] 1.1 RED: Write failing unit tests in `src/open.rs` for the seven Requirement-2
+- [x] 1.1 RED: Write failing unit tests in `src/open.rs` for the seven Requirement-2
       scenarios: `a_pane_absent_before_and_present_after_is_chosen`,
       `a_pre_existing_dashboard_is_not_chosen_when_a_new_one_appears`,
       `two_new_matches_choose_the_first_in_order`,
       `every_match_already_present_falls_back_to_the_first`,
       `a_vanished_pre_open_id_is_ignored`, `no_post_open_match_chooses_nothing`, and
       `an_unparseable_listing_is_the_same_error_from_both_matchers`.
-- [ ] 1.2 GREEN: Add `dashboard_panes(listing, workspace_id) -> Result<Vec<String>, String>`,
+- [x] 1.2 GREEN: Add `dashboard_panes(listing, workspace_id) -> Result<Vec<String>, String>`,
       lifting `existing_pane`'s three-part test to yield every match in listing order and
       keeping its two error reasons verbatim. Its `pane_id` clause requires a **non-empty**
       string, which `existing_pane` does not enforce at HEAD (`src/open.rs:116`).
-- [ ] 1.3 GREEN: Add `opened_pane(before: &[String], after: &[String]) -> Option<String>`,
+- [x] 1.3 GREEN: Add `opened_pane(before: &[String], after: &[String]) -> Option<String>`,
       total over both lists: the first `after` id absent from `before`, else `after`'s first,
       else `None`.
-- [ ] 1.4 REFACTOR: Clean up while green, or state that none was needed.
-- [ ] 1.5 Run `cargo test --all-features --lib open::tests` — green, and the 37 tests already in
+- [x] 1.4 REFACTOR: Clean up while green, or state that none was needed.
+- [x] 1.5 Run `cargo test --all-features --lib open::tests` — green, and the 37 tests already in
       `src/open.rs` still pass.
 
 ## 2. `existing_pane` re-expressed through the extractor

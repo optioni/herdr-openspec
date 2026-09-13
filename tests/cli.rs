@@ -471,8 +471,7 @@ fn main_focuses_the_pane_it_just_opened() {
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let argv_log =
-        std::fs::read_to_string(scratch.path().join("argv.log")).expect("read argv.log");
+    let argv_log = std::fs::read_to_string(scratch.path().join("argv.log")).expect("read argv.log");
     let lines: Vec<&str> = argv_log.lines().collect();
     assert_eq!(
         lines.last().copied(),
