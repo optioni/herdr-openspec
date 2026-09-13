@@ -18,6 +18,10 @@ use crate::ui::layout::{columns, truncate_columns};
 const BULLET: &str = "• ";
 const QUOTE: &str = "│ ";
 const RULE: &str = "─";
+const TABLE_SEP: &str = "│";
+const TABLE_RULE_LEFT: &str = "├";
+const TABLE_RULE_MID: &str = "┼";
+const TABLE_RULE_RIGHT: &str = "┤";
 
 /// A segment's styling. A struct of flags, not an enum: markdown nests
 /// (`[**bold link**](x)` is bold *and* a link), and an enum would force an
@@ -932,7 +936,7 @@ fn pipe_rows(table: &Table, w: &[usize]) -> Vec<Vec<Segment>> {
         let height = wrapped.iter().map(Vec::len).max().unwrap_or(1).max(1);
         for k in 0..height {
             let mut segs: Vec<Segment> = Vec::new();
-            append(&mut segs, "|", Face::plain());
+            append(&mut segs, TABLE_SEP, Face::plain());
             for (j, cell_lines) in wrapped.iter().enumerate() {
                 append(&mut segs, " ", Face::plain());
                 let line: &[Segment] = cell_lines.get(k).map_or(&[], Vec::as_slice);
@@ -956,16 +960,26 @@ fn pipe_rows(table: &Table, w: &[usize]) -> Vec<Vec<Segment>> {
                     append(&mut segs, &" ".repeat(trail), Face::plain());
                 }
                 append(&mut segs, " ", Face::plain());
-                append(&mut segs, "|", Face::plain());
+                append(&mut segs, TABLE_SEP, Face::plain());
             }
             out.push(segs);
         }
         if row.header {
+            // The delimiter line is a row line's own shape with every padding
+            // space and content column replaced by `─` and the separators by
+            // `├`/`┼`/`┤`, so its junctions fall under the row lines' `│` by
+            // construction rather than by a second arithmetic
+            // (design.md -> Decision 3).
             let mut segs: Vec<Segment> = Vec::new();
-            append(&mut segs, "|", Face::plain());
-            for cell_width in w {
-                append(&mut segs, &"-".repeat(cell_width + 2), Face::plain());
-                append(&mut segs, "|", Face::plain());
+            append(&mut segs, TABLE_RULE_LEFT, Face::plain());
+            for (j, cell_width) in w.iter().enumerate() {
+                append(&mut segs, &RULE.repeat(cell_width + 2), Face::plain());
+                let sep = if j + 1 == n {
+                    TABLE_RULE_RIGHT
+                } else {
+                    TABLE_RULE_MID
+                };
+                append(&mut segs, sep, Face::plain());
             }
             out.push(segs);
         }
@@ -2061,7 +2075,7 @@ mod tests {
             let rendered = lines(departed, width);
             let texts = text_of(&rendered);
             assert!(
-                texts.iter().any(|t| t == "| Gate   | Runner    |"),
+                texts.iter().any(|t| t == "│ Gate   │ Runner    │"),
                 "width {width}: the table must render as aligned columns, not literal \
                  source: {texts:?}"
             );
@@ -2090,21 +2104,21 @@ mod tests {
     }
 
     /// The column widths a rendered table's delimiter line reports: each run of
-    /// `-` between two `|` measures `w[j] + 2`. Read back out of the output
-    /// rather than recomputed by the test, so an assertion on it is an assertion
-    /// on what the reader is shown.
+    /// `─` between two junctions measures `w[j] + 2`. Read back out of the
+    /// output rather than recomputed by the test, so an assertion on it is an
+    /// assertion on what the reader is shown.
     fn allocated_widths(delimiter: &str) -> Vec<usize> {
         delimiter
-            .trim_matches('|')
-            .split('|')
+            .trim_matches(|c| c == '├' || c == '┤')
+            .split('┼')
             .map(|run| columns(run) - 2)
             .collect()
     }
 
     /// Column `j`'s own field of a rendered row line: the `w[j]` columns between
-    /// that column's two padding spaces. The leading `|` costs one column and
+    /// that column's two padding spaces. The leading `│` costs one column and
     /// every earlier column costs `w[i] + 3` — a padding space, its content, a
-    /// padding space, and the `|` that closes it.
+    /// padding space, and the `│` that closes it.
     fn field(row: &str, w: &[usize], j: usize) -> String {
         let start: usize = 1 + w[..j].iter().map(|x| x + 3).sum::<usize>() + 1;
         row.chars().skip(start).take(w[j]).collect()
@@ -2125,10 +2139,10 @@ mod tests {
             assert_eq!(
                 texts,
                 vec![
-                    "| Gate   | Runner       |".to_string(),
-                    "|--------|--------------|".to_string(),
-                    "| Format | cargo fmt    |".to_string(),
-                    "| Lint   | cargo clippy |".to_string(),
+                    "│ Gate   │ Runner       │".to_string(),
+                    "├────────┼──────────────┤".to_string(),
+                    "│ Format │ cargo fmt    │".to_string(),
+                    "│ Lint   │ cargo clippy │".to_string(),
                 ],
                 "width {width}"
             );
@@ -2176,22 +2190,22 @@ mod tests {
                 }
             }
 
-            // The columns are aligned: the delimiter line's `|` offsets are every
-            // row line's.
-            let expected: Vec<usize> = texts[1]
-                .chars()
-                .enumerate()
-                .filter(|(_, c)| *c == '|')
-                .map(|(i, _)| i)
-                .collect();
-            assert_eq!(expected.len(), 3, "width {width}: n + 1 pipes");
-            for text in &texts {
-                let got: Vec<usize> = text
-                    .chars()
+            // The columns are aligned: the delimiter line's `├`/`┼`/`┤`
+            // offsets are every row line's `│` offsets.
+            let seps = |text: &str, set: [char; 3]| -> Vec<usize> {
+                text.chars()
                     .enumerate()
-                    .filter(|(_, c)| *c == '|')
+                    .filter(|(_, c)| set.contains(c))
                     .map(|(i, _)| i)
-                    .collect();
+                    .collect()
+            };
+            let expected = seps(&texts[1], ['├', '┼', '┤']);
+            assert_eq!(expected.len(), 3, "width {width}: n + 1 separators");
+            for (i, text) in texts.iter().enumerate() {
+                if i == 1 {
+                    continue;
+                }
+                let got = seps(text, ['│', '│', '│']);
                 assert_eq!(got, expected, "width {width}: {text:?} is not aligned");
             }
         }
@@ -2399,9 +2413,11 @@ mod tests {
             for text in &texts {
                 assert_eq!(columns(text), total, "width {width}: {text:?}");
                 assert_eq!(
-                    text.chars().filter(|c| *c == '|').count(),
+                    text.chars()
+                        .filter(|c| ['│', '├', '┼', '┤'].contains(c))
+                        .count(),
                     4,
-                    "width {width}: {text:?} does not hold n + 1 pipes"
+                    "width {width}: {text:?} does not hold n + 1 separators"
                 );
             }
             assert_eq!(
@@ -2431,7 +2447,7 @@ mod tests {
             let texts = non_blank(&lines(source, width));
             for text in &texts {
                 assert!(
-                    !text.contains('|'),
+                    !text.contains('│'),
                     "width {width}: the pipe grammar cannot fit here: {text:?}"
                 );
                 assert!(columns(text) <= width as usize, "width {width}: {text:?}");
@@ -2462,7 +2478,7 @@ mod tests {
         for width in 9..=10u16 {
             let texts = non_blank(&lines(source, width));
             assert!(
-                texts.iter().any(|t| t.contains('|')),
+                texts.iter().any(|t| t.contains('│')),
                 "width {width}: the pipe grammar fits from 4n + 1 = 9 onward"
             );
             for text in &texts {
@@ -2474,9 +2490,9 @@ mod tests {
             assert_eq!(
                 texts,
                 vec![
-                    "| Gate   | Runner    |".to_string(),
-                    "|--------|-----------|".to_string(),
-                    "| Format | cargo fmt |".to_string(),
+                    "│ Gate   │ Runner    │".to_string(),
+                    "├────────┼───────────┤".to_string(),
+                    "│ Format │ cargo fmt │".to_string(),
                 ],
                 "width {width}: the aligned form"
             );

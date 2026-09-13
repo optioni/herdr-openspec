@@ -4393,12 +4393,14 @@ mod tests {
         }
     }
 
-    /// The character offsets of every `|` in `row`, counted in characters and
-    /// never in bytes.
+    /// The character offsets of every table separator in `row` — `│` on a row
+    /// line, `├`/`┼`/`┤` on the delimiter line — counted in characters and never
+    /// in bytes. The two sets share their offsets by construction, which is what
+    /// makes an equality between them the alignment assertion.
     fn pipe_offsets(row: &str) -> Vec<usize> {
         row.chars()
             .enumerate()
-            .filter(|(_, c)| *c == '|')
+            .filter(|(_, c)| ['│', '├', '┼', '┤'].contains(c))
             .map(|(i, _)| i)
             .collect()
     }
@@ -4437,7 +4439,7 @@ mod tests {
             let interior = if width == 60 { 58 } else { 78 };
             let drawn: Vec<(u16, String)> = (5..=18u16)
                 .map(|y| (y, detail_interior_cols(&buf, y, interior)))
-                .filter(|(_, text)| text.contains('|'))
+                .filter(|(_, text)| !pipe_offsets(text).is_empty())
                 .collect();
             assert!(
                 drawn.len() >= 5,
@@ -4453,7 +4455,7 @@ mod tests {
                 .iter()
                 .find(|(_, text)| {
                     let t = text.trim_end();
-                    !t.is_empty() && t.chars().all(|c| c == '|' || c == '-')
+                    !t.is_empty() && t.chars().all(|c| ['├', '┼', '┤', '─'].contains(&c))
                 })
                 .expect("a delimiter line is drawn");
             let expected = pipe_offsets(&delimiter.1);
@@ -4494,7 +4496,7 @@ mod tests {
                 }
             }
             for (i, c) in header_text.chars().enumerate() {
-                if c != '|' && c != ' ' {
+                if c != '│' && c != ' ' {
                     continue;
                 }
                 let x = offset + i as u16;
@@ -4740,7 +4742,7 @@ mod tests {
         // assertions above by rendering nothing at all.
         for (label, buf) in [("120", &tbuf120), ("60", &tbuf60)] {
             assert!(
-                (5..=18u16).any(|y| row_text(buf, y).contains('|')),
+                (5..=18u16).any(|y| row_text(buf, y).contains('│')),
                 "width {label}: no table line was drawn"
             );
         }
@@ -4762,11 +4764,11 @@ mod tests {
         // The two widths take the two different paths, which is the whole point
         // of this fixture: pipes at 120, none at 60.
         assert!(
-            (5..=18u16).any(|y| row_text(&fbuf120, y).contains('|')),
+            (5..=18u16).any(|y| row_text(&fbuf120, y).contains('│')),
             "at 120 the fifteen-column table still fits the pipe grammar"
         );
         assert!(
-            (5..=18u16).all(|y| !row_text(&fbuf60, y).contains('|')),
+            (5..=18u16).all(|y| !row_text(&fbuf60, y).contains('│')),
             "at 60 the fifteen-column table must degrade to one cell per line"
         );
         assert!(

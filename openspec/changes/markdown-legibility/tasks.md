@@ -85,7 +85,7 @@
 ## 3. Table separators become box-drawing
 <!-- kind: behavior -->
 
-- [ ] 3.1 RED: Write failing tests for `A table that fits renders as aligned columns at both mandated widths`, `A ragged table renders every declared column and drops no header column`, and `A region too narrow for the pipe grammar renders one cell per line`.
+- [x] 3.1 RED: Write failing tests for `A table that fits renders as aligned columns at both mandated widths`, `A ragged table renders every declared column and drops no header column`, and `A region too narrow for the pipe grammar renders one cell per line`.
 
   Check, run at HEAD:
 
@@ -100,11 +100,11 @@
 
   → exit **101**; the row line still starts `|` and the delimiter line still starts `|`.
 
-- [ ] 3.2 GREEN: Emit `│` at every row-line separator, and build the delimiter line as the row line's own shape with spaces and content columns replaced by `─` and the separators by `├`/`┼`/`┤` (per design.md → Decision 3). `total = 3n + 1 + sum(w)` and the `width < 4n + 1` fallback threshold do not change.
-- [ ] 3.3 GREEN: Rewrite the two test helpers the separator change invalidates before touching any literal. `allocated_widths` (`src/ui/markdown.rs:2034`) does `.trim_matches('|').split('|')` and `columns(run) - 2`, neither valid against a `├─┼─┤` delimiter — trim `├`/`┤` and split on `┼`. `field`'s doc comment (`:2042-2045`) names "the `|` that closes it" and goes stale with it. `grep -c 'allocated_widths(' src/ui/markdown.rs` → **9** (one definition, eight call sites).
-- [ ] 3.4 GREEN: Re-baseline every table literal, not only the worked example: the eight `allocated_widths` call sites, plus `a_narrow_region_renders_one_cell_per_line` and `unmodelled_constructs_render_as_source`, which assert a rendered `| Gate   | Runner    |` row directly. Assert `layout::columns` on the delimiter line equals that of a row line.
-- [ ] 3.5 GREEN: Re-baseline `a_table_inside_a_container_carries_the_prefix_on_every_line` (`src/ui/markdown.rs:2526`), which group 2's quote prefix and this group's separators both hit. It backs the table requirement's "A table inside a container" paragraph, which carries no scenario of its own and so appears in no matrix row.
-- [ ] 3.6 Run `cargo test --lib ui::` — no regressions; no refactor was needed beyond 3.3's helper rewrite.
+- [x] 3.2 GREEN: Emit `│` at every row-line separator, and build the delimiter line as the row line's own shape with spaces and content columns replaced by `─` and the separators by `├`/`┼`/`┤` (per design.md → Decision 3). `total = 3n + 1 + sum(w)` and the `width < 4n + 1` fallback threshold do not change.
+- [x] 3.3 GREEN: Rewrite the two test helpers the separator change invalidates before touching any literal. `allocated_widths` (`src/ui/markdown.rs:2034`) does `.trim_matches('|').split('|')` and `columns(run) - 2`, neither valid against a `├─┼─┤` delimiter — trim `├`/`┤` and split on `┼`. `field`'s doc comment (`:2042-2045`) names "the `|` that closes it" and goes stale with it. `grep -c 'allocated_widths(' src/ui/markdown.rs` → **9** (one definition, eight call sites).
+- [x] 3.4 GREEN: **Two further sites the plan did not name**, both in `src/ui/view.rs` and both found by running rather than by grepping: `a_table_reaches_the_buffer_aligned`'s `pipe_offsets` helper and its delimiter-line predicate, and `content_never_overwrites_the_detail_region_s_border`'s three `contains('|')` probes. `pipe_offsets` now matches all four separator glyphs, which is what keeps the delimiter-to-row-line offset equality the alignment assertion. Originally: Re-baseline every table literal, not only the worked example: the eight `allocated_widths` call sites, plus `a_narrow_region_renders_one_cell_per_line` and `unmodelled_constructs_render_as_source`, which assert a rendered `| Gate   | Runner    |` row directly. Assert `layout::columns` on the delimiter line equals that of a row line.
+- [x] 3.5 GREEN: Re-baseline `a_table_inside_a_container_carries_the_prefix_on_every_line` (`src/ui/markdown.rs:2526`), which group 2's quote prefix and this group's separators both hit. It backs the table requirement's "A table inside a container" paragraph, which carries no scenario of its own and so appears in no matrix row.
+- [x] 3.6 Run `cargo test --lib ui::` — no regressions; no refactor was needed beyond 3.3's helper rewrite.
 
 ## 4. Task-list items are modelled
 <!-- kind: behavior -->
