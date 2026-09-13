@@ -3685,6 +3685,327 @@ mod tests {
             assert_eq!(d2.route, Route::List);
         }
 
+        /// Six active changes, `agents.reachable` `true` — `help-overlay`'s own
+        /// fixture for the scenarios that need a real selected change under the
+        /// overlay, reusing `super::dashboard_for_attribution` rather than a new
+        /// literal.
+        fn six_active_changes() -> Vec<crate::changes::Change> {
+            (0..6)
+                .map(|i| fixture::active(&format!("a{i}"), 0, 1))
+                .collect()
+        }
+
+        /// The seventeen actions `help-overlay`'s spec names as inert while the
+        /// overlay is open, in the order the dashboard-loop scenario applies
+        /// them.
+        fn seventeen_inert_actions() -> [Action; 17] {
+            [
+                Action::OpenDetail,
+                Action::SelectTab(3),
+                Action::NextTab,
+                Action::PrevTab,
+                Action::FilterStart,
+                Action::FilterPush('a'),
+                Action::FilterPop,
+                Action::Refresh,
+                Action::LaunchApply,
+                Action::LaunchContinue,
+                Action::LaunchArchive,
+                Action::FocusAgent,
+                Action::ToggleSection,
+                Action::SelectNext,
+                Action::SelectPrev,
+                Action::Click(Target::Change(0)),
+                Action::Ignore,
+            ]
+        }
+
+        /// `help-overlay` -> "The overlay opens and closes without moving the
+        /// route".
+        #[test]
+        fn overlay_opens_and_closes_without_moving_the_route() {
+            let mut d = dashboard_at(Route::Detail);
+            d.detail.tab = 2;
+            d.detail.scroll = 7;
+            d.selected = 3;
+            let before = d.clone();
+
+            d.apply(Action::ToggleHelp);
+            assert!(d.help.open);
+            assert_eq!(d.help.scroll, 0);
+            assert_eq!(d.route, Route::Detail);
+            assert_eq!(d.detail.tab, 2);
+            assert_eq!(d.detail.scroll, 7);
+            assert_eq!(d.selected, 3);
+
+            d.apply(Action::ToggleHelp);
+            assert!(!d.help.open);
+            assert_eq!(d.help.scroll, 0);
+            assert_eq!(d.route, Route::Detail);
+            assert_eq!(d.detail.tab, 2);
+            assert_eq!(d.detail.scroll, 7);
+            assert_eq!(d.selected, 3);
+
+            assert_eq!(d.changes, before.changes);
+            assert_eq!(d.filter, before.filter);
+            assert_eq!(d.quit, before.quit);
+            assert_eq!(d.refresh, before.refresh);
+            assert_eq!(d.agents, before.agents);
+            assert_eq!(d.agent_names, before.agent_names);
+            assert_eq!(d.launch, before.launch);
+            assert_eq!(d.sections, before.sections);
+        }
+
+        /// `help-overlay` -> "`Esc` closes the overlay before any other layer".
+        #[test]
+        fn esc_closes_the_overlay_before_any_other_layer() {
+            let mut d = dashboard_at(Route::Detail);
+            d.filter.active = true;
+            d.filter.query = "add".to_string();
+            d.help.open = true;
+
+            d.apply(Action::Back);
+            assert!(!d.help.open, "the overlay is the outermost layer");
+            assert!(d.filter.active, "dismissing the overlay is not a filter move");
+            assert_eq!(d.filter.query, "add");
+            assert!(!d.quit);
+
+            d.apply(Action::Back);
+            assert!(!d.filter.active);
+            assert_eq!(d.filter.query, "");
+            assert!(!d.quit);
+
+            d.apply(Action::Back);
+            assert_eq!(d.route, Route::List);
+            assert!(!d.quit);
+
+            let before = d.clone();
+            d.apply(Action::Back);
+            assert_eq!(d, before, "the fourth Back changes nothing");
+            assert!(!d.quit);
+        }
+
+        /// `dashboard-loop` -> "The overlay layer suppresses every action but
+        /// seven".
+        #[test]
+        fn the_overlay_layer_suppresses_every_action_but_seven() {
+            let mut open = super::dashboard_for_attribution(
+                six_active_changes(),
+                Vec::new(),
+                2,
+                Vec::new(),
+                std::collections::BTreeMap::new(),
+            );
+            open.detail.tab = 1;
+            open.help.open = true;
+            let before = open.clone();
+            for action in seventeen_inert_actions() {
+                open.apply(action);
+            }
+            assert_eq!(open.changes, before.changes);
+            assert_eq!(open.route, before.route);
+            assert_eq!(open.selected, before.selected);
+            assert_eq!(open.detail, before.detail);
+            assert_eq!(open.filter, before.filter);
+            assert_eq!(open.quit, before.quit);
+            assert_eq!(open.agents, before.agents);
+            assert_eq!(open.agent_names, before.agent_names);
+            assert_eq!(open.sections, before.sections);
+            assert_eq!(open.help, before.help);
+            assert_eq!(open.launch.pending, None);
+            assert!(open.launch.problems.is_empty());
+            if before.needs_archived_refresh() {
+                assert!(open.refresh.requested);
+            } else {
+                assert_eq!(open.refresh.requested, before.refresh.requested);
+            }
+
+            // The same seventeen actions, applied to the identical dashboard
+            // with the overlay closed, do change it — so the suppression above
+            // is the overlay's own and not a property of the dashboard.
+            let mut closed = super::dashboard_for_attribution(
+                six_active_changes(),
+                Vec::new(),
+                2,
+                Vec::new(),
+                std::collections::BTreeMap::new(),
+            );
+            closed.detail.tab = 1;
+            let before_closed = closed.clone();
+            for action in seventeen_inert_actions() {
+                closed.apply(action);
+            }
+            assert_ne!(closed, before_closed);
+        }
+
+        /// `dashboard-loop` -> "The overlay's seven live actions act and
+        /// nothing else moves".
+        #[test]
+        fn the_overlays_seven_live_actions_act_and_nothing_else_moves() {
+            let mut d = dashboard_at(Route::Detail);
+            d.detail.scroll = 4;
+            d.selected = 1;
+            d.help.open = true;
+
+            d.apply(Action::Next);
+            assert_eq!(d.help.scroll, 1);
+            d.apply(Action::ScrollDown);
+            assert_eq!(d.help.scroll, 2);
+            d.apply(Action::Prev);
+            assert_eq!(d.help.scroll, 1);
+            d.apply(Action::ScrollUp);
+            assert_eq!(d.help.scroll, 0);
+            d.apply(Action::Prev);
+            assert_eq!(d.help.scroll, 0, "saturates rather than underflowing");
+
+            assert_eq!(d.detail.scroll, 4);
+            assert_eq!(d.selected, 1);
+
+            d.apply(Action::Back);
+            assert!(!d.help.open);
+            assert_eq!(d.help.scroll, 0);
+
+            d.apply(Action::Quit);
+            assert!(d.quit);
+        }
+
+        /// `help-overlay` -> "Both quit keys still quit from inside the
+        /// overlay".
+        #[test]
+        fn both_quit_keys_still_quit_from_inside_the_overlay() {
+            let mut d = dashboard_at(Route::List);
+            d.help.open = true;
+            d.apply(Action::Quit);
+            assert!(d.quit);
+
+            let mut d2 = dashboard_at(Route::List);
+            d2.help.open = true;
+            d2.filter.active = true;
+            d2.apply(Action::Quit);
+            assert!(d2.quit, "no combination of layers traps the reader");
+        }
+
+        /// `help-overlay` -> "The agent keys launch nothing while the overlay
+        /// is open".
+        #[test]
+        fn the_agent_keys_launch_nothing_while_the_overlay_is_open() {
+            let mut d = super::dashboard_for_attribution(
+                vec![fixture::active("add-auth", 1, 2)],
+                Vec::new(),
+                // `list-sections`: 1, not 0 — target 0 is the active header.
+                1,
+                Vec::new(),
+                std::collections::BTreeMap::new(),
+            );
+            d.help.open = true;
+            let before = d.clone();
+
+            for action in [
+                Action::LaunchApply,
+                Action::LaunchContinue,
+                Action::LaunchArchive,
+                Action::FocusAgent,
+                Action::Refresh,
+            ] {
+                d.apply(action);
+            }
+
+            assert_eq!(d.launch.pending, None);
+            assert!(d.launch.problems.is_empty());
+            if before.needs_archived_refresh() {
+                assert!(d.refresh.requested);
+            } else {
+                assert!(!d.refresh.requested);
+            }
+            assert_eq!(d.changes, before.changes);
+            assert_eq!(d.route, before.route);
+            assert_eq!(d.selected, before.selected);
+            assert_eq!(d.detail, before.detail);
+            assert_eq!(d.filter, before.filter);
+            assert_eq!(d.quit, before.quit);
+            assert_eq!(d.agents, before.agents);
+            assert_eq!(d.agent_names, before.agent_names);
+            assert_eq!(d.sections, before.sections);
+            assert_eq!(d.help, before.help);
+        }
+
+        /// `help-overlay` -> "The overlay swallows the seventeen inert
+        /// actions".
+        #[test]
+        fn the_overlay_swallows_the_seventeen_inert_actions() {
+            let mut d = super::dashboard_for_attribution(
+                six_active_changes(),
+                Vec::new(),
+                2,
+                Vec::new(),
+                std::collections::BTreeMap::new(),
+            );
+            d.detail.tab = 1;
+            d.help.open = true;
+            let sections_before = d.sections.clone();
+
+            for action in [
+                Action::OpenDetail,
+                Action::SelectTab(3),
+                Action::NextTab,
+                Action::PrevTab,
+                Action::FilterStart,
+                Action::FilterPush('a'),
+                Action::FilterPop,
+                Action::ToggleSection,
+                Action::SelectNext,
+                Action::SelectPrev,
+                Action::Click(Target::Change(0)),
+            ] {
+                d.apply(action);
+            }
+
+            assert_eq!(d.route, Route::List);
+            assert_eq!(d.selected, 2);
+            assert_eq!(d.detail.tab, 1);
+            assert_eq!(d.filter.query, "");
+            assert!(!d.filter.active);
+            assert_eq!(d.sections, sections_before);
+            assert!(d.help.open);
+            assert_eq!(d.help.scroll, 0);
+        }
+
+        /// `help-overlay` -> "`j` and `k` scroll the overlay rather than the
+        /// frame beneath".
+        #[test]
+        fn j_and_k_scroll_the_overlay_rather_than_the_frame_beneath() {
+            let mut d = dashboard_at(Route::Detail);
+            d.detail.scroll = 4;
+            d.selected = 1;
+            d.help.open = true;
+
+            d.apply(Action::Next);
+            d.apply(Action::Next);
+            d.apply(Action::Next);
+            assert_eq!(d.help.scroll, 3);
+            d.apply(Action::Prev);
+            assert_eq!(d.help.scroll, 2);
+
+            assert_eq!(d.detail.scroll, 4, "the overlay's scroll is not the detail region's");
+            assert_eq!(d.selected, 1);
+
+            let mut d2 = dashboard_at(Route::List);
+            d2.detail.scroll = 4;
+            d2.selected = 1;
+            d2.help.open = true;
+            d2.apply(Action::Next);
+            d2.apply(Action::Next);
+            d2.apply(Action::Next);
+            d2.apply(Action::Prev);
+            assert_eq!(d2.help.scroll, 2, "route-agnostic where Next and Prev are not");
+            assert_eq!(d2.selected, 1);
+
+            let mut d3 = dashboard_at(Route::Detail);
+            d3.help.open = true;
+            d3.apply(Action::Prev);
+            assert_eq!(d3.help.scroll, 0, "saturates rather than underflowing");
+        }
+
         #[test]
         fn next_and_prev_clamp() {
             let mut d = five_change_dashboard();
