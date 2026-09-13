@@ -79,18 +79,26 @@ impl Drop for ScratchDir {
 /// Returns the scratch dir (kept alive for its `Drop`) and the directory holding the
 /// `herdr` program, suitable for prepending to `PATH`.
 fn stub_herdr() -> (ScratchDir, std::path::PathBuf) {
-    let scratch = ScratchDir::new();
-    let bin_dir = scratch.path().join("bin");
-    std::fs::create_dir_all(&bin_dir).expect("create stub bin dir");
-    let herdr = bin_dir.join("herdr");
-    let script = r#"#!/bin/sh
+    write_stub_herdr(
+        r#"#!/bin/sh
 echo "$@" >> "$(dirname "$0")/../argv.log"
 case "$*" in
   "pane list") printf '{"result":{"panes":[]}}' ;;
   *) printf '' ;;
 esac
 exit 0
-"#;
+"#,
+    )
+}
+
+/// The half [`stub_herdr`] and [`stub_herdr_sequenced`] share: a fresh [`ScratchDir`] with
+/// `script` written into it as an executable program named `herdr`. Only the script itself
+/// differs between the two, so only the script is written at each call site.
+fn write_stub_herdr(script: &str) -> (ScratchDir, std::path::PathBuf) {
+    let scratch = ScratchDir::new();
+    let bin_dir = scratch.path().join("bin");
+    std::fs::create_dir_all(&bin_dir).expect("create stub bin dir");
+    let herdr = bin_dir.join("herdr");
     std::fs::write(&herdr, script).expect("write stub herdr script");
     let mut perms = std::fs::metadata(&herdr)
         .expect("stat stub herdr script")
@@ -110,11 +118,8 @@ exit 0
 /// dir, and no reset affordance is built here, because no test needs to replay the
 /// sequence within one process (design.md -> Decision 4).
 fn stub_herdr_sequenced() -> (ScratchDir, std::path::PathBuf) {
-    let scratch = ScratchDir::new();
-    let bin_dir = scratch.path().join("bin");
-    std::fs::create_dir_all(&bin_dir).expect("create stub bin dir");
-    let herdr = bin_dir.join("herdr");
-    let script = r#"#!/bin/sh
+    write_stub_herdr(
+        r#"#!/bin/sh
 D="$(dirname "$0")/.."
 echo "$@" >> "$D/argv.log"
 case "$*" in
@@ -129,15 +134,8 @@ case "$*" in
   *) printf '' ;;
 esac
 exit 0
-"#;
-    std::fs::write(&herdr, script).expect("write stub herdr script");
-    let mut perms = std::fs::metadata(&herdr)
-        .expect("stat stub herdr script")
-        .permissions();
-    use std::os::unix::fs::PermissionsExt;
-    perms.set_mode(0o755);
-    std::fs::set_permissions(&herdr, perms).expect("chmod stub herdr script");
-    (scratch, bin_dir)
+"#,
+    )
 }
 
 #[test]
@@ -398,11 +396,15 @@ fn main_routes_each_subcommand_to_its_own_placement() {
     );
 
     // Each subcommand issues `pane list` before its own `plugin pane open` call (design.md
-    // -> "An already-open dashboard is focused, never duplicated"), so four lines total —
-    // filter down to the two `plugin pane open` calls to read the placement each produced.
+    // -> "An already-open dashboard is focused, never duplicated") and a second `pane list`
+    // after it succeeds (`specs/pane-open/spec.md` -> "A newly opened dashboard pane is
+    // focused after opening"), so three lines each and six in total. `stub_herdr` answers
+    // every listing empty, so neither post-open listing identifies a pane and no focus call
+    // follows — filter down to the two `plugin pane open` calls to read the placement each
+    // produced.
     let argv_log = std::fs::read_to_string(scratch.path().join("argv.log")).expect("read argv.log");
     let lines: Vec<&str> = argv_log.lines().collect();
-    assert_eq!(lines.len(), 4, "argv.log:\n{argv_log}");
+    assert_eq!(lines.len(), 6, "argv.log:\n{argv_log}");
     let opens: Vec<&str> = lines
         .iter()
         .copied()

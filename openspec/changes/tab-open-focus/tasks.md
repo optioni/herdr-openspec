@@ -163,15 +163,15 @@ grep -q "plugin pane focus" "$S/argv.log"
 ## 4. Acceptance Test — Outer Loop GREEN
 <!-- kind: behavior -->
 
-- [ ] 4.1 GREEN: Correct `main_routes_each_subcommand_to_its_own_placement`'s
+- [x] 4.1 GREEN: Correct `main_routes_each_subcommand_to_its_own_placement`'s
       `assert_eq!(lines.len(), 4)` to 6 — with the plain stub each subcommand now lists, opens,
       and lists again, finding nothing. Its two `plugin pane open` assertions are unaffected. Correct the stale comment above it
       (`tests/cli.rs:361`, "so four lines total") in the same edit.
-- [ ] 4.2 VERIFY: `cargo test --test cli` — green, including
+- [x] 4.2 VERIFY: `cargo test --test cli` — green, including
       `main_focuses_the_pane_it_just_opened` from group 0.
       (HEAD: `cargo test --test cli main_routes_each_subcommand_to_its_own_placement` exits 0,
       `1 passed`, so the 4 → 6 edit is a real change and not a pre-broken test.)
-- [ ] 4.3 REFACTOR: Factor any duplication between `stub_herdr` and `stub_herdr_sequenced`
+- [x] 4.3 REFACTOR: Factor any duplication between `stub_herdr` and `stub_herdr_sequenced`
       into a shared writer, or state that the two are small enough that none was warranted.
 
 ## 5. Degraded-states contract
