@@ -29,12 +29,13 @@ pub enum Route {
     Detail,
 }
 
-/// The twenty-three outcomes a terminal event can map to, under either filter mode. The
-/// count has moved four times since this comment was last true: to thirteen with
+/// The twenty-four outcomes a terminal event can map to, under either filter mode. The
+/// count has moved five times since this comment was last true: to thirteen with
 /// `live-refresh`'s `Refresh`, to seventeen with `agent-launch`'s `LaunchApply`,
 /// `LaunchContinue`, `LaunchArchive`, and `FocusAgent`, to eighteen with `list-sections`'s
-/// `ToggleSection`, and to twenty-three with `mouse-input`'s `SelectNext`, `SelectPrev`,
-/// `ScrollDown`, `ScrollUp`, and `Click`.
+/// `ToggleSection`, to twenty-three with `mouse-input`'s `SelectNext`, `SelectPrev`,
+/// `ScrollDown`, `ScrollUp`, and `Click`, and to twenty-four with `help-overlay`'s
+/// `ToggleHelp`.
 /// `action_for` is total over every `Event`. `Back` replaces the earlier
 /// `BackToList`: it now dismisses one of several layers rather than only
 /// ever returning to the list route. `Next` and `Prev` are renamed from
@@ -75,6 +76,16 @@ pub enum Action {
     /// space types into the query on the same terms as every other
     /// printable character.
     ToggleSection,
+    /// `help-overlay`'s addition: open the help overlay when it is closed and
+    /// close it when it is open. Mapped from `Char('?')` outside filter mode,
+    /// under both `KeyModifiers::NONE` and `KeyModifiers::SHIFT` — the one key
+    /// with two accepted modifier values, because terminals disagree about
+    /// whether `Shift` is reported alongside a shifted character like `?`.
+    /// Inside filter mode, `?` types into the query on the same terms as
+    /// every other printable character. Route-agnostic in the same stronger
+    /// sense as `Refresh`: it opens a layer over whichever route is current
+    /// and leaves `route` alone.
+    ToggleHelp,
     /// `mouse-input`'s five. `action_for` maps **no key** to any of them:
     /// they exist because a mouse event names the region or the row it landed
     /// on, where a key does not, and `ui::driver::mouse_action` is their only
@@ -553,6 +564,10 @@ impl Dashboard {
                 Route::List => self.apply_toggle_section(),
                 Route::Detail => self.apply_toggle_detail_section(),
             },
+            // `help-overlay`'s group 3 gives this its real dispatch — the `Help` field
+            // and the overlay layer do not exist yet at this group's end, so this arm is
+            // a compile-preserving no-op, not a claim that `?` does anything yet.
+            Action::ToggleHelp => {}
             Action::Ignore => {}
         }
         // `list-sections`' one blanket rule, run after every action rather than a named
@@ -1196,7 +1211,7 @@ pub fn matches(name: &str, query: &str) -> bool {
     name.to_lowercase().contains(query.to_lowercase().as_str())
 }
 
-/// Map a terminal event and the current filter mode to one of the nine
+/// Map a terminal event and the current filter mode to one of the twenty-four
 /// actions. Total: every `Event` value maps to something, under either
 /// mode, and nothing panics. Acts only on key events whose `kind` is
 /// `KeyEventKind::Press` — a `Repeat` or `Release` maps to `Ignore` under
@@ -1250,6 +1265,14 @@ pub fn action_for(event: &Event, filtering: bool) -> Action {
         // filtering, `' '` already falls through to the generic `Char(c)` arm above,
         // which types it — no row is added to that table.
         (KeyCode::Char(' '), KeyModifiers::NONE) => Action::ToggleSection,
+        // `help-overlay`: the one row with two accepted modifier values — terminals
+        // disagree about whether `Shift` is reported alongside a shifted character like
+        // `?`, so matching only `NONE` would make the key work on some terminals and not
+        // others. While filtering, `'?'` already falls through to the generic `Char(c)`
+        // arm above, which types it under either modifier — no row is added there.
+        (KeyCode::Char('?'), KeyModifiers::NONE) | (KeyCode::Char('?'), KeyModifiers::SHIFT) => {
+            Action::ToggleHelp
+        }
         (KeyCode::Enter, KeyModifiers::NONE) => Action::OpenDetail,
         (KeyCode::Esc, KeyModifiers::NONE) => Action::Back,
         _ => Action::Ignore,
@@ -3352,6 +3375,7 @@ mod tests {
                     | Action::LaunchArchive
                     | Action::FocusAgent
                     | Action::ToggleSection
+                    | Action::ToggleHelp
                     | Action::SelectNext
                     | Action::SelectPrev
                     | Action::ScrollDown
@@ -3392,12 +3416,17 @@ mod tests {
                 Action::ScrollDown,
                 Action::ScrollUp,
                 Action::Click(crate::ui::app::Target::Change(0)),
+                // `help-overlay`'s addition, bumping the count from twenty-three to
+                // twenty-four. `apply`'s arm for it is still a no-op at this group's end —
+                // group 3 gives it the overlay's real dispatch — so it trivially leaves
+                // `changes` untouched here.
+                Action::ToggleHelp,
                 Action::Ignore,
             ];
             assert_eq!(
                 variants.len(),
-                23,
-                "the twenty-three variants this crate specifies"
+                24,
+                "the twenty-four variants this crate specifies"
             );
             for v in &variants {
                 assert_known_variant(v);
@@ -4074,6 +4103,63 @@ mod tests {
                 assert_eq!(action_for(&released, filtering), Action::Ignore);
                 assert_eq!(action_for(&repeated, filtering), Action::Ignore);
             }
+        }
+
+        /// `dashboard-loop` -> "`?` maps to `ToggleHelp` outside filter mode
+        /// and types inside it".
+        #[test]
+        fn question_mark_maps_to_toggle_help_outside_filter_mode_and_types_inside_it() {
+            assert_eq!(
+                action_for(&press(KeyCode::Char('?'), KeyModifiers::NONE), false),
+                Action::ToggleHelp
+            );
+            assert_eq!(
+                action_for(&press(KeyCode::Char('?'), KeyModifiers::SHIFT), false),
+                Action::ToggleHelp
+            );
+            assert_eq!(
+                action_for(&press(KeyCode::Char('?'), KeyModifiers::NONE), true),
+                Action::FilterPush('?')
+            );
+            assert_eq!(
+                action_for(&press(KeyCode::Char('?'), KeyModifiers::SHIFT), true),
+                Action::FilterPush('?')
+            );
+        }
+
+        /// `help-overlay` -> "`?` toggles the overlay and its near misses do
+        /// not".
+        #[test]
+        fn question_mark_toggles_the_overlay_and_its_near_misses_do_not() {
+            assert_eq!(
+                action_for(&press(KeyCode::Char('?'), KeyModifiers::CONTROL), false),
+                Action::Ignore
+            );
+            assert_eq!(
+                action_for(&press(KeyCode::Char('?'), KeyModifiers::ALT), false),
+                Action::Ignore
+            );
+            // `Char('/')` with `SHIFT` is not `?` — the filter key carrying a
+            // stray modifier falls to the wildcard rather than starting a
+            // filter, and the two are distinguished by the `KeyCode` the
+            // terminal reports rather than by the physical key.
+            assert_eq!(
+                action_for(&press(KeyCode::Char('/'), KeyModifiers::SHIFT), false),
+                Action::Ignore
+            );
+
+            let released = Event::Key(KeyEvent::new_with_kind(
+                KeyCode::Char('?'),
+                KeyModifiers::NONE,
+                KeyEventKind::Release,
+            ));
+            let repeated = Event::Key(KeyEvent::new_with_kind(
+                KeyCode::Char('?'),
+                KeyModifiers::NONE,
+                KeyEventKind::Repeat,
+            ));
+            assert_eq!(action_for(&released, false), Action::Ignore);
+            assert_eq!(action_for(&repeated, false), Action::Ignore);
         }
 
         /// `list-selection` -> "`Space` on a header folds and unfolds that

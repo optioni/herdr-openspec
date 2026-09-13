@@ -49,20 +49,20 @@ run it avoids.
 ## 2. `Action::ToggleHelp` and the `?` key
 <!-- kind: behavior -->
 
-- [ ] 2.1 RED: Add tests in `src/ui/app.rs`'s `mod tests` named for the scenarios
+- [x] 2.1 RED: Add tests in `src/ui/app.rs`'s `mod tests` named for the scenarios
   `?` maps to `ToggleHelp` outside filter mode and types inside it and
   `?` toggles the overlay and its near misses do not. Assert `Char('?')` under both `NONE` and
   `SHIFT` returns `ToggleHelp`; under `CONTROL` and `ALT`, and as `Release`/`Repeat`, returns
   `Ignore`; under `filtering` true returns `FilterPush('?')`; and that `Char('/')` with `SHIFT`
   returns `Ignore`. Confirm red: `cargo test ui::app::tests` fails on a missing `ToggleHelp`
   variant — RED at HEAD by construction, since `grep -n "Char('?')" src/ui/app.rs` exits 1.
-- [ ] 2.2 GREEN: Add `ToggleHelp` to `Action` and the two `action_for` arms. Update the doc
+- [x] 2.2 GREEN: Add `ToggleHelp` to `Action` and the two `action_for` arms. Update the doc
   comment's count from twenty-three to twenty-four.
-- [ ] 2.3 CHECK: Contract gate — re-read `SPEC.md` → Keys and confirm the key table there still
+- [x] 2.3 CHECK: Contract gate — re-read `SPEC.md` → Keys and confirm the key table there still
   matches `action_for`'s `filtering` false table, row for row.
-- [ ] 2.4 REFACTOR: None expected — the change is one enum variant and two match arms. State
+- [x] 2.4 REFACTOR: None expected — the change is one enum variant and two match arms. State
   explicitly that no refactor was needed if that holds.
-- [ ] 2.5 Run `cargo test ui::app` — no regressions.
+- [x] 2.5 Run `cargo test ui::app` — no regressions.
 
 ## 3. `Help` on `Dashboard`, and `apply`'s overlay layer
 <!-- kind: behavior -->
@@ -91,8 +91,10 @@ run it avoids.
 - [ ] 4.1 RED: Add `src/ui/help.rs` with `mod tests` holding tests named for The inventory's
   shape is asserted, not described, `Space` and `Esc` each appear under their route, Both quit
   keys have a row, and The inventory is a pure `'static` value with no construction cost. Assert
-  six groups, the six titles and `scope` values in order, binding counts 5/7/4/4/3/5 summing to
-  28, no empty group and no shared title.
+  six groups, the six titles and `scope` values in order, binding counts 5/7/4/4/5/6 summing to
+  31, no empty group and no shared title. These are the **repaired** counts: groups 5 and 6 went
+  from 3 and 5 to 5 and 6 in the planning review, and an earlier draft of this line still read
+  `5/7/4/4/3/5` summing to 28. `specs/binding-inventory/spec.md`'s table is the authority.
 - [ ] 4.2 GREEN: Write `Scope`, `Binding`, `Group`, and `INVENTORY` per
   `specs/binding-inventory/spec.md`'s table. No `Default` on `Binding` or `Group`; every literal
   names every field.
@@ -263,22 +265,34 @@ run it avoids.
 ## 12. Documentation
 <!-- kind: operational -->
 
-- [ ] 12.0 CHECK: Confirm the passages this group edits still say what it expects — in
-  particular that `SPEC.md`'s pure-view sentence still reads **eight** and omits
+- [ ] 12.0 CHECK: Confirm the passages this group edits still say what it expects — that
+  `AGENTS.md:339` still reads "The pure set is **nine** files" and already names
   `src/ui/palette.rs`, and that `AGENTS.md:247` still reads "nine further claims". If either has
   moved, a concurrent change edited it and this group's text needs rebasing.
+  **Both sentences live in `AGENTS.md` only.** `SPEC.md` carries no pure-set count and no
+  pure-view file list anywhere, and its § Doc-conformance checks is an uncounted bullet list;
+  an earlier draft of 12.0 and 12.2 sent this group hunting `SPEC.md` for a sentence reading
+  "eight" that is in fact in the **landed `openspec/specs/dashboard-loop/spec.md`**, which this
+  change repairs through its own delta rather than by editing `SPEC.md`. Do not go looking.
   The `SPEC.md`/`README.md` → Keys rows are **not** here: groups 9 and 10 own them, because a
   gate in each of those groups reads them.
 - [ ] 12.1 CHANGE: Rewrite in `SPEC.md` → Module map's `ui` row and § Unit-tested modules
   (audience: this repository's agents) — mention the overlay and the binding inventory in prose.
   No check enforces this: both map checks read `src/lib.rs`'s top-level `pub mod` set, so a
   submodule is invisible to them (`specs/doc-conformance/spec.md`).
-- [ ] 12.2 CHANGE: Rewrite in `SPEC.md` → Architecture — the pure view set goes from nine files
-  to ten. This passage still reads **eight** and omits `src/ui/palette.rs`; correct both, per
-  design.md → Decision 9.
-- [ ] 12.3 CHANGE: Rewrite in `AGENTS.md` and `SPEC.md` → Doc-conformance checks — the
-  `tests/doc_contract.rs` claim count goes from **nine** to **ten**, this change adding the
-  inventory/key-table binding.
+- [ ] 12.2 CHECK: **No `SPEC.md` edit is owed here — record that and move on.** An earlier draft
+  of this line ordered the pure-view set corrected in `SPEC.md` → Architecture from eight to ten.
+  `SPEC.md` has no such passage: `grep -n 'pure set' SPEC.md` and a search for any
+  `src/ui/<file>.rs` in the pure list both return nothing, and its render-seam paragraph states
+  the property in prose while enumerating no file. The prose nine → ten edit is **task 12.4's**,
+  on `AGENTS.md:339`, and the landed-spec drift design.md → Decision 9 names is repaired by this
+  change's own `dashboard-loop` delta. Confirm both by running those two greps and record the
+  result.
+- [ ] 12.3 CHANGE: `AGENTS.md:247`'s `tests/doc_contract.rs` claim count goes from **nine** to
+  **ten**, this change adding the inventory/key-table binding. `SPEC.md` § Doc-conformance
+  checks carries the same claims as an **uncounted bullet list**, so its share is a **tenth
+  bullet** naming the new binding — an addition, not a changed numeral. Both per
+  `specs/doc-conformance/spec.md`, whose two bullets were re-pointed for exactly this reason.
 - [ ] 12.4 CHANGE: Rewrite in `AGENTS.md` → Architecture rules (audience: every future session) — the pure
   set is **ten** files, naming `src/ui/help.rs`; and one new durable rule, in place rather than
   appended: the bindings are data in `src/ui/help.rs` and are bound to `action_for`/`mouse_action`
