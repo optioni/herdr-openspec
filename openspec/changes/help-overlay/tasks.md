@@ -88,25 +88,25 @@ run it avoids.
 ## 4. `src/ui/help.rs` — the inventory and the row grammar
 <!-- kind: behavior -->
 
-- [ ] 4.1 RED: Add `src/ui/help.rs` with `mod tests` holding tests named for The inventory's
+- [x] 4.1 RED: Add `src/ui/help.rs` with `mod tests` holding tests named for The inventory's
   shape is asserted, not described, `Space` and `Esc` each appear under their route, Both quit
   keys have a row, and The inventory is a pure `'static` value with no construction cost. Assert
   six groups, the six titles and `scope` values in order, binding counts 5/7/4/4/5/6 summing to
   31, no empty group and no shared title. These are the **repaired** counts: groups 5 and 6 went
   from 3 and 5 to 5 and 6 in the planning review, and an earlier draft of this line still read
   `5/7/4/4/3/5` summing to 28. `specs/binding-inventory/spec.md`'s table is the authority.
-- [ ] 4.2 GREEN: Write `Scope`, `Binding`, `Group`, and `INVENTORY` per
+- [x] 4.2 GREEN: Write `Scope`, `Binding`, `Group`, and `INVENTORY` per
   `specs/binding-inventory/spec.md`'s table. No `Default` on `Binding` or `Group`; every literal
   names every field.
-- [ ] 4.3 RED: Add view tests named for The grammar renders at 120 columns, The grammar renders
+- [x] 4.3 RED: Add view tests named for The grammar renders at 120 columns, The grammar renders
   at 60 columns, and The key column is measured in display columns, rendering into a
   `TestBackend` at both mandated widths.
-- [ ] 4.4 GREEN: Write the row grammar — group heading with its parenthesised scope, binding rows
+- [x] 4.4 GREEN: Write the row grammar — group heading with its parenthesised scope, binding rows
   padded to the key column, blank row between groups — taking every style from
   `palette::style(Role::…)` and every width from `layout::columns`/`truncate_columns`.
-- [ ] 4.5 REFACTOR: Extract the key-column measurement if 4.4's grammar and 4.2's data ended up
+- [x] 4.5 REFACTOR: Extract the key-column measurement if 4.4's grammar and 4.2's data ended up
   computing it twice, or state that no refactor was needed.
-- [ ] 4.6 Run `cargo test ui::help` — no regressions.
+- [x] 4.6 Run `cargo test ui::help` — no regressions.
 
 ## 5. `layout::help_band`
 <!-- kind: behavior -->

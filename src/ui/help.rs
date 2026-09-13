@@ -101,7 +101,7 @@ pub const INVENTORY: &[Group] = &[
             },
             Binding {
                 input: "Space",
-                description: "Fold or unfold the list section the cursor is on or in.",
+                description: "Fold/unfold the list section.",
                 action: Action::ToggleSection,
             },
             Binding {
@@ -117,12 +117,12 @@ pub const INVENTORY: &[Group] = &[
         bindings: &[
             Binding {
                 input: "j / ↓",
-                description: "Scroll the artifact content down, or move the section cursor at a foldable artifact.",
+                description: "Scroll the content down, or walk the sections.",
                 action: Action::Next,
             },
             Binding {
                 input: "k / ↑",
-                description: "Scroll the artifact content up, or move the section cursor at a foldable artifact.",
+                description: "Scroll the content up, or walk the sections.",
                 action: Action::Prev,
             },
             Binding {
@@ -142,7 +142,7 @@ pub const INVENTORY: &[Group] = &[
             },
             Binding {
                 input: "Space",
-                description: "Fold or unfold the content section the cursor is on or in.",
+                description: "Fold/unfold the content section.",
                 action: Action::ToggleSection,
             },
             Binding {
@@ -158,22 +158,22 @@ pub const INVENTORY: &[Group] = &[
         bindings: &[
             Binding {
                 input: "a",
-                description: "Launch an agent on the selected change with /opsx:apply.",
+                description: "Launch an agent with /opsx:apply.",
                 action: Action::LaunchApply,
             },
             Binding {
                 input: "c",
-                description: "Launch an agent on the selected change with /opsx:continue.",
+                description: "Launch an agent with /opsx:continue.",
                 action: Action::LaunchContinue,
             },
             Binding {
                 input: "s",
-                description: "Launch an agent on the selected change with /opsx:archive.",
+                description: "Launch an agent with /opsx:archive.",
                 action: Action::LaunchArchive,
             },
             Binding {
                 input: "g",
-                description: "Focus the agent already running for the selected change.",
+                description: "Focus the agent already running for it.",
                 action: Action::FocusAgent,
             },
         ],
@@ -215,7 +215,7 @@ pub const INVENTORY: &[Group] = &[
             },
             Binding {
                 input: "Backspace",
-                description: "Delete the last character of the query.",
+                description: "Delete the last character; other keys type.",
                 action: Action::FilterPop,
             },
             Binding {
@@ -230,7 +230,7 @@ pub const INVENTORY: &[Group] = &[
             },
             Binding {
                 input: "↓",
-                description: "Move the selection down. Every other printable key types into the query instead.",
+                description: "Move the selection down.",
                 action: Action::Next,
             },
         ],
@@ -261,7 +261,7 @@ pub const INVENTORY: &[Group] = &[
             },
             Binding {
                 input: "Click",
-                description: "Select a list row, fold a section header, or scroll to a line in the detail content.",
+                description: "Select a row, fold a section, or pick a line.",
                 action: Action::Click(Target::Change(0)),
             },
             Binding {
@@ -525,11 +525,16 @@ mod tests {
     }
 
     /// A `TestBackend` buffer's own resting style before anything is drawn
-    /// into it — `ratatui-view`'s own precedent (`ui::view`'s
-    /// `uncoloured()`), needed because `Cell::default().style()` carries
-    /// explicit `Color::Reset` fields rather than `Style::default()`'s
-    /// `None`s, and `Buffer::set_string` **patches** onto whatever a cell
-    /// already carried rather than replacing it outright.
+    /// into it — `ui::view`'s `uncoloured()` is the same helper for the same
+    /// reason. Ratatui fills an uncoloured cell with its own reset colour
+    /// rather than leaving the field empty, so "carries no colour" is
+    /// equality with this rather than with `Style::default()`, whose fields
+    /// are `None`. Read from `Cell::default()` because this file, like every
+    /// file but `src/ui/palette.rs`, may not name a colour at all — the
+    /// `PALETTE` gate sweeps inline test modules too, comments included.
+    /// `Buffer::set_string` also **patches** onto whatever a cell already
+    /// carried rather than replacing it outright, which is why the
+    /// comparisons below patch the expected role onto this.
     fn uncoloured() -> ratatui::style::Style {
         ratatui::buffer::Cell::default().style()
     }
@@ -561,16 +566,27 @@ mod tests {
         let desc_col = 2 + key_col + 2;
         for (i, binding) in INVENTORY[0].bindings.iter().enumerate() {
             let y = 1 + i as u16;
-            let text = row_text(&buffer, y);
-            let chars: Vec<char> = text.chars().collect();
-            assert_eq!(&chars[0..2], &[' ', ' '], "row {y} starts with two spaces");
-            let key_field: String = chars[2..desc_col - 2].iter().collect();
+            // Sliced by **column**, one cell at a time, never by `char` over
+            // the joined row: `row_text` concatenates cell symbols, and a cell
+            // symbol is a grapheme that need not be one `char`. Counting chars
+            // here would be silently correct against an ASCII fixture and wrong
+            // against the `↑`/`↓` this very inventory already carries — the
+            // exact drift `COLWIDTH` exists to forbid, in a test whose whole
+            // subject is display-column alignment. `COLWIDTH` stops at the
+            // first `#[cfg(test)]` and would not have caught it.
+            let columns = |from: usize, to: usize| -> String {
+                (from..to.min(width as usize))
+                    .map(|x| cell(&buffer, x as u16, y).symbol())
+                    .collect()
+            };
+            assert_eq!(columns(0, 2), "  ", "row {y} starts with two spaces");
+            let key_field = columns(2, desc_col - 2);
             assert_eq!(
                 key_field.trim_end(),
                 binding.input,
                 "row {y}'s key column holds its own input"
             );
-            let description: String = chars[desc_col..].iter().collect();
+            let description = columns(desc_col, width as usize);
             let expected_description = fit(binding.description, width as usize - desc_col);
             assert_eq!(
                 description, expected_description,
