@@ -4,7 +4,9 @@
 The detail tab that renders a change's task file as a checklist instead of markdown: the
 single decision — made from the selected artifact's `tracks_tasks` flag, never from its id or
 filename — that swaps `ui::markdown::lines` for `ui::tasks::lines`, and the line grammar that
-results, with heading lines reproduced from their level, one `[x]`/`[ ]` glyph line per item
+results, with heading lines reproduced from their level, one `[✓]`/`[ ]` glyph line per item
+— the same glyph `markdown-render` gives a task-list item, so the two checkbox renderers agree
+by construction and what names this path is the progress-bar row rather than the glyph —
 preserving the parse's own indent, hanging-indent wrapping, whole-indent dropping as the width
 collapses, and blank separators between groups. It fixes `No tasks yet` for a source that
 holds no items, kept distinct from `artifact-content`'s `No content yet` for a source that
@@ -43,11 +45,13 @@ change adds no code to it.
   `## 1. Setup\n\n- [x] 1.1 first\n- [ ] 1.2 second\n`, is rendered at 120x20 and at 60x20
   with `detail.tab == 3`
 - **THEN** in each buffer the content area holds a progress-bar row, a blank row,
-  `## 1. Setup`, `[x] 1.1 first`, and `[ ] 1.2 second`, in that order
+  `## 1. Setup`, `[✓] 1.1 first`, and `[ ] 1.2 second`, in that order
 - **AND** the same `Dashboard` with `detail.tab == 0` renders the identical source through
-  `markdown::lines` instead: the content area's first row reads `## 1. Setup` with no
-  progress-bar row above it, and the item rows read `- [x] 1.1 first` and
-  `- [ ] 1.2 second` with their source bullets intact
+  `markdown::lines` instead: the content area's first row reads `## 1. Setup` with **no
+  progress-bar row and no blank row above it**, which is what discriminates the two paths now
+  that `markdown-render` models task-list items and both paths render the item rows as
+  `[✓] 1.1 first` and `[ ] 1.2 second`. The glyphs agreeing across the two paths is asserted
+  here, not incidental: it is the structural answer to the drift `markdown-render` names.
 - **AND** the tab bar in row 2 is byte-identical between the two renders, so switching tabs
   changed content and nothing else
 
@@ -58,9 +62,10 @@ change adds no code to it.
   `tracks_tasks == false`, and whose one section holds `- [x] done\n`, is rendered at
   120x20 and at 60x20
 - **THEN** with `detail.tab == 0` the content area holds the checklist grammar — a
-  progress-bar row and a `[x] done` row
-- **AND** with `detail.tab == 1` the content area holds `- [x] done` and no progress-bar
-  row, even though that artifact's id is `tasks`
+  progress-bar row and a `[✓] done` row
+- **AND** with `detail.tab == 1` the content area holds a `[✓] done` row and **no
+  progress-bar row**, even though that artifact's id is `tasks` — the markdown path renders
+  the same glyph, so the absence of the bar is what names the path taken
 - **AND** neither render panics and the tab bar shows both cells in both cases
 
 #### Scenario: A schema naming no tasks artifact leaves every tab as markdown
@@ -68,7 +73,8 @@ change adds no code to it.
 - **WHEN** a `Dashboard` whose selected change carries three artifacts, none with
   `tracks_tasks == true`, and whose one section holds `- [ ] a\n`, is rendered at 120x20
   and at 60x20 with `detail.tab` at each of `0`, `1`, and `2`
-- **THEN** no render shows a progress-bar row and every render shows `- [ ] a` verbatim
+- **THEN** no render shows a progress-bar row and every render shows `[ ] a`, the markdown
+  path's own task-list rendering
 - **AND** the tab bar still holds all three cells in every render, so no tab was removed
 
 #### Scenario: A `detail.tab` past the end of the artifact list renders no checklist
@@ -97,7 +103,7 @@ For a tracked-tasks tab whose source is `source` and whose change carries `progr
    - one blank line after every group but the last.
 
 An item's line SHALL be a prefix followed by its text. The prefix is `item.indent` spaces,
-then the three-character glyph `[x]` when `item.checked` and `[ ]` when it is not, then one
+then the three-character glyph `[✓]` when `item.checked` and `[ ]` when it is not, then one
 space. Every line SHALL carry `Face::plain()` except a heading line.
 
 `item.indent` is `task-parsing`'s own count of the whitespace **characters** preceding the
@@ -114,11 +120,11 @@ available text column SHALL be hard-split at that column rather than overflowing
 interior or being dropped, so a long path never silently loses its tail.
 
 The indent SHALL be **dropped whole** when the prefix would not leave at least one text
-column: `item.indent` spaces first, leaving `[x] ` alone; and when even that does not fit,
+column: `item.indent` spaces first, leaving `[✓] ` alone; and when even that does not fit,
 the glyph alone truncated by `ui::list::pad_or_truncate_right` at `width`. No line's text
 SHALL exceed `width` **display columns**, as `responsive-layout` defines them — the unit
 this change makes uniform across the crate, replacing the `char` count this requirement
-carried. The `[x]`/`[ ]` glyph and `item.indent`'s spaces are ASCII and measure exactly
+carried. The `[✓]`/`[ ]` glyph and `item.indent`'s spaces measure exactly
 their character counts, so the drop-whole indent rule above is unchanged; only an item's
 own text can differ between the two measures.
 
@@ -135,7 +141,7 @@ capability renders an existing parse and introduces no second checkbox rule.
   `## 1. Setup\n\n- [x] 1.1 first\n- [ ] 1.2 second\n\n## 2. Build\n\n- [ ] 2.1 third\n`
   with `Progress { completed: 1, total: 3 }`
 - **THEN** at each width the lines' texts are, in order: the progress bar, an empty line,
-  `## 1. Setup`, `[x] 1.1 first`, `[ ] 1.2 second`, an empty line, `## 2. Build`, and
+  `## 1. Setup`, `[✓] 1.1 first`, `[ ] 1.2 second`, an empty line, `## 2. Build`, and
   `[ ] 2.1 third`
 - **AND** exactly one blank line separates the two groups and none follows the last
 - **AND** the two heading lines carry `Face { heading: Some(2), .. }` and every other line
@@ -146,7 +152,7 @@ capability renders an existing parse and introduces no second checkbox rule.
 - **WHEN** `ui::tasks::lines` is called at width `78` and at width `58` over
   `- [ ] parent\n  - [x] child\n    - [ ] grandchild\n` with
   `Progress { completed: 1, total: 3 }`
-- **THEN** at each width the three item lines read `[ ] parent`, `  [x] child`, and
+- **THEN** at each width the three item lines read `[ ] parent`, `  [✓] child`, and
   `    [ ] grandchild`, so the source's own two- and four-space indents are reproduced
 - **AND** the list is flat: no line is dropped, merged, or re-ordered, because
   `tasks::parse` never nests
@@ -176,9 +182,9 @@ capability renders an existing parse and introduces no second checkbox rule.
   `2`, `1`, and `0` over the source `      - [x] alpha\n` (an indent of six) with
   `Progress { completed: 1, total: 1 }`
 - **THEN** no call panics and no returned line's text exceeds its width
-- **AND** at `78` and `58` the item line begins with six spaces then `[x] alpha`
+- **AND** at `78` and `58` the item line begins with six spaces then `[✓] alpha`
 - **AND** at a width where the six-space indent leaves no text column, the item line begins
-  `[x]` at column zero — the indent was dropped whole rather than partially
+  `[✓]` at column zero — the indent was dropped whole rather than partially
 - **AND** at `0` the returned vector is empty
 
 #### Scenario: A heading with no items still renders its heading
@@ -195,7 +201,7 @@ capability renders an existing parse and introduces no second checkbox rule.
 - **WHEN** `ui::tasks::lines` is called at width `78` and at width `58` over
   `- [x] loose\n\n## 1. Later\n\n- [ ] grouped\n` with
   `Progress { completed: 1, total: 2 }`
-- **THEN** at each width `[x] loose` appears before `## 1. Later` with no heading line
+- **THEN** at each width `[✓] loose` appears before `## 1. Later` with no heading line
   above it
 - **AND** exactly one blank line separates the two groups
 
@@ -445,9 +451,11 @@ them, at **every** `width`, not only at the two mandated interiors of 78 and 58.
 `layout::truncate_columns`, and SHALL continue to name no `ratatui` type. The item wrap SHALL
 break at a **grapheme-cluster boundary**, so a task item holding a wide character, an emoji,
 or a combining mark can never produce a line wider than the region and never ends in half a
-cluster. The `[x]`/`[ ]` glyph, its separating space, and the hanging indent under it are
-ASCII and measure exactly their character counts; the indent a continuation carries SHALL be
-as many spaces as the glyph and its space measure in columns.
+cluster. The `[✓]`/`[ ]` glyph, its separating space, and the hanging indent under it measure
+exactly their character counts — `✓` (U+2713) is East Asian **Neutral** and one column, so the
+glyph is three columns exactly as `[x]` was, and no arithmetic in this capability changes; the
+indent a continuation carries SHALL be as many spaces as the glyph and its space measure in
+columns.
 
 A task item holding a single grapheme cluster wider than the columns available to it SHALL
 drop that cluster rather than emit a line wider than the region, on exactly
@@ -464,7 +472,7 @@ drop that cluster rather than emit a line wider than the region, on exactly
   fills the region rather than stopping early
 - **AND** slicing every drawn item line back out of the source at its own byte offsets
   succeeds, so no line ends in half a cluster
-- **AND** the `[x]` and `[ ]` glyphs still begin at the same interior columns they do for an
+- **AND** the `[✓]` and `[ ]` glyphs still begin at the same interior columns they do for an
   ASCII checklist, because the glyph budget did not move
 
 #### Scenario: No checklist line exceeds its width at any width

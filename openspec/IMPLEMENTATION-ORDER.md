@@ -195,6 +195,13 @@ prevent it.
 
 **Archive order: `foldable-spec-sections`, then `markdown-legibility`, then `pane-chrome`.**
 
+**Status: the first two have archived.** `pane-chrome` is the only one left, and both of its
+rebase bases are now settled in `openspec/specs/` — so the five deltas named below can be
+re-extracted for real rather than anticipated. `markdown-legibility`'s own Change Review found
+exactly the failure this ordering exists to prevent: its `tasks-checklist` delta had been
+written against the pre-`foldable-spec-sections` spec and would have reverted four of that
+change's corrections on archive. Re-extract; do not trust a delta written before its base landed.
+
 The first two overlap **nothing** with each other, so their relative order is free. Only
 `pane-chrome`'s position is load-bearing, and it goes **last** for two reasons. It is the only
 one whose geometry the other two render into — it moves `interior()` to reserve two rows, gives

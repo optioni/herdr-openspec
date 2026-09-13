@@ -250,8 +250,10 @@ not a proof of a degraded state.
 - **WHEN** a change whose schema declares three artifacts, none matching `apply.tracks` and none
   with id `tasks`, and whose directory holds a `tasks.md` counting 3 of 7, is rendered at both
   widths with each of the three tabs selected in turn
-- **THEN** none of the three renders the checklist grammar: no `[x]` glyph and no progress bar
-  appears in any of the six buffers
+- **THEN** none of the three renders the checklist grammar: no progress bar appears in any of
+  the six buffers, and no line begins with a checkbox glyph. The discriminator is stated as the
+  absent progress bar rather than an absent `[x]`, which after this change no path emits; the
+  bound test already asserts the stronger `!text.contains('[')`
 - **AND** the change's list row ends `[3/7]` in all six, so the `tasks.md` fallback count is
   live while no artifact is marked
 - **AND** exactly three tabs are shown — none added, removed, or hidden
@@ -349,15 +351,27 @@ not a proof of a degraded state.
 
 The scenario's name is kept verbatim because a delta's scenario headers are its merge key and
 OpenSpec has no scenario-level rename — `openspec validate --strict` refuses a MODIFIED block
-that drops one. Its subject narrows to the two constructs that stay literal, and the two that
-left the set appear below as the **discriminating control**, so the scenario fails if the
-narrowing did not actually happen.
+that drops one. Its subject narrows again, to the **one** construct that stays literal, and
+the three that have left the set — strikethrough, the table, and now the task-list item —
+appear below as the **discriminating controls**, so the scenario fails if the narrowing did
+not actually happen.
 
-- **WHEN** a non-tracked tab whose source holds, on separate lines, a footnote reference and
-  definition and a task-list item is rendered at 78 and at 58 columns
+The degraded-states row this scenario proves is reworded by the same change, from "a footnote,
+a task-list item" to "a footnote"; `tests/degraded-coverage.toml`'s `condition` for it is
+updated to match, and its `proof` continues to name this scenario's test.
+
+- **WHEN** a non-tracked tab whose source is exactly `See it here[^1].` / `` / `[^1]: The
+  note.` — the same three lines, blank line included, that `markdown-render`'s own scenario
+  names — is rendered at 78 and at 58 columns. The blank line is load-bearing rather than
+  incidental: with soft breaks now folding, two adjacent source lines become one paragraph
+  and the line-count assertion below would fail for a reason the scenario is not about
 - **THEN** each construct appears as its own literal source text, one rendered line per source
   line, with no character dropped and none reinterpreted
-- **AND** the rendered line count equals the source line count for that region
+- **AND** the rendered line count equals the source line count for that region — an assertion
+  the reflow this change also lands would break for any source that is **not** literal, which
+  is what makes it a live check rather than a tautology
+- **AND** a task-list item in the same fixture renders as `[✓]`/`[ ]` rather than as its
+  literal `- [x]`/`- [ ]` source, so the scenario fails if the task-list narrowing is not real
 - **AND** the same source on the **tracked-tasks** tab renders the checklist grammar instead,
   which is the row's own "on a tab other than the tracked-tasks one" carve-out
 - **AND** a strikethrough span and a GFM table in the same fixture render as a struck face and
