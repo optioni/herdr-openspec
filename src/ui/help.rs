@@ -264,8 +264,13 @@ pub const INVENTORY: &[Group] = &[
 
 #[cfg(test)]
 mod tests {
-    use super::{Binding, Group, INVENTORY, Scope};
+    use super::{Binding, Group, INVENTORY, Row, Scope, content_rows, fit, key_column, render, rows};
+    use crate::testutil::{cell, row_text};
     use crate::ui::app::Action;
+    use crate::ui::layout::columns;
+    use crate::ui::palette::{self, Role};
+    use ratatui::backend::TestBackend;
+    use ratatui::layout::Rect;
     use std::collections::BTreeSet;
 
     /// The observable second site `specs/binding-inventory/spec.md`'s own
@@ -369,5 +374,116 @@ mod tests {
         let a: *const [Group] = INVENTORY;
         let b: *const [Group] = INVENTORY;
         assert_eq!(a, b);
+    }
+
+    #[test]
+    fn the_key_column_is_measured_in_display_columns() {
+        let key_col = key_column();
+        assert_eq!(key_col, columns("Backspace"));
+        assert_eq!(key_col, 9);
+        assert_eq!(2 + key_col + 2, 13);
+
+        for group in INVENTORY {
+            for binding in group.bindings {
+                assert!(columns(binding.input) <= key_col);
+            }
+        }
+    }
+
+    fn row_plain_text(row: &Row) -> String {
+        row.segments.iter().map(|(text, _)| text.as_str()).collect()
+    }
+
+    fn assert_grammar_renders_correctly(width: u16) {
+        let content = rows(width);
+        assert_eq!(content.len(), content_rows());
+        let height = content.len() as u16;
+        let area = Rect::new(0, 0, width, height);
+        let backend = TestBackend::new(width, height);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        terminal
+            .draw(|frame| render(frame, area))
+            .expect("draw a frame");
+        let buffer = terminal.backend().buffer().clone();
+
+        // Row 0: the `Changes` heading, padded to the full width, bold.
+        let changes_heading = format!("Changes ({})", Scope::List.label().unwrap());
+        assert_eq!(row_text(&buffer, 0), fit(&changes_heading, width as usize));
+        assert_eq!(
+            cell(&buffer, 0, 0).style(),
+            palette::style(Role::RegionHeadingFocused)
+        );
+
+        // The next five rows: the `Changes` group's own bindings, each
+        // carrying its own `input` and `description`, both beginning at
+        // the same column as every other binding row.
+        let key_col = key_column();
+        let desc_col = 2 + key_col + 2;
+        for (i, binding) in INVENTORY[0].bindings.iter().enumerate() {
+            let y = 1 + i as u16;
+            let text = row_text(&buffer, y);
+            let chars: Vec<char> = text.chars().collect();
+            assert_eq!(&chars[0..2], &[' ', ' '], "row {y} starts with two spaces");
+            let key_field: String = chars[2..desc_col - 2].iter().collect();
+            assert_eq!(
+                key_field.trim_end(),
+                binding.input,
+                "row {y}'s key column holds its own input"
+            );
+            let description: String = chars[desc_col..].iter().collect();
+            assert!(
+                description.starts_with(binding.description),
+                "row {y}'s description should begin at column {desc_col}"
+            );
+            assert_eq!(
+                cell(&buffer, 2, y).style(),
+                palette::style(Role::Strong),
+                "row {y}'s input is styled Strong"
+            );
+            assert_eq!(
+                cell(&buffer, desc_col as u16, y).style(),
+                palette::style(Role::ListRow),
+                "row {y}'s description is styled ListRow"
+            );
+        }
+
+        // A blank row separates the `Changes` group from the `Artifact` group.
+        let blank_y = 1 + INVENTORY[0].bindings.len() as u16;
+        assert_eq!(row_text(&buffer, blank_y), " ".repeat(width as usize));
+
+        // The `Artifact` heading follows the blank row.
+        let artifact_heading = format!("Artifact ({})", Scope::Detail.label().unwrap());
+        assert_eq!(
+            row_text(&buffer, blank_y + 1),
+            fit(&artifact_heading, width as usize)
+        );
+
+        // `Agents`, `Pane`, and `Mouse` carry no parenthesised scope,
+        // because their groups' `scope` is `Any`.
+        for title in ["Agents", "Pane", "Mouse"] {
+            let group = INVENTORY.iter().find(|g| g.title == title).unwrap();
+            assert_eq!(group.scope, Scope::Any);
+            let want = fit(title, width as usize);
+            assert!(
+                content.iter().any(|row| row_plain_text(row) == want),
+                "{title}'s heading should carry no parenthesised scope"
+            );
+        }
+
+        // No interior row exceeds `width` display columns.
+        for row in &content {
+            let total: usize = row.segments.iter().map(|(t, _)| columns(t)).sum();
+            assert!(total <= width as usize, "a row exceeded {width} columns");
+        }
+    }
+
+    #[test]
+    fn the_grammar_renders_at_120_columns() {
+        assert_grammar_renders_correctly(120);
+    }
+
+    #[test]
+    fn the_grammar_renders_at_60_columns() {
+        assert_grammar_renders_correctly(60);
     }
 }
