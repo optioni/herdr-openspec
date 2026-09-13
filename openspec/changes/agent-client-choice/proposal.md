@@ -38,9 +38,17 @@ overlay — this change stops at a problem row.)*
   into one overlay rather than this change building a second modal beside it.
 - **`claude` stops being the default and becomes the last resort.** Step 5 exists because
   refusing to launch would fail closed, not because Claude Code is presumed.
-- **The three actions resolve their prompt through the resolved kind**, with Claude Code's
-  mapping built in and per-kind overrides in `config.toml`. An unmapped kind degrades to a
-  problem row naming it — never a silent wrong prompt, never a blocked key.
+- **The three actions resolve their prompt through the resolved kind — as two shapes, not
+  twenty-three mappings:**
+
+  | Shape | Sent | Why |
+  |---|---|---|
+  | Claude Code shortcut | `/opsx:apply <change>` and friends | What ships today; works because the `opsx` plugin is installed there |
+  | CLI-driven generic | a short instruction to run `openspec instructions apply --change <name>` and follow it | Agent-neutral: needs only a shell and the `openspec` binary, which every coding agent has |
+
+  The generic shape is the default for every kind other than `claude`, so adding a client
+  requires **no new mapping at all**. `config.toml` keeps per-kind overrides for anyone whose
+  agent wants something different.
 - **Behaviour change without a config edit.** A user with no `agent_kind` set and an
   integration other than `claude` installed will now launch that one. That is the point, and it
   is worth calling out rather than discovering.
@@ -58,6 +66,30 @@ overlay — this change stops at a problem row.)*
   start writing into it.
 - Teaching non-Claude clients the OpenSpec workflow.
 - Per-change or per-repository selection.
+
+## Why the prompts are not per-agent
+
+`openspec instructions apply --change <name> --json` returns the apply instructions and the
+context-file list for a change — measured working against `openspec` 1.12.0. `continue` and
+`archive` have equivalent CLI paths (`openspec status --change <name> --json` names the next
+ready artifact; `openspec archive <name>` is mechanical). So the workflow is reachable from a
+shell, and an agent that can run a shell command can follow it.
+
+That makes "adapt the commands per agent" the wrong axis. `/opsx:apply` is not a Claude Code
+*dialect* of a universal idea — it is a **shortcut** that happens to exist because the `opsx`
+plugin is installed in that client. No other client has an equivalent to translate to, and
+inventing one per kind would mean guessing at command grammars that do not exist. What
+generalises is the CLI underneath.
+
+The generic shape also leans on something already true: an agent started in this repository
+reads `AGENTS.md`, which documents the OpenSpec workflow, so the prompt can be short rather
+than carrying the whole procedure.
+
+**One degraded case this creates.** The generic shape names the `openspec` binary, and in
+**file mode** there is none — the dashboard runs with every change file-sourced and no binary
+resolved. A non-`claude` kind launched in file mode therefore has nothing to point the agent
+at, and must degrade to a problem row saying so rather than sending a prompt naming a command
+that cannot run.
 
 ## What Herdr's surfaces actually provide
 
