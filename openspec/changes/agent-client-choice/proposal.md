@@ -16,9 +16,9 @@ agent integrations the user has actually installed. On the reference machine tha
 `herdr agent start --kind`, so `agent_kind = "codex"` launches Codex correctly today — and then
 sends it `/opsx:apply`, which it does not understand.
 
-*(Two corrections from earlier drafts: the configuration surface already exists, and the
-first-run picker — dropped on the grounds that no unconfigured state could occur — is
-reinstated, because "several integrations installed and none chosen" is exactly that state.)*
+*(Corrected from earlier drafts: the configuration surface already exists, so this change
+builds none. The interactive picker moved to `settings-window`, which absorbs it into one
+overlay — this change stops at a problem row.)*
 
 ## What Changes
 
@@ -27,14 +27,15 @@ reinstated, because "several integrations installed and none chosen" is exactly 
   | | Source | Notes |
   |---|---|---|
   | 1 | `agent_kind` in `config.toml` | An explicit, hand-edited choice always wins. No picker, ever |
-  | 2 | The recorded choice under `HERDR_PLUGIN_STATE_DIR` | What the picker wrote last time |
+  | 2 | The recorded choice under `HERDR_PLUGIN_STATE_DIR` | What `settings-window` writes, once it lands |
   | 3 | The single installed integration | Unambiguous — no need to ask |
-  | 4 | The picker | Several installed, none chosen |
+  | 4 | A problem row naming the installed integrations | Several installed, none chosen. Upgraded to an interactive picker by `settings-window` |
   | 5 | `claude` | Last resort only, when nothing is installed and nothing is configured |
 
-- **A picker opens on `a`/`c`/`s`** when the resolution reaches step 4, listing the installed
-  integrations, and records the choice so it is asked once. The key that opened it proceeds
-  with the chosen kind.
+- **Step 4 renders a problem row** naming the installed integrations and asking for an explicit
+  `agent_kind`, rather than guessing between them. It does not block the other keys. The
+  interactive picker that replaces this row is `settings-window`'s job — that change absorbs it
+  into one overlay rather than this change building a second modal beside it.
 - **`claude` stops being the default and becomes the last resort.** Step 5 exists because
   refusing to launch would fail closed, not because Claude Code is presumed.
 - **The three actions resolve their prompt through the resolved kind**, with Claude Code's
@@ -81,7 +82,8 @@ path already in place.
 - `agent-prompts`: action + kind → the text sent, its built-in default, and how an unmapped
   kind degrades.
 - `integration-status`: parsing `herdr integration status`, and the missing-integration warning.
-- `client-picker`: when the picker opens, what it renders, which keys it takes, what it records.
+
+The interactive picker is **not** here — it belongs to `settings-window`, which subsumes it.
 
 ### Modified Capabilities
 
@@ -89,14 +91,13 @@ path already in place.
 - `plugin-config`: per-kind prompt overrides; `agent_kind` becomes an override rather than a
   defaulted value.
 - `plugin-state`: the recorded choice, beside `agent-names.toml`.
-- `dashboard-loop`: a modal route changes what keys mean while open, as `/` filter mode does.
+- `dashboard-loop`: no new route — step 4 is a problem row, not a mode.
 
 ## Impact
 
 - `src/launch.rs` — kind resolution and prompt resolution.
 - `src/config.rs` — `agent_kind` loses its `claude` default; overrides added.
 - `src/state.rs` — recording the choice.
-- `src/ui/` — the picker view (pure), its route, and key handling.
 - `README.md`, `SPEC.md` — the precedence table; `SPEC.md`'s degraded-states table gains rows,
   each bound in `tests/degraded-coverage.toml`.
 - One new `HerdrCli` call from an existing consumer — no new spawn, no new seam file, the
@@ -106,8 +107,9 @@ path already in place.
 
 1. **Is the precedence table right at step 3?** Auto-selecting a single installed integration
    is convenient and also the one step that acts without asking.
-2. **Does the picker block the keypress or launch afterwards?** Choosing and then launching in
-   one gesture is nicer and makes the modal harder to specify.
+2. **Is a problem row enough on its own?** It is honest and costs no new machinery, but it asks
+   the user to leave the pane and edit a file. `settings-window` is the answer; the question is
+   whether this change is worth shipping before it.
 3. **Should step 5 warn loudly?** Reaching `claude` as a last resort with nothing installed is
    exactly the case that used to be silent.
 4. **Is `integration status` read at startup or lazily on first `a`/`c`/`s`?** Lazy costs
