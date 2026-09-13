@@ -389,6 +389,17 @@ use — are painted at two columns by a CJK-locale terminal, where `unicode-widt
 and therefore ratatui's own, says one. Any compensation for either case would be a guess
 that breaks the terminal it did not guess wrong for, so the pane makes none.
 
+`markdown-legibility` **widens** that second exposure from the artifacts' own content to the
+pane's own chrome, deliberately and without compensation. The markdown renderer now emits
+seven glyphs of its own — the bullet `•`, the block-quote prefix `│`, the thematic break `─`,
+the table separators `│`, `├`, `┼`, `┤`, and the checkbox `✓` — and six of the seven are
+Ambiguous (`✓`, U+2713, is Neutral and is not). Every one of them measures one column under
+`layout::columns`, which `markdown-render`'s own scenario asserts, so the arithmetic is
+correct against the measure `Buffer::set_string` consumes; a CJK-locale terminal will
+nonetheless paint six of them at two and overrun the row. The trade-off was put to the user
+with the measurement in hand and answered in favour of the glyphs; the rule above is
+unchanged, and no compensation is added.
+
 ### List view
 
 Two foldable sections — `active`, then `archived` — each a selectable header
@@ -501,29 +512,37 @@ The **tracked-tasks tab** — identified by **position**, from the schema
 artifact `ArtifactRef::tracks_tasks` marks, never by id or filename —
 renders `ui::tasks`' grammar: a progress bar showing the change's own
 `progress` (never a second count of the source), then task groups under
-their headings with a `[x]`/`[ ]` glyph per item (`tasks-tab`). Every other
+their headings with a `[✓]`/`[ ]` glyph per item (`tasks-tab`). Every other
 tab is rendered by
 `markdown-viewer`'s markdown viewer, whose rendering grammar is: a heading
 keeps its `#` markers rather than being distinguished by colour; a paragraph
-word-wraps to the interior width, with a soft break starting a new rendered
-line rather than being folded into a space; a bullet or ordered list item
-carries its marker — numbered from the list's own start value, not from 1 —
-and a hanging indent of two columns per nesting level; a fenced or indented
+word-wraps to the interior width, with a **soft** break folded into a single
+space so the paragraph reflows as one unit and a **hard** break — two
+trailing spaces or a backslash — still starting a new rendered line, which is
+the author's explicit opt-out for a shape laid out on purpose
+(`markdown-legibility`); a bullet item carries the marker `• ` and an ordered
+one its number — from the list's own start value, not from 1 — and a hanging
+indent of two columns per nesting level; a task-list item carries `[✓] ` or
+`[ ] ` in place of its bullet marker, with its continuations hanging under
+its own four-column text position; a fenced or indented
 code block, and a raw HTML block, are reproduced verbatim and hard-split at
 the interior width rather than word-wrapped or clipped, so a long line never
 silently loses its tail; a block quote prefixes every one of its lines,
-continuations included, with `> `; a thematic break fills the interior width;
+continuations included, with `│ `; a thematic break fills the interior width
+with `─`;
 emphasis, strong, inline code, and links become faces on the affected text,
 with a link's destination never printed and an image rendering its alt text
 in its place; a GFM pipe table is laid out as aligned columns sized to the
-interior — a leading `|`, then a padding space, the cell laid out in exactly
-its column's allocated width, a padding space, and the `|` that closes it,
+interior — a leading `│`, then a padding space, the cell laid out in exactly
+its column's allocated width, a padding space, and the `│` that closes it,
+its delimiter line the row line's own shape with every space and content
+column replaced by `─` and the separators by `├`/`┼`/`┤`,
 with the column widths allocated max-min fairly so a table that does not fit
 spends its columns on the narrow ones, a cell too wide for its column wrapped
 inside it rather than truncated, and one cell per line below the width the
 pipe grammar needs; `~~struck~~` sets a face on its text, crossed out and
-uncoloured; and a construct the parser does not model — a footnote, a
-task-list item — renders as its literal source
+uncoloured; and a construct the parser does not model — a footnote —
+renders as its literal source
 text rather than being dropped or mangled (see Degraded states). The content
 scrolls with `j` / `k` and the arrows at the detail route (`markdown-viewer`,
 tables and strikethrough by `markdown-constructs`) — see the fold rules below,
@@ -942,7 +961,7 @@ Every condition renders usable content rather than an error screen:
 | Artifact file missing | Tab is still shown and renders "No content yet" (`detail-view`) |
 | An artifact file exists and cannot be read (permission error, I/O error) | Tab is still shown; a `!`-marked problem line naming the path and the reason is rendered above the content, and "No content yet" is not also shown — the reason is known, and showing both would say two contradictory things about the same tab (`detail-view`) |
 | No change is selected (an empty visible list, or a `/` filter matching none) | The whole detail region is blank; the list region already names the empty state, and duplicating it in the detail region would say the same thing twice (`detail-view`) |
-| Markdown source holds a construct the parser does not model (a footnote, a task-list item), on a tab **other** than the tracked-tasks one | Renders as its literal source text, one line per source line, rather than being dropped or mangled (`markdown-viewer`) |
+| Markdown source holds a construct the parser does not model (a footnote), on a tab **other** than the tracked-tasks one | Renders as its literal source text, one line per source line, rather than being dropped or mangled (`markdown-viewer`) |
 | A tasks file exists and yields no task **items** | The tracked-tasks tab renders `No tasks yet`, distinct from `No content yet`, with no heading line even where the source carries headings (`tasks-tab`) |
 | A marked tab's artifact resolves to no file while the change's `progress` is non-zero (the `tasks.md` fallback above counted a file the artifact itself did not) | The tab reads `No content yet` and shows no progress bar, while the header one row up still shows the counted pair — the one place the tab's content and the header legitimately disagree (`tasks-tab`) |
 | `openspec/changes/` or its `archive/` exists and cannot be read | Empty list for the affected tier, with the reason named on `ChangeSet::problems` and rendered as a leading `!`-marked row of the list, above the change rows; the archive walk is not attempted when the parent read already failed, so a permission error is never reported twice for the same fault |
