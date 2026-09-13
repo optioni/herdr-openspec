@@ -195,12 +195,27 @@ prevent it.
 
 **Archive order: `foldable-spec-sections`, then `markdown-legibility`, then `pane-chrome`.**
 
-**Status: the first two have archived.** `pane-chrome` is the only one left, and both of its
-rebase bases are now settled in `openspec/specs/` — so the five deltas named below can be
-re-extracted for real rather than anticipated. `markdown-legibility`'s own Change Review found
-exactly the failure this ordering exists to prevent: its `tasks-checklist` delta had been
-written against the pre-`foldable-spec-sections` spec and would have reverted four of that
-change's corrections on archive. Re-extract; do not trust a delta written before its base landed.
+**Status: all three have archived, and the order below was NOT the order taken.** Actual:
+`pane-chrome` first (`08025d3`, 2026-09-10 15:36), `foldable-spec-sections` second (`3f98b29`,
+21:37 the same day), `markdown-legibility` third (`9b63ca6`, 2026-09-13). `pane-chrome` went
+**first** where this section put it last, so the two changes archived after it were the ones
+rebasing onto a changed frame rather than the reverse.
+
+**It cost nothing, checked rather than assumed.** Every line `pane-chrome`'s archive commit
+added to the five shared capability specs is still present in `openspec/specs/` today —
+`artifact-content`, `detail-scroll`, `list-selection`, `mouse-input` and `tasks-checklist`.
+Three passages read as missing to a line-exact search and are not: two were re-wrapped at
+different line breaks by a later archive, and one had a clarifying clause inserted mid-sentence
+(`mouse-input`'s ignore-sweep scenario, which now names the detail content area's foldable
+state). Compare by phrase, never by line, when auditing this.
+
+**What the ordering exists to catch did happen once, and was caught in review rather than by a
+gate.** `markdown-legibility`'s `tasks-checklist` delta had been written against the
+pre-`foldable-spec-sections` spec and would have reverted four of that change's corrections on
+archive — three references to a `detail.source` field that no longer exists, and a tab-bar row
+number a passing test contradicts. Its Change Review found it; nothing else would have.
+**Re-extract each requirement block from the archived spec before archiving a delta written
+earlier — do not trust one written before its base landed.**
 
 The first two overlap **nothing** with each other, so their relative order is free. Only
 `pane-chrome`'s position is load-bearing, and it goes **last** for two reasons. It is the only
