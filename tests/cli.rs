@@ -101,6 +101,45 @@ exit 0
     (scratch, bin_dir)
 }
 
+/// Like [`stub_herdr`], but its `pane list` answer is **sequenced** rather than constant:
+/// the first `pane list` of a process answers the same empty listing `stub_herdr` always
+/// does, and every one after it answers with a single dashboard pane already labelled
+/// `OpenSpec` in workspace `w8` — so a test against it can tell a post-open re-listing
+/// actually happened, not only that *some* `pane list` call was made. `stub_herdr` itself
+/// is left untouched; sequencing lives on a counter file inside this stub's own scratch
+/// dir, and no reset affordance is built here, because no test needs to replay the
+/// sequence within one process (design.md -> Decision 4).
+fn stub_herdr_sequenced() -> (ScratchDir, std::path::PathBuf) {
+    let scratch = ScratchDir::new();
+    let bin_dir = scratch.path().join("bin");
+    std::fs::create_dir_all(&bin_dir).expect("create stub bin dir");
+    let herdr = bin_dir.join("herdr");
+    let script = r#"#!/bin/sh
+D="$(dirname "$0")/.."
+echo "$@" >> "$D/argv.log"
+case "$*" in
+  "pane list")
+    if [ -f "$D/pane-list-count" ]; then
+      printf '{"pane_id":"w8:pG","label":"OpenSpec","workspace_id":"w8"}'
+    else
+      : > "$D/pane-list-count"
+      printf '{"result":{"panes":[]}}'
+    fi
+    ;;
+  *) printf '' ;;
+esac
+exit 0
+"#;
+    std::fs::write(&herdr, script).expect("write stub herdr script");
+    let mut perms = std::fs::metadata(&herdr)
+        .expect("stat stub herdr script")
+        .permissions();
+    use std::os::unix::fs::PermissionsExt;
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&herdr, perms).expect("chmod stub herdr script");
+    (scratch, bin_dir)
+}
+
 #[test]
 fn ui_without_a_terminal_exits_three() {
     // stdin's write end is deliberately left open (not Stdio::null()) so a
@@ -397,6 +436,49 @@ fn main_routes_each_subcommand_to_its_own_placement() {
     assert_eq!(tab_flag_out.status.code(), Some(2));
     let stderr = String::from_utf8_lossy(&tab_flag_out.stderr);
     assert!(stderr.contains("usage"), "stderr: {stderr}");
+}
+
+/// `openspec/changes/tab-open-focus` -> `specs/pane-open/spec.md` -> "A newly opened
+/// dashboard pane is focused after opening", "A tab open is followed by a listing and a
+/// focus": the real built binary, not only `open::run`'s unit tests against `FakeCli`,
+/// must issue the post-open `plugin pane focus` call — this is precisely the wiring gap
+/// the change exists to close (design.md -> Test Strategy). Drives `open-tab` against
+/// [`stub_herdr_sequenced`], whose first `pane list` answers empty and whose second
+/// answers with pane `w8:pG` labelled `OpenSpec` in workspace `w8`.
+#[test]
+fn main_focuses_the_pane_it_just_opened() {
+    let (scratch, bin_dir) = stub_herdr_sequenced();
+    let path_var = format!(
+        "{}:{}",
+        bin_dir.display(),
+        std::env::var("PATH").unwrap_or_default()
+    );
+    let context_json = r#"{"workspace_id":"w8","workspace_cwd":"/repo","focused_pane_id":"w8:p1"}"#;
+
+    let output = scrubbed()
+        .arg("open-tab")
+        .env("PATH", &path_var)
+        .env("HERDR_WORKSPACE_ID", "w8")
+        .env("HERDR_PLUGIN_CONTEXT_JSON", context_json)
+        .stdin(Stdio::null())
+        .output()
+        .expect("failed to run binary");
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let argv_log =
+        std::fs::read_to_string(scratch.path().join("argv.log")).expect("read argv.log");
+    let lines: Vec<&str> = argv_log.lines().collect();
+    assert_eq!(
+        lines.last().copied(),
+        Some("plugin pane focus w8:pG"),
+        "argv.log ended without the post-open focus call:\n{argv_log}"
+    );
 }
 
 /// The open family never reaches status 3 — that stays `ui`'s alone, since a plugin

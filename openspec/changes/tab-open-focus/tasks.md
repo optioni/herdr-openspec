@@ -21,19 +21,19 @@ The end-to-end wiring is precisely what failed here: every unit test passed whil
 binary never issued the call. This group takes the outer loop for that reason
 (design.md → Test Strategy).
 
-- [ ] 0.1 Add `stub_herdr_sequenced` to `tests/cli.rs` beside `stub_herdr`, answering the
+- [x] 0.1 Add `stub_herdr_sequenced` to `tests/cli.rs` beside `stub_herdr`, answering the
       first `pane list` of a process with `{"result":{"panes":[]}}` and later ones with
       `{"pane_id":"w8:pG","label":"OpenSpec","workspace_id":"w8"}`, keyed on a counter file in
       its own scratch dir. `stub_herdr` is left untouched, and no reset affordance is built —
       no test consumes one (design.md → Decision 4).
-- [ ] 0.2 RED: Write `main_focuses_the_pane_it_just_opened` in `tests/cli.rs`, driving the
+- [x] 0.2 RED: Write `main_focuses_the_pane_it_just_opened` in `tests/cli.rs`, driving the
       real built binary for `open-tab` against that stub and asserting `argv.log` ends with
       `plugin pane focus w8:pG`. It covers the acceptance row of "A tab open is followed by a
       listing and a focus". Build the spawn from `scrubbed()`, never `bin()`, and pipe or null
       stdout: `every_run_pipes_and_scrubs_herdr` (`tests/cli.rs:460`) enforces that on any spawn
       site naming `open`/`open-tab`. Its `MIN_SPAWN_SITES = 9` is a `>=` floor, so adding a site
       cannot break it.
-- [ ] 0.3 Confirm it fails because the focus call is missing, not because the stub is
+- [x] 0.3 Confirm it fails because the focus call is missing, not because the stub is
       misconfigured — the shell reproduction below is the same check outside Rust and was run
       at HEAD.
 
