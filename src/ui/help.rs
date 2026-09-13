@@ -8,8 +8,19 @@
 //! state, and no panic for any input. `INVENTORY` is a `'static` value with
 //! no construction cost — see the test module's own
 //! `const _: &[Group] = INVENTORY;`.
+//!
+//! This module owns the inventory and the overlay's **interior** row
+//! grammar only: the band's own geometry (`layout::help_band`), its
+//! scrolling and position indicator, its degenerate-frame handling, and its
+//! wiring into `ui::view::render` are `help-overlay`'s later task groups (5,
+//! 6, and 9). [`render`] here draws [`rows`] top-anchored and unscrolled
+//! into whatever `Rect` its caller hands it — no rule rows, no window.
 
 use crate::ui::app::{Action, Target};
+use crate::ui::layout::{columns, truncate_columns};
+use crate::ui::palette::{self, Role};
+use ratatui::Frame;
+use ratatui::layout::Rect;
 
 /// The route (or filter mode) a [`Group`]'s bindings apply at. Sits on the
 /// group, not the binding: within a group every binding shares one scope,
@@ -262,9 +273,128 @@ pub const INVENTORY: &[Group] = &[
     },
 ];
 
+/// One row of the overlay's interior grammar: one or more `(text, role)`
+/// segments, each already fitted (truncated or padded) to its own share of
+/// the row's width, so a caller draws every cell the row covers. Styling a
+/// segment is this module's job here, never a render call site's — every
+/// segment names a `palette::Role`, on `ui::view`'s own terms.
+pub struct Row {
+    pub segments: Vec<(String, Role)>,
+}
+
+/// The number of rows [`rows`] produces, independent of any particular
+/// width: one heading row and one binding row per binding, per group, plus
+/// one blank row after every group but the last. Thirty-one bindings, six
+/// headings, five blanks: **42**.
+pub fn content_rows() -> usize {
+    let bindings: usize = INVENTORY.iter().map(|group| group.bindings.len()).sum();
+    let headings = INVENTORY.len();
+    let blanks = INVENTORY.len().saturating_sub(1);
+    bindings + headings + blanks
+}
+
+/// The widest `input` in the whole inventory, measured in display columns
+/// by [`columns`] and never by a `char` count — every group's descriptions
+/// align to this one number. Shared by [`rows`] and by the test module's
+/// own key-column assertions, so it is computed in exactly one place.
+fn key_column() -> usize {
+    INVENTORY
+        .iter()
+        .flat_map(|group| group.bindings.iter())
+        .map(|binding| columns(binding.input))
+        .max()
+        .unwrap_or(0)
+}
+
+/// The longest prefix of `text` that fits in `width` display columns,
+/// padded with spaces to exactly `width` columns when it is shorter —
+/// never sliced by byte or by `char`. The crate's one column-aware
+/// pad-or-truncate; both halves it uses, [`truncate_columns`] and
+/// [`columns`], are `ui::layout`'s.
+fn fit(text: &str, width: usize) -> String {
+    let truncated = truncate_columns(text, width);
+    let used = columns(truncated);
+    let mut out = truncated.to_string();
+    out.push_str(&" ".repeat(width.saturating_sub(used)));
+    out
+}
+
+/// `title`, and, when `scope` is not [`Scope::Any`], a space and the
+/// scope's label in parentheses — `Changes (list route)`, or `Agents` with
+/// no suffix at all.
+fn heading_text(group: &Group) -> String {
+    match group.scope.label() {
+        Some(label) => format!("{} ({label})", group.title),
+        None => group.title.to_string(),
+    }
+}
+
+/// The interior grammar at `width` display columns: for every group, in
+/// order, a heading row, one row per binding, and a blank row after every
+/// group but the last — [`content_rows`] rows in total, regardless of
+/// `width`. Every row's segments sum to exactly `width` columns whenever
+/// `width` is at least as wide as the key column plus its four surrounding
+/// spaces, so a caller painting them leaves no gap for whatever was drawn
+/// underneath to show through.
+///
+/// This is the interior alone: no top or bottom rule row, and no
+/// scrolling window onto it — both are `help-overlay`'s later groups.
+pub fn rows(width: u16) -> Vec<Row> {
+    let key_col = key_column();
+    let w = width as usize;
+    let mut out = Vec::with_capacity(content_rows());
+    let last = INVENTORY.len().saturating_sub(1);
+    for (i, group) in INVENTORY.iter().enumerate() {
+        out.push(Row {
+            segments: vec![(fit(&heading_text(group), w), Role::RegionHeadingFocused)],
+        });
+        for binding in group.bindings {
+            let key_field = format!("  {}  ", fit(binding.input, key_col));
+            let key_field_width = columns(&key_field);
+            let description = fit(binding.description, w.saturating_sub(key_field_width));
+            out.push(Row {
+                segments: vec![(key_field, Role::Strong), (description, Role::ListRow)],
+            });
+        }
+        if i != last {
+            out.push(Row {
+                segments: vec![(" ".repeat(w), Role::ListRow)],
+            });
+        }
+    }
+    out
+}
+
+/// Draw [`rows`] into `area`, top-anchored and clipped to `area.height` —
+/// no rule rows, no scrolling window, no degenerate-frame handling beyond
+/// the zero-area guard below. `help-overlay`'s later groups window this
+/// through `layout::scroll_offset`, add the rule rows, and wire the whole
+/// band into `ui::view::render`.
+pub fn render(frame: &mut Frame, area: Rect) {
+    if area.width == 0 || area.height == 0 {
+        return;
+    }
+    let buf = frame.buffer_mut();
+    for (i, row) in rows(area.width).into_iter().enumerate() {
+        let Some(y) = area.y.checked_add(i as u16) else {
+            break;
+        };
+        if y >= area.y.saturating_add(area.height) {
+            break;
+        }
+        let mut x = area.x;
+        for (text, role) in &row.segments {
+            buf.set_string(x, y, text, palette::style(*role));
+            x = x.saturating_add(columns(text) as u16);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Binding, Group, INVENTORY, Row, Scope, content_rows, fit, key_column, render, rows};
+    use super::{
+        Binding, Group, INVENTORY, Row, Scope, content_rows, fit, key_column, render, rows,
+    };
     use crate::testutil::{cell, row_text};
     use crate::ui::app::Action;
     use crate::ui::layout::columns;
@@ -394,6 +524,16 @@ mod tests {
         row.segments.iter().map(|(text, _)| text.as_str()).collect()
     }
 
+    /// A `TestBackend` buffer's own resting style before anything is drawn
+    /// into it — `ratatui-view`'s own precedent (`ui::view`'s
+    /// `uncoloured()`), needed because `Cell::default().style()` carries
+    /// explicit `Color::Reset` fields rather than `Style::default()`'s
+    /// `None`s, and `Buffer::set_string` **patches** onto whatever a cell
+    /// already carried rather than replacing it outright.
+    fn uncoloured() -> ratatui::style::Style {
+        ratatui::buffer::Cell::default().style()
+    }
+
     fn assert_grammar_renders_correctly(width: u16) {
         let content = rows(width);
         assert_eq!(content.len(), content_rows());
@@ -411,7 +551,7 @@ mod tests {
         assert_eq!(row_text(&buffer, 0), fit(&changes_heading, width as usize));
         assert_eq!(
             cell(&buffer, 0, 0).style(),
-            palette::style(Role::RegionHeadingFocused)
+            uncoloured().patch(palette::style(Role::RegionHeadingFocused))
         );
 
         // The next five rows: the `Changes` group's own bindings, each
@@ -431,18 +571,20 @@ mod tests {
                 "row {y}'s key column holds its own input"
             );
             let description: String = chars[desc_col..].iter().collect();
-            assert!(
-                description.starts_with(binding.description),
-                "row {y}'s description should begin at column {desc_col}"
+            let expected_description = fit(binding.description, width as usize - desc_col);
+            assert_eq!(
+                description, expected_description,
+                "row {y}'s description should begin at column {desc_col}, \
+                 truncated or padded to the band's own width"
             );
             assert_eq!(
                 cell(&buffer, 2, y).style(),
-                palette::style(Role::Strong),
+                uncoloured().patch(palette::style(Role::Strong)),
                 "row {y}'s input is styled Strong"
             );
             assert_eq!(
                 cell(&buffer, desc_col as u16, y).style(),
-                palette::style(Role::ListRow),
+                uncoloured().patch(palette::style(Role::ListRow)),
                 "row {y}'s description is styled ListRow"
             );
         }
