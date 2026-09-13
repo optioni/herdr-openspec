@@ -93,6 +93,11 @@ picker it absorbs. Until this lands, that change's step 4 degrades to a problem 
 installed integrations and telling the user to set `agent_kind` — honest and non-blocking, and
 the fallback this window upgrades.
 
+**Prefer landing `help-overlay` first.** Both need the crate's first overlay, and that change is
+read-only — no editing, no state writes, no provenance — so it proves the machinery at a
+fraction of the risk. Whichever lands first owns the overlay; if it is `help-overlay`, this
+change becomes a second panel rather than a second mechanism.
+
 ## Open Questions for Review
 
 1. **Is provenance display the real product here?** If so the editable set could start empty and
