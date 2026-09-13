@@ -171,8 +171,25 @@ binding whose `input` names a **key** rather than `Wheel` or `Click` — the che
    `Ctrl-C` yields `Char('c')` with `CONTROL`;
 2. derive the filter mode from the group's `scope`: `Filter` means `filtering` true, every
    other scope means false;
-3. assert `action_for(press(code, mods), filtering) == binding.action` for **every** pair
-   parsed.
+3. assert `action_name(action_for(press(code, mods), filtering)) == action_name(binding.action)`
+   for **every** pair parsed — compared by the **variant name** `action_name` already returns
+   for the action-set check above, not by value.
+
+The comparison is by name because one `Binding` carries one `action` and a row may parse to
+several pairs whose actions differ in their **payload**. `1`–`9` is the case that forces it:
+`action_for` maps `Char(c @ '1'..='9')` to `Action::SelectTab((c - b'1') as usize)`
+(`src/ui/app.rs:1350`), so the nine digits yield `SelectTab(0)` through `SelectTab(8)` and no
+single `binding.action` can equal all nine. A value comparison would fail eight of the nine by
+construction, and the only ways to make it pass would be to shrink the row to the digit `1`
+alone — leaving eight keys undocumented — or to split group 2 into fifteen bindings, which
+contradicts the fixed count of seven this spec mandates below.
+
+Comparing names costs this check nothing it was relying on. What it exists to catch is a row
+naming the **wrong key** — `k  scroll down`, `Ctrl-C  refresh` — and those fail on the name
+alone, since `Prev` and `Refresh` are different names. A row that named the right key and the
+wrong tab **index** is not a failure mode the inventory can have: the row's `input` is the
+range `1`–`9` and its description says which tab each digit selects, so there is no index in
+the data to get wrong.
 
 The parse SHALL be **total over the inventory**: the check SHALL assert that every non-mouse
 `input` parsed to at least one pair, and SHALL fail naming the row when one did not. A spelling
@@ -188,7 +205,8 @@ character, a `X / Y` pair, a `Ctrl-<c>` form, a `<a>`–`<b>` digit range, and t
 - **WHEN** the `Binding` whose `input` is `r` has its `input` changed to `k` while its `action`
   stays `Action::Refresh`
 - **THEN** the check fails naming the row, the key it claims, and the action `action_for`
-  actually returns for that key — `Prev`, not `Refresh`
+  actually returns for that key — `Prev`, not `Refresh`; the two differ by **name**, which is
+  what the per-row comparison reads, so this failure does not depend on any payload
 - **AND** the action-set check above still **passes** on that same tree, since `Refresh` is
   still named exactly once, which is precisely why this second check exists
 
