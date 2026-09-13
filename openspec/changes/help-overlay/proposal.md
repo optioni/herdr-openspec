@@ -53,12 +53,25 @@ panel to proven machinery is the cheaper order.
 
 ### Modified Capabilities
 
-- `dashboard-loop`: an overlay route and what keys mean while it is open; `/` filter mode is
-  the existing precedent for a mode that changes key meaning.
-- `responsive-layout`: how the overlay sizes at and below the 100-column breakpoint, and what
-  it does when the pane cannot hold the full list.
-- `doc-conformance`: the help rows join the claims bound to a computable second site.
-- `mouse-input`: clicking outside the overlay dismisses it.
+Ten, of which six are the footer's ripple. The overlay itself touches four:
+
+- `dashboard-loop`: the `ToggleHelp` action (taking `Action` to twenty-four), the `help: Help`
+  field (taking `Dashboard` to fifteen), the overlay's precedence over every other dispatch,
+  and `Esc` gaining an outermost layer. Also repairs a landed drift: the pure-view file list
+  still read **eight** and omitted `src/ui/palette.rs`, which `view-palette` corrected in its
+  own spec and not in this one.
+- `responsive-layout`: `layout::help_band`, and the footer's new leading hint.
+- `mouse-input`: the open overlay captures the wheel and the click, by a precedence rule rather
+  than by rewriting the two landed gesture tables.
+- `doc-conformance`: the inventory, `SPEC.md` → Keys and `README.md` → Keys bound to the swept
+  functions; and the module map and pure-set counts naming `src/ui/help.rs`.
+- `view-palette`: `NOIO-VIEW`'s `PURE` list goes to ten and `COLWIDTH`'s to nine. **No new
+  `Role`** — the overlay reuses six.
+
+And six carry landed footer strings that the new leading hint moves, each byte-exact in a
+scenario: `list-filtering`, `agent-launch`, `agent-poller`, `agent-attribution`,
+`quality-gates`, and `responsive-layout` again. This is the change's largest single cost and it
+was invisible until the specs were written; see Sequencing.
 
 ## Impact
 
@@ -76,15 +89,47 @@ Independent of every other queued change, and a **prerequisite by preference** f
 lower-risk candidate because it writes nothing. If `settings-window` goes first instead, this
 change shrinks to a panel.
 
-## Open Questions for Review
+## Open Questions for Review — answered
 
-1. **How is the inventory derived without a second list?** Deriving rows from the driver's match
-   arms is ideal and probably not reachable in Rust without a macro; a hand-written inventory
-   bound by a test is the realistic shape. Worth settling before specs — it is the whole
-   anti-drift claim.
-2. **What happens when the pane is shorter than the list?** Scrolling inside an overlay means a
-   cursor inside a mode inside a route.
-3. **Does `?` conflict at the `/` filter route**, where printable keys type instead of
-   commanding? Almost certainly it must not open there.
-4. **Does the footer shrink once this exists?** It could drop to `q quit  ? help` and give the
-   width back to the unattributed-agent count.
+All four are settled; the specs implement the answers.
+
+1. **How is the inventory derived without a second list?** Not by parsing source, and not by a
+   macro. `action_for` and `mouse_action` are pure total functions, so the set of actions the
+   pane binds is derived by **executing** them over a swept input space and comparing that set
+   against `INVENTORY`'s. An exhaustive `match` in the test maps each `Action` to a name, so a
+   variant added later is a compile error before it is a missing help row. The exemption list is
+   closed at two names — `FilterPush` and `Ignore` — asserted by name and by length.
+2. **What happens when the pane is shorter than the list?** It scrolls. `help.scroll` is a line
+   offset clamped every frame by the same `layout::scroll_offset` the detail region already
+   uses, and the bottom rule carries a `<first>-<last>/<total>` indicator when the content does
+   not fit. No arrow glyphs: `▲`/`▼` are East Asian Ambiguous and would widen the exposure
+   `SPEC.md` records. The overlay is a full-width **band**, not a box, for the same reason —
+   four corner glyphs would widen it further, and `pane-chrome` removed every border in the pane.
+3. **Does `?` conflict at the `/` filter route?** It does not open there. `?` types into the
+   query like every other printable character; `list-filtering`'s rule that only `Ctrl-C` keeps a
+   command meaning is not carved out for it. `?` is matched under both `NONE` and `SHIFT`,
+   because on a US layout it is `Shift`+`/` and terminals disagree about reporting the modifier.
+4. **Does the footer shrink?** No — `? help` is **prepended** and everything else stays.
+   Prepending is the only position that works: hints drop from the end, and the key that reveals
+   every other key must be the last one standing.
+
+## Sequencing cost, measured
+
+`? help` costs eight columns. The reachable footer goes from 53 to **61**, which no longer fits
+the mandated 60-column frame: **`g focus` is dropped at 60 columns**. That is accepted rather
+than worked around, and it repairs `agent-launch`'s own rationale rather than contradicting it.
+That requirement rejected four separate action hints because dropping two would leave the reader
+with "no indication that the other two exist" — an argument that only held while nothing on
+screen pointed at the full list. `? help` is now the first hint on the row and the overlay lists
+`g` under `Agents`. The footer is the always-visible minimum; the overlay is the full list.
+
+**Archive-order hazard.** Six capabilities here carry landed byte-exact footer strings, and
+`openspec/IMPLEMENTATION-ORDER.md` records what that costs when two changes modify one
+requirement: the `MODIFIED` block carries the whole requirement, so archiving two such changes
+silently discards the edits of whichever archived first, and git reports nothing. Seven other
+changes are in flight in this checkout. `mouse-text-selection` overlaps `mouse-input`,
+`header-progress-bar` and `heading-sections` plausibly overlap `responsive-layout` and
+`detail-header`, and `settings-window` overlaps `dashboard-loop`. Before archiving this change,
+re-extract each requirement block from `openspec/specs/<capability>/spec.md` rather than
+trusting the block extracted here — and compare by **phrase**, never by line, since a later
+archive may have re-wrapped it.
