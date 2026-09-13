@@ -534,9 +534,10 @@ swept list without breaking that control. What the check enforces about `Request
 enclosing `Launch` literal, which must name `pending` explicitly at every site; what covers the
 enums themselves is an exhaustive `match` with no wildcard arm in the compile-time companions
 below. `help-overlay` adds **three** to the swept set — `Help` in `src/ui/app.rs`, which the
-existing `src/ui/app.rs` run already covers, and `help::Binding` and `help::Group`, which need a
-fourth parameterisation of the same script with its positive-control file set to
-`src/ui/help.rs`. The reason is `Binding`'s: it is twenty-eight `'static` literals, which is
+existing `Dashboard Filter Detail Sections` run already covers, and `help::Binding` and
+`help::Group`, which need one further parameterisation of the same script with `HOMEFILE` set to
+`src/ui/help.rs`. `make gates` runs `scripts/gates/nodefault-ui.sh` **six** times today
+(`grep -c nodefault-ui.sh Makefile` = 6, lines 45-50); this change makes it **seven**. The reason is `Binding`'s: it is twenty-eight `'static` literals, which is
 exactly the shape a `..Default::default()` rest is tempting in, and a field added to it later
 would otherwise silently become the empty string at twenty-eight sites at once.
 `change-model`'s existing gate does not reach any of these thirteen types: that gate is
@@ -615,13 +616,14 @@ its merge key; its subject is unchanged and only the type list and the field cou
   no longer there
 - **AND** the control's file is a **parameter**, defaulting to `src/ui/app.rs`, and the check is
   run a second time with it set to `src/agents.rs` for `Agent`, `Listed`, `AgentSnapshot`, and
-  `Attribution`, a **third** time with it set to `src/launch.rs` for `Outcome`, and a
-  **fourth** with it set to `src/ui/help.rs` for `Binding` and `Group`, so every
+  `Attribution`, a **third** time with it set to `src/launch.rs` for `Outcome`, and — this
+  change's addition — once more with it set to `src/ui/help.rs` for `Binding` and `Group`, so
+  every
   type outside `src/ui/app.rs` is covered by the same executable file rather than by a fork of it
 - **AND** the search is judged against a counted minimum of literal or pattern spans that is
   **per type set**, not one number shared across the runs: the `src/ui/app.rs` set, the
   `src/agents.rs` set, the `src/launch.rs` set, and — `degraded-states`' fourth run — the
-  `Refresh` set — and `help-overlay`'s fifth, the `src/ui/help.rs` set covering `Binding` and
+  `Refresh` set — and `help-overlay`'s own, the `src/ui/help.rs` set covering `Binding` and
   `Group` — each carry their own floor, measured on the tree at this change's base commit
   and written as that run's own default when the gate becomes a repository file
   (`quality-gates`). Measured at `89cb3b2` by running the extracted script: **126** spans for
