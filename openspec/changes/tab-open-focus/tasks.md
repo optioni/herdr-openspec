@@ -204,14 +204,14 @@ grep -q "plugin pane focus" "$S/argv.log"
 ## 6. Change Review
 <!-- kind: operational -->
 
-- [ ] 6.1 CHECK: Dispatch `outside-in-tdd-reviewer` against proposal, specs, design, and tasks
+- [x] 6.1 CHECK: Dispatch `outside-in-tdd-reviewer` against proposal, specs, design, and tasks
       with the diff only. Concentration points for this change: that the post-open focus is
       asserted on a *recorded argv* rather than on the fake's own return value; that no test
       asserts the `plugin pane open` response shape; and that the four post-open failure paths
       each have a test that would go red if the warning were dropped.
-- [ ] 6.2 CHANGE: Fix every CRITICAL, resolve or accept each WARNING with a one-line reason,
+- [x] 6.2 CHANGE: Fix every CRITICAL, resolve or accept each WARNING with a one-line reason,
       note SUGGESTIONs, and re-run affected tests.
-- [ ] 6.3 VERIFY: Confirm no blocking or unowned finding remains.
+- [x] 6.3 VERIFY: Confirm no blocking or unowned finding remains.
 
 ## 7. Documentation
 <!-- kind: operational -->

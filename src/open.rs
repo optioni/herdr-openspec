@@ -6,7 +6,9 @@
 //! render loop.
 //!
 //! `context` reads Herdr's injected invocation context through one injected lookup;
-//! `existing_pane` decides whether a listed pane is this workspace's dashboard;
+//! `dashboard_panes` decides which of a listing's panes are this workspace's dashboard,
+//! and `existing_pane` names its first element; `opened_pane` picks the pane a successful
+//! open just created, by difference against the pre-open listing;
 //! `split_target` decides which live pane a split targets when the injected one is gone;
 //! `open_args`/`focus_args` are the exact Herdr argument vectors; `run` is the impure
 //! driver over `&dyn HerdrCli`; `placement_for`/`report_output` are the two pure
@@ -105,6 +107,12 @@ pub fn context(env: &dyn Fn(&str) -> Option<String>) -> Result<Context, String> 
 /// pane this plugin opens reports the **plugin root** as its `cwd`, identically,
 /// regardless of workspace — the value would no longer discriminate anything
 /// (design.md -> Decision 6, corrected).
+/// **Called from tests and `specs/pane-open/spec.md` only, not from `run`.** design.md ->
+/// Decision 6 said the refactor would keep this function's one production call site, but
+/// `run` needs the pre-open listing's *whole* id list for `opened_pane` as well as its
+/// first element, and calling both would parse the same payload twice. `run` therefore
+/// calls `dashboard_panes` and takes `.first()` itself. This stays as the named
+/// single-match accessor the spec's Requirement-2 scenarios exercise.
 pub fn existing_pane(listing: &str, workspace_id: &str) -> Result<Option<String>, String> {
     Ok(dashboard_panes(listing, workspace_id)?.into_iter().next())
 }
@@ -1254,6 +1262,20 @@ mod tests {
             ]
         );
         assert_eq!(calls[2].1, argv);
+        // ...and the post-open pair really does follow them: without this the test stays
+        // green with the whole post-open block deleted, even though the scenario it is
+        // named for mandates that pair.
+        assert_eq!(calls.len(), 5, "{calls:?}");
+        assert_eq!(calls[3].1, vec!["pane".to_string(), "list".to_string()]);
+        assert_eq!(
+            calls[4].1,
+            vec![
+                "plugin".to_string(),
+                "pane".to_string(),
+                "focus".to_string(),
+                "w8:pG".to_string()
+            ]
+        );
         assert!(!report.warnings.is_empty());
         assert_eq!(report.outcome, Ok(()));
     }
@@ -1575,7 +1597,11 @@ mod tests {
             "focus".to_string(),
             "w8:pG".to_string(),
         ];
-        let cases: Vec<(&str, CliError)> = vec![
+        // The third element is the reason fragment the warning must carry: the spec's
+        // "`Report.warnings` carries the reason verbatim in each" is not proved by a
+        // non-empty `warnings`, which stays green if the reason is replaced by a
+        // constant of this module's own.
+        let cases: Vec<(&str, CliError, &str)> = vec![
             (
                 "domain error",
                 CliError::Failed {
@@ -1584,6 +1610,7 @@ mod tests {
                     code: Some(1),
                     stderr: "plugin_pane_not_found".to_string(),
                 },
+                "plugin_pane_not_found",
             ),
             (
                 "usage error",
@@ -1593,6 +1620,7 @@ mod tests {
                     code: Some(2),
                     stderr: "unrecognized subcommand".to_string(),
                 },
+                "unrecognized subcommand",
             ),
             (
                 "not started",
@@ -1601,10 +1629,11 @@ mod tests {
                     args: focus_argv.clone(),
                     reason: "No such file or directory (os error 2)".to_string(),
                 },
+                "No such file or directory",
             ),
         ];
 
-        for (label, err) in cases {
+        for (label, err, reason) in cases {
             let fake = FakeCli::new();
             fake.register_herdr(&["pane", "list"], Ok(empty_listing()));
             let open_argv = open_refs(Placement::Split, &ctx);
@@ -1615,7 +1644,11 @@ mod tests {
 
             let report = run(&fake, &ctx, Placement::Split);
             assert_eq!(report.outcome, Ok(()), "case: {label}");
-            assert!(!report.warnings.is_empty(), "case: {label}");
+            assert!(
+                report.warnings.iter().any(|w| w.contains(reason)),
+                "case {label}: warnings must carry {reason:?} verbatim: {:?}",
+                report.warnings
+            );
             assert!(
                 fake.calls().iter().any(|(_, argv)| argv == &focus_argv),
                 "case {label}: {:?}",

@@ -196,6 +196,13 @@ matcher.** The post-open step needs every match, not the first. Copying the thre
 would put the pre-open and post-open definitions of "this workspace's dashboard" in two places
 that a later change could move apart. `existing_pane` keeps its signature and callers.
 
+*Accepted deviation, recorded at Change Review.* `existing_pane` kept its signature but lost
+its **production** call site: `run` needs the pre-open listing's whole id list for
+`opened_pane` as well as its first element, and calling both matchers would parse the same
+payload twice, so `run` calls `dashboard_panes` and takes `.first()` itself. `existing_pane`
+remains as the named single-match accessor this change's Requirement-2 scenarios exercise by
+name, so deleting it would require a spec edit. Recorded in its own doc comment.
+
 **Decision 7 — The single matcher requires a non-empty `pane_id`, which closes a latent gap
 rather than only avoiding a new one.** `existing_pane` accepts `"pane_id":""` today
 (`src/open.rs:116` calls `as_str()` with no emptiness check), while the live

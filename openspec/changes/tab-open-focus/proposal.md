@@ -49,7 +49,9 @@ None.
 ## Impact
 
 - `src/open.rs` — `run`, plus two new pure functions for the new-pane decision.
-- `tests/cli.rs` — the scratch `herdr` stub gains a per-invocation counter, and one
+- `tests/cli.rs` — a **second** scratch `herdr` stub is added beside the existing one,
+  sequencing its `pane list` answer on a counter file rather than teaching the existing
+  stub to reset (design.md → Decision 4, corrected in planning review), and one
   acceptance test is added; the existing routing test's call count is corrected.
 - `SPEC.md` — two degraded-states rows, and the § Herdr integration prose that currently
   implies `--focus` is sufficient.

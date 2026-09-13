@@ -480,6 +480,14 @@ fn main_focuses_the_pane_it_just_opened() {
         Some("plugin pane focus w8:pG"),
         "argv.log ended without the post-open focus call:\n{argv_log}"
     );
+    // The other half of the same scenario: "exactly four Herdr calls are made, in order".
+    assert_eq!(lines.len(), 4, "argv.log:\n{argv_log}");
+    assert_eq!(lines[0], "pane list");
+    assert!(
+        lines[1].starts_with("plugin pane open ") && lines[1].contains("--placement tab"),
+        "argv.log:\n{argv_log}"
+    );
+    assert_eq!(lines[2], "pane list");
 }
 
 /// The open family never reaches status 3 — that stays `ui`'s alone, since a plugin
