@@ -41,14 +41,16 @@ overlay — this change stops at a problem row.)*
 - **The three actions resolve their prompt through the resolved kind — as two shapes, not
   twenty-three mappings:**
 
-  | Shape | Sent | Why |
-  |---|---|---|
-  | Claude Code shortcut | `/opsx:apply <change>` and friends | What ships today; works because the `opsx` plugin is installed there |
-  | CLI-driven generic | a short instruction to run `openspec instructions apply --change <name>` and follow it | Agent-neutral: needs only a shell and the `openspec` binary, which every coding agent has |
-
-  The generic shape is the default for every kind other than `claude`, so adding a client
-  requires **no new mapping at all**. `config.toml` keeps per-kind overrides for anyone whose
-  agent wants something different.
+  **one** CLI-driven shape for every kind, `claude` included: a short instruction to run
+  `openspec instructions apply --change <name>` and follow it. The `/opsx:apply` shortcut is
+  **dropped** — it is one more branch and one more failure mode (it fails in any Claude Code
+  without the `opsx` plugin installed), while the CLI shape works in all of them. Adding a
+  client therefore requires **no mapping at all**. `config.toml` keeps per-kind overrides.
+- **The prompt names the plugin's resolved absolute path to `openspec`, not the bare command.**
+  Measured on the reference machine: a fresh interactive `zsh` with a reset `PATH` reports
+  `openspec not found` even though `.zshrc` references nvm — it is lazy-loaded. The plugin's
+  four-step probe (config, `PATH`, nvm, `npm prefix -g`) is *more* thorough than a shell lookup,
+  so a bare `openspec` in the prompt would fail for an agent even when the plugin found one.
 - **Behaviour change without a config edit.** A user with no `agent_kind` set and an
   integration other than `claude` installed will now launch that one. That is the point, and it
   is worth calling out rather than discovering.
@@ -85,11 +87,15 @@ The generic shape also leans on something already true: an agent started in this
 reads `AGENTS.md`, which documents the OpenSpec workflow, so the prompt can be short rather
 than carrying the whole procedure.
 
-**One degraded case this creates.** The generic shape names the `openspec` binary, and in
-**file mode** there is none — the dashboard runs with every change file-sourced and no binary
-resolved. A non-`claude` kind launched in file mode therefore has nothing to point the agent
-at, and must degrade to a problem row saying so rather than sending a prompt naming a command
-that cannot run.
+**`a`/`c`/`s` are hidden in file mode.** With no resolved binary there is no path to name, and
+the measurement above shows the agent's own shell will not resolve `openspec` either — so the
+prompt could not work. The `a/c/s launch` footer hint is dropped, the keys go inert on the
+established "inert when nothing applies" terms, and pressing one records a problem row naming
+the reason rather than failing silently. The header already badges `file mode`, so the context
+is on screen.
+
+**`g` is not hidden.** It focuses an agent that is already running, which needs no `openspec`
+binary at all.
 
 ## What Herdr's surfaces actually provide
 
