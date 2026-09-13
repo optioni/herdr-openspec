@@ -5,6 +5,7 @@ pub mod app;
 pub mod detail;
 pub mod driver;
 pub mod event;
+pub mod help;
 pub mod layout;
 pub mod list;
 pub mod markdown;
