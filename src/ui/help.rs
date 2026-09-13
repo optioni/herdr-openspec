@@ -5,7 +5,262 @@
 //!
 //! Pure and total, on exactly `ui::palette`'s terms: no filesystem, process,
 //! environment, network, or standard-I/O API, no clock, no global mutable
-//! state, and no panic for any input.
+//! state, and no panic for any input. `INVENTORY` is a `'static` value with
+//! no construction cost — see the test module's own
+//! `const _: &[Group] = INVENTORY;`.
+
+use crate::ui::app::{Action, Target};
+
+/// The route (or filter mode) a [`Group`]'s bindings apply at. Sits on the
+/// group, not the binding: within a group every binding shares one scope,
+/// so a per-row tag would repeat the heading's own information. `Any` means
+/// the group's bindings act the same way at every route — `Agents`, `Pane`,
+/// and `Mouse`, whose descriptions name their own region instead. See
+/// `specs/binding-inventory/spec.md`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Scope {
+    Any,
+    List,
+    Detail,
+    Filter,
+}
+
+impl Scope {
+    /// The parenthesised suffix a group heading carries — `None` for
+    /// `Any`, whose group carries no suffix at all.
+    fn label(self) -> Option<&'static str> {
+        match self {
+            Scope::Any => None,
+            Scope::List => Some("list route"),
+            Scope::Detail => Some("detail route"),
+            Scope::Filter => Some("filter mode"),
+        }
+    }
+}
+
+/// One key or gesture and the [`Action`] it produces. `input` is the
+/// reader's own spelling — `j / ↓`, `Ctrl-C`, `1`–`9` — not a machine
+/// token; `help-overlay`'s contract-tier parser (task group 10) reads it
+/// back into `(KeyCode, KeyModifiers)` pairs.
+///
+/// No `Default`, anywhere in the crate: every construction site below names
+/// all three fields, with no `..` rest, so a field added later is a
+/// compile error at each site rather than a silent `""`. Joins
+/// `NODEFAULT-UI`'s scanned type sets on exactly `Filter`, `Refresh`, and
+/// `Launch`'s own terms.
+pub struct Binding {
+    pub input: &'static str,
+    pub description: &'static str,
+    pub action: Action,
+}
+
+/// A titled, scoped run of [`Binding`]s — one section of the overlay. No
+/// `Default`, on the same terms as [`Binding`].
+pub struct Group {
+    pub title: &'static str,
+    pub scope: Scope,
+    pub bindings: &'static [Binding],
+}
+
+/// The pane's whole binding inventory, in the reading order
+/// `specs/binding-inventory/spec.md` mandates: the list first, the detail
+/// second, the agent and pane keys next, and the two modal groups last —
+/// not alphabetical, and not the order `action_for`'s `match` happens to be
+/// written in. Six groups, thirty-one bindings; the test module's own shape
+/// assertion is the authority `cargo test` enforces, not this comment.
+pub const INVENTORY: &[Group] = &[
+    Group {
+        title: "Changes",
+        scope: Scope::List,
+        bindings: &[
+            Binding {
+                input: "j / ↓",
+                description: "Move the selection down.",
+                action: Action::Next,
+            },
+            Binding {
+                input: "k / ↑",
+                description: "Move the selection up.",
+                action: Action::Prev,
+            },
+            Binding {
+                input: "Enter",
+                description: "Open the selected change.",
+                action: Action::OpenDetail,
+            },
+            Binding {
+                input: "Space",
+                description: "Fold or unfold the list section the cursor is on or in.",
+                action: Action::ToggleSection,
+            },
+            Binding {
+                input: "/",
+                description: "Start filtering the list by name.",
+                action: Action::FilterStart,
+            },
+        ],
+    },
+    Group {
+        title: "Artifact",
+        scope: Scope::Detail,
+        bindings: &[
+            Binding {
+                input: "j / ↓",
+                description: "Scroll the artifact content down, or move the section cursor at a foldable artifact.",
+                action: Action::Next,
+            },
+            Binding {
+                input: "k / ↑",
+                description: "Scroll the artifact content up, or move the section cursor at a foldable artifact.",
+                action: Action::Prev,
+            },
+            Binding {
+                input: "1–9",
+                description: "Jump straight to that numbered artifact tab.",
+                action: Action::SelectTab(0),
+            },
+            Binding {
+                input: "]",
+                description: "Move to the next artifact tab.",
+                action: Action::NextTab,
+            },
+            Binding {
+                input: "[",
+                description: "Move to the previous artifact tab.",
+                action: Action::PrevTab,
+            },
+            Binding {
+                input: "Space",
+                description: "Fold or unfold the content section the cursor is on or in.",
+                action: Action::ToggleSection,
+            },
+            Binding {
+                input: "Esc",
+                description: "Return to the change list.",
+                action: Action::Back,
+            },
+        ],
+    },
+    Group {
+        title: "Agents",
+        scope: Scope::Any,
+        bindings: &[
+            Binding {
+                input: "a",
+                description: "Launch an agent on the selected change with /opsx:apply.",
+                action: Action::LaunchApply,
+            },
+            Binding {
+                input: "c",
+                description: "Launch an agent on the selected change with /opsx:continue.",
+                action: Action::LaunchContinue,
+            },
+            Binding {
+                input: "s",
+                description: "Launch an agent on the selected change with /opsx:archive.",
+                action: Action::LaunchArchive,
+            },
+            Binding {
+                input: "g",
+                description: "Focus the agent already running for the selected change.",
+                action: Action::FocusAgent,
+            },
+        ],
+    },
+    Group {
+        title: "Pane",
+        scope: Scope::Any,
+        bindings: &[
+            Binding {
+                input: "q",
+                description: "Quit the pane.",
+                action: Action::Quit,
+            },
+            Binding {
+                input: "Ctrl-C",
+                description: "Quit the pane.",
+                action: Action::Quit,
+            },
+            Binding {
+                input: "r",
+                description: "Force a full refresh of the change set.",
+                action: Action::Refresh,
+            },
+            Binding {
+                input: "?",
+                description: "Open or close this help overlay.",
+                action: Action::ToggleHelp,
+            },
+        ],
+    },
+    Group {
+        title: "While filtering",
+        scope: Scope::Filter,
+        bindings: &[
+            Binding {
+                input: "Esc",
+                description: "Clear the query and stop filtering.",
+                action: Action::Back,
+            },
+            Binding {
+                input: "Backspace",
+                description: "Delete the last character of the query.",
+                action: Action::FilterPop,
+            },
+            Binding {
+                input: "Enter",
+                description: "Open the selected change.",
+                action: Action::OpenDetail,
+            },
+            Binding {
+                input: "↑",
+                description: "Move the selection up.",
+                action: Action::Prev,
+            },
+            Binding {
+                input: "↓",
+                description: "Move the selection down. Every other printable key types into the query instead.",
+                action: Action::Next,
+            },
+        ],
+    },
+    Group {
+        title: "Mouse",
+        scope: Scope::Any,
+        bindings: &[
+            Binding {
+                input: "Wheel ↓",
+                description: "Move the selection down, over the list.",
+                action: Action::SelectNext,
+            },
+            Binding {
+                input: "Wheel ↑",
+                description: "Move the selection up, over the list.",
+                action: Action::SelectPrev,
+            },
+            Binding {
+                input: "Wheel ↓",
+                description: "Scroll down, over the detail region.",
+                action: Action::ScrollDown,
+            },
+            Binding {
+                input: "Wheel ↑",
+                description: "Scroll up, over the detail region.",
+                action: Action::ScrollUp,
+            },
+            Binding {
+                input: "Click",
+                description: "Select a list row, fold a section header, or scroll to a line in the detail content.",
+                action: Action::Click(Target::Change(0)),
+            },
+            Binding {
+                input: "Click",
+                description: "Switch to the clicked artifact tab.",
+                action: Action::SelectTab(0),
+            },
+        ],
+    },
+];
 
 #[cfg(test)]
 mod tests {
@@ -25,7 +280,14 @@ mod tests {
         let titles: Vec<&str> = INVENTORY.iter().map(|g| g.title).collect();
         assert_eq!(
             titles,
-            vec!["Changes", "Artifact", "Agents", "Pane", "While filtering", "Mouse"]
+            vec![
+                "Changes",
+                "Artifact",
+                "Agents",
+                "Pane",
+                "While filtering",
+                "Mouse"
+            ]
         );
 
         let scopes: Vec<Scope> = INVENTORY.iter().map(|g| g.scope).collect();
