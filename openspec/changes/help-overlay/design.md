@@ -3,7 +3,7 @@
 Most of the pane's bindings are undiscoverable. The footer holds at most five hints and drops
 them from the end, so `r`, `Space`, `/`, `1`–`9`, `[`, `]` and every mouse gesture are never
 named on screen at any width. Against that: twenty-two bound actions reachable from eighteen
-keys and five gestures.
+keys and six gestures.
 
 Two constraints shape the answer more than the feature does.
 
@@ -359,7 +359,7 @@ widths for a layout no other requirement asks for.
 
 ### Decision 4 — It scrolls, and the indicator is digits rather than arrows
 
-Thirty-nine content rows against a body that is 39 rows at 120x40 and 19 at 60x20: the overlay
+Forty-two content rows against a body that is 39 rows at 120x40 and 19 at 60x20: the overlay
 is scrollable at **both** mandated sizes, which is a feature of the test surface rather than a
 regret — every render test exercises the windowing path.
 
@@ -425,7 +425,7 @@ otherwise, so there it is unavoidable.
 
 ### Decision 8 — No new palette `Role`
 
-The overlay reuses six: `RegionRule` for its rules, `RegionHeadingFocused` for the `Help` title
+The overlay reuses five: `RegionRule` for its rules, `RegionHeadingFocused` for the `Help` title
 and the group headings, `Strong` for `input`, `ListRow` for `description`, and `ListSeparator`
 for the indicator. Minting `HelpTitle`, `HelpGroup`, `HelpKey`, and `HelpText` would add four
 roles identical in every respect but their names to four existing ones, which is exactly the
@@ -508,7 +508,7 @@ Test Boundaries row, which says the gate scripts' subject tree is a scratch copy
   line, since a later archive may have re-wrapped it.
 - **`g focus` disappears from the narrow footer** → stated as a decision rather than discovered
   as a bug, and answered by the overlay itself, which lists `g` under `Agents`.
-- **Thirty-nine content rows make the overlay scrollable even at 120x40** → accepted; it means
+- **Forty-two content rows make the overlay scrollable even at 120x40** → accepted; it means
   the windowing path is exercised at both mandated widths rather than only at the narrow one.
   If the inventory later shrinks below the body height, the "No indicator when the content
   fits" scenario is the one that keeps the non-scrolling path honest.

@@ -117,7 +117,7 @@ reported counts move with them.
 every style it applies from `palette::style(Role::…)`. It introduces **no new `Role`**: its
 rule rows are `RegionRule`, its `Help` title and its group headings are
 `RegionHeadingFocused`, its `input` cells are `Strong`, its `description` cells are
-`ListRow`, and its scroll indicator is `ListSeparator`. Reusing six existing roles rather
+`ListRow`, and its scroll indicator is `ListSeparator`. Reusing five existing roles rather
 than minting `HelpTitle`, `HelpGroup`, `HelpKey`, and `HelpText` is this requirement's own
 "colour is added only where it carries a distinction a modifier cannot", applied to roles:
 four new roles identical in every respect but their names to four existing ones would let the

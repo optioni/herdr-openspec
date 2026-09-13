@@ -80,6 +80,11 @@ Severity is as assigned after this session verified the finding, not as first re
 | SUGGESTION | `tasks.md`, `design.md` | Four task lines justified rather than instructed; the parallelism note's file map was wrong twice (group 6 touches three files; `normalise_scroll` is `src/ui/app.rs:865`, not `driver.rs`). | Trimmed and corrected. | tasks 1.1, 7.4, 7.6, 8.4; design.md → Boundaries |
 | SUGGESTION | `proposal.md` | `settings-window` was named as merely overlapping `dashboard-loop`. It overlaps **three** capabilities and plans the same overlay machinery from the same `/`-filter precedent. | Full collision table added, naming the route-versus-layer disagreement as the load-bearing one. | proposal.md → Sequencing cost |
 
+| CRITICAL | `tasks.md`, `design.md` | The 28 → **31** binding and 39 → **42** content-row repair propagated to the four spec files and to neither of the other two artifacts. `tasks.md:94-95` still instructed the group-4 implementer to assert counts `5/7/4/4/3/5` summing to 28 — three bindings short, and two of the three are the `While filtering` rows the repair existed to add. `design.md:6,362,511` still read "five gestures" and "Thirty-nine content rows". An implementer reading its own task line would have written the RED test against the pre-repair inventory and the spec would have lost. Found in group 1's gate, before group 4 was dispatched. | Counts corrected in both artifacts to `5/7/4/4/5/6` summing to 31, six gestures, and forty-two content rows. The specs were already right and are unchanged. | tasks 4.1; design.md → Context, Decision 4, Risks |
+
+| WARNING | `specs/doc-conformance`, `tasks.md` | Reported by slice **D**, arriving after this file was first written, and verified here. Two bullets mandated that **`SPEC.md`'s** "the pure set is nine files" and "`tests/doc_contract.rs` carries nine further claims" each read **ten**. `SPEC.md` carries neither sentence: it has no pure-set count and no pure-view file list anywhere (its render-seam passage states the property in prose and enumerates nothing), and its § Doc-conformance checks is an uncounted nine-bullet list. Both sentences live only in `AGENTS.md`, at `:339` and `:247`. The requirement was therefore unsatisfiable — the exact unfalsifiable guard its own preceding paragraph refuses once, three lines above. It also mis-sent tasks 12.0 and 12.2 hunting `SPEC.md` for a sentence reading "eight and omitting `src/ui/palette.rs`" — text that is in the **landed `dashboard-loop` capability spec**, not in `SPEC.md`, and that this change's own delta already repairs. | Both bullets re-pointed at `AGENTS.md` alone, with the omission stated and argued rather than silent; `SPEC.md`'s share reduced to gaining a **tenth bullet** in § Doc-conformance checks, which is an addition and not a changed numeral. Tasks 12.0/12.2/12.3 re-pointed to match. | `specs/doc-conformance`, tasks 12.0, 12.2, 12.3 |
+| WARNING | `proposal.md`, `design.md`, `specs/view-palette` | Reported by slice **D** and verified here. All three said the overlay "reuses **six**" palette roles while enumerating **five** — `RegionRule`, `RegionHeadingFocused`, `Strong`, `ListRow`, `ListSeparator`. Confirmed five by collecting every `Role::` token in `specs/help-overlay/spec.md`: the same five, no sixth anywhere in the change. Decision 8's whole argument is a count comparison — five reused against four that would have been minted — so the wrong numeral weakens the one claim the decision rests on. | Corrected to **five** in all three places. | `proposal.md`, `design.md` → Decision 8, `specs/view-palette` |
+
 **Two landed drifts repaired in passing**, both inside blocks this change had to copy anyway,
 under the rule design.md → Decision 9 states: `dashboard-loop`'s pure-view list read *eight*
 and omitted `src/ui/palette.rs`; `quality-gates`' `TestBackend` scenario asserted an `OpenSpec`
@@ -112,11 +117,26 @@ None remain. Every CRITICAL and WARNING above is repaired in the owning artifact
 `openspec validate help-overlay --strict` passes.
 
 Three slices (A, B, C) reported complete and were closed out. **Slice D — factual verification —
-did not return before this file was written.** Its checklist was not skipped: every item on it
-was executed by this session instead and is recorded under *Independently Verified at HEAD*
+did not return before this file was first written.** Its checklist was not skipped: every item on
+it was executed by this session instead and is recorded under *Independently Verified at HEAD*
 above, including the two checks it was specifically scoped to (the footer arithmetic across all
-seven specs, and the in-flight/overlap claims). If D reports later, its findings are additive
-and this file should be amended rather than treated as closed.
+seven specs, and the in-flight/overlap claims).
+
+**Slice D has since reported, during implementation, and this file is amended rather than
+treated as closed** — which is what the paragraph above reserved. Its report came in two passes.
+The first, against the superseded `5249315`, re-raised four items this session had already
+repaired (the `scroll_offset` argument order, the indicator string, the mouse sweep's missing
+`SelectTab`, and the footer arithmetic) and is closed as stale on those. The second, against
+`a1cbda5`, independently re-derived every footer width, every band figure, and the 31/42 counts
+and found **no mismatch** — an agreeing second measurement of the numbers this file's
+*Independently Verified* section had measured once.
+
+Two of its findings were **live at `a1cbda5`** and neither had been found by any other slice or
+by this session: the `SPEC.md` misattribution and the five-versus-six role count, both now
+repaired and logged in the table above. Both were found the way this file's Method section says
+the valuable findings are found — by running a grep rather than by re-reading a sentence. The
+`SPEC.md` one is the more instructive: it sat inside the one requirement whose own prose forbids
+exactly that defect, which is why re-reading did not catch it in four prior passes.
 
 ## Deferred Non-Blocking Notes
 

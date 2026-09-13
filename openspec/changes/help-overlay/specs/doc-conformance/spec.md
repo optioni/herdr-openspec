@@ -81,11 +81,24 @@ What SHALL be machine-bound is what has a computable second site:
 - `scripts/gates/noio-view.sh`'s `PURE` list SHALL hold **ten** entries and
   `scripts/gates/colwidth.sh`'s **nine**, both naming `src/ui/help.rs`, and both gates SHALL
   fail when it is absent — `view-palette` owns that leg and this change extends it.
-- `AGENTS.md`'s and `SPEC.md`'s "the pure set is **nine** files" SHALL both read **ten** and
-  SHALL list `src/ui/help.rs`. The gate output is the second site: a prose count that
-  disagrees with `NOIO-VIEW OK: 10 pure files` is a drift a reader can settle in one command.
-- `AGENTS.md`'s and `SPEC.md`'s "`tests/doc_contract.rs` carries **nine** further claims"
-  SHALL read **ten**, since this change adds the inventory/key-table binding to that file.
+- **`AGENTS.md`'s** "the pure set is **nine** files" SHALL read **ten** and SHALL list
+  `src/ui/help.rs`. The gate output is the second site: a prose count that disagrees with
+  `NOIO-VIEW OK: 10 pure files` is a drift a reader can settle in one command. `SPEC.md` is
+  **not** named here, and the omission is deliberate: it carries no pure-set count and no
+  pure-view file list at all. Its § Architecture render-seam passage states the property in
+  prose — "Views are pure functions … They perform no I/O" — and enumerates nothing, so there
+  is no sentence in it to move from nine to ten. `AGENTS.md:339` is the crate's only prose
+  copy of that list.
+- **`AGENTS.md`'s** "`tests/doc_contract.rs` carries **nine** further claims" SHALL read
+  **ten**, since this change adds the inventory/key-table binding to that file. `SPEC.md`
+  § Doc-conformance checks carries the same nine claims as an unnumbered **bullet list** and
+  no count, so what it SHALL gain is a **tenth bullet** naming the new binding — not a
+  changed numeral.
+
+Naming `SPEC.md` in either bullet would have mandated an edit to a sentence that does not
+exist, which is the unfalsifiable guard this capability's own standing rule forbids and which
+the paragraph above already refuses once. It was caught by executing the greps rather than by
+re-reading the bullet.
 
 What SHALL be hand-written, with no check claimed for it: `SPEC.md`'s Module map `ui` row
 and § Unit-tested modules SHALL mention the overlay and the inventory in prose, as

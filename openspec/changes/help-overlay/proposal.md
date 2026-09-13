@@ -66,7 +66,7 @@ Ten, of which six are the footer's ripple. The overlay itself touches four:
 - `doc-conformance`: the inventory, `SPEC.md` → Keys and `README.md` → Keys bound to the swept
   functions; and the module map and pure-set counts naming `src/ui/help.rs`.
 - `view-palette`: `NOIO-VIEW`'s `PURE` list goes to ten and `COLWIDTH`'s to nine. **No new
-  `Role`** — the overlay reuses six.
+  `Role`** — the overlay reuses five.
 
 And six carry landed footer strings that the new leading hint moves, each byte-exact in a
 scenario: `list-filtering`, `agent-launch`, `agent-poller`, `agent-attribution`,
