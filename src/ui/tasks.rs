@@ -246,7 +246,13 @@ fn wrap_plain(text: &str, col: usize) -> Vec<String> {
 /// the item's text discarded rather than wrapped into zero columns.
 fn item_lines(item: &crate::tasks::Item, width: u16) -> Vec<crate::ui::markdown::Line> {
     let w = width as usize;
-    let glyph = if item.checked { "[x]" } else { "[ ]" };
+    // The same three-column glyph `ui::markdown` renders for a task-list
+    // item, so the two checkbox renderers agree by construction and a future
+    // divergence is a failing test rather than a silent inconsistency
+    // (design.md -> Decision 6). `✓` (U+2713) is East Asian Neutral and one
+    // column, so the prefix is three columns exactly as `[x]` was and no
+    // wrap or indent arithmetic moves.
+    let glyph = if item.checked { "[✓]" } else { "[ ]" };
 
     let full_prefix_len = item.indent + 4;
     let prefix = if full_prefix_len < w {
@@ -638,7 +644,7 @@ mod tests {
                     bar,
                     String::new(),
                     "## 1. Setup".to_string(),
-                    "[x] 1.1 first".to_string(),
+                    "[✓] 1.1 first".to_string(),
                     "[ ] 1.2 second".to_string(),
                     String::new(),
                     "## 2. Build".to_string(),
@@ -678,7 +684,7 @@ mod tests {
                     progress_bar(&progress, width),
                     String::new(),
                     "[ ] parent".to_string(),
-                    "  [x] child".to_string(),
+                    "  [✓] child".to_string(),
                     "    [ ] grandchild".to_string(),
                 ],
                 "width {width}: flat, in order, no heading line"
@@ -742,7 +748,7 @@ mod tests {
                     "width {width} line {i}: {t:?}"
                 );
                 let stripped = if i == 0 {
-                    t.strip_prefix("[x] ").unwrap_or(&t).to_string()
+                    t.strip_prefix("[✓] ").unwrap_or(&t).to_string()
                 } else {
                     t.trim_start_matches(' ').to_string()
                 };
@@ -770,13 +776,13 @@ mod tests {
             let out = lines(source, &progress, width);
             let start = first_content_index(&progress, width);
             let item = out[start].text();
-            assert!(item.starts_with("      [x]"), "width {width}: {item:?}");
+            assert!(item.starts_with("      [✓]"), "width {width}: {item:?}");
         }
         for width in [6, 5, 4, 3] {
             let out = lines(source, &progress, width);
             let start = first_content_index(&progress, width);
             let item = out[start].text();
-            assert!(item.starts_with("[x]"), "width {width}: {item:?}");
+            assert!(item.starts_with("[✓]"), "width {width}: {item:?}");
             assert!(!item.starts_with(' '), "width {width}: {item:?}");
         }
         let out0 = lines(source, &progress, 0);
@@ -829,7 +835,7 @@ mod tests {
         for width in [78, 58] {
             let out = lines(source, &progress, width);
             let texts: Vec<String> = out.iter().map(|l| l.text()).collect();
-            let loose_idx = texts.iter().position(|t| t == "[x] loose").unwrap();
+            let loose_idx = texts.iter().position(|t| t == "[✓] loose").unwrap();
             let later_idx = texts.iter().position(|t| t == "## 1. Later").unwrap();
             assert!(loose_idx < later_idx, "width {width}: {texts:?}");
             assert_eq!(
@@ -937,7 +943,7 @@ mod tests {
                     "width {width} line {i}: {t:?} exceeds its width"
                 );
                 let stripped = if i == 0 {
-                    t.strip_prefix("[x] ").unwrap_or(&t).to_string()
+                    t.strip_prefix("[✓] ").unwrap_or(&t).to_string()
                 } else {
                     t.trim_start_matches(' ').to_string()
                 };

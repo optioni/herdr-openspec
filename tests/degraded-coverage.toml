@@ -97,7 +97,7 @@ tier = "unit"
 proof = ["unmodelled_constructs_render_as_source"]
 verdict = "unproven"
 why = "ui::markdown::lines renders a footnote and a task-list item as literal source, one line per source line, and the same fixture's table and struck run render as aligned columns and as a face — the control that says the narrowing is real"
-covers = ["src/ui/markdown.rs:684-684"]
+covers = ["src/ui/markdown.rs:695-695"]
 
 [[row]]
 condition = "A tasks file exists and yields no task **items**"
@@ -105,7 +105,7 @@ tier = "view"
 proof = ["prose_only_reads_no_tasks_yet"]
 verdict = "confirmed"
 why = "the tracked-tasks tab's No tasks yet state, rendered through render_at"
-covers = ["src/ui/tasks.rs:318-324"]
+covers = ["src/ui/tasks.rs:324-330"]
 
 [[row]]
 condition = "A marked tab's artifact resolves to no file while the change's `progress` is non-zero (the `tasks.md` fallback above counted a file the artifact itself did not)"

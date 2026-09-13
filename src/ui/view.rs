@@ -5682,7 +5682,7 @@ mod tests {
             );
             assert_eq!(
                 detail_interior_cols(&buf3, 8, 13),
-                "[x] 1.1 first",
+                "[✓] 1.1 first",
                 "width {width}"
             );
             assert_eq!(
@@ -5693,21 +5693,34 @@ mod tests {
 
             let d0 = dashboard_with_marked_change(&ids, Some(3), progress, source, Vec::new(), 0);
             let buf0 = render_at(width, 20, &d0);
+            // What discriminates the two paths is the ABSENT progress-bar
+            // row, not the glyph: `markdown-render` models a task-list item
+            // now and both paths render the same `[✓]`/`[ ]`.
             assert_eq!(
                 detail_interior_cols(&buf0, 5, 11),
                 "## 1. Setup",
                 "width {width}: no bar row above it"
             );
             assert_eq!(
-                detail_interior_cols(&buf0, 7, 15),
-                "• [x] 1.1 first",
-                "width {width}: source bullet intact"
+                detail_interior_cols(&buf0, 7, 13),
+                "[✓] 1.1 first",
+                "width {width}"
             );
             assert_eq!(
-                detail_interior_cols(&buf0, 8, 16),
-                "• [ ] 1.2 second",
-                "width {width}: source bullet intact"
+                detail_interior_cols(&buf0, 8, 14),
+                "[ ] 1.2 second",
+                "width {width}"
             );
+            // The two renderers agreeing on the glyph is asserted, not
+            // incidental: it is the structural answer to the drift
+            // `markdown-render` names (design.md -> Decision 6).
+            for (y3, y0, n) in [(8u16, 7u16, 13usize), (9, 8, 14)] {
+                assert_eq!(
+                    detail_interior_cols(&buf3, y3, n),
+                    detail_interior_cols(&buf0, y0, n),
+                    "width {width}: the two checkbox renderers disagree"
+                );
+            }
 
             assert_eq!(
                 row_text(&buf3, 2),
@@ -5737,15 +5750,17 @@ mod tests {
             );
             assert_eq!(
                 detail_interior_cols(&buf0, 7, 8),
-                "[x] done",
+                "[✓] done",
                 "width {width}"
             );
 
             let d1 = dashboard_with_marked_change(&ids, Some(0), progress, source, Vec::new(), 1);
             let buf1 = render_at(width, 20, &d1);
+            // The markdown path renders the same glyph, so the ABSENT
+            // progress-bar row below is what names the path taken.
             assert_eq!(
-                detail_interior_cols(&buf1, 5, 10),
-                "• [x] done",
+                detail_interior_cols(&buf1, 5, 8),
+                "[✓] done",
                 "width {width}: id tasks does not carry the flag"
             );
             assert_ne!(
@@ -5777,9 +5792,9 @@ mod tests {
                     "width {width} tab {tab}: no progress-bar row"
                 );
                 assert_eq!(
-                    detail_interior_cols(&buf, 5, 7),
-                    "• [ ] a",
-                    "width {width} tab {tab}"
+                    detail_interior_cols(&buf, 5, 5),
+                    "[ ] a",
+                    "width {width} tab {tab}: the markdown path's own task-list rendering"
                 );
                 assert!(
                     row_text(&buf, 2).contains(" alpha ")

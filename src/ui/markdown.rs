@@ -22,6 +22,8 @@ const TABLE_SEP: &str = "│";
 const TABLE_RULE_LEFT: &str = "├";
 const TABLE_RULE_MID: &str = "┼";
 const TABLE_RULE_RIGHT: &str = "┤";
+const CHECKED: &str = "[✓] ";
+const UNCHECKED: &str = "[ ] ";
 
 /// A segment's styling. A struct of flags, not an enum: markdown nests
 /// (`[**bold link**](x)` is bold *and* a link), and an enum would force an
@@ -207,6 +209,12 @@ struct Folder {
     quote_depth: usize,
     list_stack: Vec<ListFrame>,
 
+    // The currently-open item's nesting indent, kept because
+    // `Event::TaskListMarker` arrives *after* `start_item` has already
+    // built both prefixes from the bullet marker and has to rebuild them
+    // from the checkbox marker instead.
+    item_indent: String,
+
     // `Some` between `Start(Table)` and `End(Table)`: the rows accumulated
     // so far, the current row's cells, and whether that row is the header.
     // The current *cell*'s runs accumulate in `group`, exactly as a
@@ -241,6 +249,7 @@ impl Folder {
             image_face: Face::plain(),
             quote_depth: 0,
             list_stack: Vec::new(),
+            item_indent: String::new(),
             table: None,
         }
     }
@@ -403,11 +412,35 @@ impl Folder {
         let qp = quote_prefix(self.quote_depth);
         self.first_prefix = format!("{qp}{indent}{marker}");
         self.cont_prefix = format!("{qp}{}", " ".repeat(columns(&indent) + columns(&marker)));
+        self.item_indent = indent;
         self.prefix_face = Face::plain();
         self.category = Category::Item;
         self.hard_split = false;
         let base = self.quoted_base();
         self.faces = vec![base];
+    }
+
+    /// `Event::TaskListMarker`: the three-character glyph `[✓]`/`[ ]` plus a
+    /// space stands in place of the item's own bullet marker, so a
+    /// task-list item's prefix costs four columns where a `• ` item's costs
+    /// two.
+    ///
+    /// Both prefixes are rebuilt, not just the first.
+    /// [`start_item`](Self::start_item) derives `cont_prefix` from the
+    /// bullet marker's own width and runs **before** this event is seen, so
+    /// an arm that rewrites `first_prefix` alone leaves a wrapped item's
+    /// continuations hanging two columns in instead of four — and no width
+    /// or totality assertion can detect that, because a shorter indent
+    /// never overruns (design.md -> Decision 7).
+    fn set_task_marker(&mut self, checked: bool) {
+        if self.category != Category::Item {
+            return;
+        }
+        let marker = if checked { CHECKED } else { UNCHECKED };
+        let qp = quote_prefix(self.quote_depth);
+        let indent = self.item_indent.clone();
+        self.first_prefix = format!("{qp}{indent}{marker}");
+        self.cont_prefix = format!("{qp}{}", " ".repeat(columns(&indent) + columns(marker)));
     }
 
     /// `Tag::Table(alignments)`. Keeps a list item's own marker for exactly
@@ -644,19 +677,22 @@ impl Folder {
 /// paragraphs, headings, lists (nested, ordered from their own start
 /// value), code blocks (fenced or indented, verbatim), block quotes
 /// (nested), thematic breaks, raw HTML (block and inline), and — with
-/// `ENABLE_TABLES` on — GFM pipe tables. A footnote or task-list source is
-/// not modelled by this option set at all: it arrives as ordinary paragraph
-/// text, which is the literal-text degraded state `markdown-render` states.
+/// `ENABLE_TABLES` and `ENABLE_TASKLISTS` on — GFM pipe tables and
+/// task-list items. A footnote is not modelled by this option set at all:
+/// it arrives as ordinary paragraph text, which is the literal-text
+/// degraded state `markdown-render` states.
 ///
-/// The option set is exactly `ENABLE_TABLES | ENABLE_STRIKETHROUGH` and
-/// nothing else (design.md -> Decision 1): a further flag turned on here
+/// The option set is exactly `ENABLE_TABLES | ENABLE_STRIKETHROUGH |
+/// ENABLE_TASKLISTS` and nothing else: a further flag turned on here
 /// starts emitting events into the wildcards below, where a construct
-/// **vanishes** rather than degrading to its literal text.
+/// **vanishes** rather than degrading to its literal text. This change is
+/// that warning's own worked example, which is why `ENABLE_TASKLISTS` and
+/// the `Event::TaskListMarker` arm landed in one edit.
 fn fold(source: &str) -> Vec<Block> {
     let mut f = Folder::new();
     for event in Parser::new_ext(
         source,
-        Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH,
+        Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS,
     ) {
         match event {
             Event::Start(tag) => match tag {
@@ -716,13 +752,13 @@ fn fold(source: &str) -> Vec<Block> {
             Event::SoftBreak => f.push_text(" "),
             Event::HardBreak => f.group_break(),
             Event::Rule => f.push_rule(),
-            // `FootnoteReference`, `TaskListMarker`, `InlineMath`, and
-            // `DisplayMath` cannot be produced by this option set —
-            // `ENABLE_FOOTNOTES` and `ENABLE_TASKLISTS` stay off precisely
-            // so the first two keep arriving as literal text instead. The
-            // wildcard is the stated default: total over the enum, and a
-            // future pulldown-cmark variant reaches it rather than a
-            // missing-arm compile error changing this module's shape.
+            Event::TaskListMarker(checked) => f.set_task_marker(checked),
+            // `FootnoteReference`, `InlineMath`, and `DisplayMath` cannot be
+            // produced by this option set — `ENABLE_FOOTNOTES` stays off
+            // precisely so a footnote keeps arriving as literal text
+            // instead. The wildcard is the stated default: total over the
+            // enum, and a future pulldown-cmark variant reaches it rather
+            // than a missing-arm compile error changing this module's shape.
             _ => {}
         }
     }
@@ -1967,35 +2003,24 @@ mod tests {
 
     /// `degraded-coverage` :: "A footnote, strikethrough, and a table each render as literal
     /// source" — row 12. The scenario's name is kept verbatim because a delta's scenario
-    /// headers are its merge key and OpenSpec has no scenario-level rename; its subject is
-    /// now the **two** constructs that remain unmodelled — a footnote reference and its
-    /// definition, and a task-list item — each on a tab this test never marks tracked, so
-    /// `ui::markdown::lines` (not `ui::tasks::lines`) is what renders them: rendered line
+    /// headers are its merge key and OpenSpec has no scenario-level rename; its subject
+    /// narrows again, to the **one** construct that remains unmodelled — a footnote
+    /// reference and its definition, on a tab this test never marks tracked, so
+    /// `ui::markdown::lines` (not `ui::tasks::lines`) is what renders it: rendered line
     /// count equals source line count, one line per source line, at both mandated markdown
-    /// widths. The two that left the set, a table and a struck run, appear at the end as the
-    /// **discriminating control**, so this test fails if the narrowing is not real.
+    /// widths. The three that have left the set — a task-list item, a table, and a struck
+    /// run — appear as the **discriminating controls**, so this test fails if the narrowing
+    /// is not real.
     #[test]
     fn unmodelled_constructs_render_as_source() {
-        let sources: [(&str, &str, &[&str]); 2] = [
-            (
-                "footnote reference and definition",
-                "See it here[^1].\n\n[^1]: The note.\n",
-                &["See it here[^1].", "", "[^1]: The note."],
-            ),
-            // The bullet marker has moved to `•`, so a task-list item's line
-            // is no longer byte-equal to its source; its checkbox text still
-            // is, which is what "unmodelled" still means here. Group 4
-            // narrows this entry out of the set entirely.
-            (
-                "task-list item",
-                "- [ ] an item\n- [x] a done item\n",
-                &["• [ ] an item", "• [x] a done item"],
-            ),
-        ];
+        let sources = [(
+            "footnote reference and definition",
+            "See it here[^1].\n\n[^1]: The note.\n",
+        )];
         for width in [58, 78] {
-            for (label, source, expected) in sources {
+            for (label, source) in sources {
                 let rendered = lines(source, width);
-                let source_lines: Vec<&str> = expected.to_vec();
+                let source_lines: Vec<&str> = source.lines().collect();
                 assert_eq!(
                     rendered.len(),
                     source_lines.len(),
@@ -2033,13 +2058,46 @@ mod tests {
             }
         }
 
+        // The first discriminating control: the task-list item, which has just
+        // LEFT this row. The checkbox glyph stands in place of the bullet
+        // marker and the literal `[ ]`/`[x]` source text is gone, so this
+        // scenario fails if the narrowing is not real.
+        let task_list_source = "- [ ] an item\n- [x] a done item\n";
+        for width in [58, 78] {
+            assert_eq!(
+                non_blank(&lines(task_list_source, width)),
+                vec!["[ ] an item".to_string(), "[✓] a done item".to_string()],
+                "width {width}"
+            );
+        }
+
+        // The hanging indent is derived from the marker actually rendered, not
+        // from the bullet marker the item would have carried: `start_item`
+        // builds `cont_prefix` before `TaskListMarker` is seen, and an arm that
+        // rewrites only the first line's prefix leaves continuations two
+        // columns in. No width or totality assertion can see that — a shorter
+        // indent never overruns — so it is asserted directly here.
+        let wrapping = "- [ ] alpha bravo charlie delta echo foxtrot golf hotel india \
+                        juliett kilo lima mike november oscar papa\n";
+        for width in [58, 78] {
+            let item = non_blank(&lines(wrapping, width));
+            assert!(item.len() > 1, "width {width}: the item must wrap");
+            assert!(item[0].starts_with("[ ] alpha"), "width {width}: {item:?}");
+            for text in &item[1..] {
+                assert!(
+                    text.starts_with("    ") && !text.starts_with("     "),
+                    "width {width}: continuation {text:?} is not four columns in"
+                );
+            }
+        }
+
         // The tracked-tasks carve-out this row's own wording names ("on a tab **other**
         // than the tracked-tasks one"): the SAME task-list source, dispatched through
         // `ui::tasks::lines` (what `ui::detail::content_lines` reaches for a tracked tab)
         // instead of `ui::markdown::lines`, renders the checklist grammar — a progress bar
-        // and `[ ]`/`[x]` glyphs — rather than the literal source text, discriminating this
-        // test's own claim that the OTHER tabs render literally.
-        let task_list_source = "- [ ] an item\n- [x] a done item\n";
+        // above the items — rather than the markdown path's bare item lines. Both paths'
+        // item glyph is the SAME `[✓]`, asserted here rather than assumed: it is the
+        // structural answer to the drift `markdown-render` names.
         let progress = crate::tasks::Progress {
             completed: 1,
             total: 2,
@@ -2051,11 +2109,9 @@ mod tests {
                 .map(|l| l.text().trim_end().to_string())
                 .collect();
             assert!(
-                tracked_text
-                    .iter()
-                    .any(|l| l.contains('[') && l.contains(']')),
-                "width {width}: the tracked-tasks tab must render the checklist grammar, \
-                 not literal source: {tracked_text:?}"
+                tracked_text.iter().any(|l| l == "[✓] a done item"),
+                "width {width}: the two renderers must agree on the item glyph: \
+                 {tracked_text:?}"
             );
             assert_ne!(
                 tracked_text,
@@ -2065,10 +2121,11 @@ mod tests {
             );
         }
 
-        // The discriminating control: the two constructs that LEFT this row. A
-        // GFM table and a `~~struck~~` span in the same fixture render as
-        // aligned columns and as a struck face rather than as literal text, so
-        // this test fails if the narrowing is a reword that changed nothing.
+        // The remaining discriminating controls: the two constructs that left
+        // this row earlier. A GFM table and a `~~struck~~` span in the same
+        // fixture render as aligned columns and as a struck face rather than as
+        // literal text, so this test fails if that narrowing is a reword that
+        // changed nothing.
         let departed =
             "| Gate | Runner |\n|---|---|\n| Format | cargo fmt |\n\nA ~~struck~~ word.\n";
         for width in [58, 78] {
@@ -2384,7 +2441,7 @@ mod tests {
         let mut in_row = false;
         for event in Parser::new_ext(
             source,
-            Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH,
+            Options::ENABLE_TABLES | Options::ENABLE_STRIKETHROUGH | Options::ENABLE_TASKLISTS,
         ) {
             match event {
                 Event::Start(Tag::TableRow) => {

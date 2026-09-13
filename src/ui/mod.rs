@@ -1311,7 +1311,7 @@ apply:
                 );
                 let first_item_row = row_cols(content_y + 3, 12);
                 assert!(
-                    first_item_row.starts_with("[x]") || first_item_row.starts_with("[ ]"),
+                    first_item_row.starts_with("[✓]") || first_item_row.starts_with("[ ]"),
                     "width {width}: no checklist glyph row below the heading: {first_item_row:?}"
                 );
 
