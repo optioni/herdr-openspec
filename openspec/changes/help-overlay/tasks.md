@@ -111,15 +111,15 @@ run it avoids.
 ## 5. `layout::help_band`
 <!-- kind: behavior -->
 
-- [ ] 5.1 RED: Add tests in `src/ui/layout.rs` named for The band's rectangle at both mandated
+- [x] 5.1 RED: Add tests in `src/ui/layout.rs` named for The band's rectangle at both mandated
   widths, The band is total over degenerate and extreme rectangles, and The overlay does not move
   the breakpoint. Drive the totality test with zero-width, zero-height, 1x1, 120x1, 120x2, and
   `u16::MAX` rectangles against `content_rows` of 0, 1, 39, and `usize::MAX`.
-- [ ] 5.2 GREEN: Implement `help_band`, every subtraction saturating, and assert in the test that
+- [x] 5.2 GREEN: Implement `help_band`, every subtraction saturating, and assert in the test that
   every returned rectangle lies inside the body it was given.
-- [ ] 5.3 REFACTOR: Fold `help_band`'s centring arithmetic into the existing saturating helpers
+- [x] 5.3 REFACTOR: Fold `help_band`'s centring arithmetic into the existing saturating helpers
   if one already exists in `src/ui/layout.rs`, or state that no refactor was needed.
-- [ ] 5.4 Run `cargo test ui::layout` — no regressions.
+- [x] 5.4 Run `cargo test ui::layout` — no regressions.
 
 ## 6. Scrolling, the indicator, and the degraded frames
 <!-- kind: behavior -->

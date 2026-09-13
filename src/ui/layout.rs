@@ -157,6 +157,34 @@ pub fn interior(area: Rect, gutters: Gutters) -> Rect {
     }
 }
 
+/// The full-width band the help overlay draws into, vertically centred in
+/// `body`. `x` and `width` are `body`'s own — the band spans the body's full
+/// width, never only a column of it; `height` is `content_rows` plus the
+/// band's own top and bottom rule row, clamped to `body.height` so the band
+/// never runs past the body it was given; `y` centres the band within
+/// `body`, with any odd remaining row landing below the band rather than
+/// above it (`help-overlay` -> "The overlay is a full-width band, vertically
+/// centred in the body", design.md -> Decision 3).
+///
+/// Total over every `body` and every `content_rows`, `usize::MAX` included:
+/// the `+ 2` is a saturating `usize` add, and the clamp against `body.height`
+/// happens before the narrowing to `u16`, so the cast can never overflow.
+/// Every subtraction saturates too, so a `body` shorter than the wanted band
+/// height never underflows on the way to computing `y`.
+pub fn help_band(body: Rect, content_rows: usize) -> Rect {
+    let wanted = content_rows.saturating_add(2);
+    let height = wanted.min(body.height as usize) as u16;
+    let y = body
+        .y
+        .saturating_add(body.height.saturating_sub(height) / 2);
+    Rect {
+        x: body.x,
+        y,
+        width: body.width,
+        height,
+    }
+}
+
 /// The detail region's `Gutters` choice, derived from `split_body`'s own
 /// divider column rather than re-decided at each call site: `Gutters::LeftOnly`
 /// when a divider is present (the wide layout, where the divider spends the
@@ -384,7 +412,7 @@ pub(crate) fn truncate_columns(text: &str, max: usize) -> &str {
 mod tests {
     use crate::ui::app::Route;
     use crate::ui::layout::{
-        Gutters, LayoutMode, WIDE_MIN_WIDTH, columns, detail_gutters, interior, mode,
+        Gutters, LayoutMode, WIDE_MIN_WIDTH, columns, detail_gutters, help_band, interior, mode,
         scroll_offset, split_body, split_detail, split_frame, truncate_columns, viewport,
     };
     use ratatui::buffer::Buffer;
@@ -949,6 +977,107 @@ mod tests {
             assert_eq!(body.height, 0);
             assert_eq!(footer.height, 0);
         }
+    }
+
+    /// `help-overlay` -> "The overlay is a full-width band, vertically
+    /// centred in the body" — task 5.1's RED test. `content_rows` is fixed at
+    /// 42, `ui::help::content_rows()`'s own current value, spelled out as a
+    /// literal so this test's expectations do not move if that count ever
+    /// changes for an unrelated reason.
+    #[test]
+    fn the_bands_rectangle_at_both_mandated_widths() {
+        const CONTENT_ROWS: usize = 42;
+
+        let (body, _) = split_frame(Rect::new(0, 0, 120, 40));
+        assert_eq!(body, Rect::new(0, 0, 120, 39));
+        assert_eq!(help_band(body, CONTENT_ROWS), Rect::new(0, 0, 120, 39));
+
+        let (body, _) = split_frame(Rect::new(0, 0, 60, 20));
+        assert_eq!(body, Rect::new(0, 0, 60, 19));
+        assert_eq!(help_band(body, CONTENT_ROWS), Rect::new(0, 0, 60, 19));
+
+        // The body is tall enough to hold the whole band (44 rows: the 42
+        // content rows plus a top and bottom rule row), so the band no
+        // longer fills the body and is centred within it, with the one odd
+        // remaining row (59 - 44 = 15, an odd number of rows to split)
+        // landing below the band rather than above it.
+        let (body, _) = split_frame(Rect::new(0, 0, 120, 60));
+        assert_eq!(body, Rect::new(0, 0, 120, 59));
+        assert_eq!(help_band(body, CONTENT_ROWS), Rect::new(0, 7, 120, 44));
+    }
+
+    /// `help-overlay` -> "The overlay degrades rather than panicking at any
+    /// frame size" — task 5.1's totality leg. Every returned rectangle must
+    /// lie inside the body it was given: `x` and `width` equal the body's
+    /// own, `y` never starts above the body's own top, and `y + height`
+    /// never runs past the body's own bottom.
+    #[test]
+    fn the_band_is_total_over_degenerate_and_extreme_rectangles() {
+        let bodies = [
+            Rect::new(0, 0, 0, 40),              // zero-width
+            Rect::new(0, 0, 120, 0),             // zero-height
+            Rect::new(0, 0, 1, 1),               // 1x1
+            Rect::new(0, 0, 120, 1),             // 120x1
+            Rect::new(0, 0, 120, 2),             // 120x2
+            Rect::new(0, 0, u16::MAX, u16::MAX), // extreme
+            // Offset origins. Without at least one of these the whole suite
+            // stays green against a `help_band` that dropped `body.x` and
+            // `body.y` and computed the centring from the height alone: every
+            // other body here sits at the origin, so `band.x == body.x` and
+            // `band.y >= body.y` are both satisfied by a constant `0`. The
+            // `body.y +` term is in the contract and is load-bearing for any
+            // caller handed a sub-rectangle rather than the whole body.
+            Rect::new(7, 5, 120, 40),   // offset, band shorter than the body
+            Rect::new(3, 9, 60, 19),    // offset, band fills the body exactly
+            Rect::new(2, 60000, 80, 8), // offset near u16's ceiling
+        ];
+        let content_rows = [0usize, 1, 39, usize::MAX];
+
+        for body in bodies {
+            for &rows in &content_rows {
+                let band = help_band(body, rows);
+                assert_eq!(band.x, body.x, "body {body:?} rows {rows}: x");
+                assert_eq!(band.width, body.width, "body {body:?} rows {rows}: width");
+                assert!(
+                    band.y as u32 >= body.y as u32,
+                    "body {body:?} rows {rows}: {band:?} starts above the body"
+                );
+                assert!(
+                    band.y as u32 + band.height as u32 <= body.y as u32 + body.height as u32,
+                    "body {body:?} rows {rows}: {band:?} overruns the body"
+                );
+                // The contract's own arithmetic, not merely containment:
+                // `y = body.y + (body.height - height) / 2`. Containment alone
+                // is satisfied by any `y` in range, including one that ignored
+                // `body.y`; this pins the centring itself.
+                assert_eq!(
+                    band.y,
+                    body.y + (body.height - band.height) / 2,
+                    "body {body:?} rows {rows}: {band:?} is not centred in the body"
+                );
+            }
+        }
+    }
+
+    /// `help-overlay` -> "The overlay is a full-width band, vertically
+    /// centred in the body" — task 5.1's regression leg: adding `help_band`
+    /// changes nothing about the existing 100-column breakpoint or the
+    /// `split_body` regions it decides between.
+    #[test]
+    fn the_overlay_does_not_move_the_breakpoint() {
+        assert_eq!(mode(99), LayoutMode::Narrow);
+        assert_eq!(mode(100), LayoutMode::Wide);
+        assert_eq!(mode(101), LayoutMode::Wide);
+
+        let (list, divider, detail) = split_body(Rect::new(0, 0, 99, 19), Route::List);
+        assert_eq!(list, Some(Rect::new(0, 0, 99, 19)));
+        assert_eq!(divider, None);
+        assert_eq!(detail, None);
+
+        let (list, divider, detail) = split_body(Rect::new(0, 0, 100, 19), Route::List);
+        assert_eq!(list, Some(Rect::new(0, 0, 40, 19)));
+        assert_eq!(divider, Some(40));
+        assert_eq!(detail, Some(Rect::new(41, 0, 59, 19)));
     }
 
     /// `split_body` gives the divider column between the two regions —
