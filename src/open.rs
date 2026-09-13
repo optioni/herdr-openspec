@@ -142,10 +142,40 @@ pub fn existing_pane(listing: &str, workspace_id: &str) -> Result<Option<String>
 /// (design.md -> Decision 6: `existing_pane` is re-expressed through this function in
 /// group 2, so the three-part test exists in exactly one place).
 pub fn dashboard_panes(listing: &str, workspace_id: &str) -> Result<Vec<String>, String> {
-    // RED stub: intentionally wrong, so every scenario test below fails on assertion
-    // rather than passing by accident before group 1.2's real implementation lands.
-    let _ = (listing, workspace_id);
-    Err("not yet implemented".to_string())
+    let value: serde_json::Value = serde_json::from_str(listing)
+        .map_err(|e| format!("pane list payload is not valid JSON: {e}"))?;
+    let panes = value
+        .get("result")
+        .and_then(|r| r.get("panes"))
+        .and_then(|p| p.as_array())
+        .ok_or_else(|| "pane list payload has no \"result\".\"panes\" array".to_string())?;
+
+    let mut ids = Vec::new();
+    for pane in panes {
+        let Some(obj) = pane.as_object() else {
+            continue;
+        };
+        let Some(pane_id) = obj.get("pane_id").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if pane_id.is_empty() {
+            continue;
+        }
+        let Some(label) = obj.get("label").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if label != DASHBOARD_LABEL {
+            continue;
+        }
+        let Some(pane_workspace) = obj.get("workspace_id").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        if pane_workspace != workspace_id {
+            continue;
+        }
+        ids.push(pane_id.to_string());
+    }
+    Ok(ids)
 }
 
 /// Which post-open pane to focus: the first `after` id absent from `before`, else
@@ -156,11 +186,11 @@ pub fn dashboard_panes(listing: &str, workspace_id: &str) -> Result<Vec<String>,
 /// (`specs/pane-open/spec.md` -> "The pane to focus after opening is identified by
 /// difference from the pre-open listing").
 pub fn opened_pane(before: &[String], after: &[String]) -> Option<String> {
-    // RED stub: intentionally wrong (always `None`), so every scenario test below that
-    // expects `Some(..)` fails on assertion before group 1.3's real implementation lands.
-    let _ = before;
-    let _ = after;
-    None
+    after
+        .iter()
+        .find(|id| !before.contains(id))
+        .or_else(|| after.first())
+        .cloned()
 }
 
 /// Which pane a split should target, decided against the live `herdr pane list` payload
