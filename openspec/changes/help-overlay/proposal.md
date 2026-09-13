@@ -152,6 +152,15 @@ specific disagreements named. The route-versus-layer choice is the load-bearing 
 rebased, because a third `Route` variant would have to remember which route to return to and
 this change's whole layer argument is that it should not.
 
+**Three further in-flight overlaps, read from each proposal's Modified Capabilities.** They are
+not additional collisions of mechanism like `settings-window`'s — none of them plans an overlay
+— but they modify capabilities this change also modifies, so the same MODIFIED-block discard
+hazard applies to all three at archive time: `spec-emphasis` and `tasks-emphasis` each modify
+`view-palette`, and `agent-client-choice` modifies `agent-launch` **and** `dashboard-loop`.
+None of the seven in-flight changes has written spec deltas yet, so the hazard is prospective
+rather than present — which is exactly when it is cheap to record. With these three, six of the
+seven are now accounted for against this change's twelve deltas.
+
 `mouse-text-selection` also overlaps `mouse-input` — it proposes reconsidering
 `EnableMouseCapture` entirely, which would change what every gesture in this change's precedence
 table can receive. `header-progress-bar` and `heading-sections` plausibly overlap

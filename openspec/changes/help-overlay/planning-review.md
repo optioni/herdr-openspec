@@ -152,5 +152,24 @@ exactly that defect, which is why re-reading did not catch it in four prior pass
   `widths.sh`'s count of `#[test]`s in `src/ui/view.rs`. Left as-is: the new `helpwidths.sh`
   covers the module's own both-widths rule, and moving the tests is an implementation-time
   judgment the group-9 implementer is better placed to make. Resolution point: tasks 9.1-9.2.
+- **`gate_controls_catch_their_plants` needs a quiescent tree, and this checkout is shared.**
+  Reported by slice D as an environment note, verified here. `tree_digest`
+  (`tests/gate_controls.rs:615-644`) walks the whole repository root excluding only `.git` and
+  `target`, and records each entry's **mtime** alongside its bytes. It exists to prove no plant
+  leaked out of the `ScratchDir` into the real tree, and it deliberately does not use
+  `git status --porcelain` because the tree is ordinarily dirty mid-implementation — a sound
+  choice with one consequence: **any** concurrent write anywhere in the repo, `.claude/` and
+  `openspec/` included, fails it with "the real working tree changed while running the gate
+  controls". Slice D observed exactly that while other agents held this checkout. It is not a
+  defect in this change and needs no repair — but it is an operational constraint on tasks 1.2
+  and 13.5, and on every inter-group gate this change's apply run performs: run `cargo test`,
+  `make test` and `make check` only when no implementer is writing. A red from this assertion
+  alone is not attributable to the change under test. Recorded here rather than in `tasks.md`
+  because it binds the orchestration, not a task.
+- **Three further in-flight overlaps** were named late and are now in the proposal's Sequencing
+  section: `spec-emphasis` and `tasks-emphasis` modify `view-palette`, `agent-client-choice`
+  modifies `agent-launch` and `dashboard-loop`. Prospective only — no in-flight change has
+  written spec deltas yet — and subject to the same archive-order re-extraction the proposal
+  already prescribes.
 - **`EXTENDED`, `TESTCOUNT`, and `OPENSPEC-UNTOUCHED`'s tracked-diff leg** remain outside
   `make gates`, as `quality-gates` already records. Unchanged by this change and not in scope.
