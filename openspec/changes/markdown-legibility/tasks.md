@@ -192,8 +192,32 @@
 ## 10. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 10.1 CHECK: Commit the change directory before running `make gates`. At HEAD `/bin/sh scripts/gates/openspec-untouched.sh` exits **1** on this change's own untracked files (`OPENSPEC-UNTOUCHED FAIL: an untracked file exists inside openspec/`), which is the gate working, not a defect.
-- [ ] 10.2 VERIFY: Run `make check` as the single gate. If it fails, name the failing sub-command — `make fmt-check`, `make lint`, `make gates`, `make test`, or `make coverage` — rather than reporting the composite. Run it on an otherwise idle machine. `ui::tests::wiring::*` failures under load are deadline flakes, not this change's — confirm by the empty-log signature and a clean isolated re-run, and report them separately rather than folding them into this change's result.
-- [ ] 10.3 VERIFY: Confirm `COLWIDTH` still passes and can still fail. `/bin/sh scripts/gates/colwidth.sh` at HEAD → exit **0**, `COLWIDTH OK: no char-count measurement in the eight pure view files`. Negative control, run at planning time: inserting `let _planted = source.chars().count();` into `lines` makes it exit **1** with `COLWIDTH FAIL: src/ui/markdown.rs has 1 char-count measurement(s) in production code`; removing the plant returns it to exit **0**.
-- [ ] 10.4 VERIFY: Read 10.2's coverage output and confirm both floors held — the total and the production slice. `Makefile:71` is `check: fmt-check lint gates test coverage`, so `make check` already ran it; re-running it here would be duplicate work, and the assertion is on its output. This change adds tests and no untested production branch, so a fall means a re-baselined test stopped exercising a path.
-- [ ] 10.5 VERIFY: Run `openspec validate markdown-legibility --strict` — valid.
+- [x] 10.1 CHECK: **Already satisfied** — the change directory was committed before this session began (`git ls-files openspec/changes/markdown-legibility` lists all eight files), so `/bin/sh scripts/gates/openspec-untouched.sh` exits **0** throughout: `OPENSPEC-UNTOUCHED OK (tree-only legs): no untracked file inside openspec/`. Originally: Commit the change directory before running `make gates`. At HEAD `/bin/sh scripts/gates/openspec-untouched.sh` exits **1** on this change's own untracked files (`OPENSPEC-UNTOUCHED FAIL: an untracked file exists inside openspec/`), which is the gate working, not a defect.
+- [x] 10.2 VERIFY: **`make check` fails at `make test`, and only there, on the pre-existing `ui::tests::wiring::*` deadline flakes. Every other sub-command passes.**
+
+  | Sub-command | Result |
+  |---|---|
+  | `make fmt-check` | OK |
+  | `make lint` | OK (0 warnings) |
+  | `make gates` | OK — every gate, `MDWIDTHS OK: all 35 markdown tests name both 58 and 78` among them |
+  | `make test` | 1251 passed / 8 failed — **all eight inside `ui::tests::wiring::*`** |
+  | `make coverage` | OK, both floors (see 10.4) |
+
+  `cargo test --lib` with the wiring module filtered out is **fully green**, and every one of the seven integration binaries passes (`ci_workflow` 21, `cli` 9, `coverage_prod` 19, `degraded_coverage` 10, `doc_contract` 61, `manifest` 4, `spec_purposes` 3).
+
+  **The flake is not this change's, measured rather than asserted.** `cargo test --lib ui::tests::wiring` run twice at this change's HEAD and twice at the pre-change commit `3f98b29`, back to back on the same machine at load average ~3 with no cargo competing:
+
+  | Commit | Run 1 | Run 2 |
+  |---|---|---|
+  | `3f98b29` (pre-change) | **11** failed of 29, 36.3s | **9** failed, 33.2s |
+  | this change | **8** failed of 29, 33.8s | **9** failed, 36.6s |
+
+  The pre-change commit fails *more* often than the change does, and every failure carries the documented signature — a count asserted against `0` with an empty log (`left: 0 / right: 3`, `calls: []`). This machine simply runs these 29 wall-clock-deadlined tests at ~35s where `design.md`'s reference measurement recorded ~3.8s, so the 5-second `DEADLINE` in `crate::testutil::Stages` expires routinely here. Pre-existing, out of scope, and deserving its own change exactly as `planning-review.md` records. Originally: Run `make check` as the single gate. If it fails, name the failing sub-command — `make fmt-check`, `make lint`, `make gates`, `make test`, or `make coverage` — rather than reporting the composite. Run it on an otherwise idle machine. `ui::tests::wiring::*` failures under load are deadline flakes, not this change's — confirm by the empty-log signature and a clean isolated re-run, and report them separately rather than folding them into this change's result.
+- [x] 10.3 VERIFY: **Reproduced end to end.** `/bin/sh scripts/gates/colwidth.sh` -> exit **0**, `COLWIDTH OK: no char-count measurement in the eight pure view files`. Planting `let _planted = source.chars().count();` into `lines` -> exit **1**, `COLWIDTH FAIL: src/ui/markdown.rs has 1 char-count measurement(s) in production code` naming line 1230; plant removed, exit **0** again. Originally: Confirm `COLWIDTH` still passes and can still fail. `/bin/sh scripts/gates/colwidth.sh` at HEAD → exit **0**, `COLWIDTH OK: no char-count measurement in the eight pure view files`. Negative control, run at planning time: inserting `let _planted = source.chars().count();` into `lines` makes it exit **1** with `COLWIDTH FAIL: src/ui/markdown.rs has 1 char-count measurement(s) in production code`; removing the plant returns it to exit **0**.
+- [x] 10.4 VERIFY: **Both floors held.** `make check` never reached `coverage` (it aborts at `test`), so `make coverage` was run on its own — the assertion is still on a real run's output, not a re-derivation:
+
+  - total: `cargo llvm-cov --fail-under-lines 80` exit **0**
+  - production slice: `COVERAGE-PROD OK: production 96.04% (4609/4799) >= floor 96%; test-module 95.22% (26168/27481); 26 file(s) under src/`
+
+  The production slice is the falsifiable one and it sits 0.04 points above its floor, so this change added no untested production branch. **One real defect was caught here rather than by review**: the Change Review's SUGGESTION-3 fix added eight comment lines above `set_task_marker`'s guard, which pushed the option-set line from 695 to 703 and left `tests/degraded-coverage.toml`'s `covers` pointer naming a comment. `make coverage` failed with `covers entry src/ui/markdown.rs:695-695 holds no line of code`; the pointer was corrected to `:703-703`. A `covers` pointer is a line number and moves whenever anything above it does — worth running `cargo test --test degraded_coverage` after any edit to a covered file, not only after a re-baseline. Originally: Read 10.2's coverage output and confirm both floors held — the total and the production slice. `Makefile:71` is `check: fmt-check lint gates test coverage`, so `make check` already ran it; re-running it here would be duplicate work, and the assertion is on its output. This change adds tests and no untested production branch, so a fall means a re-baselined test stopped exercising a path.
+- [x] 10.5 VERIFY: `openspec validate markdown-legibility --strict` -> `Change 'markdown-legibility' is valid`. (The binary is under nvm and not on a non-login shell's `PATH`; reached as `$HOME/.nvm/versions/node/v24.18.0/bin/openspec`.)
