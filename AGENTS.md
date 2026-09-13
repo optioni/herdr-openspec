@@ -23,7 +23,8 @@ spec is wrong, update the spec as part of that change rather than letting the tw
 `schema-model`, `task-parsing`, `changes-from-files`, `subprocess-seam`,
 `changes-from-cli`, `tui-shell`, `list-view`, `markdown-viewer`,
 `detail-view`, `tasks-tab`, `live-refresh`, `agent-polling`,
-`agent-attribution`, `agent-launch`, and `plugin-actions` have landed: the crate builds with six third-party dependencies (`toml`,
+`agent-attribution`, `agent-launch`, `plugin-actions`, and
+`markdown-legibility` have landed: the crate builds with six third-party dependencies (`toml`,
 `yaml-rust2`, `serde_json`, `ratatui` — reached through `ratatui::crossterm`'s
 re-export, not a direct dependency — `pulldown-cmark`, and `notify`), `make check` runs
 every quality gate locally and in CI — `COLWIDTH` among them, sweeping every pure view
@@ -96,8 +97,20 @@ the interior entirely, not counted among these rows — so a held key cannot run
 it away. The tab the schema marks as tracking tasks (`ArtifactRef::tracks_tasks`,
 set by position, never by id or filename) renders `ui::tasks`' grammar
 instead of markdown: a progress bar showing the change's own `progress`
-followed by task groups under their headings with a `[x]`/`[ ]` glyph per
-item — read-only, with no key that toggles one. `ui` refuses to start with exit status 3 when stdout is not a terminal, which is
+followed by task groups under their headings with a `[✓]`/`[ ]` glyph per
+item — read-only, with no key that toggles one. The markdown path renders a
+task-list item with that **same** glyph (`markdown-legibility` turned
+`ENABLE_TASKLISTS` on), so the two checkbox renderers are asserted to agree
+rather than left to drift; what names the checklist path is the progress-bar
+row, not the glyph. On that path a **soft** break folds into a single space
+and the paragraph reflows at the region width, while a **hard** break — two
+trailing spaces or a backslash — still starts a rendered line, which is the
+author's explicit opt-out for a shape laid out on purpose; the bullet marker
+is `• `, the block-quote prefix `│ `, the thematic break a run of `─`, and a
+table's separators `│` with `├`/`┼`/`┤` on its delimiter line. Six of those
+seven glyphs are East Asian **Ambiguous** and a CJK-locale terminal paints
+them at two columns where `layout::columns` says one — an accepted,
+uncompensated exposure `SPEC.md` records beside the standing rule it widens. `ui` refuses to start with exit status 3 when stdout is not a terminal, which is
 also what keeps `cargo test` (which spawns this binary) from ever putting a
 real terminal into raw mode.
 
@@ -363,10 +376,13 @@ unreachable and the tests become integration tests by accident.
   gate also fails when its exclusion goes **vacuous** — `src/ui/palette.rs` missing, or
   present but naming no `Color` — and when that file drops out of `noio-view.sh`'s or
   `colwidth.sh`'s `PURE` list, so the new module cannot silently stop being swept.
-  The parser's option set is exactly `ENABLE_TABLES | ENABLE_STRIKETHROUGH`: turning on a
+  The parser's option set is exactly `ENABLE_TABLES | ENABLE_STRIKETHROUGH |
+  ENABLE_TASKLISTS`: turning on a
   further flag without also writing that construct's rendering path makes it **vanish**
   into `fold`'s `_ => {}` wildcards rather than degrade to literal text, and no gate can
-  see a wrongly-added flag.
+  see a wrongly-added flag. `markdown-legibility` is that warning's own worked example —
+  it turned `ENABLE_TASKLISTS` on and wrote the `Event::TaskListMarker` arm in a single
+  task, for exactly this reason.
 - **The detail region's two mandated interior widths are 78 and 58 columns** — the
   wide layout's `Min(0)` detail column at the mandated 120-column frame, less
   its one left gutter column only (its right edge runs flush to the frame's
