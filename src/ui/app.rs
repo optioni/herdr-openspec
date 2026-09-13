@@ -362,6 +362,24 @@ pub enum Target {
     },
 }
 
+/// `help-overlay`'s addition: the help overlay's own layer state — whether it
+/// is open, and the scroll position within its own row sequence. A sibling of
+/// `Filter` on `filter.active`'s own terms: the overlay is a layer over
+/// whichever route is current rather than a third `Route` variant, and
+/// closing it must return the reader to that route, which a `Route::Help`
+/// would have to remember separately. `scroll` is a user-controlled position
+/// on exactly `detail.scroll`'s terms, not derived geometry, clamped on every
+/// draw by `ui::layout::scroll_offset`. Deliberately implements no `Default`,
+/// anywhere in the crate, on the same terms as `Dashboard`, `Filter`,
+/// `Detail`, `Refresh`, and `Launch`: every construction and destructuring
+/// names both fields, with no `..` rest. See `specs/help-overlay/spec.md` and
+/// the `NODEFAULT-UI` check, whose type list now covers this type too.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Help {
+    pub open: bool,
+    pub scroll: usize,
+}
+
 /// The dashboard's whole state. Carries no layout mode, no terminal handle, and
 /// no frame — those are derived from the frame area on every draw, never stored
 /// here. **One exception, and only one:** `Detail::drawn_width` records the
@@ -370,7 +388,7 @@ pub enum Target {
 /// pure and cannot tell it (design.md -> Decision 13). It is never a source of
 /// what is drawn. Deliberately implements no
 /// `Default`, anywhere in the crate: every construction and every
-/// destructuring names all fourteen fields, so a field added later fails to
+/// destructuring names all fifteen fields, so a field added later fails to
 /// compile at each site rather than defaulting silently. See
 /// `specs/dashboard-loop/spec.md` and the `NODEFAULT-UI` check.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -417,16 +435,45 @@ pub struct Dashboard {
     /// sets `false` on both branches, since it never probes for a binary. Read only by the
     /// header badge (`ui::view::render_header`). See `specs/responsive-layout/spec.md`.
     pub file_mode: bool,
+    /// `help-overlay`'s addition: the help overlay's layer state. See
+    /// `specs/help-overlay/spec.md`.
+    pub help: Help,
 }
 
 impl Dashboard {
     /// Apply `action`, mutating only the field(s) it names. `Ignore` changes
-    /// nothing. After the match, `list-sections`' one blanket rule runs for
-    /// **every** action: `refresh.requested` is set to `true` when
-    /// `needs_archived_refresh()` holds, so a future key that opens a
-    /// section cannot forget to trigger its resolution. See design.md ->
-    /// Decision 6.
+    /// nothing. `help-overlay`'s overlay layer (`apply_help_action`) takes
+    /// precedence over the ordinary route dispatch (`apply_route_action`)
+    /// whenever `help.open` is set — see design.md -> Decision 2. After
+    /// either, `list-sections`' one blanket rule runs for **every** action:
+    /// `refresh.requested` is set to `true` when `needs_archived_refresh()`
+    /// holds, so a future key that opens a section cannot forget to trigger
+    /// its resolution. See design.md -> Decision 6.
     pub fn apply(&mut self, action: Action) {
+        if self.help.open {
+            // `help-overlay`: this branch takes precedence over the route
+            // dispatch and the filter dispatch alike, and over every other
+            // capability that owns an action's semantics. See
+            // `apply_help_action` and design.md -> Decision 2 and Decision 5.
+            self.apply_help_action(action);
+        } else {
+            self.apply_route_action(action);
+        }
+        // `list-sections`' one blanket rule, run after every action rather than a named
+        // subset: see design.md -> Decision 6. It never clears the flag. `help-overlay`
+        // leaves it running unconditionally while the overlay is open too: it is not an
+        // action's effect and the overlay does not suppress it.
+        if self.needs_archived_refresh() {
+            self.refresh.requested = true;
+        }
+    }
+
+    /// The route dispatch: every action's ordinary effect, reached only while
+    /// `help.open` is `false`. Pulled out of `apply` so the overlay's own
+    /// precedence branch can sit ahead of it without duplicating the blanket
+    /// `needs_archived_refresh()` rule that follows both. See
+    /// `specs/dashboard-loop/spec.md`.
+    fn apply_route_action(&mut self, action: Action) {
         match action {
             Action::Quit => self.quit = true,
             // `list-sections`: inert while the cursor addresses a section header —
@@ -564,16 +611,60 @@ impl Dashboard {
                 Route::List => self.apply_toggle_section(),
                 Route::Detail => self.apply_toggle_detail_section(),
             },
-            // `help-overlay`'s group 3 gives this its real dispatch — the `Help` field
-            // and the overlay layer do not exist yet at this group's end, so this arm is
-            // a compile-preserving no-op, not a claim that `?` does anything yet.
-            Action::ToggleHelp => {}
+            // `help-overlay`: reached only while the overlay is closed —
+            // `apply` dispatches to `apply_help_action` instead while it is
+            // open, and that branch closes it rather than reopening it. Open
+            // it and reset `help.scroll`, changing nothing else.
+            Action::ToggleHelp => {
+                self.help.open = true;
+                self.help.scroll = 0;
+            }
             Action::Ignore => {}
         }
-        // `list-sections`' one blanket rule, run after every action rather than a named
-        // subset: see design.md -> Decision 6. It never clears the flag.
-        if self.needs_archived_refresh() {
-            self.refresh.requested = true;
+    }
+
+    /// `help-overlay`'s overlay layer: while `help.open` is set, this table
+    /// takes precedence over `apply_route_action` and over every capability
+    /// that owns an action's semantics elsewhere — `detail-scroll`,
+    /// `artifact-tabs`, `artifact-folds`, `list-selection`, `live-updates`,
+    /// and `agent-launch` among them. Seven actions act; the other seventeen
+    /// — the closed remainder `specs/help-overlay/spec.md` names — change
+    /// nothing at all. Written as an exhaustive match with no wildcard arm,
+    /// on the same terms `ui::help`'s own action sweep uses, so an `Action`
+    /// added later is a compile error here rather than a silently-inert
+    /// eighteenth. `Quit` is the one exception that still acts: a modal that
+    /// traps the reader is a worse failure than one that lets a quit through
+    /// (design.md -> Decision 5).
+    fn apply_help_action(&mut self, action: Action) {
+        match action {
+            Action::Quit => self.quit = true,
+            Action::ToggleHelp | Action::Back => {
+                self.help.open = false;
+                self.help.scroll = 0;
+            }
+            Action::Next | Action::ScrollDown => {
+                self.help.scroll = self.help.scroll.saturating_add(1);
+            }
+            Action::Prev | Action::ScrollUp => {
+                self.help.scroll = self.help.scroll.saturating_sub(1);
+            }
+            Action::OpenDetail
+            | Action::SelectTab(_)
+            | Action::NextTab
+            | Action::PrevTab
+            | Action::FilterStart
+            | Action::FilterPush(_)
+            | Action::FilterPop
+            | Action::Refresh
+            | Action::LaunchApply
+            | Action::LaunchContinue
+            | Action::LaunchArchive
+            | Action::FocusAgent
+            | Action::ToggleSection
+            | Action::SelectNext
+            | Action::SelectPrev
+            | Action::Click(_)
+            | Action::Ignore => {}
         }
     }
 
@@ -1361,6 +1452,10 @@ mod tests {
                 collapsed: std::collections::BTreeSet::new(),
             },
             file_mode: false,
+            help: crate::ui::app::Help {
+                open: false,
+                scroll: 0,
+            },
         }
     }
 
@@ -1387,6 +1482,7 @@ mod tests {
             launch,
             sections: _,
             file_mode: _,
+            help: _,
         } = &d;
         assert_eq!(*repo, Some(std::path::PathBuf::from("/repo")));
         assert_eq!(searched_from, &std::path::PathBuf::from("/repo"));
@@ -1741,6 +1837,7 @@ mod tests {
             launch,
             sections: _,
             file_mode: _,
+            help: _,
         } = &d;
         assert_eq!(launch.pending, None);
         assert!(launch.problems.is_empty());
@@ -2918,6 +3015,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
+                help: crate::ui::app::Help {
+                    open: false,
+                    scroll: 0,
+                },
             }
         }
 
@@ -2966,6 +3067,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
+                help: crate::ui::app::Help {
+                    open: false,
+                    scroll: 0,
+                },
             }
         }
 
@@ -3020,6 +3125,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
+                help: crate::ui::app::Help {
+                    open: false,
+                    scroll: 0,
+                },
             }
         }
 
@@ -3496,6 +3605,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
+                help: crate::ui::app::Help {
+                    open: false,
+                    scroll: 0,
+                },
             };
 
             for action in variants {
@@ -3766,7 +3879,10 @@ mod tests {
 
             d.apply(Action::Back);
             assert!(!d.help.open, "the overlay is the outermost layer");
-            assert!(d.filter.active, "dismissing the overlay is not a filter move");
+            assert!(
+                d.filter.active,
+                "dismissing the overlay is not a filter move"
+            );
             assert_eq!(d.filter.query, "add");
             assert!(!d.quit);
 
@@ -3986,7 +4102,10 @@ mod tests {
             d.apply(Action::Prev);
             assert_eq!(d.help.scroll, 2);
 
-            assert_eq!(d.detail.scroll, 4, "the overlay's scroll is not the detail region's");
+            assert_eq!(
+                d.detail.scroll, 4,
+                "the overlay's scroll is not the detail region's"
+            );
             assert_eq!(d.selected, 1);
 
             let mut d2 = dashboard_at(Route::List);
@@ -3997,7 +4116,10 @@ mod tests {
             d2.apply(Action::Next);
             d2.apply(Action::Next);
             d2.apply(Action::Prev);
-            assert_eq!(d2.help.scroll, 2, "route-agnostic where Next and Prev are not");
+            assert_eq!(
+                d2.help.scroll, 2,
+                "route-agnostic where Next and Prev are not"
+            );
             assert_eq!(d2.selected, 1);
 
             let mut d3 = dashboard_at(Route::Detail);
@@ -4067,6 +4189,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
+                help: crate::ui::app::Help {
+                    open: false,
+                    scroll: 0,
+                },
             }
         }
 
@@ -4963,6 +5089,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
+                help: crate::ui::app::Help {
+                    open: false,
+                    scroll: 0,
+                },
             };
             d.apply(Action::Next);
             assert_eq!(d.detail.scroll, 1);
@@ -5022,6 +5152,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
+                help: crate::ui::app::Help {
+                    open: false,
+                    scroll: 0,
+                },
             };
             for _ in 0..4 {
                 d.apply(Action::Prev);
@@ -5096,6 +5230,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
+                help: crate::ui::app::Help {
+                    open: false,
+                    scroll: 0,
+                },
             };
             d.apply(Action::FilterPush('j'));
             d.apply(Action::FilterPush('k'));
@@ -5146,6 +5284,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
+                help: crate::ui::app::Help {
+                    open: false,
+                    scroll: 0,
+                },
             };
             d.apply(Action::Back);
             assert_eq!(d.detail.scroll, 0);
@@ -5191,6 +5333,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
+                help: crate::ui::app::Help {
+                    open: false,
+                    scroll: 0,
+                },
             };
             d2.apply(Action::FilterStart);
             assert_eq!(d2.route, Route::List);
@@ -5238,6 +5384,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
+                help: crate::ui::app::Help {
+                    open: false,
+                    scroll: 0,
+                },
             };
             d3.apply(Action::Back);
             assert_eq!(d3.detail.scroll, 3);
@@ -5318,6 +5468,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
+                help: crate::ui::app::Help {
+                    open: false,
+                    scroll: 0,
+                },
             }
         }
 
@@ -5584,6 +5738,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
+                help: crate::ui::app::Help {
+                    open: false,
+                    scroll: 0,
+                },
             };
             d.normalise_scroll(ratatui::layout::Rect::new(0, 0, 120, 20));
             assert_eq!(d.detail.scroll, 6);
@@ -5627,6 +5785,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
+                help: crate::ui::app::Help {
+                    open: false,
+                    scroll: 0,
+                },
             };
             d2.normalise_scroll(ratatui::layout::Rect::new(0, 0, 60, 20));
             assert_eq!(d2.detail.scroll, 6);
@@ -5670,6 +5832,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
+                help: crate::ui::app::Help {
+                    open: false,
+                    scroll: 0,
+                },
             };
             d3.normalise_scroll(ratatui::layout::Rect::new(0, 0, 120, 40));
             assert_eq!(
@@ -5735,6 +5901,10 @@ mod tests {
                         collapsed: std::collections::BTreeSet::new(),
                     },
                     file_mode: false,
+                    help: crate::ui::app::Help {
+                        open: false,
+                        scroll: 0,
+                    },
                 }
             }
 
@@ -5802,6 +5972,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
+                help: crate::ui::app::Help {
+                    open: false,
+                    scroll: 0,
+                },
             };
             d.normalise_scroll(ratatui::layout::Rect::new(0, 0, 60, 20));
             assert_eq!(
@@ -5874,6 +6048,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
+                help: crate::ui::app::Help {
+                    open: false,
+                    scroll: 0,
+                },
             };
             d.normalise_scroll(ratatui::layout::Rect::new(0, 0, 120, 20));
             assert_eq!(
@@ -6001,6 +6179,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
+                help: crate::ui::app::Help {
+                    open: false,
+                    scroll: 0,
+                },
             };
             let before = dashboard.clone();
 
@@ -6082,6 +6264,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
+                help: crate::ui::app::Help {
+                    open: false,
+                    scroll: 0,
+                },
             }
         }
 
@@ -6219,7 +6405,7 @@ mod tests {
         }
 
         #[test]
-        fn dashboard_destructures_into_exactly_fourteen_fields() {
+        fn dashboard_destructures_into_exactly_fifteen_fields() {
             let d = dashboard_at(Route::List);
             let Dashboard {
                 repo,
@@ -6236,6 +6422,7 @@ mod tests {
                 launch,
                 sections,
                 file_mode: _,
+                help,
             } = &d;
             assert_eq!(*repo, None);
             assert_eq!(
@@ -6260,6 +6447,8 @@ mod tests {
             assert!(launch.problems.is_empty());
             assert!(!launch.in_flight);
             assert!(sections.collapsed.is_empty());
+            assert!(!help.open);
+            assert_eq!(help.scroll, 0);
         }
 
         #[test]
@@ -6614,6 +6803,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
+                help: crate::ui::app::Help {
+                    open: false,
+                    scroll: 0,
+                },
             };
             d.apply(Action::Next);
             assert_eq!(d.selected, 1);
@@ -6667,6 +6860,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
+                help: crate::ui::app::Help {
+                    open: false,
+                    scroll: 0,
+                },
             };
             d2.apply(Action::Prev);
             assert_eq!(d2.selected, 0);
@@ -6732,6 +6929,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
+                help: crate::ui::app::Help {
+                    open: false,
+                    scroll: 0,
+                },
             }
         }
 
@@ -6968,6 +7169,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
+                help: crate::ui::app::Help {
+                    open: false,
+                    scroll: 0,
+                },
             };
             let recorder = RecordingReader::always(Ok("text".to_string()));
             let read = |p: &std::path::Path| recorder.read(p);
@@ -7046,6 +7251,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
+                help: crate::ui::app::Help {
+                    open: false,
+                    scroll: 0,
+                },
             };
             let recorder = RecordingReader::new(
                 vec![
@@ -7239,6 +7448,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
+                help: crate::ui::app::Help {
+                    open: false,
+                    scroll: 0,
+                },
             };
             let recorder = RecordingReader::always(Ok("t".to_string()));
             let read = |p: &std::path::Path| recorder.read(p);
@@ -7325,6 +7538,10 @@ mod tests {
                     collapsed: std::collections::BTreeSet::new(),
                 },
                 file_mode: false,
+                help: crate::ui::app::Help {
+                    open: false,
+                    scroll: 0,
+                },
             };
             let recorder2 = RecordingReader::always(Err("must not be called".to_string()));
             let read2 = |p: &std::path::Path| recorder2.read(p);
