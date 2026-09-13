@@ -356,34 +356,45 @@ fn herdr_reason(err: &crate::cli::CliError) -> String {
 }
 
 /// Run one `open`/`open-tab` invocation to completion against a real `HerdrCli`: list,
-/// then focus or open. A failed or unparseable listing warns and still opens
-/// (`existing_pane`'s `Err` case). A focus failing with `CliError::Failed { code:
-/// Some(2), .. }` — the measured usage shape, what a Herdr without `plugin pane focus`
-/// produces — warns and falls through to opening once; any other focus failure stops.
-/// The open response is never parsed: exit status alone carries success
-/// (design.md -> Decisions 4 and 5). The same listing also repairs a split's target pane
-/// when the injected `focused_pane_id` names a pane that has since closed — see
-/// [`split_target`].
+/// then focus or open, and — on a successful open — list and focus again so the
+/// invoking workspace's active tab is actually raised
+/// (`specs/pane-open/spec.md` -> "A newly opened dashboard pane is focused after
+/// opening"). A failed or unparseable listing warns and still opens (`dashboard_panes`'s
+/// `Err` case). A focus failing with `CliError::Failed { code: Some(2), .. }` — the
+/// measured usage shape, what a Herdr without `plugin pane focus` produces — warns and
+/// falls through to opening once; any other focus failure stops. The open response is
+/// never parsed: exit status alone carries success (design.md -> Decisions 4 and 5). The
+/// same first listing also repairs a split's target pane when the injected
+/// `focused_pane_id` names a pane that has since closed — see [`split_target`] — and
+/// supplies the pre-open dashboard pane ids [`opened_pane`] needs to tell a genuinely new
+/// pane from one that was already there.
+///
+/// Every failure **after** a successful open — the second listing failing or being
+/// unparseable, no dashboard pane identified in it, or the second focus failing on any
+/// code — is recorded on `warnings` and never changes `outcome` away from `Ok(())`: the
+/// dashboard is open either way, and refusing to report that would be exactly the
+/// fail-closed behaviour this project forbids.
 pub fn run(cli: &dyn crate::cli::HerdrCli, ctx: &Context, placement: Placement) -> Report {
     let mut warnings = Vec::new();
 
-    // One listing answers two questions: whether a dashboard pane already exists, and
-    // which live pane a split may target (`split_target`).
-    let (existing, split_pane) = match cli.run(&["pane", "list"]) {
+    // One listing answers three questions: whether a dashboard pane already exists,
+    // which live pane a split may target (`split_target`), and which dashboard pane ids
+    // existed before the open, for `opened_pane`'s post-open comparison.
+    let (existing, split_pane, before_ids) = match cli.run(&["pane", "list"]) {
         Ok(listing) => {
-            let found = match existing_pane(&listing, &ctx.workspace_id) {
-                Ok(found) => found,
+            let (found, ids) = match dashboard_panes(&listing, &ctx.workspace_id) {
+                Ok(ids) => (ids.first().cloned(), ids),
                 Err(reason) => {
                     warnings.push(reason);
-                    None
+                    (None, Vec::new())
                 }
             };
             let target = split_target(&listing, &ctx.workspace_id, ctx.focused_pane_id.as_deref());
-            (found, target)
+            (found, target, ids)
         }
         Err(err) => {
             warnings.push(herdr_reason(&err));
-            (None, ctx.focused_pane_id.clone())
+            (None, ctx.focused_pane_id.clone(), Vec::new())
         }
     };
 
@@ -423,15 +434,42 @@ pub fn run(cli: &dyn crate::cli::HerdrCli, ctx: &Context, placement: Placement) 
     };
     let open = open_args(placement, &open_ctx);
     let refs: Vec<&str> = open.iter().map(String::as_str).collect();
-    match cli.run(&refs) {
-        Ok(_) => Report {
-            warnings,
-            outcome: Ok(()),
-        },
-        Err(err) => Report {
+    if let Err(err) = cli.run(&refs) {
+        return Report {
             warnings,
             outcome: Err(herdr_reason(&err)),
+        };
+    }
+
+    // The open succeeded. Every failure from here is a warning, never an `Err`: no
+    // placement branch — a split whose pane already took focus is unharmed by a second
+    // focus (`specs/pane-open/spec.md` -> "A newly opened dashboard pane is focused
+    // after opening").
+    match cli.run(&["pane", "list"]) {
+        Ok(listing) => match dashboard_panes(&listing, &ctx.workspace_id) {
+            Ok(after_ids) => match opened_pane(&before_ids, &after_ids) {
+                Some(pane_id) => {
+                    let focus = focus_args(&pane_id);
+                    let refs: Vec<&str> = focus.iter().map(String::as_str).collect();
+                    if let Err(err) = cli.run(&refs) {
+                        warnings.push(herdr_reason(&err));
+                    }
+                }
+                None => {
+                    warnings.push(format!(
+                        "no dashboard pane was identified for workspace {} after opening",
+                        ctx.workspace_id
+                    ));
+                }
+            },
+            Err(reason) => warnings.push(reason),
         },
+        Err(err) => warnings.push(herdr_reason(&err)),
+    }
+
+    Report {
+        warnings,
+        outcome: Ok(()),
     }
 }
 
@@ -580,7 +618,9 @@ mod tests {
             let report = run(&fake, &ctx, Placement::Split);
             assert_eq!(report.outcome, Ok(()));
             let calls = fake.calls();
-            assert_eq!(calls.len(), 2, "listing: {listing}");
+            // list -> open -> list again (repeat-last answers the same non-matching
+            // listing, so no dashboard pane is identified and no focus call follows).
+            assert_eq!(calls.len(), 3, "listing: {listing}");
             assert_eq!(
                 calls[1].1.get(2),
                 Some(&"open".to_string()),
@@ -978,6 +1018,22 @@ mod tests {
         r#"{"result":{"panes":[{"pane_id":"w8:p1","label":"zsh","workspace_id":"w8","focused":true},{"pane_id":"w8:pG","label":"OpenSpec","workspace_id":"w8","cwd":"/repo"}]}}"#.to_string()
     }
 
+    /// A `pane list` payload carrying exactly one dashboard pane for workspace `w8`,
+    /// named `pane_id`. Used by group 3's post-open scenarios.
+    fn dashboard_listing(pane_id: &str) -> String {
+        format!(
+            r#"{{"result":{{"panes":[{{"pane_id":"{pane_id}","label":"OpenSpec","workspace_id":"w8"}}]}}}}"#
+        )
+    }
+
+    /// A `pane list` payload carrying two dashboard panes for workspace `w8`, in the
+    /// given order — used by `the_post_open_focus_names_the_newly_opened_pane`.
+    fn dashboard_listing2(id1: &str, id2: &str) -> String {
+        format!(
+            r#"{{"result":{{"panes":[{{"pane_id":"{id1}","label":"OpenSpec","workspace_id":"w8"}},{{"pane_id":"{id2}","label":"OpenSpec","workspace_id":"w8"}}]}}}}"#
+        )
+    }
+
     fn open_refs(placement: Placement, ctx: &Context) -> Vec<String> {
         open_args(placement, ctx)
     }
@@ -1180,7 +1236,24 @@ mod tests {
         fake.register_herdr(&refs, Ok(String::new()));
 
         let report = run(&fake, &ctx, Placement::Split);
-        assert_eq!(fake.calls().len(), 3);
+        // `specs/pane-open/spec.md` -> "A usage-error focus warns and opens once": "the
+        // first three Herdr calls are `pane list`, `plugin pane focus`, then `plugin
+        // pane open`, and the post-open listing and focus... follow them". Repeat-last
+        // then answers the post-open listing with the same `labelled_listing`, so
+        // `opened_pane` falls back to the pre-existing `w8:pG` and the post-open focus
+        // repeats the same registered usage-error response.
+        let calls = fake.calls();
+        assert_eq!(calls[0].1, vec!["pane".to_string(), "list".to_string()]);
+        assert_eq!(
+            calls[1].1,
+            vec![
+                "plugin".to_string(),
+                "pane".to_string(),
+                "focus".to_string(),
+                "w8:pG".to_string()
+            ]
+        );
+        assert_eq!(calls[2].1, argv);
         assert!(!report.warnings.is_empty());
         assert_eq!(report.outcome, Ok(()));
     }
@@ -1198,14 +1271,30 @@ mod tests {
                 stderr: "boom".to_string(),
             }),
         );
+        // A second, distinct `pane list` answer for the post-open listing: the empty
+        // pre-open ids (the first listing failed) mean the post-open listing's first
+        // match is the pane focused (`specs/pane-open/spec.md` -> "A failed listing
+        // warns and still opens").
+        fake.register_herdr(&["pane", "list"], Ok(dashboard_listing("w8:pG")));
         let argv = open_refs(Placement::Split, &ctx);
         let refs: Vec<&str> = argv.iter().map(String::as_str).collect();
         fake.register_herdr(&refs, Ok(String::new()));
+        fake.register_herdr(&["plugin", "pane", "focus", "w8:pG"], Ok(String::new()));
 
         let report = run(&fake, &ctx, Placement::Split);
         assert!(!report.warnings.is_empty());
         assert_eq!(report.outcome, Ok(()));
-        assert_eq!(fake.calls().len(), 2);
+        let calls = fake.calls();
+        assert_eq!(calls.len(), 4, "{calls:?}");
+        assert_eq!(
+            calls[3].1,
+            vec![
+                "plugin".to_string(),
+                "pane".to_string(),
+                "focus".to_string(),
+                "w8:pG".to_string()
+            ]
+        );
     }
 
     #[test]
@@ -1244,6 +1333,13 @@ mod tests {
         let argv = open_refs(Placement::Split, &repaired);
         let refs: Vec<&str> = argv.iter().map(String::as_str).collect();
         fake.register_herdr(&refs, Ok(String::new()));
+        // `pane_listing`'s entries are all labelled `"zsh"`, not `DASHBOARD_LABEL`, so
+        // the post-open listing needs its own answer carrying a dashboard pane —
+        // otherwise repeat-last would re-answer with the same unlabelled listing, the
+        // post-open step would warn, and this test's `warnings: Vec::new()` — the only
+        // thing it says about silence — would go false rather than exercising the focus.
+        fake.register_herdr(&["pane", "list"], Ok(dashboard_listing("w8:pG")));
+        fake.register_herdr(&["plugin", "pane", "focus", "w8:pG"], Ok(String::new()));
 
         let report = run(&fake, &ctx, Placement::Split);
         assert_eq!(
@@ -1256,6 +1352,15 @@ mod tests {
         let opened = &fake.calls()[1].1;
         assert!(opened.contains(&"w8:p2".to_string()), "{opened:?}");
         assert!(!opened.contains(&"w8:pD".to_string()), "{opened:?}");
+        assert_eq!(
+            fake.calls().last().unwrap().1,
+            vec![
+                "plugin".to_string(),
+                "pane".to_string(),
+                "focus".to_string(),
+                "w8:pG".to_string()
+            ]
+        );
     }
 
     /// A tab never carries `--target-pane`, so a dead focused pane cannot affect it.
@@ -1285,6 +1390,319 @@ mod tests {
         let argv = open_refs(Placement::Split, &ctx);
         let refs: Vec<&str> = argv.iter().map(String::as_str).collect();
         fake.register_herdr(&refs, Ok(String::new()));
+        fake.register_herdr(&["pane", "list"], Ok(dashboard_listing("w8:pG")));
+        fake.register_herdr(&["plugin", "pane", "focus", "w8:pG"], Ok(String::new()));
+
+        let report = run(&fake, &ctx, Placement::Split);
+        assert_eq!(report.warnings, Vec::<String>::new());
+        assert_eq!(report.outcome, Ok(()));
+        let calls = fake.calls();
+        assert_eq!(calls.len(), 4, "{calls:?}");
+        assert_eq!(
+            calls[3].1,
+            vec![
+                "plugin".to_string(),
+                "pane".to_string(),
+                "focus".to_string(),
+                "w8:pG".to_string()
+            ]
+        );
+    }
+
+    // --- group 3: run's post-open listing and focus -------------------------------------
+    // `specs/pane-open/spec.md` -> "A newly opened dashboard pane is focused after
+    // opening". Every assertion below reads `fake.calls()` — the recorded argument
+    // vectors — rather than `outcome` alone, because `outcome == Ok` alone stays green
+    // with the whole post-open step deleted (design.md -> Test Strategy).
+
+    #[test]
+    fn a_tab_open_lists_then_focuses() {
+        let ctx = full_context();
+        let fake = FakeCli::new();
+        fake.register_herdr(&["pane", "list"], Ok(empty_listing()));
+        let open_argv = open_refs(Placement::Tab, &ctx);
+        let open_refs_: Vec<&str> = open_argv.iter().map(String::as_str).collect();
+        fake.register_herdr(&open_refs_, Ok(String::new()));
+        fake.register_herdr(&["pane", "list"], Ok(dashboard_listing("w8:pG")));
+        fake.register_herdr(&["plugin", "pane", "focus", "w8:pG"], Ok(String::new()));
+
+        let report = run(&fake, &ctx, Placement::Tab);
+        assert_eq!(
+            report,
+            Report {
+                warnings: Vec::new(),
+                outcome: Ok(())
+            }
+        );
+        assert_eq!(
+            fake.calls(),
+            vec![
+                (Program::Herdr, vec!["pane".to_string(), "list".to_string()]),
+                (Program::Herdr, open_argv.clone()),
+                (Program::Herdr, vec!["pane".to_string(), "list".to_string()]),
+                (
+                    Program::Herdr,
+                    vec![
+                        "plugin".to_string(),
+                        "pane".to_string(),
+                        "focus".to_string(),
+                        "w8:pG".to_string()
+                    ]
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_split_open_takes_the_same_path() {
+        let ctx = full_context();
+        let fake = FakeCli::new();
+        fake.register_herdr(&["pane", "list"], Ok(empty_listing()));
+        let open_argv = open_refs(Placement::Split, &ctx);
+        let open_refs_: Vec<&str> = open_argv.iter().map(String::as_str).collect();
+        fake.register_herdr(&open_refs_, Ok(String::new()));
+        fake.register_herdr(&["pane", "list"], Ok(dashboard_listing("w8:pG")));
+        fake.register_herdr(&["plugin", "pane", "focus", "w8:pG"], Ok(String::new()));
+
+        let report = run(&fake, &ctx, Placement::Split);
+        assert_eq!(report.outcome, Ok(()));
+        assert_eq!(
+            fake.calls(),
+            vec![
+                (Program::Herdr, vec!["pane".to_string(), "list".to_string()]),
+                (Program::Herdr, open_argv.clone()),
+                (Program::Herdr, vec!["pane".to_string(), "list".to_string()]),
+                (
+                    Program::Herdr,
+                    vec![
+                        "plugin".to_string(),
+                        "pane".to_string(),
+                        "focus".to_string(),
+                        "w8:pG".to_string()
+                    ]
+                ),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_failed_second_listing_warns_and_succeeds() {
+        let ctx = full_context();
+        let fake = FakeCli::new();
+        fake.register_herdr(&["pane", "list"], Ok(empty_listing()));
+        let open_argv = open_refs(Placement::Split, &ctx);
+        let open_refs_: Vec<&str> = open_argv.iter().map(String::as_str).collect();
+        fake.register_herdr(&open_refs_, Ok(String::new()));
+        fake.register_herdr(
+            &["pane", "list"],
+            Err(CliError::Failed {
+                program: "herdr".to_string(),
+                args: vec!["pane".to_string(), "list".to_string()],
+                code: Some(1),
+                stderr: "boom-second".to_string(),
+            }),
+        );
+
+        let report = run(&fake, &ctx, Placement::Split);
+        assert_eq!(report.outcome, Ok(()));
+        assert!(
+            report.warnings.iter().any(|w| w.contains("boom-second")),
+            "{:?}",
+            report.warnings
+        );
+        assert_eq!(
+            fake.calls().len(),
+            3,
+            "no focus call should follow a failed second listing: {:?}",
+            fake.calls()
+        );
+    }
+
+    #[test]
+    fn an_unparseable_second_listing_warns_and_succeeds() {
+        let ctx = full_context();
+        for bad in ["not json", r#"{"result":{}}"#] {
+            let fake = FakeCli::new();
+            fake.register_herdr(&["pane", "list"], Ok(empty_listing()));
+            let open_argv = open_refs(Placement::Split, &ctx);
+            let open_refs_: Vec<&str> = open_argv.iter().map(String::as_str).collect();
+            fake.register_herdr(&open_refs_, Ok(String::new()));
+            fake.register_herdr(&["pane", "list"], Ok(bad.to_string()));
+
+            let report = run(&fake, &ctx, Placement::Split);
+            assert_eq!(report.outcome, Ok(()), "listing: {bad}");
+            assert!(!report.warnings.is_empty(), "listing: {bad}");
+            assert_eq!(fake.calls().len(), 3, "no focus call should follow: {bad}");
+        }
+    }
+
+    #[test]
+    fn an_empty_second_listing_warns_rather_than_focusing_nothing() {
+        let ctx = full_context();
+        let fake = FakeCli::new();
+        fake.register_herdr(&["pane", "list"], Ok(empty_listing()));
+        let open_argv = open_refs(Placement::Split, &ctx);
+        let open_refs_: Vec<&str> = open_argv.iter().map(String::as_str).collect();
+        fake.register_herdr(&open_refs_, Ok(String::new()));
+
+        let report = run(&fake, &ctx, Placement::Split);
+        assert_eq!(report.outcome, Ok(()));
+        assert!(
+            report
+                .warnings
+                .iter()
+                .any(|w| w.contains("w8") && w.contains("no dashboard pane")),
+            "warning should name the workspace id and that no dashboard pane was \
+             identified: {:?}",
+            report.warnings
+        );
+        assert!(
+            !fake
+                .calls()
+                .iter()
+                .any(|(_, argv)| argv.contains(&"focus".to_string())),
+            "no focus call should be made, empty pane id included: {:?}",
+            fake.calls()
+        );
+    }
+
+    #[test]
+    fn a_post_open_focus_failure_warns_on_every_code() {
+        let ctx = full_context();
+        let focus_argv = vec![
+            "plugin".to_string(),
+            "pane".to_string(),
+            "focus".to_string(),
+            "w8:pG".to_string(),
+        ];
+        let cases: Vec<(&str, CliError)> = vec![
+            (
+                "domain error",
+                CliError::Failed {
+                    program: "herdr".to_string(),
+                    args: focus_argv.clone(),
+                    code: Some(1),
+                    stderr: "plugin_pane_not_found".to_string(),
+                },
+            ),
+            (
+                "usage error",
+                CliError::Failed {
+                    program: "herdr".to_string(),
+                    args: focus_argv.clone(),
+                    code: Some(2),
+                    stderr: "unrecognized subcommand".to_string(),
+                },
+            ),
+            (
+                "not started",
+                CliError::NotStarted {
+                    program: "herdr".to_string(),
+                    args: focus_argv.clone(),
+                    reason: "No such file or directory (os error 2)".to_string(),
+                },
+            ),
+        ];
+
+        for (label, err) in cases {
+            let fake = FakeCli::new();
+            fake.register_herdr(&["pane", "list"], Ok(empty_listing()));
+            let open_argv = open_refs(Placement::Split, &ctx);
+            let open_refs_: Vec<&str> = open_argv.iter().map(String::as_str).collect();
+            fake.register_herdr(&open_refs_, Ok(String::new()));
+            fake.register_herdr(&["pane", "list"], Ok(dashboard_listing("w8:pG")));
+            fake.register_herdr(&["plugin", "pane", "focus", "w8:pG"], Err(err));
+
+            let report = run(&fake, &ctx, Placement::Split);
+            assert_eq!(report.outcome, Ok(()), "case: {label}");
+            assert!(!report.warnings.is_empty(), "case: {label}");
+            assert!(
+                fake.calls().iter().any(|(_, argv)| argv == &focus_argv),
+                "case {label}: {:?}",
+                fake.calls()
+            );
+        }
+    }
+
+    #[test]
+    fn the_post_open_focus_names_the_newly_opened_pane() {
+        let ctx = full_context();
+        let fake = FakeCli::new();
+        fake.register_herdr(&["pane", "list"], Ok(dashboard_listing("w8:pG")));
+        fake.register_herdr(
+            &["plugin", "pane", "focus", "w8:pG"],
+            Err(CliError::Failed {
+                program: "herdr".to_string(),
+                args: vec![
+                    "plugin".to_string(),
+                    "pane".to_string(),
+                    "focus".to_string(),
+                    "w8:pG".to_string(),
+                ],
+                code: Some(2),
+                stderr: "unrecognized subcommand".to_string(),
+            }),
+        );
+        let open_argv = open_refs(Placement::Tab, &ctx);
+        let open_refs_: Vec<&str> = open_argv.iter().map(String::as_str).collect();
+        fake.register_herdr(&open_refs_, Ok(String::new()));
+        fake.register_herdr(&["pane", "list"], Ok(dashboard_listing2("w8:pG", "w8:pH")));
+        fake.register_herdr(&["plugin", "pane", "focus", "w8:pH"], Ok(String::new()));
+
+        let report = run(&fake, &ctx, Placement::Tab);
+        assert_eq!(report.outcome, Ok(()));
+        let calls = fake.calls();
+        assert_eq!(calls.len(), 5, "{calls:?}");
+        assert_eq!(
+            calls[4].1,
+            vec![
+                "plugin".to_string(),
+                "pane".to_string(),
+                "focus".to_string(),
+                "w8:pH".to_string()
+            ],
+            "the fifth call must focus the newly opened pane, not the one already known \
+             not to be focusable: {calls:?}"
+        );
+        assert_ne!(
+            calls[4].1,
+            vec![
+                "plugin".to_string(),
+                "pane".to_string(),
+                "focus".to_string(),
+                "w8:pG".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn a_failed_open_makes_no_post_open_call() {
+        let ctx = full_context();
+        let fake = FakeCli::new();
+        fake.register_herdr(&["pane", "list"], Ok(empty_listing()));
+        let open_argv = open_refs(Placement::Split, &ctx);
+        let open_refs_: Vec<&str> = open_argv.iter().map(String::as_str).collect();
+        fake.register_herdr(
+            &open_refs_,
+            Err(CliError::Failed {
+                program: "herdr".to_string(),
+                args: open_argv.clone(),
+                code: Some(1),
+                stderr: "plugin_pane_open_failed".to_string(),
+            }),
+        );
+
+        let report = run(&fake, &ctx, Placement::Split);
+        assert!(report.outcome.is_err());
+        assert_eq!(fake.calls().len(), 2, "{:?}", fake.calls());
+    }
+
+    #[test]
+    fn the_already_open_path_is_untouched() {
+        let ctx = full_context();
+        let fake = FakeCli::new();
+        fake.register_herdr(&["pane", "list"], Ok(dashboard_listing("w8:pG")));
+        fake.register_herdr(&["plugin", "pane", "focus", "w8:pG"], Ok(String::new()));
 
         let report = run(&fake, &ctx, Placement::Split);
         assert_eq!(
@@ -1293,6 +1711,15 @@ mod tests {
                 warnings: Vec::new(),
                 outcome: Ok(())
             }
+        );
+        assert_eq!(fake.calls().len(), 2, "{:?}", fake.calls());
+        assert!(
+            !fake
+                .calls()
+                .iter()
+                .any(|(_, argv)| argv.contains(&"open".to_string())),
+            "no open call should follow: {:?}",
+            fake.calls()
         );
     }
 }
