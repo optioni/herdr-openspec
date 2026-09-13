@@ -809,6 +809,10 @@ pub(crate) mod testutil {
 
         fn empty_dashboard() -> Dashboard {
             Dashboard {
+                help: crate::ui::app::Help {
+                    open: false,
+                    scroll: 0,
+                },
                 repo: None,
                 searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
                 changes: empty_set(),

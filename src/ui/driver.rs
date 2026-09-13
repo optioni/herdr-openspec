@@ -396,6 +396,10 @@ mod tests {
     /// `dashboard()`'s empty set.
     fn dashboard_with_change(repo: &str, name: &str, completed: usize, total: usize) -> Dashboard {
         Dashboard {
+            help: crate::ui::app::Help {
+                open: false,
+                scroll: 0,
+            },
             repo: Some(std::path::PathBuf::from(repo)),
             searched_from: std::path::PathBuf::from(repo),
             changes: crate::changes::fixture::set(
@@ -447,6 +451,10 @@ mod tests {
 
     fn dashboard() -> Dashboard {
         Dashboard {
+            help: crate::ui::app::Help {
+                open: false,
+                scroll: 0,
+            },
             repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
             searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
             changes: empty_set(),
@@ -835,6 +843,10 @@ mod tests {
             &[("proposal", &["/repo/p.md"])],
         );
         Dashboard {
+            help: crate::ui::app::Help {
+                open: false,
+                scroll: 0,
+            },
             repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
             searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
             changes: crate::changes::fixture::set(vec![change], Vec::new(), Vec::new()),
@@ -977,6 +989,10 @@ mod tests {
             1,
         );
         Dashboard {
+            help: crate::ui::app::Help {
+                open: false,
+                scroll: 0,
+            },
             repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
             searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
             changes: crate::changes::fixture::set(vec![change], Vec::new(), Vec::new()),
@@ -1208,6 +1224,10 @@ mod tests {
         // resize the backend from inside it.
         let base = twenty_line_detail_dashboard();
         let mut dashboard = Dashboard {
+            help: crate::ui::app::Help {
+                open: false,
+                scroll: 0,
+            },
             repo: base.repo,
             searched_from: base.searched_from,
             changes: base.changes,
@@ -1273,6 +1293,7 @@ mod tests {
         // collapsed sections is `2` after all three areas below, because a
         // cursor does not move when the pane resizes.
         let mut foldable = Dashboard {
+            help: dashboard.help.clone(),
             repo: dashboard.repo.clone(),
             searched_from: dashboard.searched_from.clone(),
             changes: dashboard.changes.clone(),
@@ -1355,6 +1376,10 @@ mod tests {
         );
         let dir = change.dir.clone();
         let mut dashboard = Dashboard {
+            help: crate::ui::app::Help {
+                open: false,
+                scroll: 0,
+            },
             repo: Some(std::path::PathBuf::from("/repo")),
             searched_from: std::path::PathBuf::from("/repo"),
             changes: crate::changes::fixture::set(vec![change], Vec::new(), Vec::new()),
@@ -1522,6 +1547,10 @@ mod tests {
             &[("proposal", &["/repo/p.md"])],
         );
         Dashboard {
+            help: crate::ui::app::Help {
+                open: false,
+                scroll: 0,
+            },
             repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
             searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
             changes: crate::changes::fixture::set(vec![change], Vec::new(), Vec::new()),
@@ -3481,6 +3510,10 @@ mod tests {
             &[("proposal", &["/repo/p.md"]), ("design", &["/repo/d.md"])],
         );
         let mut dashboard = Dashboard {
+            help: crate::ui::app::Help {
+                open: false,
+                scroll: 0,
+            },
             repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
             searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
             changes: crate::changes::fixture::set(vec![change], Vec::new(), Vec::new()),
@@ -4964,6 +4997,10 @@ mod tests {
             &[("specs", &SPEC_PATHS)],
         );
         Dashboard {
+            help: crate::ui::app::Help {
+                open: false,
+                scroll: 0,
+            },
             repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
             searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
             changes: crate::changes::fixture::set(vec![change], Vec::new(), Vec::new()),

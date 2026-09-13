@@ -946,6 +946,10 @@ mod tests {
         route: Route,
     ) -> Dashboard {
         Dashboard {
+            help: crate::ui::app::Help {
+                open: false,
+                scroll: 0,
+            },
             repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
             searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
             changes: fixture::set(active, archived, Vec::new()),
@@ -990,6 +994,10 @@ mod tests {
         detail: Detail,
     ) -> Dashboard {
         Dashboard {
+            help: crate::ui::app::Help {
+                open: false,
+                scroll: 0,
+            },
             repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
             searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
             changes: fixture::set(active, archived, Vec::new()),
@@ -1036,6 +1044,10 @@ mod tests {
     // preamble — every scenario in this capability renders an empty `ChangeSet`.
     fn dashboard(repo: Option<&str>, route: Route) -> Dashboard {
         Dashboard {
+            help: crate::ui::app::Help {
+                open: false,
+                scroll: 0,
+            },
             repo: repo.map(std::path::PathBuf::from),
             searched_from: std::path::PathBuf::from("/tmp/searched-from"),
             changes: empty_set(),
@@ -1077,6 +1089,10 @@ mod tests {
     /// module's own established rule that every construction names all thirteen fields.
     fn dashboard_in_file_mode(repo: Option<&str>, route: Route) -> Dashboard {
         Dashboard {
+            help: crate::ui::app::Help {
+                open: false,
+                scroll: 0,
+            },
             repo: repo.map(std::path::PathBuf::from),
             searched_from: std::path::PathBuf::from("/tmp/searched-from"),
             changes: empty_set(),
@@ -2791,6 +2807,10 @@ mod tests {
     #[test]
     fn no_repository_names_the_directory_searched() {
         let d = Dashboard {
+            help: crate::ui::app::Help {
+                open: false,
+                scroll: 0,
+            },
             repo: None,
             searched_from: std::path::PathBuf::from(
                 "/home/dev/workspaces/openspec-demos/a-rather-long-repository-name-here",
@@ -3742,6 +3762,10 @@ mod tests {
         let change =
             fixture::with_artifacts(fixture::active("detail-view", 4, 9), &[("proposal", &[])]);
         Dashboard {
+            help: crate::ui::app::Help {
+                open: false,
+                scroll: 0,
+            },
             repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
             searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
             changes: fixture::set(vec![change], Vec::new(), Vec::new()),
@@ -4194,6 +4218,10 @@ mod tests {
     fn the_detail_document_fills_the_interior_at_60_and_120() {
         let base = detail_dashboard(twenty_line_source(), 0, Route::List);
         let mut d = Dashboard {
+            help: crate::ui::app::Help {
+                open: false,
+                scroll: 0,
+            },
             repo: base.repo,
             searched_from: base.searched_from,
             changes: fixture::set(
@@ -4547,6 +4575,10 @@ mod tests {
         // empty source" to "no change selected" — with a change selected
         // the region is never blank, `No content yet` is drawn instead.
         let no_change = Dashboard {
+            help: crate::ui::app::Help {
+                open: false,
+                scroll: 0,
+            },
             repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
             searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
             changes: fixture::set(Vec::new(), Vec::new(), Vec::new()),
@@ -4984,6 +5016,10 @@ mod tests {
     fn the_list_route_still_moves_the_marker_with_detail_content_present() {
         let base = detail_dashboard(twenty_line_source(), 0, Route::List);
         let mut d = Dashboard {
+            help: crate::ui::app::Help {
+                open: false,
+                scroll: 0,
+            },
             repo: base.repo,
             searched_from: base.searched_from,
             changes: fixture::set(

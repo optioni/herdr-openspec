@@ -67,7 +67,7 @@ run it avoids.
 ## 3. `Help` on `Dashboard`, and `apply`'s overlay layer
 <!-- kind: behavior -->
 
-- [ ] 3.1 RED: Add tests named for the scenarios The overlay opens and closes without moving the
+- [x] 3.1 RED: Add tests named for the scenarios The overlay opens and closes without moving the
   route, `Esc` closes the overlay before any other layer, The overlay layer suppresses every
   action but seven, The overlay's seven live actions act and nothing else moves, Both quit keys
   still quit from inside the overlay, The agent keys launch nothing while the overlay is open,
@@ -75,15 +75,15 @@ run it avoids.
   than the frame beneath. The last two are `help-overlay`'s own and are not duplicates of the
   `dashboard-loop` pair above them: one drives eleven actions at `Route::List`, the other pins
   the route-agnostic scroll and the saturating underflow.
-- [ ] 3.2 GREEN: Add `pub struct Help { pub open: bool, pub scroll: usize }` with no `Default`,
+- [x] 3.2 GREEN: Add `pub struct Help { pub open: bool, pub scroll: usize }` with no `Default`,
   and the `help` field on `Dashboard`. Every construction site is a compile error until it names
   the field; fix each.
-- [ ] 3.3 GREEN: Add `apply`'s overlay branch ahead of the existing dispatch, per
+- [x] 3.3 GREEN: Add `apply`'s overlay branch ahead of the existing dispatch, per
   `specs/help-overlay/spec.md`'s table. Extend `Back`'s layer order with the overlay at the
   front. Leave the blanket `needs_archived_refresh()` rule running for every action.
-- [ ] 3.4 REFACTOR: If the overlay branch and the route dispatch share a scroll step, extract it;
+- [x] 3.4 REFACTOR: If the overlay branch and the route dispatch share a scroll step, extract it;
   otherwise state that no refactor was needed.
-- [ ] 3.5 Run `cargo test ui::app` — no regressions.
+- [x] 3.5 Run `cargo test ui::app` — no regressions.
 
 ## 4. `src/ui/help.rs` — the inventory and the row grammar
 <!-- kind: behavior -->

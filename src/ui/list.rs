@@ -842,6 +842,10 @@ mod tests {
         selected: usize,
     ) -> Dashboard {
         Dashboard {
+            help: crate::ui::app::Help {
+                open: false,
+                scroll: 0,
+            },
             repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
             searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
             changes: fixture::set(active, archived, problems),
@@ -939,6 +943,10 @@ mod tests {
                 0,
             ),
             Dashboard {
+                help: crate::ui::app::Help {
+                    open: false,
+                    scroll: 0,
+                },
                 repo: None,
                 searched_from: std::path::PathBuf::from(
                     "/home/dev/workspaces/openspec-demos/a-rather-long-repository-name-here",
@@ -1978,6 +1986,10 @@ mod tests {
     #[test]
     fn the_no_repository_block_is_three_rows() {
         let d = Dashboard {
+            help: crate::ui::app::Help {
+                open: false,
+                scroll: 0,
+            },
             repo: None,
             searched_from: std::path::PathBuf::from(
                 "/home/dev/workspaces/openspec-demos/a-rather-long-repository-name-here",
@@ -2049,6 +2061,10 @@ mod tests {
         // narrowed to `repo.is_none() && problems.is_empty()` would have
         // passed the whole suite.
         let with_problems = Dashboard {
+            help: crate::ui::app::Help {
+                open: false,
+                scroll: 0,
+            },
             repo: None,
             searched_from: d.searched_from.clone(),
             changes: fixture::set(Vec::new(), Vec::new(), vec!["broken".to_string()]),
@@ -2829,6 +2845,10 @@ mod tests {
         assert_eq!(columns(path), 65);
 
         let d = Dashboard {
+            help: crate::ui::app::Help {
+                open: false,
+                scroll: 0,
+            },
             repo: None,
             searched_from: std::path::PathBuf::from(path),
             changes: fixture::set(Vec::new(), Vec::new(), Vec::new()),

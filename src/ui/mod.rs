@@ -465,6 +465,10 @@ pub fn load(
             let searched_from =
                 std::fs::canonicalize(start).unwrap_or_else(|_| start.to_path_buf());
             Dashboard {
+                help: crate::ui::app::Help {
+                    open: false,
+                    scroll: 0,
+                },
                 repo: Some(root),
                 searched_from,
                 changes,
@@ -514,6 +518,10 @@ pub fn load(
             }
         }
         crate::resolve::RepoSearch::NotFound { searched_from } => Dashboard {
+            help: crate::ui::app::Help {
+                open: false,
+                scroll: 0,
+            },
             repo: None,
             searched_from,
             changes: crate::changes::empty_set(),
@@ -710,6 +718,10 @@ mod tests {
                 &[("proposal", &["/repo/p.md"])],
             );
             Dashboard {
+                help: crate::ui::app::Help {
+                    open: false,
+                    scroll: 0,
+                },
                 repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
                 searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
                 changes: crate::changes::fixture::set(vec![change], Vec::new(), Vec::new()),
@@ -861,6 +873,10 @@ mod tests {
                     twenty_problems,
                 );
                 let mut dashboard = Dashboard {
+                    help: crate::ui::app::Help {
+                        open: false,
+                        scroll: 0,
+                    },
                     repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
                     searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
                     changes: crate::changes::fixture::set(vec![change], Vec::new(), Vec::new()),
@@ -1007,6 +1023,10 @@ mod tests {
                 );
                 let other = crate::changes::fixture::active("fix-empty-basket", 7, 7);
                 Dashboard {
+                    help: crate::ui::app::Help {
+                        open: false,
+                        scroll: 0,
+                    },
                     repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
                     searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
                     changes: crate::changes::fixture::set(

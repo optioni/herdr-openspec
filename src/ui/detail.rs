@@ -818,6 +818,10 @@ mod tests {
     /// anywhere else.
     fn dashboard_at_detail(change: crate::changes::Change, detail: Detail) -> Dashboard {
         Dashboard {
+            help: crate::ui::app::Help {
+                open: false,
+                scroll: 0,
+            },
             repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
             searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
             changes: fixture::set(vec![change], Vec::new(), Vec::new()),
