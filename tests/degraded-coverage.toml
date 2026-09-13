@@ -352,7 +352,7 @@ tier = "integration"
 proof = ["open_outside_herdr_exits_one"]
 verdict = "confirmed"
 why = "the real binary, spawned with no HERDR_WORKSPACE_ID, exits 1 with an empty Herdr argv log"
-covers = ["src/open.rs:69-73"]
+covers = ["src/open.rs:70-74"]
 
 [[row]]
 condition = "`open`/`open-tab`'s `pane list` call fails or its payload is unparseable"
@@ -360,7 +360,7 @@ tier = "unit"
 proof = ["listing_failure_warns_and_still_opens", "listing_unparseable_warns_and_still_opens"]
 verdict = "confirmed"
 why = "open::run's own unit proof that a failed or unparseable pane list still opens the pane"
-covers = ["src/open.rs:268-280"]
+covers = ["src/open.rs:383-399"]
 
 [[row]]
 condition = "`open`/`open-tab`'s `plugin pane focus` call fails with a usage error (code 2)"
@@ -368,7 +368,7 @@ tier = "unit"
 proof = ["focus_usage_error_warns_and_opens_once"]
 verdict = "confirmed"
 why = "open::run's own unit proof that a usage-error focus warns and still opens once"
-covers = ["src/open.rs:293-306"]
+covers = ["src/open.rs:411-417"]
 
 [[row]]
 condition = "`open`/`open-tab`'s `plugin pane focus` call fails with a domain error, or `plugin pane open` itself fails"
@@ -376,7 +376,23 @@ tier = "unit"
 proof = ["focus_domain_error_stops_and_opens_nothing"]
 verdict = "spec-corrected"
 why = "herdr_reason's own formatted prefix, not Herdr's raw message verbatim, is what reaches stderr"
-covers = ["src/open.rs:299-304", "src/open.rs:316-319"]
+covers = ["src/open.rs:418-422", "src/open.rs:437-441"]
+
+[[row]]
+condition = "`open`/`open-tab`'s **post-open** `pane list` call fails, is unparseable, or names no dashboard pane"
+tier = "unit"
+proof = ["a_failed_second_listing_warns_and_succeeds", "an_unparseable_second_listing_warns_and_succeeds", "an_empty_second_listing_warns_rather_than_focusing_nothing"]
+verdict = "implemented"
+why = "open::run's own unit proofs over cli::FakeCli, asserted on the recorded argv sequence rather than outcome alone; none render anything, which is why this row stays unit rather than the capability spec's stated integration preference for one-shot commands"
+covers = ["src/open.rs:458-463", "src/open.rs:465-467"]
+
+[[row]]
+condition = "`open`/`open-tab`'s **post-open** `plugin pane focus` call fails, on any code"
+tier = "unit"
+proof = ["a_post_open_focus_failure_warns_on_every_code"]
+verdict = "implemented"
+why = "open::run's own unit proof looping over Failed{code:Some(1)}, Failed{code:Some(2)}, and NotStarted, asserted on the recorded focus argv and the warning text; it renders nothing, which is why this row stays unit rather than the capability spec's stated integration preference for one-shot commands"
+covers = ["src/open.rs:454-456"]
 
 [[row]]
 condition = "The dashboard process opened by `open`/`open-tab` finds no workspace cwd in its own injected Herdr context (`ui::startup_cwd` returns `None`)"
