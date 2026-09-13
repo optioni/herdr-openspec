@@ -1,81 +1,89 @@
 ## Why
 
-`a`, `c`, and `s` launch an agent onto the selected change — and they launch **Claude Code**,
-because what they actually send is `/opsx:apply`, `/opsx:continue`, and `/opsx:archive`. Those
-are Claude Code slash commands. A user running Codex, GitHub Copilot CLI, or anything else gets
-a session that receives a string its client does not understand.
+`a`, `c`, and `s` launch an agent onto the selected change and send it `/opsx:apply`,
+`/opsx:continue`, or `/opsx:archive`. Those are **Claude Code slash commands**.
 
-So "let the user pick their client" is not a setting with three values. The binding from an
-**action** (apply / continue / archive) to the **text sent to a client** is the thing that
-varies, and today it is hardcoded to one client's command grammar. Picking a client without
-picking that mapping just moves the breakage.
+Choosing the client is **already possible and already shipped**: `config.toml` carries
+`agent_kind` (default `claude`, documented at `README.md:85`), and `launch::start_args` passes
+it straight to `herdr agent start --kind`. Setting `agent_kind = "codex"` today launches Codex
+correctly — and then sends it `/opsx:apply`, which it does not understand.
 
-Unplanned work past Phase 6, and the largest of the ideas currently queued.
+So the gap is not client selection. It is that **the prompt is hardcoded to one client's command
+grammar** while the client it is sent to is configurable. The two halves disagree, and the
+half that is missing is the smaller one.
+
+*(Corrected from this proposal's first draft, which proposed building the configuration surface
+that already exists.)*
 
 ## What Changes
 
-- **A client is a named entry in configuration**, carrying what Herdr should start and how each
-  of the three actions is phrased for it. Claude Code ships as the built-in default, so an
-  existing install behaves exactly as it does today with no configuration at all.
-- **The three keys resolve their prompt through the selected client** rather than through a
-  hardcoded `/opsx:*` literal.
-- **A first-run prompt.** Pressing `a`/`c`/`s` with no client configured opens a picker instead
-  of launching, and records the choice. Pressing it again launches.
-- An unknown, malformed, or removed client entry degrades to a problem row and the built-in
-  default — it never blocks the launch key and never replaces the dashboard with an error.
-- **BREAKING** if the plugin config format gains a required key. The intent is that it does not:
-  every new key is optional, and absence means "Claude Code, as today".
+- **The three actions resolve their prompt through the configured `agent_kind`**, instead of a
+  hardcoded `/opsx:*` literal. Claude Code's mapping is the built-in default, so an existing
+  install behaves exactly as it does today.
+- **A kind with no known mapping is configurable, not fatal.** The user writes what to send;
+  absent that, the action degrades to a problem row naming the kind, never a silent wrong
+  prompt and never a blocked key.
+- Not **BREAKING**: every new key is optional and absence means "as today".
 
 ## Non-Goals
 
-- Detecting installed clients on the machine. Probing `PATH` for four binaries is a different
-  change with its own failure surface; configuration is explicit here.
-- Per-change or per-repository client selection. One choice per plugin install.
-- Teaching non-Claude clients the OpenSpec workflow. If a client has no equivalent of
-  `/opsx:apply`, this change lets the user write what to send; it does not make the workflow
-  work there.
-- Editing Herdr's own agent integrations, or anything under `herdr integration`.
-- Launching more than one agent per change, which `agent-launch` already refuses.
-- A general settings surface. This is one setting, not a preferences system — resist the pull.
+- **Re-inventing `agent_kind`.** It exists, it works, it is documented. This change reads it.
+- **Probing for available clients — including through Herdr.** Considered and rejected on
+  measurement, see below.
+- **A first-run picker.** There is no unconfigured state to catch: `agent_kind` defaults to
+  `claude` and works. A picker would interrupt a flow that is already correct.
+- Teaching non-Claude clients the OpenSpec workflow. This lets the user say what to send; it
+  does not make `/opsx:apply` exist elsewhere.
+- Per-change or per-repository selection.
+
+## Why not ask Herdr which agents are available
+
+Herdr does expose two surfaces, and both were measured against 0.9.0:
+
+- `herdr agent start --kind` accepts a closed enum of **23** kinds (`pi, claude, codex, gemini,
+  cursor, devin, agy, cline, omp, mastracode, opencode, copilot, kimi, kiro, droid, amp, grok,
+  hermes, kilo, qodercli, qwen, maki, muse`). That list lives in `--help` **text**, not in a
+  machine-readable API. Scraping help output is more brittle than not validating at all.
+- `herdr integration status` lists 17 integrations with an installed/not-installed state. Two
+  problems. It prints **plain text, not JSON** — unlike every payload this crate parses. And,
+  decisively, it reports whether *Herdr's own status-reporting hook* is installed (the paths it
+  names are `~/.copilot/hooks/herdr-agent-state.sh` and similar), **not** whether the agent's
+  CLI exists or can be launched. On the reference machine `claude: current (v9)` and `codex:
+  current (v8)`, everything else "not installed" — which says nothing about what is runnable.
+  Using it as an availability signal would be wrong in both directions.
+
+No probe is needed anyway: `herdr agent start` already fails with its own reason when a kind is
+unsupported, and `launch` already carries that reason verbatim into a problem row. The
+never-fail-closed path is the validation.
 
 ## Capabilities
 
 ### New Capabilities
 
-- `agent-client`: the client registry — what a client entry is, how the three actions map to
-  prompts, what the built-in default is, and how a bad entry degrades.
-- `client-picker`: the first-run modal — when it opens, what it renders, which keys it takes,
-  and what it records.
+- `agent-prompts`: the mapping from an action (apply / continue / archive) and an `agent_kind`
+  to the text sent, its built-in default, and how an unmapped kind degrades.
 
 ### Modified Capabilities
 
-- `agent-launch`: the prompt is resolved from the selected client rather than hardcoded.
-- `plugin-config`: the new optional configuration surface.
-- `plugin-state`: where the selection is recorded — under `HERDR_PLUGIN_STATE_DIR`, beside
-  `agent-names.toml`, never in the repository and never in the config directory the user
-  hand-edits.
-- `dashboard-loop`: a modal route changes what keys mean while it is open, the way `/` filter
-  mode already does.
+- `agent-launch`: the prompt is resolved rather than hardcoded.
+- `plugin-config`: the optional per-kind prompt overrides.
 
 ## Impact
 
-- `src/launch.rs` — prompt resolution; it stays outside `src/ui/` and keeps its worker thread.
-- `src/config.rs` — the client entries.
-- `src/state.rs` — recording the selection.
-- `src/ui/` — a new modal view, pure, plus the route and key handling in `app`/`driver`.
-- `SPEC.md` — the degraded-states table gains rows, each bound in `tests/degraded-coverage.toml`.
-- No new dependency expected. No new process spawn: the launcher already reaches `herdr` through
-  `HerdrCli`, and a different prompt string is not a new seam.
+- `src/launch.rs` — prompt resolution. It already receives `kind` as a parameter
+  (`src/launch.rs:259`), so the value is in hand; only the prompt is hardcoded.
+- `src/config.rs` — the optional overrides beside the existing `agent_kind`.
+- `README.md`, `SPEC.md` — the `agent_kind` row gains the prompt half.
+- `SPEC.md`'s degraded-states table gains a row, bound in `tests/degraded-coverage.toml`.
+- No new dependency, no new spawn, no new seam: `launch` already reaches `herdr` through
+  `HerdrCli`, and a different prompt string is not a new collaborator.
 
 ## Open Questions for Review
 
-1. **Where the choice lives.** State dir (per-install, written by the plugin) or config dir
-   (hand-editable, user-owned)? The prompts are something a user will want to edit by hand,
-   which argues config; the *selection* is something the plugin writes, which argues state.
-   Probably both, split — worth settling before design.
-2. **Whether the picker is a modal at all.** A modal is a new route and new key semantics. The
-   cheaper shape is a problem row saying "no client configured; edit config.toml" — worse
-   ergonomics, far less machinery. This is the main thing to iterate on.
-3. **Which clients ship as built-ins.** Claude Code certainly. Codex and Copilot CLI only if
-   their prompt grammar can be written down accurately — a wrong built-in is worse than none,
-   because the user will trust it.
+1. **Which kinds ship with a built-in mapping?** Claude Code certainly. A wrong built-in is
+   worse than none, because the user will trust it — so probably only kinds whose command
+   grammar can be written down from documentation rather than guessed.
+2. **Config shape.** A table keyed by kind (`[prompts.codex]`) or three flat keys overridden
+   per kind? The first is tidier; the second is easier to explain in `README.md`.
+3. **Is a prompt-less kind a problem row or a config error at load?** The load path already
+   accumulates config problems, so either fits — but they surface in different places.
