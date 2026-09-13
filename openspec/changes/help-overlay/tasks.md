@@ -163,7 +163,12 @@ run it avoids.
   the four plants makes its gate exit non-zero, and that `make gates` on the unplanted tree exits
   zero. Record both halves; all four pin invariants that are already green, so the planted half
   is the only evidence any of them can fail.
-- [ ] 7.7 VERIFY: Run `make gates` and `cargo test --test gate_controls` — both green.
+- [ ] 7.7 CHANGE: Add `scripts/gates/helpwidths.sh` on `detailwidths.sh`'s pattern and compose
+  it into the `gates:` recipe. `src/ui/help.rs` is otherwise the only view module with a
+  both-widths mandate and no gate counting it (`Makefile:39,40,42,64,66` carry the other five).
+  Measure its floor from the tree once group 4's and group 6's tests exist, and add its plant to
+  `tests/gate-controls.toml`.
+- [ ] 7.8 VERIFY: Run `make gates` and `cargo test --test gate_controls` — both green.
 
 ## 8. The footer's leading hint
 <!-- kind: behavior -->
@@ -220,9 +225,16 @@ run it avoids.
   documented key set and the inventory agree at HEAD, and A gutted document fails as a broken
   control rather than a clean tree.
 - [ ] 10.2 GREEN: Write `action_name(Action) -> &'static str` as an exhaustive `match` with no
-  wildcard arm, the two sweeps, and the four-leg comparison per
+  wildcard arm, the two sweeps, and the three-leg comparison per
   `specs/doc-conformance/spec.md`. Assert the exemption list holds exactly `FilterPush` and
-  `Ignore` and has length two.
+  `Ignore` and has length two. The mouse sweep's first run yields **seven** names including
+  `SelectTab`; if it yields six the fixture's selected change is carrying no artifacts.
+- [ ] 10.2a RED: Add the tests named for A row naming the wrong key fails, Every non-mouse row
+  parses and agrees at HEAD, and An unparseable spelling fails rather than skipping.
+- [ ] 10.2b GREEN: Write the `input` parser and the per-row assertion
+  `action_for(press(code, mods), filtering_for(scope)) == binding.action`, with the
+  every-row-parsed totality assertion. Without this the action-set check passes against an
+  inventory that names the wrong key for every row (`specs/binding-inventory/spec.md`).
 - [ ] 10.3 CHECK: Negative control — the sweep must fail in **both** directions. Temporarily
   delete `action_for`'s `Char('r')` arm and confirm the check names `Refresh` as documented but
   unreachable; restore it. Temporarily remove a `Binding` and confirm it names the action as

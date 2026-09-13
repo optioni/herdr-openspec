@@ -686,8 +686,14 @@ separately. It carries plain data — no trait, no handle, no thread — so the 
 `Clone`, `PartialEq`, and constructible in a test.
 
 `ui::app::Filter` SHALL carry exactly two fields: `query: String` and `active: bool`.
-`ui::app::Detail` SHALL carry exactly **five** fields: `source: String`, `scroll: usize`,
-`tab: usize`, `problems: Vec<String>`, and `loaded: Option<(PathBuf, usize)>`. Three of them
+`ui::app::Detail` SHALL carry exactly **seven** fields: `sections: Vec<ArtifactSection>`,
+`scroll: usize`, `tab: usize`, `problems: Vec<String>`, `loaded: Option<(PathBuf, usize)>`,
+`expanded: BTreeSet<usize>`, and `drawn_width: Option<u16>`. This sentence read "**five**" and
+named a `source: String` until `help-overlay`; `foldable-spec-sections` replaced `source` with
+`sections` and added `expanded` and `drawn_width` (`src/ui/app.rs:184-206`) without carrying the
+count back here, and `pane-chrome`'s own delta did not either. Corrected in passing under the
+rule Decision 9 states: a known-false sentence inside a block this change must copy anyway is
+repaired rather than reproduced. Three of them
 are `detail-view`'s: `tab` is the selected artifact's position, `problems` names each
 artifact file that could not be read, and `loaded` is the `(change directory, tab)` key whose
 content `source` currently holds — the cache key `artifact-content`'s `sync_detail` compares
@@ -697,9 +703,10 @@ field to any of the three: which grammar a tab renders is read from
 
 `ui::app::Refresh` is `live-refresh`'s addition and SHALL carry exactly **three** fields:
 `requested: bool`, `reload: bool`, and `problems: Vec<String>`, defined by `live-updates`.
-`Detail` is deliberately left at five: `reload` could have lived there, but `Dashboard` gains
-one field either way and putting it on `Refresh` leaves `Detail`'s five construction-site
-count untouched.
+`Detail` was deliberately left at five when `live-refresh` landed: `reload` could have lived
+there, but `Dashboard` gains one field either way and putting it on `Refresh` left `Detail`'s
+construction-site count untouched. It has since grown to seven by `foldable-spec-sections`, as
+the corrected sentence above records; the argument for where `reload` went is unaffected.
 
 `agents::AgentSnapshot` is `agent-polling`'s addition and SHALL carry exactly **three** fields:
 `agents: Vec<agents::Agent>`, `reachable: bool`, and `problem: Option<String>`, defined by

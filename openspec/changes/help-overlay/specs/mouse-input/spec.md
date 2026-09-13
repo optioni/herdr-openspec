@@ -77,8 +77,8 @@ interesting.
 #### Scenario: A click outside the band dismisses it and selects nothing
 
 - **WHEN** a dashboard with `help.open` true, `selected` `2`, and `route` `List` is drawn
-  at 120x60 — where the band is 41 rows centred in a 59-row body, so rows 0 through 8 and
-  rows 50 through 58 are outside it — and `mouse_action` is called with
+  at 120x60 — where the band is 44 rows centred in a 59-row body, so rows 0 through 6 and
+  rows 51 through 58 are outside it — and `mouse_action` is called with
   `Down(MouseButton::Left)` at row 4 over a change row, then at row 55, then at row 59
   (the footer row)
 - **THEN** every one of the three returns `Action::ToggleHelp`
@@ -91,10 +91,10 @@ interesting.
 
 #### Scenario: The band's edges are inside it
 
-- **WHEN** the band at 120x60 occupies rows 9 through 49 and `mouse_action` is called with
-  `Down(MouseButton::Left)` at rows 8, 9, 49, and 50, each at column 60
-- **THEN** the calls at rows 8 and 50 return `Action::ToggleHelp` and the calls at rows 9
-  and 49 return `Action::Ignore`, so both rule rows belong to the band and the boundary is
+- **WHEN** the band at 120x60 occupies rows 7 through 50 and `mouse_action` is called with
+  `Down(MouseButton::Left)` at rows 6, 7, 50, and 51, each at column 60
+- **THEN** the calls at rows 6 and 51 return `Action::ToggleHelp` and the calls at rows 7
+  and 50 return `Action::Ignore`, so both rule rows belong to the band and the boundary is
   pinned from both sides
 
 #### Scenario: Motion still costs no frame while the overlay is open

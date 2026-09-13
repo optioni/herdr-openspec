@@ -26,11 +26,14 @@ pub struct Group {
 pub const INVENTORY: &[Group];
 ```
 
-`input` is the key or gesture as the reader presses it — `j`, `Ctrl-C`, `1`–`9`,
-`Wheel`, `Click` — and is prose: no check reads it. `action` is the `Action` the
-input produces and is the field every check below reads. A binding therefore carries
-both a human half and a machine half, and only the machine half is load-bearing, which
-is what lets `input` say `j / ↓` in one string where the mapping has two rows.
+`input` is the key or gesture as the reader presses it — `j / ↓`, `Ctrl-C`, `1`–`9`,
+`Wheel`, `Click`. `action` is the `Action` that input produces. **Both halves are
+machine-bound**, by two different checks, and the reason the second one exists is worth
+stating: an action-set comparison alone would pass against an `INVENTORY` that read
+`k  scroll down` or `Ctrl-C  refresh`. Every action would still be named exactly once, the
+group counts would still be right, and the overlay would still be **wrong about which key does
+what** — which is the only thing a reader opens it for. A check that binds the goal's
+bookkeeping and not the goal is the shape this repository calls an unfalsifiable guard.
 
 `scope` SHALL be the route the bindings apply at, and SHALL sit on the **group**, not on
 the binding. It is not decoration and SHALL NOT be collapsed away: `Space` folds a
@@ -48,18 +51,16 @@ join `NODEFAULT-UI`'s scanned type sets on exactly the terms `Filter`, `Refresh`
 `Launch` are on them: every construction site names every field, with no `..` rest, so
 a field added later is a compile error at each entry rather than a silent `""`.
 
-#### Scenario: The inventory is a pure `'static` value with no construction cost
+#### Scenario: The inventory is const-evaluable, proved by a const item
 
-- **WHEN** `ui::help::INVENTORY` is read twice in one process and the two reads are
-  compared
-- **THEN** both are the same slice, no allocation happened, no file was opened, no
-  process was spawned, and no clock was read
-- **AND** `src/ui/help.rs` searched for `std::fs`, `std::io`, `std::env`,
-  `std::process`, `std::net`, `File::`, `read_to_string`, `tasks::read`, `state::read`,
-  `state::record`, `launch::start`, and `Command` returns no match, because
-  `dashboard-loop`'s pure set now names it
-- **AND** `src/ui/help.rs` names no `ratatui::style::Color` and no `Color::` variant, so
-  `view-palette`'s confinement holds over the new file too
+- **WHEN** the test module declares `const _: &[Group] = ui::help::INVENTORY;`
+- **THEN** it compiles, which is the observable second site: a const item is evaluated at
+  compile time, so an `INVENTORY` that became a function call, allocated, or read a file would
+  fail to compile here rather than pass a runtime assertion that has nothing to observe
+- **AND** the purity greps over `src/ui/help.rs` are **not** asserted here: they are
+  `dashboard-loop`'s `NOIO-VIEW` leg and `view-palette`'s `PALETTE` leg, both of which name the
+  file in their own `PURE` lists, and restating them in this scenario would file a gate under
+  the contract tier and count one guard twice
 
 #### Scenario: Every binding names a field explicitly
 
@@ -143,11 +144,70 @@ help.
 #### Scenario: The sweep covers the mouse under both overlay states
 
 - **WHEN** step 3's sweep is run with `help.open` false and then with it true
-- **THEN** the first run yields `SelectNext`, `SelectPrev`, `ScrollDown`, `ScrollUp`,
-  `Click`, and `Ignore`, and the second yields `ScrollDown`, `ScrollUp`, `ToggleHelp`,
-  and `Ignore`
+- **THEN** the first run yields **seven** names — `SelectNext`, `SelectPrev`, `ScrollDown`,
+  `ScrollUp`, `SelectTab`, `Click`, and `Ignore` — and the second yields `ScrollDown`,
+  `ScrollUp`, `ToggleHelp`, and `Ignore`
+- **AND** `SelectTab` is in the first set because `mouse_action` maps `Zone::DetailTab` through
+  `detail::tab_at` to `Action::SelectTab` (`src/ui/driver.rs:235-245`), which is reachable only
+  when the swept dashboard's selected change carries **several artifact tabs**. The fixture
+  step 3 mandates therefore is not incidental: a dashboard whose changes carry no artifacts
+  yields six names and passes an equality written against six, while silently removing the
+  mouse's tab-switching and detail-header coverage from this whole check. A future session
+  that finds this assertion red must widen the fixture, never narrow the expected set
 - **AND** the union names `ToggleHelp`, so the click-outside dismissal `mouse-input`
   adds is bound by this check and not only by its own scenarios
+
+### Requirement: Every key row's `input` is executed against the driver
+
+The action-set check above binds *which actions exist*. This one binds *which key produces
+which action*, and without it the inventory could name the wrong key for every row and stay
+green.
+
+For every binding in a group whose `scope` is not `Any`-with-a-mouse-gesture — that is, every
+binding whose `input` names a **key** rather than `Wheel` or `Click` — the check SHALL:
+
+1. parse `input` into one or more `(KeyCode, KeyModifiers)` pairs, so `j / ↓` yields
+   `Char('j')` with `NONE` and `Down` with `NONE`, `1`–`9` yields all nine digits, and
+   `Ctrl-C` yields `Char('c')` with `CONTROL`;
+2. derive the filter mode from the group's `scope`: `Filter` means `filtering` true, every
+   other scope means false;
+3. assert `action_for(press(code, mods), filtering) == binding.action` for **every** pair
+   parsed.
+
+The parse SHALL be **total over the inventory**: the check SHALL assert that every non-mouse
+`input` parsed to at least one pair, and SHALL fail naming the row when one did not. A spelling
+the parser does not recognise must fail loudly rather than be skipped — a silently skipped row
+is the same unfalsifiable guard this requirement exists to remove, one level down.
+
+The parser SHALL be small and SHALL NOT become a second key table: it recognises a single
+character, a `X / Y` pair, a `Ctrl-<c>` form, a `<a>`–`<b>` digit range, and the named keys
+`Enter`, `Esc`, `Space`, `Backspace`, `↑`, and `↓`. Anything else is an error, not a guess.
+
+#### Scenario: A row naming the wrong key fails
+
+- **WHEN** the `Binding` whose `input` is `r` has its `input` changed to `k` while its `action`
+  stays `Action::Refresh`
+- **THEN** the check fails naming the row, the key it claims, and the action `action_for`
+  actually returns for that key — `Prev`, not `Refresh`
+- **AND** the action-set check above still **passes** on that same tree, since `Refresh` is
+  still named exactly once, which is precisely why this second check exists
+
+#### Scenario: Every non-mouse row parses and agrees at HEAD
+
+- **WHEN** the check is run against the tree at the end of this change
+- **THEN** every binding in the `Changes`, `Artifact`, `Agents`, `Pane`, and `While filtering`
+  groups parses to at least one `(KeyCode, KeyModifiers)` pair
+- **AND** every parsed pair, evaluated under its group's filter mode, returns exactly that
+  binding's `action`
+- **AND** the `While filtering` group's five rows are evaluated with `filtering` **true**, which
+  is what makes `Esc` → `Back`, `Backspace` → `FilterPop`, `Enter` → `OpenDetail`, `↑` → `Prev`,
+  and `↓` → `Next` the assertions rather than the `filtering` false table's answers
+
+#### Scenario: An unparseable spelling fails rather than skipping
+
+- **WHEN** a binding's `input` is changed to `the any key`
+- **THEN** the check fails naming that row as unparseable
+- **AND** it does not pass by treating an unrecognised spelling as a mouse row or as zero pairs
 
 ### Requirement: The inventory's groups and order are fixed and readable
 
@@ -160,10 +220,23 @@ these binding counts:
 | 2 | `Artifact` | `Detail` | 7 | the detail region at `Route::Detail` |
 | 3 | `Agents` | `Any` | 4 | the four keys that reach Herdr |
 | 4 | `Pane` | `Any` | 4 | the keys that name no region |
-| 5 | `While filtering` | `Filter` | 3 | the keys that keep a command meaning inside `/` |
-| 6 | `Mouse` | `Any` | 5 | the gestures `ui::driver::mouse_action` produces |
+| 5 | `While filtering` | `Filter` | 5 | the keys that keep a command meaning inside `/` |
+| 6 | `Mouse` | `Any` | 6 | the gestures `ui::driver::mouse_action` produces |
 
-Twenty-eight bindings in total. The order SHALL be the order a reader meets the pane in
+**Thirty-one** bindings in total, and the two counts that are not free are groups 5 and 6.
+
+Group 5 SHALL hold **five**, not three, because `action_for`'s `filtering` table has exactly
+**six** non-typing rows (`src/ui/app.rs:1213-1225`): `Ctrl-C` → `Quit`, `Backspace` →
+`FilterPop`, `Enter` → `OpenDetail`, `Esc` → `Back`, `Up` → `Prev`, and `Down` → `Next`.
+`Ctrl-C` has its row in `Pane`; the other five belong here. Three rows would have left `Up` and
+`Down` undocumented **and invisible to the action-set check**, because `Prev` and `Next` are
+each already named by group 1 — a set comparison cannot see a key that is missing when its
+action is spoken for elsewhere.
+
+Group 6 SHALL hold **six** for the same reason one layer over: `mouse_action` produces six
+non-`Ignore` actions with the overlay closed — `SelectNext`, `SelectPrev`, `ScrollDown`,
+`ScrollUp`, `Click`, and `SelectTab` — and a `Binding` carries exactly one `action`, so five
+rows cannot name six actions. The order SHALL be the order a reader meets the pane in
 — the list first, the detail second, the agents and pane keys after, and the two modal
 groups last — not alphabetical and not the order `action_for`'s `match` happens to be
 written in, which is an implementation artefact.
@@ -188,7 +261,7 @@ object to.
   `Agents`, `Pane`, `While filtering`, and `Mouse`
 - **AND** their `scope` values, in order, are `List`, `Detail`, `Any`, `Any`, `Filter`,
   and `Any`
-- **AND** their binding counts, in order, are 5, 7, 4, 4, 3, and 5, summing to 28
+- **AND** their binding counts, in order, are 5, 7, 4, 4, 5, and 6, summing to 31
 - **AND** no group is empty, and no two groups share a title
 
 #### Scenario: `Space` and `Esc` each appear under their route

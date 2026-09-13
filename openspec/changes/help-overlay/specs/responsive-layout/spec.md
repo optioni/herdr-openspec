@@ -39,22 +39,42 @@ display-width measure, and `src/ui/help.rs` SHALL use them for the key column an
 every truncation. `COLWIDTH`'s `PURE` list SHALL gain `src/ui/help.rs`, taking it from
 eight files to **nine**, and `NOIO-VIEW`'s from nine to **ten**.
 
+`ui::help`'s own both-widths rule SHALL be **mechanized**, not merely mandated. Every other
+view module in the crate has a width gate of its own — `detailwidths.sh`, `listwidths.sh`,
+`mdwidths.sh`, `taskwidths.sh`, and `widths.sh` (hard-coded to `src/ui/view.rs`) at
+`Makefile:39,40,42,64,66` — and without one, `ui::help` would be the only module carrying a
+"60 and 120, both widths, every time" mandate with nothing counting whether it is kept. A
+`scripts/gates/helpwidths.sh` SHALL be added on `detailwidths.sh`'s pattern, composed into the
+`gates:` recipe, its floor measured when the module's tests are written rather than guessed,
+and bound to its own planted defect in `tests/gate-controls.toml` like every other gate.
+
+#### Scenario: The overlay's both-widths rule is counted, not just stated
+
+- **WHEN** `scripts/gates/helpwidths.sh` is run against the tree at the end of this change
+- **THEN** it exits zero and reports the number of `src/ui/help.rs` tests asserting at both 60
+  and 120 columns, against a floor measured from that tree
+- **AND** it exits non-zero against a copy in which a `ui::help` test asserting only at 120 is
+  added, and against one in which the module's tests are removed — the second being the vacuity
+  leg every other width gate carries
+- **AND** `tests/gate-controls.toml` binds it to a planted defect, so a `helpwidths.sh` neutered
+  to `exit 0` fails `cargo test` rather than passing `make gates` quietly
+
 #### Scenario: The band's rectangle at both mandated widths
 
 - **WHEN** `help_band` is called with the body a 120x40 frame produces — `x` 0, `y` 0,
-  `width` 120, `height` 39 — and `content_rows` of 39
-- **THEN** it returns `x` 0, `width` 120, `height` 39, and `y` 0: the content needs 41
+  `width` 120, `height` 39 — and `content_rows` of 42
+- **THEN** it returns `x` 0, `width` 120, `height` 39, and `y` 0: the content needs 44
   rows and the body holds 39, so the band fills it
 - **AND** with the body a 60x20 frame produces — `height` 19 — and the same
   `content_rows`, it returns `x` 0, `width` 60, `height` 19, and `y` 0
 - **AND** with a 120x60 frame's body — `height` 59 — and the same `content_rows`, it
-  returns `height` 41 and `y` 9, so the band is centred with the odd row below it
+  returns `height` 44 and `y` 7, so the band is centred with the odd row below it
 
 #### Scenario: The band is total over degenerate and extreme rectangles
 
 - **WHEN** `help_band` is called with a zero-width body, a zero-height body, a 1x1 body, a
   120x1 body, a 120x2 body, a body at `u16::MAX` width and height, and `content_rows` of
-  `0`, `1`, `39`, and `usize::MAX` against each
+  `0`, `1`, `42`, and `usize::MAX` against each
 - **THEN** no call panics, overflows, or underflows
 - **AND** every returned rectangle lies entirely inside the body it was given: its `x` and
   `y` are at least the body's, and its right and bottom edges do not exceed the body's

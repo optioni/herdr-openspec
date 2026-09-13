@@ -245,8 +245,8 @@ descriptions of every group align in one column. A binding row whose text exceed
 band's width SHALL be truncated by `ui::layout::truncate_columns`, never sliced by byte
 or by `char`.
 
-For the inventory `binding-inventory` mandates — six groups, twenty-eight bindings —
-`content_rows` is therefore **39**: twenty-eight binding rows, six heading rows, and five
+For the inventory `binding-inventory` mandates — six groups, thirty-one bindings —
+`content_rows` is therefore **42**: thirty-one binding rows, six heading rows, and five
 blanks.
 
 #### Scenario: The grammar renders at 120 columns
@@ -317,7 +317,7 @@ edge, in `palette::Role::ListSeparator`.
 
 It SHALL carry **no arrow glyphs**. `▲` and `▼` are East Asian Ambiguous and would widen
 the uncompensated CJK-locale exposure `SPEC.md` records, for information the numbers
-already carry: `1-37/39` says both that there is more below and exactly how much.
+already carry: `1-37/42` says both that there is more below and exactly how much.
 
 When the band is too **narrow** to hold an indicator — a band whose width is under the
 indicator's own display width plus two — the indicator SHALL be omitted and the bottom
@@ -327,23 +327,23 @@ indicator would not be.
 #### Scenario: The overlay scrolls at both mandated sizes
 
 - **WHEN** a dashboard with `help.open` true is rendered at 120x40, where the body is 39
-  rows, the band is 39 rows, and its interior is 37 against 39 content rows
-- **THEN** the bottom rule row's final columns read `1-37/39`, ending one column in from
+  rows, the band is 39 rows, and its interior is 37 against 42 content rows
+- **THEN** the bottom rule row's final columns read `1-37/42`, ending one column in from
   column 119
-- **AND** after ten `Next` actions and a redraw the offset is **clamped to 2** — 39
-  content rows less a 37-row interior — so the interior's first row is content row 3 and
-  the indicator reads `3-39/39`, not the `11-47/39` an unclamped offset of ten would give
+- **AND** after ten `Next` actions and a redraw the offset is **clamped to 5** — 42
+  content rows less a 37-row interior — so the interior's first row is content row 6 and
+  the indicator reads `6-42/42`, not the `11-47/42` an unclamped offset of ten would give
 - **AND** at 60x20 the body is 19 rows, the band is 19, its interior is 17, and the
-  indicator reads `1-17/39`, ending one column in from column 59
+  indicator reads `1-17/42`, ending one column in from column 59
 
 #### Scenario: A held key cannot run the window off the end
 
 - **WHEN** a dashboard with `help.open` true is given two hundred consecutive `Next`
   actions at 60x20, redrawing after each
-- **THEN** the last interior row is always content row 39 once the window has reached the
+- **THEN** the last interior row is always content row 42 once the window has reached the
   end, and never a blank row past it
 - **AND** `help.scroll` is clamped on every frame by
-  `ui::layout::scroll_offset(39, help.scroll, 17)` to a maximum of 22, so it is never used
+  `ui::layout::scroll_offset(42, help.scroll, 17)` to a maximum of 25, so it is never used
   unbounded — and it is `normalise_help_scroll` that applies it, which is why this
   60x20 `Route::List` fixture clamps at all where `normalise_scroll` would have returned
   early
@@ -353,9 +353,9 @@ indicator would not be.
 #### Scenario: No indicator when the content fits
 
 - **WHEN** a dashboard with `help.open` true is rendered at 120x60, where the body is 59
-  rows and the band is `39 + 2 = 41` rows with an interior of 39 against 39 content rows
+  rows and the band is `42 + 2 = 44` rows with an interior of 42 against 42 content rows
 - **THEN** the band's bottom row is `─` repeated to the band's width with no digits in it
-- **AND** every one of the 39 content rows is present in the buffer, so the whole
+- **AND** every one of the 42 content rows is present in the buffer, so the whole
   inventory is visible in one frame at a tall pane
 
 ### Requirement: The overlay degrades rather than panicking at any frame size

@@ -116,8 +116,8 @@ depends on, and `SPEC.md` → Keys is its written form.
 | Filesystem (`openspec/`, artifact reads) | **not reached** — the overlay reads no file; `Dashboard` values are built in memory | not reached |
 | Filesystem (gate scripts' subject tree) | **real** — `tests/gate_controls.rs` copies `src/` to a `testutil::ScratchDir` and plants a defect | real (scratch copy only) |
 | Filesystem (`SPEC.md`, `README.md`, `AGENTS.md`, gate scripts) | **real, read-only** — `tests/doc_contract.rs` reads the repository's own files as text | real, read-only |
-| `openspec` binary (`OpenspecCli`) | **not reached** — no CLI call is added and none is removed | not reached |
-| Herdr socket (`HerdrCli`) | **not reached** — the overlay reaches no collaborator; `agents.reachable` is a plain `bool` on an in-memory `AgentSnapshot` | not reached |
+| `openspec` binary (`OpenspecCli`) | **replaced** by a scratch `#!/bin/sh` program in the one inherited `file_mode` wiring scenario, which this change carries but does not edit; **not reached** by anything this change adds | not reached |
+| Herdr socket (`HerdrCli`) | **replaced** by a scratch `#!/bin/sh herdr` in the nine inherited `agent-poller` wiring scenarios, four of whose footer assertions this change edits; **not reached** by anything this change adds | not reached |
 | Herdr agent poller / launcher / refresh worker / filesystem watcher | **not reached** — `run_loop`'s live tier is unchanged; no scenario here drives it | not reached |
 | Process environment (`HERDR_PLUGIN_*`) | **not reached** — no new environment read; `env_lookup` is untouched | not reached |
 | Clock | **not reached** — no scenario reads one, and `src/ui/` may not name one | not reached |
@@ -125,17 +125,30 @@ depends on, and `SPEC.md` → Keys is its written form.
 | `ui::help::INVENTORY` | **real** — a `'static` slice, compared against the swept set | real |
 
 Three rows are the load-bearing ones. The terminal is replaced everywhere, with no exception.
-The `openspec` binary and the Herdr socket are **not reached at all** — that is a stronger
-statement than "replaced", and it is what makes every scenario here a `make test` scenario. And
-`action_for`/`mouse_action` are **real** in the contract tier by design: the anti-drift claim is
-worth nothing if the check runs against a double.
+The `openspec` binary and the Herdr socket are reached by **ten inherited scenarios** this
+change carries into its deltas — nine `agent-poller` rows and one `file_mode` row, each
+spawning a real scratch `#!/bin/sh` program — and by **nothing this change adds**. An earlier
+draft of this table said "not reached at all"; that was false, and it mattered, because the
+no-acceptance-group argument below was resting on it. And `action_for`/`mouse_action` are
+**real** in the contract tier by design: the anti-drift claim is worth nothing if the check runs
+against a double.
 
 ## Test Strategy
 
-Every scenario lands in `make test`. **No scenario needs the outer-loop acceptance tier**, and
-the reason is the Test Boundaries table above rather than a preference: this change reaches no
-process, no socket, and no terminal, so there is no integration a slower tier could exercise
-that a `TestBackend` render and a swept pure function do not.
+Every scenario lands in `make check`, which is the single gate; within it they split six ways,
+and the split is **not** uniform per capability. The matrix below was first drafted by assigning
+a tier per capability and that was wrong on thirteen rows — a `MODIFIED` block carries its
+inherited scenarios with it, and several of `dashboard-loop`'s are tree-wide greps run by
+`make gates`, not unit tests, while one drives `run_wired` against a **real** scratch
+`openspec` program. Each row's tier is now read from the scenario's own body.
+
+**No scenario needs the outer-loop acceptance tier**, and the argument is "no **new**
+collaborator" rather than "no collaborator". Ten inherited wiring scenarios do spawn scratch
+programs, and `ui::tests::wiring` already covers the composition root end to end. What this
+change adds reaches no process, no socket, and no terminal, so an acceptance test written for it
+would drive the same `TestBackend` render and the same pure functions the view and unit tiers
+already drive, one layer of machinery further out. The four wiring assertions this change edits
+are edits to tests that already exist.
 
 Tiers used, in this repository's own terms:
 
@@ -147,14 +160,20 @@ Tiers used, in this repository's own terms:
   documents.
 - **gate** — `scripts/gates/*.sh` run by `make gates`, each bound to a planted defect in
   `tests/gate-controls.toml` and executed by `tests/gate_controls.rs`.
+- **coverage** — `cargo llvm-cov`, one row: the total and production-slice floors.
 - **wiring** — `ui::tests::wiring` in `src/ui/mod.rs`. The footer prepend breaks **four**
   assertions there across `agent-poller` and `agent-launch` fixtures, one of them a byte-exact
   `assert_eq!` on the full 120-column row and two of them 60-column assertions that lose
   `g focus`. Group 8 owns the repair; `grep -n 'q quit\|g focus' src/ui/mod.rs` finds the five
   sites, of which four move.
 
-Commands: `make test` for the first five tiers' assertions, `make gates` for the gate scripts
-themselves, and `make check` as the single gate before any group is called complete.
+Row counts, from the matrix below: **42** unit, **31** view, **15** gate, **11** contract,
+**8** wiring, **3** unit/view, **1** view+gate, **1** coverage — 112 in all.
+
+Commands: `make test` runs the unit, view, contract and wiring assertions **and**
+`tests/gate_controls.rs`, which executes each gate against its planted defect; `make gates` runs
+the gate scripts themselves over the working tree; `make coverage` runs the one coverage row;
+and `make check` composes all three and is the gate before any group is called complete.
 
 | Spec Scenario | Verification | Tier | Collaborators | Command |
 |---|---|---|---|---|
@@ -171,14 +190,17 @@ themselves, and `make check` as the single gate before any group is called compl
 | `help-overlay` / The overlay lists the agent keys when the socket is unreachable | `ui::help::tests` two-render byte-identity assertion | view | `TestBackend` 60 and 120; `AgentSnapshot` in memory, socket not reached | `make test` |
 | `help-overlay` / The grammar renders at 120 columns | `ui::help::tests` buffer assertion | view | `TestBackend` 60 and 120; no real terminal | `make test` |
 | `help-overlay` / The grammar renders at 60 columns | `ui::help::tests` buffer assertion | view | `TestBackend` 60 and 120; no real terminal | `make test` |
-| `help-overlay` / The key column is measured in display columns | `ui::help::tests` buffer assertion | view | `TestBackend` 60 and 120; no real terminal | `make test` |
+| `help-overlay` / The key column is measured in display columns | `ui::help::tests` buffer assertion **and** `scripts/gates/colwidth.sh` | view + gate | `TestBackend` 60 and 120; scratch tree for the gate leg | `make test` / `make gates` |
 | `help-overlay` / The overlay scrolls at both mandated sizes | `ui::help::tests` buffer assertion | view | `TestBackend` 60 and 120; no real terminal | `make test` |
 | `help-overlay` / A held key cannot run the window off the end | `ui::help::tests` buffer assertion | view | `TestBackend` 60 and 120; no real terminal | `make test` |
 | `help-overlay` / No indicator when the content fits | `ui::help::tests` buffer assertion | view | `TestBackend` 60 and 120; no real terminal | `make test` |
 | `help-overlay` / Degenerate frames render without panicking | `ui::help::tests` buffer assertion | view | `TestBackend` 60 and 120; no real terminal | `make test` |
 | `help-overlay` / The reader is never trapped in a degenerate frame | `ui::app` unit over `apply` | unit | `Dashboard` in memory; none replaced | `make test` |
-| `binding-inventory` / The inventory is a pure `'static` value with no construction cost | `tests/doc_contract.rs` | contract | crate linked; documents read as text | `make test` |
-| `binding-inventory` / Every binding names a field explicitly | `tests/doc_contract.rs` | contract | crate linked; documents read as text | `make test` |
+| `binding-inventory` / The inventory is const-evaluable, proved by a const item | `const _: &[Group] = INVENTORY;` — a compile-time item | contract | none; fails to compile rather than asserting | `make test` |
+| `binding-inventory` / Every binding names a field explicitly | `scripts/gates/nodefault-ui.sh` + a planted `..Default::default()` | gate | scratch tree copy of `src/` | `make gates` / `make test` |
+| `binding-inventory` / A row naming the wrong key fails | `tests/doc_contract.rs` input-parse check, with a planted wrong key | contract | `action_for` real; no I/O | `make test` |
+| `binding-inventory` / Every non-mouse row parses and agrees at HEAD | `tests/doc_contract.rs` input-parse check over all 25 key rows | contract | `action_for` real; no I/O | `make test` |
+| `binding-inventory` / An unparseable spelling fails rather than skipping | `tests/doc_contract.rs` totality assertion on the parse | contract | none | `make test` |
 | `binding-inventory` / An action added without a help row fails `cargo test` | `tests/doc_contract.rs` | contract | crate linked; documents read as text | `make test` |
 | `binding-inventory` / A binding removed from the driver and left in the help fails | `tests/doc_contract.rs` | contract | crate linked; documents read as text | `make test` |
 | `binding-inventory` / The sweep finds the twenty-two bound actions and exactly two exemptions | `tests/doc_contract.rs` | contract | crate linked; documents read as text | `make test` |
@@ -211,17 +233,18 @@ themselves, and `make check` as the single gate before any group is called compl
 | `dashboard-loop` / `?` maps to `ToggleHelp` outside filter mode and types inside it | `ui::app::tests` unit | unit | `Dashboard` in memory; none replaced | `make test` |
 | `dashboard-loop` / The overlay layer suppresses every action but seven | `ui::app::tests` unit | unit | `Dashboard` in memory; none replaced | `make test` |
 | `dashboard-loop` / The overlay's seven live actions act and nothing else moves | `ui::app::tests` unit | unit | `Dashboard` in memory; none replaced | `make test` |
-| `dashboard-loop` / `Dashboard` has no `Default` and no site elides a field | `scripts/gates/*.sh` + `tests/gate_controls.rs` plant | gate | scratch tree copy of the repo | `make gates` / `make test` |
-| `dashboard-loop` / The pure view files name no I/O API | `scripts/gates/*.sh` + `tests/gate_controls.rs` plant | gate | scratch tree copy of the repo | `make gates` / `make test` |
-| `dashboard-loop` / The shell never names the CLI seam | `ui::app::tests` unit | unit | `Dashboard` in memory; none replaced | `make test` |
-| `dashboard-loop` / Change literals live only in the gated file | `scripts/gates/*.sh` + `tests/gate_controls.rs` plant | gate | scratch tree copy of the repo | `make gates` / `make test` |
-| `dashboard-loop` / The render path names no channel, thread, lock, or clock | `ui::app::tests` unit | unit | `Dashboard` in memory; none replaced | `make test` |
-| `dashboard-loop` / No test sleeps and then asserts something has already happened | `ui::app::tests` unit | unit | `Dashboard` in memory; none replaced | `make test` |
-| `dashboard-loop` / `file_mode` is set by the composition root and by nothing else | `ui::app::tests` unit | unit | `Dashboard` in memory; none replaced | `make test` |
-| `dashboard-loop` / The fifteenth field is named at every construction site | `ui::app::tests` unit | unit | `Dashboard` in memory; none replaced | `make test` |
+| `dashboard-loop` / `Dashboard` has no `Default` and no site elides a field | `scripts/gates/nodefault-ui.sh`, seven parameterised runs | gate | scratch tree copy of `src/` | `make gates` / `make test` |
+| `dashboard-loop` / The pure view files name no I/O API | `scripts/gates/noio-view.sh` + its positive control | gate | scratch tree copy of `src/` | `make gates` / `make test` |
+| `dashboard-loop` / The shell never names the CLI seam | `scripts/gates/nocli-shell.sh` tree-wide grep | gate | scratch tree copy of `src/` | `make gates` / `make test` |
+| `dashboard-loop` / Change literals live only in the gated file | `change-model`'s literal gate | gate | scratch tree copy of `src/` | `make gates` / `make test` |
+| `dashboard-loop` / The render path names no channel, thread, lock, or clock | `scripts/gates/noblock.sh` over `src/ui/` and the four seam modules | gate | scratch tree copy of `src/` | `make gates` / `make test` |
+| `dashboard-loop` / No test sleeps and then asserts something has already happened | `scripts/gates/nosleep.sh` over `src/` and `tests/` | gate | scratch tree copy of the repo | `make gates` / `make test` |
+| `dashboard-loop` / `file_mode` is set by the composition root and by nothing else | `ui::tests::wiring` drives `ui::load` and `run_wired` | wiring | **real** scratch repository and a scratch `#!/bin/sh` `openspec`; real spawn | `make test` |
+| `dashboard-loop` / The fifteenth field is named at every construction site | `scripts/gates/nodefault-ui.sh` half B span count | gate | scratch tree copy of `src/` | `make gates` / `make test` |
 | `responsive-layout` / The band's rectangle at both mandated widths | `ui::layout::tests` unit over `help_band` | unit | `Rect` values in memory | `make test` |
 | `responsive-layout` / The band is total over degenerate and extreme rectangles | `ui::layout::tests` unit over `help_band` | unit | `Rect` values in memory | `make test` |
 | `responsive-layout` / The overlay does not move the breakpoint | `ui::layout::tests` unit over `help_band` | unit | `Rect` values in memory | `make test` |
+| `responsive-layout` / The overlay's both-widths rule is counted, not just stated | `scripts/gates/helpwidths.sh` + its planted defect | gate | scratch tree copy of `src/` | `make gates` / `make test` |
 | `responsive-layout` / Body and footer occupy their rows at both widths | `ui::view::tests` buffer assertion | view | `TestBackend` 60 and 120; no real terminal | `make test` |
 | `responsive-layout` / The action hints follow `Esc back` when the socket is reachable | `ui::view::tests` buffer assertion | view | `TestBackend` 60 and 120; no real terminal | `make test` |
 | `responsive-layout` / The action hints are dropped whole, `g focus` first | `ui::view::tests` buffer assertion | view | `TestBackend` 60 and 120; no real terminal | `make test` |
@@ -243,8 +266,8 @@ themselves, and `make check` as the single gate before any group is called compl
 | `doc-conformance` / The documented key set and the inventory agree at HEAD | `tests/doc_contract.rs` | contract | crate linked; documents read as text | `make test` |
 | `doc-conformance` / A gutted document fails as a broken control rather than a clean tree | `scripts/gates/*.sh` + `tests/gate_controls.rs` plant | gate | scratch tree copy of the repo | `make gates` / `make test` |
 | `doc-conformance` / The submodule is invisible to both map checks, and that is asserted rather than assumed | `tests/doc_contract.rs` assertion on `pub_mod_names(src/lib.rs)` | contract | `src/lib.rs` read as text | `make test` |
-| `doc-conformance` / The gate lists and the prose counts agree | `scripts/gates/*.sh` + `tests/gate_controls.rs` plant | gate | scratch tree copy of the repo | `make gates` / `make test` |
-| `view-palette` / The palette answers every role with a `Style` | `scripts/gates/palette.sh` + `tests/gate_controls.rs` plant | gate | scratch tree copy of `src/` | `make gates` / `make test` |
+| `doc-conformance` / The gate lists and the prose counts agree | `scripts/gates/noio-view.sh` and `colwidth.sh` reported counts | gate | scratch tree copy of `src/` | `make gates` |
+| `view-palette` / The palette answers every role with a `Style` | `src/ui/palette.rs`'s own unit test over an exhaustive `match` | unit | none — a pure table | `make test` |
 | `view-palette` / The confinement gate catches a `Color` named outside the palette | `scripts/gates/*.sh` + `tests/gate_controls.rs` plant | gate | scratch tree copy of the repo | `make gates` / `make test` |
 | `view-palette` / The palette module reaches no I/O and measures no width | `scripts/gates/*.sh` + `tests/gate_controls.rs` plant | gate | scratch tree copy of the repo | `make gates` / `make test` |
 | `list-filtering` / The prompt replaces the hints while filtering, at both widths | `ui::view::tests` buffer assertion | view | `TestBackend` 60 and 120 | `make test` |
@@ -260,16 +283,16 @@ themselves, and `make check` as the single gate before any group is called compl
 | `agent-poller` / The wiring test fails when the poller is replaced by the inert double | `ui::tests::wiring` composition-root test | wiring | scratch `#!/bin/sh` `herdr`; `TestBackend` | `make test` |
 | `agent-poller` / An unreachable scratch Herdr leaves the pane a working standalone TUI | `ui::tests::wiring` composition-root test | wiring | scratch `#!/bin/sh` `herdr`; `TestBackend` | `make test` |
 | `agent-poller` / A pane with no OpenSpec repository still polls for agents | `ui::tests::wiring` composition-root test | wiring | scratch `#!/bin/sh` `herdr`; `TestBackend` | `make test` |
-| `agent-poller` / The residue left in `run` is small enough to read | `ui::tests::wiring` composition-root test | wiring | scratch `#!/bin/sh` `herdr`; `TestBackend` | `make test` |
+| `agent-poller` / The residue left in `run` is small enough to read | `scripts/gates/wired.sh` | gate | scratch tree copy of `src/` | `make gates` / `make test` |
 | `agent-poller` / `startup_dir` prefers the workspace cwd and falls back when there is none | `ui::tests::wiring` composition-root test | wiring | scratch `#!/bin/sh` `herdr`; `TestBackend` | `make test` |
-| `agent-poller` / `startup_dir` propagates a failing fallback rather than panicking | `scripts/gates/*.sh` + `tests/gate_controls.rs` plant | gate | scratch tree copy of the repo | `make gates` / `make test` |
+| `agent-poller` / `startup_dir` propagates a failing fallback rather than panicking | `ui::tests` unit over an injected closure | unit | injected `Fn` double; no real FS | `make test` |
 | `agent-poller` / A Herdr context with no workspace cwd is the fallback case, not a failure | `ui::tests::wiring` composition-root test | wiring | scratch `#!/bin/sh` `herdr`; `TestBackend` | `make test` |
 | `agent-attribution` / A refresh that reorders the list moves the badge with its change | `ui::app::tests` + `ui::view::tests` | unit / view | `TestBackend`; agents in memory | `make test` |
 | `agent-attribution` / An unreachable socket yields no badge, no count, and no problem | `ui::app::tests` + `ui::view::tests` | unit / view | `TestBackend`; agents in memory | `make test` |
 | `agent-attribution` / The `/` filter hides rows without changing the count | `ui::app::tests` + `ui::view::tests` | unit / view | `TestBackend`; agents in memory | `make test` |
 | `quality-gates` / The harness renders a state value with no repository on disk | `ui::view::tests` buffer assertion | view | `TestBackend`; `ScratchDir` | `make test` |
-| `quality-gates` / Both widths are exercised for every view scenario | `ui::view::tests` buffer assertion | view | `TestBackend`; `ScratchDir` | `make test` |
-| `quality-gates` / The coverage floor is unchanged by the new module | `ui::view::tests` buffer assertion | view | `TestBackend`; `ScratchDir` | `make test` |
+| `quality-gates` / Both widths are exercised for every view scenario | `scripts/gates/widths.sh` plus its counted filtered run | gate | scratch tree copy of `src/` | `make gates` / `make test` |
+| `quality-gates` / The coverage floor is unchanged by the new module | `cargo llvm-cov` total and production-slice floors | coverage | whole crate; no collaborator replaced | `make coverage` |
 
 ## Decisions
 
@@ -354,7 +377,7 @@ new glyph class for one bit of information.
 
 ### Decision 5 — `q` and `Ctrl-C` still quit from inside the overlay
 
-Seventeen actions are inert while the overlay is open and one is not. A modal that traps the
+Seventeen actions are inert while the overlay is open and seven are not. A modal that traps the
 reader is a worse failure than one that lets a quit through, and both keys have a row in the
 inventory's `Pane` group saying so. This is also what makes the degenerate-frame scenarios safe:
 at a 1x1 frame the view can draw almost nothing, but `apply` never receives a `Rect`, so every
