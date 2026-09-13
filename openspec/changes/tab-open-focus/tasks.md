@@ -233,11 +233,11 @@ grep -q "plugin pane focus" "$S/argv.log"
 - [x] 8.1 CHECK: Affected tiers are the `src/open.rs` unit tests, `tests/cli.rs`, and
       `tests/degraded_coverage.rs`; no view, schema, or coverage-sensitive module is touched
       beyond `src/open.rs`.
-- [ ] 8.2 VERIFY: `make check` — green. If it fails, name the failing sub-command
+- [x] 8.2 VERIFY: `make check` — green. If it fails, name the failing sub-command
       (`make fmt-check`, `make lint`, `make gates`, `make test`, `make coverage`) rather than
       re-running the composite. Commit the change's own artifacts before running it: measured
       at planning time, `make gates` exits 1 with `OPENSPEC-UNTOUCHED FAIL: an untracked file
       exists inside openspec/` while this change's five files are untracked, which is that
       gate working, not a defect to chase.
-- [ ] 8.3 VERIFY: `openspec validate tab-open-focus --strict` — valid. The `openspec` binary is
+- [x] 8.3 VERIFY: `openspec validate tab-open-focus --strict` — valid. The `openspec` binary is
       nvm-installed; prepend the active node's bin directory to `PATH` first.
