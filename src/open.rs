@@ -133,6 +133,36 @@ pub fn existing_pane(listing: &str, workspace_id: &str) -> Result<Option<String>
     Ok(None)
 }
 
+/// Every dashboard pane `listing` names for `workspace_id`, in the listing's own order —
+/// `existing_pane`'s three-part test (string `pane_id`, `label` equal to
+/// [`DASHBOARD_LABEL`], `workspace_id` equal to `workspace_id`), generalised from first
+/// match to all matches, with one clause made explicit: `pane_id` must be **non-empty**,
+/// which `existing_pane` does not enforce (design.md -> Decision 7). `Err` carries the
+/// same two reasons `existing_pane` does, verbatim, for the same unparseable input
+/// (design.md -> Decision 6: `existing_pane` is re-expressed through this function in
+/// group 2, so the three-part test exists in exactly one place).
+pub fn dashboard_panes(listing: &str, workspace_id: &str) -> Result<Vec<String>, String> {
+    // RED stub: intentionally wrong, so every scenario test below fails on assertion
+    // rather than passing by accident before group 1.2's real implementation lands.
+    let _ = (listing, workspace_id);
+    Err("not yet implemented".to_string())
+}
+
+/// Which post-open pane to focus: the first `after` id absent from `before`, else
+/// `after`'s first element, else `None`. Total over both lists — no I/O, no parsing.
+/// `before` is the pre-open dashboard pane ids for this workspace; `after` is the
+/// post-open ones. Difference over a plain first-match is what keeps a pre-existing
+/// dashboard from being raised again when a new one was just opened alongside it
+/// (`specs/pane-open/spec.md` -> "The pane to focus after opening is identified by
+/// difference from the pre-open listing").
+pub fn opened_pane(before: &[String], after: &[String]) -> Option<String> {
+    // RED stub: intentionally wrong (always `None`), so every scenario test below that
+    // expects `Some(..)` fails on assertion before group 1.3's real implementation lands.
+    let _ = before;
+    let _ = after;
+    None
+}
+
 /// Which pane a split should target, decided against the live `herdr pane list` payload
 /// rather than trusted from the injected context.
 ///
@@ -579,6 +609,95 @@ mod tests {
             {"pane_id":"w8:pH","label":"OpenSpec","workspace_id":"w8"}
         ]}}"#;
         assert_eq!(existing_pane(listing, "w8"), Ok(Some("w8:pG".to_string())));
+    }
+
+    // --- group 4a: the two pure post-open matchers --------------------------------------
+    // `specs/pane-open/spec.md` -> "The pane to focus after opening is identified by
+    // difference from the pre-open listing". `opened_pane` is total over two id lists;
+    // `dashboard_panes` is `existing_pane`'s three-part test generalised to every match.
+
+    #[test]
+    fn a_pane_absent_before_and_present_after_is_chosen() {
+        let before: Vec<String> = Vec::new();
+        let after = vec!["w8:pG".to_string()];
+        assert_eq!(opened_pane(&before, &after), Some("w8:pG".to_string()));
+    }
+
+    #[test]
+    fn a_pre_existing_dashboard_is_not_chosen_when_a_new_one_appears() {
+        let before = vec!["w8:pG".to_string()];
+        let after = vec!["w8:pG".to_string(), "w8:pH".to_string()];
+        assert_eq!(
+            opened_pane(&before, &after),
+            Some("w8:pH".to_string()),
+            "the pre-existing dashboard must not be chosen again just because it is first"
+        );
+    }
+
+    #[test]
+    fn two_new_matches_choose_the_first_in_order() {
+        let before: Vec<String> = Vec::new();
+        let after = vec!["w8:pG".to_string(), "w8:pH".to_string()];
+        assert_eq!(opened_pane(&before, &after), Some("w8:pG".to_string()));
+    }
+
+    #[test]
+    fn every_match_already_present_falls_back_to_the_first() {
+        let before = vec!["w8:pG".to_string()];
+        let after = vec!["w8:pG".to_string()];
+        assert_eq!(
+            opened_pane(&before, &after),
+            Some("w8:pG".to_string()),
+            "a dashboard for this workspace is what the user asked to be shown"
+        );
+    }
+
+    #[test]
+    fn a_vanished_pre_open_id_is_ignored() {
+        let before = vec!["w8:pZ".to_string()];
+        let after = vec!["w8:pG".to_string()];
+        assert_eq!(opened_pane(&before, &after), Some("w8:pG".to_string()));
+    }
+
+    #[test]
+    fn no_post_open_match_chooses_nothing() {
+        let empty = r#"{"result":{"panes":[]}}"#;
+        let no_label = r#"{"result":{"panes":[{"pane_id":"w8:pX","workspace_id":"w8"}]}}"#;
+        let other_workspace =
+            r#"{"result":{"panes":[{"pane_id":"wA:pG","label":"OpenSpec","workspace_id":"wA"}]}}"#;
+        let no_pane_id = r#"{"result":{"panes":[{"label":"OpenSpec","workspace_id":"w8"}]}}"#;
+        let empty_pane_id =
+            r#"{"result":{"panes":[{"pane_id":"","label":"OpenSpec","workspace_id":"w8"}]}}"#;
+
+        for listing in [empty, no_label, other_workspace, no_pane_id, empty_pane_id] {
+            assert_eq!(
+                dashboard_panes(listing, "w8"),
+                Ok(Vec::new()),
+                "listing: {listing}"
+            );
+        }
+        // Deferred to group 2: the `existing_pane` half of this scenario ("existing_pane
+        // returns no match for that same empty-pane_id listing, which it does not do at
+        // HEAD") is `existing_pane`'s own refactor, not this group's. Only the
+        // `dashboard_panes` half is asserted here.
+
+        assert_eq!(opened_pane(&[], &[]), None);
+        assert_eq!(opened_pane(&["w8:pG".to_string()], &[]), None);
+    }
+
+    #[test]
+    fn an_unparseable_listing_is_the_same_error_from_both_matchers() {
+        let not_json = "not json";
+        let no_panes_array = r#"{"result":{}}"#;
+
+        for listing in [not_json, no_panes_array] {
+            let extractor_err = dashboard_panes(listing, "w8").expect_err("should error");
+            let existing_err = existing_pane(listing, "w8").expect_err("should error");
+            assert_eq!(
+                extractor_err, existing_err,
+                "the two matchers must report the same reason for: {listing}"
+            );
+        }
     }
 
     // --- group 4b: repairing a dead split target ----------------------------------------
