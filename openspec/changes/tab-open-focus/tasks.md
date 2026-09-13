@@ -177,13 +177,13 @@ grep -q "plugin pane focus" "$S/argv.log"
 ## 5. Degraded-states contract
 <!-- kind: operational -->
 
-- [ ] 5.1 CHECK: Run `cargo test --test degraded_coverage` at HEAD and record it green, so a
+- [x] 5.1 CHECK: Run `cargo test --test degraded_coverage` at HEAD and record it green, so a
       later failure names this change's own rows rather than inherited drift.
-- [ ] 5.2 CHANGE: Add two rows to `SPEC.md`'s degraded-states table, beside the four `open`
+- [x] 5.2 CHANGE: Add two rows to `SPEC.md`'s degraded-states table, beside the four `open`
       rows it already has (design.md → Decision 5): the post-open `pane list` failing, being
       unparseable, or naming no dashboard pane; and the post-open `plugin pane focus` failing
       on any code. Both state that the process still exits 0 with the reason on stderr.
-- [ ] 5.3 CHANGE: Bind each new row in `tests/degraded-coverage.toml` with **all six** keys
+- [x] 5.3 CHANGE: Bind each new row in `tests/degraded-coverage.toml` with **all six** keys
       `openspec/specs/degraded-coverage/spec.md` requires — `condition` (the table's first
       column verbatim), `tier = "unit"`, `proof` naming the group-3 tests,
       `verdict = "implemented"` (new behaviour this change adds, not an audit confirmation of
@@ -191,14 +191,14 @@ grep -q "plugin pane focus" "$S/argv.log"
       `verdict` fails the parse at `tests/degraded_coverage.rs:126`, so task 5.4 would reject it.
       `unit` matches the three existing `open` rows; the capability spec's prose prefers
       `integration` for one-shot commands, so the `why` states that these proofs render nothing.
-- [ ] 5.3a CHANGE: Re-anchor the `covers` ranges of the four existing `open` rows while the
+- [x] 5.3a CHANGE: Re-anchor the `covers` ranges of the four existing `open` rows while the
       file is open. They are already wrong at HEAD — `covers = ["src/open.rs:268-280"]` lands
       on `placement_for` and the `Report` doc comment, not the listing block, and `run` begins
       at `src/open.rs:332` — and this change inserts lines that shift them further.
       `validate_covers` (`tests/degraded_coverage.rs:352-392`) only checks that a range names
       an existing path, is non-reversed, is in range, and holds a line of code, so it cannot
       catch this drift and will not catch it after the change either.
-- [ ] 5.4 VERIFY: `cargo test --test degraded_coverage` — green, each new row bound to a named
+- [x] 5.4 VERIFY: `cargo test --test degraded_coverage` — green, each new row bound to a named
       passing test.
 
 ## 6. Change Review
