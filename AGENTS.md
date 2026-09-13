@@ -143,7 +143,10 @@ or needs a terminal, and neither ever passes `--cwd` to `herdr plugin pane
 open`: Herdr 0.8.2 was measured to resolve the manifest's relative pane
 `command` against `--cwd` too, not only against the plugin root, so `ui::run`
 instead reads the workspace's own cwd from its injected Herdr context
-(`ui::startup_cwd`) in preference to `std::env::current_dir()`.
+(`ui::startup_cwd`) in preference to `std::env::current_dir()`. A successful
+open re-lists and focuses the pane it just opened, rather than reading the
+open response — a later change would otherwise reach for
+`result.plugin_pane.pane.pane_id`, admitting a second Herdr envelope shape.
 
 Important files:
 

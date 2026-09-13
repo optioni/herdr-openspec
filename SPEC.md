@@ -903,6 +903,20 @@ entries deliberately share (`OpenSpec`), so `open` and `open-tab` focus each oth
 workspace's dashboard when it carries a string `pane_id`, its `label` matches, and its
 `workspace_id` matches; the first match in list order wins.
 
+`--focus` on the open call is **not sufficient for a tab**: measured live against Herdr
+**0.9.0**, `plugin pane open --placement tab --focus` creates the tab and focuses the pane
+*within* it, but leaves the workspace showing whichever tab it already had open — the action
+appears to do nothing. So a successful open is followed by a second `pane list` and a
+`plugin pane focus <pane_id>`, on **both** placements with no placement branch: a split
+whose pane already took focus is unharmed by a second focus, and one path is cheaper to
+specify and test than two. The pane to focus is identified by difference against the ids the
+**pre-open** listing reported (`opened_pane`), never by reading the open call's own response
+— see "Nothing about the open response is parsed" below — so a dashboard pane that already
+existed is not raised again in place of the one just opened. Pane creation is **synchronous**
+with respect to the listing API (measured on Herdr 0.9.0: a pane created by one socket call
+is present in the very next `pane list`), so this second listing is neither retried nor
+delayed.
+
 **The two argument vectors.** A split targets an **existing** pane — the focused one by
 default, or `--target-pane <id>` — and fails `invalid_params` with `--workspace` unless
 that workspace happens to be focused; `--direction` is optional here, unlike
@@ -929,14 +943,25 @@ the workspace cwd from its own injected context (`ui::startup_cwd`, reading the 
 plugin — a `[[panes]]` entry no less than an `[[actions]]` one — receives this same
 injected context.
 
-**Focus can fail two ways.** `herdr plugin pane focus <pane_id>` reaches the server in
-0.8.2 but appears nowhere in Herdr's changelog, so its first supported version is unknown.
-A usage error (`CliError::Failed { code: Some(2), .. }` — plain text on stderr, what a
-Herdr without this subcommand produces) warns and falls through to opening once, rather
-than refusing on a Herdr the manifest's own `min_herdr_version` still declares supported.
-Any other focus failure — including the recoverable case of a pane that closed between the
-listing and the focus call — stops the command; invoking the action again recovers it, once
-the pane is no longer listed.
+**Focus can fail two ways — for the pre-open focus only.** `herdr plugin pane focus
+<pane_id>` reaches the server in 0.8.2 but appears nowhere in Herdr's changelog, so its
+first supported version is unknown. This split governs the focus of a pane the **first**
+`pane list` already reported, before any open is attempted: a usage error
+(`CliError::Failed { code: Some(2), .. }` — plain text on stderr, what a Herdr without this
+subcommand produces) warns and falls through to opening once, rather than refusing on a
+Herdr the manifest's own `min_herdr_version` still declares supported. Any other focus
+failure — including the recoverable case of a pane that closed between the listing and the
+focus call — stops the command; invoking the action again recovers it, once the pane is no
+longer listed.
+
+The focus that follows a successful open carries **no such split**. Every failure shape
+there — the second listing failing or being unparseable, naming no dashboard pane, or the
+focus itself failing on any exit code — is recorded as a warning and leaves the process
+exiting 0. Nothing follows that focus, so a failure leaks nothing and the pane is open
+either way; refusing to report success because the dashboard could not be *raised* would be
+the fail-closed behaviour this project forbids. The asymmetry is deliberate: the pre-open
+split above exists to bound a systematic focus failure that would otherwise leak one
+dashboard pane per keypress, a risk with no counterpart once the pane already exists.
 
 **Nothing about the open response is parsed.** Its envelope
 (`result.plugin_pane.pane.pane_id`) differs from `pane split`'s (`result.pane.pane_id`);
