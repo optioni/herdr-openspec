@@ -317,15 +317,15 @@ run it avoids.
 ## 13. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 13.1 CHECK: Inspect the intended verification commands and affected tiers — unit, view,
+- [x] 13.1 CHECK: Inspect the intended verification commands and affected tiers — unit, view,
   contract, gate, and wiring, all reached by `make test` and `make gates`.
-- [ ] 13.2 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
-- [ ] 13.3 VERIFY: `cargo fmt --all -- --check` — clean.
-- [ ] 13.4 VERIFY: `cargo build --all-features` — 0 errors. Rust has no separate type checker.
-- [ ] 13.5 VERIFY: `cargo test --all-features` — green.
-- [ ] 13.6 VERIFY: `make gates` — every gate green, with `NOIO-VIEW` reporting ten pure files and
+- [x] 13.2 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
+- [x] 13.3 VERIFY: `cargo fmt --all -- --check` — clean.
+- [x] 13.4 VERIFY: `cargo build --all-features` — 0 errors. Rust has no separate type checker.
+- [x] 13.5 VERIFY: `cargo test --all-features` — green.
+- [x] 13.6 VERIFY: `make gates` — every gate green, with `NOIO-VIEW` reporting ten pure files and
   `COLWIDTH` nine.
-- [ ] 13.7 VERIFY: `cargo llvm-cov --fail-under-lines 80` and the production-slice floor — green.
+- [x] 13.7 VERIFY: `cargo llvm-cov --fail-under-lines 80` and the production-slice floor — green.
   Never lower, waive, or exclude; if coverage falls short, add tests.
-- [ ] 13.8 VERIFY: `make check` as the single gate, naming the failing sub-command if it fails.
-- [ ] 13.9 VERIFY: `openspec validate help-overlay --strict` — valid.
+- [x] 13.8 VERIFY: `make check` as the single gate, naming the failing sub-command if it fails.
+- [x] 13.9 VERIFY: `openspec validate help-overlay --strict` — valid.
