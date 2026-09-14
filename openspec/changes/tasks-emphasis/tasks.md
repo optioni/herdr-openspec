@@ -1,21 +1,32 @@
-<!-- Ordering: measured with `grep -rln "<symbol>" src/ tests/`. Groups 1 and 2 write one
-     file each and neither is written by any other group (`src/tasks.rs`, `src/ui/palette.rs`);
-     groups 3, 4, 5, 6 and 7 write `src/ui/markdown.rs`+`src/ui/view.rs`, `src/ui/tasks.rs`,
-     `src/ui/tasks.rs`+`src/ui/detail.rs`, `src/ui/app.rs`+every ArtifactSection site, and
-     `src/ui/app.rs`+`src/ui/detail.rs`. Group 8 writes only tests.
+<!-- Ordering, with the file each group writes (`grep -rln` over the symbols named):
+
+       1  src/tasks.rs
+       2  src/ui/palette.rs
+       3  src/ui/markdown.rs, src/ui/view.rs, src/ui/tasks.rs (the one Face literal at :159)
+       4  src/ui/tasks.rs
+       5  src/ui/app.rs and every ArtifactSection site in src/ and tests/
+       6  src/ui/app.rs, src/ui/detail.rs, src/ui/view.rs (three fixtures and their helper)
+       7  src/ui/tasks.rs, src/ui/detail.rs, src/ui/view.rs (nine progress_bar sites)
+       8  src/ui/view.rs (tests only, but that is still a shared file)
 
      Groups 1 and 2 pass parallelism tests 1 and 2 against each other and against every other
-     group: no shared file, and neither needs the other's code — `LabelRole` is named by
+     group: no shared file, and neither names the other's symbols — `LabelRole` is named by
      `src/ui/markdown.rs` (group 3), not by `src/ui/palette.rs`. They are rejected on test 3
-     alone, for the reason `heading-sections` recorded: `make check` is a whole-tree gate, a
-     concurrent failure would not stay attributable in a shared checkout, and this
-     repository's rules forbid a worktree. No pair is marked `parallel-after`; every group is
-     sequential, and that is a finding rather than an unexamined default. -->
+     alone, for the reason `heading-sections` recorded and `openspec/config.yaml` backs:
+     `make check` is a whole-tree gate, a concurrent failure would not stay attributable in a
+     shared checkout, and this repository's rules forbid a worktree. No pair is marked
+     `parallel-after`; every group is sequential, and that is a finding rather than an
+     unexamined default.
 
-<!-- No group 0. The change binds no key and alters no state transition, so a `run_loop` row
-     would drive an untouched key to observe a rendering the view tier observes directly
-     (design.md -> Test Strategy). The view tier is the outermost tier that can fail here, and
-     group 8 is where the cross-capability view rows land. -->
+     Groups 5, 6 and 7 are ordered by a real dependency, not by narrative: group 7's segmented
+     gauge is fed from `ArtifactSection::progress`, which group 5 adds and group 6 populates.
+     Planning review found the first draft had the gauge at group 5 passing an empty slice
+     from the only path that renders it. -->
+
+<!-- No group 0 acceptance test. The change binds no key and alters no state transition, so a
+     `run_loop` row would drive an untouched key to observe a rendering the view tier observes
+     directly (design.md -> Test Strategy). The view tier is the outermost tier that can fail
+     here; groups 7 and 8 are where its rows land. -->
 
 ## 0. Measurements
 
@@ -26,35 +37,43 @@ Every number this plan uses, with the command that produced it, run at HEAD on 2
 | Figure | Command | Result |
 |---|---|---|
 | `Face` literals spelling every field out | brace-matched scan over `src/**/*.rs` for `Face {` whose body holds no `..` | **1** — `src/ui/tasks.rs:159` (`heading_line`); the other five hits are the struct definition, two doc comments, and two `impl` bodies |
-| `ArtifactSection {` construction and pattern sites | `grep -rn "ArtifactSection {" src/ tests/ \| wc -l` | **78** |
-| `ArtifactSection` spans `NODEFAULT-UI` scans | `SCAN_MIN=25 TYPES='ArtifactSection' /bin/sh scripts/gates/nodefault-ui.sh` | **72** spans, "none elides a field" — so every one names every field |
-| `progress_bar(` call sites | `grep -rn "progress_bar(" src/ \| cut -d: -f1 \| sort \| uniq -c` | **51** — 39 `src/ui/tasks.rs`, 9 `src/ui/view.rs`, 3 `src/ui/detail.rs` |
-| `bar_lines(` call sites | same, for `bar_lines(` | **6** — 4 `src/ui/tasks.rs`, 2 `src/ui/detail.rs` |
+| `ArtifactSection {` occurrences | `grep -rn "ArtifactSection {" src/ tests/ \| cut -d: -f1 \| sort \| uniq -c` | **78** total — 26 `src/ui/app.rs`, 19 `src/ui/detail.rs`, 14 `src/ui/driver.rs`, 14 `src/ui/view.rs`, 2 `tests/doc_contract.rs`, **3 `tests/gate-controls.toml`** |
+| …of which the compiler forces | the 75 in `.rs` files, less the struct definition | **74** construction and pattern sites. The 3 in `gate-controls.toml` are planted-defect **strings** and are edited only if the plant itself must change |
+| `ArtifactSection` spans `NODEFAULT-UI` scans | `SCAN_MIN=25 TYPES='ArtifactSection' /bin/sh scripts/gates/nodefault-ui.sh` | **72** spans, "none elides a field" |
+| `progress_bar(` call sites | `grep -rn "progress_bar(" src/ \| cut -d: -f1 \| sort \| uniq -c` | **51** — 39 `src/ui/tasks.rs`, **9 `src/ui/view.rs`**, 3 `src/ui/detail.rs` |
+| `bar_lines(` call sites | same, for `bar_lines(` | **6** — 4 `src/ui/tasks.rs`, 2 `src/ui/detail.rs`; the production pair is `src/ui/tasks.rs:363` and `src/ui/detail.rs:461` |
+| View tests asserting a fold-header row | `grep -n "expected_header_at" src/ui/view.rs` | the helper at `:3974` and its call sites; the three tracked-tasks tests are at `:4488`, `:4540`, `:4659` |
 | `#[test]` count, `src/ui/tasks.rs` | `grep -c "#\[test\]" src/ui/tasks.rs` | **29** (`TASKWIDTHS` floor is 22) |
 | `#[test]` count, `src/ui/palette.rs` | `grep -c "#\[test\]" src/ui/palette.rs` | **4** |
-| Archive task items / labelled / compound | `python3` scan over `openspec/changes/archive/*/tasks.md` (proposal.md -> Measurements) | 2563 / 2272 / 76, with **0** false positives |
+| Archive task items / labelled / plain / compound | `python3` scan over `openspec/changes/archive/*/tasks.md` (proposal.md -> Measurements) | 2563 / 2272 / 2196 / 76, with **0** false positives |
 | Groups per archived task file | `for f in openspec/changes/archive/*/tasks.md; do grep -c '^## ' "$f"; done \| sort -n` | n=37, min 5, median 12, max 22 |
 
 - [ ] 0.1 CHECK: Re-run every command above and confirm each figure still holds. A figure that
-      moved invalidates the task that cites it — the `ArtifactSection` count sends you to 6.2,
-      the `bar_lines` count to 5.3, and the `Face` count to 3.3.
-- [ ] 0.2 CHECK: Confirm the baseline is green before any edit. Measured at HEAD on
-      2026-09-14, with this change's own artifacts committed: `cargo test --all-features` exits
-      **0** with **1413 passed, 0 failed, 1 ignored** across six binaries, and `make gates`
-      exits **0**. Re-run both and confirm they still hold; a figure that moved means the
-      baseline is not this one.
+      moved invalidates the task that cites it — the `ArtifactSection` counts send you to 5.2,
+      the `progress_bar` split to 7.3, the `expected_header_at` lines to 6.5, and the `Face`
+      count to 3.3.
+- [ ] 0.2 CHECK: Confirm the baseline is green before any edit. Measured at HEAD on 2026-09-14
+      with this change's artifacts committed: `cargo test --all-features` exits **0** with
+      **1413 passed, 0 failed, 1 ignored** across six binaries, and `make gates` exits **0**.
+      Re-run both; a figure that moved means the baseline is not this one.
 - [ ] 0.3 CHECK: Re-run the four RED checks below. Each was run at HEAD on 2026-09-14 and each
-      returned **0**, so the behaviours this change adds are provably absent before group 1:
-      `grep -rc "label_of" src/` → 0; `grep -c "muted" src/ui/markdown.rs` → 0;
+      returned **0**, so the behaviours this change adds are provably absent before group 1.
+      Note the first uses `-rl`, not `-rc`: `grep -rc` prints a `path:0` line per file and so
+      never reports `0` on its own.
+      `grep -rl "label_of" src/ | wc -l` → 0;
+      `grep -c "muted" src/ui/markdown.rs` → 0;
       `grep -cE "Role::Muted|TaskEvidence" src/ui/palette.rs` → 0;
       `grep -A6 "pub struct ArtifactSection" src/ui/app.rs | grep -c progress` → 0.
+- [ ] 0.4 CHECK: Confirm the four greps above are **absence-of-string** checks, not
+      absence-of-behaviour ones, and that the behavioural RED is each group's own 1.1/2.1/…
+      task. A grep cannot fail for the right reason; it is recorded as a starting condition.
 
 ## 1. `tasks::label_of` — the recognition and the vocabulary
 
 <!-- kind: behavior -->
 
-Writes `src/tasks.rs` alone. Deepest dependency, no collaborators: the function takes a `&str`
-and returns plain data (design.md -> Decision 1).
+Writes `src/tasks.rs` alone. The function takes a `&str` and returns plain data
+(design.md -> Decision 1).
 
 - [ ] 1.1 RED: Write failing `tasks` unit tests named for the eight `task-labels` scenarios —
       `the_plain_and_compound_label_forms_are_both_recognised`,
@@ -66,11 +85,8 @@ and returns plain data (design.md -> Decision 1).
       `matching_is_case_sensitive_and_whole_run`, and
       `the_classification_reads_nothing_outside_its_argument`. Confirm each fails on the
       missing `label_of` rather than on a malformed fixture.
-- [ ] 1.2 GREEN: Implement `LabelRole`, `Label { start, len, role }`, and `label_of`, following
-      the five-step rule in `specs/task-labels/spec.md` exactly. Count the task number and the
-      uppercase run with byte arithmetic and `trim_start_matches`-style scanning — `src/tasks.rs`
-      is outside `COLWIDTH`'s `PURE` list, but the crate's one width measure is
-      `ui::layout::columns` and this function measures no width at all.
+- [ ] 1.2 GREEN: Implement `LabelRole`, `Label { start, len, role }`, and `label_of` per the
+      five-step rule in `specs/task-labels/spec.md`, with byte arithmetic throughout.
 - [ ] 1.3 GREEN: Implement the classification table as an exact, case-sensitive match over the
       run, with `Other` as the fallback arm rather than a lookup miss.
 - [ ] 1.4 CHECK: Run
@@ -78,7 +94,7 @@ and returns plain data (design.md -> Decision 1).
       prints nothing, proving the non-goal that this capability consults no schema.
 - [ ] 1.5 REFACTOR: Fold the number-skip and the run-scan into one pass if two emerged, or
       record that none was needed.
-- [ ] 1.6 VERIFY: `cargo test --all-features tasks::` — green — and `make gates` exits 0.
+- [ ] 1.6 VERIFY: `cargo test --all-features` — green — and `make gates` exits 0.
 
 ## 2. The five palette roles
 
@@ -88,34 +104,39 @@ Writes `src/ui/palette.rs` alone. Sequential rather than parallel with group 1 f
 the ordering note above gives.
 
 - [ ] 2.1 RED: Write failing `ui::palette` tests for
-      `each_roles_modifier_set_is_exactly_the_table` (extended to five new rows, with the
-      no-modifier count moving 7 → 11), `the_coloured_set_is_exactly_the_table` (four new rows,
-      plus the assertion that `TaskEvidence` is `LightRed` and **not** `Red`), and
-      `every_shared_style_is_licensed_and_the_unshared_roles_stay_unshared`. Confirm each fails
-      on the missing `Role` variants.
+      `each_roles_modifier_set_is_exactly_the_table` (five new rows; the no-modifier count
+      moves 7 → 11), `the_coloured_set_is_exactly_the_table` (four new rows, plus the
+      assertion that `TaskEvidence` is `LightRed` and **not** `Red`),
+      `every_shared_style_is_licensed_and_the_unshared_roles_stay_unshared`, and
+      `the_enums_membership_is_exactly_this_list`. Confirm each fails on the missing `Role`
+      variants.
 - [ ] 2.2 GREEN: Add `Muted`, `TaskEvidence`, `TaskChange`, `TaskConfirm`, and `TaskLabel` to
-      `Role` and to `style`, with the modifiers and colours `specs/view-palette/spec.md` states.
-      Colour literals stay in this file's own tests, which is where the second, independent
-      transcription lives.
-- [ ] 2.3 GREEN: Implement the shared-style test by grouping every `Role` variant, every
-      `AgentStatus`, and heading levels 1–6 by `Style` equality, and requiring each group of
-      size greater than one to be one of the groups the spec enumerates.
-- [ ] 2.4 CHANGE: Update the `table()` doc comment's "thirty-one rows" to the new count and the
-      module doc's "Two pairs share a style deliberately" to the two licences
-      (design.md -> Decision 7). These are the file's own prose, not a separate document.
-- [ ] 2.5 VERIFY: `cargo test --all-features ui::palette` — green — and
+      `Role` and to `style`, appended after `Strikethrough`, with the modifiers and colours
+      `specs/view-palette/spec.md` states. Colour literals stay in this file's own tests.
+- [ ] 2.3 GREEN: Implement the shared-style test by **discarding the uncoloured roles first**,
+      then grouping the rest by `Style` equality against the spec's five-group table. Grouping
+      every role would produce three unenumerated plain-modifier groups that already exist at
+      HEAD, which is the defect planning review found in the first draft of this task.
+- [ ] 2.4 GREEN: Implement `the_enums_membership_is_exactly_this_list` as an exhaustive `match`
+      over `Role`, so a later variant added without updating `specs/view-palette`'s reproduced
+      enum fails to compile rather than drifting.
+- [ ] 2.5 GREEN: Update this file's own prose — `table()`'s "thirty-one rows" doc comment and
+      the module doc's "Two pairs share a style deliberately" — to the new count and the two
+      licences (design.md -> Decision 7).
+- [ ] 2.6 VERIFY: `cargo test --all-features` — green — and
       `/bin/sh scripts/gates/palette.sh` exits 0, proving no colour literal escaped the file.
 
 ## 3. `Face` gains two fields, and `style_for` composes nine roles
 
 <!-- kind: behavior -->
 
-Writes `src/ui/markdown.rs` and `src/ui/view.rs`.
+Writes `src/ui/markdown.rs`, `src/ui/view.rs`, and the one `Face` literal in
+`src/ui/tasks.rs`.
 
 - [ ] 3.1 RED: Write a failing `ui::markdown` test
       `the_markdown_path_sets_neither_new_face_field` at widths 58 and 78 over the
       multi-construct document the scenario names, asserting `muted: false` and `label: None`
-      on every segment, and that the output is byte-identical to the pre-change result.
+      on every segment.
 - [ ] 3.2 RED: Write a failing `ui::view` test
       `the_two_new_face_fields_compose_in_their_stated_positions` calling `style_for` on the
       four `Face` values the scenario names, including the unreachable `muted` + `label`
@@ -125,165 +146,202 @@ Writes `src/ui/markdown.rs` and `src/ui/view.rs`.
       (`src/ui/tasks.rs:159`, per 0.1). The compiler names any site this count missed.
 - [ ] 3.4 GREEN: Extend `style_for` to the nine-step fold — `Muted` first, `face.label` last —
       per `specs/view-palette/spec.md`.
-- [ ] 3.5 CHECK: Contract gate — re-read design.md -> Contracts, confirm the five moved
-      signatures still name every consumer, and that `Face`'s two new fields reach no consumer
-      outside `src/`. No serialized or persisted form exists.
+- [ ] 3.5 CHECK: Contract gate — re-read design.md -> Contracts, confirm `Face`'s two new
+      fields reach no consumer outside `src/`, and that no serialized or persisted form exists.
 - [ ] 3.6 CHECK: Run `/bin/sh scripts/gates/mdseam.sh`, `noio-view.sh`, and `colwidth.sh` and
-      confirm each exits 0 — `ui::markdown` naming `crate::tasks::LabelRole` must widen none of
-      the three.
-- [ ] 3.7 VERIFY: `cargo test --all-features ui::markdown ui::view` — green.
+      confirm each exits 0 — `ui::markdown` naming `crate::tasks::LabelRole` must widen none.
+- [ ] 3.7 VERIFY: `cargo test --all-features` — green. The whole suite, not a module filter:
+      this group edits `src/ui/tasks.rs`, which a `ui::markdown ui::view` filter would not run.
 
 ## 4. The checklist item grammar: split at the label, mute a finished row
 
 <!-- kind: behavior -->
 
-Writes `src/ui/tasks.rs`. `TASKWIDTHS` has no exemption list, so **every** test added here names
-both `58` and `78` even where its interesting widths are elsewhere (design.md -> Test Strategy).
+Writes `src/ui/tasks.rs`. `TASKWIDTHS` has no exemption list, so **every** test added here
+names both `58` and `78` even where its interesting widths are elsewhere.
 
 - [ ] 4.1 RED: Write failing `ui::tasks` tests
       `a_labelled_unchecked_item_splits_into_three_segments`,
       `a_checked_item_is_de_emphasised_whole_label_included`,
       `a_wrapped_labelled_item_labels_only_its_first_row`, and
       `a_label_split_across_a_wrap_degrades_to_unlabelled`. Each names 58 and 78; the last also
-      sweeps 12, 14 and 16. Confirm each fails on the missing behaviour.
+      sweeps 12, 14 and 16.
 - [ ] 4.2 RED: Extend the two existing face assertions —
       `a_folded_group_and_an_unfolded_one_render_the_same_item_lines` and
-      `groups_headings_items_and_separators_at_both_mandated_widths` — to the new fields, so a
-      checked row's `muted: true` is asserted on the path that already existed.
+      `groups_headings_items_and_separators_at_both_mandated_widths` — to the new fields.
 - [ ] 4.3 GREEN: Implement the two-rule facing in `item_lines`: a checked item is one
       `muted: true` segment covering the whole row; an unchecked one calls
-      `tasks::label_of(&item.text)` and splits into at most three segments, omitting any that
-      would be empty.
+      `tasks::label_of(&item.text)` and splits into at most three segments, omitting any empty.
 - [ ] 4.4 GREEN: Implement the wrap degradation — when `start + len` exceeds the first row's own
       text length, render one `Face::plain()` segment (design.md -> Decision 9).
-- [ ] 4.5 CHECK: Assert `Line::text()` is byte-identical to the pre-change output for every
-      fixture in this group, checked and unchecked alike. This is the claim that the change
-      moved no character, and it is the one a reviewer will want run.
+- [ ] 4.5 CHECK: Assert every fixture's `Line::text()` equals a **string literal written into
+      the test**, copied from the pre-change output and never recomputed from the function
+      under test. A comparison against the function's own fresh output cannot fail, and this
+      is the assertion carrying the claim that the change moved no character.
 - [ ] 4.6 REFACTOR: Extract the segment-building if `item_lines` grew a second copy of the
       prefix arithmetic, or record that none was needed.
-- [ ] 4.7 VERIFY: `cargo test --all-features ui::tasks` — green — and
+- [ ] 4.7 VERIFY: `cargo test --all-features` — green — and
       `/bin/sh scripts/gates/taskwidths.sh`, `taskseam.sh` and `colwidth.sh` each exit 0.
 
-## 5. The segmented gauge
+## 5. `ArtifactSection` gains a `progress` field
+
+<!-- kind: refactor -->
+
+Writes `src/ui/app.rs` and the 74 compiler-forced sites across `src/` and `tests/`. Structure
+only: every site takes `None`, so no rendered output moves and the characterization tests stay
+unchanged.
+
+- [ ] 5.1 CHARACTERIZE: Run `cargo test --all-features` and record it green **at the head of
+      this group**, after groups 1–4 have landed, so a red here is attributable to the field
+      rather than to an earlier group. This is not 0.2, which measured the pre-change tree.
+- [ ] 5.2 REFACTOR: Add `progress: Option<crate::tasks::Progress>` to `ArtifactSection` and
+      update all **74** compiler-forced sites (per 0.1) to `progress: None`. `NODEFAULT-UI`
+      requires every span to name every field, so none may be elided with `..`. The 3
+      occurrences in `tests/gate-controls.toml` are planted-defect strings; leave them unless
+      the plant stops matching.
+- [ ] 5.3 CHANGE: Update `openspec/specs/detail-scroll/spec.md`'s companion obligation via this
+      change's own `specs/detail-scroll/spec.md` delta — the live spec names `ArtifactSection`'s
+      "all **three**" fields and this makes it four. Add the compile-time companion test the
+      delta requires, destructuring all four with no `..`.
+- [ ] 5.4 CHECK: Contract gate — re-read design.md -> Contracts, confirm the only consumers are
+      `sync_detail`, `content_lines`, `Detail::foldable`, and test fixtures, and that
+      `Detail::foldable` is still `sections.len() > 1`.
+- [ ] 5.5 VERIFY: Run the unchanged tests — `cargo test --all-features` green — and
+      `SCAN_MIN=25 TYPES='ArtifactSection' /bin/sh scripts/gates/nodefault-ui.sh` exits 0 with
+      a span count at or above the 72 recorded in 0.1.
+
+## 6. Per-group progress on the fold header row
 
 <!-- kind: behavior -->
 
-Writes `src/ui/tasks.rs` and `src/ui/detail.rs`'s two `bar_lines` call sites.
+Writes `src/ui/app.rs` (`sync_detail`), `src/ui/detail.rs` (`header`), and three `ui::view`
+fixtures with their shared helper.
 
-- [ ] 5.1 RED: Write failing `ui::tasks` tests
+- [ ] 6.1 RED: Write failing `ui::app` tests
+      `a_tracked_tasks_tabs_group_headers_carry_their_own_progress` and
+      `a_group_holding_no_items_still_gets_a_header_and_a_counted_cell`, driving `sync_detail`
+      with a closure reader and asserting on `detail.sections`.
+- [ ] 6.2 RED: Write the **view halves** of those same two scenarios in `ui::view`, rendering
+      at 120x20 and 60x20 and asserting the drawn cells. design.md's matrix tiers both as
+      "unit (pure) + view"; the unit half alone would not show the cell reaching a buffer.
+- [ ] 6.3 RED: Write failing `ui::view` test
+      `every_other_artifacts_section_headers_carry_no_progress_cell` — `ui::view`, not
+      `ui::detail`, per the matrix — and failing `ui::detail` test
+      `the_progress_cell_is_dropped_whole_rather_than_truncated`, the latter sweeping content
+      widths 0..=40 and naming 58 and 78 as the contrasted pair for `DETAILWIDTHS`.
+- [ ] 6.4 GREEN: In `sync_detail`, set `progress` to `tasks::parse(&section.text).progress()`
+      for the heading sections of a split file whose `ArtifactRef` carries
+      `tracks_tasks == true`, and leave every other section `None`.
+- [ ] 6.5 GREEN: In `ui::detail::header`, draw the right-aligned cell from
+      `ui::list::progress_cell` when the section carries a `progress`, dropped whole in the
+      order `specs/artifact-folds/spec.md` states: the cell, then the label, then the glyph and
+      the indent.
+- [ ] 6.6 CHANGE: Amend the three existing `ui::view` fixtures that assert tracked-tasks
+      fold-header rows — `a_foldable_tasks_tab_draws_its_groups_as_fold_headers` (`:4488`),
+      `the_progress_bar_leads_the_folded_task_groups` (`:4540`), and
+      `a_mostly_finished_task_file_opens_at_its_first_unfinished_group` (`:4659`) — and give
+      their shared helper `expected_header_at` (`:3974`) a progress argument. These go red the
+      moment 6.5 lands; without this task the group reports green on a red tree.
+- [ ] 6.7 CHECK: Assert the drawn cell is byte-identical to `ui::list::progress_cell` called on
+      the same value, so the row provably does not format its own.
+- [ ] 6.8 REFACTOR: Extract the right-align arithmetic if `header` grew a second copy of
+      `pad_or_truncate_right`'s job, or record that none was needed.
+- [ ] 6.9 VERIFY: `cargo test --all-features` — green — and
+      `/bin/sh scripts/gates/detailwidths.sh`, `colwidth.sh`, `noio-view.sh` and `readseam.sh`
+      each exit 0.
+
+## 7. The segmented gauge, wired to the path that renders it
+
+<!-- kind: behavior -->
+
+Writes `src/ui/tasks.rs`, `src/ui/detail.rs`, and the nine `progress_bar` sites in
+`src/ui/view.rs`. It follows groups 5 and 6 because its slice is fed from
+`ArtifactSection::progress`.
+
+- [ ] 7.1 RED: Write the failing render row first —
+      `a_real_tasks_tab_renders_a_segmented_gauge_into_the_frame` in `ui::view`, at 120x20 and
+      60x20 over the two-group fixture, asserting at least one `▓` or `▒` in the progress-bar
+      row and the two spans in the ratio the sections' own totals give. This is the only
+      scenario in the change that renders a segmented gauge through `content_lines`; the other
+      five pass hand-built slices and would all pass against an unwired build.
+- [ ] 7.2 RED: Write failing `ui::tasks` tests
       `two_groups_of_unequal_size_get_spans_proportional_to_their_item_counts`,
       `an_empty_group_contributes_no_span_and_consumes_no_index`,
       `segmentation_is_skipped_below_the_legibility_floor`,
       `a_single_group_is_never_segmented`, and
       `segmentation_is_total_and_partitions_the_run_exactly`. Each names 58 and 78; three sweep
-      0..=130. Confirm each fails on the missing parameter rather than on a compile error in the
-      fixture.
-- [ ] 5.2 GREEN: Add the `groups: &[tasks::Progress]` parameter to `progress_bar` and
-      `bar_lines`, and implement segmentation as a **glyph substitution** over the run
-      `gauge_of` already returns (design.md -> Decision 3). `gauge_of` itself does not move.
-- [ ] 5.3 CHANGE: Update the 6 `bar_lines` call sites and the 51 `progress_bar` ones (per 0.1):
-      `ui::tasks::lines` passes `group.progress()` per parsed group; every other site passes an
-      empty slice, which the spec requires to reproduce the previous output byte for byte.
-- [ ] 5.4 CHECK: Re-run the three carried `tasks-progress-bar` sweeps —
-      `the_bar_measures_at_most_its_width_at_every_width`, the saturating-`Progress` test, and
-      the drop-whole order test — with **both** an empty slice and a populated one, and confirm
-      the empty-slice results are byte-identical to HEAD's.
-- [ ] 5.5 REFACTOR: Fold the span arithmetic and the substitution into one pass if two emerged,
+      0..=130.
+- [ ] 7.3 GREEN: Add the `groups: &[tasks::Progress]` parameter to `progress_bar` and
+      `bar_lines` and implement segmentation as a **glyph substitution** over the run
+      `gauge_of` already returns (design.md -> Decision 3). `gauge_of` does not move.
+- [ ] 7.4 GREEN: Wire both production callers. `ui::tasks::lines` passes `group.progress()` per
+      parsed group. `ui::detail::content_lines`' foldable branch — `src/ui/detail.rs:461`, the
+      path every real `tasks.md` takes — passes `detail.sections`' own `progress` values in
+      order, skipping `None`, and SHALL NOT re-parse the file to build the slice.
+- [ ] 7.5 CHANGE: Update the remaining `progress_bar` sites, including the **nine in
+      `src/ui/view.rs`** (per 0.1), to pass an empty slice, which the spec requires to
+      reproduce the previous output byte for byte.
+- [ ] 7.6 CHECK: Contract gate — `progress_bar` and `bar_lines` both appear in design.md ->
+      Contracts with named consumers. Re-inspect both signatures against that table and confirm
+      every consumer is named and the empty-slice compatibility claim holds.
+- [ ] 7.7 CHECK: Re-run the three carried `tasks-progress-bar` sweeps with **both** an empty
+      slice and a populated one, comparing the empty-slice results against string literals
+      recorded from HEAD's output — not against a fresh call, which could not fail.
+- [ ] 7.8 REFACTOR: Fold the span arithmetic and the substitution into one pass if two emerged,
       or record that none was needed.
-- [ ] 5.6 VERIFY: `cargo test --all-features ui::tasks ui::detail` — green — and
+- [ ] 7.9 VERIFY: `cargo test --all-features` — green — and
       `/bin/sh scripts/gates/taskwidths.sh`, `detailwidths.sh` and `taskseam.sh` each exit 0.
-
-## 6. `ArtifactSection` gains a `progress` field
-
-<!-- kind: refactor -->
-
-Writes `src/ui/app.rs` and the 78 construction and pattern sites across `src/` and `tests/`.
-Structure only: every site takes `None`, so no rendered output moves and the characterization
-tests stay unchanged.
-
-- [ ] 6.1 CHARACTERIZE: Run `cargo test --all-features` and record it green, so a later red in
-      this group is attributable to the field rather than inherited.
-- [ ] 6.2 REFACTOR: Add `progress: Option<crate::tasks::Progress>` to `ArtifactSection` and
-      update all **78** sites (per 0.1) to `progress: None`. `NODEFAULT-UI` scans 72 spans and
-      requires each to name every field, so none may be elided with `..`.
-- [ ] 6.3 CHECK: Contract gate — re-read design.md -> Contracts, confirm the only consumers are
-      `sync_detail`, `content_lines`, `Detail::foldable`, and test fixtures, and that
-      `Detail::foldable` is still `sections.len() > 1`.
-- [ ] 6.4 VERIFY: Run the unchanged tests — `cargo test --all-features` green — and
-      `SCAN_MIN=25 TYPES='ArtifactSection' /bin/sh scripts/gates/nodefault-ui.sh` exits 0 with a
-      span count at or above the 72 recorded in 0.1.
-
-## 7. Per-group progress on the fold header row
-
-<!-- kind: behavior -->
-
-Writes `src/ui/app.rs` (`sync_detail`) and `src/ui/detail.rs` (`header`).
-
-- [ ] 7.1 RED: Write failing `ui::app` tests
-      `a_tracked_tasks_tabs_group_headers_carry_their_own_progress` and
-      `a_group_holding_no_items_still_gets_a_header_and_a_counted_cell`, driving `sync_detail`
-      with a closure reader and asserting on `detail.sections`. Confirm each fails on the
-      field's `None` value rather than on a missing fixture.
-- [ ] 7.2 RED: Write failing `ui::detail` tests
-      `every_other_artifacts_section_headers_carry_no_progress_cell` and
-      `the_progress_cell_is_dropped_whole_rather_than_truncated`, the latter sweeping content
-      widths 0..=40 and naming 58 and 78 as the contrasted pair, since `DETAILWIDTHS` sweeps
-      this file with no exemption list.
-- [ ] 7.3 GREEN: In `sync_detail`, set `progress` to `tasks::parse(&section.text).progress()`
-      for the heading sections of a split file whose `ArtifactRef` carries
-      `tracks_tasks == true`, and leave every other section `None`.
-- [ ] 7.4 GREEN: In `ui::detail::header`, draw the right-aligned cell from
-      `ui::list::progress_cell` when the section carries a `progress`, dropped whole in the
-      order `specs/artifact-folds/spec.md` states: the cell first, then the label, then the
-      glyph and the indent.
-- [ ] 7.5 CHECK: Assert the drawn cell is byte-identical to `ui::list::progress_cell` called on
-      the same value, so the row provably does not format its own.
-- [ ] 7.6 REFACTOR: Extract the right-align arithmetic if `header` grew a second copy of
-      `pad_or_truncate_right`'s job, or record that none was needed.
-- [ ] 7.7 VERIFY: `cargo test --all-features ui::app ui::detail` — green — and
-      `/bin/sh scripts/gates/detailwidths.sh`, `colwidth.sh`, `noio-view.sh` and `readseam.sh`
-      each exit 0.
 
 ## 8. The cross-capability view rows
 
-<!-- kind: behavior -->
+<!-- kind: operational -->
 
-Writes test code in `src/ui/view.rs` only. This is the outermost tier that can fail here
-(design.md -> Test Strategy); every collaborator below is replaced per design.md -> Test
-Boundaries.
+Writes test code in `src/ui/view.rs`. These rows span every group above, so none of them can be
+RED inside a group of its own — which is why this group is `operational` and its lifecycle is
+CHECK → CHANGE → VERIFY rather than a manufactured RED. Its evidence is that the rows pass
+against the assembled change and would fail against any one group reverted.
 
-- [ ] 8.1 RED: Write failing `ui::view` tests
+- [ ] 8.1 CHECK: Write `ui::view` tests
       `the_five_new_roles_leave_every_existing_cell_s_modifier_where_it_was`,
       `a_task_label_and_a_problem_row_are_distinguishable_in_one_frame`, and
-      `a_checklist_row_reaches_the_buffer_with_its_label_coloured`, each rendering into a
-      `TestBackend` at 120x20 and 60x20.
-- [ ] 8.2 GREEN: No production code is expected here — groups 1 through 7 supply it. If a test
-      fails, the defect is in one of those groups; fix it there and record which.
-- [ ] 8.3 CHECK: Confirm no assertion in this group writes a colour literal: each compares
-      against `palette::style(role)`. Run
-      `grep -nE 'Color::(Red|Green|Blue|LightRed|DarkGray)' src/ui/view.rs` and confirm it
-      prints nothing.
+      `a_checklist_row_reaches_the_buffer_with_its_label_coloured`, each rendering at 120x20 and
+      60x20. Run them and record the result.
+- [ ] 8.2 CHECK: Confirm each can fail, by reverting one group's production change in a scratch
+      copy and recording which row goes red. A row no reverted group can redden is testing
+      something other than this change.
+- [ ] 8.3 CHANGE: Fix whatever 8.1 or 8.2 reddens, in the group that owns it, and record which
+      group and why here.
 - [ ] 8.4 CHECK: Confirm the carried view rows are byte-identical — render the `color-palette`
-      monochrome fixture and the three-spec fixture at both widths and compare against HEAD's
-      buffers, which is the claim that this change moved no rendered text outside the tasks tab.
-- [ ] 8.5 VERIFY: `cargo test --all-features ui::view` — green — and
-      `/bin/sh scripts/gates/palette.sh` and `readonly-ui.sh` each exit 0.
+      monochrome fixture and the three-spec fixture at both widths and compare against string
+      literals recorded from HEAD, which is the claim that this change moved no rendered text
+      outside the tasks tab.
+- [ ] 8.5 VERIFY: `cargo test --all-features` — green — and
+      `/bin/sh scripts/gates/palette.sh` and `readonly-ui.sh` each exit 0. `palette.sh`
+      subsumes a hand-written grep for colour literals, so none is written here.
 
 ## 9. Change Review
 
 <!-- kind: operational -->
 
-- [ ] 9.1 CHECK: Dispatch an independent `outside-in-tdd-reviewer` against proposal.md, all six
-      spec deltas, design.md, and tasks.md, given the diff and the artifacts only — not this
-      session's reasoning. Name the repository's own concentration points in the brief: nothing
-      spawns outside `cli`; views do no I/O; the plugin writes nothing inside `openspec/`;
-      view tests run at 60 and 120; and the six `*WIDTHS` gates carry no exemption list.
-- [ ] 9.2 CHECK: Ask the reviewer specifically whether any test here can fail — in particular
-      whether the byte-identical assertions in 4.5, 5.4 and 8.4 compare against a recorded
-      literal rather than against the function's own fresh output, which would be tautological.
+- [ ] 9.1 CHECK: Dispatch an independent `outside-in-tdd-reviewer` against proposal.md, all
+      seven spec deltas, design.md, and tasks.md, given the diff and the artifacts only — not
+      this session's reasoning. Name the repository's concentration points in the brief:
+      nothing spawns outside `cli`; views do no I/O; the plugin writes nothing inside
+      `openspec/`; view tests run at 60 and 120; the six `*WIDTHS` gates carry no exemption
+      list.
+- [ ] 9.2 CHECK: Ask the reviewer specifically whether any assertion here can fail — the
+      byte-identical comparisons in 4.5, 7.7 and 8.4 must compare against recorded literals,
+      and every scenario must have a production path that reaches it. Planning review found
+      five segmentation scenarios that would have passed against a build rendering none.
 - [ ] 9.3 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a
       one-line reason, note SUGGESTIONs, and re-run affected tests.
-- [ ] 9.4 VERIFY: Confirm no blocking or unowned finding remains.
+- [ ] 9.4 CHECK: Before archiving, re-extract the `markdown-render`, `detail-scroll`, and four
+      `view-palette` requirement blocks from `openspec/specs/<capability>/spec.md` and compare
+      by **phrase** against this change's deltas. `spec-emphasis` modifies `markdown-render`
+      and `view-palette` too, and a `MODIFIED` block carries the whole requirement, so
+      whichever change archives second silently discards the first's edits
+      (design.md -> Risks).
+- [ ] 9.5 VERIFY: Confirm no blocking or unowned finding remains.
 
 ## 10. Documentation
 
@@ -291,16 +349,15 @@ Boundaries.
 
 - [ ] 10.1 Add in `SPEC.md`: the East Asian Ambiguous paragraph (audience: future implementers)
       — one sentence naming the gauge's two new shades `▓` and `▒` as joining that exposure.
-      The markdown renderer's "seven glyphs, six Ambiguous" count does **not** move, because
-      this change adds no markdown glyph; rewrite the surrounding sentence only if it reads as
-      a total for the pane rather than for the renderer.
+      The markdown renderer's "seven glyphs, six Ambiguous" count does **not** move, since this
+      change adds no markdown glyph; rewrite the surrounding sentence only if it reads as a
+      total for the pane rather than for the renderer.
 - [ ] 10.2 Rewrite in `AGENTS.md`: the paragraph beginning "Six of those seven glyphs"
       (audience: every agent session) — it repeats `SPEC.md`'s count and must say the same
-      thing after 10.1. Rewrite in place; do not append a second sentence beside it.
+      thing after 10.1. Rewrite in place; do not append beside it.
 - [ ] 10.3 Rewrite in `AGENTS.md`: the sentence stating the crate has "**one** gauge run beside
       its **one** progress cell" (audience: every agent session) — it stays true and gains a
-      third consumer, the fold header row. Correct it in place rather than adding a rule; a
-      future change rendering a change's progress in a fourth place must still call these two.
+      third consumer, the fold header row. Correct it in place rather than adding a rule.
 - [ ] 10.4 VERIFY: `cargo test --all-features --test doc_contract` — green — confirming no
       documented claim this change touched drifted from the file that determines it.
 
@@ -317,11 +374,6 @@ Boundaries.
 - [ ] 11.5 VERIFY: `cargo test --all-features` — green.
 - [ ] 11.6 VERIFY: `cargo llvm-cov --fail-under-lines 80` — passes, and the production-slice
       floor from `scripts/coverage-prod.py` passes with it.
-- [ ] 11.7 VERIFY: `make check` — exits 0 as a whole. If it fails, name the failing
+- [ ] 11.7 VERIFY: `openspec validate tasks-emphasis --strict` — valid.
+- [ ] 11.8 VERIFY: `make check` — exits 0 as a whole. If it fails, name the failing
       sub-command here rather than the composite.
-- [ ] 11.8 VERIFY: `openspec validate tasks-emphasis --strict` — valid.
-- [ ] 11.9 CHECK: Before archiving, re-extract the `markdown-render` and three `view-palette`
-      requirement blocks from `openspec/specs/<capability>/spec.md` and compare by **phrase**
-      against the copies in this change's deltas. `spec-emphasis` modifies both capabilities
-      and a `MODIFIED` block carries the whole requirement, so whichever change archives second
-      silently discards the first's edits (design.md -> Risks).

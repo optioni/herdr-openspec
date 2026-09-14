@@ -12,8 +12,11 @@ longer care about. Three signals already exist in the data and none of them reac
   **Dropped from this change's scope** — see the resolved questions below. It stays a real
   signal and a later change may take it; this one does not, because a badge did not earn a
   cell on a heading row that now also carries a progress pair.
-- **Task labels.** 1,989 labelled tasks across the archive — `VERIFY` 557, `CHECK` 427, `RED`
-  329, `GREEN` 313, `CHANGE` 212, `REFACTOR` 140, `CHARACTERIZE` 11 — rendered as plain text.
+- **Task labels.** 2,272 labelled tasks across the archive — `VERIFY` 609, `CHECK` 471, `RED`
+  358, `GREEN` 348, `CHANGE` 236, `REFACTOR` 157, `CHARACTERIZE` 16, `NOTE` 1 — rendered as
+  plain text. (An earlier draft of this proposal said 1,989 and a lower figure for every
+  token; those were counted before `task-labels`' recognition rule existed and are superseded
+  by the Measurements table below, which states the rule it counted under.)
 
 ## What Changes
 
@@ -75,7 +78,15 @@ longer care about. Three signals already exist in the data and none of them reac
   carries a right-aligned progress cell when it has one. This is where a group heading's own
   progress lands — on a real `tasks.md` the group headings are **fold headers**, not
   `Face { heading }` lines, since `heading-sections` archived.
-- `view-palette`: five new roles.
+- `markdown-render`: `Face` gains `muted` and `label`, neither of which `ui::markdown` ever
+  sets. `Face` is the crate's one carrier of "what this run of text is", and `markdown-render`
+  is where its shape is pinned — `markdown-legibility` set the precedent adding
+  `strikethrough` the same way.
+- `detail-scroll`: its spec fixes `ArtifactSection`'s field list at three, and this change
+  makes it four.
+- `view-palette`: five new roles, and the reproduced `Role` enum that would otherwise go
+  stale — the block whose own prose says it is reproduced because changes keep altering its
+  membership.
 
 ## Impact
 
@@ -112,8 +123,8 @@ with the decision rather than re-derive it.
    is not written: retaining a marker nothing renders would be spec'ing dead data. Group
    heading rows carry their own progress and nothing else.
 
-A fourth decision fell out of the first three. The proposal said "four new roles"; it is
-**five**. De-emphasising a completed item needs a role of its own (`Muted`, plain `DIM`) beside
+A fourth decision fell out of the first three. An earlier draft of this proposal said "four
+new roles"; it is **five**. De-emphasising a completed item needs a role of its own (`Muted`, plain `DIM`) beside
 the four label roles, and reusing `Quoted` for it would mean a block quote and a finished task
 were the same thing.
 

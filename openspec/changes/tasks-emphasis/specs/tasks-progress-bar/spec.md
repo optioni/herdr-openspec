@@ -32,7 +32,9 @@ draws it left to right and leaves the rest of its row untouched, exactly as
   the empty one `░` (U+2591), exactly as before this change.
 
 `groups` SHALL be one `Progress` per task group, in document order, as `tasks-checklist`
-states its caller derives them. It SHALL affect **only** which glyph each position is drawn
+states each of its two callers derives them — and on the **foldable** path, which is the path
+every real `tasks.md` takes, that slice SHALL be populated from `detail.sections`' own
+`progress` values rather than left empty. It SHALL affect **only** which glyph each position is drawn
 with — never `g`, never `filled`, never either cell, and never the drop-whole order. An
 **empty slice** SHALL therefore produce a byte-identical line to the one this capability
 produced before this change, at every width and for every `Progress`, which is what the
@@ -247,3 +249,22 @@ change in every respect.
 - **AND** for `{ usize::MAX, usize::MAX }` every position is a filled glyph, `█` or `▓`, and
   the percent cell reads `100%`, so segmentation did not reintroduce the saturation defect the
   requirement above repairs
+
+#### Scenario: A real tasks tab renders a segmented gauge into the frame
+
+- **WHEN** a `Dashboard` at `Route::Detail` whose selected artifact carries
+  `tracks_tasks == true` and whose one path reads
+  `## 1. Setup\n\n- [x] 1.1 first\n- [ ] 1.2 second\n\n## 2. Build\n\n- [ ] 2.1 third\n` is
+  synced and rendered at 120x20 and at 60x20
+- **THEN** at each width the progress-bar row holds at least one `▓` or `▒`, so the pane
+  actually draws a segmented gauge rather than only `progress_bar` being able to
+- **AND** the first group's span is drawn with the `█`/`░` pair and the second with `▓`/`▒`,
+  their widths in the ratio `tasks-checklist`'s two sections' own `progress` totals give — 2
+  items against 1
+- **AND** the same dashboard whose artifact does **not** track tasks draws no progress-bar row
+  at all, and no `▓` or `▒` appears anywhere in either buffer
+- **AND** this is the one scenario in this capability that renders through
+  `ui::detail::content_lines` rather than calling `progress_bar` directly. Every other
+  segmentation scenario passes a hand-built slice, so all of them would pass against a build
+  whose production caller passed an empty one — which is the defect this scenario exists to
+  catch, and did catch, in planning review

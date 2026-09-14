@@ -57,7 +57,8 @@ does not re-argue them; it records the mechanisms they imply.
 | `src/ui/palette.rs` | five roles: `Muted`, `TaskEvidence`, `TaskChange`, `TaskConfirm`, `TaskLabel` | the existing role table; colour literals stay in its own tests |
 | `src/ui/view.rs` | `style_for` grows from seven composing roles to nine | the existing fold-with-`patch` order |
 | `src/ui/app.rs` | `ArtifactSection` gains `progress: Option<Progress>`, set only for a split tracked-tasks file | `heading-sections`' own `label: Option<String>` / `depth` addition |
-| `src/ui/detail.rs` | the header row gains a right-aligned progress cell, dropped whole | `tasks-progress-bar`'s and `detail-header`'s drop-whole order |
+| `src/ui/detail.rs` | the header row gains a right-aligned progress cell, dropped whole; `content_lines`' foldable branch feeds the gauge its group slice | `tasks-progress-bar`'s and `detail-header`'s drop-whole order |
+| `src/ui/view.rs` (tests) | three tracked-tasks fold-header fixtures and their shared `expected_header_at` helper gain the progress cell | the fixture-amendment discipline every row-grammar change here has used |
 
 **No process spawn is added anywhere.** No file this change touches names `process::Command`,
 `Stdio`, `OpenspecCli`, or `HerdrCli`; `src/cli.rs` is untouched. **No I/O is added to a
@@ -90,8 +91,15 @@ serialized form exists, and no consumer outside `src/` names any of them.
 Three are **additive at the call site** because `Face` derives `Default` and `Face::plain()`
 stays the zero value: a construction written `..Face::plain()` compiles unchanged. The two
 slice parameters are **breaking at the call site and additive in behaviour** — an empty slice
-reproduces the previous output byte for byte, at every width and for every `Progress`, which
-is what `ui::detail::content_lines` passes on the paths that have no groups.
+reproduces the previous output byte for byte, at every width and for every `Progress`.
+
+**Both production callers pass a populated slice.** `ui::tasks::lines` derives it from its own
+parse; `ui::detail::content_lines`' foldable branch passes `detail.sections`' `progress`
+values, skipping `None`. The empty slice is what the crate's **test** call sites pass and what
+a future caller with no group data would pass — not what the pane passes. Planning review found
+an earlier draft of this paragraph saying `content_lines` passed the empty slice, which would
+have made the segmented gauge unreachable in every frame while all five of its scenarios
+passed; the render-tier scenario `tasks-progress-bar` now carries is the repair's own check.
 
 `ui::tasks::gauge_of` does **not** move. It keeps the signature and output `header-progress-bar`
 gave it, so `detail-header`'s twelve-column gauge is untouched in every respect.
@@ -162,6 +170,12 @@ Every scenario appears at least once. Rows marked *carried* reproduce an existin
 whose scenario already has a passing test; the obligation there is that it **stays** green
 byte-for-byte, which is what proves this change moved no rendered text.
 
+**Every "byte-identical" assertion compares against a string literal recorded from HEAD and
+written into the test**, never against a fresh call of the function under test. The second form
+cannot fail and would silently convert the change's central claim — that no character of
+rendered text moved — into a tautology. Tasks 4.5, 7.7 and 8.4 carry that wording explicitly,
+and the Change Review group asks its reviewer to check exactly this.
+
 | Spec Scenario | Verification | Tier | Collaborators | Command |
 |---|---|---|---|---|
 | task-labels — The plain and compound label forms are both recognised | `tasks` unit test over `&str` literals | unit (pure) | none | `cargo test tasks::tests::label` |
@@ -203,7 +217,7 @@ byte-for-byte, which is what proves this change moved no rendered text.
 | tasks-progress-bar — The bar measures at most its width at every width *(carried)* | existing sweep stays green, now also with a populated slice | unit (pure) | `gauge_of` **real** | `cargo test ui::tasks` |
 | tasks-progress-bar — A saturating `Progress` renders a full gauge and a full percentage *(carried)* | existing test stays green, now also with a two-group slice | unit (pure) | `gauge_of` **real** | `cargo test ui::tasks` |
 | artifact-folds — A tracked-tasks tab's group headers carry their own progress | `ui::app` unit test on `detail.sections`, plus a `TestBackend` render at 120 and 60 | unit (pure) + view | reader **replaced**; terminal **replaced**; `progress_cell` **real** | `cargo test ui::app` and `cargo test ui::view` |
-| artifact-folds — Every other artifact's section headers carry no progress cell | `TestBackend` render at 120 and 60 compared against the pre-change buffer | view | terminal **replaced**; reader **replaced** | `cargo test ui::view` |
+| artifact-folds — Every other artifact's section headers carry no progress cell | `TestBackend` render at 120 and 60 compared against literals recorded from HEAD | view | terminal **replaced**; reader **replaced** | `cargo test ui::view` |
 | artifact-folds — The progress cell is dropped whole rather than truncated | `ui::detail` unit test sweeping content widths 0..=40, naming 58 and 78 as the contrasted pair | unit (pure) | `progress_cell` **real** | `cargo test ui::detail` |
 | artifact-folds — A group holding no items still gets a header and a counted cell | `ui::app` unit test on `detail.sections`, plus a `TestBackend` render at 120 | unit (pure) + view | reader **replaced**; terminal **replaced** | `cargo test ui::app` and `cargo test ui::view` |
 | artifact-folds — The three spec files of a change become three labelled sections *(amended)* | existing test, its `ArtifactSection` literals gaining `progress: None` | unit (pure) | reader **replaced** | `cargo test ui::app` |
@@ -229,6 +243,14 @@ byte-for-byte, which is what proves this change moved no rendered text.
 | view-palette — Faces reach the buffer as coloured styles at both mandated widths *(carried)* | existing view test stays green | view | terminal **replaced**; reader **replaced** | `cargo test ui::view` |
 | view-palette — A section header's role is selected by its kind, not by its face *(carried)* | existing view test stays green | view | terminal **replaced**; reader **replaced** | `cargo test ui::view` |
 | view-palette — Heading foreground wins over a code span inside it *(carried)* | existing view test stays green | view | terminal **replaced**; reader **replaced** | `cargo test ui::view` |
+| tasks-progress-bar — A real tasks tab renders a segmented gauge into the frame | `TestBackend` render at 120x20 and 60x20 asserting `▓`/`▒` in the bar row | view | terminal **replaced**; reader **replaced** | `cargo test ui::view` |
+| detail-scroll — The `ArtifactSection` companion names the fourth field | compile-time destructuring test, plus the `NODEFAULT-UI` invocation | unit (pure) + gate | the working tree | `cargo test ui::app` and `SCAN_MIN=25 TYPES='ArtifactSection' /bin/sh scripts/gates/nodefault-ui.sh` |
+| detail-scroll — Startup leaves the detail empty and unscrolled *(carried)* | existing `ui::load` test over a `ScratchDir` stays green | run-time (scratch tree) | filesystem **real** (`crate::testutil::ScratchDir`) | `cargo test ui::tests` |
+| detail-scroll — `Detail` has no `Default` and no site elides a field *(carried)* | existing test and gate stay green | unit (pure) + gate | the working tree | `cargo test` and `make gates` |
+| view-palette — The enum's membership is exactly this list | `ui::palette` unit test with an exhaustive `match` over `Role` | unit (pure) | none | `cargo test ui::palette` |
+| view-palette — The palette answers every role with a `Style` *(amended)* | existing test, its shared-pair assertions widened from two pairs to five groups | unit (pure) | none | `cargo test ui::palette` |
+| view-palette — The confinement gate catches a `Color` named outside the palette *(carried)* | existing gate-control stays green | gate | the working tree, copied to a scratch directory | `cargo test --test gate_controls` |
+| view-palette — The palette module reaches no I/O and measures no width *(carried)* | existing gate stays green | gate | the working tree | `/bin/sh scripts/gates/noio-view.sh` |
 | view-palette — A plain face is the default style *(carried)* | existing test stays green with the two new fields at their zero | unit (pure) | none | `cargo test ui::view` |
 
 ## Decisions
@@ -262,8 +284,13 @@ of two shades each position is drawn with. This is the decision that keeps the c
 `filled == g` iff complete, `filled == 0` when `completed == 0`, and the `u128` arithmetic
 `header-progress-bar` repaired all hold **by construction** rather than by a second assertion,
 and `gauge_of` itself does not move, so `detail-header`'s twelve-column gauge is untouched.
-*Alternative considered:* compute each group's fill independently and concatenate, rejected
-because the per-segment fills do not sum to the global formula — a change at 7/31 would have
+What "by construction" does and does not cover, since planning review asked: it covers the
+three **fill** properties, which are properties of `gauge_of`'s output and are untouched by a
+substitution that preserves each position's filled/empty state. It does **not** cover the
+substitution's own correctness — that the spans partition the run exactly, that the shades
+alternate, and that the skip rule fires — each of which has its own scenario and its own
+sweep. *Alternative considered:* compute each group's fill independently and concatenate,
+rejected because the per-segment fills do not sum to the global formula — a change at 7/31 would have
 rendered a gauge disagreeing with its own count cell — and because it would have created the
 crate's second fill computation, which is exactly what `header-progress-bar` spent a change
 removing.

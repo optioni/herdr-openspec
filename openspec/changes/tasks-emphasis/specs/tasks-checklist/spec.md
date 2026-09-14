@@ -10,8 +10,27 @@ and an unfolded one render the same items through the same code:
   by one blank line; the **empty vector** when the bar renders as the empty string at that
   width. `groups` is one `Progress` per task group in document order, which
   `tasks-progress-bar` uses to segment the gauge; an **empty slice** SHALL render the bar
-  exactly as it rendered before that change, which is what the non-foldable path and the
-  detail header both pass;
+  exactly as it rendered before that change.
+
+  **Both callers SHALL pass a populated slice, and which one they are decides how they build
+  it.** `lines` — the non-foldable path — derives it from its own `tasks::parse`. The
+  **foldable** path is `artifact-content`'s walk in `ui::detail::content_lines`, and it is the
+  path every real `tasks.md` takes; it SHALL pass the `progress` values `artifact-folds` now
+  stores on `detail.sections`, in section order, skipping the sections carrying `None`. It
+  SHALL NOT re-parse the file to build the slice: the number is already computed once per
+  sync, and a second derivation is a second number that can disagree with the header cells
+  drawn beside it.
+
+  The consequence of skipping `None` is stated rather than left to be found: `artifact-folds`
+  sets `progress` on **heading** sections only, so a split file's **preamble** — text before
+  its first heading — contributes no span even when it holds items. Those items are still
+  counted by the bar's own `progress`, which is the `Change`'s field, so the gauge's fill is
+  unaffected; only the boundary marking omits them. A preamble holding task items is not a
+  shape any schema's `tasks.md` produces, and the alternative — a span with no header row to
+  match it — would mark a boundary the reader cannot see.
+
+  The **detail header** is not a caller: `detail-header` draws its gauge through
+  `ui::tasks::gauge_of` directly and never through this function;
 - `ui::tasks::items(items: &[crate::tasks::Item], width)` — one or more lines per item, in
   order, as specified below, with **no** progress bar, **no** heading line, and **no** blank
   separator. It SHALL take **parsed items**, never a source string: `lines` already holds
