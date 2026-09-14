@@ -3967,6 +3967,16 @@ mod tests {
         crate::ui::list::pad_or_truncate_right(&format!("{glyph} {label}"), width as usize)
     }
 
+    /// [`expected_header`] for a section at `depth`: `"  " * depth`, then the glyph, a
+    /// space, and the label, the whole row through `ui::list::pad_or_truncate_right`.
+    /// The indent is emitted **before** the glyph (`heading-sections` -> design.md ->
+    /// D7), so truncation eats the label first and the depth survives it.
+    fn expected_header_at(label: &str, collapsed: bool, depth: usize, width: u16) -> String {
+        let glyph = crate::ui::list::fold_glyph(collapsed);
+        let indent = "  ".repeat(depth);
+        crate::ui::list::pad_or_truncate_right(&format!("{indent}{glyph} {label}"), width as usize)
+    }
+
     /// The style shared by every cell of content row `y` across its `width` interior
     /// columns — panics if the row is not uniformly styled. Used to assert a header
     /// row's whole-row role, since a header row is always one plain-face segment
@@ -4190,6 +4200,222 @@ mod tests {
 
             // Rendering the same dashboard must not panic.
             let _buf = render_at(width, 20, &d);
+        }
+    }
+
+    /// `heading-sections`: the seven-section spec-glob dashboard — the shape
+    /// `ui::app::tests::a_spec_glob_nests_requirements_under_their_capability`
+    /// derives through `sync_detail` from a three-path `specs` artifact whose first
+    /// file is the four-section delta spec, at depths `0, 1, 2, 3, 2, 0, 0`. Built
+    /// here field for field rather than synced: the subject of these scenarios is
+    /// the **walk** over `detail.sections`, not the derivation that produced it, and
+    /// group 3's own tests already bind the derivation to this exact shape.
+    fn seven_section_dashboard(
+        expanded: std::collections::BTreeSet<usize>,
+        scroll: usize,
+    ) -> Dashboard {
+        let change =
+            fixture::with_artifacts(fixture::active("detail-view", 4, 9), &[("specs", &[])]);
+        let section = |label: &str, text: &str, depth: usize| ArtifactSection {
+            label: Some(label.to_string()),
+            text: text.to_string(),
+            depth,
+        };
+        let detail = Detail {
+            sections: vec![
+                // A split file's own text lives in its heading sections, so the
+                // file section's `text` is the empty string.
+                section("degraded-coverage", "", 0),
+                section("ADDED Requirements", "\n", 1),
+                section("Requirement: Alpha", "Alpha text.\n\n", 2),
+                section("Scenario: A works", "- **WHEN** a\n- **THEN** b\n\n", 3),
+                section("Requirement: Beta", "Beta text.\n", 2),
+                section("markdown-render", "## MODIFIED Requirements\n", 0),
+                section("tasks-checklist", "## MODIFIED Requirements\n", 0),
+            ],
+            scroll,
+            tab: 0,
+            problems: Vec::new(),
+            loaded: None,
+            expanded,
+            drawn_width: Some(78),
+        };
+        dashboard_with_detail(vec![change], Vec::new(), 1, Route::Detail, detail)
+    }
+
+    /// Every non-blank content row of `buf`, from the content area's first row
+    /// down, as its own interior band — stopping at the first blank row is wrong
+    /// here, because a blank separator row sits *between* two drawn rows, so the
+    /// list runs to the last row that carries text.
+    fn drawn_content_rows(buf: &Buffer, interior: u16) -> Vec<String> {
+        // The content area runs from `CONTENT_FIRST_ROW` to the frame's own last
+        // row exclusive — `layout::split_detail` gives it the interior's rows less
+        // the tab bar, the rule, and the padding row, and the frame's final row is
+        // the footer band below the regions entirely.
+        let mut rows: Vec<String> = (CONTENT_FIRST_ROW..buf.area.height - 1)
+            .map(|y| detail_interior_cols(buf, y, interior as usize))
+            .collect();
+        while rows.last().is_some_and(|r| r.trim().is_empty()) {
+            rows.pop();
+        }
+        rows
+    }
+
+    /// The detail content area's first buffer row: the heading row, the tab bar,
+    /// the rule, and the padding row precede it.
+    const CONTENT_FIRST_ROW: u16 = 5;
+
+    /// `artifact-folds` :: "A fold hides a whole subtree".
+    #[test]
+    fn a_fold_hides_a_whole_subtree() {
+        for width in [120u16, 60] {
+            let interior = interior_width(width);
+
+            // `expanded` holding `0` alone: the open file section shows its own
+            // `ADDED Requirements` child, which is collapsed and therefore hides
+            // the two requirements and the scenario beneath it.
+            let one = seven_section_dashboard(std::collections::BTreeSet::from([0]), 0);
+            assert_eq!(
+                drawn_content_rows(&render_at(width, 40, &one), interior),
+                vec![
+                    expected_header_at("degraded-coverage", false, 0, interior),
+                    expected_header_at("ADDED Requirements", true, 1, interior),
+                    expected_header_at("markdown-render", true, 0, interior),
+                    expected_header_at("tasks-checklist", true, 0, interior),
+                ],
+                "width {width}: expanded {{0}}"
+            );
+
+            // `0` and `1`: the two requirements appear at depth 2, and the
+            // scenario stays hidden under its own collapsed requirement — two
+            // levels below an open ancestor.
+            let two = seven_section_dashboard(std::collections::BTreeSet::from([0, 1]), 0);
+            assert_eq!(
+                drawn_content_rows(&render_at(width, 40, &two), interior),
+                vec![
+                    expected_header_at("degraded-coverage", false, 0, interior),
+                    expected_header_at("ADDED Requirements", false, 1, interior),
+                    expected_header_at("Requirement: Alpha", true, 2, interior),
+                    expected_header_at("Requirement: Beta", true, 2, interior),
+                    expected_header_at("markdown-render", true, 0, interior),
+                    expected_header_at("tasks-checklist", true, 0, interior),
+                ],
+                "width {width}: expanded {{0, 1}}"
+            );
+
+            // `1` alone: its parent is collapsed, so the `ADDED Requirements`
+            // header is not drawn at all — membership in `expanded` is not
+            // visibility.
+            let orphan = seven_section_dashboard(std::collections::BTreeSet::from([1]), 0);
+            assert_eq!(
+                drawn_content_rows(&render_at(width, 40, &orphan), interior),
+                vec![
+                    expected_header_at("degraded-coverage", true, 0, interior),
+                    expected_header_at("markdown-render", true, 0, interior),
+                    expected_header_at("tasks-checklist", true, 0, interior),
+                ],
+                "width {width}: expanded {{1}}"
+            );
+        }
+    }
+
+    /// `artifact-content` :: "A body row is never indented by its section's depth".
+    #[test]
+    fn a_body_row_is_never_indented_by_its_sections_depth() {
+        let every = std::collections::BTreeSet::from([0, 1, 2, 3, 4, 5, 6]);
+        for width in [120u16, 60] {
+            let interior = interior_width(width);
+            let d = seven_section_dashboard(every.clone(), 0);
+            let buf = render_at(width, 40, &d);
+            let rows = drawn_content_rows(&buf, interior);
+
+            // `Requirement: Alpha` is a depth-2 section: its header begins with
+            // exactly four spaces and then the open glyph.
+            let alpha = rows
+                .iter()
+                .position(|r| r.contains("Requirement: Alpha"))
+                .expect("Alpha's header is drawn");
+            let open = crate::ui::list::fold_glyph(false);
+            assert_eq!(
+                rows[alpha],
+                expected_header_at("Requirement: Alpha", false, 2, interior),
+                "width {width}: the depth-2 header"
+            );
+            assert!(
+                rows[alpha].starts_with(&format!("    {open} ")),
+                "width {width}: {:?} does not open with exactly four spaces",
+                rows[alpha]
+            );
+
+            // Its body begins at column zero of the content area, with no leading
+            // space the source did not carry.
+            assert_eq!(
+                rows[alpha + 1],
+                crate::ui::list::pad_or_truncate_right("Alpha text.", interior as usize),
+                "width {width}: a body row carries no depth indent"
+            );
+
+            // Every drawn row measures exactly the content area's width.
+            for (i, row) in rows.iter().enumerate() {
+                assert_eq!(
+                    columns(row),
+                    interior as usize,
+                    "width {width}: row {i} ({row:?}) is not the content width"
+                );
+            }
+        }
+    }
+
+    /// `artifact-folds` :: "A delta spec tab opens as its operation headings alone".
+    ///
+    /// Driven through `sync_detail` rather than a hand-built `Detail`, because the
+    /// scenario's own claim is that the two requirement headers are **hidden by
+    /// their collapsed parents rather than absent from `detail.sections`**, which
+    /// only the derivation can establish.
+    #[test]
+    fn a_delta_spec_tab_opens_as_its_operation_headings_alone() {
+        const TWO_OPERATIONS: &str = "## ADDED Requirements\n\n### Requirement: Alpha\nx\n\n\
+             ## MODIFIED Requirements\n\n### Requirement: Beta\ny\n";
+        let change = fixture::with_artifacts(
+            fixture::active("detail-view", 4, 9),
+            &[(
+                "specs",
+                &["/repo/openspec/changes/detail-view/specs/a/spec.md"],
+            )],
+        );
+        let mut d = dashboard_with_detail(
+            vec![change],
+            Vec::new(),
+            1,
+            Route::Detail,
+            Detail {
+                sections: Vec::new(),
+                scroll: 0,
+                tab: 0,
+                problems: Vec::new(),
+                loaded: None,
+                expanded: std::collections::BTreeSet::new(),
+                drawn_width: None,
+            },
+        );
+        let recorder = crate::testutil::RecordingReader::always(Ok(TWO_OPERATIONS.to_string()));
+        let read = |p: &std::path::Path| recorder.read(p);
+        d.sync_detail(&read);
+
+        assert_eq!(d.detail.sections.len(), 4, "four sections were derived");
+        assert!(d.detail.expanded.is_empty(), "the tab opens collapsed");
+
+        for width in [120u16, 60] {
+            let interior = interior_width(width);
+            let buf = render_at(width, 20, &d);
+            assert_eq!(
+                drawn_content_rows(&buf, interior),
+                vec![
+                    expected_header_at("ADDED Requirements", true, 0, interior),
+                    expected_header_at("MODIFIED Requirements", true, 0, interior),
+                ],
+                "width {width}: the two operation headings alone"
+            );
         }
     }
 

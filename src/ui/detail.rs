@@ -523,6 +523,69 @@ mod tests {
         }
     }
 
+    /// `heading-sections`: the seven-section spec-glob `Detail` — the shape
+    /// `ui::app::tests::a_spec_glob_nests_requirements_under_their_capability`
+    /// derives through `sync_detail`, at depths `0, 1, 2, 3, 2, 0, 0`. Its
+    /// depth-3 section is what makes a width sweep from `0` reach the band in
+    /// which a header's indent alone exceeds the region.
+    fn seven_section_detail(expanded: std::collections::BTreeSet<usize>) -> Detail {
+        let section = |label: &str, text: &str, depth: usize| ArtifactSection {
+            label: Some(label.to_string()),
+            text: text.to_string(),
+            depth,
+        };
+        Detail {
+            sections: vec![
+                section("degraded-coverage", "", 0),
+                section("ADDED Requirements", "\n", 1),
+                section("Requirement: Alpha", "Alpha text.\n\n", 2),
+                section("Scenario: A works", "- **WHEN** a\n- **THEN** b\n\n", 3),
+                section("Requirement: Beta", "Beta text.\n", 2),
+                section("markdown-render", "## MODIFIED Requirements\n", 0),
+                section("tasks-checklist", "## MODIFIED Requirements\n", 0),
+            ],
+            scroll: 0,
+            tab: 0,
+            problems: Vec::new(),
+            loaded: None,
+            expanded,
+            drawn_width: Some(78),
+        }
+    }
+
+    /// `heading-sections`: a `None`-labelled preamble section followed by two
+    /// depth-0 task groups — the shape `sync_detail` derives from the spec's
+    /// own two-group task file, whose first line is `Intro prose.`. The
+    /// preamble owns no header row and is never a fold target, which is what
+    /// this fixture exists to drive through the width properties.
+    fn preamble_detail(expanded: std::collections::BTreeSet<usize>) -> Detail {
+        Detail {
+            sections: vec![
+                ArtifactSection {
+                    label: None,
+                    text: "Intro prose.\n\n".to_string(),
+                    depth: 0,
+                },
+                ArtifactSection {
+                    label: Some("1. Setup".to_string()),
+                    text: "- [x] 1.1 first\n- [ ] 1.2 second\n\n".to_string(),
+                    depth: 0,
+                },
+                ArtifactSection {
+                    label: Some("2. Build".to_string()),
+                    text: "- [ ] 2.1 third\n".to_string(),
+                    depth: 0,
+                },
+            ],
+            scroll: 0,
+            tab: 0,
+            problems: Vec::new(),
+            loaded: None,
+            expanded,
+            drawn_width: Some(78),
+        }
+    }
+
     fn detail(source: &str, problems: Vec<String>) -> Detail {
         Detail {
             sections: if source.is_empty() {
@@ -721,11 +784,11 @@ mod tests {
             let label = "degraded-coverage";
             let glyph = fold_glyph(true);
 
-            let at_18 = header(label, false, 18);
+            let at_18 = header(label, 0, false, 18);
             assert_eq!(columns(&at_18), 18);
             assert_eq!(at_18, format!("{glyph} degraded-covera…"));
 
-            let at_13 = header(label, false, 13);
+            let at_13 = header(label, 0, false, 13);
             assert_eq!(columns(&at_13), 13);
             assert_eq!(at_13, format!("{glyph} degraded-c…"));
 
@@ -734,17 +797,60 @@ mod tests {
             assert!(at_18.starts_with(&format!("{glyph} ")));
             assert!(at_13.starts_with(&format!("{glyph} ")));
 
+            // `heading-sections` -> design.md -> D7: a depth-2 header carries
+            // four columns of indent, emitted **before** the glyph, so
+            // truncation eats the label first and the depth survives it.
+            let nested = "Requirement: Alpha";
+            let nested_18 = header(nested, 2, false, 18);
+            assert_eq!(columns(&nested_18), 18);
+            assert_eq!(nested_18, format!("    {glyph} Requirement…"));
+            // At 13 the same grammar keeps six columns of indent-and-glyph and
+            // spends the remaining seven on the label: six of its columns plus
+            // the `…`. (The spec's own literal for this case, `    > Requi…`,
+            // measures twelve rather than thirteen columns — one short of the
+            // region — so the row below is what the crate's one truncation
+            // rule, `ui::list::pad_or_truncate_right`, actually returns.)
+            let nested_13 = header(nested, 2, false, 13);
+            assert_eq!(columns(&nested_13), 13);
+            assert_eq!(nested_13, format!("    {glyph} Requir…"));
+            assert!(nested_18.starts_with(&format!("    {glyph} ")));
+            assert!(nested_13.starts_with(&format!("    {glyph} ")));
+
+            // A depth-3 header's six columns of indent alone exceed a
+            // four-column region: the row degrades to truncated **indent**
+            // rather than to a dropped glyph, and does not panic.
+            let deep = header("Scenario: A works", 3, false, 4);
+            assert_eq!(columns(&deep), 4);
+            assert_eq!(deep, "   …");
+            assert!(
+                !deep.contains(glyph),
+                "the glyph was not kept at the cost of the indent"
+            );
+            for width in 0u16..=20 {
+                let got = header("Scenario: A works", 3, false, width);
+                assert!(
+                    columns(&got) <= width as usize,
+                    "depth 3 width {width}: {got:?}"
+                );
+            }
+
             // The mandated pair, named explicitly per DETAILWIDTHS: the
             // label fits whole at both, so the row is padded rather than
-            // truncated, and still opens with the glyph and its space.
+            // truncated, and still opens with the indent, the glyph and its
+            // space — at depth 0, 2, and 3 alike.
             for width in [78, 58] {
-                let got = header(label, false, width);
-                assert_eq!(columns(&got), width as usize, "width {width}");
-                assert!(got.trim_end().ends_with(label), "width {width}: {got:?}");
-                assert!(
-                    got.starts_with(&format!("{glyph} ")),
-                    "width {width}: {got:?}"
-                );
+                for depth in [0usize, 2, 3] {
+                    let got = header(label, depth, false, width);
+                    assert_eq!(columns(&got), width as usize, "width {width} depth {depth}");
+                    assert!(
+                        got.trim_end().ends_with(label),
+                        "width {width} depth {depth}: {got:?}"
+                    );
+                    assert!(
+                        got.starts_with(&format!("{}{glyph} ", "  ".repeat(depth))),
+                        "width {width} depth {depth}: {got:?}"
+                    );
+                }
             }
         }
 
@@ -755,11 +861,13 @@ mod tests {
         fn a_cjk_label_is_truncated_in_columns() {
             let label = "日本語のラベルです見出しの続き";
             for width in [18u16, 13, 78, 58] {
-                let got = header(label, false, width);
-                assert!(
-                    columns(&got) <= width as usize,
-                    "width {width}: {got:?} exceeds its width"
-                );
+                for depth in [0usize, 2, 3] {
+                    let got = header(label, depth, false, width);
+                    assert!(
+                        columns(&got) <= width as usize,
+                        "width {width} depth {depth}: {got:?} exceeds its width"
+                    );
+                }
             }
         }
 
@@ -770,16 +878,18 @@ mod tests {
         fn header_is_total_from_zero_through_twenty_columns() {
             let label = "degraded-coverage";
             for expanded in [false, true] {
-                for width in 0u16..=20 {
-                    let got = header(label, expanded, width);
-                    assert!(
-                        columns(&got) <= width as usize,
-                        "expanded {expanded} width {width}: {got:?}"
-                    );
-                }
-                for width in [78, 58] {
-                    let got = header(label, expanded, width);
-                    assert_eq!(columns(&got), width as usize, "width {width}");
+                for depth in 0usize..=3 {
+                    for width in 0u16..=20 {
+                        let got = header(label, depth, expanded, width);
+                        assert!(
+                            columns(&got) <= width as usize,
+                            "expanded {expanded} depth {depth} width {width}: {got:?}"
+                        );
+                    }
+                    for width in [78, 58] {
+                        let got = header(label, depth, expanded, width);
+                        assert_eq!(columns(&got), width as usize, "width {width} depth {depth}");
+                    }
                 }
             }
         }
@@ -2303,6 +2413,12 @@ mod tests {
             // panic on.
             three_spec_detail(std::collections::BTreeSet::new()),
             three_spec_detail(std::collections::BTreeSet::from([0, 1, 2, 7])),
+            // `heading-sections`' own tenth and eleventh values: the
+            // seven-section spec glob, every section open so the depth-3
+            // header is actually drawn, and the `None`-labelled preamble
+            // followed by two task groups.
+            seven_section_detail(std::collections::BTreeSet::from([0, 1, 2, 3, 4, 5, 6])),
+            preamble_detail(std::collections::BTreeSet::from([1, 2])),
         ];
         for width in [78, 58] {
             for change in [None, Some(&marked), Some(&unmarked), Some(&no_artifacts)] {
@@ -2315,6 +2431,19 @@ mod tests {
                             d.sections,
                             line.text()
                         );
+                    }
+                    // Every header's carried `section` addresses an entry of
+                    // `detail.sections`: a hidden subtree shifts the drawn row
+                    // positions, and must never shift a header's own index off
+                    // its section.
+                    for row in &lines {
+                        if let ContentKind::SectionHeader { section, .. } = row.kind {
+                            assert!(
+                                section < d.sections.len(),
+                                "width {width}: header names section {section} of {}",
+                                d.sections.len()
+                            );
+                        }
                     }
                 }
             }
@@ -2786,6 +2915,13 @@ mod tests {
             // — the last past the end, folded shut rather than panicking.
             three_spec_detail(std::collections::BTreeSet::new()),
             three_spec_detail(std::collections::BTreeSet::from([0, 1, 2, 7])),
+            // `heading-sections`' own tenth and eleventh values, per
+            // `content_lines_total` above. The spec-glob case is what reaches
+            // widths `0` through `13` with a depth-3 header whose six columns
+            // of indent alone exceed the region: the row degrades to truncated
+            // indent rather than to a dropped glyph, and does not panic.
+            seven_section_detail(std::collections::BTreeSet::from([0, 1, 2, 3, 4, 5, 6])),
+            preamble_detail(std::collections::BTreeSet::from([1, 2])),
         ];
 
         // No clock read here: `src/ui/` — tests included — names no clock API (`NOBLOCK`).
@@ -2804,6 +2940,15 @@ mod tests {
                             d.sections,
                             line.text()
                         );
+                    }
+                    for row in &lines {
+                        if let ContentKind::SectionHeader { section, .. } = row.kind {
+                            assert!(
+                                section < d.sections.len(),
+                                "width {width}: header names section {section} of {}",
+                                d.sections.len()
+                            );
+                        }
                     }
                 }
             }
