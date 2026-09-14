@@ -13,11 +13,32 @@ new test per scenario instead would leave a duplicate pair, one permanently red,
 existing tests unowned. design.md → Test Strategy carries the full scenario-to-test table; the
 tasks below name the file and line for each.
 
+**The measured red set.** Rather than estimate which tests break, a design-conformant gauge was
+planted in `header_row` at planning time — 12 columns, first in the drop order, `total == 0`
+branch before the budget, reproducing the spec's own strings — and the full suite run:
+`cargo test --all-features --no-fail-fast` → `1308 passed; 3 failed` in the lib target, plus one
+integration failure. **Four tests fail, not the twelve the plan first assumed:**
+
+| Test | File:line | Why |
+|---|---|---|
+| `the_full_header_grammar_at_both_mandated_interior_widths` | `src/ui/detail.rs:868` | literal full-row expectation |
+| `an_empty_schema_name_is_a_cell_of_two_characters_not_an_absent_one` | `src/ui/detail.rs:950` | literal full-row expectation |
+| `the_header_reaches_the_buffer_without_crossing_the_region_border` | `src/ui/detail.rs:2191` | hard-coded `tail = " (tdd) [4/9]"` |
+| `every_table_row_has_a_proof` | `tests/degraded_coverage.rs` | a shifted `covers` range — see group 3 |
+
+Nine of the twelve existing tests **pass unchanged**, including all four `src/ui/view.rs`
+detail-header tests, because those derive their expectation by calling `header_row` and the
+detail-side ones assert width, cell presence and band membership rather than the row's bytes.
+That is why the tasks below distinguish RED, RED-by-addition, and CHARACTERIZE: an expectation
+edit alone leaves nine of them green before *and* after, which is a check that passes when it
+should fail.
+
 **Group ordering: sequential, no `parallel-after` markers.** Group 0 must precede everything
-because it captures values that cease to exist once group 2 lands. Groups 1 through 3 are
-dependency-ordered, not narrative-ordered: group 2's `header_row` calls the `pub(crate)`
-function group 1 creates, and group 3 asserts the buffer group 2 produces. Groups 1 and 2 both
-write `src/ui/tasks.rs`. Group 4 reads the final line numbers of groups 1 through 3.
+because it captures values that cease to exist once group 2 lands. Groups 1, 2 and 4 are
+dependency-ordered, not narrative-ordered: group 2's `header_row` calls the `pub(crate)` function
+group 1 creates, and group 4 asserts the buffer group 2 produces. Groups 1 and 2 both write
+`src/ui/tasks.rs`. Group 3 re-anchors line numbers that only groups 1 and 2 move, and sits
+directly after them so group 4's run is not polluted by a failure neither group caused.
 
 **Counts this plan depends on:**
 
@@ -25,7 +46,7 @@ write `src/ui/tasks.rs`. Group 4 reads the final line numbers of groups 1 throug
 |---|---|---|
 | `gauge_of` sites in the crate | 3 — the definition plus two calls, both inside `progress_bar` | `grep -rn "gauge_of" src/ tests/` |
 | `header_row(` sites in `src/ui/view.rs` | 3 — one production (`:150`), two tests (`:5208`, `:6750`) | `grep -n "header_row(" src/ui/view.rs` |
-| Existing tests asserting the pre-gauge grammar | 5, all in `src/ui/detail.rs` | see group 2 |
+| Existing tests that actually fail | 3 in `src/ui/detail.rs`, plus 1 in `tests/degraded_coverage.rs` | measured, see the red set above |
 | Gauge glyphs in `src/ui/detail.rs` / `src/ui/tasks.rs` | 0 / 19 | `grep -c '█\|░' src/ui/detail.rs src/ui/tasks.rs` |
 | `covers` ranges pointing into the edited files | 4 — `src/ui/detail.rs` ×3, `src/ui/tasks.rs` ×1 | `grep -n 'src/ui/detail.rs:\|src/ui/tasks.rs:' tests/degraded-coverage.toml` |
 | Longest change name in the repo | 22 (`foldable-spec-sections`) | `ls openspec/changes/ openspec/changes/archive/ \| sed 's/^[0-9-]\{11\}//' \| awk '{print length, $0}' \| sort -rn \| head -1` |
@@ -120,84 +141,116 @@ Everything here records a value that stops existing once group 2 lands. It must 
 <!-- kind: behavior -->
 
 Tasks 2.1–2.4 rewrite existing tests in place. Each keeps its name and its
-``/// `detail-header` :: "…"`` doc comment; only the expectation changes.
+``/// `detail-header` :: "…"`` doc comment; only the expectation changes. **The RED evidence
+splits three ways** — see the measured red set above. Editing an expectation gives honest RED
+only for the two literal-expectation tests in 2.1; for 2.2 and 2.3 the existing assertions pass
+both before and after, so RED comes only from *adding* the scenario's new gauge claim, and a
+task that stops at "update the expectation" will see green and move on.
 
 - [ ] 2.1 RED: Rewrite `the_full_header_grammar_at_both_mandated_interior_widths`
   (`src/ui/detail.rs:868`) — name field 65/45 → 52/32, expected tail gains a 12-column gauge
   holding one `█` — and `an_empty_schema_name_is_a_cell_of_two_characters_not_an_absent_one`
-  (`:950`), whose `contains("() [1/2]")` the gauge splits; assert the full expected row with
-  six `█`. Confirm both report `FAILED` under `redfail`.
-- [ ] 2.2 RED: Rewrite `the_cells_are_dropped_whole_in_order_as_the_row_narrows` (`:919`) —
-  the `w >= 13` band assertion becomes `w >= 26`, and widths 26 and 25 join the sample so both
-  boundaries of the new band are covered — and
-  `a_long_name_is_truncated_with_an_ellipsis_never_overflowing_the_row` (`:898`), whose
-  `find(" (tdd)")` name-field slice must be re-derived. Confirm `FAILED`.
-- [ ] 2.3 RED: Rewrite `a_cjk_change_name_keeps_the_header_inside_its_region_at_both_mandated_widths`
-  (`:2162`), where `(tdd)` is no longer immediately before the progress cell, and
-  `header_row_is_total_over_adversarial_names_at_every_width` (`:2244`), crossing the five
-  names with four `Progress` values — with the band clause scoped to `{4, 9}`, since a 43-column
-  progress cell moves every boundary. Confirm `FAILED`.
-- [ ] 2.4 RED: Rewrite `a_change_with_no_tasks_still_ends_its_row_in_the_same_column` (`:885`)
-  to nine widths with a no-`█`/`░` clause, and write the two new tests
-  `a_complete_change_renders_a_full_gauge` and
-  `below_the_full_form_band_the_header_is_byte_identical` from 0.2's captured literals. The
-  no-tasks rewrite is a CHARACTERIZE, not a RED: Decision 7 means its output must not move.
-- [ ] 2.5 GREEN: Add `const HEADER_GAUGE_COLUMNS: u16 = 12;` to `src/ui/detail.rs` and extend
-  `header_row` with the gauge cell: branch on `progress.total == 0` before computing the
-  budget, name field `width - 3 - schema - 12 - progress`, gauge dropped first. Per design.md →
+  (`:950`), whose `contains("() [1/2]")` the gauge splits; assert the full expected row with six
+  `█`. Both hold literal full-row expectations, so both report `FAILED` under `redfail` on the
+  expectation edit alone.
+- [ ] 2.2 RED-by-addition: Rewrite `the_cells_are_dropped_whole_in_order_as_the_row_narrows`
+  (`:919`) — `w >= 13` becomes `w >= 26`, widths 26 and 25 join the sample — and
+  `a_long_name_is_truncated_with_an_ellipsis_never_overflowing_the_row` (`:898`). Both pass
+  unchanged against a gauge-bearing `header_row`, so each MUST also gain the delta's new claims:
+  a 12-column gauge present at 78/58/26, "wherever it contains `█` or `░` it contains exactly
+  twelve", and for the long name that the gauge is present and intact. Confirm `FAILED` only
+  after those clauses are added.
+- [ ] 2.3 RED-by-addition: Rewrite
+  `a_cjk_change_name_keeps_the_header_inside_its_region_at_both_mandated_widths` (`:2162`),
+  where `(tdd)` is no longer immediately before the progress cell, and
+  `header_row_is_total_over_adversarial_names_at_every_width` (`:2244`), crossing the five names
+  with four `Progress` values — band clause scoped to `{4, 9}`, since a 43-column progress cell
+  moves every boundary. Both pass unchanged today; the gauge-presence and no-gauge-at-`total==0`
+  clauses are what make them fail. Confirm `FAILED` after adding them.
+- [ ] 2.4 CHARACTERIZE: Rewrite `a_change_with_no_tasks_still_ends_its_row_in_the_same_column`
+  (`:885`) to nine widths with a no-`█`/`░` clause, and write the new
+  `below_the_full_form_band_the_header_is_byte_identical` from 0.2's captured literals. Neither
+  can honestly be RED: Decision 7 fixes the `total == 0` row as unchanged, and the second asserts
+  byte-identity below width 26. Both are green at HEAD and MUST stay green through 2.6 — that is
+  their whole purpose, and they fail against an implementation that reserves the gauge's columns
+  before deciding whether it fits.
+- [ ] 2.5 RED: Write the new `a_complete_change_renders_a_full_gauge` — 7-of-7 gives twelve `█`
+  and no `░`, 0-of-7 twelve `░` and no `█`, 6-of-7 at least one `░`. Confirm `FAILED`.
+- [ ] 2.6 GREEN: Add `const HEADER_GAUGE_COLUMNS: u16 = 12;` to `src/ui/detail.rs` and extend
+  `header_row` with the gauge cell: branch on `progress.total == 0` before computing the budget,
+  name field `width - 3 - schema - 12 - progress`, gauge dropped first. Per design.md →
   Decisions 2, 3, 4 and 7.
-- [ ] 2.6 GREEN: Write `the_header_s_gauge_and_the_bar_s_gauge_agree` in `src/ui/tasks.rs`'s
-  test module — `gauge_of(p, 12)` appears space-bounded inside `header_row(…)` at 78 and 58 for
+- [ ] 2.7 GREEN: Write `the_header_s_gauge_and_the_bar_s_gauge_agree` in `src/ui/tasks.rs`'s test
+  module — `gauge_of(p, 12)` appears space-bounded inside `header_row(…)` at 78 and 58 for
   4-of-9, 7-of-7 and 0-of-7. It lands here because it needs both sides to exist.
-- [ ] 2.7 CHECK: Contract gate. `header_row`'s signature must be unchanged and
+- [ ] 2.8 CHECK: Contract gate. `header_row`'s signature must be unchanged and
   `src/ui/view.rs:150` untouched in the diff — that is Decision 10, and an edit there falsifies
   it.
-- [ ] 2.8 REFACTOR: Fold the gauge's width arithmetic into the existing `i64` budget
-  computation rather than a parallel one, or state that none was needed.
-- [ ] 2.9 Run `cargo test --lib ui::detail` and `cargo test --lib ui::tasks` — green, with
-  every rewritten test passing on its new expectation.
+- [ ] 2.9 REFACTOR: Fold the gauge's width arithmetic into the existing `i64` budget computation
+  rather than a parallel one, or state that none was needed.
+- [ ] 2.10 Run `cargo test --lib ui::detail` and `cargo test --lib ui::tasks` — green.
+  `cargo test --test degraded_coverage` may now fail naming a `covers` range; group 3 owns that
+  and it is expected here, not a defect in this group's work.
 
-## 3. The header gauge in the rendered frame
+## 3. Re-anchor the degraded-coverage `covers` ranges
+<!-- kind: operational -->
+
+This runs **immediately after the two groups that insert lines**, not at the end. Groups 1 and 2
+shift four `covers` ranges in `tests/degraded-coverage.toml`, which are line numbers, and the
+consequence is nondeterministic rather than merely silent — measured both ways at planning time
+against a design-conformant gauge plant:
+
+- a **one-line** insert inside `header_row` left `cargo test --test degraded_coverage` at
+  `10 passed`: all three `src/ui/detail.rs` fingerprints moved while the suite saw nothing,
+  because each shifted range still happened to hold a line of code;
+- the **full** gauge (a ten-line insert) made it fail with
+  `row "An artifact file exists and cannot be read (permission error, I/O error)": covers entry
+  src/ui/detail.rs:245-251 holds no line of code (blank or comment-only)` — a loud failure
+  naming a degraded-states row that has nothing to do with the edit.
+
+`validate_covers` only requires a range to be in bounds and hold one non-comment line, so which
+outcome you get depends on where the shifted range lands. Re-anchoring here keeps the confusing
+loud case out of group 4's test run.
+
+- [ ] 3.1 CHANGE: Re-run 0.1's command and, for every entry whose sha moved, update its range so
+  it names the same code as `/tmp/covers-baseline.txt`. Expect `src/ui/detail.rs` ×3 and
+  `src/ui/tasks.rs` ×1 to move and nothing else; investigate any other mover rather than
+  re-pointing it.
+- [ ] 3.2 VERIFY: Re-run and diff against the baseline — every sha equal — then
+  `cargo test --test degraded_coverage` green at `10 passed`.
+
+## 4. The header gauge in the rendered frame
 <!-- kind: behavior -->
 
 Every test here asserts literal glyph counts and literal tails. None may assert
 `assert_eq!(buffer, header_row(…))`: that is the shape already at `src/ui/view.rs:5208` and
-`:6750`, which cannot fail on the gauge because it calls the function under test.
+`:6750`, which cannot fail on the gauge because it calls the function under test — which is also
+why all four existing `src/ui/view.rs` detail-header tests pass unchanged against a gauge-bearing
+header, measured. Only 4.3's new test is RED for free here.
 
-- [ ] 3.1 RED: Rewrite `the_header_names_the_selected_change_at_both_mandated_widths`
+- [ ] 4.1 RED-by-addition: Rewrite `the_header_names_the_selected_change_at_both_mandated_widths`
   (`src/ui/view.rs:5191`) and `moving_the_selection_moves_the_header` (`:5230`) to assert the
   literal tail `(tdd) █████░░░░░░░ [4/9]` and five `█`, with BOLD at `Route::Detail` and DIM at
-  `Route::List` compared against `palette::style(role)`. Confirm `FAILED` under `redfail`.
-- [ ] 3.2 RED: Rewrite `the_header_reaches_the_buffer_without_crossing_the_region_border` —
-  which lives in **`src/ui/detail.rs:2191`**, not `view.rs` — whose `tail = " (tdd) [4/9]"`
-  becomes the gauge-bearing tail, keeping its column-indexed slicing. Confirm `FAILED`.
-- [ ] 3.3 RED: Rewrite `an_archived_change_s_header_carries_its_stripped_name_and_its_own_schema`
-  (`src/ui/view.rs:5257`) for name fields 45/25 and twelve `█`, and
-  `an_empty_visible_list_leaves_the_whole_detail_interior_blank` (`:5279`) to add the
-  no-`█`/`░`-anywhere clause. Confirm the first reports `FAILED`; the second is a CHARACTERIZE,
-  since a blank region must stay blank.
-- [ ] 3.4 RED: Write the new `the_gauge_is_present_on_an_artifact_tab` — with the `proposal` tab
-  selected the heading carries the gauge and no `%` appears anywhere in the frame; switching to
-  the tracked-tasks tab leaves the heading's gauge byte-identical. This is the scenario the
-  change exists for. Confirm `FAILED`.
-- [ ] 3.5 CHECK: Confirm `src/ui/view.rs` needs no further edit — its two existing `header_row`
-  expectations are computed by calling the function and are invariant to this change, so no
-  task rewrites them.
-- [ ] 3.6 Run `cargo test --lib ui::view` — no regressions.
-
-## 4. Re-anchor the degraded-coverage `covers` ranges
-<!-- kind: operational -->
-
-Groups 1 through 3 insert lines above four `covers` ranges in `tests/degraded-coverage.toml`,
-which are line numbers. `validate_covers` only requires a range to be in bounds and hold one
-non-comment line, so a slid range stays green while naming the wrong code.
-
-- [ ] 4.1 CHANGE: Re-run 0.1's command and, for every entry whose sha moved, update its range
-  so it names the same code as `/tmp/covers-baseline.txt`. Expect `src/ui/detail.rs` ×3 and
-  `src/ui/tasks.rs` ×1 to move and nothing else; investigate any other mover rather than
-  re-pointing it.
-- [ ] 4.2 VERIFY: Re-run and diff against the baseline — every sha equal. Then
-  `cargo test --test degraded_coverage` green.
+  `Route::List` compared against `palette::style(role)`. Both pass unchanged today because they
+  derive their expectation from `header_row`; replacing that derivation with the literal is what
+  produces RED.
+- [ ] 4.2 RED-by-addition: Rewrite
+  `an_archived_change_s_header_carries_its_stripped_name_and_its_own_schema` (`:5257`) for name
+  fields 45/25 and twelve `█`, and CHARACTERIZE
+  `an_empty_visible_list_leaves_the_whole_detail_interior_blank` (`:5279`) by adding the
+  no-`█`/`░`-anywhere clause — the second cannot be RED, since a blank region must stay blank.
+- [ ] 4.3 RED: Rewrite `the_header_reaches_the_buffer_without_crossing_the_region_border` —
+  which lives in **`src/ui/detail.rs:2191`**, not `view.rs` — whose hard-coded
+  `tail = " (tdd) [4/9]"` is sliced at `first_col + interior - tail.len()`; it is one of the
+  three measured genuine reds. Then write the new `the_gauge_is_present_on_an_artifact_tab`:
+  with the `proposal` tab selected the heading carries the gauge and no `%` appears anywhere in
+  the frame, and switching to the tracked-tasks tab leaves the heading's gauge byte-identical.
+  That is the scenario the change exists for. Confirm `FAILED` for both.
+- [ ] 4.4 CHECK: Confirm `src/ui/view.rs` needs no further edit beyond 4.1 and 4.2 — its two
+  `header_row` expectations at `:5208` and `:6750` are computed by calling the function and are
+  invariant to this change, and `the_detail_header_is_bold_and_uncoloured_at_both_mandated_widths`
+  (`:6729`) passes unchanged, measured.
+- [ ] 4.5 Run `cargo test --lib ui::view` and `cargo test --lib ui::detail` — no regressions.
 
 ## 5. Change Review
 <!-- kind: operational -->

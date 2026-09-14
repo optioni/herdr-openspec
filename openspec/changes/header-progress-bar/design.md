@@ -71,11 +71,17 @@ change.
 The *output* changes at `width >= 26` for a change with `total > 0`. Consumers affected: none
 in production — `ui::view` draws whatever string it is handed.
 
-The affected callers are the existing tests in **`src/ui/detail.rs`**, five of which assert
-the pre-gauge grammar literally and go red the moment the gauge lands: `:878` asserts
-`format!("{name_field} (tdd) [4/42]")` with a 65/45-column name field, `:927` asserts `(tdd)`
-is present at `w >= 13` (now `w >= 26`), and `:951`'s `got.contains("() [1/2]")` is split by
-the gauge between the two cells. Updating them is this change's own work, not collateral.
+The affected callers are existing tests in **`src/ui/detail.rs`**. Measured against a
+design-conformant gauge plant, exactly **three** fail: `the_full_header_grammar…` (`:868`,
+whose `:878` asserts `format!("{name_field} (tdd) [4/42]")` against a 65/45-column name field),
+`an_empty_schema_name…` (`:950`, whose `contains("() [1/2]")` the gauge splits), and
+`the_header_reaches_the_buffer…` (`:2191`, hard-coded `tail = " (tdd) [4/9]"`). All three hold
+literal expectations. Updating them is this change's own work, not collateral.
+
+The nine others pass unchanged, which is the more important fact for planning: tests asserting
+width, cell presence, or band membership — `the_cells_are_dropped_whole…`'s `w >= 13` check
+among them — stay green against a gauge-bearing row, so their scenarios' new gauge claims have
+to be *added*, not merely re-expected.
 
 `src/ui/view.rs`'s two test expectations are **not** affected, and this is worth stating
 because it is counter-intuitive: both build their expectation by calling the function under
@@ -304,9 +310,10 @@ is confined to the grammar.
   tasks** → The `[4/42]` cell one space away states the exact pair, which is why the gauge is
   an addition to that cell rather than a replacement for it. Any fixed gauge has this limit;
   a remainder-width gauge would only move the threshold, at the cost rejected in Decision 3.
-- **Five existing tests in `src/ui/detail.rs` assert the pre-gauge grammar and go red when
-  the gauge lands** → Expected and in scope: the verification matrix above assigns each one a
-  `rewrite` row, so none is left unowned. The scenario *Below the full-form band the header is
+- **Three existing tests in `src/ui/detail.rs` go red when the gauge lands, and nine more pass
+  unchanged when they should not** → Both are handled: the verification matrix assigns every one
+  a `rewrite` row, and tasks.md separates RED from RED-by-addition so the nine gain the new gauge
+  claim rather than being re-expected into a check that still cannot fail. The scenario *Below the full-form band the header is
   byte-identical to the pre-gauge grammar* is the guard that those rewrites were confined to
   the widths that should have moved. `src/ui/view.rs`'s expectations are computed by calling
   `header_row` and stay green either way, which is why no task edits that file's tests.
