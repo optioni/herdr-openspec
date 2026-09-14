@@ -2654,6 +2654,86 @@ mod tests {
         }
     }
 
+    /// The two-path counterpart of the test above, and the derivation that
+    /// `ui::detail`'s `the_tracked_tasks_tab_concatenates_rather_than_folding`
+    /// transcribes by hand rather than executing. Two things run nowhere
+    /// else: the derivation of a **multi-path** tracked-tasks artifact — one
+    /// file section at `depth` `0` per path with that file's own groups
+    /// nested beneath it at `depth` `1` — and `seed_expanded`'s subtree walk
+    /// at a **non-zero** `base`, where a group sits under a file section
+    /// rather than at the root. Each file here carries a single heading, so
+    /// this is also the far side of the split gate's
+    /// `base > 0 || contributions > 1`: with a file section ahead of it that
+    /// heading does draw as a header row, so the file splits where the
+    /// one-path fixture above refuses to.
+    ///
+    /// Two path pairs, because a file section's label keys on the file name:
+    /// `tasks.md` labels by file name — twice over, since labels are not
+    /// required to be unique — while `spec.md` labels by its parent
+    /// directory and so reproduces the `a`/`b` labels `ui::detail`
+    /// transcribes, binding the two shapes literally.
+    #[test]
+    fn a_two_path_tracked_tasks_artifact_nests_its_groups_and_seeds_them_all() {
+        const SETUP: &str = "## 1. Setup\n\n- [ ] a\n";
+        const BUILD: &str = "## 2. Build\n\n- [ ] b\n";
+
+        for (first, second, labels) in [
+            (
+                "/repo/openspec/changes/c/a/tasks.md",
+                "/repo/openspec/changes/c/b/tasks.md",
+                ["tasks.md", "tasks.md"],
+            ),
+            (
+                "/repo/openspec/changes/c/a/spec.md",
+                "/repo/openspec/changes/c/b/spec.md",
+                ["a", "b"],
+            ),
+        ] {
+            let mut d = dashboard_over(&[("tasks", &[first, second])], Some(0));
+            let recorder = crate::testutil::RecordingReader::new(
+                vec![
+                    (std::path::PathBuf::from(first), Ok(SETUP.to_string())),
+                    (std::path::PathBuf::from(second), Ok(BUILD.to_string())),
+                ],
+                Err("unexpected".to_string()),
+            );
+            let read = |p: &std::path::Path| recorder.read(p);
+
+            d.sync_detail(&read);
+
+            assert_eq!(
+                shape_of(&d.detail),
+                vec![
+                    (Some(labels[0]), 0),
+                    (Some("1. Setup"), 1),
+                    (Some(labels[1]), 0),
+                    (Some("2. Build"), 1),
+                ],
+                "{first}: a file section per path, each file's group beneath it"
+            );
+            assert_eq!(
+                (
+                    d.detail.sections[0].text.as_str(),
+                    d.detail.sections[1].text.as_str(),
+                    d.detail.sections[2].text.as_str(),
+                    d.detail.sections[3].text.as_str(),
+                ),
+                // The group's body is the **verbatim** bytes between its own
+                // heading line and the next heading line (design.md -> D6),
+                // so the blank line after the heading belongs to the body:
+                // heading line + body reassembles the file exactly.
+                ("", "\n- [ ] a\n", "", "\n- [ ] b\n"),
+                "{first}: a split file's text lives in its heading sections"
+            );
+            assert_eq!(
+                d.detail.expanded,
+                std::collections::BTreeSet::from([0, 1, 2, 3]),
+                "{first}: every subtree is incomplete, so every index is seeded"
+            );
+            assert!(d.detail.foldable(), "{first}: four sections are foldable");
+        }
+    }
+
     /// The same defect on the spec axis: a delta carrying exactly one
     /// `### Requirement:` heading and no preamble lost that requirement's
     /// own name off the screen.
