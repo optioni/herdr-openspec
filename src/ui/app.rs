@@ -2279,6 +2279,238 @@ mod tests {
         assert!(d.detail.foldable(), "still foldable");
     }
 
+    // `heading-sections`, group 3: the split gate and the section derivation,
+    // every one of them driven through `sync_detail` with a closure reader
+    // (design.md -> Test Boundaries), never the real filesystem.
+
+    /// A prose artifact, whose `##` and `###` headings are not navigation
+    /// targets: `specs/artifact-folds/spec.md` -> "A prose artifact with
+    /// headings does not split".
+    const PROSE_WITH_HEADINGS: &str = "# Why\n\n## What Changes\n\n### A sub-heading\ntext\n";
+
+    /// One change's dashboard over `artifacts`, with `marked` — when `Some` —
+    /// the position whose `tracks_tasks` is `true`, selected at the one change
+    /// row these scenarios have.
+    fn dashboard_over(artifacts: &[(&str, &[&str])], marked: Option<usize>) -> Dashboard {
+        let change = fixture::with_artifacts(fixture::active("c", 0, 0), artifacts);
+        let change = match marked {
+            Some(index) => fixture::track_tasks_at(change, index),
+            None => change,
+        };
+        dashboard_for_attribution(vec![change], Vec::new(), 1, Vec::new(), BTreeMap::new())
+    }
+
+    /// Every section's `(label, depth)` pair, in order.
+    fn shape_of(detail: &Detail) -> Vec<(Option<&str>, usize)> {
+        detail
+            .sections
+            .iter()
+            .map(|s| (s.label.as_deref(), s.depth))
+            .collect()
+    }
+
+    /// `artifact-folds`: "A prose artifact with headings does not split" — the
+    /// change's answer to the Non-Goal "folding arbitrary markdown headings in
+    /// prose artifacts".
+    #[test]
+    fn a_prose_artifact_with_headings_does_not_split() {
+        let mut d = dashboard_over(
+            &[("proposal", &["/repo/openspec/changes/c/proposal.md"])],
+            None,
+        );
+        let recorder =
+            crate::testutil::RecordingReader::always(Ok(PROSE_WITH_HEADINGS.to_string()));
+        let read = |p: &std::path::Path| recorder.read(p);
+
+        d.sync_detail(&read);
+
+        assert_eq!(shape_of(&d.detail), vec![(Some("proposal.md"), 0)]);
+        assert_eq!(d.detail.sections[0].text, PROSE_WITH_HEADINGS);
+        assert!(!d.detail.foldable(), "one section is not foldable");
+    }
+
+    /// `artifact-folds`: "A spec file splits and a task file splits" — the two
+    /// halves of the gate, one dashboard each.
+    #[test]
+    fn a_spec_file_splits_and_a_task_file_splits() {
+        let mut spec = dashboard_over(
+            &[("specs", &["/repo/openspec/changes/c/specs/a/spec.md"])],
+            None,
+        );
+        let spec_recorder = crate::testutil::RecordingReader::always(Ok(DELTA_SPEC.to_string()));
+        let read_spec = |p: &std::path::Path| spec_recorder.read(p);
+
+        spec.sync_detail(&read_spec);
+
+        assert_eq!(
+            shape_of(&spec.detail),
+            vec![
+                (Some("ADDED Requirements"), 0),
+                (Some("Requirement: Alpha"), 1),
+                (Some("Scenario: A works"), 2),
+                (Some("Requirement: Beta"), 1),
+            ],
+            "four sections, normalised against the file's own `##`"
+        );
+        assert!(spec.detail.foldable());
+
+        let mut tasks = dashboard_over(
+            &[("tasks", &["/repo/openspec/changes/c/tasks.md"])],
+            Some(0),
+        );
+        let task_recorder = crate::testutil::RecordingReader::always(Ok(TASK_FILE.to_string()));
+        let read_tasks = |p: &std::path::Path| task_recorder.read(p);
+
+        tasks.sync_detail(&read_tasks);
+
+        assert_eq!(
+            shape_of(&tasks.detail),
+            vec![(None, 0), (Some("1. Setup"), 0), (Some("2. Build"), 0)],
+            "three: the preamble the splitter does not return, then its two groups"
+        );
+        assert!(
+            tasks.detail.foldable(),
+            "foldable because `tasks::count` reported three items"
+        );
+    }
+
+    /// `artifact-folds`: "A spec file whose `### Requirement:` sits inside a
+    /// fence does not split" — `is_spec_shaped` asks the splitter, which never
+    /// returns a heading from inside a fence.
+    #[test]
+    fn a_spec_file_whose_requirement_sits_inside_a_fence_does_not_split() {
+        const QUOTED: &str = "# Doc\n\n```md\n### Requirement: quoted\n```\n";
+        let mut d = dashboard_over(
+            &[("specs", &["/repo/openspec/changes/c/specs/a/spec.md"])],
+            None,
+        );
+        let recorder = crate::testutil::RecordingReader::always(Ok(QUOTED.to_string()));
+        let read = |p: &std::path::Path| recorder.read(p);
+
+        d.sync_detail(&read);
+
+        assert_eq!(shape_of(&d.detail), vec![(Some("a"), 0)]);
+        assert_eq!(d.detail.sections[0].text, QUOTED);
+        assert!(!d.detail.foldable());
+    }
+
+    /// `artifact-folds`: "A spec glob nests requirements under their
+    /// capability" — a file section at `0`, its own headings under it from
+    /// `1`, and the two unsplit siblings back at `0`.
+    #[test]
+    fn a_spec_glob_nests_requirements_under_their_capability() {
+        let mut d = dashboard_over(
+            &[(
+                "specs",
+                &[
+                    "/repo/openspec/changes/c/specs/degraded-coverage/spec.md",
+                    "/repo/openspec/changes/c/specs/markdown-render/spec.md",
+                    "/repo/openspec/changes/c/specs/tasks-checklist/spec.md",
+                ],
+            )],
+            None,
+        );
+        let recorder = crate::testutil::RecordingReader::new(
+            vec![(
+                std::path::PathBuf::from(
+                    "/repo/openspec/changes/c/specs/degraded-coverage/spec.md",
+                ),
+                Ok(DELTA_SPEC.to_string()),
+            )],
+            Ok("## MODIFIED Requirements\n".to_string()),
+        );
+        let read = |p: &std::path::Path| recorder.read(p);
+
+        d.sync_detail(&read);
+
+        assert_eq!(
+            shape_of(&d.detail),
+            vec![
+                (Some("degraded-coverage"), 0),
+                (Some("ADDED Requirements"), 1),
+                (Some("Requirement: Alpha"), 2),
+                (Some("Scenario: A works"), 3),
+                (Some("Requirement: Beta"), 2),
+                (Some("markdown-render"), 0),
+                (Some("tasks-checklist"), 0),
+            ]
+        );
+        assert_eq!(
+            d.detail.sections[0].text, "",
+            "a split file's text lives in its heading sections"
+        );
+        assert!(
+            !d.detail.sections.iter().any(|s| s.label.is_none()),
+            "the delta spec's own preamble is empty, so no `None` section appears"
+        );
+        assert_eq!(recorder.calls(), 3);
+    }
+
+    /// `artifact-folds`: "A preamble becomes an unlabelled section" — the text
+    /// before a split file's first heading owns no header row and is no fold
+    /// target (design.md -> Decision 2).
+    #[test]
+    fn a_preamble_becomes_an_unlabelled_section() {
+        let mut d = dashboard_over(
+            &[("tasks", &["/repo/openspec/changes/c/tasks.md"])],
+            Some(0),
+        );
+        let recorder = crate::testutil::RecordingReader::always(Ok(TASK_FILE.to_string()));
+        let read = |p: &std::path::Path| recorder.read(p);
+
+        d.sync_detail(&read);
+
+        assert_eq!(
+            shape_of(&d.detail),
+            vec![(None, 0), (Some("1. Setup"), 0), (Some("2. Build"), 0)]
+        );
+        assert_eq!(d.detail.sections[0].text, "Intro prose.\n\n");
+        assert_eq!(
+            d.detail.sections[0].label, None,
+            "the preamble carries no label at all"
+        );
+    }
+
+    /// `artifact-folds` / design.md -> Decision 6: sections partition the file
+    /// rather than copying it. Reassembling every section's `text` with the
+    /// heading line each labelled section's `(depth, label)` names reproduces
+    /// the reader's bytes exactly — over a spec file whose preamble is empty
+    /// and a task file whose preamble is not.
+    #[test]
+    fn a_split_file_is_partitioned_rather_than_copied() {
+        // Both fixtures start at `##` and resolve to one path, so a section's
+        // own heading level is `2 + depth`.
+        for (artifact, marked, source) in [
+            (
+                ("specs", ["/repo/openspec/changes/c/specs/a/spec.md"]),
+                None,
+                DELTA_SPEC,
+            ),
+            (
+                ("tasks", ["/repo/openspec/changes/c/tasks.md"]),
+                Some(0),
+                TASK_FILE,
+            ),
+        ] {
+            let mut d = dashboard_over(&[(artifact.0, &artifact.1)], marked);
+            let recorder = crate::testutil::RecordingReader::always(Ok(source.to_string()));
+            let read = |p: &std::path::Path| recorder.read(p);
+
+            d.sync_detail(&read);
+
+            let parts: Vec<String> = d
+                .detail
+                .sections
+                .iter()
+                .map(|s| match &s.label {
+                    Some(label) => format!("{} {label}\n{}", "#".repeat(2 + s.depth), s.text),
+                    None => s.text.clone(),
+                })
+                .collect();
+            assert_eq!(parts.concat(), source, "round trip over {artifact:?}");
+        }
+    }
+
     /// A `Route::Detail` dashboard over one active, selected change, carrying
     /// `detail` verbatim. The common shape group 7's `Space`-at-the-detail-
     /// route scenarios build on, mirroring `ui::view::tests::dashboard_with_detail`.
