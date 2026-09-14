@@ -912,6 +912,7 @@ mod tests {
                     label: Some(String::new()),
                     text: (0..20).map(|i| format!("- line-{i:02}\n")).collect(),
                     depth: 0,
+                    progress: None,
                 }],
                 scroll: 0,
                 tab: 0,
@@ -1625,16 +1626,19 @@ mod tests {
                         label: Some("a".to_string()),
                         text: "one\n".to_string(),
                         depth: 0,
+                        progress: None,
                     },
                     ArtifactSection {
                         label: Some("b".to_string()),
                         text: "two\n".to_string(),
                         depth: 0,
+                        progress: None,
                     },
                     ArtifactSection {
                         label: Some("c".to_string()),
                         text: "three\n".to_string(),
                         depth: 0,
+                        progress: None,
                     },
                 ],
                 scroll: 2,
@@ -1717,6 +1721,7 @@ mod tests {
                     label: Some(String::new()),
                     text: (0..20).map(|i| format!("- line-{i:02}\n")).collect(),
                     depth: 0,
+                    progress: None,
                 }],
                 scroll: 3,
                 tab: 0,
@@ -4167,16 +4172,19 @@ mod tests {
                 label: Some("degraded-coverage".to_string()),
                 text: "one\n".to_string(),
                 depth: 0,
+                progress: None,
             },
             ArtifactSection {
                 label: Some("markdown-render".to_string()),
                 text: "two\n".to_string(),
                 depth: 0,
+                progress: None,
             },
             ArtifactSection {
                 label: Some("tasks-checklist".to_string()),
                 text: "three\n".to_string(),
                 depth: 0,
+                progress: None,
             },
         ]
     }
@@ -4272,6 +4280,7 @@ mod tests {
                 label: Some(String::new()),
                 text: (0..20).map(|i| format!("- line-{i:02}\n")).collect(),
                 depth: 0,
+                progress: None,
             }];
 
             let over_list = mouse_action(&dashboard, WIDE, &m(MouseEventKind::ScrollDown, 10, 10));
@@ -4735,6 +4744,7 @@ mod tests {
                 label: Some("degraded-coverage".to_string()),
                 text: "one\n".to_string(),
                 depth: 0,
+                progress: None,
             },
             ArtifactSection {
                 label: Some("markdown-render".to_string()),
@@ -4743,11 +4753,13 @@ mod tests {
                 // rendered body lines for the click to land in.
                 text: (0..5).map(|i| format!("- line-{i:02}\n")).collect(),
                 depth: 0,
+                progress: None,
             },
             ArtifactSection {
                 label: Some("tasks-checklist".to_string()),
                 text: "three\n".to_string(),
                 depth: 0,
+                progress: None,
             },
         ];
         for (width, height) in [(120u16, 40u16), (60, 40)] {
@@ -4796,6 +4808,7 @@ mod tests {
             label: Some(String::new()),
             text: (0..20).map(|i| format!("- line-{i:02}\n")).collect(),
             depth: 0,
+            progress: None,
         }];
         for (width, height) in [(120u16, 40u16), (60, 40)] {
             let area = Rect::new(0, 0, width, height);
@@ -6010,6 +6023,7 @@ mod tests {
             label: Some(String::new()),
             text: (0..20).map(|i| format!("- line-{i:02}\n")).collect(),
             depth: 0,
+            progress: None,
         }];
         dashboard.help.open = true;
         dashboard

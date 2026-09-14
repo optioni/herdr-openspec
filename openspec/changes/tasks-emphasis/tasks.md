@@ -214,22 +214,22 @@ Writes `src/ui/app.rs` and the 74 compiler-forced sites across `src/` and `tests
 only: every site takes `None`, so no rendered output moves and the characterization tests stay
 unchanged.
 
-- [ ] 5.1 CHARACTERIZE: Run `cargo test --all-features` and record it green **at the head of
+- [x] 5.1 CHARACTERIZE: Run `cargo test --all-features` and record it green **at the head of
       this group**, after groups 1–4 have landed, so a red here is attributable to the field
       rather than to an earlier group. This is not 0.2, which measured the pre-change tree.
-- [ ] 5.2 REFACTOR: Add `progress: Option<crate::tasks::Progress>` to `ArtifactSection` and
+- [x] 5.2 REFACTOR: Add `progress: Option<crate::tasks::Progress>` to `ArtifactSection` and
       update all **74** compiler-forced sites (per 0.1) to `progress: None`. `NODEFAULT-UI`
       requires every span to name every field, so none may be elided with `..`. The 3
       occurrences in `tests/gate-controls.toml` are planted-defect strings; leave them unless
       the plant stops matching.
-- [ ] 5.3 CHANGE: Update `openspec/specs/detail-scroll/spec.md`'s companion obligation via this
+- [x] 5.3 CHANGE: Update `openspec/specs/detail-scroll/spec.md`'s companion obligation via this
       change's own `specs/detail-scroll/spec.md` delta — the live spec names `ArtifactSection`'s
       "all **three**" fields and this makes it four. Add the compile-time companion test the
       delta requires, destructuring all four with no `..`.
-- [ ] 5.4 CHECK: Contract gate — re-read design.md -> Contracts, confirm the only consumers are
+- [x] 5.4 CHECK: Contract gate — re-read design.md -> Contracts, confirm the only consumers are
       `sync_detail`, `content_lines`, `Detail::foldable`, and test fixtures, and that
       `Detail::foldable` is still `sections.len() > 1`.
-- [ ] 5.5 VERIFY: Run the unchanged tests — `cargo test --all-features` green — and
+- [x] 5.5 VERIFY: Run the unchanged tests — `cargo test --all-features` green — and
       `SCAN_MIN=25 TYPES='ArtifactSection' /bin/sh scripts/gates/nodefault-ui.sh` exits 0 with
       a span count at or above the 72 recorded in 0.1.
 

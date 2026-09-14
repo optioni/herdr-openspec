@@ -2335,11 +2335,13 @@ fn sweep_dashboard(route: Route, help_open: bool) -> Dashboard {
                     label: Some("one".to_string()),
                     text: "# One\n\nbody one\n".to_string(),
                     depth: 0,
+                    progress: None,
                 },
                 ArtifactSection {
                     label: Some("two".to_string()),
                     text: "# Two\n\nbody two\n".to_string(),
                     depth: 0,
+                    progress: None,
                 },
             ],
             scroll: 0,

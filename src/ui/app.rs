@@ -138,11 +138,22 @@ pub struct Filter {
 /// anything else arrive with the splitter.
 /// See `specs/artifact-folds/spec.md` -> "A multi-file artifact's content
 /// is a list of named sections" and design.md -> Decision 1 and Decision 2.
+///
+/// `tasks-emphasis` adds a fourth field. `progress` is `Some` for exactly the
+/// **heading sections of a split tracked-tasks file** and `None` everywhere
+/// else — on every file section, every preamble, every section of an unsplit
+/// file, and every section of every other artifact — so a reader can fold a
+/// completed task group without losing how far along it was. It is an
+/// `Option<Progress>` rather than a `Progress` defaulting to `{0, 0}` because
+/// the two mean different things on a header row: a `[-]` cell would claim the
+/// section was counted and found empty, when a spec file's section is not a
+/// task group at all.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArtifactSection {
     pub label: Option<String>,
     pub text: String,
     pub depth: usize,
+    pub progress: Option<crate::tasks::Progress>,
 }
 
 /// The label `artifact_section_label` derives for `path`, relative to
@@ -1535,6 +1546,7 @@ impl Dashboard {
                             label,
                             text,
                             depth: 0,
+                            progress: None,
                         });
                         continue;
                     }
@@ -1543,6 +1555,7 @@ impl Dashboard {
                             label,
                             text: String::new(),
                             depth: 0,
+                            progress: None,
                         });
                     }
                     let preamble = text.get(..preamble_end).unwrap_or_default();
@@ -1551,6 +1564,7 @@ impl Dashboard {
                             label: None,
                             text: preamble.to_string(),
                             depth: base,
+                            progress: None,
                         });
                     }
                     // Normalised against this file's own shallowest heading,
@@ -1562,6 +1576,7 @@ impl Dashboard {
                             label: Some(heading.label),
                             text: heading.body,
                             depth: base + usize::from(heading.level.saturating_sub(min_level)),
+                            progress: None,
                         });
                     }
                 }
@@ -2845,16 +2860,19 @@ mod tests {
                     label: Some("degraded-coverage".to_string()),
                     text: "one\n".to_string(),
                     depth: 0,
+                    progress: None,
                 },
                 ArtifactSection {
                     label: Some("markdown-render".to_string()),
                     text: "two\n".to_string(),
                     depth: 0,
+                    progress: None,
                 },
                 ArtifactSection {
                     label: Some("tasks-checklist".to_string()),
                     text: "three\n".to_string(),
                     depth: 0,
+                    progress: None,
                 },
             ],
             scroll,
@@ -3028,6 +3046,7 @@ mod tests {
             label: Some(label.to_string()),
             text: long.to_string(),
             depth: 0,
+            progress: None,
         };
         let mut d = dashboard_with_detail(Detail {
             sections: vec![section("first"), section("second"), section("third")],
@@ -3104,11 +3123,13 @@ mod tests {
                     label: Some("a".to_string()),
                     text: "one\n".to_string(),
                     depth: 0,
+                    progress: None,
                 },
                 ArtifactSection {
                     label: Some("b".to_string()),
                     text: "two\n".to_string(),
                     depth: 0,
+                    progress: None,
                 },
             ],
             scroll: 0,
@@ -3144,6 +3165,7 @@ mod tests {
                 label: Some("a".to_string()),
                 text: "one\n".to_string(),
                 depth: 0,
+                progress: None,
             }],
             scroll: 0,
             tab: 0,
@@ -3217,6 +3239,7 @@ mod tests {
                 label: Some("a".to_string()),
                 text: "one\n".to_string(),
                 depth: 0,
+                progress: None,
             }],
             scroll: 0,
             tab: 0,
@@ -3336,6 +3359,7 @@ mod tests {
             label: Some(label.to_string()),
             text: "one\n".to_string(),
             depth,
+            progress: None,
         };
         dashboard_with_detail(Detail {
             sections: vec![
@@ -3933,6 +3957,7 @@ mod tests {
                 label: Some(String::new()),
                 text: lines(40),
                 depth: 0,
+                progress: None,
             }];
             let selected_before = d.selected;
 
@@ -3970,6 +3995,7 @@ mod tests {
                     label: Some(String::new()),
                     text: lines(40),
                     depth: 0,
+                    progress: None,
                 }];
                 let before = d.clone();
                 d.apply(Action::ScrollUp);
@@ -3986,6 +4012,7 @@ mod tests {
                 label: Some(String::new()),
                 text: lines(12),
                 depth: 0,
+                progress: None,
             }];
             for _ in 0..500 {
                 wheeled.apply(Action::ScrollDown);
@@ -4014,6 +4041,7 @@ mod tests {
                 label: Some(String::new()),
                 text: lines(12),
                 depth: 0,
+                progress: None,
             }];
             held.route = Route::Detail;
             for _ in 0..500 {
@@ -4031,6 +4059,7 @@ mod tests {
                 label: Some(String::new()),
                 text: lines(40),
                 depth: 0,
+                progress: None,
             }];
             let mut wheeled = keyed.clone();
             keyed.apply(Action::Next);
@@ -4710,6 +4739,7 @@ mod tests {
                         label: Some(String::new()),
                         text: "## 1. Setup\n- [x] a\n- [ ] b\n".to_string(),
                         depth: 0,
+                        progress: None,
                     }],
                     scroll: 0,
                     tab: 0,
@@ -6178,6 +6208,7 @@ mod tests {
                     label: Some(String::new()),
                     text: (0..20).map(|i| format!("- line-{i:02}\n")).collect(),
                     depth: 0,
+                    progress: None,
                 }],
                 scroll: 0,
                 tab: 0,
@@ -6212,6 +6243,53 @@ mod tests {
             // fixture that never drew a frame has recorded no width, which is
             // what makes the fold inert before the first draw.
             assert_eq!(*drawn_width, None);
+        }
+
+        /// `detail-scroll` :: "The `ArtifactSection` companion names the fourth
+        /// field".
+        ///
+        /// The compile-time half of `NODEFAULT-UI`'s textual scan: removing any
+        /// one of the four from this pattern fails to compile, which is what
+        /// makes the companion a check rather than a restatement. `progress` is
+        /// `tasks-emphasis`' addition.
+        #[test]
+        fn artifact_section_destructures_into_exactly_four_fields() {
+            let section = ArtifactSection {
+                label: Some("1. Setup".to_string()),
+                text: "- [x] 1.1 first\n".to_string(),
+                depth: 1,
+                progress: Some(crate::tasks::Progress {
+                    completed: 1,
+                    total: 1,
+                }),
+            };
+            let ArtifactSection {
+                label,
+                text,
+                depth,
+                progress,
+            } = &section;
+            assert_eq!(label.as_deref(), Some("1. Setup"));
+            assert!(text.starts_with("- [x]"));
+            assert_eq!(*depth, 1);
+            assert_eq!(
+                *progress,
+                Some(crate::tasks::Progress {
+                    completed: 1,
+                    total: 1
+                })
+            );
+
+            // And the value with no default is really optional: a section that
+            // is not a task group carries `None`, which is not the same claim
+            // as a counted-and-empty `[-]`.
+            let plain = ArtifactSection {
+                label: Some("proposal.md".to_string()),
+                text: "# proposal\n".to_string(),
+                depth: 0,
+                progress: None,
+            };
+            assert_eq!(plain.progress, None);
         }
 
         #[test]
@@ -7022,6 +7100,7 @@ mod tests {
                             label: Some(String::new()),
                             text: source,
                             depth: 0,
+                            progress: None,
                         }],
                         scroll: 99,
                         tab: 0,
@@ -7171,6 +7250,7 @@ mod tests {
                         label: Some(String::new()),
                         text: "x".repeat(1092),
                         depth: 0,
+                        progress: None,
                     }],
                     scroll: 99,
                     tab: 0,
@@ -7310,6 +7390,7 @@ mod tests {
                         label: Some(String::new()),
                         text: "stale".to_string(),
                         depth: 0,
+                        progress: None,
                     }],
                     scroll: 5,
                     tab: 2,
@@ -7396,6 +7477,7 @@ mod tests {
                         label: Some(String::new()),
                         text: "stale".to_string(),
                         depth: 0,
+                        progress: None,
                     }],
                     scroll: 6,
                     tab: 2,
@@ -8777,6 +8859,7 @@ mod tests {
                         label: Some(String::new()),
                         text: "stale".to_string(),
                         depth: 0,
+                        progress: None,
                     }],
                     scroll: 3,
                     tab: 2,

@@ -3452,6 +3452,7 @@ mod tests {
             label: Some(String::new()),
             text: (0..30).map(|_| format!("{}\n", "x".repeat(200))).collect(),
             depth: 0,
+            progress: None,
         }];
 
         // `pane-chrome`: there is no border any more. Columns 0 and 59 are the
@@ -3859,6 +3860,7 @@ mod tests {
                         label: Some(String::new()),
                         text: source,
                         depth: 0,
+                        progress: None,
                     }]
                 },
                 scroll,
@@ -3952,16 +3954,19 @@ mod tests {
                     label: Some("degraded-coverage".to_string()),
                     text: "one\n".to_string(),
                     depth: 0,
+                    progress: None,
                 },
                 ArtifactSection {
                     label: Some("markdown-render".to_string()),
                     text: "two\n".to_string(),
                     depth: 0,
+                    progress: None,
                 },
                 ArtifactSection {
                     label: Some("tasks-checklist".to_string()),
                     text: "three\n".to_string(),
                     depth: 0,
+                    progress: None,
                 },
             ],
             scroll,
@@ -4184,11 +4189,13 @@ mod tests {
                     label: Some("degraded-coverage".to_string()),
                     text: "one\n".to_string(),
                     depth: 0,
+                    progress: None,
                 },
                 ArtifactSection {
                     label: Some("markdown-render".to_string()),
                     text: "two\n".to_string(),
                     depth: 0,
+                    progress: None,
                 },
             ],
             scroll: 0,
@@ -4247,6 +4254,7 @@ mod tests {
             label: Some(label.to_string()),
             text: text.to_string(),
             depth,
+            progress: None,
         };
         let detail = Detail {
             sections: vec![
@@ -5716,6 +5724,7 @@ mod tests {
                     label: Some(String::new()),
                     text: source.to_string(),
                     depth: 0,
+                    progress: None,
                 }]
             },
             scroll: 0,
@@ -7955,6 +7964,7 @@ mod tests {
                     text: "## Heading\n\n**bold** and *italic* and `code` and [link](u)\n"
                         .to_string(),
                     depth: 0,
+                    progress: None,
                 }],
                 scroll: 0,
                 tab: 0,
@@ -7995,16 +8005,19 @@ mod tests {
                         label: Some("degraded-coverage".to_string()),
                         text: "one\n".to_string(),
                         depth: 0,
+                        progress: None,
                     },
                     ArtifactSection {
                         label: Some("markdown-render".to_string()),
                         text: "two\n".to_string(),
                         depth: 0,
+                        progress: None,
                     },
                     ArtifactSection {
                         label: Some("tasks-checklist".to_string()),
                         text: "three\n".to_string(),
                         depth: 0,
+                        progress: None,
                     },
                 ],
                 scroll: 0,
@@ -8246,6 +8259,7 @@ mod tests {
                         .map(|i| format!("- zzartifact-{i:02}\n"))
                         .collect::<String>(),
                     depth: 0,
+                    progress: None,
                 }],
                 scroll: 0,
                 tab: 0,
