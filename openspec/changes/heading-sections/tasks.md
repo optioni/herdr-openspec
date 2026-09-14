@@ -99,11 +99,37 @@ by `cargo test --all-features gate_controls`.
 and "A file splits at its headings only when it is a spec or a tracked task file";
 `specs/artifact-content/spec.md` -> step 4.
 
-- [ ] 3.1 RED: Write failing `ui::app` tests for `a_prose_artifact_with_headings_does_not_split`, `a_spec_file_splits_and_a_task_file_splits`, `a_spec_file_whose_requirement_sits_inside_a_fence_does_not_split`, `a_spec_glob_nests_requirements_under_their_capability`, `a_preamble_becomes_an_unlabelled_section`, and `a_split_file_is_partitioned_rather_than_copied`. Drive each through `sync_detail` with a closure reader, per design.md -> Test Boundaries.
-- [ ] 3.2 GREEN: Implement the split gate — `tracks_tasks && tasks::count(text).total > 0`, or `is_spec_shaped(text)` — and the file-section rule (a file section only when the artifact resolved to more than one path).
-- [ ] 3.3 GREEN: Implement the preamble as a `None`-labelled section and the per-file depth normalisation `base + (level - min_level_in_that_file)`.
-- [ ] 3.4 CHECK: Confirm the five landed file-axis tests still pass with no edit beyond group 2's mechanical widening — `the_three_spec_files_of_a_change_become_three_labelled_sections`, `an_unreadable_file_drops_its_section_and_keeps_its_siblings`, `an_artifact_with_no_resolved_paths_has_no_sections` and `the_label_derivation_is_total_over_adversarial_paths` in `src/ui/app.rs`, and `a_single_file_artifact_is_one_section_and_is_not_foldable` in `src/ui/view.rs`. They exist; do not write them again.
-- [ ] 3.5 VERIFY: `cargo test --all-features ui::app` — green, and the reader's recorded call count is unchanged for every pre-existing fixture.
+- [x] 3.1 RED: Write failing `ui::app` tests for `a_prose_artifact_with_headings_does_not_split`, `a_spec_file_splits_and_a_task_file_splits`, `a_spec_file_whose_requirement_sits_inside_a_fence_does_not_split`, `a_spec_glob_nests_requirements_under_their_capability`, `a_preamble_becomes_an_unlabelled_section`, and `a_split_file_is_partitioned_rather_than_copied`. Drive each through `sync_detail` with a closure reader, per design.md -> Test Boundaries.
+  - Four of the six failed; `a_prose_artifact_with_headings_does_not_split` and
+    `a_spec_file_whose_requirement_sits_inside_a_fence_does_not_split` pass at HEAD by
+    construction — nothing split yet — and stand as the regression guards for the gate's
+    negative half.
+  - `a_spec_glob_nests_requirements_under_their_capability` asserts **seven** sections, not
+    the six the spec's prose counts: its own enumerated list names seven (one file section,
+    four heading sections, two unsplit siblings). The list is implemented; the count word is
+    a spec defect for Change Review.
+- [x] 3.2 GREEN: Implement the split gate — `tracks_tasks && tasks::count(text).total > 0`, or `is_spec_shaped(text)` — and the file-section rule (a file section only when the artifact resolved to more than one path).
+  - `is_spec_shaped` is not the call site: `artifact-content` allows one `split_headings` call
+    per successfully read path, and `is_spec_shaped` makes one of its own. The predicate moved
+    to a private `has_requirement_heading(&[HeadingSection])` that both callers share, so the
+    rule is still written once.
+- [x] 3.3 GREEN: Implement the preamble as a `None`-labelled section and the per-file depth normalisation `base + (level - min_level_in_that_file)`.
+  - `split_headings` does not return the preamble, so `preamble_len` derives its length from
+    the returned sections by walking them backwards — no second, fence-aware scan of the text.
+- [x] 3.4 CHECK: Confirm the five landed file-axis tests still pass with no edit beyond group 2's mechanical widening — `the_three_spec_files_of_a_change_become_three_labelled_sections`, `an_unreadable_file_drops_its_section_and_keeps_its_siblings`, `an_artifact_with_no_resolved_paths_has_no_sections` and `the_label_derivation_is_total_over_adversarial_paths` in `src/ui/app.rs`, and `a_single_file_artifact_is_one_section_and_is_not_foldable` in `src/ui/view.rs`. They exist; do not write them again.
+  - Confirmed, all five unedited: the four in `src/ui/app.rs` and
+    `a_single_file_artifact_is_one_section_and_is_not_foldable` in `src/ui/view.rs`.
+- [x] 3.5 VERIFY: `cargo test --all-features ui::app` — green, and the reader's recorded call count is unchanged for every pre-existing fixture.
+  - `cargo test --all-features ui::app`: 151 passed, 0 failed. Every landed `calls()` assertion
+    passes unedited — 0, 1, 1, 2, 0, 1, 0 at `src/ui/app.rs` lines 2306, 7693, 7720, 7763,
+    8013, 8120, 8197, 8289 — so one call per resolved path per re-read still holds.
+  - **Handed to group 6, not fixed here:** `ui::driver::tests::checklist_scroll_is_clamped` and
+    `tab_move_resets_and_reclamps` are red. Both share `twenty_task_source` — `## Tasks\n` and
+    twenty items — which now splits, so `content_lines`' tracked-tasks branch concatenates
+    section texts that no longer carry the `## Tasks` line: 23 rows become 22 and the clamp
+    goes 9 → 8. Task 6.3 (delete that exemption branch) is the repair. Task 6.1 already plans
+    to rewrite the first; **6.6's claim that `tab_move_resets_and_reclamps` passes unedited is
+    false** — it fails on the same shared fixture, at its `scroll == 9` precondition.
 
 ## 4. The fold walk: visibility, indent, and separators
 
