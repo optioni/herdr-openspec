@@ -348,7 +348,7 @@ pub fn lines(
 
 #[cfg(test)]
 mod tests {
-    use super::{columns, lines, progress_bar};
+    use super::{columns, gauge_of, lines, progress_bar};
     use crate::tasks::Progress;
 
     #[test]
@@ -1220,5 +1220,217 @@ mod tests {
         let want58 = format!("{}{} [4/9] 44%", "█".repeat(21), "░".repeat(27));
         assert_eq!(progress_bar(&progress, 78), want78);
         assert_eq!(progress_bar(&progress, 58), want58);
+    }
+
+    /// `tasks-progress-bar` :: "The gauge is full exactly when the change is
+    /// complete, at the header's width too" — `gauge_of` at `g == 12`, the
+    /// detail header's own budget, plus `progress_bar` at the mandated `78`
+    /// and `58`. The `usize::MAX` clause is the one that fails against the
+    /// shipped saturating arithmetic, which returns a single `█` followed
+    /// by `g - 1` `░` at each of `g`'s 12, 48 and 68.
+    #[test]
+    fn the_gauge_is_full_exactly_when_the_change_is_complete() {
+        let cases = [
+            Progress {
+                completed: 11,
+                total: 12,
+            },
+            Progress {
+                completed: 12,
+                total: 12,
+            },
+            Progress {
+                completed: 0,
+                total: 12,
+            },
+            Progress {
+                completed: 99,
+                total: 100,
+            },
+            Progress {
+                completed: 100,
+                total: 100,
+            },
+        ];
+        for progress in cases {
+            let g12 = gauge_of(&progress, 12);
+            assert_eq!(g12.chars().count(), 12, "{progress:?}: {g12:?}");
+            assert_eq!(
+                !g12.contains('░'),
+                progress.is_complete(),
+                "{progress:?}: {g12:?}"
+            );
+            for width in [78, 58] {
+                let bar = progress_bar(&progress, width);
+                assert_eq!(
+                    !bar.contains('░'),
+                    progress.is_complete(),
+                    "width {width} {progress:?}: {bar:?}"
+                );
+            }
+        }
+        let zero_fill = gauge_of(
+            &Progress {
+                completed: 0,
+                total: 12,
+            },
+            12,
+        );
+        assert!(!zero_fill.contains('█'), "{zero_fill:?}");
+
+        let saturating = Progress {
+            completed: usize::MAX,
+            total: usize::MAX,
+        };
+        for g in [12, 48, 68] {
+            let run = gauge_of(&saturating, g);
+            assert!(!run.contains('░'), "g {g}: {run:?}");
+        }
+    }
+
+    /// `tasks-progress-bar` :: "The promoted function is total at both
+    /// guard values" — `gauge_of(&Progress { completed: 4, total: 9 }, 0)`
+    /// already returns the empty string today, so that half is a
+    /// characterization; `gauge_of(&Progress { completed: 0, total: 0 },
+    /// 12)` is the behavior change, and `progress_bar`'s own `total == 0`
+    /// path (`[-]` at widths `78` and `58`, and below) stays untouched
+    /// beside it.
+    #[test]
+    fn the_promoted_function_is_total_at_both_guard_values() {
+        let ordinary = Progress {
+            completed: 4,
+            total: 9,
+        };
+        assert_eq!(gauge_of(&ordinary, 0), "");
+
+        let empty = Progress {
+            completed: 0,
+            total: 0,
+        };
+        assert_eq!(gauge_of(&empty, 12), "");
+
+        for width in [78, 58] {
+            assert_eq!(progress_bar(&empty, width), "[-]", "width {width}");
+        }
+        assert_eq!(progress_bar(&empty, 3), "[-]");
+        assert_eq!(progress_bar(&empty, 2), "");
+    }
+
+    /// `tasks-progress-bar` :: "The completeness property holds at the
+    /// saturation boundary" — `gauge_of` at `g` of `12`, `48` and `68`, the
+    /// detail header's budget and the bar's own two mandated gauges, each
+    /// reached again through `progress_bar` at `78` and `58`, so the test
+    /// names both interiors and needs no `TASKWIDTHS` exemption.
+    #[test]
+    fn the_completeness_property_holds_at_the_saturation_boundary() {
+        let saturating = Progress {
+            completed: usize::MAX,
+            total: usize::MAX,
+        };
+        for g in [12u16, 48, 68] {
+            let run = gauge_of(&saturating, g);
+            assert_eq!(run.chars().count(), g as usize, "g {g}: {run:?}");
+            assert!(!run.contains('░'), "g {g}: {run:?}");
+        }
+        for width in [78, 58] {
+            let bar = progress_bar(&saturating, width);
+            assert!(!bar.contains('░'), "width {width}: {bar:?}");
+        }
+
+        let zero_fill = gauge_of(
+            &Progress {
+                completed: 0,
+                total: usize::MAX,
+            },
+            12,
+        );
+        assert!(!zero_fill.contains('█'), "{zero_fill:?}");
+    }
+
+    /// `tasks-progress-bar` :: "A saturating `Progress` renders a full
+    /// gauge and a full percentage" — at `Progress { completed: usize::MAX,
+    /// total: usize::MAX }` the gauge holds no `░` and the percent cell
+    /// reads `100%`, at widths `78` and `58`, where the shipped saturating
+    /// arithmetic produced a single `█` and `1%`.
+    /// `Progress { completed: 4, total: 9 }` at the same two widths is
+    /// byte-identical to before, so the widening moved exactly the
+    /// saturating input and nothing else.
+    #[test]
+    fn a_saturating_progress_renders_a_full_gauge_and_a_full_percentage() {
+        let saturating = Progress {
+            completed: usize::MAX,
+            total: usize::MAX,
+        };
+        for width in [78, 58] {
+            let bar = progress_bar(&saturating, width);
+            assert!(!bar.contains('░'), "width {width}: {bar:?}");
+            assert!(bar.ends_with("100%"), "width {width}: {bar:?}");
+        }
+
+        let unmoved = Progress {
+            completed: 4,
+            total: 9,
+        };
+        let want78 = format!("{}{} [4/9] 44%", "█".repeat(30), "░".repeat(38));
+        let want58 = format!("{}{} [4/9] 44%", "█".repeat(21), "░".repeat(27));
+        assert_eq!(progress_bar(&unmoved, 78), want78);
+        assert_eq!(progress_bar(&unmoved, 58), want58);
+    }
+
+    /// `tasks-progress-bar` :: "The bar's rendered output does not move" —
+    /// `progress_bar` over widths `0..=130` for the five `Progress` values
+    /// this scenario names, characterizing that nothing panics and every
+    /// result fits its width, plus the literal `78`- and `58`-column
+    /// expectations for `{ completed: 4, total: 9 }` — built independently
+    /// of `progress_bar`, on the same terms
+    /// `full_grammar_is_byte_identical_to_pre_change_output` states, so the
+    /// claim is that the bar did not move and not merely that it still
+    /// runs. The saturating `Progress` in this sweep is the one excepted
+    /// input whose *content* changes; this test pins no literal for it —
+    /// `a_saturating_progress_renders_a_full_gauge_and_a_full_percentage`
+    /// asserts its new value instead, which is why this test is green both
+    /// before and after the widening.
+    #[test]
+    fn the_bar_s_rendered_output_does_not_move() {
+        let cases = [
+            Progress {
+                completed: 4,
+                total: 9,
+            },
+            Progress {
+                completed: 0,
+                total: 0,
+            },
+            Progress {
+                completed: 2,
+                total: 3,
+            },
+            Progress {
+                completed: 0,
+                total: usize::MAX,
+            },
+            Progress {
+                completed: usize::MAX,
+                total: usize::MAX,
+            },
+        ];
+        for progress in cases {
+            for width in 0u16..=130 {
+                let bar = progress_bar(&progress, width);
+                assert!(
+                    columns(&bar) <= width as usize,
+                    "{progress:?} width {width}: {bar:?} exceeds its width"
+                );
+            }
+        }
+
+        let unmoved = Progress {
+            completed: 4,
+            total: 9,
+        };
+        let want78 = format!("{}{} [4/9] 44%", "█".repeat(30), "░".repeat(38));
+        let want58 = format!("{}{} [4/9] 44%", "█".repeat(21), "░".repeat(27));
+        assert_eq!(progress_bar(&unmoved, 78), want78);
+        assert_eq!(progress_bar(&unmoved, 58), want58);
     }
 }
