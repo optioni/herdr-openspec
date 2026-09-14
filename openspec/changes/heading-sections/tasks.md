@@ -379,11 +379,13 @@ own `selected` flag, so this group is mostly new coverage plus the preamble case
 
 <!-- kind: operational -->
 
-- [ ] 10.1 CHECK: Inspect the intended verification commands and affected tiers — the pure `ui::*` unit tests, the 60/120-column view tests, the `run_loop` tests, `make gates`, and the two coverage floors.
-- [ ] 10.2 VERIFY: `make lint` — 0 errors
-- [ ] 10.3 VERIFY: `make fmt-check` — clean
-- [ ] 10.4 VERIFY: `make gates` — every gate exits 0, `NOIO-VIEW` still reporting 10 pure files, `COLWIDTH` nine, and `DETAILWIDTHS` all detail tests naming both widths
-- [ ] 10.5 VERIFY: `make test` — green
-- [ ] 10.6 VERIFY: `make coverage` — both floors hold, the total and the production slice
-- [ ] 10.7 VERIFY: `make check` — the single gate, green; name the failing sub-command if it is not
-- [ ] 10.8 VERIFY: `openspec validate heading-sections --strict` — valid
+- [x] 10.1 CHECK: Inspect the intended verification commands and affected tiers — the pure `ui::*` unit tests, the 60/120-column view tests, the `run_loop` tests, `make gates`, and the two coverage floors.
+  - All five tiers ran. The `run_loop` tier is this change's only end-to-end evidence and carries three rows; the gate tier runs out of process over the real tree; the coverage tier enforces two floors from one `cargo llvm-cov` run.
+- [x] 10.2 VERIFY: `make lint` — 0 errors. Exit 0, zero warnings and zero errors.
+- [x] 10.3 VERIFY: `make fmt-check` — clean. Exit 0.
+- [x] 10.4 VERIFY: `make gates` — every gate exits 0, `NOIO-VIEW` still reporting 10 pure files, `COLWIDTH` nine, and `DETAILWIDTHS` all detail tests naming both widths
+  - Exit 0. `NOIO-VIEW OK: 10 pure files carry no I/O API; positive control matched`, `COLWIDTH OK: no char-count measurement in the nine pure view files`, `DETAILWIDTHS OK: all 52 detail tests name both 58 and 78`. All three figures are the pre-change ones, as design.md -> Boundaries predicted: no new module was added under `src/ui/`.
+- [x] 10.5 VERIFY: `make test` — green. Exit 0: 1353 lib tests and 145 across the contract and integration tiers, 0 failed, 1 pre-existing ignored.
+- [x] 10.6 VERIFY: `make coverage` — both floors hold, the total and the production slice. Exit 0: total 95.78% against the 80% floor, production 96.35% (4983/5172) against the 96% floor — the falsifiable one, and up from 96.29% at the change's start.
+- [x] 10.7 VERIFY: `make check` — the single gate, green; name the failing sub-command if it is not. Exit 0, no sub-command to name.
+- [x] 10.8 VERIFY: `openspec validate heading-sections --strict` — valid. `Change 'heading-sections' is valid`, exit 0.
