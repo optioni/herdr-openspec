@@ -63,8 +63,14 @@ on `Dashboard::launch.problems`, not here.
   `2 unattributed` in the footer
 - **AND** with `agents.reachable` set to `true` the two `attribution()` results are still equal
   to each other and to the pair above, and the 120x20 footer reads
-  `? help  q quit  Enter detail  Esc back  a/c/s launch  g focus  2 unattributed` — 77
+  `/beta  ? help  q quit  Enter detail  Esc back  a/c/s launch  g focus  2 unattributed` — 84
   columns, which fits 120 whole: the filter changes
   neither the count nor the availability of the action keys
+- **AND** the **query leads that row**, because `render_footer` pushes `/<query>` onto the hint
+  list before `FOOTER_HINTS` whenever the query is non-empty and the filter is not active. The
+  landed spec omitted the prefix and claimed **69** for the same row, which is the unprefixed
+  width; the prefixed one was **76**. This change corrects the omission rather than moving the
+  wrong number by eight, under design.md → Decision 9's repair-in-passing rule — the arithmetic
+  is `/beta` + the four key hints + the two action hints + the count, two spaces between each
 - **AND** `g` pressed under the `beta` query does nothing, because `beta` carries no badge — the
   filter hides `alpha`'s row and hiding a row does not make its agent focusable from another

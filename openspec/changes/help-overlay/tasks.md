@@ -177,11 +177,11 @@ run it avoids.
 ## 8. The footer's leading hint
 <!-- kind: behavior -->
 
-- [ ] 8.1 RED: Update the landed footer assertions in `src/ui/view.rs`'s tests to the strings
+- [x] 8.1 RED: Update the landed footer assertions in `src/ui/view.rs`'s tests to the strings
   `specs/responsive-layout/spec.md` and the five other footer deltas now mandate. Every width in
   those scenarios moved by eight columns; the boundary scenarios moved to 61/60/52/51, 54/53,
   77/76, and 28/27.
-- [ ] 8.2 RED: Update the **five** assertions outside `src/ui/view.rs` that the prepend breaks.
+- [x] 8.2 RED: Update the **five** assertions outside `src/ui/view.rs` that the prepend breaks.
   Four are wiring-tier, in `src/ui/mod.rs` — byte-exact `assert_eq!`s at lines 3565 and 3567
   (`a_polled_agent_reaches_a_rendered_badge`), `footer_row.contains("g focus")` at 3667 inside a
   `for width in [120, 60]` loop (`a_keypress_launches_an_agent`), and
@@ -192,13 +192,13 @@ run it avoids.
   only and survives. Confirm with `grep -rn 'q quit\|g focus' src` — repository-wide, **not**
   scoped to `src/ui/mod.rs`, which is what hid the `src/lib.rs` site — that six sites exist and
   five move.
-- [ ] 8.3 GREEN: Change `FOOTER_HINTS` to `[&str; 4] = ["? help", "q quit", "Enter detail", "Esc
+- [x] 8.3 GREEN: Change `FOOTER_HINTS` to `[&str; 4] = ["? help", "q quit", "Enter detail", "Esc
   back"]`. Nothing else in `render_footer` moves — the drop-from-the-end rule is unchanged.
-- [ ] 8.4 CHECK: Contract gate — confirm a scenario asserts that `g focus` is dropped at 60
+- [x] 8.4 CHECK: Contract gate — confirm a scenario asserts that `g focus` is dropped at 60
   columns, per design.md → Decision 6.
-- [ ] 8.5 REFACTOR: None expected — the change is one const's length and contents. State
+- [x] 8.5 REFACTOR: None expected — the change is one const's length and contents. State
   explicitly that no refactor was needed if that holds.
-- [ ] 8.6 Run `cargo test ui::view ui::tests::wiring` — no regressions.
+- [x] 8.6 Run `cargo test ui::view ui::tests::wiring` — no regressions.
 
 ## 9. Drawing the overlay, and the mouse
 <!-- kind: behavior -->

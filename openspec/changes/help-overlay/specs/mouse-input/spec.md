@@ -23,7 +23,8 @@ The mapping SHALL be:
 | `ScrollUp`, anywhere in the frame | `Action::ScrollUp` |
 | `ScrollLeft` or `ScrollRight`, anywhere | `Action::Ignore` |
 | `Down(Left)` **inside** the band, its two rule rows included | `Action::Ignore` |
-| `Down(Left)` **outside** the band — above it, below it, on the footer row, or outside the frame | `Action::ToggleHelp` |
+| `Down(Left)` **outside** the band but **inside the frame** — above it, below it, or on the footer row | `Action::ToggleHelp` |
+| `Down(Left)` **outside the frame** | `Action::Ignore` |
 | `Down` of any other button, anywhere | `Action::Ignore` |
 | `Moved` or `Drag`, anywhere | `Action::Ignore` |
 
@@ -42,6 +43,16 @@ the reader has met elsewhere follows. It closes it and does nothing else in the 
 event: `Action::ToggleHelp` is one action, `run_loop` applies one action per event, and
 the click that dismissed the overlay SHALL NOT also select the row it landed on. A reader
 dismissing a modal is not also choosing what is under it.
+
+A click **outside the frame** SHALL be `Action::Ignore`, not a dismissal, on exactly the
+reasoning the wheel row already states: a point outside the frame is outside the band too, but
+it is not a gesture the pane received. This matches the landed table's own `Ignore` row, which
+names "or outside the frame" among the points it covers, and `mouse_action`'s existing
+`Zone::Outside => Action::Ignore` arm on every event kind. An earlier draft of the table above
+put "or outside the frame" on the **dismissal** row, which contradicted both — and contradicted
+the wheel scenario three paragraphs below it, which returns `Ignore` at column 200 for that
+exact reason. No scenario pinned either reading, so the disagreement would have reached
+`mouse_action` as an implementer's coin-flip; the scenario below now pins it.
 
 `Moved` and `Drag` SHALL keep costing no frame at all: `run_loop`'s existing
 pointer-motion exemption is unchanged, and the overlay does not make a motion event
@@ -88,6 +99,10 @@ interesting.
 - **AND** a second identical click, now that the overlay is closed, returns
   `Action::Click(Target::Change(…))` per the click table this requirement took precedence
   over, so the precedence is conditional on `help.open` and not permanent
+- **AND** a fourth call, at column 200 — past the frame's right edge — returns
+  `Action::Ignore` and **not** `Action::ToggleHelp`, so a click the pane never received does
+  not dismiss the overlay, on the same terms the wheel scenario above establishes for
+  `ScrollDown` at that column
 
 #### Scenario: The band's edges are inside it
 
