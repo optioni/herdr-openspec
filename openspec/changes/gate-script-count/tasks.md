@@ -109,15 +109,25 @@ directions of that control are run below, per design.md → Test Boundaries.
 ## 3. Documentation
 <!-- kind: operational -->
 
-- [ ] 3.1 Rewrite in `AGENTS.md`: `NODEFAULT-UI`'s subject-set count at `:266` and `:270`
+- [x] 3.1 Rewrite in `AGENTS.md`: `NODEFAULT-UI`'s subject-set count at `:266` and `:270`
   (audience: every future session) — both read "five", and the `Makefile` carries seven. This
   is the same figure task 2.4 corrects in the spec; leaving `AGENTS.md` behind would recreate
   the two-files-disagree state this change exists to end.
-- [ ] 3.2 Rewrite in `AGENTS.md`: the `tests/ci_workflow.rs` sentence under Quality gates
+  **Done at HEAD `f258715`:** both sites read seven, and the parenthetical now enumerates all
+  seven type sets rather than five — `ArtifactSection` (`foldable-spec-sections`' sixth) and
+  `src/ui/help.rs`'s `Binding`/`Group` (`help-overlay`'s seventh) were the two missing, matching
+  the `Makefile`'s seven `SCAN_MIN` lines one for one. `grep -n 'NODEFAULT-UI' AGENTS.md` now
+  returns a single line, so no second copy of the figure survives.
+- [x] 3.2 Rewrite in `AGENTS.md`: the `tests/ci_workflow.rs` sentence under Quality gates
   (audience: every future session) — it currently says that file "proves a narrower thing
   beside it: the recipe names every script under `scripts/gates/` and vice versa". That is now
   incomplete: it also pins the count. One clause, naming what breaks when a gate is added, so
   the next session extracting a gate knows two files move and not one.
+  **Done at HEAD `f258715`:** the sentence now says `tests/ci_workflow.rs` proves *two* narrower
+  things — the correspondence, and the file count against the spec's figure by equality rather
+  than floor — and names the consequence: extracting a gate moves three sites (the script, the
+  recipe line, and the count in both the test and the spec sentence the failure message names).
+  `cargo test --all-features` green afterwards, so no `doc_contract` claim was disturbed.
 
 ## 4. Change Review
 <!-- kind: operational -->

@@ -263,20 +263,26 @@ check, a width assertion, a dependency argument, a build-graph snapshot, and a c
 checker among them. **A gate's floor is its own script default** — every line in the
 recipe runs the script bare, with no `MIN`/`SCAN_MIN` override, because the default is
 kept at the gate's true measured floor rather than a value someone must remember to pass.
-The one stated exception is a **multi-subject gate**: `NODEFAULT-UI` scans five distinct
+The one stated exception is a **multi-subject gate**: `NODEFAULT-UI` scans seven distinct
 type sets across the codebase (the view-layer dashboard types, `Refresh`, `Launch`,
-`src/agents.rs`'s set, and `src/launch.rs`'s `Outcome`), and one shared default would
+`src/agents.rs`'s set, `src/launch.rs`'s `Outcome`, `ArtifactSection`, and
+`src/ui/help.rs`'s `Binding`/`Group`), and one shared default would
 either pass vacuously for the smallest set or fail legitimately for the largest — so each
-of its five recipe lines carries its own explicit `SCAN_MIN`, the only floors that live on
+of its seven recipe lines carries its own explicit `SCAN_MIN`, the only floors that live on
 the `Makefile` line rather than the script default (`notes/gate-floors.md` in the
 `degraded-states` change records how each was measured). Every gate is executed against a
 recorded planted defect, not merely attested to catch one: `tests/gate-controls.toml`
 binds each script under `scripts/gates/` to a plant, and `tests/gate_controls.rs` copies
 the tree to a scratch directory, applies it, and requires that gate to exit non-zero — so
 a script neutered to `exit 0` fails `cargo test` even though `make gates` alone would not
-catch it. `tests/ci_workflow.rs` proves a narrower thing beside it: the recipe names every
+catch it. `tests/ci_workflow.rs` proves two narrower things beside it: the recipe names every
 script under `scripts/gates/` and vice versa, so an extracted gate can never silently drop
-out of `make gates` — which says nothing on its own about whether the gate can still fail.
+out of `make gates` — which says nothing on its own about whether the gate can still fail —
+and the directory's **file count** equals the figure `openspec/specs/quality-gates/spec.md`
+states, by an equality rather than a floor (`gate-script-count`, after the prose drifted three
+behind the directory unnoticed). So extracting a gate moves three sites, not two: the script,
+the recipe line, and that count in both the test and the spec sentence its failure message
+names.
 
 Three gates guard no standing, repository-wide invariant and are excluded from this tier,
 or only partly so: `EXTENDED` is a per-change ratchet — a hardcoded list of test-name
