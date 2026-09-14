@@ -158,6 +158,13 @@ Target::DetailLine(usize),
 Target::DetailHeader { line: usize, section: usize },
 ```
 
+The tracked-tasks tab is no longer excluded from those two rows. Before
+`heading-sections` it was never foldable at any section count, so every press in its content
+area resolved to `Action::Ignore`; now a task file carrying a heading and an item splits into
+sections, the tab is foldable like any other, and a press on a group heading folds that group.
+Nothing in this table changed to allow it — the table was already written in terms of
+`Detail::foldable()`, and that predicate simply started answering `true` for one more tab.
+
 Both carry indices **already resolved against the frame just drawn**. `mouse_action` has the
 content area's width and can call `ui::detail::content_lines` and
 `ui::detail::section_at`; `Dashboard::apply` has neither and SHALL NOT recompute either. That
@@ -300,6 +307,38 @@ A `MouseEventKind::Down` of `MouseButton::Right` or `MouseButton::Middle` SHALL 
 - **AND** in particular no press of any button reaches `Action::LaunchApply`,
   `Action::LaunchContinue`, `Action::LaunchArchive`, or `Action::FocusAgent`, so a
   mis-click cannot start or focus an agent
+
+#### Scenario: A click on a task group's header folds that group
+
+- **WHEN** a dashboard at `Route::Detail` whose selected artifact carries
+  `tracks_tasks == true` and whose file reads
+  `## 1. Done\n\n- [x] a\n\n## 2. Doing\n\n- [ ] b\n` is drawn at 120x40 and at 60x40,
+  and a left press lands on the `> 1. Done` header row
+- **THEN** `mouse_action` returns `Action::Click(Target::DetailHeader { line, section })` for
+  that row's own content-line index and a `section` of `0`
+- **AND** applying it opens that group, sets `detail.scroll` to the group's header row, and
+  leaves `route`, `selected`, and `detail.tab` unchanged
+- **AND** a left press on the progress-bar row or on its blank line returns
+  `Action::Click(Target::DetailLine(line))` for that row's own index, per the table above:
+  both are drawn rows of a foldable content area, and the table sends every drawn row that is
+  not a header there. Neither belongs to a section, so applying it moves `detail.scroll` and
+  folds nothing, and `Space` from where it lands is inert
+- **AND** the same two presses against a dashboard whose task file holds items but no heading
+  — which does not split, so the tab is not foldable — both return `Action::Ignore`
+
+#### Scenario: A click on a nested scenario header folds only that scenario
+
+- **WHEN** a dashboard at `Route::Detail` whose selected artifact resolves to one delta spec
+  path, with `detail.expanded` holding the indices of the operation heading and its first
+  requirement, is drawn at 120x40 and at 60x40, and a left press lands on the
+  `    > Scenario: A works` row
+- **THEN** `mouse_action` returns `Action::Click(Target::DetailHeader { line, section })`
+  whose `section` is that scenario's own index into `detail.sections`, not its position among
+  the drawn rows
+- **AND** applying it opens that scenario and leaves every other section's membership of
+  `detail.expanded` exactly as it was
+- **AND** a left press on one of that scenario's body rows returns
+  `Action::Click(Target::DetailLine(line))`, which moves `detail.scroll` and folds nothing
 
 ### Requirement: The mouse acts while filtering
 

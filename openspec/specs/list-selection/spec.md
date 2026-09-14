@@ -403,11 +403,18 @@ while handling `ToggleSection` at either route, exactly as it does for every oth
 
 #### Scenario: `Space` at the detail route is inert on a non-foldable artifact
 
-- **WHEN** a `Dashboard` at `Route::Detail` whose selected artifact resolves to one path is
-  given ten `ToggleSection` actions
+- **WHEN** a `Dashboard` at `Route::Detail` whose selected artifact resolves to one path
+  **holding prose** — a file that carries no `### Requirement:` heading and is not the
+  tracked-tasks artifact, so `heading-sections`' gate leaves it unsplit and it is therefore
+  the one section that makes the artifact non-foldable — is given ten `ToggleSection` actions
 - **THEN** the `Dashboard` is equal, field for field, to what it was before the ten
 - **AND** none panics, and no problem is recorded anywhere
 - **AND** the same holds for an artifact resolving to no path at all
+- **AND** a `Dashboard` whose selected artifact resolves to one path holding a **spec** file
+  is **not** covered by this scenario: that file splits into heading sections and is
+  foldable, so `Space` acts. "Resolves to one path" stopped implying "one section" when
+  `heading-sections` landed, and the fixture says which kind of file it means for that
+  reason
 
 #### Scenario: An empty list makes `Space` inert
 
