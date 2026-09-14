@@ -652,7 +652,9 @@ false.
 
 - **WHEN** the three-section task dashboard whose first entry is a `None`-labelled preamble is
   given ten `ToggleSection` actions with `detail.scroll` addressing a preamble row — which,
-  on that tab, is any row from the progress bar through the last line of `Intro prose.`
+  on that tab, is the progress-bar row and its blank line, and those two only. `Intro prose.`
+  itself draws **no** row there: a `None`-labelled section's body on a tracked-tasks tab goes
+  through `ui::tasks::items`, which renders task items and nothing else
 - **THEN** the `Dashboard` is equal, field for field, to what it was before the ten
 - **AND** moving `detail.scroll` onto the `1. Setup` header and repeating the action toggles
   that section

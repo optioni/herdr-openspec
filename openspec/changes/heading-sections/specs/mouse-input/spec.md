@@ -182,7 +182,10 @@ A `MouseEventKind::Down` of `MouseButton::Right` or `MouseButton::Middle` SHALL 
 - **AND** applying it opens that group, sets `detail.scroll` to the group's header row, and
   leaves `route`, `selected`, and `detail.tab` unchanged
 - **AND** a left press on the progress-bar row or on its blank line returns
-  `Action::Ignore`, because neither is a header row and neither belongs to a section
+  `Action::Click(Target::DetailLine(line))` for that row's own index, per the table above:
+  both are drawn rows of a foldable content area, and the table sends every drawn row that is
+  not a header there. Neither belongs to a section, so applying it moves `detail.scroll` and
+  folds nothing, and `Space` from where it lands is inert
 - **AND** the same two presses against a dashboard whose task file holds items but no heading
   — which does not split, so the tab is not foldable — both return `Action::Ignore`
 
