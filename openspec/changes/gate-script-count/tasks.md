@@ -187,11 +187,20 @@ directions of that control are run below, per design.md → Test Boundaries.
 ## 5. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 5.1 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
-- [ ] 5.2 VERIFY: `cargo fmt --all -- --check` — clean.
-- [ ] 5.3 VERIFY: `cargo test --all-features` — green, on a quiescent tree.
+- [x] 5.1 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 errors.
+  **Run at HEAD `e32fcb5`:** 0 errors, 0 warnings.
+- [x] 5.2 VERIFY: `cargo fmt --all -- --check` — clean.
+  **Run at HEAD `e32fcb5`:** clean.
+- [x] 5.3 VERIFY: `cargo test --all-features` — green, on a quiescent tree.
   `tests/gate_controls.rs` digests file mtimes repository-wide, so this is attributable only
   when nothing else is writing.
-- [ ] 5.4 VERIFY: `make gates` — exit 0.
-- [ ] 5.5 VERIFY: `make check` as the single gate, naming the failing sub-command if it fails.
-- [ ] 5.6 VERIFY: `openspec validate gate-script-count --strict` — valid.
+  **Run at HEAD `e32fcb5`** on a quiescent tree: `1311 passed` in the unit tier, `21` in
+  `ci_workflow`, `73` in `gate_controls`, `19`, `10`, `10`, `5`, `4`, `3` across the rest — 0
+  failed, 1 ignored, in every binary.
+- [x] 5.4 VERIFY: `make gates` — exit 0.
+  **Run at HEAD `e32fcb5`:** exit 0, every script printing its own `OK` summary.
+- [x] 5.5 VERIFY: `make check` as the single gate, naming the failing sub-command if it fails.
+  **Run at HEAD `e32fcb5`:** exit 0. Coverage 95.87% total against the 80% floor, and
+  `COVERAGE-PROD OK: production 96.24% (4817/5005) >= floor 96%`. No sub-command failed.
+- [x] 5.6 VERIFY: `openspec validate gate-script-count --strict` — valid.
+  **Run at HEAD `e32fcb5`:** `Change 'gate-script-count' is valid`.
