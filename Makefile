@@ -37,6 +37,7 @@ gates:
 	LAUNCH=src/open.rs ENTRY='pub fn run_from_env\(' /bin/sh scripts/gates/launchseam.sh
 	/bin/sh scripts/gates/colwidth.sh
 	/bin/sh scripts/gates/detailwidths.sh
+	/bin/sh scripts/gates/helpwidths.sh
 	/bin/sh scripts/gates/listwidths.sh
 	/bin/sh scripts/gates/mdseam.sh
 	/bin/sh scripts/gates/mdwidths.sh
@@ -48,6 +49,7 @@ gates:
 	SCAN_MIN=111 HOMEFILE=src/agents.rs TYPES='Agent Listed AgentSnapshot Attribution' /bin/sh scripts/gates/nodefault-ui.sh
 	SCAN_MIN=26 HOMEFILE=src/launch.rs TYPES='Outcome' /bin/sh scripts/gates/nodefault-ui.sh
 	SCAN_MIN=25 TYPES='ArtifactSection' /bin/sh scripts/gates/nodefault-ui.sh
+	SCAN_MIN=55 HOMEFILE=src/ui/help.rs TYPES='Binding Group' /bin/sh scripts/gates/nodefault-ui.sh
 	/bin/sh scripts/gates/noio-view.sh
 	/bin/sh scripts/gates/nojson-seam.sh
 	/bin/sh scripts/gates/nolit-change.sh

@@ -119,6 +119,18 @@ expect = "COLWIDTH FAIL: src/ui/tasks.rs has"
 why = "the sweep's `Vec<char>` alternative is a distinct alternation branch from the other two, and this plant fails only if that branch still matches on its own"
 
 [[control]]
+id = "colwidth-sweep-help"
+script = "colwidth.sh"
+plant_file = "src/ui/help.rs"
+plant_find = "//! The pane's key and gesture inventory, and the overlay's row grammar. See"
+plant_replace = '''//! The pane's key and gesture inventory, and the overlay's row grammar. See
+fn planted_colwidth_help_violation(s: &str) -> usize {
+    s.chars().count()
+}'''
+expect = "COLWIDTH FAIL: src/ui/help.rs has"
+why = "help-overlay: src/ui/help.rs joins COLWIDTH's PURE list as its ninth file, and a .chars().count() reintroduced there must fail the sweep on the same terms as every other pure view file"
+
+[[control]]
 id = "deps-features"
 script = "deps.sh"
 cargo = true
@@ -155,6 +167,38 @@ impl Default for Change {
 }'''
 expect = "GATE-MECH1 FAIL (half A): Default reachable for a Change type"
 why = "an impl Default for one of the four gated types must fail half A anywhere under src/"
+
+[[control]]
+id = "helpwidths-narrowed"
+script = "helpwidths.sh"
+plant_file = "src/ui/help.rs"
+# Narrows a both-width test to 120 alone by deleting its 60x20 half, rather than adding a
+# new single-width test - the spec's own distinction ("Narrowed rather than added: this gate
+# counts the tests that assert at both widths against a floor, so a new single-width test
+# raises the total without lowering that count and is not the defect the floor exists to
+# catch"). This drops the both-width count from 3 to 2, below HELP_MIN's floor of 3.
+plant_find = '''
+        // 60x20: body 19 rows, band 19, interior 17 against 42 content
+        // rows.
+        let total = Rect::new(0, 0, 60, 20);
+        let body = body_for(total);
+        let band = band_for(total);
+        assert_eq!(band.height, 19);
+        let help = crate::ui::app::Help {
+            open: true,
+            scroll: 0,
+        };
+        let backend = TestBackend::new(60, 20);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        terminal
+            .draw(|f| render(f, body, &help))
+            .expect("draw the 60x20 band");
+        let buffer = terminal.backend().buffer().clone();
+        assert_indicator(&buffer, band, band.y + band.height - 1, "1-17/42");
+    }'''
+plant_replace = "\n    }"
+expect = "HELPWIDTHS FAIL: only 2 src/ui/help.rs tests name both 60 and 120 columns"
+why = "help-overlay: helpwidths.sh is a count against a floor, not an every-test rule, so its own control must be a both-width test NARROWED to one width rather than a new single-width test added - the spec's own worked example of the distinction"
 
 [[control]]
 id = "launchseam-spawn"
@@ -340,6 +384,30 @@ with its own SCAN_MIN, and this is that line's own executed control rather than 
 one'''
 
 [[control]]
+id = "nodefault-ui-help-binding"
+script = "nodefault-ui.sh"
+env = "SCAN_MIN=31 HOMEFILE=src/ui/help.rs TYPES=Binding"
+plant_file = "src/ui/help.rs"
+plant_find = "//! The pane's key and gesture inventory, and the overlay's row grammar. See"
+plant_replace = '''//! The pane's key and gesture inventory, and the overlay's row grammar. See
+fn planted_binding_elides_a_field() -> Binding {
+    Binding {
+        input: "x",
+        ..Default::default()
+    }
+}'''
+expect = "NODEFAULT-UI FAIL: multi-line-aware half B"
+why = '''help-overlay: binding-inventory's own control - a `Binding` literal written with a
+`..Default::default()` rest must fail NODEFAULT-UI on exactly the terms every other
+NODEFAULT-UI-scanned type is on. The env above is the SINGLE-type invocation, not the
+Makefile's seventh line (SCAN_MIN=55 HOMEFILE=src/ui/help.rs TYPES='Binding Group'), because
+`env_overrides` splits this field on whitespace and so cannot carry a two-word TYPES at all -
+the same limit that leaves the first nodefault-ui control on a bare SCAN_MIN. The plant was
+measured to fail BOTH invocations, so the narrower one loses no evidence: half B reports
+`src/ui/help.rs:3: Binding literal or pattern elides a field` under SCAN_MIN=55 TYPES='Binding
+Group' and under SCAN_MIN=31 TYPES=Binding alike'''
+
+[[control]]
 id = "noio-view-hit"
 script = "noio-view.sh"
 plant_file = "src/ui/list.rs"
@@ -350,6 +418,16 @@ fn planted_io() {
 }'''
 expect = "NOIO-VIEW FAIL: I/O API in a pure view file"
 why = "an I/O API named in one of the eight pure files must fail the sweep"
+
+[[control]]
+id = "noio-view-help-hit"
+script = "noio-view.sh"
+plant_file = "src/ui/help.rs"
+plant_find = "//! The pane's key and gesture inventory, and the overlay's row grammar. See"
+plant_replace = '''//! The pane's key and gesture inventory, and the overlay's row grammar. See
+use std::fs;'''
+expect = "NOIO-VIEW FAIL: I/O API in a pure view file"
+why = "help-overlay: src/ui/help.rs joins NOIO-VIEW's PURE list as its tenth file, and std::fs named there must fail the sweep on the same terms as every other pure view file"
 
 [[control]]
 id = "nojson-seam-hit"
@@ -518,6 +596,16 @@ plant_file = "openspec/PLANTED_STRAY_FILE.txt"
 plant_content = "planted stray file\n"
 expect = "OPENSPEC-UNTOUCHED FAIL: an untracked file exists inside openspec/"
 why = "an untracked file inside openspec/ must fail the untracked-file sweep; the scratch copy needs its own git history for the gate's own git rev-parse to succeed at all (design.md -> Decision 6a)"
+
+[[control]]
+id = "palette-help-unswept"
+script = "palette.sh"
+env = ""
+plant_file = "scripts/gates/noio-view.sh"
+plant_find = "src/ui/help.rs src/ui/layout.rs"
+plant_replace = "src/ui/layout.rs"
+expect = "does not list src/ui/help.rs in its PURE set"
+why = "help-overlay: the same third leg, one module on - src/ui/help.rs struck from noio-view.sh's PURE list must fail on the same terms palette-unswept proves for src/ui/palette.rs, since neither standing view gate can see its own PURE list quietly drop the new module"
 
 [[control]]
 id = "palette-outside"

@@ -20,7 +20,11 @@
 # the [ -f ] guard doing its job, not a defect: without it, a renamed or deleted module makes
 # the check report a clean tree. Task 0.3 records the expected failure; task 4.4 is its first
 # green run.
-PURE="src/ui/app.rs src/ui/detail.rs src/ui/layout.rs src/ui/list.rs src/ui/markdown.rs src/ui/palette.rs src/ui/tasks.rs src/ui/view.rs src/ui/driver.rs"
+#
+# help-overlay adds the overlay's module below, taking PURE from nine files to TEN: its
+# bindings and rendering are pure data and a pure draw function, on exactly the same terms as
+# every other file already swept here.
+PURE="src/ui/app.rs src/ui/detail.rs src/ui/help.rs src/ui/layout.rs src/ui/list.rs src/ui/markdown.rs src/ui/palette.rs src/ui/tasks.rs src/ui/view.rs src/ui/driver.rs"
 # `tasks::read` is NEW in the pattern, and it is the second deliberate edit this change makes
 # to this block. crate::tasks::read is the filesystem edge of the module ui::tasks renders
 # from, and it matches NONE of the other alternatives - not `std::fs` (the call site writes
@@ -47,4 +51,4 @@ grep -qE 'std::io' src/ui/terminal.rs \
 hits=$(grep -nE "$IO_RE" $PURE || true)
 [ -z "$hits" ] || { echo "NOIO-VIEW FAIL: I/O API in a pure view file:" >&2
                     echo "$hits" >&2; exit 1; }
-echo "NOIO-VIEW OK: 9 pure files carry no I/O API; positive control matched"
+echo "NOIO-VIEW OK: 10 pure files carry no I/O API; positive control matched"

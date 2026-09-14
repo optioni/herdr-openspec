@@ -29,8 +29,15 @@ r=$(grep -nE 'Color::Rgb|Color::Indexed|Color::Reset' "$PAL" || true)
 # Third leg - the two standing view gates actually sweep the new module. Both
 # hard-code their PURE lists and check only that the files they name exist, so
 # without this a forgotten edit leaves palette.rs unswept while both print OK.
+#
+# help-overlay widens this leg to a second pure-view module, src/ui/help.rs, on the same
+# argument one module on: it too styles by role rather than naming a Color, so a PURE list
+# that quietly stopped naming it is a gap neither sweep can see on its own. The gate fails
+# when EITHER of the two files is missing from EITHER list.
+HELP="${HELP:-src/ui/help.rs}"
 for g in scripts/gates/noio-view.sh scripts/gates/colwidth.sh; do
   [ -f "$g" ] || fail "$g missing"
   grep -q "$PAL" "$g" || fail "$g does not list $PAL in its PURE set"
+  grep -q "$HELP" "$g" || fail "$g does not list $HELP in its PURE set"
 done
 echo "PALETTE OK: $n files searched (>= $MIN), Color only in $PAL, named ANSI indices only, swept by NOIO-VIEW and COLWIDTH"

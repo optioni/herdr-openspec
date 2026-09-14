@@ -148,31 +148,31 @@ run it avoids.
 ## 7. Gate scripts and their planted controls
 <!-- kind: operational -->
 
-- [ ] 7.1 CHECK: Confirm `make gates` is green and record the three counts this group moves:
+- [x] 7.1 CHECK: Confirm `make gates` is green and record the three counts this group moves:
   `NOIO-VIEW OK: 9 pure files`, `COLWIDTH OK: … the eight pure view files`, and
   `grep -c nodefault-ui.sh Makefile` = 6.
-- [ ] 7.2 CHANGE: Add `src/ui/help.rs` to `PURE` in `scripts/gates/noio-view.sh` and
+- [x] 7.2 CHANGE: Add `src/ui/help.rs` to `PURE` in `scripts/gates/noio-view.sh` and
   `scripts/gates/colwidth.sh`, and confirm they then report ten and nine.
-- [ ] 7.3 CHANGE: Extend `scripts/gates/palette.sh`'s `PURE`-list leg to fail when **either**
+- [x] 7.3 CHANGE: Extend `scripts/gates/palette.sh`'s `PURE`-list leg to fail when **either**
   `src/ui/palette.rs` or `src/ui/help.rs` is missing from either list.
-- [ ] 7.4 CHANGE: Add a seventh `nodefault-ui.sh` line to the `Makefile` with
+- [x] 7.4 CHANGE: Add a seventh `nodefault-ui.sh` line to the `Makefile` with
   `HOMEFILE=src/ui/help.rs TYPES='Binding Group'`. Measure its `SCAN_MIN` by running the script
   bare and write that floor on the recipe line, as the other six do.
-- [ ] 7.5 CHANGE: Add a planted control per gate to `tests/gate-controls.toml` — `use std::fs;`
+- [x] 7.5 CHANGE: Add a planted control per gate to `tests/gate-controls.toml` — `use std::fs;`
   in `src/ui/help.rs` for `NOIO-VIEW`, `s.chars().count()` there for `COLWIDTH`, `src/ui/help.rs`
   struck from each `PURE` list for `PALETTE`, and `..Default::default()` in a `Binding` literal
   for `NODEFAULT-UI`. `tests/gate_controls.rs` copies the tree to a `testutil::ScratchDir` and
   applies each plant there, which is the boundary design.md → Test Boundaries names.
-- [ ] 7.6 CHECK: Negative control — run `cargo test --test gate_controls` and confirm each of
+- [x] 7.6 CHECK: Negative control — run `cargo test --test gate_controls` and confirm each of
   the four plants makes its gate exit non-zero, and that `make gates` on the unplanted tree exits
   zero. Record both halves; all four pin invariants that are already green, so the planted half
   is the only evidence any of them can fail.
-- [ ] 7.7 CHANGE: Add `scripts/gates/helpwidths.sh` on `detailwidths.sh`'s pattern and compose
+- [x] 7.7 CHANGE: Add `scripts/gates/helpwidths.sh` on `detailwidths.sh`'s pattern and compose
   it into the `gates:` recipe. `src/ui/help.rs` is otherwise the only view module with a
   both-widths mandate and no gate counting it (`Makefile:39,40,42,64,66` carry the other five).
   Measure its floor from the tree once group 4's and group 6's tests exist, and add its plant to
   `tests/gate-controls.toml`.
-- [ ] 7.8 VERIFY: Run `make gates` and `cargo test --test gate_controls` — both green.
+- [x] 7.8 VERIFY: Run `make gates` and `cargo test --test gate_controls` — both green.
 
 ## 8. The footer's leading hint
 <!-- kind: behavior -->
@@ -182,11 +182,11 @@ run it avoids.
   those scenarios moved by eight columns; the boundary scenarios moved to 61/60/52/51, 54/53,
   77/76, and 28/27.
 - [ ] 8.2 RED: Update the four wiring-tier footer assertions in `src/ui/mod.rs` that the
-  prepend breaks — byte-exact `assert_eq!`s at lines 3544 and 3546
-  (`a_polled_agent_reaches_a_rendered_badge`), `footer_row.contains("g focus")` at 3646 inside a
+  prepend breaks — byte-exact `assert_eq!`s at lines 3565 and 3567
+  (`a_polled_agent_reaches_a_rendered_badge`), `footer_row.contains("g focus")` at 3667 inside a
   `for width in [120, 60]` loop (`a_keypress_launches_an_agent`), and
-  `row.starts_with("q quit")` at 4423 (`a_refused_capture_is_named_last`). The two 60-column
-  ones lose `g focus` per design.md → Decision 6; line 3437 renders at 120 only and survives.
+  `row.starts_with("q quit")` at 4444 (`a_refused_capture_is_named_last`). The two 60-column
+  ones lose `g focus` per design.md → Decision 6; line 3458 renders at 120 only and survives.
   Confirm with `grep -n 'q quit\|g focus' src/ui/mod.rs` that five sites exist and four move.
 - [ ] 8.3 GREEN: Change `FOOTER_HINTS` to `[&str; 4] = ["? help", "q quit", "Enter detail", "Esc
   back"]`. Nothing else in `render_footer` moves — the drop-from-the-end rule is unchanged.
