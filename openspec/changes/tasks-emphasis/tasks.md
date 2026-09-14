@@ -40,8 +40,10 @@ Every number this plan uses, with the command that produced it, run at HEAD on 2
 | `ArtifactSection {` occurrences | `grep -rn "ArtifactSection {" src/ tests/ \| cut -d: -f1 \| sort \| uniq -c` | **78** total — 26 `src/ui/app.rs`, 19 `src/ui/detail.rs`, 14 `src/ui/driver.rs`, 14 `src/ui/view.rs`, 2 `tests/doc_contract.rs`, **3 `tests/gate-controls.toml`** |
 | …of which the compiler forces | the 75 in `.rs` files, less the struct definition | **74** construction and pattern sites. The 3 in `gate-controls.toml` are planted-defect **strings** and are edited only if the plant itself must change |
 | `ArtifactSection` spans `NODEFAULT-UI` scans | `SCAN_MIN=25 TYPES='ArtifactSection' /bin/sh scripts/gates/nodefault-ui.sh` | **72** spans, "none elides a field" |
-| `progress_bar(` call sites | `grep -rn "progress_bar(" src/ \| cut -d: -f1 \| sort \| uniq -c` | **51** — 39 `src/ui/tasks.rs`, **9 `src/ui/view.rs`**, 3 `src/ui/detail.rs` |
-| `bar_lines(` call sites | same, for `bar_lines(` | **6** — 4 `src/ui/tasks.rs`, 2 `src/ui/detail.rs`; the production pair is `src/ui/tasks.rs:363` and `src/ui/detail.rs:461` |
+| `progress_bar(` occurrences | `grep -rn "progress_bar(" src/ \| cut -d: -f1 \| sort \| uniq -c` | **51** — 39 `src/ui/tasks.rs`, 9 `src/ui/view.rs`, 3 `src/ui/detail.rs` |
+| …split by `#[cfg(test)]` | count occurrences before and after the `#[cfg(test)]` marker per file | **2 production**, both in `src/ui/tasks.rs`; the other **49 are test sites**, including every one of the 9 in `view.rs` and the 3 in `detail.rs` |
+| `bar_lines(` occurrences, same split | same, for `bar_lines(` | **2 production** in `src/ui/tasks.rs` (its definition and the call in `lines`) and **2** in `src/ui/detail.rs` (a doc-comment mention and the call at `:461`); 2 test sites |
+| Gauge tests already carrying recorded literals | `grep -n "byte_identical\|does_not_move" src/ui/tasks.rs` | `full_grammar_is_byte_identical_to_pre_change_output` (`:1337`) and `the_bar_s_rendered_output_does_not_move` (`:1517`) — the pattern this change's own byte-identical assertions follow |
 | View tests asserting a fold-header row | `grep -n "expected_header_at" src/ui/view.rs` | the helper at `:3974` and its call sites; the three tracked-tasks tests are at `:4488`, `:4540`, `:4659` |
 | `#[test]` count, `src/ui/tasks.rs` | `grep -c "#\[test\]" src/ui/tasks.rs` | **29** (`TASKWIDTHS` floor is 22) |
 | `#[test]` count, `src/ui/palette.rs` | `grep -c "#\[test\]" src/ui/palette.rs` | **4** |
@@ -67,6 +69,14 @@ Every number this plan uses, with the command that produced it, run at HEAD on 2
 - [ ] 0.4 CHECK: Confirm the four greps above are **absence-of-string** checks, not
       absence-of-behaviour ones, and that the behavioural RED is each group's own 1.1/2.1/…
       task. A grep cannot fail for the right reason; it is recorded as a starting condition.
+- [ ] 0.5 CHARACTERIZE: **Capture the baseline this change's byte-identical claims compare
+      against, before any edit.** Write the HEAD output of `ui::tasks::items` and
+      `ui::tasks::lines` over each group-4 fixture, and of `ui::markdown::lines` over the
+      group-3 document, at widths 58 and 78, into `notes/head-output.md` in this change
+      directory. Without this the later assertions have nothing recorded to compare against:
+      by the time group 4 runs the pre-change function is gone, and a literal written then
+      proves forward stability only. This is the repair of a tautology planning review found
+      in 4.5, 7.7 and 8.4.
 
 ## 1. `tasks::label_of` — the recognition and the vocabulary
 
@@ -89,9 +99,11 @@ Writes `src/tasks.rs` alone. The function takes a `&str` and returns plain data
       five-step rule in `specs/task-labels/spec.md`, with byte arithmetic throughout.
 - [ ] 1.3 GREEN: Implement the classification table as an exact, case-sensitive match over the
       run, with `Other` as the fallback arm rather than a lookup miss.
-- [ ] 1.4 CHECK: Run
-      `grep -nE 'schema::|Schema|config\.yaml|\.openspec\.yaml' src/tasks.rs` and confirm it
-      prints nothing, proving the non-goal that this capability consults no schema.
+- [ ] 1.4 CHECK: Confirm `label_of` and `LabelRole` reach no schema, over a **comment-stripped**
+      copy of the file: `grep -vE '^\s*(//|///)' src/tasks.rs | grep -nE 'schema::|Schema|config\.yaml|\.openspec\.yaml'`
+      prints nothing. The unstripped form is already red at HEAD — `src/tasks.rs:328` is a
+      comment naming `schema::read_file` — so it would fail for the wrong reason on an
+      untouched tree.
 - [ ] 1.5 REFACTOR: Fold the number-skip and the run-scan into one pass if two emerged, or
       record that none was needed.
 - [ ] 1.6 VERIFY: `cargo test --all-features` — green — and `make gates` exits 0.
@@ -174,10 +186,12 @@ names both `58` and `78` even where its interesting widths are elsewhere.
       `tasks::label_of(&item.text)` and splits into at most three segments, omitting any empty.
 - [ ] 4.4 GREEN: Implement the wrap degradation — when `start + len` exceeds the first row's own
       text length, render one `Face::plain()` segment (design.md -> Decision 9).
-- [ ] 4.5 CHECK: Assert every fixture's `Line::text()` equals a **string literal written into
-      the test**, copied from the pre-change output and never recomputed from the function
-      under test. A comparison against the function's own fresh output cannot fail, and this
-      is the assertion carrying the claim that the change moved no character.
+- [ ] 4.5 CHECK: Assert every fixture's `Line::text()` equals the literal recorded in
+      `notes/head-output.md` at 0.5, written into the test as a string literal — never
+      recomputed from the function under test, which could not fail. This assertion carries
+      the claim that the change moved no character, and it follows the pattern
+      `full_grammar_is_byte_identical_to_pre_change_output` (`src/ui/tasks.rs:1337`) already
+      uses.
 - [ ] 4.6 REFACTOR: Extract the segment-building if `item_lines` grew a second copy of the
       prefix arithmetic, or record that none was needed.
 - [ ] 4.7 VERIFY: `cargo test --all-features` — green — and
@@ -261,9 +275,13 @@ Writes `src/ui/tasks.rs`, `src/ui/detail.rs`, and the nine `progress_bar` sites 
 - [ ] 7.1 RED: Write the failing render row first —
       `a_real_tasks_tab_renders_a_segmented_gauge_into_the_frame` in `ui::view`, at 120x20 and
       60x20 over the two-group fixture, asserting at least one `▓` or `▒` in the progress-bar
-      row and the two spans in the ratio the sections' own totals give. This is the only
-      scenario in the change that renders a segmented gauge through `content_lines`; the other
-      five pass hand-built slices and would all pass against an unwired build.
+      row and the two spans in the ratio the sections' own totals give. The fixture SHALL be
+      built by calling `sync_detail` with a closure reader, **not** by hand-populating
+      `detail.sections`: `monochrome_dashboard` (`src/ui/view.rs:7836`) hand-builds its
+      sections and so cannot fail on a wiring defect between `sync_detail` and
+      `content_lines` — which is the class of defect planning review found here. This is the
+      only scenario in the change that renders a segmented gauge through `content_lines`; the
+      other five pass hand-built slices and would all pass against an unwired build.
 - [ ] 7.2 RED: Write failing `ui::tasks` tests
       `two_groups_of_unequal_size_get_spans_proportional_to_their_item_counts`,
       `an_empty_group_contributes_no_span_and_consumes_no_index`,
@@ -284,9 +302,12 @@ Writes `src/ui/tasks.rs`, `src/ui/detail.rs`, and the nine `progress_bar` sites 
 - [ ] 7.6 CHECK: Contract gate — `progress_bar` and `bar_lines` both appear in design.md ->
       Contracts with named consumers. Re-inspect both signatures against that table and confirm
       every consumer is named and the empty-slice compatibility claim holds.
-- [ ] 7.7 CHECK: Re-run the three carried `tasks-progress-bar` sweeps with **both** an empty
-      slice and a populated one, comparing the empty-slice results against string literals
-      recorded from HEAD's output — not against a fresh call, which could not fail.
+- [ ] 7.7 CHECK: Re-run the two literal-carrying gauge tests —
+      `full_grammar_is_byte_identical_to_pre_change_output` (`src/ui/tasks.rs:1337`) and
+      `the_bar_s_rendered_output_does_not_move` (`:1517`) — unmodified except for the new
+      empty-slice argument, and confirm both stay green. They already hold recorded literals,
+      which is what makes them falsifiable; `bar_measures_at_most_its_width_at_every_width` is
+      a property sweep recording nothing and is **not** evidence for this claim.
 - [ ] 7.8 REFACTOR: Fold the span arithmetic and the substitution into one pass if two emerged,
       or record that none was needed.
 - [ ] 7.9 VERIFY: `cargo test --all-features` — green — and
@@ -311,10 +332,11 @@ against the assembled change and would fail against any one group reverted.
       something other than this change.
 - [ ] 8.3 CHANGE: Fix whatever 8.1 or 8.2 reddens, in the group that owns it, and record which
       group and why here.
-- [ ] 8.4 CHECK: Confirm the carried view rows are byte-identical — render the `color-palette`
-      monochrome fixture and the three-spec fixture at both widths and compare against string
-      literals recorded from HEAD, which is the claim that this change moved no rendered text
-      outside the tasks tab.
+- [ ] 8.4 CHECK: Confirm `a_monochrome_reading_of_the_frame_is_unchanged` (`src/ui/view.rs:7928`)
+      and the three-section fixture's own tests stay green **with their assertions unmodified**.
+      They already assert per-cell literals, so leaving them untouched is the falsifiable form
+      of "no rendered text moved outside the tasks tab"; re-rendering and comparing against a
+      fresh buffer is not, and there is no recorded-buffer mechanism in this repository.
 - [ ] 8.5 VERIFY: `cargo test --all-features` — green — and
       `/bin/sh scripts/gates/palette.sh` and `readonly-ui.sh` each exit 0. `palette.sh`
       subsumes a hand-written grep for colour literals, so none is written here.

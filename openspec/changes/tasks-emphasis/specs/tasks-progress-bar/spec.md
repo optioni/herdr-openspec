@@ -246,6 +246,9 @@ change in every respect.
 - **AND** at every width the returned line measures at most that width in display columns
 - **AND** wherever a gauge is drawn, its four glyphs' counts sum to exactly `g`, so no position
   is unassigned or assigned twice
+- **AND** at every width the count of **filled** positions — `█` and `▓` together — is equal
+  to the count of `█` in the same call made with an **empty** `groups` slice, so the
+  substitution provably preserves the fill rather than being asserted to by construction
 - **AND** for `{ usize::MAX, usize::MAX }` every position is a filled glyph, `█` or `▓`, and
   the percent cell reads `100%`, so segmentation did not reintroduce the saturation defect the
   requirement above repairs

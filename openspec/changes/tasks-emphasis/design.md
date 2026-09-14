@@ -127,7 +127,8 @@ total. There is no pagination, no streaming, and no backwards-compatibility surf
 |---|---|---|
 | Terminal (crossterm raw mode, alternate screen) | **replaced** — `ratatui::backend::TestBackend` at 120 and 60 columns; the real seam stays confined to `src/ui/terminal.rs` and is never reached | **replaced** (same) |
 | Artifact reader (`&dyn Fn(&Path) -> Result<String, String>`) | **replaced** — a closure returning fixture text | **replaced** (same) |
-| Filesystem | **not reached** — every fixture in this change is an in-memory `&str` or an in-memory `Dashboard` | **not reached** |
+| Filesystem | **not reached** — every fixture in this change is an in-memory `&str` or an in-memory `Dashboard` | **not reached**, with the one exception below |
+| Working tree, read by `tests/doc_contract.rs` | **real**, read-only — task 10.4 runs `--test doc_contract`, which reads `SPEC.md` and `AGENTS.md` off the tree to bind their claims to the files that determine them | not reached |
 | `openspec` binary (`OpenspecCli`) | **not reached** — no code path this change touches spawns it | **not reached** |
 | Herdr socket (`HerdrCli`, agent poller, launcher) | **not reached** — no file under `src/ui/` may name `HerdrCli` | **not reached** |
 | Filesystem watcher (`notify`, `FsEvents`) | **inert** — the loop tier passes a live tier that yields nothing | **not reached** |
@@ -178,14 +179,14 @@ and the Change Review group asks its reviewer to check exactly this.
 
 | Spec Scenario | Verification | Tier | Collaborators | Command |
 |---|---|---|---|---|
-| task-labels — The plain and compound label forms are both recognised | `tasks` unit test over `&str` literals | unit (pure) | none | `cargo test tasks::tests::label` |
-| task-labels — A task number is skipped and does not become part of the label | `tasks` unit test over `&str` literals | unit (pure) | none | `cargo test tasks::tests::label` |
-| task-labels — Unlabelled tasks are recognised as unlabelled | `tasks` unit test over `&str` literals | unit (pure) | none | `cargo test tasks::tests::label` |
-| task-labels — The recognition is total over degenerate input | `tasks` unit test sweeping the degenerate set and calling `split_at` at every returned offset | unit (pure) | none | `cargo test tasks::tests::label` |
-| task-labels — Every token in the table classifies to its own role | `tasks` unit test over all thirteen tokens | unit (pure) | none | `cargo test tasks::tests::label` |
-| task-labels — An unrecognised run is a generic label, not a miss | `tasks` unit test over `&str` literals | unit (pure) | none | `cargo test tasks::tests::label` |
-| task-labels — Matching is case-sensitive and whole-run | `tasks` unit test over `&str` literals | unit (pure) | none | `cargo test tasks::tests::label` |
-| task-labels — The classification reads nothing outside its argument | `grep` over `src/tasks.rs` for the schema-reading names, plus a compile-time test constructing no `Schema` | unit (pure) + deterministic evidence | the working tree | `cargo test tasks::tests::label` and `grep -nE 'schema::\|Schema\|config\.yaml\|\.openspec\.yaml' src/tasks.rs` |
+| task-labels — The plain and compound label forms are both recognised | `tasks` unit test over `&str` literals | unit (pure) | none | `cargo test tasks::` |
+| task-labels — A task number is skipped and does not become part of the label | `tasks` unit test over `&str` literals | unit (pure) | none | `cargo test tasks::` |
+| task-labels — Unlabelled tasks are recognised as unlabelled | `tasks` unit test over `&str` literals | unit (pure) | none | `cargo test tasks::` |
+| task-labels — The recognition is total over degenerate input | `tasks` unit test sweeping the degenerate set and calling `split_at` at every returned offset | unit (pure) | none | `cargo test tasks::` |
+| task-labels — Every token in the table classifies to its own role | `tasks` unit test over all thirteen tokens | unit (pure) | none | `cargo test tasks::` |
+| task-labels — An unrecognised run is a generic label, not a miss | `tasks` unit test over `&str` literals | unit (pure) | none | `cargo test tasks::` |
+| task-labels — Matching is case-sensitive and whole-run | `tasks` unit test over `&str` literals | unit (pure) | none | `cargo test tasks::` |
+| task-labels — The classification reads nothing outside its argument | `grep` over `src/tasks.rs` for the schema-reading names, plus a compile-time test constructing no `Schema` | unit (pure) + deterministic evidence | the working tree | `cargo test tasks::` and `grep -nE 'schema::\|Schema\|config\.yaml\|\.openspec\.yaml' src/tasks.rs` |
 | markdown-render — The markdown path sets neither new face field | `ui::markdown` unit test at 58 and 78 asserting every segment's two new fields | unit (pure) | none | `cargo test ui::markdown` |
 | markdown-render — A paragraph is word-wrapped, differently at the two mandated widths *(carried)* | existing test stays green | unit (pure) | none | `cargo test ui::markdown` |
 | markdown-render — An empty source and a zero width each produce no lines *(carried)* | existing test stays green | unit (pure) | none | `cargo test ui::markdown` |
@@ -217,7 +218,7 @@ and the Change Review group asks its reviewer to check exactly this.
 | tasks-progress-bar — The bar measures at most its width at every width *(carried)* | existing sweep stays green, now also with a populated slice | unit (pure) | `gauge_of` **real** | `cargo test ui::tasks` |
 | tasks-progress-bar — A saturating `Progress` renders a full gauge and a full percentage *(carried)* | existing test stays green, now also with a two-group slice | unit (pure) | `gauge_of` **real** | `cargo test ui::tasks` |
 | artifact-folds — A tracked-tasks tab's group headers carry their own progress | `ui::app` unit test on `detail.sections`, plus a `TestBackend` render at 120 and 60 | unit (pure) + view | reader **replaced**; terminal **replaced**; `progress_cell` **real** | `cargo test ui::app` and `cargo test ui::view` |
-| artifact-folds — Every other artifact's section headers carry no progress cell | `TestBackend` render at 120 and 60 compared against literals recorded from HEAD | view | terminal **replaced**; reader **replaced** | `cargo test ui::view` |
+| artifact-folds — Every other artifact's section headers carry no progress cell | the existing three-section fixture's view tests stay green with their assertions **unmodified** | view | terminal **replaced**; reader **replaced** | `cargo test ui::view` |
 | artifact-folds — The progress cell is dropped whole rather than truncated | `ui::detail` unit test sweeping content widths 0..=40, naming 58 and 78 as the contrasted pair | unit (pure) | `progress_cell` **real** | `cargo test ui::detail` |
 | artifact-folds — A group holding no items still gets a header and a counted cell | `ui::app` unit test on `detail.sections`, plus a `TestBackend` render at 120 | unit (pure) + view | reader **replaced**; terminal **replaced** | `cargo test ui::app` and `cargo test ui::view` |
 | artifact-folds — The three spec files of a change become three labelled sections *(amended)* | existing test, its `ArtifactSection` literals gaining `progress: None` | unit (pure) | reader **replaced** | `cargo test ui::app` |
@@ -284,7 +285,10 @@ of two shades each position is drawn with. This is the decision that keeps the c
 `filled == g` iff complete, `filled == 0` when `completed == 0`, and the `u128` arithmetic
 `header-progress-bar` repaired all hold **by construction** rather than by a second assertion,
 and `gauge_of` itself does not move, so `detail-header`'s twelve-column gauge is untouched.
-What "by construction" does and does not cover, since planning review asked: it covers the
+Planning review pushed back on "by construction" and it now carries an assertion beside it:
+the `0..=130` sweep compares the filled-glyph count against the same call made with an empty
+slice, so the preservation is checked rather than argued. What the phrase does and does not
+cover: it covers the
 three **fill** properties, which are properties of `gauge_of`'s output and are untouched by a
 substitution that preserves each position's filled/empty state. It does **not** cover the
 substitution's own correctness — that the spans partition the run exactly, that the shades
