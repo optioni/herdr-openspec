@@ -181,13 +181,17 @@ run it avoids.
   `specs/responsive-layout/spec.md` and the five other footer deltas now mandate. Every width in
   those scenarios moved by eight columns; the boundary scenarios moved to 61/60/52/51, 54/53,
   77/76, and 28/27.
-- [ ] 8.2 RED: Update the four wiring-tier footer assertions in `src/ui/mod.rs` that the
-  prepend breaks — byte-exact `assert_eq!`s at lines 3565 and 3567
+- [ ] 8.2 RED: Update the **five** assertions outside `src/ui/view.rs` that the prepend breaks.
+  Four are wiring-tier, in `src/ui/mod.rs` — byte-exact `assert_eq!`s at lines 3565 and 3567
   (`a_polled_agent_reaches_a_rendered_badge`), `footer_row.contains("g focus")` at 3667 inside a
   `for width in [120, 60]` loop (`a_keypress_launches_an_agent`), and
-  `row.starts_with("q quit")` at 4444 (`a_refused_capture_is_named_last`). The two 60-column
-  ones lose `g focus` per design.md → Decision 6; line 3458 renders at 120 only and survives.
-  Confirm with `grep -n 'q quit\|g focus' src/ui/mod.rs` that five sites exist and four move.
+  `row.starts_with("q quit")` at 4444 (`a_refused_capture_is_named_last`). The fifth is in
+  **`src/lib.rs:881`**, `render_at_touches_no_directory`'s
+  `row_text(buf, buf.area.height - 1).starts_with("q quit")`, which becomes `"? help"`. The two
+  60-column ones lose `g focus` per design.md → Decision 6; `src/ui/mod.rs:3458` renders at 120
+  only and survives. Confirm with `grep -rn 'q quit\|g focus' src` — repository-wide, **not**
+  scoped to `src/ui/mod.rs`, which is what hid the `src/lib.rs` site — that six sites exist and
+  five move.
 - [ ] 8.3 GREEN: Change `FOOTER_HINTS` to `[&str; 4] = ["? help", "q quit", "Enter detail", "Esc
   back"]`. Nothing else in `render_footer` moves — the drop-from-the-end rule is unchanged.
 - [ ] 8.4 CHECK: Contract gate — confirm a scenario asserts that `g focus` is dropped at 60
