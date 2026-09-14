@@ -2588,6 +2588,100 @@ mod tests {
         );
     }
 
+    /// One resolved path, an empty preamble, exactly one heading. Splitting
+    /// such a file consumes its heading into a `label` that
+    /// `content_lines`' **non-foldable** branch never draws, so the heading
+    /// row vanishes from the screen — which `artifact-folds` forbids ("SHALL
+    /// render the single section's `text` exactly as it rendered it before
+    /// this change") and `tasks-checklist` forbids twice over (a group
+    /// heading is rendered as a `Face { heading }` line or as a fold header,
+    /// "never both, and **never neither**"). So `sync_detail` adopts a
+    /// file's split only when it would yield more than one section.
+    #[test]
+    fn a_single_heading_task_file_is_not_split_and_keeps_its_heading() {
+        const ONE_GROUP: &str = "## 1. Setup\n\n- [x] 1.1 first\n- [ ] 1.2 second\n";
+        let mut d = dashboard_over(
+            &[("tasks", &["/repo/openspec/changes/c/tasks.md"])],
+            Some(0),
+        );
+        let recorder = crate::testutil::RecordingReader::always(Ok(ONE_GROUP.to_string()));
+        let read = |p: &std::path::Path| recorder.read(p);
+
+        d.sync_detail(&read);
+
+        assert_eq!(
+            shape_of(&d.detail),
+            vec![(Some("tasks.md"), 0)],
+            "one unsplit section carrying the file's own label"
+        );
+        assert_eq!(
+            d.detail.sections[0].text, ONE_GROUP,
+            "the reader's bytes verbatim"
+        );
+        assert!(!d.detail.foldable(), "one section is not foldable");
+
+        for width in [78, 58] {
+            let change = d.selected_change().expect("a change is selected");
+            let rows = crate::ui::detail::content_lines(&d.detail, Some(change), width);
+            let want = crate::ui::tasks::lines(ONE_GROUP, &change.progress, width);
+            assert_eq!(rows.len(), want.len(), "width {width}");
+            for (row, line) in rows.iter().zip(want.iter()) {
+                assert_eq!(&row.line, line, "width {width}");
+            }
+            assert!(
+                rows.iter().any(|r| r.text().contains("1. Setup")),
+                "width {width}: the heading row is gone: {:?}",
+                rows.iter()
+                    .map(crate::ui::detail::ContentRow::text)
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+
+    /// The same defect on the spec axis: a delta carrying exactly one
+    /// `### Requirement:` heading and no preamble lost that requirement's
+    /// own name off the screen.
+    #[test]
+    fn a_single_requirement_spec_file_is_not_split_and_keeps_its_heading() {
+        const ONE_REQUIREMENT: &str = "### Requirement: Alpha\nAlpha text.\n";
+        let mut d = dashboard_over(
+            &[("specs", &["/repo/openspec/changes/c/specs/a/spec.md"])],
+            None,
+        );
+        let recorder = crate::testutil::RecordingReader::always(Ok(ONE_REQUIREMENT.to_string()));
+        let read = |p: &std::path::Path| recorder.read(p);
+
+        d.sync_detail(&read);
+
+        assert_eq!(
+            shape_of(&d.detail),
+            vec![(Some("a"), 0)],
+            "one unsplit section carrying the file's own label"
+        );
+        assert_eq!(
+            d.detail.sections[0].text, ONE_REQUIREMENT,
+            "the reader's bytes verbatim"
+        );
+        assert!(!d.detail.foldable(), "one section is not foldable");
+
+        for width in [78, 58] {
+            let change = d.selected_change().expect("a change is selected");
+            let rows = crate::ui::detail::content_lines(&d.detail, Some(change), width);
+            let want = crate::ui::markdown::lines(ONE_REQUIREMENT, width);
+            assert_eq!(rows.len(), want.len(), "width {width}");
+            for (row, line) in rows.iter().zip(want.iter()) {
+                assert_eq!(&row.line, line, "width {width}");
+            }
+            assert!(
+                rows.iter().any(|r| r.text().contains("Requirement: Alpha")),
+                "width {width}: the heading row is gone: {:?}",
+                rows.iter()
+                    .map(crate::ui::detail::ContentRow::text)
+                    .collect::<Vec<_>>()
+            );
+        }
+    }
+
     /// `artifact-folds` / design.md -> Decision 6: sections partition the file
     /// rather than copying it. Reassembling every section's `text` with the
     /// heading line each labelled section's `(depth, label)` names reproduces
