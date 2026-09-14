@@ -36,13 +36,18 @@ never split into sections that could produce one.
 #### Scenario: The tasks tab shows checkboxes and its siblings show markdown
 
 - **WHEN** a `Dashboard` at `Route::Detail`, whose selected change carries the five `tdd`
-  artifacts with `tracks_tasks` set at position 3 (`tasks`) and whose one section holds
-  `## 1. Setup\n\n- [x] 1.1 first\n- [ ] 1.2 second\n`, is rendered at 120x20 and at 60x20
-  with `detail.tab == 3`
+  artifacts with `tracks_tasks` set at position 3 (`tasks`) and whose file holds
+  `## 1. Setup\n\n- [x] 1.1 first\n- [ ] 1.2 second\n\n## 2. Build\n\n- [ ] 2.1 third\n`, is
+  rendered at 120x20 and at 60x20 with `detail.tab == 3`
 - **THEN** in each buffer the content area holds a progress-bar row, a blank row,
   `v 1. Setup`, `[✓] 1.1 first`, and `[ ] 1.2 second`, in that order — the group heading is
   now that group's own **fold header**, open because its subtree is incomplete, and the `##`
   markers are gone with the heading line
+- **AND** the source carries **two** groups deliberately. One group splits into exactly one
+  section, which `Detail::foldable` reports **not** foldable per design.md -> Decision 10, so
+  no header row is drawn for it and the `v 1. Setup` row above would not exist. A fixture
+  that means to exercise folding needs two sections, and this is the third scenario in this
+  change to have been written with a one-group source before that was noticed
 - **AND** the same `Dashboard` with `detail.tab == 0` renders the identical source through
   `markdown::lines` instead: the content area's first row reads `## 1. Setup` with **no
   progress-bar row, no blank row, and no fold header above it** — that artifact does not

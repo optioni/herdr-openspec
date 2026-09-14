@@ -24,7 +24,7 @@ order `dashboard-loop` already specifies; this change adds no loop step and no n
 #### Scenario: Scrolling the checklist is clamped against the checklist's own length
 
 - **WHEN** `run_loop` runs against a `TestBackend` of 120x20 and again of 60x20, with a
-  scripted source delivering twenty Presses of `Char('j')` then `Char('q')`, over a
+  scripted source delivering **thirty** Presses of `Char('j')` then `Char('q')`, over a
   `Dashboard` at `Route::Detail` whose selected change's only artifact is marked
   `tracks_tasks`, whose `progress` is `Progress { completed: 0, total: 20 }`, and whose file
   reads as twenty unchecked task lines split across **two** headings — two headings, so two
@@ -32,8 +32,13 @@ order `dashboard-loop` already specifies; this change adds no loop step and no n
   and the offset rule, and the scenario would then assert the wrong clamp and discriminate
   nothing
 - **THEN** the run ends with `dashboard.detail.scroll` clamped to the checklist's own row
-  count less one — the **cursor** rule, because the twenty items under one heading make the
-  tab foldable — and not to `20`
+  count less one — the **cursor** rule, because the twenty items under **two** headings make
+  the tab foldable — and not to `20`
+- **AND** thirty presses rather than twenty is what makes that assertion mean anything. The
+  drawn body is twenty-five rows — the bar, its blank, two open headers, twenty items, and
+  one blank separator — so the cursor clamps at `24`. Twenty presses reach exactly `20` and
+  the clamp never binds, which would satisfy neither the "row count less one" clause nor the
+  "not to `20`" one
 - **AND** the final buffer's content area's last row holds the checklist's last item, so the
   clamp used the body that was actually drawn
 - **AND** the clamped value differs from the value the same source's markdown rendering
@@ -69,8 +74,11 @@ order `dashboard-loop` already specifies; this change adds no loop step and no n
 - **AND** a `Char(' ')` at that position opens the **first** group and the content area's
   fourth and fifth rows hold its two items
 - **AND** two further `j` presses from there reach `detail.scroll` of `4`, which is the
-  second group's header row once the first group's two item rows are drawn — so the cursor
-  walks the rendered list rather than a fixed section index
+  **first group's second item row** — a cursor over a fixed section index would have reached
+  the second group instead, so this is what "walks the rendered list" means
+- **AND** the second group's header has itself moved down to row `6`, behind the two item
+  rows and the blank separator now drawn above it, which is the same fact seen from the
+  row list rather than from the cursor
 
 ### Requirement: `Dashboard::detail` carries the markdown source and the scroll offset
 
