@@ -301,7 +301,10 @@ own `selected` flag, so this group is mostly new coverage plus the preamble case
 <!-- kind: operational -->
 
 - [ ] 8.1 CHECK: Dispatch an `outside-in-tdd-reviewer` subagent — not a fork of this session — against proposal.md, all six delta specs, design.md, and tasks.md, given only the artifacts and the diff.
-- [ ] 8.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a one-line reason, note each SUGGESTION, and re-run the affected tests.
+- [x] 8.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a one-line reason, note each SUGGESTION, and re-run the affected tests.
+  - **CRITICAL — a one-section split lost its heading row.** A file passing the split gate but yielding exactly one section (one resolved path, empty preamble, one heading) had its heading consumed into `ArtifactSection::label`; `Detail::foldable()` is then `false`, so `content_lines` took its non-foldable branch and drew the section *text* with no header row. The heading vanished from the screen, against `artifact-folds`' byte-identity sentence and `tasks-checklist`' "never both, and **never neither**".
+  - **Repair, in `sync_detail` only:** a file's split is adopted only when it would yield more than one section — `splits && (base > 0 || usize::from(has_preamble) + headings.len() > 1)`. Otherwise the single unsplit section the pre-change path produced is contributed, so byte-identity is restored by construction rather than by a second exemption inside `content_lines` (design.md -> D3's own argument). `Detail::foldable()` stays `sections.len() > 1` (D10) and no call site moved. The `base > 0` clause keeps a one-heading file inside a multi-path artifact splitting, where its file section already draws the heading as a header row.
+  - Covered by `a_single_heading_task_file_is_not_split_and_keeps_its_heading` and `a_single_requirement_spec_file_is_not_split_and_keeps_its_heading` in `src/ui/app.rs`, both asserting the shape, the verbatim text, not-foldable, and rows byte-identical to `ui::tasks::lines`/`ui::markdown::lines` at 78 and 58 — the two fixtures earlier repairs had removed, which is why the defect survived to review.
 - [ ] 8.3 VERIFY: Confirm no blocking or unowned finding remains, and record the triage in the change directory.
 
 ## 9. Documentation

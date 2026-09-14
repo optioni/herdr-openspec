@@ -1507,8 +1507,26 @@ impl Dashboard {
                     // path, which is why the spec half of the gate is asked of
                     // the sections rather than of the text.
                     let headings = split_headings(&text);
-                    let splits = (tracks_tasks && crate::tasks::count(&text).total > 0)
-                        || has_requirement_heading(&headings);
+                    let preamble_end = preamble_len(&text, &headings);
+                    // What this file would contribute if it split: its
+                    // preamble, when non-empty, plus one section per heading.
+                    // A file that would contribute exactly one section is not
+                    // split at all, unless a file section already precedes it.
+                    // Splitting it would consume its one heading into a
+                    // `label` that `content_lines`' non-foldable branch never
+                    // draws, losing the heading row off the screen — so
+                    // refusing the split keeps `artifact-folds`'
+                    // byte-identity sentence true by construction rather than
+                    // by a second exemption inside `content_lines`, which is
+                    // the argument design.md -> D3 already makes for the
+                    // gate's `total > 0` half. With a file section ahead of
+                    // it the heading does draw as a header row, so the
+                    // fallback is not wanted there.
+                    let has_preamble = !text.get(..preamble_end).unwrap_or_default().is_empty();
+                    let contributions = usize::from(has_preamble) + headings.len();
+                    let splits = ((tracks_tasks && crate::tasks::count(&text).total > 0)
+                        || has_requirement_heading(&headings))
+                        && (base > 0 || contributions > 1);
                     let label = Some(artifact_section_label(&key.0, path));
                     if !splits {
                         // Today's behaviour, unchanged: one section carrying
@@ -1527,9 +1545,7 @@ impl Dashboard {
                             depth: 0,
                         });
                     }
-                    let preamble = text
-                        .get(..preamble_len(&text, &headings))
-                        .unwrap_or_default();
+                    let preamble = text.get(..preamble_end).unwrap_or_default();
                     if !preamble.is_empty() {
                         self.detail.sections.push(ArtifactSection {
                             label: None,
