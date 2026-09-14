@@ -72,9 +72,9 @@ pub fn progress_bar(progress: &crate::tasks::Progress, width: u16) -> String {
 /// `Progress` value can overflow it. `total == 0` is never passed here —
 /// `progress_bar` returns before reaching this for that case.
 fn percent_of(progress: &crate::tasks::Progress) -> u64 {
-    let completed = progress.completed as u64;
-    let total = progress.total as u64;
-    completed.saturating_mul(100) / total
+    let completed = progress.completed as u128;
+    let total = progress.total as u128;
+    (completed * 100 / total) as u64
 }
 
 /// A bare run of exactly `g` characters: `filled` of `█` (U+2588) followed
@@ -83,12 +83,14 @@ fn percent_of(progress: &crate::tasks::Progress) -> u64 {
 /// iff `progress.is_complete()`, and `filled == 0` holds whenever
 /// `completed == 0` — both properties of plain integer truncation given
 /// `completed <= total`.
-fn gauge_of(progress: &crate::tasks::Progress, g: u16) -> String {
-    let g = u64::from(g);
-    let completed = progress.completed as u64;
-    let total = progress.total as u64;
-    let filled = completed.saturating_mul(g) / total;
-    let filled = filled.min(g) as usize;
+pub(crate) fn gauge_of(progress: &crate::tasks::Progress, g: u16) -> String {
+    if g == 0 || progress.total == 0 {
+        return String::new();
+    }
+    let g = u128::from(g);
+    let completed = progress.completed as u128;
+    let total = progress.total as u128;
+    let filled = (completed * g / total).min(g) as usize;
     let g = g as usize;
     let mut out = String::with_capacity(g * "█".len());
     for _ in 0..filled {
