@@ -10,25 +10,33 @@ The new assertion pins an invariant that already holds — `scripts/gates/` hold
 today — so it is green on arrival and proves nothing without its negative control. Both
 directions of that control are run below, per design.md → Test Boundaries.
 
-- [ ] 1.1 CHECK: Record the gap this change closes. Plant a 32nd script and its `gates:`
+- [x] 1.1 CHECK: Record the gap this change closes. Plant a 32nd script and its `gates:`
   recipe line, run `cargo test --test ci_workflow`, and confirm it **passes** — the count is
   bound to nothing. Then delete an existing script with its recipe line and confirm it passes
   again. Remove both plants and confirm `git status --short -- Makefile scripts/gates` is empty.
   **Run at HEAD `9c37085`:** plant → `test result: ok. 21 passed; 0 failed`; deletion →
   `test result: ok. 21 passed; 0 failed`; tree clean after both. The existing
   `assert!(on_disk.len() >= 25, …)` floor fires in neither direction.
-- [ ] 1.2 CHANGE: In `tests/ci_workflow.rs`'s
+  **Re-confirmed at HEAD `db5ebc0`** (docs-only commits since): plant → `ok. 21 passed;
+  0 failed`; deletion → `ok. 21 passed; 0 failed`; tree clean after both.
+- [x] 1.2 CHANGE: In `tests/ci_workflow.rs`'s
   `every_gate_script_the_recipe_names_exists_and_every_script_is_named`, replace the `>= 25`
   floor with an equality against the figure `specs/quality-gates` states. The message names
   both counts and the spec sentence to edit, so a reader who adds a gate is told which
   sentence moved rather than only that a number did.
-- [ ] 1.3 VERIFY: Negative control, both directions. Re-plant the 32nd script with its recipe
+- [x] 1.3 VERIFY: Negative control, both directions. Re-plant the 32nd script with its recipe
   line and confirm the suite now **fails**, naming 32 against 31; remove it and confirm green.
   Delete a script with its recipe line and confirm it fails naming 30 against 31; restore it
   and confirm green. Record all four runs.
-- [ ] 1.4 VERIFY: `cargo test --test ci_workflow` — **21** passing, no regressions. Twenty-one,
+  **Run at HEAD `db5ebc0`** (`plant32.sh` planted with its recipe line; `nosleep.sh` the one
+  deleted): plant → `FAILED. 20 passed; 1 failed`, `left: 32 / right: 31`, message naming
+  `openspec/specs/quality-gates/spec.md` and both scenarios; removed → `ok. 21 passed`;
+  deletion → `FAILED. 20 passed; 1 failed`, `left: 30 / right: 31`; restored → `ok. 21
+  passed`. `git status --short -- Makefile scripts/gates` empty after each restore.
+- [x] 1.4 VERIFY: `cargo test --test ci_workflow` — **21** passing, no regressions. Twenty-one,
   not twenty-two: 1.2 replaces an assertion inside an existing test rather than adding a new
   one, so the count does not move. **Run at HEAD `9c37085`:** `21 passed; 0 failed`.
+  **Re-run after 1.2 at HEAD `db5ebc0`:** `21 passed; 0 failed`.
 
 ## 2. Correct the figures, and attribute the historical ones
 <!-- kind: operational -->

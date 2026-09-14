@@ -650,7 +650,9 @@ fn gates_recipe(makefile: &str) -> String {
 /// directions, so a script added without a recipe line and a recipe line naming a deleted
 /// script are both caught. `EXTENDED` and `TESTCOUNT` are named nowhere in either direction
 /// (design.md -> Decision 9): a per-change ratchet and a shell function respectively, neither
-/// composed into `make gates`.
+/// composed into `make gates`. `gate-script-count` added the cardinality leg: the number of
+/// files in the directory must equal the figure `openspec/specs/quality-gates/spec.md` states,
+/// so extracting a gate moves the prose too instead of drifting from it silently.
 #[test]
 fn every_gate_script_the_recipe_names_exists_and_every_script_is_named() {
     let makefile = read_makefile();
@@ -662,10 +664,26 @@ fn every_gate_script_the_recipe_names_exists_and_every_script_is_named() {
         .filter_map(|e| e.ok())
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
-    assert!(
-        on_disk.len() >= 25,
-        "expected at least 25 files under scripts/gates/, found {}",
-        on_disk.len()
+    // `gate-script-count` :: the figure `openspec/specs/quality-gates/spec.md` states about
+    // this directory, asserted by equality rather than by a floor. A floor cannot notice a
+    // gate being added; an equality can. The spec is deliberately not read: `openspec/specs/`
+    // is written only by `openspec archive`, so an assertion over its text would be red for
+    // the whole apply phase of any change that moves the count (design.md -> Test
+    // Boundaries). The message below is therefore the only thing binding the literal to the
+    // sentence, and must keep naming the file, the scenario, and both counts.
+    const STATED_GATE_SCRIPT_COUNT: usize = 31;
+    let found = on_disk.len();
+    assert_eq!(
+        found, STATED_GATE_SCRIPT_COUNT,
+        "scripts/gates/ holds {found} files; \
+         openspec/specs/quality-gates/spec.md states {STATED_GATE_SCRIPT_COUNT}. Adding or \
+         removing a gate moves two sites, not one: bump STATED_GATE_SCRIPT_COUNT here *and* \
+         edit the figure in that file — requirement \"The repository's hygiene gates are \
+         files in the repository\", scenario \"Both hygiene gates are checked-in files \
+         invoked from the Makefile\", which spells the count out in words (\"thirty-one in \
+         all, counting openspec-untouched.sh\"), and the enumeration of gate names above it, \
+         which that figure summarises. Scenario \"The stated gate-script count is asserted \
+         against the directory\" is the one this assertion implements."
     );
 
     // Every file on disk must be named in the recipe (direction 1).
