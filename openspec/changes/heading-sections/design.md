@@ -141,8 +141,13 @@ as it does today. Pagination and streaming: not applicable.
 | Refresh worker, launcher worker | **inert** — same | **not reached** |
 | Event source (key and mouse input) | **replaced** — a scripted `EventSource` yielding a fixed sequence | **replaced** (same) |
 | Clock | **not reached** — no file under `src/ui/` names `Instant::now()`, and this change adds none | **not reached** |
+| Gate scripts (`/bin/sh scripts/gates/*.sh`, `make gates`) | **real**, out of process, over the real working tree — tasks 1.6, 4.6, 6.8, 9.6 and 10.4 invoke them | not reached |
+| `tests/gate_controls.rs` planted defects | **real** — it copies the tree to a scratch directory, applies the plant, and requires the gate to exit non-zero | not reached |
 
-No task may invent a boundary this table does not name.
+No task may invent a boundary this table does not name. The last two rows were added in
+planning review: four tasks and the final verify already shelled out to the gate tier, and two
+matrix rows already named "the working tree, copied to a scratch directory" as their
+collaborator, so the sentence above was false of its own table.
 
 ## Test Strategy
 

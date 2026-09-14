@@ -54,8 +54,9 @@ Severity is the reviewer's, kept where this session's own verification agreed wi
 | WARNING | `proposal.md` | GAP-18. The task-group figures were measured over 33 archived changes; there are 37, and the minimum is 5, not 6. | Recounted and corrected, with the command retained. | `proposal.md` → Why |
 | WARNING | `tasks.md` | GAP-19. "67 construction sites" is the grep's line count, not the number of sites to edit: 3 matches are the `tests/gate-controls.toml` planted defect and 1 is the struct definition. | Row restated as **63** with the per-file breakdown, plus the finding that the plant matches the struct's *header* line and therefore keeps working when fields are added. | `tasks.md` group 0, 2.2 |
 | WARNING | `tasks.md` | GAP-20. The sequential-ordering rationale said "six groups write `src/ui/detail.rs`" (four do) and contradicted itself three sentences later about group 5. Neither number carried a command. | Rewritten with measured file sets and the command that produced them, and with group 5's parallelism analysis stated explicitly: it passes tests 1 and 2 and is rejected on attributability alone. | `tasks.md` header note |
-| WARNING | `design.md` | GAP-21. The verification matrix omitted the 8 scenarios of the `list-selection` delta added by GAP-07. | 8 rows added; a re-run of the coverage check reports 97 delta scenarios and 0 missing. | `design.md` → Test Strategy |
+| WARNING | `design.md` | GAP-21. The verification matrix omitted the 8 scenarios of the `list-selection` delta added by GAP-07. | 8 rows added; a re-run of the coverage check reports 97 delta scenarios and 97 matrix rows, 0 missing. | `design.md` → Test Strategy |
 | SUGGESTION | `specs/artifact-folds/spec.md` | GAP-22. Three rationale sentences were dropped from the `fold_glyph` paragraph, including the one arguing that an agreement assertion would be tautological — the same argument `design.md` → D9 relies on. No SHALL was lost. | Restored while the block was being edited anyway. | `specs/artifact-folds/spec.md` |
+| WARNING | `design.md` | GAP-24. The Test Boundaries table closes with "No task may invent a boundary this table does not name", but its nine rows covered only the unit, view and loop tiers. Tasks 1.6, 4.6, 6.8, 9.6 and 10.4 shell out to the **gate tier** — real subprocesses over the real working tree — and two matrix rows already named the scratch-directory tree as their collaborator. The sentence was false of its own table. | Two rows added: the gate scripts, and `tests/gate_controls.rs`'s planted defects. The other direction is clean — no task invents a unit, view or loop collaborator the table omits. | `design.md` → Test Boundaries |
 | SUGGESTION | `design.md` | GAP-23. Two gate hazards in the splitter's own code were unpriced: `COLWIDTH` sweeps `src/ui/app.rs` whole-file for `.chars().count()`, and `NOBLOCK`'s pattern matches a bare zero-argument `.join()` — exactly where a round-trip reassembly reaches. | Both recorded in Boundaries and in tasks 1.4 and 1.5, with the safe form named. | `design.md` → Boundaries; `tasks.md` 1.4, 1.5 |
 
 ### Checked and found clean
@@ -102,6 +103,13 @@ whether the tasks tab's move to the line-cursor model is acceptable given that `
 scrolling by line, and whether a completed group starting collapsed is the right default given
 that it makes the tab's opening shape depend on file content. Both were user decisions at
 proposal time and neither is a planning defect.
+
+A second reviewer observation is **recorded rather than repaired**: tasks 2.3, 6.7 and 10.1
+are prose-only CHECK steps that cannot mechanically fail. All three are the contract gate, the
+persistence gate, and the verification-command inspection that the `tdd` schema mandates by
+name and in that form. An inspection step is what those gates are; rewriting them into
+assertions would be inventing a check the schema does not ask for. Every gate the tasks
+actually invoke does carry a planted negative control.
 
 One reviewer suggestion was **considered and declined**: marking group 5 `parallel-after: 0`.
 It passes two of the three parallelism tests, but `make check` is a whole-tree gate and this
