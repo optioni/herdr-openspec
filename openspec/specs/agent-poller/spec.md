@@ -525,10 +525,11 @@ mechanical reason `NOCLI-SHELL` stays green while the shell is wired to two real
 - **THEN** the list row for `2fa-support` carries the badge character `w` and the row for
   `alpha` carries `b`, at both widths, in the badge column `change-rows` specifies
 - **AND** the footer row reads exactly
-  `q quit  Enter detail  Esc back  a/c/s launch  g focus  1 unattributed` at 120 and
-  `q quit  Enter detail  Esc back  a/c/s launch  g focus` at 60 — the socket is reachable, so
+  `? help  q quit  Enter detail  Esc back  a/c/s launch  g focus  1 unattributed` at 120 and
+  `? help  q quit  Enter detail  Esc back  a/c/s launch` at 60 — the socket is reachable, so
   `agent-launch`'s two hints are offered, and at 60 the count no longer fits and is dropped
-  whole. The unnamed in-scope agent is counted at 120, and the out-of-scope agent named
+  whole, and `g focus` with it once `help-overlay`'s leading `? help` takes the full row to
+  77 columns. The unnamed in-scope agent is counted at 120, and the out-of-scope agent named
   `nothing-like-a-change` is neither counted nor badged at either width
 - **AND** that count is discriminating in **both** directions at 120 — it reads `0` if the
   poller was never wired or the mapping was never read, and `2` if the repository-scope test
@@ -545,8 +546,9 @@ mechanical reason `NOCLI-SHELL` stays green while the shell is wired to two real
 - **WHEN** `start_collaborators` is edited to pass `agents::none()` in place of
   `agents::start(...)`, and the two scenarios above are run
 - **THEN** both fail, the first naming `agents.reachable` as false and `agents.agents` as empty,
-  and the second naming a footer that reads `q quit  Enter detail  Esc back` — with neither the
-  action hints nor the count, since `reachable` is false — and list rows carrying no badge
+  and the second naming a footer that reads `? help  q quit  Enter detail  Esc back` — with
+  neither the action hints nor the count, since `reachable` is false — and list rows carrying
+  no badge
 - **AND** this plant is run and recorded during implementation, and the edit reverted, because a
   wiring test that cannot fail is exactly the artifact that let `live-refresh`'s inert live tier
   through

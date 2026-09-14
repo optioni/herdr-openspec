@@ -179,6 +179,25 @@ A "close the table" change finding a small number of real gaps is not evidence a
 earlier change was incomplete on its own terms; it is evidence that closing a table
 this large should never have been assumed additive-free going in.
 
+## Known drift, found 2026-09-14 while archiving `help-overlay`
+
+`openspec/specs/quality-gates/spec.md` states that `scripts/gates/` holds **twenty-eight**
+files (`:210`, with the figure repeated at `:140`, `:187` and `:755`). It holds **31**. The
+count was already stale by two before `help-overlay`, which added `helpwidths.sh` and made it
+three.
+
+Nothing binds the numeral. `tests/ci_workflow.rs` proves the `gates:` recipe names every script
+under `scripts/gates/` and vice versa — a correspondence, not a count — so a script added with
+its recipe line drifts the prose silently, which is exactly how it reached three.
+
+Not repaired here, deliberately: it is a landed capability `help-overlay` does not own, several
+of the four figures are **historical** (`:127`'s "left twenty-eight outside" describes what
+`spec-purposes` faced at the time, and reads wrong at HEAD for the same reason
+`dashboard-loop:774`'s "six times today" does), and telling a superseded figure from a
+deliberate one needs the capability's own change rather than a sweep at archive time. The fix
+worth making is the repository's own standing rule: bind the count to `scripts/gates/`'s own
+file list inside `cargo test`, so the next added gate corrects the prose or fails.
+
 ## In flight, 2026-09-09: three concurrent unplanned changes
 
 The roadmap above ends at Phase 6 (`degraded-states`). Three changes are in flight past it,

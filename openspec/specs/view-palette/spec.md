@@ -104,6 +104,12 @@ or `scripts/gates/colwidth.sh`'s `PURE` list. Both hard-code that list and check
 files they name exist, so a forgotten edit would leave the new module unswept while both
 scripts still print `OK` — a gap no other check in the tree can see.
 
+The same SHALL hold for `src/ui/help.rs`, `help-overlay`'s addition: the palette gate SHALL
+fail when **either** of the two pure-view modules is missing from **either** `PURE` list. The
+argument is the one above, one module on: `src/ui/help.rs` is a pure view file that styles by
+role like every other, and a `PURE` list that has quietly stopped naming it is the one failure
+the two sweeps themselves cannot report.
+
 Each of the gate's three failure modes — a `Color` outside the palette, a non-ANSI colour
 inside it, and a vacuous exclusion — SHALL have its **own** planted control in
 `tests/gate-controls.toml`, on `gate-integrity`'s "executed, not attested" standard. One
@@ -122,10 +128,24 @@ test asserting that a section header is the emphasised one SHALL compare the cel
 against `palette::style(Role::DetailSectionSelected)`, never against a `Modifier` it writes
 itself.
 
-`ui::palette` SHALL be in the pure view set both standing view gates already carry:
-`NOIO-VIEW`'s `PURE` list of **nine** files and `COLWIDTH`'s of **eight**. This change adds
-no module and moves neither count. Measured at HEAD `08025d3`: `NOIO-VIEW OK: 9 pure files`
-and `COLWIDTH OK: … the eight pure view files`.
+`ui::palette` and `ui::help` SHALL both be in the pure view set both standing view gates
+carry. `view-palette` left those lists at `NOIO-VIEW`'s **nine** files and `COLWIDTH`'s
+**eight**, adding no module and moving neither count; measured at HEAD `08025d3`:
+`NOIO-VIEW OK: 9 pure files` and `COLWIDTH OK: … the eight pure view files`.
+`help-overlay` adds exactly one module, `src/ui/help.rs`, and moves both counts by one:
+`NOIO-VIEW`'s `PURE` list becomes **ten** files and `COLWIDTH`'s **nine**, and both scripts'
+reported counts move with them.
+
+`ui::help` SHALL name no `ratatui::style::Color` and no `Color::` variant, and SHALL take
+every style it applies from `palette::style(Role::…)`. It introduces **no new `Role`**: its
+rule rows are `RegionRule`, its `Help` title and its group headings are
+`RegionHeadingFocused`, its `input` cells are `Strong`, its `description` cells are
+`ListRow`, and its scroll indicator is `ListSeparator`. Reusing five existing roles rather
+than minting `HelpTitle`, `HelpGroup`, `HelpKey`, and `HelpText` is this requirement's own
+"colour is added only where it carries a distinction a modifier cannot", applied to roles:
+four new roles identical in every respect but their names to four existing ones would let the
+two sets drift for no reason a reader could see, which is exactly why `pane-chrome` removed
+`DetailHeader`.
 
 #### Scenario: The palette answers every role with a `Style`
 
@@ -162,12 +182,20 @@ and `COLWIDTH OK: … the eight pure view files`.
 - **AND** when `src/ui/palette.rs` is removed from `scripts/gates/noio-view.sh`'s `PURE` list
   it exits non-zero naming that script, so the two standing view gates cannot silently stop
   sweeping the new module
+- **AND** the same holds for `src/ui/help.rs`: removing it from either script's `PURE` list
+  makes the gate exit non-zero naming that script, so neither pure-view module can drop out of
+  either sweep
 
 #### Scenario: The palette module reaches no I/O and measures no width
 
-- **WHEN** `make gates` runs on a tree carrying `src/ui/palette.rs`
-- **THEN** `NOIO-VIEW` reports nine pure files carrying no I/O API
-- **AND** `COLWIDTH` reports eight pure view files carrying no `char`-count measurement
+The scenario's name is kept verbatim from `view-palette` because a delta's scenario headers are
+its merge key; its subject widens from one pure-view module to two.
+
+- **WHEN** `make gates` runs on a tree carrying `src/ui/palette.rs` and `src/ui/help.rs`
+- **THEN** `NOIO-VIEW` reports **ten** pure files carrying no I/O API
+- **AND** `COLWIDTH` reports **nine** pure view files carrying no `char`-count measurement
+- **AND** both counts include `src/ui/palette.rs` and `src/ui/help.rs`, and both gates fail
+  when either file is absent from their list rather than reporting a clean tree over the rest
 
 ### Requirement: Colour is a named ANSI index, never an RGB triple
 

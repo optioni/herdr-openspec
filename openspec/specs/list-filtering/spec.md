@@ -235,7 +235,8 @@ When the prompt is longer than the footer width it SHALL keep its **tail**, so t
 just typed remain visible.
 
 While `filter.active` is false and `filter.query` is non-empty, the footer's hint list
-SHALL be `/` followed by the query, then `q quit`, then `Enter detail`, then `Esc back`, then
+SHALL be `/` followed by the query, then `? help`, then `q quit`, then `Enter detail`, then
+`Esc back`, then
 — when `Dashboard::agents.reachable` is true — `a/c/s launch` and `g focus`, and
 then — when `Dashboard::attribution().unattributed` is greater than zero —
 `<n> unattributed`, joined by two spaces and dropped from the **end** by the existing rule.
@@ -261,7 +262,7 @@ the twenty-six lower-case letters would otherwise be unavailable in a query, and
 - **THEN** the 60-column buffer's row 19 is exactly `/add_` followed by fifty-five spaces
 - **AND** the 120-column buffer's row 19 is exactly `/add_` followed by one hundred and
   fifteen spaces
-- **AND** neither buffer's row 19 contains `q quit`, `Enter detail`, or `Esc back`
+- **AND** neither buffer's row 19 contains `? help`, `q quit`, `Enter detail`, or `Esc back`
 - **AND** the same holds with two in-scope unattributable agents on the dashboard: neither
   buffer's row 19 contains `unattributed` either, so the prompt replaces the whole row
 - **AND** the same holds with `agents.reachable` set to `true`: neither buffer's row 19 contains
@@ -272,23 +273,24 @@ the twenty-six lower-case letters would otherwise be unavailable in a query, and
 - **WHEN** a `Dashboard` whose `filter.active` is false, whose `filter.query` is `add`, and
   whose `agents.reachable` is false is rendered at 120x20 and at 60x20
 - **THEN** the 60-column buffer's row 19 is exactly
-  `/add  q quit  Enter detail  Esc back` — thirty-six characters — followed by twenty-four
+  `/add  ? help  q quit  Enter detail  Esc back` — forty-four characters — followed by sixteen
   spaces
-- **AND** the 120-column buffer's row 19 is the same thirty-six characters followed by
-  eighty-four spaces
+- **AND** the 120-column buffer's row 19 is the same forty-four characters followed by
+  seventy-six spaces
 - **AND** the same dashboard with an empty query renders row 19 as exactly
-  `q quit  Enter detail  Esc back` followed by spaces at both widths, so the leading hint
-  is present only when a query is
+  `? help  q quit  Enter detail  Esc back` followed by spaces at both widths, so the leading
+  hint is present only when a query is
 - **AND** the same dashboard with one in-scope unattributable agent added renders row 19 as
-  exactly `/add  q quit  Enter detail  Esc back  1 unattributed` — fifty-two characters — at
-  both widths, so the query leads the list and the count trails it
+  exactly `/add  ? help  q quit  Enter detail  Esc back  1 unattributed` — **sixty**
+  characters — at both widths, filling the mandated narrow frame exactly with no trailing
+  space, so the query leads the list and the count trails it
 - **AND** the same dashboard with `agents.reachable` set to `true` and that one agent renders
   row 19 as exactly
-  `/add  q quit  Enter detail  Esc back  a/c/s launch  g focus  1 unattributed` — seventy-five
-  characters — at 120, and as exactly
-  `/add  q quit  Enter detail  Esc back  a/c/s launch  g focus` — fifty-nine characters —
-  followed by one space at 60: the action hints sit between `Esc back` and the count, and at
-  the narrow width the count is the one dropped
+  `/add  ? help  q quit  Enter detail  Esc back  a/c/s launch  g focus  1 unattributed` —
+  eighty-three characters — at 120, and as exactly
+  `/add  ? help  q quit  Enter detail  Esc back  a/c/s launch` — fifty-eight characters —
+  followed by two spaces at 60: the action hints sit between `Esc back` and the count, and at
+  the narrow width the count is dropped first and `g focus` second
 
 #### Scenario: The action keys type into the query rather than launching
 
