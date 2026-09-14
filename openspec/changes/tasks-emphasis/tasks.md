@@ -124,27 +124,27 @@ Writes `src/tasks.rs` alone. The function takes a `&str` and returns plain data
 Writes `src/ui/palette.rs` alone. Sequential rather than parallel with group 1 for the reason
 the ordering note above gives.
 
-- [ ] 2.1 RED: Write failing `ui::palette` tests for
+- [x] 2.1 RED: Write failing `ui::palette` tests for
       `each_roles_modifier_set_is_exactly_the_table` (five new rows; the no-modifier count
       moves 7 → 11), `the_coloured_set_is_exactly_the_table` (four new rows, plus the
       assertion that `TaskEvidence` is `LightRed` and **not** `Red`),
       `every_shared_style_is_licensed_and_the_unshared_roles_stay_unshared`, and
       `the_enums_membership_is_exactly_this_list`. Confirm each fails on the missing `Role`
       variants.
-- [ ] 2.2 GREEN: Add `Muted`, `TaskEvidence`, `TaskChange`, `TaskConfirm`, and `TaskLabel` to
+- [x] 2.2 GREEN: Add `Muted`, `TaskEvidence`, `TaskChange`, `TaskConfirm`, and `TaskLabel` to
       `Role` and to `style`, appended after `Strikethrough`, with the modifiers and colours
       `specs/view-palette/spec.md` states. Colour literals stay in this file's own tests.
-- [ ] 2.3 GREEN: Implement the shared-style test by **discarding the uncoloured roles first**,
+- [x] 2.3 GREEN: Implement the shared-style test by **discarding the uncoloured roles first**,
       then grouping the rest by `Style` equality against the spec's five-group table. Grouping
       every role would produce three unenumerated plain-modifier groups that already exist at
       HEAD, which is the defect planning review found in the first draft of this task.
-- [ ] 2.4 GREEN: Implement `the_enums_membership_is_exactly_this_list` as an exhaustive `match`
+- [x] 2.4 GREEN: Implement `the_enums_membership_is_exactly_this_list` as an exhaustive `match`
       over `Role`, so a later variant added without updating `specs/view-palette`'s reproduced
       enum fails to compile rather than drifting.
-- [ ] 2.5 GREEN: Update this file's own prose — `table()`'s "thirty-one rows" doc comment and
+- [x] 2.5 GREEN: Update this file's own prose — `table()`'s "thirty-one rows" doc comment and
       the module doc's "Two pairs share a style deliberately" — to the new count and the two
       licences (design.md -> Decision 7).
-- [ ] 2.6 VERIFY: `cargo test --all-features` — green — and
+- [x] 2.6 VERIFY: `cargo test --all-features` — green — and
       `/bin/sh scripts/gates/palette.sh` exits 0, proving no colour literal escaped the file.
 
 ## 3. `Face` gains two fields, and `style_for` composes nine roles

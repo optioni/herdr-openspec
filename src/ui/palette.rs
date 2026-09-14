@@ -43,6 +43,12 @@ use crate::agents::AgentStatus;
 /// construct the parser emitted (`foldable-spec-sections` -> design.md ->
 /// Decision 11). They join no earlier group because `pane-chrome` removed
 /// `DetailHeader`, so there is no detail-chrome role left to sit beside.
+///
+/// `Muted` and the four `task-labels` roles are appended after `Strikethrough`,
+/// where the markdown faces end, because a task label is not a markdown
+/// construct and a completed row is not a face the parser can emit — the same
+/// placement argument `foldable-spec-sections` used above
+/// (`tasks-emphasis` -> design.md -> Decision 2).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Role {
     FileMode,
@@ -67,6 +73,11 @@ pub enum Role {
     Link,
     Quoted,
     Strikethrough,
+    Muted,
+    TaskEvidence,
+    TaskChange,
+    TaskConfirm,
+    TaskLabel,
 }
 
 /// The role table, transcribed from `specs/view-palette/spec.md`'s modifier table
@@ -75,17 +86,33 @@ pub enum Role {
 /// than panicking on a level `markdown-render`'s parser cannot emit.
 ///
 /// Colour sits **beside** the modifier a role already carried, never in place of
-/// it. Two pairs share a style deliberately: `FileMode` with `Code` (both `DIM` +
-/// `Yellow`, and they cannot meet — one is drawn in the list region's heading
-/// row, the other
-/// only inside the detail region's content area), and `AgentBadge(Unknown)` with
-/// `ListSeparator` (both `DarkGray`, this palette's one "no information" grey, and
-/// an unknown status and a divider rule are both exactly that).
+/// it. Roles may share a style, but only under one of **two licences**, and a
+/// share outside both is a defect rather than a decision. The rule ranges over
+/// the roles that carry a colour; plain-modifier equality among the uncoloured
+/// ones is not policed and never was.
+///
+/// 1. **They cannot meet** — two roles never drawn in the same region, so no
+///    reader is ever asked to tell them apart. `FileMode` with `Code`, one drawn
+///    in the list region's heading row and the other only inside the detail
+///    region's content area; and each of `AgentBadge(Working)`,
+///    `AgentBadge(Done)`, and `AgentBadge(Blocked)` with a task-label role,
+///    badges being drawn only in the list region and labels only in the detail
+///    region.
+/// 2. **They mean the same thing** — `DarkGray` is this palette's one "no
+///    information" grey, and `ListSeparator`, `AgentBadge(Unknown)`, and
+///    `TaskLabel` all wear it: a divider rule, an unknown status, and a label
+///    the crate declines to classify are the same statement three times.
+///
+/// `tasks-emphasis` replaced an enumeration ("exactly two pairs") with those two
+/// licences, which is a restatement rather than a relaxation — they were already
+/// the justifications that enumeration gave — and it is what makes the new shares
+/// checkable rather than merely appended (design.md -> Decision 7).
 ///
 /// `DetailSection`'s plain `BOLD` equals several other roles' modifier set
-/// deliberately — plain-`BOLD` equality is not a distinction this table polices —
-/// while `DetailSectionSelected` is a style equal to no other role's, so the
-/// shared set stays exactly the two pairs above.
+/// deliberately — plain-`BOLD` equality is not a distinction this table polices,
+/// and neither is `Muted`'s plain `DIM` against `Quoted`'s — while
+/// `DetailSectionSelected` and `Strikethrough` are each a style equal to no other
+/// role's, so the two roles whose whole job is to be unmistakable stay unshared.
 pub fn style(role: Role) -> Style {
     match role {
         Role::FileMode => Style::default()
@@ -147,6 +174,30 @@ pub fn style(role: Role) -> Style {
         // shows the text — the right failure for a construct whose whole point
         // is that the text is still there (design.md -> Decision 9).
         Role::Strikethrough => Style::default().add_modifier(Modifier::CROSSED_OUT),
+        // `tasks-emphasis` -> design.md -> Decision 10: plain `DIM`, and a role
+        // of its own rather than a reuse of `Quoted`, so a reader tracing why a
+        // row is dim lands on a role that says "this is finished" rather than
+        // one that says "this is a block quote". Uncoloured for the sharpest
+        // version of the reason this table gives everywhere else: it is the role
+        // that says *stop looking here*, and a colour is the opposite
+        // instruction.
+        Role::Muted => Style::default().add_modifier(Modifier::DIM),
+        // The four `task-labels` roles are the inverse case and take a colour
+        // precisely because no modifier distinguishes them — a modifier here
+        // would have to be `BOLD`, which would make the leading token of most
+        // rows in a task file bold and defeat the de-emphasis above.
+        //
+        // `LightRed` and not `Red`: `ListProblem` is `Red` and is drawn in the
+        // **detail** region, the same region a task label is drawn in, so `Red`
+        // would have been a share with no licence. `LightRed` collides instead
+        // with `AgentBadge(Blocked)`, drawn only in the list region, so the two
+        // can never meet (design.md -> Decision 6).
+        Role::TaskEvidence => Style::default().fg(Color::LightRed),
+        Role::TaskChange => Style::default().fg(Color::Green),
+        Role::TaskConfirm => Style::default().fg(Color::Blue),
+        // This palette's one "no information" grey, used for exactly that: a
+        // label the crate recognises as a label and classifies no further.
+        Role::TaskLabel => Style::default().fg(Color::DarkGray),
     }
 }
 
@@ -183,9 +234,10 @@ mod tests {
     }
 
     /// Every `Role` variant, the five `AgentStatus` values, and heading levels 1
-    /// through 6 — thirty-one rows, so no arm of `style` is asserted by a
-    /// hand-listed subset of the enum. `foldable-spec-sections` added the last
-    /// two, `DetailSection` and `DetailSectionSelected`.
+    /// through 6 — thirty-six rows, so no arm of `style` is asserted by a
+    /// hand-listed subset of the enum. `tasks-emphasis` added the last five,
+    /// `Muted` and the four `task-labels` roles; `foldable-spec-sections` added
+    /// `DetailSection` and `DetailSectionSelected` before them.
     fn table() -> Vec<Expect> {
         vec![
             row(Role::FileMode, Modifier::DIM, Some(Color::Yellow), None),
@@ -259,6 +311,11 @@ mod tests {
             row(Role::Link, Modifier::UNDERLINED, Some(Color::Blue), None),
             row(Role::Quoted, Modifier::DIM, None, None),
             row(Role::Strikethrough, Modifier::CROSSED_OUT, None, None),
+            row(Role::Muted, Modifier::DIM, None, None),
+            row(Role::TaskEvidence, NONE, Some(Color::LightRed), None),
+            row(Role::TaskChange, NONE, Some(Color::Green), None),
+            row(Role::TaskConfirm, NONE, Some(Color::Blue), None),
+            row(Role::TaskLabel, NONE, Some(Color::DarkGray), None),
         ]
     }
 
@@ -291,6 +348,11 @@ mod tests {
             Role::Link => "Link".to_string(),
             Role::Quoted => "Quoted".to_string(),
             Role::Strikethrough => "Strikethrough".to_string(),
+            Role::Muted => "Muted".to_string(),
+            Role::TaskEvidence => "TaskEvidence".to_string(),
+            Role::TaskChange => "TaskChange".to_string(),
+            Role::TaskConfirm => "TaskConfirm".to_string(),
+            Role::TaskLabel => "TaskLabel".to_string(),
         }
     }
 
@@ -361,8 +423,11 @@ mod tests {
             }
         }
 
-        // The two pairs that DO share a style share it deliberately, so the sharing
-        // is recorded rather than a gap the loop above happens to step around.
+        // The five coloured groups that DO share a style share it deliberately, so
+        // each sharing is recorded rather than a gap the loop above happens to
+        // step around. `tasks-emphasis` widened this from two pairs to five
+        // groups: the four new coloured roles join `AgentBadge` styles rather
+        // than each other, so the distinctness loop above stays true as written.
         assert_eq!(
             style(Role::FileMode),
             style(Role::Code),
@@ -372,6 +437,26 @@ mod tests {
             style(Role::AgentBadge(AgentStatus::Unknown)),
             style(Role::ListSeparator),
             "DarkGray is this palette's one 'no information' grey"
+        );
+        assert_eq!(
+            style(Role::AgentBadge(AgentStatus::Unknown)),
+            style(Role::TaskLabel),
+            "a label the crate declines to classify is that same grey"
+        );
+        assert_eq!(
+            style(Role::AgentBadge(AgentStatus::Working)),
+            style(Role::TaskChange),
+            "a badge is drawn only in the list region and a label only in the detail region"
+        );
+        assert_eq!(
+            style(Role::AgentBadge(AgentStatus::Done)),
+            style(Role::TaskConfirm),
+            "a badge is drawn only in the list region and a label only in the detail region"
+        );
+        assert_eq!(
+            style(Role::AgentBadge(AgentStatus::Blocked)),
+            style(Role::TaskEvidence),
+            "a badge is drawn only in the list region and a label only in the detail region"
         );
 
         // `markdown-constructs`: `Strikethrough` joins neither of those pairs by
@@ -420,7 +505,9 @@ mod tests {
             );
         }
 
-        // The seven roles the spec names as carrying no modifier at all.
+        // The eleven roles the spec names as carrying no modifier at all —
+        // `tasks-emphasis` moved the count from seven, `Muted` joining the
+        // modifier-carrying side and the four label roles the other.
         for role in [
             Role::Footer,
             Role::ListRow,
@@ -429,6 +516,10 @@ mod tests {
             Role::ListMessage,
             Role::AgentBadge(AgentStatus::Working),
             Role::TabInactive,
+            Role::TaskEvidence,
+            Role::TaskChange,
+            Role::TaskConfirm,
+            Role::TaskLabel,
         ] {
             assert_eq!(
                 style(role).add_modifier,
@@ -469,6 +560,16 @@ mod tests {
             !style(Role::DetailSection)
                 .add_modifier
                 .contains(Modifier::REVERSED)
+        );
+
+        // `tasks-emphasis`: `Muted` is plain `DIM` — the modifier that says
+        // "stop looking here" — and emphatically not `CROSSED_OUT`, which says
+        // the text was removed.
+        assert_eq!(style(Role::Muted).add_modifier, Modifier::DIM);
+        assert!(
+            !style(Role::Muted)
+                .add_modifier
+                .contains(Modifier::CROSSED_OUT)
         );
     }
 
@@ -514,6 +615,19 @@ mod tests {
             assert_eq!(style(role).bg, None, "{}: unexpected bg", label(role));
         }
 
+        // `tasks-emphasis`: `Muted` is the role that says *stop looking here*,
+        // and a colour is the opposite instruction.
+        assert_eq!(style(Role::Muted).fg, None);
+        assert_eq!(style(Role::Muted).bg, None);
+
+        // The one colour choice this change was asked to justify, and the one
+        // an assertion would catch being reverted: `LightRed` collides with
+        // `AgentBadge(Blocked)`, drawn only in the list region, where `Red`
+        // would have collided with `ListProblem`, drawn in the **detail**
+        // region — the same region a task label is drawn in.
+        assert_eq!(style(Role::TaskEvidence).fg, Some(Color::LightRed));
+        assert_ne!(style(Role::TaskEvidence).fg, Some(Color::Red));
+
         // Every role the table leaves uncoloured reports neither, so the coloured
         // set is exactly the table rather than merely a subset of it.
         for expect in table() {
@@ -522,6 +636,202 @@ mod tests {
                 assert_eq!(got.fg, None, "{}: unexpected fg", label(expect.role));
                 assert_eq!(got.bg, None, "{}: unexpected bg", label(expect.role));
             }
+        }
+    }
+
+    /// `view-palette` :: "Every shared style is licensed, and the unshared roles
+    /// stay unshared".
+    ///
+    /// The rule ranges over the roles that carry a **colour**, which is what
+    /// makes it checkable: plain-modifier equality among uncoloured roles is
+    /// not a distinction this table polices and never was — `Footer`,
+    /// `ListRow`, and `ListMessage` are all `Style::default()`;
+    /// `RegionHeadingFocused`, `ListRowSelected`, `DetailSection`, and `Strong`
+    /// are all plain `BOLD`; `RegionHeading`, `RegionRule`, `Quoted`, and now
+    /// `Muted` are all plain `DIM`. Grouping every role would report those three
+    /// pre-existing groups as unlicensed shares.
+    #[test]
+    fn every_shared_style_is_licensed_and_the_unshared_roles_stay_unshared() {
+        // Discard the uncoloured roles first, and assert the discarded set by
+        // name — so a role that silently loses its colour is caught here rather
+        // than passing as "uncoloured and therefore out of scope".
+        let mut discarded: Vec<String> = Vec::new();
+        let mut coloured: Vec<(String, Style)> = Vec::new();
+        for expect in table() {
+            let got = style(expect.role);
+            if got.fg.is_none() && got.bg.is_none() {
+                discarded.push(label(expect.role));
+            } else {
+                coloured.push((label(expect.role), got));
+            }
+        }
+        assert_eq!(
+            discarded,
+            vec![
+                "Footer",
+                "RegionHeading",
+                "RegionHeadingFocused",
+                "RegionRule",
+                "ListRow",
+                "ListRowSelected",
+                "ListMessage",
+                "DetailSection",
+                "DetailSectionSelected",
+                "Strong",
+                "Emphasis",
+                "Quoted",
+                "Strikethrough",
+                "Muted",
+            ],
+            "the uncoloured set moved"
+        );
+
+        // Group the rest by equal `Style`, in first-seen order.
+        let mut groups: Vec<(Style, Vec<String>)> = Vec::new();
+        for (name, got) in coloured {
+            match groups.iter_mut().find(|(s, _)| *s == got) {
+                Some((_, members)) => members.push(name),
+                None => groups.push((got, vec![name])),
+            }
+        }
+        let shared: Vec<Vec<String>> = groups
+            .iter()
+            .filter(|(_, members)| members.len() > 1)
+            .map(|(_, members)| members.clone())
+            .collect();
+        assert_eq!(
+            shared,
+            vec![
+                vec!["FileMode", "Code"],
+                vec!["ListSeparator", "AgentBadge(Unknown)", "TaskLabel"],
+                vec!["AgentBadge(Working)", "TaskChange"],
+                vec!["AgentBadge(Blocked)", "TaskEvidence"],
+                vec!["AgentBadge(Done)", "TaskConfirm"],
+            ],
+            "the shared coloured groups are exactly the five the spec licenses"
+        );
+
+        // `Heading(3)` and `Heading(4)` are each alone in their group, because
+        // `BOLD` separates them from `TaskConfirm` and `TaskChange`. A table
+        // that dropped the `BOLD` from either would turn a colour reuse into an
+        // unlicensed share, and this is the assertion that catches it.
+        for role in [Role::Heading(3), Role::Heading(4)] {
+            let target = style(role);
+            let members: Vec<String> = groups
+                .iter()
+                .find(|(s, _)| *s == target)
+                .map(|(_, m)| m.clone())
+                .unwrap_or_default();
+            assert_eq!(members, vec![label(role)], "{} must be alone", label(role));
+        }
+
+        // `TaskEvidence`'s group holds `AgentBadge(Blocked)` and **not**
+        // `ListProblem`, which is the distinction between a licensed share and
+        // an unlicensed one for this change.
+        assert_eq!(
+            style(Role::TaskEvidence),
+            style(Role::AgentBadge(AgentStatus::Blocked))
+        );
+        assert_ne!(style(Role::TaskEvidence), style(Role::ListProblem));
+    }
+
+    /// `view-palette` :: "The enum's membership is exactly this list".
+    ///
+    /// The mechanism is the exhaustive `match` below, not a hand-counted total:
+    /// a count goes stale silently, and this requirement exists precisely
+    /// because the enum's membership keeps moving. A variant added without
+    /// updating the spec's reproduced enum fails to **compile** here.
+    #[test]
+    fn the_enums_membership_is_exactly_this_list() {
+        /// The variant name as `specs/view-palette/spec.md`'s reproduced enum
+        /// spells it — parameterised variants named without their payload,
+        /// which is how that block writes them.
+        fn variant(role: Role) -> &'static str {
+            match role {
+                Role::FileMode => "FileMode",
+                Role::Footer => "Footer",
+                Role::RegionHeading => "RegionHeading",
+                Role::RegionHeadingFocused => "RegionHeadingFocused",
+                Role::RegionRule => "RegionRule",
+                Role::ListRow => "ListRow",
+                Role::ListRowSelected => "ListRowSelected",
+                Role::ListProblem => "ListProblem",
+                Role::ListSeparator => "ListSeparator",
+                Role::ListMessage => "ListMessage",
+                Role::AgentBadge(_) => "AgentBadge",
+                Role::TabActive => "TabActive",
+                Role::TabInactive => "TabInactive",
+                Role::DetailSection => "DetailSection",
+                Role::DetailSectionSelected => "DetailSectionSelected",
+                Role::Heading(_) => "Heading",
+                Role::Strong => "Strong",
+                Role::Emphasis => "Emphasis",
+                Role::Code => "Code",
+                Role::Link => "Link",
+                Role::Quoted => "Quoted",
+                Role::Strikethrough => "Strikethrough",
+                Role::Muted => "Muted",
+                Role::TaskEvidence => "TaskEvidence",
+                Role::TaskChange => "TaskChange",
+                Role::TaskConfirm => "TaskConfirm",
+                Role::TaskLabel => "TaskLabel",
+            }
+        }
+
+        let mut named: Vec<&'static str> = Vec::new();
+        for expect in table() {
+            // Every call returns a `Style` and none panics.
+            let _ = style(expect.role);
+            let name = variant(expect.role);
+            if !named.contains(&name) {
+                named.push(name);
+            }
+        }
+
+        // Transcribed from `specs/view-palette/spec.md`'s reproduced `Role`
+        // block, in its own order.
+        assert_eq!(
+            named,
+            vec![
+                "FileMode",
+                "Footer",
+                "RegionHeading",
+                "RegionHeadingFocused",
+                "RegionRule",
+                "ListRow",
+                "ListRowSelected",
+                "ListProblem",
+                "ListSeparator",
+                "ListMessage",
+                "AgentBadge",
+                "TabActive",
+                "TabInactive",
+                "DetailSection",
+                "DetailSectionSelected",
+                "Heading",
+                "Strong",
+                "Emphasis",
+                "Code",
+                "Link",
+                "Quoted",
+                "Strikethrough",
+                "Muted",
+                "TaskEvidence",
+                "TaskChange",
+                "TaskConfirm",
+                "TaskLabel",
+            ]
+        );
+
+        // The five this change adds are among them.
+        for role in [
+            Role::Muted,
+            Role::TaskEvidence,
+            Role::TaskChange,
+            Role::TaskConfirm,
+            Role::TaskLabel,
+        ] {
+            assert!(named.contains(&variant(role)), "{} is missing", label(role));
         }
     }
 
