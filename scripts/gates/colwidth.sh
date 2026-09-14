@@ -1,5 +1,14 @@
 #!/bin/sh
 set -u
+# Do NOT write either swept path as a contiguous literal anywhere in this file except on the
+# PURE line below. The two are `src/ui/{help,palette}.rs` — written braced here precisely so
+# this comment is not itself a match. `palette.sh`'s third leg greps THIS WHOLE FILE for each
+# of those names, not the PURE assignment alone, so a mention in a comment satisfies it
+# vacuously and the leg stops being able to see either file dropped from PURE. The failure is
+# loud rather than silent — `tests/gate-controls.toml`'s `palette-unswept` and
+# `palette-help-unswept` controls strike the name from PURE and require PALETTE to fail, so a
+# stray comment mention turns up as a RED `cargo test --test gate_controls` — but the message
+# names PALETTE, not the comment that broke it, which is why the rule is written down here.
 # help-overlay adds the overlay's module below, taking PURE from eight files to NINE: it uses
 # ui::layout::columns/truncate_columns for its key column and its truncation, on exactly the
 # same terms every other pure view file already does.
