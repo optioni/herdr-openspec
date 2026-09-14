@@ -1326,7 +1326,9 @@ mod tests {
                 let buf = terminal.backend().buffer();
                 assert_eq!(
                     cell(buf, base, content_first_row + 2).style(),
-                    crate::ui::palette::style(crate::ui::palette::Role::DetailSectionSelected),
+                    Cell::default().style().patch(crate::ui::palette::style(
+                        crate::ui::palette::Role::DetailSectionSelected,
+                    )),
                     "width {width}: the cursor's own header row is the emphasised one"
                 );
                 for y in content_first_row..content_first_row + 5 {
@@ -1347,8 +1349,8 @@ mod tests {
                         .map(|x| row_text(buf, y).chars().nth(x as usize).unwrap())
                         .collect()
                 };
-                assert_eq!(row_at(content_first_row + 3, 8), "[✓] a1", "width {width}");
-                assert_eq!(row_at(content_first_row + 4, 8), "[✓] a2", "width {width}");
+                assert_eq!(row_at(content_first_row + 3, 6), "[✓] a1", "width {width}");
+                assert_eq!(row_at(content_first_row + 4, 6), "[✓] a2", "width {width}");
             }
 
             // Stage three: two further `j` presses.

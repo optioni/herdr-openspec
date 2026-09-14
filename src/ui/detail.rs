@@ -435,62 +435,80 @@ pub fn content_lines(
             .map(|_| &c.progress)
     });
 
-    match tracked_tasks_progress {
-        Some(progress) => {
-            // `artifact-folds` -> Decision 8: every section's text
-            // concatenated in order, with no separator inserted, never
-            // folded — exactly the grammar this tab had before
-            // `artifact-folds` existed.
-            let text: String = detail.sections.iter().map(|s| s.text.as_str()).collect();
+    if detail.foldable() {
+        // `heading-sections` -> design.md -> D8: the progress bar leads the
+        // whole body, above every header, as leading body owned by no
+        // section and hidden by no fold. A bar that counts the change and a
+        // fold that hides a group answer different questions, which is what
+        // retires `artifact-folds` Decision 8's objection to a foldable
+        // tracked-tasks tab.
+        if let Some(progress) = tracked_tasks_progress {
             out.extend(
-                crate::ui::tasks::lines(&text, progress, width)
+                crate::ui::tasks::bar_lines(progress, width)
                     .into_iter()
                     .map(body_row),
             );
         }
-        None if detail.foldable() => {
-            // `artifact-folds`: a header row per **visible** labelled section,
-            // in order, each followed by that section's own rendered markdown
-            // exactly when it is open, and a blank separator row after a
-            // non-empty open body that a further visible section follows.
-            let visible = visible_sections(&detail.sections, &detail.expanded);
-            for (position, &index) in visible.iter().enumerate() {
-                let section = &detail.sections[index];
-                // A `None`-labelled preamble is always open and owns no
-                // header row at all (design.md -> D2).
-                let open = section.label.is_none() || detail.expanded.contains(&index);
-                if let Some(label) = section.label.as_deref() {
-                    out.push(ContentRow {
-                        line: crate::ui::markdown::Line {
-                            segments: vec![crate::ui::markdown::Segment {
-                                text: header(label, section.depth, open, width),
-                                face: crate::ui::markdown::Face::plain(),
-                            }],
-                        },
-                        kind: ContentKind::SectionHeader {
-                            section: index,
-                            selected: false,
-                        },
-                    });
-                }
-                if open {
-                    let body = crate::ui::markdown::lines(&section.text, width);
-                    let non_empty = !body.is_empty();
-                    out.extend(body.into_iter().map(body_row));
-                    if non_empty && position + 1 < visible.len() {
-                        out.push(separator_row(width));
-                    }
+        // `artifact-folds`: a header row per **visible** labelled section,
+        // in order, each followed by that section's own rendered body
+        // exactly when it is open, and a blank separator row after a
+        // non-empty open body that a further visible section follows.
+        let visible = visible_sections(&detail.sections, &detail.expanded);
+        for (position, &index) in visible.iter().enumerate() {
+            let section = &detail.sections[index];
+            // A `None`-labelled preamble is always open and owns no
+            // header row at all (design.md -> D2).
+            let open = section.label.is_none() || detail.expanded.contains(&index);
+            if let Some(label) = section.label.as_deref() {
+                out.push(ContentRow {
+                    line: crate::ui::markdown::Line {
+                        segments: vec![crate::ui::markdown::Segment {
+                            text: header(label, section.depth, open, width),
+                            face: crate::ui::markdown::Face::plain(),
+                        }],
+                    },
+                    kind: ContentKind::SectionHeader {
+                        section: index,
+                        selected: false,
+                    },
+                });
+            }
+            if open {
+                // A tracked-tasks section's body is its items and nothing
+                // else — `ui::tasks::items`, the very function
+                // `ui::tasks::lines` calls per group, so a folded group and
+                // an unfolded one cannot disagree about an item line
+                // (design.md -> D9). Its own heading is already its header
+                // row above.
+                let body = match tracked_tasks_progress {
+                    Some(_) => crate::ui::tasks::items(
+                        &crate::tasks::parse(&section.text)
+                            .groups
+                            .into_iter()
+                            .flat_map(|g| g.items)
+                            .collect::<Vec<_>>(),
+                        width,
+                    ),
+                    None => crate::ui::markdown::lines(&section.text, width),
+                };
+                let non_empty = !body.is_empty();
+                out.extend(body.into_iter().map(body_row));
+                if non_empty && position + 1 < visible.len() {
+                    out.push(separator_row(width));
                 }
             }
         }
-        None => {
-            let text: String = detail.sections.iter().map(|s| s.text.as_str()).collect();
-            out.extend(
-                crate::ui::markdown::lines(&text, width)
-                    .into_iter()
-                    .map(body_row),
-            );
-        }
+    } else {
+        // A non-foldable tab is byte-identical to what it drew before this
+        // change: the whole checklist grammar over the one section's text
+        // (which is a task file holding no items, or one whose single group
+        // left no second section to fold against), or the markdown one.
+        let text: String = detail.sections.iter().map(|s| s.text.as_str()).collect();
+        let body = match tracked_tasks_progress {
+            Some(progress) => crate::ui::tasks::lines(&text, progress, width),
+            None => crate::ui::markdown::lines(&text, width),
+        };
+        out.extend(body.into_iter().map(body_row));
     }
 
     // The header whose section the cursor is on or in: the greatest

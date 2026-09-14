@@ -329,6 +329,42 @@ fn has_requirement_heading(sections: &[HeadingSection]) -> bool {
 /// the offset is the start of the first heading line. Total: an offset that
 /// does not land on a character boundary — which the partition rules out —
 /// falls back to the whole text rather than panicking.
+/// The indices of `sections` a tracked-tasks tab opens with:
+/// `artifact-folds`' seed, every section whose **subtree** is incomplete and
+/// no other. A section's subtree is itself and every following section of
+/// strictly greater `depth`, up to the first section of `depth` at or below
+/// its own; it is incomplete when `tasks::count` over the concatenation of
+/// that subtree's `text` values reports `completed < total`.
+///
+/// The subtree, not the section's own text (design.md -> D5): a group's own
+/// `text` holds only the lines before its first child heading, so a `tasks.md`
+/// with `###` sub-headings would otherwise report the parent itemless and
+/// leave it collapsed over incomplete work. A subtree holding no items at all
+/// is **not** seeded — `completed < total` is false at `total == 0` — because
+/// opening it would show nothing.
+///
+/// Called by `sync_detail` on the key change and nowhere else, which is what
+/// keeps an agent checking a task off in another pane from folding a group
+/// shut under the reader.
+fn seed_expanded(sections: &[ArtifactSection]) -> std::collections::BTreeSet<usize> {
+    let mut seeded = std::collections::BTreeSet::new();
+    for (index, section) in sections.iter().enumerate() {
+        let end = sections[index + 1..]
+            .iter()
+            .position(|s| s.depth <= section.depth)
+            .map_or(sections.len(), |offset| index + 1 + offset);
+        let subtree: String = sections[index..end]
+            .iter()
+            .map(|s| s.text.as_str())
+            .collect();
+        let progress = crate::tasks::count(&subtree);
+        if progress.completed < progress.total {
+            seeded.insert(index);
+        }
+    }
+    seeded
+}
+
 fn preamble_len(text: &str, sections: &[HeadingSection]) -> usize {
     let mut pos = text.len();
     for section in sections.iter().rev() {
@@ -1522,10 +1558,14 @@ impl Dashboard {
         }
         // Step 5: the scroll and the fold state reset on a key change only,
         // never on a forced-but-unchanged-key reload — `artifact-folds`'
-        // "A tab move forgets the fold, a forced reload does not".
+        // "A tab move forgets the fold, a forced reload does not" — and, on
+        // that same condition and only there, the tracked-tasks seed.
         if key_changed {
             self.detail.scroll = 0;
             self.detail.expanded.clear();
+            if tracks_tasks {
+                self.detail.expanded = seed_expanded(&self.detail.sections);
+            }
         }
         self.detail.loaded = Some(key);
     }
