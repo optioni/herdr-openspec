@@ -304,9 +304,42 @@ fn heading_of(line: &str) -> Option<(u8, String)> {
 /// folding prose. See `specs/artifact-folds/spec.md` -> "A file splits at its
 /// headings only when it is a spec or a tracked task file".
 pub fn is_spec_shaped(text: &str) -> bool {
-    split_headings(text)
+    has_requirement_heading(&split_headings(text))
+}
+
+/// The spec half of the split gate, over sections already derived.
+/// `Dashboard::sync_detail` asks this rather than [`is_spec_shaped`] because
+/// it holds the sections already and `artifact-content` allows it exactly one
+/// `split_headings` call per successfully read path; writing the predicate
+/// twice would be the drift `is_spec_shaped`'s own doc comment warns about.
+fn has_requirement_heading(sections: &[HeadingSection]) -> bool {
+    sections
         .iter()
         .any(|section| section.level == 3 && section.label.starts_with("Requirement:"))
+}
+
+/// The byte length of `text`'s preamble — everything before the first heading
+/// line `split_headings` recognised — derived from `sections` themselves
+/// rather than from a second, fence-aware scan of the text, which would be
+/// the second implementation of one rule this change exists to avoid.
+///
+/// Walks backwards: the last section's `body` is a suffix of `text`, so the
+/// heading line above it ends where that body starts, and stepping over that
+/// line lands on the end of the previous section's body. After every section
+/// the offset is the start of the first heading line. Total: an offset that
+/// does not land on a character boundary — which the partition rules out —
+/// falls back to the whole text rather than panicking.
+fn preamble_len(text: &str, sections: &[HeadingSection]) -> usize {
+    let mut pos = text.len();
+    for section in sections.iter().rev() {
+        pos = pos.saturating_sub(section.body.len());
+        let Some(head) = text.get(..pos) else {
+            return text.len();
+        };
+        let line = head.strip_suffix('\n').unwrap_or(head);
+        pos = line.rfind('\n').map_or(0, |i| i + 1);
+    }
+    pos
 }
 
 /// The detail region's content and scroll offset, plus `detail-view`'s three
@@ -1398,15 +1431,13 @@ impl Dashboard {
     /// `openspec/changes/detail-view/design.md` -> Contracts.
     pub fn sync_detail(&mut self, read: ArtifactReader<'_>) {
         let forced = std::mem::take(&mut self.refresh.reload);
-        let Some((dir, tab, paths)) = self.selected_change().map(|change| {
+        let Some((dir, tab, paths, tracks_tasks)) = self.selected_change().map(|change| {
             let count = change.artifacts.len();
             let tab = self.detail.tab.min(count.saturating_sub(1));
-            let paths = change
-                .artifacts
-                .get(tab)
-                .map(|a| a.paths.clone())
-                .unwrap_or_default();
-            (change.dir.clone(), tab, paths)
+            let artifact = change.artifacts.get(tab);
+            let paths = artifact.map(|a| a.paths.clone()).unwrap_or_default();
+            let tracks_tasks = artifact.is_some_and(|a| a.tracks_tasks);
+            (change.dir.clone(), tab, paths, tracks_tasks)
         }) else {
             // Step 1: nothing selected.
             self.detail.sections.clear();
@@ -1423,19 +1454,65 @@ impl Dashboard {
         if !key_changed && !forced {
             return; // step 3
         }
-        // Step 4: re-read every path, one `ArtifactSection` per successful
-        // read, in resolution order — no separator inserted and no newline
-        // added, per `artifact-folds`. A failing path contributes no
-        // section, only a problem.
+        // Step 4: re-read every path, one or more `ArtifactSection` values
+        // per successful read, in resolution order — nothing concatenated,
+        // no separator inserted and no newline added, per `artifact-folds`.
+        // A failing path contributes no section, only a problem.
         self.detail.problems.clear();
         self.detail.sections.clear();
+        // A file section is contributed only when the artifact resolved to
+        // more than one path, and it is what pushes that file's own headings
+        // down one level.
+        let base = usize::from(paths.len() > 1);
         for path in &paths {
             match read(path) {
-                Ok(text) => self.detail.sections.push(ArtifactSection {
-                    label: Some(artifact_section_label(&key.0, path)),
-                    text,
-                    depth: 0,
-                }),
+                Ok(text) => {
+                    // Exactly one `split_headings` call per successfully read
+                    // path, which is why the spec half of the gate is asked of
+                    // the sections rather than of the text.
+                    let headings = split_headings(&text);
+                    let splits = (tracks_tasks && crate::tasks::count(&text).total > 0)
+                        || has_requirement_heading(&headings);
+                    let label = Some(artifact_section_label(&key.0, path));
+                    if !splits {
+                        // Today's behaviour, unchanged: one section carrying
+                        // the reader's bytes, which is every prose artifact.
+                        self.detail.sections.push(ArtifactSection {
+                            label,
+                            text,
+                            depth: 0,
+                        });
+                        continue;
+                    }
+                    if base > 0 {
+                        self.detail.sections.push(ArtifactSection {
+                            label,
+                            text: String::new(),
+                            depth: 0,
+                        });
+                    }
+                    let preamble = text
+                        .get(..preamble_len(&text, &headings))
+                        .unwrap_or_default();
+                    if !preamble.is_empty() {
+                        self.detail.sections.push(ArtifactSection {
+                            label: None,
+                            text: preamble.to_string(),
+                            depth: base,
+                        });
+                    }
+                    // Normalised against this file's own shallowest heading,
+                    // so a delta spec starting at `##` and an archived spec
+                    // starting at `#` both open flush at the left.
+                    let min_level = headings.iter().map(|h| h.level).min().unwrap_or(0);
+                    for heading in headings {
+                        self.detail.sections.push(ArtifactSection {
+                            label: Some(heading.label),
+                            text: heading.body,
+                            depth: base + usize::from(heading.level.saturating_sub(min_level)),
+                        });
+                    }
+                }
                 Err(e) => {
                     self.detail
                         .problems
