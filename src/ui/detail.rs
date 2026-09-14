@@ -864,36 +864,95 @@ mod tests {
         text.chars().skip(range.start).take(range.len()).collect()
     }
 
+    /// `detail-header` :: "The full header grammar at both mandated interior widths".
     #[test]
     fn the_full_header_grammar_at_both_mandated_interior_widths() {
         let progress = Progress {
             completed: 4,
             total: 42,
         };
-        for (width, name_field_width) in [(78, 65usize), (58, 45)] {
+        for (width, name_field_width) in [(78, 52usize), (58, 32)] {
             let got = header_row("detail-view", "tdd", &progress, width);
             assert_eq!(columns(&got), width as usize, "width {width}");
             let expected_name_field =
                 format!("{:<width$}", "detail-view", width = name_field_width);
-            let expected = format!("{expected_name_field} (tdd) [4/42]");
+            // `12 * 4 / 42` truncates to 1: one filled cell, eleven empty.
+            let expected = format!("{expected_name_field} (tdd) █░░░░░░░░░░░ [4/42]");
             assert_eq!(got, expected, "width {width}");
             assert!(got.ends_with("[4/42]"), "width {width}");
         }
     }
 
+    /// `detail-header` :: "A complete change renders a full gauge and an untouched
+    /// one renders an empty gauge".
+    #[test]
+    fn a_complete_change_renders_a_full_gauge() {
+        for width in [78, 58] {
+            let full = Progress {
+                completed: 7,
+                total: 7,
+            };
+            let got = header_row("fix-empty-basket", "tdd", &full, width);
+            assert_eq!(columns(&got), width as usize, "width {width}");
+            assert!(got.ends_with("[7/7]"), "width {width}: {got:?}");
+            assert_eq!(
+                got.chars().filter(|&c| c == '█').count(),
+                12,
+                "width {width}: {got:?}"
+            );
+            assert!(!got.contains('░'), "width {width}: {got:?}");
+
+            let empty = Progress {
+                completed: 0,
+                total: 7,
+            };
+            let got = header_row("fix-empty-basket", "tdd", &empty, width);
+            assert_eq!(columns(&got), width as usize, "width {width}");
+            assert!(got.ends_with("[0/7]"), "width {width}: {got:?}");
+            assert_eq!(
+                got.chars().filter(|&c| c == '░').count(),
+                12,
+                "width {width}: {got:?}"
+            );
+            assert!(!got.contains('█'), "width {width}: {got:?}");
+
+            // A one-task-short change never renders a full gauge, the same
+            // `filled == g` iff `is_complete()` property `tasks-progress-bar` fixes.
+            let almost = Progress {
+                completed: 6,
+                total: 7,
+            };
+            let got = header_row("fix-empty-basket", "tdd", &almost, width);
+            assert!(got.contains('░'), "width {width}: {got:?}");
+        }
+    }
+
+    /// `detail-header` :: "A change with no tasks still ends its row in the same
+    /// column".
     #[test]
     fn a_change_with_no_tasks_still_ends_its_row_in_the_same_column() {
         let progress = Progress {
             completed: 0,
             total: 0,
         };
-        for width in [78, 58] {
+        for width in [78, 58, 26, 13, 12, 7, 6, 1, 0] {
             let got = header_row("migrate-ai-sdk-v7", "tdd", &progress, width);
             assert_eq!(columns(&got), width as usize, "width {width}");
-            assert!(got.ends_with("[-]"), "width {width}: {got:?}");
+            assert!(
+                !got.contains('█') && !got.contains('░'),
+                "width {width}: {got:?}"
+            );
+            if width == 78 || width == 58 {
+                assert!(got.ends_with("[-]"), "width {width}: {got:?}");
+            }
+            if width == 0 {
+                assert_eq!(got, "", "width {width}");
+            }
         }
     }
 
+    /// `detail-header` :: "A long name is truncated with an ellipsis, never
+    /// overflowing the row".
     #[test]
     fn a_long_name_is_truncated_with_an_ellipsis_never_overflowing_the_row() {
         let name = "a".repeat(200);
@@ -906,6 +965,11 @@ mod tests {
             assert_eq!(columns(&got), width as usize, "width {width}");
             assert!(got.contains("(tdd)"), "width {width}: {got:?}");
             assert!(got.ends_with("[4/42]"), "width {width}: {got:?}");
+            assert_eq!(
+                got.chars().filter(|&c| c == '█' || c == '░').count(),
+                12,
+                "width {width}: {got:?}"
+            );
             let name_field_end = got.find(" (tdd)").expect("schema cell present");
             let name_field = &got[..name_field_end];
             assert!(
@@ -915,18 +979,32 @@ mod tests {
         }
     }
 
+    /// `detail-header` :: "The cells are dropped whole in order as the row
+    /// narrows".
     #[test]
     fn the_cells_are_dropped_whole_in_order_as_the_row_narrows() {
         let progress = Progress {
             completed: 4,
             total: 9,
         };
-        for w in [78, 58, 13, 12, 7, 6, 5, 1, 0] {
+        for w in [78, 58, 26, 25, 13, 12, 7, 6, 5, 1, 0] {
             let got = header_row("add-token-refresh", "tdd", &progress, w);
             assert_eq!(columns(&got), w as usize, "width {w}");
-            if w >= 13 {
+            if w >= 26 {
                 assert!(got.contains("(tdd)"), "width {w}: {got:?}");
                 assert!(got.contains("[4/9]"), "width {w}: {got:?}");
+                assert_eq!(
+                    got.chars().filter(|&c| c == '█' || c == '░').count(),
+                    12,
+                    "width {w}: {got:?}"
+                );
+            } else if (13..=25).contains(&w) {
+                assert!(got.contains("(tdd)"), "width {w}: {got:?}");
+                assert!(got.contains("[4/9]"), "width {w}: {got:?}");
+                assert!(
+                    !got.contains('█') && !got.contains('░'),
+                    "width {w}: {got:?}"
+                );
             } else if (7..=12).contains(&w) {
                 assert!(!got.contains("(tdd"), "width {w}: {got:?}");
                 assert!(got.contains("[4/9]"), "width {w}: {got:?}");
@@ -943,19 +1021,88 @@ mod tests {
             if got.contains("[4/") {
                 assert!(got.contains("[4/9]"), "width {w}: partial progress cell");
             }
+            if got.contains('█') || got.contains('░') {
+                assert_eq!(
+                    got.chars().filter(|&c| c == '█' || c == '░').count(),
+                    12,
+                    "width {w}: partial gauge cell"
+                );
+            }
         }
     }
 
+    /// `detail-header` :: "Below the full-form band the header is byte-identical
+    /// to the pre-gauge grammar".
+    #[test]
+    fn below_the_full_form_band_the_header_is_byte_identical() {
+        let progress = Progress {
+            completed: 4,
+            total: 9,
+        };
+        // Captured from HEAD's `header_row`, before the gauge cell existed —
+        // group 0's baseline (`/tmp/header-pregauge.txt`), written here as
+        // literals rather than recomputed from the post-gauge implementation,
+        // which would make this test a tautology.
+        let pre_gauge: [(u16, &str); 26] = [
+            (0, ""),
+            (1, "…"),
+            (2, "a…"),
+            (3, "ad…"),
+            (4, "add…"),
+            (5, "add-…"),
+            (6, "add-t…"),
+            (7, "… [4/9]"),
+            (8, "a… [4/9]"),
+            (9, "ad… [4/9]"),
+            (10, "add… [4/9]"),
+            (11, "add-… [4/9]"),
+            (12, "add-t… [4/9]"),
+            (13, "… (tdd) [4/9]"),
+            (14, "a… (tdd) [4/9]"),
+            (15, "ad… (tdd) [4/9]"),
+            (16, "add… (tdd) [4/9]"),
+            (17, "add-… (tdd) [4/9]"),
+            (18, "add-t… (tdd) [4/9]"),
+            (19, "add-to… (tdd) [4/9]"),
+            (20, "add-tok… (tdd) [4/9]"),
+            (21, "add-toke… (tdd) [4/9]"),
+            (22, "add-token… (tdd) [4/9]"),
+            (23, "add-token-… (tdd) [4/9]"),
+            (24, "add-token-r… (tdd) [4/9]"),
+            (25, "add-token-re… (tdd) [4/9]"),
+        ];
+        for (w, expected) in pre_gauge {
+            let got = header_row("add-token-refresh", "tdd", &progress, w);
+            assert_eq!(got, expected, "width {w}");
+        }
+        // The other half of the claim: at both mandated interiors the row
+        // does differ from what the pre-gauge grammar produced, so a no-op
+        // implementation — one that never draws a gauge at all — fails this
+        // scenario too, not only the ones above that require a gauge.
+        for (width, name_field_width) in [(78, 66usize), (58, 46)] {
+            let got = header_row("add-token-refresh", "tdd", &progress, width);
+            let old_name_field =
+                format!("{:<width$}", "add-token-refresh", width = name_field_width);
+            let old = format!("{old_name_field} (tdd) [4/9]");
+            assert_ne!(got, old, "width {width}");
+        }
+    }
+
+    /// `detail-header` :: "An empty schema name is a cell of two characters, not
+    /// an absent one".
     #[test]
     fn an_empty_schema_name_is_a_cell_of_two_characters_not_an_absent_one() {
         let progress = Progress {
             completed: 1,
             total: 2,
         };
-        for width in [78, 58] {
+        for (width, name_field_width) in [(78, 56usize), (58, 36)] {
             let got = header_row("alpha", "", &progress, width);
             assert_eq!(columns(&got), width as usize, "width {width}");
-            assert!(got.contains("() [1/2]"), "width {width}: {got:?}");
+            let expected_name_field = format!("{:<width$}", "alpha", width = name_field_width);
+            // `12 * 1 / 2` is 6: six filled cells, six empty.
+            let expected = format!("{expected_name_field} () ██████░░░░░░ [1/2]");
+            assert_eq!(got, expected, "width {width}: {got:?}");
         }
     }
 
@@ -2165,15 +2312,25 @@ mod tests {
             completed: 4,
             total: 9,
         };
+        // `12 * 4 / 9` truncates to 5.
+        let gauge = crate::ui::tasks::gauge_of(&progress, 12);
         for width in [78, 58] {
             let got = header_row(name, "tdd", &progress, width);
             assert_eq!(columns(&got), width as usize, "width {width}: {got:?}");
             assert!(got.ends_with("[4/9]"), "width {width}: {got:?}");
-            assert!(got.contains("(tdd)"), "width {width}: {got:?}");
+            // `(tdd)` is no longer immediately before the progress cell: a space, a
+            // twelve-column gauge, and a space now sit between them.
+            let expected_tail = format!("(tdd) {gauge} [4/9]");
+            assert!(
+                got.contains(&expected_tail),
+                "width {width}: {got:?} missing {expected_tail:?}"
+            );
             // Discriminating: proves the padding was computed in columns rather than in
             // characters — a `chars().count()`-based budget would have produced a header
-            // whose `chars().count()` also equalled `width`, dropping the schema and
-            // progress cells off the row instead.
+            // whose `chars().count()` also equalled `width`, dropping the schema, gauge,
+            // and progress cells off the row instead. The gauge's twelve characters are
+            // also twelve columns, so they contribute equally to both counts and neither
+            // strengthen nor weaken this claim.
             assert!(
                 got.chars().count() < columns(&got),
                 "width {width}: {got:?} was not measured in columns"
@@ -2182,15 +2339,23 @@ mod tests {
     }
 
     /// `detail-header` :: "The header reaches the buffer without crossing the region
-    /// border". The tail `" (tdd) [4/9]"` is checked by exact column-indexed slicing (it is
-    /// pure ASCII, one buffer cell per character); the CJK name field itself is not
+    /// border". The tail is checked by exact column-indexed slicing, using the tail's
+    /// **char** count rather than its byte length — the gauge glyphs are multi-byte —
+    /// since one buffer cell holds one gauge character; the CJK name field itself is not
     /// reconstructed by slicing `row_text`'s per-column output, because a two-column
     /// grapheme cluster's own trailing cell is reset to a single blank space, which would
     /// otherwise be misread as a character the name never had.
     #[test]
     fn the_header_reaches_the_buffer_without_crossing_the_region_border() {
         let name = "日本語の変更名前です";
-        let tail = " (tdd) [4/9]";
+        let progress = Progress {
+            completed: 4,
+            total: 9,
+        };
+        // `12 * 4 / 9` truncates to 5: five filled cells, seven empty.
+        let gauge = crate::ui::tasks::gauge_of(&progress, 12);
+        let tail = format!(" (tdd) {gauge} [4/9]");
+        let tail_len = tail.chars().count();
         let change = fixture::active(name, 4, 9);
         let d = dashboard_at_detail(change, detail("", Vec::new()));
 
@@ -2202,9 +2367,9 @@ mod tests {
         let cases: [(u16, usize, usize); 2] = [(120, 78, 42), (60, 58, 1)];
         for (frame, interior, first_col) in cases {
             let buf = render_at(frame, 20, &d);
-            let tail_start = first_col + interior - tail.len();
+            let tail_start = first_col + interior - tail_len;
             assert_eq!(
-                cols(&row_text(&buf, 0), tail_start..tail_start + tail.len()),
+                cols(&row_text(&buf, 0), tail_start..tail_start + tail_len),
                 tail,
                 "frame {frame}"
             );
@@ -2224,7 +2389,9 @@ mod tests {
         // At 120 columns, unchanged from the same render with an ASCII name: columns
         // 39 and 41 are the blank columns either side of the divider, and column 40
         // holds it — the wide detail region has no right gutter of its own, so its
-        // content reaches the frame's own last column instead.
+        // content reaches the frame's own last column instead. No gauge character bled
+        // left across the divider, which is the failure a gauge measured in `char`s
+        // beside a wide name would produce.
         let buf120 = render_at(120, 20, &d);
         assert_eq!(
             cell(&buf120, 39, 0).symbol(),
@@ -2250,57 +2417,122 @@ mod tests {
             "a\u{0}b".to_string(),
             String::new(),
         ];
-        let progress = Progress {
-            completed: 4,
-            total: 9,
-        };
+        // Four `Progress` values: the band boundaries below are derived from a
+        // five-column progress cell (`{4, 9}`), so the other three — a 24- and a
+        // 43-column progress cell, and the always-dash `{0, 0}` — get only the
+        // width-exactness, no-panic, and drop-whole checks that hold for any cell.
+        let progresses = [
+            Progress {
+                completed: 4,
+                total: 9,
+            },
+            Progress {
+                completed: 0,
+                total: 0,
+            },
+            Progress {
+                completed: 0,
+                total: usize::MAX,
+            },
+            Progress {
+                completed: usize::MAX,
+                total: usize::MAX,
+            },
+        ];
         for name in &names {
-            for width in 0u16..=130 {
-                let got = header_row(name, "tdd", &progress, width);
-                if width == 0 {
-                    assert_eq!(got, "", "name {name:?} width {width}");
-                } else {
-                    assert_eq!(
-                        columns(&got),
-                        width as usize,
-                        "name {name:?} width {width}: {got:?}"
-                    );
-                }
-                match width {
-                    78 | 58 | 13 => {
-                        assert!(
-                            got.contains("(tdd)"),
-                            "name {name:?} width {width}: {got:?}"
+            for progress in &progresses {
+                for width in 0u16..=130 {
+                    let got = header_row(name, "tdd", progress, width);
+                    if width == 0 {
+                        assert_eq!(got, "", "name {name:?} progress {progress:?} width {width}");
+                    } else {
+                        assert_eq!(
+                            columns(&got),
+                            width as usize,
+                            "name {name:?} progress {progress:?} width {width}: {got:?}"
                         );
+                    }
+                    if progress.total == 0 {
                         assert!(
-                            got.contains("[4/9]"),
+                            !got.contains('█') && !got.contains('░'),
                             "name {name:?} width {width}: {got:?}"
                         );
                     }
-                    12 | 7 => {
+                    if progress.completed == 4 && progress.total == 9 {
+                        match width {
+                            78 | 58 | 26 => {
+                                assert!(
+                                    got.contains("(tdd)"),
+                                    "name {name:?} width {width}: {got:?}"
+                                );
+                                assert!(
+                                    got.contains("[4/9]"),
+                                    "name {name:?} width {width}: {got:?}"
+                                );
+                                assert_eq!(
+                                    got.chars().filter(|&c| c == '█' || c == '░').count(),
+                                    12,
+                                    "name {name:?} width {width}: {got:?}"
+                                );
+                            }
+                            25 | 13 => {
+                                assert!(
+                                    got.contains("(tdd)"),
+                                    "name {name:?} width {width}: {got:?}"
+                                );
+                                assert!(
+                                    got.contains("[4/9]"),
+                                    "name {name:?} width {width}: {got:?}"
+                                );
+                                assert!(
+                                    !got.contains('█') && !got.contains('░'),
+                                    "name {name:?} width {width}: {got:?}"
+                                );
+                            }
+                            12 | 7 => {
+                                assert!(
+                                    !got.contains("(tdd"),
+                                    "name {name:?} width {width}: {got:?}"
+                                );
+                                assert!(
+                                    got.contains("[4/9]"),
+                                    "name {name:?} width {width}: {got:?}"
+                                );
+                            }
+                            6 | 1 => {
+                                assert!(
+                                    !got.contains("(tdd"),
+                                    "name {name:?} width {width}: {got:?}"
+                                );
+                                assert!(
+                                    !got.contains("[4/"),
+                                    "name {name:?} width {width}: {got:?}"
+                                );
+                            }
+                            _ => {}
+                        }
+                    } else if got.contains('[') {
+                        // The drop-whole property, for a progress cell too wide for
+                        // the documented boundaries to apply to: wherever a `[`
+                        // appears, the whole cell is present, never cut short.
+                        let cell = crate::ui::list::progress_cell(progress);
                         assert!(
-                            !got.contains("(tdd"),
-                            "name {name:?} width {width}: {got:?}"
-                        );
-                        assert!(
-                            got.contains("[4/9]"),
-                            "name {name:?} width {width}: {got:?}"
+                            got.contains(&cell),
+                            "name {name:?} width {width}: {got:?} holds a partial progress cell"
                         );
                     }
-                    6 | 1 => {
-                        assert!(
-                            !got.contains("(tdd"),
-                            "name {name:?} width {width}: {got:?}"
-                        );
-                        assert!(!got.contains("[4/"), "name {name:?} width {width}: {got:?}");
-                    }
-                    _ => {}
                 }
             }
             // The mandated pair, asserted explicitly by this sweep too.
-            for width in [78, 58] {
-                let got = header_row(name, "tdd", &progress, width);
-                assert_eq!(columns(&got), width as usize, "name {name:?} width {width}");
+            for progress in &progresses {
+                for width in [78, 58] {
+                    let got = header_row(name, "tdd", progress, width);
+                    assert_eq!(
+                        columns(&got),
+                        width as usize,
+                        "name {name:?} progress {progress:?} width {width}"
+                    );
+                }
             }
         }
     }

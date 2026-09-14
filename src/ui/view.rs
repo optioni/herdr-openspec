@@ -5187,6 +5187,8 @@ mod tests {
         }
     }
 
+    /// `detail-header` :: "The header names the selected change at both mandated
+    /// widths".
     #[test]
     fn the_header_names_the_selected_change_at_both_mandated_widths() {
         let d = dashboard_with(
@@ -5199,33 +5201,56 @@ mod tests {
             1,
             Route::Detail,
         );
-        let progress = crate::tasks::Progress {
-            completed: 4,
-            total: 9,
-        };
         for (width, w) in [(120, 78), (60, 58)] {
             let buf = render_at(width, 20, &d);
-            let expected = crate::ui::detail::header_row("add-token-refresh", "tdd", &progress, w);
-            assert_eq!(
-                detail_interior_cols(&buf, 0, w as usize),
-                expected,
-                "width {width}"
+            let header = detail_interior_cols(&buf, 0, w as usize);
+            assert!(
+                header.starts_with("add-token-refresh"),
+                "width {width}: {header:?}"
             );
-            // The wide detail region has no right gutter (D5): its header
-            // reaches the frame's own last column, 119, not 118.
+            // `12 * 4 / 9` truncates to 5: five filled cells, seven empty.
+            assert!(
+                header.ends_with("(tdd) █████░░░░░░░ [4/9]"),
+                "width {width}: {header:?}"
+            );
+            assert_eq!(
+                header.chars().filter(|&c| c == '█').count(),
+                5,
+                "width {width}: {header:?}"
+            );
+
+            // Every cell of the header row reports `Modifier::BOLD`, because the
+            // route is `Route::Detail` — the gauge's own cells included. The wide
+            // detail region has no right gutter (D5): its header reaches the
+            // frame's own last column, 119, not 118.
             let last_col = if width == 60 { 58u16 } else { 119 };
             for x in (last_col - 4)..=last_col {
-                assert!(
-                    cell(&buf, x, 0)
-                        .style()
-                        .add_modifier
-                        .contains(Modifier::BOLD),
+                assert_eq!(
+                    cell(&buf, x, 0).style(),
+                    palette::style(Role::RegionHeadingFocused),
                     "width {width} x {x}"
                 );
             }
         }
+
+        // Rendering the 120-column case at `Route::List` gives the identical 78
+        // characters with `Modifier::DIM` set and `Modifier::BOLD` clear, so the
+        // emphasis discriminates rather than asserting a constant.
+        let mut list_route = d;
+        list_route.route = Route::List;
+        let buf = render_at(120, 20, &list_route);
+        let header = detail_interior_cols(&buf, 0, 78);
+        assert!(header.ends_with("(tdd) █████░░░░░░░ [4/9]"));
+        for x in 115..=119u16 {
+            assert_eq!(
+                cell(&buf, x, 0).style(),
+                palette::style(Role::RegionHeading),
+                "x {x}"
+            );
+        }
     }
 
+    /// `detail-header` :: "Moving the selection moves the header".
     #[test]
     fn moving_the_selection_moves_the_header() {
         let mut d = dashboard_with(
@@ -5239,7 +5264,10 @@ mod tests {
             Route::Detail,
         );
         let buf_first = render_at(120, 20, &d);
-        assert!(detail_interior_cols(&buf_first, 0, 78).contains("add-token-refresh"));
+        let header_first = detail_interior_cols(&buf_first, 0, 78);
+        assert!(header_first.contains("add-token-refresh"));
+        assert!(header_first.ends_with("(tdd) █████░░░░░░░ [4/9]"));
+        assert_eq!(header_first.chars().filter(|&c| c == '█').count(), 5);
 
         // `list-sections`: 2, not 1 — target 1 is `add-token-refresh`,
         // target 2 is `fix-empty-basket`.
@@ -5250,9 +5278,19 @@ mod tests {
             assert!(header.contains("fix-empty-basket"), "width {width}");
             assert!(header.contains("[7/7]"), "width {width}");
             assert!(!header.contains("add-token-refresh"), "width {width}");
+            // The two headers differ in the name field, the gauge run, and the
+            // progress cell alike: `fix-empty-basket` is complete, a full gauge.
+            assert_eq!(
+                header.chars().filter(|&c| c == '█').count(),
+                12,
+                "width {width}: {header:?}"
+            );
+            assert!(!header.contains('░'), "width {width}: {header:?}");
         }
     }
 
+    /// `detail-header` :: "An archived change's header carries its stripped name
+    /// and its own schema".
     #[test]
     fn an_archived_change_s_header_carries_its_stripped_name_and_its_own_schema() {
         let archived_change = fixture::with_schema(
@@ -5272,9 +5310,20 @@ mod tests {
             assert!(!row.contains("2026-08-14-add-auth"), "width {width}");
             assert!(row.contains("(spec-driven)"), "width {width}: {row:?}");
             assert!(row.contains("[7/7]"), "width {width}");
+            // 7-of-7 is complete: a full, twelve-column gauge and no empty cell —
+            // the thirteen-column schema cell having taken from the name field
+            // and not from the gauge.
+            assert_eq!(
+                row.chars().filter(|&c| c == '█').count(),
+                12,
+                "width {width}: {row:?}"
+            );
+            assert!(!row.contains('░'), "width {width}: {row:?}");
         }
     }
 
+    /// `detail-header` :: "An empty visible list leaves the whole detail interior
+    /// blank".
     #[test]
     fn an_empty_visible_list_leaves_the_whole_detail_interior_blank() {
         let default_style = Cell::default().style();
@@ -5288,6 +5337,10 @@ mod tests {
                 assert_eq!(cell(&buf, x, y).symbol(), " ", "x={x} y={y}");
                 assert_eq!(cell(&buf, x, y).style(), default_style, "x={x} y={y}");
             }
+            assert!(
+                !row_text(&buf, y).contains('█') && !row_text(&buf, y).contains('░'),
+                "y={y}: no gauge glyph anywhere"
+            );
         }
 
         let mut zzz = dashboard_with(
@@ -5305,6 +5358,10 @@ mod tests {
                 for x in from..=last {
                     assert_eq!(cell(&buf, x, y).symbol(), " ", "width {width} x={x} y={y}");
                 }
+                assert!(
+                    !row_text(&buf, y).contains('█') && !row_text(&buf, y).contains('░'),
+                    "width {width} y={y}: no gauge glyph anywhere"
+                );
             }
         }
 
@@ -5320,6 +5377,61 @@ mod tests {
         );
         let buf = render_at(120, 20, &with_change);
         assert!(row_text(&buf, 0).contains("alpha"));
+    }
+
+    /// `detail-header` :: "The gauge is present on an artifact tab that is not the
+    /// tracked-tasks one".
+    #[test]
+    fn the_gauge_is_present_on_an_artifact_tab() {
+        let progress = crate::tasks::Progress {
+            completed: 4,
+            total: 9,
+        };
+        let source: String = (0..9).map(|i| format!("- [ ] t{i}\n")).collect();
+        // `proposal` (tab 0) is not the tracked-tasks artifact; `tasks` (tab 1,
+        // marked) is.
+        let mut d = dashboard_with_marked_change(
+            &["proposal", "tasks"],
+            Some(1),
+            progress,
+            &source,
+            Vec::new(),
+            0,
+        );
+
+        for (width, w) in [(120, 78), (60, 58)] {
+            let buf = render_at(width, 20, &d);
+            let header = detail_interior_cols(&buf, 0, w);
+            assert!(
+                header.ends_with("(tdd) █████░░░░░░░ [4/9]"),
+                "width {width}: {header:?}"
+            );
+            // No percent cell appears anywhere in the frame: the gauge reached
+            // the reader by the header, not by the tracked-tasks tab having
+            // been selected — `progress_bar`'s own percent cell is absent.
+            assert!(
+                !buffer_contains(&buf, "%"),
+                "width {width}: a percent cell leaked outside the tracked-tasks tab"
+            );
+        }
+
+        // Switching to the tracked-tasks tab leaves the heading row's gauge
+        // byte-identical while the content area now also holds the tab's own
+        // wider bar, the two agreeing about the same change because both are
+        // `gauge_of` over the same `progress`.
+        d.detail.tab = 1;
+        for (width, w) in [(120, 78), (60, 58)] {
+            let buf = render_at(width, 20, &d);
+            let header = detail_interior_cols(&buf, 0, w);
+            assert!(
+                header.ends_with("(tdd) █████░░░░░░░ [4/9]"),
+                "width {width}: {header:?}"
+            );
+            assert!(
+                buffer_contains(&buf, "%"),
+                "width {width}: the tracked-tasks tab's own bar is missing"
+            );
+        }
     }
 
     #[test]
