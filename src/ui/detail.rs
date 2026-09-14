@@ -285,10 +285,41 @@ pub enum ContentKind {
 /// Body rows carry no indent at all: indenting them would take the narrow
 /// interior's text column away from exactly the artifacts this change exists
 /// to make readable.
-fn header(label: &str, depth: usize, expanded: bool, width: u16) -> String {
+///
+/// `tasks-emphasis` adds the right-aligned **progress cell** a tracked-tasks
+/// group header carries. It is `ui::list::progress_cell` — the crate's one
+/// progress cell, on exactly the terms `tasks-progress-bar`'s bar and
+/// `detail-header`'s header row already reach it — and is **dropped whole**
+/// when the row cannot hold the indent, the glyph, its separating space, at
+/// least one column of label, one further separating space, and the cell
+/// itself. Never truncated, and never allowed to push the label out. The
+/// drop-whole order as the row narrows is therefore the cell first, reclaiming
+/// its own padding; then the label, truncated with the `…` rule; then the
+/// glyph and the indent — the same discipline the bar and the change header
+/// already use, so a narrowing pane loses fields in one order everywhere.
+fn header(
+    label: &str,
+    depth: usize,
+    expanded: bool,
+    progress: Option<&crate::tasks::Progress>,
+    width: u16,
+) -> String {
     let glyph = crate::ui::list::fold_glyph(!expanded);
     let indent = "  ".repeat(depth);
-    crate::ui::list::pad_or_truncate_right(&format!("{indent}{glyph} {label}"), width as usize)
+    let base = format!("{indent}{glyph} {label}");
+    let w = width as usize;
+    if let Some(progress) = progress {
+        let cell = crate::ui::list::progress_cell(progress);
+        let cell_cols = columns(&cell);
+        // The indent, the glyph, its space, one column of label, one
+        // separating space, and the cell.
+        let minimum = columns(&indent) + 3 + 1 + cell_cols;
+        if w >= minimum {
+            let left = crate::ui::list::pad_or_truncate_right(&base, w - cell_cols - 1);
+            return format!("{left} {cell}");
+        }
+    }
+    crate::ui::list::pad_or_truncate_right(&base, w)
 }
 
 /// The blank separator row, padded to `width` on the same terms every other
@@ -477,7 +508,13 @@ pub fn content_lines(
                 out.push(ContentRow {
                     line: crate::ui::markdown::Line {
                         segments: vec![crate::ui::markdown::Segment {
-                            text: header(label, section.depth, open, width),
+                            text: header(
+                                label,
+                                section.depth,
+                                open,
+                                section.progress.as_ref(),
+                                width,
+                            ),
                             face: crate::ui::markdown::Face::plain(),
                         }],
                     },
@@ -892,11 +929,11 @@ mod tests {
             let label = "degraded-coverage";
             let glyph = fold_glyph(true);
 
-            let at_18 = header(label, 0, false, 18);
+            let at_18 = header(label, 0, false, None, 18);
             assert_eq!(columns(&at_18), 18);
             assert_eq!(at_18, format!("{glyph} degraded-covera…"));
 
-            let at_13 = header(label, 0, false, 13);
+            let at_13 = header(label, 0, false, None, 13);
             assert_eq!(columns(&at_13), 13);
             assert_eq!(at_13, format!("{glyph} degraded-c…"));
 
@@ -909,7 +946,7 @@ mod tests {
             // four columns of indent, emitted **before** the glyph, so
             // truncation eats the label first and the depth survives it.
             let nested = "Requirement: Alpha";
-            let nested_18 = header(nested, 2, false, 18);
+            let nested_18 = header(nested, 2, false, None, 18);
             assert_eq!(columns(&nested_18), 18);
             assert_eq!(nested_18, format!("    {glyph} Requirement…"));
             // At 13 the same grammar keeps six columns of indent-and-glyph and
@@ -918,7 +955,7 @@ mod tests {
             // measures twelve rather than thirteen columns — one short of the
             // region — so the row below is what the crate's one truncation
             // rule, `ui::list::pad_or_truncate_right`, actually returns.)
-            let nested_13 = header(nested, 2, false, 13);
+            let nested_13 = header(nested, 2, false, None, 13);
             assert_eq!(columns(&nested_13), 13);
             assert_eq!(nested_13, format!("    {glyph} Requir…"));
             assert!(nested_18.starts_with(&format!("    {glyph} ")));
@@ -927,7 +964,7 @@ mod tests {
             // A depth-3 header's six columns of indent alone exceed a
             // four-column region: the row degrades to truncated **indent**
             // rather than to a dropped glyph, and does not panic.
-            let deep = header("Scenario: A works", 3, false, 4);
+            let deep = header("Scenario: A works", 3, false, None, 4);
             assert_eq!(columns(&deep), 4);
             assert_eq!(deep, "   …");
             assert!(
@@ -935,7 +972,7 @@ mod tests {
                 "the glyph was not kept at the cost of the indent"
             );
             for width in 0u16..=20 {
-                let got = header("Scenario: A works", 3, false, width);
+                let got = header("Scenario: A works", 3, false, None, width);
                 assert!(
                     columns(&got) <= width as usize,
                     "depth 3 width {width}: {got:?}"
@@ -948,7 +985,7 @@ mod tests {
             // space — at depth 0, 2, and 3 alike.
             for width in [78, 58] {
                 for depth in [0usize, 2, 3] {
-                    let got = header(label, depth, false, width);
+                    let got = header(label, depth, false, None, width);
                     assert_eq!(columns(&got), width as usize, "width {width} depth {depth}");
                     assert!(
                         got.trim_end().ends_with(label),
@@ -970,7 +1007,7 @@ mod tests {
             let label = "日本語のラベルです見出しの続き";
             for width in [18u16, 13, 78, 58] {
                 for depth in [0usize, 2, 3] {
-                    let got = header(label, depth, false, width);
+                    let got = header(label, depth, false, None, width);
                     assert!(
                         columns(&got) <= width as usize,
                         "width {width} depth {depth}: {got:?} exceeds its width"
@@ -982,20 +1019,92 @@ mod tests {
         /// Total and never panicking from `0` through `20`, plus the
         /// mandated pair — `header` is one of the functions `DETAILWIDTHS`
         /// requires to name both.
+        /// `artifact-folds` :: "The progress cell is dropped whole rather than
+        /// truncated".
+        ///
+        /// `DETAILWIDTHS` carries no exemption list, so 58 and 78 are named as
+        /// the contrasted pair even though the interesting widths are the
+        /// 0..=40 sweep: the drop fires well below either.
+        #[test]
+        fn the_progress_cell_is_dropped_whole_rather_than_truncated() {
+            let group = crate::tasks::Progress {
+                completed: 1,
+                total: 2,
+            };
+            let cell = crate::ui::list::progress_cell(&group);
+            assert_eq!(cell, "[1/2]");
+
+            let mut present = 0usize;
+            let mut absent = 0usize;
+            for width in 0u16..=40 {
+                let got = header("1. Setup", 0, false, Some(&group), width);
+                assert!(
+                    columns(&got) <= width as usize,
+                    "width {width}: {got:?} exceeds it"
+                );
+                if got.contains(&cell) {
+                    present += 1;
+                    // The cell yields to the label rather than the other way
+                    // round: at least one column of label survives beside it.
+                    assert!(
+                        got.contains("1") || got.contains('…'),
+                        "width {width}: the label was pushed out entirely: {got:?}"
+                    );
+                } else {
+                    absent += 1;
+                    // No partial cell is ever drawn.
+                    for fragment in ['[', ']', '/'] {
+                        assert!(
+                            !got.contains(fragment),
+                            "width {width}: a partial cell was drawn: {got:?}"
+                        );
+                    }
+                }
+            }
+            assert!(
+                present > 0 && absent > 0,
+                "the sweep must cross the drop, not sit on one side of it \
+                 (present {present}, absent {absent})"
+            );
+
+            // The two mandated interior widths, where the cell always fits and
+            // sits flush against the row's own last column.
+            // Unsuffixed: `DETAILWIDTHS`' number scan is `\b(\d+)\b` and does
+            // not see `58u16`.
+            for width in [58, 78] {
+                let got = header("1. Setup", 0, false, Some(&group), width);
+                assert_eq!(columns(&got), width as usize, "width {width}");
+                assert!(got.ends_with(&cell), "width {width}: {got:?}");
+                // Byte-identical to `ui::list::progress_cell` on the same
+                // value, so the row provably does not format its own.
+                assert!(
+                    got.ends_with(&crate::ui::list::progress_cell(&group)),
+                    "width {width}"
+                );
+                // And a section carrying no progress draws no cell at all,
+                // byte-identical to the row this capability drew before.
+                assert_eq!(
+                    header("1. Setup", 0, false, None, width),
+                    crate::ui::list::pad_or_truncate_right("▸ 1. Setup", width as usize),
+                    "width {width}"
+                );
+            }
+        }
+
         #[test]
         fn header_is_total_from_zero_through_twenty_columns() {
             let label = "degraded-coverage";
             for expanded in [false, true] {
                 for depth in 0usize..=3 {
                     for width in 0u16..=20 {
-                        let got = header(label, depth, expanded, width);
+                        let got = header(label, depth, expanded, None, width);
                         assert!(
                             columns(&got) <= width as usize,
                             "expanded {expanded} depth {depth} width {width}: {got:?}"
                         );
                     }
                     for width in [78, 58] {
-                        let got = header(label, depth, expanded, width);
+                        let got = header(label, depth, expanded, None, width);
                         assert_eq!(columns(&got), width as usize, "width {width} depth {depth}");
                     }
                 }
@@ -2380,13 +2489,13 @@ mod tests {
                     // `ui::tasks`' own blank line, unpadded — `bar_lines`
                     // emits the very pair the flat tab leads with.
                     String::new(),
-                    header("a", 0, true, width),
-                    header("1. Setup", 1, true, width),
+                    header("a", 0, true, None, width),
+                    header("1. Setup", 1, true, None, width),
                     "[ ] a".to_string(),
                     // The fold walk's own separator row, which IS padded.
                     crate::ui::list::pad_or_truncate_right("", width as usize),
-                    header("b", 0, true, width),
-                    header("2. Build", 1, true, width),
+                    header("b", 0, true, None, width),
+                    header("2. Build", 1, true, None, width),
                     "[ ] b".to_string(),
                 ],
                 "width {width}"
@@ -2401,9 +2510,9 @@ mod tests {
                 vec![
                     bar,
                     String::new(),
-                    header("a", 0, false, width),
-                    header("b", 0, true, width),
-                    header("2. Build", 1, true, width),
+                    header("a", 0, false, None, width),
+                    header("b", 0, true, None, width),
+                    header("2. Build", 1, true, None, width),
                     "[ ] b".to_string(),
                 ],
                 "width {width}: a collapsed depth-0 file section hides its own group"

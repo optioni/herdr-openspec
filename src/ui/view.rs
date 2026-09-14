@@ -3995,10 +3995,30 @@ mod tests {
     /// space, and the label, the whole row through `ui::list::pad_or_truncate_right`.
     /// The indent is emitted **before** the glyph (`heading-sections` -> design.md ->
     /// D7), so truncation eats the label first and the depth survives it.
-    fn expected_header_at(label: &str, collapsed: bool, depth: usize, width: u16) -> String {
+    /// `tasks-emphasis` gave this helper a `progress` argument: a tracked-tasks
+    /// group header carries its own count, right-aligned against the content
+    /// area's last column, and every other section header carries none. Built
+    /// from `ui::list::progress_cell` here for the same reason the row itself
+    /// is — the crate has one progress cell, and a second formatting of the
+    /// same pair could disagree with it.
+    fn expected_header_at(
+        label: &str,
+        collapsed: bool,
+        depth: usize,
+        progress: Option<crate::tasks::Progress>,
+        width: u16,
+    ) -> String {
         let glyph = crate::ui::list::fold_glyph(collapsed);
         let indent = "  ".repeat(depth);
-        crate::ui::list::pad_or_truncate_right(&format!("{indent}{glyph} {label}"), width as usize)
+        let base = format!("{indent}{glyph} {label}");
+        if let Some(progress) = progress {
+            let cell = crate::ui::list::progress_cell(&progress);
+            let cell_cols = crate::ui::layout::columns(&cell);
+            let left =
+                crate::ui::list::pad_or_truncate_right(&base, width as usize - cell_cols - 1);
+            return format!("{left} {cell}");
+        }
+        crate::ui::list::pad_or_truncate_right(&base, width as usize)
     }
 
     /// The style shared by every cell of content row `y` across its `width` interior
@@ -4313,10 +4333,10 @@ mod tests {
             assert_eq!(
                 drawn_content_rows(&render_at(width, 40, &one), interior),
                 vec![
-                    expected_header_at("degraded-coverage", false, 0, interior),
-                    expected_header_at("ADDED Requirements", true, 1, interior),
-                    expected_header_at("markdown-render", true, 0, interior),
-                    expected_header_at("tasks-checklist", true, 0, interior),
+                    expected_header_at("degraded-coverage", false, 0, None, interior),
+                    expected_header_at("ADDED Requirements", true, 1, None, interior),
+                    expected_header_at("markdown-render", true, 0, None, interior),
+                    expected_header_at("tasks-checklist", true, 0, None, interior),
                 ],
                 "width {width}: expanded {{0}}"
             );
@@ -4328,12 +4348,12 @@ mod tests {
             assert_eq!(
                 drawn_content_rows(&render_at(width, 40, &two), interior),
                 vec![
-                    expected_header_at("degraded-coverage", false, 0, interior),
-                    expected_header_at("ADDED Requirements", false, 1, interior),
-                    expected_header_at("Requirement: Alpha", true, 2, interior),
-                    expected_header_at("Requirement: Beta", true, 2, interior),
-                    expected_header_at("markdown-render", true, 0, interior),
-                    expected_header_at("tasks-checklist", true, 0, interior),
+                    expected_header_at("degraded-coverage", false, 0, None, interior),
+                    expected_header_at("ADDED Requirements", false, 1, None, interior),
+                    expected_header_at("Requirement: Alpha", true, 2, None, interior),
+                    expected_header_at("Requirement: Beta", true, 2, None, interior),
+                    expected_header_at("markdown-render", true, 0, None, interior),
+                    expected_header_at("tasks-checklist", true, 0, None, interior),
                 ],
                 "width {width}: expanded {{0, 1}}"
             );
@@ -4345,9 +4365,9 @@ mod tests {
             assert_eq!(
                 drawn_content_rows(&render_at(width, 40, &orphan), interior),
                 vec![
-                    expected_header_at("degraded-coverage", true, 0, interior),
-                    expected_header_at("markdown-render", true, 0, interior),
-                    expected_header_at("tasks-checklist", true, 0, interior),
+                    expected_header_at("degraded-coverage", true, 0, None, interior),
+                    expected_header_at("markdown-render", true, 0, None, interior),
+                    expected_header_at("tasks-checklist", true, 0, None, interior),
                 ],
                 "width {width}: expanded {{1}}"
             );
@@ -4373,7 +4393,7 @@ mod tests {
             let open = crate::ui::list::fold_glyph(false);
             assert_eq!(
                 rows[alpha],
-                expected_header_at("Requirement: Alpha", false, 2, interior),
+                expected_header_at("Requirement: Alpha", false, 2, None, interior),
                 "width {width}: the depth-2 header"
             );
             assert!(
@@ -4446,8 +4466,8 @@ mod tests {
             assert_eq!(
                 drawn_content_rows(&buf, interior),
                 vec![
-                    expected_header_at("ADDED Requirements", true, 0, interior),
-                    expected_header_at("MODIFIED Requirements", true, 0, interior),
+                    expected_header_at("ADDED Requirements", true, 0, None, interior),
+                    expected_header_at("MODIFIED Requirements", true, 0, None, interior),
                 ],
                 "width {width}: the two operation headings alone"
             );
@@ -4532,11 +4552,29 @@ mod tests {
                 vec![
                     padded(&bar, interior),
                     padded("", interior),
-                    expected_header_at("1. Setup", false, 0, interior),
+                    expected_header_at(
+                        "1. Setup",
+                        false,
+                        0,
+                        Some(crate::tasks::Progress {
+                            completed: 1,
+                            total: 2
+                        }),
+                        interior
+                    ),
                     padded("[✓] 1.1 first", interior),
                     padded("[ ] 1.2 second", interior),
                     padded("", interior),
-                    expected_header_at("2. Build", false, 0, interior),
+                    expected_header_at(
+                        "2. Build",
+                        false,
+                        0,
+                        Some(crate::tasks::Progress {
+                            completed: 0,
+                            total: 1
+                        }),
+                        interior
+                    ),
                     padded("[ ] 2.1 third", interior),
                 ],
                 "width {width}: both groups open, the `#` markers gone with their heading lines"
@@ -4552,12 +4590,177 @@ mod tests {
                 vec![
                     padded(&bar, interior),
                     padded("", interior),
-                    expected_header_at("1. Setup", true, 0, interior),
-                    expected_header_at("2. Build", true, 0, interior),
+                    expected_header_at(
+                        "1. Setup",
+                        true,
+                        0,
+                        Some(crate::tasks::Progress {
+                            completed: 1,
+                            total: 2
+                        }),
+                        interior
+                    ),
+                    expected_header_at(
+                        "2. Build",
+                        true,
+                        0,
+                        Some(crate::tasks::Progress {
+                            completed: 0,
+                            total: 1
+                        }),
+                        interior
+                    ),
                 ],
                 "width {width}: collapsed, and no item row at all"
             );
         }
+    }
+
+    /// `artifact-folds` :: "A tracked-tasks tab's group headers carry their own
+    /// progress" — the **view** half. `ui::app`'s test of the same name is the
+    /// unit half; alone it would not show the cell reaching a buffer.
+    #[test]
+    fn a_tracked_tasks_tabs_group_headers_carry_their_own_progress() {
+        let progress = crate::tasks::Progress {
+            completed: 1,
+            total: 3,
+        };
+        let mut d = synced_task_dashboard(TWO_TASK_GROUPS, progress, 1);
+        let setup = crate::tasks::Progress {
+            completed: 1,
+            total: 2,
+        };
+        let build = crate::tasks::Progress {
+            completed: 0,
+            total: 1,
+        };
+        assert_eq!(
+            d.detail
+                .sections
+                .iter()
+                .map(|s| s.progress)
+                .collect::<Vec<_>>(),
+            vec![Some(setup), Some(build)],
+        );
+
+        for width in [120, 60] {
+            let interior = interior_width(width);
+            let rows = drawn_content_rows(&render_at(width, 20, &d), interior);
+            let setup_row = &rows[2];
+            let build_row = &rows[6];
+            assert!(
+                setup_row.starts_with("▾ 1. Setup"),
+                "width {width}: {setup_row:?}"
+            );
+            // Right-aligned against the content area's own last column, and
+            // byte-identical to `ui::list::progress_cell` on the same value, so
+            // the row provably does not format its own.
+            assert!(
+                setup_row.ends_with(&crate::ui::list::progress_cell(&setup)),
+                "width {width}: {setup_row:?}"
+            );
+            assert!(
+                build_row.ends_with(&crate::ui::list::progress_cell(&build)),
+                "width {width}: {build_row:?}"
+            );
+            assert!(setup_row.ends_with("[1/2]"), "width {width}");
+            assert!(build_row.ends_with("[0/1]"), "width {width}");
+        }
+
+        // A folded group still says how far along it is, which is the point.
+        d.detail.expanded.clear();
+        for width in [120, 60] {
+            let interior = interior_width(width);
+            assert_eq!(
+                drawn_content_rows(&render_at(width, 20, &d), interior),
+                vec![
+                    padded(
+                        &crate::ui::tasks::progress_bar(&progress, interior),
+                        interior
+                    ),
+                    padded("", interior),
+                    expected_header_at("1. Setup", true, 0, Some(setup), interior),
+                    expected_header_at("2. Build", true, 0, Some(build), interior),
+                ],
+                "width {width}: both cells still drawn"
+            );
+        }
+    }
+
+    /// `artifact-folds` :: "A group holding no items still gets a header and a
+    /// counted cell" — the **view** half. A prose group and an unstarted group
+    /// are distinguishable on the header row alone.
+    #[test]
+    fn a_group_holding_no_items_still_gets_a_header_and_a_counted_cell() {
+        let progress = crate::tasks::Progress {
+            completed: 0,
+            total: 1,
+        };
+        let d = synced_task_dashboard(
+            "## 1. Notes\n\nprose only\n\n## 2. Build\n\n- [ ] 2.1 third\n",
+            progress,
+            1,
+        );
+        for width in [120, 60] {
+            let interior = interior_width(width);
+            let rows = drawn_content_rows(&render_at(width, 20, &d), interior);
+            let notes = rows.iter().find(|r| r.contains("1. Notes")).unwrap();
+            let build = rows.iter().find(|r| r.contains("2. Build")).unwrap();
+            assert!(notes.ends_with("[-]"), "width {width}: {notes:?}");
+            assert!(build.ends_with("[0/1]"), "width {width}: {build:?}");
+            assert_ne!(
+                notes.trim_end().rsplit(' ').next(),
+                build.trim_end().rsplit(' ').next(),
+                "width {width}: the two cells must differ"
+            );
+        }
+    }
+
+    /// `artifact-folds` :: "Every other artifact's section headers carry no
+    /// progress cell". Its assertions are the three-spec fixture's own,
+    /// **unmodified**: they were written before this change and stay green,
+    /// which is the falsifiable form of "no header row moved".
+    #[test]
+    fn every_other_artifacts_section_headers_carry_no_progress_cell() {
+        let d = three_spec_dashboard(std::collections::BTreeSet::new(), 0, Route::Detail);
+        assert!(
+            d.detail.sections.iter().all(|s| s.progress.is_none()),
+            "a specs glob is not a tracked-tasks artifact"
+        );
+        for width in [120, 60] {
+            let interior = interior_width(width);
+            assert_eq!(
+                drawn_content_rows(&render_at(width, 20, &d), interior),
+                vec![
+                    expected_header_at("degraded-coverage", true, 0, None, interior),
+                    expected_header_at("markdown-render", true, 0, None, interior),
+                    expected_header_at("tasks-checklist", true, 0, None, interior),
+                ],
+                "width {width}: byte-identical to the row drawn before this change"
+            );
+            for row in drawn_content_rows(&render_at(width, 20, &d), interior) {
+                assert!(
+                    !row.contains('['),
+                    "width {width}: a cell was drawn: {row:?}"
+                );
+            }
+        }
+
+        // The file section and the preamble of a **split tracked-tasks** file
+        // carry `None` too, so only heading sections gain a cell.
+        let tasks = synced_task_dashboard(
+            "Intro prose.\n\n## 1. Setup\n\n- [x] a\n\n## 2. Build\n\n- [ ] b\n",
+            crate::tasks::Progress {
+                completed: 1,
+                total: 2,
+            },
+            1,
+        );
+        assert_eq!(
+            tasks.detail.sections[0].progress, None,
+            "the preamble is not a task group"
+        );
+        assert!(tasks.detail.sections[0].label.is_none());
     }
 
     /// `artifact-content` :: "The progress bar leads the folded task groups" —
@@ -4582,8 +4785,26 @@ mod tests {
                 vec![
                     padded(&bar, interior),
                     padded("", interior),
-                    expected_header_at("1. Done", true, 0, interior),
-                    expected_header_at("2. Doing", false, 0, interior),
+                    expected_header_at(
+                        "1. Done",
+                        true,
+                        0,
+                        Some(crate::tasks::Progress {
+                            completed: 1,
+                            total: 1
+                        }),
+                        interior
+                    ),
+                    expected_header_at(
+                        "2. Doing",
+                        false,
+                        0,
+                        Some(crate::tasks::Progress {
+                            completed: 0,
+                            total: 2
+                        }),
+                        interior
+                    ),
                     padded("[ ] b", interior),
                     padded("[ ] c", interior),
                 ],
@@ -4707,12 +4928,39 @@ mod tests {
                 vec![
                     padded(&bar, interior),
                     padded("", interior),
-                    expected_header_at("1. Done", true, 0, interior),
-                    expected_header_at("2. Doing", false, 0, interior),
+                    expected_header_at(
+                        "1. Done",
+                        true,
+                        0,
+                        Some(crate::tasks::Progress {
+                            completed: 1,
+                            total: 1
+                        }),
+                        interior
+                    ),
+                    expected_header_at(
+                        "2. Doing",
+                        false,
+                        0,
+                        Some(crate::tasks::Progress {
+                            completed: 1,
+                            total: 2
+                        }),
+                        interior
+                    ),
                     padded("[✓] b", interior),
                     padded("[ ] c", interior),
                     padded("", interior),
-                    expected_header_at("3. Later", false, 0, interior),
+                    expected_header_at(
+                        "3. Later",
+                        false,
+                        0,
+                        Some(crate::tasks::Progress {
+                            completed: 0,
+                            total: 1
+                        }),
+                        interior
+                    ),
                     padded("[ ] d", interior),
                 ],
                 "width {width}"
@@ -6461,7 +6709,16 @@ mod tests {
             );
             assert_eq!(
                 detail_interior_cols(&buf3, 7, interior_width(width) as usize),
-                expected_header_at("1. Setup", false, 0, interior_width(width)),
+                expected_header_at(
+                    "1. Setup",
+                    false,
+                    0,
+                    Some(crate::tasks::Progress {
+                        completed: 1,
+                        total: 2
+                    }),
+                    interior_width(width)
+                ),
                 "width {width}: the group heading is now its own fold header"
             );
             assert_eq!(

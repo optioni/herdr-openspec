@@ -240,36 +240,36 @@ unchanged.
 Writes `src/ui/app.rs` (`sync_detail`), `src/ui/detail.rs` (`header`), and three `ui::view`
 fixtures with their shared helper.
 
-- [ ] 6.1 RED: Write failing `ui::app` tests
+- [x] 6.1 RED: Write failing `ui::app` tests
       `a_tracked_tasks_tabs_group_headers_carry_their_own_progress` and
       `a_group_holding_no_items_still_gets_a_header_and_a_counted_cell`, driving `sync_detail`
       with a closure reader and asserting on `detail.sections`.
-- [ ] 6.2 RED: Write the **view halves** of those same two scenarios in `ui::view`, rendering
+- [x] 6.2 RED: Write the **view halves** of those same two scenarios in `ui::view`, rendering
       at 120x20 and 60x20 and asserting the drawn cells. design.md's matrix tiers both as
       "unit (pure) + view"; the unit half alone would not show the cell reaching a buffer.
-- [ ] 6.3 RED: Write failing `ui::view` test
+- [x] 6.3 RED: Write failing `ui::view` test
       `every_other_artifacts_section_headers_carry_no_progress_cell` — `ui::view`, not
       `ui::detail`, per the matrix — and failing `ui::detail` test
       `the_progress_cell_is_dropped_whole_rather_than_truncated`, the latter sweeping content
       widths 0..=40 and naming 58 and 78 as the contrasted pair for `DETAILWIDTHS`.
-- [ ] 6.4 GREEN: In `sync_detail`, set `progress` to `tasks::parse(&section.text).progress()`
+- [x] 6.4 GREEN: In `sync_detail`, set `progress` to `tasks::parse(&section.text).progress()`
       for the heading sections of a split file whose `ArtifactRef` carries
       `tracks_tasks == true`, and leave every other section `None`.
-- [ ] 6.5 GREEN: In `ui::detail::header`, draw the right-aligned cell from
+- [x] 6.5 GREEN: In `ui::detail::header`, draw the right-aligned cell from
       `ui::list::progress_cell` when the section carries a `progress`, dropped whole in the
       order `specs/artifact-folds/spec.md` states: the cell, then the label, then the glyph and
       the indent.
-- [ ] 6.6 CHANGE: Amend the three existing `ui::view` fixtures that assert tracked-tasks
+- [x] 6.6 CHANGE: Amend the three existing `ui::view` fixtures that assert tracked-tasks
       fold-header rows — `a_foldable_tasks_tab_draws_its_groups_as_fold_headers` (`:4488`),
       `the_progress_bar_leads_the_folded_task_groups` (`:4540`), and
       `a_mostly_finished_task_file_opens_at_its_first_unfinished_group` (`:4659`) — and give
       their shared helper `expected_header_at` (`:3974`) a progress argument. These go red the
       moment 6.5 lands; without this task the group reports green on a red tree.
-- [ ] 6.7 CHECK: Assert the drawn cell is byte-identical to `ui::list::progress_cell` called on
+- [x] 6.7 CHECK: Assert the drawn cell is byte-identical to `ui::list::progress_cell` called on
       the same value, so the row provably does not format its own.
-- [ ] 6.8 REFACTOR: Extract the right-align arithmetic if `header` grew a second copy of
+- [x] 6.8 REFACTOR: Extract the right-align arithmetic if `header` grew a second copy of
       `pad_or_truncate_right`'s job, or record that none was needed.
-- [ ] 6.9 VERIFY: `cargo test --all-features` — green — and
+- [x] 6.9 VERIFY: `cargo test --all-features` — green — and
       `/bin/sh scripts/gates/detailwidths.sh`, `colwidth.sh`, `noio-view.sh` and `readseam.sh`
       each exit 0.
 

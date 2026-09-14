@@ -1572,11 +1572,23 @@ impl Dashboard {
                     // starting at `#` both open flush at the left.
                     let min_level = headings.iter().map(|h| h.level).min().unwrap_or(0);
                     for heading in headings {
+                        // `tasks-emphasis`: a **heading section of a split
+                        // tracked-tasks file** carries its own group's count,
+                        // which is what lets a reader fold a completed group
+                        // without losing how far along it was. Every other
+                        // section — the file section, the preamble, every
+                        // section of an unsplit file, and every section of
+                        // every other artifact — carries `None`. The value is
+                        // `task-groups`' own count of that group's items, so
+                        // it agrees with the whole file's by that capability's
+                        // summation property.
+                        let progress =
+                            tracks_tasks.then(|| crate::tasks::parse(&heading.body).progress());
                         self.detail.sections.push(ArtifactSection {
                             label: Some(heading.label),
                             text: heading.body,
                             depth: base + usize::from(heading.level.saturating_sub(min_level)),
-                            progress: None,
+                            progress,
                         });
                     }
                 }
@@ -3282,6 +3294,121 @@ mod tests {
         // going inert for want of a drawn width (design.md -> Decision 13).
         d.detail.drawn_width = Some(78);
         d
+    }
+
+    /// A `tracks_tasks` dashboard whose one path reads `text`, synced.
+    /// `progress` is the change's own field, which the bar renders and which
+    /// the per-group cells are deliberately independent of.
+    fn synced_tracked_tasks_dashboard(text: &str, completed: usize, total: usize) -> Dashboard {
+        let change = fixture::track_tasks_at(
+            fixture::with_artifacts(
+                fixture::active("c", completed, total),
+                &[("tasks", &["/repo/openspec/changes/c/tasks.md"])],
+            ),
+            0,
+        );
+        let mut d =
+            dashboard_for_attribution(vec![change], Vec::new(), 1, Vec::new(), BTreeMap::new());
+        d.route = Route::Detail;
+        let recorder = crate::testutil::RecordingReader::always(Ok(text.to_string()));
+        let read = |p: &std::path::Path| recorder.read(p);
+        d.sync_detail(&read);
+        d.detail.drawn_width = Some(78);
+        d
+    }
+
+    fn progress_of(detail: &Detail) -> Vec<Option<crate::tasks::Progress>> {
+        detail.sections.iter().map(|s| s.progress).collect()
+    }
+
+    fn progress(completed: usize, total: usize) -> Option<crate::tasks::Progress> {
+        Some(crate::tasks::Progress { completed, total })
+    }
+
+    /// `artifact-folds` :: "A tracked-tasks tab's group headers carry their own
+    /// progress" — the unit half. The view half is `ui::view`'s test of the
+    /// same name, which is what shows the cell reaching a buffer.
+    #[test]
+    fn a_tracked_tasks_tabs_group_headers_carry_their_own_progress() {
+        let d = synced_tracked_tasks_dashboard(
+            "## 1. Setup\n\n- [x] 1.1 first\n- [ ] 1.2 second\n\n## 2. Build\n\n- [ ] 2.1 third\n",
+            1,
+            3,
+        );
+        assert_eq!(
+            shape_of(&d.detail),
+            vec![(Some("1. Setup"), 0), (Some("2. Build"), 0)],
+            "two heading sections and no preamble"
+        );
+        assert_eq!(
+            progress_of(&d.detail),
+            vec![progress(1, 2), progress(0, 1)],
+            "each section carries its own group's count"
+        );
+
+        // The preamble and the file section of the same shape carry `None`, so
+        // only heading sections gain a cell.
+        let with_preamble = synced_tracked_tasks_dashboard(TASK_FILE, 1, 3);
+        assert_eq!(
+            progress_of(&with_preamble.detail),
+            vec![None, progress(1, 2), progress(0, 1)],
+            "the `None`-labelled preamble is not a task group"
+        );
+    }
+
+    /// `artifact-folds` :: "A group holding no items still gets a header and a
+    /// counted cell" — the unit half.
+    #[test]
+    fn a_group_holding_no_items_still_gets_a_header_and_a_counted_cell() {
+        let d = synced_tracked_tasks_dashboard(
+            "## 1. Notes\n\nprose only\n\n## 2. Build\n\n- [ ] 2.1 third\n",
+            0,
+            1,
+        );
+        assert_eq!(
+            shape_of(&d.detail),
+            vec![(Some("1. Notes"), 0), (Some("2. Build"), 0)],
+        );
+        assert_eq!(
+            progress_of(&d.detail),
+            vec![progress(0, 0), progress(0, 1)],
+            "a prose group is counted and found empty, not left uncounted"
+        );
+        // `[-]` and `[0/1]` are different cells, which is the distinction a
+        // `Progress` defaulting to `{0, 0}` on every section would have erased.
+        assert_ne!(
+            crate::ui::list::progress_cell(&d.detail.sections[0].progress.unwrap()),
+            crate::ui::list::progress_cell(&d.detail.sections[1].progress.unwrap()),
+        );
+    }
+
+    /// Every other artifact's sections carry no progress at all — the unit half
+    /// of `artifact-folds` :: "Every other artifact's section headers carry no
+    /// progress cell".
+    #[test]
+    fn a_non_tracked_tasks_artifacts_sections_carry_no_progress() {
+        let change = fixture::with_artifacts(
+            fixture::active("c", 1, 3),
+            &[(
+                "specs",
+                &[
+                    "/repo/openspec/changes/c/specs/a/spec.md",
+                    "/repo/openspec/changes/c/specs/b/spec.md",
+                ],
+            )],
+        );
+        let mut d =
+            dashboard_for_attribution(vec![change], Vec::new(), 1, Vec::new(), BTreeMap::new());
+        d.route = Route::Detail;
+        let recorder = crate::testutil::RecordingReader::always(Ok(
+            "## MODIFIED Requirements\n\n- [ ] not a task file\n".to_string(),
+        ));
+        let read = |p: &std::path::Path| recorder.read(p);
+        d.sync_detail(&read);
+        assert!(
+            d.detail.sections.iter().all(|s| s.progress.is_none()),
+            "no section of a non-tracked-tasks artifact carries a count"
+        );
     }
 
     /// `artifact-folds`: "`Space` on a preamble row is inert".
