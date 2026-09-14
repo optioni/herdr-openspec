@@ -165,6 +165,32 @@ fn artifact_section_label(change_dir: &std::path::Path, path: &std::path::Path) 
     file_name.to_string()
 }
 
+/// `heading-sections`' addition: one heading and the text beneath it, as
+/// [`split_headings`] derives it. `level` is the count of `#` characters,
+/// `label` the heading's remainder with surrounding whitespace trimmed, and
+/// `body` the verbatim bytes between that heading's line and the next heading
+/// line at **any** level. See `specs/artifact-folds/spec.md` -> "Headings
+/// split a file into nested sections".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HeadingSection {
+    pub level: u8,
+    pub label: String,
+    pub body: String,
+}
+
+/// The crate's **one** rule for deriving sections from a document's own
+/// headings — the same function for a task file and for a spec file, because
+/// two implementations of one rule drift.
+pub fn split_headings(_text: &str) -> Vec<HeadingSection> {
+    unimplemented!("heading-sections task 1.2")
+}
+
+/// Whether `text` is a specification delta: it carries at least one level-3
+/// heading whose label begins `Requirement:`.
+pub fn is_spec_shaped(_text: &str) -> bool {
+    unimplemented!("heading-sections task 1.3")
+}
+
 /// The detail region's content and scroll offset, plus `detail-view`'s three
 /// additions. `sections` is set by `Dashboard::sync_detail`, driven once per
 /// loop iteration by the injected `ArtifactReader`; `ui::load` still starts
@@ -1414,7 +1440,7 @@ mod tests {
     use crate::changes::fixture;
     use crate::ui::app::{
         Action, ArtifactSection, Dashboard, Detail, Filter, Refresh, Route, Sections, action_for,
-        artifact_section_label,
+        artifact_section_label, is_spec_shaped, split_headings,
     };
     use std::collections::BTreeMap;
 
@@ -2595,6 +2621,220 @@ mod tests {
             rows[0].kind,
             crate::ui::detail::ContentKind::SectionHeader { selected: true, .. }
         ));
+    }
+
+    // `heading-sections`: the heading splitter's own fixtures and its six tests.
+    // Every one of them is width-free, which is why the splitter is sited in this
+    // file and not in `src/ui/detail.rs` — `DETAILWIDTHS` requires every `#[test]`
+    // there to name both `58` and `78` and carries no exemption list (design.md
+    // -> Decision 11).
+
+    /// `specs/artifact-folds/spec.md` -> "A delta spec splits into operations,
+    /// requirements, and scenarios", verbatim.
+    const DELTA_SPEC: &str = "## ADDED Requirements\n\n### Requirement: Alpha\nAlpha text.\n\n#### Scenario: A works\n- **WHEN** a\n- **THEN** b\n\n### Requirement: Beta\nBeta text.\n";
+
+    /// `specs/artifact-folds/spec.md` -> "A task file splits into its groups",
+    /// verbatim. Its `Intro prose.` is the preamble, which is no section.
+    const TASK_FILE: &str = "Intro prose.\n\n## 1. Setup\n\n- [x] 1.1 first\n- [ ] 1.2 second\n\n## 2. Build\n\n- [ ] 2.1 third\n";
+
+    /// The fence fixture, in its three forms: three backticks, three tildes, and
+    /// a four-backtick fence closed by four backticks.
+    const FENCED: &str = "## Real\n\n```sh\n# not a heading\nmake check\n```\n\n### Also real\nx\n";
+    const TILDE_FENCED: &str =
+        "## Real\n\n~~~sh\n# not a heading\nmake check\n~~~\n\n### Also real\nx\n";
+    const QUAD_FENCED: &str =
+        "## Real\n\n````sh\n# not a heading\nmake check\n````\n\n### Also real\nx\n";
+
+    /// A fence opened with three backticks and closed with three tildes is not
+    /// closed: everything after it stays body.
+    const MISMATCHED_FENCE: &str = "## Real\n\n```sh\n# not a heading\n~~~\n\n### Also real\nx\n";
+
+    /// `specs/artifact-folds/spec.md` -> "Near-headings are not headings",
+    /// verbatim: no space after the run, seven hashes, four spaces of indent,
+    /// three spaces of indent (the one real heading), a bare `#`, and a `#`
+    /// whose remainder trims to nothing.
+    const NEAR_HEADINGS: &str =
+        "#Nospace\n####### Seven hashes\n    # Indented four\n   ### Indented three\n#\n# \n";
+
+    /// A file that is one unterminated fence.
+    const UNTERMINATED_FENCE: &str = "```sh\n# one\n## two\n";
+
+    /// Reconstruct each section's heading line from its `level` and `label` and
+    /// concatenate the result with its `body`. `concat()` rather than the bare
+    /// zero-argument `.join()`, which `NOBLOCK` greps this file for (design.md
+    /// -> Boundaries).
+    fn reassemble(text: &str) -> String {
+        let parts: Vec<String> = split_headings(text)
+            .iter()
+            .map(|s| {
+                format!(
+                    "{} {}\n{}",
+                    "#".repeat(usize::from(s.level)),
+                    s.label,
+                    s.body
+                )
+            })
+            .collect();
+        parts.concat()
+    }
+
+    /// The `(level, label)` pairs `split_headings` returns for `text`.
+    fn shape(text: &str) -> Vec<(u8, String)> {
+        split_headings(text)
+            .into_iter()
+            .map(|s| (s.level, s.label))
+            .collect()
+    }
+
+    /// `specs/artifact-folds/spec.md` -> "A delta spec splits into operations,
+    /// requirements, and scenarios".
+    #[test]
+    fn a_delta_spec_splits_into_operations_requirements_and_scenarios() {
+        assert_eq!(
+            shape(DELTA_SPEC),
+            vec![
+                (2, "ADDED Requirements".to_string()),
+                (3, "Requirement: Alpha".to_string()),
+                (4, "Scenario: A works".to_string()),
+                (3, "Requirement: Beta".to_string()),
+            ]
+        );
+        let sections = split_headings(DELTA_SPEC);
+        assert_eq!(sections[0].body, "\n");
+        assert_eq!(sections[1].body, "Alpha text.\n\n");
+        assert_eq!(sections[2].body, "- **WHEN** a\n- **THEN** b\n\n");
+        assert_eq!(sections[3].body, "Beta text.\n");
+        assert_eq!(reassemble(DELTA_SPEC), DELTA_SPEC);
+    }
+
+    /// `specs/artifact-folds/spec.md` -> "A task file splits into its groups".
+    #[test]
+    fn a_task_file_splits_into_its_groups() {
+        assert_eq!(
+            shape(TASK_FILE),
+            vec![(2, "1. Setup".to_string()), (2, "2. Build".to_string())]
+        );
+        let sections = split_headings(TASK_FILE);
+        for section in &sections {
+            assert!(
+                !section.body.contains("Intro prose."),
+                "the preamble precedes the first heading and is no section's body"
+            );
+        }
+        assert!(sections[0].body.contains("- [x] 1.1 first"));
+        assert!(sections[0].body.contains("- [ ] 1.2 second"));
+        assert!(!sections[0].body.contains("2.1 third"));
+        assert!(sections[1].body.contains("- [ ] 2.1 third"));
+    }
+
+    /// `specs/artifact-folds/spec.md` -> "A heading inside a fence is body text".
+    #[test]
+    fn a_heading_inside_a_fence_is_body_text() {
+        for input in [FENCED, TILDE_FENCED, QUAD_FENCED] {
+            assert_eq!(
+                shape(input),
+                vec![(2, "Real".to_string()), (3, "Also real".to_string())],
+                "fence fixture: {input:?}"
+            );
+            let sections = split_headings(input);
+            let fence = input
+                .strip_prefix("## Real\n")
+                .and_then(|rest| rest.strip_suffix("### Also real\nx\n"))
+                .expect("fixture shape");
+            assert_eq!(sections[0].body, fence, "the fence is body, verbatim");
+            assert!(sections[0].body.contains("# not a heading"));
+            assert_eq!(sections[1].body, "x\n");
+        }
+
+        // A fence opened with three backticks is not closed by three tildes.
+        let sections = split_headings(MISMATCHED_FENCE);
+        assert_eq!(sections.len(), 1);
+        assert_eq!(sections[0].label, "Real");
+        assert_eq!(
+            sections[0].body,
+            "\n```sh\n# not a heading\n~~~\n\n### Also real\nx\n"
+        );
+    }
+
+    /// `specs/artifact-folds/spec.md` -> "Near-headings are not headings".
+    #[test]
+    fn near_headings_are_not_headings() {
+        assert_eq!(
+            shape(NEAR_HEADINGS),
+            vec![(3, "Indented three".to_string())]
+        );
+        assert_eq!(split_headings(NEAR_HEADINGS)[0].body, "#\n# \n");
+    }
+
+    /// `specs/artifact-folds/spec.md` -> "The splitter is total over degenerate
+    /// input".
+    #[test]
+    fn the_splitter_is_total_over_degenerate_input() {
+        assert!(split_headings("").is_empty());
+        assert!(split_headings("\n\n\n").is_empty());
+
+        let one = split_headings("## a");
+        assert_eq!(one.len(), 1);
+        assert_eq!(one[0].level, 2);
+        assert_eq!(one[0].label, "a");
+        assert_eq!(one[0].body, "");
+
+        // 2,000 CJK code points, each two display columns wide: a 4,000-column
+        // label, which the splitter returns whole because it measures no width.
+        let wide = "漢".repeat(2000);
+        let cjk = split_headings(&format!("### {wide}\n"));
+        assert_eq!(cjk.len(), 1);
+        assert_eq!(cjk[0].level, 3);
+        assert_eq!(cjk[0].label, wide);
+
+        assert!(split_headings(UNTERMINATED_FENCE).is_empty());
+    }
+
+    /// `heading-sections` task 1.4: reassembling each section's heading line and
+    /// `body` reproduces the input less its preamble, over all five scenario
+    /// fixtures and over a file with no trailing newline. Two of them document
+    /// where the canonical heading line is not the input's own bytes: a legally
+    /// indented heading loses its indent, and a file with no final newline gains
+    /// one.
+    #[test]
+    fn reassembling_the_sections_reproduces_the_input_less_its_preamble() {
+        for input in [DELTA_SPEC, FENCED, TILDE_FENCED, QUAD_FENCED] {
+            assert_eq!(reassemble(input), input, "no preamble: {input:?}");
+        }
+
+        assert_eq!(
+            reassemble(TASK_FILE),
+            TASK_FILE
+                .strip_prefix("Intro prose.\n\n")
+                .expect("preamble")
+        );
+
+        let tail = NEAR_HEADINGS
+            .strip_prefix("#Nospace\n####### Seven hashes\n    # Indented four\n")
+            .expect("preamble");
+        assert_eq!(reassemble(NEAR_HEADINGS), tail.trim_start_matches(' '));
+
+        assert_eq!(reassemble(""), "");
+        assert_eq!(reassemble("\n\n\n"), "");
+        assert_eq!(reassemble(UNTERMINATED_FENCE), "");
+        assert_eq!(reassemble("## a"), "## a\n");
+    }
+
+    /// `specs/artifact-folds/spec.md` -> "A file splits at its headings only
+    /// when it is a spec or a tracked task file": the `is_spec_shaped` half.
+    /// It asks `split_headings` rather than scanning the text a second time,
+    /// which is why a `### Requirement:` inside a fence does not count.
+    #[test]
+    fn is_spec_shaped_asks_the_splitter_for_a_level_three_requirement() {
+        assert!(is_spec_shaped(DELTA_SPEC));
+        assert!(!is_spec_shaped(TASK_FILE));
+        assert!(!is_spec_shaped(""));
+        assert!(!is_spec_shaped(
+            "# Doc\n\n```md\n### Requirement: quoted\n```\n"
+        ));
+        assert!(!is_spec_shaped("## Requirement: too shallow\n"));
+        assert!(!is_spec_shaped("#### Requirement: too deep\n"));
+        assert!(!is_spec_shaped("### Requirements\n"));
     }
 
     /// `mouse-input`: the wheel and click actions `Dashboard::apply` gains.
