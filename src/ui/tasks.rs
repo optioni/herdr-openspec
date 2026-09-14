@@ -303,6 +303,42 @@ fn item_lines(item: &crate::tasks::Item, width: u16) -> Vec<crate::ui::markdown:
         .collect()
 }
 
+/// The progress-bar line followed by one blank line — and the **empty
+/// vector** when [`progress_bar`] renders as the empty string at `width`,
+/// so a bar that does not fit costs no blank line either.
+///
+/// Extracted from [`lines`] so `artifact-content`'s foldable walk can draw
+/// the same two rows above the first fold header that the flat tab draws
+/// above its first heading. [`lines`] calls it; the two can therefore not
+/// disagree.
+pub(crate) fn bar_lines(
+    progress: &crate::tasks::Progress,
+    width: u16,
+) -> Vec<crate::ui::markdown::Line> {
+    let bar = progress_bar(progress, width);
+    if bar.is_empty() {
+        return Vec::new();
+    }
+    vec![plain_line(bar), blank_line()]
+}
+
+/// One or more lines per item, in order — no progress bar, no heading
+/// line, no blank separator.
+///
+/// Takes **parsed items** rather than a source string: [`lines`] already
+/// holds `tasks::Group` values and would have to re-serialise each group to
+/// call a string-taking form, which is the duplication this extraction
+/// exists to remove. A folded tab reaches it through
+/// `tasks::parse(&section.text)` on a section body whose own heading has
+/// become the fold header.
+pub(crate) fn items(items: &[crate::tasks::Item], width: u16) -> Vec<crate::ui::markdown::Line> {
+    let mut out = Vec::new();
+    for item in items {
+        out.extend(item_lines(item, width));
+    }
+    out
+}
+
 /// The tracked-tasks tab's body: the bar, a blank line, then
 /// `tasks::parse`'s groups. Empty vector at width 0, matching
 /// `ui::markdown::lines`.
@@ -324,12 +360,7 @@ pub fn lines(
         return Vec::new();
     }
 
-    let mut out = Vec::new();
-    let bar = progress_bar(progress, width);
-    if !bar.is_empty() {
-        out.push(plain_line(bar));
-        out.push(blank_line());
-    }
+    let mut out = bar_lines(progress, width);
 
     let tasks = crate::tasks::parse(source);
 
@@ -352,9 +383,7 @@ pub fn lines(
         if let Some(heading) = &group.heading {
             out.push(heading_line(heading, width));
         }
-        for item in &group.items {
-            out.extend(item_lines(item, width));
-        }
+        out.extend(items(&group.items, width));
         if index != last_index {
             out.push(blank_line());
         }
