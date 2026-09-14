@@ -257,7 +257,7 @@ that tab to the line-cursor model.
 
 - **WHEN** the same dashboard is synced with a reader returning the four-section delta spec
   for the **first** path and `## MODIFIED Requirements\n` for the other two
-- **THEN** `detail.sections` holds six entries: `(Some("degraded-coverage"), 0)`,
+- **THEN** `detail.sections` holds seven entries: `(Some("degraded-coverage"), 0)`,
   `(Some("ADDED Requirements"), 1)`, `(Some("Requirement: Alpha"), 2)`,
   `(Some("Scenario: A works"), 3)`, `(Some("Requirement: Beta"), 2)`, and then
   `(Some("markdown-render"), 0)` and `(Some("tasks-checklist"), 0)`
@@ -513,7 +513,7 @@ rather than to a dropped glyph, and SHALL NOT panic.
 
 #### Scenario: A fold hides a whole subtree
 
-- **WHEN** the six-section spec-glob dashboard above has `detail.expanded` holding `0` — the
+- **WHEN** the seven-section spec-glob dashboard above has `detail.expanded` holding `0` — the
   `degraded-coverage` file section — and is rendered at 120x40 and at 60x40
 - **THEN** the content area's rows are `v degraded-coverage`, `  > ADDED Requirements`,
   `> markdown-render`, and `> tasks-checklist`, in that order
@@ -629,7 +629,7 @@ false.
 
 #### Scenario: Closing an ancestor preserves its subtree's folds
 
-- **WHEN** the six-section spec-glob dashboard with `detail.expanded` holding `0`, `1`, and
+- **WHEN** the seven-section spec-glob dashboard with `detail.expanded` holding `0`, `1`, and
   `2` has the cursor moved to the `degraded-coverage` header row and is given two
   `ToggleSection` actions
 - **THEN** after the first `detail.expanded` holds `1` and `2` — the descendants kept their

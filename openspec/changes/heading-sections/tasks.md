@@ -141,7 +141,7 @@ state". The markdown path only; the tracked-tasks path is group 6.
 - [ ] 4.1 RED: Write failing `ui::detail` and `ui::view` tests for `a_fold_hides_a_whole_subtree`, `a_delta_spec_tab_opens_as_its_operation_headings_alone`, and `a_body_row_is_never_indented_by_its_sections_depth`, and extend the landed `a_narrow_pane_truncates_the_label_and_keeps_the_glyph` with the depth-2 and depth-3 indent cases. Render at 120 and 60 columns.
 - [ ] 4.2 GREEN: Implement the visibility walk — a collapsed labelled section at depth `d` hides every following section of depth greater than `d` until the first at or below `d` — and the `"  " * depth` header indent emitted before the glyph.
 - [ ] 4.3 GREEN: Implement the blank separator after a non-empty open body that a further visible section follows, and skip header emission for a `None` label. Then run `cargo test --all-features` and update every failing landed assertion. **Exactly five failures are expected**, measured by planting the separator in a `git archive HEAD` tree: `ui::detail::tests::a_foldable_tabs_body_is_headers_and_an_open_sections_markdown_beneath_its_own`, `ui::view::tests::folding_one_section_shows_its_body_and_leaves_its_siblings_shut`, `ui::driver::tests::a_fold_reads_no_file`, `ui::app::tests::space_opens_the_section_under_the_cursor_and_leaves_its_siblings_shut`, and `ui::app::tests::space_inside_an_open_section_folds_it_and_moves_the_cursor_to_its_header`. A sixth means the separator rule is wider than specified; fewer than five means it did not fire. The last of the five is **semantic** — `expanded` becomes `{0,1}` instead of `{0,2}` because the extra row shifts which section `detail.scroll` resolves to — so it is not found by grepping for adjacency.
-- [ ] 4.4 RED→GREEN: Extend the two landed width properties — `content_lines_total` and `no_content_lines_line_exceeds_its_width_at_any_width`, both in `src/ui/detail.rs` — with the six-section spec-glob and preamble fixtures over widths 0 through 130, asserting also that every `SectionHeader`'s carried `section` addresses an entry of `detail.sections`.
+- [ ] 4.4 RED→GREEN: Extend the two landed width properties — `content_lines_total` and `no_content_lines_line_exceeds_its_width_at_any_width`, both in `src/ui/detail.rs` — with the seven-section spec-glob and preamble fixtures over widths 0 through 130, asserting also that every `SectionHeader`'s carried `section` addresses an entry of `detail.sections`.
 - [ ] 4.5 REFACTOR: Extract the visibility walk if the header emission and the `selected` pass ended up scanning twice, or record that they did not.
 - [ ] 4.6 VERIFY: `cargo test --all-features` — green, all five repaired — and `/bin/sh scripts/gates/colwidth.sh` and `notabseam.sh` exit 0.
 
@@ -170,12 +170,25 @@ cursor (-> D10), in one group because each one's tests need the others: a seeded
 observable once the tab renders headers, and the clamp only changes once the tab is foldable.
 Tasks 6.1's three `run_loop` rows are this change's end-to-end evidence and are RED at HEAD.
 
-- [ ] 6.1 RED: Write the failing `run_loop` tests — `j_walks_the_groups_rather_than_scrolling_the_lines`, and the two rewritten halves of the landed `checklist_scroll_is_clamped` in `src/ui/driver.rs` (twenty items under **two** headings takes the cursor rule; the same twenty under none takes the offset rule). Confirm each fails because the tab is not yet foldable.
+- [ ] 6.1 RED: Write the failing `run_loop` tests — `j_walks_the_groups_rather_than_scrolling_the_lines`, and the **cursor-rule** half of the landed `checklist_scroll_is_clamped` in `src/ui/driver.rs` (twenty items under **two** headings). Confirm each fails because the tab is not yet foldable.
+
+      Scope correction, made during group 3. The offset-rule half — the same twenty items under
+      **no** heading — already landed there: group 3's split gate made `twenty_task_source`'s
+      single `## Tasks` heading a section `label`, which left one section, no header row, and a
+      checklist body that clamped identically to the markdown one, collapsing the `assert_ne!`
+      that is the test's whole point. The fixture is now headingless, which is this half
+      verbatim, and both tests are green. Only the two-heading half remains for this group.
 - [ ] 6.2 RED: Write the failing rendering tests — `a_foldable_tasks_tab_draws_its_groups_as_fold_headers`, `the_progress_bar_leads_the_folded_task_groups`, `a_task_file_holding_no_items_does_not_split`, `a_missing_artifact_file_renders_no_content_yet_and_nothing_else`, `a_mostly_finished_task_file_opens_at_its_first_unfinished_group`, `the_tasks_tab_seeds_its_folds_once_on_the_key_change`, `a_completed_group_does_not_fold_shut_under_the_reader` — and rewrite the landed `tasks_tab_shows_checkboxes` in `src/ui/view.rs` and `the_tracked_tasks_tab_concatenates_rather_than_folding` in `src/ui/detail.rs`.
 - [ ] 6.3 GREEN: Delete `content_lines`' tracked-tasks exemption branch; emit `bar_lines` above the section walk and render each open section's body with `items`.
 - [ ] 6.4 GREEN: Implement the seed in `sync_detail` — the subtree walk (a section plus every following section of strictly greater depth, to the first at or below its own) and insertion of those whose `tasks::count` over the concatenated subtree text reports `completed < total`, on the key change only.
 - [ ] 6.5 CHECK: Confirm `normalise_scroll` branches on `Detail::foldable()` and not on `tracks_tasks` — it already does, at `src/ui/app.rs:998`, so this is a confirmation and not an edit. Change it only if the confirmation fails.
-- [ ] 6.6 CHECK: Confirm the landed `marked_tab_renders_checklist_body` (`src/ui/view.rs`), `marked_tab_returns_the_checklist_body` (`src/ui/detail.rs`), `prose_only_reads_no_tasks_yet` (`src/ui/view.rs`) and `tab_move_resets_and_reclamps` (`src/ui/driver.rs`) still pass unedited — the `total > 0` half of the split gate exists to keep the first three true by construction.
+- [ ] 6.6 CHECK: Confirm the landed `marked_tab_renders_checklist_body` (`src/ui/view.rs`), `marked_tab_returns_the_checklist_body` (`src/ui/detail.rs`) and `prose_only_reads_no_tasks_yet` (`src/ui/view.rs`) still pass unedited — the `total > 0` half of the split gate exists to keep all three true by construction.
+
+      `tab_move_resets_and_reclamps` (`src/ui/driver.rs`) was **removed from this list** during
+      group 3. The claim that it passes unedited was wrong: it shares `twenty_task_source` with
+      `checklist_scroll_is_clamped` and failed on its own `scroll == 9` precondition for the same
+      reason. It was repaired with that fixture in group 3 and is green; confirm it still is,
+      but it is not an unedited test.
 - [ ] 6.7 CHECK: Persistence gate — confirm nothing is written to disk, that `expanded` stays per-session, and that the only cache is the existing `(change directory, tab)` key; record that no migration, backfill, invalidation, or index rebuild applies.
 - [ ] 6.8 VERIFY: `cargo test --all-features` — green, the three `run_loop` rows included — and `/bin/sh scripts/gates/readonly-ui.sh` and `noblock.sh` exit 0.
 

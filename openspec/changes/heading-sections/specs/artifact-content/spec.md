@@ -434,8 +434,8 @@ what the literal must not eat is now the region's right gutter column.
   a single section only; one with both; one whose section is a 200-character paragraph; one
   whose section is a 200-column CJK paragraph; one whose `tab` is past the end of the
   artifact list; one holding three sections with `expanded` empty; and one holding three
-  sections with `expanded` holding `0`, `1`, `2`, and `7`; one holding a six-section spec
-  glob whose depths run `0, 1, 2, 3, 2, 0`; and one holding a `None`-labelled preamble
+  sections with `expanded` holding `0`, `1`, `2`, and `7`; one holding a seven-section spec
+  glob whose depths run `0, 1, 2, 3, 2, 0, 0`; and one holding a `None`-labelled preamble
   section followed by two depth-0 task groups
 - **THEN** no call panics at either width for any combination
 - **AND** the wrapped paragraph produces strictly more lines at `58` than at `78`, so the
@@ -447,7 +447,7 @@ what the literal must not eat is now the region's right gutter column.
 #### Scenario: No `content_lines` line exceeds its width at any width
 
 - **WHEN** `content_lines` is called at **every** width from `0` through `130`, for each of
-  the same nine `Detail` values and four `change` values above, and additionally for an
+  the same eleven `Detail` values and four `change` values above, and additionally for an
   empty `Detail` with a `None` change — the `No content yet` case
 - **THEN** no call panics, and at every width every returned line's `layout::columns` is at
   most that width
@@ -457,7 +457,7 @@ what the literal must not eat is now the region's right gutter column.
   the mandated pair
 - **AND** the foldable cases are included at widths `0` through `13`, the range in which a
   header row's glyph, its separating space, and its label are together longer than the region
-- **AND** the six-section spec-glob case is included over that same range, where a depth-3
+- **AND** the seven-section spec-glob case is included over that same range, where a depth-3
   header's six columns of indent alone exceed the region — the row degrades to truncated
   indent rather than to a dropped glyph, and does not panic
 #### Scenario: A foldable tab's body is headers, and an open section's markdown beneath its own
@@ -525,7 +525,7 @@ now pins the **reversal**: the tab folds, and concatenation is gone.
 
 #### Scenario: A body row is never indented by its section's depth
 
-- **WHEN** the six-section spec-glob dashboard is rendered at 120x40 and at 60x40 with
+- **WHEN** the seven-section spec-glob dashboard is rendered at 120x40 and at 60x40 with
   `detail.expanded` holding every index
 - **THEN** the rows of `Requirement: Alpha`'s body — a depth-2 section — begin at column
   zero of the content area, with no leading spaces the source did not carry

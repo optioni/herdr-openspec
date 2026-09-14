@@ -1011,14 +1011,20 @@ mod tests {
         }
     }
 
-    /// The checklist's own text: one heading, twenty unchecked items —
-    /// group 5's grammar over `task-parsing`'s parse, so its line count
-    /// (heading + bar + blank + twenty items) genuinely differs from what
+    /// The checklist's own text: twenty unchecked items under **no**
+    /// heading — the checklist grammar over `task-parsing`'s parse, so its
+    /// line count (bar + blank + twenty items) genuinely differs from what
     /// `ui::markdown::lines` produces for the same bytes.
+    ///
+    /// Headingless on purpose. A tracked-tasks file carrying items now
+    /// splits at its headings, so one heading would put `## Tasks` into a
+    /// section `label` and leave a single section — not foldable, and with
+    /// the heading row gone the checklist and the markdown body would clamp
+    /// to the same line, which is the one thing the assertion below exists
+    /// to deny. Twenty items under no heading is the **offset-rule** half of
+    /// task 6.1; group 6 adds the cursor-rule half, twenty under two.
     fn twenty_task_source() -> String {
-        std::iter::once("## Tasks\n".to_string())
-            .chain((0..20).map(|i| format!("- [ ] line-{i:02}\n")))
-            .collect()
+        (0..20).map(|i| format!("- [ ] line-{i:02}\n")).collect()
     }
 
     /// A dashboard whose one selected change carries two artifacts —
@@ -1125,9 +1131,12 @@ mod tests {
             )
             .expect("loop ends");
 
-            // heading (1) + bar (1) + blank (1) + twenty items (20) = 23
-            // lines; a 14-row content area clamps to 23 - 14 = 9, not 20.
-            assert_eq!(dashboard.detail.scroll, 9, "width {width}");
+            // bar (1) + blank (1) + twenty items (20) = 22 lines; a 14-row
+            // content area clamps to 22 - 14 = 8, not 20. The source carries
+            // no heading, so it contributes one `None`-labelled section and
+            // the tab stays non-foldable — this is the offset rule, and the
+            // clamp is still an offset rather than a line cursor.
+            assert_eq!(dashboard.detail.scroll, 8, "width {width}");
 
             let interior = if width == 60 { 58 } else { 78 };
             let markdown_len = crate::ui::markdown::lines(&source, interior).len();
@@ -1188,7 +1197,9 @@ mod tests {
                 Duration::from_millis(1),
             )
             .expect("first stage ends");
-            assert_eq!(dashboard.detail.scroll, 9, "width {width}: precondition");
+            // 8, for the reason recorded in `checklist_scroll_is_clamped`:
+            // the shared fixture carries no heading row.
+            assert_eq!(dashboard.detail.scroll, 8, "width {width}: precondition");
 
             // The same run continues: a Press of `1` — selecting the
             // unmarked `proposal` artifact — then quit, to check the
