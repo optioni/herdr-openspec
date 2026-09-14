@@ -1027,6 +1027,25 @@ mod tests {
         (0..20).map(|i| format!("- [ ] line-{i:02}\n")).collect()
     }
 
+    /// The very same twenty unchecked items, split across **two** `##`
+    /// headings — the **cursor-rule** half of task 6.1. Two headings yield two
+    /// sections, which is what makes the tab foldable and puts
+    /// `normalise_scroll` on the line-cursor branch; the headingless source
+    /// above yields one and keeps the offset branch, so the two runs differ in
+    /// exactly the one thing the scenario exists to discriminate.
+    fn twenty_task_source_under_two_headings() -> String {
+        let first: String = (0..10).map(|i| format!("- [ ] line-{i:02}\n")).collect();
+        let second: String = (10..20).map(|i| format!("- [ ] line-{i:02}\n")).collect();
+        format!("## A\n\n{first}\n## B\n\n{second}")
+    }
+
+    /// A task file of three **complete** groups of two items each — every
+    /// subtree finished, so `sync_detail`'s seed opens none of them and the
+    /// tab draws three collapsed headers over six hidden item lines.
+    const THREE_COMPLETE_GROUPS: &str = "## 1. A\n\n- [x] a1\n- [x] a2\n\n\
+         ## 2. B\n\n- [x] b1\n- [x] b2\n\n\
+         ## 3. C\n\n- [x] c1\n- [x] c2\n";
+
     /// A dashboard whose one selected change carries two artifacts —
     /// `proposal` (unmarked) at position 0 and `tasks` (marked
     /// `tracks_tasks`) at position 1 — with the tracked-tasks tab
@@ -1034,9 +1053,17 @@ mod tests {
     /// tab to move *away from* the checklist to, which a single-artifact
     /// change cannot provide.
     fn twenty_task_detail_dashboard() -> Dashboard {
+        task_detail_dashboard(0, 20)
+    }
+
+    /// `twenty_task_detail_dashboard`'s shape with the change's own
+    /// `progress` supplied: the progress bar counts the **change**, not the
+    /// file, so a fixture whose file is wholly finished still needs its own
+    /// pair rather than the twenty-item one.
+    fn task_detail_dashboard(completed: usize, total: usize) -> Dashboard {
         let change = crate::changes::fixture::track_tasks_at(
             crate::changes::fixture::with_artifacts(
-                crate::changes::fixture::active("detail-view", 0, 20),
+                crate::changes::fixture::active("detail-view", completed, total),
                 &[
                     ("proposal", &["/repo/p.md"]),
                     ("tasks", &["/repo/tasks.md"]),
@@ -1159,6 +1186,234 @@ mod tests {
                 "width {width}: the clamp used the body that was actually drawn"
             );
         }
+    }
+
+    /// `detail-scroll` :: "Scrolling the checklist is clamped against the
+    /// checklist's own length" — the **cursor-rule** half: the same twenty
+    /// items under **two** headings, which split into two sections and make
+    /// the tab foldable.
+    ///
+    /// Deviation from the scenario's letter, recorded here rather than left
+    /// to be rediscovered: the scenario scripts twenty `j` presses, but the
+    /// foldable body is twenty-five rows (bar, blank, two open headers, the
+    /// twenty items, and one blank separator), so twenty presses land at
+    /// twenty and the clamp never binds at all — the scenario's own "not to
+    /// `20`" and "the last row holds the checklist's last item" clauses both
+    /// require it to bind. Thirty presses are scripted so it does.
+    #[test]
+    fn checklist_scroll_is_clamped_to_the_cursor_when_the_file_splits() {
+        for width in [120u16, 60] {
+            let backend = TestBackend::new(width, 20);
+            let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+            let mut dashboard = twenty_task_detail_dashboard();
+            let source = twenty_task_source_under_two_headings();
+
+            let mut presses: Vec<_> = (0..30)
+                .map(|_| Ok(Some(press(KeyCode::Char('j'), KeyModifiers::NONE))))
+                .collect();
+            presses.push(Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))));
+            let mut events = Script::new(presses);
+
+            let recorder = crate::testutil::RecordingReader::always(Ok(source.clone()));
+            let read = |p: &std::path::Path| recorder.read(p);
+
+            let mut fs = crate::watch::none();
+            let mut refresher = crate::refresh::none();
+            let mut agents = crate::agents::none();
+            let mut launcher = crate::launch::none();
+            let mut live = crate::ui::driver::Live {
+                fs: &mut *fs,
+                refresher: &mut *refresher,
+                agents: &mut *agents,
+                launcher: &mut *launcher,
+            };
+            run_loop(
+                &mut terminal,
+                &mut dashboard,
+                &mut events,
+                &mut live,
+                &read,
+                Duration::from_millis(1),
+            )
+            .expect("loop ends");
+
+            assert_eq!(
+                dashboard.detail.sections.len(),
+                2,
+                "width {width}: two headings, two sections"
+            );
+            assert!(
+                dashboard.detail.foldable(),
+                "width {width}: two sections make the tab foldable"
+            );
+
+            let interior = if width == 60 { 58 } else { 78 };
+            let rows = crate::ui::detail::content_lines(
+                &dashboard.detail,
+                dashboard.selected_change(),
+                interior,
+            );
+            // bar + blank + two open headers + twenty items + one separator.
+            assert_eq!(rows.len(), 25, "width {width}");
+            assert_eq!(
+                dashboard.detail.scroll,
+                rows.len() - 1,
+                "width {width}: the cursor rule clamps to the last line"
+            );
+            assert_ne!(dashboard.detail.scroll, 20, "width {width}");
+
+            let markdown_len = crate::ui::markdown::lines(&source, interior).len();
+            assert_ne!(
+                dashboard.detail.scroll,
+                markdown_len.saturating_sub(14),
+                "width {width}: the clamp must differ from the markdown body's own"
+            );
+
+            let buf = terminal.backend().buffer();
+            let base = if width == 60 { 1 } else { 42 };
+            let row_at = |y: u16, len: usize| -> String {
+                (base..base + len as u16)
+                    .map(|x| row_text(buf, y).chars().nth(x as usize).unwrap())
+                    .collect()
+            };
+            assert_eq!(
+                row_at(18, 11),
+                "[ ] line-19",
+                "width {width}: the clamp used the body that was actually drawn"
+            );
+        }
+    }
+
+    /// `detail-scroll` :: "`j` walks the groups rather than scrolling the
+    /// lines".
+    #[test]
+    fn j_walks_the_groups_rather_than_scrolling_the_lines() {
+        for width in [120u16, 60] {
+            let backend = TestBackend::new(width, 40);
+            let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+            let mut dashboard = task_detail_dashboard(6, 6);
+            let recorder =
+                crate::testutil::RecordingReader::always(Ok(THREE_COMPLETE_GROUPS.to_string()));
+            let read = |p: &std::path::Path| recorder.read(p);
+
+            let interior = if width == 60 { 58 } else { 78 };
+            let base = if width == 60 { 1u16 } else { 42 };
+            let content_first_row = 5u16;
+
+            // Stage one: two `j` presses over the collapsed groups.
+            drive(&mut terminal, &mut dashboard, &read, &['j', 'j']);
+
+            assert_eq!(
+                dashboard.detail.expanded,
+                std::collections::BTreeSet::new(),
+                "width {width}: every subtree is complete, so the seed opened none"
+            );
+            assert_eq!(
+                dashboard.detail.scroll, 2,
+                "width {width}: rows 0 and 1 are the progress bar and its blank line"
+            );
+            {
+                let rows = crate::ui::detail::content_lines(
+                    &dashboard.detail,
+                    dashboard.selected_change(),
+                    interior,
+                );
+                assert_eq!(
+                    rows.len(),
+                    5,
+                    "width {width}: three headers over six hidden items"
+                );
+                let buf = terminal.backend().buffer();
+                assert_eq!(
+                    cell(buf, base, content_first_row + 2).style(),
+                    crate::ui::palette::style(crate::ui::palette::Role::DetailSectionSelected),
+                    "width {width}: the cursor's own header row is the emphasised one"
+                );
+                for y in content_first_row..content_first_row + 5 {
+                    assert!(
+                        !row_text(buf, y).contains("[✓]"),
+                        "width {width}: no item line is drawn behind a collapsed header"
+                    );
+                }
+            }
+
+            // Stage two: `Space` opens the first group.
+            drive(&mut terminal, &mut dashboard, &read, &[' ']);
+            assert_eq!(dashboard.detail.scroll, 2, "width {width}");
+            {
+                let buf = terminal.backend().buffer();
+                let row_at = |y: u16, len: usize| -> String {
+                    (base..base + len as u16)
+                        .map(|x| row_text(buf, y).chars().nth(x as usize).unwrap())
+                        .collect()
+                };
+                assert_eq!(row_at(content_first_row + 3, 8), "[✓] a1", "width {width}");
+                assert_eq!(row_at(content_first_row + 4, 8), "[✓] a2", "width {width}");
+            }
+
+            // Stage three: two further `j` presses.
+            drive(&mut terminal, &mut dashboard, &read, &['j', 'j']);
+            assert_eq!(
+                dashboard.detail.scroll, 4,
+                "width {width}: the cursor walks the RENDERED list"
+            );
+            let rows = crate::ui::detail::content_lines(
+                &dashboard.detail,
+                dashboard.selected_change(),
+                interior,
+            );
+            assert_eq!(
+                rows[4].text().trim_end(),
+                "[✓] a2",
+                "width {width}: row 4 is the first group's second item, not a section index"
+            );
+            assert!(
+                matches!(
+                    rows[6].kind,
+                    crate::ui::detail::ContentKind::SectionHeader { section: 1, .. }
+                ),
+                "width {width}: the second group's header moved down with the rows drawn \
+                 above it, which is what a rendered-list cursor means"
+            );
+        }
+    }
+
+    /// One `run_loop` stage: the scripted `keys` followed by `q`, over a
+    /// terminal and dashboard that persist across stages. Extracted because
+    /// `j_walks_the_groups_rather_than_scrolling_the_lines` has to observe
+    /// the buffer between presses, which a single run cannot show.
+    fn drive(
+        terminal: &mut ratatui::Terminal<TestBackend>,
+        dashboard: &mut Dashboard,
+        read: &dyn Fn(&std::path::Path) -> Result<String, String>,
+        keys: &[char],
+    ) {
+        dashboard.quit = false;
+        let mut presses: Vec<_> = keys
+            .iter()
+            .map(|k| Ok(Some(press(KeyCode::Char(*k), KeyModifiers::NONE))))
+            .collect();
+        presses.push(Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))));
+        let mut events = Script::new(presses);
+        let mut fs = crate::watch::none();
+        let mut refresher = crate::refresh::none();
+        let mut agents = crate::agents::none();
+        let mut launcher = crate::launch::none();
+        let mut live = crate::ui::driver::Live {
+            fs: &mut *fs,
+            refresher: &mut *refresher,
+            agents: &mut *agents,
+            launcher: &mut *launcher,
+        };
+        run_loop(
+            terminal,
+            dashboard,
+            &mut events,
+            &mut live,
+            read,
+            Duration::from_millis(1),
+        )
+        .expect("stage ends");
     }
 
     #[test]
