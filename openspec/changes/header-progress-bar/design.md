@@ -271,8 +271,11 @@ product is computed, and every ordinary value is provably unchanged (4/9 at g=68
 way; 3/10 at g=12 → 3; 4/42 at g=12 → 1). *Alternative rejected:* qualifying the property with
 a saturation regime, which weakens shipped text to accommodate a defect.
 
-**Decision 6 — `gauge_of` becomes total.** It currently divides by `total` with no guard,
-safe only because its one caller returns before reaching it at `total == 0`. A `pub(crate)`
+**Decision 6 — `gauge_of` becomes total.** It divides by `total` with no guard, safe only
+because its one caller returns before reaching it at `total == 0`. Only that arm removes a
+panic: `gauge_of(p, 0)` already returns the empty string today, since `filled = completed * 0 /
+total` is `0` and both push loops are empty, so the `g == 0` half of the guard codifies
+behaviour rather than changing it. A `pub(crate)`
 function is reachable from a call site it does not control, so it gains a guard returning the
 empty string at `g == 0` or `total == 0`. Neither production call site reaches either value,
 so no rendered output moves — the guard is a contract for the next caller, not a behaviour

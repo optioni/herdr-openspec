@@ -49,7 +49,7 @@ directly after them so group 4's run is not polluted by a failure neither group 
 | Existing tests that actually fail | 3 in `src/ui/detail.rs`, plus 1 in `tests/degraded_coverage.rs` | measured, see the red set above |
 | Gauge glyphs in `src/ui/detail.rs` / `src/ui/tasks.rs` | 0 / 19 | `grep -c '█\|░' src/ui/detail.rs src/ui/tasks.rs` |
 | `covers` ranges pointing into the edited files | 4 — `src/ui/detail.rs` ×3, `src/ui/tasks.rs` ×1 | `grep -n 'src/ui/detail.rs:\|src/ui/tasks.rs:' tests/degraded-coverage.toml` |
-| Longest change name in the repo | 22 (`foldable-spec-sections`) | `ls openspec/changes/ openspec/changes/archive/ \| sed 's/^[0-9-]\{11\}//' \| awk '{print length, $0}' \| sort -rn \| head -1` |
+| Longest change name in the repo | 22 (`foldable-spec-sections`) | `{ ls openspec/changes/; ls openspec/changes/archive/ \| sed 's/^[0-9-]\{11\}//'; } \| sed 's#/$##' \| grep -vE '^\.\|:$\|^$' \| awk '{print length, $0}' \| sort -rn \| head -1` — two `ls` arguments emit a `dirname:` header that wins the numeric sort, so the filter is load-bearing |
 
 **The RED protocol.** `cargo test` exits 0 when a filter matches nothing, so a filtered run
 cannot tell "no such test" from "test failed" — and a test whose *name* is new reports the same
@@ -108,8 +108,12 @@ Everything here records a value that stops existing once group 2 lands. It must 
 ## 1. The shared gauge run
 <!-- kind: behavior -->
 
+- [ ] 1.1a NOTE: `gauge_of(&Progress { completed: 4, total: 9 }, 0)` already returns the empty
+  string today — `filled = 4 * 0 / 9 = 0` and both push loops are empty — so the `g == 0` arm of
+  1.4's guard codifies existing behaviour. Only the `total == 0` arm removes a division by zero.
 - [ ] 1.1 RED: In `src/ui/tasks.rs`, write `the_gauge_is_full_exactly_when_the_change_is_complete`,
-  `the_promoted_function_is_total_at_both_guard_values`, and the two saturation scenarios —
+  `the_promoted_function_is_total_at_both_guard_values` (only its `total == 0` assertion is
+  RED; see 1.1a), and the two saturation scenarios —
   `the_completeness_property_holds_at_the_saturation_boundary` and
   `a_saturating_progress_renders_a_full_gauge_and_a_full_percentage`. Each must carry the
   `Progress { completed: usize::MAX, total: usize::MAX }` clause at `g` of 12, 48 and 68; that
@@ -150,8 +154,8 @@ task that stops at "update the expectation" will see green and move on.
 - [ ] 2.1 RED: Rewrite `the_full_header_grammar_at_both_mandated_interior_widths`
   (`src/ui/detail.rs:868`) — name field 65/45 → 52/32, expected tail gains a 12-column gauge
   holding one `█` — and `an_empty_schema_name_is_a_cell_of_two_characters_not_an_absent_one`
-  (`:950`), whose `contains("() [1/2]")` the gauge splits; assert the full expected row with six
-  `█`. Both hold literal full-row expectations, so both report `FAILED` under `redfail` on the
+  (`:950`), whose `contains("() [1/2]")` the gauge splits; assert the full expected row with a
+  56-column name field at 78 and 36 at 58 (`58 - 3 - 2 - 12 - 5`) and six `█`. Both hold literal full-row expectations, so both report `FAILED` under `redfail` on the
   expectation edit alone.
 - [ ] 2.2 RED-by-addition: Rewrite `the_cells_are_dropped_whole_in_order_as_the_row_narrows`
   (`:919`) — `w >= 13` becomes `w >= 26`, widths 26 and 25 join the sample — and
@@ -223,7 +227,9 @@ loud case out of group 4's test run.
 - [ ] 3.1 CHANGE: Re-run 0.1's command and, for every entry whose sha moved, update its range so
   it names the same code as `/tmp/covers-baseline.txt`. Expect `src/ui/detail.rs` ×3 and
   `src/ui/tasks.rs` ×1 to move and nothing else; investigate any other mover rather than
-  re-pointing it.
+  re-pointing it. **Four distinct ranges, five lines to edit**: `src/ui/detail.rs:265-272` is
+  written in two `covers` arrays, at `tests/degraded-coverage.toml:76` and again at `:116`, and
+  0.1's `sort -u` collapses them — updating one site leaves 3.2's diff non-empty.
 - [ ] 3.2 VERIFY: Re-run and diff against the baseline — every sha equal — then
   `cargo test --test degraded_coverage` green at `10 passed`.
 
@@ -315,7 +321,10 @@ header, measured. Only 4.3's new test is RED for free here.
 - [ ] 7.4 VERIFY: `make gates` — exit 0, including `COLWIDTH OK` naming the nine pure files and
   `OPENSPEC-UNTOUCHED OK` (commit the artifacts first; it fails on untracked files under
   `openspec/`).
-- [ ] 7.5 VERIFY: `make test` — green, at or above the 1311 lib tests HEAD reported.
+- [ ] 7.5 VERIFY: `make test` — green, at or above the 1311 lib tests HEAD reported. If
+  `gate_controls_catch_their_plants` fails with "the real working tree changed while running the
+  gate controls", that is its whole-tree digest reacting to a concurrent write, not a defect in
+  this change; re-run `cargo test --test gate_controls` with nothing else touching the tree.
 - [ ] 7.6 VERIFY: `make coverage` — at or above the 80% line floor and the production-slice
   floor. Never lower, waive, or exclude; add tests if it falls short.
 - [ ] 7.7 VERIFY: `make check` as the single gate — exit 0, naming the failing sub-command if

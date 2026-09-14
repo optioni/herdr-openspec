@@ -188,7 +188,9 @@ drawn from the same `Change::progress` SHALL NOT be able to disagree about how f
 change is, and the only way to guarantee that is for there to be one run to disagree about.
 
 `gauge_of` SHALL become **total**, returning the empty string when `g == 0` or when
-`progress.total == 0` rather than dividing by zero. Neither value is reachable from either
+`progress.total == 0`. Only the second of those removes a division by zero; at `g == 0` the
+function already returns the empty string, since `filled` is `0` and both push loops are empty,
+so that arm fixes existing behaviour in place rather than changing it. Neither value is reachable from either
 production call site — `progress_bar` returns before reaching it at `total == 0` and draws
 no zero-width gauge, and `detail-header` draws no gauge cell at all at `total == 0` — so the
 guard changes no rendered output anywhere. It is required because a `pub(crate)` function is
@@ -276,6 +278,9 @@ rendering moves.
 - **WHEN** `gauge_of(&Progress { completed: 4, total: 9 }, 0)` is called, and
   `gauge_of(&Progress { completed: 0, total: 0 }, 12)` is called
 - **THEN** neither call panics and both return the empty string
+- **AND** only the second is a behaviour change: the first already returns the empty string
+  against the implementation this requirement is written for, so it is a characterization and
+  the `total == 0` call is the one that fails
 - **AND** `progress_bar`'s own results for `Progress { completed: 0, total: 0 }` at widths
   `78`, `58`, `3`, and `2` are still exactly `[-]`, `[-]`, `[-]`, and the empty string, so
   the guard did not reroute a path this capability already specifies
