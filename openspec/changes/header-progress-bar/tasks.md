@@ -298,13 +298,13 @@ So do not expect that failure, and do not treat its absence as evidence the rang
 correct — silence is the *likelier* outcome and the more dangerous one. Re-anchor unconditionally
 against the baseline shas, which detect the slide either way.
 
-- [ ] 3.1 CHANGE: Re-run 0.1's command and, for every entry whose sha moved, update its range so
+- [x] 3.1 CHANGE: Re-run 0.1's command and, for every entry whose sha moved, update its range so
   it names the same code as `/tmp/covers-baseline.txt`. Expect `src/ui/detail.rs` ×3 and
   `src/ui/tasks.rs` ×1 to move and nothing else; investigate any other mover rather than
   re-pointing it. **Four distinct ranges, five lines to edit**: `src/ui/detail.rs:265-272` is
   written in two `covers` arrays, at `tests/degraded-coverage.toml:76` and again at `:116`, and
   0.1's `sort -u` collapses them — updating one site leaves 3.2's diff non-empty.
-- [ ] 3.2 VERIFY: Re-run and diff against the baseline — every sha equal — then
+- [x] 3.2 VERIFY: Re-run and diff against the baseline — every sha equal — then
   `cargo test --test degraded_coverage` green at `10 passed`.
 
 ## 4. Change Review
