@@ -85,10 +85,11 @@ fails to compile at each of its **67** construction sites rather than defaulting
 → exit **0**. Its negative control is already recorded in `tests/gate-controls.toml` and run
 by `cargo test --all-features gate_controls`.
 
-- [ ] 2.1 CHARACTERIZE: Run `cargo test --all-features` and record it green, so any later red is attributable to this change rather than inherited.
-- [ ] 2.2 REFACTOR: Change `label` to `Option<String>`, add `depth: usize`, and update all **63** construction and destructuring sites to `Some(..)` and `0`. Nothing else moves — `Detail::foldable` stays `sections.len() > 1`.
-- [ ] 2.3 CHECK: Contract gate — re-read design.md -> Contracts, confirm the only consumers are `sync_detail`, `content_lines`, `Detail::foldable`, and test fixtures, and that no serialized or persisted form exists.
-- [ ] 2.4 VERIFY: `cargo test --all-features` — green with the characterization tests unchanged — and the `NODEFAULT-UI` invocation above still exits 0.
+- [x] 2.1 CHARACTERIZE: Run `cargo test --all-features` and record it green, so any later red is attributable to this change rather than inherited.
+- [x] 2.2 REFACTOR: Change `label` to `Option<String>`, add `depth: usize`, and update all **63** construction and destructuring sites to `Some(..)` and `0`. Nothing else moves — `Detail::foldable` stays `sections.len() > 1`.
+- [x] 2.3 CHECK: Contract gate — re-read design.md -> Contracts, confirm the only consumers are `sync_detail`, `content_lines`, `Detail::foldable`, and test fixtures, and that no serialized or persisted form exists.
+  - Contract gate result: consumers confirmed by the compiler at exactly four sites — `sync_detail` (the one producer), `ui::detail::content_lines`, `Detail::foldable` (`sections.len() > 1`, untouched), and test fixtures; the type derives only `Debug, Clone, PartialEq, Eq`, so there is no serialized, wire, or persisted form.
+- [x] 2.4 VERIFY: `cargo test --all-features` — green with the characterization tests unchanged — and the `NODEFAULT-UI` invocation above still exits 0.
 
 ## 3. Section construction in `sync_detail`
 

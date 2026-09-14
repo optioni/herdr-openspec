@@ -397,7 +397,7 @@ pub fn content_lines(
                 out.push(ContentRow {
                     line: crate::ui::markdown::Line {
                         segments: vec![crate::ui::markdown::Segment {
-                            text: header(&section.label, expanded, width),
+                            text: header(section.label.as_deref().unwrap_or(""), expanded, width),
                             face: crate::ui::markdown::Face::plain(),
                         }],
                     },
@@ -496,16 +496,19 @@ mod tests {
         Detail {
             sections: vec![
                 ArtifactSection {
-                    label: "degraded-coverage".to_string(),
+                    label: Some("degraded-coverage".to_string()),
                     text: "one\n".to_string(),
+                    depth: 0,
                 },
                 ArtifactSection {
-                    label: "markdown-render".to_string(),
+                    label: Some("markdown-render".to_string()),
                     text: "two\n".to_string(),
+                    depth: 0,
                 },
                 ArtifactSection {
-                    label: "tasks-checklist".to_string(),
+                    label: Some("tasks-checklist".to_string()),
                     text: "three\n".to_string(),
+                    depth: 0,
                 },
             ],
             scroll: 0,
@@ -526,8 +529,9 @@ mod tests {
                 Vec::new()
             } else {
                 vec![ArtifactSection {
-                    label: String::new(),
+                    label: Some(String::new()),
                     text: source.to_string(),
+                    depth: 0,
                 }]
             },
             scroll: 0,
@@ -1689,8 +1693,9 @@ mod tests {
             for (tab, source_heading) in [(0, "proposal"), (1, "specs"), (2, "design")] {
                 let d = Detail {
                     sections: vec![ArtifactSection {
-                        label: String::new(),
+                        label: Some(String::new()),
                         text: sources[tab].to_string(),
+                        depth: 0,
                     }],
                     scroll: 0,
                     tab,
@@ -2084,12 +2089,14 @@ mod tests {
             let d = Detail {
                 sections: vec![
                     ArtifactSection {
-                        label: String::new(),
+                        label: Some(String::new()),
                         text: "## 1. Setup\n- [x] a\n".to_string(),
+                        depth: 0,
                     },
                     ArtifactSection {
-                        label: String::new(),
+                        label: Some(String::new()),
                         text: "## 2. Build\n- [ ] b\n".to_string(),
+                        depth: 0,
                     },
                 ],
                 scroll: 0,
@@ -2143,8 +2150,9 @@ mod tests {
         for width in [78, 58] {
             let d = Detail {
                 sections: vec![ArtifactSection {
-                    label: String::new(),
+                    label: Some(String::new()),
                     text: source.to_string(),
+                    depth: 0,
                 }],
                 scroll: 0,
                 tab: 1,
@@ -2180,8 +2188,9 @@ mod tests {
             // tab 0 ("proposal") is not the marked position.
             let d = Detail {
                 sections: vec![ArtifactSection {
-                    label: String::new(),
+                    label: Some(String::new()),
                     text: source.to_string(),
+                    depth: 0,
                 }],
                 scroll: 0,
                 tab: 0,
@@ -2213,8 +2222,9 @@ mod tests {
         for width in [78, 58] {
             let d = Detail {
                 sections: vec![ArtifactSection {
-                    label: String::new(),
+                    label: Some(String::new()),
                     text: source.to_string(),
+                    depth: 0,
                 }],
                 scroll: 0,
                 tab: 7,
@@ -2679,16 +2689,19 @@ mod tests {
         let cjk_detail = Detail {
             sections: vec![
                 ArtifactSection {
-                    label: "日本語ラベル".to_string(),
+                    label: Some("日本語ラベル".to_string()),
                     text: "one\n".to_string(),
+                    depth: 0,
                 },
                 ArtifactSection {
-                    label: "見出し二番目".to_string(),
+                    label: Some("見出し二番目".to_string()),
                     text: paragraph.clone(),
+                    depth: 0,
                 },
                 ArtifactSection {
-                    label: "タスク一覧".to_string(),
+                    label: Some("タスク一覧".to_string()),
                     text: "three\n".to_string(),
+                    depth: 0,
                 },
             ],
             scroll: 0,

@@ -127,13 +127,22 @@ pub struct Filter {
 /// sections and no newline added, unlike the single concatenated `source`
 /// string this type replaces. Labels are not required to be unique;
 /// sections are addressed by index everywhere, never by label. Joins the
-/// `NODEFAULT-UI` type list, so every construction site names both fields.
+/// `NODEFAULT-UI` type list, so every construction site names all three
+/// fields.
+///
+/// `heading-sections` widened it: `label` is an `Option` so that a split
+/// file's text before its first heading can carry no label at all, and
+/// `depth` is that section's nesting level within the flat, index-addressed
+/// list — `0` for a whole file, deeper for a heading inside one. Every site
+/// this change touched passes `Some(..)` and `0`; the producers that supply
+/// anything else arrive with the splitter.
 /// See `specs/artifact-folds/spec.md` -> "A multi-file artifact's content
-/// is a list of named sections" and design.md -> Decision 1.
+/// is a list of named sections" and design.md -> Decision 1 and Decision 2.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArtifactSection {
-    pub label: String,
+    pub label: Option<String>,
     pub text: String,
+    pub depth: usize,
 }
 
 /// The label `artifact_section_label` derives for `path`, relative to
@@ -1423,8 +1432,9 @@ impl Dashboard {
         for path in &paths {
             match read(path) {
                 Ok(text) => self.detail.sections.push(ArtifactSection {
-                    label: artifact_section_label(&key.0, path),
+                    label: Some(artifact_section_label(&key.0, path)),
                     text,
+                    depth: 0,
                 }),
                 Err(e) => {
                     self.detail
@@ -2183,9 +2193,18 @@ mod tests {
         d.sync_detail(&read);
 
         assert_eq!(d.detail.sections.len(), 3);
-        assert_eq!(d.detail.sections[0].label, "degraded-coverage");
-        assert_eq!(d.detail.sections[1].label, "markdown-render");
-        assert_eq!(d.detail.sections[2].label, "tasks-checklist");
+        assert_eq!(
+            d.detail.sections[0].label.as_deref(),
+            Some("degraded-coverage")
+        );
+        assert_eq!(
+            d.detail.sections[1].label.as_deref(),
+            Some("markdown-render")
+        );
+        assert_eq!(
+            d.detail.sections[2].label.as_deref(),
+            Some("tasks-checklist")
+        );
         for section in &d.detail.sections {
             assert_eq!(section.text, "## MODIFIED Requirements\n");
         }
@@ -2252,8 +2271,8 @@ mod tests {
         d.sync_detail(&read);
 
         assert_eq!(d.detail.sections.len(), 2);
-        assert_eq!(d.detail.sections[0].label, "a");
-        assert_eq!(d.detail.sections[1].label, "d");
+        assert_eq!(d.detail.sections[0].label.as_deref(), Some("a"));
+        assert_eq!(d.detail.sections[1].label.as_deref(), Some("d"));
         assert_eq!(d.detail.problems.len(), 1);
         assert!(d.detail.problems[0].contains("/repo/openspec/changes/c/specs/b/spec.md"));
         assert!(d.detail.problems[0].contains("permission denied"));
@@ -2284,16 +2303,19 @@ mod tests {
         Detail {
             sections: vec![
                 ArtifactSection {
-                    label: "degraded-coverage".to_string(),
+                    label: Some("degraded-coverage".to_string()),
                     text: "one\n".to_string(),
+                    depth: 0,
                 },
                 ArtifactSection {
-                    label: "markdown-render".to_string(),
+                    label: Some("markdown-render".to_string()),
                     text: "two\n".to_string(),
+                    depth: 0,
                 },
                 ArtifactSection {
-                    label: "tasks-checklist".to_string(),
+                    label: Some("tasks-checklist".to_string()),
                     text: "three\n".to_string(),
+                    depth: 0,
                 },
             ],
             scroll,
@@ -2456,8 +2478,9 @@ mod tests {
     fn a_wrapping_body_folds_the_section_the_cursor_is_actually_in() {
         let long = "alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima\n";
         let section = |label: &str| ArtifactSection {
-            label: label.to_string(),
+            label: Some(label.to_string()),
             text: long.to_string(),
+            depth: 0,
         };
         let mut d = dashboard_with_detail(Detail {
             sections: vec![section("first"), section("second"), section("third")],
@@ -2531,12 +2554,14 @@ mod tests {
         let mut d = dashboard_with_detail(Detail {
             sections: vec![
                 ArtifactSection {
-                    label: "a".to_string(),
+                    label: Some("a".to_string()),
                     text: "one\n".to_string(),
+                    depth: 0,
                 },
                 ArtifactSection {
-                    label: "b".to_string(),
+                    label: Some("b".to_string()),
                     text: "two\n".to_string(),
+                    depth: 0,
                 },
             ],
             scroll: 0,
@@ -2569,8 +2594,9 @@ mod tests {
     fn space_is_inert_on_a_non_foldable_artifact() {
         let mut one = dashboard_with_detail(Detail {
             sections: vec![ArtifactSection {
-                label: "a".to_string(),
+                label: Some("a".to_string()),
                 text: "one\n".to_string(),
+                depth: 0,
             }],
             scroll: 0,
             tab: 0,
@@ -2641,8 +2667,9 @@ mod tests {
     fn space_at_the_detail_route_is_inert_on_a_non_foldable_artifact() {
         let mut d = dashboard_with_detail(Detail {
             sections: vec![ArtifactSection {
-                label: "a".to_string(),
+                label: Some("a".to_string()),
                 text: "one\n".to_string(),
+                depth: 0,
             }],
             scroll: 0,
             tab: 0,
@@ -3162,8 +3189,9 @@ mod tests {
             let mut d = dashboard(3, 0, 0);
             d.selected = index_of(&d, Target::Change(0));
             d.detail.sections = vec![ArtifactSection {
-                label: String::new(),
+                label: Some(String::new()),
                 text: lines(40),
+                depth: 0,
             }];
             let selected_before = d.selected;
 
@@ -3198,8 +3226,9 @@ mod tests {
                 let mut d = dashboard(3, 0, 1);
                 d.route = route;
                 d.detail.sections = vec![ArtifactSection {
-                    label: String::new(),
+                    label: Some(String::new()),
                     text: lines(40),
+                    depth: 0,
                 }];
                 let before = d.clone();
                 d.apply(Action::ScrollUp);
@@ -3213,8 +3242,9 @@ mod tests {
             let mut wheeled = dashboard(3, 0, 0);
             wheeled.selected = index_of(&wheeled, Target::Change(0));
             wheeled.detail.sections = vec![ArtifactSection {
-                label: String::new(),
+                label: Some(String::new()),
                 text: lines(12),
+                depth: 0,
             }];
             for _ in 0..500 {
                 wheeled.apply(Action::ScrollDown);
@@ -3240,8 +3270,9 @@ mod tests {
             let mut held = dashboard(3, 0, 0);
             held.selected = index_of(&held, Target::Change(0));
             held.detail.sections = vec![ArtifactSection {
-                label: String::new(),
+                label: Some(String::new()),
                 text: lines(12),
+                depth: 0,
             }];
             held.route = Route::Detail;
             for _ in 0..500 {
@@ -3256,8 +3287,9 @@ mod tests {
             let mut keyed = dashboard(3, 0, 1);
             keyed.route = Route::Detail;
             keyed.detail.sections = vec![ArtifactSection {
-                label: String::new(),
+                label: Some(String::new()),
                 text: lines(40),
+                depth: 0,
             }];
             let mut wheeled = keyed.clone();
             keyed.apply(Action::Next);
@@ -3934,8 +3966,9 @@ mod tests {
             let dashboard = Dashboard {
                 detail: Detail {
                     sections: vec![ArtifactSection {
-                        label: String::new(),
+                        label: Some(String::new()),
                         text: "## 1. Setup\n- [x] a\n- [ ] b\n".to_string(),
+                        depth: 0,
                     }],
                     scroll: 0,
                     tab: 0,
@@ -5401,8 +5434,9 @@ mod tests {
         fn twenty_line_detail() -> Detail {
             Detail {
                 sections: vec![ArtifactSection {
-                    label: String::new(),
+                    label: Some(String::new()),
                     text: (0..20).map(|i| format!("- line-{i:02}\n")).collect(),
+                    depth: 0,
                 }],
                 scroll: 0,
                 tab: 0,
@@ -6244,8 +6278,9 @@ mod tests {
                 Dashboard {
                     detail: Detail {
                         sections: vec![ArtifactSection {
-                            label: String::new(),
+                            label: Some(String::new()),
                             text: source,
+                            depth: 0,
                         }],
                         scroll: 99,
                         tab: 0,
@@ -6392,8 +6427,9 @@ mod tests {
             let mut d = Dashboard {
                 detail: Detail {
                     sections: vec![ArtifactSection {
-                        label: String::new(),
+                        label: Some(String::new()),
                         text: "x".repeat(1092),
+                        depth: 0,
                     }],
                     scroll: 99,
                     tab: 0,
@@ -6530,8 +6566,9 @@ mod tests {
                 },
                 detail: Detail {
                     sections: vec![ArtifactSection {
-                        label: String::new(),
+                        label: Some(String::new()),
                         text: "stale".to_string(),
+                        depth: 0,
                     }],
                     scroll: 5,
                     tab: 2,
@@ -6615,8 +6652,9 @@ mod tests {
                 },
                 detail: Detail {
                     sections: vec![ArtifactSection {
-                        label: String::new(),
+                        label: Some(String::new()),
                         text: "stale".to_string(),
+                        depth: 0,
                     }],
                     scroll: 6,
                     tab: 2,
@@ -7703,9 +7741,9 @@ mod tests {
             d.sync_detail(&read);
 
             assert_eq!(d.detail.sections.len(), 2);
-            assert_eq!(d.detail.sections[0].label, "a");
+            assert_eq!(d.detail.sections[0].label.as_deref(), Some("a"));
             assert_eq!(d.detail.sections[0].text, "# a");
-            assert_eq!(d.detail.sections[1].label, "b");
+            assert_eq!(d.detail.sections[1].label.as_deref(), Some("b"));
             assert_eq!(d.detail.sections[1].text, "# b\n");
         }
 
@@ -7889,8 +7927,9 @@ mod tests {
                 filter: empty_filter(),
                 detail: Detail {
                     sections: vec![ArtifactSection {
-                        label: String::new(),
+                        label: Some(String::new()),
                         text: "stale".to_string(),
+                        depth: 0,
                     }],
                     scroll: 3,
                     tab: 2,

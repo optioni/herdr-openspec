@@ -909,8 +909,9 @@ mod tests {
             },
             detail: crate::ui::app::Detail {
                 sections: vec![ArtifactSection {
-                    label: String::new(),
+                    label: Some(String::new()),
                     text: (0..20).map(|i| format!("- line-{i:02}\n")).collect(),
+                    depth: 0,
                 }],
                 scroll: 0,
                 tab: 0,
@@ -1353,16 +1354,19 @@ mod tests {
             detail: crate::ui::app::Detail {
                 sections: vec![
                     ArtifactSection {
-                        label: "a".to_string(),
+                        label: Some("a".to_string()),
                         text: "one\n".to_string(),
+                        depth: 0,
                     },
                     ArtifactSection {
-                        label: "b".to_string(),
+                        label: Some("b".to_string()),
                         text: "two\n".to_string(),
+                        depth: 0,
                     },
                     ArtifactSection {
-                        label: "c".to_string(),
+                        label: Some("c".to_string()),
                         text: "three\n".to_string(),
+                        depth: 0,
                     },
                 ],
                 scroll: 2,
@@ -1442,8 +1446,9 @@ mod tests {
             },
             detail: crate::ui::app::Detail {
                 sections: vec![ArtifactSection {
-                    label: String::new(),
+                    label: Some(String::new()),
                     text: (0..20).map(|i| format!("- line-{i:02}\n")).collect(),
+                    depth: 0,
                 }],
                 scroll: 3,
                 tab: 0,
@@ -3891,16 +3896,19 @@ mod tests {
     fn three_spec_sections() -> Vec<ArtifactSection> {
         vec![
             ArtifactSection {
-                label: "degraded-coverage".to_string(),
+                label: Some("degraded-coverage".to_string()),
                 text: "one\n".to_string(),
+                depth: 0,
             },
             ArtifactSection {
-                label: "markdown-render".to_string(),
+                label: Some("markdown-render".to_string()),
                 text: "two\n".to_string(),
+                depth: 0,
             },
             ArtifactSection {
-                label: "tasks-checklist".to_string(),
+                label: Some("tasks-checklist".to_string()),
                 text: "three\n".to_string(),
+                depth: 0,
             },
         ]
     }
@@ -3993,8 +4001,9 @@ mod tests {
             dashboard.route = route;
             dashboard.selected = 1;
             dashboard.detail.sections = vec![ArtifactSection {
-                label: String::new(),
+                label: Some(String::new()),
                 text: (0..20).map(|i| format!("- line-{i:02}\n")).collect(),
+                depth: 0,
             }];
 
             let over_list = mouse_action(&dashboard, WIDE, &m(MouseEventKind::ScrollDown, 10, 10));
@@ -4455,19 +4464,22 @@ mod tests {
         // detail cursor and folds nothing".
         let sections = vec![
             ArtifactSection {
-                label: "degraded-coverage".to_string(),
+                label: Some("degraded-coverage".to_string()),
                 text: "one\n".to_string(),
+                depth: 0,
             },
             ArtifactSection {
-                label: "markdown-render".to_string(),
+                label: Some("markdown-render".to_string()),
                 // A bullet list, not a five-line paragraph: a soft break
                 // folds into the paragraph, so only a list keeps five
                 // rendered body lines for the click to land in.
                 text: (0..5).map(|i| format!("- line-{i:02}\n")).collect(),
+                depth: 0,
             },
             ArtifactSection {
-                label: "tasks-checklist".to_string(),
+                label: Some("tasks-checklist".to_string()),
                 text: "three\n".to_string(),
+                depth: 0,
             },
         ];
         for (width, height) in [(120u16, 40u16), (60, 40)] {
@@ -4513,8 +4525,9 @@ mod tests {
     fn a_click_on_a_non_foldable_tab_is_inert() {
         // `mouse-input`: "A click on a non-foldable tab's content is inert".
         let sections = vec![ArtifactSection {
-            label: String::new(),
+            label: Some(String::new()),
             text: (0..20).map(|i| format!("- line-{i:02}\n")).collect(),
+            depth: 0,
         }];
         for (width, height) in [(120u16, 40u16), (60, 40)] {
             let area = Rect::new(0, 0, width, height);
@@ -5489,8 +5502,9 @@ mod tests {
         dashboard.route = route;
         dashboard.selected = selected;
         dashboard.detail.sections = vec![ArtifactSection {
-            label: String::new(),
+            label: Some(String::new()),
             text: (0..20).map(|i| format!("- line-{i:02}\n")).collect(),
+            depth: 0,
         }];
         dashboard.help.open = true;
         dashboard
