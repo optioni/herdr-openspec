@@ -2712,8 +2712,15 @@ mod tests {
                 crate::ui::list::pad_or_truncate_right(&body[0].text(), interior as usize),
                 "width {width}: the opened section's own body"
             );
+            // `heading-sections`: a blank separator row follows a non-empty
+            // open body that a further visible section follows.
             assert_eq!(
-                detail_interior_row(&buf, 8),
+                detail_interior_row(&buf, 8).trim(),
+                "",
+                "width {width}: the separator below the opened body"
+            );
+            assert_eq!(
+                detail_interior_row(&buf, 9),
                 expected_header("tasks-checklist", true, interior),
                 "width {width}: third header, still collapsed"
             );
@@ -2759,8 +2766,9 @@ mod tests {
 
         // Section 0 still open, cursor now on the third header row — the row
         // index depends on the one body line the open first section
-        // contributes.
-        let mut third = foldable_dashboard(std::collections::BTreeSet::from([0]), 3);
+        // contributes **and** on the blank separator row `heading-sections`
+        // emits after it, so the third header sits at row 4 rather than row 3.
+        let mut third = foldable_dashboard(std::collections::BTreeSet::from([0]), 4);
         third.apply(Action::ToggleSection);
         assert_eq!(
             third.detail.expanded,

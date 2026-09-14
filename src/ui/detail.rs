@@ -270,16 +270,76 @@ pub enum ContentKind {
     SectionHeader { section: usize, selected: bool },
 }
 
-/// A foldable tab's own section-header row: `<glyph> <label>`, where the
-/// glyph is `ui::list::fold_glyph`'s own — the crate's one site for that
-/// pair, so one fold reads the same glyph in both regions
-/// (design.md -> Decision 9). Passed through the crate's one right-
-/// truncation grammar, `ui::list::pad_or_truncate_right`, so the glyph and
-/// its separating space — emitted first — survive any truncation the label
-/// needs and the row still measures at most `width` display columns.
-fn header(label: &str, expanded: bool, width: u16) -> String {
+/// A foldable tab's own section-header row: `<indent><glyph> <label>`, where
+/// `indent` is two spaces per unit of `depth` and the glyph is
+/// `ui::list::fold_glyph`'s own — the crate's one site for that pair, so one
+/// fold reads the same glyph in both regions (design.md -> Decision 9).
+/// Passed through the crate's one right-truncation grammar,
+/// `ui::list::pad_or_truncate_right`, so the indent, the glyph and its
+/// separating space — emitted first — survive any truncation the label needs
+/// and the row still measures at most `width` display columns. Below the
+/// indent's own columns the row degrades to truncated indent rather than to a
+/// dropped glyph (`heading-sections` -> design.md -> D7: the indent precedes
+/// the glyph precisely so truncation eats the label first).
+///
+/// Body rows carry no indent at all: indenting them would take the narrow
+/// interior's text column away from exactly the artifacts this change exists
+/// to make readable.
+fn header(label: &str, depth: usize, expanded: bool, width: u16) -> String {
     let glyph = crate::ui::list::fold_glyph(!expanded);
-    crate::ui::list::pad_or_truncate_right(&format!("{glyph} {label}"), width as usize)
+    let indent = "  ".repeat(depth);
+    crate::ui::list::pad_or_truncate_right(&format!("{indent}{glyph} {label}"), width as usize)
+}
+
+/// The blank separator row, padded to `width` on the same terms every other
+/// row this function adds is. `Face::plain()`, `ContentKind::Body`: it is not
+/// a header, and the cursor never emphasises it.
+fn separator_row(width: u16) -> ContentRow {
+    ContentRow {
+        line: crate::ui::markdown::Line {
+            segments: vec![crate::ui::markdown::Segment {
+                text: crate::ui::list::pad_or_truncate_right("", width as usize),
+                face: crate::ui::markdown::Face::plain(),
+            }],
+        },
+        kind: ContentKind::Body,
+    }
+}
+
+/// The indices of `sections` that are **visible**, in order: walking the list
+/// once, a **collapsed labelled** section at depth `d` hides every following
+/// section of depth strictly greater than `d` — header and body alike — until
+/// the first section of depth at or below `d`.
+///
+/// A `None`-labelled section is a split file's preamble: it is always open,
+/// owns no header row, and is never a fold target, so it hides nothing
+/// (design.md -> D2). Indentation is therefore never the only signal of
+/// nesting — a fold hides a whole subtree, which is what makes a two-level
+/// spec tab navigable at the 58-column interior.
+///
+/// Extracted rather than walked inline because the emission needs to look
+/// **ahead**: a blank separator follows a non-empty open body only when a
+/// further visible section follows it, which is a question about the visible
+/// list rather than about the next index.
+fn visible_sections(
+    sections: &[crate::ui::app::ArtifactSection],
+    expanded: &std::collections::BTreeSet<usize>,
+) -> Vec<usize> {
+    let mut visible = Vec::new();
+    let mut hidden_below: Option<usize> = None;
+    for (index, section) in sections.iter().enumerate() {
+        if let Some(d) = hidden_below {
+            if section.depth > d {
+                continue;
+            }
+            hidden_below = None;
+        }
+        visible.push(index);
+        if section.label.is_some() && !expanded.contains(&index) {
+            hidden_below = Some(section.depth);
+        }
+    }
+    visible
 }
 
 /// The `No content yet` row, padded to `width` on the same terms every
@@ -389,29 +449,37 @@ pub fn content_lines(
             );
         }
         None if detail.foldable() => {
-            // `artifact-folds`: a header row per section, in order, each
-            // followed by that section's own rendered markdown exactly
-            // when it is open.
-            for (index, section) in detail.sections.iter().enumerate() {
-                let expanded = detail.expanded.contains(&index);
-                out.push(ContentRow {
-                    line: crate::ui::markdown::Line {
-                        segments: vec![crate::ui::markdown::Segment {
-                            text: header(section.label.as_deref().unwrap_or(""), expanded, width),
-                            face: crate::ui::markdown::Face::plain(),
-                        }],
-                    },
-                    kind: ContentKind::SectionHeader {
-                        section: index,
-                        selected: false,
-                    },
-                });
-                if expanded {
-                    out.extend(
-                        crate::ui::markdown::lines(&section.text, width)
-                            .into_iter()
-                            .map(body_row),
-                    );
+            // `artifact-folds`: a header row per **visible** labelled section,
+            // in order, each followed by that section's own rendered markdown
+            // exactly when it is open, and a blank separator row after a
+            // non-empty open body that a further visible section follows.
+            let visible = visible_sections(&detail.sections, &detail.expanded);
+            for (position, &index) in visible.iter().enumerate() {
+                let section = &detail.sections[index];
+                // A `None`-labelled preamble is always open and owns no
+                // header row at all (design.md -> D2).
+                let open = section.label.is_none() || detail.expanded.contains(&index);
+                if let Some(label) = section.label.as_deref() {
+                    out.push(ContentRow {
+                        line: crate::ui::markdown::Line {
+                            segments: vec![crate::ui::markdown::Segment {
+                                text: header(label, section.depth, open, width),
+                                face: crate::ui::markdown::Face::plain(),
+                            }],
+                        },
+                        kind: ContentKind::SectionHeader {
+                            section: index,
+                            selected: false,
+                        },
+                    });
+                }
+                if open {
+                    let body = crate::ui::markdown::lines(&section.text, width);
+                    let non_empty = !body.is_empty();
+                    out.extend(body.into_iter().map(body_row));
+                    if non_empty && position + 1 < visible.len() {
+                        out.push(separator_row(width));
+                    }
                 }
             }
         }
@@ -2135,7 +2203,23 @@ mod tests {
                 assert_eq!(row.kind, ContentKind::Body, "width {width}");
             }
 
-            let after = &rows[2 + body.len()];
+            // `heading-sections`: one blank separator row — that body is
+            // non-empty and a further visible section follows it — and then
+            // section 2's own header.
+            let separator = &rows[2 + body.len()];
+            assert_eq!(separator.kind, ContentKind::Body, "width {width}");
+            assert!(
+                separator.text().trim().is_empty(),
+                "width {width}: {:?} is not blank",
+                separator.text()
+            );
+            assert_eq!(
+                columns(&separator.text()),
+                width as usize,
+                "width {width}: the separator is padded like every row around it"
+            );
+
+            let after = &rows[3 + body.len()];
             assert!(
                 matches!(after.kind, ContentKind::SectionHeader { section: 2, .. }),
                 "width {width}: {:?}",

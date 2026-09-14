@@ -5369,8 +5369,15 @@ mod tests {
             "# alpha body",
             "and its body is drawn beneath its own header"
         );
+        // `heading-sections`: a blank separator row sits between the open
+        // section's non-empty body and the next visible header.
         assert_eq!(
             content_row(&opened, 120, 2),
+            "",
+            "a blank row separates the open body from the next header"
+        );
+        assert_eq!(
+            content_row(&opened, 120, 3),
             format!("{shut} beta"),
             "while its siblings stay shut"
         );

@@ -4059,10 +4059,18 @@ mod tests {
                 );
                 y += 1;
             }
+            // `heading-sections`: the row following that file's last rendered
+            // line is blank, and the row after it is the third header.
+            assert_eq!(
+                detail_interior_cols(&buf, y, interior as usize).trim(),
+                "",
+                "width {width}: row following the open section's last body line is blank"
+            );
+            y += 1;
             assert_eq!(
                 detail_interior_cols(&buf, y, interior as usize),
                 expected_header("tasks-checklist", true, interior),
-                "width {width}: row following the open section's last body line"
+                "width {width}: the row after the separator"
             );
             for row_y in 5..=y {
                 assert_eq!(
