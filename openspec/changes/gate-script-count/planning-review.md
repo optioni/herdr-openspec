@@ -7,7 +7,8 @@
 
 ## Reviewed Against
 
-- This repository HEAD: `9c37085`
+- This repository HEAD: `9c37085` for the planning review; `cef8339` for the Change Review pass
+  that added the third repair-log row (the four commits between are this change's own)
 - Sibling repository HEAD: Not applicable
 - Working tree: clean apart from this change's own directory, which is untracked
 
@@ -29,6 +30,7 @@ that is exactly what it found.
 | WARNING | `specs/quality-gates`, `design.md` | The new scenario claimed the test asserts the directory count equals "the figure this requirement's first scenario states". A Rust literal reads no figure. The surviving failure mode the wording hid: a developer adds a gate, sees red, bumps the literal to 32, and leaves the spec at thirty-one — today's drift minus one red run. `design.md` justified the literal as avoiding a parser, which answered an argument nobody made: `tests/ci_workflow.rs` already carries `read_spec_md()` and `spec_md_gates_section_names_every_check_prerequisite_by_name` already asserts document content, so `spec.contains("— **thirty-one** in all")` was available and is no parser. | The literal stands, for the reason the reviewer identified as unaddressed rather than the one given. Verified: `openspec/specs/` is written **only** by `openspec archive` — every edit to it across the whole of `help-overlay` lands in one commit, `9c37085`, and the live spec still reads "twenty-eight in all". A content assertion would go red the moment it landed and stay red for the entire apply phase, with `make check` gating every commit between. The scenario now states what the test does, says the directory is bound by machine and the sentence by the **failure message**, and requires that message to name the file, the scenario and both counts — since it is the only thing standing against the surviving failure mode. | `specs/quality-gates` (new scenario), `design.md` → Test Boundaries |
 | WARNING | `tasks.md`, `proposal.md` | Tasks 1.2 and 1.4 contradicted each other on the test count: 1.2 replaces an assertion **inside** `every_gate_script_the_recipe_names_exists_and_every_script_is_named`, which leaves `tests/ci_workflow.rs` at 21 tests, while 1.4 asserted 22 passing. `proposal.md` → Impact carried the same ambiguity as a hedge — "gains the count assertion, **or a sibling test carries it**". An implementer would have had to guess, and either guess makes one of the two lines false. | 1.4 corrected to 21 with the reason stated (an assertion replaced, not a test added) and the figure measured at HEAD; the proposal's hedge removed in favour of the decision. | tasks 1.4, `proposal.md` → Impact |
 | WARNING | `tasks.md` | Task 2.2 read "Apply the delta in `specs/quality-gates/spec.md`", which reads as an instruction to edit the **live** spec during apply. Doing so would put the two copies in disagreement in the opposite direction and pre-empt the archive. | Rewritten to name the delta path explicitly and forbid editing `openspec/specs/quality-gates/spec.md`, with the archive-boundary reason attached. Line references are marked as pointing into the live spec, which is where the figures are read from. | tasks 2.2 |
+| WARNING | `specs/quality-gates`, `tasks.md` | **Found by Change Review, after implementation.** Two defects of the change's own class. (a) `specs/quality-gates:76` carried "`deps.sh` (fourteen `cargo` calls)" — a stale figure **inside a requirement block this delta reproduces**, the exact shape of the `NODEFAULT-UI` CRITICAL above, and one both planning slices missed while auditing the modified blocks. Measured: fourteen is `grep -c 'cargo ' scripts/gates/deps.sh`, of whose lines four are comments (`:3, :16, :49, :80`) and two `echo` strings (`:96, :97`); actual invocation sites are eight, default-run calls ten (one site loops four target triples), `DEPS_FULL=1` calls sixteen. No reading of "calls" yields fourteen. (b) `tasks.md`'s group-2 completion record credited the delta's figures to commit `db5ebc0`; that commit touched only `design.md`, `planning-review.md`, `proposal.md` and `tasks.md`, and the delta has been byte-identical since the propose commit `2bdb88c`. A change about a wrong number must not carry a wrong hash in its own record. | (a) Corrected to eight invocation sites, with both derived call counts and the arithmetic that produced the old figure written down, so a later sweep cannot "repair" it back. Scope widened by one figure beyond the proposal's named two, under that proposal's own stated rule rather than against it: the Non-Goal excludes a false numeral *elsewhere* in the capability, and this one is not elsewhere. `proposal.md` → What Changes and Non-Goals updated to say so. (b) `db5ebc0` → `2bdb88c`, with the diff that establishes it cited in the record. | `specs/quality-gates` (the hermeticity paragraph); `proposal.md` → What Changes, Non-Goals, Impact; `tasks.md` → 2.2 |
 
 **The drift's archaeology**, established by slice D — one gate per change, three changes, the
 figure never propagated:
@@ -77,6 +79,7 @@ suppressed. The reasoning, and the one cheap alternative rejected on the record 
 count into `AGENTS.md` and binding that, which would make a fourth site for one integer), are
 `design.md` → Decisions 3.
 
+
 ## Deferred Non-Blocking Notes
 
 - **`NODEFAULT-UI`'s subject-set count is corrected but unbound.** It will drift again the next
@@ -86,4 +89,25 @@ count into `AGENTS.md` and binding that, which would make a fourth site for one 
 - **`quality-gates` numerals outside the two modified requirements were not audited.** The
   Non-Goal is scoped to figures that are both false today and inside a requirement this change
   already modifies. Slice A checked for others and found none in the modified blocks; the rest of
-  the capability is untested ground and stays so deliberately.
+  the capability is untested ground and stays so deliberately. **Change Review found one the
+  planning slices missed** — see the repair log's third row.
+- **A third copy of `NODEFAULT-UI`'s subject-set count survives, and this change creates the
+  contradiction knowingly.** `openspec/specs/quality-gates/spec.md:55` reads "`NODEFAULT-UI`
+  over each of its five type sets", inside the requirement "`make check` is the single gate and
+  runs every check" — which this delta does **not** reproduce. After archive the one spec file
+  will therefore say five at `:55` and seven where this delta lands, where before it said five
+  in both places. That is a real cost, and it is accepted rather than paid: correcting `:55`
+  means reproducing an entire unrelated requirement block in the delta to change one word, and
+  the argument that pulled the other two copies into scope — a MODIFIED block re-lands its
+  content as **current** at archive time — does not reach a block this change never re-asserts.
+  Consistently-wrong is not better than inconsistently-wrong; both are wrong, and the numeral at
+  `:55` is the same one `design.md` → Decisions 1 already hands to whichever change next touches
+  that gate. It inherits this site too. Found by Change Review (WARNING 3), not by the planning
+  slices.
+- **Two more unbound numerals in this capability are now visibly stale, and are left for a later
+  sweep.** `openspec/specs/quality-gates/spec.md:111` and `:1009` say "extracting a
+  twenty-ninth gate" and "a twenty-ninth gate cannot be added"; the directory holds thirty-one,
+  so the next one added is the thirty-second. Both sit outside every requirement this delta
+  reproduces, so archive does not re-assert either, and both are informational rather than
+  normative — the sentences make their point with any number. Named here so the sweep that
+  eventually takes them meets them as known items. Found by Change Review (SUGGESTION 6).

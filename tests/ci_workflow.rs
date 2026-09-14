@@ -664,6 +664,14 @@ fn every_gate_script_the_recipe_names_exists_and_every_script_is_named() {
         .filter_map(|e| e.ok())
         .map(|e| e.file_name().to_string_lossy().into_owned())
         .collect();
+    // Every file on disk must be named in the recipe (direction 1).
+    for name in &on_disk {
+        assert!(
+            recipe.contains(&format!("scripts/gates/{name}")),
+            "scripts/gates/{name} exists but is not named anywhere in the gates: recipe"
+        );
+    }
+
     // `gate-script-count` :: the figure `openspec/specs/quality-gates/spec.md` states about
     // this directory, asserted by equality rather than by a floor. A floor cannot notice a
     // gate being added; an equality can. The spec is deliberately not read: `openspec/specs/`
@@ -671,6 +679,12 @@ fn every_gate_script_the_recipe_names_exists_and_every_script_is_named() {
     // the whole apply phase of any change that moves the count (design.md -> Test
     // Boundaries). The message below is therefore the only thing binding the literal to the
     // sentence, and must keep naming the file, the scenario, and both counts.
+    //
+    // Deliberately placed *after* direction 1, and `on_disk` is deliberately unfiltered: a
+    // stray `.DS_Store` or a subdirectory under `scripts/gates/` is an intruder, not a gate,
+    // and direction 1 names it ("exists but is not named anywhere in the gates: recipe").
+    // Asserting the count first would meet the same intruder with "bump the literal and edit
+    // the spec", which is the wrong remedy. Filtering it out instead would let it in silently.
     const STATED_GATE_SCRIPT_COUNT: usize = 31;
     let found = on_disk.len();
     assert_eq!(
@@ -683,16 +697,10 @@ fn every_gate_script_the_recipe_names_exists_and_every_script_is_named() {
          invoked from the Makefile\", which spells the count out in words (\"thirty-one in \
          all, counting openspec-untouched.sh\"), and the enumeration of gate names above it, \
          which that figure summarises. Scenario \"The stated gate-script count is asserted \
-         against the directory\" is the one this assertion implements."
+         against the directory\" is the one this assertion implements. Until this change is \
+         archived the delta under openspec/changes/ carries that sentence and the live spec \
+         still reads twenty-eight; `openspec archive` is what makes the two agree."
     );
-
-    // Every file on disk must be named in the recipe (direction 1).
-    for name in &on_disk {
-        assert!(
-            recipe.contains(&format!("scripts/gates/{name}")),
-            "scripts/gates/{name} exists but is not named anywhere in the gates: recipe"
-        );
-    }
 
     // Every `scripts/gates/<name>` the recipe mentions must exist on disk (direction 2).
     let mut named_in_recipe: BTreeSet<String> = BTreeSet::new();

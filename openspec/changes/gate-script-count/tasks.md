@@ -53,10 +53,14 @@ directions of that control are run below, per design.md → Test Boundaries.
   from: `:140`, `:187`, `:210` from twenty-eight to thirty-one, `:139`/`:187`'s non-`cargo`
   count from twenty-six to twenty-nine, and the requirement's new paragraph stating that the
   count is asserted rather than written down.
-  **Already landed:** the planning-review repair (commit `db5ebc0`) wrote these into the delta
-  when it fixed the enumeration CRITICAL, since the delta *is* a planning artifact. Verified at
-  HEAD `9d40d19` by diffing each MODIFIED requirement block against the live spec: the only
-  differences are exactly the edits tasks 2.2, 2.4, 2.5 and 2.6 describe, and nothing else.
+  **Already landed:** the delta carried these from the propose commit `2bdb88c` onward — the
+  planning-review repairs were written straight into it, since the delta *is* a planning
+  artifact. (`db5ebc0`, the later review commit, touched only `design.md`,
+  `planning-review.md`, `proposal.md` and `tasks.md`; `git diff 2bdb88c HEAD --
+  openspec/changes/gate-script-count/specs/quality-gates/spec.md` is empty. Change Review
+  caught this misattribution in an earlier draft of this record.) Verified at HEAD `9d40d19` by
+  diffing each MODIFIED requirement block against the live spec: the only differences are
+  exactly the edits tasks 2.2, 2.4, 2.5 and 2.6 describe, and nothing else.
 - [x] 2.3 CHECK: Verify the non-`cargo` figure by measurement, not arithmetic. `grep -ln cargo
   scripts/gates/*` returns five files, of which `colwidth.sh`, `noio-view.sh` and `wired.sh`
   name `cargo` only inside comments; `deps.sh` and `build-graph.sh` are the two that invoke
@@ -132,13 +136,53 @@ directions of that control are run below, per design.md → Test Boundaries.
 ## 4. Change Review
 <!-- kind: operational -->
 
-- [ ] 4.1 CHECK: Dispatch `outside-in-tdd-reviewer` against proposal, specs, design, tasks and
+- [x] 4.1 CHECK: Dispatch `outside-in-tdd-reviewer` against proposal, specs, design, tasks and
   the diff. Point it at the one question that matters here — whether the assertion can fail in
   both directions, and whether any *other* count in `quality-gates` is unbound in the same way
   this one was.
-- [ ] 4.2 CHANGE: Fix every CRITICAL, resolve or accept each WARNING with a one-line reason,
+  **Done at HEAD `cef8339`:** `outside-in-tdd-reviewer` dispatched with both questions named.
+  Q1 — the assertion fails in both directions, and the reviewer independently checked the one
+  thing a green test cannot show, that the inline `{STATED_GATE_SCRIPT_COUNT}` capture of a
+  `const` renders, by compiling a standalone program. Q2 — no other count in the capability is
+  both false and inside a block this delta reproduces, except the one it found (below).
+- [x] 4.2 CHANGE: Fix every CRITICAL, resolve or accept each WARNING with a one-line reason,
   note SUGGESTIONs, re-run affected tests.
-- [ ] 4.3 VERIFY: Confirm no blocking or unowned finding remains.
+  **No CRITICAL.** Three WARNINGs, all resolved:
+  1. `specs/quality-gates:76`'s "`deps.sh` (fourteen `cargo` calls)" — a stale figure inside a
+     block this delta reproduces, the same class as the `NODEFAULT-UI` CRITICAL and missed by
+     both planning slices. **Fixed**: eight invocation sites, ten default-run calls, sixteen
+     under `DEPS_FULL=1`, all measured, with the bad arithmetic recorded so a sweep cannot undo
+     it. Scope widened by one figure under the proposal's own rule — the Non-Goal excludes a
+     false numeral *elsewhere*, and this one is not elsewhere; `proposal.md` updated to say so.
+  2. `tasks.md`'s group-2 record credited the delta to `db5ebc0`, which touched four files, none
+     of them the delta. **Fixed**: `2bdb88c`, with the establishing diff cited.
+  3. `openspec/specs/quality-gates/spec.md:55`'s third copy of the `NODEFAULT-UI` figure, in a
+     requirement this delta does not reproduce, which leaves the archived file self-contradictory.
+     **Accepted with reason**: correcting it means reproducing an unrelated requirement block to
+     change one word, and the re-lands-as-current argument does not reach a block this change
+     never re-asserts. Recorded in `planning-review.md` → Deferred Non-Blocking Notes and handed
+     to the change that next touches that gate, alongside the binding already deferred there.
+  Three SUGGESTIONs, all taken:
+  4. `on_disk` is unfiltered, so a stray `.DS_Store` or a subdirectory would have fired the
+     *count* assertion first, telling the developer to bump the literal — the wrong remedy for
+     an intruder. **Taken by reordering**, not by filtering: the count assertion now runs after
+     direction 1, so an intruder is named by "exists but is not named anywhere in the gates:
+     recipe", while filtering it out would have let it in silently. The reason is in the code.
+  5. The failure message quotes a spec sentence that does not exist until archive lands the
+     delta — the same archive-boundary asymmetry `design.md` → Test Boundaries accepted for the
+     literal. **Taken**: the message now names `openspec archive` as the step that makes the two
+     documents agree, so a reader who greps during the apply window is not misled.
+  6. `openspec/specs/quality-gates/spec.md:111` and `:1009` say "a twenty-ninth gate" where the
+     directory holds thirty-one. Outside every reproduced block, informational rather than
+     normative. **Taken as a note only**, in Deferred Non-Blocking Notes, for a later sweep.
+  Repair-log row added to `planning-review.md`; `openspec validate --strict` re-run and valid.
+  All three negative controls re-run after the reorder, since it changed the code they validate:
+  a stray `.DS_Store` → direction 1 names it; a 32nd script with its recipe line → `left: 32 /
+  right: 31`; `nosleep.sh` deleted with its line → `left: 30 / right: 31`; `21 passed` and a
+  clean tree after each restore.
+- [x] 4.3 VERIFY: Confirm no blocking or unowned finding remains.
+  **Confirmed at HEAD `cef8339`:** no CRITICAL; two WARNINGs fixed in the tree, one accepted
+  with a written reason and an owner; no finding left unowned.
 
 ## 5. Lint & Verify
 <!-- kind: operational -->

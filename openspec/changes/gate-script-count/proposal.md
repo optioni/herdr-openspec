@@ -32,6 +32,12 @@ than leaving it, since it converts a stale sentence into a freshly asserted one.
   them, so the list read twenty-five where the directory says twenty-eight.
 - `NODEFAULT-UI`'s subject-set count goes from five to **seven** at both sites, and
   `AGENTS.md`'s two copies of the same figure with it.
+- A **third** false figure, found by Change Review rather than by the planning slices, is
+  corrected on the same terms: the hermeticity paragraph's "`deps.sh` (fourteen `cargo` calls)"
+  names no quantity that exists — fourteen is `grep -c 'cargo ' scripts/gates/deps.sh`, four of
+  whose lines are comments and two `echo` strings. Eight invocation sites, ten calls on a
+  default run, sixteen under `DEPS_FULL=1`; all three written down, with the arithmetic that
+  produced the old figure, so a later sweep cannot "repair" it back.
 - The four **historical** figures are left as figures but gain the commit or change that makes
   each true, so the next sweep can tell a superseded number from a deliberate one. This is the
   convention `help-overlay`'s Change Review named after nearly "repairing" a correct sentence:
@@ -39,10 +45,16 @@ than leaving it, since it converts a stale sentence into a freshly asserted one.
 
 ## Non-Goals
 
-- **Not** re-auditing every numeral in `quality-gates`' 17 requirements. Scope is the two
-  figures that are both **false today** and **inside a requirement this change already
-  modifies** — the gate-script count and `NODEFAULT-UI`'s subject-set count. A false numeral
-  elsewhere in the capability stays for its own change.
+- **Not** re-auditing every numeral in `quality-gates`' 17 requirements. Scope is every figure
+  that is both **false today** and **inside a requirement this change already modifies** — the
+  gate-script count, `NODEFAULT-UI`'s subject-set count, and (added by Change Review)
+  `deps.sh`'s `cargo`-call count. A false numeral **elsewhere** in the capability stays for its
+  own change, which is why `openspec/specs/quality-gates/spec.md:55`'s third copy of the
+  `NODEFAULT-UI` figure is left alone: the requirement holding it is one this delta never
+  reproduces, so archive does not re-assert it. That leaves the archived file saying five in one
+  place and seven in another; the cost is accepted with its reason in `planning-review.md` →
+  Deferred Non-Blocking Notes rather than paid by reproducing an unrelated requirement block to
+  change one word.
 - **Not** changing which gates exist, what they check, their floors, or the `gates:` recipe.
 - **Not** extracting `EXTENDED` or `TESTCOUNT`, which are deliberately unextracted.
 - **Not** generalising to other prose counts (the pure-view set, the worker-thread count, the
@@ -67,7 +79,7 @@ None.
 ## Impact
 
 - `openspec/specs/quality-gates/spec.md` — one requirement and its first scenario; four
-  sentences carrying the figure.
+  sentences carrying the figure, plus the hermeticity paragraph's `deps.sh` call count.
 - `tests/ci_workflow.rs` — `every_gate_script_the_recipe_names_exists_and_every_script_is_named`
   has its `>= 25` floor replaced by the count assertion. No new test: the file stays at 21.
 - No production code. No gate script, no `Makefile` recipe line, no CI job.

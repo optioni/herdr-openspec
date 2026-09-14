@@ -73,8 +73,11 @@ already needs to read `Cargo.lock`, no tool `make check` does not already requir
 runs on. No extracted gate SHALL invoke `cargo` **except the two dependency gates**: measured,
 twenty-nine of the thirty-one are `grep`, `awk`, `sed`, `find`, and `python3` over the source
 tree and complete in under a second each, so composing them into `make gates` adds no
-meaningful time to `make check`. `deps.sh` (fourteen `cargo` calls, including
-`cargo build --locked` at leg 2c) and `build-graph.sh` (`cargo tree`) are the stated
+meaningful time to `make check`. `deps.sh` (**eight** `cargo` invocation sites, ten calls on a
+default run because one is a loop over four target triples, sixteen under `DEPS_FULL=1` — the
+earlier figure of fourteen counted `grep -c 'cargo ' scripts/gates/deps.sh`, four of whose
+lines are comments and two `echo` strings, so it named no quantity that exists; and among the
+sites is `cargo build --locked` at leg 2c) and `build-graph.sh` (`cargo tree`) are the stated
 exception, and always were — the blanket "all twenty-five are grep, awk, sed, find and
 python3" was false when it was written. Naming the exception is what lets
 `gates-full` exist as a separate job for the *rebuilding* legs without implying the
