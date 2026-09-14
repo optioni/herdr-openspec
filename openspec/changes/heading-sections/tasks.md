@@ -170,11 +170,20 @@ functions it comes to call, per
 design.md -> D9. The new function is `items`, not `item_lines`: `src/ui/tasks.rs:264` already
 has a private per-item `item_lines`.
 
-- [ ] 5.1 CHARACTERIZE: Confirm the seven landed grammar tests in `src/ui/tasks.rs` are green and record them as the invariant this group must not move — `groups_headings_items`, `nested_indent`, `long_item_hanging_indent`, `unbreakable_word_hard_split`, `indent_dropped_whole`, `empty_group_keeps_heading`, `headingless_leading_group`.
-- [ ] 5.2 RED: Write `a_folded_group_and_an_unfolded_one_render_the_same_item_lines` against the not-yet-existing `bar_lines`/`items`, asserting each against **literals** — `items`, given `tasks::parse(..).groups[0].items`, returns exactly the two item rows with no bar, heading, or blank row; `bar_lines` returns the bar row and one blank, and the empty vector at a width where the bar is empty. Do not assert `items`' output equals a slice of `lines`' output: once `lines` calls `items` that comparison cannot fail.
-- [ ] 5.3 GREEN: Extract `bar_lines(progress, width)` and `items(&[tasks::Item], width)`, and rewrite `lines` to call both — `items(&group.items, width)` per group, so no group is re-serialised. `lines`' returned vector must be unchanged for every one of the seven fixtures.
-- [ ] 5.4 CHECK: Contract gate — re-inspect `ui::tasks`' published surface: `lines`' signature and returned vector unchanged, `bar_lines`/`items` `pub(crate)` with group 6 as their only new consumer, and the private `item_lines` untouched.
-- [ ] 5.5 VERIFY: `cargo test --all-features ui::tasks` — green with the seven characterization tests unedited — and `/bin/sh scripts/gates/taskwidths.sh` exits 0.
+- [x] 5.1 CHARACTERIZE: Confirm the seven landed grammar tests in `src/ui/tasks.rs` are green and record them as the invariant this group must not move — `groups_headings_items`, `nested_indent`, `long_item_hanging_indent`, `unbreakable_word_hard_split`, `indent_dropped_whole`, `empty_group_keeps_heading`, `headingless_leading_group`.
+- [x] 5.2 RED: Write `a_folded_group_and_an_unfolded_one_render_the_same_item_lines` against the not-yet-existing `bar_lines`/`items`, asserting each against **literals** — `items`, given `tasks::parse(..).groups[0].items`, returns exactly the two item rows with no bar, heading, or blank row; `bar_lines` returns the bar row and one blank, and the empty vector at a width where the bar is empty. Do not assert `items`' output equals a slice of `lines`' output: once `lines` calls `items` that comparison cannot fail.
+- [x] 5.3 GREEN: Extract `bar_lines(progress, width)` and `items(&[tasks::Item], width)`, and rewrite `lines` to call both — `items(&group.items, width)` per group, so no group is re-serialised. `lines`' returned vector must be unchanged for every one of the seven fixtures.
+- [x] 5.4 CHECK: Contract gate — re-inspect `ui::tasks`' published surface: `lines`' signature and returned vector unchanged, `bar_lines`/`items` `pub(crate)` with group 6 as their only new consumer, and the private `item_lines` untouched.
+
+      Contract gate result: `lines`' signature is byte-for-byte unchanged (`pub fn
+      lines(source: &str, progress: &crate::tasks::Progress, width: u16) ->
+      Vec<crate::ui::markdown::Line>`) and its returned vector is unchanged for all
+      seven characterization fixtures, which pass unedited. `bar_lines(&crate::tasks::Progress,
+      u16) -> Vec<crate::ui::markdown::Line>` and `items(&[crate::tasks::Item], u16) ->
+      Vec<crate::ui::markdown::Line>` are both `pub(crate)` with no consumer outside this
+      module yet — group 6 will be their first. The private `item_lines` is untouched.
+
+- [x] 5.5 VERIFY: `cargo test --all-features ui::tasks` — green with the seven characterization tests unedited — and `/bin/sh scripts/gates/taskwidths.sh` exits 0.
 
 ## 6. The tracked-tasks tab folds, seeds, and clamps
 
