@@ -422,7 +422,7 @@ fn body_row(line: crate::ui::markdown::Line) -> ContentRow {
 ///
 /// The body is dispatched on `Detail::foldable` — derived rather than
 /// stored (`artifact-folds` -> Decision 3) — and not on the artifact's
-/// kind. At a **foldable** tab it is `ui::tasks::bar_lines(&change.progress,
+/// kind. At a **foldable** tab it is `ui::tasks::bar_lines(&change.progress, &[],
 /// width)` first, when `change` is `Some` and the `ArtifactRef` at
 /// `detail.tab` carries `tracks_tasks == true`, as leading body owned by no
 /// section and hidden by no fold; then `artifact-folds`' walk — a header
@@ -488,8 +488,26 @@ pub fn content_lines(
         // retires `artifact-folds` Decision 8's objection to a foldable
         // tracked-tasks tab.
         if let Some(progress) = tracked_tasks_progress {
+            // `tasks-emphasis`: the gauge's group slice comes from
+            // `detail.sections`' own `progress` values, in section order,
+            // skipping the sections carrying `None` — the number is already
+            // computed once per sync, and re-parsing the file here would be a
+            // second derivation that can disagree with the header cells drawn
+            // beside it.
+            //
+            // Skipping `None` has a stated consequence: `artifact-folds` sets
+            // `progress` on heading sections only, so a split file's preamble
+            // contributes no span even when it holds items. Those items are
+            // still counted by the bar's own `progress`, which is the
+            // `Change`'s field, so the gauge's fill is unaffected; only the
+            // boundary marking omits them. A preamble holding task items is
+            // not a shape any workflow's `tasks.md` produces, and the
+            // alternative — a span with no header row to match it — would mark
+            // a boundary the reader cannot see.
+            let groups: Vec<crate::tasks::Progress> =
+                detail.sections.iter().filter_map(|s| s.progress).collect();
             out.extend(
-                crate::ui::tasks::bar_lines(progress, width)
+                crate::ui::tasks::bar_lines(progress, &groups, width)
                     .into_iter()
                     .map(body_row),
             );
@@ -2481,7 +2499,7 @@ mod tests {
                 std::collections::BTreeSet::from([0, 1, 2, 3]),
             );
             let rows = content_lines(&d, Some(&change), width);
-            let bar = crate::ui::tasks::progress_bar(&progress, width);
+            let bar = crate::ui::tasks::progress_bar(&progress, &[], width);
             assert_eq!(
                 rows.iter().map(ContentRow::text).collect::<Vec<_>>(),
                 vec![
@@ -2570,7 +2588,7 @@ mod tests {
             // produces.
             assert_eq!(
                 lines[0].text(),
-                crate::ui::tasks::progress_bar(&progress, width),
+                crate::ui::tasks::progress_bar(&progress, &[], width),
                 "width {width}"
             );
             let want = crate::ui::tasks::lines(source, &progress, width);
@@ -2608,7 +2626,7 @@ mod tests {
             assert_rows_equal_lines(&lines, &want);
             assert_ne!(
                 lines[0].text(),
-                crate::ui::tasks::progress_bar(&progress, width),
+                crate::ui::tasks::progress_bar(&progress, &[], width),
                 "width {width}: markdown source starts with its own text, not the bar"
             );
         }

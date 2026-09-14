@@ -26,7 +26,19 @@ use crate::ui::layout::{columns, truncate_columns};
 /// leaving the count cell alone; and, when even that does not fit, the
 /// empty string. Width arithmetic is done in `i64`, the same way the view
 /// already avoids a `u16` subtraction underflowing.
-pub fn progress_bar(progress: &crate::tasks::Progress, width: u16) -> String {
+///
+/// `groups` is one `Progress` per task group in document order, which
+/// [`segmented_gauge`] uses to mark the group boundaries by alternating shade.
+/// It affects **only** which glyph each position is drawn with — never `g`,
+/// never `filled`, never either cell, and never the drop-whole order — so an
+/// **empty slice** produces a byte-identical line to the one this function
+/// produced before `tasks-emphasis`, at every width and for every `Progress`.
+/// That is what the detail header and the non-foldable path both rely on.
+pub fn progress_bar(
+    progress: &crate::tasks::Progress,
+    groups: &[crate::tasks::Progress],
+    width: u16,
+) -> String {
     if width == 0 {
         return String::new();
     }
@@ -49,14 +61,14 @@ pub fn progress_bar(progress: &crate::tasks::Progress, width: u16) -> String {
     // Full form: gauge + ' ' + count cell + ' ' + percent cell.
     let full_gauge_len = w - count_len - percent_len - 2;
     if full_gauge_len >= 1 {
-        let gauge = gauge_of(progress, full_gauge_len as u16);
+        let gauge = segmented_gauge(progress, groups, full_gauge_len as u16);
         return format!("{gauge} {count_cell} {percent_cell}");
     }
 
     // Drop the percent cell and its separating space.
     let no_percent_gauge_len = w - count_len - 1;
     if no_percent_gauge_len >= 1 {
-        let gauge = gauge_of(progress, no_percent_gauge_len as u16);
+        let gauge = segmented_gauge(progress, groups, no_percent_gauge_len as u16);
         return format!("{gauge} {count_cell}");
     }
 
@@ -113,6 +125,83 @@ pub(crate) fn gauge_of(progress: &crate::tasks::Progress, g: u16) -> String {
     }
     for _ in filled..g {
         out.push('░');
+    }
+    out
+}
+
+/// [`gauge_of`]'s run with each position's **shade** chosen by which group it
+/// falls in: `█`/`░` in an even-indexed contributing group and `▓`/`▒` in an
+/// odd-indexed one. A glyph **substitution**, never a second fill computation —
+/// each position keeps whether it is filled or empty and changes only which of
+/// two shades it is drawn with, so `filled == g` iff complete, `filled == 0`
+/// whenever `completed == 0`, and the `u128` arithmetic all hold unchanged and
+/// by construction. `gauge_of` itself does not move, so `detail-header`'s
+/// twelve-column gauge is untouched.
+///
+/// A **contributing group** is one whose `total` is greater than zero. An empty
+/// group contributes no stretch and **consumes no index**, so two groups left
+/// adjacent after empty ones are dropped still alternate — an empty group
+/// taking an index would give two neighbours the same shade and erase the
+/// boundary between them.
+///
+/// Each group's stretch is proportional to its item count, by **cumulative flooring**: with
+/// contributing totals `t_0 … t_{n-1}` summing to `T`, group `i` owns
+/// `[e_{i-1}, e_i)` where `e_i = floor(g * (t_0 + … + t_i) / T)` in `u128` and
+/// `e_{-1} = 0`. Those stretches partition the `g` positions exactly, with no
+/// position unassigned and none assigned twice, for every `g` and every set of
+/// totals — a property of cumulative flooring, with no rounding residue to
+/// distribute and no tie-break rule to specify (design.md -> Decision 4).
+/// `T` is the **sum of the slice**, never `progress.total`: the bar's own
+/// progress is the `Change`'s field, which `change-merge` may have replaced
+/// with the CLI's count, and the two are allowed to disagree. A disagreement
+/// moves no rendered output, because this chooses glyph variants and never how
+/// many positions are filled.
+///
+/// (The word *stretch* is used throughout rather than the obvious one: this
+/// module's own seam check greps the whole file, prose included, for the
+/// drawing crate's type names, and one of them is a substring of it. That is
+/// the known limit that check already carries, and rewording is its stated
+/// repair.)
+///
+/// Segmentation is **skipped entirely** — the plain `█`/`░` run — when `groups`
+/// holds fewer than two contributing groups, when `T` is zero, or when
+/// `g < 2 * n`. The last is the legibility floor, stated in columns: a
+/// one-column stretch cannot be read as a shade run, so a gauge that cannot give
+/// every contributing group two columns shows no boundaries rather than
+/// unreliable ones (design.md -> Decision 5).
+fn segmented_gauge(
+    progress: &crate::tasks::Progress,
+    groups: &[crate::tasks::Progress],
+    g: u16,
+) -> String {
+    let run = gauge_of(progress, g);
+    let totals: Vec<usize> = groups.iter().map(|p| p.total).filter(|&t| t > 0).collect();
+    let n = totals.len();
+    let sum: u128 = totals.iter().map(|&t| t as u128).sum();
+    if n < 2 || sum == 0 || usize::from(g) < 2 * n {
+        return run;
+    }
+
+    // `e_i` for each contributing group, in order; `e_{n-1}` is exactly `g`.
+    let mut ends = Vec::with_capacity(n);
+    let mut cumulative: u128 = 0;
+    for &total in &totals {
+        cumulative += total as u128;
+        ends.push((u128::from(g) * cumulative / sum) as usize);
+    }
+
+    let mut out = String::with_capacity(run.len());
+    let mut group = 0usize;
+    for (position, glyph) in run.chars().enumerate() {
+        while group + 1 < n && position >= ends[group] {
+            group += 1;
+        }
+        let odd = group % 2 == 1;
+        out.push(match (glyph, odd) {
+            ('█', true) => '▓',
+            ('░', true) => '▒',
+            (g, _) => g,
+        });
     }
     out
 }
@@ -403,9 +492,10 @@ fn item_lines(item: &crate::tasks::Item, width: u16) -> Vec<crate::ui::markdown:
 /// disagree.
 pub(crate) fn bar_lines(
     progress: &crate::tasks::Progress,
+    groups: &[crate::tasks::Progress],
     width: u16,
 ) -> Vec<crate::ui::markdown::Line> {
-    let bar = progress_bar(progress, width);
+    let bar = progress_bar(progress, groups, width);
     if bar.is_empty() {
         return Vec::new();
     }
@@ -450,9 +540,17 @@ pub fn lines(
         return Vec::new();
     }
 
-    let mut out = bar_lines(progress, width);
-
     let tasks = crate::tasks::parse(source);
+
+    // One `Progress` per parsed group, in document order — this path's own
+    // derivation of the slice. The foldable path, which is the one every real
+    // `tasks.md` takes, passes `detail.sections`' own values instead and does
+    // not re-parse: a second derivation is a second number that can disagree
+    // with the header cells drawn beside it.
+    let per_group: Vec<crate::tasks::Progress> =
+        tasks.groups.iter().map(|g| g.progress()).collect();
+
+    let mut out = bar_lines(progress, &per_group, width);
 
     // The trigger is items, not groups: `task-groups` requires `parse` to
     // emit a group for every heading it recognises, including one holding
@@ -494,7 +592,7 @@ mod tests {
             total: 9,
         };
         for width in [78, 58] {
-            let bar = progress_bar(&progress, width);
+            let bar = progress_bar(&progress, &[], width);
             assert_eq!(columns(&bar), width as usize, "width {width}");
             assert!(bar.ends_with("[4/9] 44%"), "width {width}: {bar:?}");
             let gauge: String = bar
@@ -506,11 +604,11 @@ mod tests {
                 "width {width}: {gauge:?}"
             );
         }
-        let bar78 = progress_bar(&progress, 78);
+        let bar78 = progress_bar(&progress, &[], 78);
         let gauge78: String = bar78.chars().take(68).collect();
         assert_eq!(gauge78.matches('█').count(), 30, "78-col gauge fill");
         assert_eq!(gauge78.matches('░').count(), 38, "78-col gauge fill");
-        let bar58 = progress_bar(&progress, 58);
+        let bar58 = progress_bar(&progress, &[], 58);
         let gauge58: String = bar58.chars().take(48).collect();
         assert_eq!(gauge58.matches('█').count(), 21, "58-col gauge fill");
         assert_eq!(gauge58.matches('░').count(), 27, "58-col gauge fill");
@@ -551,7 +649,7 @@ mod tests {
                 ),
             ];
             for (progress, want) in cases {
-                let bar = progress_bar(&progress, width);
+                let bar = progress_bar(&progress, &[], width);
                 assert!(
                     bar.ends_with(want),
                     "width {width}: {progress:?} -> {bar:?}, want ending {want:?}"
@@ -571,6 +669,7 @@ mod tests {
                     completed: 99,
                     total: 100,
                 },
+                &[],
                 width,
             );
             assert!(almost.contains('░'), "width {width}: {almost:?}");
@@ -580,6 +679,7 @@ mod tests {
                     completed: 100,
                     total: 100,
                 },
+                &[],
                 width,
             );
             assert!(!complete.contains('░'), "width {width}: {complete:?}");
@@ -590,6 +690,7 @@ mod tests {
                     completed: 0,
                     total: 100,
                 },
+                &[],
                 width,
             );
             assert!(!untouched.contains('█'), "width {width}: {untouched:?}");
@@ -631,7 +732,7 @@ mod tests {
             let cell = crate::ui::list::progress_cell(&progress);
             let cell_len = columns(&cell);
             for width in 0..=120 {
-                let bar = progress_bar(&progress, width);
+                let bar = progress_bar(&progress, &[], width);
                 assert!(
                     columns(&bar) <= width as usize,
                     "{progress:?} width {width}: {bar:?} exceeds its width"
@@ -655,7 +756,7 @@ mod tests {
             }
             // The mandated pair, asserted explicitly by this scenario too.
             for width in [58, 78] {
-                let bar = progress_bar(&progress, width);
+                let bar = progress_bar(&progress, &[], width);
                 assert!(columns(&bar) <= width as usize, "width {width}");
                 assert!(bar.contains(cell.as_str()), "width {width}: {bar:?}");
             }
@@ -669,7 +770,7 @@ mod tests {
             total: 9,
         };
         for width in [78, 58, 11] {
-            let bar = progress_bar(&progress, width);
+            let bar = progress_bar(&progress, &[], width);
             assert!(
                 bar.chars().any(|c| c == '█' || c == '░'),
                 "width {width}: {bar:?}"
@@ -678,7 +779,7 @@ mod tests {
             assert!(bar.ends_with('%'), "width {width}: {bar:?}");
         }
         for width in [10, 7] {
-            let bar = progress_bar(&progress, width);
+            let bar = progress_bar(&progress, &[], width);
             assert!(
                 bar.chars().any(|c| c == '█' || c == '░'),
                 "width {width}: {bar:?}"
@@ -687,11 +788,11 @@ mod tests {
             assert!(!bar.contains('%'), "width {width}: {bar:?}");
         }
         for width in [6, 5] {
-            let bar = progress_bar(&progress, width);
+            let bar = progress_bar(&progress, &[], width);
             assert_eq!(bar, "[4/9]", "width {width}");
         }
         for width in [4, 1, 0] {
-            let bar = progress_bar(&progress, width);
+            let bar = progress_bar(&progress, &[], width);
             assert_eq!(bar, "", "width {width}");
         }
     }
@@ -704,7 +805,7 @@ mod tests {
         };
         let widths: Vec<u16> = (0..=30).chain([58, 78]).collect();
         for width in widths {
-            let bar = progress_bar(&progress, width);
+            let bar = progress_bar(&progress, &[], width);
             assert!(
                 bar.contains("[4/9]") || !bar.contains('['),
                 "width {width}: {bar:?}"
@@ -733,10 +834,10 @@ mod tests {
             total: 0,
         };
         for width in [78, 58, 4, 3] {
-            assert_eq!(progress_bar(&progress, width), "[-]", "width {width}");
+            assert_eq!(progress_bar(&progress, &[], width), "[-]", "width {width}");
         }
         for width in [2, 1, 0] {
-            assert_eq!(progress_bar(&progress, width), "", "width {width}");
+            assert_eq!(progress_bar(&progress, &[], width), "", "width {width}");
         }
     }
 
@@ -760,7 +861,7 @@ mod tests {
     /// `width`, which happens well before the checklist's own text runs out
     /// of room.
     fn first_content_index(progress: &Progress, width: u16) -> usize {
-        if progress_bar(progress, width).is_empty() {
+        if progress_bar(progress, &[], width).is_empty() {
             0
         } else {
             2
@@ -1060,6 +1161,219 @@ mod tests {
         }
     }
 
+    fn p(completed: usize, total: usize) -> Progress {
+        Progress { completed, total }
+    }
+
+    /// The four glyphs the segmented gauge can draw, and the two counts every
+    /// test below reads a run through.
+    fn gauge_run(bar: &str) -> String {
+        bar.chars().take_while(|c| "█░▓▒".contains(*c)).collect()
+    }
+
+    fn filled_count(bar: &str) -> usize {
+        gauge_run(bar)
+            .chars()
+            .filter(|&c| c == '█' || c == '▓')
+            .count()
+    }
+
+    /// `tasks-progress-bar` :: "Two groups of unequal size get spans
+    /// proportional to their item counts".
+    #[test]
+    fn two_groups_of_unequal_size_get_spans_proportional_to_their_item_counts() {
+        let progress = p(3, 12);
+        let groups = [p(3, 9), p(0, 3)];
+        for width in [78, 58] {
+            let bar = progress_bar(&progress, &groups, width);
+            let run = gauge_run(&bar);
+            let g = run.chars().count();
+            let even = run.chars().filter(|&c| c == '█' || c == '░').count();
+            let odd = run.chars().filter(|&c| c == '▓' || c == '▒').count();
+            assert_eq!(even + odd, g, "width {width}: every position is drawn");
+            assert_eq!(even, g * 9 / 12, "width {width}: the first span");
+            assert_eq!(odd, g - g * 9 / 12, "width {width}: the second span");
+            // The first `floor(g * 9 / 12)` positions are the `█`/`░` pair and
+            // the remainder the `▓`/`▒` pair, in that order.
+            assert!(
+                run.chars().take(even).all(|c| c == '█' || c == '░'),
+                "width {width}: {run:?}"
+            );
+            assert!(
+                run.chars().skip(even).all(|c| c == '▓' || c == '▒'),
+                "width {width}: {run:?}"
+            );
+
+            // The fill is unchanged: the same count the unsegmented gauge
+            // produces.
+            assert_eq!(filled_count(&bar), g * 3 / 12, "width {width}");
+
+            // And the empty-slice call differs only in the shades.
+            let plain = progress_bar(&progress, &[], width);
+            assert_eq!(
+                bar.replace('▓', "█").replace('▒', "░"),
+                plain,
+                "width {width}: segmentation moved something other than a glyph"
+            );
+        }
+    }
+
+    /// `tasks-progress-bar` :: "An empty group contributes no span and consumes
+    /// no index".
+    #[test]
+    fn an_empty_group_contributes_no_span_and_consumes_no_index() {
+        let progress = p(0, 4);
+        let with_empty = [p(0, 2), p(0, 0), p(0, 2)];
+        let without = [p(0, 2), p(0, 2)];
+        for width in [78, 58] {
+            let bar = progress_bar(&progress, &with_empty, width);
+            let run = gauge_run(&bar);
+            let g = run.chars().count();
+            let first = run.chars().filter(|&c| c == '░').count();
+            let second = run.chars().filter(|&c| c == '▒').count();
+            assert_eq!(first + second, g, "width {width}: every position is drawn");
+            assert_eq!(first, g / 2, "width {width}: the first half");
+            assert!(
+                run.chars().take(first).all(|c| c == '░'),
+                "width {width}: {run:?}"
+            );
+            assert!(
+                run.chars().skip(first).all(|c| c == '▒'),
+                "width {width}: {run:?}"
+            );
+
+            // The empty group took no index: the two contributing groups are
+            // `0` and `1`, so dropping it is what the rule does rather than
+            // merely what it permits.
+            assert_eq!(
+                bar,
+                progress_bar(&progress, &without, width),
+                "width {width}: byte-identical with the empty group removed"
+            );
+        }
+    }
+
+    /// `tasks-progress-bar` :: "Segmentation is skipped below the legibility
+    /// floor". 58 and 78 are inside the sweep and are named for `TASKWIDTHS`.
+    #[test]
+    fn segmentation_is_skipped_below_the_legibility_floor() {
+        let progress = p(5, 22);
+        let groups: Vec<Progress> = (0..22).map(|_| p(0, 1)).collect();
+        let mut below = 0usize;
+        let mut above = 0usize;
+        for width in 0..=130u16 {
+            let bar = progress_bar(&progress, &groups, width);
+            let run = gauge_run(&bar);
+            let g = run.chars().count();
+            if g == 0 {
+                continue;
+            }
+            let shaded = run.chars().any(|c| c == '▓' || c == '▒');
+            if g < 44 {
+                below += 1;
+                assert!(!shaded, "width {width}: g {g} is below the floor: {run:?}");
+            } else {
+                above += 1;
+                assert!(
+                    run.chars().any(|c| c == '█' || c == '░')
+                        && run.chars().any(|c| c == '▓' || c == '▒'),
+                    "width {width}: g {g} is above the floor and holds one pair only: {run:?}"
+                );
+            }
+        }
+        assert!(
+            below > 0 && above > 0,
+            "the sweep must cross the floor in both directions (below {below}, above {above})"
+        );
+
+        // At 58 — the narrow mandated interior, the measured worst case the
+        // floor was chosen against — `g` is at least 44 and the bar segments.
+        // 78 is the wide one, comfortably above it.
+        for width in [58, 78] {
+            let run = gauge_run(&progress_bar(&progress, &groups, width));
+            assert!(run.chars().count() >= 44, "width {width}");
+            assert!(
+                run.chars().any(|c| c == '▓' || c == '▒'),
+                "width {width}: {run:?}"
+            );
+        }
+    }
+
+    /// `tasks-progress-bar` :: "A single group is never segmented".
+    #[test]
+    fn a_single_group_is_never_segmented() {
+        let progress = p(1, 2);
+        for width in [78, 58] {
+            let bar = progress_bar(&progress, &[p(1, 2)], width);
+            assert!(
+                !bar.contains('▓') && !bar.contains('▒'),
+                "width {width}: one group has no boundary to mark: {bar:?}"
+            );
+            assert_eq!(
+                bar,
+                progress_bar(&progress, &[], width),
+                "width {width}: byte-identical to the empty-slice call"
+            );
+        }
+    }
+
+    /// `tasks-progress-bar` :: "Segmentation is total and partitions the run
+    /// exactly". 58 and 78 are inside the sweep and are named for
+    /// `TASKWIDTHS`.
+    #[test]
+    fn segmentation_is_total_and_partitions_the_run_exactly() {
+        let half = usize::MAX / 2;
+        let cases: Vec<(Progress, Vec<Progress>)> = vec![
+            (p(0, 0), Vec::new()),
+            (
+                p(usize::MAX, usize::MAX),
+                vec![p(half, half), p(half, half)],
+            ),
+            (p(7, 40), (0..40).map(|_| p(0, 1)).collect()),
+            (p(1, 2), vec![p(0, usize::MAX), p(1, 1)]),
+            (p(0, 3), (0..100).map(|_| p(0, 0)).collect()),
+        ];
+        for (index, (progress, groups)) in cases.iter().enumerate() {
+            for width in 0..=130u16 {
+                let bar = progress_bar(progress, groups, width);
+                assert!(
+                    columns(&bar) <= width as usize,
+                    "case {index} width {width}: {bar:?} exceeds it"
+                );
+                let run = gauge_run(&bar);
+                let g = run.chars().count();
+                let counts = ['█', '░', '▓', '▒']
+                    .iter()
+                    .map(|&glyph| run.chars().filter(|&c| c == glyph).count())
+                    .sum::<usize>();
+                assert_eq!(
+                    counts, g,
+                    "case {index} width {width}: a position is unassigned or assigned twice"
+                );
+                // The substitution provably preserves the fill rather than
+                // being asserted to by construction.
+                assert_eq!(
+                    filled_count(&bar),
+                    filled_count(&progress_bar(progress, &[], width)),
+                    "case {index} width {width}: the fill moved"
+                );
+            }
+        }
+
+        // The saturating input is not reintroduced by segmentation: every
+        // position is a filled glyph and the percent cell reads 100%.
+        let groups = [p(half, half), p(half, half)];
+        for width in [78, 58] {
+            let bar = progress_bar(&p(usize::MAX, usize::MAX), &groups, width);
+            let run = gauge_run(&bar);
+            assert!(
+                run.chars().all(|c| c == '█' || c == '▓'),
+                "width {width}: {run:?}"
+            );
+            assert!(bar.ends_with("100%"), "width {width}: {bar:?}");
+        }
+    }
+
     /// `tasks-checklist` :: "A folded group and an unfolded one render the
     /// same item lines". Every expectation here is a **literal**: asserting
     /// that `items`' output equals a slice of `lines`' output could not fail
@@ -1110,15 +1424,16 @@ mod tests {
             );
 
             // `bar_lines` alone: the bar row and one blank.
-            let bar_out = super::bar_lines(&progress, width);
+            let bar_out = super::bar_lines(&progress, &[], width);
             let bar_texts: Vec<String> = bar_out.iter().map(|l| l.text()).collect();
             assert_eq!(
                 bar_texts,
-                vec![progress_bar(&progress, width), String::new()],
+                vec![progress_bar(&progress, &[], width), String::new()],
                 "width {width}: the bar and one blank line"
             );
 
-            // The whole-tab grammar, against literals.
+            // The whole-tab grammar, against literals. One group, so `lines`'
+            // own slice segments nothing and the bar is the unsegmented form.
             let whole = lines(
                 "## 1. Setup\n\n- [x] 1.1 first\n- [ ] 1.2 second\n",
                 &progress,
@@ -1128,7 +1443,7 @@ mod tests {
             assert_eq!(
                 whole_texts,
                 vec![
-                    progress_bar(&progress, width),
+                    progress_bar(&progress, &[], width),
                     String::new(),
                     "## 1. Setup".to_string(),
                     "[✓] 1.1 first".to_string(),
@@ -1146,8 +1461,8 @@ mod tests {
         // A width where the bar renders as the empty string: `[1/2]` alone
         // measures five columns, so four leaves the bar nothing to draw and
         // `bar_lines` contributes no blank line either.
-        assert!(progress_bar(&progress, 4).is_empty());
-        assert!(super::bar_lines(&progress, 4).is_empty());
+        assert!(progress_bar(&progress, &[], 4).is_empty());
+        assert!(super::bar_lines(&progress, &[], 4).is_empty());
     }
 
     #[test]
@@ -1158,9 +1473,27 @@ mod tests {
             completed: 1,
             total: 3,
         };
+        // `lines` derives its own group slice from its own parse, so the bar it
+        // draws is segmented — two groups of two and one item. Naming the
+        // slice here rather than passing `&[]` is what keeps this assertion
+        // against the grammar `lines` actually produces.
+        let per_group = [
+            Progress {
+                completed: 1,
+                total: 2,
+            },
+            Progress {
+                completed: 0,
+                total: 1,
+            },
+        ];
         for width in [78, 58] {
             let out = lines(source, &progress, width);
-            let bar = progress_bar(&progress, width);
+            let bar = progress_bar(&progress, &per_group, width);
+            assert!(
+                bar.contains('▓') || bar.contains('▒'),
+                "width {width}: two groups, so the bar segments"
+            );
             let texts: Vec<String> = out.iter().map(|l| l.text()).collect();
             assert_eq!(
                 texts,
@@ -1223,7 +1556,7 @@ mod tests {
             assert_eq!(
                 texts,
                 vec![
-                    progress_bar(&progress, width),
+                    progress_bar(&progress, &[], width),
                     String::new(),
                     "[ ] parent".to_string(),
                     "  [✓] child".to_string(),
@@ -1731,7 +2064,7 @@ mod tests {
         ];
         for progress in cases {
             for width in 0u16..=130 {
-                let bar = progress_bar(&progress, width);
+                let bar = progress_bar(&progress, &[], width);
                 let cols = columns(&bar);
                 assert!(
                     cols <= width as usize,
@@ -1739,7 +2072,7 @@ mod tests {
                 );
             }
             for width in [78, 58] {
-                let bar = progress_bar(&progress, width);
+                let bar = progress_bar(&progress, &[], width);
                 assert!(columns(&bar) <= width as usize, "width {width}");
             }
         }
@@ -1760,8 +2093,8 @@ mod tests {
         };
         let want78 = format!("{}{} [4/9] 44%", "█".repeat(30), "░".repeat(38));
         let want58 = format!("{}{} [4/9] 44%", "█".repeat(21), "░".repeat(27));
-        assert_eq!(progress_bar(&progress, 78), want78);
-        assert_eq!(progress_bar(&progress, 58), want58);
+        assert_eq!(progress_bar(&progress, &[], 78), want78);
+        assert_eq!(progress_bar(&progress, &[], 58), want58);
     }
 
     /// `tasks-progress-bar` :: "The gauge is full exactly when the change is
@@ -1803,7 +2136,7 @@ mod tests {
                 "{progress:?}: {g12:?}"
             );
             for width in [78, 58] {
-                let bar = progress_bar(&progress, width);
+                let bar = progress_bar(&progress, &[], width);
                 assert_eq!(
                     !bar.contains('░'),
                     progress.is_complete(),
@@ -1852,10 +2185,10 @@ mod tests {
         assert_eq!(gauge_of(&empty, 12), "");
 
         for width in [78, 58] {
-            assert_eq!(progress_bar(&empty, width), "[-]", "width {width}");
+            assert_eq!(progress_bar(&empty, &[], width), "[-]", "width {width}");
         }
-        assert_eq!(progress_bar(&empty, 3), "[-]");
-        assert_eq!(progress_bar(&empty, 2), "");
+        assert_eq!(progress_bar(&empty, &[], 3), "[-]");
+        assert_eq!(progress_bar(&empty, &[], 2), "");
     }
 
     /// `tasks-progress-bar` :: "The completeness property holds at the
@@ -1875,7 +2208,7 @@ mod tests {
             assert!(!run.contains('░'), "g {g}: {run:?}");
         }
         for width in [78, 58] {
-            let bar = progress_bar(&saturating, width);
+            let bar = progress_bar(&saturating, &[], width);
             assert!(!bar.contains('░'), "width {width}: {bar:?}");
         }
 
@@ -1904,7 +2237,7 @@ mod tests {
             total: usize::MAX,
         };
         for width in [78, 58] {
-            let bar = progress_bar(&saturating, width);
+            let bar = progress_bar(&saturating, &[], width);
             assert!(!bar.contains('░'), "width {width}: {bar:?}");
             assert!(bar.ends_with("100%"), "width {width}: {bar:?}");
         }
@@ -1915,8 +2248,8 @@ mod tests {
         };
         let want78 = format!("{}{} [4/9] 44%", "█".repeat(30), "░".repeat(38));
         let want58 = format!("{}{} [4/9] 44%", "█".repeat(21), "░".repeat(27));
-        assert_eq!(progress_bar(&unmoved, 78), want78);
-        assert_eq!(progress_bar(&unmoved, 58), want58);
+        assert_eq!(progress_bar(&unmoved, &[], 78), want78);
+        assert_eq!(progress_bar(&unmoved, &[], 58), want58);
     }
 
     /// `tasks-progress-bar` :: "The bar's rendered output does not move" —
@@ -1958,7 +2291,7 @@ mod tests {
         ];
         for progress in cases {
             for width in 0u16..=130 {
-                let bar = progress_bar(&progress, width);
+                let bar = progress_bar(&progress, &[], width);
                 assert!(
                     columns(&bar) <= width as usize,
                     "{progress:?} width {width}: {bar:?} exceeds its width"
@@ -1972,8 +2305,8 @@ mod tests {
         };
         let want78 = format!("{}{} [4/9] 44%", "█".repeat(30), "░".repeat(38));
         let want58 = format!("{}{} [4/9] 44%", "█".repeat(21), "░".repeat(27));
-        assert_eq!(progress_bar(&unmoved, 78), want78);
-        assert_eq!(progress_bar(&unmoved, 58), want58);
+        assert_eq!(progress_bar(&unmoved, &[], 78), want78);
+        assert_eq!(progress_bar(&unmoved, &[], 58), want58);
     }
 
     /// `tasks-progress-bar` :: "The header's gauge and the bar's gauge agree

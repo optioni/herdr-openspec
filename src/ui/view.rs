@@ -4527,6 +4527,23 @@ mod tests {
         crate::ui::list::pad_or_truncate_right(text, width as usize)
     }
 
+    /// The bar the pane draws for a tracked-tasks tab, built from the same
+    /// per-group slice `ui::detail::content_lines` feeds the gauge — written
+    /// here as literal `(completed, total)` pairs, so a test asserts against
+    /// the groups its own fixture holds rather than against whatever the
+    /// production path happened to pass.
+    fn segmented_bar(
+        progress: &crate::tasks::Progress,
+        groups: &[(usize, usize)],
+        width: u16,
+    ) -> String {
+        let groups: Vec<crate::tasks::Progress> = groups
+            .iter()
+            .map(|&(completed, total)| crate::tasks::Progress { completed, total })
+            .collect();
+        crate::ui::tasks::progress_bar(progress, &groups, width)
+    }
+
     const TWO_TASK_GROUPS: &str =
         "## 1. Setup\n\n- [x] 1.1 first\n- [ ] 1.2 second\n\n## 2. Build\n\n- [ ] 2.1 third\n";
 
@@ -4546,7 +4563,7 @@ mod tests {
 
         for width in [120, 60] {
             let interior = interior_width(width);
-            let bar = crate::ui::tasks::progress_bar(&progress, interior);
+            let bar = segmented_bar(&progress, &[(1, 2), (0, 1)], interior);
             assert_eq!(
                 drawn_content_rows(&render_at(width, 20, &d), interior),
                 vec![
@@ -4584,7 +4601,7 @@ mod tests {
         d.detail.expanded.clear();
         for width in [120, 60] {
             let interior = interior_width(width);
-            let bar = crate::ui::tasks::progress_bar(&progress, interior);
+            let bar = segmented_bar(&progress, &[(1, 2), (0, 1)], interior);
             assert_eq!(
                 drawn_content_rows(&render_at(width, 20, &d), interior),
                 vec![
@@ -4613,6 +4630,68 @@ mod tests {
                 ],
                 "width {width}: collapsed, and no item row at all"
             );
+        }
+    }
+
+    /// `tasks-progress-bar` :: "A real tasks tab renders a segmented gauge into
+    /// the frame".
+    ///
+    /// The **only** scenario in this capability that renders through
+    /// `ui::detail::content_lines`. Every other segmentation scenario passes a
+    /// hand-built slice to `progress_bar` directly, so all of them would pass
+    /// against a build whose production caller passed an empty one — which is
+    /// the defect planning review found, and which this test exists to catch.
+    /// Its fixture is therefore built by `sync_detail` with a closure reader,
+    /// never by hand-populating `detail.sections`.
+    #[test]
+    fn a_real_tasks_tab_renders_a_segmented_gauge_into_the_frame() {
+        let progress = crate::tasks::Progress {
+            completed: 1,
+            total: 3,
+        };
+        let d = synced_task_dashboard(TWO_TASK_GROUPS, progress, 1);
+        for width in [120, 60] {
+            let interior = interior_width(width);
+            let bar = drawn_content_rows(&render_at(width, 20, &d), interior)[0].clone();
+            assert!(
+                bar.contains('▓') || bar.contains('▒'),
+                "width {width}: the pane draws no segmented gauge at all: {bar:?}"
+            );
+
+            // The first group's span is the `█`/`░` pair and the second the
+            // `▓`/`▒` pair, their widths in the ratio the two sections' own
+            // totals give — 2 items against 1.
+            let first: usize = bar.chars().filter(|&c| c == '█' || c == '░').count();
+            let second: usize = bar.chars().filter(|&c| c == '▓' || c == '▒').count();
+            let g = first + second;
+            assert_eq!(first, g * 2 / 3, "width {width}: first span");
+            assert_eq!(second, g - g * 2 / 3, "width {width}: second span");
+
+            // The run's first position belongs to the first group, and its
+            // last to the second, so the order is document order.
+            let run: String = bar.chars().take_while(|c| "█░▓▒".contains(*c)).collect();
+            assert!(
+                run.starts_with('█') || run.starts_with('░'),
+                "width {width}: {run:?}"
+            );
+            assert!(
+                run.ends_with('▓') || run.ends_with('▒'),
+                "width {width}: {run:?}"
+            );
+        }
+
+        // The same dashboard whose artifact does not track tasks draws no
+        // progress-bar row at all, and no shade from either new pair anywhere.
+        let prose = synced_task_dashboard(TWO_TASK_GROUPS, progress, 0);
+        for width in [120, 60] {
+            let buf = render_at(width, 20, &prose);
+            for y in 0..buf.area.height {
+                let row = row_text(&buf, y);
+                assert!(
+                    !row.contains('▓') && !row.contains('▒'),
+                    "width {width} row {y}: {row:?}"
+                );
+            }
         }
     }
 
@@ -4675,7 +4754,7 @@ mod tests {
                 drawn_content_rows(&render_at(width, 20, &d), interior),
                 vec![
                     padded(
-                        &crate::ui::tasks::progress_bar(&progress, interior),
+                        &segmented_bar(&progress, &[(1, 2), (0, 1)], interior),
                         interior
                     ),
                     padded("", interior),
@@ -4779,7 +4858,7 @@ mod tests {
         );
         for width in [120, 60] {
             let interior = interior_width(width);
-            let bar = crate::ui::tasks::progress_bar(&progress, interior);
+            let bar = segmented_bar(&progress, &[(1, 1), (0, 2)], interior);
             assert_eq!(
                 drawn_content_rows(&render_at(width, 20, &d), interior),
                 vec![
@@ -4828,7 +4907,7 @@ mod tests {
 
         for width in [120, 60] {
             let interior = interior_width(width);
-            let bar = crate::ui::tasks::progress_bar(&progress, interior);
+            let bar = crate::ui::tasks::progress_bar(&progress, &[], interior);
             assert_eq!(
                 drawn_content_rows(&render_at(width, 20, &d), interior),
                 vec![
@@ -4922,7 +5001,7 @@ mod tests {
 
         for width in [120, 60] {
             let interior = interior_width(width);
-            let bar = crate::ui::tasks::progress_bar(&progress, interior);
+            let bar = segmented_bar(&progress, &[(1, 1), (1, 2), (0, 1)], interior);
             assert_eq!(
                 drawn_content_rows(&render_at(width, 20, &d), interior),
                 vec![
@@ -6696,7 +6775,7 @@ mod tests {
         for width in [120, 60] {
             let d3 = synced_task_dashboard(source, progress, 1);
             let buf3 = render_at(width, 20, &d3);
-            let bar = crate::ui::tasks::progress_bar(&progress, interior_width(width));
+            let bar = segmented_bar(&progress, &[(1, 2), (0, 1)], interior_width(width));
             assert_eq!(
                 detail_interior_cols(&buf3, 5, columns(&bar)),
                 bar,
@@ -6783,7 +6862,7 @@ mod tests {
         for width in [120, 60] {
             let d0 = dashboard_with_marked_change(&ids, Some(0), progress, source, Vec::new(), 0);
             let buf0 = render_at(width, 20, &d0);
-            let bar = crate::ui::tasks::progress_bar(&progress, interior_width(width));
+            let bar = crate::ui::tasks::progress_bar(&progress, &[], interior_width(width));
             assert_eq!(
                 detail_interior_cols(&buf0, 5, columns(&bar)),
                 bar,
@@ -6972,14 +7051,14 @@ mod tests {
         let buf120 = render_at(120, 20, &d);
         assert_eq!(
             cols(&row_text(&buf120, 5), 42..120),
-            crate::ui::tasks::progress_bar(&progress, 78),
+            crate::ui::tasks::progress_bar(&progress, &[], 78),
         );
         assert!(cols(&row_text(&buf120, 5), 42..120).ends_with("[4/9] 44%"));
 
         let buf60 = render_at(60, 20, &d);
         assert_eq!(
             cols(&row_text(&buf60, 5), 1..59),
-            crate::ui::tasks::progress_bar(&progress, 58),
+            crate::ui::tasks::progress_bar(&progress, &[], 58),
         );
         assert!(cols(&row_text(&buf60, 5), 1..59).ends_with("[4/9] 44%"));
 

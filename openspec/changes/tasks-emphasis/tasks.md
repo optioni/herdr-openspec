@@ -281,7 +281,7 @@ Writes `src/ui/tasks.rs`, `src/ui/detail.rs`, and the nine `progress_bar` sites 
 `src/ui/view.rs`. It follows groups 5 and 6 because its slice is fed from
 `ArtifactSection::progress`.
 
-- [ ] 7.1 RED: Write the failing render row first —
+- [x] 7.1 RED: Write the failing render row first —
       `a_real_tasks_tab_renders_a_segmented_gauge_into_the_frame` in `ui::view`, at 120x20 and
       60x20 over the two-group fixture, asserting at least one `▓` or `▒` in the progress-bar
       row and the two spans in the ratio the sections' own totals give. The fixture SHALL be
@@ -291,35 +291,35 @@ Writes `src/ui/tasks.rs`, `src/ui/detail.rs`, and the nine `progress_bar` sites 
       `content_lines` — which is the class of defect planning review found here. This is the
       only scenario in the change that renders a segmented gauge through `content_lines`; the
       other five pass hand-built slices and would all pass against an unwired build.
-- [ ] 7.2 RED: Write failing `ui::tasks` tests
+- [x] 7.2 RED: Write failing `ui::tasks` tests
       `two_groups_of_unequal_size_get_spans_proportional_to_their_item_counts`,
       `an_empty_group_contributes_no_span_and_consumes_no_index`,
       `segmentation_is_skipped_below_the_legibility_floor`,
       `a_single_group_is_never_segmented`, and
       `segmentation_is_total_and_partitions_the_run_exactly`. Each names 58 and 78; three sweep
       0..=130.
-- [ ] 7.3 GREEN: Add the `groups: &[tasks::Progress]` parameter to `progress_bar` and
+- [x] 7.3 GREEN: Add the `groups: &[tasks::Progress]` parameter to `progress_bar` and
       `bar_lines` and implement segmentation as a **glyph substitution** over the run
       `gauge_of` already returns (design.md -> Decision 3). `gauge_of` does not move.
-- [ ] 7.4 GREEN: Wire both production callers. `ui::tasks::lines` passes `group.progress()` per
+- [x] 7.4 GREEN: Wire both production callers. `ui::tasks::lines` passes `group.progress()` per
       parsed group. `ui::detail::content_lines`' foldable branch — `src/ui/detail.rs:461`, the
       path every real `tasks.md` takes — passes `detail.sections`' own `progress` values in
       order, skipping `None`, and SHALL NOT re-parse the file to build the slice.
-- [ ] 7.5 CHANGE: Update the remaining `progress_bar` sites, including the **nine in
+- [x] 7.5 CHANGE: Update the remaining `progress_bar` sites, including the **nine in
       `src/ui/view.rs`** (per 0.1), to pass an empty slice, which the spec requires to
       reproduce the previous output byte for byte.
-- [ ] 7.6 CHECK: Contract gate — `progress_bar` and `bar_lines` both appear in design.md ->
+- [x] 7.6 CHECK: Contract gate — `progress_bar` and `bar_lines` both appear in design.md ->
       Contracts with named consumers. Re-inspect both signatures against that table and confirm
       every consumer is named and the empty-slice compatibility claim holds.
-- [ ] 7.7 CHECK: Re-run the two literal-carrying gauge tests —
+- [x] 7.7 CHECK: Re-run the two literal-carrying gauge tests —
       `full_grammar_is_byte_identical_to_pre_change_output` (`src/ui/tasks.rs:1337`) and
       `the_bar_s_rendered_output_does_not_move` (`:1517`) — unmodified except for the new
       empty-slice argument, and confirm both stay green. They already hold recorded literals,
       which is what makes them falsifiable; `bar_measures_at_most_its_width_at_every_width` is
       a property sweep recording nothing and is **not** evidence for this claim.
-- [ ] 7.8 REFACTOR: Fold the span arithmetic and the substitution into one pass if two emerged,
+- [x] 7.8 REFACTOR: Fold the span arithmetic and the substitution into one pass if two emerged,
       or record that none was needed.
-- [ ] 7.9 VERIFY: `cargo test --all-features` — green — and
+- [x] 7.9 VERIFY: `cargo test --all-features` — green — and
       `/bin/sh scripts/gates/taskwidths.sh`, `detailwidths.sh` and `taskseam.sh` each exit 0.
 
 ## 8. The cross-capability view rows
