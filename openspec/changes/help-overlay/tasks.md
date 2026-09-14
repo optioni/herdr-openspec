@@ -265,14 +265,14 @@ run it avoids.
 ## 11. Change Review
 <!-- kind: operational -->
 
-- [ ] 11.1 CHECK: Dispatch `outside-in-tdd-reviewer` against proposal.md, all twelve spec files,
+- [x] 11.1 CHECK: Dispatch `outside-in-tdd-reviewer` against proposal.md, all twelve spec files,
   design.md, and the diff. Do not fork this session.
-- [ ] 11.2 CHECK: Point the reviewer at this change's own concentration points first — the action
+- [x] 11.2 CHECK: Point the reviewer at this change's own concentration points first — the action
   sweep's ability to fail in both directions, the seventeen suppressed actions, the six
   capabilities carrying byte-exact footer strings, and whether `src/ui/help.rs` reaches any I/O.
-- [ ] 11.3 CHANGE: Fix every CRITICAL, resolve or accept each WARNING with a one-line reason, note
+- [x] 11.3 CHANGE: Fix every CRITICAL, resolve or accept each WARNING with a one-line reason, note
   SUGGESTIONs, re-run affected tests.
-- [ ] 11.4 VERIFY: Confirm no blocking or unowned finding remains.
+- [x] 11.4 VERIFY: Confirm no blocking or unowned finding remains.
 
 ## 12. Documentation
 <!-- kind: operational -->

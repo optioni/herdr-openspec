@@ -928,8 +928,9 @@ its merge key; its subject is unchanged and only the type list and the field cou
 - **AND** `state::record` and `launch::start` join them for `agent-launch`: the first is the
   crate's only write outside a test and the second spawns its third worker thread, and a view
   reaching for either directly is the leak this change makes plausible
-- **AND** the check fails when any of the eight files is absent, rather than reporting a
-  clean tree
+- **AND** the check fails when any of the **ten** files is absent, rather than reporting a
+  clean tree — ten, not eight: the historical bullet three above names the set `agent-launch`
+  left behind, and this bullet names the set the check sweeps *here*
 - **AND** it is paired with a positive control asserting that `src/ui/terminal.rs` **does**
   name `std::io`, so a search that matched nothing because it searched nothing fails instead
   of passing
