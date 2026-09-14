@@ -14,9 +14,37 @@ requirement binds all three.
    `binding-inventory` requires. That requirement owns the sweep, the exemption set, and the
    failure directions; this one neither restates nor weakens them, and legs 2 and 3 below are
    what `doc-conformance` adds on top;
-2. requires `SPEC.md` → Keys' **key** table to name every `input` string `INVENTORY`
-   holds, and to name no key `INVENTORY` does not;
-3. requires `README.md` → Keys to name the same set of `input` strings.
+2. requires `SPEC.md` → Keys' **key** table to name every key `INVENTORY` holds, and to name
+   no key `INVENTORY` does not;
+3. requires `README.md` → Keys to name the same set.
+
+Legs 2 and 3 compare **key atoms**, not `input` strings verbatim, and the normalisation SHALL
+be stated here rather than left to the implementer — an earlier draft said "every `input` string
+`INVENTORY` holds", which is unsatisfiable against either document as written and was caught by
+running the comparison rather than by re-reading it. The rule is:
+
+- The **`Mouse`** group is excluded. Its gestures are bound by `documented_mouse_actions`
+  against `SPEC.md` → Keys' **mouse** table, which is a different table with a different
+  grammar, and `README.md` documents no gesture at all.
+- An `INVENTORY` `input` is split on `" / "` into atoms, so `j / ↓` contributes `j` and `↓`.
+  This is what lets one overlay row stand for a key and its arrow synonym without forcing the
+  prose to split into two rows.
+- A document's atoms are the **backticked spans in the Key column** of its Keys table, the
+  table bounded by its own contiguous `|` rows — never a scan of the whole document, which
+  picks up every backticked identifier in it.
+- Exactly **two** normalisations are permitted, and they SHALL be named in the check's own
+  source: the bare word `arrows` in a Key cell contributes `↑` and `↓`; and a backticked pair
+  joined by an en-dash, `` `1`–`9` ``, contributes the single range atom `1–9` rather than the
+  two endpoints. No third alias SHALL be added — a future binding whose prose spelling does not
+  atomise to its `INVENTORY` spelling SHALL be made to agree by editing the document, not by
+  growing this list. The check SHALL assert the alias table's length is two, on the same terms
+  leg 1's exemption set is pinned at two.
+
+Under that rule the two documents SHALL gain four things, which are real gaps rather than
+artifacts of the comparison: `?` in both (it is this change's own binding); `Space` in
+`README.md`, which omits it while `SPEC.md` carries it; and `Backspace` in **both**, which each
+document mentions only inside the `/` row's prose and neither names as a key of its own,
+though `INVENTORY`'s `While filtering` group binds it to `FilterPop`.
 
 Legs 2 and 3 compare the prose against `INVENTORY`, not against the swept functions, and
 that is deliberate: leg 1 already binds `INVENTORY` to the functions, so binding the prose
@@ -52,6 +80,12 @@ disagreement between them is itself informative.
 - **AND** leg 2's extraction finds `SPEC.md` → Keys' key table by its own header row, not
   by position, and reports at least one row
 - **AND** leg 3's extraction finds `README.md` → Keys the same way
+- **AND** the atom sets agree exactly, in both directions, with the alias table at length two —
+  no residual difference is tolerated and none is exempted
+- **AND** the extraction is bounded to the table's own contiguous `|` rows: a check that
+  scanned the whole of `SPEC.md` would collect every backticked identifier in it — sixty-odd
+  role names, CLI fragments and paths — and pass vacuously in the doc-has-extra direction,
+  which is the failure this bullet exists to forbid
 
 #### Scenario: A gutted document fails as a broken control rather than a clean tree
 

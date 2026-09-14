@@ -249,9 +249,15 @@ run it avoids.
   bound but undocumented; restore it. Record both.
 - [ ] 10.4 CHECK: Confirm the landed `documented_mouse_actions` check still passes with the new
   mouse row in `SPEC.md` → Keys' mouse table.
-- [ ] 10.5 GREEN: Add the `?` row to `SPEC.md` → Keys' key table and to `README.md` → Keys.
-  Legs 2 and 3 of the new check read those two documents, so they must land here or 10.1's
-  tests cannot go green in their own group.
+- [ ] 10.5 GREEN: Bring both key tables into agreement with `INVENTORY`'s key atoms. Four rows,
+  not one: `?` in **both**; `Space` in `README.md`, which omits it while `SPEC.md` carries it;
+  and `Backspace` in **both**, which each document mentions only inside the `/` row's prose
+  while `INVENTORY`'s `While filtering` group binds it to `FilterPop`. Legs 2 and 3 read those
+  two documents, so they must land here or 10.1's tests cannot go green in their own group.
+  The normalisation legs 2 and 3 compare under — the `Mouse` group excluded, `input` split on
+  `" / "`, the Key column's backticked spans only, and exactly two aliases (`arrows` → `↑`/`↓`,
+  and `` `1`–`9` `` → `1–9`) — is specified in `specs/doc-conformance/spec.md`. Measured against
+  HEAD, those four rows are the *entire* residual difference in both directions.
 - [ ] 10.6 REFACTOR: Collapse the two sweeps' shared setup if it duplicates, or state that no
   refactor was needed.
 - [ ] 10.7 Run `cargo test --test doc_contract` — no regressions.
