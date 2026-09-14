@@ -29,13 +29,19 @@ Every number this plan uses, with the command that produced it, run at HEAD on 2
 | Change spec files carrying `### Requirement:` | `grep -l '^### Requirement:' openspec/changes/archive/*/specs/*/spec.md \| wc -l` vs `ls ... \| wc -l` | 198 of 198 |
 | Prose artifacts carrying `### Requirement:` at line start | `grep -l '^### Requirement:' openspec/changes/archive/*/{proposal,design,tasks}.md \| wc -l` | 0 |
 | Fenced `#` lines in **spec-shaped** files, and how many are ATX-shaped | fence-tracking scan over the 198 archived change specs and 47 live specs | 15 fenced, **0** ATX-shaped (12 `#[derive(`, 3 `#[cfg(test)]`) |
-| Fenced ATX-shaped lines in **archived `tasks.md`** | same scan over `openspec/changes/archive/*/tasks.md` | 1501 fenced, **1297 ATX-shaped**, over 37 files — the figure that makes fence tracking load-bearing (design.md -> D4) |
+| Fenced ATX-shaped lines in **archived `tasks.md`** | same scan over `openspec/changes/archive/*/tasks.md` | 1501 fenced, **1368 ATX-shaped**, over 37 files — the figure that makes fence tracking load-bearing (design.md -> D4) |
 | `ArtifactSection {` sites to edit | `grep -rn "ArtifactSection {" src/ tests/ \| wc -l` = 67, of which 3 are the `tests/gate-controls.toml` planted defect and 1 is the struct definition | **63** to edit: app.rs 21, driver.rs 14, view.rs 13, detail.rs 13, doc_contract.rs 2. The `.toml` plant matches the struct's *header* line, so added fields leave it working |
 | `noio-view.sh` / `colwidth.sh` `PURE` entries | `grep '^PURE=' scripts/gates/{noio-view,colwidth}.sh` | 10 / 9 — unchanged, because no new file is added under `src/ui/` |
 | Landed tests the blank separator breaks | plant the separator in a `git archive HEAD` tree, then `cargo test --all-features` | `1315 passed; 5 failed` — the five named in task 4.3 |
 | `DETAILWIDTHS` at HEAD, and under a planted width-free test | `/bin/sh scripts/gates/detailwidths.sh` | `OK: all 52 detail tests name both 58 and 78`; planted → `FAIL: … the_splitter_is_total_over_degenerate_input` |
 
-- [ ] 0.1 CHECK: Re-run the nine commands above and confirm each figure still holds. A figure that moved invalidates the task that cites it — the separator count sends you to 4.3, the fence count to D4, the `ArtifactSection` count to 2.2.
+- [x] 0.1 CHECK: Re-run the nine commands above and confirm each figure still holds. A figure that moved invalidates the task that cites it — the separator count sends you to 4.3, the fence count to D4, the `ArtifactSection` count to 2.2.
+
+      Re-run result: eight of nine figures exact. The ninth moved — fenced ATX-shaped lines in
+      archived `tasks.md` measured **1368**, not 1297; the fenced total (1501) is exact. The
+      figure is cited only by D4, whose claim is that fence tracking is load-bearing, and a
+      larger count strengthens it. No task is invalidated; the table row above is corrected.
+      Baseline `cargo test --all-features`: green, 1320 lib tests.
 
 ## 1. The heading splitter
 
