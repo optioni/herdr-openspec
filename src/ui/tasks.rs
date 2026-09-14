@@ -648,6 +648,78 @@ mod tests {
         }
     }
 
+    /// `tasks-checklist` :: "A folded group and an unfolded one render the
+    /// same item lines". Every expectation here is a **literal**: asserting
+    /// that `items`' output equals a slice of `lines`' output could not fail
+    /// once `lines` calls `items`, and this repository does not keep tests
+    /// that cannot fail.
+    #[test]
+    fn a_folded_group_and_an_unfolded_one_render_the_same_item_lines() {
+        let progress = Progress {
+            completed: 1,
+            total: 2,
+        };
+        let parsed = crate::tasks::parse("- [x] 1.1 first\n- [ ] 1.2 second\n");
+        let group = &parsed.groups[0];
+
+        for width in [78, 58] {
+            // `items` alone: the item rows and nothing else.
+            let out = super::items(&group.items, width);
+            let texts: Vec<String> = out.iter().map(|l| l.text()).collect();
+            assert_eq!(
+                texts,
+                vec!["[✓] 1.1 first".to_string(), "[ ] 1.2 second".to_string()],
+                "width {width}: no bar, no heading, no blank separator"
+            );
+            for (i, line) in out.iter().enumerate() {
+                assert_eq!(
+                    line.segments.first().map(|s| s.face),
+                    Some(crate::ui::markdown::Face::plain()),
+                    "width {width} line {i}"
+                );
+            }
+
+            // `bar_lines` alone: the bar row and one blank.
+            let bar_out = super::bar_lines(&progress, width);
+            let bar_texts: Vec<String> = bar_out.iter().map(|l| l.text()).collect();
+            assert_eq!(
+                bar_texts,
+                vec![progress_bar(&progress, width), String::new()],
+                "width {width}: the bar and one blank line"
+            );
+
+            // The whole-tab grammar, against literals.
+            let whole = lines(
+                "## 1. Setup\n\n- [x] 1.1 first\n- [ ] 1.2 second\n",
+                &progress,
+                width,
+            );
+            let whole_texts: Vec<String> = whole.iter().map(|l| l.text()).collect();
+            assert_eq!(
+                whole_texts,
+                vec![
+                    progress_bar(&progress, width),
+                    String::new(),
+                    "## 1. Setup".to_string(),
+                    "[✓] 1.1 first".to_string(),
+                    "[ ] 1.2 second".to_string(),
+                ],
+                "width {width}"
+            );
+            assert_eq!(
+                whole[2].segments.first().map(|s| s.face.heading),
+                Some(Some(2)),
+                "width {width}: the heading line"
+            );
+        }
+
+        // A width where the bar renders as the empty string: `[1/2]` alone
+        // measures five columns, so four leaves the bar nothing to draw and
+        // `bar_lines` contributes no blank line either.
+        assert!(progress_bar(&progress, 4).is_empty());
+        assert!(super::bar_lines(&progress, 4).is_empty());
+    }
+
     #[test]
     fn groups_headings_items() {
         let source = "## 1. Setup\n\n- [x] 1.1 first\n- [ ] 1.2 second\n\n\
