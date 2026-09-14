@@ -310,14 +310,39 @@ against the baseline shas, which detect the slide either way.
 ## 4. Change Review
 <!-- kind: operational -->
 
-- [ ] 4.1 CHECK: Dispatch the `outside-in-tdd-reviewer` subagent against proposal.md, both spec
+- [x] 4.1 CHECK: Dispatch the `outside-in-tdd-reviewer` subagent against proposal.md, both spec
   deltas, design.md, and the diff. Do not fork this session. Concentrate it on: every rewritten
   test still carrying its original name and doc comment; no new view test asserting the buffer
   against `header_row`; the band boundaries at 26/25/13/12/7/6/1; and whether any colour
   literal entered a render assertion.
-- [ ] 4.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a
+- [x] 4.2 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a
   one-line reason, note SUGGESTIONs, and re-run affected tests.
-- [ ] 4.3 VERIFY: Confirm no blocking or unowned finding remains.
+- [x] 4.3 VERIFY: Confirm no blocking or unowned finding remains.
+
+  **Outcome.** The `outside-in-tdd-reviewer` was dispatched against the artifacts and the diff,
+  concentrated on the four failure modes 4.1 names. It reported **no CRITICAL**, one WARNING,
+  and five SUGGESTIONs, and confirmed all four concentration areas clean: every rewritten test
+  keeps its name and carries a scenario doc comment; no new or rewritten view test asserts the
+  buffer against `header_row`; all four band boundaries are entered from both sides; and no
+  colour literal reached a render assertion.
+
+  - **WARNING (fixed, `ab727d1`).** The ADDED requirement in `specs/tasks-progress-bar` still
+    described the fill as "integer arithmetic with a saturating multiply" — the mechanism the
+    MODIFIED requirement above it replaces — and the paragraph beneath it spoke from a
+    pre-change vantage. `openspec archive` merges a delta verbatim, so the live capability would
+    have shipped one requirement whose two paragraphs disagree. Both restated in `u128` terms.
+    This is the failure 5.1/5.2 guard for `## Purpose`, reached by a different route.
+  - **SUGGESTIONs 1–4 (applied, `ab727d1`).** Three tests asserted a clause their scenario
+    states only indirectly — the 68/48- and 45/25-column name fields, and the BOLD claim's "the
+    gauge's own cells included", which sampled only the progress cell's five columns. Each is
+    now asserted directly. Four `tasks-progress-bar` scenarios bound only by design.md's table
+    gained a doc comment, so the capability is bound both ways throughout.
+  - **SUGGESTION 5 (noted, no change).** `percent_of`'s `as u64` cast can wrap for a `Progress`
+    with `completed > total`, where the old saturating path clamped. The parser cannot produce
+    such a value and both outputs are nonsense at that input, so there is no behaviour to
+    preserve and nothing to guard.
+
+  No blocking finding remains, and every finding is owned above.
 
 ## 5. Documentation
 <!-- kind: operational -->
