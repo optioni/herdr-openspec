@@ -4822,6 +4822,236 @@ mod tests {
         }
     }
 
+    /// `mouse-input`: "A click on a task group's header folds that group",
+    /// verbatim — two groups, the first complete and the second not.
+    const TWO_TASK_GROUPS: &str = "## 1. Done\n\n- [x] a\n\n## 2. Doing\n\n- [ ] b\n";
+
+    /// The same file's items with no heading at all: it does not split, so the
+    /// tab carries one section and is not foldable.
+    const HEADLESS_TASKS: &str = "- [x] a\n- [ ] b\n";
+
+    /// A `Route::Detail` dashboard over a `tracks_tasks` artifact whose
+    /// sections — and whose fold seed — `sync_detail` derives from `source`,
+    /// with `drawn_width` set to the interior the frame will hand
+    /// `content_lines`. Built through `sync_detail` rather than by writing
+    /// sections out here, so the seed a click lands on is the production one.
+    fn task_source_dashboard(source: &str, width: u16) -> Dashboard {
+        let mut dashboard = task_detail_dashboard(1, 2);
+        let recorder = crate::testutil::RecordingReader::always(Ok(source.to_string()));
+        let read = |p: &std::path::Path| recorder.read(p);
+        dashboard.sync_detail(&read);
+        dashboard.detail.drawn_width = Some(width);
+        dashboard
+    }
+
+    #[test]
+    fn a_click_on_a_task_groups_header_folds_that_group() {
+        // `mouse-input`: "A click on a task group's header folds that group".
+        for (width, height) in [(120u16, 40u16), (60, 40)] {
+            let area = Rect::new(0, 0, width, height);
+            let content = detail_content_area(area, Route::Detail);
+            let mut dashboard = task_source_dashboard(TWO_TASK_GROUPS, content.width);
+            // Rows: the progress bar (0), its blank line (1), `> 1. Done` (2),
+            // `v 2. Doing` (3), and that group's one item (4). The seed opened
+            // the incomplete group and left the finished one shut.
+            assert_eq!(
+                dashboard.detail.expanded,
+                std::collections::BTreeSet::from([1]),
+                "{width}x{height}: the seed"
+            );
+
+            let action = mouse_action(&dashboard, area, &left(content.x, content.y + 2));
+            assert_eq!(
+                action,
+                Action::Click(Target::DetailHeader {
+                    line: 2,
+                    section: 0
+                }),
+                "{width}x{height}: the `1. Done` header row"
+            );
+
+            let before = dashboard.clone();
+            dashboard.apply(action);
+            assert!(
+                dashboard.detail.expanded.contains(&0),
+                "{width}x{height}: the group opened"
+            );
+            assert_eq!(
+                dashboard.detail.scroll, 2,
+                "{width}x{height}: the cursor is on that group's header row"
+            );
+            assert_eq!(dashboard.route, before.route, "{width}x{height}");
+            assert_eq!(dashboard.selected, before.selected, "{width}x{height}");
+            assert_eq!(dashboard.detail.tab, before.detail.tab, "{width}x{height}");
+
+            // The progress-bar row and its blank line. Neither is a header row
+            // and neither belongs to a section, so neither folds anything —
+            // but neither resolves to `Action::Ignore` either: the requirement
+            // table above these scenarios sends **every other drawn row** of a
+            // foldable content area to `Target::DetailLine`, and that is what
+            // the code does. The scenario's `Action::Ignore` disagrees with its
+            // own table; asserted here as the table has it, since a click that
+            // moves the detail cursor onto a preamble row is exactly as
+            // fold-inert as the scenario requires.
+            for row in 0..2u16 {
+                let action = mouse_action(&dashboard, area, &left(content.x, content.y + row));
+                assert_eq!(
+                    action,
+                    Action::Click(Target::DetailLine(row as usize)),
+                    "{width}x{height}: preamble row {row} moves the cursor and folds nothing"
+                );
+                let mut moved = dashboard.clone();
+                moved.apply(action);
+                assert_eq!(
+                    moved.detail.expanded, dashboard.detail.expanded,
+                    "{width}x{height}: preamble row {row} folded nothing"
+                );
+                moved.apply(Action::ToggleSection);
+                assert_eq!(
+                    moved.detail.expanded, dashboard.detail.expanded,
+                    "{width}x{height}: and `Space` from there is inert too"
+                );
+            }
+
+            // A task file holding items but no heading does not split, so the
+            // tab is not foldable and both presses are inert.
+            let headless = task_source_dashboard(HEADLESS_TASKS, content.width);
+            assert!(
+                !headless.detail.foldable(),
+                "{width}x{height}: one section, so not foldable"
+            );
+            for row in 0..2u16 {
+                assert_eq!(
+                    mouse_action(&headless, area, &left(content.x, content.y + row)),
+                    Action::Ignore,
+                    "{width}x{height}: headless row {row}"
+                );
+            }
+        }
+    }
+
+    /// `specs/artifact-folds/spec.md`'s delta-spec fixture, verbatim: one
+    /// operation heading, a requirement carrying a nested scenario, and a
+    /// second requirement.
+    const DELTA_SPEC: &str = "## ADDED Requirements\n\n### Requirement: Alpha\nAlpha text.\n\n#### Scenario: A works\n- **WHEN** a\n- **THEN** b\n\n### Requirement: Beta\nBeta text.\n";
+
+    /// A `Route::Detail` dashboard whose one selected change carries a single
+    /// `specs` artifact resolving to **one** delta-spec path, its sections
+    /// derived from `source` by `sync_detail` and its folds set afterwards —
+    /// `sync_detail` seeds none on a tab that tracks no tasks.
+    fn spec_source_dashboard(
+        source: &str,
+        expanded: std::collections::BTreeSet<usize>,
+        width: u16,
+    ) -> Dashboard {
+        let change = crate::changes::fixture::with_artifacts(
+            crate::changes::fixture::active("detail-view", 4, 9),
+            &[("specs", &["/repo/openspec/changes/c/specs/a/spec.md"])],
+        );
+        let mut dashboard = dashboard_with_change("/repo", "unused", 0, 0);
+        dashboard.changes = crate::changes::fixture::set(vec![change], Vec::new(), Vec::new());
+        dashboard.selected = 1;
+        dashboard.route = Route::Detail;
+        let recorder = crate::testutil::RecordingReader::always(Ok(source.to_string()));
+        let read = |p: &std::path::Path| recorder.read(p);
+        dashboard.sync_detail(&read);
+        dashboard.detail.expanded = expanded;
+        dashboard.detail.drawn_width = Some(width);
+        dashboard
+    }
+
+    #[test]
+    fn a_click_on_a_nested_scenario_header_folds_only_that_scenario() {
+        // `mouse-input`: "A click on a nested scenario header folds only that
+        // scenario".
+        for (width, height) in [(120u16, 40u16), (60, 40)] {
+            let area = Rect::new(0, 0, width, height);
+            let content = detail_content_area(area, Route::Detail);
+            // The operation heading and its first requirement open; the
+            // scenario nested under that requirement, and the second
+            // requirement, shut.
+            let mut dashboard = spec_source_dashboard(
+                DELTA_SPEC,
+                std::collections::BTreeSet::from([0, 1]),
+                content.width,
+            );
+            assert_eq!(
+                dashboard
+                    .detail
+                    .sections
+                    .iter()
+                    .map(|s| (s.label.as_deref(), s.depth))
+                    .collect::<Vec<_>>(),
+                vec![
+                    (Some("ADDED Requirements"), 0),
+                    (Some("Requirement: Alpha"), 1),
+                    (Some("Scenario: A works"), 2),
+                    (Some("Requirement: Beta"), 1),
+                ],
+                "{width}x{height}: the delta spec's own four sections"
+            );
+
+            // Rows: header 0, header 1, `Alpha text.`, the blank separator,
+            // the scenario's own header, header 3. The scenario is the fifth
+            // drawn row and the **third** section — which is the distinction
+            // this scenario exists to hold.
+            let scenario_row = content.y + 4;
+            let action = mouse_action(&dashboard, area, &left(content.x, scenario_row));
+            assert_eq!(
+                action,
+                Action::Click(Target::DetailHeader {
+                    line: 4,
+                    section: 2
+                }),
+                "{width}x{height}: its index into `detail.sections`, not its drawn position"
+            );
+
+            let before = dashboard.clone();
+            dashboard.apply(action);
+            assert_eq!(
+                dashboard.detail.expanded,
+                std::collections::BTreeSet::from([0, 1, 2]),
+                "{width}x{height}: only that scenario's membership changed"
+            );
+            assert_eq!(dashboard.route, before.route, "{width}x{height}");
+            assert_eq!(dashboard.selected, before.selected, "{width}x{height}");
+            assert_eq!(dashboard.detail.tab, before.detail.tab, "{width}x{height}");
+
+            // A press on one of that scenario's own body rows moves the cursor
+            // and folds nothing.
+            let rows = crate::ui::detail::content_lines(
+                &dashboard.detail,
+                dashboard.selected_change(),
+                content.width,
+            );
+            let body = rows
+                .iter()
+                .enumerate()
+                .skip(5)
+                .find_map(|(index, r)| {
+                    matches!(r.kind, crate::ui::detail::ContentKind::Body).then_some(index)
+                })
+                .expect("the opened scenario draws its own body below its header");
+            assert_eq!(
+                body, 5,
+                "{width}x{height}: the row immediately below the scenario's own header"
+            );
+            let action = mouse_action(&dashboard, area, &left(content.x, content.y + body as u16));
+            assert_eq!(
+                action,
+                Action::Click(Target::DetailLine(body)),
+                "{width}x{height}: a body row moves the cursor"
+            );
+            let folds = dashboard.detail.expanded.clone();
+            dashboard.apply(action);
+            assert_eq!(dashboard.detail.scroll, body, "{width}x{height}");
+            assert_eq!(
+                dashboard.detail.expanded, folds,
+                "{width}x{height}: and folds nothing"
+            );
+        }
+    }
+
     #[test]
     fn a_click_acts_while_filtering() {
         // `mouse-input`: "A click selects while the filter is open".

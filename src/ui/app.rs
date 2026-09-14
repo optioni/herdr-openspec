@@ -3045,6 +3045,200 @@ mod tests {
         assert_eq!(d, before);
     }
 
+    /// The three-section task dashboard `artifact-folds`' preamble scenario
+    /// names: `TASK_FILE` on a `tracks_tasks` artifact, split by `sync_detail`
+    /// into a `None`-labelled preamble and its two groups. The change's own
+    /// progress is `1/3` rather than the `0/0` `dashboard_over` fixes, because
+    /// a change with no tasks draws no gauge at all — and the progress-bar row
+    /// is exactly the preamble row this scenario is about.
+    fn task_preamble_dashboard() -> Dashboard {
+        let change = fixture::track_tasks_at(
+            fixture::with_artifacts(
+                fixture::active("c", 1, 3),
+                &[("tasks", &["/repo/openspec/changes/c/tasks.md"])],
+            ),
+            0,
+        );
+        let mut d =
+            dashboard_for_attribution(vec![change], Vec::new(), 1, Vec::new(), BTreeMap::new());
+        d.route = Route::Detail;
+        let recorder = crate::testutil::RecordingReader::always(Ok(TASK_FILE.to_string()));
+        let read = |p: &std::path::Path| recorder.read(p);
+        d.sync_detail(&read);
+        // The mandated wide detail interior, so the fold resolves rather than
+        // going inert for want of a drawn width (design.md -> Decision 13).
+        d.detail.drawn_width = Some(78);
+        d
+    }
+
+    /// `artifact-folds`: "`Space` on a preamble row is inert".
+    ///
+    /// No branch of `apply`'s own answers this: `detail_cursor_section` finds
+    /// no header row at or before a cursor above the first one, and a
+    /// `None`-labelled preamble emits no header row at all (design.md -> D2).
+    /// The test exists to hold that property, not a guard.
+    #[test]
+    fn space_on_a_preamble_row_is_inert() {
+        let mut d = task_preamble_dashboard();
+        assert_eq!(
+            shape_of(&d.detail),
+            vec![(None, 0), (Some("1. Setup"), 0), (Some("2. Build"), 0)],
+            "three sections, the first of them the unlabelled preamble"
+        );
+
+        let rows = crate::ui::detail::content_lines(&d.detail, d.selected_change(), 78);
+        let first_header = rows
+            .iter()
+            .position(|r| matches!(r.kind, crate::ui::detail::ContentKind::SectionHeader { .. }))
+            .expect("the fixture is foldable, so it draws header rows");
+        assert_eq!(
+            first_header, 2,
+            "the progress-bar row and its blank line precede every header"
+        );
+        // `Intro prose.` itself draws **no** row on this tab: a `None`-labelled
+        // section's body goes through `ui::tasks::items`, which renders task
+        // items and nothing else, and that text holds none. So the rows above
+        // the first header are exactly the bar row and its blank line —
+        // narrower than the scenario's "through the last line of `Intro
+        // prose.`", which names rows this grammar does not draw. Asserted here
+        // so the finding cannot rot into a stale comment.
+        assert!(
+            rows.iter().all(|r| !r.line.text().contains("Intro prose.")),
+            "the preamble's prose is not drawn on the tracked-tasks tab"
+        );
+
+        for row in 0..first_header {
+            d.detail.scroll = row;
+            let before = d.clone();
+            for _ in 0..10 {
+                d.apply(Action::ToggleSection);
+            }
+            assert_eq!(
+                d, before,
+                "row {row}: no field changed, and it did not panic"
+            );
+        }
+
+        // Moving onto the `1. Setup` header and repeating the action toggles
+        // that section, so the inertness was attributable to the row.
+        assert_eq!(
+            d.detail.expanded,
+            std::collections::BTreeSet::from([1, 2]),
+            "the seed opened both incomplete groups"
+        );
+        d.detail.scroll = first_header;
+        d.apply(Action::ToggleSection);
+        assert_eq!(
+            d.detail.expanded,
+            std::collections::BTreeSet::from([2]),
+            "`1. Setup` folded"
+        );
+    }
+
+    /// The seven-section spec-glob dashboard `artifact-folds`' ancestor
+    /// scenario names: three capability sections at depth `0`, the first of
+    /// them carrying a requirement with a nested scenario and a second
+    /// requirement, the second carrying one requirement. Every body is a
+    /// single word, so no width wraps it and the row list is the same at 78
+    /// and at 58.
+    fn seven_section_dashboard(expanded: std::collections::BTreeSet<usize>) -> Dashboard {
+        let section = |label: &str, depth: usize| ArtifactSection {
+            label: Some(label.to_string()),
+            text: "one\n".to_string(),
+            depth,
+        };
+        dashboard_with_detail(Detail {
+            sections: vec![
+                section("degraded-coverage", 0),
+                section("Requirement: Alpha", 1),
+                section("Scenario: A works", 2),
+                section("Requirement: Beta", 1),
+                section("markdown-render", 0),
+                section("Requirement: Gamma", 1),
+                section("tasks-checklist", 0),
+            ],
+            scroll: 0,
+            tab: 0,
+            problems: Vec::new(),
+            loaded: None,
+            expanded,
+            drawn_width: Some(78),
+        })
+    }
+
+    /// `artifact-folds`: "Closing an ancestor preserves its subtree's folds".
+    ///
+    /// The flat encoding is what makes this free (design.md -> D1): a closed
+    /// ancestor hides its descendants at render time, and their membership of
+    /// `detail.expanded` is never touched.
+    #[test]
+    fn closing_an_ancestor_preserves_its_subtrees_folds() {
+        let mut d = seven_section_dashboard(std::collections::BTreeSet::from([0, 1, 2]));
+        // The cursor on the `degraded-coverage` header row, which is row 0.
+        d.detail.scroll = 0;
+        let before = [(120u16, 40u16), (60, 40)]
+            .map(|(width, height)| crate::testutil::render_at(width, height, &d));
+
+        d.apply(Action::ToggleSection);
+
+        assert_eq!(
+            d.detail.expanded,
+            std::collections::BTreeSet::from([1, 2]),
+            "the descendants kept their membership"
+        );
+        assert_eq!(d.detail.scroll, 0, "the cursor is on the folded header");
+        for (width, height) in [(120u16, 40u16), (60, 40)] {
+            let interior = if width == 60 { 58 } else { 78 };
+            let rows = crate::ui::detail::content_lines(&d.detail, d.selected_change(), interior);
+            assert_eq!(
+                rows.len(),
+                3,
+                "width {width}: three collapsed capability headers alone"
+            );
+            for (row, label) in [
+                (0usize, "degraded-coverage"),
+                (1, "markdown-render"),
+                (2, "tasks-checklist"),
+            ] {
+                assert_eq!(
+                    rows[row].line.text(),
+                    expected_header(label, true, interior),
+                    "width {width} row {row}"
+                );
+            }
+            let buf = crate::testutil::render_at(width, height, &d);
+            for (row, label) in [
+                (5u16, "degraded-coverage"),
+                (6, "markdown-render"),
+                (7, "tasks-checklist"),
+            ] {
+                assert_eq!(
+                    detail_interior_row(&buf, row),
+                    expected_header(label, true, interior),
+                    "width {width} drawn row {row}"
+                );
+            }
+        }
+
+        d.apply(Action::ToggleSection);
+
+        assert_eq!(
+            d.detail.expanded,
+            std::collections::BTreeSet::from([0, 1, 2]),
+            "reopening the ancestor restores exactly the subtree it had"
+        );
+        for (index, (width, height)) in [(120u16, 40u16), (60, 40)].into_iter().enumerate() {
+            let after = crate::testutil::render_at(width, height, &d);
+            for y in 0..height {
+                assert_eq!(
+                    crate::testutil::row_text(&before[index], y),
+                    crate::testutil::row_text(&after, y),
+                    "{width}x{height} row {y}: byte-identical to before the two actions"
+                );
+            }
+        }
+    }
+
     /// `detail-scroll`: "At a collapsed foldable tab the same keys walk the
     /// section list". Named `ui::view::tests::…` in design.md's Test
     /// Strategy table, but the analogous existing test for this exact
