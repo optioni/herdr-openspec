@@ -26,7 +26,9 @@ directions of that control are run below, per design.md → Test Boundaries.
   line and confirm the suite now **fails**, naming 32 against 31; remove it and confirm green.
   Delete a script with its recipe line and confirm it fails naming 30 against 31; restore it
   and confirm green. Record all four runs.
-- [ ] 1.4 VERIFY: `cargo test --test ci_workflow` — 22 passing, no regressions.
+- [ ] 1.4 VERIFY: `cargo test --test ci_workflow` — **21** passing, no regressions. Twenty-one,
+  not twenty-two: 1.2 replaces an assertion inside an existing test rather than adding a new
+  one, so the count does not move. **Run at HEAD `9c37085`:** `21 passed; 0 failed`.
 
 ## 2. Correct the figures, and attribute the historical ones
 <!-- kind: operational -->

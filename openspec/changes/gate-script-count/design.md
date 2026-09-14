@@ -126,6 +126,35 @@ is worth more than the fix: **where a figure summarises a list, the list is the 
 the figure is derived from it** — re-deriving the figure from a different source, even a
 correct one, leaves the two disagreeing.
 
+**3. The surviving failure mode is accepted, and one cheap alternative is rejected on the
+record.** The count is bound to the test by machine and to the spec sentence only by the failure
+message, so a developer can see red, bump the literal to 32, and leave the sentence at
+thirty-one. That is accepted, on three grounds planning review established:
+
+- It is a **different class** from the drift being fixed. Today's failure is silent — nobody is
+  told. The surviving one requires someone to read a message naming the file, the scenario and
+  both counts, and edit past it. "Nobody knew" and "someone was told and didn't" are not the
+  same risk, and only the first is worth machinery.
+- The archive window is **not rare**: 9 of 35 archived changes carry a `quality-gates` delta and
+  three touched this requirement. A live-spec content assertion would be red through roughly a
+  quarter of all changes here, each gating every commit behind `make check`. A check that is red
+  by design during normal work gets suppressed, and a suppressed check is worse than a literal.
+- The only mechanism that actually crosses the boundary — assert against whichever of the live
+  spec and the active delta is authoritative — is a miniature OpenSpec resolver inside a test,
+  vacuous the moment an unrelated active change carries a `quality-gates` delta that does not
+  restate the count. That is the parser failure mode for real, and it would need its own planted
+  control. "A gate that cannot fail is itself a failure" cuts against adding it.
+
+**Rejected, and named so it is not re-proposed:** putting the count in `AGENTS.md` and binding
+*that* by machine. It is genuinely cheap — `AGENTS.md` is outside `openspec/` and so editable in
+the same commit as the test, `tests/ci_workflow.rs` already has `read_agents_md()` and already
+asserts `AGENTS.md` content, and task 3.2 edits that sentence anyway — and it would shrink the
+unbound hop from directory→spec to `AGENTS.md`→spec, landing on the document a future session
+actually reads. It is rejected because it creates a **fourth** site for one integer. Two
+machine-bound sites and one message-bound is a better shape than three and one. What would
+change this: `openspec/specs/` becoming writable during apply, at which point the `contains`
+leg is free and should be added.
+
 ## Open Questions
 
 None.

@@ -69,7 +69,7 @@ None.
 - `openspec/specs/quality-gates/spec.md` — one requirement and its first scenario; four
   sentences carrying the figure.
 - `tests/ci_workflow.rs` — `every_gate_script_the_recipe_names_exists_and_every_script_is_named`
-  gains the count assertion, or a sibling test carries it.
+  has its `>= 25` floor replaced by the count assertion. No new test: the file stays at 21.
 - No production code. No gate script, no `Makefile` recipe line, no CI job.
 - `AGENTS.md` — two copies of `NODEFAULT-UI`'s five/seven figure (`:266`, `:270`). It names no
   gate-script *count* and is unaffected by that half — verified: `grep -c 'twenty-eight'
