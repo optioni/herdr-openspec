@@ -244,9 +244,11 @@ triangle — a `herdr-plugin.toml`, `README.md`, or binary-name edit that drifts
 against another fails it, deliberately asserting nothing about `target/release/`, which
 `make check` never builds), `tests/degraded_coverage.rs` (`SPEC.md`'s degraded-states
 table bound to a named, passing proving test per row), and `tests/doc_contract.rs`
-(nine further claims — the module map, the tested-modules list, the worker-thread
+(ten further claims — the module map, the tested-modules list, the worker-thread
 count, the MSRV, the gate-path programs, the manifest transcription, the injected
-OpenSpec context, the documented mouse bindings, and the confined terminal-seam
+OpenSpec context, the documented mouse bindings, the documented key bindings
+(`SPEC.md` → Keys and `README.md` → Keys against `ui::help::INVENTORY`), and the
+confined terminal-seam
 names — each bound to the repository file that determines it; see `SPEC.md`
 → § Testing and quality gates → Doc-conformance checks). The rule all three share: **a
 documented claim with a computable second site is bound to that site inside `cargo
@@ -337,9 +339,9 @@ unreachable and the tests become integration tests by accident.
   `serde_json` must never appear in `src/cli.rs`, checked the same way.
 - **Views do no I/O.** They are pure functions from state to a ratatui frame, tested
   by rendering into a `TestBackend` buffer at 60 and 120 columns. The pure set is
-  **nine** files — `src/ui/app.rs`, `src/ui/detail.rs`, `src/ui/layout.rs`,
-  `src/ui/list.rs`, `src/ui/markdown.rs`, `src/ui/palette.rs`, `src/ui/tasks.rs`,
-  `src/ui/view.rs`, and
+  **ten** files — `src/ui/app.rs`, `src/ui/detail.rs`, `src/ui/help.rs`,
+  `src/ui/layout.rs`, `src/ui/list.rs`, `src/ui/markdown.rs`,
+  `src/ui/palette.rs`, `src/ui/tasks.rs`, `src/ui/view.rs`, and
   `src/ui/driver.rs` — none of which names a filesystem, process, environment,
   network, or standard-I/O API (`src/ui/tasks.rs` calls `tasks::parse`, a pure
   function over `&str`, and never `tasks::read`, the filesystem edge, which the
@@ -386,6 +388,14 @@ unreachable and the tests become integration tests by accident.
   see a wrongly-added flag. `markdown-legibility` is that warning's own worked example —
   it turned `ENABLE_TASKLISTS` on and wrote the `Event::TaskListMarker` arm in a single
   task, for exactly this reason.
+- **Every key and gesture the pane binds has a row in `ui::help::INVENTORY`.** The bindings
+  are data in `src/ui/help.rs`, and `tests/doc_contract.rs` binds that data to
+  `ui::app::action_for` and `ui::driver::mouse_action` by **executing** them — over every
+  key at both filter modes, and every `MouseEventKind` at every cell of two frames — never
+  by parsing their source. So a key bound in the driver with no `Binding` row fails `cargo
+  test`, and so does a row no key reaches. Two exemptions exist, pinned by name and by
+  count; a third costs a spec change. `SPEC.md` → Keys and `README.md` → Keys are bound to
+  that same inventory, so the pane's bindings are written once and checked from three sides.
 - **The detail region's two mandated interior widths are 78 and 58 columns** — the
   wide layout's `Min(0)` detail column at the mandated 120-column frame, less
   its one left gutter column only (its right edge runs flush to the frame's
@@ -396,7 +406,7 @@ unreachable and the tests become integration tests by accident.
 - **Every width computation under `src/ui/` is measured in terminal display columns, never
   a `char` count.** `ui::layout::columns`/`truncate_columns` are the crate's only measure,
   agreeing by construction with what `Buffer::set_string` itself consumes; `COLWIDTH` sweeps
-  the other eight pure view files for `.chars().count()`/`.chars().take(`/a `Vec<char>`
+  the other nine pure view files for `.chars().count()`/`.chars().take(`/a `Vec<char>`
   collect, because a `chars().count()` written later is silently correct against this
   project's own ASCII fixtures and wrong against anything else.
 - **The render path blocks on nothing but the terminal, and reads no clock.**

@@ -277,7 +277,7 @@ run it avoids.
 ## 12. Documentation
 <!-- kind: operational -->
 
-- [ ] 12.0 CHECK: Confirm the passages this group edits still say what it expects — that
+- [x] 12.0 CHECK: Confirm the passages this group edits still say what it expects — that
   `AGENTS.md:339` still reads "The pure set is **nine** files" and already names
   `src/ui/palette.rs`, and that `AGENTS.md:247` still reads "nine further claims". If either has
   moved, a concurrent change edited it and this group's text needs rebasing.
@@ -288,11 +288,11 @@ run it avoids.
   change repairs through its own delta rather than by editing `SPEC.md`. Do not go looking.
   The `SPEC.md`/`README.md` → Keys rows are **not** here: groups 9 and 10 own them, because a
   gate in each of those groups reads them.
-- [ ] 12.1 CHANGE: Rewrite in `SPEC.md` → Module map's `ui` row and § Unit-tested modules
+- [x] 12.1 CHANGE: Rewrite in `SPEC.md` → Module map's `ui` row and § Unit-tested modules
   (audience: this repository's agents) — mention the overlay and the binding inventory in prose.
   No check enforces this: both map checks read `src/lib.rs`'s top-level `pub mod` set, so a
   submodule is invisible to them (`specs/doc-conformance/spec.md`).
-- [ ] 12.2 CHECK: **No `SPEC.md` edit is owed here — record that and move on.** An earlier draft
+- [x] 12.2 CHECK: **No `SPEC.md` edit is owed here — record that and move on.** An earlier draft
   of this line ordered the pure-view set corrected in `SPEC.md` → Architecture from eight to ten.
   `SPEC.md` has no such passage: `grep -n 'pure set' SPEC.md` and a search for any
   `src/ui/<file>.rs` in the pure list both return nothing, and its render-seam paragraph states
@@ -300,17 +300,17 @@ run it avoids.
   on `AGENTS.md:339`, and the landed-spec drift design.md → Decision 9 names is repaired by this
   change's own `dashboard-loop` delta. Confirm both by running those two greps and record the
   result.
-- [ ] 12.3 CHANGE: `AGENTS.md:247`'s `tests/doc_contract.rs` claim count goes from **nine** to
+- [x] 12.3 CHANGE: `AGENTS.md:247`'s `tests/doc_contract.rs` claim count goes from **nine** to
   **ten**, this change adding the inventory/key-table binding. `SPEC.md` § Doc-conformance
   checks carries the same claims as an **uncounted bullet list**, so its share is a **tenth
   bullet** naming the new binding — an addition, not a changed numeral. Both per
   `specs/doc-conformance/spec.md`, whose two bullets were re-pointed for exactly this reason.
-- [ ] 12.4 CHANGE: Rewrite in `AGENTS.md` → Architecture rules (audience: every future session) — the pure
+- [x] 12.4 CHANGE: Rewrite in `AGENTS.md` → Architecture rules (audience: every future session) — the pure
   set is **ten** files, naming `src/ui/help.rs`; and one new durable rule, in place rather than
   appended: the bindings are data in `src/ui/help.rs` and are bound to `action_for`/`mouse_action`
   by executing them, so a new keybinding needs a `Binding` row or `cargo test` fails. Net add is
   under ten lines; the pure-set sentence is a correction, not an addition.
-- [ ] 12.5 CHANGE: Rewrite in `openspec/IMPLEMENTATION-ORDER.md` — add a row for this change beside
+- [x] 12.5 CHANGE: Rewrite in `openspec/IMPLEMENTATION-ORDER.md` — add a row for this change beside
   `doc-conformance` and `foldable-spec-sections` as unplanned post-roadmap work, and record in the
   in-flight section that six capabilities here carry byte-exact footer strings.
 

@@ -93,7 +93,7 @@ binding, not its only one — `NOBLOCK` leg 2 covers it identically.
 | `watch` | The recursive `notify` watch, the debounce, and classifying a touched path to a per-change `Selection` |
 | `refresh` | The worker thread and the non-blocking `Refresher` seam it answers through |
 | `open` | The `open` and `open-tab` subcommands that open or focus the dashboard pane through `herdr plugin pane`; the crate's third `HerdrCli` consumer |
-| `ui` | Views (the change-row grammar, the detail region's header/tab-bar/content grammar, markdown rendering, and `ui::tasks`' checklist-and-progress-bar grammar for the tracked-tasks tab), the semantic-role colour palette (`ui::palette`, the one table from a role to a `Style` and the crate's only `ratatui::style::Color` — see Colour and style), layout, the dashboard's own state (selection, the `/` filter, the detail region's per-file sections and its fold set, the detail cursor, the width of the content area last drawn — the one piece of geometry the dashboard stores, and only so a keypress taken between frames can resolve against what the last frame did, never as a source of what is drawn — the selected artifact tab, the live tier's refresh flag and standing problems, and the injected artifact-read binding), key handling, terminal lifecycle, and the event loop |
+| `ui` | Views (the change-row grammar, the detail region's header/tab-bar/content grammar, markdown rendering, `ui::tasks`' checklist-and-progress-bar grammar for the tracked-tasks tab, and `ui::help`'s help band — its row grammar and, in `ui::help::INVENTORY`, the crate's one list of what every key and gesture does, which `?` renders and `tests/doc_contract.rs` binds back to the driver), the semantic-role colour palette (`ui::palette`, the one table from a role to a `Style` and the crate's only `ratatui::style::Color` — see Colour and style), layout, the dashboard's own state (selection, the `/` filter, the detail region's per-file sections and its fold set, the detail cursor, the width of the content area last drawn — the one piece of geometry the dashboard stores, and only so a keypress taken between frames can resolve against what the last frame did, never as a source of what is drawn — the selected artifact tab, the live tier's refresh flag and standing problems, the help overlay's own layer state — open or not, and its scroll — and the injected artifact-read binding), key handling, terminal lifecycle, and the event loop |
 | `cli` | The two subprocess traits and their real implementations |
 
 ## Data layer
@@ -1101,7 +1101,7 @@ is tested against scratch `#!/bin/sh` programs rather than the real `openspec`,
   `cli::HerdrCli` — tested through its own `#[cfg(test)]` constructor
   (`poller_for_test`), on `worker_for_test`'s terms
 - `ui::layout`, `ui::app`, `ui::list`, `ui::detail`, `ui::markdown`,
-  `ui::tasks`, `ui::view`, `ui::driver`, `ui::terminal`, and `ui::mod`'s
+  `ui::tasks`, `ui::help`, `ui::view`, `ui::driver`, `ui::terminal`, and `ui::mod`'s
   `load` and `read_artifact` functions — the breakpoint and frame split,
   `Dashboard` and key handling, the change-row grammar, the detail
   region's header/tab-bar/content grammar (`ui::detail` — plain data, no
@@ -1112,7 +1112,11 @@ is tested against scratch `#!/bin/sh` programs rather than the real `openspec`,
   I/O, parameterised by width, on the same terms as `ui::detail` and
   `ui::markdown`; the tab is chosen by `ArtifactRef::tracks_tasks`, never
   an id or filename, and the bar renders `Change::progress` rather than
-  recounting the source), the render seam proper, the draw-then-wait event
+  recounting the source), the help band's binding inventory and its own row
+  grammar (`ui::help` — plain data, no I/O, parameterised by width and total
+  over every `Rect`, degenerate ones included; `INVENTORY` is the pane's one
+  list of what each key and gesture does, and the overlay renders it rather
+  than restating it), the render seam proper, the draw-then-wait event
   loop, startup state from files, and the one artifact-read binding.
   `ratatui::backend::TestBackend` stands in for the rendering surface and
   a recording `TerminalOps` double stands in for the terminal; no test
@@ -1196,6 +1200,7 @@ own such test lives in `ui::tests::load::`, never in a view module.
 - `SPEC.md`'s fenced manifest transcription ↔ `herdr-plugin.toml` (values and `[[…]]` order).
 - `openspec/config.yaml`'s injected `context` ↔ the repository (the fixture claim and every `check:` prerequisite target).
 - § Keys' mouse table ↔ the `Action::` variants `ui::driver::mouse_action`'s own body produces (`mouse-input`).
+- § Keys' key table and `README.md` → Keys ↔ `ui::help::INVENTORY`, itself swept against the `Action`s `ui::app::action_for` and `ui::driver::mouse_action` really produce when **executed** (`help-overlay`).
 - `AGENTS.md`'s confined terminal-seam names ↔ `scripts/gates/noraw-grep.sh`'s `RAW_RE` (`mouse-input`).
 - A claim with no second site is argued in review, not checked.
 
