@@ -56,37 +56,25 @@ pub fn header_row(
     let schema_cell = format!("({schema})");
     let schema_len = columns(&schema_cell) as i64;
 
-    if progress.total == 0 {
-        // Full form: name + space + schema cell + space + progress cell.
-        let name_field_full = w - 2 - schema_len - progress_len;
+    // Full form: name + space + schema cell + space + gauge cell + space +
+    // progress cell. Skipped entirely at `total == 0`, so that row falls
+    // through to the three pre-gauge bands below and is byte-identical to
+    // what this function produced before the gauge existed — rather than
+    // reserving the gauge's columns and then declining to draw it.
+    if progress.total > 0 {
+        let gauge_len = i64::from(HEADER_GAUGE_COLUMNS);
+        let name_field_full = w - 3 - schema_len - gauge_len - progress_len;
         if name_field_full >= 1 {
             let name_field = crate::ui::list::pad_or_truncate_right(name, name_field_full as usize);
-            return format!("{name_field} {schema_cell} {progress_cell}");
+            let gauge_cell = crate::ui::tasks::gauge_of(progress, HEADER_GAUGE_COLUMNS);
+            return format!("{name_field} {schema_cell} {gauge_cell} {progress_cell}");
         }
-
-        // Drop the schema cell and its separating space: name + space + progress.
-        let name_field_no_schema = w - 1 - progress_len;
-        if name_field_no_schema >= 1 {
-            let name_field =
-                crate::ui::list::pad_or_truncate_right(name, name_field_no_schema as usize);
-            return format!("{name_field} {progress_cell}");
-        }
-
-        // Drop the progress cell too: the name field alone, the whole width.
-        return crate::ui::list::pad_or_truncate_right(name, w as usize);
     }
 
-    let gauge_len = i64::from(HEADER_GAUGE_COLUMNS);
-
-    // Full form: name + space + schema cell + space + gauge cell + space + progress.
-    let name_field_full = w - 3 - schema_len - gauge_len - progress_len;
-    if name_field_full >= 1 {
-        let name_field = crate::ui::list::pad_or_truncate_right(name, name_field_full as usize);
-        let gauge_cell = crate::ui::tasks::gauge_of(progress, HEADER_GAUGE_COLUMNS);
-        return format!("{name_field} {schema_cell} {gauge_cell} {progress_cell}");
-    }
-
-    // Drop the gauge cell and its separating space: name + space + schema + space + progress.
+    // Gauge dropped, with its separating space: name + space + schema + space
+    // + progress. This and the two bands below it are the three the header had
+    // before the gauge cell, at the same boundaries and producing the same
+    // strings, which is what places the gauge first in the drop order.
     let name_field_no_gauge = w - 2 - schema_len - progress_len;
     if name_field_no_gauge >= 1 {
         let name_field = crate::ui::list::pad_or_truncate_right(name, name_field_no_gauge as usize);
