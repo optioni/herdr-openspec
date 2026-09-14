@@ -397,6 +397,7 @@ mod tests {
         assert_eq!(gauge58.matches('░').count(), 27, "58-col gauge fill");
     }
 
+    /// `tasks-progress-bar` :: "The percentage truncates rather than rounds".
     #[test]
     fn percent_truncates() {
         for width in [78, 58] {
@@ -441,6 +442,8 @@ mod tests {
         }
     }
 
+    /// `tasks-progress-bar` :: "A one-task-short change never renders a full
+    /// gauge".
     #[test]
     fn gauge_full_only_when_complete() {
         for width in [78, 58] {
@@ -475,6 +478,8 @@ mod tests {
         }
     }
 
+    /// `tasks-progress-bar` :: "The property holds across a swept range of
+    /// gauge widths".
     #[test]
     fn gauge_property_sweep() {
         let cases = [

@@ -5224,7 +5224,11 @@ mod tests {
             // detail region has no right gutter (D5): its header reaches the
             // frame's own last column, 119, not 118.
             let last_col = if width == 60 { 58u16 } else { 119 };
-            for x in (last_col - 4)..=last_col {
+            // The whole 24-column tail `(tdd) █████░░░░░░░ [4/9]`, not just the
+            // five columns of `[4/9]`: the scenario says "the gauge's own cells
+            // included", and a loop stopping at the progress cell never reaches
+            // one of them.
+            for x in (last_col - 23)..=last_col {
                 assert_eq!(
                     cell(&buf, x, 0).style().add_modifier,
                     palette::style(Role::RegionHeadingFocused).add_modifier,
@@ -5241,7 +5245,7 @@ mod tests {
         let buf = render_at(120, 20, &list_route);
         let header = detail_interior_cols(&buf, 0, 78);
         assert!(header.ends_with("(tdd) █████░░░░░░░ [4/9]"));
-        for x in 115..=119u16 {
+        for x in 96..=119u16 {
             assert_eq!(
                 cell(&buf, x, 0).style().add_modifier,
                 palette::style(Role::RegionHeading).add_modifier,
@@ -5317,6 +5321,22 @@ mod tests {
                 row.chars().filter(|&c| c == '█').count(),
                 12,
                 "width {width}: {row:?}"
+            );
+            // The scenario's name-field claim, asserted rather than left to the
+            // comment above: 45 columns at the 78-column interior and 25 at the
+            // 58-column one, `interior - 3 - 13 - 12 - 5`.
+            let interior = if width == 60 { 58usize } else { 78 };
+            let header = detail_interior_cols(&buf, 0, interior);
+            let name_field = interior - 3 - "(spec-driven)".len() - 12 - "[7/7]".len();
+            assert_eq!(name_field, if interior == 78 { 45 } else { 25 });
+            assert_eq!(
+                header,
+                format!(
+                    "{:<name_field$} (spec-driven) {} [7/7]",
+                    "add-auth",
+                    "█".repeat(12)
+                ),
+                "width {width}"
             );
             assert!(!row.contains('░'), "width {width}: {row:?}");
         }
@@ -6115,6 +6135,8 @@ mod tests {
         }
     }
 
+    /// `tasks-progress-bar` :: "The bar reaches the buffer at both mandated
+    /// frame widths".
     #[test]
     fn progress_bar_in_the_buffer() {
         let progress = crate::tasks::Progress {

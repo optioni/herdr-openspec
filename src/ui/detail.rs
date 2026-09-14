@@ -982,6 +982,17 @@ mod tests {
             );
             if width == 78 || width == 58 {
                 assert!(got.ends_with("[-]"), "width {width}: {got:?}");
+                // The scenario's own claim, pinned as a literal rather than
+                // inferred from the width: a 68-column name field at 78 and a
+                // 48-column one at 58 — the fields this grammar produced before
+                // the gauge existed, not ones narrowed by 13 columns for a gauge
+                // that is never drawn. `columns(&got) == width` alone cannot tell
+                // those apart, since a budget-reserving implementation would pad
+                // the name field back to the same total.
+                let name_field = width as usize - 2 - "(tdd)".len() - "[-]".len();
+                assert_eq!(name_field, if width == 78 { 68 } else { 48 });
+                let expected = format!("{:<name_field$} (tdd) [-]", "migrate-ai-sdk-v7");
+                assert_eq!(got, expected, "width {width}");
             }
             if width == 0 {
                 assert_eq!(got, "", "width {width}");

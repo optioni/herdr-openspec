@@ -200,14 +200,18 @@ trap laid for the next caller rather than a contract.
 The properties this capability already fixes for the run SHALL hold at every `g`, the detail
 header's 12 included: `filled == g` if and only if `progress.is_complete()`, `filled == 0`
 whenever `completed == 0`, and otherwise `filled = g * completed / total` in integer
-arithmetic with a saturating multiply so no `Progress` value can overflow it.
+arithmetic computed in `u128`, in which `completed * g` cannot overflow for any `Progress`
+and any `u16` `g`.
 
-The first of those does **not** hold of the shipped implementation. The repair is specified by
-the MODIFIED requirements above — the arithmetic widens to `u128`, which removes the saturation
-that produced the wrong quotient — and this requirement inherits it rather than restating a
-second mechanism. No existing test falsified the defect because the one sweep reaching
-`usize::MAX` (`bar_measures_at_most_its_width_at_every_width`) asserts only that the bar fits
-its width and never a fill count.
+The first of those did **not** hold before this change, and the mechanism is why: the product
+was a saturating `u64` multiply, and saturation there produces the wrong *quotient* rather than
+a clamped magnitude — `u64::MAX / u64::MAX == 1`, so a complete change rendered one filled
+cell. The MODIFIED requirements above specify the repair and this requirement inherits it
+rather than restating a second mechanism; the arithmetic is named here in the same `u128`
+terms so the two paragraphs of one requirement cannot disagree about how the fill is computed.
+No existing test falsified the defect, because the one sweep reaching `usize::MAX`
+(`bar_measures_at_most_its_width_at_every_width`) asserts only that the bar fits its width and
+never a fill count.
 
 `progress_bar`'s own output SHALL be **unchanged** — byte-identical at every width — for
 every `Progress` whose `completed * g` does not saturate, which is every `Progress` a
