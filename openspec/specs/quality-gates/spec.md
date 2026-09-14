@@ -18,6 +18,7 @@ by a test inside `cargo test` rather than left to periodic hand-running.
 
 ### Requirement: `make check` is the single gate and runs every check
 
+
 The repository SHALL provide a `Makefile` with phony targets `fmt`, `fmt-check`,
 `lint`, `test`, `coverage`, `gates`, `gates-full`, `build`, and `check`. `check` SHALL be
 composed from `fmt-check`, `lint`, `gates`, `test`, and `coverage` in that order, so that no
@@ -117,6 +118,7 @@ recipe and not a second definition of the first.
 
 ### Requirement: The repository's hygiene gates are files in the repository
 
+
 Every gate that guards a repository-wide invariant SHALL exist as a script under
 `scripts/gates/`, checked in and reviewable, and SHALL be invoked by a `Makefile` target
 rather than reproduced anywhere else. A gate SHALL NOT be defined only as prose inside a
@@ -124,20 +126,22 @@ change's planning artifacts: `DEPS` and `GRAPH-SNAP` were, they were re-extracte
 change and run outside `make check`, and both were **red on `main` for three changes** before
 anyone noticed. A gate that nothing forces to run does not run.
 
-`spec-purposes` proved that claim on two gates and left twenty-eight outside. `WIRED` then
+`spec-purposes` proved that claim on two gates and left twenty-eight outside (the count at
+`spec-purposes`' own base; see the historical-figure convention below). `WIRED` then
 went red on `main` within a single change — `plugin-actions` put a branch into `pub fn run()`,
 and nothing ran the check that forbids one. `degraded-states` is the last change in the
 roadmap, so "a later change will extract the rest" is not available: **every** standing gate
 SHALL become a repository file here, and each exclusion SHALL be named with its reason rather
 than left implicit.
 
-The gates that SHALL be extracted are the twenty-five that guard a standing, repository-wide
+The gates that SHALL be extracted are the twenty-eight that guard a standing, repository-wide
 invariant: `NOSPAWN-GREP`, `NOJSON-SEAM`, `NOCLI-SHELL`, `READSEAM`, `MDSEAM`, `NOTABSEAM`,
 `TASKSEAM`, `WATCHSEAM`, `AGENTSEAM`, `LAUNCHSEAM`, `NOIO-VIEW`, `NOBLOCK`, `NORAW-GREP`,
 `NOLIT-CHANGE`, `READONLY-UI`, `NOWAIVER`, `WIRED`, `WIDTHS`, `LISTWIDTHS`, `MDWIDTHS`,
-`TASKWIDTHS`, `DETAILWIDTHS`, `NODEFAULT-UI`, `NOSLEEP`, and `GATE-MECH1`, plus
-`OPENSPEC-UNTOUCHED`'s `BASE`-free legs — twenty-six, which with `deps.sh` and
-`build-graph.sh` is the twenty-eight files this requirement's first scenario counts. **Two**
+`TASKWIDTHS`, `DETAILWIDTHS`, `NODEFAULT-UI`, `NOSLEEP`, `GATE-MECH1`, `COLWIDTH`, `PALETTE`,
+and `HELPWIDTHS`, plus
+`OPENSPEC-UNTOUCHED`'s `BASE`-free legs — twenty-nine, which with `deps.sh` and
+`build-graph.sh` is the **thirty-one** files this requirement's first scenario counts. **Two**
 SHALL NOT be, and the reason is the same for both — neither guards a standing invariant, so
 neither can be run on an unmodified tree and pass. A third, `OPENSPEC-UNTOUCHED`, is split
 rather than excluded, and saying "three excluded gates" was the error that let its extracted
@@ -167,7 +171,7 @@ bare, and therefore run at a block default nobody chose. Where a gate has one su
 `Makefile` SHALL invoke it bare, and the floor SHALL NOT also appear on the recipe line.
 
 A gate with **more than one subject** — `LAUNCHSEAM` over `src/launch.rs` and `src/open.rs`,
-`NODEFAULT-UI` over its five type sets — SHALL carry its subject-selecting variables on the
+`NODEFAULT-UI` over its seven type sets — SHALL carry its subject-selecting variables on the
 `Makefile` line. Where such a gate's floor is a **property of the subject** rather than of the
 gate, the floor SHALL accompany its subject there: `NODEFAULT-UI`'s span count differs by an
 order of magnitude between the `Dashboard` type set and the `Refresh` one, so a single default
@@ -184,10 +188,13 @@ Each script SHALL be hermetic and platform-portable: no network access beyond wh
 already needs to read `Cargo.lock`, no tool `make check` does not already require except
 `python3`, and no assertion whose truth depends on which of the two supported platforms it
 runs on. No extracted gate SHALL invoke `cargo` **except the two dependency gates**: measured,
-twenty-six of the twenty-eight are `grep`, `awk`, `sed`, `find`, and `python3` over the source
+twenty-nine of the thirty-one are `grep`, `awk`, `sed`, `find`, and `python3` over the source
 tree and complete in under a second each, so composing them into `make gates` adds no
-meaningful time to `make check`. `deps.sh` (fourteen `cargo` calls, including
-`cargo build --locked` at leg 2c) and `build-graph.sh` (`cargo tree`) are the stated
+meaningful time to `make check`. `deps.sh` (**eight** `cargo` invocation sites, ten calls on a
+default run because one is a loop over four target triples, sixteen under `DEPS_FULL=1` — the
+earlier figure of fourteen counted `grep -c 'cargo ' scripts/gates/deps.sh`, four of whose
+lines are comments and two `echo` strings, so it named no quantity that exists; and among the
+sites is `cargo build --locked` at leg 2c) and `build-graph.sh` (`cargo tree`) are the stated
 exception, and always were — the blanket "all twenty-five are grep, awk, sed, find and
 python3" was false when it was written. Naming the exception is what lets
 `gates-full` exist as a separate job for the *rebuilding* legs without implying the
@@ -203,11 +210,28 @@ per named leg followed by a final summary naming everything the script proved �
 non-zero with a message naming the leg that failed, so a CI log identifies the gate rather
 than reporting one opaque failure.
 
+The count in that scenario SHALL be **asserted against `scripts/gates/` itself** inside `cargo
+test`, not merely written here. It was wrong for three changes — the spec read twenty-eight
+while the directory held thirty-one — because nothing bound it:
+`tests/ci_workflow.rs`'s `every_gate_script_the_recipe_names_exists_and_every_script_is_named`
+proves *correspondence* between the directory and the `gates:` recipe in both directions, and
+its only cardinality assertion is `on_disk.len() >= 25`, a floor thirty-one satisfies as
+comfortably as twenty-eight did. A floor cannot notice a gate being added; an equality can.
+
+**The historical-figure convention.** Several counts in this requirement describe the tree as
+it stood when an earlier change measured it, not as it stands now — "left twenty-eight
+outside" above is one. Such a figure SHALL name the change or commit that makes it true, so a
+later sweep can tell a superseded number from a deliberate one without re-deriving the history.
+`help-overlay`'s Change Review established this after nearly "repairing" a correct sentence:
+`dashboard-loop`'s "`make gates` runs `nodefault-ui.sh` six times today" verifies only against
+that change's own base, and reads wrong at any later HEAD. Turning a true sentence false is a
+worse outcome than the drift the sweep was hunting.
+
 #### Scenario: Both hygiene gates are checked-in files invoked from the Makefile
 
 - **WHEN** the repository tree is read at HEAD
 - **THEN** `scripts/gates/` holds `deps.sh`, `build-graph.sh`, and one file per extracted gate
-  — twenty-eight in all, counting `openspec-untouched.sh` — each readable by `/bin/sh` or, for
+  — **thirty-one** in all, counting `openspec-untouched.sh` — each readable by `/bin/sh` or, for
   `GATE-MECH1`, by `python3`
 - **AND** the `Makefile`'s `gates` target invokes exactly those paths and no others, and no
   **live** file in the repository restates any of their commands. The copies under
@@ -231,7 +255,7 @@ than reporting one opaque failure.
 - **AND** no floor appears in both a script's default and the `Makefile`'s recipe line. The
   `Makefile` carries only what a subject genuinely requires: `LAUNCH`/`ENTRY` for
   `LAUNCHSEAM`'s second subject, `SCAN_MIN`/`HOMEFILE`/`TYPES` for each of `NODEFAULT-UI`'s
-  five, and `env -u GRAPH_WRITE` for `GRAPH-SNAP` — five `SCAN_MIN` values and one `env -u`,
+  seven, and `env -u GRAPH_WRITE` for `GRAPH-SNAP` — seven `SCAN_MIN` values and one `env -u`,
   which the earlier wording "and nothing else" wrongly denied
 
 #### Scenario: The three excluded gates are named, with reasons, where a reader will meet them
@@ -275,7 +299,26 @@ scenario contradict its own neighbour.
 - **AND** the exercise is driven by a test inside `cargo test`, not by hand — see "Every
   gate's positive control is executed, not attested"
 
+#### Scenario: The stated gate-script count is asserted against the directory
+
+- **WHEN** `tests/ci_workflow.rs` is run against the repository tree
+- **THEN** the number of files under `scripts/gates/` is asserted to equal a **literal** —
+  **thirty-one**, the figure this requirement's first scenario states — by an equality, not by
+  a floor
+- **AND** the test does **not** read this document. `openspec/specs/` is written only by
+  `openspec archive`, so an assertion over this file's text would be red for the whole apply
+  phase of any change that moves the count, and `make check` gates every commit in between.
+  The directory is bound to the test by machine; the test is bound to this sentence by its
+  **failure message**, which SHALL name this file, this scenario, and both counts — because
+  that message is the only thing standing between a developer who adds a gate and a developer
+  who bumps the literal to 32 and leaves this sentence at thirty-one
+- **AND** adding a thirty-second script under `scripts/gates/`, with its own `gates:` recipe
+  line so the existing correspondence assertions still pass, makes that test **fail**; the
+  pre-existing `on_disk.len() >= 25` floor does not fire, which is why the equality is needed
+- **AND** deleting a script, again with its recipe line, fails it from the other side
+
 ### Requirement: The declared dependency set is checked against the argued set
+
 
 `scripts/gates/deps.sh` SHALL read the crate's resolved manifest through
 `cargo metadata --no-deps` and SHALL assert that the set of normal dependencies is exactly
@@ -315,6 +358,7 @@ the first five. Those experiments rebuild the crate once per dependency and SHAL
 - **AND** the run exits 0 only when all six removals fail to build
 
 ### Requirement: The build graph is pinned per triple and its platform difference named per direction
+
 
 `scripts/gates/build-graph.sh` SHALL resolve the normal build graph for each of the four
 supported triples — `aarch64-apple-darwin`, `x86_64-apple-darwin`,
@@ -358,6 +402,7 @@ a name belongs to, so a package migrating from one platform to the other would p
 
 ### Requirement: The dependency gates close the three clauses left parked
 
+
 `spec-purposes` found three clauses of `plugin-build`'s dependency requirement true and
 deliberately did not add them, recording them in `HANDOFF.md` as a follow-up. There is no
 follow-up: `degraded-states` is the last change in the roadmap, so the three SHALL be closed
@@ -385,6 +430,7 @@ violation in a copied manifest or a copied graph, show the leg fire, remove the 
 - **AND** removing each plant returns both to exit 0
 
 ### Requirement: Every capability spec carries a Purpose someone wrote
+
 
 Every `openspec/specs/<capability>/spec.md` SHALL open with a `## Purpose` section whose body
 describes what that capability is for, derived from that capability's own requirements. The
@@ -424,6 +470,7 @@ capability directory, so it cannot go green by finding nothing to check.
 - **AND** the failure names the count it found and the minimum it requires
 
 ### Requirement: The coverage floor is 80% of lines, enforced and never waived
+
 
 `make coverage` SHALL run `cargo llvm-cov --fail-under-lines 80`, with no
 `--ignore-filename-regex` or other flag narrowing what is measured. The threshold SHALL
@@ -482,6 +529,7 @@ vacuity this change exists to remove.
 
 ### Requirement: Missing one-time tools fail with the install command named
 
+
 `lint` and `coverage` SHALL each check that their own tool is resolvable before running,
 and SHALL fail with a message naming the one-time install command when it is not. The
 guard is for the developer whose Rust toolchain is present but whose component or
@@ -504,6 +552,7 @@ subcommand is not.
 
 ### Requirement: Formatting configuration is checked in and the tree is formatted
 
+
 `rustfmt.toml` SHALL exist at the repository root and SHALL declare the same edition as
 `Cargo.toml`, so that a bare `rustfmt` — which, unlike `cargo fmt`, is passed no
 `--edition` flag and would otherwise default to edition 2015 — agrees with the gate.
@@ -525,6 +574,7 @@ subcommand is not.
 
 ### Requirement: The gates do not depend on Herdr
 
+
 No target in `check` SHALL invoke the `herdr` binary or reach the Herdr socket, so the
 crate remains buildable and verifiable on a machine where Herdr is not installed.
 
@@ -538,6 +588,7 @@ crate remains buildable and verifiable on a machine where Herdr is not installed
   gate can acquire a dependency on it without the search finding it
 
 ### Requirement: View behaviour is verified against a `TestBackend` buffer at both widths
+
 
 Every test of a `ui` view SHALL render into a `ratatui::backend::TestBackend` buffer and
 SHALL assert on the content of named cells — an exact character at an exact column and row,
@@ -645,6 +696,7 @@ the help hint is now the footer's leading one.
 
 ### Requirement: The coverage floor is measured against production code
 
+
 `cargo llvm-cov --fail-under-lines 80` is dominated by test-module lines. Re-measured for
 gate-integrity's own Change Review (task 9.3), because the figures below had drifted from an
 earlier estimate as the tree grew — the corrected finding is what SHALL be recorded, per the
@@ -747,12 +799,16 @@ nothing.
 
 ### Requirement: A seam grep resists an import alias
 
+
 `NOSPAWN-GREP`, `AGENTSEAM`, `LAUNCHSEAM`, and `WATCHSEAM` each search for the literal
 spellings `process::Command`, `Command::new`, and `Stdio`. All four are defeated by an
 alias: `use std::process::{Child, Command as Proc};` produces neither
 `process::Command` nor `Command::new`, and `Proc::new(...).output()` spawns anyway. Measured
 — a full `herdr agent list` spawn injected into `src/ui/mod.rs` was reported green by every
-one of the twenty-eight gate scripts.
+one of the gate scripts then extracted, twenty-eight of them, measured by `gate-integrity`
+(archived `2026-09-07`). The figure is that change's, not a current count: `scripts/gates/`
+holds thirty-one today, and this requirement's point is that **every** seam grep was defeated,
+which the number only illustrates.
 The two-item brace form is rustfmt-stable: `rustfmt` collapses a single-item
 `use std::process::{Command};` back to a catchable spelling, but keeps braces at two or more.
 
@@ -830,6 +886,7 @@ on the same terms `WIRED` leg 2 records its keyword-based one, not engineered ar
 
 ### Requirement: The read-only sweep matches the write type, not the convenience function
 
+
 `READONLY-UI` searches for `fs::write`, `File::create`, and `OpenOptions` among others, and
 misses two stable ways to open a file for writing: `File::options()`, the inherent alias for
 `OpenOptions::new()`, and `DirBuilder::new().create(...)`. Measured — an appending write
@@ -866,6 +923,7 @@ a pattern with no control is a pattern that can silently stop matching.
   unmatched string
 
 ### Requirement: The non-blocking sweep covers every file under `src/ui/`
+
 
 `NOBLOCK` claims that no file under `src/ui/` names a blocking-wait API. Its clock leg
 sweeps the directory; its **blocking-wait leg scans `src/ui/driver.rs` alone**. Measured — a
@@ -910,6 +968,7 @@ prevent.
   cheaper plant would be a control asserting on the harness rather than on the repair
 
 ### Requirement: `WIRED` reads code, and the panic hook is one of the names it requires
+
 
 `WIRED` strips `//` line comments before searching, then looks for twelve required names as
 plain substrings. Two consequences, both measured:
@@ -988,6 +1047,7 @@ more.
   stripper reduced to the identity function cannot pass
 
 ### Requirement: Every gate's positive control is executed, not attested
+
 
 `tests/ci_workflow.rs` proves the file set under `scripts/gates/` equals the set the `gates:`
 recipe names, in both directions — a real anti-drop check. What no test does is **run** a
