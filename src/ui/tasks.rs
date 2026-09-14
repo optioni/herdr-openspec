@@ -68,9 +68,10 @@ pub fn progress_bar(progress: &crate::tasks::Progress, width: u16) -> String {
     String::new()
 }
 
-/// `completed * 100 / total`, truncating, with a saturating multiply so no
-/// `Progress` value can overflow it. `total == 0` is never passed here —
-/// `progress_bar` returns before reaching this for that case.
+/// `completed * 100 / total`, truncating, computed in `u128` so
+/// `usize::MAX * 100` cannot overflow for any `Progress`. `total == 0` is
+/// never passed here — `progress_bar` returns before reaching this for
+/// that case.
 fn percent_of(progress: &crate::tasks::Progress) -> u64 {
     let completed = progress.completed as u128;
     let total = progress.total as u128;
@@ -79,10 +80,24 @@ fn percent_of(progress: &crate::tasks::Progress) -> u64 {
 
 /// A bare run of exactly `g` characters: `filled` of `█` (U+2588) followed
 /// by `g - filled` of `░` (U+2591), where `filled = g * completed / total`
-/// in integer arithmetic with a saturating multiply. `filled == g` holds
-/// iff `progress.is_complete()`, and `filled == 0` holds whenever
-/// `completed == 0` — both properties of plain integer truncation given
-/// `completed <= total`.
+/// in integer arithmetic computed in `u128`, so `usize::MAX * g` cannot
+/// overflow for any `Progress` and no `u16` `g`. `filled == g` holds iff
+/// `progress.is_complete()`, and `filled == 0` holds whenever
+/// `completed == 0` — both properties of plain integer truncation, and
+/// both now hold for **every** `Progress`, with no saturation regime
+/// excepted: a saturating `u64` multiply previously produced the wrong
+/// *quotient* at `Progress { completed: usize::MAX, total: usize::MAX }`
+/// (`u64::MAX / u64::MAX == 1`), not merely a clamped magnitude, which is
+/// why widening rather than re-clamping is what repairs it.
+///
+/// Total: returns the empty string at `g == 0` — an existing property
+/// rather than a new one, since `filled` was already `0` there and both
+/// push loops were already empty — and at `progress.total == 0`, which
+/// removes a division by zero. Neither guard is reachable from either
+/// production call site: `progress_bar` returns before reaching this at
+/// `total == 0` and draws no zero-width gauge, and `ui::detail::header_row`
+/// draws no gauge cell at all at `total == 0`. The guard exists for a
+/// `pub(crate)` caller this module does not control.
 pub(crate) fn gauge_of(progress: &crate::tasks::Progress, g: u16) -> String {
     if g == 0 || progress.total == 0 {
         return String::new();
