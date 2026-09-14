@@ -389,18 +389,32 @@ fn body_row(line: crate::ui::markdown::Line) -> ContentRow {
 /// adding `No content yet` would say two contradictory things about the
 /// same tab.
 ///
-/// The body is `ui::tasks::lines(&text, &change.progress, width)` —
-/// `tasks-checklist`'s grammar and `tasks-progress-bar`'s leading line —
-/// over the concatenation of every section's text, when `change` is `Some`
-/// and the `ArtifactRef` at `detail.tab` carries `tracks_tasks == true`
-/// (`artifact-folds` -> Decision 8: this tab is never foldable, at any
-/// section count); `artifact-folds`' own header rows and per-section
-/// bodies when the artifact is **foldable** (`Detail::foldable`,
-/// derived rather than stored — Decision 3); and
-/// `ui::markdown::lines(&text, width)` over the same concatenation in every
+/// The body is dispatched on `Detail::foldable` — derived rather than
+/// stored (`artifact-folds` -> Decision 3) — and not on the artifact's
+/// kind. At a **foldable** tab it is `ui::tasks::bar_lines(&change.progress,
+/// width)` first, when `change` is `Some` and the `ArtifactRef` at
+/// `detail.tab` carries `tracks_tasks == true`, as leading body owned by no
+/// section and hidden by no fold; then `artifact-folds`' walk — a header
+/// row per visible labelled section, that section's own rendered body
+/// beneath it exactly when it is open, and a blank separator after a
+/// non-empty open body a further visible section follows. An open section's
+/// body is `ui::tasks::items` over its parsed items on a tracked-tasks tab
+/// and `ui::markdown::lines(&section.text, width)` otherwise. The
+/// tracked-tasks tab folding at all **reverses** `artifact-folds` ->
+/// Decision 8, which held that tab never foldable at any section count
+/// because its whole-change progress bar would disagree with a per-section
+/// fold: the bar now leads the body above every header, so it and a fold
+/// answer different questions (`heading-sections` -> design.md -> D8).
+///
+/// At a **non-foldable** tab the body is taken over the concatenation of
+/// every section's text: `ui::tasks::lines(&text, &change.progress, width)`
+/// — `tasks-checklist`'s grammar and `tasks-progress-bar`'s leading line —
+/// on a tracked-tasks tab, and `ui::markdown::lines(&text, width)` in every
 /// other case — a single section, no section at all, a `None` change, a
 /// `detail.tab` past the end of the artifact list, and a change carrying no
-/// artifacts at all. Each header row carries `ContentKind::SectionHeader {
+/// artifacts at all.
+///
+/// Each header row carries `ContentKind::SectionHeader {
 /// section, selected }`, where `selected` is true for exactly the header
 /// whose section the cursor — `detail.scroll`, an index into this same row
 /// list — is on or in, and false on every header when the cursor addresses

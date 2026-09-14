@@ -4,11 +4,14 @@
 Governs what the detail region's body actually holds: `Dashboard::sync_detail` resolves the
 selected `(change directory, tab)` pair into text by reading the artifact's files through a
 single injected reader closure — one production binding, `ui::read_artifact`, so no view file
-ever names a filesystem API — producing **one section per resolved file**, in resolution order
-and with no separator inserted, caching on the key so an unchanged selection re-reads nothing,
-and re-reading when a live refresh forces it without throwing a mid-document reader back to
-line one. An artifact resolving to more than one path is **foldable**, and `artifact-folds`
-owns what that means; the row list `content_lines` returns carries a *kind* per row so
+ever names a filesystem API — producing **one section per resolved file** and, for a file that
+is spec-shaped or is the tracked task file, one section per heading beneath it, in resolution
+order and with no separator inserted, caching on the key so an unchanged selection re-reads
+nothing, and re-reading when a live refresh forces it without throwing a mid-document reader
+back to line one. An artifact resolving to more than one section is **foldable**, and
+`artifact-folds` owns what that means and what a file's split costs — a file is split only when
+doing so would yield more than one section, so a one-heading file on a one-path artifact stays
+exactly the flat document it was; the row list `content_lines` returns carries a *kind* per row so
 `ui::view` alone decides what a row looks like. It also fixes what the content area
 shows: problem rows for files that failed to read, then either the markdown body or, for the
 schema's tracked-tasks artifact, the checklist body, and `No content yet` only when there is

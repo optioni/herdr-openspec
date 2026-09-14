@@ -82,10 +82,16 @@ from the schema's declared order and switched with `1`–`9`/`[`/`]`, and that
 tab's content, read
 through an injected `&dyn Fn(&Path) -> Result<String, String>` reader
 (`ui::read_artifact` is the one production binding, in `src/ui/mod.rs`) and
-resolved once per `(change directory, tab)` rather than on every frame, as one
-**section per resolved file** — an artifact whose `generates` is a glob, `specs`
-being the one every shipped schema has, becomes a list of foldable per-file
-sections, all collapsed at first, each labelled by its capability directory;
+resolved once per `(change directory, tab)` rather than on every frame, as a
+list of foldable **sections** drawn from two sources: one per resolved file — so
+an artifact whose `generates` is a glob, `specs` being the one every shipped
+schema has, becomes a list of per-file sections each labelled by its capability
+directory — and one per ATX heading inside any file that is spec-shaped (it
+carries a level-3 `Requirement:` heading) or is the tracked task file. Every
+section carries a `depth` and the list stays flat, so collapsing a section hides
+its whole subtree; all sections start collapsed; a file is split only when doing
+so would yield more than one section, which is what keeps a one-heading file on
+a one-path artifact byte-identical to the flat document it was; and
 `Detail::foldable` is the crate's one site for that question and derives it from
 the section count, never storing it. The header's gauge is drawn on **every**
 artifact tab, not only the tracked-tasks one, and it is first in the header's
@@ -107,7 +113,12 @@ it away. The tab the schema marks as tracking tasks (`ArtifactRef::tracks_tasks`
 set by position, never by id or filename) renders `ui::tasks`' grammar
 instead of markdown: a progress bar showing the change's own `progress`
 followed by task groups under their headings with a `[✓]`/`[ ]` glyph per
-item — read-only, with no key that toggles one. The markdown path renders a
+item — read-only, with no key that toggles one. That tab **folds** like any
+other once its file splits at its headings, which **reverses** `artifact-folds`'
+Decision 8: `ui::tasks::bar_lines` draws the bar above every header, as leading
+body owned by no section and hidden by no fold, and `ui::tasks::items` draws
+each open group's items beneath its own header row, with every group whose
+subtree still holds incomplete work seeded open. The markdown path renders a
 task-list item with that **same** glyph (`markdown-legibility` turned
 `ENABLE_TASKLISTS` on), so the two checkbox renderers are asserted to agree
 rather than left to drift; what names the checklist path is the progress-bar
@@ -424,6 +435,10 @@ unreachable and the tests become integration tests by accident.
   the other nine pure view files for `.chars().count()`/`.chars().take(`/a `Vec<char>`
   collect, because a `chars().count()` written later is silently correct against this
   project's own ASCII fixtures and wrong against anything else.
+- **Under `src/ui/`, where a pure helper lives decides which gates it must satisfy.** The six
+  `*WIDTHS` gates carry no exemption list — `DETAILWIDTHS` requires every `#[test]` in
+  `src/ui/detail.rs` to name both `58` and `78` — so a width-free function's tests belong in a
+  file they do not sweep, and a new module moves the pure-view count two capability specs bind.
 - **The render path blocks on nothing but the terminal, and reads no clock.**
   `src/watch.rs`, `src/refresh.rs`, `src/agents.rs`, and `src/launch.rs` — all
   four outside `src/ui/` — hold the filesystem watcher, the refresh worker

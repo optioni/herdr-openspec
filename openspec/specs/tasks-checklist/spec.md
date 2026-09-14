@@ -3,8 +3,14 @@
 ## Purpose
 The detail tab that renders a change's task file as a checklist instead of markdown: the
 single decision — made from the selected artifact's `tracks_tasks` flag, never from its id or
-filename — that swaps `ui::markdown::lines` for `ui::tasks::lines`, and the line grammar that
-results, with heading lines reproduced from their level, one `[✓]`/`[ ]` glyph line per item
+filename — that swaps `ui::markdown`'s grammar for `ui::tasks`', and the line grammar that
+results. Which of `ui::tasks`' three entry points draws it follows the tab's foldability, not
+a second decision about its kind: an unsplit file is `ui::tasks::lines` whole, and a file that
+split at its headings is `ui::tasks::bar_lines` above every section header with
+`ui::tasks::items` inside each open group — `lines` calls `items` per group itself, so a folded
+group and an unfolded one cannot disagree about an item line, and a group's heading is drawn as
+its header row or as a heading line but never both and never neither. The grammar is heading
+lines reproduced from their level, one `[✓]`/`[ ]` glyph line per item
 — the same glyph `markdown-render` gives a task-list item, so the two checkbox renderers agree
 by construction and what names this path is the progress-bar row rather than the glyph —
 preserving the parse's own indent, hanging-indent wrapping, whole-indent dropping as the width

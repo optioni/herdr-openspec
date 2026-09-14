@@ -318,17 +318,6 @@ fn has_requirement_heading(sections: &[HeadingSection]) -> bool {
         .any(|section| section.level == 3 && section.label.starts_with("Requirement:"))
 }
 
-/// The byte length of `text`'s preamble — everything before the first heading
-/// line `split_headings` recognised — derived from `sections` themselves
-/// rather than from a second, fence-aware scan of the text, which would be
-/// the second implementation of one rule this change exists to avoid.
-///
-/// Walks backwards: the last section's `body` is a suffix of `text`, so the
-/// heading line above it ends where that body starts, and stepping over that
-/// line lands on the end of the previous section's body. After every section
-/// the offset is the start of the first heading line. Total: an offset that
-/// does not land on a character boundary — which the partition rules out —
-/// falls back to the whole text rather than panicking.
 /// The indices of `sections` a tracked-tasks tab opens with:
 /// `artifact-folds`' seed, every section whose **subtree** is incomplete and
 /// no other. A section's subtree is itself and every following section of
@@ -365,6 +354,17 @@ fn seed_expanded(sections: &[ArtifactSection]) -> std::collections::BTreeSet<usi
     seeded
 }
 
+/// The byte length of `text`'s preamble — everything before the first heading
+/// line `split_headings` recognised — derived from `sections` themselves
+/// rather than from a second, fence-aware scan of the text, which would be
+/// the second implementation of one rule this change exists to avoid.
+///
+/// Walks backwards: the last section's `body` is a suffix of `text`, so the
+/// heading line above it ends where that body starts, and stepping over that
+/// line lands on the end of the previous section's body. After every section
+/// the offset is the start of the first heading line. Total: an offset that
+/// does not land on a character boundary — which the partition rules out —
+/// falls back to the whole text rather than panicking.
 fn preamble_len(text: &str, sections: &[HeadingSection]) -> usize {
     let mut pos = text.len();
     for section in sections.iter().rev() {

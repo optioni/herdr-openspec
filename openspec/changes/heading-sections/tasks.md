@@ -315,14 +315,65 @@ own `selected` flag, so this group is mostly new coverage plus the preamble case
 
 <!-- kind: operational -->
 
-- [ ] 9.1 CHECK: Confirm the net size before editing — 9.3 and 9.4 rewrite rather than add, 9.5 is the only addition and is under ten lines, and 9.2's three Purpose blocks are rewrites. Nothing else in the maintained set is made stale by this change.
-- [ ] 9.2 Rewrite three `## Purpose` blocks in `openspec/specs/` (audience: every future change): `artifact-folds` (its Purpose states "one per resolved file" and carries the Decision 8 claim this change reverses verbatim), `artifact-content` ("one section per resolved file"), and `tasks-checklist` ("swaps `ui::markdown::lines` for `ui::tasks::lines`" — the foldable path uses `items`). A delta carries no Purpose block and `openspec archive` never rewrites one, so an untouched Purpose ships stale; this repository has already paid for that twice. `detail-scroll`'s, `mouse-input`'s and `list-selection`'s were read and stay true.
-- [ ] 9.3 Rewrite in `CLAUDE.md` (audience: every future session): the passage stating the tracked-tasks tab "is never foldable, at any section count" and that its body concatenates. It is now false, and a session reading it would route around folding rather than use it.
-- [ ] 9.4 Rewrite in `SPEC.md` (audience: every future change): the detail region's content description — sections may come from headings, carry a `depth`, and a fold hides a subtree. **Two sites, not one:** the content description near `SPEC.md:566`, and the module-map row at `SPEC.md:96`, which still calls the dashboard's stored state "the detail region's per-file sections and its fold set". Sections are no longer per-file. Found by the Change Review; the second site is covered by none of this group's other edits.
-- [ ] 9.5 Add to `CLAUDE.md` (≤4 lines): under `src/ui/`, where a pure helper lives decides which gates it must satisfy — `DETAILWIDTHS` and the other five `*WIDTHS` gates have no exemption list, so a width-free function cannot live in the file they sweep, and a new module moves a pure-view count two capability specs bind. Non-obvious, and the next change adding a pure helper pays the same discovery cost without it.
-- [ ] 9.7 Rewrite `content_lines`' own doc comment in `src/ui/detail.rs` (roughly lines 391–401), which still states the pre-reversal rule and cites Decision 8 as live: "the concatenation of every section's text, when … `tracks_tasks == true` (`artifact-folds` -> Decision 8: this tab is never foldable, at any section count)". That is the opposite of what the function does twelve lines below it, where the dispatch is `if detail.foldable()`, `bar_lines` above the section walk, and `items` inside each open tracked-tasks section. WARNING from the Change Review. This is the contract documentation of the one function this change reversed, and no other task named a source doc comment.
-- [ ] 9.8 Split the doc block above `seed_expanded` in `src/ui/app.rs` (roughly lines 321–348). `preamble_len`'s documentation — "The byte length of `text`'s preamble …", including the backwards-walk argument that is the non-obvious part of this change's derivation — runs into `seed_expanded`'s with no break, so the compiler binds the whole run to `seed_expanded` and `preamble_len` carries no documentation at all. Move the first block down to `preamble_len` at its own definition. WARNING from the Change Review.
-- [ ] 9.6 VERIFY: `cargo test --all-features --test doc_contract` and `--test spec_purposes` — green, confirming no documented binding, module-map row, confined-seam name, or capability Purpose drifted.
+- [x] 9.1 CHECK: Confirm the net size before editing — 9.3 and 9.4 rewrite rather than add, 9.5 is the only addition and is under ten lines, and 9.2's three Purpose blocks are rewrites. Nothing else in the maintained set is made stale by this change.
+  - **Re-checked, and the plan's claim holds with two corrections.** Net size: 9.2, 9.3, 9.4,
+    9.7 and 9.8 rewrite; 9.5 is the only addition, four lines. 9.4 is two sites as the Change
+    Review found. **The quoted passage 9.3 names is not in `AGENTS.md`.** "never foldable, at
+    any section count" appears in `SPEC.md:580` — inside 9.4's own content-description site —
+    and in `openspec/specs/artifact-folds/spec.md:22`, which is 9.2's. `AGENTS.md`'s stale
+    passages are different ones and were rewritten instead: its detail-region description
+    ("one **section per resolved file**", "foldable per-file sections") and its tracked-tasks
+    sentence, which described the unfolded body as the whole grammar.
+  - One further site was found stale and **left alone deliberately**:
+    `openspec/specs/artifact-content/spec.md:307` ("The tracked-tasks body is deliberately
+    **not** foldable, at any section count") sits inside the requirement this change's own
+    delta MODIFIES, so `openspec archive` rewrites it. Only the Purpose blocks ship stale,
+    which is what 9.2 is for. `README.md` and the other capability Purposes were swept for
+    the same phrases and carry none.
+- [x] 9.2 Rewrite three `## Purpose` blocks in `openspec/specs/` (audience: every future change): `artifact-folds` (its Purpose states "one per resolved file" and carries the Decision 8 claim this change reverses verbatim), `artifact-content` ("one section per resolved file"), and `tasks-checklist` ("swaps `ui::markdown::lines` for `ui::tasks::lines`" — the foldable path uses `items`). A delta carries no Purpose block and `openspec archive` never rewrites one, so an untouched Purpose ships stale; this repository has already paid for that twice. `detail-scroll`'s, `mouse-input`'s and `list-selection`'s were read and stay true.
+  - `artifact-folds`: the opening now states both section sources (per resolved file, and
+    per ATX heading inside a spec-shaped or tracked task file), the `depth` field and the
+    subtree-hiding rule, the `None`-labelled preamble, and the header's indent; the
+    "needs no seeding" sentence gains the tracked-tasks exception; and the Decision 8 claim
+    is rewritten as a **reversal**, with the bar-above-every-header argument that retires it.
+  - `artifact-content`: "one section per resolved file" becomes both sources, and "more than
+    one path is foldable" becomes more than one **section**, with the split gate's
+    "only when it would yield more than one section" clause.
+  - `tasks-checklist`: the swap is now `ui::markdown`'s grammar for `ui::tasks`', with which
+    entry point draws it following foldability — `lines` whole when unsplit, `bar_lines` plus
+    `items` per open group when split — and the "never both, never neither" rule for a
+    group's heading.
+- [x] 9.3 Rewrite in `CLAUDE.md` (audience: every future session): the passage stating the tracked-tasks tab "is never foldable, at any section count" and that its body concatenates. It is now false, and a session reading it would route around folding rather than use it.
+  - Two passages in `AGENTS.md`, not the one the task line quotes (see 9.1): the detail
+    region's content description now names both section sources, the `depth`, the
+    collapsed-by-default rule and the split gate; and the tracked-tasks sentence now says the
+    tab folds once its file splits, names the reversal, and names `bar_lines`/`items` and the
+    incomplete-subtree seed.
+- [x] 9.4 Rewrite in `SPEC.md` (audience: every future change): the detail region's content description — sections may come from headings, carry a `depth`, and a fold hides a subtree. **Two sites, not one:** the content description near `SPEC.md:566`, and the module-map row at `SPEC.md:96`, which still calls the dashboard's stored state "the detail region's per-file sections and its fold set". Sections are no longer per-file. Found by the Change Review; the second site is covered by none of this group's other edits.
+  - `SPEC.md:564-582`: rewritten as three paragraphs — the two section sources and the flat
+    `depth` encoding, the header grammar with its indent and the tracked-tasks seeding
+    exception, and foldability with Decision 8's reversal stated as a reversal.
+  - `SPEC.md:96`: the module-map row's stored state is now "the detail region's section list —
+    one section per resolved file and, inside a spec-shaped or tracked task file, one per
+    heading, each carrying a `depth` — and its fold set".
+- [x] 9.5 Add to `CLAUDE.md` (≤4 lines): under `src/ui/`, where a pure helper lives decides which gates it must satisfy — `DETAILWIDTHS` and the other five `*WIDTHS` gates have no exemption list, so a width-free function cannot live in the file they sweep, and a new module moves a pure-view count two capability specs bind. Non-obvious, and the next change adding a pure helper pays the same discovery cost without it.
+  - Added as a bullet in `AGENTS.md` -> Architecture rules, beside the `COLWIDTH` rule: the
+    six `*WIDTHS` gates carry no exemption list, so a width-free function's tests belong in a
+    file they do not sweep, and a new module moves the pure-view count two capability specs
+    bind. Four lines.
+- [x] 9.7 Rewrite `content_lines`' own doc comment in `src/ui/detail.rs` (roughly lines 391–401), which still states the pre-reversal rule and cites Decision 8 as live: "the concatenation of every section's text, when … `tracks_tasks == true` (`artifact-folds` -> Decision 8: this tab is never foldable, at any section count)". That is the opposite of what the function does twelve lines below it, where the dispatch is `if detail.foldable()`, `bar_lines` above the section walk, and `items` inside each open tracked-tasks section. WARNING from the Change Review. This is the contract documentation of the one function this change reversed, and no other task named a source doc comment.
+  - `content_lines`' doc comment now dispatches on `Detail::foldable` rather than on the
+    artifact's kind: the foldable branch (bar first as leading body, then the header/body/
+    separator walk, `items` or `markdown::lines` per open section), the non-foldable branch
+    over the concatenation, and Decision 8 named as **reversed** rather than as live.
+- [x] 9.8 Split the doc block above `seed_expanded` in `src/ui/app.rs` (roughly lines 321–348). `preamble_len`'s documentation — "The byte length of `text`'s preamble …", including the backwards-walk argument that is the non-obvious part of this change's derivation — runs into `seed_expanded`'s with no break, so the compiler binds the whole run to `seed_expanded` and `preamble_len` carries no documentation at all. Move the first block down to `preamble_len` at its own definition. WARNING from the Change Review.
+  - `preamble_len`'s block — the backwards-walk argument and the totality clause — moved
+    intact to its own definition; `seed_expanded` keeps only its own. Both now carry
+    documentation the compiler binds to the right function.
+- [x] 9.6 VERIFY: `cargo test --all-features --test doc_contract` and `--test spec_purposes` — green, confirming no documented binding, module-map row, confined-seam name, or capability Purpose drifted.
+  - `cargo test --all-features --test doc_contract --test spec_purposes`: **73 passed, 0
+    failed** and **3 passed, 0 failed**. `cargo fmt --all` applied, `make check` exits 0 with
+    the full suite green and both coverage floors holding (production 96.35% >= 96%).
 
 ## 10. Lint & Verify
 

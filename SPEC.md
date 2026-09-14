@@ -93,7 +93,7 @@ binding, not its only one — `NOBLOCK` leg 2 covers it identically.
 | `watch` | The recursive `notify` watch, the debounce, and classifying a touched path to a per-change `Selection` |
 | `refresh` | The worker thread and the non-blocking `Refresher` seam it answers through |
 | `open` | The `open` and `open-tab` subcommands that open or focus the dashboard pane through `herdr plugin pane`; the crate's third `HerdrCli` consumer |
-| `ui` | Views (the change-row grammar, the detail region's header/tab-bar/content grammar, markdown rendering, `ui::tasks`' checklist-and-progress-bar grammar for the tracked-tasks tab, and `ui::help`'s help band — its row grammar and, in `ui::help::INVENTORY`, the crate's one list of what every key and gesture does, which `?` renders and `tests/doc_contract.rs` binds back to the driver), the semantic-role colour palette (`ui::palette`, the one table from a role to a `Style` and the crate's only `ratatui::style::Color` — see Colour and style), layout, the dashboard's own state (selection, the `/` filter, the detail region's per-file sections and its fold set, the detail cursor, the width of the content area last drawn — the one piece of geometry the dashboard stores, and only so a keypress taken between frames can resolve against what the last frame did, never as a source of what is drawn — the selected artifact tab, the live tier's refresh flag and standing problems, the help overlay's own layer state — open or not, and its scroll — and the injected artifact-read binding), key handling, terminal lifecycle, and the event loop |
+| `ui` | Views (the change-row grammar, the detail region's header/tab-bar/content grammar, markdown rendering, `ui::tasks`' checklist-and-progress-bar grammar for the tracked-tasks tab, and `ui::help`'s help band — its row grammar and, in `ui::help::INVENTORY`, the crate's one list of what every key and gesture does, which `?` renders and `tests/doc_contract.rs` binds back to the driver), the semantic-role colour palette (`ui::palette`, the one table from a role to a `Style` and the crate's only `ratatui::style::Color` — see Colour and style), layout, the dashboard's own state (selection, the `/` filter, the detail region's section list — one section per resolved file and, inside a spec-shaped or tracked task file, one per heading, each carrying a `depth` — and its fold set, the detail cursor, the width of the content area last drawn — the one piece of geometry the dashboard stores, and only so a keypress taken between frames can resolve against what the last frame did, never as a source of what is drawn — the selected artifact tab, the live tier's refresh flag and standing problems, the help overlay's own layer state — open or not, and its scroll — and the injected artifact-read binding), key handling, terminal lifecycle, and the event loop |
 | `cli` | The two subprocess traits and their real implementations |
 
 ## Data layer
@@ -561,25 +561,44 @@ scrolls with `j` / `k` and the arrows at the detail route (`markdown-viewer`,
 tables and strikethrough by `markdown-constructs`) — see the fold rules below,
 which make that a **cursor** rather than an offset at a foldable tab.
 
-An artifact whose `generates` is a **glob** resolves to more than one file — the
-`specs` artifact of every schema this repository ships is one — and its content
-is then a list of **foldable per-file sections** rather than one concatenated
-document (`foldable-spec-sections`). Each section carries a label, which for
-`specs/<capability>/spec.md` is the capability directory, and is drawn under a
-header row of `<glyph> <label>` whose glyph pair is the list region's own, read
-from `ui::list::fold_glyph` so one fold reads the same in both regions. **All
+A tab's content is a list of **foldable sections** rather than one concatenated
+document (`foldable-spec-sections`, `heading-sections`). Sections come from two
+sources and one artifact can use both. An artifact whose `generates` is a
+**glob** resolves to more than one file — the `specs` artifact of every schema
+this repository ships is one — and contributes one section per resolved file,
+labelled with the capability directory for `specs/<capability>/spec.md` and with
+the file name otherwise. And a file that is **spec-shaped** — it carries a
+level-3 heading whose label begins `Requirement:` — or that is the tracked task
+file is split again at its own ATX headings, one section per heading, labelled
+with the heading's own text. Every section carries a `depth`, and the list stays
+flat and index-addressed: collapsing a section at depth `d` hides every
+following section of greater depth until the first at or below `d`, so a fold
+hides a **subtree**. Text before a split file's first heading is a section with
+no label — it draws no header row, is always open, and is never a fold target.
+
+A labelled section is drawn under a header row of `"  " * depth` then
+`<glyph> <label>`, whose glyph pair is the list region's own, read from
+`ui::list::fold_glyph` so one fold reads the same in both regions; bodies carry
+no depth indent, so the narrow interior spends its columns on text. **All
 sections start collapsed**, so the `specs` tab opens as a list of capability
 names — the problem it was built to solve, since OpenSpec spec files open at
 `## MODIFIED Requirements` and carry the capability name only in their
-directory. `Space` folds the section the cursor is on or in, and a left click on
-a header does the same thing through the same code.
+directory. The tracked-tasks tab is the one stated exception: it opens with
+every group whose subtree still holds incomplete work expanded. `Space` folds
+the section the cursor is on or in, and a left click on a header does the same
+thing through the same code.
 
 Foldability is **derived, never stored** (`Detail::foldable`, the crate's one
-site for the question): more than one section. An artifact resolving to **one**
-path is unaffected in every respect — no header row, no fold state, no
-behavioural change — and the tracked-tasks tab is never foldable at any section
-count, because its progress bar counts the change's whole `progress` and would
-disagree with a per-section fold.
+site for the question): more than one section. A file is split only when doing
+so would yield more than one section, so an artifact resolving to **one** path
+and holding at most one heading is unaffected in every respect — no header row,
+no fold state, no behavioural change. The tracked-tasks tab **is** foldable once
+its file splits, which reverses `artifact-folds`' Decision 8: that decision held
+the tab never foldable at any section count, because its progress bar counts the
+change's whole `progress` and would disagree with a per-section fold. The bar is
+now drawn above every header, as leading body owned by no section and hidden by
+no fold, so a bar counting the change and a fold hiding a group answer different
+questions and neither claims the other's answer.
 
 At a **foldable** tab the drawn window follows a **line cursor**: `detail.scroll`
 is an index into the row list and the offset is derived with `layout::viewport`,

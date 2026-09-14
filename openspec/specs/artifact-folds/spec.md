@@ -1,26 +1,44 @@
 # artifact-folds Specification
 
 ## Purpose
-Makes a multi-file artifact readable by turning its content into named, foldable **sections**,
-one per resolved file. It exists because an artifact whose `generates` is a **glob** — the
-`specs` artifact of every schema this repository ships — resolved to many files that were
-concatenated into one flat document, and OpenSpec spec files open at `## MODIFIED
-Requirements` and carry their capability name only in the directory: the `specs` tab of a
-change was therefore several indistinguishable blocks run together, with no way to see which
-capabilities the change touched, let alone reach one. It owns the section list and the label
-rule (the capability directory for `specs/<capability>/spec.md`, the file name otherwise, total
-over every adversarial path), the header row's grammar and its fold glyph — taken from
+Makes a long or multi-file artifact readable by turning its content into named, foldable
+**sections**. Sections come from two sources and one artifact can use both: one per resolved
+file, and — inside a file that is **spec-shaped** (it carries a level-3 `Requirement:`
+heading) or is the tracked task file — one per ATX heading beneath it. Every section carries
+a `depth`; the list stays flat and index-addressed, and nesting is that field rather than a
+tree, so a collapsed section at depth `d` hides every following section of greater depth
+until the first at or below `d`. Text before a split file's first heading is a section with
+**no** label: it draws no header row, is always open, and is never a fold target. It exists
+because an artifact whose `generates` is a **glob** — the `specs` artifact of every schema
+this repository ships — resolved to many files that were concatenated into one flat document,
+and OpenSpec spec files open at `## MODIFIED Requirements` and carry their capability name
+only in the directory: the `specs` tab of a change was therefore several indistinguishable
+blocks run together, with no way to see which capabilities the change touched, let alone
+reach one. The same wall stands inside a single file — one change's `tasks.md` is its groups
+run together and one capability's `spec.md` its requirements — which is why a file splits at
+its own headings too. It owns the section list and the label rule (the capability directory
+for `specs/<capability>/spec.md`, the file name otherwise, the heading's own text for a
+heading section, total over every adversarial path), the header row's grammar — its `"  " *
+depth` indent, emitted before the glyph so truncation eats the label first, with bodies drawn
+unindented at the full content width — and its fold glyph — taken from
 `ui::list::fold_glyph`, the crate's one site for that pair, so a single fold reads the same in
 both regions — the **collapsed-by-default** rule that makes the tab open as a list of
 capability names, the `Detail::expanded` set that inverts the list's `collapsed` so a freshly
-constructed value needs no seeding, the reset that clears it on exactly the `(change directory,
+constructed value needs no seeding — the tracked-tasks tab being the one stated exception,
+seeded open at every group whose subtree still holds incomplete work — the reset that clears it on exactly the `(change directory,
 tab)` change that resets the scroll and on nothing else, and `section_at`, the saturating
 lookup that resolves a drawn row to the section it belongs to.
 
-Foldability is **derived, never stored**: more than one section, asked in one place. An
-artifact resolving to one path or none is not foldable and is unaffected in every respect, and
-the tracked-tasks tab is never foldable at any section count, because its progress bar counts
-the change's whole `progress` and would disagree with a per-section fold.
+Foldability is **derived, never stored**: more than one section, asked in one place. A file
+whose split would yield a single section is left unsplit, so an artifact resolving to one path
+or none — and holding at most one heading — is not foldable and is unaffected in every
+respect. The tracked-tasks tab **is** foldable once its file splits, which **reverses** this
+capability's earlier Decision 8, held here for as long as sections came only from a `generates`
+glob: that tab was then never foldable at any section count, because its progress bar counts
+the change's whole `progress` and would disagree with a per-section fold. The bar is now drawn
+above every header, as leading body owned by no section and hidden by no fold, so a bar
+counting the change and a fold hiding a group answer different questions and neither claims the
+other's answer.
 
 Two boundaries are deliberately elsewhere. Whether a row carries emphasis is a **kind** this
 capability emits and `view-palette`'s two roles paint, so `ui::detail` names no `Role` and no
