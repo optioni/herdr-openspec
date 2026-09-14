@@ -1450,4 +1450,40 @@ mod tests {
         assert_eq!(progress_bar(&unmoved, 78), want78);
         assert_eq!(progress_bar(&unmoved, 58), want58);
     }
+
+    /// `tasks-progress-bar` :: "The header's gauge and the bar's gauge agree
+    /// about the same change" — `gauge_of(p, 12)` appears, space-bounded, in
+    /// `ui::detail::header_row`'s own output at both mandated widths, for
+    /// 4-of-9, a complete change, and an untouched one. The header and the
+    /// tracked-tasks tab's own bar share exactly this one `gauge_of` call,
+    /// so the two can never disagree about how full a change is.
+    #[test]
+    fn the_header_s_gauge_and_the_bar_s_gauge_agree() {
+        let cases = [
+            Progress {
+                completed: 4,
+                total: 9,
+            },
+            Progress {
+                completed: 7,
+                total: 7,
+            },
+            Progress {
+                completed: 0,
+                total: 7,
+            },
+        ];
+        for progress in cases {
+            let gauge = gauge_of(&progress, 12);
+            let needle = format!(" {gauge} ");
+            for width in [78, 58] {
+                let header =
+                    crate::ui::detail::header_row("add-token-refresh", "tdd", &progress, width);
+                assert!(
+                    header.contains(&needle),
+                    "progress {progress:?} width {width}: {header:?} missing {needle:?}"
+                );
+            }
+        }
+    }
 }
