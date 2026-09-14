@@ -167,6 +167,14 @@ task that stops at "update the expectation" will see green and move on.
   with four `Progress` values — band clause scoped to `{4, 9}`, since a 43-column progress cell
   moves every boundary. Both pass unchanged today; the gauge-presence and no-gauge-at-`total==0`
   clauses are what make them fail. Confirm `FAILED` after adding them.
+- [ ] 2.4a CHECK: Every `#[test]` written or rewritten in `src/ui/detail.rs` and
+  `src/ui/tasks.rs` must contain the bare literals `78` and `58`. `DETAILWIDTHS` and
+  `TASKWIDTHS` enforce this over **every** test in those two files with no exemption list, and
+  strip only `///` and `//!` lines — so a doc comment cannot satisfy it and an inline `//`
+  naming them would be gaming a gate whose own header calls an exemption list "how a width
+  check rots into a rubber stamp". Four planned tests need a real assertion at both widths to
+  comply; the specs now carry it. Run `/bin/sh scripts/gates/detailwidths.sh` and
+  `/bin/sh scripts/gates/taskwidths.sh` after each group rather than discovering it at 7.4.
 - [ ] 2.4 CHARACTERIZE: Rewrite `a_change_with_no_tasks_still_ends_its_row_in_the_same_column`
   (`:885`) to nine widths with a no-`█`/`░` clause, and write the new
   `below_the_full_form_band_the_header_is_byte_identical` from 0.2's captured literals. Neither
@@ -250,7 +258,8 @@ header, measured. Only 4.3's new test is RED for free here.
   `header_row` expectations at `:5208` and `:6750` are computed by calling the function and are
   invariant to this change, and `the_detail_header_is_bold_and_uncoloured_at_both_mandated_widths`
   (`:6729`) passes unchanged, measured.
-- [ ] 4.5 Run `cargo test --lib ui::view` and `cargo test --lib ui::detail` — no regressions.
+- [ ] 4.5 Run `cargo test --lib ui::view` and `cargo test --lib ui::detail` — no regressions;
+  `ui::view` is 132 tests at HEAD plus the one new.
 
 ## 5. Change Review
 <!-- kind: operational -->

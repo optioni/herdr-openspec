@@ -160,8 +160,11 @@ rather than documenting it, so this requirement needs no qualifying clause.
 #### Scenario: The completeness property holds at the saturation boundary
 
 - **WHEN** `gauge_of` is called with `Progress { completed: usize::MAX, total: usize::MAX }`
-  at `g` of 12, 48, and 68 — the detail header's budget and this bar's two mandated gauges
+  at `g` of 12, 48, and 68 — the detail header's budget and the gauges `progress_bar` produces
+  at the mandated interior widths `78` and `58`, which the scenario reaches by calling
+  `progress_bar` at both as well, so the test names them and needs no `TASKWIDTHS` exemption
 - **THEN** each result is exactly `g` characters and holds no `░` at all
+- **AND** `progress_bar` at `78` and at `58` for the same `Progress` likewise holds no `░`
 - **AND** each held exactly one `█` and `g - 1` `░` under the previous arithmetic, so this
   scenario is the one that fails against the shipped implementation
 - **AND** `gauge_of(&Progress { completed: 0, total: usize::MAX }, 12)` holds no `█` at all,
@@ -253,8 +256,13 @@ rendering moves.
 - **WHEN** `gauge_of` is called with `g == 12` for each of
   `Progress { completed: 11, total: 12 }`, `{ completed: 12, total: 12 }`,
   `{ completed: 0, total: 12 }`, `{ completed: 99, total: 100 }`, and
-  `{ completed: 100, total: 100 }`
+  `{ completed: 100, total: 100 }`, and `progress_bar` is called with the same five at the
+  mandated widths `78` and `58` — the route `gauge_full_only_when_complete` already takes, so
+  the test names both interiors and needs no `TASKWIDTHS` exemption
 - **THEN** each result is exactly twelve characters long
+- **AND** each `progress_bar` result's gauge holds no `░` exactly when that
+  `Progress::is_complete()` is true, so the property is asserted at the header's budget and at
+  both of the bar's own gauges
 - **AND** a result holds no `░` exactly when that `Progress::is_complete()` is true, so the
   11-of-12 and 99-of-100 runs each hold at least one `░` and the two complete ones hold none
 - **AND** the 0-of-12 run holds no `█` at all

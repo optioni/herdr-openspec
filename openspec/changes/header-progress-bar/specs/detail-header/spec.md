@@ -159,6 +159,11 @@ already fixes, so the gauge takes the heading's own emphasis and `view-palette` 
 - **AND** this is the discriminating claim of the drop order: an implementation that placed
   the gauge anywhere but first in the order, or that reserved its 12 columns before deciding
   whether it fits, would change at least one of these 26 strings
+- **AND** at widths `78` and `58` the same call does **not** equal its pre-gauge string, which
+  is the other half of the claim: the scenario asserts where the change is invisible *and*
+  where it must be visible, so a no-op implementation fails it. Naming both mandated interiors
+  is also what `DETAILWIDTHS` requires of every test in `src/ui/detail.rs`, which has no
+  exemption list
 
 #### Scenario: An empty schema name is a cell of two characters, not an absent one
 
@@ -349,7 +354,9 @@ what the header must not cross is now the region's right gutter column.
 
 #### Scenario: The header is total over adversarial names at every width
 
-- **WHEN** `header_row` is called at every width from `0` through `130`, with schema `tdd`
+- **WHEN** `header_row` is called at every width from `0` through `130` — a range containing
+  the mandated `78` and `58`, which the scenario also names explicitly as swept values so no
+  `DETAILWIDTHS` exemption is needed — with schema `tdd`
   and each of `Progress { completed: 4, total: 9 }`, `{ completed: 0, total: 0 }`,
   `{ completed: 0, total: usize::MAX }`, and `{ completed: usize::MAX, total: usize::MAX }`,
   for each of: a 200-column CJK name; a family emoji joined by two zero-width joiners; `e`

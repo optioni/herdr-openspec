@@ -141,7 +141,14 @@ paths already produce and `merge` already reconciles.
 Four tiers, all inside `cargo test` (`make test`):
 
 - **Unit** — inline `#[cfg(test)]` in `src/ui/detail.rs` and `src/ui/tasks.rs`. Pure calls,
-  string assertions, sweeps over widths. Every test names both mandated interiors, 78 and 58.
+  string assertions, sweeps over widths. Every test names both mandated interiors, 78 and 58 —
+  not a convention but a gate: `DETAILWIDTHS` and `TASKWIDTHS` fail any `#[test]` in those two
+  files that does not contain both literals, with no exemption list, and they strip `///` and
+  `//!` lines so a doc comment cannot satisfy it. Four of this change's tests are naturally
+  expressed over other quantities — widths `0..=25`, or a gauge width `g` — and each is given a
+  real assertion at 78 and 58 rather than an exemption: the byte-identical sweep also asserts
+  the row *differs* at both mandated widths, and the gauge-property tests route through
+  `progress_bar` at both, which is the route `gauge_full_only_when_complete` already takes.
 - **View** — rendering a `Dashboard` into a `TestBackend` at **120x20 and 60x20**, asserting
   buffer rows, columns, and styles. Note the tier is not the file: two view-tier tests for
   this capability live in `src/ui/detail.rs`, not `src/ui/view.rs`.
