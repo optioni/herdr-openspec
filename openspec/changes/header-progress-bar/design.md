@@ -176,6 +176,14 @@ leave a duplicate pair, one permanently red. The `Verification` column below say
 | A CJK change name keeps the header inside its region at both mandated widths | rewrite `a_cjk_change_name_keeps_the_header_inside_its_region_at_both_mandated_widths` (`src/ui/detail.rs:2162`) — `(tdd)` is no longer immediately before the cell | Unit | real `columns`, `truncate_columns` | `cargo test --lib ui::detail::tests::a_cjk_change_name_keeps_the_header_inside_its_region` |
 | The header reaches the buffer without crossing the region border | rewrite `the_header_reaches_the_buffer_without_crossing_the_region_border` (**`src/ui/detail.rs:2191`**, not `view.rs`) — its `tail = " (tdd) [4/9]"` becomes the gauge-bearing tail | View | `TestBackend` | `cargo test --lib ui::detail::tests::the_header_reaches_the_buffer_without_crossing` |
 | The header is total over adversarial names at every width | rewrite `header_row_is_total_over_adversarial_names_at_every_width` (`src/ui/detail.rs:2244`) — cross the five names with four `Progress`, band clause scoped to `{4, 9}` | Unit | real `columns` | `cargo test --lib ui::detail::tests::header_row_is_total_over_adversarial_names` |
+| The full grammar at both mandated interior widths | **unchanged** — `bar_full_grammar` (`src/ui/tasks.rs:355`) and `full_grammar_is_byte_identical_to_pre_change_output` (`:1214`) stay green; carried into the MODIFIED block only because a delta replaces the whole requirement | Unit | real `gauge_of`, `progress_cell` | `cargo test --lib ui::tasks::tests::bar_full_grammar` |
+| The bar reaches the buffer at both mandated frame widths | **unchanged** — `progress_bar_in_the_buffer` (`src/ui/view.rs:6007`) stays green | View | `TestBackend` | `cargo test --lib ui::view::tests::progress_bar_in_the_buffer` |
+| The percentage truncates rather than rounds | **unchanged** — `percent_truncates` (`src/ui/tasks.rs:384`) stays green; its fixtures are 2/3, 1/3, 0/7, 7/7, none of which saturate | Unit | real `percent_of` | `cargo test --lib ui::tasks::tests::percent_truncates` |
+| The bar measures at most its width at every width | **unchanged** — `bar_measures_at_most_its_width_at_every_width` (`src/ui/tasks.rs:1171`) stays green; it reaches `usize::MAX` but asserts only that the bar fits its width, which is why it never caught the saturation defect | Unit | real `progress_bar` | `cargo test --lib ui::tasks::tests::bar_measures_at_most_its_width` |
+| A saturating `Progress` renders a full gauge and a full percentage | **new** in `src/ui/tasks.rs` — fails against the shipped saturating arithmetic (one `█`, `1%`) | Unit | real `gauge_of`, `percent_of` | `cargo test --lib ui::tasks::tests::a_saturating_progress_renders_a_full_gauge` |
+| A one-task-short change never renders a full gauge | **unchanged** — `gauge_full_only_when_complete` (`src/ui/tasks.rs:428`) stays green | Unit | real `gauge_of` | `cargo test --lib ui::tasks::tests::gauge_full_only_when_complete` |
+| The property holds across a swept range of gauge widths | **unchanged** — `gauge_property_sweep` (`src/ui/tasks.rs:462`) stays green; its six fixtures top out at 999/1000 | Unit | real `gauge_of` | `cargo test --lib ui::tasks::tests::gauge_property_sweep` |
+| The completeness property holds at the saturation boundary | **new** in `src/ui/tasks.rs` — the clause that fails before the widening | Unit | real `gauge_of` | `cargo test --lib ui::tasks::tests::the_completeness_property_holds_at_the_saturation_boundary` |
 | The bar's rendered output does not move | **new** in `src/ui/tasks.rs`, expectations built independently of `progress_bar` per `full_grammar_is_byte_identical_to_pre_change_output`'s stated discipline | Unit | real `gauge_of`, `progress_cell` | `cargo test --lib ui::tasks::tests::the_bar_s_rendered_output_does_not_move` |
 | The header's gauge and the bar's gauge agree about the same change | **new** in `src/ui/tasks.rs` | Unit | real `gauge_of`, real `header_row` | `cargo test --lib ui::tasks::tests::the_header_s_gauge_and_the_bar_s_gauge_agree` |
 | The gauge is full exactly when the change is complete, at the header's width too | **new** in `src/ui/tasks.rs`; its `usize::MAX` clause is the one that fails against the shipped implementation | Unit | real `gauge_of` | `cargo test --lib ui::tasks::tests::the_gauge_is_full_exactly_when_the_change_is_complete` |
@@ -233,6 +241,23 @@ twelve characters itself in three lines. It must not, for the same reason it alr
 drift, and this fact — how full a change is — is the one the change exists to show in two
 places at once. Promotion costs one visibility keyword.
 
+**Decision 11 — the saturation defect is repaired by widening to `u128`, not by a
+completeness short-circuit.** `gauge_of` and `percent_of` both compute
+`x.saturating_mul(k) / total` in `u64`. At `Progress { completed: usize::MAX, total: usize::MAX }`
+the multiply saturates to `u64::MAX` and `u64::MAX / u64::MAX == 1`, so a complete change
+renders a one-cell gauge beside `1%` — at the header's 12 columns and at the bar's own 68- and
+48-column gauges. Saturation produces the wrong *quotient* here, not merely a clamped
+magnitude, which is why the existing "so no `Progress` value can overflow it" clause did not
+protect the property. `usize::MAX * 100` and `usize::MAX * g` both fit in `u128` for every
+`u16` `g`, so widening removes the saturation entirely. *Alternative rejected:* short-circuiting
+`gauge_of` on `is_complete()`. It repairs the gauge but leaves `percent_of` reading `1%` beside
+a now-full gauge — a bar that contradicts itself at the same input — and it contradicts the
+live formula clause `filled = g * completed / total` rather than making it true, so it would
+need a MODIFIED block saying the formula no longer holds. The widening needs one saying how the
+product is computed, and every ordinary value is provably unchanged (4/9 at g=68 → 30 either
+way; 3/10 at g=12 → 3; 4/42 at g=12 → 1). *Alternative rejected:* qualifying the property with
+a saturation regime, which weakens shipped text to accommodate a defect.
+
 **Decision 6 — `gauge_of` becomes total.** It currently divides by `total` with no guard,
 safe only because its one caller returns before reaching it at `total == 0`. A `pub(crate)`
 function is reachable from a call site it does not control, so it gains a guard returning the
@@ -289,14 +314,20 @@ is confined to the grammar.
   and `:6750` both assert the buffer equals `header_row(…)`, the function under test. Copying
   that shape for the three new view tests would produce three more that cannot fail on the
   gauge, so the matrix requires literal glyph counts and literal tails instead.
-- **A `Progress` at the saturation boundary renders a gauge that contradicts
-  `is_complete()`** → Repaired rather than documented: `gauge_of` short-circuits on
-  `is_complete()`. This is a defect in already-shipped behaviour, reached at `g` of 12, 48 and
-  68, that no existing test caught because the one `usize::MAX` sweep asserts only that the
-  bar fits its width.
+- **A `Progress` at the saturation boundary renders a gauge and a percentage that contradict
+  `is_complete()`** → Repaired at the root rather than documented, per Decision 11. This is a
+  defect in already-shipped behaviour, reached at `g` of 12, 48 and 68, that no existing test
+  caught because the one `usize::MAX` sweep asserts only that the bar fits its width.
 - **A `.chars()`-based width slipping into the new arithmetic would be silently correct on
-  ASCII fixtures and wrong elsewhere** → `COLWIDTH` sweeps `src/ui/detail.rs`; the CJK
-  scenarios assert `chars().count() < columns()`, which a char-counting implementation fails.
+  ASCII fixtures and wrong elsewhere** → The guards are `COLWIDTH`, which sweeps
+  `src/ui/detail.rs`, and the CJK scenarios' `layout::columns(&got) == 78` / `== 58`
+  assertions. Not their `chars().count() < columns()` clause, which does **not**
+  discriminate: for the CJK fixture a correct implementation returns 68 chars against 78
+  columns and a char-counting one returns 78 against 88, and both satisfy the strict
+  inequality. That clause is evidence the wide name survived truncation, nothing more —
+  `openspec/specs/tasks-progress-bar/spec.md` already calls the `columns`-versus-`chars`
+  comparison "a tautology" for an all-width-1 fixture, and the 12-column gauge adds equally
+  to both sides, so it neither strengthens nor weakens the scenario.
 - **Coverage could drift below the 80% line floor or the production-slice floor** → The new
   code is a handful of branches, every one of which a listed scenario enters. `make coverage`
   is in `make check`. The floor is never lowered.

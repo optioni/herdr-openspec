@@ -87,29 +87,33 @@ Everything here records a value that stops existing once group 2 lands. It must 
 ## 1. The shared gauge run
 <!-- kind: behavior -->
 
-- [ ] 1.1 RED: In `src/ui/tasks.rs`, write `the_gauge_is_full_exactly_when_the_change_is_complete`
-  and `the_promoted_function_is_total_at_both_guard_values`. The first must include the
-  `Progress { completed: usize::MAX, total: usize::MAX }` clause at `g` of 12, 48 and 68 — that
-  clause is what fails against the shipped implementation, since the other values already pass.
-  Confirm with `redfail` on both: each must report `FAILED`, not `ABSENT`.
+- [ ] 1.1 RED: In `src/ui/tasks.rs`, write `the_gauge_is_full_exactly_when_the_change_is_complete`,
+  `the_promoted_function_is_total_at_both_guard_values`, and the two saturation scenarios —
+  `the_completeness_property_holds_at_the_saturation_boundary` and
+  `a_saturating_progress_renders_a_full_gauge_and_a_full_percentage`. Each must carry the
+  `Progress { completed: usize::MAX, total: usize::MAX }` clause at `g` of 12, 48 and 68; that
+  clause is what fails against the shipped implementation, since every other value already
+  passes. Confirm with `redfail`: each must report `FAILED`, not `ABSENT`.
 - [ ] 1.2 CHARACTERIZE: Write `the_bar_s_rendered_output_does_not_move` — `progress_bar` over
   widths 0..=130 for 5 `Progress` values, with the 78- and 58-column expectations for 4-of-9
   built independently of `progress_bar` rather than by calling it, per
   `full_grammar_is_byte_identical_to_pre_change_output`'s stated discipline at
   `src/ui/tasks.rs:1211`. Green at HEAD and must stay green through 1.4, except the one
   saturating input 1.3 deliberately moves.
-- [ ] 1.3 GREEN: Short-circuit `gauge_of` to return `g` filled cells when
-  `progress.is_complete()`, before the quotient. `completed.saturating_mul(g) / total` yields 1
-  at `usize::MAX`/`usize::MAX`, contradicting this capability's own shipped requirement at the
-  bar's own mandated gauges. Per design.md → Risks.
+- [ ] 1.3 GREEN: Widen `gauge_of`'s and `percent_of`'s arithmetic to `u128`, dropping both
+  `saturating_mul` calls. Per design.md → Decision 11: saturation yields the wrong quotient
+  (`u64::MAX / u64::MAX == 1`), so a complete change renders one filled cell beside `1%`.
+  Verify the ordinary values are unmoved — 4/9 at `g` 68 and 48 give 30 and 21, 3/10 at 12
+  gives 3 — which 1.2 also pins.
 - [ ] 1.4 GREEN: Raise `gauge_of` to `pub(crate)` and add the totality guard returning
   `String::new()` at `g == 0 || progress.total == 0`, per design.md → Decisions 5 and 6.
-- [ ] 1.5 REFACTOR: Update `gauge_of`'s doc comment — it states `total == 0` is never passed
-  and hedges the fill property with "given `completed <= total`", both of which 1.3 and 1.4
-  make stale.
-- [ ] 1.6 CHECK: Contract gate. `gauge_of` becomes reachable from a second module; confirm
-  `cargo test --lib ui::tasks` is green and that the only `progress_bar` output that moved is
-  the saturating one 1.2 excepts.
+- [ ] 1.5 REFACTOR: Update `gauge_of`'s and `percent_of`'s doc comments — they state
+  `total == 0` is never passed, name a saturating multiply, and hedge the fill property with
+  "given `completed <= total`", all of which 1.3 and 1.4 make stale.
+- [ ] 1.6 CHECK: Contract gate. `gauge_of` becomes reachable from a second module, and two
+  live requirements of `tasks-progress-bar` are MODIFIED; confirm `cargo test --lib ui::tasks`
+  is green and that the only `progress_bar` output that moved is the saturating one 1.2
+  excepts.
 - [ ] 1.7 Run `cargo test --lib ui::tasks` — no regressions.
 
 ## 2. The header's gauge cell
