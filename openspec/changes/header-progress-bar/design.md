@@ -83,11 +83,17 @@ width, cell presence, or band membership — `the_cells_are_dropped_whole…`'s 
 among them — stay green against a gauge-bearing row, so their scenarios' new gauge claims have
 to be *added*, not merely re-expected.
 
-`src/ui/view.rs`'s two test expectations are **not** affected, and this is worth stating
+`src/ui/view.rs`'s two test expectations are **not** broken, and this is worth stating
 because it is counter-intuitive: both build their expectation by calling the function under
 test — `let expected = crate::ui::detail::header_row("add-token-refresh", "tdd", &progress, w)`
 at `:5208`, and the same call inline at `:6750`. They discriminate the header's placement,
-span, and style, never its grammar, so they stay green with or without a gauge. The corollary
+span, and style, never its grammar, so they stay green with or without a gauge. **Not broken is
+not the same as not edited**: `:5208` sits inside
+`the_header_names_the_selected_change_at_both_mandated_widths`, which the Test Strategy table
+below schedules for rewrite precisely *because* staying green is the defect — its derivation is
+replaced by a literal tail so the test can fail on the gauge at all. `:6750` sits inside
+`the_detail_header_is_bold_and_uncoloured_at_both_mandated_widths`, which asserts style rather
+than grammar and is genuinely left alone. The corollary
 binds this change's new view tests: they SHALL assert literal glyph counts and literal tails
 (`five █`, ending `(tdd) █████░░░░░░░ [4/9]`) and never `assert_eq!(buffer, header_row(…))`,
 which would reproduce exactly the tautology already sitting at those two sites.
@@ -177,7 +183,10 @@ is why tasks.md group 2 is large; it is one unit of work, not several.
 
 **Twelve of the nineteen scenarios already have passing tests at HEAD.** The repository binds
 a scenario to a test by snake-casing the scenario header and carrying a
-`/// \`<capability>\` :: "<scenario header>"` doc comment. For those twelve the work is to
+`/// \`<capability>\` :: "<scenario header>"` doc comment. At HEAD only **four** of the twelve actually
+carried that doc comment; the other nine were bound by snake-cased name alone, and this change
+adds the missing comment to each as part of its rewrite. The rewrite-in-place decision does not
+depend on which: a second test per scenario would collide by name with one that already exists. For those twelve the work is to
 **rewrite the existing test in place**, keeping its name and its doc comment, so the RED
 evidence is honest: an expectation edited to the post-gauge value genuinely fails against the
 unchanged `header_row`, reporting `1 failed`. Inventing a second test per scenario would

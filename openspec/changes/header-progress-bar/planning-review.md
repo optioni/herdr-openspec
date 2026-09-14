@@ -68,6 +68,24 @@ Slice D's closing suggestions, all verified and applied:
 | SUGGESTION | tasks.md | Task 2.1 named the 78-column empty-schema name field but not the 58-column one. | Both stated, with the arithmetic. | tasks.md 2.1 |
 | SUGGESTION | tasks.md | `gate_controls_catch_their_plants` digests the whole tree before and after, so a concurrent write fails it spuriously — which is what slice D hit with four review agents live against this working tree. | Noted at the verification task so the implementer does not chase it as a defect. | tasks.md 7.5 |
 
+## Implementation-Time Corrections
+
+Three claims in the reviewed package turned out to be wrong once the tests were written. None
+changes the scope, the contracts, the drop order, the budget, or any spec scenario; all three are
+corrections to what the package asserted about the **existing test baseline**, and each is
+recorded at the task that hit it as well as here.
+
+| Severity | Source Artifact | Problem | Repair | Updated Location |
+|---|---|---|---|---|
+| WARNING | tasks.md, design.md | "Twelve of the nineteen scenarios already have passing tests … carrying a ``/// `<capability>` :: "<scenario>"`` doc comment" overstates the baseline. At HEAD only **four** tests carried the doc comment (three in `src/ui/detail.rs`, one in `src/ui/view.rs`); the other nine were bound by snake-cased name alone. The rewrite-in-place decision is unaffected — a second test per scenario would collide by name either way — but the review's stated reason for it was half true. | Both artifacts corrected. Group 2 added the missing doc comment to each of the nine as part of its rewrite, so all twelve are now bound by name *and* by comment. | tasks.md preamble; design.md → Test Strategy |
+| WARNING | tasks.md 2.5 | `below_the_full_form_band_the_header_is_byte_identical` was labelled CHARACTERIZE, "cannot honestly be RED". Its second clause — asserting the row **differs** from its pre-gauge string at 78 and 58, which review itself added so the test would discriminate and satisfy `DETAILWIDTHS` — necessarily fails before 2.11, because until then `header_row` *is* the pre-gauge grammar. Measured: `assertion left != right failed: width 78`. | Task relabelled: its first clause characterizes, its second is RED, and it was recorded as RED. The "cannot be RED" framing predates the clause review later added and was never reconciled with it. | tasks.md 2.5 |
+| WARNING | tasks.md 2.13, design.md | 2.13's contract gate asked to confirm `src/ui/view.rs:5208` "needed no edit", contradicting 2.7, which rewrites the very test that line sits inside. design.md's Contracts paragraph reads the same way. The two are not in tension on the facts — the test is invariant to the gauge — but invariance is *why* it is rewritten, not why it is exempt. | 2.13's list reduced to `:6750` and `:6729`, which are genuinely unedited; design.md now distinguishes "not broken" from "not edited". The contract gate proper is `src/ui/view.rs:150`, the production call site, confirmed untouched in the diff. | tasks.md 2.13; design.md → Contracts |
+
+A fourth observation needed no repair: the group 2 implementer saw `src/ui/detail.rs` briefly
+revert two lines to an unformatted state between two `fmt` checks and attributed it to a
+concurrent write in the shared working tree. No second agent was editing those files, the
+condition did not recur, and the committed tree is `cargo fmt --all -- --check` clean.
+
 ## No Remaining Implementation-Blocking Gaps
 
 None. The package validates `--strict`, every one of the 27 scenarios has a verification-matrix

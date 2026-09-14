@@ -8,7 +8,15 @@ and 145 more across the integration targets; `make gates` exit 0.
 **Twelve of the nineteen scenarios already have passing tests.** This is the fact that shapes
 the plan. The repository binds a scenario to a test by snake-casing the scenario header and
 carrying a ``/// `<capability>` :: "<scenario header>"`` doc comment, so those twelve tasks are
-**rewrites in place** — keep the name, keep the doc comment, change the expectation. Writing a
+**rewrites in place** — keep the name, keep the doc comment, change the expectation.
+
+**Corrected while implementing:** the binding *mechanism* is as described, but at HEAD only
+**four** of the twelve tests actually carried the doc comment — three in `src/ui/detail.rs` (the
+CJK, buffer-border and adversarial-names scenarios) and one in `src/ui/view.rs` (the
+bold-and-uncoloured one). The other nine were bound by snake-cased **name** alone. Rewriting in
+place is still right, and for the stronger reason: a second test per scenario would collide by
+name with one that already exists. Group 2 added the missing doc comment to each of the nine as
+part of its rewrite, so all twelve are bound both ways now. Writing a
 new test per scenario instead would leave a duplicate pair, one permanently red, and five
 existing tests unowned. design.md → Test Strategy carries the full scenario-to-test table; the
 tasks below name the file and line for each.
@@ -177,76 +185,94 @@ new gauge claim is *added*; 2.5 and the second half of 2.8 cannot honestly fail 
 Tasks 2.1–2.9 rewrite existing tests in place, each keeping its name and its
 ``/// `<capability>` :: "…"`` doc comment; only the expectation changes.
 
-- [ ] 2.1 RED: Rewrite `the_full_header_grammar_at_both_mandated_interior_widths`
+- [x] 2.1 RED: Rewrite `the_full_header_grammar_at_both_mandated_interior_widths`
   (`src/ui/detail.rs:868`) — name field 65/45 → 52/32, expected tail gains a 12-column gauge
   holding one `█` — and `an_empty_schema_name_is_a_cell_of_two_characters_not_an_absent_one`
   (`:950`), whose `contains("() [1/2]")` the gauge splits; assert the full expected row with a
   56-column name field at 78 and 36 at 58 (`58 - 3 - 2 - 12 - 5`) and six `█`. Both hold literal
   full-row expectations, so both report `FAILED` under `redfail` on the edit alone.
-- [ ] 2.2 RED: Rewrite `the_header_reaches_the_buffer_without_crossing_the_region_border`
+- [x] 2.2 RED: Rewrite `the_header_reaches_the_buffer_without_crossing_the_region_border`
   (`src/ui/detail.rs:2191`), whose hard-coded `tail = " (tdd) [4/9]"` is sliced at
   `first_col + interior - tail.len()`; it becomes the gauge-bearing tail, keeping the
   column-indexed slicing. This is the third measured red and it belongs here, not downstream: it
   is a `src/ui/detail.rs` test that 2.11 breaks.
-- [ ] 2.3 RED-by-addition: Rewrite `the_cells_are_dropped_whole_in_order_as_the_row_narrows`
+- [x] 2.3 RED-by-addition: Rewrite `the_cells_are_dropped_whole_in_order_as_the_row_narrows`
   (`:919`) — `w >= 13` becomes `w >= 26`, widths 26 and 25 join the sample — and
   `a_long_name_is_truncated_with_an_ellipsis_never_overflowing_the_row` (`:898`). Both pass
   unchanged against a gauge-bearing `header_row`, so each MUST also gain the delta's new claims:
   a 12-column gauge present at 78/58/26, "wherever it contains `█` or `░` it contains exactly
   twelve", and for the long name that the gauge is present and intact.
-- [ ] 2.4 RED-by-addition: Rewrite
+- [x] 2.4 RED-by-addition: Rewrite
   `a_cjk_change_name_keeps_the_header_inside_its_region_at_both_mandated_widths` (`:2162`),
   where `(tdd)` is no longer immediately before the progress cell, and
   `header_row_is_total_over_adversarial_names_at_every_width` (`:2244`), crossing the five names
   with four `Progress` values — band clause scoped to `{4, 9}`, since a 43-column progress cell
   moves every boundary.
-- [ ] 2.5 CHARACTERIZE: Rewrite `a_change_with_no_tasks_still_ends_its_row_in_the_same_column`
+- [x] 2.5 CHARACTERIZE: Rewrite `a_change_with_no_tasks_still_ends_its_row_in_the_same_column`
   (`:885`) to nine widths with a no-`█`/`░` clause, and write the new
   `below_the_full_form_band_the_header_is_byte_identical` from 0.2's captured literals — which
   must also assert the row **differs** at 78 and 58, both for `DETAILWIDTHS` and because that is
-  what makes it discriminating. Neither can honestly be RED: Decision 7 fixes the `total == 0`
-  row as unchanged, and the second asserts byte-identity below width 26. Both are green at HEAD
-  and MUST stay green through 2.11 — they fail against an implementation that reserves the
+  what makes it discriminating. `a_change_with_no_tasks_still_ends_its_row_in_the_same_column`
+  cannot honestly be RED: Decision 7 fixes the `total == 0` row as unchanged, so it is green at
+  HEAD and MUST stay green through 2.11 — it fails against an implementation that reserves the
   gauge's columns before deciding whether it fits.
-- [ ] 2.6 RED: Write the new `a_complete_change_renders_a_full_gauge` in `src/ui/detail.rs` —
+
+  **Corrected while implementing:** `below_the_full_form_band_the_header_is_byte_identical` was
+  labelled CHARACTERIZE here too, and it is **not**. Its first clause — the 26 literals at widths
+  0..=25 — is a characterization that holds either side of 2.11. Its second clause, added during
+  planning review so the test would be discriminating and satisfy `DETAILWIDTHS`, asserts the row
+  **differs** from its pre-gauge string at 78 and 58; before 2.11 lands `header_row` *is* the
+  pre-gauge grammar, so the two sides are identical and the `assert_ne!` fails. Measured:
+  `assertion left != right failed: width 78`. It is genuinely RED, and was recorded as RED. The
+  stale label is the earlier "cannot be RED" framing not reconciled with the clause that review
+  later added.
+- [x] 2.6 RED: Write the new `a_complete_change_renders_a_full_gauge` in `src/ui/detail.rs` —
   7-of-7 gives twelve `█` and no `░`, 0-of-7 twelve `░` and no `█`, 6-of-7 at least one `░`.
-- [ ] 2.7 RED-by-addition: Rewrite `the_header_names_the_selected_change_at_both_mandated_widths`
+- [x] 2.7 RED-by-addition: Rewrite `the_header_names_the_selected_change_at_both_mandated_widths`
   (`src/ui/view.rs:5191`) and `moving_the_selection_moves_the_header` (`:5230`) to assert the
   literal tail `(tdd) █████░░░░░░░ [4/9]` and five `█`, with BOLD at `Route::Detail` and DIM at
   `Route::List` compared against `palette::style(role)`. Both pass unchanged today because they
   derive their expectation by calling `header_row`; replacing that derivation with the literal is
   what makes them capable of failing at all.
-- [ ] 2.8 RED-by-addition: Rewrite
+- [x] 2.8 RED-by-addition: Rewrite
   `an_archived_change_s_header_carries_its_stripped_name_and_its_own_schema` (`:5257`) for name
   fields 45/25 and twelve `█`; then CHARACTERIZE
   `an_empty_visible_list_leaves_the_whole_detail_interior_blank` (`:5279`) by adding the
   no-`█`/`░`-anywhere clause — that one cannot be RED, since a blank region must stay blank.
-- [ ] 2.9 RED: Write the new `the_gauge_is_present_on_an_artifact_tab` in `src/ui/view.rs` —
+- [x] 2.9 RED: Write the new `the_gauge_is_present_on_an_artifact_tab` in `src/ui/view.rs` —
   with the `proposal` tab selected the heading carries the gauge and no `%` appears anywhere in
   the frame; switching to the tracked-tasks tab leaves the heading's gauge byte-identical. This
   is the scenario the change exists for, and the one test here that is RED for free.
-- [ ] 2.10 CHECK: Every `#[test]` written or rewritten in `src/ui/detail.rs` and
+- [x] 2.10 CHECK: Every `#[test]` written or rewritten in `src/ui/detail.rs` and
   `src/ui/tasks.rs` must contain the bare literals `78` and `58`. `DETAILWIDTHS` and
   `TASKWIDTHS` enforce this over **every** test in those two files with no exemption list, and
   strip only `///` and `//!` lines — so a doc comment cannot satisfy it, and an inline `//`
   naming them would be gaming a gate whose own header calls an exemption list "how a width check
   rots into a rubber stamp". Run `/bin/sh scripts/gates/detailwidths.sh` and
   `/bin/sh scripts/gates/taskwidths.sh` now, not at 6.4.
-- [ ] 2.11 GREEN: Add `const HEADER_GAUGE_COLUMNS: u16 = 12;` to `src/ui/detail.rs` and extend
+- [x] 2.11 GREEN: Add `const HEADER_GAUGE_COLUMNS: u16 = 12;` to `src/ui/detail.rs` and extend
   `header_row` with the gauge cell: branch on `progress.total == 0` before computing the budget,
   name field `width - 3 - schema - 12 - progress`, gauge dropped first. Per design.md →
   Decisions 2, 3, 4 and 7.
-- [ ] 2.12 GREEN: Write `the_header_s_gauge_and_the_bar_s_gauge_agree` in `src/ui/tasks.rs`'s
+- [x] 2.12 GREEN: Write `the_header_s_gauge_and_the_bar_s_gauge_agree` in `src/ui/tasks.rs`'s
   test module — `gauge_of(p, 12)` appears space-bounded inside `header_row(…)` at 78 and 58 for
   4-of-9, 7-of-7 and 0-of-7. It lands here because it needs both sides to exist.
-- [ ] 2.13 CHECK: Contract gate. `header_row`'s signature must be unchanged and
+- [x] 2.13 CHECK: Contract gate. `header_row`'s signature must be unchanged and
   `src/ui/view.rs:150` untouched in the diff — that is Decision 10, and an edit there falsifies
-  it. Confirm too that `:5208`, `:6750` and
+  it. Confirm too that `:6750` and
   `the_detail_header_is_bold_and_uncoloured_at_both_mandated_widths` (`:6729`) needed no edit:
-  all three derive their expectation from `header_row` and are invariant to this change.
-- [ ] 2.14 REFACTOR: Fold the gauge's width arithmetic into the existing `i64` budget computation
+  both derive their expectation from `header_row` and are invariant to this change.
+
+  **Corrected while implementing:** this task also listed `:5208`, which contradicts 2.7. That
+  line is the `let expected = header_row(…)` derivation *inside*
+  `the_header_names_the_selected_change_at_both_mandated_widths`, and 2.7 exists precisely to
+  replace it with a literal — "replacing that derivation with the literal is what makes them
+  capable of failing at all". Being invariant to the change is what makes that test worth
+  rewriting, not what exempts it. The contract gate is `src/ui/view.rs:150`, the production call
+  site, which is untouched; `:6750` and `:6729` are genuinely unedited.
+- [x] 2.14 REFACTOR: Fold the gauge's width arithmetic into the existing `i64` budget computation
   rather than a parallel one, or state that none was needed.
-- [ ] 2.15 Run `cargo test --lib ui::detail`, `ui::tasks` and `ui::view` — **all green**, which
+- [x] 2.15 Run `cargo test --lib ui::detail`, `ui::tasks` and `ui::view` — **all green**, which
   is this group's gate. `ui::view` is 132 tests at HEAD plus the one new.
   `cargo test --test degraded_coverage` may or may not fail here depending on how many lines
   2.11 inserted; group 3 owns that either way and it is not a defect in this group's work.
