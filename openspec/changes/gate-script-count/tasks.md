@@ -41,41 +41,70 @@ directions of that control are run below, per design.md → Test Boundaries.
 ## 2. Correct the figures, and attribute the historical ones
 <!-- kind: operational -->
 
-- [ ] 2.1 CHECK: Confirm the three current figures and the one historical figure are still
+- [x] 2.1 CHECK: Confirm the three current figures and the one historical figure are still
   where this change expects them, and that no concurrent change has moved them.
   **Run at HEAD `9c37085`:** `grep -nE 'twenty-eight|twenty-six'
   openspec/specs/quality-gates/spec.md` → `:49`, `:71`, `:127`, `:139`, `:140`, `:187`,
   `:210`, `:755`. `ls scripts/gates/ | wc -l` → `31`.
-- [ ] 2.2 CHANGE: Edit the **delta** at `openspec/changes/gate-script-count/specs/quality-gates/
+- [x] 2.2 CHANGE: Edit the **delta** at `openspec/changes/gate-script-count/specs/quality-gates/
   spec.md`, never `openspec/specs/quality-gates/spec.md` — the live spec is written only by
   `openspec archive`, and editing it during apply would make the two disagree in the opposite
   direction. Line references below are into the live spec, which is where the figures are read
   from: `:140`, `:187`, `:210` from twenty-eight to thirty-one, `:139`/`:187`'s non-`cargo`
   count from twenty-six to twenty-nine, and the requirement's new paragraph stating that the
   count is asserted rather than written down.
-- [ ] 2.3 CHECK: Verify the non-`cargo` figure by measurement, not arithmetic. `grep -ln cargo
+  **Already landed:** the planning-review repair (commit `db5ebc0`) wrote these into the delta
+  when it fixed the enumeration CRITICAL, since the delta *is* a planning artifact. Verified at
+  HEAD `9d40d19` by diffing each MODIFIED requirement block against the live spec: the only
+  differences are exactly the edits tasks 2.2, 2.4, 2.5 and 2.6 describe, and nothing else.
+- [x] 2.3 CHECK: Verify the non-`cargo` figure by measurement, not arithmetic. `grep -ln cargo
   scripts/gates/*` returns five files, of which `colwidth.sh`, `noio-view.sh` and `wired.sh`
   name `cargo` only inside comments; `deps.sh` and `build-graph.sh` are the two that invoke
   it, so the figure is 29 of 31. **Run at HEAD `9c37085`:** five hits, three comment-only,
   confirmed by reading each line.
-- [ ] 2.4 CHANGE: Correct `NODEFAULT-UI`'s subject-set count from five to **seven** at both
+  **Re-run at HEAD `9d40d19`:** `grep -ln cargo scripts/gates/*` → `build-graph.sh`,
+  `colwidth.sh`, `deps.sh`, `noio-view.sh`, `wired.sh`; the hits in `colwidth.sh:10`,
+  `wired.sh:209` and `noio-view.sh:31` are each on a `#`-prefixed comment line. 29 of 31
+  confirmed by measurement.
+- [x] 2.4 CHANGE: Correct `NODEFAULT-UI`'s subject-set count from five to **seven** at both
   sites the delta carries — the multi-subject sentence and the `SCAN_MIN`-inventory bullet.
   **Run at HEAD `9c37085`:** `grep -c SCAN_MIN Makefile` → `7`; `grep -rn five tests/*.rs |
   grep -i 'nodefault\|scan_min'` → no output, so nothing binds it; `grep -n seventh
   tests/gate-controls.toml` → `:425`, which already says seven. In scope per proposal → Why: a
   MODIFIED block re-lands its content as current at archive time.
-- [ ] 2.5 CHANGE: Re-count the extracted-gate enumeration against the directory rather than by
+  **Already landed in the delta** (see 2.2). Re-confirmed at HEAD `9d40d19`: all three
+  measurements identical, and the delta reads "seven type sets" and "seven `SCAN_MIN` values"
+  at both sites.
+- [x] 2.5 CHANGE: Re-count the extracted-gate enumeration against the directory rather than by
   arithmetic, and confirm `list + OPENSPEC-UNTOUCHED + deps.sh + build-graph.sh` equals the
   directory count. **Run at HEAD `9c37085`:** the enumeration omitted `COLWIDTH`, `PALETTE` and
   `HELPWIDTHS`, so it read twenty-five against a directory of twenty-eight; with them the chain
   is 28 + 1 = 29 and 29 + 2 = 31.
-- [ ] 2.6 CHANGE: Attribute the two unattributed historical figures — `:127`'s "left
+  **Already landed in the delta** (see 2.2). Re-verified at HEAD `9d40d19` mechanically, by
+  mapping every backtick-delimited gate name in the enumeration onto a file under
+  `scripts/gates/`: 28 names → 28 distinct files, none unmapped; the three files no name covers
+  are exactly `openspec-untouched.sh`, `deps.sh` and `build-graph.sh`; 28 + 1 = 29, 29 + 2 = 31
+  = `ls scripts/gates/ | wc -l`. The list is the measurement and the figure is derived from it,
+  per design.md → Decisions 2.
+- [x] 2.6 CHANGE: Attribute the two unattributed historical figures — `:127`'s "left
   twenty-eight outside" and `:755`'s "every one of the twenty-eight gate scripts", the latter
   naming `gate-integrity` (archived `2026-09-07`). `:49` and `:71` already name
   `degraded-states` and are left alone.
-- [ ] 2.7 VERIFY: `grep -n 'twenty-eight' openspec/specs/quality-gates/spec.md` — every
+  **Already landed in the delta** (see 2.2): `:12` of the delta carries "(the count at
+  `spec-purposes`' own base; see the historical-figure convention below)" and `:207` carries
+  "measured by `gate-integrity` (archived `2026-09-07`)".
+- [x] 2.7 VERIFY: `grep -n 'twenty-eight' openspec/specs/quality-gates/spec.md` — every
   surviving occurrence is either an attributed historical figure or part of the paragraph
   describing the drift itself. No unattributed current figure remains.
+  **Task clarification:** run against the **delta**, not the live spec. Task 2.2 forbids
+  editing `openspec/specs/quality-gates/spec.md` during apply, so the live file still carries
+  the uncorrected figures by design; the delta is what archive re-lands, and is therefore the
+  file this check has a subject in. **Run at HEAD `9d40d19`** over
+  `openspec/changes/gate-script-count/specs/quality-gates/spec.md` — six occurrences, each
+  accounted for: `:12` attributed (`spec-purposes`' base), `:20` a **current** figure that is
+  true (28 enumerated gates, verified in 2.5), `:94` and `:99` inside the paragraph describing
+  the drift, `:102` quoting `:12` to illustrate the convention, `:207` attributed
+  (`gate-integrity`). No unattributed stale figure remains.
 
 ## 3. Documentation
 <!-- kind: operational -->
