@@ -90,7 +90,7 @@ than inventing a name.
 
 Everything here records a value that stops existing once group 2 lands. It must run first.
 
-- [ ] 0.1 CHECK: Record the `covers` fingerprints, before any edit:
+- [x] 0.1 CHECK: Record the `covers` fingerprints, before any edit:
 
   ```sh
   grep -o 'src/[a-z_/]*\.rs:[0-9]*-[0-9]*' tests/degraded-coverage.toml | sort -u |
@@ -105,12 +105,12 @@ Everything here records a value that stops existing once group 2 lands. It must 
   `cargo test --test degraded_coverage` still reported `10 passed` — the suite does not see it.
   Reverting made the diff empty again (exit 0). The check fires, is silent when clean, and
   catches what the suite misses.
-- [ ] 0.2 CHECK: Capture the 26 pre-gauge header strings that
+- [x] 0.2 CHECK: Capture the 26 pre-gauge header strings that
   `below_the_full_form_band_the_header_is_byte_identical` will assert as literals — print
   `header_row("add-token-refresh", "tdd", &Progress { completed: 4, total: 9 }, w)` for every
   `w` in `0..=25` against HEAD's implementation and save the output. These are what makes that
   test "pre-gauge"; recomputing them after group 2 would make it a tautology.
-- [ ] 0.3 CHECK: Confirm `cargo test --all-features` is green and `make gates` exits 0, so any
+- [x] 0.3 CHECK: Confirm `cargo test --all-features` is green and `make gates` exits 0, so any
   later red is attributable to this change.
 
 ## 1. The shared gauge run
