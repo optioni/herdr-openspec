@@ -878,7 +878,7 @@ pub(crate) mod testutil {
             // stays blank).
             for buf in [&buf60, &buf120] {
                 assert_eq!(&row_text(buf, 0)[1..14], "no repository");
-                assert!(row_text(buf, buf.area.height - 1).starts_with("q quit"));
+                assert!(row_text(buf, buf.area.height - 1).starts_with("? help"));
             }
         }
 

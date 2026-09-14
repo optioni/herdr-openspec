@@ -3560,11 +3560,12 @@ esac
 
                 // `agent-launch`: the socket is reachable, so the two action hints are
                 // offered too — at 120 the count still fits after them; at 60 it no longer
-                // does and is dropped whole.
+                // does and is dropped whole, and `g focus` with it once `help-overlay`'s
+                // leading `? help` takes the full row to 77 columns.
                 let footer = if width == 120 {
-                    "q quit  Enter detail  Esc back  a/c/s launch  g focus  1 unattributed"
+                    "? help  q quit  Enter detail  Esc back  a/c/s launch  g focus  1 unattributed"
                 } else {
-                    "q quit  Enter detail  Esc back  a/c/s launch  g focus"
+                    "? help  q quit  Enter detail  Esc back  a/c/s launch"
                 };
                 let expected_footer = format!(
                     "{footer}{}",
@@ -3664,8 +3665,15 @@ esac
 
                 let footer_row = &buf[19];
                 assert!(
-                    footer_row.contains("a/c/s launch") && footer_row.contains("g focus"),
-                    "width {width}: the footer must carry both action hints: {footer_row:?}"
+                    footer_row.contains("a/c/s launch"),
+                    "width {width}: the footer must carry the launch hint: {footer_row:?}"
+                );
+                // `help-overlay`: `? help` takes the reachable footer to 61 columns, so
+                // `g focus` survives at 120 and is dropped whole at the narrow width.
+                assert_eq!(
+                    footer_row.contains("g focus"),
+                    width == 120,
+                    "width {width}: {footer_row:?}"
                 );
 
                 let after = snapshot(&root.join("openspec"));
@@ -4441,7 +4449,7 @@ esac
                 "the change list must still be drawn: {buf:?}"
             );
             assert!(
-                buf.last().is_some_and(|row| row.starts_with("q quit")),
+                buf.last().is_some_and(|row| row.starts_with("? help")),
                 "the footer must still be drawn: {buf:?}"
             );
         }

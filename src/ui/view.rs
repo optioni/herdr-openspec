@@ -18,7 +18,11 @@ use crate::ui::markdown::Face;
 use crate::ui::palette::{self, Role};
 
 /// The footer's key hints, in the order they are drawn and dropped from.
-const FOOTER_HINTS: [&str; 3] = ["q quit", "Enter detail", "Esc back"];
+///
+/// `help-overlay` places `? help` **first**, which is the only position that
+/// works: hints are dropped from the end, so the one key that reveals every
+/// other key must be the last hint standing rather than the first one lost.
+const FOOTER_HINTS: [&str; 4] = ["? help", "q quit", "Enter detail", "Esc back"];
 
 /// Draw `dashboard` into `frame`. A pure function of its two arguments.
 ///
@@ -459,7 +463,7 @@ fn repo_heading_name(dashboard: &Dashboard) -> String {
 ///   the footer;
 /// - not filtering, a non-empty query: `/` + query leads the hint list,
 ///   dropped last rather than first, with the count still last;
-/// - otherwise: `q quit`, `Enter detail`, and `Esc back`, then —
+/// - otherwise: `? help`, `q quit`, `Enter detail`, and `Esc back`, then —
 ///   `agent-launch`'s addition — `a/c/s launch` and `g focus`, each its own
 ///   hint, when `Dashboard::agents.reachable`, then — `agent-attribution`'s
 ///   addition — `<n> unattributed` when `Dashboard::attribution().unattributed`
@@ -1207,11 +1211,11 @@ mod tests {
 
             let footer = row_text(&buf, 19);
             assert!(
-                footer.starts_with("q quit  Enter detail  Esc back"),
+                footer.starts_with("? help  q quit  Enter detail  Esc back"),
                 "width {width}"
             );
             assert!(
-                footer.chars().skip(30).all(|c| c == ' '),
+                footer.chars().skip(38).all(|c| c == ' '),
                 "width {width}: footer remainder must be all spaces: {footer:?}"
             );
 
@@ -1257,8 +1261,9 @@ mod tests {
                 "demo-repo",
                 "width {width}"
             );
-            // No `q quit` appears anywhere: the footer was not drawn into the
-            // body's single row.
+            // Neither `? help` nor `q quit` appears anywhere: the footer was not
+            // drawn into the body's single row.
+            assert!(!buffer_contains(&buf, "? help"), "width {width}");
             assert!(!buffer_contains(&buf, "q quit"), "width {width}");
         }
     }
@@ -1273,7 +1278,7 @@ mod tests {
                 "demo-repo",
                 "width {width}"
             );
-            assert_eq!(cols(&row_text(&buf, 1), 0..6), "q quit", "width {width}");
+            assert_eq!(cols(&row_text(&buf, 1), 0..6), "? help", "width {width}");
             // No list row is drawn anywhere: the body received one row and the
             // heading row consumed it.
             assert!(!buffer_contains(&buf, "No changes yet"), "width {width}");
@@ -1290,7 +1295,7 @@ mod tests {
         // wide, so the heading row is truncated to nothing rather than drawn over
         // the gutter — row 0 is a single space.
         assert_eq!(row_text(&buf, 0), " ");
-        // `q quit` needs six columns, so the first hint is dropped whole rather
+        // `? help` needs six columns, so the first hint is dropped whole rather
         // than truncated — row 19 is a single space too.
         assert_eq!(row_text(&buf, 19), " ");
         // Extended: a 2x20 render, so a zero-column list-region interior is
@@ -1308,7 +1313,7 @@ mod tests {
                 "demo-repo",
                 "width {width}"
             );
-            assert_eq!(cols(&row_text(&buf, 19), 0..6), "q quit", "width {width}");
+            assert_eq!(cols(&row_text(&buf, 19), 0..6), "? help", "width {width}");
         }
 
         // `agent-launch`: the same holds with `agents.reachable` `true`, which adds no hint
@@ -1326,22 +1331,25 @@ mod tests {
         // `agent-launch`: pinned unreachable, so the action hints never enter this test's
         // own drop sequence.
         assert!(!d.agents.reachable);
-        let buf = render_at(18, 20, &d);
-        assert_eq!(row_text(&buf, 19), format!("q quit{}", " ".repeat(12)));
+        let buf = render_at(27, 20, &d);
+        assert_eq!(
+            row_text(&buf, 19),
+            format!("? help  q quit{}", " ".repeat(13))
+        );
 
-        let buf = render_at(20, 20, &d);
-        assert_eq!(row_text(&buf, 19), "q quit  Enter detail");
+        let buf = render_at(28, 20, &d);
+        assert_eq!(row_text(&buf, 19), "? help  q quit  Enter detail");
 
         let buf = render_at(60, 20, &d);
         assert_eq!(
             row_text(&buf, 19),
-            format!("q quit  Enter detail  Esc back{}", " ".repeat(30))
+            format!("? help  q quit  Enter detail  Esc back{}", " ".repeat(22))
         );
 
         let buf = render_at(120, 20, &d);
         assert_eq!(
             row_text(&buf, 19),
-            format!("q quit  Enter detail  Esc back{}", " ".repeat(90))
+            format!("? help  q quit  Enter detail  Esc back{}", " ".repeat(82))
         );
     }
 
@@ -1357,24 +1365,21 @@ mod tests {
         );
         d.agents.agents = vec![unattributed_agent("nothing-like-a-change")];
 
-        let expected = "q quit  Enter detail  Esc back  1 unattributed";
-        assert_eq!(columns(expected), 46);
+        let expected = "? help  q quit  Enter detail  Esc back  1 unattributed";
+        assert_eq!(columns(expected), 54);
         let buf60 = render_at(60, 20, &d);
-        assert_eq!(
-            row_text(&buf60, 19),
-            format!("{expected}{}", " ".repeat(14))
-        );
+        assert_eq!(row_text(&buf60, 19), format!("{expected}{}", " ".repeat(6)));
         let buf120 = render_at(120, 20, &d);
         assert_eq!(
             row_text(&buf120, 19),
-            format!("{expected}{}", " ".repeat(74))
+            format!("{expected}{}", " ".repeat(66))
         );
 
         let mut without_agents = d.clone();
         without_agents.agents.agents = Vec::new();
         assert_eq!(
             row_text(&render_at(60, 20, &without_agents), 19),
-            format!("q quit  Enter detail  Esc back{}", " ".repeat(30)),
+            format!("? help  q quit  Enter detail  Esc back{}", " ".repeat(22)),
             "byte-identical to the row this capability specified before the count existed"
         );
 
@@ -1382,26 +1387,28 @@ mod tests {
         for width in [60u16, 120u16] {
             assert!(
                 row_text(&render_at(width, 20, &d), 19)
-                    .starts_with("q quit  Enter detail  Esc back  2 unattributed"),
+                    .starts_with("? help  q quit  Enter detail  Esc back  2 unattributed"),
                 "width {width}: the count is over agents, adding a second must read 2"
             );
         }
 
         // `agent-launch`: with `agents.reachable` set, the action hints sit between
-        // `Esc back` and the count, and at 60 the count is the one dropped.
+        // `Esc back` and the count, and at 60 the count is dropped — and, since
+        // `help-overlay` prepended `? help`, `g focus` with it.
         let mut reachable = d.clone();
         reachable.agents.agents = vec![unattributed_agent("nothing-like-a-change")];
         reachable.agents.reachable = true;
-        let expected_120 = "q quit  Enter detail  Esc back  a/c/s launch  g focus  1 unattributed";
-        assert_eq!(columns(expected_120), 69);
+        let expected_120 =
+            "? help  q quit  Enter detail  Esc back  a/c/s launch  g focus  1 unattributed";
+        assert_eq!(columns(expected_120), 77);
         assert_eq!(
             row_text(&render_at(120, 20, &reachable), 19),
-            format!("{expected_120}{}", " ".repeat(51))
+            format!("{expected_120}{}", " ".repeat(43))
         );
-        let expected_60 = "q quit  Enter detail  Esc back  a/c/s launch  g focus";
+        let expected_60 = "? help  q quit  Enter detail  Esc back  a/c/s launch";
         assert_eq!(
             row_text(&render_at(60, 20, &reachable), 19),
-            format!("{expected_60}{}", " ".repeat(7))
+            format!("{expected_60}{}", " ".repeat(8))
         );
     }
 
@@ -1416,7 +1423,8 @@ mod tests {
         for width in [60, 120] {
             let buf = render_at(width, 20, &d);
             assert!(
-                row_text(&buf, 19).starts_with("q quit  Enter detail  Esc back  2 unattributed")
+                row_text(&buf, 19)
+                    .starts_with("? help  q quit  Enter detail  Esc back  2 unattributed")
             );
             assert!(buffer_contains(&buf, "No changes yet"));
         }
@@ -1468,15 +1476,15 @@ mod tests {
         let mut d = dashboard(Some("/tmp/demo-repo"), Route::List);
         d.agents.agents = vec![unattributed_agent("nothing-like-a-change")];
 
-        let buf46 = render_at(46, 20, &d);
+        let buf54 = render_at(54, 20, &d);
         assert_eq!(
-            row_text(&buf46, 19),
-            "q quit  Enter detail  Esc back  1 unattributed"
+            row_text(&buf54, 19),
+            "? help  q quit  Enter detail  Esc back  1 unattributed"
         );
-        let buf45 = render_at(45, 20, &d);
+        let buf53 = render_at(53, 20, &d);
         assert_eq!(
-            row_text(&buf45, 19),
-            format!("q quit  Enter detail  Esc back{}", " ".repeat(15))
+            row_text(&buf53, 19),
+            format!("? help  q quit  Enter detail  Esc back{}", " ".repeat(15))
         );
 
         // 60 and 120 as controls: comfortably wide enough that the count is never
@@ -1490,16 +1498,16 @@ mod tests {
         // before the (now longer) key hint list.
         let mut reachable = d.clone();
         reachable.agents.reachable = true;
-        let buf69 = render_at(69, 20, &reachable);
+        let buf77 = render_at(77, 20, &reachable);
         assert_eq!(
-            row_text(&buf69, 19),
-            "q quit  Enter detail  Esc back  a/c/s launch  g focus  1 unattributed"
+            row_text(&buf77, 19),
+            "? help  q quit  Enter detail  Esc back  a/c/s launch  g focus  1 unattributed"
         );
-        let buf68 = render_at(68, 20, &reachable);
+        let buf76 = render_at(76, 20, &reachable);
         assert_eq!(
-            row_text(&buf68, 19),
+            row_text(&buf76, 19),
             format!(
-                "q quit  Enter detail  Esc back  a/c/s launch  g focus{}",
+                "? help  q quit  Enter detail  Esc back  a/c/s launch  g focus{}",
                 " ".repeat(15)
             )
         );
@@ -1536,11 +1544,45 @@ mod tests {
                 !buffer_contains(&buf, "alpha"),
                 "width {width}: the alpha row must be hidden by the filter"
             );
-            assert!(
-                row_text(&buf, 19).contains("2 unattributed"),
-                "width {width}"
-            );
         }
+        assert!(
+            row_text(&render_at(120, 20, &ab), 19).contains("2 unattributed"),
+            "the filter hides a row without changing the count"
+        );
+        // `help-overlay`: `/beta` + the four key hints + the count is 61 columns, so at
+        // the mandated narrow width the count is now dropped whole — the same
+        // last-hint-first rule, against a hint list eight columns longer.
+        assert_eq!(
+            row_text(&render_at(60, 20, &ab), 19),
+            format!(
+                "/beta  ? help  q quit  Enter detail  Esc back{}",
+                " ".repeat(15)
+            )
+        );
+
+        // `agent-attribution`: with the socket reachable the same query leads the row —
+        // `render_footer` pushes `/<query>` onto the hint list ahead of `FOOTER_HINTS`
+        // whenever the query is non-empty and the filter is inactive, so the prefix is
+        // part of every measured width here. The full row is 84 columns and fits 120
+        // whole: the filter changes neither the count nor the availability of the
+        // action keys.
+        let mut ab_reachable = ab.clone();
+        ab_reachable.agents.reachable = true;
+        assert_eq!(
+            row_text(&render_at(120, 20, &ab_reachable), 19),
+            format!(
+                "/beta  ? help  q quit  Enter detail  Esc back  a/c/s launch  g focus  2 unattributed{}",
+                " ".repeat(36)
+            )
+        );
+        // At 60 the count is dropped whole and then `g focus`, leaving 59 columns —
+        // `a/c/s launch` survives with a single column to spare, so the reachable pane
+        // still names an action key at the mandated narrow width even under a query.
+        assert_eq!(
+            row_text(&render_at(60, 20, &ab_reachable), 19),
+            // One trailing space: 59 columns of hints in a 60-column frame.
+            "/beta  ? help  q quit  Enter detail  Esc back  a/c/s launch "
+        );
 
         // `responsive-layout`'s own fixture: one change, one unattributed agent.
         let mut base = dashboard(Some("/tmp/demo-repo"), Route::List);
@@ -1573,12 +1615,16 @@ mod tests {
 
             let accepted_footer = row_text(&render_at(width, 20, &accepted_form), 19);
             assert!(
-                accepted_footer.starts_with("/be  q quit  Enter detail  Esc back  1 unattributed"),
+                accepted_footer
+                    .starts_with("/be  ? help  q quit  Enter detail  Esc back  1 unattributed"),
                 "width {width}: {accepted_footer:?}"
             );
             let accepted_no_agents_footer =
                 row_text(&render_at(width, 20, &accepted_form_no_agents), 19);
-            assert!(accepted_no_agents_footer.starts_with("/be  q quit  Enter detail  Esc back"));
+            assert!(
+                accepted_no_agents_footer
+                    .starts_with("/be  ? help  q quit  Enter detail  Esc back")
+            );
             assert!(!accepted_no_agents_footer.contains("unattributed"));
         }
 
@@ -1597,13 +1643,13 @@ mod tests {
         }
         assert!(
             row_text(&render_at(120, 20, &accepted_reachable), 19).starts_with(
-                "/be  q quit  Enter detail  Esc back  a/c/s launch  g focus  1 unattributed"
+                "/be  ? help  q quit  Enter detail  Esc back  a/c/s launch  g focus  1 unattributed"
             )
         );
         assert!(
             row_text(&render_at(60, 20, &accepted_reachable), 19)
-                .starts_with("/be  q quit  Enter detail  Esc back  a/c/s launch  g focus"),
-            "width 60: the count is dropped, the action hints are kept"
+                .starts_with("/be  ? help  q quit  Enter detail  Esc back  a/c/s launch"),
+            "width 60: the count is dropped and `g focus` with it"
         );
     }
 
@@ -3448,6 +3494,7 @@ mod tests {
         assert_eq!(row_text(&buf120, 19), format!("/add_{}", " ".repeat(115)));
         for buf in [&buf60, &buf120] {
             let footer = row_text(buf, 19);
+            assert!(!footer.contains("? help"));
             assert!(!footer.contains("q quit"));
             assert!(!footer.contains("Enter detail"));
             assert!(!footer.contains("Esc back"));
@@ -3480,62 +3527,62 @@ mod tests {
             query: "add".to_string(),
             active: false,
         };
-        let expected = "/add  q quit  Enter detail  Esc back";
-        assert_eq!(columns(expected), 36);
+        let expected = "/add  ? help  q quit  Enter detail  Esc back";
+        assert_eq!(columns(expected), 44);
         let buf60 = render_at(60, 20, &d);
         assert_eq!(
             row_text(&buf60, 19),
-            format!("{expected}{}", " ".repeat(24))
+            format!("{expected}{}", " ".repeat(16))
         );
         let buf120 = render_at(120, 20, &d);
         assert_eq!(
             row_text(&buf120, 19),
-            format!("{expected}{}", " ".repeat(84))
+            format!("{expected}{}", " ".repeat(76))
         );
 
         d.filter.query = String::new();
         let buf60 = render_at(60, 20, &d);
         assert_eq!(
             row_text(&buf60, 19),
-            format!("q quit  Enter detail  Esc back{}", " ".repeat(30))
+            format!("? help  q quit  Enter detail  Esc back{}", " ".repeat(22))
         );
         let buf120 = render_at(120, 20, &d);
         assert_eq!(
             row_text(&buf120, 19),
-            format!("q quit  Enter detail  Esc back{}", " ".repeat(90))
+            format!("? help  q quit  Enter detail  Esc back{}", " ".repeat(82))
         );
 
         // `agent-attribution`: with a query leading and one unattributed agent, the
         // count still trails the query at both widths.
         d.filter.query = "add".to_string();
         d.agents.agents = vec![unattributed_agent("nothing-like-a-change")];
-        let with_count = "/add  q quit  Enter detail  Esc back  1 unattributed";
-        assert_eq!(columns(with_count), 52);
+        let with_count = "/add  ? help  q quit  Enter detail  Esc back  1 unattributed";
+        assert_eq!(columns(with_count), 60);
+        // Sixty columns exactly: the count fills the mandated narrow frame with no
+        // trailing space.
         let buf60 = render_at(60, 20, &d);
-        assert_eq!(
-            row_text(&buf60, 19),
-            format!("{with_count}{}", " ".repeat(8))
-        );
+        assert_eq!(row_text(&buf60, 19), with_count);
         let buf120 = render_at(120, 20, &d);
         assert_eq!(
             row_text(&buf120, 19),
-            format!("{with_count}{}", " ".repeat(68))
+            format!("{with_count}{}", " ".repeat(60))
         );
 
         // `agent-launch`: with `agents.reachable` set, the action hints sit between
-        // `Esc back` and the count, and at 60 the count is the one dropped.
+        // `Esc back` and the count; at 60 the count is dropped first and `g focus`
+        // second, since `help-overlay`'s leading `? help` takes the full row to 83.
         d.agents.reachable = true;
         let with_hints_and_count =
-            "/add  q quit  Enter detail  Esc back  a/c/s launch  g focus  1 unattributed";
-        assert_eq!(columns(with_hints_and_count), 75);
+            "/add  ? help  q quit  Enter detail  Esc back  a/c/s launch  g focus  1 unattributed";
+        assert_eq!(columns(with_hints_and_count), 83);
         assert!(
             row_text(&render_at(120, 20, &d), 19).starts_with(with_hints_and_count),
             "width 120"
         );
-        let with_hints_only = "/add  q quit  Enter detail  Esc back  a/c/s launch  g focus";
+        let with_hints_only = "/add  ? help  q quit  Enter detail  Esc back  a/c/s launch";
         assert!(
             row_text(&render_at(60, 20, &d), 19).starts_with(with_hints_only),
-            "width 60: the count is the one dropped"
+            "width 60: the count is dropped first and `g focus` second"
         );
     }
 
@@ -6213,21 +6260,27 @@ mod tests {
     fn the_action_hints_follow_esc_back_when_reachable() {
         let mut d = dashboard(Some("/tmp/demo-repo"), Route::List);
         d.agents.reachable = true;
-        let expected = "q quit  Enter detail  Esc back  a/c/s launch  g focus";
-        assert_eq!(columns(expected), 53);
-        let buf60 = render_at(60, 20, &d);
-        assert_eq!(row_text(&buf60, 19), format!("{expected}{}", " ".repeat(7)));
+        let expected = "? help  q quit  Enter detail  Esc back  a/c/s launch  g focus";
+        assert_eq!(columns(expected), 61);
         let buf120 = render_at(120, 20, &d);
         assert_eq!(
             row_text(&buf120, 19),
-            format!("{expected}{}", " ".repeat(67))
+            format!("{expected}{}", " ".repeat(59))
+        );
+        // `help-overlay`: 61 columns no longer fits the mandated narrow frame, so
+        // `g focus` is dropped whole there rather than cut to `g focu`.
+        let expected_60 = "? help  q quit  Enter detail  Esc back  a/c/s launch";
+        let buf60 = render_at(60, 20, &d);
+        assert_eq!(
+            row_text(&buf60, 19),
+            format!("{expected_60}{}", " ".repeat(8))
         );
 
         let mut unreachable = d.clone();
         unreachable.agents.reachable = false;
         assert_eq!(
             row_text(&render_at(60, 20, &unreachable), 19),
-            format!("q quit  Enter detail  Esc back{}", " ".repeat(30)),
+            format!("? help  q quit  Enter detail  Esc back{}", " ".repeat(22)),
             "byte-identical to the row this capability specified before the action hints existed"
         );
 
@@ -6250,42 +6303,45 @@ mod tests {
         let mut d = dashboard(Some("/tmp/demo-repo"), Route::List);
         d.agents.reachable = true;
 
-        let buf53 = render_at(53, 20, &d);
+        let buf61 = render_at(61, 20, &d);
         assert_eq!(
-            row_text(&buf53, 19),
-            "q quit  Enter detail  Esc back  a/c/s launch  g focus"
+            row_text(&buf61, 19),
+            "? help  q quit  Enter detail  Esc back  a/c/s launch  g focus"
         );
 
-        let buf52 = render_at(52, 20, &d);
+        let buf60 = render_at(60, 20, &d);
         assert_eq!(
-            row_text(&buf52, 19),
+            row_text(&buf60, 19),
             format!(
-                "q quit  Enter detail  Esc back  a/c/s launch{}",
+                "? help  q quit  Enter detail  Esc back  a/c/s launch{}",
                 " ".repeat(8)
             ),
             "g focus and its separator need nine columns and only eight remain"
         );
 
-        let buf44 = render_at(44, 20, &d);
+        let buf52 = render_at(52, 20, &d);
         assert_eq!(
-            row_text(&buf44, 19),
-            "q quit  Enter detail  Esc back  a/c/s launch"
+            row_text(&buf52, 19),
+            "? help  q quit  Enter detail  Esc back  a/c/s launch"
         );
 
-        let buf43 = render_at(43, 20, &d);
+        let buf51 = render_at(51, 20, &d);
         assert_eq!(
-            row_text(&buf43, 19),
-            format!("q quit  Enter detail  Esc back{}", " ".repeat(13)),
-            "both action hints are dropped before any of the three key hints"
+            row_text(&buf51, 19),
+            format!("? help  q quit  Enter detail  Esc back{}", " ".repeat(13)),
+            "both action hints are dropped before any of the four key hints"
         );
 
-        // 60 and 120 as contrasting controls: comfortably wide enough that both hints are
-        // never dropped there.
-        for width in [60, 120] {
-            let row = row_text(&render_at(width, 20, &d), 19);
-            assert!(row.contains("a/c/s launch"), "width {width}");
-            assert!(row.contains("g focus"), "width {width}");
+        // At 51 columns all four key hints are still present, `? help` among them, so
+        // both action hints go before any of them and the help key is never one of the
+        // dropped. 120 is the contrasting control: wide enough to keep both.
+        let row51 = row_text(&buf51, 19);
+        for hint in ["? help", "q quit", "Enter detail", "Esc back"] {
+            assert!(row51.contains(hint), "51 columns must keep {hint:?}");
         }
+        let row120 = row_text(&render_at(120, 20, &d), 19);
+        assert!(row120.contains("a/c/s launch"));
+        assert!(row120.contains("g focus"));
     }
 
     /// `agent-launch`: "An unreachable socket hides both hints at both widths."
@@ -6296,7 +6352,7 @@ mod tests {
         for width in [60, 120] {
             let row = row_text(&render_at(width, 20, &d), 19);
             assert!(
-                row.starts_with("q quit  Enter detail  Esc back"),
+                row.starts_with("? help  q quit  Enter detail  Esc back"),
                 "width {width}"
             );
             assert!(!row.contains("a/c/s launch"), "width {width}");
@@ -6312,20 +6368,18 @@ mod tests {
         d.agents.agents = vec![unattributed_agent("nothing-like-a-change")];
 
         let buf120 = row_text(&render_at(120, 20, &d), 19);
-        assert!(
-            buf120.starts_with(
-                "q quit  Enter detail  Esc back  a/c/s launch  g focus  1 unattributed"
-            )
-        );
+        assert!(buf120.starts_with(
+            "? help  q quit  Enter detail  Esc back  a/c/s launch  g focus  1 unattributed"
+        ));
 
         let buf60 = render_at(60, 20, &d);
         assert_eq!(
             row_text(&buf60, 19),
             format!(
-                "q quit  Enter detail  Esc back  a/c/s launch  g focus{}",
-                " ".repeat(7)
+                "? help  q quit  Enter detail  Esc back  a/c/s launch{}",
+                " ".repeat(8)
             ),
-            "the count is 69 columns in and does not fit; fit_hints drops it whole"
+            "the full row is 77 columns; fit_hints drops the count whole and then `g focus`"
         );
 
         let mut unreachable = d.clone();
