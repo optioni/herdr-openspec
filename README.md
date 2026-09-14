@@ -49,7 +49,10 @@ actions to appear — Herdr re-reads the manifest only then.
 | `Esc` | Dismiss one layer: filter mode, then a leftover query, then detail. At the list root it does nothing |
 | `1`–`9`, `[`, `]` | Switch artifact tab, from either the list or the detail. `0` is inert — tabs are 1-based |
 | `/` | Filter changes |
+| `Backspace` | While filtering, delete the last character of the query. Inert outside filter mode, and on an already-empty query |
+| `Space` | Fold or unfold a section — the list section at the list route, the artifact section at the detail route |
 | `r` | Force a full refresh — re-read every change from disk and re-ask the CLI about each one |
+| `?` | Open or close the help overlay, from either route — it lists every key and gesture the pane binds |
 | `a` | Launch an agent with `/opsx:apply`. Inert — no call, no problem — with no change selected; refused with a reason (shown as a problem row) when the derived name is already running for this change |
 | `c` | Launch an agent with `/opsx:continue`, on the same terms as `a` |
 | `s` | Launch an agent with `/opsx:archive`, on the same terms as `a` |

@@ -2101,3 +2101,878 @@ fn documented_seam_names_takes_identifiers_only() {
     );
     assert!(documented_seam_names("nothing here\n").is_err());
 }
+
+// ---------------------------------------------------------------------------
+// The tenth claim: the pane's bindings, bound to the functions that produce
+// them. Three legs — the action sweep against `ui::help::INVENTORY`, and
+// `INVENTORY` against each of `SPEC.md` -> Keys and `README.md` -> Keys. See
+// `openspec/changes/help-overlay/specs/doc-conformance/spec.md` (legs 2 and 3,
+// and the normalisation they compare under) and
+// `.../specs/binding-inventory/spec.md` (the sweep, the exemption set, and the
+// per-row parser).
+//
+// Unlike every other leg in this file, legs 1 and the per-row check parse no
+// source text at all: `action_for` and `mouse_action` are pure total functions,
+// so the set each produces is computable by **calling** it, and a derivation
+// that calls the function cannot disagree with the function the way one that
+// parses it can. Still no process is spawned.
+// ---------------------------------------------------------------------------
+
+use std::collections::BTreeMap;
+
+use ratatui::crossterm::event::{
+    Event, KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
+};
+use ratatui::layout::Rect;
+
+use herdr_openspec::agents::AgentSnapshot;
+use herdr_openspec::changes::{ArtifactRef, Change, ChangeSet, Origin};
+use herdr_openspec::state::Mapping;
+use herdr_openspec::tasks::Progress;
+use herdr_openspec::ui::app::{
+    Action, ArtifactSection, Dashboard, Detail, Filter, Help, Launch, Refresh, Route, Sections,
+    action_for,
+};
+use herdr_openspec::ui::driver::mouse_action;
+use herdr_openspec::ui::help::{INVENTORY, Scope};
+
+/// Every `Action` mapped to a stable name by an **exhaustive** `match` with no
+/// wildcard arm: a variant added later is a compile error here, in this test,
+/// before it is a missing help row.
+fn action_name(action: Action) -> &'static str {
+    match action {
+        Action::Quit => "Quit",
+        Action::OpenDetail => "OpenDetail",
+        Action::Back => "Back",
+        Action::Next => "Next",
+        Action::Prev => "Prev",
+        Action::SelectTab(_) => "SelectTab",
+        Action::NextTab => "NextTab",
+        Action::PrevTab => "PrevTab",
+        Action::FilterStart => "FilterStart",
+        Action::FilterPush(_) => "FilterPush",
+        Action::FilterPop => "FilterPop",
+        Action::Refresh => "Refresh",
+        Action::LaunchApply => "LaunchApply",
+        Action::LaunchContinue => "LaunchContinue",
+        Action::LaunchArchive => "LaunchArchive",
+        Action::FocusAgent => "FocusAgent",
+        Action::ToggleSection => "ToggleSection",
+        Action::ToggleHelp => "ToggleHelp",
+        Action::SelectNext => "SelectNext",
+        Action::SelectPrev => "SelectPrev",
+        Action::ScrollDown => "ScrollDown",
+        Action::ScrollUp => "ScrollUp",
+        Action::Click(_) => "Click",
+        Action::Ignore => "Ignore",
+    }
+}
+
+/// The **closed** exemption set, named rather than predicated: `FilterPush` is
+/// typing rather than a binding, and `Ignore` is the absence of one. A third
+/// exemption costs a spec change — see `binding-inventory`.
+const EXEMPT_ACTIONS: [&str; 2] = ["FilterPush", "Ignore"];
+
+/// The **only two** normalisations legs 2 and 3 compare under, named here in
+/// the check's own source as `doc-conformance` requires. A future binding whose
+/// prose spelling does not atomise to its `INVENTORY` spelling is made to agree
+/// by editing the document, never by growing this list.
+///
+/// The first is the bare word `arrows` in a Key cell, which stands for the two
+/// arrow keys `INVENTORY` spells `↑` and `↓`. The second is a backticked pair
+/// joined by an en-dash, which is one range atom rather than its two endpoints.
+const KEY_ALIASES: [(&str, &[&str]); 2] = [("arrows", &["↑", "↓"]), ("`1`–`9`", &["1–9"])];
+
+fn press(code: KeyCode, modifiers: KeyModifiers) -> Event {
+    Event::Key(KeyEvent::new(code, modifiers))
+}
+
+/// Step 2 of the derivation: every printable ASCII `Char`, plus the named keys
+/// a terminal can send that this pane might bind, each under four modifier
+/// values and both filter modes.
+///
+/// Computed once per test binary and cloned thereafter. Seven tests below want
+/// a swept set and the sweeps are the expensive part of this file — the mouse
+/// one resolves a `Down(Left)` at every cell of two frames at two routes, and
+/// each such cell inside the detail region renders the fixture's markdown. The
+/// cache changes nothing about what is swept; it only stops the same total
+/// function being asked the same question fourteen times.
+fn swept_key_action_names() -> BTreeSet<String> {
+    static CACHE: std::sync::OnceLock<BTreeSet<String>> = std::sync::OnceLock::new();
+    CACHE.get_or_init(sweep_key_actions).clone()
+}
+
+fn sweep_key_actions() -> BTreeSet<String> {
+    let mut codes: Vec<KeyCode> = (' '..='~').map(KeyCode::Char).collect();
+    codes.extend([
+        KeyCode::Backspace,
+        KeyCode::Enter,
+        KeyCode::Esc,
+        KeyCode::Up,
+        KeyCode::Down,
+        KeyCode::Left,
+        KeyCode::Right,
+        KeyCode::Tab,
+        KeyCode::Home,
+        KeyCode::End,
+        KeyCode::PageUp,
+        KeyCode::PageDown,
+        KeyCode::Delete,
+    ]);
+
+    let mut names = BTreeSet::new();
+    for code in codes {
+        for modifiers in [
+            KeyModifiers::NONE,
+            KeyModifiers::SHIFT,
+            KeyModifiers::CONTROL,
+            KeyModifiers::ALT,
+        ] {
+            for filtering in [false, true] {
+                names.insert(
+                    action_name(action_for(&press(code, modifiers), filtering)).to_string(),
+                );
+            }
+        }
+    }
+    names
+}
+
+/// One change carrying `tabs` artifacts. `tabs` is not decoration: a dashboard
+/// whose selected change carries no artifacts makes `Zone::DetailTab` resolve
+/// to `Action::Ignore` and silently removes the mouse's tab-switching coverage
+/// from the whole sweep.
+fn sweep_change(name: &str, origin: Origin, tabs: usize) -> Change {
+    Change {
+        name: name.to_string(),
+        dir: PathBuf::from(format!("/repo/openspec/changes/{name}")),
+        origin,
+        schema: "tdd".to_string(),
+        artifacts: (0..tabs)
+            .map(|i| ArtifactRef {
+                id: format!("artifact-{i}"),
+                paths: vec![PathBuf::from(format!(
+                    "/repo/openspec/changes/{name}/artifact-{i}.md"
+                ))],
+                tracks_tasks: false,
+            })
+            .collect(),
+        progress: Progress {
+            completed: 1,
+            total: 3,
+        },
+        problems: Vec::new(),
+    }
+}
+
+/// The fixture step 3 mandates: active changes, archived changes, a selected
+/// change with several artifact tabs, and a **foldable** artifact (more than one
+/// resolved section), so `Zone::DetailRow`'s fold path is reachable too.
+fn sweep_dashboard(route: Route, help_open: bool) -> Dashboard {
+    Dashboard {
+        repo: Some(PathBuf::from("/repo")),
+        searched_from: PathBuf::from("/repo"),
+        changes: ChangeSet {
+            active: vec![
+                sweep_change("alpha", Origin::Active, 4),
+                sweep_change("beta", Origin::Active, 4),
+            ],
+            archived: vec![sweep_change(
+                "gamma",
+                Origin::Archived {
+                    date: Some("2026-01-01".to_string()),
+                },
+                2,
+            )],
+            problems: Vec::new(),
+            archived_total: 1,
+        },
+        route,
+        quit: false,
+        // `targets()` is [Section(Active), Change(0), Change(1),
+        // Section(Archived), Change(2)] with both sections open, so index 1 is
+        // a change and `selected_change()` is `Some`.
+        selected: 1,
+        filter: Filter {
+            query: String::new(),
+            active: false,
+        },
+        detail: Detail {
+            sections: vec![
+                ArtifactSection {
+                    label: "one".to_string(),
+                    text: "# One\n\nbody one\n".to_string(),
+                },
+                ArtifactSection {
+                    label: "two".to_string(),
+                    text: "# Two\n\nbody two\n".to_string(),
+                },
+            ],
+            scroll: 0,
+            tab: 0,
+            problems: Vec::new(),
+            loaded: None,
+            expanded: BTreeSet::new(),
+            drawn_width: None,
+        },
+        refresh: Refresh {
+            requested: false,
+            reload: false,
+            startup: Vec::new(),
+            problems: Vec::new(),
+        },
+        agents: AgentSnapshot {
+            agents: Vec::new(),
+            reachable: true,
+            stalled: false,
+            problem: None,
+        },
+        agent_names: Mapping {
+            names: BTreeMap::new(),
+            problems: Vec::new(),
+        },
+        launch: Launch {
+            pending: None,
+            problems: Vec::new(),
+            in_flight: false,
+        },
+        sections: Sections {
+            collapsed: BTreeSet::new(),
+        },
+        file_mode: false,
+        help: Help {
+            open: help_open,
+            scroll: 0,
+        },
+    }
+}
+
+/// Step 3: every `MouseEventKind` the crate can receive — all fourteen
+/// inhabited values of an eight-variant enum over three buttons — at every cell
+/// of a 120x40 frame and of a 60x20 frame, under both overlay states.
+///
+/// **The route dimension is this check's own addition, not the spec's.**
+/// `binding-inventory` mandates the two frames, the kinds, the fixture and the
+/// two overlay states, and names no route at all; sweeping the narrow frame at
+/// both routes is what reaches the detail region there, since `split_body`'s
+/// `Narrow` arm draws exactly one region and `route` is what picks which.
+///
+/// The **wide** frame is swept once, route-free, and that is not a narrowed
+/// sweep: `split_body`'s `Wide` arm ignores `route` entirely, `zone` passes
+/// `route` nowhere else, and nothing downstream of `zone` reads it — so the two
+/// route passes at 120x40 were byte-identical work, not a second set of cells.
+/// [`the_wide_layout_resolves_every_cell_route_free`] is the executable licence
+/// for that: it asserts the property per cell rather than trusting the layout
+/// function's shape.
+///
+/// Cached per overlay state, on exactly [`swept_key_action_names`]'s terms.
+fn swept_mouse_action_names(help_open: bool) -> BTreeSet<String> {
+    static CLOSED: std::sync::OnceLock<BTreeSet<String>> = std::sync::OnceLock::new();
+    static OPEN: std::sync::OnceLock<BTreeSet<String>> = std::sync::OnceLock::new();
+    let cache = if help_open { &OPEN } else { &CLOSED };
+    cache.get_or_init(|| sweep_mouse_actions(help_open)).clone()
+}
+
+fn sweep_mouse_actions(help_open: bool) -> BTreeSet<String> {
+    let kinds = [
+        MouseEventKind::Down(MouseButton::Left),
+        MouseEventKind::Down(MouseButton::Right),
+        MouseEventKind::Down(MouseButton::Middle),
+        MouseEventKind::Up(MouseButton::Left),
+        MouseEventKind::Up(MouseButton::Right),
+        MouseEventKind::Up(MouseButton::Middle),
+        MouseEventKind::Drag(MouseButton::Left),
+        MouseEventKind::Drag(MouseButton::Right),
+        MouseEventKind::Drag(MouseButton::Middle),
+        MouseEventKind::Moved,
+        MouseEventKind::ScrollDown,
+        MouseEventKind::ScrollUp,
+        MouseEventKind::ScrollLeft,
+        MouseEventKind::ScrollRight,
+    ];
+
+    // The wide frame once (route-free, licensed by the per-cell assertion
+    // above); the narrow frame at both routes, where `route` genuinely selects
+    // which single region exists.
+    let passes = [
+        (Route::List, 120u16, 40u16),
+        (Route::List, 60, 20),
+        (Route::Detail, 60, 20),
+    ];
+
+    let mut names = BTreeSet::new();
+    for (route, width, height) in passes {
+        let dashboard = sweep_dashboard(route, help_open);
+        let area = Rect::new(0, 0, width, height);
+        for kind in kinds {
+            for row in 0..height {
+                for column in 0..width {
+                    let mouse = MouseEvent {
+                        kind,
+                        column,
+                        row,
+                        modifiers: KeyModifiers::NONE,
+                    };
+                    names.insert(action_name(mouse_action(&dashboard, area, &mouse)).to_string());
+                }
+            }
+        }
+    }
+    names
+}
+
+/// Step 4's left-hand side: the swept union less the closed exemption set.
+fn bound_action_names() -> BTreeSet<String> {
+    let mut union = swept_action_names();
+    for name in EXEMPT_ACTIONS {
+        union.remove(name);
+    }
+    union
+}
+
+/// The swept union itself, exemptions still in it — what the shape assertion
+/// counts, and the shared setup both sweeps' callers want.
+fn swept_action_names() -> BTreeSet<String> {
+    let mut union = swept_key_action_names();
+    union.extend(swept_mouse_action_names(false));
+    union.extend(swept_mouse_action_names(true));
+    union
+}
+
+/// Step 4's right-hand side: `action_name(binding.action)` over every binding.
+fn inventory_action_names() -> BTreeSet<String> {
+    INVENTORY
+        .iter()
+        .flat_map(|group| group.bindings.iter())
+        .map(|binding| action_name(binding.action).to_string())
+        .collect()
+}
+
+/// Leg 1's comparison, failing in **both** directions and naming both sides in
+/// each, so the reader is never left to work out which of the two moved.
+fn compare_bound_and_documented(
+    bound: &BTreeSet<String>,
+    documented: &BTreeSet<String>,
+) -> Result<(), String> {
+    let only_bound: Vec<_> = bound.difference(documented).cloned().collect();
+    let only_documented: Vec<_> = documented.difference(bound).cloned().collect();
+    if only_bound.is_empty() && only_documented.is_empty() {
+        return Ok(());
+    }
+    let mut msg = String::new();
+    if !only_bound.is_empty() {
+        msg.push_str(&format!(
+            "bound but not documented: {only_bound:?} - produced by ui::app::action_for or \
+             ui::driver::mouse_action, named by no row in ui::help::INVENTORY; "
+        ));
+    }
+    if !only_documented.is_empty() {
+        msg.push_str(&format!(
+            "documented but unreachable: {only_documented:?} - named by a row in \
+             ui::help::INVENTORY, produced by no call to ui::app::action_for or \
+             ui::driver::mouse_action"
+        ));
+    }
+    Err(msg)
+}
+
+/// The atoms one Key cell contributes: the two aliases first (each removed from
+/// the cell as it is honoured, so its own backticks cannot be read twice), then
+/// every remaining backticked span.
+fn key_atoms(cell: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut rest = cell.to_string();
+    for (pattern, atoms) in KEY_ALIASES {
+        while rest.contains(pattern) {
+            rest = rest.replacen(pattern, " ", 1);
+            out.extend(atoms.iter().map(|atom| (*atom).to_string()));
+        }
+    }
+    for (index, span) in rest.split('`').enumerate() {
+        if index % 2 == 1 {
+            let span = span.trim();
+            if !span.is_empty() {
+                out.push(span.to_string());
+            }
+        }
+    }
+    out
+}
+
+/// A document's Keys table, reduced to its key atoms, with the row count beside
+/// them. The table is located by its own `| Key | Action |` header row inside
+/// the named section and bounded to its own **contiguous** `|` rows — never a
+/// scan of the whole document, which would collect every backticked identifier
+/// in it and pass vacuously in the doc-has-extra direction.
+///
+/// `Err` names what was missing: a gutted document is a broken control, never
+/// an agreement between two empty sets.
+fn documented_key_atoms(text: &str, heading: &str) -> Result<(BTreeSet<String>, usize), String> {
+    let keys = section(text, heading)?;
+    let start = keys.find("| Key | Action |").ok_or_else(|| {
+        format!("{heading} holds no key table (no `| Key | Action |` header row)")
+    })?;
+    let table = &keys[start..];
+
+    let mut atoms = BTreeSet::new();
+    let mut rows = 0usize;
+    for line in table.lines() {
+        if !line.starts_with('|') {
+            break;
+        }
+        rows += 1;
+        let cell = line.trim_start_matches('|').split('|').next().unwrap_or("");
+        atoms.extend(key_atoms(cell));
+    }
+    if rows < 3 {
+        return Err(format!(
+            "{heading}'s key table has {rows} row(s) - a header, a separator, and at least one \
+             binding are the minimum"
+        ));
+    }
+    if atoms.is_empty() {
+        return Err(format!(
+            "{heading}'s key table names no key in backticks - the extraction rule this check \
+             depends on is not being followed"
+        ));
+    }
+    Ok((atoms, rows))
+}
+
+/// `INVENTORY`'s own key atoms: every non-`Mouse` group's `input`, split on
+/// `" / "`, so one overlay row stands for a key and its arrow synonym without
+/// forcing the prose to split into two rows.
+fn inventory_key_atoms() -> BTreeSet<String> {
+    let mut atoms = BTreeSet::new();
+    for group in INVENTORY {
+        if group.title == "Mouse" {
+            continue;
+        }
+        for binding in group.bindings {
+            for atom in binding.input.split(" / ") {
+                let atom = atom.trim();
+                if !atom.is_empty() {
+                    atoms.insert(atom.to_string());
+                }
+            }
+        }
+    }
+    atoms
+}
+
+/// The `input` string an atom came from, so leg 2's and leg 3's failure names
+/// the row and not only the atom.
+fn inventory_input_for(atom: &str) -> Option<&'static str> {
+    INVENTORY
+        .iter()
+        .filter(|group| group.title != "Mouse")
+        .flat_map(|group| group.bindings.iter())
+        .find(|binding| binding.input.split(" / ").any(|a| a.trim() == atom))
+        .map(|binding| binding.input)
+}
+
+/// Legs 2 and 3's comparison. No residual difference is tolerated and none is
+/// exempted: the alias table above is the whole of the permitted normalisation.
+fn compare_key_atoms(
+    document: &str,
+    documented: &BTreeSet<String>,
+    inventory: &BTreeSet<String>,
+) -> Result<(), String> {
+    let missing: Vec<_> = inventory.difference(documented).cloned().collect();
+    let extra: Vec<_> = documented.difference(inventory).cloned().collect();
+    if missing.is_empty() && extra.is_empty() {
+        return Ok(());
+    }
+    let mut msg = format!("{document} disagrees with ui::help::INVENTORY: ");
+    if !missing.is_empty() {
+        let rows: Vec<String> = missing
+            .iter()
+            .map(|atom| format!("{atom:?} (INVENTORY input {:?})", inventory_input_for(atom)))
+            .collect();
+        msg.push_str(&format!(
+            "named by the inventory and not by {document}: {}; ",
+            rows.join(", ")
+        ));
+    }
+    if !extra.is_empty() {
+        msg.push_str(&format!(
+            "named by {document} and not by the inventory: {extra:?}"
+        ));
+    }
+    Err(msg)
+}
+
+/// Read one `input` back into the `(KeyCode, KeyModifiers)` pairs a reader
+/// would press. Small on purpose, and not a second key table: a single
+/// character, an `X / Y` pair, a `Ctrl-<c>` form, an `<a>`–`<b>` digit range,
+/// and the named keys `Enter`, `Esc`, `Space`, `Backspace`, `↑`, and `↓`.
+/// Anything else is an error, not a guess — a silently skipped row is the same
+/// unfalsifiable guard this check exists to remove, one level down.
+fn parse_input(input: &str) -> Result<Vec<(KeyCode, KeyModifiers)>, String> {
+    let unrecognised = || format!("{input:?} is not a recognised key spelling");
+
+    if let Some((left, right)) = input.split_once(" / ") {
+        let mut pairs = parse_input(left.trim())?;
+        pairs.extend(parse_input(right.trim())?);
+        return Ok(pairs);
+    }
+
+    if let Some(rest) = input.strip_prefix("Ctrl-") {
+        let mut chars = rest.chars();
+        return match (chars.next(), chars.next()) {
+            (Some(c), None) => Ok(vec![(
+                KeyCode::Char(c.to_ascii_lowercase()),
+                KeyModifiers::CONTROL,
+            )]),
+            _ => Err(unrecognised()),
+        };
+    }
+
+    if let Some((low, high)) = input.split_once('–') {
+        let bounds = (one_char(low), one_char(high));
+        return match bounds {
+            (Some(low), Some(high))
+                if low.is_ascii_digit() && high.is_ascii_digit() && low <= high =>
+            {
+                Ok((low..=high)
+                    .map(|c| (KeyCode::Char(c), KeyModifiers::NONE))
+                    .collect())
+            }
+            _ => Err(unrecognised()),
+        };
+    }
+
+    match input {
+        "Enter" => Ok(vec![(KeyCode::Enter, KeyModifiers::NONE)]),
+        "Esc" => Ok(vec![(KeyCode::Esc, KeyModifiers::NONE)]),
+        "Space" => Ok(vec![(KeyCode::Char(' '), KeyModifiers::NONE)]),
+        "Backspace" => Ok(vec![(KeyCode::Backspace, KeyModifiers::NONE)]),
+        "↑" => Ok(vec![(KeyCode::Up, KeyModifiers::NONE)]),
+        "↓" => Ok(vec![(KeyCode::Down, KeyModifiers::NONE)]),
+        _ => match one_char(input) {
+            Some(c) => Ok(vec![(KeyCode::Char(c), KeyModifiers::NONE)]),
+            None => Err(unrecognised()),
+        },
+    }
+}
+
+/// `Some(c)` when `text` is exactly one `char`, `None` otherwise.
+fn one_char(text: &str) -> Option<char> {
+    let mut chars = text.chars();
+    match (chars.next(), chars.next()) {
+        (Some(c), None) => Some(c),
+        _ => None,
+    }
+}
+
+/// One row's own assertion: every pair its `input` parses to, evaluated under
+/// its group's filter mode, returns the action the row claims — compared by the
+/// **variant name**, because `1`–`9` parses to nine pairs whose actions differ
+/// in their payload and no single `binding.action` can equal all nine.
+fn check_binding_row(
+    group: &str,
+    input: &str,
+    filtering: bool,
+    expected: &str,
+) -> Result<(), String> {
+    let pairs = parse_input(input).map_err(|e| format!("{group} -> {e}"))?;
+    if pairs.is_empty() {
+        return Err(format!(
+            "{group} -> {input:?} parsed to no (KeyCode, KeyModifiers) pair"
+        ));
+    }
+    for (code, modifiers) in pairs {
+        let got = action_name(action_for(&press(code, modifiers), filtering));
+        if got != expected {
+            return Err(format!(
+                "{group} -> {input:?} claims {expected} but ui::app::action_for returns {got} \
+                 for {code:?} with {modifiers:?} (filtering: {filtering})"
+            ));
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn an_action_added_without_a_help_row_fails() {
+    // `action_name`'s exhaustive `match` is what catches a *new variant* — that
+    // is a compile error, before any assertion runs, and cannot be exercised at
+    // run time. What this test drives is the assertion one step later: the
+    // variant is named but `INVENTORY` still holds no row for it.
+    let mut bound = bound_action_names();
+    bound.insert("Fabricated".to_string());
+    let documented = inventory_action_names();
+
+    let err = compare_bound_and_documented(&bound, &documented)
+        .expect_err("an action with no inventory row must fail");
+    assert!(err.contains("Fabricated"), "{err}");
+    assert!(err.contains("bound but not documented"), "{err}");
+    assert!(err.contains("ui::help::INVENTORY"), "{err}");
+}
+
+#[test]
+fn a_binding_removed_from_the_driver_and_left_in_the_help_fails() {
+    // The other direction: `INVENTORY` names `Refresh` and no swept call
+    // produces it — what a deleted `action_for` arm looks like from here.
+    let mut bound = bound_action_names();
+    assert!(bound.remove("Refresh"), "the sweep must reach `r` at HEAD");
+    let documented = inventory_action_names();
+
+    let err = compare_bound_and_documented(&bound, &documented)
+        .expect_err("an inventory row no key reaches must fail");
+    assert!(err.contains("Refresh"), "{err}");
+    assert!(err.contains("documented but unreachable"), "{err}");
+    // Both sides named, so the reader is not left to work out which moved.
+    assert!(err.contains("ui::help::INVENTORY"), "{err}");
+    assert!(err.contains("ui::app::action_for"), "{err}");
+    assert!(err.contains("ui::driver::mouse_action"), "{err}");
+}
+
+#[test]
+fn sweep_finds_the_twenty_two_bound_actions_and_exactly_two_exemptions() {
+    // The substantive claim first, and deliberately: a planted defect in either
+    // direction — a deleted `action_for` arm, a removed `Binding` — must report
+    // the *action* that moved and which side moved it, not a count that happens
+    // to be one short. The bookkeeping below is what pins the numbers.
+    let bound = bound_action_names();
+    let documented = inventory_action_names();
+    compare_bound_and_documented(&bound, &documented).expect("the tree at HEAD agrees");
+
+    // The exemption set is asserted by name and by length, never by a predicate:
+    // a third exemption must cost a spec change.
+    assert_eq!(EXEMPT_ACTIONS.len(), 2);
+    assert_eq!(EXEMPT_ACTIONS, ["FilterPush", "Ignore"]);
+
+    let union = swept_action_names();
+    for name in EXEMPT_ACTIONS {
+        assert!(union.contains(name), "the sweep must produce {name}");
+    }
+    assert_eq!(
+        union.len(),
+        24,
+        "the swept union is `Action`'s full membership after `ToggleHelp`: {union:?}"
+    );
+    assert_eq!(bound.len(), 22, "{bound:?}");
+}
+
+#[test]
+fn the_wide_layout_resolves_every_cell_route_free() {
+    // What this protects: `swept_mouse_action_names` sweeps the **wide** frame
+    // once rather than once per route, on the ground that `route` cannot reach
+    // the answer there. That is the whole of the licence, and it is asserted
+    // per cell rather than inferred from `split_body`'s shape — a future change
+    // that branched on `route` further down `zone`'s body would satisfy
+    // `split_body(body, List) == split_body(body, Detail)` and still break the
+    // sweep, which is why that weaker proxy is not what is written here.
+    //
+    // If this goes red, the fix is to restore the second route pass in
+    // `sweep_mouse_actions` — roughly doubling that sweep's cost — and NOT to
+    // delete or weaken this assertion. The cell coverage is the point; the
+    // single pass is only an optimisation this property pays for.
+    let area = Rect::new(0, 0, 120, 40);
+    for row in 0..area.height {
+        for column in 0..area.width {
+            let at_list = herdr_openspec::ui::layout::zone(area, Route::List, column, row);
+            let at_detail = herdr_openspec::ui::layout::zone(area, Route::Detail, column, row);
+            assert_eq!(
+                at_list, at_detail,
+                "the wide layout became route-dependent at ({column}, {row}): \
+                 Route::List resolves to {at_list:?} and Route::Detail to {at_detail:?} - \
+                 restore the second route pass in sweep_mouse_actions"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_sweep_covers_the_mouse_under_both_overlay_states() {
+    let closed = swept_mouse_action_names(false);
+    let expected_closed: BTreeSet<String> = [
+        "SelectNext",
+        "SelectPrev",
+        "ScrollDown",
+        "ScrollUp",
+        "SelectTab",
+        "Click",
+        "Ignore",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect();
+    assert_eq!(
+        closed, expected_closed,
+        "a dashboard whose selected change carries no artifact tabs yields six \
+         names and silently drops the mouse's tab-switching coverage - widen the \
+         fixture, never narrow this set"
+    );
+
+    let open = swept_mouse_action_names(true);
+    let expected_open: BTreeSet<String> = ["ScrollDown", "ScrollUp", "ToggleHelp", "Ignore"]
+        .into_iter()
+        .map(str::to_string)
+        .collect();
+    assert_eq!(open, expected_open);
+
+    // The union names `ToggleHelp`, so the click-outside dismissal is bound here
+    // and not only by its own scenarios.
+    assert!(closed.union(&open).any(|n| n == "ToggleHelp"));
+}
+
+#[test]
+fn a_binding_added_to_the_driver_and_not_to_the_docs_fails_make_check() {
+    // Leg 1: bound, not documented.
+    let mut bound = bound_action_names();
+    bound.insert("Fabricated".to_string());
+    let err = compare_bound_and_documented(&bound, &inventory_action_names())
+        .expect_err("leg 1 fails first");
+    assert!(
+        err.contains("Fabricated") && err.contains("ui::app::action_for"),
+        "{err}"
+    );
+
+    // Leg 2: the inventory row exists, `SPEC.md` -> Keys does not name the key.
+    let inventory: BTreeSet<String> = ["q".to_string(), "F13".to_string()].into_iter().collect();
+    let documented: BTreeSet<String> = ["q".to_string()].into_iter().collect();
+    let err = compare_key_atoms("SPEC.md -> Keys", &documented, &inventory)
+        .expect_err("leg 2 fails when the document omits a key");
+    assert!(
+        err.contains("F13") && err.contains("SPEC.md -> Keys"),
+        "{err}"
+    );
+
+    // Leg 3: the same terms, against the other document.
+    let err = compare_key_atoms("README.md -> Keys", &documented, &inventory)
+        .expect_err("leg 3 fails on the same terms");
+    assert!(
+        err.contains("F13") && err.contains("README.md -> Keys"),
+        "{err}"
+    );
+}
+
+#[test]
+fn the_documented_key_set_and_the_inventory_agree_at_head() {
+    // Exactly two normalisations, named in this file's own source and pinned at
+    // two on the same terms the exemption set is.
+    assert_eq!(KEY_ALIASES.len(), 2);
+
+    let spec_md = read_doc(&manifest_dir().join("SPEC.md")).expect("read SPEC.md");
+    let readme = read_doc(&manifest_dir().join("README.md")).expect("read README.md");
+
+    let inventory = inventory_key_atoms();
+    assert_eq!(
+        inventory.len(),
+        20,
+        "the non-mouse groups hold twenty distinct key atoms: {inventory:?}"
+    );
+
+    let (spec_atoms, spec_rows) =
+        documented_key_atoms(&spec_md, "### Keys").expect("SPEC.md -> Keys' key table");
+    assert!(
+        spec_rows >= 1,
+        "leg 2's extraction reports at least one row"
+    );
+    compare_key_atoms("SPEC.md -> Keys", &spec_atoms, &inventory).expect("leg 2 agrees at HEAD");
+
+    let (readme_atoms, readme_rows) =
+        documented_key_atoms(&readme, "## Keys").expect("README.md -> Keys' key table");
+    assert!(
+        readme_rows >= 1,
+        "leg 3's extraction reports at least one row"
+    );
+    compare_key_atoms("README.md -> Keys", &readme_atoms, &inventory)
+        .expect("leg 3 agrees at HEAD");
+}
+
+#[test]
+fn a_gutted_document_fails_as_a_broken_control_rather_than_a_clean_tree() {
+    // The section is gone.
+    let no_section = "## Overview\n\nnothing here\n";
+    let err =
+        documented_key_atoms(no_section, "### Keys").expect_err("a missing section is an error");
+    assert!(err.contains("### Keys"), "{err}");
+
+    // The section is there and the key table is not.
+    let no_table = "### Keys\n\nsome prose, no table\n\n### Next\n";
+    let err = documented_key_atoms(no_table, "### Keys").expect_err("a missing table is an error");
+    assert!(err.contains("no key table"), "{err}");
+
+    // The table is reduced to a header row and a separator row.
+    let gutted = "### Keys\n\n| Key | Action |\n|---|---|\n\n### Next\n";
+    let err = documented_key_atoms(gutted, "### Keys").expect_err("an emptied table is an error");
+    assert!(err.contains("row(s)"), "{err}");
+
+    // A table whose Key cells carry no backticked span at all.
+    let unnamed = "### Keys\n\n| Key | Action |\n|---|---|\n| the any key | quits |\n";
+    let err = documented_key_atoms(unnamed, "### Keys").expect_err("no atom is an error");
+    assert!(err.contains("names no key"), "{err}");
+
+    // And the bounding: a whole-document scan would collect every backticked
+    // identifier below the table and pass vacuously in the doc-has-extra
+    // direction. The extraction stops at the table's own last `|` row.
+    let bounded = "### Keys\n\n| Key | Action |\n|---|---|\n| `q` | Quit |\n\n\
+                   `ui::view` and `src/ui/help.rs` are named in this prose\n";
+    let (atoms, rows) = documented_key_atoms(bounded, "### Keys").expect("parse");
+    assert_eq!(atoms, ["q".to_string()].into_iter().collect());
+    assert_eq!(rows, 3);
+}
+
+#[test]
+fn a_row_naming_the_wrong_key_fails() {
+    // The `r` row's `input` changed to `k`, its `action` left as `Refresh`.
+    let err = check_binding_row("Pane", "k", false, "Refresh")
+        .expect_err("a row naming the wrong key must fail");
+    assert!(err.contains("Refresh"), "{err}");
+    assert!(err.contains("Prev"), "{err}");
+    assert!(err.contains('k'), "{err}");
+
+    // And the action-set check still passes on that same tree, which is
+    // precisely why this second check exists: `Refresh` is still named once.
+    compare_bound_and_documented(&bound_action_names(), &inventory_action_names())
+        .expect("the action-set check is blind to a wrong key");
+}
+
+#[test]
+fn every_non_mouse_row_parses_and_agrees_at_head() {
+    let mut checked = 0usize;
+    for group in INVENTORY {
+        if group.title == "Mouse" {
+            continue;
+        }
+        let filtering = matches!(group.scope, Scope::Filter);
+        for binding in group.bindings {
+            let pairs = parse_input(binding.input)
+                .unwrap_or_else(|e| panic!("{} -> {:?}: {e}", group.title, binding.input));
+            assert!(
+                !pairs.is_empty(),
+                "{} -> {:?} parsed to no key",
+                group.title,
+                binding.input
+            );
+            check_binding_row(
+                group.title,
+                binding.input,
+                filtering,
+                action_name(binding.action),
+            )
+            .expect("every row agrees with the driver at HEAD");
+            checked += 1;
+        }
+    }
+    assert_eq!(checked, 25, "five non-mouse groups, 5 + 7 + 4 + 4 + 5 rows");
+}
+
+#[test]
+fn an_unparseable_spelling_fails_rather_than_skipping() {
+    let err = parse_input("the any key").expect_err("an unrecognised spelling is an error");
+    assert!(err.contains("the any key"), "{err}");
+
+    // And it reaches the per-row check as a failure, never as a skipped row or
+    // a row treated as a mouse gesture.
+    let err = check_binding_row("Pane", "the any key", false, "Refresh")
+        .expect_err("an unparseable row fails the per-row check");
+    assert!(err.contains("the any key"), "{err}");
+
+    // A mouse spelling in a non-mouse group is unparseable too.
+    assert!(parse_input("Wheel ↓").is_err());
+    assert!(parse_input("Click").is_err());
+}

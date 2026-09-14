@@ -226,30 +226,30 @@ run it avoids.
 ## 10. The contract tier
 <!-- kind: behavior -->
 
-- [ ] 10.1 RED: Add to `tests/doc_contract.rs` the tests named for An action added without a help
+- [x] 10.1 RED: Add to `tests/doc_contract.rs` the tests named for An action added without a help
   row fails `cargo test`, A binding removed from the driver and left in the help fails, The sweep
   finds the twenty-two bound actions and exactly two exemptions, The sweep covers the mouse under
   both overlay states, A binding added to the driver and not to the docs fails `make check`, The
   documented key set and the inventory agree at HEAD, and A gutted document fails as a broken
   control rather than a clean tree.
-- [ ] 10.2 GREEN: Write `action_name(Action) -> &'static str` as an exhaustive `match` with no
+- [x] 10.2 GREEN: Write `action_name(Action) -> &'static str` as an exhaustive `match` with no
   wildcard arm, the two sweeps, and the three-leg comparison per
   `specs/doc-conformance/spec.md`. Assert the exemption list holds exactly `FilterPush` and
   `Ignore` and has length two. The mouse sweep's first run yields **seven** names including
   `SelectTab`; if it yields six the fixture's selected change is carrying no artifacts.
-- [ ] 10.2a RED: Add the tests named for A row naming the wrong key fails, Every non-mouse row
+- [x] 10.2a RED: Add the tests named for A row naming the wrong key fails, Every non-mouse row
   parses and agrees at HEAD, and An unparseable spelling fails rather than skipping.
-- [ ] 10.2b GREEN: Write the `input` parser and the per-row assertion
+- [x] 10.2b GREEN: Write the `input` parser and the per-row assertion
   `action_for(press(code, mods), filtering_for(scope)) == binding.action`, with the
   every-row-parsed totality assertion. Without this the action-set check passes against an
   inventory that names the wrong key for every row (`specs/binding-inventory/spec.md`).
-- [ ] 10.3 CHECK: Negative control — the sweep must fail in **both** directions. Temporarily
+- [x] 10.3 CHECK: Negative control — the sweep must fail in **both** directions. Temporarily
   delete `action_for`'s `Char('r')` arm and confirm the check names `Refresh` as documented but
   unreachable; restore it. Temporarily remove a `Binding` and confirm it names the action as
   bound but undocumented; restore it. Record both.
-- [ ] 10.4 CHECK: Confirm the landed `documented_mouse_actions` check still passes with the new
+- [x] 10.4 CHECK: Confirm the landed `documented_mouse_actions` check still passes with the new
   mouse row in `SPEC.md` → Keys' mouse table.
-- [ ] 10.5 GREEN: Bring both key tables into agreement with `INVENTORY`'s key atoms. Four rows,
+- [x] 10.5 GREEN: Bring both key tables into agreement with `INVENTORY`'s key atoms. Four rows,
   not one: `?` in **both**; `Space` in `README.md`, which omits it while `SPEC.md` carries it;
   and `Backspace` in **both**, which each document mentions only inside the `/` row's prose
   while `INVENTORY`'s `While filtering` group binds it to `FilterPop`. Legs 2 and 3 read those
@@ -258,9 +258,9 @@ run it avoids.
   `" / "`, the Key column's backticked spans only, and exactly two aliases (`arrows` → `↑`/`↓`,
   and `` `1`–`9` `` → `1–9`) — is specified in `specs/doc-conformance/spec.md`. Measured against
   HEAD, those four rows are the *entire* residual difference in both directions.
-- [ ] 10.6 REFACTOR: Collapse the two sweeps' shared setup if it duplicates, or state that no
+- [x] 10.6 REFACTOR: Collapse the two sweeps' shared setup if it duplicates, or state that no
   refactor was needed.
-- [ ] 10.7 Run `cargo test --test doc_contract` — no regressions.
+- [x] 10.7 Run `cargo test --test doc_contract` — no regressions.
 
 ## 11. Change Review
 <!-- kind: operational -->
