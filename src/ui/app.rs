@@ -181,14 +181,123 @@ pub struct HeadingSection {
 /// The crate's **one** rule for deriving sections from a document's own
 /// headings — the same function for a task file and for a spec file, because
 /// two implementations of one rule drift.
-pub fn split_headings(_text: &str) -> Vec<HeadingSection> {
-    unimplemented!("heading-sections task 1.2")
+///
+/// A line is a heading exactly when, **outside a fenced code block**, it
+/// begins with at most three spaces of indent, then one to six `#`
+/// characters, then at least one space, then a non-empty remainder after
+/// trimming. Fences are tracked: a trimmed line beginning with three or more
+/// backticks or three or more tildes opens one, and the next trimmed line
+/// beginning with at least as many of the **same** character closes it. Every
+/// line inside an open fence, the fence lines included, is body text — this
+/// repository's own `tasks.md` files carry well over a thousand `# comment`
+/// lines inside `sh` fences, each of which would otherwise become a level-one
+/// section (design.md -> Decision 4).
+///
+/// The returned sections **partition** the text: `body` is the verbatim bytes
+/// between a heading's line and the next heading line at any level, so
+/// reassembling the heading lines and bodies reproduces the input, less the
+/// preamble before the first heading, which is no section (design.md ->
+/// Decision 6). Pure and total: no I/O, no panic for any input, no `ratatui`
+/// type, and no display-width measurement at all — truncation is the header
+/// row's job, and measuring no width is why this is sited here rather than in
+/// `src/ui/detail.rs` (design.md -> Decision 11).
+///
+/// See `specs/artifact-folds/spec.md` -> "Headings split a file into nested
+/// sections".
+pub fn split_headings(text: &str) -> Vec<HeadingSection> {
+    let mut sections = Vec::new();
+    // The heading whose body is still open: its level, its label, and the byte
+    // offset its body starts at.
+    let mut open: Option<(u8, String, usize)> = None;
+    // The fence currently open: its character and the length of its run.
+    let mut fence: Option<(char, usize)> = None;
+    let mut start = 0;
+
+    for line in text.split_inclusive('\n') {
+        let end = start + line.len();
+        let trimmed = line.trim();
+
+        if let Some((ch, run)) = fence {
+            if marker_run(trimmed, ch) >= run {
+                fence = None;
+            }
+        } else if let Some(opener) = fence_opener(trimmed) {
+            fence = Some(opener);
+        } else if let Some((level, label)) = heading_of(line) {
+            if let Some((prev_level, prev_label, body_start)) = open.take() {
+                sections.push(HeadingSection {
+                    level: prev_level,
+                    label: prev_label,
+                    body: text[body_start..start].to_string(),
+                });
+            }
+            open = Some((level, label, end));
+        }
+
+        start = end;
+    }
+
+    if let Some((level, label, body_start)) = open {
+        sections.push(HeadingSection {
+            level,
+            label,
+            body: text[body_start..].to_string(),
+        });
+    }
+    sections
+}
+
+/// The length of the run of `ch` at the start of `trimmed`. Both fence
+/// characters and `#` are one byte, so this byte arithmetic counts them
+/// exactly — and it is not a display-width measurement, which this file is
+/// swept for and which a run of markers does not need.
+fn marker_run(trimmed: &str, ch: char) -> usize {
+    trimmed.len() - trimmed.trim_start_matches(ch).len()
+}
+
+/// The fence `trimmed` opens, if any: its character and the length of its run.
+fn fence_opener(trimmed: &str) -> Option<(char, usize)> {
+    ['`', '~'].into_iter().find_map(|ch| {
+        let run = marker_run(trimmed, ch);
+        (run >= 3).then_some((ch, run))
+    })
+}
+
+/// The `(level, label)` pair `line` is a heading for, if it is one. `line` may
+/// carry its own line terminator. Fences are the caller's business: this
+/// answers only the ATX shape.
+fn heading_of(line: &str) -> Option<(u8, String)> {
+    let line = line.strip_suffix('\n').unwrap_or(line);
+    let line = line.strip_suffix('\r').unwrap_or(line);
+
+    let unindented = line.trim_start_matches(' ');
+    if line.len() - unindented.len() > 3 {
+        return None;
+    }
+
+    let after = unindented.trim_start_matches('#');
+    let level = u8::try_from(unindented.len() - after.len()).ok()?;
+    if !(1..=6).contains(&level) || !after.starts_with(' ') {
+        return None;
+    }
+
+    let label = after.trim();
+    (!label.is_empty()).then(|| (level, label.to_string()))
 }
 
 /// Whether `text` is a specification delta: it carries at least one level-3
 /// heading whose label begins `Requirement:`.
-pub fn is_spec_shaped(_text: &str) -> bool {
-    unimplemented!("heading-sections task 1.3")
+///
+/// Asks [`split_headings`] rather than scanning the text a second time, which
+/// is what makes a `### Requirement:` quoted inside a fence — as this
+/// repository's own planning documents do constantly — not count. Two scans
+/// of one rule would drift, and this one would drift in the direction of
+/// folding prose. See `specs/artifact-folds/spec.md` -> "A file splits at its
+/// headings only when it is a spec or a tracked task file".
+pub fn is_spec_shaped(text: &str) -> bool {
+    split_headings(text)
+        .iter()
+        .any(|section| section.level == 3 && section.label.starts_with("Requirement:"))
 }
 
 /// The detail region's content and scroll offset, plus `detail-view`'s three
