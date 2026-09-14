@@ -60,8 +60,7 @@ pub fn header_row(
         // Full form: name + space + schema cell + space + progress cell.
         let name_field_full = w - 2 - schema_len - progress_len;
         if name_field_full >= 1 {
-            let name_field =
-                crate::ui::list::pad_or_truncate_right(name, name_field_full as usize);
+            let name_field = crate::ui::list::pad_or_truncate_right(name, name_field_full as usize);
             return format!("{name_field} {schema_cell} {progress_cell}");
         }
 
@@ -90,8 +89,7 @@ pub fn header_row(
     // Drop the gauge cell and its separating space: name + space + schema + space + progress.
     let name_field_no_gauge = w - 2 - schema_len - progress_len;
     if name_field_no_gauge >= 1 {
-        let name_field =
-            crate::ui::list::pad_or_truncate_right(name, name_field_no_gauge as usize);
+        let name_field = crate::ui::list::pad_or_truncate_right(name, name_field_no_gauge as usize);
         return format!("{name_field} {schema_cell} {progress_cell}");
     }
 
