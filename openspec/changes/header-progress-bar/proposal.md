@@ -43,11 +43,15 @@ None.
 
 ### Modified Capabilities
 
-- `detail-header`: the heading gains the bar and the width-degradation ordering that governs it.
-- `tasks-progress-bar`: `progress_bar` becomes a function two call sites render, not one, so its
-  contract must say what it owes a caller that is not the tasks tab.
-- `responsive-layout`: the mandated 78- and 58-column detail interiors are where the new cell
-  has to fit or drop.
+- `detail-header`: the heading gains the gauge cell and the width-degradation ordering that
+  governs it.
+- `tasks-progress-bar`: the `█`/`░` run becomes a function two call sites render, not one, so
+  its contract must say what it owes a caller that is not the tasks tab.
+
+`responsive-layout` was listed here before the shape below was settled and is **not** modified:
+the mandated 78- and 58-column detail interiors do not move, the gauge's budget is fixed by
+`detail-header` rather than by a layout split, and the display-column rule the gauge inherits is
+already that capability's standing one. Writing a delta for it would say nothing.
 
 ## Impact
 
@@ -59,9 +63,27 @@ None.
 - No dependency, manifest, or gate change. No process spawn, no I/O — this is a pure view change
   on both sides of the seam.
 
-## Open Question for Review
+## Settled: the shape and the width split
 
-Whether the bar **replaces** the numeric cell at narrow widths or sits beside it. `header_row`
-currently drops the schema cell first and the progress cell second; a third cell needs a place
-in that order, and at 58 columns the name field is already the thing being squeezed. Worth
-prototyping both before the specs artifact fixes one.
+The open question this proposal raised — whether the bar **replaces** the numeric cell or sits
+beside it — was resolved before the specs artifact, in favour of **beside**, in the one form
+where that is coherent.
+
+`ui::tasks::progress_bar` already *contains* the numeric cell (`gauge ␣ [n/m] ␣ pct%`), so
+"beside" cannot mean calling it: the header would state `[4/9]` twice. What the header renders
+instead is the **bare gauge run** — `tasks::gauge_of`, raised from private to `pub(crate)` — as
+a fourth cell in the existing grammar, with no percent cell at any width.
+
+- **Drop order: gauge, then schema, then numeric.** The new cell goes *first* in the order, so
+  the two existing cells keep their relative positions and every width band below the full
+  form produces byte-identically what it produced before. Below 26 columns this change is not
+  observable at all.
+- **Fixed 12-column gauge budget; the name field absorbs the remainder.** The gauge reads the
+  same at 58 and at 120 columns, and every column a wider frame brings goes to the name — the
+  field already being squeezed at 58. A proportional split was rejected for turning every width
+  assertion into a computed expectation; a name minimum with a remainder gauge was rejected for
+  leaving a long name truncated at 120 columns where there is plainly room for it.
+- **No gauge at `total == 0`,** and no separating space reserved for one, so a change with no
+  tasks renders exactly the row it renders today.
+
+`progress_bar` itself is untouched — this is the correction to the Capabilities note above.
