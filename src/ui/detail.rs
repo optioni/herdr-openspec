@@ -14,13 +14,33 @@
 
 use crate::ui::layout::columns;
 
-/// The change header's fixed-field grammar:
-/// `[name field][space][schema cell][space][progress cell]`, exactly
-/// `width` characters. The progress cell is `ui::list::progress_cell` — one
-/// implementation, so the header and a list row can never disagree about a
-/// change's progress. A cell too wide for the row is dropped **whole**: the
-/// schema cell first, then the progress cell, leaving the name field alone;
-/// the name is truncated only after both cells have been dropped.
+/// The gauge cell's fixed budget: the number of `█`/`░` display columns
+/// `header_row` reserves for `ui::tasks::gauge_of`, wherever it draws one at
+/// all. A named module-local constant beside the grammar that spends it, on
+/// the same terms every other measurement in this file is a fact about the
+/// row rather than about the frame. See design.md -> Decision 4: twelve
+/// columns leaves a 32-column name field at the 58-column interior, wider
+/// than the longest change name this repository has.
+const HEADER_GAUGE_COLUMNS: u16 = 12;
+
+/// The change header's fixed-field grammar. When `progress.total > 0` it is
+/// `[name field][space][schema cell][space][gauge cell][space][progress
+/// cell]`, exactly `width` display columns; when `progress.total == 0` it
+/// is `[name field][space][schema cell][space][progress cell]` — no gauge
+/// cell and no separating space at all, byte-identically to what this
+/// function produced before the gauge cell existed (design.md -> Decision
+/// 7: a gauge with no denominator would have to invent a fill).
+///
+/// The progress cell is `ui::list::progress_cell` and the gauge cell is
+/// `ui::tasks::gauge_of` — one implementation of each, so the header can
+/// never disagree with a list row about a change's progress, or with the
+/// tracked-tasks tab's own bar about how full a change is. A cell too wide
+/// for the row is dropped **whole**, in this order: the gauge cell first
+/// (design.md -> Decision 2 — this keeps the schema and progress cells at
+/// exactly the positions they held before the gauge was added, so every
+/// band below the full form is unchanged), then the schema cell, then the
+/// progress cell, leaving the name field alone; the name is truncated only
+/// after all cells that apply have been dropped.
 pub fn header_row(
     name: &str,
     schema: &str,
@@ -36,14 +56,46 @@ pub fn header_row(
     let schema_cell = format!("({schema})");
     let schema_len = columns(&schema_cell) as i64;
 
-    // Full form: name + space + schema cell + space + progress cell.
-    let name_field_full = w - 2 - schema_len - progress_len;
+    if progress.total == 0 {
+        // Full form: name + space + schema cell + space + progress cell.
+        let name_field_full = w - 2 - schema_len - progress_len;
+        if name_field_full >= 1 {
+            let name_field =
+                crate::ui::list::pad_or_truncate_right(name, name_field_full as usize);
+            return format!("{name_field} {schema_cell} {progress_cell}");
+        }
+
+        // Drop the schema cell and its separating space: name + space + progress.
+        let name_field_no_schema = w - 1 - progress_len;
+        if name_field_no_schema >= 1 {
+            let name_field =
+                crate::ui::list::pad_or_truncate_right(name, name_field_no_schema as usize);
+            return format!("{name_field} {progress_cell}");
+        }
+
+        // Drop the progress cell too: the name field alone, the whole width.
+        return crate::ui::list::pad_or_truncate_right(name, w as usize);
+    }
+
+    let gauge_len = i64::from(HEADER_GAUGE_COLUMNS);
+
+    // Full form: name + space + schema cell + space + gauge cell + space + progress.
+    let name_field_full = w - 3 - schema_len - gauge_len - progress_len;
     if name_field_full >= 1 {
         let name_field = crate::ui::list::pad_or_truncate_right(name, name_field_full as usize);
+        let gauge_cell = crate::ui::tasks::gauge_of(progress, HEADER_GAUGE_COLUMNS);
+        return format!("{name_field} {schema_cell} {gauge_cell} {progress_cell}");
+    }
+
+    // Drop the gauge cell and its separating space: name + space + schema + space + progress.
+    let name_field_no_gauge = w - 2 - schema_len - progress_len;
+    if name_field_no_gauge >= 1 {
+        let name_field =
+            crate::ui::list::pad_or_truncate_right(name, name_field_no_gauge as usize);
         return format!("{name_field} {schema_cell} {progress_cell}");
     }
 
-    // Drop the schema cell and its separating space: name + space + progress.
+    // Drop the schema cell too: name + space + progress.
     let name_field_no_schema = w - 1 - progress_len;
     if name_field_no_schema >= 1 {
         let name_field =

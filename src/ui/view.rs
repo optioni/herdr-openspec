@@ -5226,8 +5226,8 @@ mod tests {
             let last_col = if width == 60 { 58u16 } else { 119 };
             for x in (last_col - 4)..=last_col {
                 assert_eq!(
-                    cell(&buf, x, 0).style(),
-                    palette::style(Role::RegionHeadingFocused),
+                    cell(&buf, x, 0).style().add_modifier,
+                    palette::style(Role::RegionHeadingFocused).add_modifier,
                     "width {width} x {x}"
                 );
             }
@@ -5243,8 +5243,8 @@ mod tests {
         assert!(header.ends_with("(tdd) █████░░░░░░░ [4/9]"));
         for x in 115..=119u16 {
             assert_eq!(
-                cell(&buf, x, 0).style(),
-                palette::style(Role::RegionHeading),
+                cell(&buf, x, 0).style().add_modifier,
+                palette::style(Role::RegionHeading).add_modifier,
                 "x {x}"
             );
         }
