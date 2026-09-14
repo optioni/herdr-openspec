@@ -2270,7 +2270,15 @@ mod tests {
     }
 
     /// `artifact-content` :: "The tracked-tasks tab concatenates rather
-    /// than folding".
+    /// than folding". The scenario's name is kept verbatim because a delta's
+    /// scenario headers are its merge key; it now pins the **reversal**
+    /// (design.md -> D8): the tab folds, and the concatenation is gone.
+    ///
+    /// The four sections are exactly what `sync_detail` derives for a
+    /// tracked-tasks artifact resolving to **two** paths — a depth-0 file
+    /// section per path and that file's one group beneath it at depth 1 — so
+    /// the shape asserted here is the derivation's, written out rather than
+    /// re-derived, which is what keeps this a `content_lines` unit test.
     #[test]
     fn the_tracked_tasks_tab_concatenates_rather_than_folding() {
         let progress = Progress {
@@ -2279,44 +2287,90 @@ mod tests {
         };
         let change =
             fixture::with_marked_artifacts(&paths_free(&["proposal", "tasks"]), Some(1), progress);
+        let sections = |first_item: &str| {
+            vec![
+                ArtifactSection {
+                    label: Some("a".to_string()),
+                    text: String::new(),
+                    depth: 0,
+                },
+                ArtifactSection {
+                    label: Some("1. Setup".to_string()),
+                    text: format!("- [{first_item}] a\n"),
+                    depth: 1,
+                },
+                ArtifactSection {
+                    label: Some("b".to_string()),
+                    text: String::new(),
+                    depth: 0,
+                },
+                ArtifactSection {
+                    label: Some("2. Build".to_string()),
+                    text: "- [ ] b\n".to_string(),
+                    depth: 1,
+                },
+            ]
+        };
+        let detail_of = |sections, expanded| Detail {
+            sections,
+            scroll: 0,
+            tab: 1,
+            problems: Vec::new(),
+            loaded: None,
+            expanded,
+            drawn_width: None,
+        };
         for width in [78, 58] {
-            let d = Detail {
-                sections: vec![
-                    ArtifactSection {
-                        label: Some(String::new()),
-                        text: "## 1. Setup\n- [x] a\n".to_string(),
-                        depth: 0,
-                    },
-                    ArtifactSection {
-                        label: Some(String::new()),
-                        text: "## 2. Build\n- [ ] b\n".to_string(),
-                        depth: 0,
-                    },
-                ],
-                scroll: 0,
-                tab: 1,
-                problems: Vec::new(),
-                loaded: None,
-                expanded: std::collections::BTreeSet::new(),
-                drawn_width: None,
-            };
+            // Both subtrees incomplete: the seed opened every section.
+            let d = detail_of(
+                sections(" "),
+                std::collections::BTreeSet::from([0, 1, 2, 3]),
+            );
             let rows = content_lines(&d, Some(&change), width);
-            let want = crate::ui::tasks::lines(
-                "## 1. Setup\n- [x] a\n## 2. Build\n- [ ] b\n",
-                &progress,
-                width,
+            let bar = crate::ui::tasks::progress_bar(&progress, width);
+            assert_eq!(
+                rows.iter().map(ContentRow::text).collect::<Vec<_>>(),
+                vec![
+                    bar.clone(),
+                    // `ui::tasks`' own blank line, unpadded — `bar_lines`
+                    // emits the very pair the flat tab leads with.
+                    String::new(),
+                    header("a", 0, true, width),
+                    header("1. Setup", 1, true, width),
+                    "[ ] a".to_string(),
+                    // The fold walk's own separator row, which IS padded.
+                    crate::ui::list::pad_or_truncate_right("", width as usize),
+                    header("b", 0, true, width),
+                    header("2. Build", 1, true, width),
+                    "[ ] b".to_string(),
+                ],
+                "width {width}"
             );
-            assert_eq!(rows.len(), want.len(), "width {width}");
-            for (row, line) in rows.iter().zip(want.iter()) {
-                assert_eq!(&row.line, line, "width {width}");
+
+            // The first file's item checked instead: the seed leaves section
+            // `0` collapsed, which hides its own group entirely.
+            let checked = detail_of(sections("x"), std::collections::BTreeSet::from([2, 3]));
+            let rows = content_lines(&checked, Some(&change), width);
+            assert_eq!(
+                rows.iter().map(ContentRow::text).collect::<Vec<_>>(),
+                vec![
+                    bar,
+                    String::new(),
+                    header("a", 0, false, width),
+                    header("b", 0, true, width),
+                    header("2. Build", 1, true, width),
+                    "[ ] b".to_string(),
+                ],
+                "width {width}: a collapsed depth-0 file section hides its own group"
+            );
+
+            for row in &rows {
+                assert!(
+                    !row.text().starts_with("## "),
+                    "width {width}: the two group headings became labels"
+                );
+                assert!(columns(&row.text()) <= width as usize, "width {width}");
             }
-            assert!(
-                !rows
-                    .iter()
-                    .any(|r| matches!(r.kind, ContentKind::SectionHeader { .. })),
-                "width {width}: a header row must never appear on the tracked-tasks tab, \
-                 even with two sections"
-            );
         }
     }
 

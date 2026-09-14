@@ -4427,6 +4427,285 @@ mod tests {
         }
     }
 
+    // --- group 6: the tracked-tasks tab folds, seeds, and clamps -----
+
+    /// A `Route::Detail` dashboard over one change carrying an unmarked
+    /// `proposal` and a `tracks_tasks` `tasks` artifact, each resolving to one
+    /// path, **synced** through a reader answering `source` for either — so
+    /// `detail.sections` and `detail.expanded` are the derivation's own and
+    /// not a hand-built stand-in for it, which is the only way the seed can be
+    /// observed at all.
+    fn synced_task_dashboard(
+        source: &str,
+        progress: crate::tasks::Progress,
+        tab: usize,
+    ) -> Dashboard {
+        let change = fixture::track_tasks_at(
+            fixture::with_artifacts(
+                fixture::active("detail-view", progress.completed, progress.total),
+                &[
+                    (
+                        "proposal",
+                        &["/repo/openspec/changes/detail-view/proposal.md"],
+                    ),
+                    ("tasks", &["/repo/openspec/changes/detail-view/tasks.md"]),
+                ],
+            ),
+            1,
+        );
+        let mut d = dashboard_with_detail(
+            vec![change],
+            Vec::new(),
+            1,
+            Route::Detail,
+            Detail {
+                sections: Vec::new(),
+                scroll: 0,
+                tab,
+                problems: Vec::new(),
+                loaded: None,
+                expanded: std::collections::BTreeSet::new(),
+                drawn_width: None,
+            },
+        );
+        let recorder = crate::testutil::RecordingReader::always(Ok(source.to_string()));
+        let read = |p: &std::path::Path| recorder.read(p);
+        d.sync_detail(&read);
+        d
+    }
+
+    /// `text` padded to `width` on the crate's one right-truncation grammar —
+    /// the shape every row of `drawn_content_rows` comes back in.
+    fn padded(text: &str, width: u16) -> String {
+        crate::ui::list::pad_or_truncate_right(text, width as usize)
+    }
+
+    const TWO_TASK_GROUPS: &str =
+        "## 1. Setup\n\n- [x] 1.1 first\n- [ ] 1.2 second\n\n## 2. Build\n\n- [ ] 2.1 third\n";
+
+    /// `tasks-checklist` :: "A foldable tasks tab draws its groups as fold headers".
+    #[test]
+    fn a_foldable_tasks_tab_draws_its_groups_as_fold_headers() {
+        let progress = crate::tasks::Progress {
+            completed: 1,
+            total: 3,
+        };
+        let mut d = synced_task_dashboard(TWO_TASK_GROUPS, progress, 1);
+        assert_eq!(
+            d.detail.expanded,
+            std::collections::BTreeSet::from([0, 1]),
+            "both subtrees are incomplete, so the seed opened both"
+        );
+
+        for width in [120, 60] {
+            let interior = interior_width(width);
+            let bar = crate::ui::tasks::progress_bar(&progress, interior);
+            assert_eq!(
+                drawn_content_rows(&render_at(width, 20, &d), interior),
+                vec![
+                    padded(&bar, interior),
+                    padded("", interior),
+                    expected_header_at("1. Setup", false, 0, interior),
+                    padded("[✓] 1.1 first", interior),
+                    padded("[ ] 1.2 second", interior),
+                    padded("", interior),
+                    expected_header_at("2. Build", false, 0, interior),
+                    padded("[ ] 2.1 third", interior),
+                ],
+                "width {width}: both groups open, the `#` markers gone with their heading lines"
+            );
+        }
+
+        d.detail.expanded.clear();
+        for width in [120, 60] {
+            let interior = interior_width(width);
+            let bar = crate::ui::tasks::progress_bar(&progress, interior);
+            assert_eq!(
+                drawn_content_rows(&render_at(width, 20, &d), interior),
+                vec![
+                    padded(&bar, interior),
+                    padded("", interior),
+                    expected_header_at("1. Setup", true, 0, interior),
+                    expected_header_at("2. Build", true, 0, interior),
+                ],
+                "width {width}: collapsed, and no item row at all"
+            );
+        }
+    }
+
+    /// `artifact-content` :: "The progress bar leads the folded task groups" —
+    /// the bar is leading body owned by no section, so a fold can never hide
+    /// it (design.md -> D8).
+    #[test]
+    fn the_progress_bar_leads_the_folded_task_groups() {
+        let progress = crate::tasks::Progress {
+            completed: 1,
+            total: 3,
+        };
+        let d = synced_task_dashboard(
+            "## 1. Done\n\n- [x] a\n\n## 2. Doing\n\n- [ ] b\n- [ ] c\n",
+            progress,
+            1,
+        );
+        for width in [120, 60] {
+            let interior = interior_width(width);
+            let bar = crate::ui::tasks::progress_bar(&progress, interior);
+            assert_eq!(
+                drawn_content_rows(&render_at(width, 20, &d), interior),
+                vec![
+                    padded(&bar, interior),
+                    padded("", interior),
+                    expected_header_at("1. Done", true, 0, interior),
+                    expected_header_at("2. Doing", false, 0, interior),
+                    padded("[ ] b", interior),
+                    padded("[ ] c", interior),
+                ],
+                "width {width}"
+            );
+        }
+    }
+
+    /// `artifact-folds` :: "A task file holding no items does not split" — the
+    /// `total > 0` half of the gate, which is what keeps "no heading line even
+    /// where the source carries headings" true by construction.
+    #[test]
+    fn a_task_file_holding_no_items_does_not_split() {
+        let progress = crate::tasks::Progress {
+            completed: 0,
+            total: 0,
+        };
+        let d = synced_task_dashboard("## 1. Setup\n\nsome prose\n\n## 2. Build\n", progress, 1);
+        assert_eq!(d.detail.sections.len(), 1, "one unsplit entry");
+        assert!(!d.detail.foldable());
+
+        for width in [120, 60] {
+            let interior = interior_width(width);
+            let bar = crate::ui::tasks::progress_bar(&progress, interior);
+            assert_eq!(
+                drawn_content_rows(&render_at(width, 20, &d), interior),
+                vec![
+                    padded(&bar, interior),
+                    padded("", interior),
+                    padded("No tasks yet", interior),
+                ],
+                "width {width}: no header row and no heading line"
+            );
+        }
+    }
+
+    /// `artifact-content` :: "A missing artifact file renders `No content yet`
+    /// and nothing else" — an artifact resolving to no path at all, marked
+    /// `tracks_tasks`, so the absence of a progress-bar row is a real claim.
+    #[test]
+    fn a_missing_artifact_file_renders_no_content_yet_and_nothing_else() {
+        let change = fixture::with_marked_artifacts(
+            &[("tasks", &[][..])],
+            Some(0),
+            crate::tasks::Progress {
+                completed: 1,
+                total: 3,
+            },
+        );
+        let mut d = dashboard_with_detail(
+            vec![change],
+            Vec::new(),
+            1,
+            Route::Detail,
+            Detail {
+                sections: Vec::new(),
+                scroll: 0,
+                tab: 0,
+                problems: Vec::new(),
+                loaded: None,
+                expanded: std::collections::BTreeSet::new(),
+                drawn_width: None,
+            },
+        );
+        let recorder = crate::testutil::RecordingReader::always(Ok(String::new()));
+        let read = |p: &std::path::Path| recorder.read(p);
+        d.sync_detail(&read);
+        assert!(d.detail.sections.is_empty(), "no path, no section");
+
+        for width in [120, 60] {
+            let interior = interior_width(width);
+            assert_eq!(
+                drawn_content_rows(&render_at(width, 20, &d), interior),
+                vec![padded("No content yet", interior)],
+                "width {width}: no header row, no progress-bar row, no problem row"
+            );
+        }
+
+        // The narrow band no mandated width can reach: the literal is longer
+        // than the region. The detail region spends both gutters here, so the
+        // content area is the frame less two columns.
+        for (frame, want) in [
+            (15u16, "No content y…"),
+            (14, "No content …"),
+            (13, "No content…"),
+        ] {
+            let buf = render_at(frame, 20, &d);
+            assert_eq!(
+                cols(&row_text(&buf, 5), 1..frame as usize - 1),
+                want,
+                "frame {frame}"
+            );
+        }
+        let _ = render_at(1, 20, &d);
+    }
+
+    /// `artifact-folds` :: "A mostly-finished task file opens at its first
+    /// unfinished group".
+    #[test]
+    fn a_mostly_finished_task_file_opens_at_its_first_unfinished_group() {
+        let progress = crate::tasks::Progress {
+            completed: 2,
+            total: 4,
+        };
+        let d = synced_task_dashboard(
+            "## 1. Done\n\n- [x] a\n\n## 2. Doing\n\n- [x] b\n- [ ] c\n\n## 3. Later\n\n- [ ] d\n",
+            progress,
+            1,
+        );
+        assert_eq!(
+            d.detail.expanded,
+            std::collections::BTreeSet::from([1, 2]),
+            "the finished first group stays shut"
+        );
+
+        for width in [120, 60] {
+            let interior = interior_width(width);
+            let bar = crate::ui::tasks::progress_bar(&progress, interior);
+            assert_eq!(
+                drawn_content_rows(&render_at(width, 20, &d), interior),
+                vec![
+                    padded(&bar, interior),
+                    padded("", interior),
+                    expected_header_at("1. Done", true, 0, interior),
+                    expected_header_at("2. Doing", false, 0, interior),
+                    padded("[✓] b", interior),
+                    padded("[ ] c", interior),
+                    padded("", interior),
+                    expected_header_at("3. Later", false, 0, interior),
+                    padded("[ ] d", interior),
+                ],
+                "width {width}"
+            );
+        }
+
+        let finished = synced_task_dashboard(
+            "## 1. Done\n\n- [x] a\n\n## 2. Also done\n\n- [x] b\n",
+            crate::tasks::Progress {
+                completed: 2,
+                total: 2,
+            },
+            1,
+        );
+        assert!(
+            finished.detail.expanded.is_empty(),
+            "a finished change opens as a list of group names alone"
+        );
+    }
+
     /// `artifact-content` :: "A wide-character document stays inside the detail region" —
     /// a discriminating instance of the scenario `detail.rs`'s own test already carries.
     /// That landed fixture (a CJK paragraph, a heading, and a family-emoji bullet) passes
@@ -6119,17 +6398,27 @@ mod tests {
         if width == 120 { 78 } else { 58 }
     }
 
+    /// `tasks-checklist` :: "The tasks tab shows checkboxes and its siblings
+    /// show markdown".
+    ///
+    /// Both dashboards are **synced** rather than hand-built, because the
+    /// group heading is now that group's own fold header and only the
+    /// derivation produces one. The scenario's own source is a **two**-group
+    /// file rather than the one-group file its prose names: a one-group task
+    /// file splits into exactly one section, which `Detail::foldable` reports
+    /// not-foldable by design (design.md -> D10 names this edge in as many
+    /// words), so no header row could be drawn for it. The rows asserted are
+    /// the scenario's own, in the scenario's own order.
     #[test]
     fn tasks_tab_shows_checkboxes() {
         let progress = crate::tasks::Progress {
             completed: 1,
             total: 3,
         };
-        let ids = ["proposal", "specs", "design", "tasks", "planning-review"];
-        let source = "## 1. Setup\n\n- [x] 1.1 first\n- [ ] 1.2 second\n";
+        let source = TWO_TASK_GROUPS;
 
         for width in [120, 60] {
-            let d3 = dashboard_with_marked_change(&ids, Some(3), progress, source, Vec::new(), 3);
+            let d3 = synced_task_dashboard(source, progress, 1);
             let buf3 = render_at(width, 20, &d3);
             let bar = crate::ui::tasks::progress_bar(&progress, interior_width(width));
             assert_eq!(
@@ -6143,9 +6432,9 @@ mod tests {
                 "width {width}: blank row"
             );
             assert_eq!(
-                detail_interior_cols(&buf3, 7, 11),
-                "## 1. Setup",
-                "width {width}"
+                detail_interior_cols(&buf3, 7, interior_width(width) as usize),
+                expected_header_at("1. Setup", false, 0, interior_width(width)),
+                "width {width}: the group heading is now its own fold header"
             );
             assert_eq!(
                 detail_interior_cols(&buf3, 8, 13),
@@ -6158,7 +6447,7 @@ mod tests {
                 "width {width}"
             );
 
-            let d0 = dashboard_with_marked_change(&ids, Some(3), progress, source, Vec::new(), 0);
+            let d0 = synced_task_dashboard(source, progress, 0);
             let buf0 = render_at(width, 20, &d0);
             // What discriminates the two paths is the ABSENT progress-bar
             // row, not the glyph: `markdown-render` models a task-list item

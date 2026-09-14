@@ -7853,6 +7853,112 @@ mod tests {
             );
         }
 
+        /// A one-change dashboard whose `proposal` is unmarked and whose
+        /// `tasks` artifact — position 1, the selected tab — carries
+        /// `tracks_tasks`, unless `marked` is false.
+        fn tasks_tab_dashboard(marked: bool) -> Dashboard {
+            let artifacts: &[(&str, &[&str])] =
+                &[("proposal", &["/repo/p.md"]), ("tasks", &["/repo/t.md"])];
+            let mut d = dashboard_with_artifacts_named("x", artifacts);
+            if marked {
+                let change = fixture::track_tasks_at(
+                    fixture::with_artifacts(fixture::active("x", 4, 9), artifacts),
+                    1,
+                );
+                d.changes = fixture::set(vec![change], Vec::new(), Vec::new());
+            }
+            d.detail.tab = 1;
+            d
+        }
+
+        /// `artifact-content` :: "The tasks tab seeds its folds once, on the
+        /// key change".
+        #[test]
+        fn the_tasks_tab_seeds_its_folds_once_on_the_key_change() {
+            const UNFINISHED: &str = "## 1. Done\n\n- [x] a\n\n## 2. Doing\n\n- [ ] b\n";
+            const FINISHED: &str = "## 1. Done\n\n- [x] a\n\n## 2. Doing\n\n- [x] b\n";
+
+            for marked in [true, false] {
+                let source = std::cell::RefCell::new(UNFINISHED.to_string());
+                let read =
+                    |_: &std::path::Path| -> Result<String, String> { Ok(source.borrow().clone()) };
+                let want_seed = if marked {
+                    std::collections::BTreeSet::from([1])
+                } else {
+                    std::collections::BTreeSet::new()
+                };
+
+                let mut d = tasks_tab_dashboard(marked);
+                d.sync_detail(&read);
+                assert_eq!(
+                    d.detail.expanded, want_seed,
+                    "marked {marked}: the first sync seeds"
+                );
+
+                // A forced reload of the **same** key re-reads and re-splits
+                // but must not re-seed, even though `b` is now checked.
+                *source.borrow_mut() = FINISHED.to_string();
+                d.refresh.reload = true;
+                d.sync_detail(&read);
+                assert_eq!(
+                    d.detail.expanded, want_seed,
+                    "marked {marked}: a forced reload does not re-seed"
+                );
+
+                // A tab move away and back re-seeds — and finds nothing.
+                d.detail.tab = 0;
+                d.sync_detail(&read);
+                d.detail.tab = 1;
+                d.sync_detail(&read);
+                assert!(
+                    d.detail.expanded.is_empty(),
+                    "marked {marked}: the re-seed found no incomplete subtree"
+                );
+            }
+        }
+
+        /// `artifact-folds` :: "A completed group does not fold shut under the
+        /// reader" — the whole reason the seed runs on the key change only.
+        #[test]
+        fn a_completed_group_does_not_fold_shut_under_the_reader() {
+            const MOSTLY: &str = "## 1. Done\n\n- [x] a\n\n## 2. Doing\n\n- [x] b\n- [ ] c\n\n## 3. Later\n\n- [ ] d\n";
+            const ALL_BUT_LAST: &str = "## 1. Done\n\n- [x] a\n\n## 2. Doing\n\n- [x] b\n- [x] c\n\n## 3. Later\n\n- [ ] d\n";
+
+            let source = std::cell::RefCell::new(MOSTLY.to_string());
+            let read =
+                |_: &std::path::Path| -> Result<String, String> { Ok(source.borrow().clone()) };
+
+            let mut d = tasks_tab_dashboard(true);
+            d.sync_detail(&read);
+            assert_eq!(
+                d.detail.expanded,
+                std::collections::BTreeSet::from([1, 2]),
+                "the mostly-finished file opens at its first unfinished group"
+            );
+
+            // An agent in another pane checks `c` off: a forced reload on an
+            // unchanged key.
+            *source.borrow_mut() = ALL_BUT_LAST.to_string();
+            d.refresh.reload = true;
+            d.sync_detail(&read);
+            assert_eq!(
+                d.detail.expanded,
+                std::collections::BTreeSet::from([1, 2]),
+                "the group the reader is in must not fold shut under them"
+            );
+
+            // Moving the tab away and back re-seeds it to hold `2` alone.
+            d.detail.tab = 0;
+            d.sync_detail(&read);
+            d.detail.tab = 1;
+            d.sync_detail(&read);
+            assert_eq!(
+                d.detail.expanded,
+                std::collections::BTreeSet::from([2]),
+                "the re-seed found only the third group incomplete"
+            );
+        }
+
         #[test]
         fn switching_the_tab_rereads_and_so_does_switching_the_change() {
             let a = fixture::with_artifacts(
