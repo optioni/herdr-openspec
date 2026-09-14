@@ -116,10 +116,10 @@ Everything here records a value that stops existing once group 2 lands. It must 
 ## 1. The shared gauge run
 <!-- kind: behavior -->
 
-- [ ] 1.1 NOTE: `gauge_of(&Progress { completed: 4, total: 9 }, 0)` already returns the empty
+- [x] 1.1 NOTE: `gauge_of(&Progress { completed: 4, total: 9 }, 0)` already returns the empty
   string today — `filled = 4 * 0 / 9 = 0` and both push loops are empty — so the `g == 0` arm of
   1.5's guard codifies existing behaviour. Only the `total == 0` arm removes a division by zero.
-- [ ] 1.2 RED: In `src/ui/tasks.rs`, write `the_gauge_is_full_exactly_when_the_change_is_complete`,
+- [x] 1.2 RED: In `src/ui/tasks.rs`, write `the_gauge_is_full_exactly_when_the_change_is_complete`,
   `the_promoted_function_is_total_at_both_guard_values` (only its `total == 0` assertion is
   RED; see 1.1), and the two saturation scenarios —
   `the_completeness_property_holds_at_the_saturation_boundary` and
@@ -127,27 +127,36 @@ Everything here records a value that stops existing once group 2 lands. It must 
   `Progress { completed: usize::MAX, total: usize::MAX }` clause at `g` of 12, 48 and 68; that
   clause is what fails against the shipped implementation, since every other value already
   passes. Confirm with `redfail`: each must report `FAILED`, not `ABSENT`.
-- [ ] 1.3 CHARACTERIZE: Write `the_bar_s_rendered_output_does_not_move` — `progress_bar` over
+- [x] 1.3 CHARACTERIZE: Write `the_bar_s_rendered_output_does_not_move` — `progress_bar` over
   widths 0..=130 for 5 `Progress` values, with the 78- and 58-column expectations for 4-of-9
   built independently of `progress_bar` rather than by calling it, per
   `full_grammar_is_byte_identical_to_pre_change_output`'s stated discipline at
   `src/ui/tasks.rs:1211`. Green at HEAD and must stay green through 1.5, except the one
   saturating input 1.3 deliberately moves.
-- [ ] 1.4 GREEN: Widen `gauge_of`'s and `percent_of`'s arithmetic to `u128`, dropping both
+
+  **Clarified while implementing:** "except the one saturating input" names the scenario 1.2
+  writes (`a_saturating_progress_renders_a_full_gauge_and_a_full_percentage`), not a clause of
+  this test. A CHARACTERIZE test must be green at HEAD *and* after 1.4/1.5; one carrying the
+  post-widening saturating literal would be a second RED task under a CHARACTERIZE label. So
+  this test asserts no-panic and fits-width over the whole `0..=130` x 5-`Progress` sweep —
+  a bound that holds either side of the widening, since only the fill's *content* moves — plus
+  the literal 78- and 58-column strings for the non-saturating 4-of-9 case. The saturating
+  case's new content is 1.2's to assert.
+- [x] 1.4 GREEN: Widen `gauge_of`'s and `percent_of`'s arithmetic to `u128`, dropping both
   `saturating_mul` calls. Per design.md → Decision 11: saturation yields the wrong quotient
   (`u64::MAX / u64::MAX == 1`), so a complete change renders one filled cell beside `1%`.
   Verify the ordinary values are unmoved — 4/9 at `g` 68 and 48 give 30 and 21, 3/10 at 12
   gives 3 — which 1.2 also pins.
-- [ ] 1.5 GREEN: Raise `gauge_of` to `pub(crate)` and add the totality guard returning
+- [x] 1.5 GREEN: Raise `gauge_of` to `pub(crate)` and add the totality guard returning
   `String::new()` at `g == 0 || progress.total == 0`, per design.md → Decisions 5 and 6.
-- [ ] 1.6 REFACTOR: Update `gauge_of`'s and `percent_of`'s doc comments — they state
+- [x] 1.6 REFACTOR: Update `gauge_of`'s and `percent_of`'s doc comments — they state
   `total == 0` is never passed, name a saturating multiply, and hedge the fill property with
   "given `completed <= total`", all of which 1.3 and 1.4 make stale.
-- [ ] 1.7 CHECK: Contract gate. `gauge_of` becomes reachable from a second module, and two
+- [x] 1.7 CHECK: Contract gate. `gauge_of` becomes reachable from a second module, and two
   live requirements of `tasks-progress-bar` are MODIFIED; confirm `cargo test --lib ui::tasks`
   is green and that the only `progress_bar` output that moved is the saturating one 1.2
   excepts.
-- [ ] 1.8 Run `cargo test --lib ui::tasks` — no regressions.
+- [x] 1.8 Run `cargo test --lib ui::tasks` — no regressions.
 
 ## 2. The header's gauge cell — every test, then the implementation
 <!-- kind: behavior -->
