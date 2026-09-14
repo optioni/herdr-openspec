@@ -2,10 +2,17 @@
 
 ## Purpose
 Specifies the detail region's own heading row and its grammar: the selected change's name in
-a padded-or-ellipsised field, its schema in parentheses, and the same right-aligned progress
-cell the list rows use — one implementation, so the header and the row can never disagree
-about a change's progress — with the schema cell and then the progress cell dropped whole at
-named width boundaries so the name is always what survives. This heading is bold when the
+a padded-or-ellipsised field, its schema in parentheses, a fixed twelve-column `█`/`░` gauge
+of how far along it is, and the same right-aligned progress cell the list rows use — one
+implementation of each, so the header can never disagree with a list row about a change's
+progress or with the tracked-tasks tab's own bar about how full it is — with the gauge cell,
+then the schema cell, then the progress cell dropped whole at named width boundaries so the
+name is always what survives. The gauge is first in that order, which is what keeps every
+band below the full form byte-identical to the grammar that preceded it; a change with no
+tasks draws no gauge and reserves no space for one, since a gauge with no denominator would
+have to invent a fill. The gauge's twelve columns are fixed at every width — every column a
+wider frame brings goes to the name field, the one already squeezed at the narrower mandated
+interior. This heading is bold when the
 detail region is routed and dim otherwise, the same pair every region's heading takes; it is
 drawn above the region's interior, never inside it. It also fixes when the row is drawn at
 all: whenever the detail region is, and never when the visible list is empty, where the whole

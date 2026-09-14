@@ -347,31 +347,37 @@ against the baseline shas, which detect the slide either way.
 ## 5. Documentation
 <!-- kind: operational -->
 
-- [ ] 5.1 Rewrite `openspec/specs/detail-header/spec.md`'s `## Purpose` (lines 3–14) — it
+- [x] 5.1 Rewrite `openspec/specs/detail-header/spec.md`'s `## Purpose` (lines 3–14) — it
   enumerates three cells "with the schema cell and then the progress cell dropped whole", which
   this change makes wrong. A delta carries no Purpose block and `openspec archive` never
   rewrites one from a delta, so an untouched Purpose ships stale; this repository has already
   paid for that twice (commits `9b63ca6`, `a156f9a`). Audience: anyone reading the live
   capability.
-- [ ] 5.2 Rewrite `openspec/specs/tasks-progress-bar/spec.md`'s `## Purpose` (lines 3–12) —
+- [x] 5.2 Rewrite `openspec/specs/tasks-progress-bar/spec.md`'s `## Purpose` (lines 3–12) —
   it describes the gauge only as part of the tracked-tasks line, never as the crate's one
   shared run with a second renderer. Same archive-time reason as 6.1.
-- [ ] 5.3 Rewrite `SPEC.md` § Detail view, line 492 — "a header carrying change name, schema,
+- [x] 5.3 Rewrite `SPEC.md` § Detail view, line 492 — "a header carrying change name, schema,
   and progress in the interior's first row" gains the gauge cell, its fixed 12 columns and its
   first place in the drop order, and "the interior's first row" is corrected to the region's
   heading row, which `pane-chrome` made stale. Audience: anyone implementing against the design
   contract, where `SPEC.md` wins over prose.
-- [ ] 5.4 Rewrite `AGENTS.md` line 79 — "the selected change's own header (name, schema,
+- [x] 5.4 Rewrite `AGENTS.md` line 79 — "the selected change's own header (name, schema,
   progress)" becomes name, schema, gauge, progress, and states the durable seam rule: the crate
   has **one** gauge (`ui::tasks::gauge_of`) beside its one progress cell
   (`ui::list::progress_cell`), and a third rendering of progress calls them rather than
   formatting its own. Rewrite in place; do not append.
-- [ ] 5.5 CHECK: Confirm `SPEC.md`'s degraded-states row *A marked tab's artifact resolves to
+- [x] 5.5 CHECK: Confirm `SPEC.md`'s degraded-states row *A marked tab's artifact resolves to
   no file…* is left **unchanged**, and record why: its claim that the header "still shows the
   counted pair" stays true with a gauge beside it, and its text is the merge key binding it to
   `tests/degraded-coverage.toml`'s `condition`, so rewording costs an identical edit at two
   further sites for no gain in accuracy.
-- [ ] 5.6 VERIFY: `cargo test --test doc_contract` and `cargo test --test degraded_coverage`
+
+  **Confirmed.** `SPEC.md:1017` is byte-identical to its pre-change text: the only line this
+  change adds containing "counted pair" is the § Detail view prose 5.3 rewrites
+  (`git diff 8672d6c -- SPEC.md | grep -E '^[+-].*counted pair'` returns that one added line and
+  nothing removed). Its merge key in `tests/degraded-coverage.toml:115` is therefore untouched
+  too, and `cargo test --test degraded_coverage` is green at 10 passed.
+- [x] 5.6 VERIFY: `cargo test --test doc_contract` and `cargo test --test degraded_coverage`
   green.
 
 ## 6. Lint & Verify

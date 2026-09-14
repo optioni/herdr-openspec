@@ -489,11 +489,24 @@ is what the pane can reach before that later change lands.
 ### Detail view
 
 The detail region's interior is split into three rows-groups (`detail-view`,
-`layout::split_detail`): a header carrying change name, schema, and progress
-in the interior's first row; a tab bar built from the schema's artifact list
-in the second row, with `1`–`9` / `[` / `]` switching between tabs; and
-content below, in the remaining rows, resolved for whichever artifact the
-selected tab names.
+`layout::split_detail`): a header carrying change name, schema, a progress
+gauge and the counted pair, drawn into the region's own **heading row** —
+two rows above the interior, with the region's padding row between, where
+`pane-chrome` put it when it replaced the region's border; a tab bar built
+from the schema's artifact list, with `1`–`9` / `[` / `]` switching between
+tabs; and content below, in the remaining rows, resolved for whichever
+artifact the selected tab names.
+
+The gauge is a bare `█`/`░` run of a fixed **12 columns** — `ui::tasks::gauge_of`,
+the same run the tracked-tasks tab's own bar draws, so the header and that
+tab can never disagree about how full a change is — and it is drawn on
+**every** artifact tab, because the row is built from the selected change and
+never from the selected tab. It is **first** in the header's drop-whole order,
+ahead of the schema and progress cells, so every width band below the full
+form is byte-identical to the grammar that preceded it and this addition is
+not observable below 26 columns. Its twelve columns never grow: every column
+a wider frame brings goes to the name field. A change whose `total` is zero
+draws no gauge and reserves no space for one.
 
 The tab bar addresses artifacts by **position**, never by id, in the
 schema's declared order: `1`–`9` select the first nine positions directly, but

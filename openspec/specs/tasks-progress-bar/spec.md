@@ -1,9 +1,16 @@
 # tasks-progress-bar Specification
 
 ## Purpose
-The single line that leads the tracked-tasks tab: a bare `█`/`░` gauge, then
-`ui::list::progress_cell`'s `[<completed>/<total>]`, then a truncated integer percentage,
-separated by one space each and filling exactly the interior width. It fixes that the gauge
+The crate's one `█`/`░` gauge run, and the single line that leads the tracked-tasks tab: that
+gauge, then `ui::list::progress_cell`'s `[<completed>/<total>]`, then a truncated integer
+percentage, separated by one space each and filling exactly the interior width. The run itself
+is `ui::tasks::gauge_of`, `pub(crate)` and shared: this line is one renderer of it and
+`detail-header`'s heading row is the other, so the two can never disagree about how full the
+same change is — the same reason `ui::list::progress_cell` is one implementation of the
+counted pair. What the run owes a caller that is not this line is fixed here: it is total at
+every gauge width including zero and for a `Progress` with no tasks, both of which return the
+empty string rather than panicking or inventing a fill, and its arithmetic is `u128`, so no
+`Progress` can overflow the product and a complete change is full at every width. It fixes that the gauge
 is full if and only if the change is complete and empty whenever nothing is done, that the
 fields degrade by being dropped whole in a fixed order — percentage, then gauge, then the
 whole line — as the width narrows, and that a change with no tasks shows `[-]` alone rather

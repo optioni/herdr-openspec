@@ -77,8 +77,9 @@ since `foldable-spec-sections` — toggling the section the cursor is on or in a
 archived starting collapsed — with selection, scrolling, and a `/` filter that
 forces every section open for as long as the query is non-empty
 — and the detail region now shows the selected change's own header (name,
-schema, progress), an artifact tab bar built from the schema's declared
-order and switched with `1`–`9`/`[`/`]`, and that tab's content, read
+schema, a twelve-column `█`/`░` gauge, progress), an artifact tab bar built
+from the schema's declared order and switched with `1`–`9`/`[`/`]`, and that
+tab's content, read
 through an injected `&dyn Fn(&Path) -> Result<String, String>` reader
 (`ui::read_artifact` is the one production binding, in `src/ui/mod.rs`) and
 resolved once per `(change directory, tab)` rather than on every frame, as one
@@ -86,7 +87,15 @@ resolved once per `(change directory, tab)` rather than on every frame, as one
 being the one every shipped schema has, becomes a list of foldable per-file
 sections, all collapsed at first, each labelled by its capability directory;
 `Detail::foldable` is the crate's one site for that question and derives it from
-the section count, never storing it. At a foldable tab `detail.scroll` is a
+the section count, never storing it. The header's gauge is drawn on **every**
+artifact tab, not only the tracked-tasks one, and it is first in the header's
+drop-whole order, so every width band below 26 columns is byte-identical to the
+pre-gauge grammar and a change with no tasks draws no gauge and reserves no space
+for one. It is `ui::tasks::gauge_of`, `pub(crate)`, which is the durable rule
+here: the crate has **one** gauge run beside its **one** progress cell
+(`ui::list::progress_cell`), and a third rendering of a change's progress calls
+them rather than formatting its own — two implementations of one fact drift, and
+this is the fact the pane exists to show in more than one place at once. At a foldable tab `detail.scroll` is a
 **line cursor** whose window comes from `layout::viewport`, so `j`/`k` walk the
 section list rather than scrolling an offset, and `Space` folds the section the
 cursor is on or in; a single-section artifact keeps `layout::scroll_offset` and
