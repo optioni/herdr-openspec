@@ -264,5 +264,5 @@ capability renders an existing parse and introduces no second checkbox rule.
   no segment carries a `label`
 - **AND** nothing panics, and each row's `text()` is byte-identical to what this capability
   returned before this change
-- **AND** at width `58`, where the label fits on the first row whole, the same item does
-  split into three segments, so the degradation is width-driven rather than unconditional
+- **AND** at widths `58` and `78`, where the label fits on the first row whole, the same item
+  does split into three segments, so the degradation is width-driven rather than unconditional
