@@ -94,7 +94,7 @@ Every number this plan uses, with the command that produced it, run at HEAD on 2
 Writes `src/tasks.rs` alone. The function takes a `&str` and returns plain data
 (design.md -> Decision 1).
 
-- [ ] 1.1 RED: Write failing `tasks` unit tests named for the eight `task-labels` scenarios —
+- [x] 1.1 RED: Write failing `tasks` unit tests named for the eight `task-labels` scenarios —
       `the_plain_and_compound_label_forms_are_both_recognised`,
       `a_task_number_is_skipped_and_does_not_become_part_of_the_label`,
       `unlabelled_tasks_are_recognised_as_unlabelled`,
@@ -104,18 +104,18 @@ Writes `src/tasks.rs` alone. The function takes a `&str` and returns plain data
       `matching_is_case_sensitive_and_whole_run`, and
       `the_classification_reads_nothing_outside_its_argument`. Confirm each fails on the
       missing `label_of` rather than on a malformed fixture.
-- [ ] 1.2 GREEN: Implement `LabelRole`, `Label { start, len, role }`, and `label_of` per the
+- [x] 1.2 GREEN: Implement `LabelRole`, `Label { start, len, role }`, and `label_of` per the
       five-step rule in `specs/task-labels/spec.md`, with byte arithmetic throughout.
-- [ ] 1.3 GREEN: Implement the classification table as an exact, case-sensitive match over the
+- [x] 1.3 GREEN: Implement the classification table as an exact, case-sensitive match over the
       run, with `Other` as the fallback arm rather than a lookup miss.
-- [ ] 1.4 CHECK: Confirm `label_of` and `LabelRole` reach no schema, over a **comment-stripped**
+- [x] 1.4 CHECK: Confirm `label_of` and `LabelRole` reach no schema, over a **comment-stripped**
       copy of the file: `grep -vE '^\s*(//|///)' src/tasks.rs | grep -nE 'schema::|Schema|config\.yaml|\.openspec\.yaml'`
       prints nothing. The unstripped form is already red at HEAD — `src/tasks.rs:328` is a
       comment naming `schema::read_file` — so it would fail for the wrong reason on an
       untouched tree.
-- [ ] 1.5 REFACTOR: Fold the number-skip and the run-scan into one pass if two emerged, or
+- [x] 1.5 REFACTOR: Fold the number-skip and the run-scan into one pass if two emerged, or
       record that none was needed.
-- [ ] 1.6 VERIFY: `cargo test --all-features` — green — and `make gates` exits 0.
+- [x] 1.6 VERIFY: `cargo test --all-features` — green — and `make gates` exits 0.
 
 ## 2. The five palette roles
 

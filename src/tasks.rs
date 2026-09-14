@@ -83,6 +83,134 @@ pub struct Item {
     pub indent: usize,
 }
 
+/// Which third of a testing lifecycle a task's leading label names:
+/// evidence first, then the change, then the confirmation. Four roles
+/// rather than one per keyword — `VERIFY`, `THEN`, and `ASSERT` are one
+/// position under three conventions, and colouring them separately would be
+/// a rainbow nobody learns. `Other` is the role a recognised but
+/// unclassified run falls back to, and is not a failure.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LabelRole {
+    Evidence,
+    Change,
+    Confirm,
+    Other,
+}
+
+/// Where an item's leading label starts, how many bytes it covers, and the
+/// role it classifies to. `start` skips any task number; `len` covers the
+/// label token itself and never the number, because a reader wants `1.1` to
+/// stay legible and styling it with the label would make the whole row's
+/// leading third one colour.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Label {
+    pub start: usize,
+    pub len: usize,
+    pub role: LabelRole,
+}
+
+/// `text`'s leading label, or `None` when it carries none. Pure and
+/// **total**: every `&str` returns a value, and both `start` and
+/// `start + len` are always character boundaries of `text`, so a caller may
+/// `split_at` at either without checking. See
+/// `openspec/changes/tasks-emphasis/specs/task-labels/spec.md`.
+///
+/// Applied to an [`Item`]'s already-trimmed text, in five steps:
+///
+/// 1. skip an optional task number — a non-empty run of ASCII digits and
+///    `.`, optionally one ASCII lowercase letter, then exactly one space;
+/// 2. take the leading run of **two or more** ASCII uppercase letters, which
+///    is what keeps `Commit: …` and `Run \`cargo test\` …` unlabelled;
+/// 3. require that run to be a whole word — the byte after it absent, or
+///    neither an ASCII letter nor an ASCII digit — so `REDdish` is not a
+///    label and `RED-by-addition:` is;
+/// 4. require a `:` somewhere at or after the run's end, which separates a
+///    labelled task from prose opening with an acronym;
+/// 5. cover the run plus one **immediately following** `:` where there is
+///    one.
+///
+/// Step 4 is a colon test rather than a keyword allow-list because the
+/// rule's errors are then misses and never wrong colours: measured over the
+/// archive, it labels 2269 of 2563 items and gives a label to **zero** items
+/// that are not one. An allow-list would need extending for every workflow
+/// and would still have missed `DEFERRED`.
+pub fn label_of(text: &str) -> Option<Label> {
+    let bytes = text.as_bytes();
+    let start = skip_task_number(bytes);
+
+    let mut end = start;
+    while end < bytes.len() && bytes[end].is_ascii_uppercase() {
+        end += 1;
+    }
+    if end - start < 2 {
+        return None;
+    }
+
+    // Whole word: the run ends the text, or the byte after it is neither a
+    // letter nor a digit. Every byte examined here is ASCII, and a
+    // multi-byte lead byte is neither, so the test is correct on any UTF-8.
+    if let Some(&next) = bytes.get(end)
+        && next.is_ascii_alphanumeric()
+    {
+        return None;
+    }
+
+    if !text[end..].contains(':') {
+        return None;
+    }
+
+    let len = if bytes.get(end) == Some(&b':') {
+        end - start + 1
+    } else {
+        end - start
+    };
+
+    Some(Label {
+        start,
+        len,
+        role: role_of(&text[start..end]),
+    })
+}
+
+/// How many bytes of `bytes` a leading task number occupies, including its
+/// single trailing space — `0` when there is none. `1.1 `, `10.2a ` and `7 `
+/// are skipped; `1.1` with no following space is not, and neither is `a1 `.
+///
+/// The bounded lookahead here and the uppercase run [`label_of`] scans next
+/// cover disjoint byte ranges, so the recognition is one left-to-right pass
+/// over the text's prefix rather than two (tasks.md 1.5).
+fn skip_task_number(bytes: &[u8]) -> usize {
+    let mut i = 0;
+    while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b'.') {
+        i += 1;
+    }
+    if i == 0 {
+        return 0;
+    }
+    if bytes.get(i).is_some_and(|b| b.is_ascii_lowercase()) {
+        i += 1;
+    }
+    if bytes.get(i) == Some(&b' ') {
+        i + 1
+    } else {
+        0
+    }
+}
+
+/// The lifecycle position `run` names, by **exact, case-sensitive** match,
+/// with `Other` as the fallback arm rather than a lookup miss. A general
+/// testing vocabulary, not one workflow's task prefixes: GIVEN/WHEN/THEN and
+/// ARRANGE/ACT/ASSERT are the same three positions under two further
+/// conventions and are styled identically. Nothing outside `run` is read.
+fn role_of(run: &str) -> LabelRole {
+    match run {
+        "RED" | "CHARACTERIZE" | "CHECK" | "GIVEN" | "ARRANGE" => LabelRole::Evidence,
+        "GREEN" | "REFACTOR" | "CHANGE" | "WHEN" | "ACT" => LabelRole::Change,
+        "VERIFY" | "THEN" | "ASSERT" => LabelRole::Confirm,
+        _ => LabelRole::Other,
+    }
+}
+
 /// The task lines under one heading (or, for the leading group, under no
 /// heading at all), in document order.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1193,5 +1321,233 @@ mod tests {
         assert!(!nonexistent.exists());
         assert!(!nonexistent.parent().unwrap().exists());
         assert!(!root.join("nonexistent").exists());
+    }
+
+    // `task-labels`: the leading-label recognition and its three-position
+    // vocabulary. Every fixture here is a `&str` literal and the function
+    // under test is pure and total — there is no schema, no filesystem, and
+    // no `Schema` value anywhere in scope.
+
+    use super::{Label, LabelRole, label_of};
+
+    /// `task-labels` :: "The plain and compound label forms are both recognised".
+    #[test]
+    fn the_plain_and_compound_label_forms_are_both_recognised() {
+        let cases = [
+            (
+                "VERIFY: cargo test is green",
+                0usize,
+                7usize,
+                LabelRole::Confirm,
+            ),
+            (
+                "CHANGE — rewrite in `SPEC.md`: the module map",
+                0,
+                6,
+                LabelRole::Change,
+            ),
+            ("RED then GREEN: write both", 0, 3, LabelRole::Evidence),
+            ("RED-by-addition: add the row", 0, 3, LabelRole::Evidence),
+            (
+                "CHECK (contract gate): re-read design.md",
+                0,
+                5,
+                LabelRole::Evidence,
+            ),
+        ];
+        for (text, start, len, role) in cases {
+            assert_eq!(label_of(text), Some(Label { start, len, role }), "{text:?}");
+        }
+        // The colon joins the label only where it immediately follows the run:
+        // `VERIFY:` is 7 bytes and `CHANGE` is 6 because a space follows it.
+        assert_eq!(&"VERIFY: cargo test is green"[0..7], "VERIFY:");
+        assert_eq!(
+            &"CHANGE — rewrite in `SPEC.md`: the module map"[0..6],
+            "CHANGE"
+        );
+    }
+
+    /// `task-labels` :: "A task number is skipped and does not become part of
+    /// the label".
+    #[test]
+    fn a_task_number_is_skipped_and_does_not_become_part_of_the_label() {
+        let cases = [
+            (
+                "1.1 RED: write the failing test",
+                4usize,
+                4usize,
+                LabelRole::Evidence,
+            ),
+            ("10.2a GREEN: implement it", 6, 6, LabelRole::Change),
+            ("7 VERIFY: make check", 2, 7, LabelRole::Confirm),
+        ];
+        for (text, start, len, role) in cases {
+            assert_eq!(label_of(text), Some(Label { start, len, role }), "{text:?}");
+            // `start` points at the run's first letter and never at a digit,
+            // so a caller splitting there leaves the number unstyled.
+            let first = text[start..].chars().next().unwrap();
+            assert!(
+                first.is_ascii_uppercase(),
+                "{text:?}: start {start} points at {first:?}, not a letter"
+            );
+        }
+        assert_eq!(&"1.1 RED: write the failing test"[4..8], "RED:");
+        assert_eq!(&"10.2a GREEN: implement it"[6..12], "GREEN:");
+        assert_eq!(&"7 VERIFY: make check"[2..9], "VERIFY:");
+    }
+
+    /// `task-labels` :: "Unlabelled tasks are recognised as unlabelled".
+    #[test]
+    fn unlabelled_tasks_are_recognised_as_unlabelled() {
+        for text in [
+            "Commit: the parser and its tests",
+            "Run `cargo test --all-features`",
+            "Rewrite in `SPEC.md`: the module map",
+            "REDdish text",
+            "A: short",
+            "CI must stay green",
+        ] {
+            assert_eq!(label_of(text), None, "{text:?}");
+        }
+    }
+
+    /// `task-labels` :: "The recognition is total over degenerate input".
+    #[test]
+    fn the_recognition_is_total_over_degenerate_input() {
+        let long = format!("{}:", "A".repeat(10000));
+        let cases: Vec<(&str, Option<Label>)> = vec![
+            ("", None),
+            ("   ", None),
+            (":", None),
+            ("::::", None),
+            ("ABC", None),
+            (
+                "ABC:",
+                Some(Label {
+                    start: 0,
+                    len: 4,
+                    role: LabelRole::Other,
+                }),
+            ),
+            ("1.1 ", None),
+            ("1.1", None),
+            (
+                long.as_str(),
+                Some(Label {
+                    start: 0,
+                    len: 10001,
+                    role: LabelRole::Other,
+                }),
+            ),
+            ("日本語: text", None),
+        ];
+        for (text, expected) in cases {
+            let got = label_of(text);
+            assert_eq!(got, expected, "{:?}", &text[..text.len().min(40)]);
+            if let Some(label) = got {
+                // Both offsets are character boundaries: `split_at` panics
+                // otherwise, which is the assertion.
+                let _ = text.split_at(label.start);
+                let _ = text.split_at(label.start + label.len);
+            }
+        }
+    }
+
+    /// `task-labels` :: "Every token in the table classifies to its own role".
+    #[test]
+    fn every_token_in_the_table_classifies_to_its_own_role() {
+        let evidence = ["RED", "CHARACTERIZE", "CHECK", "GIVEN", "ARRANGE"];
+        let change = ["GREEN", "REFACTOR", "CHANGE", "WHEN", "ACT"];
+        let confirm = ["VERIFY", "THEN", "ASSERT"];
+        for (tokens, role) in [
+            (&evidence[..], LabelRole::Evidence),
+            (&change[..], LabelRole::Change),
+            (&confirm[..], LabelRole::Confirm),
+        ] {
+            for token in tokens {
+                let text = format!("{token}: do the thing");
+                let label = label_of(&text).unwrap_or_else(|| panic!("{text:?} unrecognised"));
+                assert_eq!(label.role, role, "{text:?}");
+                assert_eq!(label.start, 0);
+                assert_eq!(label.len, token.len() + 1);
+            }
+        }
+        // The assertion discriminates: a table collapsing two roles could not
+        // pass either of these.
+        assert_eq!(
+            label_of("RED: do the thing").unwrap().role,
+            LabelRole::Evidence
+        );
+        assert_ne!(
+            label_of("RED: do the thing").unwrap().role,
+            LabelRole::Change
+        );
+        assert_eq!(
+            label_of("CHANGE: do the thing").unwrap().role,
+            LabelRole::Change
+        );
+        assert_ne!(
+            label_of("CHANGE: do the thing").unwrap().role,
+            LabelRole::Evidence
+        );
+    }
+
+    /// `task-labels` :: "An unrecognised run is a generic label, not a miss".
+    #[test]
+    fn an_unrecognised_run_is_a_generic_label_not_a_miss() {
+        for (text, len) in [
+            ("NOTE: see design.md", 5usize),
+            ("TODO: later", 5),
+            ("HANDOFF: the next session picks this up", 8),
+        ] {
+            let label = label_of(text).unwrap_or_else(|| panic!("{text:?} returned None"));
+            assert_eq!(label.role, LabelRole::Other, "{text:?}");
+            assert_eq!(label.start, 0, "{text:?}");
+            assert_eq!(label.len, len, "{text:?}");
+        }
+    }
+
+    /// `task-labels` :: "Matching is case-sensitive and whole-run".
+    #[test]
+    fn matching_is_case_sensitive_and_whole_run() {
+        assert_eq!(label_of("Red: lower"), None);
+        assert_eq!(
+            label_of("RE D: spaced"),
+            Some(Label {
+                start: 0,
+                len: 2,
+                role: LabelRole::Other
+            })
+        );
+        assert_eq!(
+            label_of("REDGREEN: joined"),
+            Some(Label {
+                start: 0,
+                len: 9,
+                role: LabelRole::Other
+            })
+        );
+    }
+
+    /// `task-labels` :: "The classification reads nothing outside its
+    /// argument". The textual half is task 1.4's comment-stripped grep; this
+    /// is the half that runs: `label_of`'s signature admits a `&str` and
+    /// nothing else, and no `Schema` value exists anywhere in this scope.
+    #[test]
+    fn the_classification_reads_nothing_outside_its_argument() {
+        let recognise: fn(&str) -> Option<Label> = label_of;
+        assert_eq!(
+            recognise("CHECK: nothing but the argument"),
+            Some(Label {
+                start: 0,
+                len: 6,
+                role: LabelRole::Evidence
+            })
+        );
+        // The same text classifies identically however many times it is
+        // called and in whatever order, so no global or ambient state is read.
+        let first = label_of("GREEN: implement it");
+        assert_eq!(label_of("RED: write it").unwrap().role, LabelRole::Evidence);
+        assert_eq!(label_of("GREEN: implement it"), first);
     }
 }
