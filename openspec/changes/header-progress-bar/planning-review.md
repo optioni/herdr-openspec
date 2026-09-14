@@ -46,8 +46,17 @@ Two findings came from reproducing a reviewer rather than from a reviewer:
 
 | Severity | Source Artifact | Problem | Repair | Updated Location |
 |---|---|---|---|---|
-| WARNING | tasks.md | Slice C reported every integration target green under its gauge plant. Reproducing it showed `degraded_coverage` failing — `covers entry src/ui/detail.rs:245-251 holds no line of code`. The hazard is **nondeterministic**: a one-line shift left it silent at `10 passed`, the real ten-line gauge makes it fail loudly naming an unrelated degraded-states row. | Group 3's account rewritten around both measurements, and moved to sit directly after the groups that shift lines so the confusing failure does not land in group 4's run. | tasks.md group 3 |
+| WARNING | tasks.md | Whether the `covers` slide is silent or loud depends on **where** the shifted range lands, not how far it moves — and both this session and slice C initially generalised from a single plant in opposite directions. Simulated over the real file, `src/ui/detail.rs:245-251` lands on code (passing while naming the wrong code) at shifts of 1, 5, 15, 21 and 25, and inside a doc-comment block (failing loudly) only at about 10. Silence is the likelier outcome and the more dangerous one. | Group 3 rewritten around the simulation, instructing unconditional re-anchoring against the baseline shas, and moved to sit directly after the only two groups that shift lines. | tasks.md group 3 |
 | WARNING | specs/tasks-progress-bar | Slice D listed three width-gate violators; a fourth — the saturation-boundary scenario added mid-review — had the same defect. | Repaired the same way, routing through `progress_bar` at 78 and 58. | specs/tasks-progress-bar |
+
+Slice C's closing findings, both structural, verified against
+`.claude/agents/apply-orchestrator.md` before repair:
+
+| Severity | Source Artifact | Problem | Repair | Updated Location |
+|---|---|---|---|---|
+| CRITICAL | tasks.md | The implementing group's exit gate could not pass. `the_header_reaches_the_buffer_without_crossing_the_region_border` lives in `src/ui/detail.rs:2191` and is one of the three measured reds, but its repair sat two groups later — and Step 4 requires a behavior group's tests to all pass before the next starts, handing the failure to a fresh implementer with no task explaining it. | Merged into the implementing group as task 2.2. | tasks.md group 2 |
+| CRITICAL | tasks.md | The view-tier group ran *after* the implementation, so its three tasks labelled RED could not be red — the literal they instruct is what a gauge-bearing header already produces. | The view tier is now part of group 2, before 2.11 lands the gauge. The alternative, an `acceptance-red` outer-loop group, was reconsidered and declined on the record: it manages wiring risk, and this change adds no wiring. | tasks.md group 2; design.md → Test Strategy |
+| WARNING | tasks.md | The red-set table stated a fourth failure (`every_table_row_has_a_proof`) as measured fact. It is not: it depends on how many lines the implementation inserts. | Count corrected to three, with the fourth marked insertion-count-dependent. | tasks.md → measured red set |
 
 Slice D's closing suggestions, all verified and applied:
 

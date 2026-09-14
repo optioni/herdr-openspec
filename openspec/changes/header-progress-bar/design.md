@@ -158,10 +158,22 @@ Four tiers, all inside `cargo test` (`make test`):
 - **Gate** — `make gates`, unchanged, run over the edited files: `COLWIDTH` (no `.chars()`
   width in the pure set), `NOIO-VIEW`, `PALETTE`, `MDSEAM`, `NOSPAWN-GREP`.
 
-**This change takes no outer-loop acceptance test of its own.** The repository's outermost
-tier for a view change *is* the `TestBackend` render at the two mandated frame widths — there
-is no higher loop short of driving a real terminal, which the architecture forbids because
-`cargo test` spawns this binary.
+**This change takes no outer-loop acceptance test of its own.** The repository's outermost tier
+for a view change *is* the `TestBackend` render at the two mandated frame widths — there is no
+higher loop short of driving a real terminal, which the architecture forbids because
+`cargo test` spawns this binary. The decision was reconsidered during planning review, because an
+`acceptance-red` group is the one structure whose gate is a *failing* test and so the one way a
+view test could be written before the implementation in a group of its own. It is still declined:
+the outer loop manages end-to-end **wiring** risk, and this change adds no wiring —
+`ui::view::render` already calls `header_row` at `src/ui/view.rs:150` and its signature does not
+move. The risk here is grammar, which the unit tier addresses directly.
+
+**The consequence is that every header-gauge test shares one group with the implementation.** The
+orchestrator gates a behavior group on all tests passing, so a test the gauge breaks must be
+repaired in the group that breaks it, and a test written after the implementation cannot be RED
+at all. Splitting the view tier into a later group produces both faults at once — an unowned red
+at the implementing group's gate, and downstream tasks labelled RED that go green on sight. That
+is why tasks.md group 2 is large; it is one unit of work, not several.
 
 **Twelve of the nineteen scenarios already have passing tests at HEAD.** The repository binds
 a scenario to a test by snake-casing the scenario header and carrying a
