@@ -543,7 +543,7 @@ rather than to a dropped glyph, and SHALL NOT panic.
   and 15 — both below the 100-column breakpoint, with content areas of 18 and 13 columns
 - **THEN** the first header row reads `> degraded-covera…` at 18 columns and
   `> degraded-c…` at 13
-- **AND** a depth-2 header at those widths reads `    > Requirement…` and `    > Requi…`, so
+- **AND** a depth-2 header at those widths reads `    > Requirement…` and `    > Requir…`, so
   the four-column indent is emitted before the glyph and survives
 - **AND** at every width from 0 through 20 no returned line exceeds that width in display
   columns, and none panics
