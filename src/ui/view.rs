@@ -4276,7 +4276,7 @@ mod tests {
     /// `artifact-folds` :: "A fold hides a whole subtree".
     #[test]
     fn a_fold_hides_a_whole_subtree() {
-        for width in [120u16, 60] {
+        for width in [120, 60] {
             let interior = interior_width(width);
 
             // `expanded` holding `0` alone: the open file section shows its own
@@ -4331,7 +4331,7 @@ mod tests {
     #[test]
     fn a_body_row_is_never_indented_by_its_sections_depth() {
         let every = std::collections::BTreeSet::from([0, 1, 2, 3, 4, 5, 6]);
-        for width in [120u16, 60] {
+        for width in [120, 60] {
             let interior = interior_width(width);
             let d = seven_section_dashboard(every.clone(), 0);
             let buf = render_at(width, 40, &d);
@@ -4413,7 +4413,7 @@ mod tests {
         assert_eq!(d.detail.sections.len(), 4, "four sections were derived");
         assert!(d.detail.expanded.is_empty(), "the tab opens collapsed");
 
-        for width in [120u16, 60] {
+        for width in [120, 60] {
             let interior = interior_width(width);
             let buf = render_at(width, 20, &d);
             assert_eq!(

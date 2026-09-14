@@ -138,12 +138,27 @@ and "A file splits at its headings only when it is a spec or a tracked task file
 `specs/artifact-folds/spec.md` -> "A section header row names the file and shows its fold
 state". The markdown path only; the tracked-tasks path is group 6.
 
-- [ ] 4.1 RED: Write failing `ui::detail` and `ui::view` tests for `a_fold_hides_a_whole_subtree`, `a_delta_spec_tab_opens_as_its_operation_headings_alone`, and `a_body_row_is_never_indented_by_its_sections_depth`, and extend the landed `a_narrow_pane_truncates_the_label_and_keeps_the_glyph` with the depth-2 and depth-3 indent cases. Render at 120 and 60 columns.
-- [ ] 4.2 GREEN: Implement the visibility walk — a collapsed labelled section at depth `d` hides every following section of depth greater than `d` until the first at or below `d` — and the `"  " * depth` header indent emitted before the glyph.
-- [ ] 4.3 GREEN: Implement the blank separator after a non-empty open body that a further visible section follows, and skip header emission for a `None` label. Then run `cargo test --all-features` and update every failing landed assertion. **Exactly five failures are expected**, measured by planting the separator in a `git archive HEAD` tree: `ui::detail::tests::a_foldable_tabs_body_is_headers_and_an_open_sections_markdown_beneath_its_own`, `ui::view::tests::folding_one_section_shows_its_body_and_leaves_its_siblings_shut`, `ui::driver::tests::a_fold_reads_no_file`, `ui::app::tests::space_opens_the_section_under_the_cursor_and_leaves_its_siblings_shut`, and `ui::app::tests::space_inside_an_open_section_folds_it_and_moves_the_cursor_to_its_header`. A sixth means the separator rule is wider than specified; fewer than five means it did not fire. The last of the five is **semantic** — `expanded` becomes `{0,1}` instead of `{0,2}` because the extra row shifts which section `detail.scroll` resolves to — so it is not found by grepping for adjacency.
-- [ ] 4.4 RED→GREEN: Extend the two landed width properties — `content_lines_total` and `no_content_lines_line_exceeds_its_width_at_any_width`, both in `src/ui/detail.rs` — with the seven-section spec-glob and preamble fixtures over widths 0 through 130, asserting also that every `SectionHeader`'s carried `section` addresses an entry of `detail.sections`.
-- [ ] 4.5 REFACTOR: Extract the visibility walk if the header emission and the `selected` pass ended up scanning twice, or record that they did not.
-- [ ] 4.6 VERIFY: `cargo test --all-features` — green, all five repaired — and `/bin/sh scripts/gates/colwidth.sh` and `notabseam.sh` exit 0.
+- [x] 4.1 RED: Write failing `ui::detail` and `ui::view` tests for `a_fold_hides_a_whole_subtree`, `a_delta_spec_tab_opens_as_its_operation_headings_alone`, and `a_body_row_is_never_indented_by_its_sections_depth`, and extend the landed `a_narrow_pane_truncates_the_label_and_keeps_the_glyph` with the depth-2 and depth-3 indent cases. Render at 120 and 60 columns.
+- [x] 4.2 GREEN: Implement the visibility walk — a collapsed labelled section at depth `d` hides every following section of depth greater than `d` until the first at or below `d` — and the `"  " * depth` header indent emitted before the glyph.
+- [x] 4.3 GREEN: Implement the blank separator after a non-empty open body that a further visible section follows, and skip header emission for a `None` label. Then run `cargo test --all-features` and update every failing landed assertion. **Exactly five failures are expected**, measured by planting the separator in a `git archive HEAD` tree: `ui::detail::tests::a_foldable_tabs_body_is_headers_and_an_open_sections_markdown_beneath_its_own`, `ui::view::tests::folding_one_section_shows_its_body_and_leaves_its_siblings_shut`, `ui::driver::tests::a_fold_reads_no_file`, `ui::app::tests::space_opens_the_section_under_the_cursor_and_leaves_its_siblings_shut`, and `ui::app::tests::space_inside_an_open_section_folds_it_and_moves_the_cursor_to_its_header`. A sixth means the separator rule is wider than specified; fewer than five means it did not fire. The last of the five is **semantic** — `expanded` becomes `{0,1}` instead of `{0,2}` because the extra row shifts which section `detail.scroll` resolves to — so it is not found by grepping for adjacency.
+
+      Measured: **exactly five**, the five named, with no sixth. The semantic one was
+      repaired by moving its cursor rather than its expectation: its third block parks
+      `detail.scroll` on the *third* header row, which the separator moved from row 3 to
+      row 4, so the fixture is now `foldable_dashboard({0}, 4)` and `expanded` stays
+      `{0,2}`. Asserting `{0,1}` at the unmoved `scroll` of 3 would have passed too, but
+      would have silently changed the block's subject from a sibling header to the open
+      section's own.
+- [x] 4.4 RED→GREEN: Extend the two landed width properties — `content_lines_total` and `no_content_lines_line_exceeds_its_width_at_any_width`, both in `src/ui/detail.rs` — with the seven-section spec-glob and preamble fixtures over widths 0 through 130, asserting also that every `SectionHeader`'s carried `section` addresses an entry of `detail.sections`.
+- [x] 4.5 REFACTOR: Extract the visibility walk if the header emission and the `selected` pass ended up scanning twice, or record that they did not.
+
+      No further extraction was needed. The walk was already extracted during 4.2 as
+      `ui::detail::visible_sections`, because the separator rule needs to look **ahead** —
+      a blank row follows an open body only when a further *visible* section does — which
+      is a question about the visible list rather than about the next index. The `selected`
+      pass scans the emitted row list for `ContentKind::SectionHeader`, not
+      `detail.sections`, so it never re-applies the visibility rule and does not scan twice.
+- [x] 4.6 VERIFY: `cargo test --all-features` — green, all five repaired — and `/bin/sh scripts/gates/colwidth.sh` and `notabseam.sh` exit 0.
 
 ## 5. `ui::tasks` — `bar_lines`, `items`, and `lines`
 
