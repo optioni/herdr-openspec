@@ -17,7 +17,7 @@ tier = "view"
 proof = ["the_badge_is_right_aligned_and_dropped_whole"]
 verdict = "implemented"
 why = "the list region's heading renders a dim, yellow file mode badge right-aligned against its own last column, dropped whole below its budget, driven through render_at at both widths and at the drop rule's own boundary"
-covers = ["src/ui/view.rs:390-411"]
+covers = ["src/ui/view.rs:400-421"]
 
 [[row]]
 condition = "Schema unknown to the CLI"
@@ -89,7 +89,7 @@ tier = "view"
 proof = ["an_empty_visible_list_leaves_the_whole_detail_interior_blank"]
 verdict = "confirmed"
 why = "the whole detail interior stays blank, rendered through render_at"
-covers = ["src/ui/view.rs:59-61"]
+covers = ["src/ui/view.rs:69-71"]
 
 [[row]]
 condition = "Markdown source holds a construct the parser does not model (a footnote), on a tab **other** than the tracked-tasks one"

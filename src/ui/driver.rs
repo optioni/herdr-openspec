@@ -213,6 +213,54 @@ pub fn run_loop<B: Backend, E: EventSource>(
 /// the resolver's one input that nothing else has is already in hand
 /// (design.md -> Decision 8).
 pub fn mouse_action(dashboard: &Dashboard, area: Rect, mouse: &MouseEvent) -> Action {
+    // `help-overlay`: while the overlay is open every event resolves against
+    // the **band** and `layout::zone` is not consulted at all. Written here
+    // rather than in a helper of its own, and deliberately: `SPEC.md` ->
+    // Keys' mouse table is bound to *this function's* body by
+    // `tests/doc_contract.rs`'s `mouse_bindings_match_spec_md`, which cuts
+    // from `pub fn mouse_action(` to the next `}` at column zero — a branch
+    // extracted into a sibling function would take `Action::ToggleHelp` out
+    // of that slice and let the table and the resolver drift with every test
+    // still green.
+    if dashboard.help.open {
+        let point = ratatui::layout::Position::new(mouse.column, mouse.row);
+        // Outside the frame is `Action::Ignore` on every event kind, checked
+        // before anything else: such a point is outside the band too, but it
+        // is not a gesture the pane received, and it must not dismiss the
+        // overlay. Same reasoning as the `Zone::Outside` arms below.
+        if !area.contains(point) {
+            return Action::Ignore;
+        }
+        return match mouse.kind {
+            // The wheel scrolls the overlay from anywhere in the frame, not
+            // only from over the band: while a modal is open the reader's
+            // attention is the modal, and a wheel over the rows of margin or
+            // footer that are not the band doing nothing would read as a dead
+            // pointer.
+            MouseEventKind::ScrollDown => Action::ScrollDown,
+            MouseEventKind::ScrollUp => Action::ScrollUp,
+            MouseEventKind::Down(MouseButton::Left) => {
+                // The band derived from the same `area`, through exactly the
+                // pair `ui::view::render` hands `ui::help::render` — so the
+                // mouse target is the rectangle the reader is looking at
+                // rather than a second one computed here.
+                let (body, _) = crate::ui::layout::split_frame(area);
+                let band = crate::ui::layout::help_band(body, crate::ui::help::content_rows());
+                if band.contains(point) {
+                    // Read-only and holding no control: no row is a button,
+                    // and there is nothing inside it a click could mean.
+                    Action::Ignore
+                } else {
+                    Action::ToggleHelp
+                }
+            }
+            // Both horizontal wheel directions, right and middle presses,
+            // every release, every drag, and pointer motion — so `run_loop`'s
+            // motion exemption is unchanged and the overlay scrolls in one
+            // dimension only.
+            _ => Action::Ignore,
+        };
+    }
     let zone = crate::ui::layout::zone(area, dashboard.route, mouse.column, mouse.row);
     match mouse.kind {
         MouseEventKind::ScrollDown => match zone {
@@ -4634,7 +4682,16 @@ mod tests {
     /// Drive `run_loop` at 120x40 over `mouse_dashboard(3, 0)` with `queue`,
     /// returning the summary. Every collaborator is the inert double.
     fn drive_queue(queue: Vec<Result<Option<Event>, crate::ui::event::EventError>>) -> LoopSummary {
-        let mut dashboard = mouse_dashboard(3, 0);
+        drive_queue_on(mouse_dashboard(3, 0), queue)
+    }
+
+    /// [`drive_queue`] over a caller-supplied `Dashboard` — `help-overlay`'s
+    /// own motion scenario needs the same drive with `help.open` set, and the
+    /// fixture is the only thing that differs.
+    fn drive_queue_on(
+        mut dashboard: Dashboard,
+        queue: Vec<Result<Option<Event>, crate::ui::event::EventError>>,
+    ) -> LoopSummary {
         let backend = TestBackend::new(120, 40);
         let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
         let mut events = Script::new(queue);
@@ -5394,6 +5451,329 @@ mod tests {
             // assertion above cannot be a mis-wired fixture.
             if route == Route::Detail {
                 assert_eq!(run.reads.len(), 3, "width {width}: three paths read");
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // `help-overlay` / `mouse-input`: the open overlay captures the mouse.
+    // Every one of these resolves against the **band**, never `layout::zone`
+    // — while a modal covers the body there is no region under the pointer
+    // to resolve to.
+    // ------------------------------------------------------------------
+
+    /// A 120x60 frame — the one `mouse-input`'s dismissal scenarios use,
+    /// because it is the only mandated-shape frame tall enough for the band
+    /// to be smaller than the body and so for "outside the band but inside
+    /// the frame" to name any row at all.
+    const TALL: Rect = Rect {
+        x: 0,
+        y: 0,
+        width: 120,
+        height: 60,
+    };
+
+    /// The band `mouse_action` resolves against at `area`, derived here the
+    /// way the draw path derives it — `split_frame`'s body, then
+    /// `layout::help_band` over `ui::help::content_rows()` — so the tests
+    /// compare against the rectangle rather than restating it.
+    fn band_for(area: Rect) -> Rect {
+        let (body, _) = crate::ui::layout::split_frame(area);
+        crate::ui::layout::help_band(body, crate::ui::help::content_rows())
+    }
+
+    /// `mouse_dashboard(6, 1)` with the overlay open and a twenty-line
+    /// artifact loaded — the fixture every scenario in this section shares.
+    fn overlay_open(selected: usize, route: Route) -> Dashboard {
+        let mut dashboard = mouse_dashboard(6, 1);
+        dashboard.route = route;
+        dashboard.selected = selected;
+        dashboard.detail.sections = vec![ArtifactSection {
+            label: String::new(),
+            text: (0..20).map(|i| format!("- line-{i:02}\n")).collect(),
+        }];
+        dashboard.help.open = true;
+        dashboard
+    }
+
+    #[test]
+    fn the_wheel_scrolls_the_overlay_from_every_region() {
+        // `mouse-input`: "The wheel scrolls the overlay from every region".
+        // The wheel scrolls the overlay from anywhere **in the frame** — over
+        // the list region, over the detail region, over the divider column,
+        // and over the footer row alike — and a point past the frame's own
+        // right edge is `Ignore`, because it is not a gesture the pane
+        // received.
+        let wide_points: [(u16, u16); 4] = [(10, 10), (80, 10), (40, 10), (10, 39)];
+        let narrow_points: [(u16, u16); 4] = [(10, 10), (30, 10), (0, 0), (10, 19)];
+        const PAST_RIGHT_EDGE: u16 = 200;
+
+        for (area, points) in [(WIDE, wide_points), (NARROW, narrow_points)] {
+            let dashboard = overlay_open(2, Route::List);
+            for (column, row) in points {
+                assert_eq!(
+                    mouse_action(
+                        &dashboard,
+                        area,
+                        &m(MouseEventKind::ScrollDown, column, row)
+                    ),
+                    Action::ScrollDown,
+                    "{area:?}: ScrollDown at ({column}, {row})"
+                );
+                assert_eq!(
+                    mouse_action(&dashboard, area, &m(MouseEventKind::ScrollUp, column, row)),
+                    Action::ScrollUp,
+                    "{area:?}: ScrollUp at ({column}, {row})"
+                );
+
+                // Applying either advances the overlay and moves nothing
+                // beneath it.
+                let mut applied = dashboard.clone();
+                applied.apply(Action::ScrollDown);
+                assert_eq!(applied.help.scroll, 1, "{area:?}: ({column}, {row})");
+                assert_eq!(applied.selected, dashboard.selected);
+                assert_eq!(applied.detail.scroll, dashboard.detail.scroll);
+
+                for kind in [MouseEventKind::ScrollLeft, MouseEventKind::ScrollRight] {
+                    assert_eq!(
+                        mouse_action(&dashboard, area, &m(kind, column, row)),
+                        Action::Ignore,
+                        "{area:?}: {kind:?} at ({column}, {row}) scrolls nothing"
+                    );
+                }
+            }
+
+            // Past the frame's right edge: outside the band, and outside the
+            // frame too, so not a gesture the pane received.
+            for kind in [
+                MouseEventKind::ScrollDown,
+                MouseEventKind::ScrollUp,
+                MouseEventKind::ScrollLeft,
+                MouseEventKind::ScrollRight,
+            ] {
+                assert_eq!(
+                    mouse_action(&dashboard, area, &m(kind, PAST_RIGHT_EDGE, 10)),
+                    Action::Ignore,
+                    "{area:?}: {kind:?} past the right edge"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_click_inside_the_band_does_nothing() {
+        // `mouse-input`: "A click inside the band does nothing". The overlay
+        // is read-only and holds no control, so there is nothing inside it a
+        // click could mean.
+        let dashboard = overlay_open(2, Route::List);
+        let band = band_for(WIDE);
+        let last_interior = band.y + band.height - 2;
+        let points: [(u16, u16); 6] = [
+            (60, band.y),                          // the top rule row
+            (60, band.y + 1),                      // the first interior row
+            (60, last_interior),                   // the last interior row
+            (60, band.y + band.height - 1),        // the bottom rule row
+            (band.x, band.y + 1),                  // its leftmost column
+            (band.x + band.width - 1, band.y + 1), // its rightmost column
+        ];
+        for (column, row) in points {
+            assert_eq!(
+                mouse_action(&dashboard, WIDE, &left(column, row)),
+                Action::Ignore,
+                "a press at ({column}, {row}) is inside the band"
+            );
+        }
+
+        // Applying `Ignore` leaves the dashboard equal, field for field.
+        let mut applied = dashboard.clone();
+        applied.apply(Action::Ignore);
+        assert_eq!(applied, dashboard);
+        assert!(applied.help.open);
+        assert_eq!(applied.help.scroll, 0);
+    }
+
+    #[test]
+    fn a_click_outside_the_band_dismisses_it_and_selects_nothing() {
+        // `mouse-input`: "A click outside the band dismisses it and selects
+        // nothing".
+        let mut dashboard = overlay_open(2, Route::List);
+        dashboard.help.scroll = 3;
+        let band = band_for(TALL);
+        // 44 rows centred in a 59-row body: rows 0 through 6 and rows 51
+        // through 58 are outside it, and row 59 is the footer.
+        assert_eq!((band.y, band.height), (7, 44));
+
+        for (column, row) in [(5u16, 4u16), (5, 55), (5, 59)] {
+            assert_eq!(
+                mouse_action(&dashboard, TALL, &left(column, row)),
+                Action::ToggleHelp,
+                "a press at ({column}, {row}) is outside the band and inside the frame"
+            );
+        }
+
+        // The click that dismissed the overlay did not also move the cursor
+        // to the row under it.
+        let mut dismissed = dashboard.clone();
+        dismissed.apply(mouse_action(&dashboard, TALL, &left(5, 4)));
+        assert!(!dismissed.help.open);
+        assert_eq!(dismissed.help.scroll, 0);
+        assert_eq!(dismissed.selected, 2);
+
+        // A second identical click, now that the overlay is closed, resolves
+        // through the click table this requirement took precedence over — so
+        // the precedence is conditional on `help.open`, not permanent.
+        assert!(
+            matches!(
+                mouse_action(&dismissed, TALL, &left(5, 4)),
+                Action::Click(Target::Change(_))
+            ),
+            "with the overlay closed the same press names the row under it"
+        );
+
+        // Past the frame's right edge: `Ignore`, and **not** `ToggleHelp` — a
+        // click the pane never received does not dismiss the overlay.
+        let outside = mouse_action(&dashboard, TALL, &left(200, 4));
+        assert_ne!(outside, Action::ToggleHelp);
+        assert_eq!(outside, Action::Ignore);
+    }
+
+    #[test]
+    fn the_band_s_edges_are_inside_it() {
+        // `mouse-input`: "The band's edges are inside it" — both rule rows
+        // belong to the band, pinned from both sides.
+        let dashboard = overlay_open(2, Route::List);
+        let band = band_for(TALL);
+        assert_eq!((band.y, band.height), (7, 44));
+        let first = band.y;
+        let last = band.y + band.height - 1;
+        for (row, want) in [
+            (first - 1, Action::ToggleHelp),
+            (first, Action::Ignore),
+            (last, Action::Ignore),
+            (last + 1, Action::ToggleHelp),
+        ] {
+            assert_eq!(
+                mouse_action(&dashboard, TALL, &left(60, row)),
+                want,
+                "a press at row {row}, against a band of rows {first}..={last}"
+            );
+        }
+    }
+
+    #[test]
+    fn motion_still_costs_no_frame_while_the_overlay_is_open() {
+        // `mouse-input`: "Motion still costs no frame while the overlay is
+        // open". The exemption is `run_loop`'s and is structural, so the
+        // overlay does not make a motion event interesting.
+        let dashboard = overlay_open(2, Route::List);
+        let band = band_for(WIDE);
+        for kind in [
+            MouseEventKind::Moved,
+            MouseEventKind::Drag(MouseButton::Left),
+        ] {
+            for (column, row) in [(60u16, band.y + 1), (200u16, 10u16)] {
+                assert_eq!(
+                    mouse_action(&dashboard, WIDE, &m(kind, column, row)),
+                    Action::Ignore,
+                    "{kind:?} at ({column}, {row})"
+                );
+            }
+        }
+
+        // And `run_loop` skips the draw for each, exactly as it does with the
+        // overlay closed: one frame for twenty motion events plus the quit.
+        for kind in [
+            MouseEventKind::Moved,
+            MouseEventKind::Drag(MouseButton::Left),
+        ] {
+            let mut queue: Vec<_> = (0..20)
+                .map(|i| Ok(Some(crate::testutil::mouse(kind, i as u16, 10))))
+                .collect();
+            queue.push(Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))));
+            assert_eq!(
+                drive_queue_on(overlay_open(2, Route::List), queue),
+                LoopSummary {
+                    frames: 1,
+                    polls: 21
+                },
+                "{kind:?} with the overlay open"
+            );
+        }
+    }
+
+    #[test]
+    fn nothing_in_the_overlay_is_mouse_only() {
+        // `mouse-input`: "Nothing in the overlay is mouse-only". Every
+        // gesture the open overlay maps to a non-`Ignore` action is collected
+        // by sweeping both mandated frames, and each is shown to have a key
+        // that does the same thing — asserted by applying both and comparing
+        // the dashboards, since `j` maps to `Next` and the wheel to
+        // `ScrollDown` and it is their *effect* that has to agree.
+        let kinds = [
+            MouseEventKind::Down(MouseButton::Left),
+            MouseEventKind::Down(MouseButton::Right),
+            MouseEventKind::Down(MouseButton::Middle),
+            MouseEventKind::Up(MouseButton::Left),
+            MouseEventKind::Drag(MouseButton::Left),
+            MouseEventKind::Moved,
+            MouseEventKind::ScrollDown,
+            MouseEventKind::ScrollUp,
+            MouseEventKind::ScrollLeft,
+            MouseEventKind::ScrollRight,
+        ];
+        let dashboard = overlay_open(2, Route::List);
+        let mut reachable: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        for area in [WIDE, NARROW, TALL] {
+            for kind in kinds {
+                for row in 0..area.height {
+                    for column in 0..area.width {
+                        let action = mouse_action(&dashboard, area, &m(kind, column, row));
+                        if action != Action::Ignore {
+                            reachable.insert(format!("{action:?}"));
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            reachable,
+            ["ScrollDown", "ScrollUp", "ToggleHelp"]
+                .iter()
+                .map(|s| s.to_string())
+                .collect::<std::collections::BTreeSet<String>>(),
+            "exactly the wheel's two directions and the dismissing click"
+        );
+
+        // Each has a key that does the same thing.
+        for (mouse, keys) in [
+            (
+                Action::ScrollDown,
+                vec![
+                    (KeyCode::Char('j'), KeyModifiers::NONE),
+                    (KeyCode::Down, KeyModifiers::NONE),
+                ],
+            ),
+            (
+                Action::ScrollUp,
+                vec![
+                    (KeyCode::Char('k'), KeyModifiers::NONE),
+                    (KeyCode::Up, KeyModifiers::NONE),
+                ],
+            ),
+            (
+                Action::ToggleHelp,
+                vec![
+                    (KeyCode::Esc, KeyModifiers::NONE),
+                    (KeyCode::Char('?'), KeyModifiers::NONE),
+                ],
+            ),
+        ] {
+            let mut by_mouse = dashboard.clone();
+            by_mouse.apply(mouse);
+            for (code, modifiers) in keys {
+                let mut by_key = dashboard.clone();
+                by_key.apply(action_for(&press(code, modifiers), false));
+                assert_eq!(by_key, by_mouse, "{code:?} does not do what {mouse:?} does");
             }
         }
     }

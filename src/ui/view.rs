@@ -30,10 +30,20 @@ const FOOTER_HINTS: [&str; 4] = ["? help", "q quit", "Enter detail", "Esc back"]
 /// now returns only `(body, footer)`, and the repository's identity moves into
 /// the list region's own heading row (`render_region`), drawn as part of the
 /// body rather than above it.
+///
+/// `help-overlay` adds the one call after the body: `ui::help::render` draws
+/// the band **over** whatever the two regions just painted, and over the
+/// **body** alone — the footer keeps its row and keeps naming `? help` and
+/// `q quit`, so the pane is never a frame with no way out named on it. The
+/// band's rectangle is `ui::help`'s own derivation from `body`, not one made
+/// here.
 pub fn render(frame: &mut Frame, dashboard: &Dashboard) {
     let (body, footer) = split_frame(frame.area());
     render_footer(frame, footer, dashboard);
     render_body(frame, body, dashboard);
+    if dashboard.help.open {
+        crate::ui::help::render(frame, body, &dashboard.help);
+    }
 }
 
 /// The body: one or two borderless regions, per `layout::split_body`, with a
@@ -7431,6 +7441,197 @@ mod tests {
                 std::collections::BTreeSet::from([5u16]),
                 "width {width}: exactly one row — the cursor's own section header — \
                  reports REVERSED"
+            );
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // `help-overlay`: the band drawn over the body, after it and before
+    // `render` returns. `ui::help` owns the grammar and the geometry; what
+    // these three scenarios pin is the **wiring** — that `render` draws the
+    // band at all, that it covers what the body painted, and that it leaves
+    // the footer row and the closed frame exactly as they were.
+    // ------------------------------------------------------------------
+
+    /// `dashboard_with_detail`'s fixture for the overlay scenarios: six
+    /// active changes, one archived, and a selected change whose artifact is
+    /// twenty distinctive markdown list items — every one of them a string
+    /// no row of the help inventory carries, so a needle found inside the
+    /// band came from the frame beneath and nowhere else.
+    fn overlay_dashboard(open: bool) -> Dashboard {
+        let selected =
+            fixture::with_artifacts(fixture::active("zzchange-00", 4, 9), &[("proposal", &[])]);
+        let mut active = vec![selected];
+        active.extend((1..6).map(|i| fixture::active(&format!("zzchange-{i:02}"), i, 6)));
+        let mut dashboard = dashboard_with_detail(
+            active,
+            vec![fixture::archived(Some("2026-01-01"), "zzarchived-00", 3, 3)],
+            // `list-sections`: 1, not 0 — target 0 is the active header.
+            1,
+            Route::Detail,
+            Detail {
+                sections: vec![ArtifactSection {
+                    label: String::new(),
+                    text: (0..20)
+                        .map(|i| format!("- zzartifact-{i:02}\n"))
+                        .collect::<String>(),
+                }],
+                scroll: 0,
+                tab: 0,
+                problems: Vec::new(),
+                loaded: None,
+                expanded: std::collections::BTreeSet::new(),
+                drawn_width: None,
+            },
+        );
+        dashboard.help.open = open;
+        dashboard
+    }
+
+    /// The needles `the_band_paints_every_cell_it_covers` hunts for: every
+    /// change name and every artifact line `overlay_dashboard` carries.
+    fn overlay_needles() -> Vec<String> {
+        let mut out: Vec<String> = (0..6).map(|i| format!("zzchange-{i:02}")).collect();
+        out.push("zzarchived-00".to_string());
+        out.extend((0..20).map(|i| format!("zzartifact-{i:02}")));
+        out
+    }
+
+    #[test]
+    fn the_band_s_geometry_at_both_mandated_widths() {
+        // `help-overlay`: "The band's geometry at both mandated widths".
+        // Both mandated frames, written unsuffixed: `WIDTHS`' number scan is
+        // `\b(\d+)\b` and does not see `120u16`.
+        let frames: [(u16, u16); 2] = [(120, 40), (60, 20)];
+        for (width, height) in frames {
+            let dashboard = overlay_dashboard(true);
+            let buffer = render_at(width, height, &dashboard);
+            let (body, footer) =
+                crate::ui::layout::split_frame(ratatui::layout::Rect::new(0, 0, width, height));
+
+            // The body is rows 0 through height - 2 and the footer is the
+            // last row: rows 0..=38 and row 39 at 120x40, rows 0..=18 and
+            // row 19 at 60x20.
+            assert_eq!((body.y, body.height), (0, height - 1), "{width}x{height}");
+            assert_eq!(
+                (footer.y, footer.height),
+                (height - 1, 1),
+                "{width}x{height}"
+            );
+
+            let total = crate::ui::help::content_rows();
+            let band = crate::ui::layout::help_band(body, total);
+            assert_eq!(band.x, 0, "{width}x{height}: the band starts at column 0");
+            assert_eq!(
+                band.width, width,
+                "{width}x{height}: the band is full-width"
+            );
+            assert_eq!(
+                band.height,
+                (total + 2).min(body.height as usize) as u16,
+                "{width}x{height}: min(content_rows + 2, body.height)"
+            );
+            assert_eq!(
+                band.y,
+                body.y + (body.height - band.height) / 2,
+                "{width}x{height}: vertically centred, odd row below"
+            );
+
+            // Drawn where the rectangle says, not merely computed there.
+            assert!(
+                row_text(&buffer, band.y).starts_with("─ Help "),
+                "{width}x{height}: the band's top rule is drawn at row {}",
+                band.y
+            );
+            assert_eq!(
+                row_text(&buffer, band.y + band.height - 1)
+                    .chars()
+                    .next()
+                    .expect("the band's bottom rule row is not empty"),
+                '─',
+                "{width}x{height}: the band's bottom rule is drawn at its last row"
+            );
+
+            // The overlay covered the body and not the frame: the footer row
+            // still reads its hints.
+            assert!(
+                row_text(&buffer, footer.y).starts_with("? help"),
+                "{width}x{height}: the footer still reads its hints"
+            );
+        }
+    }
+
+    #[test]
+    fn the_band_paints_every_cell_it_covers() {
+        // `help-overlay`: "The band paints every cell it covers".
+        // Both mandated frames, written unsuffixed: `WIDTHS`' number scan is
+        // `\b(\d+)\b` and does not see `120u16`.
+        let frames: [(u16, u16); 2] = [(120, 40), (60, 20)];
+        for (width, height) in frames {
+            let closed = render_at(width, height, &overlay_dashboard(false));
+            let open = render_at(width, height, &overlay_dashboard(true));
+            let (body, _) =
+                crate::ui::layout::split_frame(ratatui::layout::Rect::new(0, 0, width, height));
+            let band = crate::ui::layout::help_band(body, crate::ui::help::content_rows());
+
+            let closed_rows: Vec<String> = (0..height).map(|y| row_text(&closed, y)).collect();
+            let band_rows: Vec<String> = (band.y..band.y + band.height)
+                .map(|y| row_text(&open, y))
+                .collect();
+
+            let mut found_beneath = 0;
+            for needle in overlay_needles() {
+                if closed_rows.iter().any(|row| row.contains(&needle)) {
+                    found_beneath += 1;
+                }
+                assert!(
+                    band_rows.iter().all(|row| !row.contains(&needle)),
+                    "{width}x{height}: `{needle}` shows through the band"
+                );
+            }
+            assert!(
+                found_beneath > 0,
+                "{width}x{height}: the closed frame carries none of the needles, \
+                 so the assertion above is vacuous"
+            );
+
+            // Every cell outside the band is byte-identical, style included.
+            for y in 0..height {
+                if y >= band.y && y < band.y + band.height {
+                    continue;
+                }
+                for x in 0..width {
+                    assert_eq!(
+                        cell(&open, x, y),
+                        cell(&closed, x, y),
+                        "{width}x{height}: cell {x},{y} lies outside the band and moved"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn the_frame_beneath_is_unchanged_when_the_overlay_closes() {
+        // `help-overlay`: "The frame beneath is unchanged when the overlay
+        // closes". Both mandated frames, written unsuffixed: `WIDTHS`' number
+        // scan is `\b(\d+)\b` and does not see `120u16`.
+        let frames: [(u16, u16); 2] = [(120, 40), (60, 20)];
+        for (width, height) in frames {
+            let mut dashboard = overlay_dashboard(false);
+            let first = render_at(width, height, &dashboard);
+            dashboard.apply(Action::ToggleHelp);
+            let second = render_at(width, height, &dashboard);
+            dashboard.apply(Action::ToggleHelp);
+            let third = render_at(width, height, &dashboard);
+
+            assert_ne!(
+                first, second,
+                "{width}x{height}: opening the overlay changed nothing at all"
+            );
+            assert_eq!(
+                first, third,
+                "{width}x{height}: closing the overlay left the frame moved"
             );
         }
     }

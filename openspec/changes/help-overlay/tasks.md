@@ -203,25 +203,25 @@ run it avoids.
 ## 9. Drawing the overlay, and the mouse
 <!-- kind: behavior -->
 
-- [ ] 9.1 RED: Add view tests named for The band's geometry at both mandated widths, The band
+- [x] 9.1 RED: Add view tests named for The band's geometry at both mandated widths, The band
   paints every cell it covers, and The frame beneath is unchanged when the overlay closes. The
   third renders, toggles twice, and asserts the first and third buffers are byte-identical.
-- [ ] 9.2 GREEN: Draw the band in `ui::view::render` after the body and before returning, leaving
+- [x] 9.2 GREEN: Draw the band in `ui::view::render` after the body and before returning, leaving
   the footer row alone.
-- [ ] 9.3 RED: Add tests in `src/ui/driver.rs` named for The wheel scrolls the overlay from every
+- [x] 9.3 RED: Add tests in `src/ui/driver.rs` named for The wheel scrolls the overlay from every
   region, A click inside the band does nothing, A click outside the band dismisses it and selects
   nothing, The band's edges are inside it, Motion still costs no frame while the overlay is open,
   and Nothing in the overlay is mouse-only.
-- [ ] 9.4 GREEN: Add `mouse_action`'s overlay branch ahead of the `zone` lookup, per
+- [x] 9.4 GREEN: Add `mouse_action`'s overlay branch ahead of the `zone` lookup, per
   `specs/mouse-input/spec.md`'s table.
-- [ ] 9.5 GREEN: Add the dismissing-click row to `SPEC.md` → Keys' **mouse** table. It must land
+- [x] 9.5 GREEN: Add the dismissing-click row to `SPEC.md` → Keys' **mouse** table. It must land
   in this group, not in Documentation: `tests/doc_contract.rs:1850`'s `documented_mouse_actions`
   compares that table against `mouse_action`'s own `Action::` variants, so 9.4 turns it red and
   only this row turns it green again.
-- [ ] 9.6 CHECK: Contract gate — re-run `cargo test --test doc_contract documented_mouse` and
+- [x] 9.6 CHECK: Contract gate — re-run `cargo test --test doc_contract documented_mouse` and
   confirm the table and the function agree.
-- [ ] 9.7 REFACTOR: Clean up while green, or state that none was needed.
-- [ ] 9.8 Run `cargo test ui` — no regressions.
+- [x] 9.7 REFACTOR: Clean up while green, or state that none was needed.
+- [x] 9.8 Run `cargo test ui` — no regressions.
 
 ## 10. The contract tier
 <!-- kind: behavior -->

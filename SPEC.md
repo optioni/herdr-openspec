@@ -626,7 +626,18 @@ pane stays fully usable over SSH in a terminal that reports no mouse
 | Left click on an artifact tab cell | `Action::SelectTab` for that cell's own position, exactly as its digit key. It does not change the route |
 | Left click on an artifact-section header, when the selected artifact is foldable | `Action::Click` naming that row's own content-line index and section index — fold it if open, unfold it if collapsed, and move the detail cursor to it, exactly as `Space` does at `Route::Detail` (`foldable-spec-sections`) |
 | Left click on any other row of a foldable artifact's content | `Action::Click` naming that row's own content-line index — move the detail cursor to it and fold nothing, exactly as `j`/`k` do there (`foldable-spec-sections`) |
+| Left click outside the help overlay's band while the overlay is open — above it, below it, or on the footer row | `Action::ToggleHelp` — close the overlay, and nothing else in the same event: the click that dismissed it does not also select the row under it (`help-overlay`) |
 | Anything else — a right or middle press, any release, any drag, pointer motion, a horizontal wheel, the footer row, a region's heading row, its padding row, or its gutter, a problem or message row, the detail content area when the selected artifact is not foldable, a content row past the last one a foldable artifact drew, or a point outside the frame | `Action::Ignore` |
+
+While the help overlay is open its own row above takes precedence over every
+other row in this table, and `ui::layout::zone` is not consulted at all: both
+of the region rules resolve the pointer to a region, and while a modal covers
+the body there is no region under the pointer to resolve it to. The wheel then
+scrolls the overlay from **anywhere in the frame** — `Action::ScrollDown` and
+`Action::ScrollUp`, which `apply` routes to `help.scroll` — while a click
+**inside** the band, which is read-only and holds no control, and a click
+**outside the frame**, which is not a gesture the pane received, are both
+`Action::Ignore`.
 
 The region under a wheel is the **whole** region — its heading row, its padding
 row, and its gutters included, and, for the detail region, its tab bar as well as its content area.
