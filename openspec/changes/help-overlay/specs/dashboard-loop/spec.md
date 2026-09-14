@@ -594,7 +594,7 @@ its merge key; its subject is unchanged and only the field count moves.
 - **WHEN** a dashboard with `help.open` true and `help.scroll` `99` is driven through one
   `run_loop` iteration at 60x20 on `Route::List` — the layout in which `split_body` returns no
   detail region and `normalise_scroll` returns early
-- **THEN** `help.scroll` is `22` after the iteration: 39 content rows less a 17-row interior,
+- **THEN** `help.scroll` is `25` after the iteration: 42 content rows less a 17-row interior,
   clamped by `normalise_help_scroll`
 - **AND** `detail.scroll` is untouched by that iteration, so `normalise_scroll` still changes
   nothing when the detail region is not drawn and `detail-scroll`'s requirement stays true
@@ -767,13 +767,14 @@ enums, the check's positive control is anchored on `struct <T> {`, and an enum c
 swept list without breaking that control. What the check enforces about `Request` is the
 enclosing `Launch` literal, which must name `pending` explicitly at every site; what covers the
 enums themselves is an exhaustive `match` with no wildcard arm in the compile-time companions
-below. `help-overlay` adds **three** to the swept set — `Help` in `src/ui/app.rs`, which the
-existing `Dashboard Filter Detail Sections` run already covers, and `help::Binding` and
+below. `help-overlay` adds **three** to the swept set — `Help` in `src/ui/app.rs`, which SHALL be
+named on that run's own `TYPES` list, taking it to `Dashboard Filter Detail Sections Help` and
+its `SCAN_MIN` from 206 to 308, and `help::Binding` and
 `help::Group`, which need one further parameterisation of the same script with `HOMEFILE` set to
 `src/ui/help.rs`. `make gates` runs `scripts/gates/nodefault-ui.sh` **six** times today
-(`grep -c nodefault-ui.sh Makefile` = 6, lines 45-50); this change makes it **seven**. The reason is `Binding`'s: it is twenty-eight `'static` literals, which is
+(`grep -c nodefault-ui.sh Makefile` = 6, lines 45-50); this change makes it **seven**. The reason is `Binding`'s: it is thirty-one `'static` literals, which is
 exactly the shape a `..Default::default()` rest is tempting in, and a field added to it later
-would otherwise silently become the empty string at twenty-eight sites at once.
+would otherwise silently become the empty string at thirty-one sites at once.
 `change-model`'s existing gate does not reach any of these thirteen types: that gate is
 stated over `Change`, `ChangeSet`, `ArtifactRef`, and `Origin` in `src/changes.rs`, and none of
 these is one of those nor there.

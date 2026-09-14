@@ -7612,6 +7612,86 @@ mod tests {
     }
 
     #[test]
+    fn the_overlay_lists_the_agent_keys_when_the_socket_is_unreachable() {
+        // `help-overlay`: "The overlay lists the agent keys when the socket is
+        // unreachable". This is the scenario the change's whole accepted footer
+        // cost rests on — the footer drops `a/c/s launch` and `g focus` when the
+        // socket is unreachable, and drops `g focus` at 60 columns even when it
+        // is reachable, and the argument for accepting both is that the overlay
+        // lists them anyway. That argument was made in three places and asserted
+        // nowhere until this change's own Change Review measured its absence.
+        //
+        // What makes it true rather than hoped for: `INVENTORY` is `'static` and
+        // no render path under `ui::help` consults `agents.reachable`. This test
+        // is the executable form of that claim, so a future change that made the
+        // overlay reachability-aware fails here rather than silently hiding the
+        // four keys the footer already dropped.
+        //
+        // Both mandated frames, written unsuffixed: `WIDTHS`' number scan is
+        // `\b(\d+)\b` and does not see `120u16`.
+        let frames: [(u16, u16); 2] = [(120, 40), (60, 20)];
+        for (width, height) in frames {
+            let mut unreachable = overlay_dashboard(true);
+            unreachable.agents.reachable = false;
+            let mut reachable = overlay_dashboard(true);
+            reachable.agents.reachable = true;
+
+            let un = render_at(width, height, &unreachable);
+            let re = render_at(width, height, &reachable);
+            let (body, _) =
+                crate::ui::layout::split_frame(ratatui::layout::Rect::new(0, 0, width, height));
+            let band = crate::ui::layout::help_band(body, crate::ui::help::content_rows());
+
+            // The two bands are byte-identical, cell for cell, style included.
+            for y in band.y..band.y + band.height {
+                for x in band.x..band.x + band.width {
+                    assert_eq!(
+                        cell(&un, x, y),
+                        cell(&re, x, y),
+                        "{width}x{height}: band cell {x},{y} moved with `agents.reachable`"
+                    );
+                }
+            }
+
+            // And the overlay LISTS the four agent keys — asserted against the
+            // row list at this width, not against the visible window. At 60x20
+            // the interior is 17 rows against 42 of content, so at scroll 0 the
+            // `Agents` heading sits at the band's lower edge and its four
+            // binding rows are below the fold. "The overlay lists them anyway"
+            // is a claim about the overlay's content, which the reader reaches
+            // by scrolling; asserting it against the visible band would be true
+            // at 120x40 and false at 60x20 for a reason that has nothing to do
+            // with reachability.
+            let listed: Vec<String> = crate::ui::help::rows(band.width)
+                .iter()
+                .map(|row| {
+                    row.segments
+                        .iter()
+                        .map(|(text, _)| text.as_str())
+                        .collect::<String>()
+                })
+                .collect();
+            for key in ["a", "c", "s", "g"] {
+                assert!(
+                    listed.iter().any(|row| {
+                        let trimmed = row.trim_start();
+                        trimmed.starts_with(key)
+                            && trimmed[key.len()..].starts_with(' ')
+                            && trimmed.trim_end().len() > key.len() + 1
+                    }),
+                    "{width}x{height}: no `{key}` row with a description in the overlay's \
+                     own row list"
+                );
+            }
+            assert!(
+                listed.iter().any(|row| row.contains("Agents")),
+                "{width}x{height}: the row list carries no `Agents` heading, so the four \
+                 assertions above could not have failed"
+            );
+        }
+    }
+
+    #[test]
     fn the_frame_beneath_is_unchanged_when_the_overlay_closes() {
         // `help-overlay`: "The frame beneath is unchanged when the overlay
         // closes". Both mandated frames, written unsuffixed: `WIDTHS`' number

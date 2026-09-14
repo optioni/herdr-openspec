@@ -41,7 +41,7 @@ the binding. It is not decoration and SHALL NOT be collapsed away: `Space` folds
 leaves the detail route at `Route::Detail` and clears the query while filtering. An
 inventory that flattens either is worse than none. Putting it on the group is what makes
 that disambiguation cost one row in each of two groups rather than a qualifier repeated
-on all twenty-eight — within `Changes` every binding is a list binding, so a per-row tag
+on all thirty-one — within `Changes` every binding is a list binding, so a per-row tag
 would say `list` five times and carry no information the heading does not. `Any` means
 the group's bindings do the same thing at both routes — `Agents`, `Pane`, and `Mouse`,
 whose gestures name their own region in their descriptions instead.
@@ -261,7 +261,7 @@ written in, which is an implementation artefact.
 
 Group 5 SHALL state in its own bindings' descriptions that every other printable key
 types into the query, which is the one behaviour the action sweep cannot name because
-`FilterPush` is exempt from it. Group 6 carries `Scope::Any` because its five gestures do
+`FilterPush` is exempt from it. Group 6 carries `Scope::Any` because its six gestures do
 not share one region — a wheel over the list and a wheel over the detail are different
 bindings sharing one input string — so each of its descriptions SHALL name the region
 the gesture acts on instead.

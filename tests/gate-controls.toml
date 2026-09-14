@@ -384,6 +384,28 @@ with its own SCAN_MIN, and this is that line's own executed control rather than 
 one'''
 
 [[control]]
+id = "nodefault-ui-help-state"
+script = "nodefault-ui.sh"
+env = "SCAN_MIN=71 TYPES=Help"
+plant_file = "src/ui/app.rs"
+plant_find = "pub struct Help {"
+plant_replace = '''impl Default for Help {
+    fn default() -> Self {
+        Help { open: false, scroll: 0 }
+    }
+}
+
+pub struct Help {'''
+expect = "NODEFAULT-UI FAIL: Help has a Default"
+why = '''help-overlay: found by this change's own Change Review, which measured that `Help`
+appeared in NO `TYPES` set on any nodefault-ui.sh recipe line, while
+`specs/dashboard-loop/spec.md` claimed the `Dashboard Filter Detail Sections` run already
+covered it. Half A greps only the names in `TYPES`, so `impl Default for Help` exited 0. `Help`
+is now named on the Makefile line (SCAN_MIN 206 -> 308) and this control pins that it fires.
+The env is the SINGLE-type invocation for the same reason `nodefault-ui-help-binding`'s is:
+`env_overrides` splits this field on whitespace and cannot carry a multi-word TYPES'''
+
+[[control]]
 id = "nodefault-ui-help-binding"
 script = "nodefault-ui.sh"
 env = "SCAN_MIN=31 HOMEFILE=src/ui/help.rs TYPES=Binding"

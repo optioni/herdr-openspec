@@ -197,6 +197,38 @@ fn set_diff_message(
 }
 
 #[test]
+fn the_overlay_submodule_is_invisible_to_both_map_checks() {
+    // `help-overlay` -> `doc-conformance`: "The submodule is invisible to both map
+    // checks, and that is asserted rather than assumed".
+    //
+    // `src/ui/help.rs` is a submodule. `pub_mod_names` reads `src/lib.rs`'s
+    // TOP-LEVEL `pub mod` declarations, and `SPEC.md`'s Module map carries a single
+    // `ui` row for every file under `src/ui/`, so adding the overlay module failed
+    // neither map check — exactly as adding `src/ui/palette.rs` failed neither.
+    //
+    // An earlier draft of that requirement claimed both checks WOULD fail until the
+    // documents named `ui::help`, which is false and would have made its own
+    // scenario unfalsifiable. This test is the executable form of the true claim,
+    // so a future change that extends either check to submodule granularity fails
+    // HERE and is told to update the requirement, rather than discovering the
+    // granularity by surprise.
+    let lib_rs = read_doc(&manifest_dir().join("src/lib.rs")).expect("read src/lib.rs");
+    let names = pub_mod_names(&lib_rs);
+    assert!(
+        names.contains("ui"),
+        "src/lib.rs declares no top-level `pub mod ui`: {names:?}"
+    );
+    for absent in ["help", "ui::help"] {
+        assert!(
+            !names.contains(absent),
+            "pub_mod_names now yields `{absent}`, so it has gained submodule \
+             granularity - update `specs/doc-conformance`'s invisibility scenario \
+             rather than deleting this assertion: {names:?}"
+        );
+    }
+}
+
+#[test]
 fn pub_mod_names_handles_comments_attributes_and_indentation() {
     let lib_rs = "\
 pub mod a; // a brand-new module
