@@ -51,11 +51,11 @@ Every number this plan uses, with the command that produced it, run at HEAD on 2
 | Groups per archived task file | `for f in openspec/changes/archive/*/tasks.md; do grep -c '^## ' "$f"; done \| sort -n` | n=38, min 5, median 11.5, max 22 |
 | The 22-group worst case, and its gauge width | `archive/2026-09-06-agent-launch`: 22 groups, 81 items, cells `[81/81]` and `100%` | `g = 58 - 7 - 4 - 2 = 45` at the narrow interior, against the `2 * 22 = 44` floor — **one** column of headroom |
 
-- [ ] 0.1 CHECK: Re-run every command above and confirm each figure still holds. A figure that
+- [x] 0.1 CHECK: Re-run every command above and confirm each figure still holds. A figure that
       moved invalidates the task that cites it — the `ArtifactSection` counts send you to 5.2,
       the `progress_bar` split to 7.3, the `expected_header_at` lines to 6.5, and the `Face`
       count to 3.3.
-- [ ] 0.2 CHECK: Confirm the baseline is green before any edit. Measured at HEAD on 2026-09-14
+- [x] 0.2 CHECK: Confirm the baseline is green before any edit. Measured at HEAD on 2026-09-14
       with this change's artifacts committed: `cargo test --all-features` exits **0** with
       **1498 passed, 0 failed, 1 ignored** across **ten** test binaries — lib 1353, main 0,
       `ci_workflow` 21, `cli` 10, `coverage_prod` 19, `degraded_coverage` 10 (+1 ignored),
@@ -67,7 +67,7 @@ Every number this plan uses, with the command that produced it, run at HEAD on 2
       changed while running the gate controls" if another agent touches this checkout during
       the run — its `TreeDigest` includes directory mtimes. Re-run in a quiet tree before
       attributing it to a change.
-- [ ] 0.3 CHECK: Re-run the four RED checks below. Each was run at HEAD on 2026-09-14 and each
+- [x] 0.3 CHECK: Re-run the four RED checks below. Each was run at HEAD on 2026-09-14 and each
       returned **0**, so the behaviours this change adds are provably absent before group 1.
       Note the first uses `-rl`, not `-rc`: `grep -rc` prints a `path:0` line per file and so
       never reports `0` on its own.
@@ -75,10 +75,10 @@ Every number this plan uses, with the command that produced it, run at HEAD on 2
       `grep -c "muted" src/ui/markdown.rs` → 0;
       `grep -cE "Role::Muted|TaskEvidence" src/ui/palette.rs` → 0;
       `grep -A6 "pub struct ArtifactSection" src/ui/app.rs | grep -c progress` → 0.
-- [ ] 0.4 CHECK: Confirm the four greps above are **absence-of-string** checks, not
+- [x] 0.4 CHECK: Confirm the four greps above are **absence-of-string** checks, not
       absence-of-behaviour ones, and that the behavioural RED is each group's own 1.1/2.1/…
       task. A grep cannot fail for the right reason; it is recorded as a starting condition.
-- [ ] 0.5 CHARACTERIZE: **Capture the baseline this change's byte-identical claims compare
+- [x] 0.5 CHARACTERIZE: **Capture the baseline this change's byte-identical claims compare
       against, before any edit.** Write the HEAD output of `ui::tasks::items` and
       `ui::tasks::lines` over each group-4 fixture, and of `ui::markdown::lines` over the
       group-3 document, at widths 58 and 78, into `notes/head-output.md` in this change
