@@ -289,6 +289,13 @@ fn detail_row_role(kind: &detail::ContentKind) -> Option<Role> {
 /// `Face::plain()` maps to `Style::default()`.
 fn style_for(face: &Face) -> Style {
     let mut style = Style::default();
+    // First: `Muted` carries no foreground, so it takes no colour from
+    // anything, and putting it first means every later role's colour wins over
+    // it rather than being suppressed by position
+    // (`tasks-emphasis` -> specs/view-palette).
+    if face.muted {
+        style = style.patch(palette::style(Role::Muted));
+    }
     if face.quoted {
         style = style.patch(palette::style(Role::Quoted));
     }
@@ -314,6 +321,18 @@ fn style_for(face: &Face) -> Style {
     }
     if let Some(level) = face.heading {
         style = style.patch(palette::style(Role::Heading(level)));
+    }
+    // Last: a label's colour is the one a reader sees, ahead of every markdown
+    // face a label segment could in principle also carry. The two new steps are
+    // not assumed mutually exclusive even though `tasks-checklist` never emits
+    // both — totality is the contract, not the absence of a caller.
+    if let Some(role) = face.label {
+        style = style.patch(palette::style(match role {
+            crate::tasks::LabelRole::Evidence => Role::TaskEvidence,
+            crate::tasks::LabelRole::Change => Role::TaskChange,
+            crate::tasks::LabelRole::Confirm => Role::TaskConfirm,
+            crate::tasks::LabelRole::Other => Role::TaskLabel,
+        }));
     }
     style
 }
@@ -7386,6 +7405,88 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// `view-palette` :: "The two new face fields compose in their stated
+    /// positions".
+    #[test]
+    fn the_two_new_face_fields_compose_in_their_stated_positions() {
+        // A pure `style_for` test: no frame is drawn here, so the two mandated widths are
+        // named rather than exercised — the 60- and 120-column render half of this same
+        // rule is `a_checklist_row_reaches_the_buffer_with_its_label_coloured`.
+        assert_eq!(
+            style_for(&Face {
+                muted: true,
+                ..Face::plain()
+            }),
+            palette::style(Role::Muted)
+        );
+        assert_eq!(
+            style_for(&Face {
+                label: Some(crate::tasks::LabelRole::Evidence),
+                ..Face::plain()
+            }),
+            palette::style(Role::TaskEvidence)
+        );
+        assert_eq!(
+            style_for(&Face {
+                label: Some(crate::tasks::LabelRole::Other),
+                ..Face::plain()
+            }),
+            palette::style(Role::TaskLabel)
+        );
+
+        // The combination `tasks-checklist` never emits — a checked item's
+        // segment carries `label: None` and a label segment carries
+        // `muted: false` — answered rather than refused. Totality is the
+        // contract, not the absence of a caller.
+        let both = style_for(&Face {
+            muted: true,
+            label: Some(crate::tasks::LabelRole::Confirm),
+            ..Face::plain()
+        });
+        assert!(
+            both.add_modifier.contains(Modifier::DIM),
+            "`Muted`'s DIM must survive the fold"
+        );
+        assert_eq!(
+            both.fg,
+            palette::style(Role::TaskConfirm).fg,
+            "the label is folded last, so its colour is the one a reader sees"
+        );
+
+        // The remaining two roles, so the four-way selection is asserted whole
+        // rather than three quarters of it.
+        assert_eq!(
+            style_for(&Face {
+                label: Some(crate::tasks::LabelRole::Change),
+                ..Face::plain()
+            }),
+            palette::style(Role::TaskChange)
+        );
+        assert_eq!(
+            style_for(&Face {
+                label: Some(crate::tasks::LabelRole::Confirm),
+                ..Face::plain()
+            }),
+            palette::style(Role::TaskConfirm)
+        );
+
+        // `Muted` is folded **first** and carries no foreground, so every later
+        // role's colour wins over it rather than being suppressed by position.
+        let muted_heading = style_for(&Face {
+            muted: true,
+            heading: Some(2),
+            ..Face::plain()
+        });
+        assert_eq!(muted_heading.fg, palette::style(Role::Heading(2)).fg);
+        assert!(muted_heading.add_modifier.contains(Modifier::DIM));
+        assert!(muted_heading.add_modifier.contains(Modifier::BOLD));
+
+        // And the zero value did not move.
+        assert_eq!(style_for(&Face::plain()), Style::default());
+        assert!(!Face::plain().muted);
+        assert_eq!(Face::plain().label, None);
     }
 
     /// `detail-header` :: "The detail header is bold and uncoloured at both mandated

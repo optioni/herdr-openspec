@@ -31,6 +31,26 @@ const UNCHECKED: &str = "[ ] ";
 /// is real information the marker carries, not a flag. The only type in
 /// this module that derives `Default`: a `Face` is a value with a
 /// meaningful zero (unstyled), not a state type `NODEFAULT-UI` gates.
+///
+/// `muted` and `label` are `tasks-emphasis`' two additions, joining
+/// `strikethrough`, which `markdown-legibility` added on the same terms. This
+/// module sets **neither**: [`lines`] returns `muted: false` and `label: None`
+/// on every segment it emits, for every source and every width. They exist
+/// because `Face` is the crate's one carrier of "what this run of text is",
+/// and `tasks-checklist` needs to say two things about a run that no markdown
+/// construct says — that a whole row is finished, and that a leading token is
+/// a lifecycle label. Putting them here rather than inventing a second segment
+/// type is what keeps `ui::detail::content_lines` returning one line type
+/// whether its body came from the markdown path or the checklist path.
+///
+/// `label`'s type is `crate::tasks::LabelRole` — a plain enum from the parsing
+/// side of the crate, reaching no I/O API and no drawing type — so it widens
+/// neither confinement this module carries: not the parser's, and not the
+/// "names no drawing type" rule stated above. (Both are enforced by a grep over
+/// this whole file, prose included, so the sentence is worded around the names
+/// they search for; that is the known limit those checks already carry, and
+/// rewording is its stated repair.) This module names the type and calls no
+/// function of `crate::tasks`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Face {
     pub heading: Option<u8>,
@@ -40,10 +60,15 @@ pub struct Face {
     pub link: bool,
     pub quoted: bool,
     pub strikethrough: bool,
+    /// De-emphasised whole: a task item the reader has finished with.
+    pub muted: bool,
+    /// A task's leading lifecycle label, as `crate::tasks::label_of` classifies
+    /// it.
+    pub label: Option<crate::tasks::LabelRole>,
 }
 
 impl Face {
-    /// The all-`false`, `heading: None` value.
+    /// The all-`false`, `heading: None`, `label: None` value.
     pub fn plain() -> Face {
         Face::default()
     }
@@ -1331,6 +1356,186 @@ mod tests {
          |---|:--:|---:|\n\
          | a | b | this cell is padded out with enough extra words that it exceeds the narrow interior |\n"
             .to_string()
+    }
+
+    /// One segment as HEAD emitted it: its text and its seven pre-change face
+    /// fields, transcribed from
+    /// `openspec/changes/tasks-emphasis/notes/head-output.md` — each row naming
+    /// only the fields HEAD set, the rest arriving from `Face::plain()`. The
+    /// comparison is against a whole `Face`, so the two fields this change adds
+    /// are compared too, at their zero, which is the claim.
+    struct Recorded {
+        text: &'static str,
+        face: Face,
+    }
+
+    fn rec(text: &'static str, face: Face) -> Recorded {
+        Recorded { text, face }
+    }
+
+    /// The group-3 document: every construct `markdown-render`'s new scenario
+    /// names — a heading, a paragraph, a bullet list, a fenced code block, a
+    /// block quote, a link, a struck run, a table, a checked and an unchecked
+    /// task-list item — plus the literal paragraph `VERIFY: this is prose, not
+    /// a task`, which is the fixture's whole point: a proposal that opens with
+    /// the word `VERIFY:` is prose, and recognising a label is
+    /// `tasks-checklist`'s job on the checklist path and never this renderer's.
+    fn face_field_fixture() -> &'static str {
+        "# Heading\n\
+         \n\
+         A paragraph of prose.\n\
+         \n\
+         - alpha\n\
+         - bravo\n\
+         \n\
+         ```sh\n\
+         cargo test\n\
+         ```\n\
+         \n\
+         > quoted line\n\
+         \n\
+         A [link](https://example.com) here.\n\
+         \n\
+         A ~~struck~~ run.\n\
+         \n\
+         | a | b |\n\
+         |---|---|\n\
+         | 1 | 2 |\n\
+         \n\
+         - [x] done item\n\
+         - [ ] open item\n\
+         \n\
+         VERIFY: this is prose, not a task\n"
+    }
+
+    /// `markdown-render` :: "The markdown path sets neither new face field".
+    ///
+    /// The recorded half is a **literal** table captured from HEAD before this
+    /// change — `openspec/changes/tasks-emphasis/notes/head-output.md`, task
+    /// 0.5 — one row per emitted segment, its text and its seven pre-change
+    /// face fields. Comparing against a fresh call of the function under test
+    /// could not fail; this can, and it is what carries the claim that adding
+    /// two fields moved no rendered output.
+    #[test]
+    fn the_markdown_path_sets_neither_new_face_field() {
+        let recorded = [
+            rec(
+                "# ",
+                Face {
+                    heading: Some(1),
+                    ..Face::plain()
+                },
+            ),
+            rec(
+                "Heading",
+                Face {
+                    heading: Some(1),
+                    ..Face::plain()
+                },
+            ),
+            rec("A paragraph of prose.", Face::plain()),
+            rec("• ", Face::plain()),
+            rec("alpha", Face::plain()),
+            rec("• ", Face::plain()),
+            rec("bravo", Face::plain()),
+            rec(
+                "cargo test",
+                Face {
+                    code: true,
+                    ..Face::plain()
+                },
+            ),
+            rec(
+                "│ ",
+                Face {
+                    quoted: true,
+                    ..Face::plain()
+                },
+            ),
+            rec(
+                "quoted line",
+                Face {
+                    quoted: true,
+                    ..Face::plain()
+                },
+            ),
+            rec("A ", Face::plain()),
+            rec(
+                "link",
+                Face {
+                    link: true,
+                    ..Face::plain()
+                },
+            ),
+            rec(" here.", Face::plain()),
+            rec("A ", Face::plain()),
+            rec(
+                "struck",
+                Face {
+                    strikethrough: true,
+                    ..Face::plain()
+                },
+            ),
+            rec(" run.", Face::plain()),
+            rec("│ ", Face::plain()),
+            rec(
+                "a",
+                Face {
+                    strong: true,
+                    ..Face::plain()
+                },
+            ),
+            rec(" │ ", Face::plain()),
+            rec(
+                "b",
+                Face {
+                    strong: true,
+                    ..Face::plain()
+                },
+            ),
+            rec(" │", Face::plain()),
+            rec("├───┼───┤", Face::plain()),
+            rec("│ 1 │ 2 │", Face::plain()),
+            rec("[✓] ", Face::plain()),
+            rec("done item", Face::plain()),
+            rec("[ ] ", Face::plain()),
+            rec("open item", Face::plain()),
+            rec("VERIFY: this is prose, not a task", Face::plain()),
+        ];
+
+        // Unsuffixed, because `MDWIDTHS`' number scan is `\b(\d+)\b` and does
+        // not see `58u16`; the script's own header says to write them bare.
+        for width in [58, 78] {
+            let out = lines(face_field_fixture(), width);
+            let got: Vec<&Segment> = out.iter().flat_map(|l| l.segments.iter()).collect();
+            assert_eq!(
+                got.len(),
+                recorded.len(),
+                "width {width}: segment count moved"
+            );
+            for (segment, row) in got.iter().zip(recorded.iter()) {
+                assert_eq!(segment.text, row.text, "width {width}: segment text moved");
+                assert_eq!(segment.face, row.face, "width {width}: {:?}", row.text);
+
+                // The two new fields, on every segment, for every construct.
+                assert!(
+                    !segment.face.muted,
+                    "width {width}: {:?} is muted",
+                    row.text
+                );
+                assert_eq!(segment.face.label, None, "width {width}: {:?}", row.text);
+            }
+
+            // The `VERIFY:` paragraph in particular: one plain segment carrying
+            // the whole sentence and no label at all.
+            let verify = got
+                .iter()
+                .find(|s| s.text.starts_with("VERIFY:"))
+                .expect("the VERIFY paragraph reached no segment");
+            assert_eq!(verify.text, "VERIFY: this is prose, not a task");
+            assert_eq!(verify.face, Face::plain());
+            assert_eq!(verify.face.label, None);
+        }
     }
 
     #[test]

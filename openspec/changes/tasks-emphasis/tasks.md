@@ -154,24 +154,24 @@ the ordering note above gives.
 Writes `src/ui/markdown.rs`, `src/ui/view.rs`, and the one `Face` literal in
 `src/ui/tasks.rs`.
 
-- [ ] 3.1 RED: Write a failing `ui::markdown` test
+- [x] 3.1 RED: Write a failing `ui::markdown` test
       `the_markdown_path_sets_neither_new_face_field` at widths 58 and 78 over the
       multi-construct document the scenario names, asserting `muted: false` and `label: None`
       on every segment.
-- [ ] 3.2 RED: Write a failing `ui::view` test
+- [x] 3.2 RED: Write a failing `ui::view` test
       `the_two_new_face_fields_compose_in_their_stated_positions` calling `style_for` on the
       four `Face` values the scenario names, including the unreachable `muted` + `label`
       combination.
-- [ ] 3.3 GREEN: Add `muted: bool` and `label: Option<crate::tasks::LabelRole>` to `Face`, keep
+- [x] 3.3 GREEN: Add `muted: bool` and `label: Option<crate::tasks::LabelRole>` to `Face`, keep
       `Default`, and update the **one** construction site that spells every field out
       (`src/ui/tasks.rs:159`, per 0.1). The compiler names any site this count missed.
-- [ ] 3.4 GREEN: Extend `style_for` to the nine-step fold — `Muted` first, `face.label` last —
+- [x] 3.4 GREEN: Extend `style_for` to the nine-step fold — `Muted` first, `face.label` last —
       per `specs/view-palette/spec.md`.
-- [ ] 3.5 CHECK: Contract gate — re-read design.md -> Contracts, confirm `Face`'s two new
+- [x] 3.5 CHECK: Contract gate — re-read design.md -> Contracts, confirm `Face`'s two new
       fields reach no consumer outside `src/`, and that no serialized or persisted form exists.
-- [ ] 3.6 CHECK: Run `/bin/sh scripts/gates/mdseam.sh`, `noio-view.sh`, and `colwidth.sh` and
+- [x] 3.6 CHECK: Run `/bin/sh scripts/gates/mdseam.sh`, `noio-view.sh`, and `colwidth.sh` and
       confirm each exits 0 — `ui::markdown` naming `crate::tasks::LabelRole` must widen none.
-- [ ] 3.7 VERIFY: `cargo test --all-features` — green. The whole suite, not a module filter:
+- [x] 3.7 VERIFY: `cargo test --all-features` — green. The whole suite, not a module filter:
       this group edits `src/ui/tasks.rs`, which a `ui::markdown ui::view` filter would not run.
 
 ## 4. The checklist item grammar: split at the label, mute a finished row

@@ -164,6 +164,10 @@ fn heading_line(heading: &crate::tasks::Heading, width: u16) -> crate::ui::markd
                 link: false,
                 quoted: false,
                 strikethrough: false,
+                // A heading line is neither muted nor labelled: it is the
+                // group's own name, not a task item.
+                muted: false,
+                label: None,
             },
         }],
     }
