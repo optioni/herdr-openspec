@@ -3,8 +3,10 @@
 ### Requirement: The gauge run is one implementation, shared with the detail header
 
 The `█`/`░` run this capability already specifies SHALL be produced by a single function that
-both call sites reach, rather than being formatted a second time where a second caller needs
-it. `ui::tasks::gauge_of(progress: &tasks::Progress, g: u16) -> String` SHALL be raised from
+every renderer of it reaches, rather than being formatted a second time where a new renderer
+needs it. `progress_bar` already calls `gauge_of` **twice** — once for the full form and once
+for the percent-dropped one — so the function has two call sites today and gains a third; what
+this change adds is a second *renderer*, the detail header, not a second call site. `ui::tasks::gauge_of(progress: &tasks::Progress, g: u16) -> String` SHALL be raised from
 private to `pub(crate)` for that purpose, and `ui::detail::header_row` SHALL call it rather
 than constructing a run of its own — the same rule that already makes
 `ui::list::progress_cell` the crate's one progress cell, applied to the crate's one gauge.
@@ -21,16 +23,33 @@ guard changes no rendered output anywhere. It is required because a `pub(crate)`
 reachable from a call site this capability does not control, and a panicking one would be a
 trap laid for the next caller rather than a contract.
 
-The properties this capability already fixes for the run SHALL continue to hold at every `g`,
-the detail header's 12 included: `filled == g` if and only if `progress.is_complete()`,
-`filled == 0` whenever `completed == 0`, and `filled = g * completed / total` in integer
+The properties this capability already fixes for the run SHALL hold at every `g`, the detail
+header's 12 included: `filled == g` if and only if `progress.is_complete()`, `filled == 0`
+whenever `completed == 0`, and otherwise `filled = g * completed / total` in integer
 arithmetic with a saturating multiply so no `Progress` value can overflow it.
 
-`progress_bar`'s own output SHALL be **unchanged** — byte-identical at every width for every
-`Progress` — by this change. Its grammar, its three-field degradation order, its percent
-cell, and its `[-]` form for a change with no tasks are all untouched: the only edit this
-capability takes is a visibility keyword and a guard on a branch neither of its call sites
-reaches.
+The first of those does **not** hold of the shipped implementation, and this change SHALL
+repair it rather than weaken the claim. `filled = completed.saturating_mul(g) / total`
+saturates at `Progress { completed: usize::MAX, total: usize::MAX }`, and
+`u64::MAX / u64::MAX == 1`, so a change this capability calls complete renders a gauge with
+**one** filled cell — at `g == 12`, and equally at the 68- and 48-column gauges the bar
+itself draws at its two mandated interior widths. `gauge_of` SHALL therefore return a run of
+`g` filled cells whenever `progress.is_complete()`, before computing the quotient. This is a
+fix to an already-shipped requirement of this capability, not a new one: the sentence
+"`filled == g` SHALL hold if and only if `progress.is_complete()`" is live text, and no
+existing test falsified it because the one sweep reaching `usize::MAX`
+(`bar_measures_at_most_its_width_at_every_width`) asserts only that the bar fits its width
+and never a fill count.
+
+`progress_bar`'s own output SHALL be **unchanged** — byte-identical at every width — for
+every `Progress` whose `completed * g` does not saturate, which is every `Progress` a
+repository of task files can produce. Its grammar, its three-field degradation order, its
+percent cell, and its `[-]` form for a change with no tasks are all untouched.
+
+The one named exception is the saturating case the completeness repair above corrects: at
+`Progress { completed: usize::MAX, total: usize::MAX }` the bar's gauge changes from one
+filled cell to a full run at every width that draws a gauge. That is the defect being fixed
+showing through, and it is the only input class whose rendering moves.
 
 #### Scenario: The bar's rendered output does not move
 
@@ -45,6 +64,14 @@ reaches.
   a space, and `44%`, the 68-column gauge holding exactly 30 `█` and the 48-column gauge
   exactly 21 `█` — the literal expectations this capability landed with, restated here so
   the claim is that the bar did not move and not merely that it still runs
+- **AND** the expected strings are built independently of `progress_bar` rather than by
+  calling it, on the same terms the existing
+  `full_grammar_is_byte_identical_to_pre_change_output` states, so the assertion cannot
+  pass by construction
+- **AND** `Progress { completed: usize::MAX, total: usize::MAX }` is the one excepted input:
+  its gauge is now a full run at every width that draws one, where it was a single filled
+  cell, and the scenario asserts the new value rather than treating the change as a
+  regression
 
 #### Scenario: The header's gauge and the bar's gauge agree about the same change
 
@@ -67,6 +94,11 @@ reaches.
 - **AND** a result holds no `░` exactly when that `Progress::is_complete()` is true, so the
   11-of-12 and 99-of-100 runs each hold at least one `░` and the two complete ones hold none
 - **AND** the 0-of-12 run holds no `█` at all
+- **AND** `gauge_of(&Progress { completed: usize::MAX, total: usize::MAX }, g)` holds no `░`
+  at `g` of 12, 48, and 68 — the header's budget and the bar's two mandated gauges. Without
+  the completeness short-circuit each of these returns a single `█` followed by `g - 1` `░`,
+  so this clause is the one that fails against the shipped implementation and proves the
+  repair landed
 
 #### Scenario: The promoted function is total at both guard values
 

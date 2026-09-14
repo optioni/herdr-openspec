@@ -357,8 +357,17 @@ what the header must not cross is now the region's right gutter column.
 - **THEN** no call panics at any width for any of the twenty combinations
 - **AND** at every width at or above 1 every result's `layout::columns` is exactly that
   width, and at width `0` every result is the empty string
-- **AND** at widths 26, 25, 13, 12, 7, 6, and 1 the cells drop in the documented order for
-  every one of the five names, so all four band boundaries hold for wide content as well as
-  for ASCII
+- **AND** for `Progress { completed: 4, total: 9 }` specifically, at widths 26, 25, 13, 12,
+  7, 6, and 1 the cells drop in the documented order for every one of the five names, so all
+  four band boundaries hold for wide content as well as for ASCII. The band clause is scoped
+  to that fixture because the boundaries are derived from a **five**-column progress cell:
+  `Progress { completed: 0, total: usize::MAX }` renders a 24-column cell and
+  `{ completed: usize::MAX, total: usize::MAX }` a 43-column one, which move every boundary
+  — at width 26 the first is already in the schema-dropped band and the second is down to
+  the name field alone. Asserting the documented boundaries across all four values would be
+  a requirement no correct implementation could satisfy
+- **AND** for the two wide-cell `Progress` values the claims are the width-exactness and
+  no-panic ones above, plus the drop-whole property: wherever a result contains `[` it
+  contains the whole progress cell
 - **AND** no result of a `total == 0` call contains `█` or `░` at any width, so the
   no-gauge rule survives every adversarial name rather than only the ASCII fixture

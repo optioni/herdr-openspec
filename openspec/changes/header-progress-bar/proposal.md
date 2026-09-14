@@ -45,8 +45,11 @@ None.
 
 - `detail-header`: the heading gains the gauge cell and the width-degradation ordering that
   governs it.
-- `tasks-progress-bar`: the `█`/`░` run becomes a function two call sites render, not one, so
-  its contract must say what it owes a caller that is not the tasks tab.
+- `tasks-progress-bar`: the `█`/`░` run gains a second **renderer** — the detail header — so
+  its contract must say what it owes a caller that is not the tasks tab. (Call sites go from
+  two to three: `progress_bar` already calls `gauge_of` twice, once per degradation band.)
+  The contract also turns out to be false as shipped at a saturating `Progress`, which this
+  change repairs rather than weakens.
 
 `responsive-layout` was listed here before the shape below was settled and is **not** modified:
 the mandated 78- and 58-column detail interiors do not move, the gauge's budget is fixed by

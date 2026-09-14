@@ -69,9 +69,22 @@ compatibility property: the only consumer of this function outside its own tests
 change.
 
 The *output* changes at `width >= 26` for a change with `total > 0`. Consumers affected: none
-in production — `ui::view` draws whatever string it is handed. The affected callers are the
-existing tests in `src/ui/detail.rs` and `src/ui/view.rs` whose expectations name the old
-strings, which this change updates as part of its own work rather than leaving red.
+in production — `ui::view` draws whatever string it is handed.
+
+The affected callers are the existing tests in **`src/ui/detail.rs`**, five of which assert
+the pre-gauge grammar literally and go red the moment the gauge lands: `:878` asserts
+`format!("{name_field} (tdd) [4/42]")` with a 65/45-column name field, `:927` asserts `(tdd)`
+is present at `w >= 13` (now `w >= 26`), and `:951`'s `got.contains("() [1/2]")` is split by
+the gauge between the two cells. Updating them is this change's own work, not collateral.
+
+`src/ui/view.rs`'s two test expectations are **not** affected, and this is worth stating
+because it is counter-intuitive: both build their expectation by calling the function under
+test — `let expected = crate::ui::detail::header_row("add-token-refresh", "tdd", &progress, w)`
+at `:5208`, and the same call inline at `:6750`. They discriminate the header's placement,
+span, and style, never its grammar, so they stay green with or without a gauge. The corollary
+binds this change's new view tests: they SHALL assert literal glyph counts and literal tails
+(`five █`, ending `(tdd) █████░░░░░░░ [4/9]`) and never `assert_eq!(buffer, header_row(…))`,
+which would reproduce exactly the tautology already sitting at those two sites.
 
 **`ui::tasks::gauge_of` — private to `pub(crate)`, additive.** Its behaviour is unchanged for
 every input `progress_bar` passes it. It gains a guard returning the empty string at `g == 0`
@@ -105,7 +118,7 @@ paths already produce and `merge` already reconciles.
 
 | Dependency | In acceptance test | In unit tests |
 |---|---|---|
-| Filesystem (`std::fs`) | not reached — `Dashboard` fixtures are constructed in memory, and the injected artifact reader is a closure over a `&str` | not reached; `header_row` and `gauge_of` are functions of `&str`/`&Progress`/`u16` |
+| Filesystem (`std::fs`) | **real** in the contract tier — `tests/degraded_coverage.rs` reads `SPEC.md` (`:558`), `tests/degraded-coverage.toml` (`:562`), and every source file named by a `covers` range (`:222`, `:292`, `:329`, `:366`), and `tests/doc_contract.rs` reads the repository likewise (`:63`). Not reached in the unit or view tiers: `Dashboard` fixtures are constructed in memory and the injected artifact reader is a closure over a `&str` | not reached; `header_row` and `gauge_of` are functions of `&str`/`&Progress`/`u16` |
 | `openspec` binary (`OpenspecCli`) | not reached — no `Change` in these tests is CLI-sourced, and no probe runs | not reached |
 | Herdr socket (`HerdrCli`) | not reached — no agent poll, no launch, no pane open; `Dashboard` fixtures carry no agents | not reached |
 | Terminal (crossterm raw mode, alternate screen, mouse capture) | **replaced** — `ratatui::backend::TestBackend`, never a real terminal; `cargo test` spawns this binary and a real terminal mode would corrupt the developer's session | not reached |
@@ -119,41 +132,61 @@ paths already produce and `merge` already reconciles.
 
 ## Test Strategy
 
-Three tiers, all inside `cargo test` (`make test`):
+Four tiers, all inside `cargo test` (`make test`):
 
 - **Unit** — inline `#[cfg(test)]` in `src/ui/detail.rs` and `src/ui/tasks.rs`. Pure calls,
   string assertions, sweeps over widths. Every test names both mandated interiors, 78 and 58.
-- **View** — inline `#[cfg(test)]` in `src/ui/view.rs`, rendering a `Dashboard` into a
-  `TestBackend` at **120x20 and 60x20**, asserting buffer rows, columns, and styles.
+- **View** — rendering a `Dashboard` into a `TestBackend` at **120x20 and 60x20**, asserting
+  buffer rows, columns, and styles. Note the tier is not the file: two view-tier tests for
+  this capability live in `src/ui/detail.rs`, not `src/ui/view.rs`.
+- **Contract** — `cargo test --test degraded_coverage` and `--test doc_contract`. These read
+  the repository from disk, which is why the Test Boundaries table marks the filesystem real
+  for this tier and only this one.
 - **Gate** — `make gates`, unchanged, run over the edited files: `COLWIDTH` (no `.chars()`
   width in the pure set), `NOIO-VIEW`, `PALETTE`, `MDSEAM`, `NOSPAWN-GREP`.
 
 **This change takes no outer-loop acceptance test of its own.** The repository's outermost
 tier for a view change *is* the `TestBackend` render at the two mandated frame widths — there
 is no higher loop short of driving a real terminal, which the architecture forbids because
-`cargo test` spawns this binary. The view rows below are that outer loop.
+`cargo test` spawns this binary.
+
+**Twelve of the nineteen scenarios already have passing tests at HEAD.** The repository binds
+a scenario to a test by snake-casing the scenario header and carrying a
+`/// \`<capability>\` :: "<scenario header>"` doc comment. For those twelve the work is to
+**rewrite the existing test in place**, keeping its name and its doc comment, so the RED
+evidence is honest: an expectation edited to the post-gauge value genuinely fails against the
+unchanged `header_row`, reporting `1 failed`. Inventing a second test per scenario would
+leave a duplicate pair, one permanently red. The `Verification` column below says `rewrite
+<name>` or `new` for every row, and the `Command` column names the test that actually exists.
 
 | Spec Scenario | Verification | Tier | Collaborators | Command |
 |---|---|---|---|---|
-| The full header grammar at both mandated interior widths | `header_row` at 78 and 58; assert full string, 52/32-column name fields, one `█` and eleven `░` | Unit | real `columns`, `progress_cell`, `gauge_of` | `cargo test --lib ui::detail::tests::full_header_grammar` |
-| A complete change renders a full gauge and an untouched one renders an empty gauge | `header_row` at 78/58 for 7-of-7, 0-of-7, 6-of-7; count `█` and `░` | Unit | real `gauge_of` | `cargo test --lib ui::detail::tests::header_gauge_fill` |
-| A change with no tasks still ends its row in the same column | `header_row` 0-of-0 at nine widths; assert no `█`/`░`, 68/48-column name fields, `[-]` last | Unit | real `progress_cell` | `cargo test --lib ui::detail::tests::header_no_tasks` |
-| A long name is truncated with an ellipsis, never overflowing the row | 200-char name at 78 and 58; assert width, trailing `…`, all three cells intact | Unit | real `pad_or_truncate_right` | `cargo test --lib ui::detail::tests::header_long_name` |
-| The cells are dropped whole in order as the row narrows | `header_row` at 78, 58, 26, 25, 13, 12, 7, 6, 5, 1, 0; assert band membership and no partial cell | Unit | real `columns` | `cargo test --lib ui::detail::tests::header_cells_drop_whole` |
-| Below the full-form band the header is byte-identical to the pre-gauge grammar | `header_row` for every width 0..=25 against 26 literal expected strings | Unit | real `pad_or_truncate_right` | `cargo test --lib ui::detail::tests::header_unchanged_below_full_band` |
-| An empty schema name is a cell of two characters, not an absent one | `header_row("alpha", "", 1-of-2, 78/58)`; assert `()`, 56-column name field, six `█` | Unit | real `gauge_of` | `cargo test --lib ui::detail::tests::header_empty_schema` |
-| The header names the selected change at both mandated widths | Render 120x20 and 60x20; assert row 0 cols 42..119 and 1..58, five `█`, BOLD set; re-render at `Route::List` for DIM | View | `TestBackend`, real `palette::style` | `cargo test --lib ui::view::tests::detail_header_names_selection` |
-| Moving the selection moves the header | Render, set `selected: 1`, re-render at both widths; assert name, gauge run, and cell all three differ | View | `TestBackend` | `cargo test --lib ui::view::tests::detail_header_follows_selection` |
-| The gauge is present on an artifact tab that is not the tracked-tasks one | Render with `proposal` tab selected; assert heading gauge present and no `%` anywhere in frame; switch to tracked-tasks tab and assert heading gauge byte-identical | View | `TestBackend`, real `gauge_of` | `cargo test --lib ui::view::tests::detail_header_gauge_on_every_tab` |
-| An archived change's header carries its stripped name and its own schema | Render archived `2026-08-14-add-auth`; assert `add-auth`, `(spec-driven)`, twelve `█`, 45/25-column name fields, no date field | View | `TestBackend` | `cargo test --lib ui::view::tests::detail_header_archived_change` |
-| An empty visible list leaves the whole detail interior blank | Render `empty_set()` and a filter matching none; assert every cell default-styled space and no `█`/`░` in frame | View | `TestBackend` | `cargo test --lib ui::view::tests::detail_header_empty_visible_list` |
-| A CJK change name keeps the header inside its region at both mandated widths | `header_row("日本語の変更名前です", …)` at 78/58; assert `columns` exact, cell order, `chars().count() < columns()` | Unit | real `columns`, `truncate_columns` | `cargo test --lib ui::detail::tests::header_cjk_name` |
-| The header reaches the buffer without crossing the region border | Render CJK-named change at 120x20 and 60x20; assert span, five `█`, col 59 space, cols 39/41 spaces and col 40 `│` | View | `TestBackend` | `cargo test --lib ui::view::tests::detail_header_cjk_within_region` |
-| The header is total over adversarial names at every width | Five names × four `Progress` × widths 0..=130; assert no panic, exact `columns`, band order at 26/25/13/12/7/6/1, no gauge at `total == 0` | Unit | real `columns` | `cargo test --lib ui::detail::tests::header_total_over_adversarial` |
-| The bar's rendered output does not move | `progress_bar` over five `Progress` × widths 0..=130; plus literal 78/58 expectations for 4-of-9 (30 `█` of 68, 21 of 48) | Unit | real `gauge_of`, `progress_cell` | `cargo test --lib ui::tasks::tests::progress_bar_output_unchanged` |
-| The header's gauge and the bar's gauge agree about the same change | `gauge_of(p, 12)` as a substring of `header_row(…)`, space-bounded, at 78/58 for 4-of-9, 7-of-7, 0-of-7 | Unit | real `gauge_of`, real `header_row` | `cargo test --lib ui::tasks::tests::gauge_agrees_with_header` |
-| The gauge is full exactly when the change is complete, at the header's width too | `gauge_of(…, 12)` for five `Progress`; assert length 12 and `no ░` iff `is_complete()` | Unit | real `gauge_of` | `cargo test --lib ui::tasks::tests::gauge_full_iff_complete_at_twelve` |
-| The promoted function is total at both guard values | `gauge_of(p, 0)` and `gauge_of(0-of-0, 12)`; plus `progress_bar` 0-of-0 at 78, 58, 3, 2 | Unit | real `gauge_of`, real `progress_bar` | `cargo test --lib ui::tasks::tests::gauge_is_total_at_guards` |
+| The full header grammar at both mandated interior widths | rewrite `the_full_header_grammar_at_both_mandated_interior_widths` (`src/ui/detail.rs:868`) — name field 65/45 → 52/32, expected tail gains the gauge | Unit | real `columns`, `progress_cell`, `gauge_of` | `cargo test --lib ui::detail::tests::the_full_header_grammar_at_both_mandated_interior_widths` |
+| A complete change renders a full gauge and an untouched one renders an empty gauge | **new** in `src/ui/detail.rs` | Unit | real `gauge_of` | `cargo test --lib ui::detail::tests::a_complete_change_renders_a_full_gauge` |
+| A change with no tasks still ends its row in the same column | rewrite `a_change_with_no_tasks_still_ends_its_row_in_the_same_column` (`src/ui/detail.rs:885`) — extend to nine widths and assert no `█`/`░`; its existing claims survive unchanged per Decision 7 | Unit | real `progress_cell` | `cargo test --lib ui::detail::tests::a_change_with_no_tasks_still_ends_its_row` |
+| A long name is truncated with an ellipsis, never overflowing the row | rewrite `a_long_name_is_truncated_with_an_ellipsis_never_overflowing_the_row` (`src/ui/detail.rs:898`) — its `find(" (tdd)")` name-field slice changes meaning and must be re-derived | Unit | real `pad_or_truncate_right` | `cargo test --lib ui::detail::tests::a_long_name_is_truncated_with_an_ellipsis` |
+| The cells are dropped whole in order as the row narrows | rewrite `the_cells_are_dropped_whole_in_order_as_the_row_narrows` (`src/ui/detail.rs:919`) — the `w >= 13` band assertion becomes `w >= 26`, and widths 26 and 25 join the sample | Unit | real `columns` | `cargo test --lib ui::detail::tests::the_cells_are_dropped_whole_in_order` |
+| Below the full-form band the header is byte-identical to the pre-gauge grammar | **new** in `src/ui/detail.rs`; its 26 expected strings are captured from HEAD's `header_row` **before** the implementation lands and written as literals, never recomputed | Unit | real `pad_or_truncate_right` | `cargo test --lib ui::detail::tests::below_the_full_form_band_the_header_is_byte_identical` |
+| An empty schema name is a cell of two characters, not an absent one | rewrite `an_empty_schema_name_is_a_cell_of_two_characters_not_an_absent_one` (`src/ui/detail.rs:950`) — `contains("() [1/2]")` is split by the gauge and must become the full expected row | Unit | real `gauge_of` | `cargo test --lib ui::detail::tests::an_empty_schema_name_is_a_cell_of_two_characters` |
+| The header names the selected change at both mandated widths | rewrite `the_header_names_the_selected_change_at_both_mandated_widths` (`src/ui/view.rs:5191`) — assert the literal tail and five `█`, not `assert_eq!(buf, header_row(…))` | View | `TestBackend`, real `palette::style` | `cargo test --lib ui::view::tests::the_header_names_the_selected_change` |
+| Moving the selection moves the header | rewrite `moving_the_selection_moves_the_header` (`src/ui/view.rs:5230`) — add the gauge run to the three-way difference | View | `TestBackend` | `cargo test --lib ui::view::tests::moving_the_selection_moves_the_header` |
+| The gauge is present on an artifact tab that is not the tracked-tasks one | **new** in `src/ui/view.rs` — the headline scenario of the change | View | `TestBackend`, real `gauge_of` | `cargo test --lib ui::view::tests::the_gauge_is_present_on_an_artifact_tab` |
+| An archived change's header carries its stripped name and its own schema | rewrite `an_archived_change_s_header_carries_its_stripped_name_and_its_own_schema` (`src/ui/view.rs:5257`) — name fields 45/25, twelve `█` | View | `TestBackend` | `cargo test --lib ui::view::tests::an_archived_change_s_header_carries_its_stripped_name` |
+| An empty visible list leaves the whole detail interior blank | rewrite `an_empty_visible_list_leaves_the_whole_detail_interior_blank` (`src/ui/view.rs:5279`) — add the no-`█`/`░`-anywhere clause | View | `TestBackend` | `cargo test --lib ui::view::tests::an_empty_visible_list_leaves_the_whole_detail_interior_blank` |
+| A CJK change name keeps the header inside its region at both mandated widths | rewrite `a_cjk_change_name_keeps_the_header_inside_its_region_at_both_mandated_widths` (`src/ui/detail.rs:2162`) — `(tdd)` is no longer immediately before the cell | Unit | real `columns`, `truncate_columns` | `cargo test --lib ui::detail::tests::a_cjk_change_name_keeps_the_header_inside_its_region` |
+| The header reaches the buffer without crossing the region border | rewrite `the_header_reaches_the_buffer_without_crossing_the_region_border` (**`src/ui/detail.rs:2191`**, not `view.rs`) — its `tail = " (tdd) [4/9]"` becomes the gauge-bearing tail | View | `TestBackend` | `cargo test --lib ui::detail::tests::the_header_reaches_the_buffer_without_crossing` |
+| The header is total over adversarial names at every width | rewrite `header_row_is_total_over_adversarial_names_at_every_width` (`src/ui/detail.rs:2244`) — cross the five names with four `Progress`, band clause scoped to `{4, 9}` | Unit | real `columns` | `cargo test --lib ui::detail::tests::header_row_is_total_over_adversarial_names` |
+| The bar's rendered output does not move | **new** in `src/ui/tasks.rs`, expectations built independently of `progress_bar` per `full_grammar_is_byte_identical_to_pre_change_output`'s stated discipline | Unit | real `gauge_of`, `progress_cell` | `cargo test --lib ui::tasks::tests::the_bar_s_rendered_output_does_not_move` |
+| The header's gauge and the bar's gauge agree about the same change | **new** in `src/ui/tasks.rs` | Unit | real `gauge_of`, real `header_row` | `cargo test --lib ui::tasks::tests::the_header_s_gauge_and_the_bar_s_gauge_agree` |
+| The gauge is full exactly when the change is complete, at the header's width too | **new** in `src/ui/tasks.rs`; its `usize::MAX` clause is the one that fails against the shipped implementation | Unit | real `gauge_of` | `cargo test --lib ui::tasks::tests::the_gauge_is_full_exactly_when_the_change_is_complete` |
+| The promoted function is total at both guard values | **new** in `src/ui/tasks.rs` | Unit | real `gauge_of`, real `progress_bar` | `cargo test --lib ui::tasks::tests::the_promoted_function_is_total_at_both_guard_values` |
+
+One existing test is deliberately **not** in this table: `src/ui/view.rs:6726`
+`the_detail_header_is_bold_and_uncoloured_at_both_mandated_widths`, which proves the fourth
+live `detail-header` requirement. It asserts every cell of the header row carries BOLD and no
+foreground, which the gauge does not change (Decision 8), and it builds its expectation by
+calling `header_row`, so it is invariant to the grammar. That requirement therefore takes no
+delta and needs no task.
 
 Whole-suite gate: `make check`.
 
@@ -246,11 +279,21 @@ is confined to the grammar.
   tasks** → The `[4/42]` cell one space away states the exact pair, which is why the gauge is
   an addition to that cell rather than a replacement for it. Any fixed gauge has this limit;
   a remainder-width gauge would only move the threshold, at the cost rejected in Decision 3.
-- **Existing test expectations in `src/ui/detail.rs` and `src/ui/view.rs` name the old header
-  strings and will go red** → Expected and in scope: updating them is this change's work, not
-  collateral. The scenario *Below the full-form band the header is byte-identical to the
-  pre-gauge grammar* is the guard that the updates were confined to the widths that should
-  have moved.
+- **Five existing tests in `src/ui/detail.rs` assert the pre-gauge grammar and go red when
+  the gauge lands** → Expected and in scope: the verification matrix above assigns each one a
+  `rewrite` row, so none is left unowned. The scenario *Below the full-form band the header is
+  byte-identical to the pre-gauge grammar* is the guard that those rewrites were confined to
+  the widths that should have moved. `src/ui/view.rs`'s expectations are computed by calling
+  `header_row` and stay green either way, which is why no task edits that file's tests.
+- **A new view test written in the house style would be a tautology** → `src/ui/view.rs:5208`
+  and `:6750` both assert the buffer equals `header_row(…)`, the function under test. Copying
+  that shape for the three new view tests would produce three more that cannot fail on the
+  gauge, so the matrix requires literal glyph counts and literal tails instead.
+- **A `Progress` at the saturation boundary renders a gauge that contradicts
+  `is_complete()`** → Repaired rather than documented: `gauge_of` short-circuits on
+  `is_complete()`. This is a defect in already-shipped behaviour, reached at `g` of 12, 48 and
+  68, that no existing test caught because the one `usize::MAX` sweep asserts only that the
+  bar fits its width.
 - **A `.chars()`-based width slipping into the new arithmetic would be silently correct on
   ASCII fixtures and wrong elsewhere** → `COLWIDTH` sweeps `src/ui/detail.rs`; the CJK
   scenarios assert `chars().count() < columns()`, which a char-counting implementation fails.
