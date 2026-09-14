@@ -194,7 +194,7 @@ cursor (-> D10), in one group because each one's tests need the others: a seeded
 observable once the tab renders headers, and the clamp only changes once the tab is foldable.
 Tasks 6.1's three `run_loop` rows are this change's end-to-end evidence and are RED at HEAD.
 
-- [ ] 6.1 RED: Write the failing `run_loop` tests — `j_walks_the_groups_rather_than_scrolling_the_lines`, and the **cursor-rule** half of the landed `checklist_scroll_is_clamped` in `src/ui/driver.rs` (twenty items under **two** headings). Confirm each fails because the tab is not yet foldable.
+- [x] 6.1 RED: Write the failing `run_loop` tests — `j_walks_the_groups_rather_than_scrolling_the_lines`, and the **cursor-rule** half of the landed `checklist_scroll_is_clamped` in `src/ui/driver.rs` (twenty items under **two** headings). Confirm each fails because the tab is not yet foldable.
 
       Scope correction, made during group 3. The offset-rule half — the same twenty items under
       **no** heading — already landed there: group 3's split gate made `twenty_task_source`'s
@@ -202,19 +202,73 @@ Tasks 6.1's three `run_loop` rows are this change's end-to-end evidence and are 
       checklist body that clamped identically to the markdown one, collapsing the `assert_ne!`
       that is the test's whole point. The fixture is now headingless, which is this half
       verbatim, and both tests are green. Only the two-heading half remains for this group.
-- [ ] 6.2 RED: Write the failing rendering tests — `a_foldable_tasks_tab_draws_its_groups_as_fold_headers`, `the_progress_bar_leads_the_folded_task_groups`, `a_task_file_holding_no_items_does_not_split`, `a_missing_artifact_file_renders_no_content_yet_and_nothing_else`, `a_mostly_finished_task_file_opens_at_its_first_unfinished_group`, `the_tasks_tab_seeds_its_folds_once_on_the_key_change`, `a_completed_group_does_not_fold_shut_under_the_reader` — and rewrite the landed `tasks_tab_shows_checkboxes` in `src/ui/view.rs` and `the_tracked_tasks_tab_concatenates_rather_than_folding` in `src/ui/detail.rs`.
-- [ ] 6.3 GREEN: Delete `content_lines`' tracked-tasks exemption branch; emit `bar_lines` above the section walk and render each open section's body with `items`.
-- [ ] 6.4 GREEN: Implement the seed in `sync_detail` — the subtree walk (a section plus every following section of strictly greater depth, to the first at or below its own) and insertion of those whose `tasks::count` over the concatenated subtree text reports `completed < total`, on the key change only.
-- [ ] 6.5 CHECK: Confirm `normalise_scroll` branches on `Detail::foldable()` and not on `tracks_tasks` — it already does, at `src/ui/app.rs:998`, so this is a confirmation and not an edit. Change it only if the confirmation fails.
-- [ ] 6.6 CHECK: Confirm the landed `marked_tab_renders_checklist_body` (`src/ui/view.rs`), `marked_tab_returns_the_checklist_body` (`src/ui/detail.rs`) and `prose_only_reads_no_tasks_yet` (`src/ui/view.rs`) still pass unedited — the `total > 0` half of the split gate exists to keep all three true by construction.
+
+      Done as `checklist_scroll_is_clamped_to_the_cursor_when_the_file_splits`, a sibling of
+      the landed offset-rule test rather than a second half inside it, so each clamp rule
+      names its own fixture. **Deviation from the scenario's letter, recorded here and in the
+      test's own doc comment:** it scripts thirty `j` presses, not twenty. The foldable body is
+      twenty-five rows (bar, blank, two open headers, twenty items, one separator), so twenty
+      presses land at exactly twenty and the clamp never binds — which would falsify the
+      scenario's own "not to `20`" clause and its "the last row holds the checklist's last
+      item" clause at once. Thirty presses make both true.
+
+      `j_walks_the_groups_rather_than_scrolling_the_lines` asserts the scenario's literal
+      `detail.scroll` of `4` after `j j Space j j`. Row `4` is the first group's **second item
+      row**, not the second group's header, which sits at row `6` once that group's two item
+      rows and the blank separator are drawn; the test asserts both, since the clause's real
+      claim — the cursor walks the rendered list rather than a fixed section index — is what
+      row `6` moving down demonstrates.
+- [x] 6.2 RED: Write the failing rendering tests — `a_foldable_tasks_tab_draws_its_groups_as_fold_headers`, `the_progress_bar_leads_the_folded_task_groups`, `a_task_file_holding_no_items_does_not_split`, `a_missing_artifact_file_renders_no_content_yet_and_nothing_else`, `a_mostly_finished_task_file_opens_at_its_first_unfinished_group`, `the_tasks_tab_seeds_its_folds_once_on_the_key_change`, `a_completed_group_does_not_fold_shut_under_the_reader` — and rewrite the landed `tasks_tab_shows_checkboxes` in `src/ui/view.rs` and `the_tracked_tasks_tab_concatenates_rather_than_folding` in `src/ui/detail.rs`.
+
+      Two of the seven — `a_task_file_holding_no_items_does_not_split` and
+      `a_missing_artifact_file_renders_no_content_yet_and_nothing_else` — were **green on
+      arrival**: they pin behaviour the reversal must preserve, which the `total > 0` half of
+      the split gate (landed in group 3) makes true by construction. The other five and the
+      two rewrites were RED for the right reason.
+
+      **Deviation, recorded:** `tasks_tab_shows_checkboxes` drives the scenario's **two**-group
+      source rather than the one-group source the scenario's WHEN names. A one-group task file
+      splits into exactly one section, which `Detail::foldable` reports not-foldable by design
+      (design.md -> D10 names that edge in as many words and this group is forbidden to add a
+      predicate), so no `v 1. Setup` fold header could ever be drawn for it and the scenario's
+      THEN is unsatisfiable as written. The rows asserted are the scenario's own, in the
+      scenario's own order, and the tab-0 half — the same source read through `markdown::lines`
+      with no bar row above it — is unchanged.
+- [x] 6.3 GREEN: Delete `content_lines`' tracked-tasks exemption branch; emit `bar_lines` above the section walk and render each open section's body with `items`.
+- [x] 6.4 GREEN: Implement the seed in `sync_detail` — the subtree walk (a section plus every following section of strictly greater depth, to the first at or below its own) and insertion of those whose `tasks::count` over the concatenated subtree text reports `completed < total`, on the key change only.
+- [x] 6.5 CHECK: Confirm `normalise_scroll` branches on `Detail::foldable()` and not on `tracks_tasks` — it already does, at `src/ui/app.rs:998`, so this is a confirmation and not an edit. Change it only if the confirmation fails.
+
+      Confirmed, no edit made. `normalise_scroll` reads `self.detail.foldable()`
+      (`src/ui/app.rs:1211` after this group's insertions) and the whole function body
+      names `tracks_tasks` zero times.
+- [x] 6.6 CHECK: Confirm the landed `marked_tab_renders_checklist_body` (`src/ui/view.rs`), `marked_tab_returns_the_checklist_body` (`src/ui/detail.rs`) and `prose_only_reads_no_tasks_yet` (`src/ui/view.rs`) still pass unedited — the `total > 0` half of the split gate exists to keep all three true by construction.
 
       `tab_move_resets_and_reclamps` (`src/ui/driver.rs`) was **removed from this list** during
       group 3. The claim that it passes unedited was wrong: it shares `twenty_task_source` with
       `checklist_scroll_is_clamped` and failed on its own `scroll == 9` precondition for the same
       reason. It was repaired with that fixture in group 3 and is green; confirm it still is,
       but it is not an unedited test.
-- [ ] 6.7 CHECK: Persistence gate — confirm nothing is written to disk, that `expanded` stays per-session, and that the only cache is the existing `(change directory, tab)` key; record that no migration, backfill, invalidation, or index rebuild applies.
-- [ ] 6.8 VERIFY: `cargo test --all-features` — green, the three `run_loop` rows included — and `/bin/sh scripts/gates/readonly-ui.sh` and `noblock.sh` exit 0.
+
+      Confirmed. All three named tests are byte-identical to their `bc5a876` text — compared
+      by extracting each function body from `git show bc5a876:<file>` and from the working
+      tree, not by eyeballing the diff — and all three pass. `tab_move_resets_and_reclamps`
+      passes too.
+- [x] 6.7 CHECK: Persistence gate — confirm nothing is written to disk, that `expanded` stays per-session, and that the only cache is the existing `(change directory, tab)` key; record that no migration, backfill, invalidation, or index rebuild applies.
+
+      Confirmed. The group's whole production diff is `ui::detail::content_lines`' dispatch,
+      `ui::app::seed_expanded`, and four lines of `sync_detail`; grepping the added lines for
+      a write, a file handle, a serialiser, or the state directory matches nothing.
+      `detail.expanded` is a `BTreeSet<usize>` on `Detail`, in memory, discarded with the
+      process; the plugin's own writes stay exactly `agent-names.toml` under
+      `HERDR_PLUGIN_STATE_DIR`. The only cache is `detail.loaded`, still the
+      `(change directory, tab)` pair, unchanged in shape and in the condition that resets it.
+      No migration, backfill, invalidation, or index rebuild applies.
+- [x] 6.8 VERIFY: `cargo test --all-features` — green, the three `run_loop` rows included — and `/bin/sh scripts/gates/readonly-ui.sh` and `noblock.sh` exit 0.
+
+      `cargo test --all-features` green: 1346 lib tests (up from 1337) plus every integration
+      tier — 21, 10, 19, 10, 73, 5, 4, 3 — 0 failed anywhere.
+      `readonly-ui.sh`, `noblock.sh`, `detailwidths.sh`, `taskwidths.sh`, `colwidth.sh`,
+      `noio-view.sh` and `palette.sh` each exit 0, and `make check` exits 0.
 
 ## 7. `Space`, the cursor, and the mouse over nested sections
 
