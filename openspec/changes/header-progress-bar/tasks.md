@@ -383,21 +383,32 @@ against the baseline shas, which detect the slide either way.
 ## 6. Lint & Verify
 <!-- kind: operational -->
 
-- [ ] 6.1 CHECK: Confirm the affected tiers are the lib unit tests (`ui::detail`, `ui::tasks`,
+- [x] 6.1 CHECK: Confirm the affected tiers are the lib unit tests (`ui::detail`, `ui::tasks`,
   `ui::view`), the contract tier (`doc_contract`, `degraded_coverage`), and the gate tier
   (`COLWIDTH` and `NOIO-VIEW` both sweep `src/ui/detail.rs` and `src/ui/tasks.rs`).
-- [ ] 6.2 VERIFY: `make lint` — `cargo clippy --all-targets --all-features -- -D warnings`,
+- [x] 6.2 VERIFY: `make lint` — `cargo clippy --all-targets --all-features -- -D warnings`,
   0 errors. Rust has no separate type-check step; clippy's build is it.
-- [ ] 6.3 VERIFY: `make fmt-check` — clean.
-- [ ] 6.4 VERIFY: `make gates` — exit 0, including `COLWIDTH OK` naming the nine pure files and
+- [x] 6.3 VERIFY: `make fmt-check` — clean.
+- [x] 6.4 VERIFY: `make gates` — exit 0, including `COLWIDTH OK` naming the nine pure files and
   `OPENSPEC-UNTOUCHED OK` (commit the artifacts first; it fails on untracked files under
   `openspec/`).
-- [ ] 6.5 VERIFY: `make test` — green, at or above the 1311 lib tests HEAD reported. If
+- [x] 6.5 VERIFY: `make test` — green, at or above the 1311 lib tests HEAD reported. If
   `gate_controls_catch_their_plants` fails with "the real working tree changed while running the
   gate controls", that is its whole-tree digest reacting to a concurrent write, not a defect in
   this change; re-run `cargo test --test gate_controls` with nothing else touching the tree.
-- [ ] 6.6 VERIFY: `make coverage` — at or above the 80% line floor and the production-slice
+- [x] 6.6 VERIFY: `make coverage` — at or above the 80% line floor and the production-slice
   floor. Never lower, waive, or exclude; add tests if it falls short.
-- [ ] 6.7 VERIFY: `make check` as the single gate — exit 0, naming the failing sub-command if
+- [x] 6.7 VERIFY: `make check` as the single gate — exit 0, naming the failing sub-command if
   it fails.
-- [ ] 6.8 VERIFY: `openspec validate header-progress-bar --strict` — valid.
+- [x] 6.8 VERIFY: `openspec validate header-progress-bar --strict` — valid.
+
+**Measured at completion.** `make check` exit 0 as the single gate. `make lint` 0 errors;
+`make fmt-check` clean; `make gates` exit 0, including `COLWIDTH OK: no char-count measurement
+in the nine pure view files` and `OPENSPEC-UNTOUCHED OK (tree-only legs)`. `make test`:
+**1320** lib tests passing, up from HEAD's 1311 — nine net new (five in group 1, four in group
+2), plus 73 `doc_contract`, 10 `degraded_coverage`, 19 `coverage_prod`, 5 `gate_controls`, 4
+`manifest`, 3 `spec_purposes`, all green. `make coverage`: total **95.83%** lines against the
+80% floor, production slice **96.25%** (4828/5016) against its own, and
+`COVERAGE-PROD DEGRADED-COVERS OK: 51 row(s), 66 range(s) … all covered` — which independently
+confirms group 3's re-anchored ranges still name covered production code.
+`openspec validate --strict`: valid.
