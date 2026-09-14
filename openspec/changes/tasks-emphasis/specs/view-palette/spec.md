@@ -240,12 +240,23 @@ asked to answer. `TaskEvidence` takes `LightRed`
 and **not** `Red` specifically so that it does not collide with `ListProblem`, which is drawn
 in the **detail** region — the same region a task label is drawn in — and so would have been a
 share with no licence at all. `AgentBadge(Blocked)`, which `LightRed` does collide with, is
-drawn only in the list region. `TaskChange`'s `Green` and `TaskConfirm`'s `Blue` reuse
-`Heading(4)`'s and `Heading(3)`'s colours, and meet them only in principle: a heading face reaches the detail region's
-content area only on the markdown path or on a **non-foldable** tracked-tasks tab, and a
-non-foldable tracked-tasks tab is by `artifact-folds`' own definition one whose file carries no
-heading at all. A label and a heading face therefore cannot appear in one frame's content area.
-`Link` cannot meet them for a blunter reason: `ui::tasks` emits no link face for any input.
+drawn only in the list region. `TaskChange`'s `Green` and `TaskConfirm`'s `Blue` reuse `Heading(4)`'s and `Heading(3)`'s
+**colours**, and the two **can** appear in one frame's content area — an earlier draft of this
+requirement claimed they could not, and planning review falsified it against
+`src/ui/app.rs:1527`. A tasks file whose text begins at its single `##` heading has no
+preamble, so `contributions == 1`, so it does not split, so the tab is **not foldable**, so
+`ui::detail::content_lines` reaches `ui::tasks::lines` — whose `heading_line` emits
+`Face { heading }` on the heading row while `items` emits label segments on the rows below it.
+`src/ui/detail.rs`'s own comment already named that case.
+
+No licence is required, because neither pair is a **share**: `Heading(3)` and `Heading(4)`
+carry `BOLD` and the label roles carry no modifier, so the four are four distinct `Style`s and
+the rule above — which ranges over `Style` equality — does not reach them. A reader who sees
+only hue sees a reused colour; a reader who sees the row sees a bolded heading against an
+unbolded leading token, on different rows. That is why `Heading(3)` and `Heading(4)` are
+asserted **alone** in their groups by the scenario below: a table that dropped `BOLD` from
+either would turn a colour reuse into an unlicensed share, and that assertion is what catches
+it. `Link` never arises at all: `ui::tasks` emits no link face for any input.
 
 `Strikethrough` SHALL remain a style equal to no other role's, and `DetailSectionSelected`
 likewise, so the two roles whose whole job is to be unmistakable stay unshared.

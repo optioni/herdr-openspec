@@ -36,7 +36,7 @@ Every number this plan uses, with the command that produced it, run at HEAD on 2
 
 | Figure | Command | Result |
 |---|---|---|
-| `Face` literals spelling every field out | brace-matched scan over `src/**/*.rs` for `Face {` whose body holds no `..` | **1** — `src/ui/tasks.rs:159` (`heading_line`); the other five hits are the struct definition, two doc comments, and two `impl` bodies |
+| `Face` literals spelling every field out | brace-matched scan over `src/**/*.rs` for `Face {` whose body holds no `..` | **1** — `src/ui/tasks.rs:159` (`heading_line`). `grep -rn "Face {" src/` gives **16** hits in all; the other 15 are the struct definition, doc comments, `impl` bodies, and 8 literals that use `..Face::plain()` or `..self.quoted_base()`. `tests/` constructs no `Face` |
 | `ArtifactSection {` occurrences | `grep -rn "ArtifactSection {" src/ tests/ \| cut -d: -f1 \| sort \| uniq -c` | **78** total — 26 `src/ui/app.rs`, 19 `src/ui/detail.rs`, 14 `src/ui/driver.rs`, 14 `src/ui/view.rs`, 2 `tests/doc_contract.rs`, **3 `tests/gate-controls.toml`** |
 | …of which the compiler forces | the 75 in `.rs` files, less the struct definition | **74** construction and pattern sites. The 3 in `gate-controls.toml` are planted-defect **strings** and are edited only if the plant itself must change |
 | `ArtifactSection` spans `NODEFAULT-UI` scans | `SCAN_MIN=25 TYPES='ArtifactSection' /bin/sh scripts/gates/nodefault-ui.sh` | **72** spans, "none elides a field" |
@@ -47,8 +47,9 @@ Every number this plan uses, with the command that produced it, run at HEAD on 2
 | View tests asserting a fold-header row | `grep -n "expected_header_at" src/ui/view.rs` | the helper at `:3974` and its call sites; the three tracked-tasks tests are at `:4488`, `:4540`, `:4659` |
 | `#[test]` count, `src/ui/tasks.rs` | `grep -c "#\[test\]" src/ui/tasks.rs` | **29** (`TASKWIDTHS` floor is 22) |
 | `#[test]` count, `src/ui/palette.rs` | `grep -c "#\[test\]" src/ui/palette.rs` | **4** |
-| Archive task items / labelled / plain / compound | `python3` scan over `openspec/changes/archive/*/tasks.md` (proposal.md -> Measurements) | 2563 / 2272 / 2196 / 76, with **0** false positives |
-| Groups per archived task file | `for f in openspec/changes/archive/*/tasks.md; do grep -c '^## ' "$f"; done \| sort -n` | n=37, min 5, median 12, max 22 |
+| Archive task items / labelled / plain / compound / declined | `python3` scan over `openspec/changes/archive/*/tasks.md`, **first physical line of each item only**, matching what `tasks::parse` keeps (proposal.md -> Measurements) | 2563 / 2269 / 2196 / 73 / 3, with **0** items wrongly given a label |
+| Groups per archived task file | `for f in openspec/changes/archive/*/tasks.md; do grep -c '^## ' "$f"; done \| sort -n` | n=38, min 5, median 11.5, max 22 |
+| The 22-group worst case, and its gauge width | `archive/2026-09-06-agent-launch`: 22 groups, 81 items, cells `[81/81]` and `100%` | `g = 58 - 7 - 4 - 2 = 45` at the narrow interior, against the `2 * 22 = 44` floor — **one** column of headroom |
 
 - [ ] 0.1 CHECK: Re-run every command above and confirm each figure still holds. A figure that
       moved invalidates the task that cites it — the `ArtifactSection` counts send you to 5.2,
@@ -56,8 +57,16 @@ Every number this plan uses, with the command that produced it, run at HEAD on 2
       count to 3.3.
 - [ ] 0.2 CHECK: Confirm the baseline is green before any edit. Measured at HEAD on 2026-09-14
       with this change's artifacts committed: `cargo test --all-features` exits **0** with
-      **1413 passed, 0 failed, 1 ignored** across six binaries, and `make gates` exits **0**.
-      Re-run both; a figure that moved means the baseline is not this one.
+      **1498 passed, 0 failed, 1 ignored** across **ten** test binaries — lib 1353, main 0,
+      `ci_workflow` 21, `cli` 10, `coverage_prod` 19, `degraded_coverage` 10 (+1 ignored),
+      `doc_contract` 73, `gate_controls` 5, `manifest` 4, `spec_purposes` 3 — and `make gates`
+      exits **0**. Capture the result with a redirect to a file, not a pipe into `grep`: a
+      pipeline drops the last four binaries' result lines and yields 1413, which is how this
+      figure was wrong in the plan's first draft.
+      **Known flake:** `gate_controls_catch_their_plants` fails with "the real working tree
+      changed while running the gate controls" if another agent touches this checkout during
+      the run — its `TreeDigest` includes directory mtimes. Re-run in a quiet tree before
+      attributing it to a change.
 - [ ] 0.3 CHECK: Re-run the four RED checks below. Each was run at HEAD on 2026-09-14 and each
       returned **0**, so the behaviours this change adds are provably absent before group 1.
       Note the first uses `-rl`, not `-rc`: `grep -rc` prints a `path:0` line per file and so

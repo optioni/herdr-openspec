@@ -12,7 +12,7 @@ longer care about. Three signals already exist in the data and none of them reac
   **Dropped from this change's scope** — see the resolved questions below. It stays a real
   signal and a later change may take it; this one does not, because a badge did not earn a
   cell on a heading row that now also carries a progress pair.
-- **Task labels.** 2,272 labelled tasks across the archive — `VERIFY` 609, `CHECK` 471, `RED`
+- **Task labels.** 2,269 labelled tasks across the archive — `VERIFY` 609, `CHECK` 471, `RED`
   358, `GREEN` 348, `CHANGE` 236, `REFACTOR` 157, `CHARACTERIZE` 16, `NOTE` 1 — rendered as
   plain text. (An earlier draft of this proposal said 1,989 and a lower figure for every
   token; those were counted before `task-labels`' recognition rule existed and are superseded
@@ -28,8 +28,10 @@ longer care about. Three signals already exist in the data and none of them reac
   lands there — right-aligned, dropped whole when it does not fit — and this change therefore
   carries an `artifact-folds` delta the first draft did not anticipate.
 - **The progress bar is segmented by group.** Constraints from the measurement: the gauge gets
-  `width - 11` (the count and percent cells take the rest), so ~67 columns at the wide interior
-  and ~47 at the narrow one; at 22 groups that is 3 and 2.1 columns each. So boundaries are
+  `width` less the count cell, the percent cell and two spaces — **data-dependent**, not a
+  fixed `width - 11`, since both cells grow with the task count. The archive's worst case is
+  `agent-launch` at 22 groups and 81 items: `58 - 7 - 4 - 2 = 45` columns, just over the
+  `2 * 22 = 44` floor. So boundaries are
   marked by **alternating shade, not separator characters** — 21 separators would eat 21 of 47
   narrow columns — and segments are sized **proportional to item count**, not equally.
   Unsegmented below whatever width the design fixes.
@@ -130,17 +132,36 @@ were the same thing.
 
 ## Measurements
 
-Run at HEAD on 2026-09-14 over `openspec/changes/archive/*/tasks.md`.
+Run at HEAD on 2026-09-14 over `openspec/changes/archive/*/tasks.md`, scanning **the first
+physical line of each checkbox item only** — which is what `tasks::parse` keeps, since it
+discards continuation lines as prose (`src/tasks.rs:152-160`). Scanning the joined multi-line
+text instead gives 2271 / 75 / 1 and was the error in this table's first draft: it measured
+text the renderer never sees.
 
 | Figure | Result |
 |---|---|
 | Task items in the archive | 2563 |
-| Items carrying a recognisable label | 2272 |
+| Items carrying a recognisable label | 2269 |
 | Items whose label is `<RUN>:` with the colon immediately following | 2196 |
-| Items whose label is a compound form (`CHANGE — rewrite in \`SPEC.md\`:`, `RED then GREEN:`, `RED→GREEN:`, `RED-by-addition:`, `CHECK (contract gate):`) | 76 |
-| Items with a leading uppercase run that are **not** a label | 0 |
-| Distinct recognised tokens | `VERIFY` 609, `CHECK` 471, `RED` 358, `GREEN` 348, `CHANGE` 236, `REFACTOR` 157, `CHARACTERIZE` 16, `NOTE` 1 |
-| Groups per task file | n=37, min 5, median 12, max 22 |
+| Items whose label is a compound form (`CHANGE — rewrite in \`SPEC.md\`:`, `RED then GREEN:`, `RED→GREEN:`, `RED-by-addition:`, `CHECK (contract gate):`) | 73 |
+| Items with a leading uppercase run the rule does **not** call a label | 3 — all false *negatives*, listed below |
+| Items the rule calls a label that are **not** one | 0 |
+| Distinct tokens, **plain `<RUN>:` form only** (sums to 2196) | `VERIFY` 609, `CHECK` 471, `RED` 358, `GREEN` 348, `CHANGE` 236, `REFACTOR` 157, `CHARACTERIZE` 16, `NOTE` 1 |
+| Distinct tokens, **all 2269 labelled items** | `VERIFY` 612, `CHECK` 477, `RED` 378, `GREEN` 348, `CHANGE` 278, `REFACTOR` 158, `CHARACTERIZE` 16, `DEFERRED` 1, `NOTE` 1 |
+| Groups per task file | n=38, min 5, median 11.5, max 22 |
 
 The last row is why the segmentation threshold is stated in columns rather than assumed: at 22
 groups and the narrow interior's ~47 gauge columns, a segment is 2.1 columns.
+
+The three items the rule declines are all **false negatives**, and each for the same reason —
+its colon sits on a continuation line `tasks::parse` discards, so the first line carries a
+leading run and no colon at all:
+
+- `archive/2026-09-04-subprocess-seam/tasks.md:607` — `8.3 VERIFY — the negative controls, …`
+- `archive/2026-09-04-subprocess-seam/tasks.md:634` — `8.3a VERIFY — the \`BINDING\` negative …`
+- `archive/2026-09-05-detail-view/tasks.md:1331` — `13.4 DEFERRED to archive time — …`
+
+They render unlabelled, which is a miss and not a wrong colour. The argument step 4 rests on is
+unchanged and is now stated in the direction the corpus actually supports: **no item the rule
+calls a label is not one.** An allow-list would have to be extended for every schema and would
+still have missed `DEFERRED`.

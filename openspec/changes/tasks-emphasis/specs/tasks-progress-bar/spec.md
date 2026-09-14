@@ -179,10 +179,17 @@ any of these holds:
 
 The last is the legibility floor, stated in columns rather than assumed: a one-column span
 cannot be read as a shade run, so a gauge that cannot give every group two columns SHALL show
-no boundaries at all rather than unreliable ones. At the measured worst case — 22 groups at
-the narrow interior's ~47 gauge columns — `2 * 22 = 44 <= 47`, so the pane segments there, and
-at the wide interior's ~67 it segments comfortably. A pane narrow enough to fail the test
-degrades to the pre-change gauge, which is a supported rendering rather than a fallback.
+no boundaries at all rather than unreliable ones.
+
+`g` is **not** `width - 11`. It is `width` less `columns(progress_cell)`, less
+`columns(percent_cell)`, less the two separating spaces — and both cells are data-dependent,
+so the deduction grows with the change's own task count. The archive's worst case is therefore
+tighter than a fixed 11 predicts: `archive/2026-09-06-agent-launch` carries **22** groups and
+**81** items, so its cells are `[81/81]` and `100%` — 7 and 4 columns — and at the 58-column
+interior `g` is `58 - 7 - 4 - 2 = 45` against a floor of `2 * 22 = 44`. It segments, with
+**one** column of headroom rather than three. A change with more groups, or a wider count cell
+at the same group count, falls below the floor and degrades to the pre-change gauge — which is
+a supported rendering, not a fallback.
 
 The **fill count SHALL NOT move.** Segmentation SHALL be expressed as a glyph substitution over
 the run `gauge_of(progress, g)` already returns: each position keeps whether it is filled or

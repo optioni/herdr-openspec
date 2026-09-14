@@ -58,14 +58,20 @@ text as `task-groups` produces it:
    deliberately outside the label: a reader wants `1.1` to stay legible, and styling it with
    the label would make the whole row's leading third one colour.
 
-Measured against `openspec/changes/archive/*/tasks.md` at the time this was written: 2563 task
-items, of which **2272** carry a label under this rule and **291** do not. Of the 2272, 2196
-are the plain `<RUN>:` form and **76** are compound (`CHANGE — rewrite in \`SPEC.md\`:` 35,
-`RED then GREEN:` 9, `RED-by-addition:` 4, `CHECK (contract gate):` 3, `CHECK — contract
-gate:` 2, `RED→GREEN:` 2, `CHANGE (only if …)` 1, and the rest singletons). **Zero** items
-carry a leading uppercase run that is not a label, which is why step 4 is a colon test rather
-than a keyword allow-list: an allow-list would have to be extended for every schema, and the
-corpus says the shape alone is sufficient.
+Measured against `openspec/changes/archive/*/tasks.md` at the time this was written, scanning
+**the first physical line of each item only** — which is what `tasks::parse` keeps: 2563 task
+items, of which **2269** carry a label under this rule and **294** do not. Of the 2269, 2196
+are the plain `<RUN>:` form and **73** are compound (`RED then GREEN:` 9, `RED-by-addition:` 4,
+`RED→GREEN:` 3, `CHECK (contract gate):` 3, `CHECK — contract gate:` 2, and the
+`CHANGE — …` family, of which `CHANGE — rewrite in \`SPEC.md\`:` is 11). **Three** items
+carry a leading uppercase run this rule declines — `8.3 VERIFY — …` and `8.3a VERIFY — …` in
+`archive/2026-09-04-subprocess-seam/tasks.md`, and `13.4 DEFERRED to archive time — …` in
+`archive/2026-09-05-detail-view/tasks.md` — each because its colon sits on a continuation line
+`tasks::parse` discards. They render unlabelled.
+
+**Zero** items are given a label that is not one. That asymmetry is why step 4 is a colon test
+rather than a keyword allow-list: the rule's errors are misses, never wrong colours, and an
+allow-list would have to be extended for every schema while still missing `DEFERRED`.
 
 #### Scenario: The plain and compound label forms are both recognised
 

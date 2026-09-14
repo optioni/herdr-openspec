@@ -49,9 +49,13 @@ and an unfolded one render the same items through the same code:
   - `items(&group.items, width)`;
   - one blank line after every group but the last.
 
-`lines` SHALL be reached only for a **non-foldable** tracked-tasks tab — a task file holding
-no items, which renders `No tasks yet`, and a task file with items but no heading at all,
-which renders as one flat checklist exactly as it did before `heading-sections`. A foldable
+`lines` SHALL be reached only for a **non-foldable** tracked-tasks tab, and **three** files
+reach it, not two: a task file holding no items, which renders `No tasks yet`; a task file
+with items but no heading at all; and — the case an earlier draft of this paragraph omitted,
+falsified in planning review against `src/ui/app.rs:1527` — a task file whose text **begins at
+its single `##` heading**, which therefore has no preamble, contributes one section, and does
+not split. That third file renders a `Face { heading }` line **and** label segments in one
+content area, so the two faces can meet; `view-palette` states why that needs no licence. A foldable
 one is rendered by `artifact-content`'s walk: `bar_lines` above every header, then
 `items` inside each open section. The three functions SHALL NOT each reimplement the
 item grammar: `lines` calls `items`, which is what makes "the folded and unfolded tabs

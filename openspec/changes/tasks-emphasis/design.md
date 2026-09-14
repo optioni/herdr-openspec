@@ -4,7 +4,7 @@ The tracked-tasks tab renders every row with equal weight. A change is mostly *d
 time anyone reads it, and the done part is the part the reader no longer cares about — but a
 completed `VERIFY:` row is exactly as bright as the unstarted `RED:` row below it. Three
 signals already in the data reach no pixel: each group's own checkbox count
-(`tasks::Group::progress()`, computed and discarded), the lifecycle label at the head of 2272
+(`tasks::Group::progress()`, computed and discarded), the lifecycle label at the head of 2269
 of the archive's 2563 task items, and the group's `kind` marker.
 
 Two facts about the current tree shape the whole design, and neither was true when the
@@ -83,7 +83,7 @@ serialized form exists, and no consumer outside `src/` names any of them.
 | Item | Before | After | Consumers |
 |---|---|---|---|
 | `markdown::Face` | seven fields | nine | `ui::view::style_for`, `ui::tasks::heading_line` (the one site that spells fields out), `ui::markdown`, and every test constructing a `Face` |
-| `ui::tasks::progress_bar` | `(&Progress, u16)` | `(&Progress, &[Progress], u16)` | `ui::tasks::bar_lines` only |
+| `ui::tasks::progress_bar` | `(&Progress, u16)` | `(&Progress, &[Progress], u16)` | `ui::tasks::bar_lines` in production; **12 further call sites** in `src/ui/detail.rs` and `src/ui/view.rs` are inside `#[cfg(test)]` and move with the signature |
 | `ui::tasks::bar_lines` | `(&Progress, u16)` | `(&Progress, &[Progress], u16)` | `ui::tasks::lines`, `ui::detail::content_lines` |
 | `app::ArtifactSection` | three fields | four | `sync_detail`, `content_lines`, `Detail::foldable`, test fixtures |
 | `ui::view::style_for` | composes seven roles | nine | `ui::view` only |
@@ -313,11 +313,14 @@ identical and the filled fraction would stop tracking the count cell beside it.
 **Decision 5 — the legibility floor is `g >= 2 * n`, stated in columns.**
 A one-column span cannot be read as a shade run, so a gauge that cannot give every contributing
 group two columns shows no boundaries rather than unreliable ones. The figure is not
-arbitrary: the archive's worst case is 22 groups, the narrow interior gives the gauge ~47
-columns, and `2 * 22 = 44 <= 47`, so the pane segments at its own narrow mandated width and
-the floor bites only below it. *Alternative considered:* a fixed minimum frame width, rejected
-because the gauge's width is `width - 11` and a rule stated in frame columns would have to
-restate that arithmetic in a second place.
+arbitrary, and planning review tightened it: the gauge's width is **not** `width - 11` but
+`width` less both data-dependent cells and two spaces, so the archive's real worst case —
+`agent-launch`, 22 groups and 81 items, cells `[81/81]` and `100%` — gets `58 - 7 - 4 - 2 = 45`
+columns against a floor of 44. The pane segments at its own narrow mandated width with **one**
+column of headroom, not three. *Alternative considered:* a fixed minimum frame width, rejected
+because the gauge's width is computed from the cells and a rule stated in frame columns would
+have to restate that arithmetic in a second place — the very mistake the `width - 11` shorthand
+made here.
 
 **Decision 6 — `TaskEvidence` takes `LightRed`, not `Red`.**
 This is the proposal's Open Question 1. `Role::ListProblem` is `Red` and is drawn in the
@@ -365,11 +368,14 @@ beside it did not earn its columns at the 58-column interior. Retaining a marker
 not written at all. It stays a real signal a later change may take.
 
 **Decision 12 — the recognition rule requires a whole-word run and a colon somewhere, not a
-colon immediately after the run.** Measured against the archive: the strict
-immediate-colon rule catches 2196 of 2272 labelled items; the whole-word-plus-colon rule
-catches all 2272, and produces **zero** false positives over 2563 items. The 76 it adds are
-the compound forms a reader would obviously want coloured — `CHANGE — rewrite in \`SPEC.md\`:`,
-`RED then GREEN:`, `RED-by-addition:`. *Alternative considered:* a keyword allow-list, which
+colon immediately after the run.** Measured against the archive, over the first physical line
+of each item — the text `tasks::parse` keeps: the strict immediate-colon rule catches 2196 of
+2269 labelled items; the whole-word-plus-colon rule catches all 2269, and gives a label to
+**zero** items that are not one. The 73 it adds are the compound forms a reader would
+obviously want coloured — `CHANGE — rewrite in \`SPEC.md\`:`, `RED then GREEN:`,
+`RED-by-addition:`. Three further items carry a leading run and are declined, their colons
+having landed on a discarded continuation line; those are misses, not miscolourings, which is
+the asymmetry the decision rests on. *Alternative considered:* a keyword allow-list, which
 would have had to be extended for every schema and would have contradicted the non-goal of
 reading the schema at all. *Alternative considered:* the strict rule, rejected for the 76.
 
@@ -413,12 +419,16 @@ arithmetic and the `Change`'s own progress for the fill, so a disagreement moves
 output: the gauge is filled by the authoritative number and divided by the parsed one. This is
 stated in the spec rather than left to be discovered.
 
-**A frame could in principle hold both a label face and a heading face**, which share
-foregrounds (`TaskChange`/`Heading(4)`, `TaskConfirm`/`Heading(3)`). → It cannot: a heading
-face reaches the detail content area only on the markdown path or on a **non-foldable**
-tracked-tasks tab, and a non-foldable tracked-tasks tab is by `artifact-folds`' own definition
-one whose file carries no heading. The argument is written into `view-palette`'s delta so a
-later change that makes a tasks tab foldable-with-heading-lines is forced to re-examine it.
+**A frame can hold both a label face and a heading face**, which reuse foregrounds
+(`TaskChange`/`Heading(4)`, `TaskConfirm`/`Heading(3)`). An earlier draft of this risk said it
+could not, and planning review falsified that against `src/ui/app.rs:1527`: a tasks file
+beginning at its single `##` heading has no preamble, contributes one section, does not split,
+and so renders through `ui::tasks::lines` with a `Face { heading }` row above label rows.
+→ The reuse is harmless for a reason that does not depend on the two never meeting:
+`Heading(3)` and `Heading(4)` carry `BOLD` and the label roles carry none, so they are
+distinct `Style`s and the palette's shared-style rule does not reach them. `view-palette`'s
+scenario asserts both headings **alone** in their groups, which is what would catch a future
+table that dropped the `BOLD` and turned a colour reuse into an unlicensed share.
 
 ## Migration Plan
 
