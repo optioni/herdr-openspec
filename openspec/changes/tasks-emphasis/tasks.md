@@ -181,29 +181,29 @@ Writes `src/ui/markdown.rs`, `src/ui/view.rs`, and the one `Face` literal in
 Writes `src/ui/tasks.rs`. `TASKWIDTHS` has no exemption list, so **every** test added here
 names both `58` and `78` even where its interesting widths are elsewhere.
 
-- [ ] 4.1 RED: Write failing `ui::tasks` tests
+- [x] 4.1 RED: Write failing `ui::tasks` tests
       `a_labelled_unchecked_item_splits_into_three_segments`,
       `a_checked_item_is_de_emphasised_whole_label_included`,
       `a_wrapped_labelled_item_labels_only_its_first_row`, and
       `a_label_split_across_a_wrap_degrades_to_unlabelled`. Each names 58 and 78; the last also
       sweeps 12, 14 and 16.
-- [ ] 4.2 RED: Extend the two existing face assertions —
+- [x] 4.2 RED: Extend the two existing face assertions —
       `a_folded_group_and_an_unfolded_one_render_the_same_item_lines` and
       `groups_headings_items_and_separators_at_both_mandated_widths` — to the new fields.
-- [ ] 4.3 GREEN: Implement the two-rule facing in `item_lines`: a checked item is one
+- [x] 4.3 GREEN: Implement the two-rule facing in `item_lines`: a checked item is one
       `muted: true` segment covering the whole row; an unchecked one calls
       `tasks::label_of(&item.text)` and splits into at most three segments, omitting any empty.
-- [ ] 4.4 GREEN: Implement the wrap degradation — when `start + len` exceeds the first row's own
+- [x] 4.4 GREEN: Implement the wrap degradation — when `start + len` exceeds the first row's own
       text length, render one `Face::plain()` segment (design.md -> Decision 9).
-- [ ] 4.5 CHECK: Assert every fixture's `Line::text()` equals the literal recorded in
+- [x] 4.5 CHECK: Assert every fixture's `Line::text()` equals the literal recorded in
       `notes/head-output.md` at 0.5, written into the test as a string literal — never
       recomputed from the function under test, which could not fail. This assertion carries
       the claim that the change moved no character, and it follows the pattern
       `full_grammar_is_byte_identical_to_pre_change_output` (`src/ui/tasks.rs:1337`) already
       uses.
-- [ ] 4.6 REFACTOR: Extract the segment-building if `item_lines` grew a second copy of the
+- [x] 4.6 REFACTOR: Extract the segment-building if `item_lines` grew a second copy of the
       prefix arithmetic, or record that none was needed.
-- [ ] 4.7 VERIFY: `cargo test --all-features` — green — and
+- [x] 4.7 VERIFY: `cargo test --all-features` — green — and
       `/bin/sh scripts/gates/taskwidths.sh`, `taskseam.sh` and `colwidth.sh` each exit 0.
 
 ## 5. `ArtifactSection` gains a `progress` field

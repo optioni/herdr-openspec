@@ -135,6 +135,61 @@ fn plain_line(text: String) -> crate::ui::markdown::Line {
     }
 }
 
+/// One line carrying `text` as a single de-emphasised segment — a completed
+/// task item's row, prefix and text alike, its label included. The label's own
+/// role is **dropped** rather than dimmed alongside it: leaving a bright
+/// `VERIFY:` on a finished task is the exact complaint this change exists to
+/// answer (design.md -> Decision 8).
+fn muted_line(text: String) -> crate::ui::markdown::Line {
+    crate::ui::markdown::Line {
+        segments: vec![crate::ui::markdown::Segment {
+            text,
+            face: crate::ui::markdown::Face {
+                muted: true,
+                ..crate::ui::markdown::Face::plain()
+            },
+        }],
+    }
+}
+
+/// An unchecked item's **first** row, split at its label: the prefix
+/// concatenated with everything before the label, the label itself, and the
+/// remainder of that row's text — each omitted rather than emitted empty, so an
+/// item whose text is exactly its label produces two segments rather than
+/// three.
+///
+/// `label` is looked up against `item.text`, never against the rendered row, so
+/// a wrap falling inside `CHARACTERIZE:` cannot half-style it. The caller has
+/// already established that `start + len` lies within `row` and on its
+/// boundaries; this function re-checks both rather than slicing on trust, so it
+/// is total for any `Label` and any `row`.
+fn labelled_line(
+    prefix: &str,
+    row: &str,
+    label: crate::tasks::Label,
+) -> Option<crate::ui::markdown::Line> {
+    let end = label.start.checked_add(label.len)?;
+    if end > row.len() || !row.is_char_boundary(label.start) || !row.is_char_boundary(end) {
+        return None;
+    }
+    let plain = crate::ui::markdown::Face::plain();
+    let faced = crate::ui::markdown::Face {
+        label: Some(label.role),
+        ..plain
+    };
+    let mut segments = Vec::with_capacity(3);
+    for (text, face) in [
+        (format!("{prefix}{}", &row[..label.start]), plain),
+        (row[label.start..end].to_string(), faced),
+        (row[end..].to_string(), plain),
+    ] {
+        if !text.is_empty() {
+            segments.push(crate::ui::markdown::Segment { text, face });
+        }
+    }
+    Some(crate::ui::markdown::Line { segments })
+}
+
 /// A heading line: `level` `#` markers, a space, and `text` verbatim,
 /// carrying `Face { heading: Some(level), .. }` spelled out field by
 /// field so the view bolds it through the existing `heading` mapping,
@@ -288,17 +343,48 @@ fn item_lines(item: &crate::tasks::Item, width: u16) -> Vec<crate::ui::markdown:
     };
 
     let Some((prefix, prefix_len)) = prefix else {
-        return vec![plain_line(crate::ui::list::pad_or_truncate_right(glyph, w))];
+        let degraded = crate::ui::list::pad_or_truncate_right(glyph, w);
+        return vec![if item.checked {
+            muted_line(degraded)
+        } else {
+            plain_line(degraded)
+        }];
     };
 
     let col = w - prefix_len;
     let wrapped = wrap_plain(&item.text, col);
     let indent = " ".repeat(prefix_len);
+
+    // An unchecked item's label, when it has one and it fits on the first row
+    // whole. `label_of` reads `item.text`; a label straddling the wrap would
+    // otherwise produce a segment reading `CHARACT`, so the item degrades to
+    // unlabelled instead (design.md -> Decision 9).
+    let label = if item.checked {
+        None
+    } else {
+        crate::tasks::label_of(&item.text)
+    };
+
     wrapped
         .into_iter()
         .enumerate()
         .map(|(i, text)| {
+            if item.checked {
+                // Every row of a checked item, its first and its continuations
+                // alike: one de-emphasised segment, never split at its label.
+                return muted_line(if i == 0 {
+                    format!("{prefix}{text}")
+                } else {
+                    format!("{indent}{text}")
+                });
+            }
             if i == 0 {
+                // A label appears once, on the row it was written on.
+                if let Some(label) = label
+                    && let Some(line) = labelled_line(&prefix, &text, label)
+                {
+                    return line;
+                }
                 plain_line(format!("{prefix}{text}"))
             } else {
                 plain_line(format!("{indent}{text}"))
@@ -681,6 +767,299 @@ mod tests {
         }
     }
 
+    /// The prefix a labelled item's first plain segment carries, and the two
+    /// helpers every test below reads a row through.
+    fn segment_texts(line: &crate::ui::markdown::Line) -> Vec<String> {
+        line.segments.iter().map(|s| s.text.clone()).collect()
+    }
+
+    fn segment_faces(line: &crate::ui::markdown::Line) -> Vec<crate::ui::markdown::Face> {
+        line.segments.iter().map(|s| s.face).collect()
+    }
+
+    fn labelled(role: crate::tasks::LabelRole) -> crate::ui::markdown::Face {
+        crate::ui::markdown::Face {
+            label: Some(role),
+            ..crate::ui::markdown::Face::plain()
+        }
+    }
+
+    fn muted() -> crate::ui::markdown::Face {
+        crate::ui::markdown::Face {
+            muted: true,
+            ..crate::ui::markdown::Face::plain()
+        }
+    }
+
+    /// `tasks-checklist` :: "A labelled unchecked item splits into three
+    /// segments".
+    ///
+    /// The byte-identical leg compares against literals recorded from HEAD
+    /// before this change (`notes/head-output.md`, task 0.5), never against a
+    /// fresh call of the function under test — the second form could not fail
+    /// and would turn this change's central claim, that it moved no character,
+    /// into a tautology.
+    #[test]
+    fn a_labelled_unchecked_item_splits_into_three_segments() {
+        let parsed = crate::tasks::parse(
+            "- [ ] 1.1 RED: write the failing test\n- [ ] Commit: the parser\n",
+        );
+        let items = &parsed.groups[0].items;
+        for width in [78, 58] {
+            let out = super::items(items, width);
+            assert_eq!(out.len(), 2, "width {width}: neither item wraps here");
+
+            assert_eq!(
+                segment_texts(&out[0]),
+                vec!["[ ] 1.1 ", "RED:", " write the failing test"],
+                "width {width}: three segments, split at the label"
+            );
+            assert_eq!(
+                segment_faces(&out[0]),
+                vec![
+                    crate::ui::markdown::Face::plain(),
+                    labelled(crate::tasks::LabelRole::Evidence),
+                    crate::ui::markdown::Face::plain(),
+                ],
+                "width {width}: only the middle segment is faced"
+            );
+
+            // `Commit:` is a one-letter uppercase run and so no label at all.
+            assert_eq!(
+                segment_texts(&out[1]),
+                vec!["[ ] Commit: the parser"],
+                "width {width}: one plain segment"
+            );
+            assert_eq!(
+                segment_faces(&out[1]),
+                vec![crate::ui::markdown::Face::plain()],
+                "width {width}"
+            );
+
+            // Recorded at HEAD, at both of these widths.
+            assert_eq!(
+                out.iter().map(|l| l.text()).collect::<Vec<_>>(),
+                vec![
+                    "[ ] 1.1 RED: write the failing test".to_string(),
+                    "[ ] Commit: the parser".to_string(),
+                ],
+                "width {width}: the split moved a character"
+            );
+        }
+    }
+
+    /// `tasks-checklist` :: "A checked item is de-emphasised whole, label
+    /// included".
+    #[test]
+    fn a_checked_item_is_de_emphasised_whole_label_included() {
+        let checked = crate::tasks::parse("- [x] 1.1 VERIFY: make check is green\n");
+        let unchecked = crate::tasks::parse("- [ ] 1.1 VERIFY: make check is green\n");
+        for width in [78, 58] {
+            let out = super::items(&checked.groups[0].items, width);
+            assert_eq!(out.len(), 1, "width {width}");
+            assert_eq!(
+                segment_texts(&out[0]),
+                vec!["[✓] 1.1 VERIFY: make check is green"],
+                "width {width}: one segment carrying the whole row"
+            );
+            assert_eq!(segment_faces(&out[0]), vec![muted()], "width {width}");
+            // The de-emphasis is not a dimmed `VERIFY:` but no `VERIFY:` role
+            // at all.
+            assert_eq!(out[0].segments[0].face.label, None, "width {width}");
+
+            // The same text unchecked: three segments with the label role on
+            // the middle one. Asserting the pair against each other is what a
+            // rule muting both, or neither, could not pass.
+            let twin = super::items(&unchecked.groups[0].items, width);
+            assert_eq!(
+                segment_texts(&twin[0]),
+                vec!["[ ] 1.1 ", "VERIFY:", " make check is green"],
+                "width {width}"
+            );
+            assert_eq!(
+                segment_faces(&twin[0]),
+                vec![
+                    crate::ui::markdown::Face::plain(),
+                    labelled(crate::tasks::LabelRole::Confirm),
+                    crate::ui::markdown::Face::plain(),
+                ],
+                "width {width}"
+            );
+
+            // Recorded at HEAD, at both widths.
+            assert_eq!(out[0].text(), "[✓] 1.1 VERIFY: make check is green");
+            assert_eq!(twin[0].text(), "[ ] 1.1 VERIFY: make check is green");
+        }
+    }
+
+    /// `tasks-checklist` :: "A wrapped labelled item labels only its first
+    /// row".
+    #[test]
+    fn a_wrapped_labelled_item_labels_only_its_first_row() {
+        let words = ["abcdefgh"; 20].join(" ");
+        let source = format!("- [ ] 1.1 GREEN: {words}\n");
+        let parsed = crate::tasks::parse(&source);
+        let items = &parsed.groups[0].items;
+
+        // Recorded at HEAD, at both mandated interior widths.
+        let recorded: [(u16, &[&str]); 2] = [
+            (
+                78,
+                &[
+                    "[ ] 1.1 GREEN: abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh",
+                    "    abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh",
+                    "    abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh",
+                ],
+            ),
+            (
+                58,
+                &[
+                    "[ ] 1.1 GREEN: abcdefgh abcdefgh abcdefgh abcdefgh",
+                    "    abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh",
+                    "    abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh abcdefgh",
+                    "    abcdefgh abcdefgh abcdefgh abcdefgh",
+                ],
+            ),
+        ];
+
+        for (width, expected) in recorded {
+            let out = super::items(items, width);
+            assert_eq!(
+                out.iter().map(|l| l.text()).collect::<Vec<_>>(),
+                expected.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+                "width {width}: the split moved a character"
+            );
+            assert!(out.len() > 1, "width {width}: the item must wrap");
+
+            // The first row splits at its label; the tail is that row's own
+            // remaining text, which is longer at 78 than at 58.
+            let first = &expected[0]["[ ] 1.1 GREEN:".len()..];
+            assert_eq!(
+                segment_texts(&out[0]),
+                vec!["[ ] 1.1 ", "GREEN:", first],
+                "width {width}: three segments, split at the label"
+            );
+            assert_eq!(
+                segment_faces(&out[0]),
+                vec![
+                    crate::ui::markdown::Face::plain(),
+                    labelled(crate::tasks::LabelRole::Change),
+                    crate::ui::markdown::Face::plain(),
+                ],
+                "width {width}"
+            );
+
+            // A label appears once, on the row it was written on.
+            for (i, line) in out.iter().enumerate().skip(1) {
+                assert_eq!(
+                    segment_faces(line),
+                    vec![crate::ui::markdown::Face::plain()],
+                    "width {width} continuation row {i}"
+                );
+                assert_eq!(line.segments[0].face.label, None, "width {width} row {i}");
+                assert!(!line.segments[0].face.muted, "width {width} row {i}");
+            }
+
+            // No character was lost to the split: strip the prefix from the
+            // first row and the hanging indent from the rest, and the item's
+            // whole text comes back.
+            let mut rebuilt = out[0].text()["[ ] ".len()..].to_string();
+            for line in out.iter().skip(1) {
+                rebuilt.push(' ');
+                rebuilt.push_str(line.text().trim_start());
+            }
+            assert_eq!(rebuilt, items[0].text, "width {width}");
+        }
+
+        assert!(
+            super::items(items, 58).len() > super::items(items, 78).len(),
+            "58 must wrap more than 78, or the width does not reach the wrap"
+        );
+    }
+
+    /// `tasks-checklist` :: "A label split across a wrap degrades to
+    /// unlabelled".
+    ///
+    /// The three narrow widths are where the first row's text column ends
+    /// before `CHARACTERIZE:` is whole; 58 and 78 are the contrast, and are
+    /// named here for `TASKWIDTHS`, which carries no exemption list.
+    #[test]
+    fn a_label_split_across_a_wrap_degrades_to_unlabelled() {
+        let parsed = crate::tasks::parse("- [ ] 1.1 CHARACTERIZE: record the baseline\n");
+        let items = &parsed.groups[0].items;
+
+        // Recorded at HEAD, at each of the three narrow widths.
+        let recorded: [(u16, &[&str]); 3] = [
+            (
+                16,
+                &[
+                    "[ ] 1.1",
+                    "    CHARACTERIZE",
+                    "    : record the",
+                    "    baseline",
+                ],
+            ),
+            (
+                14,
+                &[
+                    "[ ] 1.1",
+                    "    CHARACTERI",
+                    "    ZE: record",
+                    "    the",
+                    "    baseline",
+                ],
+            ),
+            (
+                12,
+                &[
+                    "[ ] 1.1",
+                    "    CHARACTE",
+                    "    RIZE:",
+                    "    record",
+                    "    the",
+                    "    baseline",
+                ],
+            ),
+        ];
+        for (width, expected) in recorded {
+            let out = super::items(items, width);
+            assert_eq!(
+                out.iter().map(|l| l.text()).collect::<Vec<_>>(),
+                expected.iter().map(|s| s.to_string()).collect::<Vec<_>>(),
+                "width {width}: the degradation moved a character"
+            );
+            for (i, line) in out.iter().enumerate() {
+                assert_eq!(
+                    segment_faces(line),
+                    vec![crate::ui::markdown::Face::plain()],
+                    "width {width} row {i}: one plain segment, no partial label"
+                );
+            }
+        }
+
+        // The contrast: where the label fits the first row whole, the same item
+        // does split, so the degradation is width-driven rather than
+        // unconditional.
+        for width in [58, 78] {
+            let out = super::items(items, width);
+            assert_eq!(
+                segment_texts(&out[0]),
+                vec!["[ ] 1.1 ", "CHARACTERIZE:", " record the baseline"],
+                "width {width}"
+            );
+            assert_eq!(
+                segment_faces(&out[0])[1],
+                labelled(crate::tasks::LabelRole::Evidence),
+                "width {width}"
+            );
+            assert_eq!(
+                out[0].text(),
+                "[ ] 1.1 CHARACTERIZE: record the baseline",
+                "width {width}: recorded at HEAD"
+            );
+        }
+    }
+
     /// `tasks-checklist` :: "A folded group and an unfolded one render the
     /// same item lines". Every expectation here is a **literal**: asserting
     /// that `items`' output equals a slice of `lines`' output could not fail
@@ -704,13 +1083,31 @@ mod tests {
                 vec!["[✓] 1.1 first".to_string(), "[ ] 1.2 second".to_string()],
                 "width {width}: no bar, no heading, no blank separator"
             );
-            for (i, line) in out.iter().enumerate() {
-                assert_eq!(
-                    line.segments.first().map(|s| s.face),
-                    Some(crate::ui::markdown::Face::plain()),
-                    "width {width} line {i}"
-                );
-            }
+            // `tasks-emphasis` widened this to the two new fields: the
+            // checked item is one de-emphasised segment, label included, and
+            // the unchecked one is plain — neither text here holding a label.
+            assert_eq!(
+                out[0].segments.len(),
+                1,
+                "width {width}: a checked item is one segment"
+            );
+            assert_eq!(
+                out[0].segments[0].face,
+                crate::ui::markdown::Face {
+                    muted: true,
+                    ..crate::ui::markdown::Face::plain()
+                },
+                "width {width}: the checked row"
+            );
+            assert_eq!(
+                out[0].segments[0].face.label, None,
+                "width {width}: a completed row carries no label role"
+            );
+            assert_eq!(
+                out[1].segments.first().map(|s| s.face),
+                Some(crate::ui::markdown::Face::plain()),
+                "width {width}: the unchecked row"
+            );
 
             // `bar_lines` alone: the bar row and one blank.
             let bar_out = super::bar_lines(&progress, width);
@@ -780,10 +1177,28 @@ mod tests {
                 "width {width}"
             );
             let heading_idxs = [2usize, 6usize];
+            // `tasks-emphasis`: line 3 is the one checked item and carries
+            // `muted: true`; every other faced row here is plain, no item text
+            // in this fixture holding a label.
+            let muted_idxs = [3usize];
             for (i, line) in out.iter().enumerate() {
                 let face = line.segments.first().map(|s| s.face).unwrap_or_default();
                 if heading_idxs.contains(&i) {
                     assert_eq!(face.heading, Some(2), "width {width} line {i}");
+                    assert!(
+                        !face.muted,
+                        "width {width} line {i}: a heading is not muted"
+                    );
+                    assert_eq!(face.label, None, "width {width} line {i}");
+                } else if muted_idxs.contains(&i) {
+                    assert_eq!(
+                        face,
+                        crate::ui::markdown::Face {
+                            muted: true,
+                            ..crate::ui::markdown::Face::plain()
+                        },
+                        "width {width} line {i}"
+                    );
                 } else if !line.segments.is_empty() {
                     assert_eq!(
                         face,
