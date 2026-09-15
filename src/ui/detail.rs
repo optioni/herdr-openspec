@@ -12,7 +12,7 @@
 //! "Display width is measured in terminal columns by one pair of
 //! primitives".
 
-use crate::ui::layout::columns;
+use crate::ui::layout::{columns, truncate_columns};
 
 /// The gauge cell's fixed budget: the number of `█`/`░` display columns
 /// `header_row` reserves for `ui::tasks::gauge_of`, wherever it draws one at
@@ -762,6 +762,98 @@ pub fn section_at(rows: &[ContentRow], offset: usize, row: u16) -> Option<usize>
         ContentKind::SectionHeader { section, .. } => Some(section),
         _ => None,
     }
+}
+
+/// The half-open display-column range `[start, end)` of the whitespace-
+/// delimited word covering `column` in `rows[line]`'s own rendered text.
+/// `None` when `line` is past the end of `rows`, or `column` lands on a
+/// whitespace cell — including one in a row's own trailing padding, which
+/// is whitespace like any other — or past the row's own rendered end.
+///
+/// See `specs/text-selection/spec.md` -> "A press arms, a second selects
+/// the word, a third selects the row": "A word is a maximal run of
+/// non-whitespace display columns in the rendered row, so an identifier, a
+/// path, or a backticked span selects whole — `ui::layout::zone` is one
+/// word, not three" and "A second press whose cell holds only whitespace
+/// SHALL select nothing".
+///
+/// Word boundaries are found with `char_indices`, a textual boundary
+/// search rather than a width measurement; every column reported is
+/// measured through [`columns`], never a `char` count (`COLWIDTH`).
+pub fn word_at(rows: &[ContentRow], line: usize, column: u16) -> Option<(u16, u16)> {
+    let text = rows.get(line)?.text();
+    let mut run_start: Option<usize> = None;
+    for (byte, ch) in text
+        .char_indices()
+        .chain(std::iter::once((text.len(), ' ')))
+    {
+        if ch.is_whitespace() {
+            if let Some(start) = run_start.take() {
+                let start_col = columns(&text[..start]) as u16;
+                let end_col = columns(&text[..byte]) as u16;
+                if (start_col..end_col).contains(&column) {
+                    return Some((start_col, end_col));
+                }
+            }
+        } else if run_start.is_none() {
+            run_start = Some(byte);
+        }
+    }
+    None
+}
+
+/// The text a selection from `anchor` to `focus` copies. Each is a
+/// `(line, column)` pair into `rows` and is accepted in either order: the
+/// pair is sorted before either endpoint is used, so dragging upward
+/// selects the same text as dragging downward across the same two points
+/// (`specs/text-selection/spec.md` -> "Anchor holds while the focus
+/// follows").
+///
+/// Every covered line contributes its own display columns `[from, to)` —
+/// clamped to that line's own rendered length, `from` defaulting to `0` and
+/// `to` to the line's own end for every line strictly between the two
+/// endpoints — with the trailing whitespace a rendered row is padded to
+/// dropped from every contributed line rather than copied verbatim: what is
+/// copied is the text, not the cells (`specs/text-selection/spec.md` -> "The
+/// selected text is copied through the terminal seam"). The contributed
+/// lines are joined with a single `\n`.
+///
+/// A line index past the end of `rows` truncates the span there rather than
+/// panicking — the same total behaviour every other function in this file
+/// holds for an out-of-range index.
+pub fn span_text(rows: &[ContentRow], anchor: (usize, u16), focus: (usize, u16)) -> String {
+    let (start, end) = if anchor <= focus {
+        (anchor, focus)
+    } else {
+        (focus, anchor)
+    };
+    let mut lines: Vec<String> = Vec::new();
+    for line in start.0..=end.0 {
+        let Some(row) = rows.get(line) else {
+            break;
+        };
+        let text = row.text();
+        let total = columns(&text) as u16;
+        let from = if line == start.0 {
+            start.1.min(total)
+        } else {
+            0
+        };
+        let to = if line == end.0 {
+            end.1.min(total)
+        } else {
+            total
+        };
+        let slice = if to <= from {
+            ""
+        } else {
+            let start_byte = truncate_columns(&text, from as usize).len();
+            let end_byte = truncate_columns(&text, to as usize).len();
+            &text[start_byte..end_byte]
+        };
+        lines.push(slice.trim_end().to_string());
+    }
+    lines.join("\n")
 }
 
 #[cfg(test)]
@@ -4045,7 +4137,8 @@ mod tests {
     /// so this stays a `src/ui/detail.rs` test in `DETAILWIDTHS`' sense.
     #[test]
     fn a_click_selects_the_whole_token_not_a_fragment() {
-        for width in [78u16, 58] {
+        let widths: [u16; 2] = [78, 58];
+        for width in widths {
             let d = detail("the `ui::layout::zone` call\n", Vec::new());
             let rows = content_lines(&d, None, width);
             assert_eq!(rows.len(), 1, "width {width}");
@@ -4079,7 +4172,8 @@ mod tests {
     /// mandated width.
     #[test]
     fn a_single_line_selection_copies_exactly_the_selected_columns() {
-        for width in [78u16, 58] {
+        let widths: [u16; 2] = [78, 58];
+        for width in widths {
             let text = "  - **WHEN** the reader presses q";
             let rows = vec![plain_row(&pad_or_truncate_right(text, width as usize))];
             // Columns 4 through 12 of the unpadded text are "**WHEN**".
@@ -4104,7 +4198,8 @@ mod tests {
     /// which is what proves the padding is dropped rather than copied.
     #[test]
     fn a_multi_line_selection_joins_with_newlines_and_drops_padding() {
-        for width in [78u16, 58] {
+        let widths: [u16; 2] = [78, 58];
+        for width in widths {
             let rows = vec![
                 plain_row("alpha bravo"),
                 plain_row(&pad_or_truncate_right("charlie", width as usize)),
@@ -4114,7 +4209,11 @@ mod tests {
             assert_eq!(joined, "alpha bravo\ncharlie\ndelta", "width {width}");
             assert_eq!(joined.matches('\n').count(), 2, "width {width}");
             for line in joined.split('\n') {
-                assert_eq!(line, line.trim_end(), "width {width}: {line:?} has trailing padding");
+                assert_eq!(
+                    line,
+                    line.trim_end(),
+                    "width {width}: {line:?} has trailing padding"
+                );
             }
         }
     }
