@@ -6,82 +6,106 @@ reporting on routes drags to the application instead of doing native selection. 
 gets click-to-select, scroll, fold, and tab-switch; the user loses copying a requirement out of
 a spec.
 
-This is a genuine trade, not a defect — but it was never made deliberately, and the losing side
-is the one the user notices. GitHub Copilot CLI reportedly supports the mouse *and* leaves
-selection working, which is the observation worth chasing before deciding anything.
+This proposal was written as an investigation, and the investigation is done. `notes/probe.sh`
+was run twice — Ghostty inside a Herdr pane and Ghostty bare — and the two tables are identical
+row for row (`notes/measurements.md`). What they establish:
 
-Unplanned work past Phase 6. **Scoped as an investigation first**: the proposal's first output
-is a measurement, and the implementation follows from it.
+- **Plain drag-selection is suppressed under every mode set**, today's included, and works only
+  with reporting fully off. This is the terminal's decision; no mode set and no code in this
+  crate changes it.
+- **Shift+drag restores selection under every mode set.** Useful, and worth writing down, but
+  it is a modifier the user has to know about — not the thing asked for.
+- **Narrowing the mode set buys nothing.** `?1000 ?1006` suppresses plain drag exactly as the
+  full bundle does, while delivering click and wheel intact.
+- **Herdr is not in the way.** Identical inside and outside a pane.
+
+So the shipped answer is the one the investigation predicted: a key that releases capture on
+demand. With capture off, plain drag behaves exactly as the measurement's `off` control row —
+select and copy natively — and the key puts capture back.
+
+Unplanned work past Phase 6.
 
 ## What Changes
 
-The investigation, which is the part that must happen first:
-
-- Measure what a terminal actually does with each mouse mode. Crossterm's `EnableMouseCapture`
-  turns on several DEC modes at once (button, drag, any-motion, SGR). Determine which of them
-  the dashboard's bindings actually need — a pointer *motion* already costs no frame
-  (`mouse-input`), so any-motion reporting may be pure cost.
-- Measure the modifier bypass on the terminals this project supports: holding Option (iTerm,
-  Ghostty) or Shift (xterm-likes) generally restores native selection while reporting is on. If
-  that works, a large part of the complaint is a documentation gap.
-- Measure what Copilot CLI does, rather than trusting the report. If it enables a narrower mode
-  set, that is the answer and it is cheap.
-
-Then, whichever the measurement supports:
-
-- **A key that releases capture on demand** is the likely shipped outcome — `TerminalOps`
-  already has `disable_mouse`, and `TerminalGuard` already treats a refused `enable_mouse` as a
-  non-fatal stored problem, so the seam for toggling exists. Capture off, select normally,
-  capture back on.
-- **Or a narrower capture mode**, if the measurement shows selection survives one.
-- **Or documentation only**, if the modifier bypass covers it — in which case this change
-  closes having spent a day and written down why, which is a real outcome.
-- Not **BREAKING** in any branch: adding a key is additive, and the default capture state does
-  not change.
+- **A key, `m`, toggles mouse capture for the running pane.** Capture stays **on** at startup:
+  nothing about today's behaviour changes until the key is pressed. Pressing it releases
+  capture, so the terminal does its own selection; pressing it again re-enters capture.
+- **The pane says so while capture is off.** A dim badge in the list region's heading row, on
+  the pattern `degraded-states` established for `file mode` — silence would read as the mouse
+  having broken.
+- **While capture is off, every key still works and no mouse gesture arrives.** The pane is
+  fully usable by keyboard, which is the property that made a refused `enable_mouse` a non-fatal
+  stored problem in the first place.
+- **The toggle goes through the existing `TerminalOps` seam**, injected into `run_loop` as a
+  `&dyn Fn(bool) -> Result<(), String>` on exactly the terms `ui::read_artifact` is injected
+  today. No view file gains an I/O call, and `src/ui/terminal.rs` remains the only file naming
+  a crossterm terminal-mode function.
+- **A re-enable that the terminal refuses leaves capture off and names the reason**, rather
+  than claiming a state the terminal did not grant.
+- **`SPEC.md` and `README.md` record the trade-off and the Shift bypass**, scoped to what was
+  actually proven: Shift, Ghostty, macOS. Option+drag was measured **not** to work in Ghostty,
+  so nothing claims it does.
+- Not **BREAKING**: the key is additive and the default capture state does not move.
 
 ## Non-Goals
 
 - Implementing selection, a clipboard, or a copy buffer inside the TUI. Rendering a selection
   overlay and owning copy is a large feature and the wrong one — the terminal already does this
-  well when we let it.
-- Removing mouse support. The bindings `mouse-input` shipped stay.
+  well when we let it, which is the whole mechanism this change uses.
+- **Narrowing the capture mode set.** Measured to buy nothing for selection. Dropping
+  `?1002`/`?1003`/`?1015` remains defensible purely as removing cost no binding asks for, but it
+  is a separate change with a separate justification and must never be sold as a selection fix.
+- Removing mouse support, or changing the default capture state. The bindings `mouse-input`
+  shipped stay, and stay on at startup.
 - OSC 52 clipboard writes, or any escape sequence that reaches outside the pane.
-- Herdr's own mouse handling, which sits above this plugin.
+- Herdr's own mouse handling, which the measurement showed is not involved.
+- Claiming the Shift bypass on terminals it was not measured on. iTerm2, Terminal.app, and the
+  Linux terminals are unmeasured; the documentation says so rather than generalising.
 - Windows terminals, out of scope repository-wide.
 
 ## Capabilities
 
 ### New Capabilities
 
-None expected. If a toggle ships it belongs to `terminal-lifecycle` and `mouse-input`, not to a
-new capability.
+None. A toggle belongs to the capabilities that already own capture, the loop, and the
+inventory.
 
 ### Modified Capabilities
 
 - `terminal-lifecycle`: capture becomes something that can be left and re-entered mid-session,
   not only at start-up and teardown. The mirrored enter/leave ordering and the panic-hook
-  guarantee must survive that — a toggle must not let a panic leave capture on.
-- `mouse-input`: what the pane does while capture is off.
-- `dashboard-loop`: the new key, if one ships.
+  guarantee must survive that. `restore_then` already calls `disable_mouse` unconditionally and
+  deliberately, so the hook still consults no state — the property that makes this safe is
+  already in place and must not be traded away.
+- `mouse-input`: what the pane does while capture is off — no gesture arrives, and every key
+  binding is unaffected.
+- `dashboard-loop`: the `m` key and the capture state it owns.
+- `binding-inventory`: `m` joins the `Pane` group. The spec pins six groups with binding counts
+  5, 7, 4, 4, 5, 6 summing to 31; this moves the fourth count to 5 and the sum to 32, and the
+  overlay's row count with it. Every one of those figures is asserted in `cargo test`.
+- `degraded-coverage`: a refused re-enable is a new row of `SPEC.md`'s degraded-states table and
+  needs a named proving test in `tests/degraded-coverage.toml`.
 
 ## Impact
 
-- `src/ui/terminal.rs` — the only file permitted to name a crossterm terminal-mode function;
-  any mode change lands here and the `NORAW` gate's per-name control must still pass.
-- `src/ui/` — the key binding and the state of whether capture is currently on.
-- `SPEC.md` — the accepted trade-off, written down either way.
-- No dependency change. No I/O added to a view: the toggle goes through the injected
-  `TerminalOps`, never a direct crossterm call from a view file.
+- `src/ui/terminal.rs` — a guard method for setting capture mid-session; still the only file
+  permitted to name a crossterm terminal-mode function, and `NORAW`'s per-name control must
+  still pass.
+- `src/ui/mod.rs` — the injected capture seam and its one production binding, beside
+  `read_artifact`.
+- `src/ui/app.rs`, `src/ui/help.rs`, `src/ui/list.rs` — the action, the inventory row, the badge.
+- `SPEC.md` — Keys, the degraded-states table, and the accepted trade-off.
+- `README.md` — Keys, bound to `INVENTORY` by `tests/doc_contract.rs`.
+- `tests/degraded-coverage.toml` — the new row's proving test.
+- `openspec/specs/binding-inventory/spec.md` — the counts above.
+- No dependency change. No I/O added to a pure view file.
 
 ## Open Questions for Review
 
-1. **Does this need a change proposal at all, or a spike first?** If the measurement says
-   "document the Option-key bypass", the result is two paragraphs in `SPEC.md` and no code. That
-   is worth knowing before writing specs, which is why this proposal deliberately stops at the
-   investigation.
-2. **What the pane shows while capture is off.** Silent is confusing — the mouse simply stops
-   working. A header badge is the obvious answer and `degraded-states` already established one
-   (`file mode`), so the pattern exists.
-3. **Panic safety of a toggle.** `restore_then` currently calls `disable_mouse`
-   unconditionally, deliberately, so the hook needs no state to consult. A toggle must not
-   introduce a state the hook has to read.
+1. **Where the badge goes when `file mode` is already there.** Both want the list region's
+   heading row, and that row already drops the `file mode` badge whole rather than truncating it
+   when the row is too narrow. Two badges need an order and a combined drop rule, or a second
+   home.
+2. **Whether `m` is the right key.** It is free, and mnemonic, but it is also a plain letter
+   next to `a`/`c`/`s`/`g`, which all start agents. A mis-keyed `m` is harmless; a mis-keyed
+   neighbour is not.
