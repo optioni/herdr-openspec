@@ -187,11 +187,17 @@ pub fn style(role: Role) -> Style {
         // would have to be `BOLD`, which would make the leading token of most
         // rows in a task file bold and defeat the de-emphasis above.
         //
-        // `LightRed` and not `Red`: `ListProblem` is `Red` and is drawn in the
-        // **detail** region, the same region a task label is drawn in, so `Red`
-        // would have been a share with no licence. `LightRed` collides instead
-        // with `AgentBadge(Blocked)`, drawn only in the list region, so the two
-        // can never meet (design.md -> Decision 6).
+        // `LightRed` and not `Red`. Both are licensed, so this is a choice
+        // rather than a forced move: a problem row drawn inside the **detail**
+        // region carries no role at all — `ui::view::detail_row_role` answers
+        // `ContentKind::Problem` with `None` — and `ListProblem`'s red is
+        // reached only from `row_role`, in the list region. `LightRed` is taken
+        // because a label and an `AgentBadge(Blocked)` can never meet, while a
+        // label and a `ListProblem` row **can**, at 120 columns where both
+        // regions are drawn; and because leaving plain `Red` to mean "a
+        // problem" keeps reliable the scan a reader makes for exactly one red
+        // thing (design.md -> Decision 6, whose first draft argued this the
+        // other way round and was falsified during apply).
         Role::TaskEvidence => Style::default().fg(Color::LightRed),
         Role::TaskChange => Style::default().fg(Color::Green),
         Role::TaskConfirm => Style::default().fg(Color::Blue),
@@ -621,10 +627,10 @@ mod tests {
         assert_eq!(style(Role::Muted).bg, None);
 
         // The one colour choice this change was asked to justify, and the one
-        // an assertion would catch being reverted: `LightRed` collides with
-        // `AgentBadge(Blocked)`, drawn only in the list region, where `Red`
-        // would have collided with `ListProblem`, drawn in the **detail**
-        // region — the same region a task label is drawn in.
+        // an assertion would catch being reverted: `LightRed` shares with
+        // `AgentBadge(Blocked)`, which a task label can never meet, where `Red`
+        // would have shared with `ListProblem`, which it **can** meet — at 120
+        // columns both regions are drawn in one frame.
         assert_eq!(style(Role::TaskEvidence).fg, Some(Color::LightRed));
         assert_ne!(style(Role::TaskEvidence).fg, Some(Color::Red));
 

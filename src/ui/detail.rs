@@ -422,8 +422,12 @@ fn body_row(line: crate::ui::markdown::Line) -> ContentRow {
 ///
 /// The body is dispatched on `Detail::foldable` — derived rather than
 /// stored (`artifact-folds` -> Decision 3) — and not on the artifact's
-/// kind. At a **foldable** tab it is `ui::tasks::bar_lines(&change.progress, &[],
-/// width)` first, when `change` is `Some` and the `ArtifactRef` at
+/// kind. At a **foldable** tab it is `ui::tasks::bar_lines` first — given
+/// `change.progress` and a group slice built from `detail.sections`' own
+/// `progress` values in section order, skipping the sections carrying `None`,
+/// which is what `tasks-progress-bar` segments the gauge by; the **empty**
+/// slice is what a test call site passes and would leave the gauge unsegmented
+/// in every frame — when `change` is `Some` and the `ArtifactRef` at
 /// `detail.tab` carries `tracks_tasks == true`, as leading body owned by no
 /// section and hidden by no fold; then `artifact-folds`' walk — a header
 /// row per visible labelled section, that section's own rendered body

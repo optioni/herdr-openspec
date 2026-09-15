@@ -87,9 +87,17 @@ and (from `live-refresh`) `Refresh`.
 site rather than defaulting silently. `heading-sections` adds two fields to it — its `label`
 becomes an `Option<String>` and it gains a `usize` `depth` — and `tasks-emphasis` adds a
 third, `progress: Option<crate::tasks::Progress>`, which is exactly the event that list
-exists to make loud: that change updates **78** construction and pattern sites, measured with
-`grep -rn "ArtifactSection {" src/ tests/ | wc -l`, and every one of them fails to compile
-until it names the field.
+exists to make loud. `grep -rn "ArtifactSection {" src/ tests/ | wc -l` returned **78** before
+that change, of which **74** are the sites the compiler forces — the other four being the
+struct definition itself and three planted-defect **strings** in `tests/gate-controls.toml`,
+which are text rather than code and move only when the plant does. Every one of the 74 fails
+to compile until it names the field.
+
+The same command returns **81** **after** the change, and the difference is not drift: the
+change adds three construction sites of its own, `detail-scroll`'s own compile-time companion
+below accounting for two of them. The figure is written as a before-and-after pair rather
+than as one number precisely because a reader re-running the command gets the second, and a
+single number would read as falsified by the very edit it describes.
 
 #### Scenario: `Detail` has no `Default` and no site elides a field
 

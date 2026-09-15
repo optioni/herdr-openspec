@@ -1530,11 +1530,55 @@ mod tests {
     }
 
     /// `task-labels` :: "The classification reads nothing outside its
-    /// argument". The textual half is task 1.4's comment-stripped grep; this
-    /// is the half that runs: `label_of`'s signature admits a `&str` and
-    /// nothing else, and no `Schema` value exists anywhere in this scope.
+    /// argument".
+    ///
+    /// The discriminating half is the **first** assertion, and it runs inside
+    /// `cargo test` rather than being left to a human re-reading the file: this
+    /// module's own production slice — everything above `mod tests`, with
+    /// comment lines stripped — names none of the four workflow-reading
+    /// identifiers. `include_str!` is a compile-time read of this very file, so
+    /// the test performs no I/O of its own, and scoping it to the production
+    /// slice is what keeps the needles below from matching themselves. A
+    /// `use crate::schema::…` added to this module reddens it.
+    ///
+    /// The rest is the scenario's second clause: `label_of`'s signature admits
+    /// a `&str` and nothing else, and no workflow value exists anywhere in
+    /// this scope.
     #[test]
     fn the_classification_reads_nothing_outside_its_argument() {
+        let whole = include_str!("tasks.rs");
+        let production = whole
+            .split_once("\nmod tests {")
+            .map_or(whole, |(above, _)| above);
+        let stripped: String = production
+            .lines()
+            .filter(|l| {
+                let t = l.trim_start();
+                !t.starts_with("//")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        // Split so the needles do not name themselves in a file this test reads.
+        for needle in [
+            concat!("schema", "::"),
+            concat!("Sche", "ma"),
+            concat!("config", ".yaml"),
+            concat!(".opens", "pec.yaml"),
+        ] {
+            assert!(
+                !stripped.contains(needle),
+                "src/tasks.rs's production slice names {needle:?}: this module \
+                 reads no workflow definition"
+            );
+        }
+        // The control: the slice really was read and really does hold code, so
+        // the four assertions above cannot pass vacuously against an empty
+        // string.
+        assert!(
+            stripped.contains("pub fn label_of(text: &str) -> Option<Label>"),
+            "the production slice was not found, so the scan above proved nothing"
+        );
+
         let recognise: fn(&str) -> Option<Label> = label_of;
         assert_eq!(
             recognise("CHECK: nothing but the argument"),

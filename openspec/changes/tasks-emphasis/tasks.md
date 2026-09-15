@@ -374,25 +374,64 @@ against the assembled change and would fail against any one group reverted.
 
 <!-- kind: operational -->
 
-- [ ] 9.1 CHECK: Dispatch an independent `outside-in-tdd-reviewer` against proposal.md, all
+- [x] 9.1 CHECK: Dispatch an independent `outside-in-tdd-reviewer` against proposal.md, all
       seven spec deltas, design.md, and tasks.md, given the diff and the artifacts only — not
       this session's reasoning. Name the repository's concentration points in the brief:
       nothing spawns outside `cli`; views do no I/O; the plugin writes nothing inside
       `openspec/`; view tests run at 60 and 120; the six `*WIDTHS` gates carry no exemption
       list.
-- [ ] 9.2 CHECK: Ask the reviewer specifically whether any assertion here can fail — the
+- [x] 9.2 CHECK: Ask the reviewer specifically whether any assertion here can fail — the
       byte-identical comparisons in 4.5, 7.7 and 8.4 must compare against recorded literals,
       and every scenario must have a production path that reaches it. Planning review found
       five segmentation scenarios that would have passed against a build rendering none.
-- [ ] 9.3 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a
+- [x] 9.3 CHANGE: Fix every CRITICAL, resolve or consciously accept each WARNING with a
       one-line reason, note SUGGESTIONs, and re-run affected tests.
-- [ ] 9.4 CHECK: Before archiving, re-extract the `markdown-render`, `detail-scroll`, and four
+      **No CRITICAL. Three WARNINGs, all fixed; two SUGGESTIONs, one fixed and
+      one rejected against the evidence.**
+      W1 — `src/ui/palette.rs`' production arm and its own test still carried
+      the justification 8.3 falsified everywhere else. 8.3 said "all three are
+      corrected in place" and named the scenario, design.md and proposal.md,
+      missing the two code sites a future reader hits first. Both rewritten to
+      the surviving reason.
+      W2 — `ui::detail::content_lines`' doc comment read
+      `bar_lines(&change.progress, &[], width)`, documenting the exact
+      empty-slice defect planning review caught and 7.1 exists to prevent. The
+      bulk rewriter that added `&[]` to the test call sites had edited a doc
+      comment too. Replaced with the section-derived slice it actually passes.
+      W3 — `the_classification_reads_nothing_outside_its_argument` could not
+      fail: its two legs were a signature restatement and the determinism of
+      any pure function, while the scenario's discriminating THEN lived only in
+      1.4's one-time grep. It now runs that grep inside `cargo test` over an
+      `include_str!` of this module's own production slice, with a positive
+      control, and is proven to redden against a planted
+      `crate::schema::Schema` in `label_of`.
+      S1 — rejected on the evidence: the reviewer reported the
+      `tests/degraded-coverage.toml` re-anchor as unrecorded, but commit
+      `e57cbc0` carries a dedicated paragraph on it.
+      S2 — fixed: `specs/detail-scroll/spec.md` stated **78** sites "measured
+      with" a command that returns **81** after the change. Restated as the
+      before-and-after pair it is, with the 74-of-78 compiler-forced split.
+- [x] 9.4 CHECK: Before archiving, re-extract the `markdown-render`, `detail-scroll`, and four
       `view-palette` requirement blocks from `openspec/specs/<capability>/spec.md` and compare
       by **phrase** against this change's deltas. `spec-emphasis` modifies `markdown-render`
       and `view-palette` too, and a `MODIFIED` block carries the whole requirement, so
       whichever change archives second silently discards the first's edits
       (design.md -> Risks).
-- [ ] 9.5 VERIFY: Confirm no blocking or unowned finding remains.
+      **Done, and the hazard is one-directional today.**
+      `openspec/changes/spec-emphasis/` holds a `proposal.md` and **no** `specs/`
+      directory, so it has nothing yet for this change to discard. The
+      obligation therefore falls on whoever writes its deltas: extract from the
+      live specs **after** this change archives.
+      `git log 53da335..HEAD -- openspec/specs/` is empty, so no live spec moved
+      while this change was implemented and the deltas are still written against
+      current text. Every `### Requirement:` header in all seven deltas resolves:
+      the nine MODIFIED ones match a live requirement verbatim, and the three
+      that do not are the ADDED blocks (`task-labels` ×2 and
+      `tasks-progress-bar`'s segmentation rule). Compared scenario by scenario,
+      **no** MODIFIED block drops a scenario the live requirement carries; each
+      only adds — `artifact-folds` 4, `tasks-checklist` 4, `view-palette` 6
+      across its four blocks, `markdown-render` 1, `detail-scroll` 1.
+- [x] 9.5 VERIFY: Confirm no blocking or unowned finding remains.
 
 ## 10. Documentation
 
