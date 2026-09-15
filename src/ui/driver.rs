@@ -294,9 +294,9 @@ pub fn mouse_action(dashboard: &Dashboard, area: Rect, mouse: &MouseEvent) -> Ac
                 .map_or(Action::Ignore, Action::SelectTab),
             // `text-selection`: a header row still folds exactly as before;
             // any other row of the content area arms a selection instead of
-            // moving the detail cursor — the removed `Target::DetailLine`'s
-            // replacement (design.md -> Decision 9). `detail_cell` resolves
-            // only the cell; the `Action` it becomes is constructed here.
+            // moving the detail cursor, replacing the removed detail-line
+            // target (design.md -> Decision 9). `detail_cell` resolves only
+            // the cell; the `Action` it becomes is constructed here.
             Zone::DetailRow { content, row } => {
                 match detail_cell(dashboard, content, row, mouse.column) {
                     Some((line, _, Some(section))) => {
