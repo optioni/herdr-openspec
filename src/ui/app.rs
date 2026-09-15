@@ -16,6 +16,16 @@ use crate::changes::{Change, ChangeSet};
 /// Decisions.
 pub type ArtifactReader<'a> = &'a dyn Fn(&std::path::Path) -> Result<String, String>;
 
+/// The clipboard write, injected on exactly `ArtifactReader`'s terms and threaded into
+/// `run_loop` beside it: `run_loop` has no `TerminalOps` handle today, so a completing
+/// selection had no reachable call site without this (design.md -> Decision 11). `String`
+/// rather than `TerminalError` — the seam speaks the same shape `ArtifactReader` does — and
+/// the crate's one production binding, in `src/ui/mod.rs`'s `run`, maps a `TerminalGuard`'s
+/// `write_clipboard` (which does return `TerminalError`) down to its `Display` text. No view
+/// file names it: `apply`/`apply_select` stay pure, and the write happens only in `run_loop`,
+/// on the completing phase (`text-selection`'s design.md -> Decision 12).
+pub type ClipboardWriter<'a> = &'a dyn Fn(&str) -> Result<(), String>;
+
 // `Route` is pulled forward from this group (3) into group 2's commit: `ui::layout`'s
 // `split_body` needs it for the narrow-mode single-region case, and layout.rs is built
 // before this file's `Dashboard`/`Action`/`action_for` content. Recorded as a deliberate,

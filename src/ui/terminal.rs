@@ -91,6 +91,15 @@ impl<'a> TerminalGuard<'a> {
     pub fn mouse_problem(&self) -> Option<String> {
         self.mouse_problem.clone()
     }
+
+    /// `mouse-text-selection`'s addition: the guard is the one place `ui::run` holds a
+    /// `TerminalOps` handle, and `run_loop` has none — this is the call site
+    /// `ClipboardWriter` needed (design.md -> Decision 11). A thin delegate to
+    /// `TerminalOps::write_clipboard`, changing no mode and consulting `mouse_problem` not at
+    /// all: a refused clipboard write is unrelated to a refused mouse capture.
+    pub fn write_clipboard(&self, text: &str) -> Result<(), TerminalError> {
+        self.ops.write_clipboard(text)
+    }
 }
 
 impl Drop for TerminalGuard<'_> {

@@ -9,7 +9,9 @@ use ratatui::backend::Backend;
 use ratatui::crossterm::event::{Event, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 
-use crate::ui::app::{Action, ArtifactReader, Dashboard, SelectPhase, Target, action_for};
+use crate::ui::app::{
+    Action, ArtifactReader, ClipboardWriter, Dashboard, SelectPhase, Target, action_for,
+};
 use crate::ui::event::{EventError, EventSource};
 use crate::ui::layout::Zone;
 use crate::ui::list::RowKind;
@@ -98,12 +100,18 @@ pub enum LoopError {
 /// the sequence adds no wait to the render path. See
 /// `specs/live-updates/spec.md` -> "The loop drives the live tier without
 /// ever waiting on it".
+///
+/// `text-selection`'s addition: `write` is threaded in beside `read`, on exactly its terms
+/// (design.md -> Decision 11) — `run_loop` is the one place that both applies a mouse event
+/// and holds a `ClipboardWriter`, so it is also the one place that can tell a completing
+/// press or drag apart from an ordinary one. See `maybe_copy_selection`.
 pub fn run_loop<B: Backend, E: EventSource>(
     terminal: &mut Terminal<B>,
     dashboard: &mut Dashboard,
     events: &mut E,
     live: &mut Live<'_>,
     read: ArtifactReader<'_>,
+    write: ClipboardWriter<'_>,
     tick: Duration,
 ) -> Result<LoopSummary, LoopError> {
     let mut frames = 0usize;
@@ -143,14 +151,23 @@ pub fn run_loop<B: Backend, E: EventSource>(
         polls += 1;
 
         if let Some(event) = event {
+            // `text-selection`: the granularity standing before this event is applied — the
+            // one piece `maybe_copy_selection` needs that `dashboard.apply` overwrites, so it
+            // is read here, before the match below, on every event rather than only mouse
+            // ones (cheap: `Option<Granularity>` is `Copy`).
+            let before_granularity = dashboard.selection.as_ref().map(|s| s.granularity);
             // One action per event, and the quit check is unchanged: a mouse
             // event can neither apply two actions nor bypass it.
-            let action = match &event {
+            let mouse_kind = match &event {
                 // The mouse is resolved against the frame just drawn — never a
                 // stored size and never the size at startup. A resize between
                 // the draw and the click costs at most one mis-targeted event,
                 // which the next frame corrects: the same one-frame window
                 // `normalise_scroll` already accepts.
+                Event::Mouse(mouse) => Some(mouse.kind),
+                _ => None,
+            };
+            let action = match &event {
                 Event::Mouse(mouse) => {
                     // No filter flag: a click is unambiguous where a keystroke
                     // is not, so the rule is structural rather than a branch.
@@ -177,12 +194,54 @@ pub fn run_loop<B: Backend, E: EventSource>(
                 _ => action_for(&event, dashboard.filter.active),
             };
             dashboard.apply(action);
+            if let Some(kind) = mouse_kind {
+                maybe_copy_selection(dashboard, kind, before_granularity, write);
+            }
             if dashboard.quit {
                 break;
             }
         }
     }
     Ok(LoopSummary { frames, polls })
+}
+
+/// `text-selection`: copy the selection's text through `write` when, and only when, `kind`
+/// and the granularity transition `apply` just performed together mean this event **completed**
+/// a selection — a drag's finish, the second press, or the third (`specs/text-selection/spec.md`
+/// -> "The selected text is copied through the terminal seam", design.md -> Decisions 11 and 12).
+///
+/// A left press completes a selection exactly when `apply` widened it from `Armed` to `Word` or
+/// from `Word` to `Row` — compared against `before`, the granularity standing immediately before
+/// this event was applied, so a fourth-or-later press at an already-`Row` cell (unchanged by
+/// `apply_select`) is told apart from the second and third, which are not. A left release
+/// completes a selection exactly when the current granularity is `Span`: only a drag sets that
+/// granularity, through `SelectPhase::Extend`, so a bare click's release (no drag in between)
+/// never reaches this arm. Every other event kind completes nothing.
+///
+/// The range copied is exactly the range [`view::highlight_span`] highlights, resolved against
+/// `dashboard.detail.drawn_width` — the content width the frame just drawn actually used
+/// (`Dashboard::normalise_scroll`'s own one exception to storing no geometry) — rather than
+/// recomputed from the current mouse position, which a release outside the content area would
+/// leave with no zone to read one from. `None` from either — no frame drawn yet, or a granularity
+/// (`Word` over whitespace) that highlights nothing — copies nothing, matching "second press
+/// whose cell holds only whitespace... selects nothing" copying nothing either.
+///
+/// `write`'s result becomes `Selection::problem`: `Ok` clears it, `Err` stores the reason,
+/// exactly the moments design.md -> Decision 12 names. Neither a non-completing gesture nor an
+/// unrelated action (a click elsewhere, a scroll) reaches this function's body at all — the
+/// caller only invokes it for the mouse event `apply` just processed, and every non-completing
+/// path returns before calling `write`, so `Selection::problem`'s existing `apply_select`-set
+/// `None` is left standing for a fresh gesture (design.md -> Decision 12's own note in
+/// `apply_select`'s doc comment).
+fn maybe_copy_selection(
+    dashboard: &mut Dashboard,
+    kind: MouseEventKind,
+    before: Option<crate::ui::app::Granularity>,
+    write: crate::ui::app::ClipboardWriter<'_>,
+) {
+    // RED checkpoint: completion detection and the clipboard write are not implemented yet —
+    // the four tests above this function fail against this stub, for the right reason.
+    let _ = (dashboard, kind, before, write);
 }
 
 /// Map a mouse event to one of the actions `Action` already carries, using
@@ -694,6 +753,7 @@ mod tests {
             &mut events,
             &mut live,
             &|_: &std::path::Path| Ok(String::new()),
+            &|_: &str| Ok(()),
             Duration::from_millis(1),
         );
         assert!(matches!(result, Err(LoopError::Events(_))));
@@ -732,6 +792,7 @@ mod tests {
             &mut events,
             &mut live,
             &|_: &std::path::Path| Ok(String::new()),
+            &|_: &str| Ok(()),
             tick,
         )
         .expect("loop ends");
@@ -774,6 +835,7 @@ mod tests {
             &mut events,
             &mut live,
             &|_: &std::path::Path| Ok(String::new()),
+            &|_: &str| Ok(()),
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -821,6 +883,7 @@ mod tests {
             &mut events,
             &mut live,
             &|_: &std::path::Path| Ok(String::new()),
+            &|_: &str| Ok(()),
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -866,6 +929,7 @@ mod tests {
             &mut events,
             &mut live,
             &|_: &std::path::Path| Ok(String::new()),
+            &|_: &str| Ok(()),
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -905,6 +969,7 @@ mod tests {
             &mut events,
             &mut live,
             &|_: &std::path::Path| Ok(String::new()),
+            &|_: &str| Ok(()),
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -1028,6 +1093,7 @@ mod tests {
                 &mut events,
                 &mut live,
                 &read,
+                &|_: &str| Ok(()),
                 Duration::from_millis(1),
             )
             .expect("loop ends");
@@ -1204,6 +1270,7 @@ mod tests {
                 &mut events,
                 &mut live,
                 &read,
+                &|_: &str| Ok(()),
                 Duration::from_millis(1),
             )
             .expect("loop ends");
@@ -1283,6 +1350,7 @@ mod tests {
                 &mut events,
                 &mut live,
                 &read,
+                &|_: &str| Ok(()),
                 Duration::from_millis(1),
             )
             .expect("loop ends");
@@ -1463,6 +1531,7 @@ mod tests {
             &mut events,
             &mut live,
             read,
+            &|_: &str| Ok(()),
             Duration::from_millis(1),
         )
         .expect("stage ends");
@@ -1501,6 +1570,7 @@ mod tests {
                 &mut events,
                 &mut live,
                 &read,
+                &|_: &str| Ok(()),
                 Duration::from_millis(1),
             )
             .expect("first stage ends");
@@ -1534,6 +1604,7 @@ mod tests {
                 &mut events_select,
                 &mut live,
                 &read,
+                &|_: &str| Ok(()),
                 Duration::from_millis(1),
             )
             .expect("tab-move stage ends");
@@ -1566,6 +1637,7 @@ mod tests {
                 &mut events2,
                 &mut live,
                 &read,
+                &|_: &str| Ok(()),
                 Duration::from_millis(1),
             )
             .expect("second stage ends");
@@ -1834,6 +1906,7 @@ mod tests {
             &mut events,
             &mut live,
             &|_: &std::path::Path| Ok(String::new()),
+            &|_: &str| Ok(()),
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -1909,6 +1982,7 @@ mod tests {
             &mut events,
             &mut live,
             &|_: &std::path::Path| Ok(String::new()),
+            &|_: &str| Ok(()),
             Duration::from_millis(1),
         );
         match result {
@@ -2008,6 +2082,7 @@ mod tests {
             &mut events,
             &mut live,
             &read,
+            &|_: &str| Ok(()),
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -2052,6 +2127,7 @@ mod tests {
             &mut events,
             &mut live,
             &read,
+            &|_: &str| Ok(()),
             Duration::from_millis(1),
         );
         assert!(matches!(result, Err(LoopError::Draw(_))));
@@ -2089,6 +2165,7 @@ mod tests {
                 &mut events,
                 &mut live,
                 &|_: &std::path::Path| Ok(String::new()),
+                &|_: &str| Ok(()),
                 Duration::from_millis(1),
             )
             .expect("loop ends");
@@ -2145,6 +2222,7 @@ mod tests {
                 &mut events,
                 &mut live,
                 &|_: &std::path::Path| Ok(String::new()),
+                &|_: &str| Ok(()),
                 Duration::from_millis(1),
             )
             .expect("loop ends");
@@ -2209,6 +2287,7 @@ mod tests {
             &mut events,
             &mut live,
             &|_: &std::path::Path| Ok(String::new()),
+            &|_: &str| Ok(()),
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -2277,6 +2356,7 @@ mod tests {
                 &mut events,
                 &mut live,
                 &|_: &std::path::Path| Ok(String::new()),
+                &|_: &str| Ok(()),
                 Duration::from_millis(1),
             )
             .expect("loop ends");
@@ -2327,6 +2407,7 @@ mod tests {
             &mut events,
             &mut live,
             &|_: &std::path::Path| Ok(String::new()),
+            &|_: &str| Ok(()),
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -2376,6 +2457,7 @@ mod tests {
             &mut events,
             &mut live,
             &|_: &std::path::Path| Ok(String::new()),
+            &|_: &str| Ok(()),
             Duration::from_millis(250),
         )
         .expect("loop ends");
@@ -2410,6 +2492,7 @@ mod tests {
             &mut events2,
             &mut live2,
             &|_: &std::path::Path| Ok(String::new()),
+            &|_: &str| Ok(()),
             Duration::from_millis(250),
         )
         .expect("loop ends");
@@ -2441,6 +2524,7 @@ mod tests {
             &mut events,
             &mut live,
             &|_: &std::path::Path| Ok(String::new()),
+            &|_: &str| Ok(()),
             Duration::from_millis(250),
         )
         .expect("loop ends");
@@ -2485,6 +2569,7 @@ mod tests {
             &mut events,
             &mut live,
             &|_: &std::path::Path| Ok(String::new()),
+            &|_: &str| Ok(()),
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -2530,6 +2615,7 @@ mod tests {
             &mut events,
             &mut live,
             &|_: &std::path::Path| Ok(String::new()),
+            &|_: &str| Ok(()),
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -2595,6 +2681,7 @@ mod tests {
             &mut events,
             &mut live,
             &|_: &std::path::Path| Ok(String::new()),
+            &|_: &str| Ok(()),
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -2638,6 +2725,7 @@ mod tests {
             &mut events2,
             &mut live2,
             &|_: &std::path::Path| Ok(String::new()),
+            &|_: &str| Ok(()),
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -2686,6 +2774,7 @@ mod tests {
             &mut events,
             &mut live,
             &|_: &std::path::Path| Ok(String::new()),
+            &|_: &str| Ok(()),
             Duration::from_millis(250),
         )
         .expect("loop ends");
@@ -2755,6 +2844,7 @@ mod tests {
                 &mut events,
                 &mut live,
                 &|_: &std::path::Path| Ok(String::new()),
+                &|_: &str| Ok(()),
                 Duration::from_millis(1),
             )
             .expect("loop ends");
@@ -2799,6 +2889,7 @@ mod tests {
                     &mut events2,
                     &mut live2,
                     &|_: &std::path::Path| Ok(String::new()),
+                    &|_: &str| Ok(()),
                     Duration::from_millis(1),
                 )
                 .expect("loop ends");
@@ -2853,6 +2944,7 @@ mod tests {
                 &mut events,
                 &mut live,
                 &|_: &std::path::Path| Ok(String::new()),
+                &|_: &str| Ok(()),
                 Duration::from_millis(1),
             )
             .expect("loop ends");
@@ -2928,6 +3020,7 @@ mod tests {
             &mut events,
             &mut live,
             &|_: &std::path::Path| Ok(String::new()),
+            &|_: &str| Ok(()),
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -2995,6 +3088,7 @@ mod tests {
             &mut events,
             &mut live,
             &|_: &std::path::Path| Ok(String::new()),
+            &|_: &str| Ok(()),
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -3061,6 +3155,7 @@ mod tests {
             &mut events,
             &mut live,
             &|_: &std::path::Path| Ok(String::new()),
+            &|_: &str| Ok(()),
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -3112,6 +3207,7 @@ mod tests {
             &mut events,
             &mut live,
             &|_: &std::path::Path| Ok(String::new()),
+            &|_: &str| Ok(()),
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -3165,6 +3261,7 @@ mod tests {
             &mut events,
             &mut live,
             &|_: &std::path::Path| Ok(String::new()),
+            &|_: &str| Ok(()),
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -3242,6 +3339,7 @@ mod tests {
                 &mut events,
                 &mut live,
                 &|_: &std::path::Path| Ok(String::new()),
+                &|_: &str| Ok(()),
                 Duration::from_millis(1),
             )
             .expect("loop ends");
@@ -3296,6 +3394,7 @@ mod tests {
             &mut events,
             &mut live,
             &|_: &std::path::Path| Ok(String::new()),
+            &|_: &str| Ok(()),
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -3331,6 +3430,7 @@ mod tests {
             &mut events2,
             &mut live2,
             &|_: &std::path::Path| Ok(String::new()),
+            &|_: &str| Ok(()),
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -3371,6 +3471,7 @@ mod tests {
             &mut events,
             &mut live,
             &|_: &std::path::Path| Ok(String::new()),
+            &|_: &str| Ok(()),
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -3428,6 +3529,7 @@ mod tests {
             &mut events1,
             &mut live1,
             &|_: &std::path::Path| Ok(String::new()),
+            &|_: &str| Ok(()),
             Duration::from_millis(1),
         )
         .expect("stage 1 ends");
@@ -3456,6 +3558,7 @@ mod tests {
             &mut events2,
             &mut live2,
             &|_: &std::path::Path| Ok(String::new()),
+            &|_: &str| Ok(()),
             Duration::from_millis(1),
         )
         .expect("stage 2 ends");
@@ -3494,6 +3597,7 @@ mod tests {
             &mut events,
             &mut live,
             &|_: &std::path::Path| Ok(String::new()),
+            &|_: &str| Ok(()),
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -3530,6 +3634,7 @@ mod tests {
             &mut events,
             &mut live,
             &|_: &std::path::Path| Ok(String::new()),
+            &|_: &str| Ok(()),
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -3576,6 +3681,7 @@ mod tests {
                 &mut events,
                 &mut live,
                 &|_: &std::path::Path| Ok(String::new()),
+                &|_: &str| Ok(()),
                 Duration::from_millis(1),
             )
             .expect("loop ends");
@@ -3648,6 +3754,7 @@ mod tests {
                 &mut events,
                 &mut live,
                 &|_: &std::path::Path| Ok(String::new()),
+                &|_: &str| Ok(()),
                 Duration::from_millis(1),
             )
             .expect("loop ends");
@@ -3722,6 +3829,7 @@ mod tests {
                 &mut events,
                 &mut live,
                 &|_: &std::path::Path| Ok(String::new()),
+                &|_: &str| Ok(()),
                 Duration::from_millis(1),
             )
             .expect("loop ends");
@@ -3778,6 +3886,7 @@ mod tests {
                 &mut events,
                 &mut live,
                 &|_: &std::path::Path| Ok(String::new()),
+                &|_: &str| Ok(()),
                 Duration::from_millis(1),
             )
             .expect("loop ends");
@@ -3844,6 +3953,7 @@ mod tests {
             &mut events1,
             &mut live1,
             &|_: &std::path::Path| Ok(String::new()),
+            &|_: &str| Ok(()),
             Duration::from_millis(1),
         )
         .expect("stage 1 ends");
@@ -3874,6 +3984,7 @@ mod tests {
             &mut events2,
             &mut live2,
             &|_: &std::path::Path| Ok(String::new()),
+            &|_: &str| Ok(()),
             Duration::from_millis(1),
         )
         .expect("stage 2 ends");
@@ -3921,6 +4032,7 @@ mod tests {
             &mut events,
             &mut live,
             &|_: &std::path::Path| Ok(String::new()),
+            &|_: &str| Ok(()),
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -3963,6 +4075,7 @@ mod tests {
                 &mut events,
                 &mut live,
                 &read,
+                &|_: &str| Ok(()),
                 Duration::from_millis(1),
             )
             .expect("loop ends");
@@ -4067,6 +4180,7 @@ mod tests {
             &mut events,
             &mut live,
             &read,
+            &|_: &str| Ok(()),
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -5413,6 +5527,313 @@ mod tests {
         );
     }
 
+    // ------------------------------------------------------------------
+    // `text-selection` group 7: copy on completion.
+    // ------------------------------------------------------------------
+
+    /// `len` columns of `buffer`'s row `y`, starting at `x` — one symbol per column, on
+    /// `ui::mod`'s own `row_cols` terms (`src/ui/mod.rs`'s `detail` test module), since
+    /// `crate::testutil::row_text` reads a whole row and the bullet glyph `word_dashboard`
+    /// renders is multi-byte, which rules out a byte-offset slice of it.
+    fn row_cols(buffer: &ratatui::buffer::Buffer, x: u16, y: u16, len: u16) -> String {
+        (x..x + len)
+            .map(|x| buffer[(x, y)].symbol().to_string())
+            .collect()
+    }
+
+    /// A `ClipboardWriter` double, on `crate::testutil::RecordingReader`'s terms: records
+    /// every text passed to it and answers `Ok` or a scripted `Err`, so a test can assert
+    /// both that a write happened (or did not) and what it carried.
+    struct ClipboardRecorder {
+        calls: std::cell::RefCell<Vec<String>>,
+        fail_with: Option<&'static str>,
+    }
+
+    impl ClipboardRecorder {
+        fn ok() -> Self {
+            Self {
+                calls: std::cell::RefCell::new(Vec::new()),
+                fail_with: None,
+            }
+        }
+
+        fn failing(reason: &'static str) -> Self {
+            Self {
+                calls: std::cell::RefCell::new(Vec::new()),
+                fail_with: Some(reason),
+            }
+        }
+
+        fn write(&self, text: &str) -> Result<(), String> {
+            self.calls.borrow_mut().push(text.to_string());
+            match self.fail_with {
+                Some(reason) => Err(reason.to_string()),
+                None => Ok(()),
+            }
+        }
+
+        fn calls(&self) -> Vec<String> {
+            self.calls.borrow().clone()
+        }
+    }
+
+    /// Run `dashboard` through `run_loop` over `mouse_events` (each queued with `MouseEventKind`
+    /// values as returned by `crate::testutil::mouse`), followed by `q`, at `WIDE` — the
+    /// standard shape every test below shares, so each test's own body is only the events and
+    /// the assertions.
+    fn drive_mouse_events(
+        dashboard: &mut Dashboard,
+        mouse_events: Vec<MouseEvent>,
+        read: crate::ui::app::ArtifactReader<'_>,
+        write: crate::ui::app::ClipboardWriter<'_>,
+    ) {
+        let mut queue: Vec<Result<Option<Event>, crate::ui::event::EventError>> = mouse_events
+            .into_iter()
+            .map(|mouse| Ok(Some(Event::Mouse(mouse))))
+            .collect();
+        queue.push(Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))));
+        let mut events = Script::new(queue);
+        let backend = TestBackend::new(WIDE.width, WIDE.height);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        let mut fs = crate::watch::none();
+        let mut refresher = crate::refresh::none();
+        let mut agents = crate::agents::none();
+        let mut launcher = crate::launch::none();
+        let mut live = crate::ui::driver::Live {
+            fs: &mut *fs,
+            refresher: &mut *refresher,
+            agents: &mut *agents,
+            launcher: &mut *launcher,
+        };
+        run_loop(
+            &mut terminal,
+            dashboard,
+            &mut events,
+            &mut live,
+            read,
+            write,
+            Duration::from_millis(1),
+        )
+        .expect("loop ends");
+    }
+
+    /// A `Route::Detail` dashboard whose one selected active change resolves one artifact —
+    /// `word_dashboard`'s own fixture presets `detail.sections` directly, which a real
+    /// `run_loop` drive discards on its very first `sync_detail`; this fixture instead gives
+    /// `sync_detail` a real path to (re-)read, so the same markdown source survives a full
+    /// loop drive the way `word_dashboard` only ever survived a bare `mouse_action` + `apply`.
+    fn word_content_dashboard() -> Dashboard {
+        let change = crate::changes::fixture::with_artifacts(
+            crate::changes::fixture::active("s0", 0, 1),
+            &[("proposal", &["/repo/p.md"])],
+        );
+        let mut d = dashboard_with_change("/repo", "unused", 0, 0);
+        d.changes = crate::changes::fixture::set(vec![change], Vec::new(), Vec::new());
+        d.selected = 1;
+        d.route = Route::Detail;
+        d
+    }
+
+    /// `specs/text-selection/spec.md` -> "A press arms, a second selects the word, a third
+    /// selects the row": only the second and third presses at one cell **complete** a
+    /// selection, so only they reach the clipboard — a first press arms nothing to copy, and a
+    /// fourth leaves the row selection unchanged from the third (design.md -> Decision 12,
+    /// `text-selection` -> "The selected text is copied through the terminal seam").
+    #[test]
+    fn only_the_second_and_third_presses_at_one_cell_copy() {
+        let mut d = word_content_dashboard();
+        let read = |_: &std::path::Path| Ok("- zone call\n".to_string());
+        let content = detail_content_area(WIDE, Route::Detail);
+        let point = (content.x + 2, content.y);
+        let recorder = ClipboardRecorder::ok();
+        let write = |t: &str| recorder.write(t);
+
+        drive_mouse_events(&mut d, vec![left(point.0, point.1)], &read, &write);
+        assert!(
+            recorder.calls().is_empty(),
+            "a first press arms nothing to copy: {:?}",
+            recorder.calls()
+        );
+
+        drive_mouse_events(&mut d, vec![left(point.0, point.1)], &read, &write);
+        assert_eq!(
+            d.selection.as_ref().map(|s| s.granularity),
+            Some(Granularity::Word)
+        );
+        assert_eq!(
+            recorder.calls().len(),
+            1,
+            "the second press completes the word: {:?}",
+            recorder.calls()
+        );
+        assert_eq!(recorder.calls()[0], "zone");
+        assert_eq!(d.selection.as_ref().and_then(|s| s.problem.clone()), None);
+
+        drive_mouse_events(&mut d, vec![left(point.0, point.1)], &read, &write);
+        assert_eq!(
+            d.selection.as_ref().map(|s| s.granularity),
+            Some(Granularity::Row)
+        );
+        assert_eq!(
+            recorder.calls().len(),
+            2,
+            "the third press completes the row: {:?}",
+            recorder.calls()
+        );
+        assert_eq!(recorder.calls()[1], "• zone call");
+
+        drive_mouse_events(&mut d, vec![left(point.0, point.1)], &read, &write);
+        assert_eq!(
+            recorder.calls().len(),
+            2,
+            "a fourth press changes nothing further and copies nothing again: {:?}",
+            recorder.calls()
+        );
+    }
+
+    /// `specs/text-selection/spec.md` -> "The selected text is copied through the terminal
+    /// seam": a drag's finishing release — not any of the motion in between — is what copies
+    /// its span (design.md -> Decision 11 and 12).
+    #[test]
+    fn a_completed_drag_copies_its_span_on_release_and_not_before() {
+        let mut d = word_content_dashboard();
+        let read = |_: &std::path::Path| Ok("- zone call\n".to_string());
+        let content = detail_content_area(WIDE, Route::Detail);
+        let anchor = (content.x + 2, content.y);
+        let focus = (content.x + 11, content.y);
+        let recorder = ClipboardRecorder::ok();
+        let write = |t: &str| recorder.write(t);
+
+        drive_mouse_events(
+            &mut d,
+            vec![left(anchor.0, anchor.1), drag(focus.0, focus.1)],
+            &read,
+            &write,
+        );
+        assert_eq!(
+            d.selection.as_ref().map(|s| s.granularity),
+            Some(Granularity::Span),
+            "the drag itself only extends the span"
+        );
+        assert!(
+            recorder.calls().is_empty(),
+            "motion copies nothing before release: {:?}",
+            recorder.calls()
+        );
+
+        drive_mouse_events(
+            &mut d,
+            vec![m(MouseEventKind::Up(MouseButton::Left), focus.0, focus.1)],
+            &read,
+            &write,
+        );
+        let rows = crate::ui::detail::content_lines(
+            &d.detail,
+            d.selected_change(),
+            d.detail.drawn_width.expect("a frame has been drawn"),
+        );
+        let selection = d.selection.clone().expect("the span survives the release");
+        let (start, end) =
+            view::highlight_span(&rows, &selection).expect("a span always highlights something");
+        let expected = crate::ui::detail::span_text(&rows, start, end);
+        assert_eq!(
+            recorder.calls(),
+            vec![expected],
+            "the release copies exactly the highlighted span, once"
+        );
+    }
+
+    /// `specs/text-selection/spec.md` -> "The clipboard write cannot be confirmed, and the
+    /// pane claims nothing": an `Ok` write leaves `Selection::problem` at `None` and renders
+    /// no row (Decision 6 and 12) — the `Err` half is
+    /// `a_failed_write_is_recorded_as_a_problem_and_rendered` below.
+    #[test]
+    fn a_successful_write_leaves_no_problem_and_renders_no_row() {
+        let mut d = word_content_dashboard();
+        let read = |_: &std::path::Path| Ok("- zone call\n".to_string());
+        let content = detail_content_area(WIDE, Route::Detail);
+        let point = (content.x + 2, content.y);
+        let recorder = ClipboardRecorder::ok();
+        let write = |t: &str| recorder.write(t);
+
+        drive_mouse_events(
+            &mut d,
+            vec![left(point.0, point.1), left(point.0, point.1)],
+            &read,
+            &write,
+        );
+        assert_eq!(recorder.calls().len(), 1, "the second press copies once");
+        assert_eq!(
+            d.selection.as_ref().and_then(|s| s.problem.clone()),
+            None,
+            "an Ok write leaves no problem"
+        );
+
+        let backend = TestBackend::new(WIDE.width, WIDE.height);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        terminal
+            .draw(|frame| view::render(frame, &d))
+            .expect("draw");
+        let below = row_cols(terminal.backend().buffer(), content.x, content.y + 1, 20);
+        assert!(
+            !below.trim_start().starts_with('!'),
+            "no problem row is drawn when the write succeeded: {below:?}"
+        );
+    }
+
+    /// `specs/text-selection/spec.md` -> "The clipboard write cannot be confirmed, and the
+    /// pane claims nothing" -> "when the seam returns Err, the reason is recorded and
+    /// rendered as a `!`-marked row, because that failure **is** observable" (design.md ->
+    /// Decision 12).
+    #[test]
+    fn a_failed_write_is_recorded_as_a_problem_and_rendered() {
+        let mut d = word_content_dashboard();
+        let read = |_: &std::path::Path| Ok("- zone call\n".to_string());
+        let content = detail_content_area(WIDE, Route::Detail);
+        let point = (content.x + 2, content.y);
+        let recorder = ClipboardRecorder::failing("clipboard unavailable");
+        let write = |t: &str| recorder.write(t);
+
+        drive_mouse_events(
+            &mut d,
+            vec![left(point.0, point.1), left(point.0, point.1)],
+            &read,
+            &write,
+        );
+        assert_eq!(
+            d.selection.as_ref().and_then(|s| s.problem.clone()),
+            Some("clipboard unavailable".to_string()),
+            "a failing write's reason is stored on Selection::problem"
+        );
+        // The highlight is the pane's only claim, and it survives the failure —
+        // Decision 6: the selection itself is untouched by a failed write.
+        assert_eq!(
+            d.selection.as_ref().map(|s| s.granularity),
+            Some(Granularity::Word)
+        );
+
+        let backend = TestBackend::new(WIDE.width, WIDE.height);
+        let mut terminal = ratatui::Terminal::new(backend).expect("construct terminal");
+        terminal
+            .draw(|frame| view::render(frame, &d))
+            .expect("draw");
+        let below = row_cols(terminal.backend().buffer(), content.x, content.y + 1, 30);
+        assert!(
+            below.starts_with("! clipboard unavailable"),
+            "the reason is rendered as a detail-region problem row: {below:?}"
+        );
+
+        // A later completing gesture that succeeds clears the standing problem.
+        let ok_recorder = ClipboardRecorder::ok();
+        let ok_write = |t: &str| ok_recorder.write(t);
+        drive_mouse_events(&mut d, vec![left(point.0, point.1)], &read, &ok_write);
+        assert_eq!(
+            d.selection.as_ref().and_then(|s| s.problem.clone()),
+            None,
+            "a fresh gesture supersedes the standing problem"
+        );
+    }
+
     #[test]
     fn a_click_acts_while_filtering() {
         // `mouse-input`: "A click selects while the filter is open".
@@ -5583,6 +6004,7 @@ mod tests {
             &mut events,
             &mut live,
             &|_: &std::path::Path| Ok(String::new()),
+            &|_: &str| Ok(()),
             Duration::from_millis(1),
         )
         .expect("loop ends")
@@ -5622,6 +6044,7 @@ mod tests {
             &mut events,
             &mut live,
             &|_: &std::path::Path| Ok(String::new()),
+            &|_: &str| Ok(()),
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -5778,6 +6201,7 @@ mod tests {
             &mut events,
             &mut live,
             &|_: &std::path::Path| Ok(String::new()),
+            &|_: &str| Ok(()),
             Duration::from_millis(1),
         )
         .expect("the loop completes without panicking");
@@ -5843,6 +6267,7 @@ mod tests {
                 &mut events,
                 &mut live,
                 &|_: &std::path::Path| Ok(source.clone()),
+                &|_: &str| Ok(()),
                 Duration::from_millis(1),
             )
             .expect("loop ends");
@@ -5911,6 +6336,7 @@ mod tests {
             &mut events,
             &mut live,
             &|_: &std::path::Path| Ok(String::new()),
+            &|_: &str| Ok(()),
             Duration::from_millis(1),
         )
         .expect("loop ends");
@@ -6104,6 +6530,7 @@ mod tests {
             &mut events,
             &mut live,
             &read,
+            &|_: &str| Ok(()),
             Duration::from_millis(1),
         )
         .expect("loop ends");

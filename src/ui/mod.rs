@@ -22,7 +22,7 @@ use ratatui::Terminal;
 use ratatui::backend::Backend;
 
 use crate::config::Config;
-use crate::ui::app::{ArtifactReader, Dashboard, Detail, Route};
+use crate::ui::app::{ArtifactReader, ClipboardWriter, Dashboard, Detail, Route};
 use crate::ui::driver::{LoopError, TICK};
 use crate::ui::event::{CrosstermEvents, EventSource};
 use crate::ui::terminal::{CrosstermOps, TerminalError, TerminalGuard, TerminalOps};
@@ -259,6 +259,7 @@ pub fn run_wired<B: Backend, E: EventSource>(
     events: &mut E,
     startup: &Startup<'_>,
     read: ArtifactReader<'_>,
+    write: ClipboardWriter<'_>,
     tick: Duration,
 ) -> Result<Dashboard, StartError> {
     // `list-sections` group 6 (design.md -> Decision 13): `load`'s archived scope depends on
@@ -316,7 +317,15 @@ pub fn run_wired<B: Backend, E: EventSource>(
             agents: &mut *collaborators.agents,
             launcher: &mut *collaborators.launcher,
         };
-        driver::run_loop(terminal, &mut dashboard, events, &mut live, read, tick)
+        driver::run_loop(
+            terminal,
+            &mut dashboard,
+            events,
+            &mut live,
+            read,
+            write,
+            tick,
+        )
     };
     // `seam-resilience`: a launch left in flight is given a bounded chance to finish before
     // this function returns, whatever the loop's own outcome — a draw or event-source error
@@ -410,11 +419,13 @@ pub fn run() -> Result<(), StartError> {
         npm_hook: &crate::cli::npm_probe_hook,
         mouse_problem: guard.mouse_problem(),
     };
+    let write = |text: &str| guard.write_clipboard(text).map_err(|e| e.to_string());
     run_wired(
         &mut term,
         &mut CrosstermEvents,
         &startup,
         &read_artifact,
+        &write,
         TICK,
     )?;
     Ok(())
@@ -836,6 +847,7 @@ mod tests {
                     &mut events,
                     &mut live,
                     &read,
+                    &|_: &str| Ok(()),
                     std::time::Duration::from_millis(1),
                 )
                 .expect("loop ends");
@@ -967,6 +979,7 @@ mod tests {
                     &mut events,
                     &mut live,
                     &read,
+                    &|_: &str| Ok(()),
                     std::time::Duration::from_millis(1),
                 )
                 .expect("loop ends");
@@ -1126,6 +1139,7 @@ mod tests {
                     &mut events,
                     &mut live,
                     &read,
+                    &|_: &str| Ok(()),
                     std::time::Duration::from_millis(1),
                 )
                 .expect("loop ends");
@@ -1306,6 +1320,7 @@ apply:
                     &mut stage1,
                     &mut live,
                     &crate::ui::read_artifact,
+                    &|_: &str| Ok(()),
                     std::time::Duration::from_millis(1),
                 )
                 .expect("stage 1 ends");
@@ -1401,6 +1416,7 @@ apply:
                     &mut stage2,
                     &mut live,
                     &crate::ui::read_artifact,
+                    &|_: &str| Ok(()),
                     std::time::Duration::from_millis(1),
                 )
                 .expect("stage 2 ends");
@@ -1468,6 +1484,7 @@ apply:
                     &mut launch_events,
                     &mut live2,
                     &crate::ui::read_artifact,
+                    &|_: &str| Ok(()),
                     std::time::Duration::from_millis(1),
                 )
                 .expect("the launch-keys run ends");
@@ -2481,6 +2498,7 @@ apply:
                     &mut events,
                     &mut live,
                     &super::super::read_artifact,
+                    &|_: &str| Ok(()),
                     Duration::from_millis(1),
                 )
                 .expect("stage 1 ends");
@@ -2551,6 +2569,7 @@ apply:
                     &mut events2,
                     &mut live2,
                     &super::super::read_artifact,
+                    &|_: &str| Ok(()),
                     Duration::from_millis(1),
                 )
                 .expect("stage 2 ends");
@@ -2679,6 +2698,7 @@ apply:
                     &mut events,
                     &mut live,
                     &super::super::read_artifact,
+                    &|_: &str| Ok(()),
                     Duration::from_millis(1),
                 )
                 .expect("loop ends");
@@ -2727,6 +2747,7 @@ apply:
                     &mut events,
                     &mut live,
                     &super::super::read_artifact,
+                    &|_: &str| Ok(()),
                     Duration::from_millis(1),
                 )
                 .expect("loop ends");
@@ -2831,6 +2852,7 @@ apply:
                 &mut events,
                 &startup,
                 &crate::ui::read_artifact,
+                &|_: &str| Ok(()),
                 Duration::from_millis(1),
             );
             let buf = terminal.backend().buffer().clone();
@@ -2889,6 +2911,7 @@ apply:
                 &mut events,
                 &startup,
                 &crate::ui::read_artifact,
+                &|_: &str| Ok(()),
                 Duration::from_millis(1),
             );
             let buf = terminal.backend().buffer().clone();
@@ -3179,6 +3202,7 @@ esac
                 &mut events,
                 &startup,
                 &crate::ui::read_artifact,
+                &|_: &str| Ok(()),
                 Duration::from_millis(1),
             );
             let buf = terminal.backend().buffer().clone();
@@ -3813,6 +3837,7 @@ esac
                 &mut events,
                 &startup,
                 &crate::ui::read_artifact,
+                &|_: &str| Ok(()),
                 Duration::from_millis(1),
             );
             let dashboard = result.expect("an unreachable socket is a supported state");
@@ -3964,6 +3989,7 @@ esac
                 &mut events,
                 &startup,
                 &crate::ui::read_artifact,
+                &|_: &str| Ok(()),
                 Duration::from_millis(1),
             );
             let dashboard = result.expect("quitting immediately is a supported state");
@@ -5066,6 +5092,7 @@ esac
                     &mut events,
                     &mut live,
                     &crate::ui::read_artifact,
+                    &|_: &str| Ok(()),
                     std::time::Duration::from_millis(1),
                 )
                 .expect("the loop keeps drawing despite the watcher failure");

@@ -232,6 +232,14 @@ fn render_detail_content(frame: &mut Frame, content: Rect, dashboard: &Dashboard
         .selection
         .as_ref()
         .and_then(|selection| highlight_span(&rows, selection));
+    // `text-selection`'s addition: how many of `content.height`'s rows the loop below
+    // actually draws — needed so a failed clipboard write's reason can be drawn on the row
+    // immediately after, when one is free. Computed before the loop rather than counted
+    // during it, so it stays a plain `usize` and not a borrow held across the loop body.
+    let visible = rows
+        .len()
+        .saturating_sub(offset)
+        .min(content.height as usize);
     let buf = frame.buffer_mut();
     for (i, row) in rows
         .iter()
@@ -280,6 +288,26 @@ fn render_detail_content(frame: &mut Frame, content: Rect, dashboard: &Dashboard
             }
         }
     }
+    // `text-selection`: a failed clipboard write's reason, on the row right after the
+    // content this frame actually drew — never woven into `rows` itself, because every
+    // click, highlight, and scroll computation elsewhere (`ui::driver::detail_cell`,
+    // `highlight_span`, `Dashboard::normalise_scroll`) addresses a line by its index into
+    // that **exact** `content_lines` output, and a row inserted only here would shift
+    // every one of those by one without them ever knowing. Drawn only when a row is free
+    // below the last one drawn — never overwriting content, and silently omitted rather
+    // than pushing content off the bottom when there is none (`SPEC.md`'s "never fail
+    // closed": a reader who cannot see the reason still sees every line of their document).
+    if let Some(problem) = dashboard
+        .selection
+        .as_ref()
+        .and_then(|s| s.problem.as_deref())
+        && visible < content.height as usize
+    {
+        let y = content.y + visible as u16;
+        let text =
+            crate::ui::list::pad_or_truncate_right(&format!("! {problem}"), content.width as usize);
+        buf.set_string(content.x, y, text, style_for(&Face::plain()));
+    }
 }
 
 /// The half-open display-column range highlighted on content row `line`, or
@@ -320,7 +348,11 @@ fn highlight_columns(
 /// time, from `rows` itself. `Armed` highlights nothing (design.md -> Decision
 /// 3), and a `Word` press that landed on whitespace highlights nothing either,
 /// since [`detail::word_at`] reports `None` for it.
-fn highlight_span(
+/// `pub(crate)` rather than private: `ui::driver::maybe_copy_selection` calls this directly
+/// so that what is copied is provably the same range that is highlighted, rather than a second
+/// resolver that could drift from it (design.md -> Contracts, "what is copied must equal what
+/// is highlighted").
+pub(crate) fn highlight_span(
     rows: &[detail::ContentRow],
     selection: &Selection,
 ) -> Option<((usize, u16), (usize, u16))> {
