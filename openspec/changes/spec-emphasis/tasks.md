@@ -192,21 +192,40 @@ Depends on 2 (for `DeltaOp`) and 3 (for the roles).
 
 Depends on 2 (for `DeltaOp`).
 
-- [ ] 5.1 RED: Write failing tests `requirements_are_attributed_to_the_operation_heading_above_them`, `a_requirement_above_every_operation_heading_carries_none`,
+- [x] 5.1 RED: Write failing tests `a_requirement_above_every_operation_heading_carries_none`,
       `a_main_specs_requirements_are_entirely_unbadged`, `only_a_level_3_requirement_heading_is_attributed`, `a_non_spec_artifact_is_attributed_nothing`,
       `a_delta_specs_requirement_sections_carry_their_operation_and_nothing_else_does`, and `a_tracked_tasks_tabs_sections_carry_progress_and_no_operation` in `ui::app`, from
-      the same-named scenarios in specs/spec-delta-badges and specs/artifact-folds.
-- [ ] 5.2 GREEN: Add `operation: Option<crate::specs::DeltaOp>` to `ArtifactSection` and fill it
+      the **six** same-named scenarios in specs/artifact-folds.
+      **Corrected during implementation.** An earlier draft opened this list with a seventh name,
+      `requirements_are_attributed_to_the_operation_heading_above_them`, which matches no
+      scenario in any spec in this package. It is a leftover of the review's own WARNING repair
+      "Walk moved wholly into `artifact-folds` … The duplicated scenario merged rather than
+      landed twice": the merge left the surviving scenario
+      (`artifact-folds/spec.md:205`, which asserts exactly this — `Requirement: A` carries
+      `Some(Added)`, `Requirement: B` carries `Some(Removed)`, the second heading resetting the
+      walk rather than nesting) and deleted the duplicate, but its **matrix row** in `design.md`
+      and its name here both survived. The orphan row is removed; the behaviour was never
+      uncovered. Found by the implementer refusing to write a test for a scenario that does not
+      exist.
+- [x] 5.2 GREEN: Add `operation: Option<crate::specs::DeltaOp>` to `ArtifactSection` and fill it
       in `sync_detail` by one forward walk, beside where `progress` is computed. Reuse the
       existing level-3 `Requirement:` predicate rather than writing it twice — per design.md →
       Decision 4.
-- [ ] 5.3 GREEN: Answer the new field at all **75** construction sites counted above
+- [x] 5.3 GREEN: Answer the new field at all **75** construction sites counted above
       (`app.rs` 28, `detail.rs` 19, `driver.rs` 14, `view.rs` 14) — none uses a rest pattern and
       `NODEFAULT-UI` forbids one, so every site must name it. The compiler enumerates them; `NODEFAULT-UI` is why no default is
       added to shortcut this.
-- [ ] 5.4 CHECK: `/bin/sh scripts/gates/nodefault-ui.sh` with `ArtifactSection`'s own `SCAN_MIN`
+      **75 was right**, confirmed a third time by the gate itself at implementation
+      (`75 literal/pattern spans scanned`). Two things the count does not tell you, both found
+      by the compiler: one of `app.rs`'s 28 spans is not a construction but the **destructuring
+      pattern** in `NODEFAULT-UI`'s compile-time companion test, where writing `operation: None`
+      makes the `let` refutable (`E0005`) — bind it as a plain identifier and assert it, and
+      rename the test from `..._exactly_four_fields` to `..._exactly_five_fields`. And **two
+      further construction sites live in `tests/doc_contract.rs`**, outside both the count and
+      its `grep -rc … src/` scope, yet required for `cargo test` to compile at all.
+- [x] 5.4 CHECK: `/bin/sh scripts/gates/nodefault-ui.sh` with `ArtifactSection`'s own `SCAN_MIN`
       as the Makefile passes it → exit 0, confirming the type still carries no `Default`.
-- [ ] 5.5 Run the group tests — `cargo test ui::app::` green, `cargo test` green overall;
+- [x] 5.5 Run the group tests — `cargo test ui::app::` green, `cargo test` green overall;
       state whether a refactor was needed.
 
 ## 6. The badge on a section header row

@@ -163,7 +163,6 @@ that is why the classifier does not live under `src/ui/`.
 | Only a level-2 heading carries an operation | `specs::tests::only_a_level_2_heading_carries_an_operation` | Unit — pure parse | none | `cargo test specs::` |
 | A renamed operation and a main spec's heading both decline | `specs::tests::a_renamed_operation_and_a_main_specs_heading_both_decline` | Unit — pure parse | none | `cargo test specs::` |
 | The recognition is total over degenerate input | `specs::tests::the_recognition_is_total_over_degenerate_input` | Unit — pure parse | none | `cargo test specs::` |
-| Requirements are attributed to the operation heading above them | `ui::app::tests::requirements_are_attributed_to_the_operation_heading_above_them` | Unit — pure view | reader replaced (closure) | `cargo test ui::app::` |
 | A requirement above every operation heading carries none | `ui::app::tests::a_requirement_above_every_operation_heading_carries_none` | Unit — pure view | reader replaced | `cargo test ui::app::` |
 | A main spec's requirements are entirely unbadged | `ui::app::tests::a_main_specs_requirements_are_entirely_unbadged` | Unit — pure view | reader replaced | `cargo test ui::app::` |
 | Only a level-3 `Requirement:` heading is attributed | `ui::app::tests::only_a_level_3_requirement_heading_is_attributed` | Unit — pure view | reader replaced | `cargo test ui::app::` |

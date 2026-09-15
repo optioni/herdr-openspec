@@ -71,8 +71,14 @@ resolution point named below, and `openspec validate spec-emphasis --strict` pas
 
 Two structural properties were established by counting rather than by reading, and both hold:
 
-- **80 scenarios across six delta specs, 80 matrix rows, diffed by title** — a scenario without
-  a row and a row without a scenario are both caught. Verified after every repair.
+- ~~**80 scenarios across six delta specs, 80 matrix rows, diffed by title** — a scenario without
+  a row and a row without a scenario are both caught. Verified after every repair.~~
+  **This claim was false, and its falsity is what hid a defect.** Re-measured at implementation:
+  **79** scenarios and **80** matrix rows, with exactly one row carrying no scenario —
+  "Requirements are attributed to the operation heading above them", stranded by this review's
+  own merge repair. Two equal numbers read as agreement, and the check was recorded as passing
+  without the diff being run both ways after the final repair. See "Repairs During
+  Implementation" below.
 - **`tasks.md` 307 lines against `design.md` 489** — tasks has not outgrown the design it
   implements, so the decisions are not being made in the checklist.
 
@@ -95,11 +101,24 @@ affected group was marked complete. Listed in the same form as the table above.
 | WARNING | `tasks.md` | Task 2.1's ninth name, `the_classification_reads_nothing_outside_its_argument`, could not be written where the task put it: the scenario's own text (`spec-delta-badges/spec.md:181`) says the check "lives in `tests/doc_contract.rs` and **not** inside `src/specs.rs`", and `doc-conformance/spec.md:39` states it from the owning side under the sentence group 8's test name transcribes. The task contradicted the spec it cited. Found by the implementer, which declined the name on the scenario's authority rather than writing an impossible test. | 2.1 rescoped to eight names, with both the delegation and the reason recorded in the task. | `tasks.md` 2.1 |
 | NIT | `tasks.md` | Task 2.2 assigned `pub mod specs;` to GREEN, but a `src/specs.rs` that `src/lib.rs` does not declare is a file rustc never compiles: `cargo test specs::` then answers `running 0 tests` and **exits 0** — the false pass this file's own Planning-time evidence warns against, reached by following the task literally. | Declaration moved into the RED step, with the honest failure it produces (`E0432`, four unresolved imports) recorded. | `tasks.md` 2.2 |
 
-**What let the first one through.** The review verified "80 scenarios across six delta specs, 80
-matrix rows, diffed by title" — scenarios against `design.md`'s verification matrix. Nothing
-diffed scenarios against **`tasks.md`**, so a scenario could carry a matrix row and no task, and
-one did. The two artifacts were checked against each other and neither against the checklist that
-implements them. A future review of a package this size should diff titles three ways, not two.
+| CRITICAL | `design.md`, `tasks.md` | The verification matrix carried a row, "Requirements are attributed to the operation heading above them", matching **no scenario in any spec** — and `tasks.md` 5.1 named its test as the first of seven. Stranded by this review's own WARNING repair, which merged the duplicated attribution walk into `artifact-folds` and deleted the duplicate scenario while leaving its matrix row and its task name standing. An implementer following 5.1 literally would have invented a test for a contract no spec states. | Orphan row deleted; 5.1 rescoped to the six real scenarios, with the merge recorded as its cause. The behaviour itself was never uncovered — `artifact-folds/spec.md:205` asserts it exactly, including that a second operation heading resets the walk rather than nesting. Found by the implementer refusing to write a test for a scenario it could not find. | `design.md` → verification matrix; `tasks.md` 5.1 |
+| NIT | `tasks.md` | The 75-site count is correct but incomplete in two ways the compiler finds and the grep cannot: one of `app.rs`'s spans is a **destructuring pattern**, not a construction, where `operation: None` makes the binding refutable (`E0005`); and two further sites live in `tests/doc_contract.rs`, outside the count's own `src/` scope but required for `cargo test` to compile. | Both recorded in 5.3. The count stays 75 — it is right about what it measures. | `tasks.md` 5.3 |
+| WARNING | `tasks.md` | Nothing in the package predicted that `tests/degraded-coverage.toml` anchors rows to **absolute line numbers**: adding a field to `Face` moved `src/ui/markdown.rs` six lines and carried a row's anchor onto a comment, failing `every_table_row_has_a_proof` with a message naming a footnote and no connection to the group that caused it. | Anchor re-pointed to the same line of code; task 4.6 added, naming every anchor the remaining groups can disturb. | `tasks.md` 4.6 |
+
+**What let these through — one cause, three defects.** The review recorded "80 scenarios across
+six delta specs, 80 matrix rows, diffed by title" as a passing structural check. It was not one.
+Re-measured, the true figures are 79 and 80: the counts were never equal, and the diff was not
+re-run both ways after the final repair, so a row with no scenario survived in the matrix while a
+scenario with no row could not have been seen either. Nothing diffed either artifact against
+**`tasks.md`**, which is the checklist that actually drives the implementer — so a scenario could
+carry a matrix row and no task (one did), and a task could name a test no scenario supports (two
+did).
+
+The generalisable rule: **titles must be diffed three ways — scenarios, matrix rows, task names —
+and a structural check is only evidence when its numbers are printed rather than asserted.** Two
+equal counts read as agreement and stopped the check; two *unequal* counts would have named the
+orphan immediately. All three defects were found by implementers refusing to write a test for a
+scenario they could not find, which is a slower and more expensive place to find them.
 
 ## Deferred Non-Blocking Notes
 
