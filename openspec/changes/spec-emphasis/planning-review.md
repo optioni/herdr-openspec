@@ -20,6 +20,14 @@
 - Working tree: clean. All four reviewers confirmed they planted nothing and edited nothing;
   the one negative control executed during planning (`PALETTE`) was planted and removed with
   `git status` verified clean after.
+- **Re-checked at implementation start**, HEAD `c607227`: `git diff --stat 3ccaea9..c607227`
+  touches nothing under `src/`, `tests/`, `scripts/`, `Makefile`, `SPEC.md`, or `README.md`, so
+  every source-derived number above was still current. Baseline `cargo test --all-features`:
+  1386 unit tests plus the contract tiers, 0 failures. Sibling repository unchanged.
+
+Implementation began at `c607227`. Defects found **after** this review, during the groups
+themselves, are logged in "Repairs During Implementation" below rather than edited into the
+table above, so the review's own error rate stays readable.
 
 The finding pass was delegated to four `planning-reviewer` subagents, none of which wrote the
 package, sliced A/B/C/D per the schema. **27 findings: 7 CRITICAL, 11 WARNING, 5 NIT, 4
@@ -75,6 +83,23 @@ the plan quoted the schema's "every check must be able to fail" rule while conta
 repair that generalises is the one slice B applied throughout: a check's *scope* is part of the
 check, and a sweep whose needles live inside its own subject is not a weaker check but a broken
 one. Every sweep in this package now names its slice.
+
+## Repairs During Implementation
+
+Defects this review did not catch, found by the between-group gate and repaired before the
+affected group was marked complete. Listed in the same form as the table above.
+
+| Severity | Source Artifact | Problem | Repair | Updated Location |
+|---|---|---|---|---|
+| CRITICAL | `tasks.md` | `specs/spec-delta-badges` has **ten** scenarios; task 2.1 listed nine and no other task named the tenth. The missing one is "The clause recognition is total over degenerate input" — a scenario **this review itself added**, as the NIT repair "`clause_of` was required to be total but had no degenerate-input scenario, while its sibling `operation_of_heading` had one". The repair landed in the spec and in no task, so `clause_of`'s totality would have shipped unasserted. | Task 2.1a added, transcribing the scenario's six inputs and mirroring its sibling's shape. | `tasks.md` 2.1a |
+| WARNING | `tasks.md` | Task 2.1's ninth name, `the_classification_reads_nothing_outside_its_argument`, could not be written where the task put it: the scenario's own text (`spec-delta-badges/spec.md:181`) says the check "lives in `tests/doc_contract.rs` and **not** inside `src/specs.rs`", and `doc-conformance/spec.md:39` states it from the owning side under the sentence group 8's test name transcribes. The task contradicted the spec it cited. Found by the implementer, which declined the name on the scenario's authority rather than writing an impossible test. | 2.1 rescoped to eight names, with both the delegation and the reason recorded in the task. | `tasks.md` 2.1 |
+| NIT | `tasks.md` | Task 2.2 assigned `pub mod specs;` to GREEN, but a `src/specs.rs` that `src/lib.rs` does not declare is a file rustc never compiles: `cargo test specs::` then answers `running 0 tests` and **exits 0** — the false pass this file's own Planning-time evidence warns against, reached by following the task literally. | Declaration moved into the RED step, with the honest failure it produces (`E0432`, four unresolved imports) recorded. | `tasks.md` 2.2 |
+
+**What let the first one through.** The review verified "80 scenarios across six delta specs, 80
+matrix rows, diffed by title" — scenarios against `design.md`'s verification matrix. Nothing
+diffed scenarios against **`tasks.md`**, so a scenario could carry a matrix row and no task, and
+one did. The two artifacts were checked against each other and neither against the checklist that
+implements them. A future review of a package this size should diff titles three ways, not two.
 
 ## Deferred Non-Blocking Notes
 

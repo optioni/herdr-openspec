@@ -69,17 +69,45 @@ group has an honest RED state rather than a manufactured one.
 
 <!-- kind: behavior -->
 
-- [ ] 2.1 RED: Write failing tests in `src/specs.rs` for `each_of_the_three_operation_headings_classifies_to_its_own_variant`,
+- [x] 2.1 RED: Write failing tests in `src/specs.rs` for `each_of_the_three_operation_headings_classifies_to_its_own_variant`,
       `internal_whitespace_is_tolerated_and_nothing_else_is`, `only_a_level_2_heading_carries_an_operation`, `a_renamed_operation_and_a_main_specs_heading_both_decline`,
-      `the_recognition_is_total_over_degenerate_input`, `the_three_measured_keywords_classify_as_specified`, `the_wider_testing_vocabulary_classifies_through_the_same_table`, `a_run_outside_the_table_is_not_a_clause`,
-      and `the_classification_reads_nothing_outside_its_argument`, from the nine same-named scenarios in specs/spec-delta-badges.
+      `the_recognition_is_total_over_degenerate_input`, `the_three_measured_keywords_classify_as_specified`, `the_wider_testing_vocabulary_classifies_through_the_same_table`, and
+      `a_run_outside_the_table_is_not_a_clause`, from **eight** of the ten same-named scenarios in specs/spec-delta-badges.
       RED check at HEAD: `test -f src/specs.rs` → exit **1**.
-- [ ] 2.2 GREEN: Add `pub mod specs;` to `src/lib.rs` and implement `DeltaOp`,
+      **Corrected during implementation, twice.** An earlier draft of this line listed a ninth
+      name, `the_classification_reads_nothing_outside_its_argument`, and called the set "the nine
+      same-named scenarios". That scenario (`specs/spec-delta-badges/spec.md:181`) delegates
+      itself in its own text — "the check lives in `tests/doc_contract.rs` and **not** inside
+      `src/specs.rs`, because a check written inside the file it sweeps contains its own needles
+      and can never pass" — and `specs/doc-conformance/spec.md:39` states it from the owning
+      side as "The production slice of `src/specs.rs` carries no I/O or schema name", which is
+      the sentence group 8's test name transcribes. Writing it here was impossible, not merely
+      redundant. Separately, the draft omitted a scenario that *is* this group's: see 2.1a.
+      Both defects were in the reviewed package; the implementer declined the ninth name on the
+      scenario's own authority and the gate found the omission.
+- [ ] 2.1a RED: Write `the_clause_recognition_is_total_over_degenerate_input` in `src/specs.rs`,
+      from `specs/spec-delta-badges/spec.md:200` — `clause_of` on the empty string, on `"   "`,
+      on a 10000-character run of `A`, on `"日本語"`, on `"AND 日本語"`, and on a string whose
+      first character is a multi-byte grapheme; no call panics, every call returns `None`, `AND`
+      being matched whole so `"AND 日本語"` is not it. The planning review added this scenario as
+      a NIT repair — "`clause_of` was required to be total but had no degenerate-input scenario,
+      while its sibling `operation_of_heading` had one — two functions in one capability held to
+      different standards for the same property" — and did not add it to 2.1's list, so the
+      repair landed in the spec and in no task. It mirrors
+      `the_recognition_is_total_over_degenerate_input`, which is what the scenario's closing
+      clause asks for: one standard for one property across both siblings.
+- [x] 2.2 GREEN: Add `pub mod specs;` to `src/lib.rs` and implement `DeltaOp`,
       `operation_of_heading(level, label)`, `Clause`, and `clause_of(run)`, with `clause_of`
       calling `crate::tasks::role_of` and never restating the token table.
       RED check at HEAD: `grep -rq "DeltaOp" src/` → exit **1**.
-- [ ] 2.3 REFACTOR: Clean up while green, or state that none was needed.
-- [ ] 2.4 CHECK: The token table must not be copied. Scope the sweep to the **production
+      **Sequencing correction.** `pub mod specs;` has to land in the **RED** commit, not this
+      one: without it `src/specs.rs` is a file rustc never compiles, and `cargo test specs::`
+      answers `running 0 tests` and **exits 0** — the precise false pass this file's own
+      Planning-time evidence warns against. With the declaration present, the RED is honest and
+      names its cause: `error[E0432]: unresolved imports super::Clause, super::DeltaOp,
+      super::clause_of, super::operation_of_heading`.
+- [x] 2.3 REFACTOR: Clean up while green, or state that none was needed.
+- [x] 2.4 CHECK: The token table must not be copied. Scope the sweep to the **production
       slice** — everything above `mod tests` — exactly as `src/tasks.rs`'s own
       `the_classification_reads_nothing_outside_its_argument` already does:
       `awk '/^mod tests/{exit} {print}' src/specs.rs | grep -nE '"(RED|GREEN|VERIFY|CHARACTERIZE|ARRANGE|ACT|ASSERT)"'`
