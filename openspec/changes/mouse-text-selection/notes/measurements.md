@@ -368,3 +368,19 @@ than `Option`, and the comparison program does not do what it was reported to do
 | mode set | plain drag selects | wheel arrives as ARROW KEYS | app saw click | Shift+drag selects |
 |---|---|---|---|---|
 | `cop-all` | no | no | yes | yes |
+
+## 2026-09-15 — ALTERNATE SCREEN — ghostty, TERM=xterm-256color, herdr=yes, tmux=no
+
+| mode set | plain drag selects | wheel arrives as ARROW KEYS | app saw click | Shift+drag selects |
+|---|---|---|---|---|
+| `copilot-set` | no | ? | ? | yes |
+| `cop-all` | no | ? | ? | yes |
+| `alt-full` | no | ? | ? | yes |
+
+## 2026-09-15 — ALTERNATE SCREEN — ghostty, TERM=xterm-ghostty, herdr=no, tmux=no
+
+| mode set | plain drag selects | wheel arrives as ARROW KEYS | app saw click | Shift+drag selects |
+|---|---|---|---|---|
+| `copilot-set` | no | ? | ? | yes |
+| `cop-all` | no | ? | ? | yes |
+| `alt-full` | no | ? | ? | yes |
