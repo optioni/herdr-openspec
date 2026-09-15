@@ -362,3 +362,9 @@ than `Option`, and the comparison program does not do what it was reported to do
 @25676     ESC[?1002l
 @25714     ESC[?1049l
 ```
+
+## 2026-09-15 — ALTERNATE SCREEN — ghostty, TERM=xterm-256color, herdr=yes, tmux=no
+
+| mode set | plain drag selects | wheel arrives as ARROW KEYS | app saw click | Shift+drag selects |
+|---|---|---|---|---|
+| `cop-all` | no | no | yes | yes |

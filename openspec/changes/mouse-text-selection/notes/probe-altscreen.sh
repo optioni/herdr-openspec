@@ -121,7 +121,7 @@ run_set() {
   at 9;  printf 'Then, watching the log below:'
   at 10; printf '  1. PLAIN DRAG across the words above — does the TERMINAL highlight them?'
   at 11; printf '  2. single click      3. scroll wheel      4. Shift+drag'
-  at 13; printf 'Press  q  to finish this set.'
+  at 13; printf 'Press  q  to finish this set.%s' "${PROBE_QUIET:+  [QUIET: nothing is drawn while you drag]}"
   at "$LOG_TOP"; printf 'events the APPLICATION received:'
 
   enable_modes "$id"
@@ -134,6 +134,13 @@ run_set() {
     log[${#log[@]}]="$vis"
     i=${#log[@]}
     [ "$i" -gt "$LOG_ROWS" ] && log=("${log[@]:$((i - LOG_ROWS))}")
+    # PROBE_QUIET=1 suppresses every screen write while events arrive. Writing to
+    # the screen discards the terminal's selection, and under ?1003 a drag fires a
+    # motion event per pixel-row — so a drawing probe erases the very selection it
+    # is trying to observe. Copilot ignores motion and draws nothing; so does this
+    # pane (`mouse-input`: "a pointer motion costs no frame at all"). Quiet mode is
+    # therefore the faithful reproduction, and the drawing mode is the artefact.
+    [ -n "${PROBE_QUIET:-}" ] && continue
     for i in $(seq 0 $((LOG_ROWS - 1))); do
       at $((LOG_TOP + 1 + i))
       [ "$i" -lt "${#log[@]}" ] && printf '    %s' "${log[$i]}"
@@ -141,6 +148,15 @@ run_set() {
   done
 
   stty "$STTY_SAVED" 2>/dev/null
+  if [ -n "${PROBE_QUIET:-}" ]; then
+    at $((LOG_TOP + 1)); printf '    %s events received; last few:' "${#log[@]}"
+    for i in $(seq 0 $((LOG_ROWS - 1))); do
+      at $((LOG_TOP + 2 + i))
+      [ "$i" -lt "${#log[@]}" ] && printf '    %s' "${log[$i]}"
+    done
+    at $((LOG_TOP + LOG_ROWS + 3)); printf '    (press Enter)'
+    read -r _
+  fi
   disable_modes "$id"
   printf '%s?25h%s?1049l' "$CSI" "$CSI"   # leave the alternate screen
 }
