@@ -9,7 +9,7 @@ use ratatui::backend::Backend;
 use ratatui::crossterm::event::{Event, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 
-use crate::ui::app::{Action, ArtifactReader, Dashboard, Target, action_for};
+use crate::ui::app::{Action, ArtifactReader, Dashboard, SelectPhase, Target, action_for};
 use crate::ui::event::{EventError, EventSource};
 use crate::ui::layout::Zone;
 use crate::ui::list::RowKind;
@@ -292,29 +292,71 @@ pub fn mouse_action(dashboard: &Dashboard, area: Rect, mouse: &MouseEvent) -> Ac
                     )
                 })
                 .map_or(Action::Ignore, Action::SelectTab),
-            Zone::DetailRow { content, row } => detail_row_click(dashboard, content, row),
+            // `text-selection`: a header row still folds exactly as before;
+            // any other row of the content area arms a selection instead of
+            // moving the detail cursor — the removed `Target::DetailLine`'s
+            // replacement (design.md -> Decision 9). `detail_cell` resolves
+            // only the cell; the `Action` it becomes is constructed here.
+            Zone::DetailRow { content, row } => {
+                match detail_cell(dashboard, content, row, mouse.column) {
+                    Some((line, _, Some(section))) => {
+                        Action::Click(Target::DetailHeader { line, section })
+                    }
+                    Some((line, column, None)) => {
+                        Action::Select(SelectPhase::Begin { line, column })
+                    }
+                    None => Action::Ignore,
+                }
+            }
             Zone::List | Zone::Detail | Zone::Outside => Action::Ignore,
         },
-        // Right and middle presses, every release, every drag, pointer motion,
-        // and both horizontal wheel directions: there is no context menu, no
-        // drag of any kind, and the pane scrolls in one dimension only.
+        // `text-selection`: a left drag begins only on a non-header
+        // `Zone::DetailRow` (design.md -> Decision 1); every other zone
+        // produces `Action::Ignore`, so no existing binding's dispatch
+        // timing changes and folding a section can never begin a selection.
+        MouseEventKind::Drag(MouseButton::Left) => match zone {
+            Zone::DetailRow { content, row } => {
+                match detail_cell(dashboard, content, row, mouse.column) {
+                    Some((line, column, None)) => {
+                        Action::Select(SelectPhase::Extend { line, column })
+                    }
+                    Some((_, _, Some(_))) | None => Action::Ignore,
+                }
+            }
+            Zone::ListRow { .. }
+            | Zone::DetailTab { .. }
+            | Zone::List
+            | Zone::Detail
+            | Zone::Outside => Action::Ignore,
+        },
+        // Right and middle presses, every release, and both horizontal wheel
+        // directions: there is no context menu and the pane scrolls in one
+        // dimension only.
         _ => Action::Ignore,
     }
 }
 
-/// Resolve a press on the detail region's content area — `foldable-spec-sections`'
-/// addition (design.md -> Decision 7). `mouse_action` has `content`'s own width
-/// and can call `ui::detail::content_lines` and `ui::detail::section_at`;
-/// `Dashboard::apply` has neither, so both indices this returns are already
-/// resolved against the frame just drawn.
+/// Resolve a `Zone::DetailRow` press or drag to its content-line index, its
+/// own section index when the row is a section header, and its display
+/// column relative to the content area's own left edge — `mouse_action` has
+/// `content`'s own width and can call `ui::detail::content_lines` and
+/// `ui::detail::section_at`; `Dashboard::apply`/`apply_select` has neither,
+/// so every value this returns is already resolved against the frame just
+/// drawn (design.md -> Decision 7 and Decision 8).
 ///
-/// Inert when the selected artifact is not foldable — `Detail::foldable()`, the
-/// one site — and inert for a `row` past the last row `content_lines` produced,
-/// which covers a press below a foldable artifact's own last drawn row.
-fn detail_row_click(dashboard: &Dashboard, content: Rect, row: u16) -> Action {
-    if !dashboard.detail.foldable() {
-        return Action::Ignore;
-    }
+/// `None` for a row past the last row `content_lines` produced — a press or
+/// drag below a foldable artifact's own last drawn row, or below a short
+/// document's. Unlike the click resolver this replaces, this is **not**
+/// gated on `Detail::foldable()`: `text-selection`'s selection must not
+/// inherit that short-circuit (design.md -> Decision 8), and a header row can
+/// only exist when the content actually split, which already implies
+/// `foldable()` is true.
+fn detail_cell(
+    dashboard: &Dashboard,
+    content: Rect,
+    row: u16,
+    column: u16,
+) -> Option<(usize, u16, Option<usize>)> {
     let rows = crate::ui::detail::content_lines(
         &dashboard.detail,
         dashboard.selected_change(),
@@ -323,12 +365,14 @@ fn detail_row_click(dashboard: &Dashboard, content: Rect, row: u16) -> Action {
     let offset = crate::ui::layout::viewport(rows.len(), dashboard.detail.scroll, content.height);
     let line = offset + row as usize;
     if line >= rows.len() {
-        return Action::Ignore;
+        return None;
     }
-    match crate::ui::detail::section_at(&rows, offset, row) {
-        Some(section) => Action::Click(Target::DetailHeader { line, section }),
-        None => Action::Click(Target::DetailLine(line)),
-    }
+    let column = column.saturating_sub(content.x);
+    Some((
+        line,
+        column,
+        crate::ui::detail::section_at(&rows, offset, row),
+    ))
 }
 
 /// The live tier's four one-shot steps — see `run_loop`'s doc comment for
@@ -2556,8 +2600,8 @@ mod tests {
         .expect("loop ends");
 
         assert_eq!(
-            dashboard.help.scroll, 25,
-            "42 content rows less a 17-row interior"
+            dashboard.help.scroll, 26,
+            "43 content rows less a 17-row interior"
         );
         assert_eq!(
             dashboard.detail.scroll, 0,
@@ -4060,7 +4104,7 @@ mod tests {
     use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
     use ratatui::layout::Rect;
 
-    use crate::ui::app::{Action, SectionKey, Target, action_for};
+    use crate::ui::app::{Action, Granularity, SectionKey, SelectPhase, Target, action_for};
     use crate::ui::driver::mouse_action;
 
     /// The two mandated frames. Every geometry below is derived from these
@@ -4090,6 +4134,10 @@ mod tests {
 
     fn left(column: u16, row: u16) -> MouseEvent {
         m(MouseEventKind::Down(MouseButton::Left), column, row)
+    }
+
+    fn drag(column: u16, row: u16) -> MouseEvent {
+        m(MouseEventKind::Drag(MouseButton::Left), column, row)
     }
 
     /// A `Route::List` dashboard over `active` active changes and `archived`
@@ -4754,9 +4802,9 @@ mod tests {
     }
 
     #[test]
-    fn a_body_click_moves_the_cursor_and_folds_nothing() {
-        // `mouse-input`: "A click in an open section's body moves the
-        // detail cursor and folds nothing".
+    fn a_body_click_arms_a_selection_and_folds_nothing() {
+        // `mouse-input`: "A click in an open section's body arms a selection
+        // and folds nothing".
         let sections = vec![
             ArtifactSection {
                 label: Some("degraded-coverage".to_string()),
@@ -4797,13 +4845,16 @@ mod tests {
             let action = mouse_action(&dashboard, area, &left(content.x, row));
             assert_eq!(
                 action,
-                Action::Click(Target::DetailLine(4)),
-                "{width}x{height}"
+                Action::Select(SelectPhase::Begin { line: 4, column: 0 }),
+                "{width}x{height}: arms rather than moving the detail cursor"
             );
 
             let before = dashboard.clone();
             dashboard.apply(action);
-            assert_eq!(dashboard.detail.scroll, 4, "{width}x{height}");
+            assert_eq!(
+                dashboard.detail.scroll, before.detail.scroll,
+                "{width}x{height}: the cursor no longer jumps to the clicked line"
+            );
             assert_eq!(
                 dashboard.detail.expanded, before.detail.expanded,
                 "{width}x{height}: nothing folded"
@@ -4811,20 +4862,36 @@ mod tests {
             assert_eq!(dashboard.route, before.route, "{width}x{height}");
             assert_eq!(dashboard.selected, before.selected, "{width}x{height}");
             assert_eq!(dashboard.detail.tab, before.detail.tab, "{width}x{height}");
+            assert_eq!(
+                dashboard.selection,
+                Some(crate::ui::app::Selection {
+                    anchor: (4, 0),
+                    focus: (4, 0),
+                    granularity: crate::ui::app::Granularity::Armed,
+                    problem: None,
+                }),
+                "{width}x{height}: a first press arms, drawing nothing"
+            );
 
-            // A `ToggleSection` given immediately afterwards folds section 1,
-            // because the click left the cursor inside it.
-            dashboard.apply(Action::ToggleSection);
-            assert!(
-                !dashboard.detail.expanded.contains(&1),
-                "{width}x{height}: folded by the cursor the click left behind"
+            // A second press at that same cell selects the word there, per
+            // `text-selection`.
+            let second = mouse_action(&dashboard, area, &left(content.x, row));
+            dashboard.apply(second);
+            assert_eq!(
+                dashboard.selection.as_ref().map(|s| s.granularity),
+                Some(crate::ui::app::Granularity::Word),
+                "{width}x{height}: the second press widens to the word"
             );
         }
     }
 
     #[test]
-    fn a_click_on_a_non_foldable_tab_is_inert() {
-        // `mouse-input`: "A click on a non-foldable tab's content is inert".
+    fn a_non_foldable_tabs_content_is_selectable_too() {
+        // `mouse-input`/`text-selection`: "A non-foldable tab's content is
+        // selectable too" — a deliberate departure from the removed
+        // `detail_row_click`'s `!foldable()` short-circuit (design.md ->
+        // Decision 8): a single-section artifact is a whole rendered
+        // document and exactly the thing a reader wants to copy out of.
         let sections = vec![ArtifactSection {
             label: Some(String::new()),
             text: (0..20).map(|i| format!("- line-{i:02}\n")).collect(),
@@ -4842,17 +4909,25 @@ mod tests {
             );
 
             let content = detail_content_area(area, Route::Detail);
-            let before = dashboard.clone();
-            for row in [
-                content.y,
-                content.y + content.height / 2,
-                content.y + content.height - 1,
-            ] {
+            // The first, fifth, and last drawn content rows — the twenty-item
+            // list fits entirely within either mandated height.
+            for line in [0usize, 4, 19] {
+                let row = content.y + line as u16;
                 let action = mouse_action(&dashboard, area, &left(content.x, row));
-                assert_eq!(action, Action::Ignore, "{width}x{height} row {row}");
+                assert_eq!(
+                    action,
+                    Action::Select(SelectPhase::Begin { line, column: 0 }),
+                    "{width}x{height} row {row}: arms, not `Action::Ignore`"
+                );
                 let mut applied = dashboard.clone();
                 applied.apply(action);
-                assert_eq!(applied, before, "{width}x{height} row {row}");
+                let second = mouse_action(&applied, area, &left(content.x, row));
+                applied.apply(second);
+                assert_eq!(
+                    applied.selection.as_ref().map(|s| s.granularity),
+                    Some(crate::ui::app::Granularity::Word),
+                    "{width}x{height} row {row}: a second press selects the word"
+                );
             }
         }
     }
@@ -4885,7 +4960,7 @@ mod tests {
         for (width, height) in [(120u16, 40u16), (60, 40)] {
             let area = Rect::new(0, 0, width, height);
             let content = detail_content_area(area, Route::Detail);
-            let mut dashboard = task_source_dashboard(TWO_TASK_GROUPS, content.width);
+            let dashboard = task_source_dashboard(TWO_TASK_GROUPS, content.width);
             // Rows: the progress bar (0), its blank line (1), `> 1. Done` (2),
             // `v 2. Doing` (3), and that group's one item (4). The seed opened
             // the incomplete group and left the finished one shut.
@@ -4905,41 +4980,48 @@ mod tests {
                 "{width}x{height}: the `1. Done` header row"
             );
 
-            let before = dashboard.clone();
-            dashboard.apply(action);
+            let mut opened = dashboard.clone();
+            let before = opened.clone();
+            opened.apply(action);
             assert!(
-                dashboard.detail.expanded.contains(&0),
+                opened.detail.expanded.contains(&0),
                 "{width}x{height}: the group opened"
             );
             assert_eq!(
-                dashboard.detail.scroll, 2,
+                opened.detail.scroll, 2,
                 "{width}x{height}: the cursor is on that group's header row"
             );
-            assert_eq!(dashboard.route, before.route, "{width}x{height}");
-            assert_eq!(dashboard.selected, before.selected, "{width}x{height}");
-            assert_eq!(dashboard.detail.tab, before.detail.tab, "{width}x{height}");
+            assert_eq!(opened.route, before.route, "{width}x{height}");
+            assert_eq!(opened.selected, before.selected, "{width}x{height}");
+            assert_eq!(opened.detail.tab, before.detail.tab, "{width}x{height}");
 
-            // The progress-bar row and its blank line. Neither is a header row
-            // and neither belongs to a section, so neither folds anything —
-            // but neither resolves to `Action::Ignore` either: the requirement
-            // table above these scenarios sends **every other drawn row** of a
-            // foldable content area to `Target::DetailLine`, and that is what
-            // the code does. The scenario's `Action::Ignore` disagrees with its
-            // own table; asserted here as the table has it, since a click that
-            // moves the detail cursor onto a preamble row is exactly as
-            // fold-inert as the scenario requires.
+            // The progress-bar row and its blank line, tested from the
+            // untouched `dashboard` fixture rather than `opened`: neither
+            // is a header row and neither belongs to a section, so a press
+            // there arms a selection and folds nothing — replacing the
+            // removed detail-line target, which used to move the detail
+            // cursor onto the row instead. Because arming does not move
+            // `detail.scroll`, the cursor is exactly where it was before the
+            // press, which is what keeps `Space` from there inert too.
             for row in 0..2u16 {
                 let action = mouse_action(&dashboard, area, &left(content.x, content.y + row));
                 assert_eq!(
                     action,
-                    Action::Click(Target::DetailLine(row as usize)),
-                    "{width}x{height}: preamble row {row} moves the cursor and folds nothing"
+                    Action::Select(SelectPhase::Begin {
+                        line: row as usize,
+                        column: 0
+                    }),
+                    "{width}x{height}: preamble row {row} arms a selection"
                 );
                 let mut moved = dashboard.clone();
                 moved.apply(action);
                 assert_eq!(
                     moved.detail.expanded, dashboard.detail.expanded,
                     "{width}x{height}: preamble row {row} folded nothing"
+                );
+                assert_eq!(
+                    moved.detail.scroll, dashboard.detail.scroll,
+                    "{width}x{height}: preamble row {row} moved no cursor"
                 );
                 moved.apply(Action::ToggleSection);
                 assert_eq!(
@@ -4949,7 +5031,16 @@ mod tests {
             }
 
             // A task file holding items but no heading does not split, so the
-            // tab is not foldable and both presses are inert.
+            // tab is not foldable — but, per design.md -> Decision 8 and
+            // `specs/mouse-input/spec.md`'s own "A non-foldable tab's content
+            // is selectable too", a non-foldable artifact's content is still
+            // selectable rather than inert. (This departs from that same
+            // spec's "A click on a task group's header folds that group"
+            // scenario, whose own headless clause still reads
+            // `Action::Ignore` — a residual inconsistency between the two
+            // scenarios that a follow-up documentation pass should reconcile;
+            // flagged in this change's own report rather than silently
+            // picking one spec sentence over the other.)
             let headless = task_source_dashboard(HEADLESS_TASKS, content.width);
             assert!(
                 !headless.detail.foldable(),
@@ -4958,8 +5049,11 @@ mod tests {
             for row in 0..2u16 {
                 assert_eq!(
                     mouse_action(&headless, area, &left(content.x, content.y + row)),
-                    Action::Ignore,
-                    "{width}x{height}: headless row {row}"
+                    Action::Select(SelectPhase::Begin {
+                        line: row as usize,
+                        column: 0
+                    }),
+                    "{width}x{height}: headless row {row} is selectable, not `Ignore`"
                 );
             }
         }
@@ -5052,8 +5146,8 @@ mod tests {
             assert_eq!(dashboard.selected, before.selected, "{width}x{height}");
             assert_eq!(dashboard.detail.tab, before.detail.tab, "{width}x{height}");
 
-            // A press on one of that scenario's own body rows moves the cursor
-            // and folds nothing.
+            // A press on one of that scenario's own body rows arms a
+            // selection, folds nothing, and moves no cursor.
             let rows = crate::ui::detail::content_lines(
                 &dashboard.detail,
                 dashboard.selected_change(),
@@ -5074,17 +5168,249 @@ mod tests {
             let action = mouse_action(&dashboard, area, &left(content.x, content.y + body as u16));
             assert_eq!(
                 action,
-                Action::Click(Target::DetailLine(body)),
-                "{width}x{height}: a body row moves the cursor"
+                Action::Select(SelectPhase::Begin {
+                    line: body,
+                    column: 0
+                }),
+                "{width}x{height}: a body row arms a selection at its own arming phase"
             );
             let folds = dashboard.detail.expanded.clone();
+            let scroll_before = dashboard.detail.scroll;
             dashboard.apply(action);
-            assert_eq!(dashboard.detail.scroll, body, "{width}x{height}");
+            assert_eq!(
+                dashboard.detail.scroll, scroll_before,
+                "{width}x{height}: moves no cursor"
+            );
             assert_eq!(
                 dashboard.detail.expanded, folds,
                 "{width}x{height}: and folds nothing"
             );
         }
+    }
+
+    // ------------------------------------------------------------------
+    // `text-selection`: the drag resolver and the press-count state machine.
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn a_drag_begins_only_in_the_detail_content_area() {
+        // `text-selection`: "A drag begins only in the detail content area".
+        let dashboard = foldable_dashboard(
+            three_spec_sections(),
+            std::collections::BTreeSet::from([1]),
+            0,
+        );
+        let area = WIDE;
+        let content = detail_content_area(area, Route::Detail);
+        let bar = tab_bar_row(area, Route::Detail);
+
+        // One point in each of the five zones a drag must ignore: a list row,
+        // the list region's own left gutter (`Zone::List`), the tab-bar row
+        // (`Zone::DetailTab`), a header row of the content area (a
+        // `Zone::DetailRow`, but a header one), the content padding row below
+        // the tab bar (`Zone::Detail`), and outside the frame entirely.
+        let ignored = [
+            (5u16, list_row(area, Route::Detail, 0)),
+            (0u16, 1u16),
+            (bar.x, bar.y),
+            (content.x, content.y + 1),
+            (content.x, content.y - 1),
+            (200u16, 10u16),
+        ];
+        for (column, row) in ignored {
+            assert_eq!(
+                mouse_action(&dashboard, area, &drag(column, row)),
+                Action::Ignore,
+                "({column}, {row}) must not begin a selection"
+            );
+        }
+
+        // The sixth zone — a non-header `Zone::DetailRow`, the open section's
+        // own body row — is the only one that begins a selection.
+        let (column, row) = (content.x, content.y + 2);
+        assert!(
+            matches!(
+                mouse_action(&dashboard, area, &drag(column, row)),
+                Action::Select(SelectPhase::Extend { .. })
+            ),
+            "the detail content area's own body row begins a selection"
+        );
+    }
+
+    #[test]
+    fn a_section_header_stays_clickable_and_is_never_selectable() {
+        // `text-selection`: "A section header stays clickable and is never
+        // selectable".
+        let dashboard = foldable_dashboard(
+            three_spec_sections(),
+            std::collections::BTreeSet::from([1]),
+            0,
+        );
+        let area = WIDE;
+        let content = detail_content_area(area, Route::Detail);
+        let header_row = content.y + 1;
+
+        let pressed = mouse_action(&dashboard, area, &left(content.x, header_row));
+        assert_eq!(
+            pressed,
+            Action::Click(Target::DetailHeader {
+                line: 1,
+                section: 1
+            }),
+            "a header row is still clickable, unchanged"
+        );
+
+        let dragged = mouse_action(&dashboard, area, &drag(content.x, header_row));
+        assert_eq!(
+            dragged,
+            Action::Ignore,
+            "folding a section can never begin a selection"
+        );
+    }
+
+    /// A dashboard whose one selected, non-foldable artifact renders `text`
+    /// verbatim as a bullet list — one word per line, so a press over a
+    /// known column lands on a known word.
+    fn word_dashboard(text: &str) -> Dashboard {
+        foldable_dashboard(
+            vec![ArtifactSection {
+                label: Some(String::new()),
+                text: text.to_string(),
+                depth: 0,
+                progress: None,
+                operation: None,
+            }],
+            std::collections::BTreeSet::new(),
+            0,
+        )
+    }
+
+    #[test]
+    fn one_press_arms_two_select_a_word_three_select_the_row() {
+        // `text-selection`: "One press arms, two select a word, three select
+        // the row".
+        let dashboard = word_dashboard("- zone call\n");
+        let area = WIDE;
+        let content = detail_content_area(area, Route::Detail);
+        // The rendered row is `• zone call`; column 2 is inside `zone`.
+        let point = (content.x + 2, content.y);
+
+        let mut d = dashboard.clone();
+        let press = |d: &Dashboard| mouse_action(d, area, &left(point.0, point.1));
+
+        let a1 = press(&d);
+        assert!(
+            matches!(a1, Action::Select(SelectPhase::Begin { .. })),
+            "{a1:?}"
+        );
+        d.apply(a1);
+        assert_eq!(
+            d.selection.as_ref().map(|s| s.granularity),
+            Some(Granularity::Armed),
+            "first press arms"
+        );
+        assert_eq!(d.selection.as_ref().map(|s| s.anchor), Some((0, 2)));
+        assert_eq!(d.selection.as_ref().map(|s| s.focus), Some((0, 2)));
+
+        let a2 = press(&d);
+        d.apply(a2);
+        assert_eq!(
+            d.selection.as_ref().map(|s| s.granularity),
+            Some(Granularity::Word),
+            "second press widens to the word"
+        );
+
+        let a3 = press(&d);
+        d.apply(a3);
+        assert_eq!(
+            d.selection.as_ref().map(|s| s.granularity),
+            Some(Granularity::Row),
+            "third press widens to the row"
+        );
+        let after_third = d.selection.clone();
+
+        let a4 = press(&d);
+        d.apply(a4);
+        assert_eq!(
+            d.selection, after_third,
+            "fourth press changes nothing further"
+        );
+    }
+
+    #[test]
+    fn a_press_elsewhere_restarts_the_count() {
+        // `text-selection`: "A press elsewhere restarts the count".
+        let dashboard = word_dashboard("- zone call\n- other line\n");
+        let area = WIDE;
+        let content = detail_content_area(area, Route::Detail);
+        let first_cell = (content.x + 2, content.y);
+        let second_cell = (content.x + 2, content.y + 1);
+
+        let mut d = dashboard.clone();
+        for _ in 0..2 {
+            let action = mouse_action(&d, area, &left(first_cell.0, first_cell.1));
+            d.apply(action);
+        }
+        assert_eq!(
+            d.selection.as_ref().map(|s| s.granularity),
+            Some(Granularity::Word),
+            "two presses at the first cell select the word"
+        );
+
+        let elsewhere = mouse_action(&d, area, &left(second_cell.0, second_cell.1));
+        d.apply(elsewhere);
+        assert_eq!(
+            d.selection.as_ref().map(|s| s.granularity),
+            Some(Granularity::Armed),
+            "a press at a different cell restarts the count at one"
+        );
+        assert_eq!(d.selection.as_ref().map(|s| s.anchor), Some((1, 2)));
+
+        // A second press at that new cell selects the word there.
+        let second_press = mouse_action(&d, area, &left(second_cell.0, second_cell.1));
+        d.apply(second_press);
+        assert_eq!(
+            d.selection.as_ref().map(|s| s.granularity),
+            Some(Granularity::Word)
+        );
+    }
+
+    #[test]
+    fn a_dragged_span_arms_rather_than_widening() {
+        // `text-selection`: "A dragged span arms rather than widening".
+        let dashboard = word_dashboard("- zone call\n");
+        let area = WIDE;
+        let content = detail_content_area(area, Route::Detail);
+        let anchor_cell = (content.x + 2, content.y);
+        let focus_cell = (content.x + 6, content.y);
+
+        let mut d = dashboard.clone();
+        let begin = mouse_action(&d, area, &left(anchor_cell.0, anchor_cell.1));
+        d.apply(begin);
+        let extend = mouse_action(&d, area, &drag(focus_cell.0, focus_cell.1));
+        d.apply(extend);
+        assert_eq!(
+            d.selection.as_ref().map(|s| s.granularity),
+            Some(Granularity::Span),
+            "the drag completes a span"
+        );
+
+        // A press then lands on that span's own anchor cell.
+        let after_drag = mouse_action(&d, area, &left(anchor_cell.0, anchor_cell.1));
+        d.apply(after_drag);
+        assert_eq!(
+            d.selection.as_ref().map(|s| s.granularity),
+            Some(Granularity::Armed),
+            "a press at a dragged span's anchor arms rather than widening"
+        );
+
+        // A second press there selects the word.
+        let second = mouse_action(&d, area, &left(anchor_cell.0, anchor_cell.1));
+        d.apply(second);
+        assert_eq!(
+            d.selection.as_ref().map(|s| s.granularity),
+            Some(Granularity::Word)
+        );
     }
 
     #[test]
@@ -6156,9 +6482,9 @@ mod tests {
         let mut dashboard = overlay_open(2, Route::List);
         dashboard.help.scroll = 3;
         let band = band_for(TALL);
-        // 44 rows centred in a 59-row body: rows 0 through 6 and rows 51
+        // 45 rows centred in a 59-row body: rows 0 through 6 and rows 52
         // through 58 are outside it, and row 59 is the footer.
-        assert_eq!((band.y, band.height), (7, 44));
+        assert_eq!((band.y, band.height), (7, 45));
 
         for (column, row) in [(5u16, 4u16), (5, 55), (5, 59)] {
             assert_eq!(
@@ -6200,7 +6526,7 @@ mod tests {
         // belong to the band, pinned from both sides.
         let dashboard = overlay_open(2, Route::List);
         let band = band_for(TALL);
-        assert_eq!((band.y, band.height), (7, 44));
+        assert_eq!((band.y, band.height), (7, 45));
         let first = band.y;
         let last = band.y + band.height - 1;
         for (row, want) in [

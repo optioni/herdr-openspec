@@ -29,13 +29,13 @@ pub enum Route {
     Detail,
 }
 
-/// The twenty-four outcomes a terminal event can map to, under either filter mode. The
-/// count has moved five times since this comment was last true: to thirteen with
+/// The twenty-five outcomes a terminal event can map to, under either filter mode. The
+/// count has moved six times since this comment was last true: to thirteen with
 /// `live-refresh`'s `Refresh`, to seventeen with `agent-launch`'s `LaunchApply`,
 /// `LaunchContinue`, `LaunchArchive`, and `FocusAgent`, to eighteen with `list-sections`'s
 /// `ToggleSection`, to twenty-three with `mouse-input`'s `SelectNext`, `SelectPrev`,
-/// `ScrollDown`, `ScrollUp`, and `Click`, and to twenty-four with `help-overlay`'s
-/// `ToggleHelp`.
+/// `ScrollDown`, `ScrollUp`, and `Click`, to twenty-four with `help-overlay`'s
+/// `ToggleHelp`, and to twenty-five with `text-selection`'s `Select`.
 /// `action_for` is total over every `Event`. `Back` replaces the earlier
 /// `BackToList`: it now dismisses one of several layers rather than only
 /// ever returning to the list route. `Next` and `Prev` are renamed from
@@ -106,7 +106,40 @@ pub enum Action {
     ScrollDown,
     ScrollUp,
     Click(Target),
+    /// `text-selection`'s addition, and the pane's one mouse-only action
+    /// (`specs/mouse-input/spec.md`'s pinned exemption): a left press or drag
+    /// over a non-header row of the detail content area. Carries the phase
+    /// rather than costing three `Action` variants — a `Begin` for a press
+    /// and an `Extend` for a drag — per design.md -> Decision 5: each
+    /// variant costs a `Mouse` row in `ui::help::INVENTORY`, and every such
+    /// row moves `binding-inventory`'s pinned counts and `help-overlay`'s row
+    /// arithmetic, where one row reading "select text in the artifact area"
+    /// is also what a reader needs. `ui::driver::mouse_action` is the only
+    /// producer; `Dashboard::apply_select` counts consecutive presses at one
+    /// cell through `Selection::granularity` alone, with no clock
+    /// (design.md -> Decision 2).
+    Select(SelectPhase),
     Ignore,
+}
+
+/// The phase [`Action::Select`] carries. Both variants carry the press or
+/// drag's own content-line index and display column, already resolved
+/// against the frame just drawn by `ui::driver::mouse_action` — `Dashboard`
+/// has neither the width nor the row list to recompute either, on the same
+/// terms `Target::DetailHeader` carries its own resolved indices (design.md
+/// -> Decision 7's note, carried forward by Decision 8).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SelectPhase {
+    /// A left press. `Dashboard::apply_select` decides, from the standing
+    /// `Selection` alone, whether this is a first press at this cell (arms),
+    /// a second at the same cell (widens to the word), or a third or later
+    /// (widens to the row) — see `specs/text-selection/spec.md` -> "A press
+    /// arms, a second selects the word, a third selects the row".
+    Begin { line: usize, column: u16 },
+    /// A left drag: the focus follows to `line`/`column` while the anchor
+    /// holds. See `specs/text-selection/spec.md` -> "A drag selects a span
+    /// of the rendered artifact".
+    Extend { line: usize, column: u16 },
 }
 
 /// The `/` filter's mode and query. Deliberately implements no `Default`,
@@ -568,25 +601,25 @@ pub struct Sections {
 /// `visible()` directly, because a collapsed section's header is its only
 /// row and must stay reachable. See design.md -> Decision 2.
 ///
-/// `DetailLine` and `DetailHeader` are `foldable-spec-sections`' two
-/// additions and address the **detail** region instead; see their own doc
-/// comments and design.md -> Decision 7 for why they carry resolved indices
-/// rather than a bare row offset, and why `targets()` never returns them.
+/// `DetailHeader` is `foldable-spec-sections`' addition and addresses the
+/// **detail** region instead; see its own doc comment and design.md ->
+/// Decision 7 for why it carries resolved indices rather than a bare row
+/// offset, and why `targets()` never returns it. `text-selection` removed
+/// this enum's other former variant, which addressed an ordinary content
+/// row: a press there now arms a selection (`Action::Select`) instead of
+/// moving the detail cursor, per `specs/text-selection/spec.md` and
+/// design.md -> Decision 9.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Target {
     Section(SectionKey),
     /// An index into `Dashboard::visible()`.
     Change(usize),
-    /// `foldable-spec-sections`' addition: an index into
-    /// `ui::detail::content_lines`' own row list, already resolved against
-    /// the frame just drawn — `mouse_action` has the width to call
-    /// `content_lines`; `Dashboard::apply` does not (design.md -> Decision 7).
-    /// Not returned by `targets()`, which addresses only the list region.
-    DetailLine(usize),
     /// A section-header row of the detail region's content: its own
     /// content-line index beside its section index, both already resolved
-    /// by `mouse_action` for the same reason `DetailLine` carries one. Not
-    /// returned by `targets()`.
+    /// against the frame just drawn — `mouse_action` has the width to call
+    /// `ui::detail::content_lines` and `ui::detail::section_at`;
+    /// `Dashboard::apply` does not (design.md -> Decision 7). Not returned by
+    /// `targets()`.
     DetailHeader {
         line: usize,
         section: usize,
@@ -900,7 +933,64 @@ impl Dashboard {
                 self.help.open = true;
                 self.help.scroll = 0;
             }
+            // `text-selection`: a press or a drag over a non-header detail
+            // content row. See `apply_select` for the press-count and
+            // clamping rules (design.md -> Decision 2 and Decision 3).
+            Action::Select(phase) => self.apply_select(phase),
             Action::Ignore => {}
+        }
+    }
+
+    /// `text-selection`: apply a press or a drag to `self.selection`.
+    ///
+    /// A `Begin` counts consecutive presses at one cell through
+    /// `Selection::granularity` alone, with no clock (design.md -> Decision
+    /// 2): a first press at a new cell, or one whose standing selection is a
+    /// dragged `Granularity::Span`, **arms** — anchor and focus both at that
+    /// cell, drawn as nothing; a second press at the same cell **armed**
+    /// widens to the word; a third or later at the same cell, already
+    /// **word** or **row**, widens to (or stays at) the row. Widening never
+    /// applies to a dragged span, which is exactly what routes a press at a
+    /// span's own anchor cell back to the first arm rather than the second
+    /// (`specs/text-selection/spec.md` -> "A dragged span arms rather than
+    /// widening").
+    ///
+    /// An `Extend` follows the focus to the given cell and sets the
+    /// granularity to `Span`, holding the anchor — the standing selection's
+    /// when one exists, or the drag's own starting cell otherwise.
+    ///
+    /// Neither arm writes to the clipboard: `Selection::problem` is always
+    /// `None` after either, since only the completing write a later change
+    /// adds can set it, and a fresh gesture supersedes whatever the last one
+    /// reported.
+    fn apply_select(&mut self, phase: SelectPhase) {
+        match phase {
+            SelectPhase::Begin { line, column } => {
+                let cell = (line, column);
+                let granularity = match &self.selection {
+                    Some(selection) if selection.anchor == cell => match selection.granularity {
+                        Granularity::Armed => Granularity::Word,
+                        Granularity::Word | Granularity::Row => Granularity::Row,
+                        Granularity::Span => Granularity::Armed,
+                    },
+                    _ => Granularity::Armed,
+                };
+                self.selection = Some(Selection {
+                    anchor: cell,
+                    focus: cell,
+                    granularity,
+                    problem: None,
+                });
+            }
+            SelectPhase::Extend { line, column } => {
+                let anchor = self.selection.as_ref().map_or((line, column), |s| s.anchor);
+                self.selection = Some(Selection {
+                    anchor,
+                    focus: (line, column),
+                    granularity: Granularity::Span,
+                    problem: None,
+                });
+            }
         }
     }
 
@@ -908,12 +998,12 @@ impl Dashboard {
     /// takes precedence over `apply_route_action` and over every capability
     /// that owns an action's semantics elsewhere — `detail-scroll`,
     /// `artifact-tabs`, `artifact-folds`, `list-selection`, `live-updates`,
-    /// and `agent-launch` among them. Seven actions act; the other seventeen
+    /// and `agent-launch` among them. Seven actions act; the other eighteen
     /// — the closed remainder `specs/help-overlay/spec.md` names — change
     /// nothing at all. Written as an exhaustive match with no wildcard arm,
     /// on the same terms `ui::help`'s own action sweep uses, so an `Action`
     /// added later is a compile error here rather than a silently-inert
-    /// eighteenth. `Quit` is the one exception that still acts: a modal that
+    /// nineteenth. `Quit` is the one exception that still acts: a modal that
     /// traps the reader is a worse failure than one that lets a quit through
     /// (design.md -> Decision 5).
     fn apply_help_action(&mut self, action: Action) {
@@ -945,6 +1035,12 @@ impl Dashboard {
             | Action::SelectNext
             | Action::SelectPrev
             | Action::Click(_)
+            // `text-selection`: inert while the overlay is open — the mouse
+            // resolver never produces it there anyway, since a drag over the
+            // band already resolves to `Action::Ignore`
+            // (`specs/help-overlay/spec.md` -> "`Action::Select` is inert
+            // while the overlay is open").
+            | Action::Select(_)
             | Action::Ignore => {}
         }
     }
@@ -995,16 +1091,16 @@ impl Dashboard {
     /// there, and otherwise — at `Route::List` — opens the detail, which is
     /// what makes a second click on a selected row an `Enter`.
     ///
-    /// `Target::DetailLine`/`Target::DetailHeader` are exempt from that guard
-    /// (design.md -> Decision 7): they carry indices `mouse_action` already
-    /// resolved against the frame just drawn, not an index into a list that
-    /// may have changed since — re-validating against `targets()`, which does
-    /// not even contain them, would be both impossible and pointless. A
-    /// top-of-function guard would return before either arm is reached,
-    /// silently discarding every detail click; the two remain gated only by
+    /// `Target::DetailHeader` is exempt from that guard (design.md ->
+    /// Decision 7): it carries indices `mouse_action` already resolved
+    /// against the frame just drawn, not an index into a list that may have
+    /// changed since — re-validating against `targets()`, which does not
+    /// even contain it, would be both impossible and pointless. A
+    /// top-of-function guard would return before this arm is reached,
+    /// silently discarding every detail click; it remains gated only by
     /// `Detail::foldable()`, on the same terms `mouse_action` does not emit
-    /// either variant for a non-foldable artifact and `apply` checks anyway
-    /// rather than trusting it.
+    /// it for a non-foldable artifact and `apply` checks anyway rather than
+    /// trusting it.
     fn apply_click(&mut self, target: Target) {
         match target {
             Target::Section(_) => {
@@ -1029,11 +1125,6 @@ impl Dashboard {
                     self.detail.scroll = 0;
                 }
             }
-            Target::DetailLine(line) => {
-                if self.detail.foldable() {
-                    self.detail.scroll = line;
-                }
-            }
             Target::DetailHeader { line, section } => {
                 if self.detail.foldable() {
                     self.detail.scroll = line;
@@ -1054,12 +1145,12 @@ impl Dashboard {
     /// is empty, which is what makes an empty list inert.
     fn target_section(&self) -> Option<SectionKey> {
         match self.targets().get(self.selected)? {
-            // `targets()` never emits `DetailLine`/`DetailHeader` — they
-            // address the detail region, not the list — so this arm is
-            // structurally unreachable; it exists only because the match is
-            // over `Target` as a whole (design.md -> Decision 7's own note
-            // on `list-selection/spec.md`).
-            Target::DetailLine(_) | Target::DetailHeader { .. } => None,
+            // `targets()` never emits `DetailHeader` — it addresses the
+            // detail region, not the list — so this arm is structurally
+            // unreachable; it exists only because the match is over `Target`
+            // as a whole (design.md -> Decision 7's own note on
+            // `list-selection/spec.md`).
+            Target::DetailHeader { .. } => None,
             Target::Section(key) => Some(*key),
             Target::Change(i) => {
                 let active_visible = if self.section_open(SectionKey::Active) {
@@ -1473,7 +1564,7 @@ impl Dashboard {
             Target::Change(i) => self.visible().get(*i).copied(),
             Target::Section(_) => None,
             // Structurally unreachable — see `target_section`'s own note.
-            Target::DetailLine(_) | Target::DetailHeader { .. } => None,
+            Target::DetailHeader { .. } => None,
         }
     }
 
@@ -4589,7 +4680,7 @@ mod tests {
         use crate::testutil::RecordingReader;
         use crate::ui::app::{
             Action, ArtifactSection, Dashboard, Detail, Filter, Granularity, Route, SectionKey,
-            Sections, Selection, Target, action_for,
+            Sections, SelectPhase, Selection, Target, action_for,
         };
 
         fn empty_filter() -> Filter {
@@ -5121,6 +5212,7 @@ mod tests {
                     | Action::ScrollDown
                     | Action::ScrollUp
                     | Action::Click(_)
+                    | Action::Select(_)
                     | Action::Ignore => {}
                 }
             }
@@ -5161,12 +5253,16 @@ mod tests {
                 // group 3 gives it the overlay's real dispatch — so it trivially leaves
                 // `changes` untouched here.
                 Action::ToggleHelp,
+                // `text-selection`'s addition, bumping the count from twenty-four to
+                // twenty-five. `apply_select` only ever writes `self.selection`, never
+                // `self.changes`, so this leaves `changes` untouched here too.
+                Action::Select(SelectPhase::Begin { line: 0, column: 0 }),
                 Action::Ignore,
             ];
             assert_eq!(
                 variants.len(),
-                24,
-                "the twenty-four variants this crate specifies"
+                25,
+                "the twenty-five variants this crate specifies"
             );
             for v in &variants {
                 assert_known_variant(v);
@@ -5443,10 +5539,10 @@ mod tests {
                 .collect()
         }
 
-        /// The seventeen actions `help-overlay`'s spec names as inert while the
+        /// The eighteen actions `help-overlay`'s spec names as inert while the
         /// overlay is open, in the order the dashboard-loop scenario applies
         /// them.
-        fn seventeen_inert_actions() -> [Action; 17] {
+        fn eighteen_inert_actions() -> [Action; 18] {
             [
                 Action::OpenDetail,
                 Action::SelectTab(3),
@@ -5464,6 +5560,9 @@ mod tests {
                 Action::SelectNext,
                 Action::SelectPrev,
                 Action::Click(Target::Change(0)),
+                // `text-selection`'s addition, bumping the count from seventeen to
+                // eighteen.
+                Action::Select(SelectPhase::Begin { line: 0, column: 0 }),
                 Action::Ignore,
             ]
         }
@@ -5550,7 +5649,7 @@ mod tests {
             open.detail.tab = 1;
             open.help.open = true;
             let before = open.clone();
-            for action in seventeen_inert_actions() {
+            for action in eighteen_inert_actions() {
                 open.apply(action);
             }
             assert_eq!(open.changes, before.changes);
@@ -5563,6 +5662,10 @@ mod tests {
             assert_eq!(open.agent_names, before.agent_names);
             assert_eq!(open.sections, before.sections);
             assert_eq!(open.help, before.help);
+            assert_eq!(
+                open.selection, before.selection,
+                "`Select` is one of the eighteen — the overlay is closed to it too"
+            );
             assert_eq!(open.launch.pending, None);
             assert!(open.launch.problems.is_empty());
             if before.needs_archived_refresh() {
@@ -5571,7 +5674,7 @@ mod tests {
                 assert_eq!(open.refresh.requested, before.refresh.requested);
             }
 
-            // The same seventeen actions, applied to the identical dashboard
+            // The same eighteen actions, applied to the identical dashboard
             // with the overlay closed, do change it — so the suppression above
             // is the overlay's own and not a property of the dashboard.
             let mut closed = super::dashboard_for_attribution(
@@ -5583,7 +5686,7 @@ mod tests {
             );
             closed.detail.tab = 1;
             let before_closed = closed.clone();
-            for action in seventeen_inert_actions() {
+            for action in eighteen_inert_actions() {
                 closed.apply(action);
             }
             assert_ne!(closed, before_closed);
