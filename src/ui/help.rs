@@ -18,7 +18,7 @@
 //! [`render`] here is total over every `Rect`, degenerate ones included, and
 //! never panics.
 
-use crate::ui::app::{Action, Target};
+use crate::ui::app::{Action, SelectPhase, Target};
 use crate::ui::layout::{columns, truncate_columns};
 use crate::ui::palette::{self, Role};
 use ratatui::Frame;
@@ -79,7 +79,7 @@ pub struct Group {
 /// `specs/binding-inventory/spec.md` mandates: the list first, the detail
 /// second, the agent and pane keys next, and the two modal groups last —
 /// not alphabetical, and not the order `action_for`'s `match` happens to be
-/// written in. Six groups, thirty-one bindings; the test module's own shape
+/// written in. Six groups, thirty-two bindings; the test module's own shape
 /// assertion is the authority `cargo test` enforces, not this comment.
 pub const INVENTORY: &[Group] = &[
     Group {
@@ -271,6 +271,11 @@ pub const INVENTORY: &[Group] = &[
                 description: "Switch to the clicked artifact tab.",
                 action: Action::SelectTab(0),
             },
+            Binding {
+                input: "Drag",
+                description: "Select text in the artifact area: drag a span, or press twice for a word and three times for the row.",
+                action: Action::Select(SelectPhase::Begin { line: 0, column: 0 }),
+            },
         ],
     },
 ];
@@ -286,8 +291,8 @@ pub struct Row {
 
 /// The number of rows [`rows`] produces, independent of any particular
 /// width: one heading row and one binding row per binding, per group, plus
-/// one blank row after every group but the last. Thirty-one bindings, six
-/// headings, five blanks: **42**.
+/// one blank row after every group but the last. Thirty-two bindings, six
+/// headings, five blanks: **43**.
 pub fn content_rows() -> usize {
     let bindings: usize = INVENTORY.iter().map(|group| group.bindings.len()).sum();
     let headings = INVENTORY.len();
@@ -644,8 +649,8 @@ mod tests {
         );
 
         let counts: Vec<usize> = INVENTORY.iter().map(|g| g.bindings.len()).collect();
-        assert_eq!(counts, vec![5, 7, 4, 4, 5, 6]);
-        assert_eq!(counts.iter().sum::<usize>(), 31);
+        assert_eq!(counts, vec![5, 7, 4, 4, 5, 7]);
+        assert_eq!(counts.iter().sum::<usize>(), 32);
 
         assert!(
             INVENTORY.iter().all(|g| !g.bindings.is_empty()),
@@ -753,7 +758,7 @@ mod tests {
         // indicator (`content_rows <= interior_height`).
         let height = content.len() as u16 + 2;
         // Passed as the **body**: `help_band` over a body of exactly
-        // `content_rows + 2` returns that same rectangle — `min(44, 44)` with
+        // `content_rows + 2` returns that same rectangle — `min(45, 45)` with
         // no remainder to centre — so the band fills it and the row indices
         // below are the band's own.
         let body = Rect::new(0, 0, width, height);
@@ -899,8 +904,8 @@ mod tests {
     /// cannot hold it" -> "The overlay scrolls at both mandated sizes".
     #[test]
     fn the_overlay_scrolls_at_both_mandated_sizes() {
-        // 120x40: body 39 rows, band 39 (clamped against 44 wanted),
-        // interior 37 against 42 content rows.
+        // 120x40: body 39 rows, band 39 (clamped against 45 wanted),
+        // interior 37 against 43 content rows.
         let total = Rect::new(0, 0, 120, 40);
         let body = body_for(total);
         let band = band_for(total);
@@ -919,20 +924,20 @@ mod tests {
             .expect("draw the unscrolled band");
         let buffer = terminal.backend().buffer().clone();
         let bottom_y = band.y + band.height - 1;
-        assert_indicator(&buffer, band, bottom_y, "1-37/42");
+        assert_indicator(&buffer, band, bottom_y, "1-37/43");
 
         for _ in 0..10 {
             dashboard.apply(Action::Next);
         }
         dashboard.normalise_help_scroll(total);
-        assert_eq!(dashboard.help.scroll, 5, "clamped to 42 - 37");
+        assert_eq!(dashboard.help.scroll, 6, "clamped to 43 - 37");
         terminal
             .draw(|f| render(f, body, &dashboard.help))
             .expect("draw the scrolled band");
         let buffer = terminal.backend().buffer().clone();
-        assert_indicator(&buffer, band, bottom_y, "6-42/42");
+        assert_indicator(&buffer, band, bottom_y, "7-43/43");
 
-        // 60x20: body 19 rows, band 19, interior 17 against 42 content
+        // 60x20: body 19 rows, band 19, interior 17 against 43 content
         // rows.
         let total = Rect::new(0, 0, 60, 20);
         let body = body_for(total);
@@ -948,7 +953,7 @@ mod tests {
             .draw(|f| render(f, body, &help))
             .expect("draw the 60x20 band");
         let buffer = terminal.backend().buffer().clone();
-        assert_indicator(&buffer, band, band.y + band.height - 1, "1-17/42");
+        assert_indicator(&buffer, band, band.y + band.height - 1, "1-17/43");
     }
 
     /// Read the trailing `text.len()` columns of row `y`, cell by cell —
@@ -997,14 +1002,14 @@ mod tests {
                 .draw(|f| render(f, body, &dashboard.help))
                 .expect("redraw after Next");
         }
-        assert_eq!(dashboard.help.scroll, 25, "clamped to 42 - 17");
+        assert_eq!(dashboard.help.scroll, 26, "clamped to 43 - 17");
         let buffer = terminal.backend().buffer().clone();
         let last_content_row = &rows(band.width)[content_rows() - 1];
         let interior_last_y = band.y + band.height - 2;
         assert_eq!(
             row_text(&buffer, interior_last_y),
             row_plain_text(last_content_row),
-            "the window's last visible row is always content row 42, never blank"
+            "the window's last visible row is always content row 43, never blank"
         );
 
         for _ in 0..200 {
@@ -1031,13 +1036,13 @@ mod tests {
     /// fits".
     #[test]
     fn no_indicator_when_the_content_fits() {
-        // 120x60: body 59 rows, band 44 (42 content rows + 2 rule rows,
-        // well under the body), interior 42 — exactly `content_rows()`, so
+        // 120x60: body 59 rows, band 45 (43 content rows + 2 rule rows,
+        // well under the body), interior 43 — exactly `content_rows()`, so
         // every row is visible in one frame and no indicator is due.
         let total = Rect::new(0, 0, 120, 60);
         let body = body_for(total);
         let band = band_for(total);
-        assert_eq!(band.height, 44);
+        assert_eq!(band.height, 45);
         let help = crate::ui::app::Help {
             open: true,
             scroll: 0,
