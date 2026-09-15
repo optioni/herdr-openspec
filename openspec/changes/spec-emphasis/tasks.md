@@ -385,9 +385,35 @@ no gate, so the property Decision 3 rests on has no check without this group.
 
 <!-- kind: operational -->
 
-- [ ] 9.1 CHECK: Dispatch an independent reviewer against proposal, specs, design, and tasks.
-- [ ] 9.2 CHANGE: Fix every CRITICAL, resolve or accept each WARNING, re-run affected tests.
-- [ ] 9.3 VERIFY: Confirm no blocking or unowned finding remains.
+- [x] 9.1 CHECK: Dispatch an independent reviewer against proposal, specs, design, and tasks.
+- [x] 9.2 CHANGE: Fix every CRITICAL, resolve or accept each WARNING, re-run affected tests.
+      **Three CRITICALs, all real, all fixed.**
+      1. **A behavioural bug no test could reach.** `label_area` did not count the badge's two
+         columns, so a row carrying **both** `operation` and `progress` kept the cell at a width
+         where `badged_pieces` then refused. Measured at depth 0: the badge draws at 5–8
+         columns, vanishes at 9–10, and returns at 11 — non-monotonic, and the progress cell
+         outliving the badge is the exact reverse of the drop-whole order
+         `artifact-folds:345` states. `header_is_total_from_zero_through_twenty_columns` passed
+         throughout, because every row still measured its own width; what was wrong was wrong
+         *inside* a totality the crate already asserted. Fixed by reserving the badge's columns,
+         and the reviewer's own diagnosis is now the doc comment. **The requirement specified
+         this combination and no scenario covered it** — the review's WARNING repair added the
+         prose and neither a scenario nor a task, the **fifth** instance of that pattern. Both
+         added: a new scenario in `artifact-folds` and
+         `a_row_carrying_both_a_badge_and_a_progress_cell_drops_them_in_the_stated_order`,
+         negative-controlled (reverting the arithmetic fails it, restoring it passes).
+      2. **Both re-pointed detail anchors were still wrong.** Task 6.8 recorded the repair as
+         done; the spans had shifted 117 lines, not the 110 applied, so `488-498` excluded the
+         `"No content yet"` literal its row's `why` names and `501-511` straddled two functions.
+         Both passed, because the check is in-bounds-and-not-blank only. Re-pointed to
+         `512-522`/`525-535` in all three places, verified against the function bodies. This is
+         the anchor trap's fifth and sixth firings, and the first where a *repair* was wrong
+         rather than merely stale.
+      3. **`view-palette:501` still said three segments** — a delta spec that archives into the
+         main tree, so 6.7's contradiction would have shipped permanently, in the same spec pair
+         it was found in. Corrected, along with `design.md`'s Decision 8 and both in-code doc
+         comments on `header` and `badged_pieces`.
+- [x] 9.3 VERIFY: Confirm no blocking or unowned finding remains.
 
 ## 10. Documentation
 

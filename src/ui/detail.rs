@@ -304,10 +304,14 @@ pub enum ContentKind {
 /// in one order everywhere.
 ///
 /// Returns the row's own `Line` rather than a bare `String`: a badged row
-/// carries **three** segments — the `<indent><glyph> ` prefix, the badge,
-/// and the label — so the badge and (on a `Removed` requirement) the label
-/// can be faced apart, while an unbadged row still carries the single
-/// plain segment it always did (design.md -> Decision 8). `ui::detail`
+/// carries **four** segments — the `<indent><glyph> ` prefix, the badge,
+/// the label, and the blank columns that pad the row to its width — so the
+/// badge and (on a `Removed` requirement) the label can be faced apart
+/// while the padding stays plain, and a strike ends with the word rather
+/// than running to the region's edge. An unbadged row still carries the
+/// single plain segment it always did, plus the progress cell's own
+/// segment when it draws one (design.md -> Decision 8, as amended in
+/// tasks.md 6.7). `ui::detail`
 /// names no `palette::Role` here: the badge segment carries
 /// `Face { delta: Some(op), .. }` and nothing else, exactly as the row
 /// carries a *kind* and not a style. Every test that cares only about the
@@ -320,7 +324,7 @@ fn header(
     operation: Option<crate::specs::DeltaOp>,
     width: u16,
 ) -> crate::ui::markdown::Line {
-    let (area, cell) = label_area(depth, progress, width as usize);
+    let (area, cell) = label_area(depth, progress, operation, width as usize);
     let mut segments = match badged_pieces(label, depth, expanded, operation, area) {
         Some((prefix, badge, label, pad)) => vec![
             crate::ui::markdown::Segment {
@@ -368,9 +372,19 @@ fn header(
 /// drawn — `None` when `progress` is absent or the row cannot hold the
 /// cell. Factored out of `header` so its cell arithmetic answers this
 /// question exactly once, whether or not a badge is also drawn.
+///
+/// `operation` is what makes that last clause true rather than merely
+/// stated. The cell yields **before** the badge does
+/// (specs/artifact-folds -> "A section header row names the file and shows
+/// its fold state": the progress cell first, then the label, then the
+/// badge), so a row that will draw a badge must reserve the badge's
+/// columns here — otherwise the cell is kept at a width where
+/// `badged_pieces` then refuses, the cell outlives the badge, and widening
+/// the row by one column makes the badge disappear and reappear.
 fn label_area(
     depth: usize,
     progress: Option<&crate::tasks::Progress>,
+    operation: Option<crate::specs::DeltaOp>,
     width: usize,
 ) -> (usize, Option<String>) {
     let Some(progress) = progress else {
@@ -379,9 +393,10 @@ fn label_area(
     let cell = crate::ui::list::progress_cell(progress);
     let cell_cols = columns(&cell);
     let indent_cols = columns(&"  ".repeat(depth));
-    // The indent, the glyph, its space, one column of label, one
-    // separating space, and the cell.
-    let minimum = indent_cols + 3 + 1 + cell_cols;
+    let badge_cols = operation.map_or(0, |op| columns(badge_text(op)));
+    // The indent, the glyph, its space, the badge when one is drawn, one
+    // column of label, one separating space, and the cell.
+    let minimum = indent_cols + 3 + badge_cols + 1 + cell_cols;
     if width >= minimum {
         (width - cell_cols - 1, Some(cell))
     } else {
@@ -389,10 +404,12 @@ fn label_area(
     }
 }
 
-/// `Some((prefix, badge, label))` when a badge is drawn at `width` —
+/// `Some((prefix, badge, label, pad))` when a badge is drawn at `width` —
 /// `operation` is `Some` and there is room for the indent, the glyph, its
 /// space, the badge, and at least one column of label — split at the seams
-/// `header` faces apart into three segments. `None` when no badge is
+/// `header` faces apart into four segments, the last being the blank
+/// columns that fill the row, plain-faced so a `Removed` label's strike
+/// ends with the word. `None` when no badge is
 /// drawn: `operation` is `None`, or the row is too narrow to hold one, in
 /// which case the caller falls back to `unbadged_row`, truncating the
 /// indent, the glyph and the label as one unit exactly as it always has.
@@ -1231,6 +1248,113 @@ mod tests {
                     crate::ui::list::pad_or_truncate_right("▸ 1. Setup", width as usize),
                     "width {width}"
                 );
+            }
+        }
+
+        /// `artifact-folds` :: "A row carrying both a badge and a progress
+        /// cell drops them in the stated order". The combination the
+        /// requirement specifies and no other test constructs: the Change
+        /// Review found the cell outliving the badge here, so that widening
+        /// the row from 8 to 9 columns made the badge vanish and reappear at
+        /// 11. `label_area` now reserves the badge's own columns.
+        ///
+        /// Both mandated detail widths, 58 and 78, are swept by the 0..=78
+        /// range below rather than named as special cases — the property is
+        /// total, and a band that misbehaves is exactly what was wrong.
+        #[test]
+        fn a_row_carrying_both_a_badge_and_a_progress_cell_drops_them_in_the_stated_order() {
+            let progress = crate::tasks::Progress {
+                completed: 1,
+                total: 2,
+            };
+            for depth in [0usize, 1] {
+                let mut badge_from: Option<u16> = None;
+                let mut cell_from: Option<u16> = None;
+                for width in 0u16..=78 {
+                    let line = header(
+                        "Requirement: A",
+                        depth,
+                        false,
+                        Some(&progress),
+                        Some(crate::specs::DeltaOp::Added),
+                        width,
+                    );
+                    let text = line.text();
+                    assert_eq!(
+                        columns(&text),
+                        width as usize,
+                        "depth {depth} width {width}: {text:?}"
+                    );
+                    let badge = line.segments.len() >= 4;
+                    let cell = text.ends_with("[1/2]");
+
+                    // Monotonic: once drawn, never dropped by widening.
+                    if badge {
+                        badge_from.get_or_insert(width);
+                    } else {
+                        assert!(
+                            badge_from.is_none(),
+                            "depth {depth}: the badge was drawn at {:?} and is gone at {width}: \
+                             {text:?}",
+                            badge_from
+                        );
+                    }
+                    if cell {
+                        cell_from.get_or_insert(width);
+                    } else {
+                        assert!(
+                            cell_from.is_none(),
+                            "depth {depth}: the cell was drawn at {:?} and is gone at {width}: \
+                             {text:?}",
+                            cell_from
+                        );
+                    }
+
+                    // The cell yields first, so it never outlives the badge.
+                    assert!(
+                        !cell || badge,
+                        "depth {depth} width {width}: the cell is drawn and the badge is not, \
+                         reversing the drop-whole order: {text:?}"
+                    );
+                }
+                let (b, c) = (
+                    badge_from.expect("the badge is drawn somewhere in 0..=78"),
+                    cell_from.expect("the cell is drawn somewhere in 0..=78"),
+                );
+                assert!(
+                    b < c,
+                    "depth {depth}: the badge first appears at {b} and the cell at {c}; the cell \
+                     must be the later of the two"
+                );
+
+                // The two mandated detail interior widths, named rather than
+                // merely swept: at 58 and at 78 a row carrying both fields
+                // draws both, which is the case the requirement is actually
+                // about — the bands above only prove it degrades in order.
+                for width in [58u16, 78] {
+                    let line = header(
+                        "Requirement: A",
+                        depth,
+                        false,
+                        Some(&progress),
+                        Some(crate::specs::DeltaOp::Added),
+                        width,
+                    );
+                    let text = line.text();
+                    assert_eq!(
+                        line.segments.len(),
+                        5,
+                        "depth {depth} width {width}: {text:?}"
+                    );
+                    assert!(
+                        text.ends_with("[1/2]"),
+                        "depth {depth} width {width}: no progress cell: {text:?}"
+                    );
+                    assert!(
+                        text.contains("+ Requirement: A"),
+                        "depth {depth} width {width}: no badge: {text:?}"
+                    );
+                }
             }
         }
 

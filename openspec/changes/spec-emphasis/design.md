@@ -383,7 +383,9 @@ does not is a `ContentKind`; a distinction about **a run of text** is a `Face`. 
 columns of a row whose remaining columns are the label, so it is a run. Making it a kind would
 have forced either a second row or a kind carrying a sub-range.
 
-This is what obliges a badged header row to carry **three** segments rather than one. The
+This is what obliges a badged header row to carry **four** segments rather than one — amended from three
+during implementation, because the padding must be faced apart from a struck label; see
+`tasks.md` 6.7 for the contradiction that forced it. The
 payoff is that `ui::view`'s existing loop needs no new branch: it already patches the row's kind
 role over each segment's `style_for`, and `Role::DetailSection`/`DetailSectionSelected` carry no
 foreground, so the badge's colour survives on a selected row for free.

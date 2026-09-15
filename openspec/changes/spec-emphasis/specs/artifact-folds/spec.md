@@ -555,6 +555,21 @@ opened the section to read. The strikethrough SHALL be the existing `Face` field
 - **AND** the badge cell's foreground equals `palette::style(Role::DeltaAdded)`'s, because
   `Role::DetailSectionSelected` carries no foreground of its own to displace it
 
+#### Scenario: A row carrying both a badge and a progress cell drops them in the stated order
+
+- **WHEN** `header` renders a section carrying both `operation: Some(Added)` and
+  `progress: Some(1/2)`, at depth 0 and again at depth 1, at **every** width from 0 through 40
+- **THEN** at every width the row measures exactly that many columns, the totality
+  `header_is_total_from_zero_through_twenty_columns` already asserts for the single-field row
+- **AND** the badge's presence is **monotonic** in width: once a width draws the badge, every
+  wider width draws it too, and likewise for the progress cell
+- **AND** the progress cell yields **before** the badge — there is no width at which the cell is
+  drawn and the badge is not, because the drop-whole order above puts the cell first
+- **AND** the reservation is what makes that true: `label_area` counts the badge's own columns
+  when `operation` is `Some`, so it cannot keep the cell at a width where `badged_pieces` then
+  refuses. Without it the badge is drawn at 5–8 columns, absent at 9–10, and drawn again at 11 —
+  measured, and the reason this scenario exists
+
 #### Scenario: A badged header row is still addressed by its own section index
 
 - **WHEN** a foldable `specs` tab holds a file section and three badged requirement sections,

@@ -498,7 +498,8 @@ A delta badge is a `Face` and not a `ContentKind` by the same test the paragraph
 the badge is a **run of text** within the header row — two columns of it — while the row's
 `SectionHeader` kind covers the whole row including its label. Making it a kind would have
 forced the row to be two rows or the kind to carry a sub-range, and the reason the badge can be
-a face at all is that `artifact-folds` splits a badged header row into three segments.
+a face at all is that `artifact-folds` splits a badged header row into four segments — the
+prefix, the badge, the label, and the plain-faced padding that fills the row.
 
 `Strikethrough` is inserted at position 3 — `markdown-constructs`' only edit to the order —
 precisely because it carries **no** foreground: wherever it sits it cannot take a colour away
