@@ -7,6 +7,10 @@ from a drag after the fact. `ui::layout::zone` already resolves any point in the
 exactly one `Zone`, and that resolution SHALL be the only thing consulted.
 
 A left drag SHALL begin only on a `Zone::DetailRow` whose row is **not** a section header.
+This SHALL hold whether or not the artifact is foldable: `detail_row_click` short-circuits on
+`!detail.foldable()` and returns `Action::Ignore` today, and selection SHALL NOT inherit that
+short-circuit — a single-section artifact is a whole rendered document, and is exactly what a
+reader wants to copy out of.
 In every other zone — `Zone::ListRow`, `Zone::DetailTab`, a `Zone::DetailRow` that is a
 section header, `Zone::List`, `Zone::Detail`, and `Zone::Outside` — a left press SHALL
 produce exactly the action it produces today, and a left drag SHALL produce
