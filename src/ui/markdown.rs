@@ -1538,6 +1538,54 @@ mod tests {
         }
     }
 
+    /// `markdown-render` :: "Every segment `lines` returns carries no delta".
+    #[test]
+    fn every_segment_lines_returns_carries_no_delta() {
+        let source = "# Heading\n\
+                       \n\
+                       A paragraph of prose.\n\
+                       \n\
+                       | a | b |\n\
+                       |---|---|\n\
+                       | 1 | 2 |\n\
+                       \n\
+                       ```sh\n\
+                       cargo test\n\
+                       ```\n\
+                       \n\
+                       > quoted line\n\
+                       \n\
+                       - [ ] an open task\n\
+                       \n\
+                       - **WHEN** the schema declares four artifacts\n";
+        // Unsuffixed, because `MDWIDTHS`' number scan is `\b(\d+)\b` and does
+        // not see `58u16`; the script's own header says to write them bare.
+        for width in [58, 78] {
+            let out = lines(source, width);
+            let segments: Vec<&Segment> = out.iter().flat_map(|l| l.segments.iter()).collect();
+            assert!(
+                !segments.is_empty(),
+                "width {width}: the fixture produced no segments"
+            );
+            for segment in &segments {
+                assert_eq!(
+                    segment.face.delta, None,
+                    "width {width}: {:?} carries a delta",
+                    segment.text
+                );
+            }
+        }
+
+        assert_eq!(
+            Face::plain(),
+            Face {
+                delta: None,
+                ..Face::plain()
+            },
+            "no markdown construct can set the badge field only ui::detail writes"
+        );
+    }
+
     #[test]
     fn no_line_exceeds_the_width_it_was_given() {
         let source = composite_fixture();

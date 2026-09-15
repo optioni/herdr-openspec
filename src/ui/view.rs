@@ -7807,6 +7807,11 @@ mod tests {
             !Face::plain().strikethrough,
             "the new field must not change what a plain face maps to"
         );
+        assert_eq!(
+            Face::plain().delta,
+            None,
+            "spec-emphasis' new field must not change what a plain face maps to either"
+        );
 
         let d = detail_dashboard("plain text only\n".to_string(), 0, Route::Detail);
         let default_style = Cell::default().style();
@@ -7908,6 +7913,56 @@ mod tests {
         assert_eq!(style_for(&Face::plain()), Style::default());
         assert!(!Face::plain().muted);
         assert_eq!(Face::plain().label, None);
+    }
+
+    /// `view-palette` :: "`style_for` maps each `DeltaOp` to its own role".
+    #[test]
+    fn style_for_maps_each_deltaop_to_its_own_role() {
+        use crate::specs::DeltaOp;
+
+        // A pure `style_for` test: no frame is drawn here, so the two mandated
+        // widths (60 and 120) are named rather than exercised — the render
+        // half of this same badge is
+        // `a_selected_badged_header_keeps_its_badge_colour`, added by group 6.
+        assert_eq!(
+            style_for(&Face {
+                delta: Some(DeltaOp::Added),
+                ..Face::plain()
+            }),
+            palette::style(Role::DeltaAdded)
+        );
+        assert_eq!(
+            style_for(&Face {
+                delta: Some(DeltaOp::Modified),
+                ..Face::plain()
+            }),
+            palette::style(Role::DeltaModified)
+        );
+        assert_eq!(
+            style_for(&Face {
+                delta: Some(DeltaOp::Removed),
+                ..Face::plain()
+            }),
+            palette::style(Role::DeltaRemoved)
+        );
+
+        // The three differ from one another, so a step-10 implementation
+        // mapping two operations onto one role could not pass.
+        let added = style_for(&Face {
+            delta: Some(DeltaOp::Added),
+            ..Face::plain()
+        });
+        let modified = style_for(&Face {
+            delta: Some(DeltaOp::Modified),
+            ..Face::plain()
+        });
+        let removed = style_for(&Face {
+            delta: Some(DeltaOp::Removed),
+            ..Face::plain()
+        });
+        assert_ne!(added, modified);
+        assert_ne!(modified, removed);
+        assert_ne!(added, removed);
     }
 
     /// `detail-header` :: "The detail header is bold and uncoloured at both mandated
