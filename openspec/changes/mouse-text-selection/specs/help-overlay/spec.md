@@ -31,7 +31,7 @@ SHALL take precedence over the route dispatch and over the filter dispatch alike
 `LaunchContinue`, `LaunchArchive`, `FocusAgent`, `ToggleSection`, `SelectNext`,
 `SelectPrev`, `Click`, and `Ignore`. Seventeen actions, and none of them does anything
 while the overlay is open. Seven answer — `Quit`, `ToggleHelp`, `Back`, `Next`, `Prev`,
-`ScrollDown`, `ScrollUp` — and eighteen plus seven is the twenty-four `Action` carries after
+`ScrollDown`, `ScrollUp` — and eighteen plus seven is the twenty-five `Action` carries after
 this change, so the two lists are exhaustive between them with nothing counted twice.
 
 `LaunchApply`, `LaunchContinue`, `LaunchArchive`, and `FocusAgent` being inert is the
