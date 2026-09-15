@@ -68,12 +68,13 @@ scroll the content: a selection covers what is drawn.
 - **AND** `detail.scroll` is unchanged in both cases, so the content did not move
 - **AND** no line outside the drawn window is included in the span
 
-#### Scenario: A press with no motion selects the word under it
+#### Scenario: A single press with no motion selects nothing
 
-- **WHEN** a left press lands on a non-header `Zone::DetailRow` over the text `content_lines`
-  and is followed by a release with no intervening drag event
-- **THEN** the word under the press is selected, per the click requirement below
-- **AND** a press landing on whitespace leaves no selection
+- **WHEN** a left press lands on a non-header `Zone::DetailRow` and is followed by a release
+  with no intervening drag event
+- **THEN** no cell is highlighted and nothing is written to the clipboard
+- **AND** the press is nonetheless recorded, so a second press at that cell can select the
+  word — see the click requirement below
 
 ### Requirement: The selection is painted from a palette role
 
@@ -104,8 +105,8 @@ feedback about what was copied — see the clipboard requirement below.
 
 ### Requirement: The selected text is copied through the terminal seam
 
-A selection is **completed** by a drag's finishing phase, by a click that selects a word, and
-by a second click that widens to a line. On completion the pane SHALL extract the selected
+A selection is **completed** by a drag's finishing phase, by the second press that selects a
+word, and by the third that widens to a row. A first press completes nothing. On completion the pane SHALL extract the selected
 text from the `ContentRow` values
 `ui::detail::content_lines` already returns, and SHALL pass it to `TerminalOps` for an OSC 52
 write. No `ratatui::buffer::Buffer` SHALL be read back: the rows are already data, produced
@@ -114,11 +115,9 @@ by a pure function, and reading the rendered buffer would make the copy depend o
 `src/ui/terminal.rs` SHALL remain the only file in the crate naming a terminal escape. The
 write SHALL go through the existing injected `TerminalOps` seam rather than a second one.
 
-**Every completed selection copies, including one made by a single click.** The accepted
-cost is that clicking around the content area overwrites the system clipboard, and it is
-accepted because the region has no other click meaning — `Target::DetailLine`, which moved
-the detail cursor, is what this capability replaces — and because requiring a second key to
-copy would defeat the point. The persisting highlight is what tells the reader what the
+**A single press copies nothing**, so clicking around the content area never disturbs the
+system clipboard. Only a gesture that highlights something — a drag, a double press, a triple
+press — writes to it, and the persisting highlight is what tells the reader what the
 clipboard now holds.
 
 A multi-line selection SHALL join its lines with a single `\n` and SHALL NOT carry the
@@ -148,61 +147,70 @@ padding a rendered row ends with: what is copied is the text, not the cells.
 - **AND** when the seam returns `Err`, the reason is recorded and rendered as a `!`-marked
   row, because that failure **is** observable
 
-### Requirement: A click selects a word and a second click widens it to the line
+### Requirement: A press arms, a second selects the word, a third selects the row
 
-A left press on a non-header `Zone::DetailRow` SHALL select the **word** under the pointer.
-A word is a maximal run of non-whitespace display columns in that rendered row, so an
-identifier, a path, or a backticked span selects whole — `ui::layout::zone` is one word, not
-three.
+On a non-header `Zone::DetailRow` the pane SHALL count **consecutive presses at the same
+cell**:
 
-A second press **at the same cell**, while that word is the current selection, SHALL widen
-the selection to the whole rendered line. A third press at the same cell SHALL change
-nothing. A press at any other cell SHALL start again, selecting the word there.
+| press at that cell | selection afterwards | highlighted | copied |
+|---|---|---|---|
+| first | the cell is recorded, nothing more | no | no |
+| second | the **word** under it | yes | yes |
+| third | the **whole rendered row** | yes | yes |
+| fourth and after | unchanged from the third | yes | no |
 
-**This is deliberately not a timed double-click.** Crossterm synthesises no double-click
-event, so detecting one means timing two presses, and `NOBLOCK` forbids `src/ui/` from naming
-a clock at all — `Instant::now`, `SystemTime::now`, and `.elapsed()` are all swept. The
-widening is therefore driven by **state**, exactly as `list-selection`'s "A second click on
-the selected change opens its detail" already is: that rule fires when "`selected` already
-addresses that target", with no clock, and its third click deliberately does nothing. The
-accepted consequence is the same one that rule already accepts — a *slow* second press at the
-same cell still widens.
+A press at any **other** cell SHALL restart the count at one, recording that cell and
+selecting nothing. A word is a maximal run of non-whitespace display columns in the rendered
+row, so an identifier, a path, or a backticked span selects whole — `ui::layout::zone` is one
+word, not three. A second press whose cell holds only whitespace SHALL select nothing and
+SHALL leave the count at two, so a third press there still selects the row.
 
-`Selection` SHALL carry the granularity — word, line, or span — rather than `Dashboard`
-carrying a further field, because the granularity is meaningless without the selection it
-describes and every read of one reads the other. A drag SHALL set it to span, and a span
-SHALL NOT widen on a later press at its anchor: widening belongs to a selection the reader
-made with a single press.
+**This is deliberately not a timed double-click, and the behaviour is the same.** Crossterm
+synthesises no double-click event, so detecting one means timing two presses, and `NOBLOCK`
+forbids `src/ui/` from naming a clock at all — `Instant::now`, `SystemTime::now` and
+`.elapsed()` are all swept. Counting consecutive presses at one cell produces the same
+gestures with no clock, exactly as `list-selection`'s "A second click on the selected change
+opens its detail" already fires on state rather than time, and its third click deliberately
+does nothing. The accepted consequence is the one that rule already accepts: presses
+separated by a long pause still count as consecutive.
 
-A press on whitespace SHALL clear any existing selection and select nothing, so there is a
-way to dismiss a highlight with the mouse alone.
+`Selection` SHALL carry the granularity — armed, word, row, or span — rather than `Dashboard`
+carrying a further field. **Armed** is the state after a first press: an anchor and focus at
+one cell, drawn as nothing. It is what lets a single field express "a press landed here and
+selected nothing" without a second field to forget to clear. A drag SHALL set the granularity
+to span directly, and a span SHALL NOT widen on a later press at its anchor — that press is a
+first press, and arms.
 
-#### Scenario: A click selects the whole token under it
+#### Scenario: One press arms, two select a word, three select the row
 
-- **WHEN** content line 5 renders as `  the `ui::layout::zone` call` and a press lands on any
-  column inside `ui::layout::zone`
+- **WHEN** a dashboard receives a left press at one cell over the word `zone` in content row
+  5, four times in a row
+- **THEN** after the first, no cell is highlighted and nothing was copied
+- **AND** after the second, exactly the columns of `zone` are highlighted and that text was
+  copied
+- **AND** after the third, every column of rendered row 5 is highlighted and the row's text
+  was copied
+- **AND** after the fourth, the buffer is identical to after the third and nothing further
+  was copied
+
+#### Scenario: A press elsewhere restarts the count
+
+- **WHEN** two presses select a word, and the next press lands on a different cell
+- **THEN** nothing is highlighted afterwards
+- **AND** a second press at that new cell selects the word there, so the count restarted at
+  one rather than continuing to three
+
+#### Scenario: A click selects the whole token, not a fragment
+
+- **WHEN** content row 5 renders as ``  the `ui::layout::zone` call`` and two presses land on
+  any column inside `ui::layout::zone`
 - **THEN** the selection covers exactly that run of non-whitespace columns
 - **AND** the granularity is word
-- **AND** a press on the space before it leaves no selection
 
-#### Scenario: The second click widens and the third does nothing
-
-- **WHEN** a dashboard receives a press at one cell three times in a row, over a word
-- **THEN** after the first the selection is that word
-- **AND** after the second it is the whole rendered line, with granularity line
-- **AND** after the third nothing has changed since the second, mirroring
-  `list-selection`'s own third-click rule
-
-#### Scenario: A press elsewhere restarts rather than widening
-
-- **WHEN** a word is selected and the next press lands on a different cell holding another
-  word
-- **THEN** the selection is that second word at granularity word
-- **AND** the first word is no longer highlighted
-
-#### Scenario: A dragged span does not widen
+#### Scenario: A dragged span arms rather than widening
 
 - **WHEN** a drag completes, leaving a span selection, and a press then lands on that span's
   anchor cell
-- **THEN** the selection becomes the word at that cell rather than the whole line
-- **AND** the granularity is word, so widening never applies to a span the reader dragged
+- **THEN** nothing is highlighted and the granularity is armed
+- **AND** a second press at that cell selects the word there, so widening never applies to a
+  span the reader dragged

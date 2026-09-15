@@ -99,10 +99,10 @@ addition; `help: Help`, the help overlay's layer state defined by `help-overlay`
 `text-selection`'s one addition.
 
 `selection` is `None` when no span is selected and otherwise carries an anchor, a focus, and
-a granularity — word, line, or span. The anchor and focus are each a line index into
-`ui::detail::content_lines` and a display column; the granularity is what makes a second
-click at the anchor widen a word to a line without the pane naming a clock, which `NOBLOCK`
-forbids under `src/ui/`. It is **one** field
+a granularity — armed, word, row, or span. The anchor and focus are each a line index into
+`ui::detail::content_lines` and a display column; the granularity is what lets consecutive presses at one
+cell arm, then select a word, then select a row without the pane naming a clock, which
+`NOBLOCK` forbids under `src/ui/`. It is **one** field
 rather than two because the pair is meaningless apart: an anchor with no focus selects
 nothing, and every read of either reads both. `Option` bounds it by construction — there is
 at most one selection, and clearing it is assigning `None` rather than remembering to reset
