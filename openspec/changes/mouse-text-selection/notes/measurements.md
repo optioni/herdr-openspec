@@ -181,6 +181,21 @@ is complete and is the one that counts. Both agree on `alt-off`.)
 | reporting **off** | **plain drag works** | **works, delivered as arrow keys** | does not reach the app |
 | reporting **on** | needs `Shift` | works, as SGR mouse events | reaches the app |
 
+**Read that middle column carefully.** The probe asked "did the wheel produce *arrow keys*",
+so `alt-minimal` and `alt-full` answer **no** — but the wheel was not dead in those sets. It
+produced `^[[<64;…M` / `^[[<65;…M`, SGR mouse events, which is what
+`ui::driver::mouse_action` already consumes. Only the **shape** of the event changes between
+the two rows, never whether the wheel works:
+
+| reporting | wheel event the app receives | consumed by | region-aware? |
+|---|---|---|---|
+| off | `^[[A` / `^[[B` — arrow keys | `ui::app::action_for`, already | **no** — acts on the routed region |
+| on | `^[[<64;x;yM` / `^[[<65;x;yM` — SGR | `ui::driver::mouse_action`, already | **yes** — carries x/y, acts under the pointer |
+
+Both paths are already implemented in this crate. Neither default needs new scroll code; the
+choice between them is a choice about region-awareness and the four button gestures, nothing
+else.
+
 So "mouse controls **and** native dragging" was never a contradiction, and needs no toggle
 key to achieve. A TUI that enables no reporting keeps the terminal's own selection *and*
 still scrolls, because the terminal translates the wheel into `Up`/`Down`. This is almost
