@@ -249,9 +249,9 @@ named on that run's own `TYPES` list, taking it to `Dashboard Filter Detail Sect
 its `SCAN_MIN` from 206 to 308, and `help::Binding` and
 `help::Group`, which need one further parameterisation of the same script with `HOMEFILE` set to
 `src/ui/help.rs`. `make gates` runs `scripts/gates/nodefault-ui.sh` **six** times today
-(`grep -c nodefault-ui.sh Makefile` = 6, lines 45-50); this change makes it **seven**. The reason is `Binding`'s: it is thirty-one `'static` literals, which is
+(`grep -c nodefault-ui.sh Makefile` = 6, lines 45-50); this change makes it **seven**. The reason is `Binding`'s: it is thirty-two `'static` literals, which is
 exactly the shape a `..Default::default()` rest is tempting in, and a field added to it later
-would otherwise silently become the empty string at thirty-one sites at once.
+would otherwise silently become the empty string at thirty-two sites at once.
 `change-model`'s existing gate does not reach any of these thirteen types: that gate is
 stated over `Change`, `ChangeSet`, `ArtifactRef`, and `Origin` in `src/changes.rs`, and none of
 these is one of those nor there.
@@ -800,7 +800,7 @@ once, so none needs a delta of its own and none is left contradicting the overla
 archive. A capability added later that owns an action inherits it without being edited. When `help.open` is set,
 `apply` SHALL dispatch per `help-overlay`'s table instead: `Quit` quits, `ToggleHelp` and
 `Back` close the overlay, `Next`/`ScrollDown` and `Prev`/`ScrollUp` move `help.scroll` by one
-line, and **every one of the other seventeen actions changes nothing at all**. The four
+line, and **every one of the other eighteen actions changes nothing at all**. The four
 launch actions and `Refresh` being inert there is the load-bearing half of the overlay's
 read-only claim: a reader who opened the help to find out what `a` does must be able to press
 it without spawning an agent. `Quit` is the one action that still acts, because a modal that
@@ -981,13 +981,13 @@ is what restores that invariant, before the next draw rather than after it.
   `selected` `2`, `detail.tab` `1`, and `help.open` true is given each of `OpenDetail`,
   `SelectTab(3)`, `NextTab`, `PrevTab`, `FilterStart`, `FilterPush('a')`, `FilterPop`,
   `Refresh`, `LaunchApply`, `LaunchContinue`, `LaunchArchive`, `FocusAgent`, `ToggleSection`,
-  `SelectNext`, `SelectPrev`, `Click(Target::Change(0))`, and `Ignore` in turn
-- **THEN** the dashboard after all seventeen is equal, field for field, to the one before
+  `SelectNext`, `SelectPrev`, `Click(Target::Change(0))`, `Select`, and `Ignore` in turn
+- **THEN** the dashboard after all eighteen is equal, field for field, to the one before
   them, but for `refresh.requested` where `needs_archived_refresh()` holds — the blanket rule
   runs after every action and the overlay does not suppress it
 - **AND** in particular `launch.pending` is `None`, `launch.problems` is empty, no process was
   spawned, no file was read or written, and no clock was read
-- **AND** the same seventeen applied to the identical dashboard with `help.open` **false**
+- **AND** the same eighteen applied to the identical dashboard with `help.open` **false**
   change it in the ways the bullets above require, so the suppression is the overlay's and not
   the dashboard's
 

@@ -29,7 +29,7 @@ SHALL take precedence over the route dispatch and over the filter dispatch alike
 "Every other action" is the closed remainder: `OpenDetail`, `SelectTab`, `NextTab`,
 `PrevTab`, `FilterStart`, `FilterPush`, `FilterPop`, `Refresh`, `LaunchApply`,
 `LaunchContinue`, `LaunchArchive`, `FocusAgent`, `ToggleSection`, `SelectNext`,
-`SelectPrev`, `Click`, and `Ignore`. Seventeen actions, and none of them does anything
+`SelectPrev`, `Click`, and `Ignore`. Eighteen actions, and none of them does anything
 while the overlay is open. Seven answer — `Quit`, `ToggleHelp`, `Back`, `Next`, `Prev`,
 `ScrollDown`, `ScrollUp` — and eighteen plus seven is the twenty-five `Action` carries after
 this change, so the two lists are exhaustive between them with nothing counted twice.
