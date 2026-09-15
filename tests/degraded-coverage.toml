@@ -416,7 +416,7 @@ tier = "unit"
 proof = ["a_failed_write_is_recorded_as_a_problem_and_rendered", "a_successful_write_leaves_no_problem_and_renders_no_row"]
 verdict = "confirmed"
 why = "text-selection: maybe_copy_selection is driven with a ClipboardWriter double scripted to fail and to succeed; the first proves the reason lands on Selection::problem and reaches the detail region as a `!`-marked row past the drawn content while the selection and its highlight stand, the second proves a successful write clears the problem and renders no row at all - the pane claims nothing about a write it cannot have acknowledged"
-covers = ["src/ui/driver.rs:266-270"]
+covers = ["src/ui/driver.rs:266-269"]
 
 [[row]]
 condition = "A change is archived between the worker's `list --json` call and its file walk"

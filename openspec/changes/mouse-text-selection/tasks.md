@@ -166,19 +166,19 @@
 ## 9. Documentation and the twelfth claim
 <!-- kind: operational -->
 
-- [ ] 9.1 CHANGE: Rewrite `SPEC.md`'s drag-to-select paragraph (audience: maintainers and
+- [x] 9.1 CHANGE: Rewrite `SPEC.md`'s drag-to-select paragraph (audience: maintainers and
       readers). It claims the bypass "requires holding `Option` (macOS) or `Shift` (most Linux
       terminals)"; `Option` was measured not to work in Ghostty under any mode set. Name
       `Shift`, name what it was measured on, say the other terminals are unmeasured, and say
       the cost no longer applies inside the detail content area.
       Check: `grep -c 'Option\` (macOS)' SPEC.md` → **1** at HEAD, must be **0**.
-- [ ] 9.2 CHANGE: Add the OSC 52 confinement leg to `tests/doc_contract.rs`, with the vacuity
+- [x] 9.2 CHANGE: Add the OSC 52 confinement leg to `tests/doc_contract.rs`, with the vacuity
       guard, and move `AGENTS.md`'s "eleven further claims" and `SPEC.md` → § Doc-conformance
       checks to twelve.
-- [ ] 9.3 CHECK: Negative control for 9.1, recorded per this repository's rule for a green
+- [x] 9.3 CHECK: Negative control for 9.1, recorded per this repository's rule for a green
       guard. Restore the `Option` sentence, confirm the leg fires, restore the correction,
       confirm it goes quiet. Record both halves in the Change Review.
-- [ ] 9.4 VERIFY: `cargo test --test doc_contract` green.
+- [x] 9.4 VERIFY: `cargo test --test doc_contract` green.
 
 ## 10. Change Review
 <!-- kind: operational -->
