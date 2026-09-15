@@ -25,8 +25,12 @@ button release, a resize, a focus change, a paste, and a timeout SHALL all still
   `MouseEventKind::Moved` events at varying coordinates, then `q`
 - **THEN** `LoopSummary::frames` is `1` — the frame drawn before the first event was read —
   and `LoopSummary::polls` is `21`
-- **AND** the same run with twenty `MouseEventKind::Drag(MouseButton::Left)` events reports
-  the same counts
+- **AND** the same run with twenty `MouseEventKind::Drag(MouseButton::Left)` events **does
+  not** report the same counts — a held-button drag draws, because the selection's focus
+  moved and the highlight is what tells the reader what they are selecting. This clause is
+  the inverse of what it said before `text-selection`, and deliberately: the exemption is
+  keyed on `Moved` alone from here, per this requirement's own paragraph above and the
+  scenario "A held-button drag draws and a free pointer motion does not" below
 - **AND** the same run with twenty `Char('z')` presses — an ignored key — reports `frames`
   `21`, so the exemption is scoped to pointer motion and did not become a general
   ignore-means-no-draw rule

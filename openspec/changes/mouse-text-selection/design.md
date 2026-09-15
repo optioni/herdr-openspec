@@ -98,7 +98,7 @@ and a real clipboard, which this repository forbids at every tier because `cargo
 this binary. The outermost honest test is `run_loop` over a `TestBackend` with every
 collaborator replaced.
 
-92 scenarios across nine capabilities — **33 new, 59 carried** (counted by enumerating
+119 scenarios across nine capabilities — **36 new, 83 carried** (counted by enumerating
 `#### Scenario:` across `specs/*/spec.md` and diffing each name against the base spec). A
 carried scenario is a regression that must stay green; it is listed because a `MODIFIED` or
 re-`ADDED` requirement replaces its whole block, so every one is this change's responsibility.
