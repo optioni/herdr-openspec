@@ -808,6 +808,20 @@ mod tests {
         assert_ne!(style(Role::DeltaRemoved).fg, Some(Color::Red));
     }
 
+    /// `view-palette` :: "`Selected` reverses and colours nothing".
+    #[test]
+    fn selected_reverses_and_colours_nothing() {
+        let got = style(Role::Selected);
+        assert_eq!(got.add_modifier, Modifier::REVERSED);
+        assert_eq!(got.fg, None);
+        assert_eq!(got.bg, None);
+
+        // The crate's only role carrying `REVERSED` alone — distinguishable
+        // from `ListRowSelected`'s plain `BOLD` without either naming a colour
+        // (design.md -> Decision 7).
+        assert_ne!(got, style(Role::ListRowSelected));
+    }
+
     /// `view-palette` :: "The enum's membership is exactly this list".
     ///
     /// The mechanism is the exhaustive `match` below, not a hand-counted total:
