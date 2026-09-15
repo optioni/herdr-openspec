@@ -106,8 +106,9 @@
       match (`:5034`, a compile error until its arm exists), the `variants` array and its
       `assert_eq!(…, 24)` (`:5063`, `:5104`), `seventeen_inert_actions() -> [Action; 17]`
       (`:5383`) with its three call sites, its test name, and the prose comment at `:861`.
-      Check: `grep -cE 'variants.len\(\), 24|\[Action; 17\]' src/ui/app.rs` → **2** at HEAD,
-      must print **0**.
+      Check: the assertion is wrapped across lines, so match the text not the call —
+      `grep -cE '\[Action; 17\]|the twenty-four variants' src/ui/app.rs` → **2** at HEAD
+      (`:5383` and `:5104`), must print **0**.
 - [ ] 5.6 CHECK: Add the drag row to **`SPEC.md`'s `| Gesture | Action |` table only**
       (`SPEC.md:660`). The binding check that fires is `mouse_bindings_match_spec_md`
       (`tests/doc_contract.rs:2029`), a set-equality between that table's backticked
