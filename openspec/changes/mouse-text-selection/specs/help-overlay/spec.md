@@ -185,3 +185,79 @@ blanks.
   `ui::layout::truncate_columns`, so `src/ui/help.rs` carries no `.chars().count()`,
   no `.chars().take(`, and no `Vec<char>` and passes `COLWIDTH`'s sweep
 
+
+### Requirement: The overlay scrolls when the body cannot hold it
+
+When `content_rows` exceeds the band's interior height, the band SHALL show a **window**
+onto the rows, and `help.scroll` SHALL be the first visible row's index.
+
+The offset actually drawn SHALL be recomputed on every draw by
+`ui::layout::scroll_offset(content_rows, help.scroll, interior_height)` — the crate's
+existing clamp, whose parameter order is `(lines, scroll, height)` — so a `help.scroll`
+left out of range by a resize is bounded before the frame is painted rather than after it,
+and a held `j` cannot run the window past the last row.
+
+`Dashboard` SHALL gain a **second** normaliser, `normalise_help_scroll(frame_area)`, and
+`ui::driver::run_loop` SHALL call it once per frame beside `normalise_scroll(area)`. It
+SHALL NOT be folded into `normalise_scroll`, and the reason is a measured contradiction
+rather than tidiness: `normalise_scroll` returns early when the detail region is not drawn
+— which `detail-scroll` requires of it in as many words — and the detail region is not
+drawn at `Route::List` below the breakpoint, which is precisely the 60x20 fixture the
+held-key scenario below uses. Sharing the function would leave `help.scroll` unclamped in
+the one case the scenario exists to pin. The two also read different geometry: the band is
+computed from the **body**, the detail clamp from the detail region's content area.
+
+`normalise_help_scroll` SHALL clamp `help.scroll` whenever the overlay is open, at either
+route and at either side of the breakpoint, and SHALL change nothing when it is closed.
+`help.scroll` is a user-controlled position and not derived geometry, and it SHALL NOT be
+stored as a row count or a page number.
+
+The **position indicator** SHALL be drawn into the band's bottom rule row when, and only
+when, `content_rows > interior_height`: the text `<first>-<last>/<total>`, where `first`
+is the offset plus one, `last` is `first + interior_height - 1`, and `total` is
+`content_rows`, placed so its final character is one column in from the band's right
+edge, in `palette::Role::ListSeparator`.
+
+It SHALL carry **no arrow glyphs**. `▲` and `▼` are East Asian Ambiguous and would widen
+the uncompensated CJK-locale exposure `SPEC.md` records, for information the numbers
+already carry: `1-37/43` says both that there is more below and exactly how much.
+
+When the band is too **narrow** to hold an indicator — a band whose width is under the
+indicator's own display width plus two — the indicator SHALL be omitted and the bottom
+rule SHALL be drawn whole. The content is still reachable by scrolling; a clipped
+indicator would not be.
+
+#### Scenario: The overlay scrolls at both mandated sizes
+
+- **WHEN** a dashboard with `help.open` true is rendered at 120x40, where the body is 39
+  rows, the band is 39 rows, and its interior is 37 against 43 content rows
+- **THEN** the bottom rule row's final columns read `1-37/43`, ending one column in from
+  column 119
+- **AND** after ten `Next` actions and a redraw the offset is **clamped to 6** — 43
+  content rows less a 37-row interior — so the interior's first row is content row 6 and
+  the indicator reads `7-43/43`, not the `11-47/43` an unclamped offset of ten would give
+- **AND** at 60x20 the body is 19 rows, the band is 19, its interior is 17, and the
+  indicator reads `1-17/43`, ending one column in from column 59
+
+#### Scenario: A held key cannot run the window off the end
+
+- **WHEN** a dashboard with `help.open` true is given two hundred consecutive `Next`
+  actions at 60x20, redrawing after each
+- **THEN** the last interior row is always content row 43 once the window has reached the
+  end, and never a blank row past it
+- **AND** `help.scroll` is clamped on every frame by
+  `ui::layout::scroll_offset(43, help.scroll, 17)` to a maximum of 26, so it is never used
+  unbounded — and it is `normalise_help_scroll` that applies it, which is why this
+  60x20 `Route::List` fixture clamps at all where `normalise_scroll` would have returned
+  early
+- **AND** two hundred consecutive `Prev` actions from there return the window to content
+  row 1 and leave `help.scroll` at `0` rather than underflowing
+
+#### Scenario: No indicator when the content fits
+
+- **WHEN** a dashboard with `help.open` true is rendered at 120x60, where the body is 59
+  rows and the band is `43 + 2 = 45` rows with an interior of 43 against 43 content rows
+- **THEN** the band's bottom row is `─` repeated to the band's width with no digits in it
+- **AND** every one of the 43 content rows is present in the buffer, so the whole
+  inventory is visible in one frame at a tall pane
+

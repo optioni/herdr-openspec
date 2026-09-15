@@ -500,3 +500,454 @@ would erase every distinction the content area exists to draw.
 - **AND** the heading cells still carry the heading role's modifiers and the code cells the
   code role's, so neither was flattened
 - **AND** every unselected cell is byte-identical to the same frame with no selection
+
+## MODIFIED Requirements
+
+### Requirement: Every role keeps the modifier the crate applied before this change
+
+Colour SHALL be added **beside** the modifier a role already carried, never in place of it,
+and `color-palette` added, removed, or altered **no modifier anywhere**. `pane-chrome` is the
+first change that alters one: `RegionHeading` carries `DIM` where the `RegionBorder` it
+replaces carried none, because an unfocused **heading** is text a reader can mistake for
+content while an unfocused border was a line nobody read. `RegionHeadingFocused` keeps
+`RegionBorderFocused`'s `BOLD` unchanged, and no other row of the table below moves. The consequence is
+falsifiable rather than aspirational: in a captured `TestBackend` buffer compared by modifier
+alone, every cell **outside the artifact tab-bar row** after that change carries exactly the
+modifier it carried before it.
+
+The tab-bar row is the stated exception, because `artifact-tabs` moves and relabels every
+chip in it. Its own guarantee is narrower and is stated here rather than left out: the
+selected chip's span remains that row's only `BOLD` span, so a monochrome reader still learns
+which tab is current — what that reader loses is the `1`–`9` digits, which the chip grammar
+drops deliberately and `action_for` still answers.
+
+`tasks-emphasis` adds **five** rows to the table below and alters none, so the invariant holds
+through it as well: nothing that carried a modifier before it carries a different one after,
+and the only cells that gain one are a completed task item's own rows, which could carry
+`Muted` only once a task item had a face to carry it.
+
+`markdown-constructs` adds one row to the table below and alters none of the others, and
+`foldable-spec-sections` adds two and alters none, so the invariant holds through both: no
+cell that carried a modifier before either change carries a different one after, and the only
+cells that gain a modifier are those the new construct or the new row produces — a
+`~~struck~~` source for `CROSSED_OUT`, and a multi-file artifact's own section header rows
+for the two below, neither of which could be drawn at all before. `pane-chrome`'s own single
+alteration is stated above and is the one exception to "alters none".
+
+The modifier each role SHALL carry:
+
+| Role | Modifiers |
+|---|---|
+| `FileMode` | `DIM` |
+| `Footer` | none |
+| `RegionHeading` | `DIM` |
+| `RegionHeadingFocused` | `BOLD` |
+| `RegionRule` | `DIM` |
+| `ListRow` | none |
+| `ListRowSelected` | `BOLD` |
+| `ListProblem` | none |
+| `ListSeparator` | none |
+| `ListMessage` | none |
+| `AgentBadge(_)` | none |
+| `TabActive` | `BOLD` |
+| `TabInactive` | none |
+| `DetailSection` | `BOLD` |
+| `DetailSectionSelected` | `BOLD` + `REVERSED` |
+| `Heading(_)` | `BOLD` |
+| `Strong` | `BOLD` |
+| `Emphasis` | `ITALIC` |
+| `Code` | `DIM` |
+| `Link` | `UNDERLINED` |
+| `Quoted` | `DIM` |
+| `Strikethrough` | `CROSSED_OUT` |
+| `Muted` | `DIM` |
+| `TaskEvidence` | none |
+| `TaskChange` | none |
+| `TaskConfirm` | none |
+| `TaskLabel` | none |
+| `DeltaAdded` | none |
+| `DeltaModified` | none |
+| `DeltaRemoved` | none |
+| `Selected` | `REVERSED` |
+
+`text-selection` adds **one** row and alters none: `Selected` carries `REVERSED`, the only
+use of that modifier in the table.
+
+`CROSSED_OUT` is chosen over a colour or a bracketing glyph for the same reason every other
+row of this table carries a modifier: it is the terminal's own rendering of exactly this
+meaning, it costs no columns, and a terminal that does not support it drops the attribute and
+still shows the text — which is the right failure for a construct whose whole point is that
+the text is still there.
+
+`Muted`'s plain `DIM` deliberately equals the plain `DIM` that `RegionHeading`, `RegionRule`,
+and `Quoted` already carry — plain-modifier equality is not a distinction this
+table polices, on exactly the terms the `DetailSection` paragraph below states for plain
+`BOLD`. It is a role of its own rather than a reuse of `Quoted` because a finished task and a
+block quote are not the same thing, and a reader tracing why a row is dim should land on a
+role that says so.
+
+The four **task-label** roles carry **no** modifier, which is deliberate and is the one place
+this table admits a monochrome reader loses something. What that reader loses is only the
+*grouping* — which third of a lifecycle a label belongs to — and never the information: the
+label is still the literal text `VERIFY:` on the row. A modifier there would have to be `BOLD`,
+which would make the leading token of most rows in a task file bold and defeat the
+de-emphasis this change exists to add.
+
+The three **delta** roles carry no modifier either, and they are the one group in this table
+where that costs a monochrome reader **nothing**. Their span is the badge marker itself — `+`,
+`~`, or `-` — so the distinction is already in the glyph, and colour is doing what this table
+everywhere else asks it to do: arriving strictly beside a signal that survives without it. The
+badge was specified as a glyph rather than as a recoloured heading for exactly this reason
+(`spec-emphasis` -> proposal.md -> Review Decisions, 1), which is what lets these three be
+added without weakening the guarantee the scenario below asserts.
+
+A modifier here would also be wrong on its own terms. `BOLD` would compete with
+`Role::DetailSection`, which every badged row already carries, and `CROSSED_OUT` is spoken for:
+a `Removed` requirement's **label** segment carries `Strikethrough` — the existing role, on the
+existing field — while its badge segment carries `DeltaRemoved`, so the two say different
+things in the same row and must not wear the same attribute.
+
+`spec-emphasis` adds **three** rows — `DeltaAdded`, `DeltaModified`, `DeltaRemoved`, each
+carrying no modifier — and alters none. The only cells that gain a modifier are a `Removed`
+requirement's own **heading label**, which gains `CROSSED_OUT` beside the `BOLD` its header row
+already carried (`artifact-folds` -> "A section header row names the file and shows its fold
+state"). That cell could not be drawn before this change, so no cell that existed has moved.
+
+`REVERSED` is chosen for the same reason and is the table's first use of it. A section header
+is a fold control, and reversing it is how a terminal says "this is the one the keys address"
+without spending a column on a marker glyph or borrowing a colour that would then mean two
+things. `DetailSection`'s plain `BOLD` deliberately equals the plain `BOLD` that
+`RegionHeadingFocused`, `ListRowSelected`, `TabActive`, `Heading(_)`, and `Strong` already
+carry — plain-`BOLD` equality is not a distinction this table polices, and the two shared
+*style* pairs named in the colour requirement are unaffected because neither new role carries
+a colour.
+
+#### Scenario: Each role's modifier set is exactly the table above
+
+- **WHEN** `palette::style` is called for every `Role` variant and its `add_modifier` set is
+  compared against the table
+- **THEN** every role matches, and the **fourteen** roles that carry no modifier — `Footer`,
+  `ListRow`, `ListProblem`, `ListSeparator`, `ListMessage`, `AgentBadge`, `TabInactive`,
+  `TaskEvidence`, `TaskChange`, `TaskConfirm`, `TaskLabel`, `DeltaAdded`, `DeltaModified`, and
+  `DeltaRemoved` — carry none, `Muted` having joined the modifier-carrying side and the four
+  label roles and three delta roles the other
+- **AND** the assertion discriminates: `Emphasis` reports `ITALIC` and not `BOLD`,
+  `Strikethrough` reports `CROSSED_OUT` and not `DIM`, `DetailSectionSelected` reports
+  `BOLD | REVERSED` and not `BOLD` alone, and `Muted` reports `DIM` and not `CROSSED_OUT`
+
+#### Scenario: A monochrome reading of the frame is unchanged
+
+- **WHEN** a `Dashboard` carrying a repository in file mode, one problem row, three active
+  changes of which one is badged `Working`, and a selected change whose single-section
+  content is `## Heading\n\n**bold** and *italic* and `code` and [link](u)\n` is rendered at
+  120x20 and at 60x20
+- **THEN** in both buffers the modifier of every cell **outside row 2, the tab bar** is
+  exactly what the same dashboard produced before `color-palette` once `pane-chrome`'s own
+  three modifier changes are applied — the removed frame header row, the routed region's
+  heading `BOLD` and the unrouted one's `DIM`, and the rules' `DIM`: the `file mode` badge
+  `DIM`, the selected row's cells `BOLD`, the heading and `bold` `BOLD`, `italic` `ITALIC`,
+  `code` `DIM`, and `link` `UNDERLINED`
+- **AND** the problem row, the separator row, and the agent badge cell carry no modifier at
+  all, exactly as before
+- **AND** in the tab-bar row the selected chip's span is the only `BOLD` span, so the one
+  excepted row still discriminates the current tab without colour
+- **AND** the same source with `~~struck~~` appended renders that word's cells with
+  `CROSSED_OUT` and leaves every other cell's modifier unchanged, so the new role adds a
+  modifier only where the new construct appears
+- **AND** a `specs` tab whose sections carry `operation: Some(Removed)` renders `CROSSED_OUT`
+  on exactly that requirement's **heading label** cells and on no other cell in the frame — not
+  on its badge, not on its body, and not on a sibling requirement carrying `Some(Added)`. This
+  is the one cell `spec-emphasis` adds a modifier to, and the fixture above — single-section,
+  not spec-shaped — cannot reach it, which is why this clause names its own dashboard
+- **AND** the same dashboard whose selected artifact resolves to **three** files instead of
+  one renders `REVERSED` on exactly one row — the cursor's own section header — and on no
+  cell anywhere else, so a single-file artifact's frame is untouched by the two new roles
+
+#### Scenario: The five new roles leave every existing cell's modifier where it was
+
+- **WHEN** the `color-palette` monochrome fixture above — a repository in file mode, one
+  problem row, three active changes one of which is badged `Working`, and a selected change
+  whose single-section content is `## Heading\n\n**bold** and *italic* and `code` and
+  [link](u)\n` — is rendered at 120x20 and at 60x20
+- **THEN** no cell of the detail region's content area carries `DIM` except the `code` span's,
+  which `Role::Code` has always carried — that fixture's selected artifact does not track
+  tasks, so no cell carries any of the five new roles. The **byte-for-byte** half of this
+  claim is carried by "A monochrome reading of the frame is unchanged", whose per-cell
+  modifier assertions across both regions at both widths this change leaves **unmodified**;
+  that is what makes it falsifiable, and it is stated here rather than promised as a
+  comparison against a pre-change buffer, which this repository has no mechanism to record
+- **AND** the same dashboard whose selected artifact tracks tasks and whose file holds one
+  checked and one unchecked item renders `DIM` on exactly the checked item's own rows, and on
+  no cell anywhere else that did not already carry it
+- **AND** in that same frame no cell carries a modifier the four label roles could have added,
+  since they add none
+
+
+#### Scenario: `Selected` is the table's only reversed role
+
+- **WHEN** every `Role`'s modifier set is compared against the table above
+- **THEN** each matches, `Selected` included
+- **AND** `Selected` is the only role carrying `REVERSED` alone, so no existing role acquired
+  or lost a modifier in this change
+
+### Requirement: Colour is added only where it carries a distinction a modifier cannot
+
+The palette SHALL assign a foreground or background colour to exactly these roles, and to no
+other:
+
+| Role | Colour |
+|---|---|
+| `FileMode` | foreground `Yellow` |
+| `ListProblem` | foreground `Red` |
+| `ListSeparator` | foreground `DarkGray` |
+| `AgentBadge(Working)` | foreground `Green` |
+| `AgentBadge(Idle)` | foreground `Cyan` |
+| `AgentBadge(Blocked)` | foreground `LightRed` |
+| `AgentBadge(Done)` | foreground `Blue` |
+| `AgentBadge(Unknown)` | foreground `DarkGray` |
+| `TabActive` | foreground `Black`, background `Cyan` |
+| `TabInactive` | background `DarkGray` |
+| `Heading(1)` | foreground `Magenta` |
+| `Heading(2)` | foreground `Cyan` |
+| `Heading(3)` | foreground `Blue` |
+| `Heading(4)` | foreground `Green` |
+| `Heading(5)` | foreground `Yellow` |
+| `Heading(6)` | foreground `DarkGray` |
+| `Code` | foreground `Yellow` |
+| `Link` | foreground `Blue` |
+| `TaskEvidence` | foreground `LightRed` |
+| `TaskChange` | foreground `Green` |
+| `TaskConfirm` | foreground `Blue` |
+| `TaskLabel` | foreground `DarkGray` |
+| `DeltaAdded` | foreground `Green` |
+| `DeltaModified` | foreground `Yellow` |
+| `DeltaRemoved` | foreground `LightRed` |
+
+`Footer`, `RegionHeading`, `RegionHeadingFocused`, `RegionRule`, `ListRow`, `ListRowSelected`,
+`ListMessage`, `DetailSection`, `DetailSectionSelected`, `Strong`, `Emphasis`, `Quoted`,
+`Strikethrough`, and `Muted` SHALL carry **no** colour: each already carries a modifier that distinguishes
+it, and a colour there would be decoration rather than information. `Quoted` in particular stays `DIM` and uncoloured. `Strikethrough` joins that
+list rather than gaining an entry of its own: `CROSSED_OUT` already says the whole of what
+the face means, and the obvious candidate colour — `DarkGray` — is this palette's one "no
+information" grey, which struck text emphatically is not, since the reader is being shown
+what it says as well as that it is struck. `DetailSection` and `DetailSectionSelected` join
+it for the same reason: `BOLD` and `BOLD | REVERSED` already carry the whole distinction
+between a fold header and the fold header the keys address, and this change's own design
+records that adding a colour there would be decoration. `Muted` joins it too, and for the
+sharpest version of the reason: it is the role that says *stop looking here*, and a colour is
+the opposite instruction.
+
+The four **task-label** roles are the inverse case and take a colour precisely because no
+modifier distinguishes them. `TaskEvidence`, `TaskChange`, and `TaskConfirm` are the three
+positions of a testing lifecycle — evidence, then the change, then the confirmation — which
+`task-labels` defines without reference to any schema, and `TaskLabel` is the generic role a
+recognised but unclassified token falls back to. Four hues rather than one per keyword is the
+whole point: `VERIFY`, `THEN`, and `ASSERT` are one position under three conventions, and
+colouring them separately would be a rainbow nobody learns. `TaskLabel`'s `DarkGray` is this
+palette's "no information" grey used for exactly that: a label the crate recognises as a label
+and classifies no further.
+
+The three **delta** roles take a colour on the same grounds and one stronger one: they colour a
+one-character marker, and a marker is the shortest span in this palette. `+`, `~`, and `-` are
+distinguishable without colour — which is the whole reason `spec-emphasis` chose a glyph — so
+colour here is redundancy rather than the only signal, and the three are the palette's clearest
+case of colour arriving strictly beside something that survives without it.
+
+The hues are the ones a reader has already learned from every diff they have read: `Green` for
+added, `Yellow` for changed, and red for removed. `DeltaRemoved` takes `LightRed` and **not**
+`Red`, for exactly the reason `TaskEvidence` does: a reader scans the pane for exactly one red
+thing, and `Red` means "a problem" — `ListProblem` and nothing else. A removed requirement is
+not a problem; it is the ordinary content of a delta spec, and 15 of them exist across the
+archive. Spending the problem colour on it would make the scan unreliable for a row that is
+never an error.
+
+Roles MAY share a style, but only under one of three stated licences, and a share outside all three
+is a defect rather than a decision. **The rule ranges over the roles that carry a colour**,
+which is the set the table above enumerates. Plain-modifier equality among uncoloured roles is
+not policed and never was — `Footer`, `ListRow`, and `ListMessage` are all `Style::default()`;
+`RegionHeadingFocused`, `ListRowSelected`, `DetailSection`, and `Strong` are all plain `BOLD`;
+`RegionHeading`, `RegionRule`, `Quoted`, and now `Muted` are all plain `DIM` — and the
+requirement above says so in as many words. Stating the range is this change's repair of a
+sentence that read as a claim about every role while three such groups already existed.
+
+1. **They cannot meet.** Two roles that are never drawn in the same region may share a style,
+   because no reader is ever asked to tell them apart. `FileMode` and `Code` are both
+   `DIM` + `Yellow` under this licence: one is drawn in the list region's heading row, the
+   other only inside the detail region's content area.
+2. **They mean the same thing.** `DarkGray` is this palette's one "no information" grey, and
+   every role wearing it means exactly that. `AgentBadge(Unknown)`, `ListSeparator`, and — as
+   of `tasks-emphasis` — `TaskLabel` all carry it: an unknown agent status, a divider rule, and
+   a label the crate declines to classify are the same statement three times.
+
+This replaces the enumeration this requirement previously carried ("exactly two pairs"), which
+`tasks-emphasis` would otherwise have had to grow with no principle to grow it by. The
+enumeration is restated as a consequence rather than a rule: among the coloured roles, the
+full set of shared styles SHALL be exactly these five groups, and no other coloured pair SHALL
+be equal:
+
+| Shared `Style` | Roles | Licence |
+|---|---|---|
+| `DIM` + `Yellow` | `FileMode`, `Code` | 1 |
+| `DarkGray` foreground | `ListSeparator`, `AgentBadge(Unknown)`, `TaskLabel` | 2 |
+| `Green` foreground, no modifier | `AgentBadge(Working)`, `TaskChange`, `DeltaAdded` | 1 and 3 |
+| `Blue` foreground, no modifier | `AgentBadge(Done)`, `TaskConfirm` | 1 |
+| `LightRed` foreground, no modifier | `AgentBadge(Blocked)`, `TaskEvidence`, `DeltaRemoved` | 1 and 3 |
+
+`DeltaModified`'s `Yellow` is a style **no** other role carries and joins no group: `FileMode`
+and `Code` are `DIM` + `Yellow` and `Heading(5)` is `BOLD` + `Yellow`, so all three differ from
+it by a modifier. It is a colour reuse and not a style share, exactly as `Heading(3)` and
+`Link` are for `Blue`.
+
+`DeltaAdded` and `DeltaRemoved` share a style with roles they **can** meet, and are licensed
+under a third licence stated here for the first time:
+
+3. **They cannot be confused.** Two roles may share a style when each span's own text carries
+   its full meaning without colour **and** the two never occupy the same row. A `+` marker in a
+   header row's prefix and a `WHEN` at the head of a body list item satisfy both: the marker
+   says "added" and the word says "when" whatever colour either is painted, and no row holds
+   both.
+
+The licence is worded narrowly on purpose. "Colour is redundant here" would license almost any
+share in this table — nearly every span carries a modifier or self-describing text — and would
+reproduce the failure this requirement already records for the enumeration it replaced: no
+principle to grow it by. Both conjuncts are load-bearing, and a future share satisfying only
+one is a defect rather than a decision.
+
+**The reader cost this licence accepts, stated rather than hidden:** on a delta spec tab the
+green `+` badge and every green `WHEN` in the open bodies are the same hue, so scanning that tab
+by colour for "the added things" does not work. `WHEN` occurs 3877 times across the corpus, so
+this is the common case and not a corner. What survives is the marker column, which is where a
+reader looks for the operation and where no clause keyword is ever drawn.
+
+An earlier draft of this requirement licensed the same two shares under **licence 1**, claiming
+a task label is drawn "only in the detail region on the tracked-tasks tab". `spec-emphasis`'
+own `markdown-render` delta falsifies that: a clause keyword sets `Face::label` on **every**
+markdown source with no spec-shape test (design.md -> Decision 11), so a `- **WHEN**` in a
+delta spec's body is drawn on the **specs** tab, the same tab the badge is on, in the same
+frame. This requirement has been wrong in exactly this way before — it already records that
+`TaskChange`'s `Green` and `TaskConfirm`'s `Blue` "**can** appear in one frame's content area —
+an earlier draft of this requirement claimed they could not, and planning review falsified it".
+Twice now the error has been a "cannot meet" asserted without a scenario that renders both, and
+the scenario below is what makes the third claim falsifiable rather than merely careful.
+
+`Heading(3)`, `Heading(4)`, `Heading(6)`, and `Link` are deliberately **absent** from that
+table even though they carry `Blue`, `Green`, `DarkGray`, and `Blue` respectively: each also
+carries a modifier the label roles do not, so none is an equal `Style` and none is a share.
+They are still a **colour** reuse, and the paragraph below is about that weaker relation,
+which a reader sees and a `Style` comparison does not.
+
+Each `AgentBadge` pairing in those groups is licence 1, the badges being list-region only; each
+`Delta*`-against-`Task*` pairing is licence 3, the two being reachable in one frame on a specs
+tab. The `DarkGray` trio is licence 2. The three
+that matter are worth spelling out because the obvious objection is the one this change was
+asked to answer. `TaskEvidence` takes `LightRed` and **not** `Red`, and the reason is recorded
+in the form the implementation left it in rather than the form this requirement first stated.
+
+The first draft said `Red` would have been an unlicensed share because `ListProblem` is drawn
+in the detail region, the same region a task label is drawn in. That is **false**:
+`ui::view::detail_row_role` answers `ContentKind::Problem` with no role, so a detail-region
+problem row is `Style::default()`, and `ListProblem`'s red is reached only from `row_role`, in
+the list region. Both colours are therefore licensed under licence 1, and the choice is a
+choice rather than a forced move. `LightRed` is taken and recorded for two reasons that
+survive the correction: a label and an `AgentBadge(Blocked)` can never meet, where a label and
+a `ListProblem` row **can** — at 120 columns both regions are drawn in one frame — so
+`LightRed` is the share that costs a reader nothing; and a reader scans the pane for exactly
+one red thing, so leaving plain `Red` to mean "a problem" and nothing else keeps that scan
+reliable. `AgentBadge(Blocked)`, which `LightRed` does collide with, is drawn only in the list
+region. `TaskChange`'s `Green` and `TaskConfirm`'s `Blue` reuse `Heading(4)`'s and `Heading(3)`'s
+**colours**, and the two **can** appear in one frame's content area — an earlier draft of this
+requirement claimed they could not, and planning review falsified it against
+`src/ui/app.rs:1527`. A tasks file whose text begins at its single `##` heading has no
+preamble, so `contributions == 1`, so it does not split, so the tab is **not foldable**, so
+`ui::detail::content_lines` reaches `ui::tasks::lines` — whose `heading_line` emits
+`Face { heading }` on the heading row while `items` emits label segments on the rows below it.
+`src/ui/detail.rs`'s own comment already named that case.
+
+No licence is required, because neither pair is a **share**: `Heading(3)` and `Heading(4)`
+carry `BOLD` and the label roles carry no modifier, so the four are four distinct `Style`s and
+the rule above — which ranges over `Style` equality — does not reach them. A reader who sees
+only hue sees a reused colour; a reader who sees the row sees a bolded heading against an
+unbolded leading token, on different rows. That is why `Heading(3)` and `Heading(4)` are
+asserted **alone** in their groups by the scenario below: a table that dropped `BOLD` from
+either would turn a colour reuse into an unlicensed share, and that assertion is what catches
+it. `Link` never arises at all: `ui::tasks` emits no link face for any input.
+
+`Strikethrough` SHALL remain a style equal to no other role's, and `DetailSectionSelected`
+likewise, so the two roles whose whole job is to be unmistakable stay unshared.
+
+`Heading(l)` for an `l` outside `1..=6` SHALL return the same `Style` as `Heading(6)`:
+`markdown-render` produces only `1..=6`, and the function is total rather than panicking on a
+value the parser cannot emit.
+
+#### Scenario: The coloured set is exactly the table above
+
+- **WHEN** `palette::style` is called for every `Role` variant and each result's `fg` and `bg`
+  are inspected
+- **THEN** exactly the roles in the table above report a `Some` foreground or background, with
+  the named variant the table gives
+- **AND** every other role reports `fg: None` and `bg: None`, `Strikethrough`,
+  `DetailSection`, `DetailSectionSelected`, and `Muted` among them
+- **AND** `TaskEvidence` reports `LightRed` and **not** `Red`, so the one colour choice this
+  change was asked to justify is the one an assertion would catch being reverted
+
+#### Scenario: An out-of-range heading level does not panic
+
+- **WHEN** `palette::style(Role::Heading(0))`, `Role::Heading(7)`, and `Role::Heading(255)`
+  are called
+- **THEN** none panics and each returns the same `Style` as `Role::Heading(6)`
+
+#### Scenario: Every shared style is licensed, and the unshared roles stay unshared
+
+- **WHEN** `palette::style` is called for every `Role` variant, every `AgentStatus`, and
+  heading levels 1 through 6; the results carrying **no** foreground and no background are
+  discarded; and the rest are grouped by equal `Style`
+- **THEN** the groups of size greater than one are exactly the five the table above lists,
+  member for member, and no other coloured group has size greater than one
+- **AND** the discarded, uncoloured roles are exactly `Footer`, `RegionHeading`,
+  `RegionHeadingFocused`, `RegionRule`, `ListRow`, `ListRowSelected`, `ListMessage`,
+  `DetailSection`, `DetailSectionSelected`, `Strong`, `Emphasis`, `Quoted`, `Strikethrough`,
+  and `Muted`, and `Selected` — asserted by name, so a role that silently loses its colour is caught here
+  rather than passing as "uncoloured and therefore out of scope"
+- **AND** `Heading(3)` and `Heading(4)` are each alone in their group, because `BOLD`
+  separates them from `TaskConfirm` and `TaskChange`; a table that dropped the `BOLD` from
+  either heading would fail this assertion
+- **AND** `TaskEvidence`'s group holds `AgentBadge(Blocked)` and **not** `ListProblem`, which
+  is the distinction between a licensed share and an unlicensed one for this change
+
+#### Scenario: A task label and a problem row are distinguishable in one frame
+
+The scenario's name is kept verbatim because a delta's scenario headers are its merge key. Its
+subject is corrected: an earlier draft asserted the problem row's cells carry `ListProblem`'s
+foreground **at both widths**, which the implementation falsified. `ui::view::detail_row_role`
+answers `ContentKind::Problem` with **no** role, so a problem row drawn inside the detail
+region carries `Style::default()`; `ListProblem`'s red is reached only from `row_role`, in the
+**list** region. At `Route::Detail` and 60 columns the list region is not drawn at all, so the
+120-column frame is the only one in which both constructs appear.
+
+- **WHEN** a `Dashboard` at `Route::Detail` whose `changes.problems` carries one entry — a
+  **list**-region problem row — and whose tracked-tasks artifact holds the unchecked item
+  `- [ ] 1.1 RED: write the test` is rendered at 120x20 and at 60x20
+- **THEN** in the 120-column frame, where both regions are drawn, the list region's problem
+  row's cells carry `palette::style(Role::ListProblem)`'s foreground and the `RED:` cells carry
+  `palette::style(Role::TaskEvidence)`'s
+- **AND** those two foregrounds are not equal, so the two constructs that can appear in one
+  frame are distinguishable by colour and not only by shape
+- **AND** in the 60-column frame the list region is not drawn, so no cell carries
+  `ListProblem`'s foreground at all, and the `RED:` cells still carry `TaskEvidence`'s — which
+  is the assertion that would fail if the narrow layout ever drew both regions without this
+  scenario being revisited
+- **AND** a problem row drawn in the **detail** region — `detail.problems` — carries neither
+  foreground, because `content_lines` gives it `ContentKind::Problem` and `ui::view` maps that
+  kind to no role. Asserted here rather than left implicit, since it is the fact this
+  scenario's first draft got wrong
+- **AND** neither assertion writes a colour literal: both compare against `palette::style`, as
+  every render test outside `src/ui/palette.rs`'s own tests does
+
+
+#### Scenario: `Selected` joins the uncoloured set and shares a style with nothing
+
+- **WHEN** the uncoloured roles are collected as the scenario above collects them
+- **THEN** `Selected` is among them, because a selection inverts whatever is underneath and a
+  foreground of its own would erase that
+- **AND** it is alone in its group: `DetailSectionSelected` is `BOLD` and `REVERSED` together,
+  so the two are not equal and the licensed-share count is unchanged
