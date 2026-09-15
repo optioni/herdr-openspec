@@ -357,7 +357,18 @@ one column of label.
 A badged header row SHALL carry **four** segments rather than one — the
 `<indent><glyph> ` prefix, the badge, the label, and the blank columns that pad the row to its
 width — so that the badge, the label and the padding may be faced apart. An unbadged header row
-SHALL carry the one segment it carried before this change.
+SHALL carry the one segment it carried before this change, **plus the progress cell's own
+segment when it draws one** — five and two respectively on a row that also carries a cell,
+since `header` appends the cell after deciding the badge.
+
+That last clause is a correction, not a refinement: an earlier wording of this requirement said
+an unbadged row carries "the one segment it carried before this change" full stop, which is
+false for a tracked-tasks group header. Before this change `header` returned a single `String`
+with the cell already formatted into it, so such a row was one segment; it is now two. **No
+frame changes** — both segments are `Face::plain()`, so the row's text and every cell's style
+are byte-identical either way — but the count is observable to a test, and the scenario below
+that asserts "exactly one segment" reaches only rows with `progress: None`, so nothing caught
+the overstatement. Found by the Change Review.
 
 The padding is a segment of its own, and plain-faced, because the label's face reaches every
 column of its own segment: a `Removed` label padded inside its own segment strikes the blank
@@ -513,8 +524,9 @@ opened the section to read. The strikethrough SHALL be the existing `Face` field
   of a main spec under `## Requirements`
 - **THEN** every header row is byte-identical to the row the same input produced before this
   change, with no badge and no reserved badge column
-- **AND** each such row carries exactly one segment, so the four-segment shape is reached only
-  by a badged row
+- **AND** each such row carries exactly one segment — these sections carry `progress: None`, so
+  no progress-cell segment is appended either — and the four-segment shape is reached only by a
+  badged row
 
 #### Scenario: A removed requirement's heading is struck and its body is not
 
