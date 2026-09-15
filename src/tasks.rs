@@ -168,7 +168,7 @@ pub fn label_of(text: &str) -> Option<Label> {
     Some(Label {
         start,
         len,
-        role: role_of(&text[start..end]),
+        role: role_of(&text[start..end]).unwrap_or(LabelRole::Other),
     })
 }
 
@@ -197,17 +197,18 @@ fn skip_task_number(bytes: &[u8]) -> usize {
     }
 }
 
-/// The lifecycle position `run` names, by **exact, case-sensitive** match,
-/// with `Other` as the fallback arm rather than a lookup miss. A general
-/// testing vocabulary, not one workflow's task prefixes: GIVEN/WHEN/THEN and
-/// ARRANGE/ACT/ASSERT are the same three positions under two further
-/// conventions and are styled identically. Nothing outside `run` is read.
-fn role_of(run: &str) -> LabelRole {
+/// The lifecycle position `run` names, or `None` when the table holds no row
+/// for it. The table itself, without `label_of`'s recognition rules around
+/// it. A general testing vocabulary, not one workflow's task prefixes:
+/// GIVEN/WHEN/THEN and ARRANGE/ACT/ASSERT are the same three positions under
+/// two further conventions and are styled identically. Nothing outside `run`
+/// is read.
+pub fn role_of(run: &str) -> Option<LabelRole> {
     match run {
-        "RED" | "CHARACTERIZE" | "CHECK" | "GIVEN" | "ARRANGE" => LabelRole::Evidence,
-        "GREEN" | "REFACTOR" | "CHANGE" | "WHEN" | "ACT" => LabelRole::Change,
-        "VERIFY" | "THEN" | "ASSERT" => LabelRole::Confirm,
-        _ => LabelRole::Other,
+        "RED" | "CHARACTERIZE" | "CHECK" | "GIVEN" | "ARRANGE" => Some(LabelRole::Evidence),
+        "GREEN" | "REFACTOR" | "CHANGE" | "WHEN" | "ACT" => Some(LabelRole::Change),
+        "VERIFY" | "THEN" | "ASSERT" => Some(LabelRole::Confirm),
+        _ => None,
     }
 }
 
