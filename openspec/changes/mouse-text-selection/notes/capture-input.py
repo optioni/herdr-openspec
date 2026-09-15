@@ -1,25 +1,30 @@
 #!/usr/bin/env python3
 """Log what the TERMINAL sends a TUI, to settle what happens during a drag.
 
-Every probe so far has measured what an application *writes*. The open question
-is the other direction: while you drag to select inside Copilot, does the
-terminal deliver mouse reports to it, or does it keep the drag for itself?
+Every probe so far measured what an application *writes*. The open question is
+the other direction: while you drag to select inside Copilot, does the terminal
+deliver mouse reports to it, or keep the drag for itself?
 
     python3 notes/capture-input.py copilot
 
-Use the program, DRAG TO SELECT SOME TEXT, then quit it. The summary says
-whether any mouse report arrived while you were dragging.
+Use the program, DRAG TO SELECT SOME TEXT, then quit it normally.
 
-If reports DID arrive, the terminal reports and selects at the same time, and
-every "no" recorded by probe-altscreen.sh is a probe bug.
-If reports did NOT arrive, the terminal stopped reporting for that gesture, and
-the reason is something other than the mode set -- which is the whole mystery.
+Note on the implementation: `pty.spawn` is not usable here. It never sets the
+child pty's window size, so a full-screen TUI renders into a phantom 80x24 (or
+0x0) and shows a blank screen. This forks the pty itself, copies the real
+window size onto it, and forwards SIGWINCH.
 """
+import fcntl
 import os
 import pty
 import re
+import select
+import signal
+import struct
 import sys
+import termios
 import time
+import tty
 
 if len(sys.argv) < 2:
     sys.exit("usage: capture-input.py <program> [args...]")
@@ -27,49 +32,89 @@ if len(sys.argv) < 2:
 log_path = "/tmp/capture-input-%d.log" % os.getpid()
 log = open(log_path, "wb")
 events = []
-
 SGR = re.compile(rb"\x1b\[<(\d+);(\d+);(\d+)([Mm])")
 
 
-def stdin_read(fd):
-    data = os.read(fd, 4096)
-    if data:
-        log.write(b"%.3f IN  %r\n" % (time.time(), data))
-        log.flush()
-        for m in SGR.finditer(data):
-            events.append((time.time(), int(m.group(1)), int(m.group(2)),
-                           int(m.group(3)), m.group(4).decode()))
-    return data
+def set_winsize(fd):
+    try:
+        cols, rows = os.get_terminal_size(0)
+    except OSError:
+        rows, cols = 24, 80
+    fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
 
 
-def master_read(fd):
-    return os.read(fd, 4096)
+pid, master = pty.fork()
+if pid == 0:
+    os.execvp(sys.argv[1], sys.argv[1:])
+    os._exit(1)
 
+set_winsize(master)
+signal.signal(signal.SIGWINCH, lambda *_: set_winsize(master))
 
-pty.spawn([sys.argv[1]] + sys.argv[2:], master_read, stdin_read)
-log.close()
+stdin_is_tty = os.isatty(0)
+old = termios.tcgetattr(0) if stdin_is_tty else None
+if stdin_is_tty:
+    tty.setraw(0)
 
-# Button encoding: low 2 bits are the button; 32 adds "motion"; 64 is the wheel.
-press = [e for e in events if e[4] == "M" and e[1] < 32]
-motion = [e for e in events if e[1] & 32 and e[1] < 64]
-release = [e for e in events if e[4] == "m"]
-wheel = [e for e in events if e[1] >= 64]
+try:
+    while True:
+        try:
+            ready, _, _ = select.select([0, master], [], [])
+        except (InterruptedError, OSError):
+            continue
+        if 0 in ready:
+            data = os.read(0, 4096)
+            if not data:
+                break
+            log.write(b"%.3f IN  %r\n" % (time.time(), data))
+            log.flush()
+            for m in SGR.finditer(data):
+                events.append((int(m.group(1)), m.group(4).decode()))
+            os.write(master, data)
+        if master in ready:
+            try:
+                data = os.read(master, 4096)
+            except OSError:
+                break
+            if not data:
+                break
+            os.write(1, data)
+finally:
+    if stdin_is_tty:
+        termios.tcsetattr(0, termios.TCSAFLUSH, old)
+    log.close()
+    try:
+        os.waitpid(pid, 0)
+    except OSError:
+        pass
 
-print("\n=== what the terminal sent %s ===" % sys.argv[1])
+# SGR button byte: low 2 bits select the button, 4 = Shift, 8 = Alt, 16 = Ctrl,
+# 32 = motion, 64 = wheel.
+press = [b for b, k in events if k == "M" and b < 32]
+motion = [b for b, k in events if (b & 32) and b < 64]
+release = [b for b, k in events if k == "m"]
+wheel = [b for b, k in events if b >= 64]
+shifted = [b for b, _ in events if b & 4]
+
+print("\r\n=== what the terminal sent %s ===" % sys.argv[1])
 print("  button presses : %d" % len(press))
 print("  DRAG MOTION    : %d   <-- the decisive number" % len(motion))
 print("  releases       : %d" % len(release))
 print("  wheel          : %d" % len(wheel))
+print("  Shift held     : %d of %d reports" % (len(shifted), len(events)))
 print("\nInterpretation:")
 if motion:
     print("  Drag motion WAS reported. The terminal reports and selects at the")
-    print("  same time, so mouse capture does not cost native selection, and")
+    print("  same time, so capture does not cost native selection, and")
     print("  probe-altscreen.sh's negatives are a bug in the probe.")
 elif press or release:
     print("  Presses arrived but NO drag motion. The terminal withheld the drag")
-    print("  while still reporting clicks -- which is exactly the behaviour the")
-    print("  pane wants, and it is not explained by the mode set alone.")
+    print("  while still reporting clicks -- exactly what the pane wants, and")
+    print("  not explained by the mode set alone.")
 else:
     print("  No mouse reports at all. Either no gesture was made, or reporting")
     print("  was not active for it.")
+if shifted:
+    print("  NOTE: %d report(s) carried Shift -- check whether the drag that" % len(shifted))
+    print("  selected was actually a Shift+drag.")
 print("\nRaw log: %s" % log_path)
