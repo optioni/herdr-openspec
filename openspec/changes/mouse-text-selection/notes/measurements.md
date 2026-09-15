@@ -152,3 +152,55 @@ keeps it — so it reaches no `Action` and would need a third exemption, which c
 a `binding-inventory` spec change by construction.
 
 `SPEC.md` and `README.md` carry no such constraint.
+
+## 2026-09-15 — ALTERNATE SCREEN — ghostty, TERM=xterm-ghostty, herdr=no, tmux=no
+
+| mode set | plain drag selects | wheel arrives as ARROW KEYS | app saw click | Shift+drag selects |
+|---|---|---|---|---|
+| `alt-off` | yes | yes | no | yes |
+| `alt-minimal` |  |  |  |  |
+| `alt-full` |  |  |  |  |
+
+## 2026-09-15 — ALTERNATE SCREEN — ghostty, TERM=xterm-ghostty, herdr=no, tmux=no
+
+| mode set | plain drag selects | wheel arrives as ARROW KEYS | app saw click | Shift+drag selects |
+|---|---|---|---|---|
+| `alt-off` | yes | yes | no | yes |
+| `alt-minimal` | ? | no | yes | yes |
+| `alt-full` | no | no | yes | yes |
+
+## What the alternate-screen measurement decided
+
+(The first `alt-` section above is a partial run — only `alt-off` was answered. The second
+is complete and is the one that counts. Both agree on `alt-off`.)
+
+**The hypothesis holds.** On the alternate screen with **no** mouse reporting:
+
+| | selection | wheel | click |
+|---|---|---|---|
+| reporting **off** | **plain drag works** | **works, delivered as arrow keys** | does not reach the app |
+| reporting **on** | needs `Shift` | works, as SGR mouse events | reaches the app |
+
+So "mouse controls **and** native dragging" was never a contradiction, and needs no toggle
+key to achieve. A TUI that enables no reporting keeps the terminal's own selection *and*
+still scrolls, because the terminal translates the wheel into `Up`/`Down`. This is almost
+certainly what Copilot CLI does, and it is measurable on any TUI with the `script` recipe
+above.
+
+**This retires the change's whole premise.** The proposal, specs, design, and tasks were
+written on "capture stays on, `m` releases it". That is now the *inferior* default: it makes
+the reader press a key to get back a behaviour they could have had for free.
+
+What the pane actually loses with reporting off is narrower than it first appears:
+
+- **Wheel scrolling survives** — and survives through machinery that already exists.
+  `action_for` already maps `Up`/`Down` to `Prev`/`Next`, so a wheel event with reporting
+  off is already a binding this pane implements. What is lost is *region-awareness*: the
+  arrow keys act on the routed region, while `mouse-input`'s wheel acts on the region under
+  the pointer.
+- **Genuinely lost:** click-to-select-a-row, second-click-to-open, click-to-fold-a-section,
+  and click-to-switch-a-tab — the four gestures that need a button.
+
+So the live question is no longer "how do we add a toggle" but "which way round is the
+default", and the honest answer depends on how much the four click bindings are worth
+against selection working without anyone pressing anything.
