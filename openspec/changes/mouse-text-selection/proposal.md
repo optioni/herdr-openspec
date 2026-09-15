@@ -1,121 +1,134 @@
 ## Why
 
-You cannot select text in the dashboard pane with the mouse. That is a direct consequence of
-`mouse-input`: `TerminalGuard::enter` issues `EnableMouseCapture`, and a terminal with mouse
-reporting on routes drags to the application instead of doing native selection. The dashboard
-gets click-to-select, scroll, fold, and tab-switch; the user loses copying a requirement out of
-a spec.
+You cannot select text in the dashboard pane with the mouse. `mouse-input` enabled mouse
+capture, and a terminal with reporting on routes drags to the application instead of doing
+native selection. The pane gained click, wheel, fold and tab-switch; the reader lost copying
+a requirement out of a spec.
 
-This proposal was written as an investigation, and the investigation is done. `notes/probe.sh`
-was run twice — Ghostty inside a Herdr pane and Ghostty bare — and the two tables are identical
-row for row (`notes/measurements.md`). What they establish:
+This proposal was scoped as an investigation. The investigation is finished, and it changed
+the answer twice. Everything below rests on `notes/measurements.md`, not on report.
 
-- **Plain drag-selection is suppressed under every mode set**, today's included, and works only
-  with reporting fully off. This is the terminal's decision; no mode set and no code in this
-  crate changes it.
-- **Shift+drag restores selection under every mode set.** Useful, and worth writing down, but
-  it is a modifier the user has to know about — not the thing asked for.
-- **Narrowing the mode set buys nothing.** `?1000 ?1006` suppresses plain drag exactly as the
-  full bundle does, while delivering click and wheel intact.
-- **Herdr is not in the way.** Identical inside and outside a pane.
+**What was measured.** Native drag-selection and mouse reporting are genuinely exclusive:
+`?1000` alone — press and release, no motion requested — still suppresses selection, and
+there is no narrower request to make. `Shift`+drag works under every mode set, which
+falsifies a sentence already in `specs/mouse-input/spec.md` claiming `Option` on macOS.
+Herdr is not involved.
 
-So the shipped answer is the one the investigation predicted: a key that releases capture on
-demand. With capture off, plain drag behaves exactly as the measurement's `off` control row —
-select and copy natively — and the key puts capture back.
+**What that first looked like, and why it was wrong.** The obvious conclusion was a key that
+releases capture on demand. It was the wrong conclusion, because GitHub Copilot CLI has both
+working at once — and the reason is not a mode set. Captured through a pty, the terminal
+delivers Copilot a complete drag: a press, eighteen consecutive `left+motion` reports, a
+release, with the `Shift` bit set on **0 of 79** reports. Its own output carries two
+`ESC]52;` clipboard writes and sixty-five reverse-video sequences. Copilot holds
+`?1003 ?1006` for the whole session, consumes the drag, paints its own highlight, and copies
+through OSC 52. What looks native is a reimplementation.
 
-Unplanned work past Phase 6.
+**And it partitions the screen rather than disambiguating gestures.** In Copilot a drag
+cannot select the top two rows; it starts at the third. Those rows are its tab bar. Regions
+that take clicks do not take selection, and there is no press-versus-drag rule at all.
+
+This pane is unusually well placed to copy that, because the partition already exists as
+tested code. `ui::layout::zone` resolves any point in the frame to exactly one of six
+`Zone` values, and the split falls out of them.
 
 ## What Changes
 
-- **A key, `m`, toggles mouse capture for the running pane.** Capture stays **on** at startup:
-  nothing about today's behaviour changes until the key is pressed. Pressing it releases
-  capture, so the terminal does its own selection; pressing it again re-enters capture.
-- **The pane says so while capture is off.** A dim badge in the list region's heading row, on
-  the pattern `degraded-states` established for `file mode` — silence would read as the mouse
-  having broken.
-- **While capture is off, every key still works and no mouse gesture arrives.** The pane is
-  fully usable by keyboard, which is the property that made a refused `enable_mouse` a non-fatal
-  stored problem in the first place.
-- **The toggle goes through the existing `TerminalOps` seam**, injected into `run_loop` as a
-  `&dyn Fn(bool) -> Result<(), String>` on exactly the terms `ui::read_artifact` is injected
-  today. No view file gains an I/O call, and `src/ui/terminal.rs` remains the only file naming
-  a crossterm terminal-mode function.
-- **A re-enable that the terminal refuses leaves capture off and names the reason**, rather
-  than claiming a state the terminal did not grant.
-- **`SPEC.md` and `README.md` record the trade-off and the Shift bypass**, scoped to what was
-  actually proven: Shift, Ghostty, macOS. Option+drag was measured **not** to work in Ghostty,
-  so nothing claims it does.
-- Not **BREAKING**: the key is additive and the default capture state does not move.
+- **The detail region's content area becomes selectable.** A left drag beginning on a
+  `Zone::DetailRow` that is not a section header starts a text selection, extends with
+  motion, and completes on release.
+- **Every other region keeps its click, unchanged.** `Zone::ListRow` still selects a change,
+  opens it, and folds a section; `Zone::DetailTab` still switches tab; a `Zone::DetailRow`
+  that **is** a section header still folds. No binding changes its dispatch timing, because
+  the selectable region and the clickable regions do not overlap.
+- **One existing binding gives way:** `Target::DetailLine`, which moves the detail cursor to
+  a clicked line. It is the weakest click in the pane, and it is the only one inside the
+  region that becomes selectable.
+- **The selection is painted by the pane**, as a reverse-video span over the selected cells,
+  through a palette role of its own.
+- **The selected text is copied on release, through OSC 52.** The text comes from
+  `ui::detail::content_lines`, which already returns `Vec<ContentRow>` from a pure function —
+  no `ratatui::buffer::Buffer` is read back.
+- **`SPEC.md`'s bypass sentence is corrected** from `Option` to `Shift`, scoped to what was
+  measured, and bound by a doc-conformance leg so it cannot silently regress.
+- Not **BREAKING** for the keyboard: no key changes, and no mouse gesture outside the detail
+  content area behaves differently.
 
 ## Non-Goals
 
-- Implementing selection, a clipboard, or a copy buffer inside the TUI. Rendering a selection
-  overlay and owning copy is a large feature and the wrong one — the terminal already does this
-  well when we let it, which is the whole mechanism this change uses.
-- **Narrowing the capture mode set.** Measured to buy nothing for selection. Dropping
-  `?1002`/`?1003`/`?1015` remains defensible purely as removing cost no binding asks for, but it
-  is a separate change with a separate justification and must never be sold as a selection fix.
-- Removing mouse support, or changing the default capture state. The bindings `mouse-input`
-  shipped stay, and stay on at startup.
-- OSC 52 clipboard writes, or any escape sequence that reaches outside the pane.
-- Herdr's own mouse handling, which the measurement showed is not involved.
-- Claiming the Shift bypass on terminals it was not measured on. iTerm2, Terminal.app, and the
-  Linux terminals are unmeasured; the documentation says so rather than generalising.
+- **No toggle key.** Two designs were considered and discarded on evidence: releasing capture
+  on demand, and inverting the default. The partition needs neither.
+- **No auto-scroll at the edges.** A drag that runs past the top or bottom of the content
+  area does not scroll it; a selection is bounded by what is on screen. This bounds the
+  change, and Copilot's own behaviour here is unmeasured. A follow-up can lift it.
+- **No selection in the list region, the tab bar, or on a section header row.** Those are the
+  clickable half of the partition, and blurring it reintroduces exactly the disambiguation
+  problem the partition avoids.
+- **No selection across a fold boundary being "expanded"** — what is selected is what is
+  drawn, which is what the reader sees.
+- **No narrowing of the capture mode set.** Measured to buy nothing for selection. Dropping
+  `?1002`/`?1003`/`?1015` remains defensible as dead-cost removal and is a separate change —
+  except that `?1003` is now **load-bearing**, since drag motion is what this change consumes.
 - Windows terminals, out of scope repository-wide.
+
+### Two non-goals this proposal explicitly reverses
+
+The investigation-era version of this document ruled both of these out, before any of it was
+measured. They are reversed deliberately, and they are the whole mechanism:
+
+1. *"Implementing selection, a clipboard, or a copy buffer inside the TUI. Rendering a
+   selection overlay and owning copy is a large feature and the wrong one."* It is a large
+   feature. It is not the wrong one: it is the only thing that delivers selection and clicks
+   together, and it is what the comparison program does.
+2. *"OSC 52 clipboard writes, or any escape sequence that reaches outside the pane."* A
+   clipboard write is the point. It is confined to `src/ui/terminal.rs`, which already owns
+   every terminal escape in the crate.
 
 ## Capabilities
 
 ### New Capabilities
 
-None. A toggle belongs to the capabilities that already own capture, the loop, and the
-inventory.
+- `text-selection`: the drag state machine, the region partition that decides where a drag
+  may begin, what the selected span covers, and what is copied.
 
 ### Modified Capabilities
 
-- `terminal-lifecycle`: capture becomes something that can be left and re-entered mid-session,
-  not only at start-up and teardown. The mirrored enter/leave ordering and the panic-hook
-  guarantee must survive that. `restore_then` already calls `disable_mouse` unconditionally and
-  deliberately, so the hook still consults no state — the property that makes this safe is
-  already in place and must not be traded away.
-- `mouse-input`: what the pane does while capture is off — no gesture arrives, and every key
-  binding is unaffected.
-- `dashboard-loop`: the `m` key and the capture state it owns.
-- `binding-inventory`: `m` joins the `Pane` group. The spec pins six groups with binding counts
-  5, 7, 4, 4, 5, 6 summing to 31; this moves the fourth count to 5 and the sum to 32, and the
-  overlay's row count with it. Every one of those figures is asserted in `cargo test`.
-- `responsive-layout`: the footer gains a `mouse off (m)` badge while capture is released,
-  placed **first** for the reason `? help` is — hints drop from the end, and a badge explaining
-  a silent mouse must not be the first thing lost. The footer rather than the list region's
-  heading row, where `file mode` sits, because below the 100-column breakpoint at
-  `Route::Detail` that region is not drawn at all and the detail route is exactly where a
-  reader releases capture to copy out of a spec.
-
-`degraded-coverage` is **not** modified. A refused capture change is a new row of `SPEC.md`'s
-degraded-states table and needs a named proving test in `tests/degraded-coverage.toml`, but
-that obligation is already this repository's standing rule for any new row, and
-`terminal-lifecycle` states it inline exactly as the start-up refusal row does today. A delta
-restating the general requirement would add no constraint.
+- `mouse-input`: left drag and left release are resolved rather than ignored; the documented
+  gesture table grows; the falsified `Option` bypass sentence is corrected.
+- `dashboard-loop`: new `Dashboard` fields for the drag anchor and focus (**15** today, by
+  `awk '/^pub struct Dashboard/,/^}/' src/ui/app.rs | grep -cE '^\s+pub [a-z_]+:'`), and new
+  `Action` variants (**24** today, by the same method over `pub enum Action`).
+- `binding-inventory`: the action sweep's pinned pair — `union.len() == 24`,
+  `bound.len() == 22` — and the test's own name, plus a `Mouse` group row per new action.
+- `help-overlay`: `apply_help_action` is an exhaustive match with no wildcard, and its
+  requirement asserts "seventeen plus seven is the twenty-four `Action` carries". Both move.
+  If `INVENTORY` grows, `content_rows` moves from **42** (`src/ui/help.rs:290`) with it.
+- `view-palette`: one new `Role` for the selection highlight (**30** today).
+- `terminal-lifecycle`: `TerminalOps` gains a clipboard write (**six** methods today).
+- `artifact-content`: `ContentRow` is the source of the copied text.
+- `list-selection`: pins `Target::DetailLine`, the binding that gives way.
+- `doc-conformance`: a twelfth claim, and `AGENTS.md`'s "eleven further claims" with it.
+- `degraded-coverage`: a refused or unsupported clipboard write is a new degraded-states row.
 
 ## Impact
 
-- `src/ui/terminal.rs` — a guard method for setting capture mid-session; still the only file
-  permitted to name a crossterm terminal-mode function, and `NORAW`'s per-name control must
-  still pass.
-- `src/ui/mod.rs` — the injected capture seam and its one production binding, beside
-  `read_artifact`.
-- `src/ui/app.rs`, `src/ui/help.rs`, `src/ui/list.rs` — the action, the inventory row, the badge.
-- `SPEC.md` — Keys, the degraded-states table, and the accepted trade-off.
-- `README.md` — Keys, bound to `INVENTORY` by `tests/doc_contract.rs`.
-- `tests/degraded-coverage.toml` — the new row's proving test.
-- `openspec/specs/binding-inventory/spec.md` — the counts above.
+- `src/ui/driver.rs` — drag resolution. **`run_loop` lives here**, not in `src/ui/mod.rs`.
+- `src/ui/app.rs` — the actions, the drag state, and applying it.
+- `src/ui/detail.rs` — the selected span over `ContentRow`s, and extracting its text.
+- `src/ui/view.rs` — painting the highlight.
+- `src/ui/palette.rs` — the role.
+- `src/ui/terminal.rs` — the OSC 52 write, behind `TerminalOps`.
+- `src/ui/help.rs` — the inventory rows and the row count.
+- `SPEC.md`, `README.md`, `AGENTS.md` — keys, gestures, the corrected bypass, the claim count.
+- `tests/doc_contract.rs`, `tests/degraded-coverage.toml` — the moved counts and the new rows.
 - No dependency change. No I/O added to a pure view file.
 
 ## Open Questions for Review
 
-1. **Where the badge goes when `file mode` is already there.** Both want the list region's
-   heading row, and that row already drops the `file mode` badge whole rather than truncating it
-   when the row is too narrow. Two badges need an order and a combined drop rule, or a second
-   home.
-2. **Whether `m` is the right key.** It is free, and mnemonic, but it is also a plain letter
-   next to `a`/`c`/`s`/`g`, which all start agents. A mis-keyed `m` is harmless; a mis-keyed
-   neighbour is not.
+1. **How many `Action` variants the drag needs.** Each one costs a `Mouse` group row, and
+   each row moves `content_rows`, `binding-inventory`'s counts, and `help-overlay`'s
+   arithmetic. One phase-carrying variant is cheaper than three; whether it is clearer is a
+   judgement design.md must make and defend.
+2. **What a terminal that ignores OSC 52 should show.** The write cannot be confirmed, so the
+   pane cannot know it failed. Silence risks the reader believing a copy happened.
+3. **Whether the selection survives a refresh.** The live tier can replace the change set
+   mid-drag, and the rows under the selection can move.
