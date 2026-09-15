@@ -116,8 +116,26 @@ text from the `ContentRow` values
 write. No `ratatui::buffer::Buffer` SHALL be read back: the rows are already data, produced
 by a pure function, and reading the rendered buffer would make the copy depend on the draw.
 
-`src/ui/terminal.rs` SHALL remain the only file in the crate naming a terminal escape. The
-write SHALL go through the existing injected `TerminalOps` seam rather than a second one.
+`src/ui/terminal.rs` SHALL remain the only file in the crate naming a terminal escape, and
+the write SHALL reach it through `TerminalOps` rather than a second seam.
+
+**The call site is an injected writer, named here because the render loop has none today.**
+`ui::driver::run_loop` takes no `TerminalOps` handle — the guard is built in `ui::run` and
+never travels inward — so the pane SHALL thread a `ClipboardWriter<'a> = &'a dyn Fn(&str) ->
+Result<(), String>` into `run_loop` **beside `ArtifactReader`**, bound in `src/ui/mod.rs` to
+the guard's `write_clipboard`. This is the crate's established shape for exactly this problem:
+`read` is already injected that way, for the same reason, and a test drives both with a
+closure. No view file SHALL name the writer.
+
+**A failed write is reported on `Selection`, not on any existing problem list.** `Selection`
+SHALL carry `problem: Option<String>`, set when the write returns `Err` and `None` otherwise.
+Every existing `!`-marked list — `launch.problems`, `refresh.problems`, `changes.problems`,
+`refresh.startup`, `agents.problem` — is replaced wholesale on its own producer's cadence, so
+a reason put in one would vanish before the reader saw it; and `Dashboard` is pinned at
+sixteen fields, so a dedicated field is not available. `Selection` is the honest home: it is
+created and cleared at exactly the moments the reason is and stops being true, and it is
+already this change's own type. The reason SHALL render as a **detail-region** problem row
+beside `detail.problems`, because the gesture that produced it is a detail-region gesture.
 
 **A single press copies nothing**, so clicking around the content area never disturbs the
 system clipboard. Only a gesture that highlights something — a drag, a double press, a triple
@@ -178,7 +196,8 @@ opens its detail" already fires on state rather than time, and its third click d
 does nothing. The accepted consequence is the one that rule already accepts: presses
 separated by a long pause still count as consecutive.
 
-`Selection` SHALL carry the granularity — armed, word, row, or span — rather than `Dashboard`
+`Selection` SHALL carry the granularity — armed, word, row, or span — and the failure
+reason above — rather than `Dashboard`
 carrying a further field. **Armed** is the state after a first press: an anchor and focus at
 one cell, drawn as nothing. It is what lets a single field express "a press landed here and
 selected nothing" without a second field to forget to clear. A drag SHALL set the granularity

@@ -67,7 +67,9 @@ crate, `tests/` included.
 - **AND** the sweep fails when that file is absent or names no such sequence, so the exclusion
   cannot pass vacuously
 - **AND** a `write_clipboard` whose underlying write fails returns a `TerminalError` naming
-  `write_clipboard`, which the pane renders as a problem row
+  `write_clipboard`, whose text the pane stores on `Selection::problem` and renders as a
+  **detail-region** problem row beside `detail.problems` — not on any list-region problem
+  list, every one of which is replaced wholesale by its own producer
 
 #### Scenario: A clipboard write changes no terminal mode
 

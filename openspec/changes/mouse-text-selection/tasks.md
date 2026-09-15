@@ -97,12 +97,25 @@
       must print **33**; `grep -c '\b42\b' src/ui/help.rs` printed **11** and must print 0;
       `grep -c '\b44\b' src/ui/help.rs` printed **4** and must print 0. The two clamp
       **values** 5 and 25 become 6 and 26, and `assert_eq!(band.height, 44)` becomes 45.
-- [ ] 5.5 CHECK: Add the `action_name` arm and the `apply_help_action` arm, and move
-      `union.len()` 24 → 25 and `bound.len()` 22 → 23 in `tests/doc_contract.rs`, renaming the
-      sweep test to drop its numeral.
-- [ ] 5.6 CHECK: Add the `m`-free drag row to `SPEC.md` → Keys and `README.md` → Keys in this
-      group. `compare_key_atoms` tolerates no residual, so an inventory row without its two
-      document rows is a red tree.
+- [ ] 5.5 CHECK: Add the arms and move the counts in `tests/doc_contract.rs` — the
+      `action_name` arm, `union.len()` 24 → 25, `bound.len()` 22 → 23, the sweep test renamed
+      to drop its numeral, and `the_sweep_covers_the_mouse_under_both_overlay_states`'
+      `expected_closed` set (`tests/doc_contract.rs:2828`) from seven names to eight.
+- [ ] 5.5b CHECK: Move the **four hand-enumerations of `Action` in `src/ui/app.rs`'s own test
+      module**, none of which any gate finds for you: `assert_known_variant`'s exhaustive
+      match (`:5034`, a compile error until its arm exists), the `variants` array and its
+      `assert_eq!(…, 24)` (`:5063`, `:5104`), `seventeen_inert_actions() -> [Action; 17]`
+      (`:5383`) with its three call sites, its test name, and the prose comment at `:861`.
+      Check: `grep -cE 'variants.len\(\), 24|\[Action; 17\]' src/ui/app.rs` → **2** at HEAD,
+      must print **0**.
+- [ ] 5.6 CHECK: Add the drag row to **`SPEC.md`'s `| Gesture | Action |` table only**
+      (`SPEC.md:660`). The binding check that fires is `mouse_bindings_match_spec_md`
+      (`tests/doc_contract.rs:2029`), a set-equality between that table's backticked
+      `Action::` names and `mouse_action`'s body, so `Action::Select` in the resolver requires
+      the row. Do **not** touch `README.md` → Keys: `grep -c '| Gesture' README.md` → **0**,
+      it has no gesture table, and `compare_key_atoms` skips the `Mouse` group entirely
+      (`tests/doc_contract.rs:2586`, `:2976`), so a row added there names a key atom the
+      inventory does not and fails the opposite direction.
 - [ ] 5.7 VERIFY: `make check` green — the whole gate, not one target. This group is the one
       most able to leave the tree inconsistent.
 
@@ -122,9 +135,13 @@
 
 - [ ] 7.1 RED: Write failing tests for "The clipboard write cannot be confirmed, and the pane
       claims nothing" and the `Err` half of it, driving a `Recorder` that fails the write.
-- [ ] 7.2 GREEN: Call `write_clipboard` on the completing phase only — a drag's finish, the
-      second press, the third press — and never on a first press. A failure is recorded and
-      rendered as a `!`-marked row; a success renders nothing.
+- [ ] 7.2 GREEN: Thread `ClipboardWriter<'a> = &'a dyn Fn(&str) -> Result<(), String>` into
+      `run_loop` beside `ArtifactReader` and bind it in `src/ui/mod.rs` to the guard's
+      `write_clipboard` — `run_loop` has no `TerminalOps` handle today, so there is otherwise
+      no call site (design.md → Decision 11).
+- [ ] 7.2b GREEN: Call it on the completing phase only — a drag's finish, the second press,
+      the third press — never on a first press. A failure is stored on `Selection::problem`
+      and rendered as a detail-region row; a success renders nothing (Decision 12).
 - [ ] 7.3 VERIFY: `cargo test ui::` green, and `make gates` — `NOBLOCK`, which must still find
       no clock under `src/ui/`, since the press counting is state-based by design.
 

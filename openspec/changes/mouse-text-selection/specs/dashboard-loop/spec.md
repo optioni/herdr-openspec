@@ -99,7 +99,8 @@ addition; `help: Help`, the help overlay's layer state defined by `help-overlay`
 `text-selection`'s one addition.
 
 `selection` is `None` when no span is selected and otherwise carries an anchor, a focus, and
-a granularity — armed, word, row, or span. The anchor and focus are each a line index into
+a granularity — armed, word, row, or span — and `problem: Option<String>`, the reason a
+clipboard write failed. The anchor and focus are each a line index into
 `ui::detail::content_lines` and a display column; the granularity is what lets consecutive presses at one
 cell arm, then select a word, then select a row without the pane naming a clock, which
 `NOBLOCK` forbids under `src/ui/`. It is **one** field
@@ -113,7 +114,14 @@ for the reason `help` is a sibling of `filter`: `Detail` is reloaded wholesale b
 `sync_detail` on a tab switch, a selection change, or an adopted refresh, and a selection
 that lived inside it would be silently discarded by a reload rather than deliberately
 cleared by one. The clearing is a rule `text-selection` states, not an accident of where the
-field sits. It carries plain data — no trait, no handle, no thread — so the state value stays
+field sits. `problem` lives here rather than on any existing `!`-marked list because every one of those —
+`launch.problems`, `refresh.problems`, `changes.problems`, `refresh.startup`,
+`agents.problem` — is replaced wholesale on its own producer's cadence and would drop a reason
+before the reader saw it, and because this requirement pins `Dashboard` at sixteen fields, so a
+dedicated field is not available. It is created and cleared at exactly the moments the reason
+becomes and stops being true.
+
+It carries plain data — no trait, no handle, no thread — so the state value stays
 `Clone`, `PartialEq`, and constructible in a test, and it joins `NODEFAULT-UI`'s scanned sets
 on exactly `Filter`, `Refresh`, and `Launch`'s terms.
 

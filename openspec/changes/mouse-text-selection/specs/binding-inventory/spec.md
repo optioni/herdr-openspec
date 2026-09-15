@@ -89,8 +89,8 @@ help.
 #### Scenario: The sweep covers the mouse under both overlay states
 
 - **WHEN** step 3's sweep is run with `help.open` false and then with it true
-- **THEN** the first run yields **seven** names — `SelectNext`, `SelectPrev`, `ScrollDown`,
-  `ScrollUp`, `SelectTab`, `Click`, and `Ignore` — and the second yields `ScrollDown`,
+- **THEN** the first run yields **eight** names — `SelectNext`, `SelectPrev`, `ScrollDown`,
+  `ScrollUp`, `SelectTab`, `Click`, `Select`, and `Ignore` — and the second yields `ScrollDown`,
   `ScrollUp`, `ToggleHelp`, and `Ignore`
 - **AND** `SelectTab` is in the first set because `mouse_action` maps `Zone::DetailTab` through
   `detail::tab_at` to `Action::SelectTab` (`src/ui/driver.rs:235-245`), which is reachable only

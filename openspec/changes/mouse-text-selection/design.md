@@ -40,7 +40,8 @@ Point 3 is what makes this affordable. The partition already exists here as test
 | span → text, word bounds | `src/ui/detail.rs` | `content_lines`, already pure and already returning `Vec<ContentRow>` |
 | the highlight | `src/ui/view.rs` | the existing span-to-role mapping, composed not replaced |
 | `Role::Selected` | `src/ui/palette.rs` | the crate's only `Color` site |
-| OSC 52 | `src/ui/terminal.rs` behind `TerminalOps` | the six existing mode methods; no new seam |
+| OSC 52 | `src/ui/terminal.rs` behind `TerminalOps` | the six existing mode methods; no new *trait* |
+| the clipboard **injection** | a `ClipboardWriter<'a>` parameter on `run_loop`, bound in `src/ui/mod.rs` | `ArtifactReader`, injected into `run_loop` the same way for the same reason |
 
 `ui::layout::zone` is **used, not changed**: `Zone` gains no variant.
 
@@ -80,6 +81,7 @@ detected, and the pane claims nothing about the clipboard — see Decision 6.
 | `ui::layout::zone` | **real** — it is pure, and replacing the thing under test would prove nothing | real |
 | `ui::detail::content_lines` | **real** — pure over `&str`, and the span's text comes from it | real |
 | The artifact reader `&dyn Fn(&Path) -> Result<String, String>` | replaced — the injected reader every loop test already uses | replaced |
+| The clipboard writer `&dyn Fn(&str) -> Result<(), String>` | **replaced** — a closure recording calls and answering `Ok`/`Err` on demand | replaced — same |
 | Filesystem (`openspec/` tree) | real, a scratch directory, only where a test already builds one | not reached |
 | `openspec` CLI, Herdr CLI | **not touched**; replaced wherever an existing test reaches them | not touched |
 | `notify` watcher, refresh worker, agent poller, launcher | **not touched**; already behind non-blocking trait objects | not touched |
@@ -251,6 +253,22 @@ demanding an arm for it.
 **Decision 10 — No auto-scroll at the edges.** The focus clamps to the content area. This
 bounds the change, keeps `detail.scroll` out of the drag path entirely, and leaves a
 well-defined follow-up. Copilot's behaviour here is unmeasured, so copying it would be guessing.
+
+**Decision 11 — The clipboard write reaches the terminal through a new `run_loop` parameter.**
+`run_loop` takes no `TerminalOps` handle today: the guard is built in `ui::run` and never
+travels inward, so "call `write_clipboard` on completion" had no reachable call site. A
+`ClipboardWriter<'a> = &'a dyn Fn(&str) -> Result<(), String>` is threaded in beside
+`ArtifactReader`, which solves exactly this problem in exactly this way and is already tested
+with a closure. *Alternative considered:* record a request on `Dashboard` and let the loop
+drain it, as `launch.pending` does. Rejected — it needs a field, and the sixteen-field pin
+forbids one.
+
+**Decision 12 — A failed write is reported on `Selection`, not on an existing problem list.**
+All five `!`-marked lists are replaced wholesale on their own producer's cadence, so a reason
+put in one would vanish before the reader saw it; and no dedicated field is available. The
+reason is created and cleared at exactly the moments it becomes and stops being true, which is
+the definition of belonging to `Selection`. It renders as a **detail-region** row beside
+`detail.problems`, because the gesture that produced it is a detail-region gesture.
 
 ## Risks / Trade-offs
 

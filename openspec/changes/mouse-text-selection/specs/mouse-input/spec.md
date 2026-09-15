@@ -9,8 +9,9 @@ through `Action::Next` and `Action::Prev` at the matching route;
 `Action::Click(Target::Section(_))` is what `Space` at `Route::List` already reaches;
 `Action::Click(Target::Change(_))` is what `j`/`k` and `Enter` already reach;
 `Action::SelectTab(i)` is what `1`–`9`, `[`, and `]` already reach;
-`Action::Click(Target::DetailHeader { .. })` is what `Space` at `Route::Detail` reaches, and
-`Action::Click(Target::DetailLine(_))` is what `j`/`k` and the arrows reach there.
+and `Action::Click(Target::DetailHeader { .. })` is what `Space` at `Route::Detail` reaches.
+`Action::Click(Target::DetailLine(_))` is gone: `text-selection` removes the variant, and the
+detail cursor it moved is what `j`/`k` and the arrows always reached directly.
 
 The clause is narrowed from "no key SHALL change its meaning" to "no key SHALL change its
 meaning **because of a mouse binding**", and the narrowing is this change's, stated rather
@@ -160,13 +161,13 @@ A `MouseEventKind::Down(MouseButton::Left)` SHALL be resolved by where it lands:
 | A drawn section-header row in the list region's interior | `Action::Click(Target::Section(key))` for that header's own key |
 | A drawn tab cell in the detail region's tab-bar row | `Action::SelectTab(i)` for that cell's own artifact position |
 | A drawn artifact-section header row in the detail region's content area, when the selected artifact is foldable | `Action::Click(Target::DetailHeader { line, section })` for that row's own content-line index and section index |
-| Any other drawn row of the detail region's content area, when the selected artifact is foldable | `Action::Click(Target::DetailLine(line))` for that row's own content-line index |
-| A problem row, a message row, an interior row past the last drawn row, a region's gutter, heading row or padding row, the divider, the detail region's rule row or content padding row, the detail content area when the selected artifact is **not** foldable, the detail content area below its last drawn line, the frame footer, or outside the frame | `Action::Ignore` |
+| Any other drawn row of the detail region's content area, foldable or not | `Action::Select` at its arming phase, for that row's own content-line index and display column |
+| A problem row, a message row, an interior row past the last drawn row, a region's gutter, heading row or padding row, the divider, the detail region's rule row or content padding row, the detail content area below its last drawn line, the frame footer, or outside the frame | `Action::Ignore` |
 
-`Target` SHALL gain exactly two variants for this:
+`Target` SHALL carry exactly **one** variant for this, `text-selection` having removed the
+other:
 
 ```rust
-Target::DetailLine(usize),
 Target::DetailHeader { line: usize, section: usize },
 ```
 
@@ -199,19 +200,16 @@ is why the header variant carries its line index beside its section index rather
   exactly what `Enter` does — so a second click on a selected row opens it;
 - when `target` is `Target::Change(i)`, the cursor is already on that row, and the route is
   already `Route::Detail`, change nothing;
-- when `target` is `Target::DetailLine(line)`, set `detail.scroll` to `line` and change
-  nothing else — not `route`, not `selected`, not `detail.tab`, not `detail.expanded` — so a
-  click in the content area moves that region's cursor exactly as a click on a list row moves
-  the list's, at **both** routes and without changing which region the keys address;
 - when `target` is `Target::DetailHeader { line, section }`, set `detail.scroll` to `line`
   and then toggle `section` through the very code `Action::ToggleSection` at `Route::Detail`
   runs, so a click and a `Space` on the same artifact header can never diverge — including
   that arm's own rule, stated in `artifact-folds`, that `detail.scroll` ends on the toggled
   section's header row;
-- when `target` is `Target::DetailLine` or `Target::DetailHeader` and the selected artifact
-  is not foldable, change nothing at all: `mouse_action` does not emit either variant there,
-  and `apply` SHALL be inert rather than trusting it, on the same terms it checks
-  `targets()` for the other two.
+- when `target` is `Target::DetailHeader` and the selected artifact is not foldable, change
+  nothing at all: `mouse_action` does not emit it there, and `apply` SHALL be inert rather
+  than trusting it, on the same terms it checks `targets()` for the other two. A **press** in
+  that same non-foldable content area is not inert — it arms a selection, per
+  `text-selection` — because a single-section artifact is a whole rendered document.
 
 A `MouseEventKind::Down` of `MouseButton::Right` or `MouseButton::Middle` SHALL produce
 `Action::Ignore`: there is no context menu, and no mouse gesture starts a process.
@@ -332,10 +330,10 @@ A `MouseEventKind::Down` of `MouseButton::Right` or `MouseButton::Middle` SHALL 
   that row's own content-line index and a `section` of `0`
 - **AND** applying it opens that group, sets `detail.scroll` to the group's header row, and
   leaves `route`, `selected`, and `detail.tab` unchanged
-- **AND** a left press on the progress-bar row or on its blank line returns
-  `Action::Click(Target::DetailLine(line))` for that row's own index, per the table above:
-  both are drawn rows of a foldable content area, and the table sends every drawn row that is
-  not a header there. Neither belongs to a section, so applying it moves `detail.scroll` and
+- **AND** a left press on the progress-bar row or on its blank line returns `Action::Select`
+  at its arming phase for that row's own index and column, per the table above: both are
+  drawn rows of a content area, and the table sends every drawn row that is not a header
+  there. Neither belongs to a section, so applying it arms a selection and
   folds nothing, and `Space` from where it lands is inert
 - **AND** the same two presses against a dashboard whose task file holds items but no heading
   — which does not split, so the tab is not foldable — both return `Action::Ignore`
@@ -351,6 +349,6 @@ A `MouseEventKind::Down` of `MouseButton::Right` or `MouseButton::Middle` SHALL 
   the drawn rows
 - **AND** applying it opens that scenario and leaves every other section's membership of
   `detail.expanded` exactly as it was
-- **AND** a left press on one of that scenario's body rows returns
-  `Action::Click(Target::DetailLine(line))`, which moves `detail.scroll` and folds nothing
+- **AND** a left press on one of that scenario's body rows returns `Action::Select` at its
+  arming phase, which folds nothing and moves no cursor
 
