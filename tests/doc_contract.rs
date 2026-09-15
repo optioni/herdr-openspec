@@ -3113,3 +3113,236 @@ fn the_production_slice_of_src_specs_rs_carries_no_io_or_schema_name() {
     specs_rs_production_slice_is_io_free(&src)
         .expect("src/specs.rs's production slice names no I/O or schema-reading API");
 }
+
+// ---------------------------------------------------------------------------
+// `mouse-text-selection` :: "The clipboard write's confinement is bound inside
+// `cargo test`" (`specs/doc-conformance/spec.md`) — the twelfth `tests/doc_contract.rs`
+// claim. `TerminalOps::write_clipboard` (`src/ui/terminal.rs`) is the crate's only
+// producer of the OSC 52 introducer `]52;`, and `NORAW-GREP`'s `make gates` script does
+// not sweep for it — this leg is the check that property would otherwise have gone
+// without, on the same terms the eleventh claim above states for `src/specs.rs`.
+// ---------------------------------------------------------------------------
+
+/// The single source of truth both `AGENTS.md` and `SPEC.md` are checked against below —
+/// a documented number is never trusted on its own, only compared to this. Bump it, and
+/// both prose sites, in the same commit that adds a thirteenth claim.
+const CLAIM_COUNT: usize = 12;
+
+/// The number words `agents_md_claim_count` accepts. `ten` is kept alongside the two
+/// values this repository has actually used so the negative-control test below has a
+/// third, distinct value to assert is parsed correctly without yet being correct.
+const CLAIM_COUNT_WORDS: [(&str, usize); 3] = [("ten", 10), ("eleven", 11), ("twelve", 12)];
+
+/// Parse `AGENTS.md`'s "(<number-word> further claims" marker — the sentence naming how
+/// many claims `tests/doc_contract.rs` carries beside `tests/manifest.rs` and
+/// `tests/degraded_coverage.rs`. `Err` when the marker is absent, or its number word is
+/// not one this parser recognises.
+fn agents_md_claim_count(agents_md: &str) -> Result<usize, String> {
+    const MARKER: &str = "further claims";
+    let idx = agents_md
+        .find(MARKER)
+        .ok_or_else(|| "AGENTS.md names no \"further claims\"".to_string())?;
+    let before = agents_md[..idx].trim_end();
+    for (word, value) in CLAIM_COUNT_WORDS {
+        if before.ends_with(word) {
+            return Ok(value);
+        }
+    }
+    Err(format!(
+        "AGENTS.md's \"further claims\" marker is preceded by an unrecognised number word: \
+         {before:?}"
+    ))
+}
+
+/// The number of claims `SPEC.md`'s "### Doc-conformance checks" section lists: one per
+/// `- ` bullet up to the next `###` heading, excluding the closing "A claim with no second
+/// site is argued in review, not checked." line, which is a statement about the section
+/// rather than a claim it lists. `Err` when the heading itself is missing, so a renamed
+/// or removed section fails loudly rather than comparing an empty count to `CLAIM_COUNT`.
+fn spec_md_doc_conformance_claim_count(spec_md: &str) -> Result<usize, String> {
+    const HEADING: &str = "### Doc-conformance checks";
+    const META_LINE: &str = "A claim with no second site is argued in review, not checked.";
+    let idx = spec_md
+        .find(HEADING)
+        .ok_or_else(|| "SPEC.md has no \"### Doc-conformance checks\" section".to_string())?;
+    let mut count = 0;
+    for line in spec_md[idx + HEADING.len()..].lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("###") {
+            break;
+        }
+        if let Some(rest) = trimmed.strip_prefix("- ")
+            && rest.trim() != META_LINE
+        {
+            count += 1;
+        }
+    }
+    Ok(count)
+}
+
+#[test]
+fn agents_md_claim_count_parses_and_fails_loudly() {
+    assert_eq!(
+        agents_md_claim_count("this crate carries (ten further claims — a, b, c)."),
+        Ok(10)
+    );
+    assert_eq!(
+        agents_md_claim_count("(twelve further claims — a, b, c)"),
+        Ok(12)
+    );
+    let err = agents_md_claim_count("no such phrase here").expect_err("no marker is an error");
+    assert!(err.contains("further claims"), "{err}");
+
+    let err = agents_md_claim_count("(nine further claims)")
+        .expect_err("an unrecognised number word is an error");
+    assert!(err.contains("nine"), "{err}");
+}
+
+#[test]
+fn spec_md_doc_conformance_claim_count_counts_bullets_and_skips_the_meta_line() {
+    let doc = "### Doc-conformance checks\n\n\
+               - First claim.\n\
+               - Second claim.\n\
+               - A claim with no second site is argued in review, not checked.\n\n\
+               ### Gates\n\n\
+               - Not counted at all.\n";
+    assert_eq!(spec_md_doc_conformance_claim_count(doc), Ok(2));
+
+    let err = spec_md_doc_conformance_claim_count("# SPEC\n\nno such section\n")
+        .expect_err("a missing heading is an error");
+    assert!(err.contains("Doc-conformance checks"), "{err}");
+}
+
+/// `mouse-text-selection` :: "The documented claim count matches the file" — `AGENTS.md`'s
+/// "further claims" marker and `SPEC.md`'s "Doc-conformance checks" bullet list are each
+/// bound to [`CLAIM_COUNT`], rather than trusted against one another or left as prose:
+/// neither site was machine-bound before this change, which is why they had already
+/// drifted (`SPEC.md`'s list was missing the eleventh claim, `src/specs.rs`'s purity,
+/// entirely).
+#[test]
+fn documented_claim_count_matches_the_file() {
+    let agents_md = read_doc(&manifest_dir().join("AGENTS.md")).expect("read AGENTS.md");
+    let spec_md = read_doc(&manifest_dir().join("SPEC.md")).expect("read SPEC.md");
+
+    let agents_count = agents_md_claim_count(&agents_md).expect("AGENTS.md's claim-count marker");
+    let spec_count = spec_md_doc_conformance_claim_count(&spec_md)
+        .expect("SPEC.md's Doc-conformance checks list");
+
+    assert_eq!(
+        agents_count, CLAIM_COUNT,
+        "AGENTS.md states {agents_count} further claims, expected {CLAIM_COUNT}"
+    );
+    assert_eq!(
+        spec_count, CLAIM_COUNT,
+        "SPEC.md's Doc-conformance checks section lists {spec_count} claims, expected \
+         {CLAIM_COUNT}"
+    );
+}
+
+/// Every real `.rs` file under `src/` and `tests/`, found by walking the directories —
+/// `tests/coverage_prod.rs`'s `all_src_rs_files` walk, extended to `tests/` because the
+/// confinement this claim binds must hold there too (`NORAW-GREP` sweeps both for the
+/// same reason).
+fn all_src_and_test_rs_files() -> Vec<PathBuf> {
+    fn walk(dir: &std::path::Path, out: &mut Vec<PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                walk(&path, out);
+            } else if path.extension().is_some_and(|ext| ext == "rs") {
+                out.push(path);
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(&manifest_dir().join("src"), &mut out);
+    walk(&manifest_dir().join("tests"), &mut out);
+    out.sort();
+    out
+}
+
+/// The OSC 52 introducer `write_clipboard` writes — the escape this claim confines to one
+/// file. A plain string, never a regex: the sequence starts with an ESC byte no source
+/// file spells literally, so the printable remainder `]52;` is what every producer and
+/// every searcher agree to look for.
+const OSC52_INTRODUCER: &str = "]52;";
+
+/// Paths, among `files` (each paired with its own text so the search is pure and testable
+/// without touching a real filesystem), that name [`OSC52_INTRODUCER`]. `Err` when `files`
+/// is empty — the vacuity guard for the walk itself, distinct from the vacuity guard for
+/// the excluded file, which the `#[test]` below checks separately.
+fn paths_naming_osc52(files: &[(PathBuf, String)]) -> Result<Vec<&PathBuf>, String> {
+    if files.is_empty() {
+        return Err(
+            "no .rs files found under src/ or tests/ — the walk itself found nothing".to_string(),
+        );
+    }
+    Ok(files
+        .iter()
+        .filter(|(_, text)| text.contains(OSC52_INTRODUCER))
+        .map(|(path, _)| path)
+        .collect())
+}
+
+#[test]
+fn paths_naming_osc52_finds_every_occurrence_and_rejects_an_empty_walk() {
+    let a = PathBuf::from("src/ui/terminal.rs");
+    let b = PathBuf::from("src/ui/view.rs");
+    let files = vec![
+        (
+            a.clone(),
+            "write!(stdout, \"\\x1b]52;c;{}\\x07\", payload)".to_string(),
+        ),
+        (b.clone(), "no such escape here".to_string()),
+    ];
+    assert_eq!(paths_naming_osc52(&files), Ok(vec![&a]));
+
+    let err = paths_naming_osc52(&[]).expect_err("an empty walk is an error, not a vacuous pass");
+    assert!(err.contains("no .rs files"), "{err}");
+}
+
+/// `mouse-text-selection` :: "The clipboard write's confinement is bound inside `cargo
+/// test`" — the twelfth `tests/doc_contract.rs` claim. `src/ui/terminal.rs` is the only
+/// file permitted to name the OSC 52 introducer `]52;`, the escape
+/// `TerminalOps::write_clipboard` writes; checked the same tree-wide-grep-with-a-
+/// positive-control way as the subprocess and terminal-mode seams (`NOSPAWN-GREP`,
+/// `NORAW-GREP`). The exclusion must not be vacuous: this leg fails just the same when
+/// `src/ui/terminal.rs` is absent from the walk, or present but naming no OSC 52 sequence
+/// at all — a confinement check that passes because the confined thing has disappeared is
+/// worse than none, because it is believed.
+#[test]
+fn osc52_confinement_matches_the_gate() {
+    let self_file = manifest_dir().join("tests/doc_contract.rs");
+    let confined_to = manifest_dir().join("src/ui/terminal.rs");
+
+    // Positive control — the excluded file must itself name the sequence, or the
+    // confinement below would hold vacuously.
+    let terminal_rs = read_doc(&confined_to).expect("read src/ui/terminal.rs");
+    assert!(
+        terminal_rs.contains(OSC52_INTRODUCER),
+        "src/ui/terminal.rs must itself name the OSC 52 introducer {OSC52_INTRODUCER:?}, \
+         or this confinement check passes vacuously"
+    );
+
+    // This file is excluded from the walk below for the same reason
+    // `documented_seam_names_takes_identifiers_only` fabricates names rather than reusing
+    // the real six: this claim's own doc comments and unit-test fixtures necessarily name
+    // the introducer they check for, and that is not the violation this leg exists to
+    // catch.
+    let files: Vec<(PathBuf, String)> = all_src_and_test_rs_files()
+        .into_iter()
+        .filter(|path| path != &self_file)
+        .filter_map(|path| read_doc(&path).ok().map(|text| (path, text)))
+        .collect();
+    let found = paths_naming_osc52(&files).expect("walk src/ and tests/ for the OSC 52 introducer");
+
+    assert_eq!(
+        found,
+        vec![&confined_to],
+        "the OSC 52 introducer {OSC52_INTRODUCER:?} must be named in exactly \
+         src/ui/terminal.rs, found in {found:?}"
+    );
+}

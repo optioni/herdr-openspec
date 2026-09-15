@@ -276,12 +276,13 @@ triangle — a `herdr-plugin.toml`, `README.md`, or binary-name edit that drifts
 against another fails it, deliberately asserting nothing about `target/release/`, which
 `make check` never builds), `tests/degraded_coverage.rs` (`SPEC.md`'s degraded-states
 table bound to a named, passing proving test per row), and `tests/doc_contract.rs`
-(eleven further claims — the module map, the tested-modules list, the worker-thread
+(twelve further claims — the module map, the tested-modules list, the worker-thread
 count, the MSRV, the gate-path programs, the manifest transcription, the injected
 OpenSpec context, the documented mouse bindings, the documented key bindings
 (`SPEC.md` → Keys and `README.md` → Keys against `ui::help::INVENTORY`), the
 confined terminal-seam
-names, and `src/specs.rs`'s production slice carrying no I/O or schema name — each
+names, `src/specs.rs`'s production slice carrying no I/O or schema name, and the
+OSC 52 introducer confined to `src/ui/terminal.rs` — each
 bound to the repository file that determines it; see `SPEC.md`
 → § Testing and quality gates → Doc-conformance checks). The rule all three share: **a
 documented claim with a computable second site is bound to that site inside `cargo
