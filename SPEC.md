@@ -688,11 +688,17 @@ row, and its gutters included, and, for the detail region, its tab bar as well a
 The mouse acts while filtering, unlike a printable key: a click is unambiguous
 where a keystroke is not.
 
-**Enabling mouse capture costs the terminal's own drag-to-select.** With capture
-on, the terminal stops handling mouse gestures itself, so selecting and copying
-text out of the pane requires holding `Option` (macOS) or `Shift` (most Linux
-terminals). This is the change's one accepted regression, and it affects a reader
-who never presses a mouse button.
+**Enabling mouse capture costs the terminal's own drag-to-select — outside the
+detail content area.** With capture on, the terminal stops handling mouse
+gestures itself, so a plain drag no longer selects text natively; holding
+`Shift` while dragging restores it, measured working under every capture mode
+set, including the one this pane ships. Only Ghostty on macOS was measured;
+`Option` was measured **not** to work there under any mode set, so despite the
+iTerm2/Terminal.app convention, nothing here should be read as a claim about
+those terminals or about the Linux terminals — all three are unmeasured
+(`notes/measurements.md`, `mouse-text-selection`). Inside the detail content
+area this cost no longer applies: a left drag there selects text natively
+through the pane itself (`text-selection`), copied on release through OSC 52.
 
 ### Colour and style
 
@@ -1252,6 +1258,8 @@ own such test lives in `ui::tests::load::`, never in a view module.
 - § Keys' mouse table ↔ the `Action::` variants `ui::driver::mouse_action`'s own body produces (`mouse-input`).
 - § Keys' key table and `README.md` → Keys ↔ `ui::help::INVENTORY`, itself swept against the `Action`s `ui::app::action_for` and `ui::driver::mouse_action` really produce when **executed** (`help-overlay`).
 - `AGENTS.md`'s confined terminal-seam names ↔ `scripts/gates/noraw-grep.sh`'s `RAW_RE` (`mouse-input`).
+- `src/specs.rs`'s production slice ↔ carries no filesystem, process, environment, network, standard-I/O, or schema-reading name (`specs-emphasis`).
+- The OSC 52 introducer `]52;` ↔ `src/ui/terminal.rs`, and nowhere else in the crate (`mouse-text-selection`).
 - A claim with no second site is argued in review, not checked.
 
 ### Gates
