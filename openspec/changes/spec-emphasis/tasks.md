@@ -85,7 +85,7 @@ group has an honest RED state rather than a manufactured one.
       redundant. Separately, the draft omitted a scenario that *is* this group's: see 2.1a.
       Both defects were in the reviewed package; the implementer declined the ninth name on the
       scenario's own authority and the gate found the omission.
-- [ ] 2.1a RED: Write `the_clause_recognition_is_total_over_degenerate_input` in `src/specs.rs`,
+- [x] 2.1a RED: Write `the_clause_recognition_is_total_over_degenerate_input` in `src/specs.rs`,
       from `specs/spec-delta-badges/spec.md:200` — `clause_of` on the empty string, on `"   "`,
       on a 10000-character run of `A`, on `"日本語"`, on `"AND 日本語"`, and on a string whose
       first character is a multi-byte grapheme; no call panics, every call returns `None`, `AND`
@@ -117,7 +117,7 @@ group has an honest RED state rather than a manufactured one.
       `GIVEN`, `ARRANGE`, `ACT`, `ASSERT`, and `RED`, so those literals must appear in the test
       module. Measured on the established analogue:
       `grep -cE '"(RED|GREEN|VERIFY|CHARACTERIZE|ARRANGE|ACT|ASSERT)"' src/tasks.rs` → **6**.
-- [ ] 2.5 Run the group tests — `cargo test specs:: && cargo test tasks::`, both green, and
+- [x] 2.5 Run the group tests — `cargo test specs:: && cargo test tasks::`, both green, and
       confirm the run reports a non-zero test count for `specs::` rather than the
       `running 0 tests` HEAD result recorded above.
 
