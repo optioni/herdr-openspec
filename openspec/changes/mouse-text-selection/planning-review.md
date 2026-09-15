@@ -12,7 +12,7 @@ empirical claim.
 
 ## Reviewed Against
 
-- This repository HEAD: `8659331`
+- This repository HEAD: `8659331` at review time; refreshed during apply at `6513310`
 - Sibling repository HEAD: Not applicable
 - Working tree: clean
 
@@ -38,6 +38,7 @@ the later commit; `src/`, `tests/`, `SPEC.md`, `AGENTS.md`, `README.md`, `Makefi
 | CRITICAL | specs/binding-inventory | The closed-overlay mouse sweep asserts a set of **seven** names by equality; `Select` makes it eight | Scenario corrected to eight, naming `Select` | `specs/binding-inventory` |
 | WARNING | specs (several) | Counts stale inside blocks copied verbatim: `18 + 7 = 24` (it is 25), capitalised `Seventeen` missed by a lowercase replace, the overlay's inert count in prose and in a scenario's enumerated list, and `Binding`'s "thirty-one `'static` literals" — a count belonging to `INVENTORY` | All corrected; a case-insensitive sweep for every count word this change moves now runs over every delta | `specs/dashboard-loop`, `specs/help-overlay` |
 | WARNING | tasks.md | Task 5.5b's own check printed 1, not the 2 it claimed — the assertion is wrapped across four lines | Matched on the message text instead; re-run and confirmed 2 | tasks 5.5b |
+| CRITICAL | specs/mouse-input | Found **during apply**, group 5. The re-`ADDED` requirement's scenario "A click on a task group's header folds that group" ended with a clause carried from the pre-selection requirement: a headless task file's two presses "both return `Action::Ignore`". That contradicts design.md → Decision 8, this same delta's `specs/text-selection` scenario "A non-foldable tab's content is selectable too", and task 5.1's own named RED test. A headless tracked-tasks file still draws real content rows, so a uniform resolver returns `Action::Select` there | Clause corrected to `Action::Select` at its arming phase, with the reason and the carry recorded inline. Implementation had already followed Decision 8, so no code moved | `specs/mouse-input` |
 
 ## No Remaining Implementation-Blocking Gaps
 

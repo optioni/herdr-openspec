@@ -340,7 +340,14 @@ A `MouseEventKind::Down` of `MouseButton::Right` or `MouseButton::Middle` SHALL 
   there. Neither belongs to a section, so applying it arms a selection and
   folds nothing, and `Space` from where it lands is inert
 - **AND** the same two presses against a dashboard whose task file holds items but no heading
-  — which does not split, so the tab is not foldable — both return `Action::Ignore`
+  — which does not split, so the tab is not foldable — both return `Action::Select` at its
+  arming phase, **not** `Action::Ignore`: a headless tracked-tasks file still draws real
+  content rows, and design.md -> Decision 8 forbids selection inheriting
+  `detail_row_click`'s `!foldable()` short-circuit, so the resolver treats a non-foldable
+  tab's rows exactly as it treats a foldable one's body rows. This clause was carried from
+  the pre-selection requirement, where `Ignore` was correct because nothing else could
+  answer; it is corrected here rather than left to contradict this same delta's
+  `specs/text-selection` scenario "A non-foldable tab's content is selectable too"
 
 #### Scenario: A click on a nested scenario header folds only that scenario
 

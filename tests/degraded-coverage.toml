@@ -153,7 +153,7 @@ tier = "view"
 proof = ["an_unreachable_socket_renders_the_agentless_pane"]
 verdict = "spec-corrected"
 why = "the pane renders identically whether AgentSnapshot::problem is Some or None, via render_at"
-covers = ["src/ui/app.rs:721-734"]
+covers = ["src/ui/app.rs:804-817"]
 
 [[row]]
 condition = "A launch's `pane split` call fails"

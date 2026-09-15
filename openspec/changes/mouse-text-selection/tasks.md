@@ -88,28 +88,28 @@
      INVENTORY and the two documents. Splitting it leaves the tree red between groups, which
      is what deadlocked the previous plan. -->
 
-- [ ] 5.1 RED: Write failing tests for the resolver and the press counting — "A drag begins
+- [x] 5.1 RED: Write failing tests for the resolver and the press counting — "A drag begins
       only in the detail content area", "A section header stays clickable and is never
       selectable", "One press arms, two select a word, three select the row", "A press
       elsewhere restarts the count", "A dragged span arms rather than widening", "A
       non-foldable tab's content is selectable too".
       Check: `grep -q 'Action::Select\b' src/ui/app.rs` → **exit 1 at HEAD**.
-- [ ] 5.2 GREEN: Add `Action::Select` carrying its phase, resolve left press and left drag in
+- [x] 5.2 GREEN: Add `Action::Select` carrying its phase, resolve left press and left drag in
       `mouse_action` by zone, and add the `apply` arm. Selection must not inherit
       `detail_row_click`'s `!foldable()` short-circuit (design.md → Decision 8).
-- [ ] 5.3 GREEN: Remove `Target::DetailLine` and every arm reaching it.
+- [x] 5.3 GREEN: Remove `Target::DetailLine` and every arm reaching it.
       `grep -rc 'DetailLine' src/` printed `driver.rs:5, app.rs:8` at HEAD — **13 sites** — and
       must print none.
-- [ ] 5.4 CHECK: Add the `Mouse` group row and move the counts it forces, all here.
+- [x] 5.4 CHECK: Add the `Mouse` group row and move the counts it forces, all here.
       `grep -c 'input:' src/ui/help.rs` printed **32** (31 bindings plus the struct field) and
       must print **33**; `grep -c '\b42\b' src/ui/help.rs` printed **11** and must print 0;
       `grep -c '\b44\b' src/ui/help.rs` printed **4** and must print 0. The two clamp
       **values** 5 and 25 become 6 and 26, and `assert_eq!(band.height, 44)` becomes 45.
-- [ ] 5.5 CHECK: Add the arms and move the counts in `tests/doc_contract.rs` — the
+- [x] 5.5 CHECK: Add the arms and move the counts in `tests/doc_contract.rs` — the
       `action_name` arm, `union.len()` 24 → 25, `bound.len()` 22 → 23, the sweep test renamed
       to drop its numeral, and `the_sweep_covers_the_mouse_under_both_overlay_states`'
       `expected_closed` set (`tests/doc_contract.rs:2828`) from seven names to eight.
-- [ ] 5.5b CHECK: Move the **four hand-enumerations of `Action` in `src/ui/app.rs`'s own test
+- [x] 5.5b CHECK: Move the **four hand-enumerations of `Action` in `src/ui/app.rs`'s own test
       module**, none of which any gate finds for you: `assert_known_variant`'s exhaustive
       match (`:5034`, a compile error until its arm exists), the `variants` array and its
       `assert_eq!(…, 24)` (`:5063`, `:5104`), `seventeen_inert_actions() -> [Action; 17]`
@@ -117,7 +117,7 @@
       Check: the assertion is wrapped across lines, so match the text not the call —
       `grep -cE '\[Action; 17\]|the twenty-four variants' src/ui/app.rs` → **2** at HEAD
       (`:5383` and `:5104`), must print **0**.
-- [ ] 5.6 CHECK: Add the drag row to **`SPEC.md`'s `| Gesture | Action |` table only**
+- [x] 5.6 CHECK: Add the drag row to **`SPEC.md`'s `| Gesture | Action |` table only**
       (`SPEC.md:660`). The binding check that fires is `mouse_bindings_match_spec_md`
       (`tests/doc_contract.rs:2029`), a set-equality between that table's backticked
       `Action::` names and `mouse_action`'s body, so `Action::Select` in the resolver requires
@@ -125,7 +125,7 @@
       it has no gesture table, and `compare_key_atoms` skips the `Mouse` group entirely
       (`tests/doc_contract.rs:2586`, `:2976`), so a row added there names a key atom the
       inventory does not and fails the opposite direction.
-- [ ] 5.7 VERIFY: `make check` green — the whole gate, not one target. This group is the one
+- [x] 5.7 VERIFY: `make check` green — the whole gate, not one target. This group is the one
       most able to leave the tree inconsistent.
 
 ## 6. Painting the highlight
