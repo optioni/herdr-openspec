@@ -204,6 +204,13 @@ fn render_detail_rule(frame: &mut Frame, rule: Rect) {
 /// interior's last column. Draws nothing when the content area has zero
 /// width or zero height — `content_lines` always returns at least one
 /// line, but there may be no row to draw it into.
+///
+/// `text-selection`'s addition: every cell [`highlight_span`] reports for
+/// `dashboard.selection` is re-styled after its segment is drawn, by
+/// **patching** `Role::Selected` onto the cell's own style rather than
+/// replacing it (design.md -> Decision 7) — a selected heading cell keeps its
+/// heading colour and gains only the reversal. This is `cell_mut`, the same
+/// per-cell patch [`render_list`] already uses for a row's own badge.
 fn render_detail_content(frame: &mut Frame, content: Rect, dashboard: &Dashboard) {
     if content.width == 0 || content.height == 0 {
         return;
@@ -221,6 +228,10 @@ fn render_detail_content(frame: &mut Frame, content: Rect, dashboard: &Dashboard
     } else {
         scroll_offset(rows.len(), dashboard.detail.scroll, content.height)
     };
+    let highlight = dashboard
+        .selection
+        .as_ref()
+        .and_then(|selection| highlight_span(&rows, selection));
     let buf = frame.buffer_mut();
     for (i, row) in rows
         .iter()
@@ -228,6 +239,7 @@ fn render_detail_content(frame: &mut Frame, content: Rect, dashboard: &Dashboard
         .take(content.height as usize)
         .enumerate()
     {
+        let line = offset + i;
         let y = content.y + i as u16;
         let mut x = content.x;
         let last_col = content.x + content.width;
@@ -254,6 +266,84 @@ fn render_detail_content(frame: &mut Frame, content: Rect, dashboard: &Dashboard
             }
             buf.set_string(x, y, text, style);
             x += columns(text) as u16;
+        }
+        if let Some((from, to)) = highlight_columns(highlight, line, row) {
+            for col in from..to {
+                let cx = content.x + col;
+                if cx >= last_col {
+                    break;
+                }
+                if let Some(cell) = buf.cell_mut((cx, y)) {
+                    let patched = cell.style().patch(palette::style(Role::Selected));
+                    cell.set_style(patched);
+                }
+            }
+        }
+    }
+}
+
+/// The half-open display-column range highlighted on content row `line`, or
+/// `None` when `line` falls outside `highlight`'s own line range.
+/// [`highlight_span`] resolves the whole selection once, before any row is
+/// drawn; this narrows that one answer to `row`'s own rendered length —
+/// `span_text`'s exact per-line math (`ui::detail::span_text`), so a line
+/// strictly inside a multi-line span highlights to its own rendered end
+/// rather than out to the content area's edge.
+fn highlight_columns(
+    highlight: Option<((usize, u16), (usize, u16))>,
+    line: usize,
+    row: &detail::ContentRow,
+) -> Option<(u16, u16)> {
+    let ((start_line, start_col), (end_line, end_col)) = highlight?;
+    if !(start_line..=end_line).contains(&line) {
+        return None;
+    }
+    let total = columns(&row.text()) as u16;
+    let from = if line == start_line {
+        start_col.min(total)
+    } else {
+        0
+    };
+    let to = if line == end_line {
+        end_col.min(total)
+    } else {
+        total
+    };
+    Some((from, to))
+}
+
+/// The line/column range a [`Selection`] highlights, derived from its
+/// granularity rather than read verbatim from `anchor`/`focus`: `apply_select`
+/// leaves `anchor == focus` at the pressed cell for both `Word` and `Row`
+/// (`ui::app::apply_select`), so the actual highlighted columns — the word
+/// under that cell, or the whole rendered row — are resolved here, at render
+/// time, from `rows` itself. `Armed` highlights nothing (design.md -> Decision
+/// 3), and a `Word` press that landed on whitespace highlights nothing either,
+/// since [`detail::word_at`] reports `None` for it.
+fn highlight_span(
+    rows: &[detail::ContentRow],
+    selection: &crate::ui::app::Selection,
+) -> Option<((usize, u16), (usize, u16))> {
+    use crate::ui::app::Granularity;
+    match selection.granularity {
+        Granularity::Armed => None,
+        Granularity::Word => {
+            let (line, column) = selection.anchor;
+            let (start, end) = detail::word_at(rows, line, column)?;
+            Some(((line, start), (line, end)))
+        }
+        Granularity::Row => {
+            let (line, _) = selection.anchor;
+            let total = columns(&rows.get(line)?.text()) as u16;
+            Some(((line, 0), (line, total)))
+        }
+        Granularity::Span => {
+            let (anchor, focus) = (selection.anchor, selection.focus);
+            Some(if anchor <= focus {
+                (anchor, focus)
+            } else {
+                (focus, anchor)
+            })
         }
     }
 }
