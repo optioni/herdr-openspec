@@ -65,10 +65,16 @@ pub struct Face {
     /// A task's leading lifecycle label, as `crate::tasks::label_of` classifies
     /// it.
     pub label: Option<crate::tasks::LabelRole>,
+    /// A delta badge's marker, as `ui::detail` sets it on a requirement
+    /// section's badge segment. `spec-emphasis`' one new field, on the same
+    /// terms as `muted` and `label`: no markdown construct is a delta
+    /// operation, so [`lines`] leaves this `None` on every segment it
+    /// returns.
+    pub delta: Option<crate::specs::DeltaOp>,
 }
 
 impl Face {
-    /// The all-`false`, `heading: None`, `label: None` value.
+    /// The all-`false`, `heading: None`, `label: None`, `delta: None` value.
     pub fn plain() -> Face {
         Face::default()
     }

@@ -334,6 +334,18 @@ fn style_for(face: &Face) -> Style {
             crate::tasks::LabelRole::Other => Role::TaskLabel,
         }));
     }
+    // Tenth and last: a badge segment carries the marker and nothing else, a
+    // clause keyword carries no badge, so `label` and `delta` are never both
+    // `Some` in production — the order between them is a totality statement
+    // rather than a precedence decision (design.md -> "`ui::view` takes every
+    // style it applies from the palette").
+    if let Some(op) = face.delta {
+        style = style.patch(palette::style(match op {
+            crate::specs::DeltaOp::Added => Role::DeltaAdded,
+            crate::specs::DeltaOp::Modified => Role::DeltaModified,
+            crate::specs::DeltaOp::Removed => Role::DeltaRemoved,
+        }));
+    }
     style
 }
 

@@ -309,9 +309,13 @@ fn heading_line(heading: &crate::tasks::Heading, width: u16) -> crate::ui::markd
                 quoted: false,
                 strikethrough: false,
                 // A heading line is neither muted nor labelled: it is the
-                // group's own name, not a task item.
+                // group's own name, not a task item. It carries no delta
+                // badge either — that is `ui::detail`'s field to set, on a
+                // requirement section's badge segment, never a tracked-tasks
+                // group's own heading.
                 muted: false,
                 label: None,
+                delta: None,
             },
         }],
     }
