@@ -3411,6 +3411,209 @@ mod tests {
         );
     }
 
+    /// `spec-emphasis` / `artifact-folds` :: the attribution walk. Every
+    /// section's `operation`, in order.
+    fn operation_of(detail: &Detail) -> Vec<Option<crate::specs::DeltaOp>> {
+        detail.sections.iter().map(|s| s.operation).collect()
+    }
+
+    /// `artifact-folds` :: "A delta spec's requirement sections carry their
+    /// operation and nothing else does" — a level-2 operation heading resets
+    /// the walk rather than nesting, and the operation heading itself, the
+    /// file section ahead of it, and every non-requirement section stay
+    /// unbadged.
+    #[test]
+    fn a_delta_specs_requirement_sections_carry_their_operation_and_nothing_else_does() {
+        let mut d = dashboard_over(
+            &[(
+                "specs",
+                &[
+                    "/repo/openspec/changes/c/specs/degraded-coverage/spec.md",
+                    "/repo/openspec/changes/c/specs/markdown-render/spec.md",
+                ],
+            )],
+            None,
+        );
+        const FIVE_HEADINGS: &str = "## ADDED Requirements\n\n### Requirement: A\nA text.\n\n#### Scenario: a1\n- **WHEN** a\n- **THEN** b\n\n## REMOVED Requirements\n\n### Requirement: B\nB text.\n";
+        let recorder = crate::testutil::RecordingReader::new(
+            vec![(
+                std::path::PathBuf::from("/repo/openspec/changes/c/specs/degraded-coverage/spec.md"),
+                Ok(FIVE_HEADINGS.to_string()),
+            )],
+            Ok("## MODIFIED Requirements\n".to_string()),
+        );
+        let read = |p: &std::path::Path| recorder.read(p);
+
+        d.sync_detail(&read);
+
+        assert_eq!(
+            shape_of(&d.detail)[..6],
+            [
+                (Some("degraded-coverage"), 0),
+                (Some("ADDED Requirements"), 1),
+                (Some("Requirement: A"), 2),
+                (Some("Scenario: a1"), 3),
+                (Some("REMOVED Requirements"), 1),
+                (Some("Requirement: B"), 2),
+            ],
+            "the file section and the five headings, in order"
+        );
+        assert_eq!(
+            operation_of(&d.detail)[..6],
+            [
+                None,
+                None,
+                Some(crate::specs::DeltaOp::Added),
+                None,
+                None,
+                Some(crate::specs::DeltaOp::Removed),
+            ],
+            "`Requirement: B` carries `Removed` and not `Added` — the second \
+             operation heading reset the walk rather than nesting"
+        );
+        assert!(
+            d.detail.sections[..6].iter().all(|s| s.progress.is_none()),
+            "the two derived fields are independent; a spec section is not \
+             mistaken for a task group"
+        );
+    }
+
+    /// `artifact-folds` :: "A requirement above every operation heading
+    /// carries none" — a requirement with no preceding operation heading is
+    /// unbadged rather than inheriting from one that comes later.
+    #[test]
+    fn a_requirement_above_every_operation_heading_carries_none() {
+        let mut d = dashboard_over(
+            &[("specs", &["/repo/openspec/changes/c/specs/a/spec.md"])],
+            None,
+        );
+        const TEXT: &str = "## Purpose\n\nPurpose text.\n\n### Requirement: A\nA text.\n\n## ADDED Requirements\n\n### Requirement: B\nB text.\n";
+        let recorder = crate::testutil::RecordingReader::always(Ok(TEXT.to_string()));
+        let read = |p: &std::path::Path| recorder.read(p);
+
+        d.sync_detail(&read);
+
+        assert_eq!(
+            shape_of(&d.detail),
+            vec![
+                (Some("Purpose"), 0),
+                (Some("Requirement: A"), 1),
+                (Some("ADDED Requirements"), 0),
+                (Some("Requirement: B"), 1),
+            ]
+        );
+        assert_eq!(
+            operation_of(&d.detail),
+            vec![None, None, None, Some(crate::specs::DeltaOp::Added)],
+            "`Requirement: A` is unbadged, having no operation heading before it"
+        );
+    }
+
+    /// `artifact-folds` :: "A main spec's requirements are entirely
+    /// unbadged" — `Purpose` and `Requirements` are not operation headings,
+    /// so a badge distinguishes a delta spec from a main spec rather than
+    /// marking every requirement in the tree.
+    #[test]
+    fn a_main_specs_requirements_are_entirely_unbadged() {
+        let mut d = dashboard_over(
+            &[("specs", &["/repo/openspec/changes/c/specs/a/spec.md"])],
+            None,
+        );
+        const MAIN_SPEC: &str = "## Purpose\n\nPurpose text.\n\n## Requirements\n\n### Requirement: A\nA text.\n\n### Requirement: B\nB text.\n";
+        let recorder = crate::testutil::RecordingReader::always(Ok(MAIN_SPEC.to_string()));
+        let read = |p: &std::path::Path| recorder.read(p);
+
+        d.sync_detail(&read);
+
+        assert!(
+            d.detail.sections.iter().all(|s| s.operation.is_none()),
+            "every section of a main spec carries `operation: None`"
+        );
+    }
+
+    /// `artifact-folds` :: "Only a level-3 `Requirement:` heading is
+    /// attributed" — a level-4 `Requirement:` heading and a level-3 heading
+    /// merely starting with `Requirements` both decline.
+    #[test]
+    fn only_a_level_3_requirement_heading_is_attributed() {
+        let mut d = dashboard_over(
+            &[("specs", &["/repo/openspec/changes/c/specs/a/spec.md"])],
+            None,
+        );
+        const TEXT: &str = "## ADDED Requirements\n\n### Requirement: A\nA text.\n\n### Requirements overview\nOverview text.\n\n#### Requirement: B\nB text.\n\n### Requirement:\nBare text.\n";
+        let recorder = crate::testutil::RecordingReader::always(Ok(TEXT.to_string()));
+        let read = |p: &std::path::Path| recorder.read(p);
+
+        d.sync_detail(&read);
+
+        assert_eq!(
+            shape_of(&d.detail)[1..],
+            [
+                (Some("Requirement: A"), 1),
+                (Some("Requirements overview"), 1),
+                (Some("Requirement: B"), 2),
+                (Some("Requirement:"), 1),
+            ]
+        );
+        assert_eq!(
+            operation_of(&d.detail)[1..],
+            [
+                Some(crate::specs::DeltaOp::Added),
+                None,
+                None,
+                Some(crate::specs::DeltaOp::Added),
+            ],
+            "`Requirements overview` is declined for its label and \
+             `Requirement: B` for its level"
+        );
+    }
+
+    /// `artifact-folds` :: "A non-spec artifact is attributed nothing" — a
+    /// `design.md`-shaped file with a level-2 `## ADDED Requirements` written
+    /// as prose and no level-3 `Requirement:` heading does not split at all,
+    /// so no badge is reachable.
+    #[test]
+    fn a_non_spec_artifact_is_attributed_nothing() {
+        let mut d = dashboard_over(
+            &[("design", &["/repo/openspec/changes/c/design.md"])],
+            None,
+        );
+        const DESIGN: &str =
+            "# Design\n\n## ADDED Requirements\n\nProse discussing what was added, not a heading structure.\n";
+        let recorder = crate::testutil::RecordingReader::always(Ok(DESIGN.to_string()));
+        let read = |p: &std::path::Path| recorder.read(p);
+
+        d.sync_detail(&read);
+
+        assert_eq!(
+            d.detail.sections.len(),
+            1,
+            "not spec-shaped, so the file does not split"
+        );
+        assert_eq!(d.detail.sections[0].operation, None);
+    }
+
+    /// `artifact-folds` :: "A tracked-tasks tab's sections carry progress and
+    /// no operation" — the badge column and the progress cell never compete
+    /// for the same header row.
+    #[test]
+    fn a_tracked_tasks_tabs_sections_carry_progress_and_no_operation() {
+        let d = synced_tracked_tasks_dashboard(
+            "## 1. Setup\n\n- [x] 1.1 first\n- [ ] 1.2 second\n\n## 2. Build\n\n- [ ] 2.1 third\n",
+            1,
+            3,
+        );
+        assert!(
+            operation_of(&d.detail).iter().all(Option::is_none),
+            "every section's operation is None on a tracked-tasks tab"
+        );
+        assert_eq!(
+            progress_of(&d.detail),
+            vec![progress(1, 2), progress(0, 1)],
+            "the group headers' progress is `Some`"
+        );
+    }
+
     /// `artifact-folds`: "`Space` on a preamble row is inert".
     ///
     /// No branch of `apply`'s own answers this: `detail_cursor_section` finds
