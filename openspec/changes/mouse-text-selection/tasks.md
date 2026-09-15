@@ -142,16 +142,16 @@
 ## 7. Copy on completion
 <!-- kind: behavior -->
 
-- [ ] 7.1 RED: Write failing tests for "The clipboard write cannot be confirmed, and the pane
+- [x] 7.1 RED: Write failing tests for "The clipboard write cannot be confirmed, and the pane
       claims nothing" and the `Err` half of it, driving a `Recorder` that fails the write.
-- [ ] 7.2 GREEN: Thread `ClipboardWriter<'a> = &'a dyn Fn(&str) -> Result<(), String>` into
+- [x] 7.2 GREEN: Thread `ClipboardWriter<'a> = &'a dyn Fn(&str) -> Result<(), String>` into
       `run_loop` beside `ArtifactReader` and bind it in `src/ui/mod.rs` to the guard's
       `write_clipboard` — `run_loop` has no `TerminalOps` handle today, so there is otherwise
       no call site (design.md → Decision 11).
-- [ ] 7.2b GREEN: Call it on the completing phase only — a drag's finish, the second press,
+- [x] 7.2b GREEN: Call it on the completing phase only — a drag's finish, the second press,
       the third press — never on a first press. A failure is stored on `Selection::problem`
       and rendered as a detail-region row; a success renders nothing (Decision 12).
-- [ ] 7.3 VERIFY: `cargo test ui::` green, and `make gates` — `NOBLOCK`, which must still find
+- [x] 7.3 VERIFY: `cargo test ui::` green, and `make gates` — `NOBLOCK`, which must still find
       no clock under `src/ui/`, since the press counting is state-based by design.
 
 ## 8. The degraded-states row
