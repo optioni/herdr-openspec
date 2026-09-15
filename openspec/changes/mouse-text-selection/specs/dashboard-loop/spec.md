@@ -1,19 +1,78 @@
+## MODIFIED Requirements
+
+### Requirement: A pointer-motion event does not trigger a draw
+
+`ui::driver::run_loop` SHALL NOT draw, SHALL NOT call `Dashboard::sync_detail`, and SHALL
+NOT call `Dashboard::normalise_scroll` on the iteration following an `Event::Mouse` whose
+kind is `MouseEventKind::Moved` or `MouseEventKind::Drag(_)`, and SHALL NOT count such an
+iteration in `LoopSummary::frames`. It SHALL carry the previous drawn frame's `area`
+forward, so a click arriving after any number of motion events still resolves against the
+frame that is on screen.
+
+This rule exists because mapping the event to `Action::Ignore` cannot prevent the draw: the
+draw happens at the top of the iteration, before the event is read. Crossterm's
+`EnableMouseCapture` writes `?1003h` — any-event tracking — so a terminal reports every
+pointer move whether the pane wants it or not, and without this rule moving a pointer across
+a Herdr split would re-render the whole detail document once per motion event.
+
+The rule SHALL be confined to pointer motion. An ignored **key** SHALL still redraw, exactly
+as `An ignored key redraws and keeps waiting` requires; a wheel event, a button press, a
+button release, a resize, a focus change, a paste, and a timeout SHALL all still draw.
+
+#### Scenario: Pointer motion does not cost a frame
+
+- **WHEN** `run_loop` is driven at 120x40 with a scripted source yielding twenty
+  `MouseEventKind::Moved` events at varying coordinates, then `q`
+- **THEN** `LoopSummary::frames` is `1` — the frame drawn before the first event was read —
+  and `LoopSummary::polls` is `21`
+- **AND** the same run with twenty `MouseEventKind::Drag(MouseButton::Left)` events reports
+  the same counts
+- **AND** the same run with twenty `Char('z')` presses — an ignored key — reports `frames`
+  `21`, so the exemption is scoped to pointer motion and did not become a general
+  ignore-means-no-draw rule
+
+#### Scenario: A click after motion still resolves against the drawn frame
+
+- **WHEN** `run_loop` is driven at 120x40 with five `Moved` events and then a left press on
+  the second change row, then `q`
+- **THEN** the press selects that row, exactly as it does with no motion events before it
+- **AND** the frame count is `2`: one before the first event, one after the press
+
+
+**`text-selection` splits the two kinds this requirement has treated as one.**
+`MouseEventKind::Moved` — the pointer crossing the frame with no button held — SHALL
+continue to cost no frame, for exactly the reason given above. `MouseEventKind::Drag(_)` —
+motion **with a button held** — SHALL draw, because the selection's focus moved and the
+highlight is what tells the reader what they are selecting. A drag that did not redraw would
+render the feature invisible while it was being used.
+
+The exemption SHALL therefore be keyed on the event kind rather than on "any motion", and a
+drag outside the selectable region SHALL still cost no frame: it resolves to
+`Action::Ignore`, and an ignored action draws nothing on any path.
+
+#### Scenario: A held-button drag draws and a free pointer motion does not
+
+- **WHEN** the loop is driven with a `MouseEventKind::Moved` event over the detail content
+  area, and separately with a `MouseEventKind::Drag(MouseButton::Left)` over the same point
+  while a selection is in progress
+- **THEN** the `Moved` event produces no draw
+- **AND** the `Drag` event produces exactly one draw
+- **AND** a `Drag` over `Zone::ListRow`, which resolves to `Action::Ignore`, produces no draw
+
 ## REMOVED Requirements
 
 ### Requirement: `Dashboard` carries fifteen fields, none defaulted and none elided
 
-**Reason**: `mouse-text-selection` adds a sixteenth field, `mouse_capture: bool`, and this
-requirement's name carries the count. The requirement is not withdrawn — it is re-stated under
-its new name in the ADDED block below, with the field and the destructure counts corrected.
-Removing and re-adding is how `help-overlay` made the same rename when the count went from
-fourteen to fifteen, and how `list-sections` made it from thirteen to fourteen; it is done that
-way here for the same reason: an OpenSpec requirement header is a merge key, so a renamed
-header must be withdrawn under the old name and introduced under the new one rather than
-edited in place.
+**Reason**: `text-selection` adds a sixteenth field, `selection: Option<Selection>`, and
+this requirement's name carries the count. The requirement is not withdrawn — it is
+re-stated under its new name in the ADDED block below. An OpenSpec requirement header is a
+merge key, so a renamed header must be withdrawn under the old name and introduced under
+the new one rather than edited in place; `help-overlay` made the same rename from fourteen
+to fifteen, and `list-sections` from thirteen to fourteen.
 
 **Migration**: None for a reader, for a `config.toml`, or for the plugin manifest. In the
-crate, every `Dashboard` construction site names one further field; there is no `Default` to
-absorb it, which is the point.
+crate, every `Dashboard` construction site names one further field; there is no `Default`
+to absorb it, which is the point.
 
 ## ADDED Requirements
 
@@ -36,21 +95,24 @@ detail region's state defined by `detail-scroll`, `artifact-tabs`, and `artifact
 `plugin-state` and consumed by `agent-attribution`'s first tier; `launch: Launch`, the
 launch tier's state defined by `agent-launch`; `file_mode: bool`, `degraded-states`'
 addition; `help: Help`, the help overlay's layer state defined by `help-overlay`,
-`help-overlay`'s one addition to this type; and `mouse_capture: bool`,
-`mouse-text-selection`'s addition.
+`help-overlay`'s one addition to this type; and `selection: Option<Selection>`,
+`text-selection`'s one addition.
 
-`mouse_capture` is true exactly while the terminal is reporting mouse events to the
-pane. It SHALL be initialised to `true` — capture is entered at startup and the
-default behaviour does not move — and SHALL be flipped only by `Action::ToggleMouse`
-and by a refused re-enable, never by a view. It is a `Dashboard` field rather than a
-`Refresh` or `Detail` one for the reason `file_mode` is: it is a fact about the
-session as a whole rather than about a change, a tab, or one refresh cycle. It
-differs from `file_mode` in exactly one respect, and that difference is the whole
-reason it is a separate field rather than a second reader of that one: `file_mode` is
-decided once at startup and never moves, while `mouse_capture` is user-controlled and
-moves as often as the reader presses `m`. `responsive-layout` is its only reader —
-the footer's released-capture badge — and `ui::list` does not branch on it: a pane
-with capture released is a fully usable pane reached by key, not a degraded one.
+`selection` is `None` when no span is selected and otherwise carries an anchor and a focus,
+each a line index into `ui::detail::content_lines` and a display column. It is **one** field
+rather than two because the pair is meaningless apart: an anchor with no focus selects
+nothing, and every read of either reads both. `Option` bounds it by construction — there is
+at most one selection, and clearing it is assigning `None` rather than remembering to reset
+two coordinates.
+
+It is a `Dashboard` field and a **sibling** of `detail` rather than an eighth `Detail` field,
+for the reason `help` is a sibling of `filter`: `Detail` is reloaded wholesale by
+`sync_detail` on a tab switch, a selection change, or an adopted refresh, and a selection
+that lived inside it would be silently discarded by a reload rather than deliberately
+cleared by one. The clearing is a rule `text-selection` states, not an accident of where the
+field sits. It carries plain data — no trait, no handle, no thread — so the state value stays
+`Clone`, `PartialEq`, and constructible in a test, and it joins `NODEFAULT-UI`'s scanned sets
+on exactly `Filter`, `Refresh`, and `Launch`'s terms.
 
 `file_mode` is true exactly when the `openspec` binary probe resolved no usable binary, so the
 pane's change list is file-sourced for the whole session and no CLI result will ever correct
@@ -540,64 +602,12 @@ its merge key; its subject is unchanged and only the type list and the field cou
 - **AND** `impl Default for Dashboard` and `impl Default for Sections` appear nowhere in the
   crate, derived or hand-written
 
-#### Scenario: `mouse_capture` starts true and only the toggle moves it
+#### Scenario: `selection` starts empty and is cleared rather than reloaded
 
-- **WHEN** `ui::load` is called over a scratch repository with any `Config` and any
-  `state_dir`, and separately `run_wired` is driven over the same repository
-- **THEN** the returned `Dashboard`'s `mouse_capture` is `true` in both cases, including the
-  no-repository branch: capture is entered at startup and nothing about the default moves
-- **AND** a `Dashboard` whose `mouse_capture` is `true`, stepped with `Action::ToggleMouse`
-  through a capture seam that succeeds, has `mouse_capture` `false` afterwards, and stepping
-  it a second time returns it to `true`
-- **AND** every other field of the dashboard is unchanged across both steps, so the toggle
-  touches exactly one field
-
-### Requirement: `m` releases and re-enters mouse capture
-
-`ui::app::action_for` SHALL map the key `m`, with no modifier, to a new `Action::ToggleMouse`
-at **both** routes and SHALL NOT map it while `filter.active` is set, where `m` types into the
-query on `list-filtering`'s existing terms. `Action::ToggleMouse` SHALL be the only action
-that moves `Dashboard::mouse_capture`.
-
-Applying it SHALL call the injected capture seam — a `&dyn Fn(bool) -> Result<(), String>`
-threaded into `run_loop` on exactly the terms `ui::read_artifact` is threaded in today — with
-the state being asked for, and SHALL set `mouse_capture` to that state only when the seam
-answers `Ok`. No view file SHALL name the seam, and `ui::app` SHALL NOT call a terminal
-function directly.
-
-The pane SHALL remain fully usable by keyboard while capture is released: every binding in
-`ui::help::INVENTORY` other than the `Mouse` group SHALL behave identically with
-`mouse_capture` `false` and `true`.
-
-`m` is chosen because it is free, it is mnemonic, and it is **harmless when mis-keyed** —
-unlike `a`, `c`, `s`, and `g`, its neighbours in the `Pane` and `Agents` groups, which start
-or focus an agent. Pressing `m` by accident releases capture and pressing it again restores
-it; pressing `a` by accident starts a process.
-
-#### Scenario: `m` toggles at both routes and types while filtering
-
-- **WHEN** `action_for` is called with the key `m` and no modifier at `Route::List` and at
-  `Route::Detail`, with `filter.active` unset
-- **THEN** both return `Action::ToggleMouse`
-- **AND** the same key with `filter.active` set returns the filter's typing action instead, so
-  a change whose name contains `m` can still be filtered for
-- **AND** `m` with a `Ctrl` or `Alt` modifier returns `Action::Ignore`, so the binding claims
-  exactly one key
-
-#### Scenario: A refused release leaves the state it failed to leave
-
-- **WHEN** a `Dashboard` whose `mouse_capture` is `true` is stepped with
-  `Action::ToggleMouse` through a capture seam that answers `Err("disable_mouse: no mouse")`
-- **THEN** `mouse_capture` is still `true`, because the terminal did not grant the state
-- **AND** the reason is recorded as a problem the list renders as a `!`-marked row, rather
-  than being swallowed
-- **AND** the pane keeps drawing and every key still works: a refused toggle is never a
-  reason to stop
-
-#### Scenario: The keyboard is unaffected by a released capture
-
-- **WHEN** a `Dashboard` with `mouse_capture` `false` and an otherwise identical
-  `Dashboard` with `mouse_capture` `true` are each stepped with the same sequence of key
-  events — `j`, `Enter`, `]`, `Space`, `k`, `Esc`
-- **THEN** the two dashboards are equal in every field but `mouse_capture` afterwards
-- **AND** neither sequence consulted the capture seam
+- **WHEN** `ui::load` is called over a scratch repository, and separately `run_wired` is
+  driven over the same repository
+- **THEN** the returned `Dashboard`'s `selection` is `None` in both cases
+- **AND** a dashboard holding a selection, stepped with a tab switch, has `selection` `None`
+  afterwards and a freshly reloaded `detail`
+- **AND** the clearing happened at the site `text-selection` names, not as a side effect of
+  `sync_detail` replacing `Detail`, which would leave the rule untested

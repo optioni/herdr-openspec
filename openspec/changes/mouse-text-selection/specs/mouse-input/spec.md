@@ -1,5 +1,73 @@
 ## MODIFIED Requirements
 
+### Requirement: Nothing becomes mouse-only
+
+Every action the mouse can produce SHALL remain reachable by key, and **no key SHALL change
+its meaning because of a mouse binding**. `Action::SelectNext`, `Action::SelectPrev`,
+`Action::ScrollDown`, and `Action::ScrollUp` are what `j`, `k`, and the arrows already reach
+through `Action::Next` and `Action::Prev` at the matching route;
+`Action::Click(Target::Section(_))` is what `Space` at `Route::List` already reaches;
+`Action::Click(Target::Change(_))` is what `j`/`k` and `Enter` already reach;
+`Action::SelectTab(i)` is what `1`–`9`, `[`, and `]` already reach;
+`Action::Click(Target::DetailHeader { .. })` is what `Space` at `Route::Detail` reaches, and
+`Action::Click(Target::DetailLine(_))` is what `j`/`k` and the arrows reach there.
+
+The clause is narrowed from "no key SHALL change its meaning" to "no key SHALL change its
+meaning **because of a mouse binding**", and the narrowing is this change's, stated rather
+than left as a contradiction. `foldable-spec-sections` does change one key's meaning —
+`Space` at `Route::Detail` folds an artifact section instead of a list section, marked
+**BREAKING** in its own proposal — and it does so for reasons that have nothing to do with
+the mouse. What this requirement guards is the property it was written for: that adding a
+gesture never silently rebinds a key, and that the pane stays fully usable with no mouse at
+all. Both remain true — every gesture above names the key that already reached it.
+
+The pane SHALL therefore stay fully usable in a terminal that reports no mouse event at
+all, including over SSH, with no feature reachable only by pointer.
+
+**`text-selection` adds the one exemption this requirement has ever had, and it is pinned
+rather than reasoned about at each call site.** `Action::Select` has no key that produces
+the same effect, and cannot: selecting a span of rendered text is a pointing gesture, and
+the reader's only other route to it — the terminal's own `Shift`+drag — is a pointer gesture
+too. What this requirement was written to protect is untouched: every *function of the pane*
+stays reachable by key, and getting text out of the pane was not a function of the pane
+before this change. The exemption SHALL be asserted **by name and by length**, exactly as
+`tests/doc_contract.rs` asserts `EXEMPT_ACTIONS`, so a second mouse-only action costs a spec
+change rather than passing under a predicate.
+
+#### Scenario: The key table is unchanged
+
+- **WHEN** `action_for` is called with the full table of inputs `list-sections` asserted —
+  every key and every near miss, under `filtering` false and again under `filtering` true
+- **THEN** each returns exactly the action it returned before this change
+- **AND** no new key is mapped: the two mapping tables gain no row
+
+#### Scenario: Every mouse action has a key that produces the same effect
+
+- **WHEN** for each of the four list-and-detail outcomes — advance the selection, retreat
+  the selection, scroll the content down, scroll the content up — the dashboard is driven
+  once by the mouse action and once by the corresponding key at the corresponding route
+- **THEN** the two resulting `Dashboard` values are equal, field for field
+- **AND** the same holds for a section toggle driven by `Action::Click(Target::Section(k))`
+  against `Space`, and for a tab switch driven by a tab click against the matching digit key
+
+
+#### Scenario: `Action::Select` is the only mouse-only action, by name and count
+
+- **WHEN** every action `ui::driver::mouse_action` can produce is swept and each is checked
+  for a key at any route that produces the same `Dashboard` change
+- **THEN** exactly one has none, and it is `Action::Select`
+- **AND** the mouse-only set is asserted to hold that one name and to have length one, so a
+  second mouse-only action fails `cargo test`
+- **AND** every other gesture still names the key that already reached it, so the pane
+  remains fully usable with no mouse in a terminal reporting none
+
+#### Scenario: The pane is still complete without a pointer
+
+- **WHEN** a dashboard is driven through a full session — list, filter, detail, tabs, folds,
+  agent keys and the help overlay — using keys only
+- **THEN** every route, every artifact and every fold state is reachable
+- **AND** the only thing unavailable is copying text, which has no pane function behind it
+
 ### Requirement: `SPEC.md` names the mouse bindings and the drag-to-select cost
 
 `SPEC.md` → Keys SHALL carry a mouse table naming each binding this capability defines —
@@ -7,26 +75,20 @@ the wheel over each region, the click on a change row, the second click, the cli
 list section header, the click on a tab cell, the click on an artifact-section header, and
 the click on any other content row of a foldable artifact: **seven**, five before
 `foldable-spec-sections` — and SHALL state that enabling mouse capture costs the terminal's
-own drag-to-select.
+own drag-to-select **outside the detail content area**.
 
 **The bypass sentence is corrected here, because this change measured it and it was wrong.**
-`notes/probe.sh` was run twice — Ghostty inside a Herdr pane and Ghostty bare — and
-`Option`+drag was observed **not** to restore selection under any mode set, while
-`Shift`+drag restored it under every one, today's included. `SPEC.md` SHALL therefore name
-`Shift` as the measured bypass, SHALL name Ghostty on macOS as what it was measured on, and
-SHALL NOT claim the `Option` bypass at all — it is an iTerm2 and Terminal.app convention this
-project has no measurement for. iTerm2, Terminal.app, and the Linux terminals are unmeasured
-and the document SHALL say so rather than generalising from one terminal.
+`Option`+drag was observed **not** to restore selection under any mode set in Ghostty on
+macOS, while `Shift`+drag restored it under every one. `SPEC.md` SHALL name `Shift`, SHALL
+name the terminal it was measured on, and SHALL NOT claim the `Option` bypass at all — it is
+an iTerm2 and Terminal.app convention this project has no measurement for. iTerm2,
+Terminal.app and the Linux terminals are unmeasured and the document SHALL say so.
 
-`SPEC.md` SHALL further state that the cost is now **escapable without the modifier**: `m`
-releases capture for as long as the reader wants it released, after which plain drag-selection
-behaves exactly as it does with no reporting at all. Both are documented, because they solve
-the problem at different costs — the modifier needs no state change and works mid-gesture, the
-toggle needs no modifier and works on a terminal whose bypass this project never measured.
-
-The same measurement established two facts the document SHALL NOT contradict: narrowing the
-enabled DEC mode set does **not** restore plain drag-selection, and Herdr's own mouse handling
-is not involved.
+`SPEC.md` SHALL further record that inside the detail content area the cost no longer
+applies, because the pane does the selecting itself, and that the mouse table gains a drag
+row. The measured facts it SHALL NOT contradict: narrowing the enabled DEC mode set does
+not restore plain drag-selection, `?1003` is load-bearing because drag motion is what the
+selection consumes, and Herdr is not involved.
 
 `AGENTS.md`'s terminal-seam rule SHALL name the two capture commands alongside the four
 terminal-mode functions it already lists, so the confined set the `NORAW-GREP` gate enforces
@@ -64,39 +126,9 @@ rather than inferred from its passing.
 
 #### Scenario: The documented bypass names what was measured
 
-- **WHEN** `tests/doc_contract.rs` reads `SPEC.md` → Keys' mouse table and its surrounding
-  drag-to-select paragraph
+- **WHEN** `tests/doc_contract.rs` reads `SPEC.md` → Keys' mouse table and its drag-to-select
+  paragraph
 - **THEN** the paragraph names `Shift` and names the terminal it was measured on
-- **AND** the literal `Option` does not appear as a claimed bypass anywhere in it, so the
-  falsified sentence cannot be reintroduced by a later edit without failing `cargo test`
-- **AND** the paragraph names `m` as the toggle that escapes the cost without a modifier
-
-## ADDED Requirements
-
-### Requirement: No gesture arrives while capture is released
-
-While `Dashboard::mouse_capture` is `false` the terminal is not reporting, so
-`ui::driver::mouse_action` SHALL NOT be reached at all. The pane SHALL NOT compensate: it
-SHALL NOT synthesise gestures, SHALL NOT keep a shadow pointer position, and SHALL NOT change
-how any key behaves. Releasing capture withdraws a second way to reach what the keys already
-reach, exactly as a refused start-up capture does.
-
-`ui::driver::mouse_action` itself SHALL be unchanged by this capability — it stays a pure,
-total function of the event and the frame, with no capture parameter and no branch on one.
-Whether a mouse event arrives is the terminal's decision and the loop's, never the resolver's.
-
-#### Scenario: The resolver gains no capture parameter
-
-- **WHEN** `ui::driver::mouse_action`'s signature is read
-- **THEN** it names no capture state, so a released capture cannot change how a gesture that
-  does arrive is resolved
-- **AND** every scenario this capability already specifies for the resolver passes unchanged
-
-#### Scenario: A released capture withdraws the gestures and nothing else
-
-- **WHEN** a `Dashboard` at `Route::Detail` with a scrolled, folded artifact has capture
-  released and is then rendered at 120x20 and at 60x20
-- **THEN** each rendered frame is byte-identical to the same dashboard with capture entered,
-  apart from the footer's released-capture badge
-- **AND** the `Mouse` group of `ui::help::INVENTORY` is still rendered in the help overlay in
-  full, because the gestures are unavailable for the moment rather than removed from the pane
+- **AND** the literal `Option` appears nowhere in it as a claimed bypass, so the falsified
+  sentence cannot be reintroduced without failing `cargo test`
+- **AND** the mouse table carries a drag row whose action is `Action::Select`
