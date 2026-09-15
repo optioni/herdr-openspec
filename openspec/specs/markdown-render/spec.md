@@ -41,23 +41,29 @@ pub struct Face {
     pub strikethrough: bool,
     pub muted: bool,                            // de-emphasised whole
     pub label: Option<crate::tasks::LabelRole>, // a task's leading label
+    pub delta: Option<crate::specs::DeltaOp>,   // a delta badge's marker
 }
 pub struct Segment { pub text: String, pub face: Face }
 pub struct Line { pub segments: Vec<Segment> }
 pub fn lines(source: &str, width: u16) -> Vec<Line>;
 ```
 
-`muted` and `label` are this change's two new fields, joining `strikethrough`, which
-`markdown-legibility` added on the same terms. `Face` SHALL keep deriving `Default` — it is
-a value with a meaningful zero, not a state type `NODEFAULT-UI` gates — so `Face::plain()`
-SHALL remain the all-`false`, `heading: None`, `label: None` value. Every construction site
-that spells the fields out rather than writing `..Face::plain()` SHALL name the new fields:
+`delta` is `spec-emphasis`' one new field, joining `muted` and `label` from `tasks-emphasis`
+and `strikethrough` from `markdown-legibility`, all three added on the same terms. `Face`
+SHALL keep deriving `Default` — it is a value with a meaningful zero, not a state type
+`NODEFAULT-UI` gates — so `Face::plain()` SHALL remain the all-`false`, `heading: None`,
+`label: None`, `delta: None` value. Every construction site
+that spells the fields out rather than writing `..Face::plain()` SHALL name the new field:
 `src/ui/tasks.rs`'s `heading_line` is the one such site in the crate, and it is a
 **compile-time** forcing site, which is why the fields are added to the struct rather than
 tracked in a parallel enum.
 
-`ui::markdown` SHALL set **neither** new field: `lines` SHALL return `muted: false` and
-`label: None` on every segment it emits, for every source and every width. The two fields
+`ui::markdown` SHALL return `muted: false` on every segment it emits, for every source and
+every width. It SHALL set `label` on exactly one construct — a clause keyword, per "A scenario
+clause's keyword carries its lifecycle role" below — and `None` on every other segment.
+`spec-emphasis` is what changed this sentence: `tasks-checklist` was `label`'s only writer when
+the field was added, and a second writer on the markdown path is the whole of that change's
+rendered half. The `muted` and `label` fields
 exist because `Face` is the crate's one carrier of "what this run of text is", and
 `tasks-checklist` needs to say two things about a run that no markdown construct says —
 that a whole row is finished, and that a leading token is a lifecycle label. Putting them
@@ -70,6 +76,19 @@ only here — nor the "names no `ratatui` type" rule above. `ui::markdown` SHALL
 `tasks::label_of` or any other function of `crate::tasks`; it names the type and nothing
 else. `NOIO-VIEW` is unaffected for the same reason: `LabelRole` is a plain enum and reaches
 no I/O API.
+
+`spec-emphasis` adds `delta`, on exactly those terms: `crate::specs::DeltaOp` is a plain enum
+naming no view type, no `ratatui` type, and no I/O API. It is set by `ui::detail`'s badge
+segment and never by this module — no markdown construct is a delta operation — so `lines`
+SHALL leave it `None` on every segment it returns.
+
+The prohibition above is **narrowed, not lifted**: `ui::markdown` SHALL NOT call any function
+of `crate::tasks`, and SHALL be permitted to call `crate::specs::clause_of` and no other
+function of `crate::specs`. The two are not the same risk. `crate::tasks` holds `tasks::read`,
+a filesystem edge that `NOIO-VIEW` names explicitly, so a call into that module is one
+`use` away from a gate failure; `crate::specs` has no I/O at all, holds no such sibling, and
+exists precisely so that this classification is reachable from a pure view file. The narrowing
+is what makes the clause requirement below implementable without a second segment type.
 
 Which `Style` each new field produces is `view-palette`'s, not this capability's, exactly as
 it already is for `strikethrough`.
@@ -207,12 +226,17 @@ consumes them rather than defining them.
   heading, a paragraph, a bullet list, a fenced code block, a block quote, a link, a struck
   run, a table, a checked and an unchecked task-list item, and the literal paragraph
   `VERIFY: this is prose, not a task`
-- **THEN** every segment of every returned line carries `muted: false` and `label: None`
+- **THEN** every segment of every returned line carries `muted: false`, `label: None`, and
+  `delta: None` — the document holds no `- **WHEN**` bullet, so no clause keyword is reached
 - **AND** the `VERIFY:` paragraph in particular carries `label: None`, so recognising a
-  label is `tasks-checklist`'s job on the checklist path and never the markdown renderer's —
-  a proposal that opens with the word `VERIFY:` is not styled as a task
+  *task* label is `tasks-checklist`'s job on the checklist path and never the markdown
+  renderer's — a proposal that opens with the word `VERIFY:` is not styled as a task. This
+  clause is what `spec-emphasis` narrowed: the markdown path now sets `label` on a clause
+  keyword, and this scenario's document deliberately contains none, so the assertion survives
+  the change unweakened rather than being deleted by it
 - **AND** the result at both widths is byte-identical, segment for segment, to the same call
-  before this change, so adding the fields moved no rendered output
+  before `tasks-emphasis`, so neither its two fields nor `spec-emphasis`' third moved any
+  rendered output for a document carrying no clause
 
 ### Requirement: Headings carry their level and their marker
 
@@ -826,6 +850,7 @@ defaults carry enters the build.
 - **AND** the `html` feature is observably off: no source file names `pulldown_cmark::html`,
   the manifest spells out `features = []`, and neither `pulldown-cmark-escape` nor
   `getopts` appears in the resolved build graph
+
 ### Requirement: Every glyph the renderer emits measures one display column
 
 Every non-space character `ui::markdown` emits that is not drawn from the source document —
@@ -853,3 +878,117 @@ thematic-break requirement above.
 - **AND** at both widths the set of non-space characters appearing in that rendering but not
   in its source is exactly those seven glyphs, so a glyph added later without a width
   assertion fails this scenario rather than passing unnoticed
+
+### Requirement: A scenario clause's keyword carries its lifecycle role
+
+`ui::markdown::lines` SHALL set `Face::label` on a **strong** run that opens a list item and is
+a clause keyword, so that a spec's `- **WHEN**` is coloured by the lifecycle position it names.
+
+A run SHALL be a clause keyword when **all** of:
+
+1. It is emitted by a `Strong` inline — the `**…**` the author already wrote. The renderer
+   SHALL NOT invent emphasis where the source has none.
+2. It is the **first** inline content of a list item, with nothing but the item's marker and
+   its hanging indent before it. A bold run later in the clause SHALL NOT be a keyword, which
+   is what keeps `- **WHEN** the **schema** declares four artifacts` styling one run and not
+   two.
+3. `crate::specs::clause_of` on the run's text — collected **verbatim**, never trimmed —
+   returns `Some`. An earlier wording said "trimmed"; `end_strong` joins the span as it
+   stands, and no `Strong` event pulldown-cmark emits carries edge whitespace, so trimming
+   would be a step that never fires pretending to be part of the rule.
+
+The role SHALL then be:
+
+- `Some(Clause::Opens(role))` — the run carries `Face { label: Some(role), .. }`, and `role`
+  SHALL be remembered as the **current clause position**.
+- `Some(Clause::Continues)` — the run carries the remembered position, so `- **AND**` is drawn
+  in the colour of the `WHEN` or `THEN` above it. A continuation reached with no remembered
+  position SHALL carry `LabelRole::Other` rather than no label at all, so a stray leading
+  `- **AND**` degrades to the generic label colour and never panics.
+
+The remembered position SHALL be **reset to none at every heading**, at any level. A heading is
+the boundary between one scenario and the next, so an `AND` under a new `#### Scenario:` can
+never inherit from the scenario above it. It SHALL NOT be reset by a paragraph, a blank line,
+or a nested list, because a scenario's clauses are frequently separated by continuation lines.
+
+The keyword's `strong` face SHALL be left **set**. The clause role is added beside the author's
+bold, never in place of it: `view-palette` patches the label colour over `Role::Strong`'s
+modifier, so a keyword is bold *and* coloured, and a monochrome reading of the frame is exactly
+what it was before this change. This is the same "colour beside the modifier" rule
+`view-palette` states for every other role.
+
+This SHALL apply to **every** markdown source the renderer is given, with no spec-shape test.
+`lines` is parameterised by text and width and knows nothing about which artifact it is
+drawing; adding that knowledge would mean threading the tab's identity through a pure
+function for no gain. The vocabulary is narrow enough that this is safe: a bold run opening a
+list item that is exactly a lifecycle token is a scenario clause wherever it appears.
+
+A `markdown-legibility` task-list item is **not** an exception to that, and an earlier wording
+of this paragraph claimed it was — "task-list items carry their marker before any strong run and
+so are untouched". They are not untouched: `set_task_marker` rebuilds the checkbox into the
+row's **prefix** rather than pushing a run into `group`, so `- [ ] **WHEN** x` leaves `group`
+empty when the `Strong` opens and the run does classify. The outcome is harmless — a checklist
+item whose text is exactly a lifecycle token is the same thing a scenario bullet is — but the
+mechanism stated was wrong, and it was doing the work of justifying why the rule may be applied
+to every source rather than only a spec tab. The real justification is the narrowness of the
+vocabulary, above.
+
+#### Scenario: A scenario's three clauses are coloured by position
+
+- **WHEN** `lines` renders, at the mandated 78-column detail interior and again at 58, the
+  source `- **WHEN** the schema declares four artifacts\n- **THEN** the tab bar shows four\n- **AND** the first is active\n`
+- **THEN** the three keyword segments carry `Face::label` values `Some(Change)`,
+  `Some(Confirm)`, and `Some(Confirm)` respectively
+- **AND** each of those segments also carries `strong: true`, so the colour was added beside
+  the author's bold and not in place of it
+- **AND** the clause text following each keyword carries `label: None`, so only the keyword is
+  coloured
+
+#### Scenario: `AND` inherits the clause above it and resets at a heading
+
+- **WHEN** `lines` renders, at 78 columns and again at 58, a source holding
+  `#### Scenario: a\n\n- **WHEN** x\n- **AND** y\n\n#### Scenario: b\n\n- **AND** z\n`
+- **THEN** the first `AND` carries `Some(Change)`, inherited from the `WHEN` above it
+- **AND** the second `AND` carries `Some(Other)`, the heading having reset the remembered
+  position, so inheritance never crosses a scenario boundary
+
+#### Scenario: Only a run opening a list item is a keyword
+
+- **WHEN** `lines` renders, at 78 columns and again at 58, the sources `**WHEN** not in a list`,
+  `- the **WHEN** clause is described`, `- **Note** this is prose`, and `- **when** lowercase`
+- **THEN** no segment in any of the four carries a `Face::label` that is `Some`
+- **AND** the bold runs still carry `strong: true`, so declining to classify changed nothing
+  else about how they render
+
+#### Scenario: Every segment `lines` returns carries no delta
+
+- **WHEN** `lines` renders a source holding a heading, a paragraph, a table, a code block, a
+  block quote, a task-list item, and a scenario clause, at 78 columns and again at 58
+- **THEN** every segment of every returned line carries `delta: None`
+- **AND** `Face::plain()` equals a `Face` with `delta: None`, so no markdown construct can set
+  the badge field that only `ui::detail` writes
+
+#### Scenario: The narrowed seam holds
+
+- **WHEN** the **production slice** of `src/ui/markdown.rs` — everything above its
+  `#[cfg(test)]` line — is searched for `crate::tasks::` and for `crate::specs::`
+- **THEN** no **call** to any function of `crate::tasks` occurs in that slice. The names it
+  does carry are `crate::tasks::LabelRole` as a field type and `crate::tasks::label_of` inside
+  a doc comment explaining why it is *not* called, neither of which is a call
+- **AND** the only function of `crate::specs` called anywhere in the file is `clause_of` — a
+  *call*, not a mention: the file also names `crate::specs::DeltaOp` as a `Face` field type,
+  which this clause permits and an earlier wording of task 7.4 did not
+- **AND** this scenario is checked **once, at implementation time**, by the greps task 7.4
+  records — not by a standing gate. No `scripts/gates/` script sweeps `src/ui/markdown.rs` for
+  either name, and `tests/doc_contract.rs` does not claim it. That is a real limit and it is
+  stated here rather than left for a reader to discover: the property can rot after this change
+  archives without anything going red. Making it standing — a twelfth `doc_contract` claim, on
+  the model of the eleventh this change adds for `src/specs.rs` — is deliberately left to a
+  later change, because adding it here would widen this one's contract-tier surface past what
+  its proposal argues for
+- **AND** `pulldown_cmark` is still named only in this file, and this file still names no
+  `ratatui` type, so neither `MDSEAM` nor the view-type rule was widened
+- **AND** the slice boundary is load-bearing rather than an exemption: the file's **test**
+  module names `crate::tasks::Progress` today and may keep doing so. A whole-file search would
+  therefore be red on an unmodified tree, which is what an earlier draft of this scenario
+  specified

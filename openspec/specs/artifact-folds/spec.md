@@ -61,8 +61,44 @@ pub struct ArtifactSection {
     pub text: String,
     pub depth: usize,
     pub progress: Option<crate::tasks::Progress>,
+    pub operation: Option<crate::specs::DeltaOp>,
 }
 ```
+
+`spec-emphasis` adds the fifth field. `operation` SHALL be `Some` for exactly the **requirement
+sections of a delta spec** — a level-3 heading labelled `Requirement:` with a level-2 operation
+heading above it — and `None` everywhere else: on every file section, every preamble, every
+scenario section, every operation heading itself, every section of a main spec under
+`## Requirements`, and every section of every other artifact.
+
+`ui::app::sync_detail` SHALL derive it by a **single forward walk** over the section list, in
+the order `heading-sections` produces it, holding the most recent recognised operation and
+attributing it to the requirement sections that follow. A section SHALL be attributed when
+**both** hold:
+
+1. It is a requirement heading by the crate's existing rule — level `3`, with a label beginning
+   `Requirement:`. This is the same predicate `is_spec_shaped` already applies, and it SHALL NOT
+   be written a second time.
+2. A level-2 heading that `specs::operation_of_heading` classifies precedes it in the file, with
+   no later such heading between them.
+
+A level-2 operation heading SHALL **reset** the attribution rather than nest it: the sections
+after `## REMOVED Requirements` carry `Removed` even where `## ADDED Requirements` appeared
+earlier in the same file. The operation heading itself is deliberately unbadged — it already
+spells the word out — and a requirement under **no** operation heading carries `None`, which is
+what leaves this repository's own main specs entirely unbadged, so the badge means "this is a
+delta" and not merely "this is a requirement".
+
+The walk lives here, not in `spec-delta-badges`, because it walks `ArtifactSection` values and
+this capability owns that type and every field on it — including `progress`, which the same walk
+derives at the same point on the same key change. `spec-delta-badges` classifies one heading and
+one run and never sees a section list. Splitting the walk across two capability specs would land
+two descriptions of one derivation in the main tree at archive time.
+
+It is an `Option<DeltaOp>` and not a `DeltaOp` with a fourth "none" variant for the reason
+`progress` is an `Option`: the two mean different things on a header row. A `None` says this
+section is not a delta requirement at all and takes no badge column, where a fourth variant
+would have to be drawn as something and would put a marker on every heading in the tree.
 
 The list is **flat, ordered, and addressed by index** — in `detail.expanded`, in
 `Target::DetailSection`, and in every scenario below — and `depth` is what carries nesting.
@@ -216,6 +252,56 @@ that tab to the line-cursor model.
   and the empty string, in that order
 - **AND** no call panics
 
+#### Scenario: A delta spec's requirement sections carry their operation and nothing else does
+
+- **WHEN** `sync_detail` runs over a change whose `specs` tab resolves to one file holding
+  `## ADDED Requirements`, `### Requirement: A`, `#### Scenario: a1`, `## REMOVED Requirements`,
+  and `### Requirement: B`, under a file section labelled by its capability directory
+- **THEN** the sections' `operation` values are, in order for the file section and the five
+  headings, `None`, `None`, `Some(Added)`, `None`, `None`, `Some(Removed)`
+- **AND** `Requirement: B` carries `Removed` and not `Added`, so the second operation heading
+  reset the walk rather than nesting under the first
+- **AND** every one of those sections' `progress` is `None`, so the two derived fields are
+  independent and a spec section is not mistaken for a task group
+
+#### Scenario: A requirement above every operation heading carries none
+
+- **WHEN** `sync_detail` runs over a file whose sections are, in order, `## Purpose`,
+  `### Requirement: A`, `## ADDED Requirements`, `### Requirement: B`
+- **THEN** the attributed operations are `None`, `None`, `None`, `Some(Added)`
+- **AND** `Requirement: A` is unbadged, having no operation heading before it
+
+#### Scenario: A main spec's requirements are entirely unbadged
+
+- **WHEN** `sync_detail` runs over the section list of `openspec/specs/markdown-render/spec.md`,
+  whose level-2 headings are `## Purpose` and `## Requirements` and which holds eleven level-3
+  `Requirement:` headings
+- **THEN** every section carries `operation: None`
+- **AND** the detail region draws that file exactly as it did before this change, so a badge
+  distinguishes a delta spec from a main spec rather than marking every requirement in the tree
+
+#### Scenario: Only a level-3 `Requirement:` heading is attributed
+
+- **WHEN** a file's sections after `## ADDED Requirements` are `### Requirement: A`,
+  `### Requirements overview`, `#### Requirement: B`, and `### Requirement:`
+- **THEN** the attributed operations are `Some(Added)`, `None`, `None`, and `Some(Added)`
+- **AND** `### Requirements overview` is declined for its label and `#### Requirement: B` for
+  its level, so both halves of the predicate are exercised
+
+#### Scenario: A non-spec artifact is attributed nothing
+
+- **WHEN** `sync_detail` runs over a `design.md` whose headings include a level-2
+  `## ADDED Requirements` written as prose, and which carries no level-3 `Requirement:` heading
+- **THEN** every section carries `operation: None`
+- **AND** the file does not split at all, not being spec-shaped, so no badge is reachable
+
+#### Scenario: A tracked-tasks tab's sections carry progress and no operation
+
+- **WHEN** `sync_detail` runs over the same change's tracked-tasks tab
+- **THEN** every section's `operation` is `None`
+- **AND** the group headers' `progress` is `Some`, so the badge column and the progress cell
+  are never competing for the same header row
+
 ### Requirement: Sections start collapsed, and the fold state resets with the tab
 
 `ui::app::Detail` SHALL carry the fold state in a field:
@@ -333,7 +419,11 @@ closed section rather than a panic.
 `detail.sections` in order and emit, for each section that is **visible**:
 
 - when its `label` is `Some(label)`, one **header row** reading
-  `<indent><glyph> <label>`, followed — when and only when that section's `progress` is
+  `<indent><glyph> <badge><label>`, where `badge` is present when and only when that section's
+  `operation` is `Some(op)` and is then exactly two columns — the marker `+` for `Added`, `~`
+  for `Modified`, `-` for `Removed`, followed by one space. A section whose `operation` is
+  `None` SHALL emit no badge and reserve no column for one, so every row this change does not
+  badge is byte-identical to the row it was, followed — when and only when that section's `progress` is
   `Some` — by right-aligned padding and the group's own **progress cell**, which SHALL be
   `ui::list::progress_cell(progress)` and SHALL NOT be a second formatting of the same pair.
   That is the crate's one progress cell, on exactly the terms `tasks-progress-bar`'s bar and
@@ -414,9 +504,70 @@ SHALL be emitted before the label so that the depth and the fold state survive a
 truncation. At a width below the indent's own columns the row degrades to truncated indent
 rather than to a dropped glyph, and SHALL NOT panic. The drop-whole order as the row narrows
 SHALL therefore be: the progress cell first, reclaiming its own separating padding; then the
-label, truncated with the `…` rule; then the glyph and the indent, in that order — the same
-drop-whole discipline `tasks-progress-bar`'s bar and `detail-header`'s header row already use,
-so a narrowing pane loses fields in one order everywhere.
+label, truncated with the `…` rule; then the **badge**; then the glyph and the indent, in that
+order — the same drop-whole discipline `tasks-progress-bar`'s bar and `detail-header`'s header
+row already use, so a narrowing pane loses fields in one order everywhere.
+
+The badge SHALL be emitted **with** the indent, the glyph and the separating space — before
+the label — and SHALL therefore survive any truncation the label needs. It is fixed-width and
+binary where the label degrades gracefully: a label cut to `Requirement: The tab bar is bui…`
+still says what it is, while half a badge says nothing. It is dropped only below the width at
+which the row can hold the indent, the glyph, its separating space, the badge, and at least
+one column of label.
+
+A badged header row SHALL carry **four** segments rather than one — the
+`<indent><glyph> ` prefix, the badge, the label, and the blank columns that pad the row to its
+width — so that the badge, the label and the padding may be faced apart. An unbadged header row
+SHALL carry the one segment it carried before this change, **plus the progress cell's own
+segment when it draws one** — five and two respectively on a row that also carries a cell,
+since `header` appends the cell after deciding the badge.
+
+That last clause is a correction, not a refinement: an earlier wording of this requirement said
+an unbadged row carries "the one segment it carried before this change" full stop, which is
+false for a tracked-tasks group header. Before this change `header` returned a single `String`
+with the cell already formatted into it, so such a row was one segment; it is now two. **No
+frame changes** — both segments are `Face::plain()`, so the row's text and every cell's style
+are byte-identical either way — but the count is observable to a test, and the scenario below
+that asserts "exactly one segment" reaches only rows with `progress: None`, so nothing caught
+the overstatement. Found by the Change Review.
+
+The padding is a segment of its own, and plain-faced, because the label's face reaches every
+column of its own segment: a `Removed` label padded inside its own segment strikes the blank
+columns after it, and a terminal draws that as a continuous rule from the word to the region's
+edge rather than as a struck heading. `view-palette` -> "A monochrome reading of the frame is
+unchanged" fixes the same fact from the other side — `CROSSED_OUT` on that requirement's label
+cells "and on no other cell in the frame" — and the two cannot both hold at three segments. The
+split is taken at `ui::list::truncate_right`, which returns `pad_or_truncate_right`'s two halves
+separately and is the function `pad_or_truncate_right` is now written in terms of, so the
+truncation rule stays written down once.
+`ui::detail` SHALL name no `palette::Role` here either: the badge segment carries
+`Face { delta: Some(op), .. }` and nothing else, exactly as the row carries a *kind* and not a
+style. `view-palette` decides what each `DeltaOp` looks like, and `ui::view::style_for`
+patches the row's own `ContentKind::SectionHeader` role over it — which is why the badge keeps
+its colour on a selected header, `Role::DetailSectionSelected` carrying no foreground of its
+own.
+
+A row whose section carries **both** `operation: Some(op)` and `progress: Some(p)` SHALL draw
+both: the badge in the prefix, after the glyph, and the progress cell right-aligned, with the
+drop-whole order above deciding which yields first as the row narrows. The combination is
+reachable — a tracked-tasks file that quotes `## ADDED Requirements` and `### Requirement: A` is
+spec-shaped by `has_requirement_heading` *and* splits as a tracked-tasks file — though no such
+file exists in this repository today
+(`grep -rl '^### Requirement:' openspec/changes/*/tasks.md openspec/changes/archive/*/tasks.md`
+returns nothing). It is specified for the reason `view-palette` gives for the unreachable
+`muted` + `label` pair: totality is the contract, not the absence of a caller.
+
+A `Removed` section's **label** segment SHALL additionally carry `Face { strikethrough: true,
+.. }`, and its body SHALL NOT. The strike goes **with** the badge when the badge is dropped:
+below the width that holds one, the row falls back to the pre-change single segment, which
+carries no strike either. That is deliberate and follows from what the fallback means — the row
+reverts to what it drew before this capability existed, face included, rather than keeping half
+of a grammar whose marker is gone. A strike with no `-` beside it would say "deleted" with
+nothing to say it about. Striking the heading is what marks the requirement as deleted;
+striking hundreds of lines of body beneath it would make unreadable exactly the text a reader
+opened the section to read. The strikethrough SHALL be the existing `Face` field and
+`Role::Strikethrough` the existing role — this change adds neither — so a struck heading and a
+`~~struck~~` markdown span are rendered by one mechanism.
 
 #### Scenario: Folding one section shows its body and leaves its siblings shut
 
@@ -518,6 +669,93 @@ so a narrowing pane loses fields in one order everywhere.
   total
 - **AND** `2. Build`'s row ends with `[0/1]`, so a prose group and an unstarted group are
   distinguishable on the header row alone
+
+#### Scenario: The three operations draw three different markers
+
+- **WHEN** `content_lines` renders, at the mandated 78-column detail interior and again at 58,
+  a foldable `specs` tab whose sections are a file section and three collapsed requirement
+  headers carrying `Some(Added)`, `Some(Modified)`, and `Some(Removed)`
+- **THEN** at both widths the three header rows read `  ▸ + Requirement: …`,
+  `  ▸ ~ Requirement: …`, and `  ▸ - Requirement: …`, the indent being the two columns of
+  their depth
+- **AND** the badge segment of each carries `Face { delta: Some(op), .. }` with `Added`,
+  `Modified`, and `Removed` respectively, and the three faces are asserted to differ
+- **AND** each row's fourth segment is its padding, plain-faced, so no row's badge or label face
+  reaches the blank columns that fill the row to its width
+
+#### Scenario: An unbadged header row is unchanged in every column
+
+- **WHEN** `content_lines` renders, at 78 columns and again at 58, a foldable tab whose
+  sections all carry `operation: None` — the file sections of a `design.md`, and the headings
+  of a main spec under `## Requirements`
+- **THEN** every header row is byte-identical to the row the same input produced before this
+  change, with no badge and no reserved badge column
+- **AND** each such row carries exactly one segment — these sections carry `progress: None`, so
+  no progress-cell segment is appended either — and the four-segment shape is reached only by a
+  badged row
+
+#### Scenario: A removed requirement's heading is struck and its body is not
+
+- **WHEN** `content_lines` renders, at 78 columns and again at 58, an **open** requirement
+  section carrying `Some(Removed)` whose text is a paragraph and a `#### Scenario:` heading
+- **THEN** the header row's label segment carries `Face { strikethrough: true, .. }` and its
+  badge segment reads `- `
+- **AND** that segment's text is the label alone, the row's padding being a separate plain-faced
+  segment, so the strike ends with the word rather than running to the region's edge
+- **AND** no body row carries `strikethrough`, so the removed requirement stays readable
+- **AND** the same section carrying `Some(Added)` produces a label segment with
+  `strikethrough` false, so the strike is the operation's and not every badged header's
+
+#### Scenario: The label truncates before the badge is dropped
+
+- **WHEN** `content_lines` renders a requirement header carrying `Some(Modified)` whose label
+  is 200 characters, at 78 columns and again at 58
+- **THEN** at both widths the row measures at most `width` display columns through
+  `ui::layout::columns`, the badge `~ ` is present, and the label is truncated with the `…`
+  rule
+- **AND** the row still begins with its indent and glyph, so the badge joined the prefix that
+  survives truncation rather than the label that does not
+
+#### Scenario: The badge is dropped whole at a width that cannot hold it
+
+- **WHEN** that same header row is rendered at every width from `0` through `20` inclusive
+- **THEN** no width panics and every row measures at most that width
+- **AND** there is a width at or below which the row carries no badge segment at all, and at
+  every width above it the badge is present in full — the marker and its space together, never
+  the marker alone
+
+#### Scenario: A selected badged header keeps its badge colour
+
+- **WHEN** the cursor is on a requirement section carrying `Some(Added)` and the frame is drawn
+  at 78 columns and again at 58
+- **THEN** the header row's kind is `ContentKind::SectionHeader { selected: true, .. }` and its
+  cells carry `Modifier::REVERSED`
+- **AND** the badge cell's foreground equals `palette::style(Role::DeltaAdded)`'s, because
+  `Role::DetailSectionSelected` carries no foreground of its own to displace it
+
+#### Scenario: A row carrying both a badge and a progress cell drops them in the stated order
+
+- **WHEN** `header` renders a section carrying both `operation: Some(Added)` and
+  `progress: Some(1/2)`, at depth 0 and again at depth 1, at **every** width from 0 through 40
+- **THEN** at every width the row measures exactly that many columns, the totality
+  `header_is_total_from_zero_through_twenty_columns` already asserts for the single-field row
+- **AND** the badge's presence is **monotonic** in width: once a width draws the badge, every
+  wider width draws it too, and likewise for the progress cell
+- **AND** the progress cell yields **before** the badge — there is no width at which the cell is
+  drawn and the badge is not, because the drop-whole order above puts the cell first
+- **AND** the reservation is what makes that true: `label_area` counts the badge's own columns
+  when `operation` is `Some`, so it cannot keep the cell at a width where `badged_pieces` then
+  refuses. Without it the badge is drawn at 5–8 columns, absent at 9–10, and drawn again at 11 —
+  measured, and the reason this scenario exists
+
+#### Scenario: A badged header row is still addressed by its own section index
+
+- **WHEN** a foldable `specs` tab holds a file section and three badged requirement sections,
+  and `Space` is pressed with the cursor on the second requirement header at 78 columns and
+  again at 58
+- **THEN** that section's index toggles in `detail.expanded` and no other section's does
+- **AND** the badge changes nothing about `section_at`'s lookup, the row still carrying
+  `ContentKind::SectionHeader { section, .. }` with its own index into `detail.sections`
 
 ### Requirement: A section header row resolves to its own section index
 

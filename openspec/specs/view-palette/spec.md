@@ -59,13 +59,31 @@ pub enum Role {
     TaskChange,
     TaskConfirm,
     TaskLabel,
+    DeltaAdded,
+    DeltaModified,
+    DeltaRemoved,
 }
 
 pub fn style(role: Role) -> Style;
 ```
 
-The enum is reproduced here because changes keep altering its membership — three in a row
-now, `tasks-emphasis` being the third. It adds **five** variants and removes none: `Muted`,
+The enum is reproduced here because changes keep altering its membership — four in a row now,
+`spec-emphasis` being the fourth. It adds **three** variants and removes none: `DeltaAdded`,
+`DeltaModified`, and `DeltaRemoved`, one per delta operation `spec-delta-badges` recognises.
+They are appended after the four `task-labels` roles, at the end, for the placement reason
+every addition since `foldable-spec-sections` has used: a delta badge is neither a markdown
+construct nor a region's chrome, so it joins no earlier group and sits where the previous
+change's own appended group ended.
+
+Three variants rather than one parameterised `Delta(DeltaOp)` — which `AgentBadge` and
+`Heading` would both be precedents for — because the parameterised form buys nothing here.
+`AgentBadge` is parameterised to answer a status enum that `src/agents.rs` owns and may grow,
+and `Heading` to answer a level outside `1..=6` with a value rather than a lookup miss. A
+`DeltaOp` has exactly three values, all three are spelled out in this module's own table, and
+naming them separately is what lets the modifier and colour tables above list them as rows
+like every other role rather than as one row with a nested match.
+
+`tasks-emphasis` made the previous set. It added **five** variants and removed none: `Muted`,
 for a task item the reader has finished with, and the four `task-labels` roles
 `TaskEvidence`, `TaskChange`, `TaskConfirm`, and `TaskLabel`. They are appended after
 `Strikethrough`, where the markdown faces end, because a task label is not a markdown
@@ -217,14 +235,74 @@ its merge key; its subject widens from one pure-view module to two.
 #### Scenario: The enum's membership is exactly this list
 
 - **WHEN** `palette::style` is called for every `Role` variant the enum above names
-- **THEN** each returns a `Style`, and the five variants this change adds — `Muted`,
-  `TaskEvidence`, `TaskChange`, `TaskConfirm`, and `TaskLabel` — are among them
+- **THEN** each returns a `Style`, and the three variants this change adds — `DeltaAdded`,
+  `DeltaModified`, and `DeltaRemoved` — are among them, as are the five `tasks-emphasis`
+  added before them
 - **AND** the enum names no variant this requirement's reproduction omits, checked by an
   exhaustive `match` over `Role` in the test that would fail to compile if a variant were
   added without this block being updated
 - **AND** that exhaustive `match` is the mechanism, not a hand-counted total: a count would go
   stale silently, and this requirement exists precisely because the enum's membership keeps
   moving
+
+#### Scenario: The three delta roles carry their colour and no modifier
+
+- **WHEN** `palette::style` is called for `Role::DeltaAdded`, `Role::DeltaModified`, and
+  `Role::DeltaRemoved`
+- **THEN** their foregrounds are `Green`, `Yellow`, and `LightRed`, and each `add_modifier`
+  set is empty
+- **AND** the assertion discriminates: `DeltaAdded` reports `Green` and not `LightRed`, so a
+  table collapsing two operations onto one colour could not pass
+- **AND** `DeltaRemoved` reports `LightRed` and **not** `Red`, so `ListProblem`'s red stays the
+  pane's one problem colour
+
+#### Scenario: The full set of shared coloured styles is still exactly five groups
+
+- **WHEN** every coloured `Role` is compared pairwise against every other for `Style` equality
+- **THEN** the equal groups are exactly the five the table above names, now including
+  `DeltaAdded` in the `Green` group and `DeltaRemoved` in the `LightRed` group
+- **AND** `DeltaModified` is equal to no other role's `Style`, `FileMode`, `Code`, and
+  `Heading(5)` each differing from it by a modifier
+- **AND** a sixth group appearing fails the test, so a future role sharing a style without a
+  stated licence is caught rather than merged in silently
+
+#### Scenario: A badged header row's colours survive the row's own role
+
+- **WHEN** a frame is drawn at 120 columns with the detail region showing a `specs` tab whose
+  selected section is a requirement carrying `Some(Added)`, and again at 60 columns in the
+  detail route
+- **THEN** the badge cell's foreground equals `palette::style(Role::DeltaAdded)`'s foreground
+  at both widths
+- **AND** that cell also carries `Modifier::REVERSED` from `Role::DetailSectionSelected`, which
+  carries no foreground of its own and so cannot displace the badge's colour
+- **AND** no colour literal appears anywhere in the test, the assertion comparing against
+  `palette::style` rather than against `Color::Green`
+
+#### Scenario: A delta badge and a clause keyword are the same style in one frame
+
+- **WHEN** a frame is drawn at 120 columns, and again at 60 in the detail route, showing a
+  `specs` tab whose sections are `## ADDED Requirements`, an **open** `### Requirement: A`, and
+  a body holding `- **WHEN** the schema declares four artifacts`
+- **THEN** the badge cell's `Style` and the `WHEN` keyword cells' `Style` are **equal** at both
+  widths — both `Green`, both carrying whatever modifier their row contributes
+- **AND** the assertion is an equality, deliberately: it documents the collision licence 3
+  accepts rather than asserting a distinction that does not exist, so a future change that
+  separates the two hues fails here and must revisit the licence
+- **AND** both cells' foregrounds are compared against `palette::style(Role::DeltaAdded)` and
+  `palette::style(Role::TaskChange)` respectively, never against a `Color` literal
+- **AND** the two spans are distinguishable by position rather than by style: the badge is in
+  the header row's prefix and the keyword opens a body list item, which is the whole content of
+  licence 3's second conjunct
+
+#### Scenario: `style_for` maps each `DeltaOp` to its own role
+
+- **WHEN** `ui::view::style_for` is called on `Face { delta: Some(op), ..Face::plain() }` for
+  each of `Added`, `Modified`, and `Removed`
+- **THEN** the three results equal `palette::style(Role::DeltaAdded)`,
+  `palette::style(Role::DeltaModified)`, and `palette::style(Role::DeltaRemoved)` respectively
+- **AND** the three differ from one another, so a step-10 implementation mapping two operations
+  onto one role could not pass — every other scenario in this change renders only `Added`, and
+  a slip mapping `Modified` to `DeltaAdded` would otherwise ship green
 
 ### Requirement: Colour is a named ANSI index, never an RGB triple
 
@@ -317,6 +395,9 @@ The modifier each role SHALL carry:
 | `TaskChange` | none |
 | `TaskConfirm` | none |
 | `TaskLabel` | none |
+| `DeltaAdded` | none |
+| `DeltaModified` | none |
+| `DeltaRemoved` | none |
 
 `CROSSED_OUT` is chosen over a colour or a bracketing glyph for the same reason every other
 row of this table carries a modifier: it is the terminal's own rendering of exactly this
@@ -338,6 +419,26 @@ label is still the literal text `VERIFY:` on the row. A modifier there would hav
 which would make the leading token of most rows in a task file bold and defeat the
 de-emphasis this change exists to add.
 
+The three **delta** roles carry no modifier either, and they are the one group in this table
+where that costs a monochrome reader **nothing**. Their span is the badge marker itself — `+`,
+`~`, or `-` — so the distinction is already in the glyph, and colour is doing what this table
+everywhere else asks it to do: arriving strictly beside a signal that survives without it. The
+badge was specified as a glyph rather than as a recoloured heading for exactly this reason
+(`spec-emphasis` -> proposal.md -> Review Decisions, 1), which is what lets these three be
+added without weakening the guarantee the scenario below asserts.
+
+A modifier here would also be wrong on its own terms. `BOLD` would compete with
+`Role::DetailSection`, which every badged row already carries, and `CROSSED_OUT` is spoken for:
+a `Removed` requirement's **label** segment carries `Strikethrough` — the existing role, on the
+existing field — while its badge segment carries `DeltaRemoved`, so the two say different
+things in the same row and must not wear the same attribute.
+
+`spec-emphasis` adds **three** rows — `DeltaAdded`, `DeltaModified`, `DeltaRemoved`, each
+carrying no modifier — and alters none. The only cells that gain a modifier are a `Removed`
+requirement's own **heading label**, which gains `CROSSED_OUT` beside the `BOLD` its header row
+already carried (`artifact-folds` -> "A section header row names the file and shows its fold
+state"). That cell could not be drawn before this change, so no cell that existed has moved.
+
 `REVERSED` is chosen for the same reason and is the table's first use of it. A section header
 is a fold control, and reversing it is how a terminal says "this is the one the keys address"
 without spending a column on a marker glyph or borrowing a colour that would then mean two
@@ -351,10 +452,11 @@ a colour.
 
 - **WHEN** `palette::style` is called for every `Role` variant and its `add_modifier` set is
   compared against the table
-- **THEN** every role matches, and the **eleven** roles that carry no modifier — `Footer`,
+- **THEN** every role matches, and the **fourteen** roles that carry no modifier — `Footer`,
   `ListRow`, `ListProblem`, `ListSeparator`, `ListMessage`, `AgentBadge`, `TabInactive`,
-  `TaskEvidence`, `TaskChange`, `TaskConfirm`, and `TaskLabel` — carry none, `Muted` having
-  joined the modifier-carrying side and the four label roles the other
+  `TaskEvidence`, `TaskChange`, `TaskConfirm`, `TaskLabel`, `DeltaAdded`, `DeltaModified`, and
+  `DeltaRemoved` — carry none, `Muted` having joined the modifier-carrying side and the four
+  label roles and three delta roles the other
 - **AND** the assertion discriminates: `Emphasis` reports `ITALIC` and not `BOLD`,
   `Strikethrough` reports `CROSSED_OUT` and not `DIM`, `DetailSectionSelected` reports
   `BOLD | REVERSED` and not `BOLD` alone, and `Muted` reports `DIM` and not `CROSSED_OUT`
@@ -378,6 +480,11 @@ a colour.
 - **AND** the same source with `~~struck~~` appended renders that word's cells with
   `CROSSED_OUT` and leaves every other cell's modifier unchanged, so the new role adds a
   modifier only where the new construct appears
+- **AND** a `specs` tab whose sections carry `operation: Some(Removed)` renders `CROSSED_OUT`
+  on exactly that requirement's **heading label** cells and on no other cell in the frame — not
+  on its badge, not on its body, and not on a sibling requirement carrying `Some(Added)`. This
+  is the one cell `spec-emphasis` adds a modifier to, and the fixture above — single-section,
+  not spec-shaped — cannot reach it, which is why this clause names its own dashboard
 - **AND** the same dashboard whose selected artifact resolves to **three** files instead of
   one renders `REVERSED` on exactly one row — the cursor's own section header — and on no
   cell anywhere else, so a single-file artifact's frame is untouched by the two new roles
@@ -430,6 +537,9 @@ other:
 | `TaskChange` | foreground `Green` |
 | `TaskConfirm` | foreground `Blue` |
 | `TaskLabel` | foreground `DarkGray` |
+| `DeltaAdded` | foreground `Green` |
+| `DeltaModified` | foreground `Yellow` |
+| `DeltaRemoved` | foreground `LightRed` |
 
 `Footer`, `RegionHeading`, `RegionHeadingFocused`, `RegionRule`, `ListRow`, `ListRowSelected`,
 `ListMessage`, `DetailSection`, `DetailSectionSelected`, `Strong`, `Emphasis`, `Quoted`,
@@ -455,7 +565,21 @@ colouring them separately would be a rainbow nobody learns. `TaskLabel`'s `DarkG
 palette's "no information" grey used for exactly that: a label the crate recognises as a label
 and classifies no further.
 
-Roles MAY share a style, but only under one of two stated licences, and a share outside both
+The three **delta** roles take a colour on the same grounds and one stronger one: they colour a
+one-character marker, and a marker is the shortest span in this palette. `+`, `~`, and `-` are
+distinguishable without colour — which is the whole reason `spec-emphasis` chose a glyph — so
+colour here is redundancy rather than the only signal, and the three are the palette's clearest
+case of colour arriving strictly beside something that survives without it.
+
+The hues are the ones a reader has already learned from every diff they have read: `Green` for
+added, `Yellow` for changed, and red for removed. `DeltaRemoved` takes `LightRed` and **not**
+`Red`, for exactly the reason `TaskEvidence` does: a reader scans the pane for exactly one red
+thing, and `Red` means "a problem" — `ListProblem` and nothing else. A removed requirement is
+not a problem; it is the ordinary content of a delta spec, and 15 of them exist across the
+archive. Spending the problem colour on it would make the scan unreliable for a row that is
+never an error.
+
+Roles MAY share a style, but only under one of three stated licences, and a share outside all three
 is a defect rather than a decision. **The rule ranges over the roles that carry a colour**,
 which is the set the table above enumerates. Plain-modifier equality among uncoloured roles is
 not policed and never was — `Footer`, `ListRow`, and `ListMessage` are all `Style::default()`;
@@ -483,9 +607,46 @@ be equal:
 |---|---|---|
 | `DIM` + `Yellow` | `FileMode`, `Code` | 1 |
 | `DarkGray` foreground | `ListSeparator`, `AgentBadge(Unknown)`, `TaskLabel` | 2 |
-| `Green` foreground, no modifier | `AgentBadge(Working)`, `TaskChange` | 1 |
+| `Green` foreground, no modifier | `AgentBadge(Working)`, `TaskChange`, `DeltaAdded` | 1 and 3 |
 | `Blue` foreground, no modifier | `AgentBadge(Done)`, `TaskConfirm` | 1 |
-| `LightRed` foreground, no modifier | `AgentBadge(Blocked)`, `TaskEvidence` | 1 |
+| `LightRed` foreground, no modifier | `AgentBadge(Blocked)`, `TaskEvidence`, `DeltaRemoved` | 1 and 3 |
+
+`DeltaModified`'s `Yellow` is a style **no** other role carries and joins no group: `FileMode`
+and `Code` are `DIM` + `Yellow` and `Heading(5)` is `BOLD` + `Yellow`, so all three differ from
+it by a modifier. It is a colour reuse and not a style share, exactly as `Heading(3)` and
+`Link` are for `Blue`.
+
+`DeltaAdded` and `DeltaRemoved` share a style with roles they **can** meet, and are licensed
+under a third licence stated here for the first time:
+
+3. **They cannot be confused.** Two roles may share a style when each span's own text carries
+   its full meaning without colour **and** the two never occupy the same row. A `+` marker in a
+   header row's prefix and a `WHEN` at the head of a body list item satisfy both: the marker
+   says "added" and the word says "when" whatever colour either is painted, and no row holds
+   both.
+
+The licence is worded narrowly on purpose. "Colour is redundant here" would license almost any
+share in this table — nearly every span carries a modifier or self-describing text — and would
+reproduce the failure this requirement already records for the enumeration it replaced: no
+principle to grow it by. Both conjuncts are load-bearing, and a future share satisfying only
+one is a defect rather than a decision.
+
+**The reader cost this licence accepts, stated rather than hidden:** on a delta spec tab the
+green `+` badge and every green `WHEN` in the open bodies are the same hue, so scanning that tab
+by colour for "the added things" does not work. `WHEN` occurs 3877 times across the corpus, so
+this is the common case and not a corner. What survives is the marker column, which is where a
+reader looks for the operation and where no clause keyword is ever drawn.
+
+An earlier draft of this requirement licensed the same two shares under **licence 1**, claiming
+a task label is drawn "only in the detail region on the tracked-tasks tab". `spec-emphasis`'
+own `markdown-render` delta falsifies that: a clause keyword sets `Face::label` on **every**
+markdown source with no spec-shape test (design.md -> Decision 11), so a `- **WHEN**` in a
+delta spec's body is drawn on the **specs** tab, the same tab the badge is on, in the same
+frame. This requirement has been wrong in exactly this way before — it already records that
+`TaskChange`'s `Green` and `TaskConfirm`'s `Blue` "**can** appear in one frame's content area —
+an earlier draft of this requirement claimed they could not, and planning review falsified it".
+Twice now the error has been a "cannot meet" asserted without a scenario that renders both, and
+the scenario below is what makes the third claim falsifiable rather than merely careful.
 
 `Heading(3)`, `Heading(4)`, `Heading(6)`, and `Link` are deliberately **absent** from that
 table even though they carry `Blue`, `Green`, `DarkGray`, and `Blue` respectively: each also
@@ -493,7 +654,9 @@ carries a modifier the label roles do not, so none is an equal `Style` and none 
 They are still a **colour** reuse, and the paragraph below is about that weaker relation,
 which a reader sees and a `Style` comparison does not.
 
-Four of the five groups are licence 1 and one — the `DarkGray` trio — is licence 2. The three
+Each `AgentBadge` pairing in those groups is licence 1, the badges being list-region only; each
+`Delta*`-against-`Task*` pairing is licence 3, the two being reachable in one frame on a specs
+tab. The `DarkGray` trio is licence 2. The three
 that matter are worth spelling out because the obvious objection is the one this change was
 asked to answer. `TaskEvidence` takes `LightRed` and **not** `Red`, and the reason is recorded
 in the form the implementation left it in rather than the form this requirement first stated.
@@ -653,7 +816,23 @@ by folding them onto `Style::default()` with `Style::patch` in this fixed order:
 7. `Strong`, when `face.strong`;
 8. `Heading(level)`, when `face.heading` is `Some(level)`;
 9. `TaskEvidence`, `TaskChange`, `TaskConfirm`, or `TaskLabel`, when `face.label` is
-   `Some(role)`, selected by that `LabelRole`.
+   `Some(role)`, selected by that `LabelRole`;
+10. `DeltaAdded`, `DeltaModified`, or `DeltaRemoved`, when `face.delta` is `Some(op)`,
+    selected by that `DeltaOp`.
+
+`spec-emphasis` adds step 10, taking `style_for` from nine to **ten**. It is placed last, after
+`face.label`, and the two are never both `Some` in production — a badge segment carries the
+marker and nothing else, a clause keyword carries no badge — so the order between them is a
+totality statement rather than a precedence decision. `style_for` SHALL answer the unreachable
+combination with the delta colour rather than `debug_assert`ing against a caller it does not
+control, on exactly the terms the paragraph below states for `muted` and `label`.
+
+A delta badge is a `Face` and not a `ContentKind` by the same test the paragraph above applies:
+the badge is a **run of text** within the header row — two columns of it — while the row's
+`SectionHeader` kind covers the whole row including its label. Making it a kind would have
+forced the row to be two rows or the kind to carry a sub-range, and the reason the badge can be
+a face at all is that `artifact-folds` splits a badged header row into four segments — the
+prefix, the badge, the label, and the plain-faced padding that fills the row.
 
 `Strikethrough` is inserted at position 3 — `markdown-constructs`' only edit to the order —
 precisely because it carries **no** foreground: wherever it sits it cannot take a colour away

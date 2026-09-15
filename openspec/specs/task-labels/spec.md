@@ -146,6 +146,35 @@ table, and everything unmatched SHALL be `Other`:
 | `Confirm` | `VERIFY`, `THEN`, `ASSERT` |
 | `Other` | every other recognised run |
 
+The table already **is** a function of its own — `fn role_of(run: &str) -> LabelRole` in
+`src/tasks.rs`, private, with `Other` as its fallback arm. It SHALL become reachable to a second
+consumer, which changes its visibility and its return type and nothing else:
+
+```rust
+/// The lifecycle position `run` names, or `None` when the table holds no row
+/// for it. The table itself, without `label_of`'s recognition rules around it.
+pub fn role_of(run: &str) -> Option<LabelRole>;
+```
+
+`role_of` SHALL stay the **one** site of the table above — it already is, and `label_of`
+already reaches the table only through it — so this is a widening of an existing seam and not a
+new one. The two changes are that it becomes `pub`, and that its `_ => LabelRole::Other`
+fallback arm becomes `_ => None`; `label_of` then absorbs the fallback at its own call site as
+`role_of(run).unwrap_or(LabelRole::Other)`, which SHALL leave `label_of`'s observable behaviour
+byte-identical for every input.
+
+`spec-delta-badges` is the second consumer and the reason this requirement changed: a spec's
+`WHEN` and a task's `WHEN` are the same fact, and two implementations of one fact drift.
+
+`role_of` returns `Option` where `label_of` returns `Other`, and the difference is load-bearing.
+`label_of` has already decided the run *is* a label by the time it classifies, so an
+unrecognised token is a label of unknown position. `clause_of` has decided nothing, and needs
+`None` to mean "this bold run is not a clause keyword at all" — which is what keeps a
+`- **Note**` bullet in a spec unstyled. Collapsing the two would style every bold run at the
+head of every list item in the tree.
+
+`role_of` SHALL be **total** and SHALL NOT panic for any `&str`, including the empty string.
+
 The table SHALL be a **general testing vocabulary**, not the active schema's task prefixes.
 The `tdd` schema's own instruction states the three lifecycles are parallel — RED before GREEN
 for behavior, CHARACTERIZE before REFACTOR for refactors, CHECK before CHANGE for operational
@@ -199,3 +228,22 @@ not as one of the three positions.
 - **THEN** none occurs in `label_of` or in `LabelRole`'s definition
 - **AND** `label_of` is called in a test with no `Schema` value constructed anywhere in scope,
   proving the signature admits none
+
+#### Scenario: The table is reachable on its own and `label_of` agrees with it
+
+- **WHEN** `tasks::role_of` is called on each of `RED`, `CHARACTERIZE`, `CHECK`, `GIVEN`,
+  `ARRANGE`, `GREEN`, `REFACTOR`, `CHANGE`, `WHEN`, `ACT`, `VERIFY`, `THEN`, and `ASSERT`
+- **THEN** the first five return `Some(Evidence)`, the next five `Some(Change)`, and the last
+  three `Some(Confirm)`
+- **AND** for every one of the thirteen, `tasks::label_of` called on that run followed by
+  `: do the thing` reports the same role, asserted in the same test, so the two cannot
+  disagree without failing
+
+#### Scenario: An unrecognised run is `None` to the table and `Other` to the label
+
+- **WHEN** `tasks::role_of` is called on `NOTE`, `TODO`, `HANDOFF`, `REDGREEN`, and the empty
+  string
+- **THEN** every call returns `None`
+- **AND** `tasks::label_of` called on `NOTE: see design.md` returns `Some` with the role
+  `Other`, so the recognised-but-unclassified run still reaches the generic role and only the
+  bare table declines
