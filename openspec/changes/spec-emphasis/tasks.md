@@ -297,22 +297,26 @@ Depends on 4 (for `Face::delta`) and 5 (for `operation`).
       old range, not the first.
       It happened **twice more** after that: group 6's own four-segment repair shifted
       `src/ui/list.rs:401-403` off `archived.len()` onto a comment. An edit anywhere above an
-      anchor moves it, including an edit made while repairing anchors.
+      anchor moves it, including an edit made while repairing anchors. And a **fourth** time in
+      group 7, which pushed `src/ui/markdown.rs`'s `self.blocks` from `:709` — where task 4.6 had
+      just re-pointed it — to `:786`. Four firings across four groups: this is not an incident,
+      it is what the design costs. Whether the anchors should be line ranges at all is a
+      question for a later change; this one only keeps them true.
 
 ## 7. Clause keywords on the markdown path
 
 <!-- kind: behavior -->
 
-- [ ] 7.1 RED: Write failing tests `a_scenarios_three_clauses_are_coloured_by_position`, `and_inherits_the_clause_above_it_and_resets_at_a_heading`, and
+- [x] 7.1 RED: Write failing tests `a_scenarios_three_clauses_are_coloured_by_position`, `and_inherits_the_clause_above_it_and_resets_at_a_heading`, and
       `only_a_run_opening_a_list_item_is_a_keyword` in `ui::markdown`, from the same-named
       specs/markdown-render scenarios.
-- [ ] 7.2 GREEN: Set `Face::label` on a `Strong` run that is the first inline of a list item and
+- [x] 7.2 GREEN: Set `Face::label` on a `Strong` run that is the first inline of a list item and
       that `specs::clause_of` accepts, holding the current position and resetting it at every
       heading. Leave `strong` set — the colour is added beside the author's bold.
-- [ ] 7.3 GREEN: Extend the existing `The markdown path sets neither new face field` test to
+- [x] 7.3 GREEN: Extend the existing `The markdown path sets neither new face field` test to
       assert `delta: None` too, keeping its document free of any `- **WHEN**` bullet so the
       assertion survives unweakened.
-- [ ] 7.4 CHECK: `/bin/sh scripts/gates/mdseam.sh` and `/bin/sh scripts/gates/mdwidths.sh`
+- [x] 7.4 CHECK: `/bin/sh scripts/gates/mdseam.sh` and `/bin/sh scripts/gates/mdwidths.sh`
       → exit 0 (at HEAD:
       `MDSEAM OK: 26 files searched (>= 25), pulldown_cmark only in src/ui/markdown.rs`), and
       `grep -n "crate::tasks::" src/ui/markdown.rs` finds no function **call**. It does return
@@ -321,7 +325,17 @@ Depends on 4 (for `Face::delta`) and 5 (for `operation`).
       and the production slice ends at `:1270`. And `grep -n "crate::specs::" src/ui/markdown.rs` prints only lines
       naming `clause_of`. Both are `grep -n`, not `grep -c`: a count names nothing, and the
       check's whole content is *which* symbols appear.
-- [ ] 7.4a GREEN (added during implementation): Write
+      **Corrected during implementation.** "prints only lines naming `clause_of`" is stricter
+      than the scenario it serves: specs/markdown-render:300 requires only that the one
+      *function* of `crate::specs` called anywhere in the file be `clause_of`. `src/ui/markdown.rs`
+      already carried `Option<crate::specs::DeltaOp>` as a **field type** from group 4, so the
+      task's literal grep description was false at HEAD, before this group touched the file — the
+      same defect shape as the seam scenario the review repaired for being already-false, one
+      artifact further along. The rule that holds is the scenario's: no call but `clause_of`.
+      Reading it that way, the implementation imports `use crate::specs::{Clause, clause_of};`,
+      so `Clause::Opens`/`Continues` carry no `crate::specs::` prefix at all and the only new
+      occurrence of that prefix is the import line, which does name `clause_of`.
+- [x] 7.4a GREEN (added during implementation): Write
       `a_delta_badge_and_a_clause_keyword_are_the_same_style_in_one_frame` in `ui::view`, from
       specs/view-palette:871, naming both `60` and `120` (`WIDTHS`). It is **cross-cutting** —
       it needs group 6's badge and this group's clause keyword in one frame — which is why it
@@ -330,7 +344,7 @@ Depends on 4 (for `Face::delta`) and 5 (for `operation`).
       This scenario is the review's own CRITICAL repair for licence 3: it asserts the two cells
       are **equal**, documenting the collision rather than a distinction that does not exist. An
       assertion that they *differ* would invert the finding the scenario was written to record.
-- [ ] 7.5 Run the group tests — `cargo test ui::markdown::` green; state whether a refactor
+- [x] 7.5 Run the group tests — `cargo test ui::markdown::` green; state whether a refactor
       was needed.
 
 ## 8. The new module's purity, checked inside `cargo test`
