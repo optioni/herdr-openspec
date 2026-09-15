@@ -54,3 +54,67 @@ append below. Run it once per terminal, and once inside Herdr.
 ## Results
 
 <!-- probe.sh appends one section per run below this line. -->
+
+## 2026-09-15 — ghostty, TERM=xterm-256color, herdr=yes, tmux=no
+
+| mode set | plain drag selects | Shift+drag selects | Option+drag selects | app saw click | app saw wheel |
+|---|---|---|---|---|---|
+| `off` | yes | yes | yes | no | no |
+| `minimal` | no | yes | no | yes | yes |
+| `drag` | no | yes | no | yes | yes |
+| `full` | no | yes | no | yes | yes |
+
+## 2026-09-15 — ghostty, TERM=xterm-ghostty, herdr=no, tmux=no
+
+| mode set | plain drag selects | Shift+drag selects | Option+drag selects | app saw click | app saw wheel |
+|---|---|---|---|---|---|
+| `off` | yes | yes | yes | no | no |
+| `minimal` | no | yes | no | yes | yes |
+| `drag` | no | yes | no | yes | yes |
+| `full` | no | yes | no | yes | yes |
+
+## What the measurement decided
+
+Two runs, Ghostty inside a Herdr pane and Ghostty bare. **Both tables are
+identical, row for row.** Three conclusions, in the order they matter:
+
+1. **Shift+drag restores native selection under every mode set, today's
+   included.** The complaint is a discoverability gap, not a defect. Nothing in
+   `src/` has to change for a user to select and copy a requirement out of a spec
+   right now — they have to know to hold Shift.
+
+2. **Narrowing the mode set buys nothing for selection.** `minimal`
+   (`?1000 ?1006`) suppresses plain drag-selection exactly as `full` does. The
+   proposal's "or a narrower capture mode, if the measurement shows selection
+   survives one" branch is **dead**: selection does not survive one. Dropping
+   `?1002`/`?1003`/`?1015` remains defensible as removing cost the dashboard
+   never asked for — no binding needs them, and `minimal` was measured to
+   deliver click and wheel intact — but it must not be sold as a selection fix.
+
+3. **Herdr is not in the way.** Identical results inside and outside a pane, so
+   the plugin owns this question end to end and there is nothing to raise with
+   Herdr.
+
+Two further facts worth keeping:
+
+- **Option+drag does not work in Ghostty** — `no` under every mode set with
+  reporting on. The Option bypass is an iTerm2/Terminal.app convention; the
+  proposal's guess that it was the macOS answer is wrong for this terminal.
+  Anything written down should say **Shift**, and say Option is terminal-specific.
+- **One terminal family measured.** Ghostty only, macOS only. Shift is the xterm
+  convention and very likely generalises, but iTerm2, Terminal.app, and the Linux
+  terminals are unmeasured. Whatever ships should not claim more than Shift-on-
+  Ghostty was actually proven.
+
+### The cost of putting it in the help overlay
+
+The obvious home for "Shift+drag selects text" is `ui::help::INVENTORY`'s `Mouse`
+group. That is **not** free. `tests/doc_contract.rs` binds every `Binding` row to
+an `Action` reachable by executing `action_for`/`mouse_action`, and its
+`EXEMPT_ACTIONS` is a closed set asserted by name *and* by length
+(`["FilterPush", "Ignore"]`, `assert_eq!(EXEMPT_ACTIONS.len(), 2)`). A Shift+drag
+row describes a gesture the application deliberately never receives — the terminal
+keeps it — so it reaches no `Action` and would need a third exemption, which costs
+a `binding-inventory` spec change by construction.
+
+`SPEC.md` and `README.md` carry no such constraint.
