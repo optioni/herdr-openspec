@@ -471,6 +471,21 @@ against the assembled change and would fail against any one group reverted.
       only adds — `artifact-folds` 4, `tasks-checklist` 4, `view-palette` 6
       across its four blocks, `markdown-render` 1, `detail-scroll` 1.
 - [x] 9.5 VERIFY: Confirm no blocking or unowned finding remains.
+      **None remains.** No CRITICAL was reported. Three WARNINGs, all fixed.
+      Five SUGGESTIONs: four fixed, and the fifth withdrawn by the reviewer
+      itself once it re-read `e57cbc0`'s message unabridged — it had read the
+      `tests/degraded-coverage.toml` re-anchor as unrecorded because its own
+      copy of the message was truncated.
+      9.2's point 3 — tautological or vacuous tests — names nothing new:
+      `the_classification_reads_nothing_outside_its_argument` was the only test
+      in the change that could not fail, and W3 fixed it. Two echoes were
+      judged below SUGGESTION on both sides: the proportional-spans test
+      restates `floor(g * 9 / 12)` but takes its constants from its own fixture
+      and independently asserts the shade **ordering** the formula does not
+      cover, and `expected_header_at` re-implements the header's right-align
+      arithmetic but is a pre-existing helper pattern this change extended
+      rather than introduced, with literal `[1/2]`/`[0/1]` row endings asserted
+      beside it so a shared drift would still be caught.
 
 ## 10. Documentation
 
