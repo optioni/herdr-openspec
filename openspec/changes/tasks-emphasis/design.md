@@ -234,7 +234,7 @@ and the Change Review group asks its reviewer to check exactly this.
 | artifact-folds — A narrow pane truncates the label and keeps the glyph *(carried)* | existing `ui::detail` test stays green | unit (pure) | none | `cargo test ui::detail` |
 | view-palette — The five new roles leave every existing cell's modifier where it was | `TestBackend` render at 120 and 60, modifier-only comparison against the pre-change buffer | view | terminal **replaced**; reader **replaced** | `cargo test ui::view` |
 | view-palette — Every shared style is licensed, and the unshared roles stay unshared | `ui::palette` unit test grouping every role's `Style` by equality | unit (pure) | none | `cargo test ui::palette` |
-| view-palette — A task label and a problem row are distinguishable in one frame | `TestBackend` render at 120 and 60 comparing two foregrounds against `palette::style` | view | terminal **replaced**; reader **replaced** | `cargo test ui::view` |
+| view-palette — A task label and a problem row are distinguishable in one frame | `TestBackend` render at 120 and 60 comparing two foregrounds against `palette::style`; the list region's problem row is the red one, and the 60-column frame draws no list region at all | view | terminal **replaced**; reader **replaced** | `cargo test ui::view` |
 | view-palette — The two new face fields compose in their stated positions | `ui::view` unit test calling `style_for` on four `Face` values | unit (pure) | `palette::style` **real** | `cargo test ui::view` |
 | view-palette — A checklist row reaches the buffer with its label coloured | `TestBackend` render at 120 and 60 | view | terminal **replaced**; reader **replaced** | `cargo test ui::view` |
 | view-palette — Each role's modifier set is exactly the table above *(amended)* | existing test, its table gaining five rows and its no-modifier count moving 7 → 11 | unit (pure) | none | `cargo test ui::palette` |
@@ -323,13 +323,29 @@ have to restate that arithmetic in a second place — the very mistake the `widt
 made here.
 
 **Decision 6 — `TaskEvidence` takes `LightRed`, not `Red`.**
-This is the proposal's Open Question 1. `Role::ListProblem` is `Red` and is drawn in the
-**detail** region — the same region a task label is drawn in — so `Red` would have been a
-share with no licence. `LightRed` collides instead with `AgentBadge(Blocked)`, which is drawn
-only in the list region, so the two can never meet. *Alternative considered:* `Red` with the
-overlap accepted, on the grounds that a full `!`-marked problem row and a short leading token
-are distinguishable by shape. Rejected: shape is a weaker signal than colour in a region the
-reader scans for exactly one red thing.
+This is the proposal's Open Question 1. The decision stands; its **justification was wrong and
+is corrected here**, falsified during apply rather than during planning.
+
+The original argument was that `Role::ListProblem` is `Red` and is drawn in the **detail**
+region — the same region a task label is drawn in — so `Red` would have been a share with no
+licence. It is not: `ui::view::detail_row_role` answers `ContentKind::Problem` with `None`, so
+a problem row drawn inside the detail region carries `Style::default()`, and `ListProblem`'s
+red is reached only from `row_role`, in the **list** region. Measured by rendering a dashboard
+carrying both problem sources: at 120 columns the list region's row is `Red` and the detail
+region's is unstyled; at 60 columns in `Route::Detail` the list region is not drawn at all.
+
+So both colours are licensed and the choice is a choice. `LightRed` is taken for two reasons
+that survive the correction. First, a label and an `AgentBadge(Blocked)` can never meet, where
+a label and a `ListProblem` row **can** — at 120 columns both regions are drawn in one frame —
+so `LightRed` is the share that costs a reader nothing and `Red` is the one that would have.
+Second, a reader scans the pane for exactly one red thing, and leaving plain `Red` to mean "a
+problem" keeps that scan reliable. *Alternative considered:* `Red` with the overlap accepted,
+on the grounds that a full `!`-marked problem row and a short leading token are distinguishable
+by shape. Rejected: shape is a weaker signal than colour in a region the reader scans for
+exactly one red thing. *Alternative considered:* giving the detail region's problem row
+`Role::ListProblem` so the original argument became true. Rejected as out of scope — it
+restyles a construct this change never proposed to touch, and it belongs to `artifact-content`
+rather than to `view-palette`.
 
 **Decision 7 — `view-palette`'s "exactly two pairs share a style" enumeration is replaced by
 the two licences it was an instance of.** Five new roles would have grown an enumeration with

@@ -236,11 +236,21 @@ which a reader sees and a `Style` comparison does not.
 
 Four of the five groups are licence 1 and one — the `DarkGray` trio — is licence 2. The three
 that matter are worth spelling out because the obvious objection is the one this change was
-asked to answer. `TaskEvidence` takes `LightRed`
-and **not** `Red` specifically so that it does not collide with `ListProblem`, which is drawn
-in the **detail** region — the same region a task label is drawn in — and so would have been a
-share with no licence at all. `AgentBadge(Blocked)`, which `LightRed` does collide with, is
-drawn only in the list region. `TaskChange`'s `Green` and `TaskConfirm`'s `Blue` reuse `Heading(4)`'s and `Heading(3)`'s
+asked to answer. `TaskEvidence` takes `LightRed` and **not** `Red`, and the reason is recorded
+in the form the implementation left it in rather than the form this requirement first stated.
+
+The first draft said `Red` would have been an unlicensed share because `ListProblem` is drawn
+in the detail region, the same region a task label is drawn in. That is **false**:
+`ui::view::detail_row_role` answers `ContentKind::Problem` with no role, so a detail-region
+problem row is `Style::default()`, and `ListProblem`'s red is reached only from `row_role`, in
+the list region. Both colours are therefore licensed under licence 1, and the choice is a
+choice rather than a forced move. `LightRed` is taken and recorded for two reasons that
+survive the correction: a label and an `AgentBadge(Blocked)` can never meet, where a label and
+a `ListProblem` row **can** — at 120 columns both regions are drawn in one frame — so
+`LightRed` is the share that costs a reader nothing; and a reader scans the pane for exactly
+one red thing, so leaving plain `Red` to mean "a problem" and nothing else keeps that scan
+reliable. `AgentBadge(Blocked)`, which `LightRed` does collide with, is drawn only in the list
+region. `TaskChange`'s `Green` and `TaskConfirm`'s `Blue` reuse `Heading(4)`'s and `Heading(3)`'s
 **colours**, and the two **can** appear in one frame's content area — an earlier draft of this
 requirement claimed they could not, and planning review falsified it against
 `src/ui/app.rs:1527`. A tasks file whose text begins at its single `##` heading has no
@@ -302,13 +312,30 @@ value the parser cannot emit.
 
 #### Scenario: A task label and a problem row are distinguishable in one frame
 
-- **WHEN** a `Dashboard` at `Route::Detail` whose selected change carries one problem and
-  whose tracked-tasks artifact holds the unchecked item `- [ ] 1.1 RED: write the test` is
-  rendered at 120x20 and at 60x20
-- **THEN** at each width the problem row's cells carry `palette::style(Role::ListProblem)`'s
-  foreground and the `RED:` cells carry `palette::style(Role::TaskEvidence)`'s
-- **AND** those two foregrounds are not equal, so the two constructs that share the detail
-  region are distinguishable by colour and not only by shape
+The scenario's name is kept verbatim because a delta's scenario headers are its merge key. Its
+subject is corrected: an earlier draft asserted the problem row's cells carry `ListProblem`'s
+foreground **at both widths**, which the implementation falsified. `ui::view::detail_row_role`
+answers `ContentKind::Problem` with **no** role, so a problem row drawn inside the detail
+region carries `Style::default()`; `ListProblem`'s red is reached only from `row_role`, in the
+**list** region. At `Route::Detail` and 60 columns the list region is not drawn at all, so the
+120-column frame is the only one in which both constructs appear.
+
+- **WHEN** a `Dashboard` at `Route::Detail` whose `changes.problems` carries one entry — a
+  **list**-region problem row — and whose tracked-tasks artifact holds the unchecked item
+  `- [ ] 1.1 RED: write the test` is rendered at 120x20 and at 60x20
+- **THEN** in the 120-column frame, where both regions are drawn, the list region's problem
+  row's cells carry `palette::style(Role::ListProblem)`'s foreground and the `RED:` cells carry
+  `palette::style(Role::TaskEvidence)`'s
+- **AND** those two foregrounds are not equal, so the two constructs that can appear in one
+  frame are distinguishable by colour and not only by shape
+- **AND** in the 60-column frame the list region is not drawn, so no cell carries
+  `ListProblem`'s foreground at all, and the `RED:` cells still carry `TaskEvidence`'s — which
+  is the assertion that would fail if the narrow layout ever drew both regions without this
+  scenario being revisited
+- **AND** a problem row drawn in the **detail** region — `detail.problems` — carries neither
+  foreground, because `content_lines` gives it `ContentKind::Problem` and `ui::view` maps that
+  kind to no role. Asserted here rather than left implicit, since it is the fact this
+  scenario's first draft got wrong
 - **AND** neither assertion writes a colour literal: both compare against `palette::style`, as
   every render test outside `src/ui/palette.rs`'s own tests does
 

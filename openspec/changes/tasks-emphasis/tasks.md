@@ -331,22 +331,42 @@ RED inside a group of its own — which is why this group is `operational` and i
 CHECK → CHANGE → VERIFY rather than a manufactured RED. Its evidence is that the rows pass
 against the assembled change and would fail against any one group reverted.
 
-- [ ] 8.1 CHECK: Write `ui::view` tests
+- [x] 8.1 CHECK: Write `ui::view` tests
       `the_five_new_roles_leave_every_existing_cell_s_modifier_where_it_was`,
       `a_task_label_and_a_problem_row_are_distinguishable_in_one_frame`, and
       `a_checklist_row_reaches_the_buffer_with_its_label_coloured`, each rendering at 120x20 and
       60x20. Run them and record the result.
-- [ ] 8.2 CHECK: Confirm each can fail, by reverting one group's production change in a scratch
+- [x] 8.2 CHECK: Confirm each can fail, by reverting one group's production change in a scratch
       copy and recording which row goes red. A row no reverted group can redden is testing
       something other than this change.
-- [ ] 8.3 CHANGE: Fix whatever 8.1 or 8.2 reddens, in the group that owns it, and record which
+      **Measured.** Three reverts, each run against the three rows:
+      group 2 (`TaskEvidence` returns `Style::default()`) reddens
+      `a_task_label_and_a_problem_row…` and `a_checklist_row…`;
+      group 3 (`style_for` stops folding `face.label`) reddens the same two;
+      group 4 (`item_lines` stops muting a checked item) reddens
+      `the_five_new_roles…` and `a_checklist_row…`. Every row is reddened by at
+      least one revert, and no row survives every revert.
+- [x] 8.3 CHANGE: Fix whatever 8.1 or 8.2 reddens, in the group that owns it, and record which
       group and why here.
-- [ ] 8.4 CHECK: Confirm `a_monochrome_reading_of_the_frame_is_unchanged` (`src/ui/view.rs:7928`)
+      **What reddened was an artifact, not a group's code.** 8.1's
+      `a_task_label_and_a_problem_row_are_distinguishable_in_one_frame` could not
+      pass as specified: `ui::view::detail_row_role` answers
+      `ContentKind::Problem` with no role, so a **detail**-region problem row is
+      `Style::default()`, and `ListProblem`'s red is reached only from
+      `row_role`, in the **list** region — which at `Route::Detail` and 60
+      columns is not drawn at all. The scenario, `design.md` -> Decision 6, and
+      `proposal.md`'s resolved question 1 all asserted the opposite. All three
+      are corrected in place; no production code moved, because the code was
+      right and the claim about it was wrong. `TaskEvidence` still takes
+      `LightRed`, now for the reason that survives the correction: a label and
+      an `AgentBadge(Blocked)` can never meet, while a label and a `ListProblem`
+      row **can**, at 120 columns where both regions are drawn.
+- [x] 8.4 CHECK: Confirm `a_monochrome_reading_of_the_frame_is_unchanged` (`src/ui/view.rs:7928`)
       and the three-section fixture's own tests stay green **with their assertions unmodified**.
       They already assert per-cell literals, so leaving them untouched is the falsifiable form
       of "no rendered text moved outside the tasks tab"; re-rendering and comparing against a
       fresh buffer is not, and there is no recorded-buffer mechanism in this repository.
-- [ ] 8.5 VERIFY: `cargo test --all-features` — green — and
+- [x] 8.5 VERIFY: `cargo test --all-features` — green — and
       `/bin/sh scripts/gates/palette.sh` and `readonly-ui.sh` each exit 0. `palette.sh`
       subsumes a hand-written grep for colour literals, so none is written here.
 

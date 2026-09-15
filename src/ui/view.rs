@@ -8372,6 +8372,252 @@ mod tests {
         d
     }
 
+    /// The detail content area's first drawn column, and the buffer row a
+    /// content row at `index` lands on.
+    fn content_origin(width: u16) -> u16 {
+        if width == 60 { 1 } else { 42 }
+    }
+
+    /// The style of the cell where `needle` starts inside content row `index`,
+    /// and the row's own text. Panics if the needle is not on that row, so a
+    /// fixture that stopped drawing what the test names fails loudly rather
+    /// than reading an unstyled cell somewhere else in the frame.
+    fn content_cell_style(
+        buf: &Buffer,
+        width: u16,
+        index: usize,
+        needle: &str,
+    ) -> ratatui::style::Style {
+        let row = drawn_content_rows(buf, interior_width(width))[index].clone();
+        let offset = row
+            .char_indices()
+            .position(|(byte, _)| row[byte..].starts_with(needle))
+            .unwrap_or_else(|| panic!("{needle:?} is not on content row {index}: {row:?}"));
+        cell(
+            buf,
+            content_origin(width) + offset as u16,
+            CONTENT_FIRST_ROW + index as u16,
+        )
+        .style()
+    }
+
+    /// The index of the first content row holding `needle`.
+    fn content_row_index(buf: &Buffer, width: u16, needle: &str) -> usize {
+        drawn_content_rows(buf, interior_width(width))
+            .iter()
+            .position(|r| r.contains(needle))
+            .unwrap_or_else(|| panic!("{needle:?} reached no content row"))
+    }
+
+    /// A tracked-tasks dashboard holding one unchecked labelled item and one
+    /// checked one — the fixture `view-palette`'s two new render scenarios name.
+    fn labelled_task_dashboard() -> Dashboard {
+        synced_task_dashboard(
+            "## 1. Setup\n\n- [ ] 1.1 RED: write it\n- [x] 1.2 VERIFY: it passes\n",
+            crate::tasks::Progress {
+                completed: 1,
+                total: 2,
+            },
+            1,
+        )
+    }
+
+    /// `view-palette` :: "The five new roles leave every existing cell's
+    /// modifier where it was".
+    ///
+    /// The first leg reads the `color-palette` monochrome fixture, whose
+    /// selected artifact does **not** track tasks, so no cell carries any of
+    /// the five new roles; the second gives the same dashboard a tracked-tasks
+    /// artifact holding one checked and one unchecked item, and asserts `DIM`
+    /// on exactly the checked item's own rows.
+    #[test]
+    fn the_five_new_roles_leave_every_existing_cell_s_modifier_where_it_was() {
+        for width in [120, 60] {
+            let d = monochrome_dashboard(Route::Detail);
+            let buf = render_at(width, 20, &d);
+            let first = content_origin(width);
+            let last = if width == 60 { 58u16 } else { 119 };
+
+            // No cell carries `Muted`'s modifier where it did not before: on
+            // this fixture the only `DIM` in the content area is the `code`
+            // span's, which `Role::Code` has always carried.
+            for y in CONTENT_FIRST_ROW..=18u16 {
+                for x in first..=last {
+                    let style = cell(&buf, x, y).style();
+                    if style.add_modifier.contains(Modifier::DIM) {
+                        assert_eq!(
+                            style.fg,
+                            palette::style(Role::Code).fg,
+                            "width {width}: cell {x},{y} is dim and is not the code span"
+                        );
+                    }
+                }
+            }
+        }
+
+        let d = labelled_task_dashboard();
+        for width in [120, 60] {
+            let buf = render_at(width, 20, &d);
+            let checked = content_row_index(&buf, width, "[✓] 1.2 VERIFY: it passes");
+            let unchecked = content_row_index(&buf, width, "[ ] 1.1 RED: write it");
+            let first = content_origin(width);
+
+            // `DIM` on exactly the checked item's own row, over its own cells.
+            let y = CONTENT_FIRST_ROW + checked as u16;
+            for x in first..first + "[✓] 1.2 VERIFY: it passes".chars().count() as u16 {
+                let style = cell(&buf, x, y).style();
+                assert!(
+                    style.add_modifier.contains(Modifier::DIM),
+                    "width {width}: checked cell {x},{y} is not dim"
+                );
+                assert_ne!(
+                    style.fg,
+                    palette::style(Role::TaskConfirm).fg,
+                    "width {width}: checked cell {x},{y} kept its label colour"
+                );
+            }
+
+            // And on no cell anywhere else that did not already carry it: the
+            // four label roles add no modifier at all.
+            let y = CONTENT_FIRST_ROW + unchecked as u16;
+            for x in first..first + "[ ] 1.1 RED: write it".chars().count() as u16 {
+                assert!(
+                    !cell(&buf, x, y)
+                        .style()
+                        .add_modifier
+                        .contains(Modifier::DIM),
+                    "width {width}: unchecked cell {x},{y} gained a modifier"
+                );
+            }
+        }
+    }
+
+    /// `view-palette` :: "A task label and a problem row are distinguishable in
+    /// one frame".
+    ///
+    /// The red problem row is the **list** region's. `ui::view::detail_row_role`
+    /// answers `ContentKind::Problem` with no role, so a problem row drawn
+    /// inside the detail region carries `Style::default()`; `ListProblem`'s red
+    /// is reached only from `row_role`. At `Route::Detail` and 60 columns the
+    /// list region is not drawn at all, so the 120-column frame is the only one
+    /// in which both constructs appear. An earlier draft of this scenario had
+    /// it the other way round, and this test is what falsified it.
+    ///
+    /// Neither assertion writes a colour literal: both compare against
+    /// `palette::style`, as every render test outside `src/ui/palette.rs`'s own
+    /// tests does.
+    #[test]
+    fn a_task_label_and_a_problem_row_are_distinguishable_in_one_frame() {
+        let mut d = synced_task_dashboard(
+            "## 1. Setup\n\n- [ ] 1.1 RED: write the test\n",
+            crate::tasks::Progress {
+                completed: 0,
+                total: 1,
+            },
+            1,
+        );
+        d.changes.problems = vec!["openspec/changes: unreadable".to_string()];
+        d.detail.problems = vec!["tasks.md: unreadable".to_string()];
+
+        for width in [120, 60] {
+            let buf = render_at(width, 20, &d);
+            let label_row = content_row_index(&buf, width, "RED:");
+            let label = content_cell_style(&buf, width, label_row, "RED:");
+            assert_eq!(
+                label.fg,
+                palette::style(Role::TaskEvidence).fg,
+                "width {width}: the RED: cells"
+            );
+
+            // The list region's problem row, wherever it lands in the frame.
+            let problem = (0..buf.area.height).find_map(|y| {
+                let row = row_text(&buf, y);
+                let at = row
+                    .char_indices()
+                    .position(|(byte, _)| row[byte..].starts_with("! openspec/changes"))?;
+                Some(cell(&buf, at as u16, y).style())
+            });
+
+            if width == 120 {
+                let problem = problem.expect("the list region draws at 120 columns");
+                assert_eq!(
+                    problem.fg,
+                    palette::style(Role::ListProblem).fg,
+                    "width {width}: the list region's problem row"
+                );
+                // The two constructs that can appear in one frame are
+                // distinguishable by colour and not only by shape.
+                assert_ne!(
+                    problem.fg, label.fg,
+                    "width {width}: a problem row and a task label must not share a foreground"
+                );
+            } else {
+                assert!(
+                    problem.is_none(),
+                    "width {width}: the detail route draws no list region, so no cell \
+                     carries ListProblem's foreground"
+                );
+            }
+
+            // A problem row drawn in the **detail** region carries neither
+            // foreground: `content_lines` gives it `ContentKind::Problem` and
+            // `ui::view` maps that kind to no role. Asserted because it is the
+            // fact this scenario's first draft got wrong.
+            let detail_problem_row = content_row_index(&buf, width, "! tasks.md");
+            let detail_problem = content_cell_style(&buf, width, detail_problem_row, "! tasks.md");
+            assert_ne!(
+                detail_problem.fg,
+                palette::style(Role::ListProblem).fg,
+                "width {width}: the detail region's problem row is unstyled"
+            );
+            assert_ne!(
+                detail_problem.fg,
+                palette::style(Role::TaskEvidence).fg,
+                "width {width}"
+            );
+        }
+    }
+
+    /// `view-palette` :: "A checklist row reaches the buffer with its label
+    /// coloured".
+    #[test]
+    fn a_checklist_row_reaches_the_buffer_with_its_label_coloured() {
+        let d = labelled_task_dashboard();
+        for width in [120, 60] {
+            let buf = render_at(width, 20, &d);
+            let unchecked = content_row_index(&buf, width, "[ ] 1.1 RED: write it");
+            let red = content_cell_style(&buf, width, unchecked, "RED:");
+            assert_eq!(
+                red.fg,
+                palette::style(Role::TaskEvidence).fg,
+                "width {width}: the RED: cells"
+            );
+            assert!(
+                !red.add_modifier.contains(Modifier::DIM),
+                "width {width}: an unfinished row's label is not dimmed"
+            );
+
+            // The completed row's label is de-emphasised rather than
+            // dimmed-but-coloured: every cell of it carries `DIM`, and none
+            // carries `TaskConfirm`'s foreground.
+            let checked = content_row_index(&buf, width, "[✓] 1.2 VERIFY: it passes");
+            let y = CONTENT_FIRST_ROW + checked as u16;
+            let first = content_origin(width);
+            for x in first..first + "[✓] 1.2 VERIFY: it passes".chars().count() as u16 {
+                let style = cell(&buf, x, y).style();
+                assert!(
+                    style.add_modifier.contains(Modifier::DIM),
+                    "width {width}: cell {x},{y} is not dim"
+                );
+                assert_ne!(
+                    style.fg,
+                    palette::style(Role::TaskConfirm).fg,
+                    "width {width}: cell {x},{y} carries the label colour"
+                );
+            }
+        }
+    }
+
     /// `view-palette` :: "A monochrome reading of the frame is unchanged" — the modifier
     /// of every cell outside the tab-bar row is exactly what it was before this change.
     #[test]

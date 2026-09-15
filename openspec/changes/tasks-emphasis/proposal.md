@@ -109,12 +109,18 @@ with the decision rather than re-derive it.
 
 1. **`Evidence` does not share red with `Role::ListProblem`.** It takes **`LightRed`**, which
    shares instead with `AgentBadge(Blocked)` — and that share is the *safe* one: an agent badge
-   is drawn only in the list region, while a problem row is drawn in the **detail** region, the
-   same region as a task label. The justification is the palette's own existing one for
-   `FileMode`/`Code`: two roles may share a style when they cannot meet. The four roles are
-   `Evidence` `LightRed`, `Change` `Green`, `Confirm` `Blue`, `Label` `DarkGray`. `Blue` is free
-   on this path: `ui::tasks` emits no link face at all, and a level-3 heading occurs once in 37
-   archived task files.
+   is drawn only in the list region, where a `ListProblem` row and a task label **can** appear
+   in one frame, at 120 columns, where both regions are drawn. The justification is the
+   palette's own existing one for `FileMode`/`Code`: two roles may share a style when they
+   cannot meet. The four roles are `Evidence` `LightRed`, `Change` `Green`, `Confirm` `Blue`,
+   `Label` `DarkGray`. `Blue` is free on this path: `ui::tasks` emits no link face at all, and
+   a level-3 heading occurs once in 37 archived task files.
+
+   **Corrected during apply.** This item first said a problem row is drawn in the *detail*
+   region, the same region as a task label. It is not: `ui::view::detail_row_role` answers
+   `ContentKind::Problem` with no role, so a detail-region problem row is unstyled, and
+   `ListProblem`'s red is reached only from the list region. The decision is unchanged and its
+   reasoning is restated above and in `design.md` -> Decision 6.
 
 2. **Segments are proportional to item count**, not equal. Boundaries are alternating shade,
    never separator characters. Segmentation changes *which glyph pair* each column is drawn
