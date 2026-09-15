@@ -725,7 +725,7 @@ mod tests {
     use crate::testutil::{cell, render_at, row_text};
     use crate::ui::app::{
         Action, ArtifactSection, Dashboard, Detail, Filter, Granularity, Route, SectionKey,
-        Selection,
+        Selection, Target,
     };
     use crate::ui::layout::columns;
     use crate::ui::markdown::Face;
@@ -4531,6 +4531,8 @@ mod tests {
     #[test]
     fn the_highlight_persists_after_release_and_clears_on_the_next_interaction() {
         let base = selection_dashboard("selection-persist");
+        let selected_style = uncoloured().patch(palette::style(Role::Selected));
+
         for width in [120, 60] {
             let interior = interior_width(width);
             let rows =
@@ -4538,22 +4540,93 @@ mod tests {
             let total = columns(&rows[0].text()) as u16;
             assert!(total > 0, "width {width}: the first line renders some text");
 
-            let mut after_release = base.clone();
-            after_release.selection = Some(Selection {
+            let selection = Selection {
                 anchor: (0, 0),
                 focus: (0, total),
                 granularity: Granularity::Span,
                 problem: None,
-            });
+            };
             let x0 = content_origin(width);
             let y0 = CONTENT_FIRST_ROW;
 
+            // No further input: the highlight persists after release.
+            let mut after_release = base.clone();
+            after_release.selection = Some(selection.clone());
             let with_release = render_at(width, 20, &after_release);
             assert_eq!(
                 cell(&with_release, x0, y0).style(),
-                uncoloured().patch(palette::style(Role::Selected)),
+                selected_style,
                 "width {width}: the highlight is still drawn with no further input after \
                  release"
+            );
+
+            // A scroll clears it — applied, not hand-cleared.
+            let mut scrolled = after_release.clone();
+            scrolled.apply(Action::ScrollDown);
+            assert_eq!(
+                scrolled.selection, None,
+                "width {width}: a scroll must clear the selection"
+            );
+            let with_scroll = render_at(width, 20, &scrolled);
+            assert_ne!(
+                cell(&with_scroll, x0, y0).style(),
+                selected_style,
+                "width {width}: no cell is drawn selected after a scroll"
+            );
+
+            // A click clears it — applied against a real list target.
+            let mut clicked = after_release.clone();
+            clicked.apply(Action::Click(Target::Section(SectionKey::Active)));
+            assert_eq!(
+                clicked.selection, None,
+                "width {width}: a click must clear the selection"
+            );
+            let with_click = render_at(width, 20, &clicked);
+            assert_ne!(
+                cell(&with_click, x0, y0).style(),
+                selected_style,
+                "width {width}: no cell is drawn selected after a click"
+            );
+
+            // A tab switch that reloads the detail content clears it — driven
+            // through `sync_detail` with a real reader, exactly as `run_loop`
+            // drives it, never hand-cleared.
+            let mut switched = two_tab_dashboard();
+            let recorder =
+                crate::testutil::RecordingReader::always(Ok("aaaa bbbb  \n".to_string()));
+            let read = |p: &std::path::Path| recorder.read(p);
+            switched.sync_detail(&read); // establishes `detail.loaded` for tab 0
+            switched.selection = Some(selection.clone());
+            switched.apply(Action::SelectTab(1));
+            switched.sync_detail(&read);
+            assert_eq!(
+                switched.selection, None,
+                "width {width}: a tab switch that reloads the detail content must clear \
+                 the selection"
+            );
+            let with_switch = render_at(width, 20, &switched);
+            assert_ne!(
+                cell(&with_switch, x0, y0).style(),
+                selected_style,
+                "width {width}: no cell is drawn selected after a tab switch"
+            );
+
+            // An adopted refresh that reloads the detail content clears it too.
+            let mut refreshed = two_tab_dashboard();
+            refreshed.sync_detail(&read);
+            refreshed.selection = Some(selection.clone());
+            refreshed.refresh.reload = true;
+            refreshed.sync_detail(&read);
+            assert_eq!(
+                refreshed.selection, None,
+                "width {width}: an adopted refresh that reloads the detail content must \
+                 clear the selection"
+            );
+            let with_refresh = render_at(width, 20, &refreshed);
+            assert_ne!(
+                cell(&with_refresh, x0, y0).style(),
+                selected_style,
+                "width {width}: no cell is drawn selected after an adopted refresh"
             );
 
             let cleared = base.clone();
@@ -4564,6 +4637,41 @@ mod tests {
                 "width {width}: an empty selection draws no highlight"
             );
         }
+    }
+
+    /// A `Route::Detail` dashboard over one change carrying two artifacts, each
+    /// resolving to a real path — what `two_tab_dashboard`'s callers need to drive
+    /// `sync_detail` across an actual tab switch, rather than hand-setting
+    /// `detail.loaded`.
+    fn two_tab_dashboard() -> Dashboard {
+        let change = fixture::with_artifacts(
+            fixture::active("selection-tabs", 0, 1),
+            &[
+                (
+                    "proposal",
+                    &["/repo/openspec/changes/selection-tabs/proposal.md"],
+                ),
+                (
+                    "design",
+                    &["/repo/openspec/changes/selection-tabs/design.md"],
+                ),
+            ],
+        );
+        dashboard_with_detail(
+            vec![change],
+            Vec::new(),
+            1,
+            Route::Detail,
+            Detail {
+                sections: Vec::new(),
+                scroll: 0,
+                tab: 0,
+                problems: Vec::new(),
+                loaded: None,
+                expanded: std::collections::BTreeSet::new(),
+                drawn_width: None,
+            },
+        )
     }
 
     /// `artifact-folds` :: "An index past the end folds shut rather than panicking".
