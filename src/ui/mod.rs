@@ -466,6 +466,7 @@ pub fn load(
             let searched_from =
                 std::fs::canonicalize(start).unwrap_or_else(|_| start.to_path_buf());
             Dashboard {
+                selection: None,
                 help: crate::ui::app::Help {
                     open: false,
                     scroll: 0,
@@ -519,6 +520,7 @@ pub fn load(
             }
         }
         crate::resolve::RepoSearch::NotFound { searched_from } => Dashboard {
+            selection: None,
             help: crate::ui::app::Help {
                 open: false,
                 scroll: 0,
@@ -719,6 +721,7 @@ mod tests {
                 &[("proposal", &["/repo/p.md"])],
             );
             Dashboard {
+                selection: None,
                 help: crate::ui::app::Help {
                     open: false,
                     scroll: 0,
@@ -874,6 +877,7 @@ mod tests {
                     twenty_problems,
                 );
                 let mut dashboard = Dashboard {
+                    selection: None,
                     help: crate::ui::app::Help {
                         open: false,
                         scroll: 0,
@@ -1024,6 +1028,7 @@ mod tests {
                 );
                 let other = crate::changes::fixture::active("fix-empty-basket", 7, 7);
                 Dashboard {
+                    selection: None,
                     help: crate::ui::app::Help {
                         open: false,
                         scroll: 0,

@@ -852,6 +852,7 @@ mod tests {
         selected: usize,
     ) -> Dashboard {
         Dashboard {
+            selection: None,
             help: crate::ui::app::Help {
                 open: false,
                 scroll: 0,
@@ -953,6 +954,7 @@ mod tests {
                 0,
             ),
             Dashboard {
+                selection: None,
                 help: crate::ui::app::Help {
                     open: false,
                     scroll: 0,
@@ -1996,6 +1998,7 @@ mod tests {
     #[test]
     fn the_no_repository_block_is_three_rows() {
         let d = Dashboard {
+            selection: None,
             help: crate::ui::app::Help {
                 open: false,
                 scroll: 0,
@@ -2071,6 +2074,7 @@ mod tests {
         // narrowed to `repo.is_none() && problems.is_empty()` would have
         // passed the whole suite.
         let with_problems = Dashboard {
+            selection: None,
             help: crate::ui::app::Help {
                 open: false,
                 scroll: 0,
@@ -2855,6 +2859,7 @@ mod tests {
         assert_eq!(columns(path), 65);
 
         let d = Dashboard {
+            selection: None,
             help: crate::ui::app::Help {
                 open: false,
                 scroll: 0,

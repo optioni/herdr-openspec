@@ -2029,6 +2029,7 @@ mod tests {
     /// anywhere else.
     fn dashboard_at_detail(change: crate::changes::Change, detail: Detail) -> Dashboard {
         Dashboard {
+            selection: None,
             help: crate::ui::app::Help {
                 open: false,
                 scroll: 0,

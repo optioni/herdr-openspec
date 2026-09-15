@@ -2302,6 +2302,7 @@ fn sweep_change(name: &str, origin: Origin, tabs: usize) -> Change {
 /// resolved section), so `Zone::DetailRow`'s fold path is reachable too.
 fn sweep_dashboard(route: Route, help_open: bool) -> Dashboard {
     Dashboard {
+        selection: None,
         repo: Some(PathBuf::from("/repo")),
         searched_from: PathBuf::from("/repo"),
         changes: ChangeSet {

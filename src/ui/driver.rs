@@ -445,6 +445,7 @@ mod tests {
     /// `dashboard()`'s empty set.
     fn dashboard_with_change(repo: &str, name: &str, completed: usize, total: usize) -> Dashboard {
         Dashboard {
+            selection: None,
             help: crate::ui::app::Help {
                 open: false,
                 scroll: 0,
@@ -500,6 +501,7 @@ mod tests {
 
     fn dashboard() -> Dashboard {
         Dashboard {
+            selection: None,
             help: crate::ui::app::Help {
                 open: false,
                 scroll: 0,
@@ -892,6 +894,7 @@ mod tests {
             &[("proposal", &["/repo/p.md"])],
         );
         Dashboard {
+            selection: None,
             help: crate::ui::app::Help {
                 open: false,
                 scroll: 0,
@@ -1074,6 +1077,7 @@ mod tests {
             1,
         );
         Dashboard {
+            selection: None,
             help: crate::ui::app::Help {
                 open: false,
                 scroll: 0,
@@ -1544,6 +1548,7 @@ mod tests {
         // resize the backend from inside it.
         let base = twenty_line_detail_dashboard();
         let mut dashboard = Dashboard {
+            selection: None,
             help: crate::ui::app::Help {
                 open: false,
                 scroll: 0,
@@ -1613,6 +1618,7 @@ mod tests {
         // collapsed sections is `2` after all three areas below, because a
         // cursor does not move when the pane resizes.
         let mut foldable = Dashboard {
+            selection: None,
             help: dashboard.help.clone(),
             repo: dashboard.repo.clone(),
             searched_from: dashboard.searched_from.clone(),
@@ -1705,6 +1711,7 @@ mod tests {
         );
         let dir = change.dir.clone();
         let mut dashboard = Dashboard {
+            selection: None,
             help: crate::ui::app::Help {
                 open: false,
                 scroll: 0,
@@ -1879,6 +1886,7 @@ mod tests {
             &[("proposal", &["/repo/p.md"])],
         );
         Dashboard {
+            selection: None,
             help: crate::ui::app::Help {
                 open: false,
                 scroll: 0,
@@ -3928,6 +3936,7 @@ mod tests {
             &[("proposal", &["/repo/p.md"]), ("design", &["/repo/d.md"])],
         );
         let mut dashboard = Dashboard {
+            selection: None,
             help: crate::ui::app::Help {
                 open: false,
                 scroll: 0,
@@ -5678,6 +5687,7 @@ mod tests {
             &[("specs", &SPEC_PATHS)],
         );
         Dashboard {
+            selection: None,
             help: crate::ui::app::Help {
                 open: false,
                 scroll: 0,

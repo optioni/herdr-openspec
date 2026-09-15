@@ -562,6 +562,7 @@ mod tests {
     /// same terms as every other test module's own fixture.
     fn minimal_dashboard(help: crate::ui::app::Help) -> crate::ui::app::Dashboard {
         crate::ui::app::Dashboard {
+            selection: None,
             help,
             repo: None,
             searched_from: std::path::PathBuf::new(),

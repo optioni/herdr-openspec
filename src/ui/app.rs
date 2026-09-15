@@ -611,6 +611,51 @@ pub struct Help {
     pub scroll: usize,
 }
 
+/// `text-selection`'s addition: the drag-selection state. `None` when nothing is
+/// selected. A sibling of `detail` rather than an eighth `Detail` field:
+/// `sync_detail` reloads `Detail` wholesale on a tab switch, a selection change, or
+/// an adopted refresh, and a selection living inside it would be silently discarded
+/// by a reload rather than deliberately cleared by one (design.md -> Decision 4).
+/// Deliberately implements no `Default`, anywhere in the crate, on the same terms as
+/// `Dashboard`, `Filter`, `Detail`, `Refresh`, `Launch`, and `Help`: every
+/// construction and destructuring names every field, with no `..` rest. See
+/// `specs/text-selection/spec.md`, design.md -> Decision 3 and Decision 12, and the
+/// `NODEFAULT-UI` check, whose type list now covers this type too.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Selection {
+    /// The line index into `ui::detail::content_lines` and the display column where
+    /// the selection began. Held even after `focus` moves past it, so a drag back
+    /// the other way still selects the same span.
+    pub anchor: (usize, u16),
+    /// The line index and display column the selection currently extends to.
+    pub focus: (usize, u16),
+    /// What a first press, a second, or a third has widened the span to. See
+    /// design.md -> Decision 2 and Decision 3.
+    pub granularity: Granularity,
+    /// The reason the completing clipboard write failed, rendered as a
+    /// detail-region problem row beside `detail.problems`. `None` before a write is
+    /// attempted and after one succeeds — design.md -> Decision 6 and Decision 12.
+    /// It lives here rather than on any of the five existing `!`-marked lists
+    /// because each of those is replaced wholesale on its own producer's cadence
+    /// and would drop the reason before the reader saw it.
+    pub problem: Option<String>,
+}
+
+/// What a [`Selection`] currently covers. No clock names any of these: consecutive
+/// presses at one cell count through this field alone (design.md -> Decision 2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Granularity {
+    /// A first press with no motion: `anchor` and `focus` sit at the same cell, and
+    /// nothing is drawn.
+    Armed,
+    /// A second press at the same cell: the span widens to the whole word under it.
+    Word,
+    /// A third press at the same cell: the span widens to the whole row.
+    Row,
+    /// A drag: the span runs from `anchor` to wherever `focus` last moved to.
+    Span,
+}
+
 /// The dashboard's whole state. Carries no layout mode, no terminal handle, and
 /// no frame — those are derived from the frame area on every draw, never stored
 /// here. **One exception, and only one:** `Detail::drawn_width` records the
@@ -619,7 +664,7 @@ pub struct Help {
 /// pure and cannot tell it (design.md -> Decision 13). It is never a source of
 /// what is drawn. Deliberately implements no
 /// `Default`, anywhere in the crate: every construction and every
-/// destructuring names all fifteen fields, so a field added later fails to
+/// destructuring names all sixteen fields, so a field added later fails to
 /// compile at each site rather than defaulting silently. See
 /// `specs/dashboard-loop/spec.md` and the `NODEFAULT-UI` check.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -669,6 +714,11 @@ pub struct Dashboard {
     /// `help-overlay`'s addition: the help overlay's layer state. See
     /// `specs/help-overlay/spec.md`.
     pub help: Help,
+    /// `text-selection`'s addition: the drag-selection state, `None` when nothing is
+    /// selected. Cleared by `sync_detail` exactly when the detail content reloads —
+    /// never by living inside `Detail` and being silently discarded by one. See
+    /// `specs/text-selection/spec.md` and design.md -> Decision 3 and Decision 4.
+    pub selection: Option<Selection>,
 }
 
 impl Dashboard {
@@ -1500,6 +1550,9 @@ impl Dashboard {
             self.detail.scroll = 0;
             self.detail.loaded = None;
             self.detail.expanded.clear();
+            // `text-selection`: no change is selected, so there is nothing left to
+            // have selected text from — design.md -> Decision 4.
+            self.selection = None;
             return;
         };
         self.detail.tab = tab; // step 2
@@ -1508,6 +1561,12 @@ impl Dashboard {
         if !key_changed && !forced {
             return; // step 3
         }
+        // `text-selection`: the detail content is about to reload, deliberately —
+        // never a side effect of `Detail` being overwritten below. A selection
+        // pointing at the old content would be stale, so it is cleared here rather
+        // than carried forward. See design.md -> Decision 4 and the scenario
+        // "`selection` starts empty and is cleared rather than reloaded".
+        self.selection = None;
         // Step 4: re-read every path, one or more `ArtifactSection` values
         // per successful read, in resolution order — nothing concatenated,
         // no separator inserted and no newline added, per `artifact-folds`.
@@ -1786,6 +1845,7 @@ mod tests {
         agent_names: BTreeMap<String, String>,
     ) -> Dashboard {
         Dashboard {
+            selection: None,
             repo: Some(std::path::PathBuf::from("/repo")),
             searched_from: std::path::PathBuf::from("/repo"),
             changes: fixture::set(active, archived, Vec::new()),
@@ -1861,6 +1921,7 @@ mod tests {
             sections: _,
             file_mode: _,
             help: _,
+            selection: _,
         } = &d;
         assert_eq!(*repo, Some(std::path::PathBuf::from("/repo")));
         assert_eq!(searched_from, &std::path::PathBuf::from("/repo"));
@@ -2216,6 +2277,7 @@ mod tests {
             sections: _,
             file_mode: _,
             help: _,
+            selection: _,
         } = &d;
         assert_eq!(launch.pending, None);
         assert!(launch.problems.is_empty());
@@ -4551,6 +4613,7 @@ mod tests {
 
         fn dashboard_at(route: Route) -> Dashboard {
             Dashboard {
+                selection: None,
                 repo: None,
                 searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
                 changes: empty_set(),
@@ -4592,6 +4655,7 @@ mod tests {
         /// `view.rs`'s tests reuse verbatim.
         fn five_change_dashboard() -> Dashboard {
             Dashboard {
+                selection: None,
                 repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
                 searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
                 changes: fixture::set(
@@ -4652,6 +4716,7 @@ mod tests {
             let pairs: Vec<(&str, &[&str])> = (0..count).map(|_| ("a", &[][..])).collect();
             let change = fixture::with_artifacts(fixture::active("detail-view", 4, 9), &pairs);
             Dashboard {
+                selection: None,
                 repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
                 searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
                 changes: fixture::set(vec![change], Vec::new(), Vec::new()),
@@ -5115,6 +5180,7 @@ mod tests {
                 0,
             );
             let dashboard = Dashboard {
+                selection: None,
                 detail: Detail {
                     sections: vec![ArtifactSection {
                         label: Some(String::new()),
@@ -5728,6 +5794,7 @@ mod tests {
             selected: usize,
         ) -> Dashboard {
             Dashboard {
+                selection: None,
                 repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
                 searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
                 changes: fixture::set(active, archived, Vec::new()),
@@ -6685,6 +6752,7 @@ mod tests {
         #[test]
         fn next_and_prev_scroll_at_the_detail_route() {
             let mut d = Dashboard {
+                selection: None,
                 detail: twenty_line_detail(),
                 repo: None,
                 searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
@@ -6748,6 +6816,7 @@ mod tests {
         #[test]
         fn scroll_stops_at_the_top() {
             let mut d = Dashboard {
+                selection: None,
                 detail: twenty_line_detail(),
                 repo: None,
                 searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
@@ -6823,6 +6892,7 @@ mod tests {
             );
 
             let mut d = Dashboard {
+                selection: None,
                 detail: twenty_line_detail(),
                 repo: None,
                 searched_from: std::path::PathBuf::from("/tmp/does-not-matter"),
@@ -6872,6 +6942,7 @@ mod tests {
         #[test]
         fn every_route_move_resets_the_scroll() {
             let mut d = Dashboard {
+                selection: None,
                 detail: Detail {
                     sections: twenty_line_detail().sections,
                     scroll: 3,
@@ -6921,6 +6992,7 @@ mod tests {
             assert_eq!(d.detail.scroll, 0);
 
             let mut d2 = Dashboard {
+                selection: None,
                 detail: Detail {
                     sections: twenty_line_detail().sections,
                     scroll: 3,
@@ -6969,6 +7041,7 @@ mod tests {
             assert_eq!(d2.detail.scroll, 0);
 
             let mut d3 = Dashboard {
+                selection: None,
                 detail: Detail {
                     sections: twenty_line_detail().sections,
                     scroll: 3,
@@ -7051,6 +7124,7 @@ mod tests {
         /// `detail.sections` or `detail.scroll`.
         fn dashboard_for_enter(route: Route, filter: Filter, scroll: usize) -> Dashboard {
             Dashboard {
+                selection: None,
                 detail: Detail {
                     sections: twenty_line_detail().sections,
                     scroll,
@@ -7326,6 +7400,7 @@ mod tests {
             // 14 rows at 120x20 and at 60x20, 34 rows at 120x40, where the
             // twenty-line source fits entirely and the clamp is 0.
             let mut d = Dashboard {
+                selection: None,
                 detail: Detail {
                     sections: twenty_line_detail().sections,
                     scroll: 99,
@@ -7373,6 +7448,7 @@ mod tests {
             assert_eq!(d.detail.scroll, 6);
 
             let mut d2 = Dashboard {
+                selection: None,
                 detail: Detail {
                     sections: twenty_line_detail().sections,
                     scroll: 99,
@@ -7420,6 +7496,7 @@ mod tests {
             assert_eq!(d2.detail.scroll, 6);
 
             let mut d3 = Dashboard {
+                selection: None,
                 detail: Detail {
                     sections: twenty_line_detail().sections,
                     scroll: 99,
@@ -7485,6 +7562,7 @@ mod tests {
 
             fn dashboard_for(change: crate::changes::Change, source: String) -> Dashboard {
                 Dashboard {
+                    selection: None,
                     detail: Detail {
                         sections: vec![ArtifactSection {
                             label: Some(String::new()),
@@ -7563,6 +7641,7 @@ mod tests {
         #[test]
         fn normalise_scroll_is_inert_when_the_detail_region_is_not_drawn() {
             let mut d = Dashboard {
+                selection: None,
                 detail: Detail {
                     sections: twenty_line_detail().sections,
                     scroll: 9,
@@ -7636,6 +7715,7 @@ mod tests {
         #[test]
         fn normalise_scroll_agrees_with_render_about_the_wide_layouts_content_width() {
             let mut d = Dashboard {
+                selection: None,
                 detail: Detail {
                     sections: vec![ArtifactSection {
                         label: Some(String::new()),
@@ -7767,6 +7847,7 @@ mod tests {
             let change_a = fixture::active("alpha", 1, 4);
             let change_b = fixture::active("beta", 2, 4);
             let mut dashboard = Dashboard {
+                selection: None,
                 repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
                 searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
                 changes: fixture::set(vec![change_a, change_b], Vec::new(), Vec::new()),
@@ -7855,6 +7936,7 @@ mod tests {
             query: &str,
         ) -> Dashboard {
             Dashboard {
+                selection: None,
                 repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
                 searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
                 changes: fixture::set(active, Vec::new(), Vec::new()),
@@ -8043,7 +8125,7 @@ mod tests {
         }
 
         #[test]
-        fn dashboard_destructures_into_exactly_fifteen_fields() {
+        fn dashboard_destructures_into_exactly_sixteen_fields() {
             let d = dashboard_at(Route::List);
             let Dashboard {
                 repo,
@@ -8061,6 +8143,7 @@ mod tests {
                 sections,
                 file_mode: _,
                 help,
+                selection,
             } = &d;
             assert_eq!(*repo, None);
             assert_eq!(
@@ -8087,6 +8170,7 @@ mod tests {
             assert!(sections.collapsed.is_empty());
             assert!(!help.open);
             assert_eq!(help.scroll, 0);
+            assert_eq!(*selection, None);
         }
 
         #[test]
@@ -8395,6 +8479,7 @@ mod tests {
         #[test]
         fn moving_the_selection_resets_the_tab_and_the_scroll_and_a_clamped_move_does_not() {
             let mut d = Dashboard {
+                selection: None,
                 repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
                 searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
                 changes: fixture::set(
@@ -8452,6 +8537,7 @@ mod tests {
             assert_eq!(d.detail.scroll, 0);
 
             let mut d2 = Dashboard {
+                selection: None,
                 repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
                 searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
                 changes: fixture::set(
@@ -8528,6 +8614,7 @@ mod tests {
         fn dashboard_with_artifacts_named(name: &str, artifacts: &[(&str, &[&str])]) -> Dashboard {
             let change = fixture::with_artifacts(fixture::active(name, 4, 9), artifacts);
             Dashboard {
+                selection: None,
                 repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
                 searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
                 changes: fixture::set(vec![change], Vec::new(), Vec::new()),
@@ -8873,6 +8960,7 @@ mod tests {
                 &[("proposal", &["/repo/b-p.md"])],
             );
             let mut d = Dashboard {
+                selection: None,
                 repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
                 searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
                 changes: fixture::set(vec![a, b], Vec::new(), Vec::new()),
@@ -8955,6 +9043,7 @@ mod tests {
                 )],
             );
             let mut d = Dashboard {
+                selection: None,
                 repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
                 searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
                 changes: fixture::set(vec![active], vec![archived], Vec::new()),
@@ -9151,6 +9240,7 @@ mod tests {
                 &[("b0", &["/repo/two/b0.md"]), ("b1", &["/repo/two/b1.md"])],
             );
             let mut d = Dashboard {
+                selection: None,
                 repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
                 searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
                 changes: fixture::set(vec![five, two], Vec::new(), Vec::new()),
@@ -9241,6 +9331,7 @@ mod tests {
 
             // The same holds for a Dashboard built over `changes::empty_set()`.
             let mut d2 = Dashboard {
+                selection: None,
                 repo: Some(std::path::PathBuf::from("/tmp/demo-repo")),
                 searched_from: std::path::PathBuf::from("/tmp/demo-repo"),
                 changes: empty_set(),

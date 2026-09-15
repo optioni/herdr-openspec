@@ -828,6 +828,7 @@ pub(crate) mod testutil {
 
         fn empty_dashboard() -> Dashboard {
             Dashboard {
+                selection: None,
                 help: crate::ui::app::Help {
                     open: false,
                     scroll: 0,
