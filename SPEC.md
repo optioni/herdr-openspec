@@ -88,6 +88,7 @@ binding, not its only one — `NOBLOCK` leg 2 covers it identically.
 | `schema` | Parse `schema.yaml` into an ordered artifact list; identify the tasks artifact |
 | `changes` | Build `Change` values from files and from CLI JSON |
 | `tasks` | Parse markdown checkboxes into groups, items, and counts |
+| `specs` | Recognise a delta spec's operation headings and a scenario clause's keyword |
 | `agents` | Poll `herdr agent list`, parse its envelope into agent values, and attribute live Herdr agents to changes |
 | `launch` | Split a pane, start an agent, send the `/opsx:*` prompt |
 | `watch` | The recursive `notify` watch, the debounce, and classifying a touched path to a per-change `Selection` |
@@ -1116,6 +1117,13 @@ is tested against scratch `#!/bin/sh` programs rather than the real `openspec`,
   flat counts and to grouped items, both by the OpenSpec CLI's own counting
   rule; `read` is the filesystem edge, tested against a scratch directory
   tree, not a faked filesystem layer
+- `specs::operation_of_heading` and `specs::clause_of` — a delta spec's
+  `## ADDED|MODIFIED|REMOVED Requirements` headings and a scenario clause's
+  leading keyword, both classified from `&str` with no filesystem edge at all.
+  `clause_of` reaches `tasks::role_of` rather than restating its token table, so
+  the two classifiers cannot disagree about what `WHEN` is; the production
+  slice's freedom from I/O is itself a `tests/doc_contract.rs` claim, because
+  outside `src/ui/` no `make gates` script sweeps this file
 - `agents::attribute` — live agents, the repository root, the change names, and the
   plugin-local mapping to per-change badges and one unattributed count, covering all
   three tiers including the deliberate non-attribution case

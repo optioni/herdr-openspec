@@ -355,30 +355,30 @@ Depends on 2. Per specs/doc-conformance → "A non-view pure module's freedom fr
 inside `cargo test`", and design.md → Decision 1: outside `src/ui/`, `src/specs.rs` is swept by
 no gate, so the property Decision 3 rests on has no check without this group.
 
-- [ ] 8.1 RED: Write the eleventh claim in `tests/doc_contract.rs` —
+- [x] 8.1 RED: Write the eleventh claim in `tests/doc_contract.rs` —
       `the_production_slice_of_src_specs_rs_carries_no_io_or_schema_name` — reading the slice
       above `src/specs.rs`'s first line-anchored `#[cfg(test)]` through the existing helper
       (`production_slice_cuts_before_cfg_test`) and failing on any of `std::fs`, `std::io`,
       `std::env`, `std::process`, `std::net`, `File::`, `read_to_string`, `Command`, `schema::`,
       `Schema`, `config.yaml`, `.openspec.yaml`. RED check at HEAD: `test -f src/specs.rs` →
       exit **1**, so the claim cannot yet read its subject.
-- [ ] 8.2 GREEN: Assert the slice is non-empty before searching it, so the claim cannot pass
+- [x] 8.2 GREEN: Assert the slice is non-empty before searching it, so the claim cannot pass
       vacuously against a file it failed to read or cut at the wrong place.
-- [ ] 8.3 CHECK: Run the negative control and record both halves. Insert `use std::fs;` above
+- [x] 8.3 CHECK: Run the negative control and record both halves. Insert `use std::fs;` above
       `src/specs.rs`'s `#[cfg(test)]` line → `cargo test --test doc_contract` must FAIL naming
       the needle and the line; remove the plant → must pass. A green-at-HEAD check without this
       is an unfalsifiable guard, which is worse than no guard.
-- [ ] 8.3a CHECK (added during implementation): Run the **complement** control, from
+- [x] 8.3a CHECK (added during implementation): Run the **complement** control, from
       specs/doc-conformance:54 — "An I/O name in the test module alone does not fail the claim".
       Plant an I/O name **below** `src/specs.rs`'s `#[cfg(test)]` line and confirm
       `cargo test --test doc_contract` still **passes**; remove it. 8.3 plants above the cut and
       requires a failure; without its complement, a claim that read the whole file rather than
       the production slice would satisfy 8.3 and be wrong. The scenario exists and no task named
       it — the same omission this package has now produced four times.
-- [ ] 8.4 CHECK: Confirm no gate moved — `ls scripts/gates/ | wc -l` still **31**, and
+- [x] 8.4 CHECK: Confirm no gate moved — `ls scripts/gates/ | wc -l` still **31**, and
       `make gates` still reports `NOIO-VIEW OK: 10 pure files`. This claim exists in the test
       tier precisely so neither count moves.
-- [ ] 8.5 Run the group tests — `cargo test --test doc_contract` green; state whether a refactor
+- [x] 8.5 Run the group tests — `cargo test --test doc_contract` green; state whether a refactor
       was needed.
 
 ## 9. Change Review
@@ -393,25 +393,34 @@ no gate, so the property Decision 3 rests on has no check without this group.
 
 <!-- kind: operational -->
 
-- [ ] 10.1 CHECK: `cargo test --test doc_contract` → must be RED on **two** counts once
+**Run before group 9, not after.** The two `doc_contract` failures this group repairs
+(`module_map_matches_lib_rs`, `tested_modules_names_every_module`) have stood red since group 2
+added `pub mod specs;` — planned, and named in every group's brief so an implementer would not
+chase them. But group 9 dispatches an independent reviewer against the **finished** change, and a
+reviewer meeting a red suite spends its attention on the two failures rather than on the change.
+Ordering documentation first costs nothing — no task in group 9 is an input to one here — and
+buys the review a green tree. Recorded rather than done silently, since it departs from the
+file's own order.
+
+- [x] 10.1 CHECK: `cargo test --test doc_contract` → must be RED on **two** counts once
       `pub mod specs;` exists: `module_map_matches_lib_rs` (the table at `SPEC.md:81`) and
       `tested_modules_names_every_module` (the `### Unit-tested modules` list at `SPEC.md:1098`).
       Both read `src/lib.rs`'s `pub mod` set; naming only the first understates what is red.
-- [ ] 10.2 CHANGE: Add the `specs` row to `SPEC.md`'s Module map (audience: anyone tracing where
+- [x] 10.2 CHANGE: Add the `specs` row to `SPEC.md`'s Module map (audience: anyone tracing where
       a classifier lives) — "Recognise a delta spec's operation headings and a scenario clause's
       keyword". It replaces nothing; it is the row a new module owes that table.
-- [ ] 10.3 CHANGE: Add `specs::operation_of_heading` and `specs::clause_of` to `SPEC.md`'s
+- [x] 10.3 CHANGE: Add `specs::operation_of_heading` and `specs::clause_of` to `SPEC.md`'s
       `### Unit-tested modules` list (`SPEC.md:1098`) — delta-operation headings and scenario
       clause keywords, classified from `&str` with no filesystem edge. The check requires a
       bounded `specs::` token, so the module name alone is not enough.
-- [ ] 10.4 CHANGE: Update `AGENTS.md` → Architecture rules (audience: agents editing this crate)
+- [x] 10.4 CHANGE: Update `AGENTS.md` → Architecture rules (audience: agents editing this crate)
       to name `src/specs.rs` beside `src/tasks.rs` as pure classification outside `src/ui/`, and
       record that `ui::markdown` may call `specs::clause_of` and no other function of that
       module. This corrects the current text's implication that no pure view file calls out.
-- [ ] 10.5 CHANGE: Update `AGENTS.md`'s contract-tier sentence from "ten further claims" to
+- [x] 10.5 CHANGE: Update `AGENTS.md`'s contract-tier sentence from "ten further claims" to
       **eleven**, naming the `src/specs.rs` purity claim. The count is prose and nothing binds
       it, which is exactly how `quality-gates`' script count drifted three behind unnoticed.
-- [ ] 10.6 VERIFY: `cargo test --test doc_contract` green.
+- [x] 10.6 VERIFY: `cargo test --test doc_contract` green.
 
 ## 11. Lint & Verify
 

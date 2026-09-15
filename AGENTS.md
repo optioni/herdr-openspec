@@ -276,12 +276,13 @@ triangle — a `herdr-plugin.toml`, `README.md`, or binary-name edit that drifts
 against another fails it, deliberately asserting nothing about `target/release/`, which
 `make check` never builds), `tests/degraded_coverage.rs` (`SPEC.md`'s degraded-states
 table bound to a named, passing proving test per row), and `tests/doc_contract.rs`
-(ten further claims — the module map, the tested-modules list, the worker-thread
+(eleven further claims — the module map, the tested-modules list, the worker-thread
 count, the MSRV, the gate-path programs, the manifest transcription, the injected
 OpenSpec context, the documented mouse bindings, the documented key bindings
-(`SPEC.md` → Keys and `README.md` → Keys against `ui::help::INVENTORY`), and the
+(`SPEC.md` → Keys and `README.md` → Keys against `ui::help::INVENTORY`), the
 confined terminal-seam
-names — each bound to the repository file that determines it; see `SPEC.md`
+names, and `src/specs.rs`'s production slice carrying no I/O or schema name — each
+bound to the repository file that determines it; see `SPEC.md`
 → § Testing and quality gates → Doc-conformance checks). The rule all three share: **a
 documented claim with a computable second site is bound to that site inside `cargo
 test`, not left to a human re-reading it.** Durable because a future change adding a
@@ -352,6 +353,23 @@ unreachable and the tests become integration tests by accident.
   very `node` it needs, so the probe chain reaches steps 3 and 4 exactly when the
   child's inherited `PATH` cannot exec it — `RealHerdrCli` keeps both prohibitions.
   Parsing, merging, and decisions live on the testable side of that seam.
+  `src/tasks.rs` and `src/specs.rs` are that side's pure classifiers: markdown
+  checkboxes to groups and counts, and a delta spec's operation headings and a
+  scenario clause's keyword to `DeltaOp` and `Clause`. Both live outside
+  `src/ui/` — `specs` deliberately, so that adding it moves neither `NOIO-VIEW`'s
+  "ten pure files" nor `COLWIDTH`'s "nine pure view files", counts four documents
+  carry. The cost of that placement is that **no `make gates` script sweeps
+  `src/specs.rs` at all**, so its freedom from I/O is an eleventh
+  `tests/doc_contract.rs` claim over its production slice instead, falsifiable by
+  a planted `use std::fs;` above the `#[cfg(test)]` line. `clause_of` calls
+  `tasks::role_of` rather than restating its token table, so the two classifiers
+  cannot disagree about what `WHEN` is.
+  A pure view file may call **out** to `specs`, which is the one exception to
+  reading `src/ui/` as a leaf: `ui::markdown` calls `specs::clause_of` and no
+  other function of that module, and names `crate::specs::DeltaOp` as a `Face`
+  field type. `MDSEAM` does not police this; specs/markdown-render's "The
+  narrowed seam holds" is the rule, and it forbids a **call**, not a type
+  mention.
   `src/agents.rs`, `src/launch.rs`,
   and `src/open.rs` are the crate's **three** `HerdrCli` consumers, reaching it only
   through the trait object; none names a spawn API itself. This is checked, not
