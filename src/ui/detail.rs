@@ -292,34 +292,144 @@ pub enum ContentKind {
 /// `detail-header`'s header row already reach it — and is **dropped whole**
 /// when the row cannot hold the indent, the glyph, its separating space, at
 /// least one column of label, one further separating space, and the cell
-/// itself. Never truncated, and never allowed to push the label out. The
-/// drop-whole order as the row narrows is therefore the cell first, reclaiming
-/// its own padding; then the label, truncated with the `…` rule; then the
-/// glyph and the indent — the same discipline the bar and the change header
-/// already use, so a narrowing pane loses fields in one order everywhere.
+/// itself. Never truncated, and never allowed to push the label out.
+///
+/// `spec-emphasis` adds the two-column **badge** a requirement section's
+/// `operation` carries: `+`/`~`/`-` followed by one space, emitted with the
+/// indent and the glyph, before the label (design.md -> Decision 5). The
+/// drop-whole order as the row narrows is therefore the cell first,
+/// reclaiming its own padding; then the label, truncated with the `…` rule;
+/// then the badge; then the glyph and the indent — the same discipline the
+/// bar and the change header already use, so a narrowing pane loses fields
+/// in one order everywhere.
+///
+/// Returns the row's own `Line` rather than a bare `String`: a badged row
+/// carries **three** segments — the `<indent><glyph> ` prefix, the badge,
+/// and the label — so the badge and (on a `Removed` requirement) the label
+/// can be faced apart, while an unbadged row still carries the single
+/// plain segment it always did (design.md -> Decision 8). `ui::detail`
+/// names no `palette::Role` here: the badge segment carries
+/// `Face { delta: Some(op), .. }` and nothing else, exactly as the row
+/// carries a *kind* and not a style. Every test that cares only about the
+/// row's own text reads it through [`crate::ui::markdown::Line::text`].
 fn header(
     label: &str,
     depth: usize,
     expanded: bool,
     progress: Option<&crate::tasks::Progress>,
+    operation: Option<crate::specs::DeltaOp>,
     width: u16,
-) -> String {
+) -> crate::ui::markdown::Line {
+    let (area, cell) = label_area(depth, progress, width as usize);
+    let mut segments = match badged_pieces(label, depth, expanded, operation, area) {
+        Some((prefix, badge, label)) => vec![
+            crate::ui::markdown::Segment {
+                text: prefix,
+                face: crate::ui::markdown::Face::plain(),
+            },
+            crate::ui::markdown::Segment {
+                text: badge,
+                face: crate::ui::markdown::Face {
+                    delta: operation,
+                    ..crate::ui::markdown::Face::plain()
+                },
+            },
+            crate::ui::markdown::Segment {
+                text: label,
+                face: crate::ui::markdown::Face {
+                    strikethrough: matches!(operation, Some(crate::specs::DeltaOp::Removed)),
+                    ..crate::ui::markdown::Face::plain()
+                },
+            },
+        ],
+        None => vec![crate::ui::markdown::Segment {
+            text: unbadged_row(label, depth, expanded, area),
+            face: crate::ui::markdown::Face::plain(),
+        }],
+    };
+    if let Some(cell) = cell {
+        segments.push(crate::ui::markdown::Segment {
+            text: format!(" {cell}"),
+            face: crate::ui::markdown::Face::plain(),
+        });
+    }
+    crate::ui::markdown::Line { segments }
+}
+
+/// The width left for the badge/label portion of a header row once a
+/// progress cell has claimed its own, plus the cell's own text when it is
+/// drawn — `None` when `progress` is absent or the row cannot hold the
+/// cell. `header`'s own drop-whole rule, shared with `header` so the
+/// two agree about how much of the row the cell claims.
+fn label_area(
+    depth: usize,
+    progress: Option<&crate::tasks::Progress>,
+    width: usize,
+) -> (usize, Option<String>) {
+    let Some(progress) = progress else {
+        return (width, None);
+    };
+    let cell = crate::ui::list::progress_cell(progress);
+    let cell_cols = columns(&cell);
+    let indent_cols = columns(&"  ".repeat(depth));
+    // The indent, the glyph, its space, one column of label, one
+    // separating space, and the cell.
+    let minimum = indent_cols + 3 + 1 + cell_cols;
+    if width >= minimum {
+        (width - cell_cols - 1, Some(cell))
+    } else {
+        (width, None)
+    }
+}
+
+/// `Some((prefix, badge, label))` when a badge is drawn at `width` —
+/// `operation` is `Some` and there is room for the indent, the glyph, its
+/// space, the badge, and at least one column of label — split at the seams
+/// `header` faces apart into three segments. `None` when no badge is
+/// drawn: `operation` is `None`, or the row is too narrow to hold one, in
+/// which case the caller falls back to `unbadged_row`, truncating the
+/// indent, the glyph and the label as one unit exactly as it always has.
+fn badged_pieces(
+    label: &str,
+    depth: usize,
+    expanded: bool,
+    operation: Option<crate::specs::DeltaOp>,
+    width: usize,
+) -> Option<(String, String, String)> {
+    let op = operation?;
     let glyph = crate::ui::list::fold_glyph(!expanded);
     let indent = "  ".repeat(depth);
-    let base = format!("{indent}{glyph} {label}");
-    let w = width as usize;
-    if let Some(progress) = progress {
-        let cell = crate::ui::list::progress_cell(progress);
-        let cell_cols = columns(&cell);
-        // The indent, the glyph, its space, one column of label, one
-        // separating space, and the cell.
-        let minimum = columns(&indent) + 3 + 1 + cell_cols;
-        if w >= minimum {
-            let left = crate::ui::list::pad_or_truncate_right(&base, w - cell_cols - 1);
-            return format!("{left} {cell}");
-        }
+    let prefix = format!("{indent}{glyph} ");
+    let badge = badge_text(op).to_string();
+    let minimum = columns(&prefix) + columns(&badge) + 1;
+    if width < minimum {
+        return None;
     }
-    crate::ui::list::pad_or_truncate_right(&base, w)
+    let label_width = width - columns(&prefix) - columns(&badge);
+    let label = crate::ui::list::pad_or_truncate_right(label, label_width);
+    Some((prefix, badge, label))
+}
+
+/// The row this capability drew before it existed: `<indent><glyph>
+/// <label>`, truncated as one unit through the crate's one truncation
+/// rule, so a depth whose indent alone exceeds `width` still degrades to
+/// truncated indent rather than a dropped glyph.
+fn unbadged_row(label: &str, depth: usize, expanded: bool, width: usize) -> String {
+    let glyph = crate::ui::list::fold_glyph(!expanded);
+    let indent = "  ".repeat(depth);
+    crate::ui::list::pad_or_truncate_right(&format!("{indent}{glyph} {label}"), width)
+}
+
+/// The badge's own two columns for a delta operation: the marker — `+` for
+/// `Added`, `~` for `Modified`, `-` for `Removed` — and the one separating
+/// space every badge carries (specs/artifact-folds -> "A section header row
+/// names the file and shows its fold state").
+fn badge_text(op: crate::specs::DeltaOp) -> &'static str {
+    match op {
+        crate::specs::DeltaOp::Added => "+ ",
+        crate::specs::DeltaOp::Modified => "~ ",
+        crate::specs::DeltaOp::Removed => "- ",
+    }
 }
 
 /// The blank separator row, padded to `width` on the same terms every other
@@ -528,18 +638,14 @@ pub fn content_lines(
             let open = section.label.is_none() || detail.expanded.contains(&index);
             if let Some(label) = section.label.as_deref() {
                 out.push(ContentRow {
-                    line: crate::ui::markdown::Line {
-                        segments: vec![crate::ui::markdown::Segment {
-                            text: header(
-                                label,
-                                section.depth,
-                                open,
-                                section.progress.as_ref(),
-                                width,
-                            ),
-                            face: crate::ui::markdown::Face::plain(),
-                        }],
-                    },
+                    line: header(
+                        label,
+                        section.depth,
+                        open,
+                        section.progress.as_ref(),
+                        section.operation,
+                        width,
+                    ),
                     kind: ContentKind::SectionHeader {
                         section: index,
                         selected: false,
@@ -959,11 +1065,11 @@ mod tests {
             let label = "degraded-coverage";
             let glyph = fold_glyph(true);
 
-            let at_18 = header(label, 0, false, None, 18);
+            let at_18 = header(label, 0, false, None, None, 18).text();
             assert_eq!(columns(&at_18), 18);
             assert_eq!(at_18, format!("{glyph} degraded-covera…"));
 
-            let at_13 = header(label, 0, false, None, 13);
+            let at_13 = header(label, 0, false, None, None, 13).text();
             assert_eq!(columns(&at_13), 13);
             assert_eq!(at_13, format!("{glyph} degraded-c…"));
 
@@ -976,7 +1082,7 @@ mod tests {
             // four columns of indent, emitted **before** the glyph, so
             // truncation eats the label first and the depth survives it.
             let nested = "Requirement: Alpha";
-            let nested_18 = header(nested, 2, false, None, 18);
+            let nested_18 = header(nested, 2, false, None, None, 18).text();
             assert_eq!(columns(&nested_18), 18);
             assert_eq!(nested_18, format!("    {glyph} Requirement…"));
             // At 13 the same grammar keeps six columns of indent-and-glyph and
@@ -985,7 +1091,7 @@ mod tests {
             // measures twelve rather than thirteen columns — one short of the
             // region — so the row below is what the crate's one truncation
             // rule, `ui::list::pad_or_truncate_right`, actually returns.)
-            let nested_13 = header(nested, 2, false, None, 13);
+            let nested_13 = header(nested, 2, false, None, None, 13).text();
             assert_eq!(columns(&nested_13), 13);
             assert_eq!(nested_13, format!("    {glyph} Requir…"));
             assert!(nested_18.starts_with(&format!("    {glyph} ")));
@@ -994,7 +1100,7 @@ mod tests {
             // A depth-3 header's six columns of indent alone exceed a
             // four-column region: the row degrades to truncated **indent**
             // rather than to a dropped glyph, and does not panic.
-            let deep = header("Scenario: A works", 3, false, None, 4);
+            let deep = header("Scenario: A works", 3, false, None, None, 4).text();
             assert_eq!(columns(&deep), 4);
             assert_eq!(deep, "   …");
             assert!(
@@ -1002,7 +1108,7 @@ mod tests {
                 "the glyph was not kept at the cost of the indent"
             );
             for width in 0u16..=20 {
-                let got = header("Scenario: A works", 3, false, None, width);
+                let got = header("Scenario: A works", 3, false, None, None, width).text();
                 assert!(
                     columns(&got) <= width as usize,
                     "depth 3 width {width}: {got:?}"
@@ -1015,7 +1121,7 @@ mod tests {
             // space — at depth 0, 2, and 3 alike.
             for width in [78, 58] {
                 for depth in [0usize, 2, 3] {
-                    let got = header(label, depth, false, None, width);
+                    let got = header(label, depth, false, None, None, width).text();
                     assert_eq!(columns(&got), width as usize, "width {width} depth {depth}");
                     assert!(
                         got.trim_end().ends_with(label),
@@ -1037,7 +1143,7 @@ mod tests {
             let label = "日本語のラベルです見出しの続き";
             for width in [18u16, 13, 78, 58] {
                 for depth in [0usize, 2, 3] {
-                    let got = header(label, depth, false, None, width);
+                    let got = header(label, depth, false, None, None, width).text();
                     assert!(
                         columns(&got) <= width as usize,
                         "width {width} depth {depth}: {got:?} exceeds its width"
@@ -1067,7 +1173,7 @@ mod tests {
             let mut present = 0usize;
             let mut absent = 0usize;
             for width in 0u16..=40 {
-                let got = header("1. Setup", 0, false, Some(&group), width);
+                let got = header("1. Setup", 0, false, Some(&group), None, width).text();
                 assert!(
                     columns(&got) <= width as usize,
                     "width {width}: {got:?} exceeds it"
@@ -1102,7 +1208,7 @@ mod tests {
             // Unsuffixed: `DETAILWIDTHS`' number scan is `\b(\d+)\b` and does
             // not see `58u16`.
             for width in [58, 78] {
-                let got = header("1. Setup", 0, false, Some(&group), width);
+                let got = header("1. Setup", 0, false, Some(&group), None, width).text();
                 assert_eq!(columns(&got), width as usize, "width {width}");
                 assert!(got.ends_with(&cell), "width {width}: {got:?}");
                 // Byte-identical to `ui::list::progress_cell` on the same
@@ -1114,7 +1220,7 @@ mod tests {
                 // And a section carrying no progress draws no cell at all,
                 // byte-identical to the row this capability drew before.
                 assert_eq!(
-                    header("1. Setup", 0, false, None, width),
+                    header("1. Setup", 0, false, None, None, width).text(),
                     crate::ui::list::pad_or_truncate_right("▸ 1. Setup", width as usize),
                     "width {width}"
                 );
@@ -1127,14 +1233,14 @@ mod tests {
             for expanded in [false, true] {
                 for depth in 0usize..=3 {
                     for width in 0u16..=20 {
-                        let got = header(label, depth, expanded, None, width);
+                        let got = header(label, depth, expanded, None, None, width).text();
                         assert!(
                             columns(&got) <= width as usize,
                             "expanded {expanded} depth {depth} width {width}: {got:?}"
                         );
                     }
                     for width in [78, 58] {
-                        let got = header(label, depth, expanded, None, width);
+                        let got = header(label, depth, expanded, None, None, width).text();
                         assert_eq!(columns(&got), width as usize, "width {width} depth {depth}");
                     }
                 }
@@ -1213,7 +1319,7 @@ mod tests {
     #[test]
     fn the_three_operations_draw_three_different_markers() {
         use crate::specs::DeltaOp;
-        for width in [78u16, 58] {
+        for width in [78, 58] {
             let detail = Detail {
                 sections: vec![
                     ArtifactSection {
@@ -1259,11 +1365,16 @@ mod tests {
             let rows = content_lines(&detail, None, width);
             assert_eq!(rows.len(), 4, "width {width}");
 
+            // The file section is open (its children must be, to be
+            // visible at all), so its own glyph is the *open* one; the
+            // three requirement headers stay collapsed, carrying the
+            // closed glyph.
+            let open_glyph = crate::ui::list::fold_glyph(false);
             let glyph = crate::ui::list::fold_glyph(true);
             assert_eq!(
                 rows[0].text(),
                 crate::ui::list::pad_or_truncate_right(
-                    &format!("{glyph} specs"),
+                    &format!("{open_glyph} specs"),
                     width as usize
                 ),
                 "width {width}"
@@ -1333,7 +1444,7 @@ mod tests {
     /// column".
     #[test]
     fn an_unbadged_header_row_is_unchanged_in_every_column() {
-        for width in [78u16, 58] {
+        for width in [78, 58] {
             let detail = three_spec_detail(std::collections::BTreeSet::new());
             let rows = content_lines(&detail, None, width);
             assert_eq!(rows.len(), 3, "width {width}");
@@ -1378,7 +1489,7 @@ mod tests {
     #[test]
     fn a_removed_requirements_heading_is_struck_and_its_body_is_not() {
         use crate::specs::DeltaOp;
-        for width in [78u16, 58] {
+        for width in [78, 58] {
             let make = |op: DeltaOp| Detail {
                 sections: vec![
                     ArtifactSection {
@@ -1448,7 +1559,7 @@ mod tests {
     fn the_label_truncates_before_the_badge_is_dropped() {
         use crate::specs::DeltaOp;
         let label = "a".repeat(200);
-        for width in [78u16, 58] {
+        for width in [78, 58] {
             let detail = Detail {
                 sections: vec![
                     ArtifactSection {
@@ -1478,11 +1589,7 @@ mod tests {
                 .iter()
                 .find(|r| matches!(r.kind, ContentKind::SectionHeader { section: 1, .. }))
                 .expect("the requirement's header row is drawn");
-            assert_eq!(
-                columns(&header_row.text()),
-                width as usize,
-                "width {width}"
-            );
+            assert_eq!(columns(&header_row.text()), width as usize, "width {width}");
             assert_eq!(
                 header_row.line.segments.len(),
                 3,
@@ -1508,33 +1615,34 @@ mod tests {
     fn the_badge_is_dropped_whole_at_a_width_that_cannot_hold_it() {
         use crate::specs::DeltaOp;
         let label = "a".repeat(200);
+        let make = |width: u16| Detail {
+            sections: vec![
+                ArtifactSection {
+                    label: Some("specs".to_string()),
+                    text: String::new(),
+                    depth: 0,
+                    progress: None,
+                    operation: None,
+                },
+                ArtifactSection {
+                    label: Some(label.clone()),
+                    text: String::new(),
+                    depth: 1,
+                    progress: None,
+                    operation: Some(DeltaOp::Modified),
+                },
+            ],
+            scroll: 0,
+            tab: 0,
+            problems: Vec::new(),
+            loaded: None,
+            expanded: std::collections::BTreeSet::from([0]),
+            drawn_width: Some(width),
+        };
         let mut present = 0usize;
         let mut absent = 0usize;
         for width in 0u16..=20 {
-            let detail = Detail {
-                sections: vec![
-                    ArtifactSection {
-                        label: Some("specs".to_string()),
-                        text: String::new(),
-                        depth: 0,
-                        progress: None,
-                        operation: None,
-                    },
-                    ArtifactSection {
-                        label: Some(label.clone()),
-                        text: String::new(),
-                        depth: 1,
-                        progress: None,
-                        operation: Some(DeltaOp::Modified),
-                    },
-                ],
-                scroll: 0,
-                tab: 0,
-                problems: Vec::new(),
-                loaded: None,
-                expanded: std::collections::BTreeSet::from([0]),
-                drawn_width: Some(width),
-            };
+            let detail = make(width);
             let rows = content_lines(&detail, None, width);
             let header_row = rows
                 .iter()
@@ -1566,6 +1674,20 @@ mod tests {
             "the sweep must cross the drop, not sit on one side of it \
              (present {present}, absent {absent})"
         );
+
+        // The two mandated interior widths, named explicitly per
+        // `DETAILWIDTHS`: at both the badge is comfortably present, since
+        // the drop fires well below either.
+        for width in [78, 58] {
+            let detail = make(width);
+            let rows = content_lines(&detail, None, width);
+            let header_row = rows
+                .iter()
+                .find(|r| matches!(r.kind, ContentKind::SectionHeader { section: 1, .. }))
+                .expect("the requirement's header row is drawn");
+            assert_eq!(header_row.line.segments.len(), 3, "width {width}");
+            assert_eq!(header_row.line.segments[1].text, "~ ", "width {width}");
+        }
     }
 
     /// `spec-emphasis` :: "A badged header row is still addressed by its
@@ -1573,7 +1695,7 @@ mod tests {
     #[test]
     fn a_badged_header_row_is_still_addressed_by_its_own_section_index() {
         use crate::specs::DeltaOp;
-        for width in [78u16, 58] {
+        for width in [78, 58] {
             let make = |expanded: std::collections::BTreeSet<usize>| Detail {
                 sections: vec![
                     ArtifactSection {
@@ -1620,10 +1742,7 @@ mod tests {
             assert_eq!(rows.len(), 4, "width {width}");
             assert_eq!(section_at(&rows, 0, 2), Some(2), "width {width}");
             assert!(
-                matches!(
-                    rows[2].kind,
-                    ContentKind::SectionHeader { section: 2, .. }
-                ),
+                matches!(rows[2].kind, ContentKind::SectionHeader { section: 2, .. }),
                 "width {width}: {:?}",
                 rows[2].kind
             );
@@ -2967,13 +3086,13 @@ mod tests {
                     // `ui::tasks`' own blank line, unpadded — `bar_lines`
                     // emits the very pair the flat tab leads with.
                     String::new(),
-                    header("a", 0, true, None, width),
-                    header("1. Setup", 1, true, None, width),
+                    header("a", 0, true, None, None, width).text(),
+                    header("1. Setup", 1, true, None, None, width).text(),
                     "[ ] a".to_string(),
                     // The fold walk's own separator row, which IS padded.
                     crate::ui::list::pad_or_truncate_right("", width as usize),
-                    header("b", 0, true, None, width),
-                    header("2. Build", 1, true, None, width),
+                    header("b", 0, true, None, None, width).text(),
+                    header("2. Build", 1, true, None, None, width).text(),
                     "[ ] b".to_string(),
                 ],
                 "width {width}"
@@ -2988,9 +3107,9 @@ mod tests {
                 vec![
                     bar,
                     String::new(),
-                    header("a", 0, false, None, width),
-                    header("b", 0, true, None, width),
-                    header("2. Build", 1, true, None, width),
+                    header("a", 0, false, None, None, width).text(),
+                    header("b", 0, true, None, None, width).text(),
+                    header("2. Build", 1, true, None, None, width).text(),
                     "[ ] b".to_string(),
                 ],
                 "width {width}: a collapsed depth-0 file section hides its own group"

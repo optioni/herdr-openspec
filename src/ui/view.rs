@@ -7794,7 +7794,7 @@ mod tests {
     /// keeps its badge colour".
     #[test]
     fn a_selected_badged_header_keeps_its_badge_colour() {
-        for width in [120u16, 60] {
+        for width in [120, 60] {
             let d = delta_badged_dashboard(1, Route::Detail);
             let interior = interior_width(width);
             let rows = crate::ui::detail::content_lines(&d.detail, d.selected_change(), interior);
@@ -7810,7 +7810,8 @@ mod tests {
             let offset = if width == 60 { 1u16 } else { 42 };
             let text = detail_interior_cols(&buf, 6, interior as usize);
             let badge_index = text
-                .find('+')
+                .chars()
+                .position(|c| c == '+')
                 .unwrap_or_else(|| panic!("width {width}: the badge marker is drawn: {text:?}"));
             let x = offset + badge_index as u16;
 
@@ -7834,14 +7835,15 @@ mod tests {
     /// colours survive the row's own role".
     #[test]
     fn a_badged_header_rows_colours_survive_the_rows_own_role() {
-        for width in [120u16, 60] {
+        for width in [120, 60] {
             let d = delta_badged_dashboard(1, Route::Detail);
             let interior = interior_width(width);
             let buf = render_at(width, 20, &d);
             let offset = if width == 60 { 1u16 } else { 42 };
             let text = detail_interior_cols(&buf, 6, interior as usize);
             let badge_index = text
-                .find('+')
+                .chars()
+                .position(|c| c == '+')
                 .unwrap_or_else(|| panic!("width {width}: the badge marker is drawn: {text:?}"));
             let x = offset + badge_index as u16;
 
