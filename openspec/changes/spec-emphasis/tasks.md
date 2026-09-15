@@ -452,19 +452,19 @@ file's own order.
 
 <!-- kind: operational -->
 
-- [ ] 11.1 CHECK: Confirm `ls scripts/gates/ | wc -l` still reports **31** — this change adds no
+- [x] 11.1 CHECK: Confirm `ls scripts/gates/ | wc -l` still reports **31** — this change adds no
       gate, so a changed count means one was added without the spec sentence
       `tests/ci_workflow.rs` binds.
-- [ ] 11.2 VERIFY: `cargo fmt --all -- --check` — clean.
-- [ ] 11.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings.
-- [ ] 11.4 VERIFY: `make gates` — exit 0, with `NOIO-VIEW` still reporting **10** pure files and
+- [x] 11.2 VERIFY: `cargo fmt --all -- --check` — clean.
+- [x] 11.3 VERIFY: `cargo clippy --all-targets --all-features -- -D warnings` — 0 warnings.
+- [x] 11.4 VERIFY: `make gates` — exit 0, with `NOIO-VIEW` still reporting **10** pure files and
       `COLWIDTH` still **nine** pure view files. Both counts must be unchanged: `src/specs.rs`
       is outside `src/ui/` precisely so they do not move (design.md → Decision 1).
-- [ ] 11.5 VERIFY: `cargo test --all-features` — green, contract tier included.
-- [ ] 11.5a VERIFY: `make coverage` — both floors hold. `src/specs.rs` is a new **production**
+- [x] 11.5 VERIFY: `cargo test --all-features` — green, contract tier included.
+- [x] 11.5a VERIFY: `make coverage` — both floors hold. `src/specs.rs` is a new **production**
       file and the production-slice floor is **96%** (`scripts/coverage-prod.py:84`), well above
       the 80% total, so every arm of `operation_of_heading` and `clause_of` needs a test. The
       eleven scenarios in specs/spec-delta-badges supply them; this task is the forewarning, so
       a shortfall surfaces here rather than as an unexplained red at `make check`.
-- [ ] 11.6 VERIFY: `make check` as the single gate; if it fails, name the failing sub-command.
-- [ ] 11.7 VERIFY: `openspec validate spec-emphasis --strict` — valid.
+- [x] 11.6 VERIFY: `make check` as the single gate; if it fails, name the failing sub-command.
+- [x] 11.7 VERIFY: `openspec validate spec-emphasis --strict` — valid.
