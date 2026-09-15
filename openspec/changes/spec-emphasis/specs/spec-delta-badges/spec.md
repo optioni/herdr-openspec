@@ -3,9 +3,11 @@
 Recognising the structural vocabulary OpenSpec itself writes into a delta spec: the three
 delta-operation headings (`## ADDED Requirements` and its two siblings), and the keyword that
 opens a scenario clause (`- **WHEN**`, `- **THEN**`, `- **AND**`). Two pure total functions
-over borrowed text in `src/specs.rs`, plus the `DeltaOp` vocabulary; `artifact-folds` badges a
-requirement's section-header row from the first, `markdown-render` faces a clause keyword from
-the second, and `view-palette` decides what each looks like.
+over borrowed text in `src/specs.rs`, plus the `DeltaOp` vocabulary; `artifact-folds` owns both the
+**attribution walk** that turns the first into a per-section `operation` and the header row that
+draws it, `markdown-render` faces a clause keyword from the second, and `view-palette` decides
+what each looks like. This capability classifies one heading and one run; it never walks a
+section list, because the list is `ArtifactSection`'s and that type is `artifact-folds`'.
 
 It lives in `src/specs.rs` rather than under `src/ui/` for exactly the reason `task-labels`
 lives in `src/tasks.rs`: recognising a heading is a fact about a spec's text and not about how
@@ -106,75 +108,6 @@ misclassification available to it.
 - **THEN** no call panics
 - **AND** every call returns `None`
 
-### Requirement: A requirement section inherits the operation of the heading above it
-
-The operation a rendered requirement carries SHALL be derived by a single forward walk over a
-spec-shaped file's section list, in the order `heading-sections` produces it, holding the most
-recent recognised operation and attributing it to the requirement sections that follow.
-
-A section SHALL be attributed an operation when **both** hold:
-
-1. It is a requirement heading by the crate's existing rule — level `3`, with a label
-   beginning `Requirement:`. This is the same predicate `is_spec_shaped` already applies, and
-   it SHALL NOT be written a second time.
-2. A level-2 operation heading precedes it in the file, with no later level-2 operation heading
-   between them.
-
-Every other section SHALL carry `None`: the operation heading itself, a scenario heading, a
-preamble, a file section, and every section of every artifact that is not spec-shaped. The
-operation heading is deliberately unbadged — it already spells the word out — and badging it
-would put the marker twice on the reader's screen for one fact.
-
-A requirement under **no** operation heading SHALL carry `None`. This is what leaves the
-repository's own main specs — `openspec/specs/*/spec.md`, whose requirements sit under
-`## Requirements` — entirely unbadged, so the badge means "this is a delta" and not merely
-"this is a requirement".
-
-A level-2 operation heading SHALL **reset** the attribution rather than nest it: the sections
-after `## REMOVED Requirements` carry `Removed` even where `## ADDED Requirements` appeared
-earlier in the same file.
-
-#### Scenario: Requirements are attributed to the operation heading above them
-
-- **WHEN** a spec-shaped file's sections are, in order, `## ADDED Requirements`,
-  `### Requirement: A`, `#### Scenario: a1`, `## REMOVED Requirements`, `### Requirement: B`
-- **THEN** the attributed operations are, in order, `None`, `Some(Added)`, `None`, `None`,
-  `Some(Removed)`
-- **AND** `Requirement: B` carries `Removed` and not `Added`, so the second heading reset the
-  walk rather than nesting under the first
-
-#### Scenario: A requirement above every operation heading carries none
-
-- **WHEN** a file's sections are, in order, `## Purpose`, `### Requirement: A`,
-  `## ADDED Requirements`, `### Requirement: B`
-- **THEN** the attributed operations are `None`, `None`, `None`, `Some(Added)`
-- **AND** `Requirement: A` is unbadged, having no operation heading before it
-
-#### Scenario: A main spec's requirements are entirely unbadged
-
-- **WHEN** the section list of `openspec/specs/markdown-render/spec.md` is attributed, whose
-  level-2 headings are `## Purpose` and `## Requirements` and which holds eleven level-3
-  `Requirement:` headings
-- **THEN** every section carries `None`
-- **AND** the detail region draws that file exactly as it did before this change, so a badge
-  distinguishes a delta spec from a main spec rather than marking every requirement in the tree
-
-#### Scenario: Only a level-3 `Requirement:` heading is attributed
-
-- **WHEN** a file's sections after `## ADDED Requirements` are `### Requirement: A`,
-  `### Requirements overview`, `#### Requirement: B`, and `### Requirement:`
-- **THEN** the attributed operations are `Some(Added)`, `None`, `None`, and `Some(Added)`
-- **AND** `### Requirements overview` is declined for its label and `#### Requirement: B` for
-  its level, so both halves of the predicate are exercised
-
-#### Scenario: A non-spec artifact is attributed nothing
-
-- **WHEN** the section list of a `tasks.md` whose headings include a level-2 `## ADDED Requirements`
-  written as prose is attributed, and the file carries no level-3 `Requirement:` heading
-- **THEN** every section carries `None`
-- **AND** no badge is drawn on the tracked-tasks tab, whose header rows already carry a
-  progress cell in the position the badge would occupy
-
 ### Requirement: A scenario clause's keyword is classified through the task-label table
 
 `crate::specs` SHALL expose the clause vocabulary and its recognition:
@@ -247,8 +180,29 @@ work to do.
 
 #### Scenario: The classification reads nothing outside its argument
 
-- **WHEN** `src/specs.rs` is searched for the schema-reading names `schema::`, `Schema`,
-  `config.yaml`, and `.openspec.yaml`, and for the filesystem name `read_to_string`
-- **THEN** none occurs anywhere in the file
-- **AND** `clause_of` and `operation_of_heading` are each called in a test with no `Schema`
-  value constructed anywhere in scope, proving their signatures admit none
+- **WHEN** `tests/doc_contract.rs` reads the **production slice** of `src/specs.rs` — the file
+  cut at its first line-anchored `#[cfg(test)]`, by the helper
+  `production_slice_cuts_before_cfg_test` already proves — and searches it for the I/O and
+  schema needles `std::fs`, `std::io`, `std::env`, `std::process`, `std::net`, `File::`,
+  `read_to_string`, `Command`, `schema::`, `Schema`, `config.yaml`, and `.openspec.yaml`
+- **THEN** none occurs, and the check fails naming the needle and the line if one does
+- **AND** the check lives in `tests/doc_contract.rs` and **not** inside `src/specs.rs`, because
+  a check written inside the file it sweeps contains its own needles and can never pass — which
+  is what an earlier draft of this scenario specified
+- **AND** it is not a `scripts/gates/` script either: `NOIO-VIEW`'s `PURE` list is the
+  render-seam's, and adding a non-view module to it would move the "ten pure files" figure that
+  `AGENTS.md`, `SPEC.md`, `view-palette` and `responsive-layout` all carry — the five-site cost
+  Decision 1 exists to avoid — while a thirty-second gate script would move the "thirty-one"
+  count `openspec/specs/quality-gates/spec.md` states in seven places
+- **AND** the check is falsifiable, proved by the standing mechanism: planting `use std::fs;`
+  above the `#[cfg(test)]` line makes it fail, and removing the plant makes it pass
+
+#### Scenario: The clause recognition is total over degenerate input
+
+- **WHEN** `specs::clause_of` is called on the empty string, on `"   "`, on a 10000-character
+  run of `A`, on `"日本語"`, on `"AND 日本語"`, and on a string whose first character is a
+  multi-byte grapheme
+- **THEN** no call panics
+- **AND** every call returns `None`, `AND` being matched whole and `"AND 日本語"` not being it
+- **AND** the obligation is the same one `operation_of_heading` carries above, so the two
+  sibling functions in this capability are held to one standard for one property

@@ -64,18 +64,23 @@ tests has to read every clause to find the one that opens it.
 - `markdown-render`: a scenario clause's keyword carries its lifecycle role on the rendered
   path.
 - `view-palette`: three roles for the three operations.
+- `doc-conformance`: an eleventh checked claim, binding `src/specs.rs`'s freedom from I/O to
+  `cargo test` — the property Decision 3 rests on when it lets a pure view file call into the
+  new module.
 
 ## Impact
 
 - `src/specs.rs` — a new module, outside `src/ui/`, on exactly the reasoning `task-labels`
   gives for living in `src/tasks.rs`: a new *pure-view* file would move a count that
   `view-palette` and `responsive-layout` both bind and that three gate scripts carry as a
-  `PURE` list. Adding a module moves `SPEC.md`'s module map, which `tests/doc_contract.rs`
-  binds — a known, single-site cost.
+  `PURE` list. Adding a module moves **two** `SPEC.md` sites, both bound by
+  `tests/doc_contract.rs`: the Module map (`module_map_matches_lib_rs`) and the
+  `### Unit-tested modules` list (`tested_modules_names_every_module`).
 - `src/tasks.rs` — the token table exposed as `role_of`; `label_of` then calls it.
 - `src/ui/app.rs` — `ArtifactSection` gains an `operation` field, set in `sync_detail`
   exactly as `tasks-emphasis` set `progress`.
-- `src/ui/detail.rs` — the section-header row grammar gains the badge.
+- `src/ui/detail.rs` — the section-header row grammar gains the badge; 19 of the crate's 75
+  `ArtifactSection` construction sites live in its tests.
 - `src/ui/markdown.rs` — `Face` gains a `delta` field; a clause keyword sets `Face::label`.
 - `src/ui/palette.rs` — three new roles; colour literals only in its own tests.
 - View tests at 60 and 120 columns, asserting colour against `palette::style(role)`; the

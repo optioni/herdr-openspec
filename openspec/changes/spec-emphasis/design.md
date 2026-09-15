@@ -146,26 +146,26 @@ that is why the classifier does not live under `src/ui/`.
 
 | Spec Scenario | Verification | Tier | Collaborators | Command |
 |---|---|---|---|---|
-| Each of the three operation headings classifies to its own variant | `specs::tests::operations_classify` | Unit — pure parse | none (all real, `&str` only) | `cargo test specs::` |
-| Internal whitespace is tolerated and nothing else is | `specs::tests::heading_tolerance` | Unit — pure parse | none | `cargo test specs::` |
-| Only a level-2 heading carries an operation | `specs::tests::level_discriminates` | Unit — pure parse | none | `cargo test specs::` |
-| A renamed operation and a main spec's heading both decline | `specs::tests::unknown_headings_decline` | Unit — pure parse | none | `cargo test specs::` |
-| The recognition is total over degenerate input | `specs::tests::heading_totality` | Unit — pure parse | none | `cargo test specs::` |
-| Requirements are attributed to the operation heading above them | `ui::app::tests::attribute_operations` | Unit — pure view | reader replaced (closure) | `cargo test ui::app::` |
-| A requirement above every operation heading carries none | `ui::app::tests::attribute_before_any_heading` | Unit — pure view | reader replaced | `cargo test ui::app::` |
-| A main spec's requirements are entirely unbadged | `ui::app::tests::main_spec_unbadged` | Unit — pure view | reader replaced | `cargo test ui::app::` |
-| Only a level-3 `Requirement:` heading is attributed | `ui::app::tests::attribute_predicate_halves` | Unit — pure view | reader replaced | `cargo test ui::app::` |
-| A non-spec artifact is attributed nothing | `ui::app::tests::tasks_tab_unattributed` | Unit — pure view | reader replaced | `cargo test ui::app::` |
-| The three measured keywords classify as specified | `specs::tests::clause_keywords` | Unit — pure parse | `tasks::role_of` real | `cargo test specs::` |
-| The wider testing vocabulary classifies through the same table | `specs::tests::clause_agrees_with_role_of` | Unit — pure parse | `tasks::role_of` real | `cargo test specs::` |
-| A run outside the table is not a clause | `specs::tests::clause_declines` | Unit — pure parse | `tasks::role_of` real | `cargo test specs::` |
-| The classification reads nothing outside its argument | `specs::tests::reads_nothing` + `NOSCHEMA` leg of `make gates` | Unit + Gates | none | `cargo test specs:: && make gates` |
-| Every token in the table classifies to its own role | existing `tasks::tests::label_roles`, unchanged | Unit — pure parse | none | `cargo test tasks::` |
-| An unrecognised run is a generic label, not a miss | existing `tasks::tests::unrecognised_is_other`, unchanged | Unit — pure parse | none | `cargo test tasks::` |
-| Matching is case-sensitive and whole-run | existing `tasks::tests::label_case_sensitive`, unchanged | Unit — pure parse | none | `cargo test tasks::` |
-| The classification reads nothing outside its argument | existing `tasks::tests::label_reads_nothing`, unchanged | Unit — pure parse | none | `cargo test tasks::` |
-| The table is reachable on its own and `label_of` agrees with it | `tasks::tests::role_of_agrees_with_label_of` | Unit — pure parse | none | `cargo test tasks::` |
-| An unrecognised run is `None` to the table and `Other` to the label | `tasks::tests::role_of_none_vs_label_other` | Unit — pure parse | none | `cargo test tasks::` |
+| Each of the three operation headings classifies to its own variant | `specs::tests::each_of_the_three_operation_headings_classifies_to_its_own_variant` | Unit — pure parse | none (all real, `&str` only) | `cargo test specs::` |
+| Internal whitespace is tolerated and nothing else is | `specs::tests::internal_whitespace_is_tolerated_and_nothing_else_is` | Unit — pure parse | none | `cargo test specs::` |
+| Only a level-2 heading carries an operation | `specs::tests::only_a_level_2_heading_carries_an_operation` | Unit — pure parse | none | `cargo test specs::` |
+| A renamed operation and a main spec's heading both decline | `specs::tests::a_renamed_operation_and_a_main_specs_heading_both_decline` | Unit — pure parse | none | `cargo test specs::` |
+| The recognition is total over degenerate input | `specs::tests::the_recognition_is_total_over_degenerate_input` | Unit — pure parse | none | `cargo test specs::` |
+| Requirements are attributed to the operation heading above them | `ui::app::tests::requirements_are_attributed_to_the_operation_heading_above_them` | Unit — pure view | reader replaced (closure) | `cargo test ui::app::` |
+| A requirement above every operation heading carries none | `ui::app::tests::a_requirement_above_every_operation_heading_carries_none` | Unit — pure view | reader replaced | `cargo test ui::app::` |
+| A main spec's requirements are entirely unbadged | `ui::app::tests::a_main_specs_requirements_are_entirely_unbadged` | Unit — pure view | reader replaced | `cargo test ui::app::` |
+| Only a level-3 `Requirement:` heading is attributed | `ui::app::tests::only_a_level_3_requirement_heading_is_attributed` | Unit — pure view | reader replaced | `cargo test ui::app::` |
+| A non-spec artifact is attributed nothing | `ui::app::tests::a_non_spec_artifact_is_attributed_nothing` | Unit — pure view | reader replaced | `cargo test ui::app::` |
+| The three measured keywords classify as specified | `specs::tests::the_three_measured_keywords_classify_as_specified` | Unit — pure parse | `tasks::role_of` real | `cargo test specs::` |
+| The wider testing vocabulary classifies through the same table | `specs::tests::the_wider_testing_vocabulary_classifies_through_the_same_table` | Unit — pure parse | `tasks::role_of` real | `cargo test specs::` |
+| A run outside the table is not a clause | `specs::tests::a_run_outside_the_table_is_not_a_clause` | Unit — pure parse | `tasks::role_of` real | `cargo test specs::` |
+| The classification reads nothing outside its argument | `specs::tests::the_classification_reads_nothing_outside_its_argument` + `NOSCHEMA` leg of `make gates` | Unit + Gates | none | `cargo test specs:: && make gates` |
+| Every token in the table classifies to its own role | existing `tasks::tests::every_token_in_the_table_classifies_to_its_own_role`, unchanged | Unit — pure parse | none | `cargo test tasks::` |
+| An unrecognised run is a generic label, not a miss | existing `tasks::tests::an_unrecognised_run_is_a_generic_label_not_a_miss`, unchanged | Unit — pure parse | none | `cargo test tasks::` |
+| Matching is case-sensitive and whole-run | existing `tasks::tests::matching_is_case_sensitive_and_whole_run`, unchanged | Unit — pure parse | none | `cargo test tasks::` |
+| The classification reads nothing outside its argument | existing `tasks::tests::the_classification_the_classification_reads_nothing_outside_its_argument_outside_its_argument`, unchanged | Unit — pure parse | none | `cargo test tasks::` |
+| The table is reachable on its own and `label_of` agrees with it | `tasks::tests::the_table_is_reachable_on_its_own_and_label_of_agrees_with_it` | Unit — pure parse | none | `cargo test tasks::` |
+| An unrecognised run is `None` to the table and `Other` to the label | `tasks::tests::an_unrecognised_run_is_none_to_the_table_and_other_to_the_label` | Unit — pure parse | none | `cargo test tasks::` |
 | The three spec files of a change become three labelled sections | existing `ui::app` test, re-run with the new field | Unit — pure view | reader replaced | `cargo test ui::app::` |
 | A spec glob nests requirements under their capability | existing test, unchanged | Unit — pure view | reader replaced | `cargo test ui::app::` |
 | A preamble becomes an unlabelled section | existing test, unchanged | Unit — pure view | reader replaced | `cargo test ui::app::` |
@@ -173,8 +173,8 @@ that is why the classifier does not live under `src/ui/`.
 | An artifact with no resolved paths has no sections | existing test, unchanged | Unit — pure view | reader replaced | `cargo test ui::app::` |
 | An unreadable file drops its section and keeps its siblings | existing test, unchanged | Unit — pure view | reader replaced (failing closure) | `cargo test ui::app::` |
 | The label derivation is total over adversarial paths | existing test, unchanged | Unit — pure view | none | `cargo test ui::app::` |
-| A delta spec's requirement sections carry their operation and nothing else does | `ui::app::tests::sections_carry_operation` | Unit — pure view | reader replaced | `cargo test ui::app::` |
-| A tracked-tasks tab's sections carry progress and no operation | `ui::app::tests::tasks_sections_carry_progress_only` | Unit — pure view | reader replaced | `cargo test ui::app::` |
+| A delta spec's requirement sections carry their operation and nothing else does | `ui::app::tests::a_delta_specs_requirement_sections_carry_their_operation_and_nothing_else_does` | Unit — pure view | reader replaced | `cargo test ui::app::` |
+| A tracked-tasks tab's sections carry progress and no operation | `ui::app::tests::a_tracked_tasks_tabs_sections_carry_progress_and_no_operation` | Unit — pure view | reader replaced | `cargo test ui::app::` |
 | Folding one section shows its body and leaves its siblings shut | existing `ui::detail` test, unchanged | Unit — pure view | none | `cargo test ui::detail::` |
 | A fold hides a whole subtree | existing test, unchanged | Unit — pure view | none | `cargo test ui::detail::` |
 | The cursor's section header is the emphasised one | existing test, unchanged | Unit — pure view | none | `cargo test ui::detail::` |
@@ -183,30 +183,30 @@ that is why the classifier does not live under `src/ui/`.
 | Every other artifact's section headers carry no progress cell | existing test, unchanged | Unit — pure view | none | `cargo test ui::detail::` |
 | The progress cell is dropped whole rather than truncated | existing test, unchanged | Unit — pure view | none | `cargo test ui::detail::` |
 | A group holding no items still gets a header and a counted cell | existing test, unchanged | Unit — pure view | none | `cargo test ui::detail::` |
-| The three operations draw three different markers | `ui::detail::tests::badge_markers_at_58_and_78` | Unit — pure view | none | `cargo test ui::detail::` |
-| An unbadged header row is unchanged in every column | `ui::detail::tests::unbadged_header_byte_identical` | Unit — pure view | none | `cargo test ui::detail::` |
-| A removed requirement's heading is struck and its body is not | `ui::detail::tests::removed_strikes_heading_only` | Unit — pure view | none | `cargo test ui::detail::` |
-| The label truncates before the badge is dropped | `ui::detail::tests::label_truncates_before_badge` | Unit — pure view | none | `cargo test ui::detail::` |
-| The badge is dropped whole at a width that cannot hold it | `ui::detail::tests::badge_dropped_whole_0_to_20` | Unit — pure view | none | `cargo test ui::detail::` |
-| A selected badged header keeps its badge colour | `ui::view::tests::selected_badge_keeps_colour` | View render | `TestBackend` real, reader replaced | `cargo test ui::view::` |
-| A badged header row is still addressed by its own section index | `ui::detail::tests::badged_header_section_index` | Unit — pure view | none | `cargo test ui::detail::` |
+| The three operations draw three different markers | `ui::detail::tests::the_three_operations_draw_three_different_markers` | Unit — pure view | none | `cargo test ui::detail::` |
+| An unbadged header row is unchanged in every column | `ui::detail::tests::an_unbadged_header_row_is_unchanged_in_every_column` | Unit — pure view | none | `cargo test ui::detail::` |
+| A removed requirement's heading is struck and its body is not | `ui::detail::tests::a_removed_requirements_heading_is_struck_and_its_body_is_not` | Unit — pure view | none | `cargo test ui::detail::` |
+| The label truncates before the badge is dropped | `ui::detail::tests::the_label_truncates_before_the_badge_is_dropped` | Unit — pure view | none | `cargo test ui::detail::` |
+| The badge is dropped whole at a width that cannot hold it | `ui::detail::tests::the_badge_is_dropped_whole_at_a_width_that_cannot_hold_it` | Unit — pure view | none | `cargo test ui::detail::` |
+| A selected badged header keeps its badge colour | `ui::view::tests::a_selected_badged_header_keeps_its_badge_colour` | View render | `TestBackend` real, reader replaced | `cargo test ui::view::` |
+| A badged header row is still addressed by its own section index | `ui::detail::tests::a_badged_header_row_is_still_addressed_by_its_own_section_index` | Unit — pure view | none | `cargo test ui::detail::` |
 | A paragraph is word-wrapped, differently at the two mandated widths | existing `ui::markdown` test, unchanged | Unit — pure view | `pulldown_cmark` real | `cargo test ui::markdown::` |
 | An empty source and a zero width each produce no lines | existing test, unchanged | Unit — pure view | `pulldown_cmark` real | `cargo test ui::markdown::` |
 | No line exceeds the width it was given | existing test, unchanged | Unit — pure view | `pulldown_cmark` real | `cargo test ui::markdown::` |
 | A wide-character document wraps by columns at both mandated widths | existing test, unchanged | Unit — pure view | `pulldown_cmark` real | `cargo test ui::markdown::` |
 | Rendering is total over arbitrary input | existing test, extended to assert no panic with clause input | Unit — pure view | `pulldown_cmark` real | `cargo test ui::markdown::` |
 | The markdown path sets neither new face field | existing test, extended to assert `delta: None` | Unit — pure view | `pulldown_cmark` real | `cargo test ui::markdown::` |
-| A scenario's three clauses are coloured by position | `ui::markdown::tests::clause_roles_at_58_and_78` | Unit — pure view | `pulldown_cmark`, `specs::clause_of` real | `cargo test ui::markdown::` |
-| `AND` inherits the clause above it and resets at a heading | `ui::markdown::tests::and_inherits_and_resets` | Unit — pure view | `pulldown_cmark`, `specs::clause_of` real | `cargo test ui::markdown::` |
-| Only a run opening a list item is a keyword | `ui::markdown::tests::only_leading_strong_is_a_clause` | Unit — pure view | `pulldown_cmark` real | `cargo test ui::markdown::` |
-| Every segment `lines` returns carries no delta | `ui::markdown::tests::lines_never_set_delta` | Unit — pure view | `pulldown_cmark` real | `cargo test ui::markdown::` |
+| A scenario's three clauses are coloured by position | `ui::markdown::tests::a_scenarios_three_clauses_are_coloured_by_position` | Unit — pure view | `pulldown_cmark`, `specs::clause_of` real | `cargo test ui::markdown::` |
+| `AND` inherits the clause above it and resets at a heading | `ui::markdown::tests::and_inherits_the_clause_above_it_and_resets_at_a_heading` | Unit — pure view | `pulldown_cmark`, `specs::clause_of` real | `cargo test ui::markdown::` |
+| Only a run opening a list item is a keyword | `ui::markdown::tests::only_a_run_opening_a_list_item_is_a_keyword` | Unit — pure view | `pulldown_cmark` real | `cargo test ui::markdown::` |
+| Every segment `lines` returns carries no delta | `ui::markdown::tests::every_segment_lines_returns_carries_no_delta` | Unit — pure view | `pulldown_cmark` real | `cargo test ui::markdown::` |
 | The narrowed seam holds | `MDSEAM` + `NOCRATETASKS` legs of `make gates` | Gates | none | `make gates` |
-| Each role's modifier set is exactly the table above | `ui::palette::tests::modifier_table`, extended by three rows | Unit — pure view | none | `cargo test ui::palette::` |
+| Each role's modifier set is exactly the table above | `ui::palette::tests::each_role_s_modifier_set_is_exactly_the_table_above`, extended by three rows | Unit — pure view | none | `cargo test ui::palette::` |
 | A monochrome reading of the frame is unchanged | existing `ui::view` test, extended with a badged section | View render | `TestBackend` real | `cargo test ui::view::` |
 | The five new roles leave every existing cell's modifier where it was | existing test, unchanged | View render | `TestBackend` real | `cargo test ui::view::` |
-| The coloured set is exactly the table above | `ui::palette::tests::colour_table`, extended by three rows | Unit — pure view | none | `cargo test ui::palette::` |
+| The coloured set is exactly the table above | `ui::palette::tests::the_coloured_set_is_exactly_the_table_and_every_colour_is_a_named_ansi_index`, extended by three rows | Unit — pure view | none | `cargo test ui::palette::` |
 | An out-of-range heading level does not panic | existing test, unchanged | Unit — pure view | none | `cargo test ui::palette::` |
-| Every shared style is licensed, and the unshared roles stay unshared | `ui::palette::tests::shared_styles`, extended | Unit — pure view | none | `cargo test ui::palette::` |
+| Every shared style is licensed, and the unshared roles stay unshared | `ui::palette::tests::every_shared_style_is_licensed_and_the_unshared_roles_stay_unshared`, extended | Unit — pure view | none | `cargo test ui::palette::` |
 | A task label and a problem row are distinguishable in one frame | existing test, unchanged | View render | `TestBackend` real | `cargo test ui::view::` |
 | Faces reach the buffer as coloured styles at both mandated widths | existing test, unchanged | View render | `TestBackend` real | `cargo test ui::view::` |
 | A section header's role is selected by its kind, not by its face | existing test, unchanged | View render | `TestBackend` real | `cargo test ui::view::` |
@@ -218,9 +218,9 @@ that is why the classifier does not live under `src/ui/`.
 | The confinement gate catches a `Color` named outside the palette | `PALETTE` gate + its planted defect in `tests/gate-controls.toml` | Gates + Contract | none | `make gates && cargo test --test gate_controls` |
 | The palette module reaches no I/O and measures no width | `NOIO-VIEW` and `COLWIDTH` legs, counts unchanged at ten and nine | Gates | none | `make gates` |
 | The enum's membership is exactly this list | existing exhaustive-`match` test, extended to name the three new variants | Unit — pure view | none | `cargo test ui::palette::` |
-| The three delta roles carry their colour and no modifier | `ui::palette::tests::delta_roles` | Unit — pure view | none | `cargo test ui::palette::` |
-| The full set of shared coloured styles is still exactly five groups | `ui::palette::tests::shared_styles` (pairwise, same test as above) | Unit — pure view | none | `cargo test ui::palette::` |
-| A badged header row's colours survive the row's own role | `ui::view::tests::badge_colour_survives_row_role` | View render | `TestBackend` real, reader replaced | `cargo test ui::view::` |
+| The three delta roles carry their colour and no modifier | `ui::palette::tests::the_three_delta_roles_carry_their_colour_and_no_modifier` | Unit — pure view | none | `cargo test ui::palette::` |
+| The full set of shared coloured styles is still exactly five groups | `ui::palette::tests::every_shared_style_is_licensed_and_the_unshared_roles_stay_unshared` (pairwise, same test as above) | Unit — pure view | none | `cargo test ui::palette::` |
+| A badged header row's colours survive the row's own role | `ui::view::tests::a_badged_header_rows_colours_survive_the_rows_own_role` | View render | `TestBackend` real, reader replaced | `cargo test ui::view::` |
 
 **75 rows, one per scenario in the five delta specs.** 32 are inherited scenarios whose tests this change does not touch, re-run unchanged; the rest are new or extended.
 
@@ -364,9 +364,10 @@ Once a spec's clauses reach `TaskChange` and `TaskConfirm`, those names are misn
 lifecycle-*position* roles with two consumers, only one of which is tasks. The rename is
 correct.
 
-Deferred anyway. `view-palette`'s four requirements are 203, 197, 170, and 146 lines, and a
-`MODIFIED` requirement must carry full content — so renaming four roles costs a ~700-line
-rewrite of specs, with no behaviour in it, on top of a change that already rewrites those same
+Deferred anyway. `view-palette` has **five** requirements; the four this change modifies are
+203, 197, 169, and 146 lines (the fifth, "Colour is a named ANSI index", is 29 lines and is left
+alone). A `MODIFIED` requirement must carry full content — so renaming four roles costs a
+**715**-line rewrite of specs, with no behaviour in it, on top of a change that already rewrites those same
 four requirements for three genuine additions. It would bury this change's content in churn and
 make the diff unreviewable in one sitting.
 
@@ -404,8 +405,9 @@ bullets opening with a bold non-keyword (`- **Note**`) classify to `None`.
 ### Decision 12: `DeltaRemoved` is `LightRed`, not `Red`
 
 `Red` is `ListProblem` and nothing else. A reader scans the pane for exactly one red thing, and
-a removed requirement is not a problem — it is the ordinary content of a delta spec, 15 of them
-across the archive. `LightRed` shares a style with `AgentBadge(Blocked)` (list region only) and
+a removed requirement is not a problem — it is the ordinary content of a delta spec: **15**
+`## REMOVED Requirements` heading blocks across the archive, holding **18** removed requirements
+between them. `LightRed` shares a style with `AgentBadge(Blocked)` (list region only) and
 `TaskEvidence` (tracked-tasks tab only), both licence-1 "cannot meet" shares, and costs nothing.
 
 This repeats `tasks-emphasis`' own reasoning for `TaskEvidence`, including the correction it
@@ -418,7 +420,7 @@ allowed, not that it is free for the reader.
 - **Adding `src/specs.rs` moves `SPEC.md`'s module map and the doc-contract test** → the failure
   is loud and names both sides; the task list edits the map in the same group that adds the
   module.
-- **`ArtifactSection` gaining a field breaks every literal construction site, including ~15 in
+- **`ArtifactSection` gaining a field breaks all 75 construction sites, 19 of them in
   `src/ui/detail.rs`'s tests** → deliberate. `NODEFAULT-UI` scans this type set precisely so
   that the compiler, not a reviewer, finds them.
 - **The clause rule applies to every markdown source, so a non-spec document with a

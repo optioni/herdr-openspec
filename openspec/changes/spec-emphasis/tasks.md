@@ -48,14 +48,14 @@ Counts used below, each with the command that produced it:
 
 <!-- kind: behavior -->
 
-Classified `behavior`, not `refactor`: `role_of_none_vs_label_other` asserts `None`, which does
+Classified `behavior`, not `refactor`: `an_unrecognised_run_is_none_to_the_table_and_other_to_the_label` asserts `None`, which does
 not compile against today's `fn role_of(run: &str) -> LabelRole` (`src/tasks.rs:205`), so the
 group has an honest RED state rather than a manufactured one.
 
-- [ ] 1.1 RED: Write `role_of_agrees_with_label_of` and `role_of_none_vs_label_other` in
+- [ ] 1.1 RED: Write `the_table_is_reachable_on_its_own_and_label_of_agrees_with_it` and `an_unrecognised_run_is_none_to_the_table_and_other_to_the_label` in
       `src/tasks.rs`'s inline `mod tests`, from the two same-named scenarios in
       specs/task-labels. RED check at HEAD: `grep -rq "pub fn role_of" src/tasks.rs` → exit
-      **1**, and `role_of_none_vs_label_other` does not compile against the current signature.
+      **1**, and `an_unrecognised_run_is_none_to_the_table_and_other_to_the_label` does not compile against the current signature.
 - [ ] 1.2 GREEN: Make `role_of` `pub` and change its return to `Option<LabelRole>`, moving its
       `_ => LabelRole::Other` arm to `label_of`'s call site as `.unwrap_or(LabelRole::Other)`.
       The existing `tasks::tests::label_*` tests are the unchanged-behaviour anchor and must
@@ -69,10 +69,10 @@ group has an honest RED state rather than a manufactured one.
 
 <!-- kind: behavior -->
 
-- [ ] 2.1 RED: Write failing tests in `src/specs.rs` for `operations_classify`,
-      `heading_tolerance`, `level_discriminates`, `unknown_headings_decline`,
-      `heading_totality`, `clause_keywords`, `clause_agrees_with_role_of`, `clause_declines`,
-      and `reads_nothing`, from the nine same-named scenarios in specs/spec-delta-badges.
+- [ ] 2.1 RED: Write failing tests in `src/specs.rs` for `each_of_the_three_operation_headings_classifies_to_its_own_variant`,
+      `internal_whitespace_is_tolerated_and_nothing_else_is`, `only_a_level_2_heading_carries_an_operation`, `a_renamed_operation_and_a_main_specs_heading_both_decline`,
+      `the_recognition_is_total_over_degenerate_input`, `the_three_measured_keywords_classify_as_specified`, `the_wider_testing_vocabulary_classifies_through_the_same_table`, `a_run_outside_the_table_is_not_a_clause`,
+      and `the_classification_reads_nothing_outside_its_argument`, from the nine same-named scenarios in specs/spec-delta-badges.
       RED check at HEAD: `test -f src/specs.rs` → exit **1**.
 - [ ] 2.2 GREEN: Add `pub mod specs;` to `src/lib.rs` and implement `DeltaOp`,
       `operation_of_heading(level, label)`, `Clause`, and `clause_of(run)`, with `clause_of`
@@ -80,11 +80,11 @@ group has an honest RED state rather than a manufactured one.
       RED check at HEAD: `grep -rq "DeltaOp" src/` → exit **1**.
 - [ ] 2.3 CHECK: The token table must not be copied. Scope the sweep to the **production
       slice** — everything above `mod tests` — exactly as `src/tasks.rs`'s own
-      `the_classification_reads_nothing_outside_its_argument` already does:
+      `the_classification_the_classification_reads_nothing_outside_its_argument_outside_its_argument` already does:
       `awk '/^mod tests/{exit} {print}' src/specs.rs | grep -nE '"(RED|GREEN|VERIFY|CHARACTERIZE|ARRANGE|ACT|ASSERT)"'`
       must print nothing, and `grep -q "crate::tasks::role_of" src/specs.rs` must exit 0.
       Unscoped, this check is guaranteed to fail on a correct implementation: 2.1's
-      `clause_agrees_with_role_of` is required by specs/spec-delta-badges to call `clause_of` on
+      `the_wider_testing_vocabulary_classifies_through_the_same_table` is required by specs/spec-delta-badges to call `clause_of` on
       `GIVEN`, `ARRANGE`, `ACT`, `ASSERT`, and `RED`, so those literals must appear in the test
       module. Measured on the established analogue:
       `grep -cE '"(RED|GREEN|VERIFY|CHARACTERIZE|ARRANGE|ACT|ASSERT)"' src/tasks.rs` → **6**.
@@ -97,8 +97,9 @@ group has an honest RED state rather than a manufactured one.
 
 <!-- kind: behavior -->
 
-- [ ] 3.1 RED: Write failing tests `delta_roles` and an extension of the existing
-      `shared_styles` pairwise test, from the specs/view-palette scenarios "The three delta
+- [ ] 3.1 RED: Write failing tests `the_three_delta_roles_carry_their_colour_and_no_modifier` and an extension of the existing
+      `every_shared_style_is_licensed_and_the_unshared_roles_stay_unshared` pairwise test, from
+      the specs/view-palette scenarios "The three delta
       roles carry their colour and no modifier" and "The full set of shared coloured styles is
       still exactly five groups". RED check at HEAD: `grep -rq "DeltaAdded" src/ui/palette.rs`
       → exit **1**.
@@ -120,7 +121,7 @@ group has an honest RED state rather than a manufactured one.
 
 Depends on 2 (for `DeltaOp`) and 3 (for the roles).
 
-- [ ] 4.1 RED: Write failing tests `lines_never_set_delta` in `ui::markdown` and an extension of
+- [ ] 4.1 RED: Write failing tests `every_segment_lines_returns_carries_no_delta` in `ui::markdown` and an extension of
       `a plain face is the default style` in `ui::view`, from the same-named specs/markdown-render
       and specs/view-palette scenarios. Both name widths 58 and 78 per `DETAILWIDTHS`.
 - [ ] 4.2 GREEN: Add `delta: Option<crate::specs::DeltaOp>` to `Face`, keeping its `Default`
@@ -138,9 +139,9 @@ Depends on 2 (for `DeltaOp`) and 3 (for the roles).
 
 Depends on 2 (for `DeltaOp`).
 
-- [ ] 5.1 RED: Write failing tests `attribute_operations`, `attribute_before_any_heading`,
-      `main_spec_unbadged`, `attribute_predicate_halves`, `tasks_tab_unattributed`,
-      `sections_carry_operation`, and `tasks_sections_carry_progress_only` in `ui::app`, from
+- [ ] 5.1 RED: Write failing tests `requirements_are_attributed_to_the_operation_heading_above_them`, `a_requirement_above_every_operation_heading_carries_none`,
+      `a_main_specs_requirements_are_entirely_unbadged`, `only_a_level_3_requirement_heading_is_attributed`, `a_non_spec_artifact_is_attributed_nothing`,
+      `a_delta_specs_requirement_sections_carry_their_operation_and_nothing_else_does`, and `a_tracked_tasks_tabs_sections_carry_progress_and_no_operation` in `ui::app`, from
       the same-named scenarios in specs/spec-delta-badges and specs/artifact-folds.
 - [ ] 5.2 GREEN: Add `operation: Option<crate::specs::DeltaOp>` to `ArtifactSection` and fill it
       in `sync_detail` by one forward walk, beside where `progress` is computed. Reuse the
@@ -160,10 +161,10 @@ Depends on 2 (for `DeltaOp`).
 
 Depends on 4 (for `Face::delta`) and 5 (for `operation`).
 
-- [ ] 6.1 RED: Write failing tests `badge_markers_at_58_and_78`,
-      `unbadged_header_byte_identical`, `removed_strikes_heading_only`,
-      `label_truncates_before_badge`, `badge_dropped_whole_0_to_20`, and
-      `badged_header_section_index` in `ui::detail`, from the same-named specs/artifact-folds
+- [ ] 6.1 RED: Write failing tests `the_three_operations_draw_three_different_markers`,
+      `an_unbadged_header_row_is_unchanged_in_every_column`, `a_removed_requirements_heading_is_struck_and_its_body_is_not`,
+      `the_label_truncates_before_the_badge_is_dropped`, `the_badge_is_dropped_whole_at_a_width_that_cannot_hold_it`, and
+      `a_badged_header_row_is_still_addressed_by_its_own_section_index` in `ui::detail`, from the same-named specs/artifact-folds
       scenarios. Every one must name both `58` and `78` or `DETAILWIDTHS` fails.
 - [ ] 6.2 GREEN: Emit the badge in `ui::detail::header` as `<indent><glyph> <badge><label>`,
       two columns, with the badge in the survives-truncation prefix and dropped whole below the
@@ -180,8 +181,8 @@ Depends on 4 (for `Face::delta`) and 5 (for `operation`).
 
 <!-- kind: behavior -->
 
-- [ ] 7.1 RED: Write failing tests `clause_roles_at_58_and_78`, `and_inherits_and_resets`, and
-      `only_leading_strong_is_a_clause` in `ui::markdown`, from the same-named
+- [ ] 7.1 RED: Write failing tests `a_scenarios_three_clauses_are_coloured_by_position`, `and_inherits_the_clause_above_it_and_resets_at_a_heading`, and
+      `only_a_run_opening_a_list_item_is_a_keyword` in `ui::markdown`, from the same-named
       specs/markdown-render scenarios.
 - [ ] 7.2 GREEN: Set `Face::label` on a `Strong` run that is the first inline of a list item and
       that `specs::clause_of` accepts, holding the current position and resetting it at every
@@ -204,8 +205,8 @@ Depends on 4 (for `Face::delta`) and 5 (for `operation`).
 
 Depends on 6. This is the outermost evidence this change has — see design.md → Test Strategy.
 
-- [ ] 8.1 RED: Write failing tests `selected_badge_keeps_colour` and
-      `badge_colour_survives_row_role` in `ui::view`, rendering into `TestBackend` at 60 and 120
+- [ ] 8.1 RED: Write failing tests `a_selected_badged_header_keeps_its_badge_colour` and
+      `a_badged_header_rows_colours_survive_the_rows_own_role` in `ui::view`, rendering into `TestBackend` at 60 and 120
       columns, from the same-named specs/artifact-folds and specs/view-palette scenarios.
 - [ ] 8.2 GREEN: Confirm no `ui::view` change is needed beyond step 10 from 4.3 — the existing
       loop already patches the row's kind role over each segment's `style_for`. If a change is

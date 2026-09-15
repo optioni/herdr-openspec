@@ -19,10 +19,31 @@ pub struct ArtifactSection {
 sections of a delta spec** — a level-3 heading labelled `Requirement:` with a level-2 operation
 heading above it — and `None` everywhere else: on every file section, every preamble, every
 scenario section, every operation heading itself, every section of a main spec under
-`## Requirements`, and every section of every other artifact. `spec-delta-badges` states the
-derivation, and `ui::app::sync_detail` SHALL apply it on the same key change and at the same
-point it computes `progress`, so a section's two derived fields are filled by one walk and
-neither is recomputed per frame.
+`## Requirements`, and every section of every other artifact.
+
+`ui::app::sync_detail` SHALL derive it by a **single forward walk** over the section list, in
+the order `heading-sections` produces it, holding the most recent recognised operation and
+attributing it to the requirement sections that follow. A section SHALL be attributed when
+**both** hold:
+
+1. It is a requirement heading by the crate's existing rule — level `3`, with a label beginning
+   `Requirement:`. This is the same predicate `is_spec_shaped` already applies, and it SHALL NOT
+   be written a second time.
+2. A level-2 heading that `specs::operation_of_heading` classifies precedes it in the file, with
+   no later such heading between them.
+
+A level-2 operation heading SHALL **reset** the attribution rather than nest it: the sections
+after `## REMOVED Requirements` carry `Removed` even where `## ADDED Requirements` appeared
+earlier in the same file. The operation heading itself is deliberately unbadged — it already
+spells the word out — and a requirement under **no** operation heading carries `None`, which is
+what leaves this repository's own main specs entirely unbadged, so the badge means "this is a
+delta" and not merely "this is a requirement".
+
+The walk lives here, not in `spec-delta-badges`, because it walks `ArtifactSection` values and
+this capability owns that type and every field on it — including `progress`, which the same walk
+derives at the same point on the same key change. `spec-delta-badges` classifies one heading and
+one run and never sees a section list. Splitting the walk across two capability specs would land
+two descriptions of one derivation in the main tree at archive time.
 
 It is an `Option<DeltaOp>` and not a `DeltaOp` with a fourth "none" variant for the reason
 `progress` is an `Option`: the two mean different things on a header row. A `None` says this
@@ -188,8 +209,41 @@ that tab to the line-cursor model.
   and `### Requirement: B`, under a file section labelled by its capability directory
 - **THEN** the sections' `operation` values are, in order for the file section and the five
   headings, `None`, `None`, `Some(Added)`, `None`, `None`, `Some(Removed)`
+- **AND** `Requirement: B` carries `Removed` and not `Added`, so the second operation heading
+  reset the walk rather than nesting under the first
 - **AND** every one of those sections' `progress` is `None`, so the two derived fields are
   independent and a spec section is not mistaken for a task group
+
+#### Scenario: A requirement above every operation heading carries none
+
+- **WHEN** `sync_detail` runs over a file whose sections are, in order, `## Purpose`,
+  `### Requirement: A`, `## ADDED Requirements`, `### Requirement: B`
+- **THEN** the attributed operations are `None`, `None`, `None`, `Some(Added)`
+- **AND** `Requirement: A` is unbadged, having no operation heading before it
+
+#### Scenario: A main spec's requirements are entirely unbadged
+
+- **WHEN** `sync_detail` runs over the section list of `openspec/specs/markdown-render/spec.md`,
+  whose level-2 headings are `## Purpose` and `## Requirements` and which holds eleven level-3
+  `Requirement:` headings
+- **THEN** every section carries `operation: None`
+- **AND** the detail region draws that file exactly as it did before this change, so a badge
+  distinguishes a delta spec from a main spec rather than marking every requirement in the tree
+
+#### Scenario: Only a level-3 `Requirement:` heading is attributed
+
+- **WHEN** a file's sections after `## ADDED Requirements` are `### Requirement: A`,
+  `### Requirements overview`, `#### Requirement: B`, and `### Requirement:`
+- **THEN** the attributed operations are `Some(Added)`, `None`, `None`, and `Some(Added)`
+- **AND** `### Requirements overview` is declined for its label and `#### Requirement: B` for
+  its level, so both halves of the predicate are exercised
+
+#### Scenario: A non-spec artifact is attributed nothing
+
+- **WHEN** `sync_detail` runs over a `design.md` whose headings include a level-2
+  `## ADDED Requirements` written as prose, and which carries no level-3 `Requirement:` heading
+- **THEN** every section carries `operation: None`
+- **AND** the file does not split at all, not being spec-shaped, so no badge is reachable
 
 #### Scenario: A tracked-tasks tab's sections carry progress and no operation
 
@@ -309,6 +363,16 @@ style. `view-palette` decides what each `DeltaOp` looks like, and `ui::view::sty
 patches the row's own `ContentKind::SectionHeader` role over it — which is why the badge keeps
 its colour on a selected header, `Role::DetailSectionSelected` carrying no foreground of its
 own.
+
+A row whose section carries **both** `operation: Some(op)` and `progress: Some(p)` SHALL draw
+both: the badge in the prefix, after the glyph, and the progress cell right-aligned, with the
+drop-whole order above deciding which yields first as the row narrows. The combination is
+reachable — a tracked-tasks file that quotes `## ADDED Requirements` and `### Requirement: A` is
+spec-shaped by `has_requirement_heading` *and* splits as a tracked-tasks file — though no such
+file exists in this repository today
+(`grep -rl '^### Requirement:' openspec/changes/*/tasks.md openspec/changes/archive/*/tasks.md`
+returns nothing). It is specified for the reason `view-palette` gives for the unreachable
+`muted` + `label` pair: totality is the contract, not the absence of a caller.
 
 A `Removed` section's **label** segment SHALL additionally carry `Face { strikethrough: true,
 .. }`, and its body SHALL NOT. Striking the heading is what marks the requirement as deleted;
