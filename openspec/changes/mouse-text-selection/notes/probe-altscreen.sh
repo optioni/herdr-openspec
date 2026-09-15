@@ -34,6 +34,8 @@ set_modes() {
     alt-full)    echo "1000 1002 1003 1015 1006" ;;
     press-only)  echo "1000" ;;
     press-sgr)   echo "1000 1006" ;;
+    copilot-set) echo "1003 1006" ;;
+    motion-only) echo "1003" ;;
   esac
 }
 
@@ -44,6 +46,8 @@ set_label() {
     alt-full)    echo "ALTERNATE screen, today's full bundle" ;;
     press-only)  echo "?1000 ONLY — no motion asked for. DOES PLAIN DRAG STILL SELECT?" ;;
     press-sgr)   echo "?1000 + ?1006 — same, with extended coords. PLAIN DRAG?" ;;
+    copilot-set) echo "?1003 + ?1006 — EXACTLY what Copilot CLI sets. PLAIN DRAG?" ;;
+    motion-only) echo "?1003 alone — any-event tracking, no ?1000. PLAIN DRAG?" ;;
   esac
 }
 
