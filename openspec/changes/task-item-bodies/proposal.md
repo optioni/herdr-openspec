@@ -58,6 +58,13 @@ statement about grouping, written for the count.
   rendered row once inline spans fold. An emphasised label (`- [ ] **RED**: …`) degrades to
   unlabelled — a miss, never a wrong colour, the error direction `task-labels` already
   chose. Measured: 2,369 plain labels across the archive, **0** emphasised.
+- **The hanging indent falls after the task number, not under it.** A wrapped item's
+  continuation rows and its body rows hang at `prefix + task number` rather than at `prefix`,
+  so the number column stays clear and a reader scanning for `2.3` reads a column of numbers
+  instead of numbers interleaved with wrapped prose. Measured: **2,751 of 2,751** items carry
+  a number, of width 4 (2,079), 5 (661), or 6 (11), so the hang is 8 columns for three items
+  in four and never more than 10. The number hang is dropped whole before the prefix is, so a
+  narrow width never loses the text to it.
 - **Bodies are always visible under an open item.** No second fold level, no new keybinding.
 
 Not **BREAKING**: no manifest, config-format, or keybinding change.
@@ -93,13 +100,16 @@ None.
   label is matched against the leading plain segment.
 - `artifact-folds`: a tracked-tasks section's body is no longer "its items and nothing
   else" — it is that section's items *and* its blocks, in document order.
+- `task-labels`: the leading task-number skip that `label_of` already performs is exposed as
+  `tasks::task_number_len`, sharing one helper with `label_of` so the rule is not copied.
 - `markdown-render`: the module's public surface gains
   `ui::markdown::inline(text, width) -> Vec<Line>`, which renders a fragment as a single
   paragraph — inline faces and wrapping, no block construct recognised.
 
 ## Impact
 
-- **Code:** `src/tasks.rs` (parse only; `count` untouched), `src/ui/markdown.rs` (the new
+- **Code:** `src/tasks.rs` (parse and the exposed `task_number_len`; `count` untouched),
+  `src/ui/markdown.rs` (the new
   `inline` entry point), `src/ui/tasks.rs`, `src/ui/detail.rs` (the tracked-tasks branch of
   the section walk).
 - **Roadmap:** **unplanned**. `openspec/IMPLEMENTATION-ORDER.md` scoped `tasks-tab` as

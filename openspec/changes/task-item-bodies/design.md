@@ -96,6 +96,29 @@ indent whole, then falls back to the glyph alone. A body hangs at `prefix_len`; 
 has degraded to the glyph-only or truncated-glyph form there is no column for it, so the body
 contributes no rows at all rather than one character per row.
 
+**9a. The hanging indent falls after the task number.** A wrapped item's continuation rows and
+its body rows hang at `prefix_len + tasks::task_number_len(&item.text)`. The number column then
+stays clear down the whole item, which is what makes a group scannable by number. Measured,
+**2,751 of 2,751** archived items carry a number — width 4 (2,079), 5 (661), 6 (11) — so the
+hang is 8 columns for three items in four and never exceeds 10, costing at most 6 further
+columns of the 58-column interior.
+
+This departs from the source file's own convention, where a continuation line is indented to
+six columns and lands *under* the number. That convention is right for the source, whose prefix
+is `- [x] `; the rendered prefix is `[x] `, a different width, so reproducing the source column
+would align with nothing on screen. The renderer aligns with what it draws.
+
+The skip rule is **not copied**. `tasks::label_of` already skips the number to find where a
+label starts; `task_number_len` exposes that same skip through one shared helper, on the terms
+`specs::clause_of` calls `tasks::role_of` rather than restating its token table. The two are
+bound by a corpus scenario asserting `Label.start == task_number_len(text)` for every labelled
+item in the archive, so a divergent second copy could not pass.
+
+The number hang is **dropped whole before the prefix is**: where `prefix_len + number_len`
+leaves no text column the hang falls back to `prefix_len`, and only then does the existing
+prefix chain (indent, then glyph-only, then truncated glyph) apply. So a width that can hold
+the glyph and some text never loses the text to the number's indent.
+
 **10. Blocks draw at column zero with a blank row either side.** A block belongs to the group,
 not to the item above it, so it carries no hanging indent. The blank separators belong to the
 block: a group with no blocks renders byte-identically to the group it was, blank rows included,
@@ -114,7 +137,8 @@ glyph.
 | Retention silently changes a count | "Retention leaves every count in the archive unmoved" asserts every file's pair against a **committed fixture** of the pre-change pairs, not against a second run of the same code |
 | A line is claimed by both an item body and a group block, or by neither | "Every retained line appears exactly once" sweeps the whole archive and asserts a partition in both directions |
 | The `inline` escape leaks into rendered text | Asserted character for character, with a `lines` comparison that must differ so the test cannot pass vacuously |
-| Tab rows grow ~3x and the tab becomes unscannable | Accepted for now, and named in Decision 11 as the reason a second fold level is the next change rather than a nice-to-have |
+| Tab rows grow ~3x and the tab becomes unscannable | Accepted for now, and named in Decision 11 as the reason a second fold level is the next change rather than a nice-to-have. Decision 9a's number-column hang is the partial mitigation: more rows, but a column a reader can run an eye down |
+| The number hang costs 4-6 more columns at the 58-column interior | Dropped whole before the prefix is, and asserted by "The number hang is dropped before the prefix is" across ten widths |
 
 ## Migration Plan
 
@@ -123,7 +147,9 @@ plugin's own writes stay exactly `agent-names.toml` under `HERDR_PLUGIN_STATE_DI
 
 ## Modules touched
 
-- `src/tasks.rs` — `parse` only. `count`, `Progress`, `label_of`, and `read` are untouched.
+- `src/tasks.rs` — `parse`, plus `task_number_len` exposing the skip `label_of` already
+  performs through one shared helper. `count`, `Progress`, `label_of`'s own behaviour, and
+  `read` are untouched.
 - `src/ui/markdown.rs` — the new `inline` entry point. The `pulldown-cmark` option set does not
   move, so `MDSEAM`'s subject does not move either.
 - `src/ui/tasks.rs` — `items` → `group_body`; item text through `inline`; body and block rows.
@@ -175,6 +201,15 @@ Tier key: **U** unit over a pure module (`cargo test --lib`), **V** view test in
 | Every retained line appears exactly once | C | real filesystem | `cargo test --test task_corpus` |
 | A group with no interstitial content carries no blocks | U | none | `cargo test --lib tasks::` |
 
+### `task-labels`
+
+| Scenario | Tier | Collaborators | Command |
+|---|---|---|---|
+| A numbered item reports its number's width | U | none | `cargo test --lib tasks::` |
+| An unnumbered item reports zero | U | none | `cargo test --lib tasks::` |
+| The exposed skip agrees with the one `label_of` performs | C | real filesystem | `cargo test --test task_corpus` |
+| A malformed number is not a number | U | none | `cargo test --lib tasks::` |
+
 ### `markdown-render`
 
 | Scenario | Tier | Collaborators | Command |
@@ -193,6 +228,8 @@ Every row runs at widths `78` and `58`, which `TASKWIDTHS` requires of every `#[
 |---|---|---|---|
 | A folded group and an unfolded one render the same item lines | U | none | `cargo test --lib ui::tasks` |
 | An item's body is drawn under it at its hanging indent | U | none | `cargo test --lib ui::tasks` |
+| The hanging indent falls after the task number | U | none | `cargo test --lib ui::tasks` |
+| The number hang is dropped before the prefix is | U | none | `cargo test --lib ui::tasks` |
 | A fenced block in an item's body renders as code, not as vanished text | U | none | `cargo test --lib ui::tasks` |
 | A group's block renders between the items it sits between | U | none | `cargo test --lib ui::tasks` |
 | An item's inline markdown is faced rather than shown as markers | U | none | `cargo test --lib ui::tasks` |

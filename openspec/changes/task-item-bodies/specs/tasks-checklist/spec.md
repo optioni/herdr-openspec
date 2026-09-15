@@ -81,7 +81,7 @@ space.
 text is a fragment, so `markdown-render`'s fragment entry point is what renders it: inline
 emphasis, strong, code spans, links, and strikethrough set their faces, and no leading `#`,
 `-`, `>`, or digit run opens a block. The rendered rows SHALL be wrapped by that call at
-`width - prefix_len` and laid out at the hanging indent below.
+`width - hang` and laid out at the hanging indent defined below.
 
 This **retires** the rule that an item's text is unfaced, and with it the guarantee that
 `Line::text()` is byte-identical to what this capability produced before. That guarantee
@@ -133,8 +133,9 @@ and SHALL be neither muted nor labelled.
 
 **An item's body SHALL be rendered through `ui::markdown::lines`** — the block entry point,
 because a body is a document fragment that may hold fenced code, a table, a block quote, or a
-nested list — at `width - prefix_len` columns, with every row it returns prefixed by
-`prefix_len` spaces so the body aligns under the item's own text. The body SHALL be drawn
+nested list — at `width - hang` columns, with every row it returns prefixed by
+`hang` spaces, the same hanging indent the item's own wrapped text uses, so an item's text and
+its body form one continuous text column beneath the task number. The body SHALL be drawn
 immediately after that item's own rows and before the next item or block. An item whose body
 is empty SHALL contribute no body row and no blank row.
 
@@ -152,11 +153,32 @@ tab-indented item renders with **one** space of indent, because a tab is one cha
 matches the parse rather than second-guessing it, and re-deriving a column width here would
 be a second indentation rule beside the one `task-parsing` already publishes.
 
-The item's text SHALL be word-wrapped to `width - prefix_len` columns, with continuation
-lines indented by `prefix_len` spaces so they align under the first line's text — a hanging
-indent, the same shape `markdown-render` gives a list item. A single word longer than the
-available text column SHALL be hard-split at that column rather than overflowing the
+**The hanging indent SHALL fall after the item's task number, not under it.** The hang is
+`prefix_len + tasks::task_number_len(&item.text)` columns: the prefix, plus the width of the
+leading task number `task-labels` already skips when it looks for a label. An item carrying no
+task number has a `task_number_len` of zero and hangs at `prefix_len`, exactly as before.
+
+The item's text SHALL be word-wrapped to `width - hang` columns, with continuation
+lines indented by `hang` spaces so they align under the first line's text after its number —
+a hanging indent, the same shape `markdown-render` gives a list item. A single word longer
+than the available text column SHALL be hard-split at that column rather than overflowing the
 interior or being dropped, so a long path never silently loses its tail.
+
+Hanging after the number rather than under it keeps the number column clear, so a reader
+scanning for `2.3` reads a column of numbers rather than a column of numbers interleaved with
+wrapped prose. It **departs from the source file's own convention** — a `tasks.md` continuation
+line is conventionally indented to six columns, which lands under the number, because the
+source prefix is `- [x] ` and the rendered one is `[x] `. The rendered prefix is a different
+width from the source's, so reproducing the source's column would align with nothing on
+screen; this capability aligns with what it actually draws. Measured over this repository's
+archive, **2,751 of 2,751** items carry a task number, of width 4 (2,079), 5 (661), or 6 (11)
+characters including its trailing space, so the hang is 8 columns for three items in four and
+never more than 10.
+
+The number hang SHALL be **dropped whole** before the prefix is: when
+`prefix_len + task_number_len` would leave no text column, the hang falls back to
+`prefix_len`, and only then does the existing prefix degradation below apply. So a width that
+can hold the glyph and some text never loses the text to the number's indent.
 
 The indent SHALL be **dropped whole** when the prefix would not leave at least one text
 column: `item.indent` spaces first, leaving `[✓] ` alone; and when even that does not fit,
@@ -198,10 +220,36 @@ capability renders an existing parse and introduces no second checkbox rule.
   `tasks::parse("- [ ] 2.2 GREEN: add the method\n      writing the OSC 52 sequence, and\n      the arm.\n").groups[0]`
 - **THEN** at both widths the first row begins `[ ] 2.2 ` and carries a label segment
   `GREEN:` under `Face { label: Some(LabelRole::Change), .. }`
-- **AND** the body rows follow it, each beginning with exactly four spaces, their text
-  reflowed at `width - 4` and holding `writing the OSC 52 sequence, and the arm.`
+- **AND** the body rows follow it, each beginning with exactly eight spaces — four for the
+  prefix and four for the task number `2.2 ` — their text reflowed at `width - 8` and holding
+  `writing the OSC 52 sequence, and the arm.`
 - **AND** the 58-column call produces strictly more body rows than the 78-column call, so
   the body genuinely reflows rather than being reproduced line for line
+
+#### Scenario: The hanging indent falls after the task number
+
+- **WHEN** `ui::tasks::group_body` is called at width `78` and at width `58` over three
+  unchecked items long enough to wrap at both widths, whose texts begin `1.1 `, `10.11a `, and
+  with no number at all
+- **THEN** at both widths the first item's continuation rows begin with exactly eight spaces,
+  the second's with exactly eleven, and the third's with exactly four
+- **AND** in each case the first row's text at column `hang` is the same character the
+  continuation rows begin with, so the text column is continuous down the item
+- **AND** the numbers themselves appear only on each item's first row, no continuation row
+  repeating or re-indenting under one
+
+#### Scenario: The number hang is dropped before the prefix is
+
+- **WHEN** `ui::tasks::group_body` is called at widths `78`, `58`, `20`, `12`, `10`, `8`, `6`,
+  `5`, `4`, and `0` over a single unchecked item whose text is `1.1 ` followed by forty
+  characters of space-separated words
+- **THEN** no call panics and no returned line's text exceeds its width
+- **AND** at the widths where `[ ] 1.1 ` leaves at least one text column, continuation rows
+  begin with eight spaces
+- **AND** at a width below that but where `[ ] ` still leaves a text column, continuation rows
+  begin with exactly four spaces and the item's text is still rendered — the number hang was
+  dropped whole and the prefix was not
+- **AND** at `0` the returned vector is empty
 
 #### Scenario: A fenced block in an item's body renders as code, not as vanished text
 
@@ -294,7 +342,9 @@ capability renders an existing parse and introduces no second checkbox rule.
   `Progress { completed: 0, total: 1 }`
 - **THEN** at each width no line's text exceeds that width
 - **AND** the first item line begins `[ ] ` and every continuation line begins with exactly
-  four spaces, aligning under the first line's text
+  four spaces, the item carrying no task number, so the hang is the prefix alone
+- **AND** the same item written with a leading `1.1 ` hangs at eight spaces instead, so the
+  number's contribution is asserted against its absence rather than on its own
 - **AND** the 58-column call produces strictly more lines than the 78-column call, so the
   width genuinely reaches the wrap
 
