@@ -400,6 +400,14 @@ nonetheless paint six of them at two and overrun the row. The trade-off was put 
 with the measurement in hand and answered in favour of the glyphs; the rule above is
 unchanged, and no compensation is added.
 
+`tasks-emphasis` widens the same exposure once more, and by two characters rather than
+seven. The segmented progress gauge draws each group's stretch with an alternating pair —
+`█` and `░` where it always did, `▓` (U+2593) and `▒` (U+2592) where the group's index is
+odd — and the two new shades are Ambiguous exactly as the two old ones are, so a
+CJK-locale terminal already painted this gauge at twice its width and gains no new class of
+failure from them. The renderer's own count above does **not** move: it is a count of the
+markdown renderer's glyphs, and this change adds none there.
+
 ### List view
 
 Two foldable sections — `active`, then `archived` — each a selectable header

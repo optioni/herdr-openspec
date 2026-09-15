@@ -398,18 +398,18 @@ against the assembled change and would fail against any one group reverted.
 
 <!-- kind: operational -->
 
-- [ ] 10.1 Add in `SPEC.md`: the East Asian Ambiguous paragraph (audience: future implementers)
+- [x] 10.1 Add in `SPEC.md`: the East Asian Ambiguous paragraph (audience: future implementers)
       — one sentence naming the gauge's two new shades `▓` and `▒` as joining that exposure.
       The markdown renderer's "seven glyphs, six Ambiguous" count does **not** move, since this
       change adds no markdown glyph; rewrite the surrounding sentence only if it reads as a
       total for the pane rather than for the renderer.
-- [ ] 10.2 Rewrite in `AGENTS.md`: the paragraph beginning "Six of those seven glyphs"
+- [x] 10.2 Rewrite in `AGENTS.md`: the paragraph beginning "Six of those seven glyphs"
       (audience: every agent session) — it repeats `SPEC.md`'s count and must say the same
       thing after 10.1. Rewrite in place; do not append beside it.
-- [ ] 10.3 Rewrite in `AGENTS.md`: the sentence stating the crate has "**one** gauge run beside
+- [x] 10.3 Rewrite in `AGENTS.md`: the sentence stating the crate has "**one** gauge run beside
       its **one** progress cell" (audience: every agent session) — it stays true and gains a
       third consumer, the fold header row. Correct it in place rather than adding a rule.
-- [ ] 10.4 VERIFY: `cargo test --all-features --test doc_contract` — green — confirming no
+- [x] 10.4 VERIFY: `cargo test --all-features --test doc_contract` — green — confirming no
       documented claim this change touched drifted from the file that determines it.
 
 ## 11. Lint & Verify

@@ -99,9 +99,16 @@ drop-whole order, so every width band below 26 columns is byte-identical to the
 pre-gauge grammar and a change with no tasks draws no gauge and reserves no space
 for one. It is `ui::tasks::gauge_of`, `pub(crate)`, which is the durable rule
 here: the crate has **one** gauge run beside its **one** progress cell
-(`ui::list::progress_cell`), and a third rendering of a change's progress calls
-them rather than formatting its own — two implementations of one fact drift, and
-this is the fact the pane exists to show in more than one place at once. At a foldable tab `detail.scroll` is a
+(`ui::list::progress_cell`), and every further rendering of a change's progress
+calls them rather than formatting its own — two implementations of one fact
+drift, and this is the fact the pane exists to show in more than one place at
+once. `tasks-emphasis` is the rule's own worked example twice over: its
+segmented gauge is a glyph **substitution** over the run `gauge_of` already
+returns rather than a second fill computation, so `gauge_of` does not move and
+the detail header's twelve-column gauge is untouched; and the progress cell a
+tracked-tasks group's fold header now carries is `progress_cell`'s own output,
+making the fold header the **third** consumer of that one cell beside the bar
+and the change header. At a foldable tab `detail.scroll` is a
 **line cursor** whose window comes from `layout::viewport`, so `j`/`k` walk the
 section list rather than scrolling an offset, and `Space` folds the section the
 cursor is on or in; a single-section artifact keeps `layout::scroll_offset` and
@@ -130,7 +137,12 @@ is `• `, the block-quote prefix `│ `, the thematic break a run of `─`, and
 table's separators `│` with `├`/`┼`/`┤` on its delimiter line. Six of those
 seven glyphs are East Asian **Ambiguous** and a CJK-locale terminal paints
 them at two columns where `layout::columns` says one — an accepted,
-uncompensated exposure `SPEC.md` records beside the standing rule it widens. `ui` refuses to start with exit status 3 when stdout is not a terminal, which is
+uncompensated exposure `SPEC.md` records beside the standing rule it widens.
+The progress gauge's own glyphs join that exposure and do not move the count
+above, which is the markdown renderer's alone: `tasks-emphasis` added `▓` and
+`▒` beside `█` and `░` to mark a group boundary by shade, and all four are
+Ambiguous, so a terminal that painted the old pair at two columns already
+painted this gauge at twice its width. `ui` refuses to start with exit status 3 when stdout is not a terminal, which is
 also what keeps `cargo test` (which spawns this binary) from ever putting a
 real terminal into raw mode.
 
