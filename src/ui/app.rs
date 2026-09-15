@@ -1612,9 +1612,8 @@ impl Dashboard {
                         // deliberately unbadged — attribution below asks
                         // `is_requirement_heading`, the same predicate
                         // `has_requirement_heading` applies, never restated —
-                        // and a
-                        // requirement under no operation heading yet carries
-                        // `None`.
+                        // and a requirement under no operation heading yet
+                        // carries `None`.
                         if let Some(op) =
                             crate::specs::operation_of_heading(heading.level, &heading.label)
                         {
