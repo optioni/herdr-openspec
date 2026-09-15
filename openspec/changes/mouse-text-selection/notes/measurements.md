@@ -450,3 +450,63 @@ Scope, stated honestly, against this repository's own architecture rules:
   folds a section, and switches a tab. A press that begins a text selection is the same
   press. That interaction needs deciding, and it is the hardest part of the design, not the
   clipboard.
+
+## Confirmed: Copilot partitions the UI by region, and so should this pane
+
+Observed directly: in Copilot CLI a drag cannot select the top two rows — it begins at the
+third. Those top rows are its tab bar, which the captured render shows as
+`Current   Sessions   Issues   Pull requests   Gists`.
+
+So Copilot does **not** disambiguate click from drag by motion. It partitions the screen:
+some regions take clicks, the rest takes selection. The press/release rule considered earlier
+is unnecessary, and no existing click binding has to change its dispatch timing.
+
+This pane is unusually well placed to copy that, because the partition already exists as
+tested code. `ui::layout::zone` resolves any point to exactly one `Zone`:
+
+| zone | click today | under this design |
+|---|---|---|
+| `ListRow` | select a change, open it, fold a section | **clickable**, unchanged |
+| `DetailTab` | switch artifact tab | **clickable**, unchanged |
+| `DetailRow` on a section header | fold that section | **clickable**, unchanged |
+| `DetailRow`, any other line | `Target::DetailLine` — moves the detail cursor | **selectable** |
+| `List`, `Detail`, `Outside` | `Action::Ignore` | unchanged |
+
+Only one binding gives way: `Target::DetailLine`, the weakest of them, which moves the detail
+cursor to a clicked line. The detail content area is also exactly where artifact text lives —
+the requirement the reader wants to copy out of a spec — so the region that becomes
+selectable is the region the complaint was always about.
+
+Two risks named earlier are now closed rather than mitigated:
+
+- **The click/drag conflict** — closed by the partition. There is nothing to disambiguate.
+- **Buffer read-back** — closed by `ui::detail::content_lines`, which already returns
+  `Vec<ContentRow>` from a pure function. The selected text is read out of that, not out of a
+  rendered `ratatui::buffer::Buffer`. No new architectural move.
+
+### Revised estimate
+
+Measured against three comparable landed changes — `mouse-input` (14 task groups, 9 spec
+deltas, 23 commits, +2958 `src/` lines), `help-overlay` (13 / 12 / 33 / +3082), and
+`foldable-spec-sections` (15 / 7 / 49 / +2814):
+
+**~10-12 task groups, ~7-8 spec deltas, ~2000-2500 `src/` lines.** Slightly under
+`mouse-input`, because the two novel parts turned out not to be needed.
+
+Production code is a small fraction of that. The multipliers are this repository's own: a
+14:1 test-to-production ratio in the files involved (`src/ui/driver.rs` is 427 production
+lines against 5,900 test lines; `src/ui/view.rs` is 596 against 8,950), and the pinned-count
+cascade that a new `Action` variant and new `Dashboard` fields set off — `doc_contract`'s
+action counts and its test name, `INVENTORY`, `help-overlay`'s row arithmetic,
+`binding-inventory`'s group counts, and the destructure companion.
+
+The one genuinely new path is **OSC 52**, the clipboard write. `src/ui/terminal.rs` is the
+only file permitted to name a terminal escape and `NORAW` enforces it with a per-name
+control, so it needs a seam, a gate argument, and the confined-name lists in `AGENTS.md` and
+`SPEC.md` updated — which also takes `doc_contract`'s claim count from eleven to twelve.
+
+### Open design question
+
+Should a drag that runs off the top or bottom of the detail content area **scroll** it?
+Saying no bounds the change and limits a selection to what is on screen. Copilot's behaviour
+here is not yet measured.
