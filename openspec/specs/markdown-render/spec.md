@@ -39,19 +39,40 @@ pub struct Face {
     pub link: bool,
     pub quoted: bool,
     pub strikethrough: bool,
+    pub muted: bool,                            // de-emphasised whole
+    pub label: Option<crate::tasks::LabelRole>, // a task's leading label
 }
 pub struct Segment { pub text: String, pub face: Face }
 pub struct Line { pub segments: Vec<Segment> }
 pub fn lines(source: &str, width: u16) -> Vec<Line>;
 ```
 
-`strikethrough` is this change's one new field. `Face` SHALL keep deriving `Default` — it is
+`muted` and `label` are this change's two new fields, joining `strikethrough`, which
+`markdown-legibility` added on the same terms. `Face` SHALL keep deriving `Default` — it is
 a value with a meaningful zero, not a state type `NODEFAULT-UI` gates — so `Face::plain()`
-SHALL remain the all-`false`, `heading: None` value and SHALL now include
-`strikethrough: false`. Every construction site that spells the fields out rather than
-writing `..Face::plain()` SHALL name the new field: `src/ui/tasks.rs`'s `heading_line` is the
-one such site in the crate, and it is a **compile-time** forcing site, which is why the field
-is added to the struct rather than tracked in a parallel enum.
+SHALL remain the all-`false`, `heading: None`, `label: None` value. Every construction site
+that spells the fields out rather than writing `..Face::plain()` SHALL name the new fields:
+`src/ui/tasks.rs`'s `heading_line` is the one such site in the crate, and it is a
+**compile-time** forcing site, which is why the fields are added to the struct rather than
+tracked in a parallel enum.
+
+`ui::markdown` SHALL set **neither** new field: `lines` SHALL return `muted: false` and
+`label: None` on every segment it emits, for every source and every width. The two fields
+exist because `Face` is the crate's one carrier of "what this run of text is", and
+`tasks-checklist` needs to say two things about a run that no markdown construct says —
+that a whole row is finished, and that a leading token is a lifecycle label. Putting them
+here rather than inventing a second segment type is what keeps `ui::detail::content_lines`
+returning one line type whether its body came from the markdown path or the checklist path.
+
+`label`'s type is `crate::tasks::LabelRole`, which is **not** a view type and is **not** a
+`ratatui` type, so it widens neither the `MDSEAM` confinement — `pulldown_cmark` stays named
+only here — nor the "names no `ratatui` type" rule above. `ui::markdown` SHALL NOT call
+`tasks::label_of` or any other function of `crate::tasks`; it names the type and nothing
+else. `NOIO-VIEW` is unaffected for the same reason: `LabelRole` is a plain enum and reaches
+no I/O API.
+
+Which `Style` each new field produces is `view-palette`'s, not this capability's, exactly as
+it already is for `strikethrough`.
 
 `Line::text()` SHALL return the line's segments concatenated, which is what a width assertion
 reads. Mapping a `Face` to a `ratatui::style::Style` is `ui::view`'s work and SHALL NOT
@@ -116,9 +137,10 @@ consumes them rather than defining them.
 - **AND** at 78 it returns exactly two lines whose `text()` values are
   `alpha bravo charlie delta echo foxtrot golf hotel india juliett kilo lima mike` — 78
   columns exactly, so the boundary is inclusive — and `november oscar papa`
-- **AND** every segment of every line carries `Face::plain()`, and the result is
-  byte-identical to the one this requirement produced before display-column measurement,
-  because every character in it measures one column
+- **AND** every segment of every line carries `Face::plain()` — `muted: false` and
+  `label: None` among its fields — and the result is byte-identical to the one this
+  requirement produced before display-column measurement, because every character in it
+  measures one column
 
 #### Scenario: An empty source and a zero width each produce no lines
 
@@ -178,6 +200,19 @@ consumes them rather than defining them.
   emitted as one over-wide line
 - **AND** the same calls at widths `1` and `2` also do not panic, and at width `1` a line
   holding only a two-column cluster is empty rather than two columns wide
+
+#### Scenario: The markdown path sets neither new face field
+
+- **WHEN** `ui::markdown::lines` is called at widths 58 and 78 over a document holding a
+  heading, a paragraph, a bullet list, a fenced code block, a block quote, a link, a struck
+  run, a table, a checked and an unchecked task-list item, and the literal paragraph
+  `VERIFY: this is prose, not a task`
+- **THEN** every segment of every returned line carries `muted: false` and `label: None`
+- **AND** the `VERIFY:` paragraph in particular carries `label: None`, so recognising a
+  label is `tasks-checklist`'s job on the checklist path and never the markdown renderer's —
+  a proposal that opens with the word `VERIFY:` is not styled as a task
+- **AND** the result at both widths is byte-identical, segment for segment, to the same call
+  before this change, so adding the fields moved no rendered output
 
 ### Requirement: Headings carry their level and their marker
 

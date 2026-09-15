@@ -117,9 +117,32 @@ never split into sections that could produce one.
 `ui::tasks` SHALL expose the checklist grammar as **three** functions, so that a folded tab
 and an unfolded one render the same items through the same code:
 
-- `ui::tasks::bar_lines(progress, width)` — the progress-bar line, `tasks-progress-bar`'s
-  single line as one plain-faced segment, followed by one blank line; the **empty vector**
-  when the bar renders as the empty string at that width;
+- `ui::tasks::bar_lines(progress, groups: &[crate::tasks::Progress], width)` — the
+  progress-bar line, `tasks-progress-bar`'s single line as one plain-faced segment, followed
+  by one blank line; the **empty vector** when the bar renders as the empty string at that
+  width. `groups` is one `Progress` per task group in document order, which
+  `tasks-progress-bar` uses to segment the gauge; an **empty slice** SHALL render the bar
+  exactly as it rendered before that change.
+
+  **Both callers SHALL pass a populated slice, and which one they are decides how they build
+  it.** `lines` — the non-foldable path — derives it from its own `tasks::parse`. The
+  **foldable** path is `artifact-content`'s walk in `ui::detail::content_lines`, and it is the
+  path every real `tasks.md` takes; it SHALL pass the `progress` values `artifact-folds` now
+  stores on `detail.sections`, in section order, skipping the sections carrying `None`. It
+  SHALL NOT re-parse the file to build the slice: the number is already computed once per
+  sync, and a second derivation is a second number that can disagree with the header cells
+  drawn beside it.
+
+  The consequence of skipping `None` is stated rather than left to be found: `artifact-folds`
+  sets `progress` on **heading** sections only, so a split file's **preamble** — text before
+  its first heading — contributes no span even when it holds items. Those items are still
+  counted by the bar's own `progress`, which is the `Change`'s field, so the gauge's fill is
+  unaffected; only the boundary marking omits them. A preamble holding task items is not a
+  shape any schema's `tasks.md` produces, and the alternative — a span with no header row to
+  match it — would mark a boundary the reader cannot see.
+
+  The **detail header** is not a caller: `detail-header` draws its gauge through
+  `ui::tasks::gauge_of` directly and never through this function;
 - `ui::tasks::items(items: &[crate::tasks::Item], width)` — one or more lines per item, in
   order, as specified below, with **no** progress bar, **no** heading line, and **no** blank
   separator. It SHALL take **parsed items**, never a source string: `lines` already holds
@@ -127,9 +150,10 @@ and an unfolded one render the same items through the same code:
   form, which is the one thing this extraction exists to avoid. A folded tab reaches it
   through `tasks::parse(&section.text)` on a section body that carries no heading of its own,
   that heading having become the fold header;
-- `ui::tasks::lines(source, progress, width)` — the whole-tab grammar, unchanged, which
-  SHALL be `bar_lines` followed by, for each `tasks::Group` returned by `tasks::parse(source)`
-  in document order:
+- `ui::tasks::lines(source, progress, width)` — the whole-tab grammar, which SHALL be
+  `bar_lines(progress, &per_group, width)`, where `per_group` is `group.progress()` for each
+  `tasks::Group` `tasks::parse(source)` returned, in document order, followed by, for each
+  such group in that same order:
   - when the group carries a `Heading`, one line whose text is that heading's `#` markers
     reproduced from its `level`, a space, and its `text` verbatim, carrying
     `Face { heading: Some(level), .. }` so `ui::view::style_for` bolds it with no new
@@ -137,9 +161,13 @@ and an unfolded one render the same items through the same code:
   - `items(&group.items, width)`;
   - one blank line after every group but the last.
 
-`lines` SHALL be reached only for a **non-foldable** tracked-tasks tab — a task file holding
-no items, which renders `No tasks yet`, and a task file with items but no heading at all,
-which renders as one flat checklist exactly as it did before `heading-sections`. A foldable
+`lines` SHALL be reached only for a **non-foldable** tracked-tasks tab, and **three** files
+reach it, not two: a task file holding no items, which renders `No tasks yet`; a task file
+with items but no heading at all; and — the case an earlier draft of this paragraph omitted,
+falsified in planning review against `src/ui/app.rs:1527` — a task file whose text **begins at
+its single `##` heading**, which therefore has no preamble, contributes one section, and does
+not split. That third file renders a `Face { heading }` line **and** label segments in one
+content area, so the two faces can meet; `view-palette` states why that needs no licence. A foldable
 one is rendered by `artifact-content`'s walk: `bar_lines` above every header, then
 `items` inside each open section. The three functions SHALL NOT each reimplement the
 item grammar: `lines` calls `items`, which is what makes "the folded and unfolded tabs
@@ -153,7 +181,44 @@ header grammar has no place for them.
 
 An item's line SHALL be a prefix followed by its text. The prefix is `item.indent` spaces,
 then the three-character glyph `[✓]` when `item.checked` and `[ ]` when it is not, then one
-space. Every line SHALL carry `Face::plain()` except a heading line.
+space.
+
+An item's rendered **rows** SHALL be faced by exactly one of two rules, chosen by
+`item.checked`:
+
+- **A checked item is de-emphasised whole.** Every row it produces — its first row and every
+  continuation row of a wrapped item — SHALL be one segment carrying
+  `Face { muted: true, ..Face::plain() }`, its prefix and its text alike, and SHALL NOT be
+  split at its label. A finished row reads as finished, `VERIFY:` included: leaving a bright
+  label on a completed task is the exact complaint this change exists to answer, so the
+  label's own role is **dropped** rather than dimmed alongside it.
+- **An unchecked item is split at its label, when it has one.** `tasks::label_of(&item.text)`
+  decides: on `None` the row is one `Face::plain()` segment exactly as before this change; on
+  `Some(Label { start, len, role })` the item's **first** row SHALL carry exactly three
+  segments — the prefix concatenated with `item.text[..start]` under `Face::plain()`, then
+  `item.text[start..start + len]` under `Face { label: Some(role), ..Face::plain() }`, then
+  the remainder of that row's text under `Face::plain()`. A **continuation** row of a wrapped
+  item SHALL carry one `Face::plain()` segment: a label appears once, on the row it was
+  written on.
+
+A segment SHALL be omitted rather than emitted empty: an item whose text is exactly its label
+produces two segments, not three, and one whose label starts at offset `0` with an empty
+prefix — unreachable, since the prefix always holds at least the glyph — would produce two.
+`Line::text()` SHALL therefore be **byte-identical** to what this capability produced before
+this change for every item, checked or not: this change splits rows into segments and faces
+them, and moves **no character**.
+
+The label SHALL be looked up against `item.text`, never against the rendered row, so a wrap
+that falls inside the label cannot half-style it: when `start + len` exceeds the first row's
+own text length, the item SHALL be treated as carrying no label at all and SHALL render as one
+`Face::plain()` segment. That case is reachable only at a width narrow enough to split
+`CHARACTERIZE:` itself, and degrading it to unlabelled is preferred to emitting a label
+segment whose text is `CHARACT`.
+
+`ui::tasks` SHALL call `tasks::label_of` and SHALL NOT reimplement the recognition rule, on
+exactly the terms it already calls `tasks::parse` rather than reimplementing the checkbox
+rule. A heading line SHALL keep carrying `Face { heading: Some(level), .. }` and SHALL be
+neither muted nor labelled.
 
 `item.indent` is `task-parsing`'s own count of the whitespace **characters** preceding the
 bullet, not a column count, and this capability reproduces it as that many spaces without
@@ -192,8 +257,8 @@ capability renders an existing parse and introduces no second checkbox rule.
   `## 1. Setup\n\n- [x] 1.1 first\n- [ ] 1.2 second\n` with
   `Progress { completed: 1, total: 2 }`
 - **THEN** `items` returns exactly two lines whose texts are `[✓] 1.1 first` and
-  `[ ] 1.2 second`, each carrying `Face::plain()`, with no progress-bar line, no heading
-  line, and no blank line
+  `[ ] 1.2 second`, the first carrying one `muted: true` segment and the second one
+  `Face::plain()` segment, with no progress-bar line, no heading line, and no blank line
 - **AND** `bar_lines` returns exactly two lines — `tasks-progress-bar`'s own bar and one
   blank — and the **empty vector** at a width where the bar renders as the empty string
 - **AND** `lines`' own output at the same width is `bar_lines`' two lines, then the heading
@@ -226,8 +291,9 @@ capability renders an existing parse and introduces no second checkbox rule.
   `## 1. Setup`, `[✓] 1.1 first`, `[ ] 1.2 second`, an empty line, `## 2. Build`, and
   `[ ] 2.1 third`
 - **AND** exactly one blank line separates the two groups and none follows the last
-- **AND** the two heading lines carry `Face { heading: Some(2), .. }` and every other line
-  carries `Face::plain()`
+- **AND** the two heading lines carry `Face { heading: Some(2), .. }`, the `[✓] 1.1 first`
+  row carries one segment with `muted: true`, and the two unchecked rows each carry one
+  `Face::plain()` segment, no item text here holding a label
 
 #### Scenario: A nested item reproduces its own indent
 
@@ -286,6 +352,55 @@ capability renders an existing parse and introduces no second checkbox rule.
 - **THEN** at each width `[✓] loose` appears before `## 1. Later` with no heading line
   above it
 - **AND** exactly one blank line separates the two groups
+
+#### Scenario: A labelled unchecked item splits into three segments
+
+- **WHEN** `ui::tasks::items` is called at width `78` and at width `58` over
+  `tasks::parse("- [ ] 1.1 RED: write the failing test\n- [ ] Commit: the parser\n").groups[0].items`
+- **THEN** the first item's row carries exactly three segments — `[ ] 1.1 ` under
+  `Face::plain()`, `RED:` under `Face { label: Some(LabelRole::Evidence), ..Face::plain() }`,
+  and ` write the failing test` under `Face::plain()`
+- **AND** the second item's row carries exactly **one** `Face::plain()` segment, `Commit:`
+  being a one-letter uppercase run and so no label at all
+- **AND** at both widths each row's `Line::text()` is byte-identical to what this capability
+  returned before this change, so the split moved no character
+
+#### Scenario: A checked item is de-emphasised whole, label included
+
+- **WHEN** `ui::tasks::items` is called at width `78` and at width `58` over
+  `tasks::parse("- [x] 1.1 VERIFY: make check is green\n").groups[0].items`
+- **THEN** the row carries exactly **one** segment, whose text is the whole row and whose
+  face is `Face { muted: true, ..Face::plain() }`
+- **AND** that segment's `label` is `None`, so the completed row carries no label role for
+  `ui::view` to colour — the de-emphasis is not a dimmed `VERIFY:` but no `VERIFY:` role at
+  all
+- **AND** the same text with `[ ]` instead of `[x]` returns three segments with
+  `label: Some(LabelRole::Confirm)` on the middle one, so the two paths are asserted against
+  each other and a rule that muted both, or neither, could not pass
+
+#### Scenario: A wrapped labelled item labels only its first row
+
+- **WHEN** `ui::tasks::items` is called at width `58` over a single unchecked item whose text
+  is `1.1 GREEN: ` followed by twenty words of eight characters each, so the item wraps to
+  more than one row
+- **THEN** the first row carries three segments, the middle one `GREEN:` under
+  `Face { label: Some(LabelRole::Change), .. }`
+- **AND** every continuation row carries exactly one `Face::plain()` segment, with
+  `label: None` and `muted: false`
+- **AND** the concatenation of every row's `text()`, with the hanging indent stripped, holds
+  the item's whole text, so no character was lost to the split
+
+#### Scenario: A label split across a wrap degrades to unlabelled
+
+- **WHEN** `ui::tasks::items` is called over a single unchecked item whose text is
+  `1.1 CHARACTERIZE: record the baseline`, at a width where the first row's text column ends
+  inside `CHARACTERIZE:` — width `12`, `14`, and `16`
+- **THEN** at each of those widths every row carries exactly one `Face::plain()` segment and
+  no segment carries a `label`
+- **AND** nothing panics, and each row's `text()` is byte-identical to what this capability
+  returned before this change
+- **AND** at widths `58` and `78`, where the label fits on the first row whole, the same item
+  does split into three segments, so the degradation is width-driven rather than unconditional
 
 ### Requirement: A source holding no task lines renders `No tasks yet`
 

@@ -389,8 +389,19 @@ and (from `live-refresh`) `Refresh`.
 `ArtifactSection` SHALL NOT implement `Default` either, and SHALL stay on the same
 `NODEFAULT-UI` type list, so a field added to it later fails to compile at each construction
 site rather than defaulting silently. `heading-sections` adds two fields to it — its `label`
-becomes an `Option<String>` and it gains a `usize` `depth` — which is exactly the event that
-list exists to make loud.
+becomes an `Option<String>` and it gains a `usize` `depth` — and `tasks-emphasis` adds a
+third, `progress: Option<crate::tasks::Progress>`, which is exactly the event that list
+exists to make loud. `grep -rn "ArtifactSection {" src/ tests/ | wc -l` returned **78** before
+that change, of which **74** are the sites the compiler forces — the other four being the
+struct definition itself and three planted-defect **strings** in `tests/gate-controls.toml`,
+which are text rather than code and move only when the plant does. Every one of the 74 fails
+to compile until it names the field.
+
+The same command returns **81** **after** the change, and the difference is not drift: the
+change adds three construction sites of its own, `detail-scroll`'s own compile-time companion
+below accounting for two of them. The figure is written as a before-and-after pair rather
+than as one number precisely because a reader re-running the command gets the second, and a
+single number would read as falsified by the very edit it describes.
 
 #### Scenario: `Detail` has no `Default` and no site elides a field
 
@@ -413,7 +424,8 @@ list exists to make loud.
   `impl Default for Detail { … }` and against a copy carrying `let Detail { sections, .. }`
 - **AND** a compile-time companion exists: a test destructures a `Detail` with an
   exhaustive pattern naming all seven fields and no `..`, a second destructures an `ArtifactSection`
-  naming all **three** — `label`, `text`, and `depth` — the `Dashboard` companion continues to name all **fourteen** — the nine this
+  naming all **four** — `label`, `text`, `depth`, and `progress`, the last added by
+  `tasks-emphasis` — the `Dashboard` companion continues to name all **fourteen** — the nine this
   requirement recorded at `live-refresh`, plus `agents`, `agent_names`, `launch`, `sections`,
   and `file_mode`, added by the four changes since; the stale count is corrected here rather
   than left to be rediscovered — and a fourth companion destructures a `Refresh` naming all
@@ -436,6 +448,18 @@ list exists to make loud.
 - **AND** rendering the loaded dashboard at 120x20 shows that change's header and tab bar
   with `No content yet` below them, because a change **is** selected and nothing has been
   read yet — which is exactly the state `run_loop`'s first `sync_detail` replaces
+
+#### Scenario: The `ArtifactSection` companion names the fourth field
+
+- **WHEN** the compile-time companion test destructures an `ArtifactSection` with an
+  exhaustive pattern and no `..`
+- **THEN** it names `label`, `text`, `depth`, and `progress`, and the crate compiles
+- **AND** removing any one of the four from the pattern fails to compile, which is what makes
+  the companion a check rather than a restatement
+- **AND** `SCAN_MIN=25 TYPES='ArtifactSection' /bin/sh scripts/gates/nodefault-ui.sh` exits 0
+  with a span count at or above the **72** it reported before this change, measured by running
+  it — a field added to the type raises the count, so a fall would mean a site was deleted
+  rather than updated
 
 ### Requirement: The drawn slice is derived on every draw from the current interior
 

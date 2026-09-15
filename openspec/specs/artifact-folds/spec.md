@@ -60,6 +60,7 @@ pub struct ArtifactSection {
     pub label: Option<String>,
     pub text: String,
     pub depth: usize,
+    pub progress: Option<crate::tasks::Progress>,
 }
 ```
 
@@ -97,6 +98,19 @@ Normalising against the file's own smallest heading level is what makes a delta 
 which starts at `##` — and an archived spec — which starts at `#` — both open with their
 shallowest headings flush at the left. The normalisation is per file, so two files at
 different heading levels in one glob each read correctly.
+
+`progress` SHALL be `Some` for exactly the **heading sections of a split tracked-tasks file**
+— one whose selected `ArtifactRef` carries `tracks_tasks == true` — and `None` everywhere
+else: `None` on every file section, on every preamble, on every section of an unsplit file,
+and on every section of every other artifact. Its value SHALL be that heading section's own
+`tasks::parse(&section.text).progress()`, which is `task-groups`' count of that group's items
+and therefore agrees with the whole file's count by that capability's own summation property.
+
+It is `Option<Progress>` rather than a `Progress` defaulting to `{0, 0}` because the two mean
+different things on a header row: a `[-]` cell would claim the section was counted and found
+empty, when in fact a spec file's section is not a task group at all. `NODEFAULT-UI` scans
+`ArtifactSection`'s type set, so this is a value with no default rather than one with a silent
+zero.
 
 `text` is the reader's bytes as the injected reader returned them for an unsplit file, and
 that file's own byte range for a split one; a path the reader failed on contributes **no
@@ -319,7 +333,15 @@ closed section rather than a panic.
 `detail.sections` in order and emit, for each section that is **visible**:
 
 - when its `label` is `Some(label)`, one **header row** reading
-  `<indent><glyph> <label>`, where `indent` is two spaces per unit of the section's own
+  `<indent><glyph> <label>`, followed — when and only when that section's `progress` is
+  `Some` — by right-aligned padding and the group's own **progress cell**, which SHALL be
+  `ui::list::progress_cell(progress)` and SHALL NOT be a second formatting of the same pair.
+  That is the crate's one progress cell, on exactly the terms `tasks-progress-bar`'s bar and
+  `detail-header`'s header row already reach it, and drawing it here is what lets a reader
+  fold a completed group without losing how far along it was. The cell SHALL be **dropped
+  whole** when the row cannot hold the indent, the glyph, the separating space, at least one
+  column of label, one separating space, and the cell itself — never truncated, and never
+  allowed to push the label out. Here `indent` is two spaces per unit of the section's own
   `depth` and the glyph pair is **the one the list region's `active` and `archived` headers
   use**, so one fold reads the same in both regions. That pair is `▸` collapsed and `▾` open,
   and SHALL live at exactly one site — `ui::list::fold_glyph(collapsed: bool) -> char`,
@@ -377,13 +399,24 @@ the header lost its role entirely. The **selected** style is `BOLD | REVERSED`, 
 `view-palette` requires to equal no other role's, so a cell comparison there is
 discriminating and SHALL be asserted that way.
 
+The progress cell SHALL be faced exactly as the rest of its header row is — the row carries
+one `ContentKind::SectionHeader`, not a second kind for the cell — so a selected group's cell
+is reversed along with its label and `view-palette` gains no role for it. A **completed**
+group's cell SHALL NOT be styled differently from an incomplete one: the numbers already say
+which is which, and a second signal there would be the per-group `kind` badge this change
+deliberately declined.
+
 Every header row SHALL measure at most `width` display columns at **every** width, measured
 through `ui::layout::columns`, on exactly the terms `artifact-content` states for every
 other line `content_lines` returns. A label too long for the width SHALL be truncated with
 the same `…` rule every other row uses, and the indent, the glyph, and the separating space
 SHALL be emitted before the label so that the depth and the fold state survive any
 truncation. At a width below the indent's own columns the row degrades to truncated indent
-rather than to a dropped glyph, and SHALL NOT panic.
+rather than to a dropped glyph, and SHALL NOT panic. The drop-whole order as the row narrows
+SHALL therefore be: the progress cell first, reclaiming its own separating padding; then the
+label, truncated with the `…` rule; then the glyph and the indent, in that order — the same
+drop-whole discipline `tasks-progress-bar`'s bar and `detail-header`'s header row already use,
+so a narrowing pane loses fields in one order everywhere.
 
 #### Scenario: Folding one section shows its body and leaves its siblings shut
 
@@ -434,6 +467,57 @@ rather than to a dropped glyph, and SHALL NOT panic.
   columns, and none panics
 - **AND** a section whose label is CJK is truncated in **columns**, so its header measures at
   most the content width even though its `chars().count()` is smaller
+
+#### Scenario: A tracked-tasks tab's group headers carry their own progress
+
+- **WHEN** a `Dashboard` at `Route::Detail` whose selected artifact carries
+  `tracks_tasks == true` and whose one path reads
+  `## 1. Setup\n\n- [x] 1.1 first\n- [ ] 1.2 second\n\n## 2. Build\n\n- [ ] 2.1 third\n`
+  is synced and rendered at 120x20 and at 60x20
+- **THEN** `detail.sections` holds two sections whose `progress` values are
+  `Some(Progress { completed: 1, total: 2 })` and `Some(Progress { completed: 0, total: 1 })`
+- **AND** at each width the `1. Setup` header row ends with `[1/2]` and the `2. Build` header
+  row with `[0/1]`, each right-aligned against the content area's own last column
+- **AND** both cells are byte-identical to `ui::list::progress_cell` called on those two
+  values, so the row does not format its own
+- **AND** with `detail.expanded` cleared both cells are still drawn, which is the point: a
+  folded group still says how far along it is
+
+#### Scenario: Every other artifact's section headers carry no progress cell
+
+- **WHEN** the three-spec dashboard — a `specs` glob resolving to three files, `tracks_tasks`
+  false — is synced and rendered at 120x20 and at 60x20
+- **THEN** every section's `progress` is `None`
+- **AND** every header row is byte-identical to the row this capability drew before this
+  change, at both widths
+- **AND** the same holds for the **file section** and the **preamble** of a split
+  tracked-tasks file whose artifact resolved to more than one path: both carry
+  `progress: None`, so only heading sections gain a cell
+
+#### Scenario: The progress cell is dropped whole rather than truncated
+
+- **WHEN** the two-group tracked-tasks dashboard above is rendered at every content-area width
+  from `0` through `40`
+- **THEN** at every width the header row measures at most that width in display columns and
+  nothing panics
+- **AND** at every width the row either holds the whole cell `[1/2]` or holds no `[`, no `]`,
+  and no `/` at all — no partial cell is ever drawn
+- **AND** there is a width in that range at which the cell is present and one at which it is
+  absent, so the drop is exercised rather than assumed
+- **AND** wherever the cell is dropped, at least one column of the label survives if the width
+  admits one, so the cell yields to the label rather than the other way round
+
+#### Scenario: A group holding no items still gets a header and a counted cell
+
+- **WHEN** a tracked-tasks file reading
+  `## 1. Notes\n\nprose only\n\n## 2. Build\n\n- [ ] 2.1 third\n` is synced and rendered at
+  120x20
+- **THEN** `1. Notes` is a section whose `progress` is
+  `Some(Progress { completed: 0, total: 0 })`
+- **AND** its header row ends with `[-]`, `ui::list::progress_cell`'s own form for a zero
+  total
+- **AND** `2. Build`'s row ends with `[0/1]`, so a prose group and an unstarted group are
+  distinguishable on the header row alone
 
 ### Requirement: A section header row resolves to its own section index
 
