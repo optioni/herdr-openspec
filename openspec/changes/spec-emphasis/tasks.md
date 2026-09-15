@@ -52,16 +52,16 @@ Classified `behavior`, not `refactor`: `an_unrecognised_run_is_none_to_the_table
 not compile against today's `fn role_of(run: &str) -> LabelRole` (`src/tasks.rs:205`), so the
 group has an honest RED state rather than a manufactured one.
 
-- [ ] 1.1 RED: Write `the_table_is_reachable_on_its_own_and_label_of_agrees_with_it` and `an_unrecognised_run_is_none_to_the_table_and_other_to_the_label` in
+- [x] 1.1 RED: Write `the_table_is_reachable_on_its_own_and_label_of_agrees_with_it` and `an_unrecognised_run_is_none_to_the_table_and_other_to_the_label` in
       `src/tasks.rs`'s inline `mod tests`, from the two same-named scenarios in
       specs/task-labels. RED check at HEAD: `grep -rq "pub fn role_of" src/tasks.rs` → exit
       **1**, and `an_unrecognised_run_is_none_to_the_table_and_other_to_the_label` does not compile against the current signature.
-- [ ] 1.2 GREEN: Make `role_of` `pub` and change its return to `Option<LabelRole>`, moving its
+- [x] 1.2 GREEN: Make `role_of` `pub` and change its return to `Option<LabelRole>`, moving its
       `_ => LabelRole::Other` arm to `label_of`'s call site as `.unwrap_or(LabelRole::Other)`.
       The existing `tasks::tests::label_*` tests are the unchanged-behaviour anchor and must
       stay green and unedited.
-- [ ] 1.3 REFACTOR: Clean up while green, or state that none was needed.
-- [ ] 1.4 VERIFY: `cargo test tasks::` green with the pre-existing `label_*` tests unedited, and
+- [x] 1.3 REFACTOR: Clean up while green, or state that none was needed.
+- [x] 1.4 VERIFY: `cargo test tasks::` green with the pre-existing `label_*` tests unedited, and
       both new tests passing — the equivalence design.md → Contracts claims is now asserted by a
       test rather than by a signature grep.
 
