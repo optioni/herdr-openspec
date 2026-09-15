@@ -257,3 +257,8 @@ a trade rather than deliver both. Two fallbacks would remain, and neither is plu
 the `Shift` bypass, already measured to work under every mode set; and Ghostty's own
 configuration, which may expose a setting permitting selection while an application is
 reporting.
+
+## 2026-09-15 — ALTERNATE SCREEN — ghostty, TERM=xterm-ghostty, herdr=no, tmux=no
+
+| mode set | plain drag selects | wheel arrives as ARROW KEYS | app saw click | Shift+drag selects |
+|---|---|---|---|---|
