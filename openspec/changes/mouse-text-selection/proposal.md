@@ -83,8 +83,18 @@ inventory.
 - `binding-inventory`: `m` joins the `Pane` group. The spec pins six groups with binding counts
   5, 7, 4, 4, 5, 6 summing to 31; this moves the fourth count to 5 and the sum to 32, and the
   overlay's row count with it. Every one of those figures is asserted in `cargo test`.
-- `degraded-coverage`: a refused re-enable is a new row of `SPEC.md`'s degraded-states table and
-  needs a named proving test in `tests/degraded-coverage.toml`.
+- `responsive-layout`: the footer gains a `mouse off (m)` badge while capture is released,
+  placed **first** for the reason `? help` is — hints drop from the end, and a badge explaining
+  a silent mouse must not be the first thing lost. The footer rather than the list region's
+  heading row, where `file mode` sits, because below the 100-column breakpoint at
+  `Route::Detail` that region is not drawn at all and the detail route is exactly where a
+  reader releases capture to copy out of a spec.
+
+`degraded-coverage` is **not** modified. A refused capture change is a new row of `SPEC.md`'s
+degraded-states table and needs a named proving test in `tests/degraded-coverage.toml`, but
+that obligation is already this repository's standing rule for any new row, and
+`terminal-lifecycle` states it inline exactly as the start-up refusal row does today. A delta
+restating the general requirement would add no constraint.
 
 ## Impact
 
