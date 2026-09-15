@@ -21,15 +21,15 @@
 ## 1. `Role::Selected`
 <!-- kind: behavior -->
 
-- [ ] 1.1 RED: Write the failing test for "`Selected` reverses and colours nothing".
+- [x] 1.1 RED: Write the failing test for "`Selected` reverses and colours nothing".
       Check: `grep -qE '^    Selected,' src/ui/palette.rs` → **exit 1 at HEAD** (run
       2026-09-15).
-- [ ] 1.2 GREEN: Add the variant, its `table()` row, and an arm in each exhaustive `match`
+- [x] 1.2 GREEN: Add the variant, its `table()` row, and an arm in each exhaustive `match`
       over `Role`. It carries `Modifier::REVERSED` and no colour, per design.md → Decision 7.
-- [ ] 1.3 CHECK: Move the role count. `awk '/^pub enum Role/,/^}/' src/ui/palette.rs |
+- [x] 1.3 CHECK: Move the role count. `awk '/^pub enum Role/,/^}/' src/ui/palette.rs |
       grep -cE '^\s+[A-Z]'` printed **30** at HEAD and must print **31**; update the
       "thirty-six rows" comment in `src/ui/palette.rs` if the table's row count moved with it.
-- [ ] 1.4 VERIFY: `cargo test ui::palette` and `make gates` green — `PALETTE` in particular,
+- [x] 1.4 VERIFY: `cargo test ui::palette` and `make gates` green — `PALETTE` in particular,
       which sweeps all of `src/` including inline test modules.
 
 ## 2. `TerminalOps::write_clipboard`
