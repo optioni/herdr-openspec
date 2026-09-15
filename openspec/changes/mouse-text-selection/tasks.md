@@ -35,16 +35,16 @@
 ## 2. `TerminalOps::write_clipboard`
 <!-- kind: behavior -->
 
-- [ ] 2.1 RED: Write the failing tests for "The clipboard write is confined and reports its
+- [x] 2.1 RED: Write the failing tests for "The clipboard write is confined and reports its
       own failure" and "A clipboard write changes no terminal mode", extending `Recorder`.
       Check: `grep -q 'write_clipboard' src/ui/terminal.rs` → **exit 1 at HEAD**.
-- [ ] 2.2 GREEN: Add the seventh trait method, its `CrosstermOps` implementation writing the
+- [x] 2.2 GREEN: Add the seventh trait method, its `CrosstermOps` implementation writing the
       OSC 52 sequence, and the `Recorder` arm. `TerminalGuard`'s entry and teardown order is
       untouched.
-- [ ] 2.3 CHECK: Confirm the escape is confined. `grep -rl ']52;' src/ tests/` → must print
+- [x] 2.3 CHECK: Confirm the escape is confined. `grep -rl ']52;' src/ tests/` → must print
       exactly `src/ui/terminal.rs`. Negative control: paste the sequence into
       `src/ui/view.rs`, re-run, confirm two files print, remove it.
-- [ ] 2.4 VERIFY: `cargo test ui::terminal` and `make gates` green — `NORAW-GREP`'s per-name
+- [x] 2.4 VERIFY: `cargo test ui::terminal` and `make gates` green — `NORAW-GREP`'s per-name
       control still passes, since no crossterm name was added.
 
 ## 3. Word bounds and span-to-text
