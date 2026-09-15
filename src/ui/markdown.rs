@@ -6,6 +6,7 @@
 
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 
+use crate::specs::{Clause, clause_of};
 use crate::ui::layout::{columns, truncate_columns};
 
 /// The glyphs this module emits that are not drawn from the source
@@ -33,15 +34,24 @@ const UNCHECKED: &str = "[ ] ";
 /// meaningful zero (unstyled), not a state type `NODEFAULT-UI` gates.
 ///
 /// `muted` and `label` are `tasks-emphasis`' two additions, joining
-/// `strikethrough`, which `markdown-legibility` added on the same terms. This
-/// module sets **neither**: [`lines`] returns `muted: false` and `label: None`
-/// on every segment it emits, for every source and every width. They exist
-/// because `Face` is the crate's one carrier of "what this run of text is",
-/// and `tasks-checklist` needs to say two things about a run that no markdown
-/// construct says — that a whole row is finished, and that a leading token is
-/// a lifecycle label. Putting them here rather than inventing a second segment
-/// type is what keeps `ui::detail::content_lines` returning one line type
-/// whether its body came from the markdown path or the checklist path.
+/// `strikethrough`, which `markdown-legibility` added on the same terms.
+/// [`lines`] returns `muted: false` on every segment it emits, for every
+/// source and every width — that flag stays the checklist path's alone. They
+/// exist because `Face` is the crate's one carrier of "what this run of text
+/// is", and `tasks-checklist` needs to say two things about a run that no
+/// markdown construct says — that a whole row is finished, and that a
+/// leading token is a lifecycle label. Putting them here rather than
+/// inventing a second segment type is what keeps `ui::detail::content_lines`
+/// returning one line type whether its body came from the markdown path or
+/// the checklist path.
+///
+/// `spec-emphasis` widens `label` to a second producer: a `Strong` run that
+/// opens a list item and that `crate::specs::clause_of` recognises as a
+/// scenario clause keyword — `- **WHEN**`, `- **THEN**`, `- **AND**`, and the
+/// wider testing vocabulary the same table carries — is faced with the
+/// clause's lifecycle role, on the same field a task item's leading label
+/// already used. Every other segment this module emits still carries
+/// `label: None`.
 ///
 /// `label`'s type is `crate::tasks::LabelRole` — a plain enum from the parsing
 /// side of the crate, reaching no I/O API and no drawing type — so it widens
@@ -50,7 +60,10 @@ const UNCHECKED: &str = "[ ] ";
 /// this whole file, prose included, so the sentence is worded around the names
 /// they search for; that is the known limit those checks already carry, and
 /// rewording is its stated repair.) This module names the type and calls no
-/// function of `crate::tasks`.
+/// function of `crate::tasks` — the classification a clause keyword needs is
+/// reached through `crate::specs::clause_of` instead, which itself calls
+/// `crate::tasks::role_of` so the two vocabularies never drift apart
+/// (design.md -> Decision 3).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Face {
     pub heading: Option<u8>,
@@ -252,6 +265,19 @@ struct Folder {
     // paragraph's do, which is what lets a cell carry inline faces without
     // a second accumulation path.
     table: Option<TableBuilder>,
+
+    // `spec-emphasis`: the scenario's remembered lifecycle position, so an
+    // `AND` clause carries the role of the `WHEN` or `THEN` above it. Reset
+    // to `None` at every heading and nowhere else — a paragraph, a blank
+    // line, or a nested list never crosses a scenario boundary.
+    clause_position: Option<crate::tasks::LabelRole>,
+
+    // One entry per currently-open `Strong` span, innermost last: `Some(i)`
+    // when that span opened with `group` at length `i` — a candidate
+    // scenario-clause keyword, resolved once the span's whole text is known
+    // at `end_strong` — and `None` for a `Strong` anywhere else, which
+    // `end_strong` leaves untouched.
+    strong_starts: Vec<Option<usize>>,
 }
 
 /// A table under construction. Separate from [`Table`] because a fold needs
@@ -282,6 +308,8 @@ impl Folder {
             list_stack: Vec::new(),
             item_indent: String::new(),
             table: None,
+            clause_position: None,
+            strong_starts: Vec::new(),
         }
     }
 
@@ -390,6 +418,10 @@ impl Folder {
 
     fn start_heading(&mut self, level: u8) {
         self.finish();
+        // `spec-emphasis`: a heading is the boundary between one scenario
+        // and the next, at any level, so an `AND` under a new heading can
+        // never inherit the position of a clause above it.
+        self.clause_position = None;
         let qp = quote_prefix(self.quote_depth);
         let face = Face {
             heading: Some(level),
@@ -676,6 +708,51 @@ impl Folder {
         self.faces.pop();
     }
 
+    /// `Tag::Strong`. A run opening a list item — nothing yet pushed into
+    /// the current `group` — is a *candidate* scenario-clause keyword;
+    /// `group.len()` at this point is where its own runs will begin, and the
+    /// candidacy is resolved once the span's whole text is known, at
+    /// [`end_strong`](Self::end_strong) (design.md -> Decision 3). Every
+    /// other `Strong` — mid-run, inside a table cell, in a paragraph outside
+    /// a list — pushes `None`, which `end_strong` leaves untouched.
+    fn start_strong(&mut self) {
+        let candidate = self.category == Category::Item && self.group.is_empty();
+        self.strong_starts
+            .push(candidate.then_some(self.group.len()));
+        self.push_faced(|face| face.strong = true);
+    }
+
+    /// `TagEnd::Strong`. Resolves a candidacy `start_strong` opened:
+    /// `specs::clause_of` classifies the span's whole accumulated text —
+    /// never a prefix, never trimmed — and a hit faces every run the span
+    /// pushed (ordinarily exactly one) with the clause's lifecycle role,
+    /// remembering it for a later `AND` or inheriting the one already
+    /// remembered. A miss, or no candidacy at all, leaves every face
+    /// `end_strong` sees exactly as `push_text` set it.
+    fn end_strong(&mut self) {
+        self.pop_faced();
+        let Some(start) = self.strong_starts.pop().flatten() else {
+            return;
+        };
+        let text: String = self.group[start..]
+            .iter()
+            .map(|r| r.text.as_str())
+            .collect();
+        let role = match clause_of(&text) {
+            Some(Clause::Opens(role)) => {
+                self.clause_position = Some(role);
+                role
+            }
+            Some(Clause::Continues) => self
+                .clause_position
+                .unwrap_or(crate::tasks::LabelRole::Other),
+            None => return,
+        };
+        for run in &mut self.group[start..] {
+            run.face.label = Some(role);
+        }
+    }
+
     fn start_image(&mut self) {
         let mut face = self.current_face();
         face.link = true;
@@ -742,7 +819,7 @@ fn fold(source: &str) -> Vec<Block> {
                 Tag::BlockQuote(_) => f.start_quote(),
                 Tag::CodeBlock(_) | Tag::HtmlBlock => f.start_verbatim_block(),
                 Tag::Emphasis => f.push_faced(|face| face.emphasis = true),
-                Tag::Strong => f.push_faced(|face| face.strong = true),
+                Tag::Strong => f.start_strong(),
                 Tag::Link { .. } => f.push_faced(|face| face.link = true),
                 Tag::Strikethrough => f.push_faced(|face| face.strikethrough = true),
                 Tag::Image { .. } => f.start_image(),
@@ -764,9 +841,8 @@ fn fold(source: &str) -> Vec<Block> {
                 TagEnd::List(_) => f.end_list(),
                 TagEnd::Item | TagEnd::CodeBlock | TagEnd::HtmlBlock => f.finish(),
                 TagEnd::BlockQuote(_) => f.end_quote(),
-                TagEnd::Emphasis | TagEnd::Strong | TagEnd::Link | TagEnd::Strikethrough => {
-                    f.pop_faced()
-                }
+                TagEnd::Strong => f.end_strong(),
+                TagEnd::Emphasis | TagEnd::Link | TagEnd::Strikethrough => f.pop_faced(),
                 TagEnd::Image => f.end_image(),
                 TagEnd::Table => f.end_table(),
                 TagEnd::TableHead | TagEnd::TableRow => f.end_table_row(),
@@ -1523,13 +1599,19 @@ mod tests {
                 assert_eq!(segment.text, row.text, "width {width}: segment text moved");
                 assert_eq!(segment.face, row.face, "width {width}: {:?}", row.text);
 
-                // The two new fields, on every segment, for every construct.
+                // The two new fields, on every segment, for every construct —
+                // and `spec-emphasis`'s own addition, `delta`, which this
+                // fixture holds no `- **WHEN**` bullet to weaken: nothing
+                // here is a scenario clause, so `label` stays `None` exactly
+                // as before, and `delta` — never set by this module at
+                // all — stays `None` beside it.
                 assert!(
                     !segment.face.muted,
                     "width {width}: {:?} is muted",
                     row.text
                 );
                 assert_eq!(segment.face.label, None, "width {width}: {:?}", row.text);
+                assert_eq!(segment.face.delta, None, "width {width}: {:?}", row.text);
             }
 
             // The `VERIFY:` paragraph in particular: one plain segment carrying
@@ -1541,6 +1623,7 @@ mod tests {
             assert_eq!(verify.text, "VERIFY: this is prose, not a task");
             assert_eq!(verify.face, Face::plain());
             assert_eq!(verify.face.label, None);
+            assert_eq!(verify.face.delta, None);
         }
     }
 
@@ -1629,10 +1712,7 @@ mod tests {
                 assert_eq!(kw.face.label, Some(role), "width {width}: {keyword:?}");
                 // The colour is added beside the author's bold, never in
                 // place of it.
-                assert!(
-                    kw.face.strong,
-                    "width {width}: {keyword:?} lost its bold"
-                );
+                assert!(kw.face.strong, "width {width}: {keyword:?} lost its bold");
 
                 let rest_seg = segments
                     .iter()
@@ -1661,7 +1741,11 @@ mod tests {
         for width in [58, 78] {
             let out = lines(source, width);
             let segments: Vec<&Segment> = out.iter().flat_map(|l| l.segments.iter()).collect();
-            let ands: Vec<&Segment> = segments.iter().copied().filter(|s| s.text == "AND").collect();
+            let ands: Vec<&Segment> = segments
+                .iter()
+                .copied()
+                .filter(|s| s.text == "AND")
+                .collect();
             assert_eq!(ands.len(), 2, "width {width}: expected two AND segments");
             assert_eq!(
                 ands[0].face.label,
@@ -1700,10 +1784,7 @@ mod tests {
                 // still carry `strong: true`.
                 let bold: Vec<&&Segment> = segments
                     .iter()
-                    .filter(|s| {
-                        s.text.eq_ignore_ascii_case("when")
-                            || s.text == "Note"
-                    })
+                    .filter(|s| s.text.eq_ignore_ascii_case("when") || s.text == "Note")
                     .collect();
                 assert!(
                     !bold.is_empty(),
