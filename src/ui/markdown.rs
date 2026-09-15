@@ -1592,6 +1592,134 @@ mod tests {
         );
     }
 
+    /// `markdown-render` :: "A scenario's three clauses are coloured by
+    /// position".
+    #[test]
+    fn a_scenarios_three_clauses_are_coloured_by_position() {
+        let source = "- **WHEN** the schema declares four artifacts\n\
+                       - **THEN** the tab bar shows four\n\
+                       - **AND** the first is active\n";
+        // Unsuffixed, because `MDWIDTHS`' number scan is `\b(\d+)\b` and does
+        // not see `58u16`; the script's own header says to write them bare.
+        for width in [58, 78] {
+            let out = lines(source, width);
+            let segments: Vec<&Segment> = out.iter().flat_map(|l| l.segments.iter()).collect();
+
+            for (keyword, role, rest) in [
+                (
+                    "WHEN",
+                    crate::tasks::LabelRole::Change,
+                    " the schema declares four artifacts",
+                ),
+                (
+                    "THEN",
+                    crate::tasks::LabelRole::Confirm,
+                    " the tab bar shows four",
+                ),
+                (
+                    "AND",
+                    crate::tasks::LabelRole::Confirm,
+                    " the first is active",
+                ),
+            ] {
+                let kw = segments
+                    .iter()
+                    .find(|s| s.text == keyword)
+                    .unwrap_or_else(|| panic!("width {width}: {keyword:?} segment missing"));
+                assert_eq!(kw.face.label, Some(role), "width {width}: {keyword:?}");
+                // The colour is added beside the author's bold, never in
+                // place of it.
+                assert!(
+                    kw.face.strong,
+                    "width {width}: {keyword:?} lost its bold"
+                );
+
+                let rest_seg = segments
+                    .iter()
+                    .find(|s| s.text == rest)
+                    .unwrap_or_else(|| panic!("width {width}: {rest:?} segment missing"));
+                assert_eq!(
+                    rest_seg.face.label, None,
+                    "width {width}: {rest:?} carries a label"
+                );
+            }
+        }
+    }
+
+    /// `markdown-render` :: "`AND` inherits the clause above it and resets at
+    /// a heading".
+    #[test]
+    fn and_inherits_the_clause_above_it_and_resets_at_a_heading() {
+        let source = "#### Scenario: a\n\
+                       \n\
+                       - **WHEN** x\n\
+                       - **AND** y\n\
+                       \n\
+                       #### Scenario: b\n\
+                       \n\
+                       - **AND** z\n";
+        for width in [58, 78] {
+            let out = lines(source, width);
+            let segments: Vec<&Segment> = out.iter().flat_map(|l| l.segments.iter()).collect();
+            let ands: Vec<&Segment> = segments.iter().copied().filter(|s| s.text == "AND").collect();
+            assert_eq!(ands.len(), 2, "width {width}: expected two AND segments");
+            assert_eq!(
+                ands[0].face.label,
+                Some(crate::tasks::LabelRole::Change),
+                "width {width}: the first AND inherits the WHEN above it"
+            );
+            assert_eq!(
+                ands[1].face.label,
+                Some(crate::tasks::LabelRole::Other),
+                "width {width}: the heading resets the remembered position"
+            );
+        }
+    }
+
+    /// `markdown-render` :: "Only a run opening a list item is a keyword".
+    #[test]
+    fn only_a_run_opening_a_list_item_is_a_keyword() {
+        let sources = [
+            "**WHEN** not in a list",
+            "- the **WHEN** clause is described",
+            "- **Note** this is prose",
+            "- **when** lowercase",
+        ];
+        for width in [58, 78] {
+            for source in sources {
+                let out = lines(source, width);
+                let segments: Vec<&Segment> = out.iter().flat_map(|l| l.segments.iter()).collect();
+                for segment in &segments {
+                    assert_eq!(
+                        segment.face.label, None,
+                        "width {width}: {source:?} produced a label on {:?}",
+                        segment.text
+                    );
+                }
+                // Declining to classify changed nothing else: the bold runs
+                // still carry `strong: true`.
+                let bold: Vec<&&Segment> = segments
+                    .iter()
+                    .filter(|s| {
+                        s.text.eq_ignore_ascii_case("when")
+                            || s.text == "Note"
+                    })
+                    .collect();
+                assert!(
+                    !bold.is_empty(),
+                    "width {width}: {source:?} produced no bold run to check"
+                );
+                for segment in bold {
+                    assert!(
+                        segment.face.strong,
+                        "width {width}: {source:?}: {:?} lost its bold",
+                        segment.text
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     fn no_line_exceeds_the_width_it_was_given() {
         let source = composite_fixture();
