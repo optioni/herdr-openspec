@@ -7877,6 +7877,92 @@ mod tests {
         }
     }
 
+    /// `spec-emphasis` -> specs/view-palette :: "A delta badge and a clause
+    /// keyword are the same style in one frame". A cross-cutting scenario
+    /// — it needs group 6's badge and group 7's clause keyword together —
+    /// asserting the two cells are **equal**, which documents the collision
+    /// `view-palette`'s licence 3 accepts rather than a distinction that
+    /// does not exist. The cursor sits on the unbadged section (index 0),
+    /// so neither cell carries `DetailSectionSelected`'s `REVERSED` — the
+    /// badge instead carries `DetailSection`'s plain `BOLD`, which
+    /// `palette.rs` records as equal to `Strong`'s, the modifier the
+    /// keyword's own bold run carries. That coincidence is exactly what
+    /// this scenario is checking for.
+    #[test]
+    fn a_delta_badge_and_a_clause_keyword_are_the_same_style_in_one_frame() {
+        let change =
+            fixture::with_artifacts(fixture::active("spec-emphasis", 1, 3), &[("specs", &[])]);
+        let detail = Detail {
+            sections: vec![
+                ArtifactSection {
+                    label: Some("ADDED Requirements".to_string()),
+                    text: String::new(),
+                    depth: 0,
+                    progress: None,
+                    operation: None,
+                },
+                ArtifactSection {
+                    label: Some("Requirement: A".to_string()),
+                    text: "- **WHEN** the schema declares four artifacts\n".to_string(),
+                    depth: 1,
+                    progress: None,
+                    operation: Some(crate::specs::DeltaOp::Added),
+                },
+            ],
+            scroll: 0,
+            tab: 0,
+            problems: Vec::new(),
+            loaded: None,
+            expanded: std::collections::BTreeSet::from([0, 1]),
+            drawn_width: Some(78),
+        };
+        let d = dashboard_with_detail(vec![change], Vec::new(), 1, Route::Detail, detail);
+
+        for width in [120, 60] {
+            let interior = interior_width(width);
+            let buf = render_at(width, 20, &d);
+            let from = if width == 60 { 1u16 } else { 42 };
+
+            let mut badge_style = None;
+            let mut keyword_style = None;
+            for y in 0..buf.area.height {
+                let text = detail_interior_cols(&buf, y, interior as usize);
+                if badge_style.is_none()
+                    && let Some(idx) = text.chars().position(|c| c == '+')
+                {
+                    badge_style = Some(cell(&buf, from + idx as u16, y).style());
+                }
+                if keyword_style.is_none()
+                    && let Some(idx) = text.find("WHEN")
+                {
+                    // The fixture is ASCII up to and including the
+                    // keyword, so a byte index is also a column index.
+                    keyword_style = Some(cell(&buf, from + idx as u16, y).style());
+                }
+            }
+
+            let badge_style =
+                badge_style.unwrap_or_else(|| panic!("width {width}: no badge marker drawn"));
+            let keyword_style =
+                keyword_style.unwrap_or_else(|| panic!("width {width}: no WHEN keyword drawn"));
+
+            assert_eq!(
+                badge_style, keyword_style,
+                "width {width}: the badge and the clause keyword carry the same style"
+            );
+            assert_eq!(
+                badge_style.fg,
+                palette::style(Role::DeltaAdded).fg,
+                "width {width}: the badge's foreground is DeltaAdded's"
+            );
+            assert_eq!(
+                keyword_style.fg,
+                palette::style(Role::TaskChange).fg,
+                "width {width}: the keyword's foreground is TaskChange's, never a literal"
+            );
+        }
+    }
+
     /// `view-palette` :: "Heading foreground wins over a code span inside it".
     #[test]
     fn heading_foreground_wins_over_a_code_span_inside_it() {
