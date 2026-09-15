@@ -4526,8 +4526,8 @@ mod tests {
         use crate::changes::fixture;
         use crate::testutil::RecordingReader;
         use crate::ui::app::{
-            Action, ArtifactSection, Dashboard, Detail, Filter, Route, SectionKey, Sections,
-            Target, action_for,
+            Action, ArtifactSection, Dashboard, Detail, Filter, Granularity, Route, SectionKey,
+            Sections, Selection, Target, action_for,
         };
 
         fn empty_filter() -> Filter {
@@ -9304,6 +9304,60 @@ mod tests {
             assert_eq!(d2.detail.loaded, None);
             assert_eq!(recorder2.calls(), 0);
             assert!(!d2.refresh.reload);
+        }
+
+        /// `text-selection`: "`selection` starts empty and is cleared rather than
+        /// reloaded" — a freshly built `Dashboard` selects nothing, a tab switch that
+        /// actually reloads the detail content clears a standing selection, and a
+        /// `sync_detail` call that hits the cache (nothing to reload) leaves a
+        /// standing selection untouched — proving the clearing is a deliberate rule
+        /// `sync_detail` states, not a side effect of every call replacing `Detail`.
+        /// See design.md -> Decision 4.
+        #[test]
+        fn selection_starts_empty_and_is_cleared_by_a_reload() {
+            let mut d = dashboard_with_artifacts_named(
+                "x",
+                &[("proposal", &["/repo/p.md"]), ("design", &["/repo/d.md"])],
+            );
+            assert_eq!(
+                d.selection, None,
+                "a freshly built Dashboard has selected nothing"
+            );
+
+            let recorder = RecordingReader::always(Ok("# heading\ntext".to_string()));
+            let read = |p: &std::path::Path| recorder.read(p);
+            d.sync_detail(&read); // loads tab 0, establishing `detail.loaded`
+
+            d.selection = Some(Selection {
+                anchor: (0, 0),
+                focus: (0, 3),
+                granularity: Granularity::Span,
+                problem: None,
+            });
+
+            // A `sync_detail` call that changes nothing — same tab, no forced
+            // reload — must not clear a standing selection: the clearing is tied to
+            // an actual reload, not to every call.
+            d.sync_detail(&read);
+            assert!(
+                d.selection.is_some(),
+                "a cache hit reloads nothing and must leave the selection alone"
+            );
+
+            let loaded_before = d.detail.loaded.clone();
+            d.apply(Action::SelectTab(1));
+            d.sync_detail(&read);
+
+            assert_eq!(
+                d.selection, None,
+                "a tab switch that reloads the detail content must clear the \
+                 selection, not carry it forward"
+            );
+            assert_ne!(
+                d.detail.loaded, loaded_before,
+                "the detail content must have actually reloaded, not merely hit the \
+                 cache, or this test proves nothing"
+            );
         }
     }
 }
