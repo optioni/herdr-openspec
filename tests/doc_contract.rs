@@ -3125,13 +3125,18 @@ fn the_production_slice_of_src_specs_rs_carries_no_io_or_schema_name() {
 
 /// The single source of truth both `AGENTS.md` and `SPEC.md` are checked against below —
 /// a documented number is never trusted on its own, only compared to this. Bump it, and
-/// both prose sites, in the same commit that adds a thirteenth claim.
-const CLAIM_COUNT: usize = 12;
+/// both prose sites, in the same commit that adds a fourteenth claim.
+const CLAIM_COUNT: usize = 13;
 
-/// The number words `agents_md_claim_count` accepts. `ten` is kept alongside the two
+/// The number words `agents_md_claim_count` accepts. `ten` is kept alongside the three
 /// values this repository has actually used so the negative-control test below has a
-/// third, distinct value to assert is parsed correctly without yet being correct.
-const CLAIM_COUNT_WORDS: [(&str, usize); 3] = [("ten", 10), ("eleven", 11), ("twelve", 12)];
+/// fourth, distinct value to assert is parsed correctly without yet being correct.
+const CLAIM_COUNT_WORDS: [(&str, usize); 4] = [
+    ("ten", 10),
+    ("eleven", 11),
+    ("twelve", 12),
+    ("thirteen", 13),
+];
 
 /// Parse `AGENTS.md`'s "(<number-word> further claims" marker — the sentence naming how
 /// many claims `tests/doc_contract.rs` carries beside `tests/manifest.rs` and
@@ -3344,5 +3349,87 @@ fn osc52_confinement_matches_the_gate() {
         vec![&confined_to],
         "the OSC 52 introducer {OSC52_INTRODUCER:?} must be named in exactly \
          src/ui/terminal.rs, found in {found:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// `mouse-text-selection` :: "The documented bypass names what was measured"
+// (`specs/mouse-input/spec.md`) — the thirteenth `tests/doc_contract.rs` claim.
+// `SPEC.md` once claimed the mouse-capture drag-to-select bypass "requires
+// holding Option (macOS) or Shift (most Linux terminals)".
+// `notes/measurements.md` found `Option` did **not** work in Ghostty on macOS
+// under any capture mode set and `Shift` did, under every one, with every
+// other terminal left unmeasured — so the sentence was corrected rather than
+// generalised from one terminal's convention. This leg is the check that
+// correction would otherwise have gone without: nothing else in `cargo test`
+// reads this paragraph at all.
+// ---------------------------------------------------------------------------
+
+/// The marker opening `SPEC.md` -> Keys' drag-to-select paragraph, immediately
+/// below the mouse table it explains.
+const DRAG_BYPASS_MARKER: &str = "**Enabling mouse capture costs the terminal's own drag-to-select";
+
+/// Extract the paragraph starting at [`DRAG_BYPASS_MARKER`]: everything up to
+/// the next blank line, this document's own paragraph boundary. `Err` when the
+/// marker itself is absent, so a rename or removal fails loudly rather than
+/// comparing an empty string that trivially satisfies every assertion below.
+fn drag_bypass_paragraph(spec_md: &str) -> Result<&str, String> {
+    let start = spec_md
+        .find(DRAG_BYPASS_MARKER)
+        .ok_or_else(|| format!("SPEC.md names no {DRAG_BYPASS_MARKER:?} paragraph"))?;
+    let rest = &spec_md[start..];
+    let end = rest.find("\n\n").unwrap_or(rest.len());
+    Ok(&rest[..end])
+}
+
+#[test]
+fn drag_bypass_paragraph_extracts_up_to_the_blank_line_and_fails_loudly() {
+    let doc = format!("intro\n\n{DRAG_BYPASS_MARKER} more.** text.\n\nnext section\n");
+    let got = drag_bypass_paragraph(&doc).expect("marker present");
+    assert!(got.starts_with(DRAG_BYPASS_MARKER), "{got:?}");
+    assert!(!got.contains("next section"), "{got:?}");
+
+    let err =
+        drag_bypass_paragraph("no such marker here").expect_err("a missing marker is an error");
+    assert!(err.contains("drag-to-select"), "{err}");
+}
+
+/// `mouse-text-selection` :: "The documented bypass names what was measured" —
+/// the thirteenth `tests/doc_contract.rs` claim. Reads `SPEC.md` -> Keys' mouse
+/// table and its drag-to-select paragraph and requires: the paragraph names
+/// `Shift`, names the terminal it was measured on (`Ghostty`), and never
+/// claims `Option` as a working bypass — the literal phrase (`holding
+/// \`Option\``) this repository once wrote and then falsified against
+/// `notes/measurements.md` — and the mouse table carries a drag row whose
+/// action is `Action::Select`.
+///
+/// The `Option` check is deliberately narrower than "the word `Option` never
+/// appears": the corrected paragraph itself names `Option` once, to say it was
+/// measured **not** to work. What must never reappear is the specific
+/// bypass-claiming phrase, `holding \`Option\``, which is what the falsified
+/// sentence read.
+#[test]
+fn the_documented_bypass_names_what_was_measured() {
+    let spec_md = read_doc(&manifest_dir().join("SPEC.md")).expect("read SPEC.md");
+
+    let paragraph = drag_bypass_paragraph(&spec_md).expect("SPEC.md's drag-to-select paragraph");
+    assert!(
+        paragraph.contains("Shift"),
+        "the drag-to-select paragraph must name Shift: {paragraph:?}"
+    );
+    assert!(
+        paragraph.contains("Ghostty"),
+        "the drag-to-select paragraph must name the terminal it was measured on: {paragraph:?}"
+    );
+    assert!(
+        !paragraph.contains("holding `Option`"),
+        "the drag-to-select paragraph must never claim Option as a working bypass: {paragraph:?}"
+    );
+
+    let documented = documented_mouse_actions(&spec_md).expect("SPEC.md -> Keys' mouse table");
+    assert!(
+        documented.contains("Select"),
+        "SPEC.md -> Keys' mouse table must carry a drag row whose action is Action::Select, \
+         found {documented:?}"
     );
 }

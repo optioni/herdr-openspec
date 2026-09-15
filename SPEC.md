@@ -1260,6 +1260,7 @@ own such test lives in `ui::tests::load::`, never in a view module.
 - `AGENTS.md`'s confined terminal-seam names ↔ `scripts/gates/noraw-grep.sh`'s `RAW_RE` (`mouse-input`).
 - `src/specs.rs`'s production slice ↔ carries no filesystem, process, environment, network, standard-I/O, or schema-reading name (`specs-emphasis`).
 - The OSC 52 introducer `]52;` ↔ `src/ui/terminal.rs`, and nowhere else in the crate (`mouse-text-selection`).
+- The documented drag-to-select bypass paragraph ↔ `notes/measurements.md` (names `Shift`, names the terminal it was measured on, and never claims `Option` as a working bypass) (`mouse-text-selection`).
 - A claim with no second site is argued in review, not checked.
 
 ### Gates
