@@ -7,7 +7,7 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
 
-use crate::ui::app::{Dashboard, Route};
+use crate::ui::app::{Dashboard, Granularity, Route, Selection};
 use crate::ui::detail;
 use crate::ui::layout::{
     Gutters, columns, interior, scroll_offset, split_body, split_detail, split_frame,
@@ -322,9 +322,8 @@ fn highlight_columns(
 /// since [`detail::word_at`] reports `None` for it.
 fn highlight_span(
     rows: &[detail::ContentRow],
-    selection: &crate::ui::app::Selection,
+    selection: &Selection,
 ) -> Option<((usize, u16), (usize, u16))> {
-    use crate::ui::app::Granularity;
     match selection.granularity {
         Granularity::Armed => None,
         Granularity::Word => {
