@@ -15,11 +15,30 @@ output lines are recorded beside each. Two findings shaped the plan:
   `205:fn role_of(run: &str) -> LabelRole {`. Group 1 widens an existing seam rather than
   extracting a new one, which is why it is a `refactor` group and not a `behavior` one.
 
+**Parallelism: none, and that is a finding rather than an unexamined default.** Group 3
+(`src/ui/palette.rs`) passes independence tests 1 and 2 against groups 1 and 2 — no shared file,
+neither names the other's symbols — and group 7 (`src/ui/markdown.rs`) passes them against
+groups 5 and 6. Both are **rejected on test 3**: `openspec/config.yaml:41` forbids a worktree
+("Work in the main checkout on `main`"), so concurrent groups share one tree and one compile,
+and `make check` is a whole-tree gate under which a concurrent failure does not stay
+attributable to its own group. This is the same pair and the same rejection
+`archive/2026-09-15-tasks-emphasis/tasks.md:12-19` recorded, citing `heading-sections` before
+it. An earlier draft of this file marked groups 3 and 7 `parallel-after` and was wrong.
+
 Counts used below, each with the command that produced it:
 
-- `grep -rc "ArtifactSection {" src/ | grep -v ":0"` → `app.rs:29`, `detail.rs:19`,
-  `driver.rs:14`, `view.rs:14` — **76** literal sites, of which
-  `grep -rn -A6 "ArtifactSection {" src/ | grep -c "\.\.\w"` → **10** use a rest pattern.
+- **75** construction sites, **every one of which spells all fields out**, confirmed two ways:
+  `TYPES='ArtifactSection' SCAN_MIN=1 /bin/sh scripts/gates/nodefault-ui.sh` →
+  `75 literal/pattern spans scanned … none elides a field`, and
+  `grep -rc "ArtifactSection {" src/` → `app.rs:29`, `detail.rs:19`, `driver.rs:14`,
+  `view.rs:14` = 76, less `src/ui/app.rs:152`, which is the `pub struct` definition rather than
+  a construction. So the per-file split is `app.rs` **28**, `detail.rs` 19, `driver.rs` 14,
+  `view.rs` 14.
+- **0** rest patterns, and `NODEFAULT-UI` half B forbids one — so the field cannot be elided
+  anywhere. Two earlier drafts of this line were wrong: the first claimed 10 rest patterns,
+  from a `\.\.\w` grep that matched range expressions (`(0..20)`, `0..500`) and no rest pattern
+  at all; the second counted the struct definition as a construction site. Both errors ran in
+  the direction that understates the implementer's work.
 - `ls scripts/gates/ | wc -l` → **31**. This change adds no gate, so it must still be 31.
 - `make gates` → exit **0** at HEAD, reporting `NOIO-VIEW OK: 10 pure files`,
   `COLWIDTH OK: ... nine pure view files`, `MDSEAM OK: 26 files searched`,
@@ -27,18 +46,24 @@ Counts used below, each with the command that produced it:
 
 ## 1. Widen `tasks::role_of` to a shared table
 
-<!-- kind: refactor -->
+<!-- kind: behavior -->
 
-- [ ] 1.1 CHARACTERIZE: Run `cargo test tasks::` and record that the existing label tests are
-      green — exit 0 at HEAD. These are the tests that must stay unchanged and green through
-      1.2; do not add to them here.
-- [ ] 1.2 REFACTOR: Make `role_of` `pub` and change its return to `Option<LabelRole>`, moving
-      its `_ => LabelRole::Other` arm to `label_of`'s call site as
-      `.unwrap_or(LabelRole::Other)`. Per specs/task-labels → "The vocabulary is three lifecycle
-      positions"; `label_of`'s observable behaviour must not move.
-- [ ] 1.3 VERIFY: `cargo test tasks::` green with the 1.1 tests unedited, and
-      `grep -n "pub fn role_of" src/tasks.rs` exits 0. At HEAD the latter exits **1**
-      (`grep -rq "pub fn role_of" src/tasks.rs` → exit 1), so it is RED until 1.2 lands.
+Classified `behavior`, not `refactor`: `role_of_none_vs_label_other` asserts `None`, which does
+not compile against today's `fn role_of(run: &str) -> LabelRole` (`src/tasks.rs:205`), so the
+group has an honest RED state rather than a manufactured one.
+
+- [ ] 1.1 RED: Write `role_of_agrees_with_label_of` and `role_of_none_vs_label_other` in
+      `src/tasks.rs`'s inline `mod tests`, from the two same-named scenarios in
+      specs/task-labels. RED check at HEAD: `grep -rq "pub fn role_of" src/tasks.rs` → exit
+      **1**, and `role_of_none_vs_label_other` does not compile against the current signature.
+- [ ] 1.2 GREEN: Make `role_of` `pub` and change its return to `Option<LabelRole>`, moving its
+      `_ => LabelRole::Other` arm to `label_of`'s call site as `.unwrap_or(LabelRole::Other)`.
+      The existing `tasks::tests::label_*` tests are the unchanged-behaviour anchor and must
+      stay green and unedited.
+- [ ] 1.3 REFACTOR: Clean up while green, or state that none was needed.
+- [ ] 1.4 VERIFY: `cargo test tasks::` green with the pre-existing `label_*` tests unedited, and
+      both new tests passing — the equivalence design.md → Contracts claims is now asserted by a
+      test rather than by a signature grep.
 
 ## 2. `crate::specs` — the delta and clause classifiers
 
@@ -53,10 +78,16 @@ Counts used below, each with the command that produced it:
       `operation_of_heading(level, label)`, `Clause`, and `clause_of(run)`, with `clause_of`
       calling `crate::tasks::role_of` and never restating the token table.
       RED check at HEAD: `grep -rq "DeltaOp" src/` → exit **1**.
-- [ ] 2.3 CHECK: `grep -c "RED\|GREEN\|role_of\|LabelRole" src/specs.rs` must find `role_of`
-      referenced and no token literal from the table duplicated — confirm by
-      `grep -E '"(RED|GREEN|VERIFY|CHARACTERIZE|ARRANGE|ACT|ASSERT)"' src/specs.rs`, which must
-      print nothing. `"AND"` and `"Requirements"` are this module's own and may appear.
+- [ ] 2.3 CHECK: The token table must not be copied. Scope the sweep to the **production
+      slice** — everything above `mod tests` — exactly as `src/tasks.rs`'s own
+      `the_classification_reads_nothing_outside_its_argument` already does:
+      `awk '/^mod tests/{exit} {print}' src/specs.rs | grep -nE '"(RED|GREEN|VERIFY|CHARACTERIZE|ARRANGE|ACT|ASSERT)"'`
+      must print nothing, and `grep -q "crate::tasks::role_of" src/specs.rs` must exit 0.
+      Unscoped, this check is guaranteed to fail on a correct implementation: 2.1's
+      `clause_agrees_with_role_of` is required by specs/spec-delta-badges to call `clause_of` on
+      `GIVEN`, `ARRANGE`, `ACT`, `ASSERT`, and `RED`, so those literals must appear in the test
+      module. Measured on the established analogue:
+      `grep -cE '"(RED|GREEN|VERIFY|CHARACTERIZE|ARRANGE|ACT|ASSERT)"' src/tasks.rs` → **6**.
 - [ ] 2.4 REFACTOR: Clean up while green, or state that none was needed.
 - [ ] 2.5 Run the group tests — `cargo test specs:: && cargo test tasks::`, both green, and
       confirm the run reports a non-zero test count for `specs::` rather than the
@@ -65,10 +96,6 @@ Counts used below, each with the command that produced it:
 ## 3. Three `Delta*` palette roles
 
 <!-- kind: behavior -->
-<!-- parallel-after: 0 -->
-
-Independent of groups 1 and 2: the three roles are plain variants and name no `DeltaOp`. It
-shares no file with them — `src/ui/palette.rs` against `src/tasks.rs` and `src/specs.rs`.
 
 - [ ] 3.1 RED: Write failing tests `delta_roles` and an extension of the existing
       `shared_styles` pairwise test, from the specs/view-palette scenarios "The three delta
@@ -109,8 +136,7 @@ Depends on 2 (for `DeltaOp`) and 3 (for the roles).
 
 <!-- kind: behavior -->
 
-Depends on 2 (for `DeltaOp`). Sequential against 4 rather than parallel: both edit
-`src/ui/view.rs`'s test module via the `ArtifactSection` literal sites counted above.
+Depends on 2 (for `DeltaOp`).
 
 - [ ] 5.1 RED: Write failing tests `attribute_operations`, `attribute_before_any_heading`,
       `main_spec_unbadged`, `attribute_predicate_halves`, `tasks_tab_unattributed`,
@@ -120,9 +146,10 @@ Depends on 2 (for `DeltaOp`). Sequential against 4 rather than parallel: both ed
       in `sync_detail` by one forward walk, beside where `progress` is computed. Reuse the
       existing level-3 `Requirement:` predicate rather than writing it twice — per design.md →
       Decision 4.
-- [ ] 5.3 GREEN: Answer the new field at the **76** literal construction sites counted above
-      (`app.rs` 29, `detail.rs` 19, `driver.rs` 14, `view.rs` 14). The compiler enumerates them;
-      `NODEFAULT-UI` is why no default is added to shortcut this.
+- [ ] 5.3 GREEN: Answer the new field at all **75** construction sites counted above
+      (`app.rs` 28, `detail.rs` 19, `driver.rs` 14, `view.rs` 14) — none uses a rest pattern and
+      `NODEFAULT-UI` forbids one, so every site must name it. The compiler enumerates them; `NODEFAULT-UI` is why no default is
+      added to shortcut this.
 - [ ] 5.4 CHECK: `/bin/sh scripts/gates/nodefault-ui.sh` with `ArtifactSection`'s own `SCAN_MIN`
       as the Makefile passes it → exit 0, confirming the type still carries no `Default`.
 - [ ] 5.5 Run the group tests — `cargo test ui::app::` green, `cargo test` green overall.
@@ -152,10 +179,6 @@ Depends on 4 (for `Face::delta`) and 5 (for `operation`).
 ## 7. Clause keywords on the markdown path
 
 <!-- kind: behavior -->
-<!-- parallel-after: 4 -->
-
-Parallel with 5 and 6: it edits `src/ui/markdown.rs` only, needs neither `operation` nor the
-badge row, and a failure is attributable to its own file.
 
 - [ ] 7.1 RED: Write failing tests `clause_roles_at_58_and_78`, `and_inherits_and_resets`, and
       `only_leading_strong_is_a_clause` in `ui::markdown`, from the same-named
@@ -170,8 +193,9 @@ badge row, and a failure is attributable to its own file.
       → exit 0 (at HEAD:
       `MDSEAM OK: 26 files searched (>= 25), pulldown_cmark only in src/ui/markdown.rs`), and
       `grep -n "crate::tasks::" src/ui/markdown.rs` finds no function call — only the
-      `LabelRole` type. `grep -c "crate::specs::" src/ui/markdown.rs` must name `clause_of` and
-      nothing else.
+      `LabelRole` type — and `grep -n "crate::specs::" src/ui/markdown.rs` prints only lines
+      naming `clause_of`. Both are `grep -n`, not `grep -c`: a count names nothing, and the
+      check's whole content is *which* symbols appear.
 - [ ] 7.5 Run the group tests — `cargo test ui::markdown::` green.
 
 ## 8. The badge reaches the buffer

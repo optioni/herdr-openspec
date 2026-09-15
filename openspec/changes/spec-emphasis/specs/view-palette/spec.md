@@ -100,6 +100,12 @@ a `Removed` requirement's **label** segment carries `Strikethrough` — the exis
 existing field — while its badge segment carries `DeltaRemoved`, so the two say different
 things in the same row and must not wear the same attribute.
 
+`spec-emphasis` adds **three** rows — `DeltaAdded`, `DeltaModified`, `DeltaRemoved`, each
+carrying no modifier — and alters none. The only cells that gain a modifier are a `Removed`
+requirement's own **heading label**, which gains `CROSSED_OUT` beside the `BOLD` its header row
+already carried (`artifact-folds` -> "A section header row names the file and shows its fold
+state"). That cell could not be drawn before this change, so no cell that existed has moved.
+
 `REVERSED` is chosen for the same reason and is the table's first use of it. A section header
 is a fold control, and reversing it is how a terminal says "this is the one the keys address"
 without spending a column on a marker glyph or borrowing a colour that would then mean two
@@ -141,6 +147,11 @@ a colour.
 - **AND** the same source with `~~struck~~` appended renders that word's cells with
   `CROSSED_OUT` and leaves every other cell's modifier unchanged, so the new role adds a
   modifier only where the new construct appears
+- **AND** a `specs` tab whose sections carry `operation: Some(Removed)` renders `CROSSED_OUT`
+  on exactly that requirement's **heading label** cells and on no other cell in the frame — not
+  on its badge, not on its body, and not on a sibling requirement carrying `Some(Added)`. This
+  is the one cell `spec-emphasis` adds a modifier to, and the fixture above — single-section,
+  not spec-shaped — cannot reach it, which is why this clause names its own dashboard
 - **AND** the same dashboard whose selected artifact resolves to **three** files instead of
   one renders `REVERSED` on exactly one row — the cursor's own section header — and on no
   cell anywhere else, so a single-file artifact's frame is untouched by the two new roles
@@ -235,7 +246,7 @@ not a problem; it is the ordinary content of a delta spec, and 15 of them exist 
 archive. Spending the problem colour on it would make the scan unreliable for a row that is
 never an error.
 
-Roles MAY share a style, but only under one of two stated licences, and a share outside both
+Roles MAY share a style, but only under one of three stated licences, and a share outside all three
 is a defect rather than a decision. **The rule ranges over the roles that carry a colour**,
 which is the set the table above enumerates. Plain-modifier equality among uncoloured roles is
 not policed and never was — `Footer`, `ListRow`, and `ListMessage` are all `Style::default()`;
@@ -263,23 +274,46 @@ be equal:
 |---|---|---|
 | `DIM` + `Yellow` | `FileMode`, `Code` | 1 |
 | `DarkGray` foreground | `ListSeparator`, `AgentBadge(Unknown)`, `TaskLabel` | 2 |
-| `Green` foreground, no modifier | `AgentBadge(Working)`, `TaskChange`, `DeltaAdded` | 1 |
+| `Green` foreground, no modifier | `AgentBadge(Working)`, `TaskChange`, `DeltaAdded` | 1 and 3 |
 | `Blue` foreground, no modifier | `AgentBadge(Done)`, `TaskConfirm` | 1 |
-| `LightRed` foreground, no modifier | `AgentBadge(Blocked)`, `TaskEvidence`, `DeltaRemoved` | 1 |
+| `LightRed` foreground, no modifier | `AgentBadge(Blocked)`, `TaskEvidence`, `DeltaRemoved` | 1 and 3 |
 
 `DeltaModified`'s `Yellow` is a style **no** other role carries and joins no group: `FileMode`
 and `Code` are `DIM` + `Yellow` and `Heading(5)` is `BOLD` + `Yellow`, so all three differ from
 it by a modifier. It is a colour reuse and not a style share, exactly as `Heading(3)` and
 `Link` are for `Blue`.
 
-`DeltaAdded` and `DeltaRemoved` join existing licence-1 groups, and the "cannot meet" claim is
-worth stating precisely because it now spans **three** roles rather than two. A delta badge is
-drawn only in the detail region, and only on a tab whose file is spec-shaped. An `AgentBadge`
-is drawn only in the list region. A task label is drawn only in the detail region on the
-**tracked-tasks** tab — and exactly one tab is drawn at a time, so a badge and a label can
-never appear in one frame even though both are detail-region spans. That is the same argument
-`tasks-emphasis` made for `FileMode` against `Code`, applied one level finer: not two regions,
-but two tabs of one region.
+`DeltaAdded` and `DeltaRemoved` share a style with roles they **can** meet, and are licensed
+under a third licence stated here for the first time:
+
+3. **They cannot be confused.** Two roles may share a style when each span's own text carries
+   its full meaning without colour **and** the two never occupy the same row. A `+` marker in a
+   header row's prefix and a `WHEN` at the head of a body list item satisfy both: the marker
+   says "added" and the word says "when" whatever colour either is painted, and no row holds
+   both.
+
+The licence is worded narrowly on purpose. "Colour is redundant here" would license almost any
+share in this table — nearly every span carries a modifier or self-describing text — and would
+reproduce the failure this requirement already records for the enumeration it replaced: no
+principle to grow it by. Both conjuncts are load-bearing, and a future share satisfying only
+one is a defect rather than a decision.
+
+**The reader cost this licence accepts, stated rather than hidden:** on a delta spec tab the
+green `+` badge and every green `WHEN` in the open bodies are the same hue, so scanning that tab
+by colour for "the added things" does not work. `WHEN` occurs 3877 times across the corpus, so
+this is the common case and not a corner. What survives is the marker column, which is where a
+reader looks for the operation and where no clause keyword is ever drawn.
+
+An earlier draft of this requirement licensed the same two shares under **licence 1**, claiming
+a task label is drawn "only in the detail region on the tracked-tasks tab". `spec-emphasis`'
+own `markdown-render` delta falsifies that: a clause keyword sets `Face::label` on **every**
+markdown source with no spec-shape test (design.md -> Decision 11), so a `- **WHEN**` in a
+delta spec's body is drawn on the **specs** tab, the same tab the badge is on, in the same
+frame. This requirement has been wrong in exactly this way before — it already records that
+`TaskChange`'s `Green` and `TaskConfirm`'s `Blue` "**can** appear in one frame's content area —
+an earlier draft of this requirement claimed they could not, and planning review falsified it".
+Twice now the error has been a "cannot meet" asserted without a scenario that renders both, and
+the scenario below is what makes the third claim falsifiable rather than merely careful.
 
 `Heading(3)`, `Heading(4)`, `Heading(6)`, and `Link` are deliberately **absent** from that
 table even though they carry `Blue`, `Green`, `DarkGray`, and `Blue` respectively: each also
@@ -287,7 +321,9 @@ carries a modifier the label roles do not, so none is an equal `Style` and none 
 They are still a **colour** reuse, and the paragraph below is about that weaker relation,
 which a reader sees and a `Style` comparison does not.
 
-Four of the five groups are licence 1 and one — the `DarkGray` trio — is licence 2. The three
+Each `AgentBadge` pairing in those groups is licence 1, the badges being list-region only; each
+`Delta*`-against-`Task*` pairing is licence 3, the two being reachable in one frame on a specs
+tab. The `DarkGray` trio is licence 2. The three
 that matter are worth spelling out because the obvious objection is the one this change was
 asked to answer. `TaskEvidence` takes `LightRed` and **not** `Red`, and the reason is recorded
 in the form the implementation left it in rather than the form this requirement first stated.
@@ -831,3 +867,29 @@ its merge key; its subject widens from one pure-view module to two.
   carries no foreground of its own and so cannot displace the badge's colour
 - **AND** no colour literal appears anywhere in the test, the assertion comparing against
   `palette::style` rather than against `Color::Green`
+
+#### Scenario: A delta badge and a clause keyword are the same style in one frame
+
+- **WHEN** a frame is drawn at 120 columns, and again at 60 in the detail route, showing a
+  `specs` tab whose sections are `## ADDED Requirements`, an **open** `### Requirement: A`, and
+  a body holding `- **WHEN** the schema declares four artifacts`
+- **THEN** the badge cell's `Style` and the `WHEN` keyword cells' `Style` are **equal** at both
+  widths — both `Green`, both carrying whatever modifier their row contributes
+- **AND** the assertion is an equality, deliberately: it documents the collision licence 3
+  accepts rather than asserting a distinction that does not exist, so a future change that
+  separates the two hues fails here and must revisit the licence
+- **AND** both cells' foregrounds are compared against `palette::style(Role::DeltaAdded)` and
+  `palette::style(Role::TaskChange)` respectively, never against a `Color` literal
+- **AND** the two spans are distinguishable by position rather than by style: the badge is in
+  the header row's prefix and the keyword opens a body list item, which is the whole content of
+  licence 3's second conjunct
+
+#### Scenario: `style_for` maps each `DeltaOp` to its own role
+
+- **WHEN** `ui::view::style_for` is called on `Face { delta: Some(op), ..Face::plain() }` for
+  each of `Added`, `Modified`, and `Removed`
+- **THEN** the three results equal `palette::style(Role::DeltaAdded)`,
+  `palette::style(Role::DeltaModified)`, and `palette::style(Role::DeltaRemoved)` respectively
+- **AND** the three differ from one another, so a step-10 implementation mapping two operations
+  onto one role could not pass — every other scenario in this change renders only `Added`, and
+  a slip mapping `Modified` to `DeltaAdded` would otherwise ship green

@@ -299,9 +299,15 @@ untouched.
 
 #### Scenario: The narrowed seam holds
 
-- **WHEN** `src/ui/markdown.rs` is searched for `crate::tasks::` and for `crate::specs::`
-- **THEN** no call to any function of `crate::tasks` occurs — the module names `LabelRole` and
-  nothing else of it
-- **AND** the only function of `crate::specs` it calls is `clause_of`
+- **WHEN** the **production slice** of `src/ui/markdown.rs` — everything above its
+  `#[cfg(test)]` line — is searched for `crate::tasks::` and for `crate::specs::`
+- **THEN** no **call** to any function of `crate::tasks` occurs in that slice. The names it
+  does carry are `crate::tasks::LabelRole` as a field type and `crate::tasks::label_of` inside
+  a doc comment explaining why it is *not* called, neither of which is a call
+- **AND** the only function of `crate::specs` called anywhere in the file is `clause_of`
 - **AND** `pulldown_cmark` is still named only in this file, and this file still names no
   `ratatui` type, so neither `MDSEAM` nor the view-type rule was widened
+- **AND** the slice boundary is load-bearing rather than an exemption: the file's **test**
+  module names `crate::tasks::Progress` today and may keep doing so. A whole-file search would
+  therefore be red on an unmodified tree, which is what an earlier draft of this scenario
+  specified
