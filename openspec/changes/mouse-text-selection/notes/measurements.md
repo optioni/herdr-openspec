@@ -262,3 +262,42 @@ reporting.
 
 | mode set | plain drag selects | wheel arrives as ARROW KEYS | app saw click | Shift+drag selects |
 |---|---|---|---|---|
+| `press-only` | no | no (corrected) | yes | yes |
+| `press-sgr` | no | no (corrected) | yes | yes |
+
+The wheel column was misclicked at entry and is corrected above: the events were SGR mouse
+reports, not `^[[A`/`^[[B`. Consistent with `?1000`, which reports the wheel as buttons 64
+and 65. The decisive column — plain drag — was not the misclicked one.
+
+## Conclusion: native selection and click reporting are mutually exclusive here
+
+`?1000` alone asks the terminal for **press and release only**, no motion of any kind, and
+plain drag-selection is still suppressed. There is no narrower request to make. So on Ghostty
+the two cannot coexist, and no arrangement of DEC private modes changes that — the terminal
+decides to stop selecting the moment an application asks for any mouse reporting at all.
+
+The full picture, every row measured:
+
+| reporting | plain drag selects | `Shift`+drag | wheel reaches app | click reaches app |
+|---|---|---|---|---|
+| none | **yes** | yes | yes, as `^[[A`/`^[[B` | no |
+| `?1000` | no | yes | yes, as SGR | yes |
+| `?1000 ?1006` | no | yes | yes, as SGR | yes |
+| `?1000 ?1002 ?1006` | no | yes | yes, as SGR | yes |
+| full bundle (today) | no | yes | yes, as SGR | yes |
+
+So the change cannot deliver "both, with no toggle". What is actually available is a choice
+between two defaults, plus one escape hatch that costs nothing:
+
+1. **Reporting off** — plain drag selects, the wheel still scrolls through `action_for`'s
+   existing `Up`/`Down` arms, and the four button gestures go.
+2. **Reporting on** (today) — the four gestures work, and selection needs `Shift`.
+3. **`Shift`+drag** — measured working under **every** row above, including today's. Zero
+   code. It is the only thing that gives selection without giving up a gesture, and the
+   pane's own documentation currently gets it wrong (it claims `Option` on macOS).
+
+A fourth path exists and is explicitly a non-goal: rendering a selection overlay and owning
+copy inside the TUI. It is the only way to have both, and it is a large feature that would
+also need OSC 52 to reach the system clipboard — itself a separate non-goal. Naming it here
+so the option is on the record as rejected rather than unconsidered.
+
