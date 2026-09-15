@@ -64,6 +64,9 @@ STTY_SAVED=$(stty -g 2>/dev/null || true)
 
 cleanup() {
   local id
+  # Nothing to restore, and nothing that should reach a pipe, when the EXIT
+  # trap fires on the no-terminal path above.
+  [ -t 1 ] || return 0
   for id in $SET_IDS; do disable_modes "$id"; done
   [ -n "$STTY_SAVED" ] && stty "$STTY_SAVED" 2>/dev/null
   printf '%s?25h' "$CSI"        # cursor back on
@@ -152,6 +155,17 @@ ask() {                 # $1 = prompt -> echoes y / n / ?
 }
 
 main() {
+  # Refuse without a real terminal on both ends, rather than letting every
+  # `read` hit EOF and recording a table of "?" that looks like a measurement.
+  # Exit 3 deliberately mirrors `ui`'s own refusal (SPEC.md -> "No terminal is
+  # not a degraded state"): a harness whose whole subject is what a terminal
+  # does has nothing to degrade to when there is no terminal.
+  if [ ! -t 0 ] || [ ! -t 1 ]; then
+    echo "probe.sh: not a terminal — run this directly in a terminal tab," >&2
+    echo "  not through an agent, a pipe, or a non-interactive shell." >&2
+    exit 3
+  fi
+
   printf 'mouse-text-selection measurement harness\n\n'
   printf 'Terminal: %s   TERM=%s\n' "${TERM_PROGRAM:-unknown}" "${TERM:-unset}"
   printf 'Inside Herdr: %s   Inside tmux: %s\n\n' \
