@@ -301,3 +301,45 @@ copy inside the TUI. It is the only way to have both, and it is a large feature 
 also need OSC 52 to reach the system clipboard — itself a separate non-goal. Naming it here
 so the option is on the record as rejected rather than unconsidered.
 
+
+## Measured: what Copilot CLI actually does
+
+The proposal's third measurement — *"Measure what Copilot CLI does, rather than trusting the
+report"* — deferred because the binary was not installed. Now measured:
+
+```sh
+script -q copilot-raw.log /opt/homebrew/bin/copilot </dev/null
+LC_ALL=C grep -ao $'\033\[?[0-9]*[hl]' copilot-raw.log | sort | uniq -c
+```
+
+stdin at `/dev/null` gives EOF, so the program starts, paints, and exits on its own — the
+capture holds a complete lifecycle, setup and teardown both, and nothing is missing.
+
+Copilot CLI sets, in order: `?1049h` (alternate screen), `?2004h` (bracketed paste),
+`?1004h` (focus events), **`?1003h` (any-event mouse tracking)**, `?1006h` (SGR coordinates).
+On teardown it resets `?1006l ?1003l ?1002l ?1004l ?2004l ?1049l` — including `?1002`, which
+it never enabled, the same defensive over-reset crossterm's `DisableMouseCapture` performs.
+
+**The report that motivated this change is false.** `?1003` is *any-event tracking*: every
+pointer motion reported, the single most capture-heavy mouse mode available. Copilot CLI asks
+for strictly more reporting than the `?1000`-only case measured above, which already
+suppressed plain drag-selection. It therefore cannot be preserving native drag-selection by
+any mechanism this plugin could copy.
+
+Two details worth keeping, since they are the only places Copilot's set differs from this
+crate's:
+
+- It enables **neither `?1000` nor `?1015`**. `?1003` already implies button reporting, so
+  `?1000` is redundant, and `?1015` is the rxvt coordinate scheme `?1006` supersedes. So
+  crossterm's five-mode bundle really does contain two redundant modes — confirming the
+  first measurement in this file from a second, independent direction.
+- It also takes `?1004` (focus) and `?2004` (bracketed paste), neither of which this pane
+  uses and neither of which bears on selection.
+
+Whatever was observed in Copilot CLI was therefore either `Shift`+drag — which works there
+exactly as it works here — or a different terminal, or a misrecollection. The behaviour is
+not reproducible as described, and no arrangement of modes in this crate would reproduce it.
+
+**This closes the investigation.** All three measurements the proposal asked for are done,
+and they agree: there is no mode set that gives both, the modifier bypass is `Shift` rather
+than `Option`, and the comparison program does not do what it was reported to do.
