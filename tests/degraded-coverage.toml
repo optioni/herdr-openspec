@@ -121,7 +121,7 @@ tier = "view"
 proof = ["repository_problems_are_named_above_the_rows"]
 verdict = "confirmed"
 why = "the list's leading problem row naming the unreadable directory, rendered through render_at"
-covers = ["src/ui/list.rs:401-403"]
+covers = ["src/ui/list.rs:411-413"]
 
 [[row]]
 condition = "An artifact's `generates` pattern falls outside the file path's supported glob subset"

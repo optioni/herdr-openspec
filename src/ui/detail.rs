@@ -322,7 +322,7 @@ fn header(
 ) -> crate::ui::markdown::Line {
     let (area, cell) = label_area(depth, progress, width as usize);
     let mut segments = match badged_pieces(label, depth, expanded, operation, area) {
-        Some((prefix, badge, label)) => vec![
+        Some((prefix, badge, label, pad)) => vec![
             crate::ui::markdown::Segment {
                 text: prefix,
                 face: crate::ui::markdown::Face::plain(),
@@ -340,6 +340,13 @@ fn header(
                     strikethrough: matches!(operation, Some(crate::specs::DeltaOp::Removed)),
                     ..crate::ui::markdown::Face::plain()
                 },
+            },
+            // The blank columns after the label carry no modifier: a struck
+            // heading must read as a struck word, not as a rule drawn across
+            // the region.
+            crate::ui::markdown::Segment {
+                text: pad,
+                face: crate::ui::markdown::Face::plain(),
             },
         ],
         None => vec![crate::ui::markdown::Segment {
@@ -395,7 +402,7 @@ fn badged_pieces(
     expanded: bool,
     operation: Option<crate::specs::DeltaOp>,
     width: usize,
-) -> Option<(String, String, String)> {
+) -> Option<(String, String, String, String)> {
     let op = operation?;
     let glyph = crate::ui::list::fold_glyph(!expanded);
     let indent = "  ".repeat(depth);
@@ -406,8 +413,8 @@ fn badged_pieces(
         return None;
     }
     let label_width = width - columns(&prefix) - columns(&badge);
-    let label = crate::ui::list::pad_or_truncate_right(label, label_width);
-    Some((prefix, badge, label))
+    let (label, pad) = crate::ui::list::truncate_right(label, label_width);
+    Some((prefix, badge, label, pad))
 }
 
 /// The row this capability drew before it existed: `<indent><glyph>
@@ -1405,7 +1412,15 @@ mod tests {
             );
 
             for row in &rows[1..4] {
-                assert_eq!(row.line.segments.len(), 3, "width {width}: {row:?}");
+                // `spec-emphasis`: four, the fourth being the row's padding,
+                // plain-faced so no badge or label face reaches the blank
+                // columns that fill the row to its width.
+                assert_eq!(row.line.segments.len(), 4, "width {width}: {row:?}");
+                assert_eq!(
+                    row.line.segments[3].face,
+                    crate::ui::markdown::Face::plain(),
+                    "width {width}: the padding segment is faced: {row:?}"
+                );
             }
             let added = rows[1].line.segments[1].face;
             let modified = rows[2].line.segments[1].face;
@@ -1521,7 +1536,7 @@ mod tests {
                 .iter()
                 .find(|r| matches!(r.kind, ContentKind::SectionHeader { section: 1, .. }))
                 .expect("the requirement's header row is drawn");
-            assert_eq!(header_row.line.segments.len(), 3, "width {width}");
+            assert_eq!(header_row.line.segments.len(), 4, "width {width}");
             assert_eq!(header_row.line.segments[1].text, "- ", "width {width}");
             assert!(
                 header_row.line.segments[2].face.strikethrough,
@@ -1592,7 +1607,7 @@ mod tests {
             assert_eq!(columns(&header_row.text()), width as usize, "width {width}");
             assert_eq!(
                 header_row.line.segments.len(),
-                3,
+                4,
                 "width {width}: {header_row:?}"
             );
             assert_eq!(header_row.line.segments[1].text, "~ ", "width {width}");
@@ -1662,7 +1677,7 @@ mod tests {
                         header_row.text()
                     );
                 }
-                3 => {
+                4 => {
                     present += 1;
                     assert_eq!(header_row.line.segments[1].text, "~ ", "width {width}");
                 }
@@ -1685,7 +1700,7 @@ mod tests {
                 .iter()
                 .find(|r| matches!(r.kind, ContentKind::SectionHeader { section: 1, .. }))
                 .expect("the requirement's header row is drawn");
-            assert_eq!(header_row.line.segments.len(), 3, "width {width}");
+            assert_eq!(header_row.line.segments.len(), 4, "width {width}");
             assert_eq!(header_row.line.segments[1].text, "~ ", "width {width}");
         }
     }

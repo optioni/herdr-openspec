@@ -260,7 +260,7 @@ Depends on 4 (for `Face::delta`) and 5 (for `operation`).
       → exit 0. At HEAD `widths.sh` reports `all 149 view tests name both 60 and 120`; the
       count rises and must not regress to a test naming one width.
 - [x] 6.6 Run the group tests — `cargo test ui::detail:: ui::view::` green, no regressions.
-- [ ] 6.7 GREEN (added during implementation): Extend the **existing**
+- [x] 6.7 GREEN (added during implementation): Extend the **existing**
       `a_monochrome_reading_of_the_frame_is_unchanged` in `ui::view` with the fifth bullet
       specs/view-palette:131 gained in this change — a `specs` tab whose sections carry
       `operation: Some(Removed)` renders `CROSSED_OUT` on exactly that requirement's heading
@@ -271,6 +271,18 @@ Depends on 4 (for `Face::delta`) and 5 (for `operation`).
       This is the review's own WARNING repair — "the monochrome scenario extended with a clause
       pinning `CROSSED_OUT` to exactly that label and no other cell" — landing in the spec and
       in no task, the **third** time that has happened in this package.
+      **Writing it found a spec-vs-spec contradiction, and specs/artifact-folds was amended.**
+      The clause failed on first run: the struck cells were `"Requirement: A"` followed by every
+      blank column to the region's edge. `badged_pieces` padded the label *inside* the label
+      segment, and a segment carries one face, so `CROSSED_OUT` reached the padding — which a
+      terminal draws as a continuous rule from the word to the edge, not as a struck heading.
+      `artifact-folds:357` mandated **three** segments; `view-palette:131` mandates the strike
+      touch "no other cell in the frame". At three segments the two cannot both hold. Amended
+      `artifact-folds` to **four** — prefix, badge, label, padding — with the reason recorded
+      beside the requirement and two scenarios updated. The split is taken once, at the new
+      `ui::list::truncate_right`, which returns `pad_or_truncate_right`'s two halves and is the
+      function `pad_or_truncate_right` is now written in terms of, so the truncation rule is
+      still written down exactly once.
 - [x] 6.8 CHECK (added during implementation): every `covers` anchor into `src/ui/detail.rs`
       re-pointed, not just the first. Task 4.6 warned that insertions shift absolute line
       numbers; this group shifted them far enough that **three** rows moved, and the two obvious
@@ -283,6 +295,9 @@ Depends on 4 (for `Face::delta`) and 5 (for `operation`).
       anchor now covers the wrong function.** Re-pointed to `488-498`/`501-511`
       (`no_content_yet_row`, `problem_row`). When repairing anchors, grep every occurrence of the
       old range, not the first.
+      It happened **twice more** after that: group 6's own four-segment repair shifted
+      `src/ui/list.rs:401-403` off `archived.len()` onto a comment. An edit anywhere above an
+      anchor moves it, including an edit made while repairing anchors.
 
 ## 7. Clause keywords on the markdown path
 

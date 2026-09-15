@@ -354,9 +354,20 @@ still says what it is, while half a badge says nothing. It is dropped only below
 which the row can hold the indent, the glyph, its separating space, the badge, and at least
 one column of label.
 
-A badged header row SHALL carry **three** segments rather than one — the
-`<indent><glyph> ` prefix, the badge, and the label — so that the badge and the label may be
-faced apart. An unbadged header row SHALL carry the one segment it carried before this change.
+A badged header row SHALL carry **four** segments rather than one — the
+`<indent><glyph> ` prefix, the badge, the label, and the blank columns that pad the row to its
+width — so that the badge, the label and the padding may be faced apart. An unbadged header row
+SHALL carry the one segment it carried before this change.
+
+The padding is a segment of its own, and plain-faced, because the label's face reaches every
+column of its own segment: a `Removed` label padded inside its own segment strikes the blank
+columns after it, and a terminal draws that as a continuous rule from the word to the region's
+edge rather than as a struck heading. `view-palette` -> "A monochrome reading of the frame is
+unchanged" fixes the same fact from the other side — `CROSSED_OUT` on that requirement's label
+cells "and on no other cell in the frame" — and the two cannot both hold at three segments. The
+split is taken at `ui::list::truncate_right`, which returns `pad_or_truncate_right`'s two halves
+separately and is the function `pad_or_truncate_right` is now written in terms of, so the
+truncation rule stays written down once.
 `ui::detail` SHALL name no `palette::Role` here either: the badge segment carries
 `Face { delta: Some(op), .. }` and nothing else, exactly as the row carries a *kind* and not a
 style. `view-palette` decides what each `DeltaOp` looks like, and `ui::view::style_for`
@@ -492,6 +503,8 @@ opened the section to read. The strikethrough SHALL be the existing `Face` field
   their depth
 - **AND** the badge segment of each carries `Face { delta: Some(op), .. }` with `Added`,
   `Modified`, and `Removed` respectively, and the three faces are asserted to differ
+- **AND** each row's fourth segment is its padding, plain-faced, so no row's badge or label face
+  reaches the blank columns that fill the row to its width
 
 #### Scenario: An unbadged header row is unchanged in every column
 
@@ -500,7 +513,7 @@ opened the section to read. The strikethrough SHALL be the existing `Face` field
   of a main spec under `## Requirements`
 - **THEN** every header row is byte-identical to the row the same input produced before this
   change, with no badge and no reserved badge column
-- **AND** each such row carries exactly one segment, so the three-segment shape is reached only
+- **AND** each such row carries exactly one segment, so the four-segment shape is reached only
   by a badged row
 
 #### Scenario: A removed requirement's heading is struck and its body is not
@@ -509,6 +522,8 @@ opened the section to read. The strikethrough SHALL be the existing `Face` field
   section carrying `Some(Removed)` whose text is a paragraph and a `#### Scenario:` heading
 - **THEN** the header row's label segment carries `Face { strikethrough: true, .. }` and its
   badge segment reads `- `
+- **AND** that segment's text is the label alone, the row's padding being a separate plain-faced
+  segment, so the strike ends with the word rather than running to the region's edge
 - **AND** no body row carries `strikethrough`, so the removed requirement stays readable
 - **AND** the same section carrying `Some(Added)` produces a label segment with
   `strikethrough` false, so the strike is the operation's and not every badged header's

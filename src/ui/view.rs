@@ -8652,6 +8652,58 @@ mod tests {
         d
     }
 
+    /// `spec-emphasis`: the monochrome fixture's sibling, whose selected
+    /// artifact is a `specs` tab holding two requirement sections — one
+    /// `Removed`, one `Added` — both expanded so their bodies draw. The
+    /// single-section fixture above cannot reach the struck heading label,
+    /// which is why the scenario's last clause names its own dashboard.
+    fn monochrome_dashboard_delta_sections(route: Route) -> Dashboard {
+        let selected = fixture::with_artifacts(
+            fixture::active("add-token-refresh", 4, 9),
+            &[("specs", &[])],
+        );
+        let mut d = dashboard_with_detail(
+            vec![
+                selected,
+                fixture::active("fix-empty-basket", 7, 7),
+                fixture::active("migrate-ai-sdk-v7", 0, 0),
+            ],
+            vec![fixture::archived(Some("2026-01-01"), "old-change", 3, 3)],
+            1,
+            route,
+            Detail {
+                sections: vec![
+                    ArtifactSection {
+                        label: Some("Requirement: A".to_string()),
+                        text: "body of the removed one\n".to_string(),
+                        depth: 0,
+                        progress: None,
+                        operation: Some(crate::specs::DeltaOp::Removed),
+                    },
+                    ArtifactSection {
+                        label: Some("Requirement: B".to_string()),
+                        text: "body of the added one\n".to_string(),
+                        depth: 0,
+                        progress: None,
+                        operation: Some(crate::specs::DeltaOp::Added),
+                    },
+                ],
+                scroll: 0,
+                tab: 0,
+                problems: Vec::new(),
+                loaded: None,
+                expanded: std::collections::BTreeSet::from([0usize, 1]),
+                drawn_width: None,
+            },
+        );
+        d.file_mode = true;
+        d.changes.problems = vec!["openspec/changes: unreadable".to_string()];
+        let mut working = unattributed_agent("fix-empty-basket");
+        working.status = crate::agents::AgentStatus::Working;
+        d.agents.agents = vec![working];
+        d
+    }
+
     /// The detail content area's first drawn column, and the buffer row a
     /// content row at `index` lands on.
     fn content_origin(width: u16) -> u16 {
@@ -9086,6 +9138,48 @@ mod tests {
                 std::collections::BTreeSet::from([5u16]),
                 "width {width}: exactly one row — the cursor's own section header — \
                  reports REVERSED"
+            );
+        }
+
+        // `spec-emphasis`: a `specs` tab whose sections carry
+        // `operation: Some(Removed)` renders CROSSED_OUT on exactly that
+        // requirement's heading **label** cells and on no other cell in the
+        // frame — not on its badge, not on its body, and not on the sibling
+        // requirement carrying `Some(Added)`. This is the one cell this change
+        // adds a modifier to.
+        for width in [120, 60] {
+            let d = monochrome_dashboard_delta_sections(Route::Detail);
+            let buf = render_at(width, 20, &d);
+
+            let mut struck: std::collections::BTreeMap<u16, String> =
+                std::collections::BTreeMap::new();
+            for y in 0..buf.area.height {
+                for x in 0..buf.area.width {
+                    if cell(&buf, x, y)
+                        .style()
+                        .add_modifier
+                        .contains(Modifier::CROSSED_OUT)
+                    {
+                        struck
+                            .entry(y)
+                            .or_default()
+                            .push_str(cell(&buf, x, y).symbol());
+                    }
+                }
+            }
+
+            let rows: Vec<u16> = struck.keys().copied().collect();
+            assert_eq!(
+                rows.len(),
+                1,
+                "width {width}: CROSSED_OUT reaches {} rows, not the one removed \
+                 requirement's heading: {struck:?}",
+                rows.len()
+            );
+            assert_eq!(
+                struck[&rows[0]], "Requirement: A",
+                "width {width}: the struck cells are not exactly the removed \
+                 requirement's label — a badge, a body or a sibling was struck too"
             );
         }
     }

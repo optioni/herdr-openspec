@@ -82,21 +82,31 @@ pub(crate) fn progress_cell(progress: &crate::tasks::Progress) -> String {
 /// header, tab bar, and problem-line grammar calls this rather than
 /// copying it.
 pub(crate) fn pad_or_truncate_right(text: &str, width: usize) -> String {
+    let (shown, pad) = truncate_right(text, width);
+    shown + &pad
+}
+
+/// `pad_or_truncate_right` split at the seam between the text it draws and
+/// the blank columns it adds, for the one caller that must face the two
+/// differently: `ui::detail::header` strikes a removed requirement's label
+/// and must **not** strike the padding after it, or a struck heading draws
+/// as a rule across the whole region rather than through its own word
+/// (specs/view-palette -> "A monochrome reading of the frame is
+/// unchanged", last clause). The two agree by construction — the function
+/// above is this one concatenated — so the truncation rule stays written
+/// down once.
+pub(crate) fn truncate_right(text: &str, width: usize) -> (String, String) {
     let measured = columns(text);
     if measured <= width {
-        let mut s = text.to_string();
-        s.push_str(&" ".repeat(width - measured));
-        return s;
+        return (text.to_string(), " ".repeat(width - measured));
     }
     if width == 0 {
-        return String::new();
+        return (String::new(), String::new());
     }
-    let mut s = format!("{}…", truncate_columns(text, width - 1));
-    let drawn = columns(&s);
-    if drawn < width {
-        s.push_str(&" ".repeat(width - drawn));
-    }
-    s
+    let shown = format!("{}…", truncate_columns(text, width - 1));
+    let drawn = columns(&shown);
+    let pad = " ".repeat(width.saturating_sub(drawn));
+    (shown, pad)
 }
 
 /// The keep-the-tail truncation `change-rows`' no-repository block and
