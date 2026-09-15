@@ -544,5 +544,61 @@ mod tests {
             let text = format!("{guard:?}");
             assert!(text.contains("TerminalGuard"));
         }
+
+        #[test]
+        fn write_clipboard_is_confined_and_reports_its_own_failure() {
+            // `terminal-lifecycle`: "The clipboard write is confined and reports
+            // its own failure". `write_clipboard` is a `TerminalOps` method like
+            // the other six, so a failing write returns a `TerminalError` naming
+            // itself rather than panicking or being silently swallowed.
+            let rec = Recorder::default();
+            rec.fail_with("write_clipboard", "clipboard unavailable");
+            let err = rec
+                .write_clipboard("selected text")
+                .expect_err("a configured failure is returned, not swallowed");
+            assert_eq!(err.op, "write_clipboard");
+            assert!(err.detail.contains("clipboard unavailable"), "{err}");
+
+            let ok_rec = Recorder::default();
+            ok_rec
+                .write_clipboard("selected text")
+                .expect("an unconfigured recorder succeeds");
+            assert_eq!(ok_rec.calls(), vec!["write_clipboard"]);
+        }
+
+        #[test]
+        fn a_clipboard_write_changes_no_terminal_mode() {
+            // `terminal-lifecycle`: "A clipboard write changes no terminal mode".
+            // Two writes inside a guard's lifetime must not disturb the mirrored
+            // entry and teardown order the six mode operations already assert.
+            let rec = Recorder::default();
+            let guard = TerminalGuard::enter(&rec).expect("enter succeeds");
+            rec.write_clipboard("first").expect("first write succeeds");
+            rec.write_clipboard("second").expect("second write succeeds");
+            drop(guard);
+
+            assert_eq!(
+                rec.calls(),
+                vec![
+                    "enable_raw",
+                    "enter_alternate",
+                    "enable_mouse",
+                    "write_clipboard",
+                    "write_clipboard",
+                    "disable_mouse",
+                    "leave_alternate",
+                    "disable_raw",
+                ]
+            );
+            // The same six mode operations, in the same order, as a guard with
+            // no clipboard write records.
+            assert_eq!(
+                rec.calls_without_capture()
+                    .into_iter()
+                    .filter(|op| *op != "write_clipboard")
+                    .collect::<Vec<_>>(),
+                vec!["enable_raw", "enter_alternate", "leave_alternate", "disable_raw"]
+            );
+        }
     }
 }
