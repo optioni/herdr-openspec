@@ -131,12 +131,12 @@
 ## 6. Painting the highlight
 <!-- kind: behavior -->
 
-- [ ] 6.1 RED: Write failing render tests for "The span is highlighted at both mandated
+- [x] 6.1 RED: Write failing render tests for "The span is highlighted at both mandated
       widths", "A selected cell keeps its own role and gains the reversal", and "The highlight
       persists after release and clears on the next interaction".
-- [ ] 6.2 GREEN: In `src/ui/view.rs`, patch each selected cell's existing style with
+- [x] 6.2 GREEN: In `src/ui/view.rs`, patch each selected cell's existing style with
       `palette::style(Role::Selected)` rather than replacing it (design.md → Decision 7).
-- [ ] 6.3 VERIFY: `cargo test ui::view` green at 120x20 and 60x20, and `make gates` —
+- [x] 6.3 VERIFY: `cargo test ui::view` green at 120x20 and 60x20, and `make gates` —
       `DETAILWIDTHS` requires both figures in every test in the swept files.
 
 ## 7. Copy on completion
