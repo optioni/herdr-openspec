@@ -171,7 +171,22 @@ pub fn run_loop<B: Backend, E: EventSource>(
                 Event::Mouse(mouse) => {
                     // No filter flag: a click is unambiguous where a keystroke
                     // is not, so the rule is structural rather than a branch.
-                    if matches!(mouse.kind, MouseEventKind::Moved | MouseEventKind::Drag(_)) {
+                    let resolved = mouse_action(dashboard, area, mouse);
+                    // `text-selection`: the exemption is keyed on the event
+                    // kind rather than on "any motion" — `Moved` still costs
+                    // no frame unconditionally, but a `Drag` costs no frame
+                    // only when it resolved to `Action::Ignore` (outside the
+                    // selectable region). A `Drag` that began or extended a
+                    // selection draws, because the selection's focus moved
+                    // and the highlight is what tells the reader what they
+                    // are selecting — a drag that did not redraw would render
+                    // the feature invisible while it was being used.
+                    let motion_ignored = match mouse.kind {
+                        MouseEventKind::Moved => true,
+                        MouseEventKind::Drag(_) => resolved == Action::Ignore,
+                        _ => false,
+                    };
+                    if motion_ignored {
                         draw = false;
                     }
                     // One consequence the skipped draw carries, named here because
@@ -189,7 +204,7 @@ pub fn run_loop<B: Backend, E: EventSource>(
                     // different change does move the cursor — accepted, at the
                     // width of one adopt landing between a pointer motion and a
                     // click, and corrected by the very next frame.
-                    mouse_action(dashboard, area, mouse)
+                    resolved
                 }
                 _ => action_for(&event, dashboard.filter.active),
             };
@@ -5960,7 +5975,12 @@ mod tests {
 
     #[test]
     fn pointer_motion_does_not_draw() {
-        // `dashboard-loop`: "Pointer motion does not cost a frame".
+        // `dashboard-loop`: "Pointer motion does not cost a frame". Since
+        // `text-selection` this is `Moved` alone — a held-button drag is
+        // covered separately by
+        // `a_held_button_drag_draws_and_a_free_pointer_motion_does_not`,
+        // because whether a drag draws now depends on where it lands rather
+        // than on its kind alone.
         fn drive(kind: MouseEventKind) -> LoopSummary {
             let mut queue: Vec<_> = (0..20)
                 .map(|i| Ok(Some(crate::testutil::mouse(kind, i as u16, 10))))
@@ -5969,19 +5989,13 @@ mod tests {
             drive_queue(queue)
         }
 
-        for kind in [
-            MouseEventKind::Moved,
-            MouseEventKind::Drag(MouseButton::Left),
-        ] {
-            assert_eq!(
-                drive(kind),
-                LoopSummary {
-                    frames: 1,
-                    polls: 21
-                },
-                "{kind:?}"
-            );
-        }
+        assert_eq!(
+            drive(MouseEventKind::Moved),
+            LoopSummary {
+                frames: 1,
+                polls: 21
+            }
+        );
 
         // An ignored **key** still redraws: the exemption is scoped to pointer
         // motion and did not become a general ignore-means-no-draw rule.
@@ -5995,6 +6009,88 @@ mod tests {
                 frames: 21,
                 polls: 21
             }
+        );
+    }
+
+    #[test]
+    fn a_held_button_drag_draws_and_a_free_pointer_motion_does_not() {
+        // `dashboard-loop`: "A held-button drag draws and a free pointer
+        // motion does not" — `text-selection`'s correction of the pointer-
+        // motion exemption from "any motion" to `Moved` alone: a drag over
+        // the selectable content area draws, because the selection's focus
+        // moved and the highlight is what tells the reader what they are
+        // selecting.
+        let mut dashboard = foldable_dashboard(
+            three_spec_sections(),
+            std::collections::BTreeSet::from([1]),
+            0,
+        );
+        // `sync_detail` re-reads and overwrites `detail.sections` whenever
+        // its `(change directory, tab)` cache key does not already match —
+        // `foldable_dashboard` leaves `loaded` at `None`, which run_loop's
+        // own pre-draw sync would otherwise treat as unloaded and replace
+        // with whatever the injected reader below returns. Priming the key
+        // here is what lets the hand-built three sections survive the loop's
+        // own draw.
+        dashboard.detail.loaded = dashboard.selected_change().map(|c| (c.dir.clone(), 0));
+        let content = detail_content_area(WIDE, Route::Detail);
+        let (column, row) = (content.x, content.y + 2);
+
+        let moved = drive_queue_on(
+            dashboard.clone(),
+            vec![
+                Ok(Some(crate::testutil::mouse(
+                    MouseEventKind::Moved,
+                    column,
+                    row,
+                ))),
+                Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
+            ],
+        );
+        assert_eq!(
+            moved,
+            LoopSummary {
+                frames: 1,
+                polls: 2
+            },
+            "a free pointer motion over the content area produces no draw"
+        );
+
+        let dragged = drive_queue_on(
+            dashboard.clone(),
+            vec![
+                Ok(Some(crate::testutil::mouse(
+                    MouseEventKind::Drag(MouseButton::Left),
+                    column,
+                    row,
+                ))),
+                Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
+            ],
+        );
+        assert_eq!(
+            dragged,
+            LoopSummary {
+                frames: 2,
+                polls: 2
+            },
+            "a held-button drag over the selectable content area draws exactly once"
+        );
+
+        let ignored = drive_queue(vec![
+            Ok(Some(crate::testutil::mouse(
+                MouseEventKind::Drag(MouseButton::Left),
+                5,
+                list_row(WIDE, Route::List, 0),
+            ))),
+            Ok(Some(press(KeyCode::Char('q'), KeyModifiers::NONE))),
+        ]);
+        assert_eq!(
+            ignored,
+            LoopSummary {
+                frames: 1,
+                polls: 2
+            },
+            "a drag over Zone::ListRow, which resolves to Action::Ignore, produces no draw"
         );
     }
 
